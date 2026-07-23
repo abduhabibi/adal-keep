@@ -1,0 +1,133 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Syne:wght@600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --ink: #0f1c1a;
+  --muted: #5b6b68;
+  --surface: #f3f6f5;
+  --panel: #ffffff;
+  --line: #d8e3df;
+  --accent: #0d9488;
+  --accent-deep: #0f766e;
+  --accent-soft: #ccfbf1;
+  --warn: #c2410c;
+  --danger: #dc2626;
+  --ok: #15803d;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: 'DM Sans', system-ui, sans-serif;
+  color: var(--ink);
+  background:
+    radial-gradient(1200px 600px at 0% -10%, rgba(13, 148, 136, 0.12), transparent 55%),
+    radial-gradient(900px 500px at 100% 0%, rgba(15, 118, 110, 0.08), transparent 50%),
+    linear-gradient(180deg, #eef4f2 0%, #f7f9f8 40%, #f3f6f5 100%);
+  -webkit-font-smoothing: antialiased;
+}
+
+.font-display {
+  font-family: 'Syne', 'DM Sans', sans-serif;
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .btn-primary {
+    @apply btn bg-teal-700 text-white hover:bg-teal-800 shadow-sm shadow-teal-900/10;
+  }
+
+  .btn-secondary {
+    @apply btn bg-white text-slate-700 border border-slate-200 hover:bg-slate-50;
+  }
+
+  .btn-danger {
+    @apply btn bg-red-600 text-white hover:bg-red-700;
+  }
+
+  .btn-ghost {
+    @apply btn bg-transparent text-slate-600 hover:bg-slate-100;
+  }
+
+  .field {
+    @apply w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 shadow-sm transition focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500/20;
+  }
+
+  .label {
+    @apply mb-1.5 block text-sm font-medium text-slate-700;
+  }
+
+  .panel {
+    @apply rounded-2xl border border-slate-200/80 bg-white/90 shadow-sm backdrop-blur;
+  }
+
+  .chip {
+    @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold;
+  }
+}
+/* Custom scrollbar for split panes */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background-color: #cbd5e1;
+  border-radius: 20px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: #94a3b8;
+}
+/* Print Styles for Checklist */
+@media print {
+  body {
+    background: white !important;
+    color: black !important;
+  }
+  .print\:hidden {
+    display: none !important;
+  }
+  .print\:bg-white {
+    background-color: white !important;
+  }
+  .print\:overflow-visible {
+    overflow: visible !important;
+  }
+  .print\:shadow-none {
+    box-shadow: none !important;
+  }
+  .print\:border-0 {
+    border: 0 !important;
+  }
+  /* Force table to print nicely */
+  table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+  }
+  th, td {
+    border: 1px solid #cbd5e1 !important;
+    padding: 8px !important;
+    font-size: 10pt !important;
+  }
+  th {
+    background-color: #f1f5f9 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}

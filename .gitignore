@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Environment variables (Secrets & DB passwords)
+.env
+
+# Local Database (SQLite)
+*.sqlite
+*.sqlite-journal
+
+# Build outputs
+dist/
+.vite/
+
+# Uploaded files (Keep repo clean, back these up separately)
+backend/uploads/
+backend/public/wallpaper.jpg
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini

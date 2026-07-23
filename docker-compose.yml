@@ -1,0 +1,14 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: adal-keep
+    ports:
+      - "5432:5432"
+    volumes:
+      - adal_keep_pg_data:/var/lib/postgresql/data
+
+volumes:
+  adal_keep_pg_data:

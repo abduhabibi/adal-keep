@@ -4,118 +4,364 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ============================================
+   1. APPLE GLASS VARIABLES - Softer & Premium
+   ============================================ */
 :root {
-  --ink: #0f1c1a;
-  --muted: #5b6b68;
-  --surface: #f3f6f5;
-  --panel: #ffffff;
-  --line: #d8e3df;
-  --accent: #0d9488;
-  --accent-deep: #0f766e;
-  --accent-soft: #ccfbf1;
-  --warn: #c2410c;
-  --danger: #dc2626;
-  --ok: #15803d;
+  /* Light Mode */
+  --bg: #f5f5f7;
+  --surface: rgba(255, 255, 255, 0.72);
+  --surface-hover: rgba(255, 255, 255, 0.92);
+  --border: rgba(255, 255, 255, 0.6);
+  --text: #1d1d1f;
+  --text-muted: #86868b;
+  --primary: #0d9488;
+  --primary-glow: rgba(13, 148, 136, 0.15);
+  --danger: #ef4444;
+  
+  --radius-lg: 20px;
+  --radius-md: 14px;
+  --radius-sm: 10px;
+  
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.08);
+  --shadow-xl: 0 24px 48px rgba(0, 0, 0, 0.10);
+  
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-smooth: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-* {
+[data-theme="dark"] {
+  /* Dark Mode - Softer, Less Heavy */
+  --bg: #0a0a0b;
+  --surface: rgba(28, 28, 30, 0.70);
+  --surface-hover: rgba(44, 44, 46, 0.85);
+  --border: rgba(255, 255, 255, 0.08);
+  --text: #f5f5f7;
+  --text-muted: #8e8e93;
+  --primary: #14b8a6;
+  --primary-glow: rgba(20, 184, 166, 0.12);
+  
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.5);
+  --shadow-xl: 0 24px 48px rgba(0, 0, 0, 0.6);
+}
+
+/* ============================================
+   2. BASE RESET & TYPOGRAPHY
+   ============================================ */
+*, *::before, *::after {
+  margin: 0;
+  padding: 0;
   box-sizing: border-box;
 }
 
-html,
-body,
-#root {
+html, body, #root {
   height: 100%;
+  width: 100%;
 }
 
 body {
-  margin: 0;
-  font-family: 'DM Sans', system-ui, sans-serif;
-  color: var(--ink);
-  background:
-    radial-gradient(1200px 600px at 0% -10%, rgba(13, 148, 136, 0.12), transparent 55%),
-    radial-gradient(900px 500px at 100% 0%, rgba(15, 118, 110, 0.08), transparent 50%),
-    linear-gradient(180deg, #eef4f2 0%, #f7f9f8 40%, #f3f6f5 100%);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "DM Sans", "Inter", system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+  transition: background 0.5s var(--ease-smooth), color 0.5s var(--ease-smooth);
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden; /* Prevents horizontal scroll from animations */
 }
 
 .font-display {
   font-family: 'Syne', 'DM Sans', sans-serif;
 }
 
-@layer components {
-  .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50;
-  }
+/* ============================================
+   3. GLASSMORPHISM & PANELS
+   ============================================ */
+.glass-panel, .panel {
+  background: var(--surface);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  transition: all 0.4s var(--ease-spring);
+}
 
-  .btn-primary {
-    @apply btn bg-teal-700 text-white hover:bg-teal-800 shadow-sm shadow-teal-900/10;
-  }
+.glass-panel:hover, .panel:hover {
+  background: var(--surface-hover);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lg);
+  border-color: rgba(255, 255, 255, 0.15);
+}
 
-  .btn-secondary {
-    @apply btn bg-white text-slate-700 border border-slate-200 hover:bg-slate-50;
-  }
+/* ============================================
+   4. FLOATING ELEMENTS & TRAY FIX (Z-INDEX)
+   ============================================ */
+/* Guarantees trays, modals, and dropdowns stay ON TOP */
+.floating-tray, 
+.quick-upload-tray,
+.modal-overlay,
+.dropdown-menu {
+  position: relative;
+  z-index: 9999 !important;
+}
 
-  .btn-danger {
-    @apply btn bg-red-600 text-white hover:bg-red-700;
-  }
+/* Ensures parent containers don't clip floating elements */
+.page-container, 
+.main-content,
+.overflow-container {
+  overflow: visible !important;
+}
 
-  .btn-ghost {
-    @apply btn bg-transparent text-slate-600 hover:bg-slate-100;
-  }
+/* ============================================
+   5. PREMIUM COMPONENT CLASSES
+   ============================================ */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: var(--radius-sm);
+  padding: 0.6rem 1.2rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  transition: all 0.3s var(--ease-spring);
+  cursor: pointer;
+  border: none;
+  text-decoration: none;
+}
 
-  .field {
-    @apply w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 shadow-sm transition focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500/20;
-  }
+.btn-primary {
+  background: linear-gradient(135deg, #0d9488, #0f766e);
+  color: #ffffff;
+  box-shadow: 0 4px 12px rgba(13, 148, 136, 0.25);
+}
 
-  .label {
-    @apply mb-1.5 block text-sm font-medium text-slate-700;
-  }
+.btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(13, 148, 136, 0.35);
+}
 
-  .panel {
-    @apply rounded-2xl border border-slate-200/80 bg-white/90 shadow-sm backdrop-blur;
-  }
+.btn-secondary {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+}
 
-  .chip {
-    @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold;
+.btn-secondary:hover {
+  background: var(--surface-hover);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+
+.btn-danger {
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+  color: #ffffff;
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.25);
+}
+
+.btn-danger:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(239, 68, 68, 0.35);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.btn-ghost:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.field {
+  width: 100%;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  padding: 0.6rem 0.875rem;
+  font-size: 0.875rem;
+  color: var(--text);
+  transition: all 0.3s var(--ease-smooth);
+  font-family: inherit;
+}
+
+.field:focus {
+  border-color: var(--primary);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--primary-glow);
+  background: var(--surface-hover);
+}
+
+.field::placeholder {
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+
+.label {
+  display: block;
+  margin-bottom: 0.375rem;
+  font-size: 0.813rem;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: 0.01em;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 9999px;
+  padding: 0.25rem 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(8px);
+}
+
+/* ============================================
+   6. DARK MODE COMPONENT OVERRIDES
+   ============================================ */
+[data-theme="dark"] .btn-secondary {
+  background: rgba(44, 44, 46, 0.7);
+  border-color: rgba(255, 255, 255, 0.08);
+  color: #f5f5f7;
+}
+
+[data-theme="dark"] .btn-secondary:hover {
+  background: rgba(58, 58, 60, 0.8);
+}
+
+[data-theme="dark"] .btn-ghost {
+  color: #8e8e93;
+}
+
+[data-theme="dark"] .btn-ghost:hover {
+  background: rgba(44, 44, 46, 0.5);
+  color: #f5f5f7;
+}
+
+[data-theme="dark"] .field {
+  background: rgba(28, 28, 30, 0.6);
+  border-color: rgba(255, 255, 255, 0.08);
+  color: #f5f5f7;
+}
+
+[data-theme="dark"] .field:focus {
+  border-color: #14b8a6;
+  box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.12);
+  background: rgba(28, 28, 30, 0.8);
+}
+
+[data-theme="dark"] .chip {
+  background: rgba(44, 44, 46, 0.6);
+  border-color: rgba(255, 255, 255, 0.08);
+  color: #d1d1d6;
+}
+
+/* ============================================
+   7. TAILWIND UTILITY OVERRIDES (DARK MODE)
+   ============================================ */
+[data-theme="dark"] .bg-white { background-color: #1c1c1e !important; }
+[data-theme="dark"] .bg-slate-50 { background-color: #1c1c1e !important; }
+[data-theme="dark"] .bg-slate-100 { background-color: #2c2c2e !important; }
+[data-theme="dark"] .bg-slate-200 { background-color: #3a3a3c !important; }
+[data-theme="dark"] .bg-white\/90 { background-color: rgba(28, 28, 30, 0.9) !important; }
+[data-theme="dark"] .bg-white\/80 { background-color: rgba(28, 28, 30, 0.8) !important; }
+[data-theme="dark"] .bg-white\/70 { background-color: rgba(28, 28, 30, 0.7) !important; }
+[data-theme="dark"] .bg-white\/60 { background-color: rgba(28, 28, 30, 0.6) !important; }
+
+[data-theme="dark"] .text-slate-900 { color: #f5f5f7 !important; }
+[data-theme="dark"] .text-slate-800 { color: #f5f5f7 !important; }
+[data-theme="dark"] .text-slate-700 { color: #d1d1d6 !important; }
+[data-theme="dark"] .text-slate-600 { color: #a1a1a6 !important; }
+[data-theme="dark"] .text-slate-500 { color: #8e8e93 !important; }
+[data-theme="dark"] .text-slate-400 { color: #6c6c70 !important; }
+
+[data-theme="dark"] .border-slate-200 { border-color: #3a3a3c !important; }
+[data-theme="dark"] .border-slate-300 { border-color: #4a4a4c !important; }
+[data-theme="dark"] .border-slate-100 { border-color: #2c2c2e !important; }
+
+[data-theme="dark"] .bg-teal-50 { background-color: rgba(20, 184, 166, 0.08) !important; }
+[data-theme="dark"] .text-teal-700,
+[data-theme="dark"] .text-teal-600 { color: #14b8a6 !important; }
+
+[data-theme="dark"] .hover\:bg-slate-100:hover { background-color: rgba(44, 44, 46, 0.5) !important; }
+[data-theme="dark"] .hover\:bg-slate-100\/70:hover { background-color: rgba(44, 44, 46, 0.6) !important; }
+[data-theme="dark"] .hover\:bg-teal-50:hover { background-color: rgba(20, 184, 166, 0.12) !important; }
+
+/* ============================================
+   8. ANIMATIONS
+   ============================================ */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
-/* Custom scrollbar for split panes */
+
+.animate-fade-in {
+  animation: fadeInUp 0.5s var(--ease-spring) forwards;
+}
+
+.animate-fade-up {
+  animation: fadeInUp 0.4s var(--ease-spring) forwards;
+}
+
+/* ============================================
+   9. CUSTOM SCROLLBAR (Apple Style)
+   ============================================ */
 .custom-scrollbar::-webkit-scrollbar {
   width: 6px;
+  height: 6px;
 }
+
 .custom-scrollbar::-webkit-scrollbar-track {
   background: transparent;
 }
+
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background-color: #cbd5e1;
+  background: rgba(0, 0, 0, 0.12);
   border-radius: 20px;
+  transition: background 0.3s ease;
 }
+
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background-color: #94a3b8;
+  background: rgba(0, 0, 0, 0.25);
 }
-/* Print Styles for Checklist */
+
+[data-theme="dark"] .custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+[data-theme="dark"] .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* ============================================
+   10. PRINT STYLES
+   ============================================ */
 @media print {
   body {
     background: white !important;
     color: black !important;
   }
-  .print\:hidden {
-    display: none !important;
-  }
-  .print\:bg-white {
-    background-color: white !important;
-  }
-  .print\:overflow-visible {
-    overflow: visible !important;
-  }
-  .print\:shadow-none {
-    box-shadow: none !important;
-  }
-  .print\:border-0 {
-    border: 0 !important;
-  }
-  /* Force table to print nicely */
+  .print\:hidden { display: none !important; }
+  .print\:bg-white { background-color: white !important; }
+  .print\:shadow-none { box-shadow: none !important; }
+  .print\:border-0 { border: 0 !important; }
+  
   table {
     width: 100% !important;
     border-collapse: collapse !important;
@@ -130,4 +376,12 @@ body {
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
+}
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in-up {
+  animation: fadeInUp 0.3s var(--ease-spring) forwards;
 }

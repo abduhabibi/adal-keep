@@ -1,0 +1,407 @@
+import { useState, useEffect } from 'react'
+import toast from 'react-hot-toast'
+import api from '../services/api'
+import { useAuth } from '../context/AuthContext'
+import PageHeader from '../components/shared/PageHeader'
+import Spinner from '../components/shared/Spinner'
+import Input from '../components/shared/Input'
+import Button from '../components/shared/Button'
+import Modal from '../components/shared/Modal'
+
+const COUNTRY_CODES = ['+251', '+966', '+971', '+974', '+965', '+249']
+const digitsOnly = (v) => (v || '').replace(/\D/g, '').slice(0, 9)
+const formatPhone = (v) => {
+  const d = digitsOnly(v)
+  if (d.length > 6) return `${d.slice(0, 3)} ${d.slice(3, 6)} ${d.slice(6)}`
+  if (d.length > 3) return `${d.slice(0, 3)} ${d.slice(3)}`
+  return d
+}
+
+function PhoneField({ label, cc, num, onChange, required }) {
+  return (
+    <div>
+      <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+        {label}{required && ' *'}
+      </label>
+      <div className="flex gap-2">
+        <select
+          value={cc}
+          onChange={(e) => onChange({ cc: e.target.value, num })}
+          className="w-24 p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-white text-sm"
+        >
+          {COUNTRY_CODES.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <input
+          inputMode="numeric"
+          value={formatPhone(num)}
+          onChange={(e) => onChange({ cc, num: digitsOnly(e.target.value) })}
+          placeholder="9XX XXX XXX"
+          className="flex-1 p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-white text-sm font-mono"
+        />
+      </div>
+    </div>
+  )
+}
+
+const emptyForm = {
+  name: '', username: '', wa_cc: '+251', wa_num: '',
+  work_cc: '+251', work_num: '', password: '', password2: ''
+}
+
+export default function EmployeesPage() {
+  const { user, setCurrentUser, refresh } = useAuth()
+  const [employees, setEmployees] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [search, setSearch] = useState('')
+  const [isModalOpen, setIsModalOpen] = useState(false)
+  const [newEmployee, setNewEmployee] = useState(emptyForm)
+  const [isSaving, setIsSaving] = useState(false)
+  const [loginForm, setLoginForm] = useState({ username: '', password: '' })
+  const [registerForm, setRegisterForm] = useState(emptyForm)
+  const [loggingIn, setLoggingIn] = useState(false)
+  const [registering, setRegistering] = useState(false)
+  const [authMode, setAuthMode] = useState('login')
+  const [selectedEmployee, setSelectedEmployee] = useState(null)
+  const [employeeProfiles, setEmployeeProfiles] = useState([])
+  const [checkingAuth, setCheckingAuth] = useState(true)
+
+  // Auto-login once
+  useEffect(() => {
+    let cancelled = false
+    const tryAutoLogin = async () => {
+      if (user) {
+        setCheckingAuth(false)
+        loadEmployees()
+        return
+      }
+      const cu = localStorage.getItem('adal_cached_username')
+      const cp = localStorage.getItem('adal_cached_password')
+      if (!cu || !cp) {
+        setCheckingAuth(false)
+        return
+      }
+      try {
+        const res = await api.post('/auth/login', { username: cu, password: cp })
+        if (cancelled) return
+        setCurrentUser(res.data)
+        await loadEmployees()
+      } catch {
+        localStorage.removeItem('adal_cached_username')
+        localStorage.removeItem('adal_cached_password')
+      } finally {
+        if (!cancelled) setCheckingAuth(false)
+      }
+    }
+    tryAutoLogin()
+    return () => { cancelled = true }
+  }, [])
+
+  const loadEmployees = async () => {
+    setLoading(true)
+    try {
+      const res = await api.get('/employees')
+      setEmployees(res.data || [])
+    } catch {
+      toast.error('ሰራተኞችን መጫን አልተቻለም')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const validate = (f) => {
+    if (!f.name.trim()) return 'ስም ያስፈልጋል'
+    if (!f.username.trim() || /\s/.test(f.username)) return 'መለያ ስም ያለ ክፍተት ያስቡ'
+    if (f.wa_num && digitsOnly(f.wa_num).length < 9) return 'ትክክለኛ ስልክ ቁጥር ያስገቡ (9 ቁጥሮች)'
+    if (f.password.length < 4) return 'የይለፍ ቃል ቢያንስ 4 ቁምፊ'
+    if (f.password !== f.password2) return 'የይለፍ ቃሎች አይመሳሰሉም'
+    return null
+  }
+
+  const buildPayload = (f) => ({
+    name: f.name.trim(),
+    username: f.username.trim(),
+    phone_whatsapp: f.wa_num ? `${f.wa_cc}${digitsOnly(f.wa_num)}` : '',
+    phone_work: f.work_num ? `${f.work_cc}${digitsOnly(f.work_num)}` : '',
+    password: f.password,
+  })
+
+  const handleLogin = async (e) => {
+    e.preventDefault()
+    setLoggingIn(true)
+    try {
+      const res = await api.post('/auth/login', loginForm)
+      localStorage.setItem('adal_cached_username', loginForm.username)
+      localStorage.setItem('adal_cached_password', loginForm.password)
+      setCurrentUser(res.data)
+      toast.success('በተሳካ ሁኔታ ገብተዋል')
+      await loadEmployees()
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'መግባት አልተቻለም')
+    } finally {
+      setLoggingIn(false)
+    }
+  }
+
+  const handleRegister = async (e) => {
+    e.preventDefault()
+    const err = validate(registerForm)
+    if (err) return toast.error(err)
+    setRegistering(true)
+    try {
+      const payload = buildPayload(registerForm)
+      await api.post('/employees/register', payload)
+      localStorage.setItem('adal_cached_username', payload.username)
+      localStorage.setItem('adal_cached_password', payload.password)
+      await new Promise(r => setTimeout(r, 400))
+      const res = await api.post('/auth/login', {
+        username: payload.username,
+        password: payload.password
+      })
+      setCurrentUser(res.data)
+      toast.success('ተመዝግበው በተሳካ ሁኔታ ገብተዋል')
+      await loadEmployees()
+    } catch (er) {
+      toast.error(er.response?.data?.error || 'ምዝገባ አልተቻለም')
+    } finally {
+      setRegistering(false)
+    }
+  }
+
+  const handleAddEmployee = async (e) => {
+    e.preventDefault()
+    const err = validate(newEmployee)
+    if (err) return toast.error(err)
+    setIsSaving(true)
+    try {
+      await api.post('/employees', buildPayload(newEmployee))
+      toast.success('ሰራተኛ ተፈጥሯል')
+      setIsModalOpen(false)
+      setNewEmployee(emptyForm)
+      loadEmployees()
+    } catch (er) {
+      toast.error(er.response?.data?.error || 'መፍጠር አልተቻለም')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const handleLogout = async () => {
+    try {
+      await api.post('/auth/logout')
+      localStorage.removeItem('adal_cached_username')
+      localStorage.removeItem('adal_cached_password')
+      setCurrentUser(null)
+      toast.success('ወጥተዋል')
+    } catch {
+      toast.error('መውጣት አልተቻለም')
+    }
+  }
+
+  const handleDeleteEmployee = async (empId, empName) => {
+    if (!confirm(`ሰራተኛ "${empName}" ይሰረዝ?`)) return
+    try {
+      await api.delete(`/employees/${empId}`)
+      toast.success('ተሰርዟል')
+      loadEmployees()
+    } catch {
+      toast.error('መሰረዝ አልተቻለም')
+    }
+  }
+
+  const loadEmployeeProfiles = async (id) => {
+    try {
+      // Profiles created by this employee (using created_by name)
+      const emp = employees.find(e => e.id === id)
+      if (!emp) return
+      const res = await api.get('/profiles')
+      const mine = (res.data || []).filter(p => p.created_by === emp.full_name || p.created_by === emp.name)
+      setEmployeeProfiles(mine)
+    } catch {
+      setEmployeeProfiles([])
+    }
+  }
+
+  const filteredEmployees = employees.filter(e =>
+    e.name?.toLowerCase().includes(search.toLowerCase()) ||
+    e.username?.toLowerCase().includes(search.toLowerCase()) ||
+    e.phone_whatsapp?.includes(search)
+  )
+
+  if (checkingAuth) {
+    return <div className="flex h-64 items-center justify-center"><Spinner /></div>
+  }
+
+  if (!user) {
+    const containerClasses = "min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900 p-4 sm:p-6"
+    const cardClasses = "max-w-md w-full bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 p-6 sm:p-8"
+    return (
+      <div className={containerClasses}>
+        <div className={cardClasses}>
+          <div className="text-center mb-6">
+            <h1 className="text-xl font-bold text-slate-800 dark:text-white">
+              {authMode === 'login' ? 'ሰራተኛ መግቢያ' : 'ሰራተኛ ምዝገባ'}
+            </h1>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+              {authMode === 'login' ? 'ወደ ስራ ቦታዎ ግቡ' : 'አዲስ መለያ ይፍጠሩ'}
+            </p>
+          </div>
+          {authMode === 'login' ? (
+            <form onSubmit={handleLogin} className="space-y-4">
+              <Input label="መለያ ስም" value={loginForm.username}
+                onChange={(e) => setLoginForm({ ...loginForm, username: e.target.value })} required />
+              <Input label="የይለፍ ቃል" type="password" value={loginForm.password}
+                onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })} required />
+              <Button type="submit" className="w-full" isLoading={loggingIn}>ግባ</Button>
+              <button type="button" onClick={() => setAuthMode('register')}
+                className="w-full text-sm text-teal-600 hover:text-teal-700 dark:text-teal-400">
+                መለያ የለዎትም? መዝገቡ
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={handleRegister} className="space-y-3 sm:space-y-4">
+              <Input label="ሙሉ ስም" value={registerForm.name}
+                onChange={(e) => setRegisterForm({ ...registerForm, name: e.target.value })} required />
+              <Input label="መለያ ስም (ያለ ክፍተት)" value={registerForm.username}
+                onChange={(e) => setRegisterForm({ ...registerForm, username: e.target.value.replace(/\s/g, '') })} required />
+              <PhoneField label="WhatsApp ስልክ" cc={registerForm.wa_cc} num={registerForm.wa_num}
+                onChange={(p) => setRegisterForm({ ...registerForm, wa_cc: p.cc, wa_num: p.num })} />
+              <PhoneField label="የስራ ስልክ" cc={registerForm.work_cc} num={registerForm.work_num}
+                onChange={(p) => setRegisterForm({ ...registerForm, work_cc: p.cc, work_num: p.num })} />
+              <Input label="የይለፍ ቃል" type="password" value={registerForm.password}
+                onChange={(e) => setRegisterForm({ ...registerForm, password: e.target.value })} required />
+              <Input label="የይለፍ ቃል ያረጋግጡ" type="password" value={registerForm.password2}
+                onChange={(e) => setRegisterForm({ ...registerForm, password2: e.target.value })} required />
+              <Button type="submit" className="w-full" isLoading={registering}>ተመዝገብ</Button>
+              <button type="button" onClick={() => setAuthMode('login')}
+                className="w-full text-sm text-teal-600 hover:text-teal-700 dark:text-teal-400">
+                መለያ አለዎት? ይግቡ
+              </button>
+            </form>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  if (loading) return <div className="flex h-64 items-center justify-center"><Spinner /></div>
+
+  return (
+    <div className="animate-fade-up h-[calc(100vh-8rem)] flex flex-col">
+      <PageHeader
+        title="ሰራተኞች"
+        subtitle="የሰራተኛ መለያዎችን እና የተመዘገቡ ፕሮፋይሎችን ያስተዳድሩ"
+        action={
+          <div className="flex gap-3">
+            <div className="w-full sm:w-64">
+              <Input placeholder="ሰራተኞችን ይፈልጉ..." value={search}
+                onChange={(e) => setSearch(e.target.value)} />
+            </div>
+            {user.role === 'owner' && (
+              <Button onClick={() => setIsModalOpen(true)}>+ ሰራተኛ አክል</Button>
+            )}
+            <Button variant="secondary" onClick={handleLogout}>ውጣ</Button>
+          </div>
+        }
+      />
+
+      <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+        {selectedEmployee ? (
+          <div className="space-y-4">
+            <button onClick={() => { setSelectedEmployee(null); setEmployeeProfiles([]) }}
+              className="text-sm text-teal-600 hover:text-teal-700">
+              ← ወደ ሰራተኞች ተመለስ
+            </button>
+            <div className="panel p-6 border border-slate-200 dark:border-slate-700 rounded-xl">
+              <h2 className="text-xl font-bold text-slate-800 dark:text-white mb-4">
+                የ{selectedEmployee.name} ፕሮፋይሎች (የፈጠራቸው ብቻ)
+              </h2>
+              {employeeProfiles.length === 0 ? (
+                <p className="text-slate-500 dark:text-slate-400">ምንም የተመዘገበ ፕሮፋይል የለም</p>
+              ) : (
+                <div className="space-y-2">
+                  {employeeProfiles.map(p => (
+                    <div key={p.id} className="p-3 bg-slate-50 dark:bg-slate-900/50 rounded-lg border border-slate-200 dark:border-slate-700">
+                      <div className="font-semibold text-slate-800 dark:text-white">{p.full_name}</div>
+                      <div className="text-sm text-slate-500 dark:text-slate-400">{p.phone_number || 'ስልክ የለም'}</div>
+                      <span className="chip bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 text-xs px-2 py-0.5 rounded-full mt-2 inline-block">
+                        ኦፊሴላዊ ፋይል · {p.created_by}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        ) : filteredEmployees.length === 0 ? (
+          <div className="text-center py-12 text-slate-400 dark:text-slate-500">
+            {search ? 'ምንም ሰራተኛ አልተገኘም' : 'ገና ምንም ሰራተኛ የለም'}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {filteredEmployees.map(emp => (
+              <div key={emp.id} className="panel p-4 border border-slate-200 dark:border-slate-700 rounded-xl">
+                <div className="flex justify-between items-start mb-3">
+                  <div className="flex-1 cursor-pointer"
+                    onClick={() => { setSelectedEmployee(emp); loadEmployeeProfiles(emp.id) }}>
+                    <h3 className="font-bold text-slate-800 dark:text-white">{emp.name}</h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">@{emp.username}</p>
+                  </div>
+                  {user.role === 'owner' && (
+                    <button onClick={() => handleDeleteEmployee(emp.id, emp.name)}
+                      className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded" title="ሰርዝ">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                          d="M19 7l-.867 12.142A2 2 0 0116.133 21H7.867a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+                <div className="space-y-1 text-sm text-slate-600 dark:text-slate-300">
+                  <div>📞 {emp.phone_work || '—'}</div>
+                  <div className="flex items-center gap-2">
+                    💬 {emp.phone_whatsapp || '—'}
+                    {emp.whatsapp_linked ? (
+                      <span className="chip bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 text-xs px-2 py-0.5 rounded-full">ተገናኝቷል</span>
+                    ) : (
+                      <span className="chip bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 text-xs px-2 py-0.5 rounded-full">አልተገናኘም</span>
+                    )}
+                  </div>
+                </div>
+                {emp.id === user.id && (
+                  <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-700">
+                    <span className="chip bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-400 text-xs px-2 py-1 rounded-full">
+                      ይህ እርስዎ ነዎት
+                    </span>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {user.role === 'owner' && (
+        <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="ሰራተኛ አክል" size="md">
+          <form onSubmit={handleAddEmployee} className="space-y-4">
+            <Input label="ሙሉ ስም" value={newEmployee.name}
+              onChange={(e) => setNewEmployee({ ...newEmployee, name: e.target.value })} required />
+            <Input label="መለያ ስም (ያለ ክፍተት)" value={newEmployee.username}
+              onChange={(e) => setNewEmployee({ ...newEmployee, username: e.target.value.replace(/\s/g, '') })} required />
+            <PhoneField label="WhatsApp ስልክ" cc={newEmployee.wa_cc} num={newEmployee.wa_num}
+              onChange={(p) => setNewEmployee({ ...newEmployee, wa_cc: p.cc, wa_num: p.num })} />
+            <PhoneField label="የስራ ስልክ" cc={newEmployee.work_cc} num={newEmployee.work_num}
+              onChange={(p) => setNewEmployee({ ...newEmployee, work_cc: p.cc, work_num: p.num })} />
+            <Input label="የይለፍ ቃል" type="password" value={newEmployee.password}
+              onChange={(e) => setNewEmployee({ ...newEmployee, password: e.target.value })} required />
+            <Input label="የይለፍ ቃል ያረጋግጡ" type="password" value={newEmployee.password2}
+              onChange={(e) => setNewEmployee({ ...newEmployee, password2: e.target.value })} required />
+            <div className="flex justify-end gap-3 pt-4">
+              <Button type="button" variant="secondary" onClick={() => setIsModalOpen(false)}>ሰርዝ</Button>
+              <Button type="submit" isLoading={isSaving}>ሰራተኛ ጨምር</Button>
+            </div>
+          </form>
+        </Modal>
+      )}
+    </div>
+  )
+}

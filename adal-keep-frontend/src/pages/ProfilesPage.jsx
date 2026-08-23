@@ -8,7 +8,12 @@ import Spinner from '../components/shared/Spinner'
 import StatusBadge from '../components/shared/StatusBadge'
 import Button from '../components/shared/Button'
 import Input from '../components/shared/Input'
-import { STATUS_OPTIONS } from '../lib/utils'
+
+const STATUS_OPTIONS_AM = [
+  { value: 'pending', label: 'በመጠባበቅ ላይ' },
+  { value: 'in_progress', label: 'በሂደት ላይ' },
+  { value: 'completed', label: 'የተጠናቀቀ' },
+]
 
 export default function ProfilesPage() {
   const navigate = useNavigate()
@@ -36,7 +41,7 @@ export default function ProfilesPage() {
       setProfiles(profilesRes.data)
       setBrokers(brokersRes.data)
     } catch {
-      toast.error('Failed to load profiles')
+      toast.error('ፕሮፋይሎችን መጫን አልተቻለም')
     } finally {
       setLoading(false)
     }
@@ -56,42 +61,42 @@ export default function ProfilesPage() {
 
   const deleteProfile = async (id, e) => {
     e?.stopPropagation()
-    if (!confirm('Delete this profile permanently?')) return
+    if (!confirm('ይህንን ፕሮፋይል ሙሉ በሙሉ ለማጥፋት እርግጠኛ ነዎት?')) return
     try {
       await api.delete(`/profiles/${id}`)
-      toast.success('Profile deleted')
+      toast.success('ፕሮፋይሉ ተሰርዟል')
       load()
     } catch {
-      toast.error('Delete failed')
+      toast.error('ማጥፋት አልተቻለም')
     }
   }
 
   const filterLabel = useMemo(() => {
     const parts = []
-    if (status !== 'all') parts.push(STATUS_OPTIONS.find((s) => s.value === status)?.label || status)
+    if (status !== 'all') parts.push(STATUS_OPTIONS_AM.find((s) => s.value === status)?.label || status)
     if (brokerId) {
       const b = brokers.find((x) => String(x.id) === String(brokerId))
       if (b) parts.push(b.name)
     }
     if (query.trim()) parts.push(`“${query.trim()}”`)
-    return parts.length ? parts.join(' · ') : 'All clients'
+    return parts.length ? parts.join(' · ') : 'ሁሉንም ደንበኞች'
   }, [status, brokerId, query, brokers])
 
   return (
     <div>
       <PageHeader
-        title="Profiles"
+        title="ፕሮፋይሎች"
         subtitle={filterLabel}
         action={
           <Button onClick={() => navigate('/profiles/new')}>
-            + Add Profile
+            + ፕሮፋይል አክል
           </Button>
         }
       />
 
       <div className="panel mb-5 grid gap-3 p-4 sm:grid-cols-[1fr_auto_auto] animate-fade-up">
         <Input
-          placeholder="Search profiles by name, phone, or ID..."
+          placeholder="በስም፣ በስልክ ወይም በመታወቂያ ይፈልጉ..."
           value={query}
           onChange={(e) => {
             setQuery(e.target.value)
@@ -112,8 +117,8 @@ export default function ProfilesPage() {
           value={status}
           onChange={(e) => updateFilter('status', e.target.value)}
         >
-          <option value="all">All statuses</option>
-          {STATUS_OPTIONS.map((s) => (
+          <option value="all">ሁሉንም ሁኔታዎች</option>
+          {STATUS_OPTIONS_AM.map((s) => (
             <option key={s.value} value={s.value}>
               {s.label}
             </option>
@@ -125,7 +130,7 @@ export default function ProfilesPage() {
           value={brokerId}
           onChange={(e) => updateFilter('broker_id', e.target.value)}
         >
-          <option value="">All brokers</option>
+          <option value="">ሁሉንም ደላሎች</option>
           {brokers.map((b) => (
             <option key={b.id} value={b.id}>
               {b.name}
@@ -138,15 +143,15 @@ export default function ProfilesPage() {
         <Spinner />
       ) : profiles.length === 0 ? (
         <EmptyState
-          title="No profiles found"
+          title="ምንም ፕሮፋይል አልተገኘም"
           description={
             query || status !== 'all' || brokerId
-              ? 'Try clearing filters or search for something else.'
-              : 'Add a client profile to start tracking paperwork and status.'
+              ? 'እባክዎ ማጣሪያዎችን ያጽዱ ወይም ሌላ ነገር ይፈልጉ።'
+              : 'የሰነዶች እና የሁኔታ ክትትል ለመጀመር የደንበኛ ፕሮፋይል ያክሉ።'
           }
           action={
             <Button onClick={() => navigate('/profiles/new')}>
-              Create profile
+              ፕሮፋይል ፍጠር
             </Button>
           }
         />
@@ -164,23 +169,23 @@ export default function ProfilesPage() {
                   <h3 className="truncate font-display text-lg font-bold text-slate-900">
                     {p.full_name}
                   </h3>
-                  <p className="mt-0.5 truncate text-sm text-slate-500">{p.phone_number || 'No phone'}</p>
+                  <p className="mt-0.5 truncate text-sm text-slate-500">{p.phone_number || 'ስልክ የለም'}</p>
                 </div>
                 <StatusBadge status={p.status} />
               </div>
 
               <dl className="mt-4 space-y-1.5 text-sm text-slate-600">
                 <div className="flex justify-between gap-2">
-                  <dt className="text-slate-400">Broker</dt>
-                  <dd className="truncate font-medium">{p.broker_name || 'Unassigned'}</dd>
+                  <dt className="text-slate-400">ደላላ</dt>
+                  <dd className="truncate font-medium">{p.broker_name || 'ያልተመደበ'}</dd>
                 </div>
                 <div className="flex justify-between gap-2">
-                  <dt className="text-slate-400">Passport</dt>
+                  <dt className="text-slate-400">ፓስፖርት</dt>
                   <dd className="truncate font-medium">{p.passport_number || '—'}</dd>
                 </div>
                 {(p.room || p.table_name || p.box_number) && (
                   <div className="flex justify-between gap-2">
-                    <dt className="text-slate-400">Location</dt>
+                    <dt className="text-slate-400">ቦታ</dt>
                     <dd className="truncate font-medium">
                       {[p.room, p.table_name, p.box_number].filter(Boolean).join(' / ')}
                     </dd>
@@ -197,7 +202,7 @@ export default function ProfilesPage() {
                     navigate(`/profiles/${p.id}`)
                   }}
                 >
-                  Open
+                  ክፈት
                 </button>
                 <button
                   type="button"
@@ -207,14 +212,14 @@ export default function ProfilesPage() {
                     navigate(`/profiles/${p.id}/edit`)
                   }}
                 >
-                  Edit
+                  አርም
                 </button>
                 <button
                   type="button"
                   className="btn-ghost py-2 text-xs text-red-600 hover:bg-red-50"
                   onClick={(e) => deleteProfile(p.id, e)}
                 >
-                  Delete
+                  ሰርዝ
                 </button>
               </div>
             </article>

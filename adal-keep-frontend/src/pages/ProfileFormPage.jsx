@@ -4,7 +4,12 @@ import toast from 'react-hot-toast'
 import api from '../services/api'
 import PageHeader from '../components/shared/PageHeader'
 import Spinner from '../components/shared/Spinner'
-import { STATUS_OPTIONS } from '../lib/utils'
+
+const STATUS_OPTIONS_AM = [
+  { value: 'pending', label: 'በመጠባበቅ ላይ' },
+  { value: 'in_progress', label: 'በሂደት ላይ' },
+  { value: 'completed', label: 'የተጠናቀቀ' },
+]
 
 const emptyForm = {
   full_name: '',
@@ -55,7 +60,7 @@ export default function ProfileFormPage() {
           })
         }
       } catch {
-        toast.error(isEdit ? 'Failed to load profile' : 'Failed to load form data')
+        toast.error(isEdit ? 'ፕሮፋይሉን መጫን አልተቻለም' : 'የፎርም መረጃዎችን መጫን አልተቻለም')
         if (isEdit) navigate('/profiles')
       } finally {
         if (alive) setLoading(false)
@@ -81,59 +86,62 @@ export default function ProfileFormPage() {
 
       if (isEdit) {
         await api.put(`/profiles/${id}`, payload)
-        toast.success('Profile updated')
+        toast.success('ፕሮፋይሉ በስኬት ተዘምኗል')
         navigate(`/profiles/${id}`)
       } else {
         const res = await api.post('/profiles', payload)
-        toast.success('Profile created')
+        toast.success('አዲስ ፕሮፋይል ተፈጥሯል')
         navigate(`/profiles/${res.data.id}`)
       }
     } catch (err) {
-      toast.error(err.response?.data?.error || 'Failed to save profile')
+      toast.error(err.response?.data?.error || 'ፕሮፋይሉን ማስቀመጥ አልተቻለም')
     } finally {
       setSaving(false)
     }
   }
 
-  if (loading) return <Spinner label={isEdit ? 'Loading profile…' : 'Loading…'} />
+  if (loading) return <Spinner label={isEdit ? 'ፕሮፋይል በመጫን ላይ…' : 'በመጫን ላይ…'} />
+
+  // Reusable styling for form fields in light & dark mode
+  const inputClass = "w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-900/50 p-2.5 text-sm text-slate-800 dark:text-slate-100 focus:bg-white dark:focus:bg-slate-900 focus:border-teal-500 focus:outline-none transition-colors"
 
   return (
     <div className="mx-auto max-w-2xl animate-fade-up">
       <PageHeader
-        title={isEdit ? 'Edit profile' : 'New profile'}
-        subtitle={isEdit ? 'Update client details and filing info' : 'Add a new client to your workspace'}
+        title={isEdit ? 'ፕሮፋይል አርም' : 'አዲስ ፕሮፋይል'}
+        subtitle={isEdit ? 'የደንበኛ ዝርዝሮችን እና የፋይል መረጃዎችን ያዘምኑ' : 'አዲስ ደንበኛ ወደ ስራ ቦታዎ ያክሉ'}
       />
 
-      <form onSubmit={handleSubmit} className="panel space-y-5 p-5 sm:p-6">
+      <form onSubmit={handleSubmit} className="panel space-y-5 p-5 sm:p-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/60 rounded-xl shadow-sm">
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="sm:col-span-2">
-            <label className="label" htmlFor="full_name">Full name *</label>
-            <input id="full_name" required className="field" value={form.full_name} onChange={setField('full_name')} />
+            <label className="label mb-1.5 block font-medium text-xs text-slate-600 dark:text-slate-300" htmlFor="full_name">ሙሉ ስም *</label>
+            <input id="full_name" required className={inputClass} value={form.full_name} onChange={setField('full_name')} />
           </div>
           <div>
-            <label className="label" htmlFor="phone_number">Phone *</label>
-            <input id="phone_number" required type="tel" className="field" value={form.phone_number} onChange={setField('phone_number')} />
+            <label className="label mb-1.5 block font-medium text-xs text-slate-600 dark:text-slate-300" htmlFor="phone_number">ስልክ ቁጥር *</label>
+            <input id="phone_number" required type="tel" className={inputClass} value={form.phone_number} onChange={setField('phone_number')} />
           </div>
           <div>
-            <label className="label" htmlFor="status">Status</label>
-            <select id="status" className="field" value={form.status} onChange={setField('status')}>
-              {STATUS_OPTIONS.map((s) => (
+            <label className="label mb-1.5 block font-medium text-xs text-slate-600 dark:text-slate-300" htmlFor="status">ሁኔታ</label>
+            <select id="status" className={inputClass} value={form.status} onChange={setField('status')}>
+              {STATUS_OPTIONS_AM.map((s) => (
                 <option key={s.value} value={s.value}>{s.label}</option>
               ))}
             </select>
           </div>
           <div>
-            <label className="label" htmlFor="national_id">National ID</label>
-            <input id="national_id" className="field" value={form.national_id} onChange={setField('national_id')} />
+            <label className="label mb-1.5 block font-medium text-xs text-slate-600 dark:text-slate-300" htmlFor="national_id">ብሔራዊ መታወቂያ</label>
+            <input id="national_id" className={inputClass} value={form.national_id} onChange={setField('national_id')} />
           </div>
           <div>
-            <label className="label" htmlFor="passport_number">Passport</label>
-            <input id="passport_number" className="field" value={form.passport_number} onChange={setField('passport_number')} />
+            <label className="label mb-1.5 block font-medium text-xs text-slate-600 dark:text-slate-300" htmlFor="passport_number">ፓስፖርት ቁጥር</label>
+            <input id="passport_number" className={inputClass} value={form.passport_number} onChange={setField('passport_number')} />
           </div>
           <div className="sm:col-span-2">
-            <label className="label" htmlFor="broker_id">Broker</label>
-            <select id="broker_id" className="field" value={form.broker_id} onChange={setField('broker_id')}>
-              <option value="">Unassigned</option>
+            <label className="label mb-1.5 block font-medium text-xs text-slate-600 dark:text-slate-300" htmlFor="broker_id">ደላላ</label>
+            <select id="broker_id" className={inputClass} value={form.broker_id} onChange={setField('broker_id')}>
+              <option value="">ያልተመደበ</option>
               {brokers.map((b) => (
                 <option key={b.id} value={b.id}>{b.name}</option>
               ))}
@@ -142,36 +150,36 @@ export default function ProfileFormPage() {
         </div>
 
         <div>
-          <p className="label">Filing location</p>
+          <p className="label mb-1.5 font-medium text-xs text-slate-600 dark:text-slate-300">የፋይል ቦታ</p>
           <div className="grid gap-3 sm:grid-cols-3">
-            <input className="field" placeholder="Room" value={form.room} onChange={setField('room')} />
-            <input className="field" placeholder="Table" value={form.table_name} onChange={setField('table_name')} />
-            <input className="field" placeholder="Box" value={form.box_number} onChange={setField('box_number')} />
+            <input className={inputClass} placeholder="ክፍል" value={form.room} onChange={setField('room')} />
+            <input className={inputClass} placeholder="ጠረጴዛ" value={form.table_name} onChange={setField('table_name')} />
+            <input className={inputClass} placeholder="ሳጥን" value={form.box_number} onChange={setField('box_number')} />
           </div>
         </div>
 
         <div>
-          <label className="label" htmlFor="notes">Notes</label>
+          <label className="label mb-1.5 block font-medium text-xs text-slate-600 dark:text-slate-300" htmlFor="notes">ማስታወሻዎች</label>
           <textarea
             id="notes"
             rows={4}
-            className="field resize-y"
-            placeholder="Anything useful about this client…"
+            className={`${inputClass} resize-y`}
+            placeholder="ስለዚህ ደንበኛ ጠቃሚ የሆኑ መረጃዎች…"
             value={form.notes}
             onChange={setField('notes')}
           />
         </div>
 
-        <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-5">
-          <button type="submit" className="btn-primary" disabled={saving}>
-            {saving ? 'Saving…' : isEdit ? 'Save changes' : 'Create profile'}
+        <div className="flex flex-wrap gap-3 border-t border-slate-200 dark:border-slate-700 pt-5">
+          <button type="submit" className="px-5 py-2.5 rounded-lg bg-teal-600 hover:bg-teal-700 text-white font-medium text-sm transition-colors disabled:opacity-50" disabled={saving}>
+            {saving ? 'በማስቀመጥ ላይ…' : isEdit ? 'ለወጦችን አስቀምጥ' : 'ፕሮፋይል ፍጠር'}
           </button>
           <button
             type="button"
-            className="btn-secondary"
+            className="px-5 py-2.5 rounded-lg border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 font-medium text-sm transition-colors"
             onClick={() => navigate(isEdit ? `/profiles/${id}` : '/profiles')}
           >
-            Cancel
+            ሰርዝ
           </button>
         </div>
       </form>

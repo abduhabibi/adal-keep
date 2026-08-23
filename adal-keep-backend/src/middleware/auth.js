@@ -1,16 +1,38 @@
-// No authentication - everyone is admin
+// Temporary permissive auth for local development
+// Makes sure req.auth always exists so Employees & AI routes work
+
 export function authenticate(req, res, next) {
-  req.user = { id: null, role: 'admin' }
+  req.auth = {
+    userId: 1,
+    companyId: 1,
+    branchId: 1,
+    role: 'owner',
+    username: 'admin'
+  }
+  req.user = req.auth
   next()
 }
 
 export function requireAuth(req, res, next) {
-  req.user = { id: null, role: 'admin' }
+  req.auth = {
+    userId: 1,
+    companyId: 1,
+    branchId: 1,
+    role: 'owner',
+    username: 'admin'
+  }
+  req.user = req.auth
   next()
 }
 
-// Default export for backward compatibility
 export default function(req, res, next) {
-  req.user = { id: null, role: 'admin' }
+  req.auth = {
+    userId: 1,
+    companyId: 1,
+    branchId: 1,
+    role: 'owner',
+    username: 'admin'
+  }
+  req.user = req.auth
   next()
 }

@@ -1,0 +1,202 @@
+import fs from 'fs/promises'
+import path from 'path'
+import { fileURLToPath } from 'url'
+import { GoogleGenerativeAI } from '@google/generative-ai'
+import chokidar from 'chokidar'
+import db from '../config/database.js'
+import logger from '../utils/logger.js'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const ROOT = path.join(__dirname, '../..')
+const SCANS_DIR = path.join(ROOT, '../scans')          // ~/Documents/Adal_keep/scans
+const PROCESSED_DIR = path.join(SCANS_DIR, 'processed')
+
+const API_KEY = process.env.GEMINI_API_KEY
+const MODEL = process.env.GEMINI_MODEL || 'gemini-2.0-flash'
+
+if (!API_KEY) {
+  console.warn('[AI] GEMINI_API_KEY is missing – folder watcher will be disabled')
+}
+
+const genAI = API_KEY ? new GoogleGenerativeAI(API_KEY) : null
+
+// Ensure folders exist
+async function ensureDirs() {
+  await fs.mkdir(SCANS_DIR, { recursive: true })
+  await fs.mkdir(PROCESSED_DIR, { recursive: true })
+}
+
+/**
+ * Ask Gemini to extract structured data from an image or PDF
+ */
+async function extractWithGemini(filePath, mimeType) {
+  if (!genAI) throw new Error('Gemini not configured')
+
+  const model = genAI.getGenerativeModel({
+    model: MODEL,
+    generationConfig: {
+      responseMimeType: 'application/json',
+      temperature: 0.1,
+    }
+  })
+
+  const buffer = await fs.readFile(filePath)
+  const base64 = buffer.toString('base64')
+
+  const prompt = `
+You are an expert at reading Ethiopian passports, national IDs and employment documents.
+Extract the following fields and return ONLY valid JSON (no markdown, no explanation):
+
+{
+  "full_name": "",
+  "passport_number": "",
+  "national_id": "",
+  "date_of_birth": "",
+  "nationality": "",
+  "gender": "",
+  "phone_number": "",
+  "issued_date": "",
+  "expiry_date": "",
+  "confidence": 0.0
+}
+
+Rules:
+- Use empty string if a field is not clearly visible.
+- confidence is a number between 0 and 1.
+- Prefer English transliteration for names when possible.
+- Date format: YYYY-MM-DD if possible.
+`
+
+  const result = await model.generateContent([
+    { text: prompt },
+    {
+      inlineData: {
+        mimeType,
+        data: base64
+      }
+    }
+  ])
+
+  const text = result.response.text()
+  try {
+    return JSON.parse(text)
+  } catch {
+    // Try to extract JSON from the response if it has extra text
+    const match = text.match(/\{[\s\S]*\}/)
+    if (match) return JSON.parse(match[0])
+    throw new Error('Gemini did not return valid JSON')
+  }
+}
+
+/**
+ * Create a draft profile from extracted data
+ */
+async function createDraftProfile(extracted, originalFilename) {
+  const [id] = await db('profiles').insert({
+    full_name: extracted.full_name || 'Unknown',
+    passport_number: extracted.passport_number || null,
+    national_id: extracted.national_id || null,
+    date_of_birth: extracted.date_of_birth || null,
+    nationality: extracted.nationality || null,
+    gender: extracted.gender || null,
+    phone_number: extracted.phone_number || null,
+    status: 'pending_approval',          // Human-in-the-loop
+    created_by: 'AI-Folder-Watcher',
+    notes: `Auto-extracted from ${originalFilename} (confidence: ${extracted.confidence || 'n/a'})`,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  })
+
+  // Optional notification
+  try {
+    await db('notifications').insert({
+      type: 'ai_extraction',
+      title: 'New draft profile from scan',
+      body: `${extracted.full_name || 'Unknown'} – please review and approve`,
+      created_day: new Date().toISOString().slice(0, 10),
+      created_at: new Date().toISOString()
+    })
+  } catch {}
+
+  return id
+}
+
+/**
+ * Process a single new file
+ */
+async function processFile(filePath) {
+  const filename = path.basename(filePath)
+  const ext = path.extname(filename).toLowerCase()
+
+  const allowed = {
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.png': 'image/png',
+    '.webp': 'image/webp',
+    '.pdf': 'application/pdf'
+  }
+
+  const mime = allowed[ext]
+  if (!mime) {
+    logger.info(`[AI] Skipping unsupported file: ${filename}`)
+    return
+  }
+
+  // Size check (< 2 MB)
+  const stat = await fs.stat(filePath)
+  if (stat.size > 2 * 1024 * 1024) {
+    logger.warn(`[AI] File too large (>2MB), skipping: ${filename}`)
+    return
+  }
+
+  logger.info(`[AI] Processing ${filename} ...`)
+
+  try {
+    const extracted = await extractWithGemini(filePath, mime)
+    logger.info(`[AI] Extracted:`, extracted)
+
+    const profileId = await createDraftProfile(extracted, filename)
+    logger.info(`[AI] Draft profile created → id ${profileId}`)
+
+    // Move file to processed/
+    const dest = path.join(PROCESSED_DIR, `${Date.now()}_${filename}`)
+    await fs.rename(filePath, dest)
+  } catch (err) {
+    logger.error(`[AI] Failed to process ${filename}: ${err.message}`)
+    // Leave the file in place so it can be retried
+  }
+}
+
+/**
+ * Start the folder watcher
+ */
+export function startFolderWatcher() {
+  if (!API_KEY) {
+    console.warn('[AI] Folder watcher NOT started – missing GEMINI_API_KEY')
+    return
+  }
+
+  ensureDirs().then(() => {
+    const watcher = chokidar.watch(SCANS_DIR, {
+      ignored: /(^|[\/\\])\../,          // ignore dotfiles
+      persistent: true,
+      ignoreInitial: true,               // only new files
+      depth: 0,                          // only top level
+      awaitWriteFinish: {
+        stabilityThreshold: 2000,
+        pollInterval: 100
+      }
+    })
+
+    watcher.on('add', (filePath) => {
+      // Ignore files that land in /processed
+      if (filePath.includes(`${path.sep}processed${path.sep}`)) return
+      processFile(filePath)
+    })
+
+    console.log(`[AI] Folder watcher started → ${SCANS_DIR}`)
+    console.log(`[AI] Model: ${MODEL}`)
+  })
+}
+
+export default { startFolderWatcher }

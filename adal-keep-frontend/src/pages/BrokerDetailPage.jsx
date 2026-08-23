@@ -6,6 +6,8 @@ import PageHeader from '../components/shared/PageHeader'
 import Spinner from '../components/shared/Spinner'
 import Card from '../components/shared/Card'
 import Button from '../components/shared/Button'
+import Input from '../components/shared/Input'
+import Modal from '../components/shared/Modal'
 
 export default function BrokerDetailPage() {
   const { id } = useParams()
@@ -13,121 +15,120 @@ export default function BrokerDetailPage() {
   const [broker, setBroker] = useState(null)
   const [profiles, setProfiles] = useState([])
   const [loading, setLoading] = useState(true)
+  const [editOpen, setEditOpen] = useState(false)
+  const [form, setForm] = useState({ name: '', contact1: '', address: '' })
+  const [saving, setSaving] = useState(false)
 
-  useEffect(() => {
-    loadData()
-  }, [id])
+  useEffect(() => { load() }, [id])
 
-  const loadData = async () => {
+  const load = async () => {
     setLoading(true)
     try {
-      const [brokerRes, profilesRes] = await Promise.all([
+      const [bRes, pRes] = await Promise.all([
         api.get(`/brokers/${id}`),
         api.get(`/profiles?broker_id=${id}`)
       ])
-      setBroker(brokerRes.data)
-      setProfiles(profilesRes.data)
+      setBroker(bRes.data)
+      setProfiles(pRes.data || [])
+      setForm({
+        name: bRes.data.name || '',
+        contact1: bRes.data.contact1 || '',
+        address: bRes.data.address || ''
+      })
     } catch {
-      toast.error('Failed to load broker details')
+      toast.error('መረጃ መጫን አልተቻለም')
       navigate('/brokers')
     } finally {
       setLoading(false)
     }
   }
 
-  const handleDelete = async () => {
-    if (!confirm(`Delete broker "${broker.name}" and unassign all ${profiles.length} profiles?`)) return
+  const save = async (e) => {
+    e.preventDefault()
+    if (!form.name.trim()) return toast.error('ስም ያስፈልጋል')
+    setSaving(true)
     try {
-      // Unassign all profiles first
+      await api.put(`/brokers/${id}`, form)
+      toast.success('ተዘምኗል')
+      setEditOpen(false)
+      load()
+    } catch {
+      toast.error('ማዘመን አልተቻለም')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const remove = async () => {
+    if (!confirm(`"${broker.name}" ይሰረዝ?\n\nፕሮፋይሎቹ አይጠፉም።`)) return
+    try {
       for (const p of profiles) {
         await api.put(`/profiles/${p.id}`, { broker_id: null })
       }
-      // Then delete the broker
       await api.delete(`/brokers/${id}`)
-      toast.success('Broker deleted and profiles unassigned')
+      toast.success('ተሰርዟል (ፕሮፋይሎች ተጠብቀዋል)')
       navigate('/brokers')
     } catch {
-      toast.error('Failed to delete broker')
+      toast.error('መሰረዝ አልተቻለም')
     }
-      }
+  }
 
   if (loading) return <div className="flex h-64 items-center justify-center"><Spinner /></div>
   if (!broker) return null
 
   return (
     <div className="animate-fade-up space-y-6">
-      <PageHeader 
-        title={broker.name} 
-        subtitle={`${profiles.length} assigned profiles`}
+      <PageHeader
+        title={broker.name}
+        subtitle={`${profiles.length} የተመደቡ ፕሮፋይሎች`}
         action={
           <div className="flex gap-2">
-            <Button variant="secondary" onClick={() => navigate('/brokers')}>Back to Brokers</Button>
-            <Button variant="danger" onClick={handleDelete}>Delete Broker</Button>
+            <Button variant="secondary" onClick={() => navigate('/brokers')}>← ተመለስ</Button>
+            <Button onClick={() => setEditOpen(true)}>አርም</Button>
+            <Button variant="danger" onClick={remove}>ሰርዝ</Button>
           </div>
-        } 
+        }
       />
 
       <div className="grid gap-6 lg:grid-cols-3">
-        {/* Broker Info Card */}
         <Card className="lg:col-span-1 p-6">
-          <h2 className="font-display text-lg font-bold text-slate-900 mb-4">Broker Information</h2>
+          <h2 className="font-bold text-lg mb-4">የደላላ መረጃ</h2>
           <dl className="space-y-4 text-sm">
             <div>
-              <dt className="text-slate-500 mb-1">Primary Contact</dt>
-              <dd className="font-medium text-slate-900">{broker.contact1 || 'N/A'}</dd>
+              <dt className="text-slate-500 mb-1">ስልክ</dt>
+              <dd className="font-medium">{broker.contact1 || 'የለም'}</dd>
             </div>
             <div>
-              <dt className="text-slate-500 mb-1">Secondary Contact</dt>
-              <dd className="font-medium text-slate-900">{broker.contact2 || 'N/A'}</dd>
-            </div>
-            <div>
-              <dt className="text-slate-500 mb-1">Address</dt>
-              <dd className="font-medium text-slate-900">{broker.address || 'N/A'}</dd>
-            </div>
-            <div>
-              <dt className="text-slate-500 mb-1">Notes</dt>
-              <dd className="font-medium text-slate-900 whitespace-pre-wrap">{broker.notes || 'No notes added.'}</dd>
+              <dt className="text-slate-500 mb-1">አድራሻ</dt>
+              <dd className="font-medium">{broker.address || 'የለም'}</dd>
             </div>
           </dl>
         </Card>
 
-        {/* Assigned Profiles List */}
         <Card className="lg:col-span-2 p-0 overflow-hidden">
-          <div className="p-6 border-b border-slate-200 bg-slate-50/50">
-            <h2 className="font-display text-lg font-bold text-slate-900">Assigned Profiles</h2>
+          <div className="p-5 border-b border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/40">
+            <h2 className="font-bold text-lg">የተመደቡ ፕሮፋይሎች</h2>
           </div>
-          
           {profiles.length === 0 ? (
-            <div className="text-center py-12 text-slate-500">
-              No profiles are currently assigned to this broker.
-            </div>
+            <div className="text-center py-14 text-slate-500">ምንም ፕሮፋይል የለም</div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm text-left">
-                <thead className="text-xs text-slate-500 uppercase bg-slate-50 border-b">
+              <table className="w-full text-sm">
+                <thead className="text-xs text-slate-500 uppercase bg-slate-50 dark:bg-slate-800/50">
                   <tr>
-                    <th className="px-6 py-3">Full Name</th>
-                    <th className="px-6 py-3">Phone</th>
-                    <th className="px-6 py-3">Status</th>
-                    <th className="px-6 py-3 text-right">Action</th>
+                    <th className="px-5 py-3 text-left">ስም</th>
+                    <th className="px-5 py-3 text-left">ስልክ</th>
+                    <th className="px-5 py-3 text-right">ተግባር</th>
                   </tr>
                 </thead>
                 <tbody>
                   {profiles.map(p => (
-                    <tr key={p.id} className="border-b hover:bg-slate-50 transition-colors">
-                      <td className="px-6 py-4 font-medium text-slate-900">{p.full_name}</td>
-                      <td className="px-6 py-4 text-slate-600">{p.phone_number || '—'}</td>
-                      <td className="px-6 py-4">
-                        <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                          p.status === 'completed' ? 'bg-emerald-100 text-emerald-800' : 
-                          p.status === 'in_progress' ? 'bg-blue-100 text-blue-800' : 'bg-amber-100 text-amber-800'
-                        }`}>
-                          {p.status || 'Pending'}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-right">
+                    <tr key={p.id} className="border-t border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                      <td className="px-5 py-3.5 font-medium">{p.full_name}</td>
+                      <td className="px-5 py-3.5 text-slate-500">{p.phone_number || '—'}</td>
+                      <td className="px-5 py-3.5 text-right">
                         <Button variant="ghost" size="sm" onClick={() => navigate(`/profiles/${p.id}`)}>
-                          View Profile
+                          ይመልከቱ
                         </Button>
                       </td>
                     </tr>
@@ -138,6 +139,22 @@ export default function BrokerDetailPage() {
           )}
         </Card>
       </div>
+
+      {/* Edit Modal */}
+      <Modal isOpen={editOpen} onClose={() => setEditOpen(false)} title="ደላላ አርም" size="sm">
+        <form onSubmit={save} className="space-y-4">
+          <Input label="ስም *" value={form.name}
+            onChange={e => setForm({ ...form, name: e.target.value })} required />
+          <Input label="ስልክ" value={form.contact1}
+            onChange={e => setForm({ ...form, contact1: e.target.value })} />
+          <Input label="አድራሻ" value={form.address}
+            onChange={e => setForm({ ...form, address: e.target.value })} />
+          <div className="flex justify-end gap-3 pt-2">
+            <Button type="button" variant="secondary" onClick={() => setEditOpen(false)}>ሰርዝ</Button>
+            <Button type="submit" isLoading={saving}>አስቀምጥ</Button>
+          </div>
+        </form>
+      </Modal>
     </div>
   )
 }

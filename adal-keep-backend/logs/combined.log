@@ -1,91 +1,19 @@
-{"level":"info","message":"License initialized – fingerprint stored.","timestamp":"2026-07-11T18:43:06.510Z"}
-{"level":"info","message":"License valid – starting server.","timestamp":"2026-07-11T18:43:06.514Z"}
-{"level":"info","message":"License valid – starting server.","timestamp":"2026-07-11T18:43:15.009Z"}
-{"level":"info","message":"License valid – starting server.","timestamp":"2026-07-11T18:44:28.658Z"}
-{"level":"info","message":"License valid – starting server.","timestamp":"2026-07-11T18:47:08.456Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-11T18:51:48.759Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-11T18:51:56.427Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-11T18:52:00.085Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-11T18:52:13.725Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-11T18:53:36.248Z"}
-{"level":"error","message":"HARDWARE MISMATCH – Server lock down.","timestamp":"2026-07-11T18:55:09.543Z"}
-{"level":"error","message":"Hardware mismatch — server locked. Use dev password in UI to unlock.","timestamp":"2026-07-11T18:55:09.546Z"}
-{"level":"error","message":"HARDWARE MISMATCH – Server lock down.","timestamp":"2026-07-11T18:58:43.760Z"}
-{"level":"error","message":"Hardware mismatch — server locked. Use dev password in UI to unlock.","timestamp":"2026-07-11T18:58:43.763Z"}
-{"level":"error","message":"HARDWARE MISMATCH – Server lock down.","timestamp":"2026-07-11T18:58:50.834Z"}
-{"level":"error","message":"Hardware mismatch — server locked. Use dev password in UI to unlock.","timestamp":"2026-07-11T18:58:50.837Z"}
-{"level":"error","message":"HARDWARE MISMATCH – Server lock down.","timestamp":"2026-07-11T18:58:54.517Z"}
-{"level":"error","message":"Hardware mismatch — server locked. Use dev password in UI to unlock.","timestamp":"2026-07-11T18:58:54.520Z"}
-{"level":"error","message":"HARDWARE MISMATCH – Server lock down.","timestamp":"2026-07-11T19:06:01.943Z"}
-{"level":"error","message":"Hardware mismatch — server locked. Use dev password in UI to unlock.","timestamp":"2026-07-11T19:06:01.946Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-11T19:13:49.136Z"}
-{"level":"error","message":"HARDWARE MISMATCH – Server lock down.","timestamp":"2026-07-11T19:15:30.774Z"}
-{"level":"error","message":"Hardware mismatch — server locked. Use dev password in UI to unlock.","timestamp":"2026-07-11T19:15:30.777Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-11T19:17:56.668Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-11T19:20:17.419Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-12T04:03:25.514Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-12T04:06:18.272Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-12T04:06:23.100Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-12T04:08:52.339Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-12T04:12:38.895Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-12T04:12:56.577Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-12T04:22:26.283Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-12T04:46:47.182Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-12T04:50:25.830Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-12T04:50:36.012Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-12T04:54:44.931Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-12T04:56:21.627Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-12T04:56:38.475Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-12T05:06:43.745Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-12T05:06:52.318Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-12T05:10:34.193Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-12T05:10:52.350Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-12T05:11:01.716Z"}
-{"level":"info","message":"Orphaned location 42 deleted","timestamp":"2026-07-12T05:17:35.462Z"}
-{"level":"info","message":"Orphaned location 43 deleted","timestamp":"2026-07-12T05:17:38.126Z"}
-{"level":"error","message":"deleteUser error: delete from \"users\" where \"id\" = $1 - update or delete on table \"users\" violates foreign key constraint \"field_templates_created_by_foreign\" on table \"field_templates\"","stack":"error: delete from \"users\" where \"id\" = $1 - update or delete on table \"users\" violates foreign key constraint \"field_templates_created_by_foreign\" on table \"field_templates\"\n    at parseErrorMessage (/home/abduhabibi/Projects/flex/backend/node_modules/pg-protocol/dist/parser.js:305:11)\n    at Parser.handlePacket (/home/abduhabibi/Projects/flex/backend/node_modules/pg-protocol/dist/parser.js:143:27)\n    at Parser.parse (/home/abduhabibi/Projects/flex/backend/node_modules/pg-protocol/dist/parser.js:37:38)\n    at Socket.<anonymous> (/home/abduhabibi/Projects/flex/backend/node_modules/pg-protocol/dist/index.js:12:42)\n    at Socket.emit (node:events:524:28)\n    at addChunk (node:internal/streams/readable:561:12)\n    at readableAddChunkPushByteMode (node:internal/streams/readable:512:3)\n    at Readable.push (node:internal/streams/readable:392:5)\n    at Pipe.onStreamRead (node:internal/stream_base_commons:191:23)","timestamp":"2026-07-12T05:24:31.243Z"}
-{"level":"error","message":"deleteUser error: delete from \"users\" where \"id\" = $1 - update or delete on table \"users\" violates foreign key constraint \"field_templates_created_by_foreign\" on table \"field_templates\"","stack":"error: delete from \"users\" where \"id\" = $1 - update or delete on table \"users\" violates foreign key constraint \"field_templates_created_by_foreign\" on table \"field_templates\"\n    at parseErrorMessage (/home/abduhabibi/Projects/flex/backend/node_modules/pg-protocol/dist/parser.js:305:11)\n    at Parser.handlePacket (/home/abduhabibi/Projects/flex/backend/node_modules/pg-protocol/dist/parser.js:143:27)\n    at Parser.parse (/home/abduhabibi/Projects/flex/backend/node_modules/pg-protocol/dist/parser.js:37:38)\n    at Socket.<anonymous> (/home/abduhabibi/Projects/flex/backend/node_modules/pg-protocol/dist/index.js:12:42)\n    at Socket.emit (node:events:524:28)\n    at addChunk (node:internal/streams/readable:561:12)\n    at readableAddChunkPushByteMode (node:internal/streams/readable:512:3)\n    at Readable.push (node:internal/streams/readable:392:5)\n    at Pipe.onStreamRead (node:internal/stream_base_commons:191:23)","timestamp":"2026-07-12T05:24:38.758Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-12T05:24:50.943Z"}
-{"level":"error","message":"deleteUser error: delete from \"users\" where \"id\" = $1 - update or delete on table \"users\" violates foreign key constraint \"field_templates_created_by_foreign\" on table \"field_templates\"","stack":"error: delete from \"users\" where \"id\" = $1 - update or delete on table \"users\" violates foreign key constraint \"field_templates_created_by_foreign\" on table \"field_templates\"\n    at parseErrorMessage (/home/abduhabibi/Projects/flex/backend/node_modules/pg-protocol/dist/parser.js:305:11)\n    at Parser.handlePacket (/home/abduhabibi/Projects/flex/backend/node_modules/pg-protocol/dist/parser.js:143:27)\n    at Parser.parse (/home/abduhabibi/Projects/flex/backend/node_modules/pg-protocol/dist/parser.js:37:38)\n    at Socket.<anonymous> (/home/abduhabibi/Projects/flex/backend/node_modules/pg-protocol/dist/index.js:12:42)\n    at Socket.emit (node:events:524:28)\n    at addChunk (node:internal/streams/readable:561:12)\n    at readableAddChunkPushByteMode (node:internal/streams/readable:512:3)\n    at Readable.push (node:internal/streams/readable:392:5)\n    at Pipe.onStreamRead (node:internal/stream_base_commons:191:23)","timestamp":"2026-07-12T05:25:04.264Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-12T05:27:16.158Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-12T05:27:17.893Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-12T05:27:18.957Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-12T05:27:27.547Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-12T05:44:04.370Z"}
-{"level":"error","message":"License check error:","timestamp":"2026-07-12T07:50:53.391Z"}
-{"level":"error","message":"License check error:","timestamp":"2026-07-12T07:54:48.731Z"}
-{"level":"error","message":"License check error:","timestamp":"2026-07-12T07:58:53.444Z"}
-{"level":"error","message":"License check error:","timestamp":"2026-07-12T08:08:56.745Z"}
-{"level":"error","message":"License check error:","timestamp":"2026-07-12T08:09:19.430Z"}
-{"level":"error","message":"License check error:","timestamp":"2026-07-12T08:13:16.045Z"}
-{"level":"info","message":"License initialized – fingerprint stored.","timestamp":"2026-07-12T08:22:32.124Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-12T08:22:32.128Z"}
-{"level":"info","message":"Orphaned location 1 deleted","timestamp":"2026-07-12T08:24:51.780Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-12T08:34:13.362Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-12T08:36:41.292Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-12T08:43:12.313Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-12T08:47:08.694Z"}
-{"level":"error","message":"License check error:","timestamp":"2026-07-22T06:26:58.071Z"}
-{"level":"error","message":"License check error:","timestamp":"2026-07-22T06:58:21.315Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-22T10:36:26.688Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-22T15:02:05.130Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-22T15:07:35.097Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-22T15:08:29.276Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-22T15:08:30.446Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-22T15:08:33.976Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-22T15:08:35.204Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-22T15:08:46.757Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-22T15:11:12.605Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-22T15:25:06.546Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-22T15:32:57.328Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-22T15:33:55.534Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-22T15:34:39.133Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-22T15:37:29.804Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-22T15:37:45.056Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-22T15:39:50.401Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-22T15:40:38.886Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-22T15:44:24.430Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-22T15:47:09.852Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-22T15:47:59.480Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-22T15:50:42.186Z"}
-{"level":"info","message":"License valid.","timestamp":"2026-07-22T15:51:11.828Z"}
+{"level":"info","message":"[AI] Processing SEMIRA KEDIR NEGASH-ZM-26-54 (1)-1.pdf with gemini-3.6 ...","timestamp":"2026-08-15T13:39:31.833Z"}
+{"level":"error","message":"[AI] Failed SEMIRA KEDIR NEGASH-ZM-26-54 (1)-1.pdf: [GoogleGenerativeAI Error]: Error fetching from https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6:generateContent: [404 Not Found] models/gemini-3.6 is not found for API version v1beta, or is not supported for generateContent. Call ModelService.ListModels to see the list of available models and their supported methods.","timestamp":"2026-08-15T13:39:38.485Z"}
+{"level":"info","message":"[AI] Processing photo_5764997369085759336_y.jpg with gemini-3.6 ...","timestamp":"2026-08-15T13:47:05.585Z"}
+{"level":"error","message":"[AI] Failed photo_5764997369085759336_y.jpg: [GoogleGenerativeAI Error]: Error fetching from https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6:generateContent: [404 Not Found] models/gemini-3.6 is not found for API version v1beta, or is not supported for generateContent. Call ModelService.ListModels to see the list of available models and their supported methods.","timestamp":"2026-08-15T13:47:06.941Z"}
+{"level":"info","message":"[AI] Processing photo_6048516243423170269_w.jpg with gemini-3.6 ...","timestamp":"2026-08-15T14:29:47.563Z"}
+{"level":"error","message":"[AI] Failed photo_6048516243423170269_w.jpg: [GoogleGenerativeAI Error]: Error fetching from https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6:generateContent: [404 Not Found] models/gemini-3.6 is not found for API version v1beta, or is not supported for generateContent. Call ModelService.ListModels to see the list of available models and their supported methods.","timestamp":"2026-08-15T14:29:50.963Z"}
+{"level":"info","message":"[AI] Processing photo_5764997369085759453_w.jpg with gemini-3.6 ...","timestamp":"2026-08-15T14:36:57.395Z"}
+{"level":"error","message":"[AI] Failed photo_5764997369085759453_w.jpg: [GoogleGenerativeAI Error]: Error fetching from https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6:generateContent: [404 Not Found] models/gemini-3.6 is not found for API version v1beta, or is not supported for generateContent. Call ModelService.ListModels to see the list of available models and their supported methods.","timestamp":"2026-08-15T14:36:59.933Z"}
+{"level":"info","message":"[AI] Processing photo_5994701961061665826_y.jpg with gemini-3.6 ...","timestamp":"2026-08-15T14:45:19.724Z"}
+{"level":"error","message":"[AI] Failed photo_5994701961061665826_y.jpg: [GoogleGenerativeAI Error]: Error fetching from https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6:generateContent: [404 Not Found] models/gemini-3.6 is not found for API version v1beta, or is not supported for generateContent. Call ModelService.ListModels to see the list of available models and their supported methods.","timestamp":"2026-08-15T14:45:21.237Z"}
+{"level":"info","message":"[AI] Processing SEMIRA KEDIR NEGASH-ZM-26-54 (1)-2.pdf with gemini-3.6-flash ...","timestamp":"2026-08-15T18:23:15.173Z"}
+{"confidence":0.98,"date_of_birth":"2002-01-24","expiry_date":"2030-11-17","full_name":"SEMIRA KEDIR NEGASH","gender":"Female","issued_date":"2025-11-18","level":"info","message":"[AI] Extracted:","national_id":"","nationality":"ETHIOPIAN","passport_number":"EQ1070912","phone_number":"0920722233","timestamp":"2026-08-15T18:23:53.495Z"}
+{"level":"error","message":"[AI] Failed SEMIRA KEDIR NEGASH-ZM-26-54 (1)-2.pdf: insert into `profiles` (`created_at`, `created_by`, `date_of_birth`, `full_name`, `gender`, `national_id`, `nationality`, `notes`, `passport_number`, `phone_number`, `status`, `updated_at`) values ('2026-08-15T18:23:53.497Z', 'AI-Folder-Watcher', '2002-01-24', 'SEMIRA KEDIR NEGASH', 'Female', NULL, 'ETHIOPIAN', 'Auto from SEMIRA KEDIR NEGASH-ZM-26-54 (1)-2.pdf (confidence 0.98)', 'EQ1070912', '0920722233', 'pending_approval', '2026-08-15T18:23:53.497Z') - SQLITE_ERROR: table profiles has no column named created_by","timestamp":"2026-08-15T18:23:53.503Z"}
+{"level":"info","message":"[AI] Processing Malware_Analysis.pdf with gemini-3.6-flash ...","timestamp":"2026-08-23T12:47:35.932Z"}
+{"level":"info","message":"[AI] Processing Malware.pdf with gemini-3.6-flash ...","timestamp":"2026-08-23T12:47:54.508Z"}
+{"confidence":0,"date_of_birth":"","expiry_date":"","full_name":"","gender":"","issued_date":"","level":"info","message":"[AI] Extracted:","national_id":"","nationality":"","passport_number":"","phone_number":"","timestamp":"2026-08-23T12:47:56.121Z"}
+{"level":"error","message":"[AI] Failed Malware_Analysis.pdf: insert into `profiles` (`created_at`, `created_by`, `date_of_birth`, `full_name`, `gender`, `national_id`, `nationality`, `notes`, `passport_number`, `phone_number`, `status`, `updated_at`) values ('2026-08-23T12:47:56.123Z', 'AI-Folder-Watcher', NULL, 'Unknown', NULL, NULL, NULL, 'Auto from Malware_Analysis.pdf (confidence n/a)', NULL, NULL, 'pending_approval', '2026-08-23T12:47:56.123Z') - SQLITE_ERROR: table profiles has no column named created_by","timestamp":"2026-08-23T12:47:56.129Z"}
+{"confidence":0,"date_of_birth":"","expiry_date":"","full_name":"","gender":"","issued_date":"","level":"info","message":"[AI] Extracted:","national_id":"","nationality":"","passport_number":"","phone_number":"","timestamp":"2026-08-23T12:48:18.947Z"}
+{"level":"error","message":"[AI] Failed Malware.pdf: insert into `profiles` (`created_at`, `created_by`, `date_of_birth`, `full_name`, `gender`, `national_id`, `nationality`, `notes`, `passport_number`, `phone_number`, `status`, `updated_at`) values ('2026-08-23T12:48:18.952Z', 'AI-Folder-Watcher', NULL, 'Unknown', NULL, NULL, NULL, 'Auto from Malware.pdf (confidence n/a)', NULL, NULL, 'pending_approval', '2026-08-23T12:48:18.952Z') - SQLITE_ERROR: table profiles has no column named created_by","timestamp":"2026-08-23T12:48:18.956Z"}

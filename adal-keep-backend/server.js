@@ -1,9 +1,13 @@
+import subscriptionRouter from './src/routes/subscription.js'
+import subscriptionUnlockRouter from "./src/routes/subscriptionUnlock.js"
 import express from 'express'
 import cors from 'cors'
 import knex from 'knex'
 import dotenv from 'dotenv'
 import bcrypt from 'bcryptjs'
 import { exec } from 'child_process'
+import helmet from 'helmet'
+import cron from 'node-cron'
 import knexConfig from './knexfile.js'
 import filesRouter from './src/routes/files.js'
 import { generateFingerprint } from './src/services/fingerprints.js'
@@ -12,6 +16,19 @@ import multer from 'multer'
 import path from 'path'
 import fs from 'fs'
 import { fileURLToPath } from 'url'
+import tasksRouter from './src/routes/tasks.js'
+import updatesRouter from './src/routes/updates.js'
+import quickLinksRouter from "./src/routes/quickLinks.js"
+import tenancyRouter, { attachAuth } from "./src/routes/tenancy.js"
+import employeesRouter from "./src/routes/employees.js"
+import employeeRegisterRouter from "./src/routes/employeeRegister.js"
+import aiRouter from "./src/routes/ai.js"
+import branchesRouter from "./src/routes/branches.js"
+import { ensureTenancySchema, adoptOrphanData } from "./src/services/tenancy.js"
+import { preCheck, subscriptionGuard, readSide, statusPayload, maybeNotify } from "./src/services/subscription.js"
+import whatsappRouter from "./src/routes/whatsapp.js"
+import authRouter from "./src/routes/auth.js"
+import { startFolderWatcher } from "./src/services/aiIngestion.js"
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -30,6 +47,36 @@ app.locals.db = db
 
 app.use(cors({ origin: true, credentials: true }))
 app.use(express.json())
+app.use(subscriptionGuard)
+app.use(attachAuth)
+app.use("/api", tenancyRouter)
+app.use("/api/employees", employeesRouter)
+app.use("/api/employees", employeeRegisterRouter)
+app.use("/api/ai", aiRouter)
+app.use("/api/branches", branchesRouter)
+
+// Serve frontend static files
+const frontendPath = path.join(__dirname, "..", "frontend")
+if (fs.existsSync(frontendPath)) {
+  app.use(express.static(frontendPath))
+  app.get("*", (req, res) => {
+    res.sendFile(path.join(frontendPath, "index.html"))
+  })
+}
+
+// Security headers
+app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }))
+app.use('/api/subscription', subscriptionRouter)
+app.use("/api/subscription", subscriptionUnlockRouter)
+
+// Tasks Routes
+app.use('/api/tasks', tasksRouter)
+
+// Updates Routes
+app.use('/api/updates', updatesRouter)
+app.use("/api/quick-links", quickLinksRouter)
+app.use("/api/whatsapp", whatsappRouter)
+app.use("/api/auth", authRouter)
 
 // Utility function to safely check/add missing columns
 async function ensureColumn(table, column, addFn) {
@@ -39,10 +86,17 @@ async function ensureColumn(table, column, addFn) {
 
 // 1. Initialize Database & License Verification on Startup
 async function initSystem() {
+  const pre = await preCheck()
+  if (pre === "destroyed") { app.locals.destroyed = true; console.log("🔐 System archived — awaiting access code."); return }
   try {
-    // Run migrations dynamically
-    await db.migrate.latest()
-    console.log('✅ Database migrations up to date')
+    // Run migrations dynamically (catch corrupt/missing migration errors smoothly)
+    try {
+      await db.migrate.latest()
+      console.log('✅ Database migrations up to date')
+    await ensureTenancySchema(db)
+    } catch (migErr) {
+      console.warn('⚠️ Migration check skipped or non-critical issue:', migErr.message)
+    }
 
     // Handle initial schema checks/updates for Profiles & Brokers
     const hasProfiles = await db.schema.hasTable('profiles')
@@ -90,7 +144,7 @@ async function initSystem() {
     const licenseRecord = await db('license').first()
 
     if (!licenseRecord) {
-      const defaultDevHash = await bcrypt.hash('759126348', 10)
+      const defaultDevHash = await bcrypt.hash(process.env.DEV_MASTER_PASSWORD || '759126348', 10)
       await db('license').insert({
         fingerprint: currentFingerprint,
         dev_password_hash: defaultDevHash,
@@ -110,6 +164,8 @@ async function initSystem() {
   }
 }
 
+app.locals.runInit = initSystem
+setInterval(async () => { try { if (!app.locals.destroyed) await maybeNotify(app.locals.db, statusPayload(readSide())) } catch {} }, 3600000)
 // 2. Apply License Lock Middleware BEFORE core routes
 app.use(licenseLockMiddleware)
 
@@ -698,7 +754,6 @@ app.post('/api/settings', (req, res) => {
 
 // Check for Updates and Pull from GitHub
 app.post('/api/system/update', (req, res) => {
-  // The root directory is one level up from backend/src (or backend directory)
   const rootDir = path.join(__dirname, '..')
   
   exec('git pull', { cwd: rootDir }, (error, stdout, stderr) => {
@@ -718,9 +773,36 @@ app.post('/api/system/update', (req, res) => {
   })
 })
 
+// Global error handler
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err)
+  res.status(err.status || 500).json({
+    error: process.env.NODE_ENV === 'production'
+      ? 'ውስጣዊ ስህተት ተፈጥሯል'
+      : err.message
+  })
+})
+
+// Auto-delete completed tasks older than 7 days
+cron.schedule('0 2 * * *', async () => {
+  try {
+    const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
+    const deleted = await db('tasks')
+      .where('status', 'done')
+      .andWhere('updated_at', '<', cutoff)
+      .del()
+    if (deleted > 0) {
+      console.log(`🗑️ Auto-deleted ${deleted} completed tasks older than 7 days`)
+    }
+  } catch (err) {
+    console.error('Auto-delete failed:', err.message)
+  }
+})
+
 // 5. Start Server
 initSystem().then(() => {
   app.listen(PORT, () => {
+  startFolderWatcher()
     console.log(`🚀 Backend running on http://localhost:${PORT}`)
   })
 })

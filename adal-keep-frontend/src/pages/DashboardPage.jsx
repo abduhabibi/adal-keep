@@ -1,145 +1,113 @@
-import { useEffect, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
-import toast from 'react-hot-toast'
+import { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import api from '../services/api'
-import PageHeader from '../components/shared/PageHeader'
-import Spinner from '../components/shared/Spinner'
-import StatusBadge from '../components/shared/StatusBadge'
-import { formatDate } from '../lib/utils'
 
 export default function DashboardPage() {
-  const navigate = useNavigate()
   const [stats, setStats] = useState(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    let alive = true
-    api
-      .get('/dashboard')
-      .then((res) => {
-        if (alive) setStats(res.data)
-      })
-      .catch(() => toast.error('Could not load dashboard'))
-      .finally(() => {
-        if (alive) setLoading(false)
-      })
-    return () => {
-      alive = false
+    const load = async () => {
+      try {
+        const [dashRes, tasksRes] = await Promise.all([
+          api.get('/dashboard'),
+          api.get('/tasks')
+        ])
+        const tasks = tasksRes.data
+        setStats({
+          ...dashRes.data,
+          tasksTodo: tasks.filter(t => t.status === 'todo').length,
+          tasksInProgress: tasks.filter(t => t.status === 'in_progress').length,
+          tasksDone: tasks.filter(t => t.status === 'done').length,
+          totalTasks: tasks.length
+        })
+      } catch {}
+      finally { setLoading(false) }
     }
+    load()
   }, [])
 
-  if (loading) return <Spinner />
-
-  const statusCounts = stats?.statusCounts || { pending: 0, in_progress: 0, completed: 0 }
-
-  return (
-    <div>
-      <PageHeader
-        title="Dashboard"
-        subtitle="Overview of clients and brokers in your workspace"
-        actions={
-          <>
-            <button type="button" className="btn-secondary" onClick={() => navigate('/brokers')}>
-              Manage brokers
-            </button>
-            <button type="button" className="btn-primary" onClick={() => navigate('/profiles/new')}>
-              New profile
-            </button>
-          </>
-        }
-      />
-
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 animate-fade-up">
-        <StatCard label="Profiles" value={stats?.totalProfiles ?? 0} tone="teal" />
-        <StatCard label="Brokers" value={stats?.totalBrokers ?? 0} tone="slate" />
-        <StatCard label="In progress" value={statusCounts.in_progress ?? 0} tone="sky" />
-        <StatCard label="Completed" value={statusCounts.completed ?? 0} tone="emerald" />
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <div className="h-8 w-64 bg-white/5 rounded animate-pulse" />
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {[1, 2, 3, 4].map(i => <div key={i} className="h-32 bg-white/5 rounded-xl animate-pulse" />)}
+        </div>
       </div>
-
-      <div className="mt-6 grid gap-4 lg:grid-cols-3">
-        <section className="panel p-5 lg:col-span-2 animate-fade-up" style={{ animationDelay: '60ms' }}>
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="font-display text-lg font-bold text-slate-900">Recent profiles</h2>
-            <Link to="/profiles" className="text-sm font-semibold text-teal-700 hover:text-teal-800">
-              View all
-            </Link>
-          </div>
-
-          {(stats?.recent || []).length === 0 ? (
-            <p className="py-8 text-center text-sm text-slate-500">
-              No profiles yet. Create your first client to get started.
-            </p>
-          ) : (
-            <ul className="divide-y divide-slate-100">
-              {stats.recent.map((p) => (
-                <li key={p.id}>
-                  <button
-                    type="button"
-                    onClick={() => navigate(`/profiles/${p.id}`)}
-                    className="flex w-full items-center justify-between gap-3 py-3 text-left transition hover:bg-slate-50/80 rounded-lg px-2 -mx-2"
-                  >
-                    <div className="min-w-0">
-                      <p className="truncate font-semibold text-slate-900">{p.full_name}</p>
-                      <p className="truncate text-sm text-slate-500">
-                        {p.phone_number || 'No phone'}
-                        {p.broker_name ? ` · ${p.broker_name}` : ''}
-                      </p>
-                    </div>
-                    <div className="flex shrink-0 flex-col items-end gap-1">
-                      <StatusBadge status={p.status} />
-                      <span className="text-xs text-slate-400">{formatDate(p.created_at)}</span>
-                    </div>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-
-        <section className="panel p-5 animate-fade-up" style={{ animationDelay: '120ms' }}>
-          <h2 className="font-display text-lg font-bold text-slate-900">Status mix</h2>
-          <p className="mt-1 text-sm text-slate-500">How your pipeline looks right now</p>
-          <div className="mt-5 space-y-3">
-            <StatusBar label="Pending" value={statusCounts.pending} total={stats?.totalProfiles || 0} color="bg-amber-500" />
-            <StatusBar label="In progress" value={statusCounts.in_progress} total={stats?.totalProfiles || 0} color="bg-sky-500" />
-            <StatusBar label="Completed" value={statusCounts.completed} total={stats?.totalProfiles || 0} color="bg-emerald-500" />
-          </div>
-        </section>
-      </div>
-    </div>
-  )
-}
-
-function StatCard({ label, value, tone }) {
-  const tones = {
-    teal: 'from-teal-700 to-teal-600',
-    slate: 'from-slate-700 to-slate-600',
-    sky: 'from-sky-600 to-sky-500',
-    emerald: 'from-emerald-700 to-emerald-600',
+    )
   }
 
-  return (
-    <div className="panel overflow-hidden p-5">
-      <p className="text-sm font-medium text-slate-500">{label}</p>
-      <p className={`mt-2 bg-gradient-to-r ${tones[tone]} bg-clip-text font-display text-3xl font-extrabold text-transparent`}>
-        {value}
-      </p>
-    </div>
-  )
-}
+  const cards = [
+    { label: 'ፕሮፋይሎች', value: stats?.totalProfiles ?? 0, color: 'from-teal-500 to-teal-600', link: '/profiles' },
+    { label: 'ደላሎች', value: stats?.totalBrokers ?? 0, color: 'from-blue-500 to-blue-600', link: '/brokers' },
+    { label: 'ተግባሮች (ለመስራት)', value: stats?.tasksTodo ?? 0, color: 'from-yellow-500 to-orange-500', link: '/tasks' },
+    { label: 'ተግባሮች (በሂደት)', value: stats?.tasksInProgress ?? 0, color: 'from-purple-500 to-purple-600', link: '/tasks' },
+  ]
 
-function StatusBar({ label, value, total, color }) {
-  const pct = total > 0 ? Math.round((value / total) * 100) : 0
   return (
-    <div>
-      <div className="mb-1.5 flex items-center justify-between text-sm">
-        <span className="font-medium text-slate-700">{label}</span>
-        <span className="tabular-nums text-slate-500">
-          {value} · {pct}%
-        </span>
+    <div className="space-y-8">
+      {/* Header */}
+      <div>
+        <h1 className="text-2xl font-bold font-display">ዳሽቦርድ</h1>
+        <p className="text-muted text-sm mt-1">የስርዓት አጠቃላይ እይታ</p>
       </div>
-      <div className="h-2 overflow-hidden rounded-full bg-slate-100">
-        <div className={`h-full rounded-full ${color} transition-all duration-500`} style={{ width: `${pct}%` }} />
+
+      {/* Quick Links */}
+
+      {/* Stats Grid */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {cards.map((card, i) => (
+          <Link
+            key={i}
+            to={card.link}
+            className="glass-panel p-5 hover:scale-[1.02] transition-all duration-300 group"
+          >
+            <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${card.color} flex items-center justify-center text-white font-bold text-lg mb-3 group-hover:shadow-lg transition-shadow`}>
+              {card.value}
+            </div>
+            <p className="text-sm font-medium">{card.label}</p>
+          </Link>
+        ))}
+      </div>
+
+      {/* Recent Profiles */}
+      <div className="glass-panel p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="font-semibold">የቅርብ ጊዜ ፕሮፋይሎች</h2>
+          <Link to="/profiles" className="text-xs text-teal-400 hover:text-teal-300 transition-colors">ሁሉንም ይመልከቱ →</Link>
+        </div>
+        {stats?.recent?.length > 0 ? (
+          <div className="space-y-2">
+            {stats.recent.map(profile => (
+              <Link
+                key={profile.id}
+                to={`/profiles/${profile.id}`}
+                className="flex items-center justify-between p-3 rounded-lg hover:bg-white/5 transition-colors group"
+              >
+                <div>
+                  <p className="text-sm font-medium group-hover:text-teal-400 transition-colors">{profile.full_name}</p>
+                  <p className="text-xs text-muted">{profile.phone_number}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {profile.broker_name && (
+                    <span className="text-xs bg-white/5 px-2 py-0.5 rounded">{profile.broker_name}</span>
+                  )}
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                    profile.status === 'completed' ? 'bg-green-500/20 text-green-300' :
+                    profile.status === 'in_progress' ? 'bg-blue-500/20 text-blue-300' :
+                    'bg-yellow-500/20 text-yellow-300'
+                  }`}>
+                    {profile.status === 'completed' ? 'ተጠናቋል' :
+                     profile.status === 'in_progress' ? 'በሂደት' : 'በመጠባበቅ'}
+                  </span>
+                </div>
+              </Link>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-muted text-center py-8">ምንም ፕሮፋይል የለም</p>
+        )}
       </div>
     </div>
   )

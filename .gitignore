@@ -1,22 +1,52 @@
 # Dependencies
 node_modules/
 
-# Environment variables (Secrets & DB passwords)
+# Environment & Secrets
 .env
+.env.*
+*.pem
+*.key
 
-# Local Database (SQLite)
+# SQLite Database
 *.sqlite
 *.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
 
 # Build outputs
 dist/
 .vite/
+.tauri/
 
-# Uploaded files (Keep repo clean, back these up separately)
+# Rust/Tauri build artifacts (HUGE - never commit)
+adal-portal/src-tauri/target/
+
+# Uploaded files
+adal-keep-backend/uploads/
+adal-keep-backend/public/wallpaper.jpg
 backend/uploads/
-backend/public/wallpaper.jpg
+backend/public/
+
+# Logs
+*.log
+adal-keep-backend/logs/
 
 # OS files
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Subscription lock file (local only)
+.subscription_lock
+
+# Backup files
+backup_*/
+
+# Misc
+CACHEDIR.TAG

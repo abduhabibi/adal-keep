@@ -10,3 +10,19 @@
 ✅ Database migrations up to date
 ✅ License verified. Hardware matches.
 🚀 Backend running on http://localhost:4000
+[AI] Watching → /home/abduhabibi/Downloads
+[AI] Model   → gemini-3.6-flash
+[32m[nodemon] restarting child process[39m
+[32m[nodemon] restarting child process[39m
+[32m[nodemon] starting `node server.js`[39m
+✅ Database migrations up to date
+✅ License verified. Hardware matches.
+🚀 Backend running on http://localhost:4000
+[AI] Watching → /home/abduhabibi/Downloads
+[AI] Model   → gemini-3.6-flash
+info: [AI] Processing Malware_Analysis.pdf with gemini-3.6-flash ... {"timestamp":"2026-08-23T12:47:35.932Z"}
+info: [AI] Processing Malware.pdf with gemini-3.6-flash ... {"timestamp":"2026-08-23T12:47:54.508Z"}
+info: [AI] Extracted: {"confidence":0,"date_of_birth":"","expiry_date":"","full_name":"","gender":"","issued_date":"","national_id":"","nationality":"","passport_number":"","phone_number":"","timestamp":"2026-08-23T12:47:56.121Z"}
+error: [AI] Failed Malware_Analysis.pdf: insert into `profiles` (`created_at`, `created_by`, `date_of_birth`, `full_name`, `gender`, `national_id`, `nationality`, `notes`, `passport_number`, `phone_number`, `status`, `updated_at`) values ('2026-08-23T12:47:56.123Z', 'AI-Folder-Watcher', NULL, 'Unknown', NULL, NULL, NULL, 'Auto from Malware_Analysis.pdf (confidence n/a)', NULL, NULL, 'pending_approval', '2026-08-23T12:47:56.123Z') - SQLITE_ERROR: table profiles has no column named created_by {"timestamp":"2026-08-23T12:47:56.129Z"}
+info: [AI] Extracted: {"confidence":0,"date_of_birth":"","expiry_date":"","full_name":"","gender":"","issued_date":"","national_id":"","nationality":"","passport_number":"","phone_number":"","timestamp":"2026-08-23T12:48:18.947Z"}
+error: [AI] Failed Malware.pdf: insert into `profiles` (`created_at`, `created_by`, `date_of_birth`, `full_name`, `gender`, `national_id`, `nationality`, `notes`, `passport_number`, `phone_number`, `status`, `updated_at`) values ('2026-08-23T12:48:18.952Z', 'AI-Folder-Watcher', NULL, 'Unknown', NULL, NULL, NULL, 'Auto from Malware.pdf (confidence n/a)', NULL, NULL, 'pending_approval', '2026-08-23T12:48:18.952Z') - SQLITE_ERROR: table profiles has no column named created_by {"timestamp":"2026-08-23T12:48:18.956Z"}

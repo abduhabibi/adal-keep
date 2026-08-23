@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0f766e" />
+    <title>Adal keep</title>
+    
+    <!-- Prevent FOUC (Flash of Unstyled Content) for Dark Mode -->
+    <script>
+      (function() {
+        const savedTheme = localStorage.getItem('theme');
+        const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        const theme = savedTheme || (systemPrefersDark ? 'dark' : 'light');
+        document.documentElement.setAttribute('data-theme', theme);
+      })();
+    </script>
+    <script type="module" crossorigin src="/assets/index-Ct8PTiez.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-CvsShyJf.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body> 
+</html>

@@ -1,21 +1,22 @@
 import os from 'os'
 import crypto from 'crypto'
 import { execSync } from 'child_process'
+import fs from 'fs'
 
 export function generateFingerprint() {
   const parts = []
 
-  // 1. CPU Model (Cross-platform)
+  // 1. CPU model
   const cpu = os.cpus()[0]?.model || 'unknown-cpu'
   parts.push(cpu.trim())
 
-  // 2. Hostname (Cross-platform)
+  // 2. Hostname
   parts.push(os.hostname().trim())
 
-  // 3. First real MAC address (Cross-platform)
+  // 3. First real MAC
   const nets = os.networkInterfaces()
   for (const name of Object.keys(nets)) {
-    for (const iface of nets[name]) {
+    for (const iface of nets[name] || []) {
       if (!iface.internal && iface.mac && iface.mac !== '00:00:00:00:00:00') {
         parts.push(iface.mac.toUpperCase())
         break
@@ -23,42 +24,46 @@ export function generateFingerprint() {
     }
   }
 
-  // 4. OS-specific Hardware Serial
+  // 4. Platform-specific stable ID
   const platform = os.platform()
   try {
     if (platform === 'win32') {
-      // Windows: Get BIOS serial number
-      const biosSerial = execSync('wmic bios get serialnumber', { encoding: 'utf8' })
-        .split('\n')[1]?.trim()
-      
-      if (biosSerial && biosSerial !== 'To be filled by O.E.M.' && biosSerial !== 'Default string') {
-        parts.push(biosSerial)
-      } else {
-        // Fallback to Disk Serial on Windows
-        const diskSerial = execSync('wmic diskdrive get serialnumber', { encoding: 'utf8' })
+      // Windows BIOS serial
+      try {
+        const bios = execSync('wmic bios get serialnumber', { encoding: 'utf8' })
           .split('\n')[1]?.trim()
-        if (diskSerial) parts.push(diskSerial)
-      }
+        if (bios && !['To be filled by O.E.M.', 'Default string', 'None'].includes(bios)) {
+          parts.push(bios)
+        }
+      } catch {}
+    } else if (platform === 'darwin') {
+      // macOS hardware UUID
+      try {
+        const uuid = execSync('system_profiler SPHardwareDataType | awk \'/Hardware UUID/ {print $3}\'', { encoding: 'utf8' }).trim()
+        if (uuid) parts.push(uuid)
+      } catch {}
     } else {
-      // Linux: Get systemd machine-id (most reliable on modern Linux)
-      const machineId = execSync('cat /etc/machine-id', { encoding: 'utf8' }).trim()
-      if (machineId) {
-        parts.push(machineId)
-        parts.push(execSync('cat /var/lib/dbus/machine-id', { encoding: 'utf8' }).trim()) // Fallback dbus id
-      } else {
-        // Fallback to disk serial on Linux
+      // Linux / Zorin / Ubuntu / Oracle
+      // Prefer /etc/machine-id (very stable)
+      if (fs.existsSync('/etc/machine-id')) {
+        parts.push(fs.readFileSync('/etc/machine-id', 'utf8').trim())
+      } else if (fs.existsSync('/var/lib/dbus/machine-id')) {
+        parts.push(fs.readFileSync('/var/lib/dbus/machine-id', 'utf8').trim())
+      }
+
+      // Also try a disk serial as extra stability
+      try {
         const disk = execSync(
-          'lsblk -o SERIAL -n /dev/sda 2>/dev/null || lsblk -o SERIAL -n /dev/nvme0n1 2>/dev/null || echo ""',
+          'lsblk -d -o SERIAL -n 2>/dev/null | head -1 || echo ""',
           { encoding: 'utf8' }
         ).trim()
         if (disk) parts.push(disk)
-      }
+      } catch {}
     }
   } catch {
-    // Silently ignore if command fails. We already have CPU, Hostname, and MAC, which is enough.
+    // ignore – we already have CPU + hostname + MAC
   }
 
-  // Filter out any empty strings, join, and hash
   const raw = parts.filter(Boolean).join('||')
   return crypto.createHash('sha256').update(raw).digest('hex')
 }

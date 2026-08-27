@@ -454,10 +454,15 @@ app.get('/api/brokers/:id', async (req, res) => {
 
 app.post('/api/brokers', async (req, res) => {
   try {
-    const data = pick(req.body, ['name', 'address', 'contact1', 'contact2', 'notes'])
+    const data = pick(req.body, ['name', 'address', 'contact1', 'contact2', 'notes', 'created_by'])
     if (!data.name?.trim()) {
       return res.status(400).json({ error: 'Name is required' })
     }
+
+    // Make sure created_by is always saved
+    data.created_by = (data.created_by || '').toString().trim() || null
+
+    console.log('[server.js] Creating broker with created_by =', data.created_by)
 
     const [id] = await db('brokers').insert(data)
     const broker = await db('brokers').where('id', id).first()

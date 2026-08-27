@@ -124,7 +124,6 @@ export default function EmployeesPage() {
 
   // ---------- WORKSPACE ----------
   const loadWorkspace = async (emp) => {
-    if (!emp) return
     setWsLoading(true)
     try {
       const [bRes, pRes] = await Promise.all([
@@ -135,18 +134,11 @@ export default function EmployeesPage() {
       const allProfiles = pRes.data || []
       const name = (emp.name || emp.full_name || '').trim().toLowerCase()
 
-      // Always filter by created_by (case-insensitive)
-      setMyBrokers(
-        allBrokers.filter(b => (b.created_by || '').trim().toLowerCase() === name)
-      )
-      setMyProfiles(
-        allProfiles.filter(p => (p.created_by || '').trim().toLowerCase() === name)
-      )
-    } catch (err) {
-      console.error('loadWorkspace error:', err)
+      // Filter both brokers and profiles by the employee who created them
+      setMyBrokers(allBrokers.filter(b => (b.created_by || '').trim().toLowerCase() === name))
+      setMyProfiles(allProfiles.filter(p => (p.created_by || '').trim().toLowerCase() === name))
+    } catch {
       toast.error('መረጃ መጫን አልተቻለም')
-      setMyBrokers([])
-      setMyProfiles([])
     } finally {
       setWsLoading(false)
     }
@@ -251,9 +243,8 @@ export default function EmployeesPage() {
     try {
       const payload = {
         ...brokerForm,
-        created_by: (active && (active.name || active.full_name || active.username || "")).toString().trim() || "unknown"
+        created_by: active?.name || active?.full_name || null   // ← tag with current employee
       }
-      console.log("Creating broker with created_by =", payload.created_by)  // temporary debug
       if (editingBroker) {
         await api.put(`/brokers/${editingBroker.id}`, payload)
         toast.success('ደላላ ተዘምኗል')

@@ -1,75 +1,92 @@
-import db from '../config/database.js'
-import { comparePassword } from '../utils/hash.js'
-export async function createProfile(req, res) {
-  try {
-    // ... logic
-  } catch (err) {
-    logger.error('createProfile error: ' + err.message, { stack: err.stack })
-    res.status(500).json({ error: 'Failed to create profile' })
-  }
+import bcrypt from 'bcryptjs'
+import { signToken, verifyToken } from '../services/tenancy.js'
+
+const parseCookies = (req) => {
+  const o = {}
+  ;(req.headers.cookie || '').split(';').forEach(p => {
+    const [k, ...v] = p.split('=')
+    if (k) o[k.trim()] = decodeURIComponent(v.join('='))
+  })
+  return o
+}
+
+const setTokenCookie = (res, token) => {
+  res.setHeader('Set-Cookie', `adal_token=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000`)
 }
 
 export async function login(req, res) {
   const { username, password } = req.body
   if (!username || !password) {
-    return res.status(400).json({ error: 'Username and password required' })
+    return res.status(400).json({ error: 'መለያ ስም እና የይለፍ ቃል ያስፈልጋሉ' })
   }
 
-  const user = await db('users')
-    .where({ username, is_active: true })
-    .first()
+  try {
+    const db = req.app.locals.db
+    const user = await db('users')
+      .where('username', username.trim())
+      .orWhere('phone_whatsapp', username.trim())
+      .orWhere('phone_work', username.trim())
+      .first()
 
-  if (!user) {
-    return res.status(401).json({ error: 'Invalid credentials' })
+    if (!user || !user.password || !(await bcrypt.compare(password, user.password))) {
+      return res.status(401).json({ error: 'መለያ ስም ወይም የይለፍ ቃል ትክክል አይደለም' })
+    }
+
+    const token = signToken({
+      uid: user.id,
+      companyId: user.company_id,
+      branchId: user.branch_id,
+      role: user.role
+    })
+    setTokenCookie(res, token)
+
+    res.json({
+      success: true,
+      id: user.id,
+      name: user.name,
+      username: user.username,
+      role: user.role
+    })
+  } catch (err) {
+    console.error('[login]', err.message)
+    res.status(500).json({ error: 'መግባት አልተቻለም' })
   }
-
-  const valid = await comparePassword(password, user.password_hash)
-  if (!valid) {
-    return res.status(401).json({ error: 'Invalid credentials' })
-  }
-
-  req.session.userId = user.id
-  req.session.role = user.role
-  req.session.branchId = user.branch_id
-
-  res.json({
-    id: user.id,
-    username: user.username,
-    full_name: user.full_name,
-    role: user.role,
-  })
 }
 
 export async function logout(req, res) {
-  req.session.destroy((err) => {
-    if (err) return res.status(500).json({ error: 'Logout failed' })
-    res.clearCookie('connect.sid')
-    res.json({ message: 'Logged out' })
-  })
+  res.setHeader('Set-Cookie', 'adal_token=; Path=/; HttpOnly; Max-Age=0')
+  res.json({ success: true })
 }
 
 export async function getMe(req, res) {
-  if (!req.session.userId) {
-    return res.status(401).json({ error: 'Not authenticated' })
-  }
+  try {
+    const db = req.app.locals.db
+    const data = verifyToken(parseCookies(req).adal_token)
+    if (!data) return res.status(401).json({ error: 'አልገባም' })
 
-  if (req.session.isDeveloper) {
-    return res.json({
-      id: 0,
-      username: 'developer',
-      full_name: 'Developer',
-      role: 'admin',
+    let user = data.uid ? await db('users').where({ id: data.uid }).first() : null
+
+    // Fallback for pure token-based owner (from original setup wizard)
+    if (!user && data.role === 'owner') {
+      user = { id: 0, name: 'Owner', role: 'owner', username: 'owner', company_id: data.companyId, branch_id: data.branchId }
+    }
+    if (!user) return res.status(401).json({ error: 'ተጠቃሚ አልተገኘም' })
+
+    const company = await db('companies').where({ id: data.companyId }).first()
+    const branch = await db('branches').where({ id: data.branchId }).first()
+
+    res.json({
+      user: {
+        id: user.id,
+        name: user.name,
+        role: user.role,
+        username: user.username
+      },
+      company: company ? { id: company.id, name: company.name } : null,
+      branch: branch ? { id: branch.id, name: branch.name } : null
     })
+  } catch (err) {
+    console.error('[me]', err.message)
+    res.status(500).json({ error: 'ስህተት' })
   }
-
-  const user = await db('users')
-    .select('id', 'username', 'full_name', 'role')
-    .where({ id: req.session.userId })
-    .first()
-
-  if (!user) {
-    return res.status(401).json({ error: 'User not found' })
-  }
-
-  res.json(user)
 }

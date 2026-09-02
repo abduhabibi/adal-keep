@@ -151,7 +151,12 @@ export default function FieldCard({ field, profileId, onFileUpdate }) {
     >
       {/* Header */}
       <div className="flex items-start justify-between">
-        <h3 className="font-display text-sm font-bold text-slate-800 dark:text-slate-100">{field.name}</h3>
+        <h3 className="font-display text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+          {field.name}
+          {(field.name === 'Self Video' || field.name === 'Photo') && (
+            <span className="text-[10px] px-2 py-0.5 bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300 rounded-full font-medium">Multiple OK</span>
+          )}
+        </h3>
         {field.files?.length > 0 && (
           <span className="chip bg-teal-50 dark:bg-teal-900/30 text-teal-700 dark:text-teal-400 ring-1 ring-teal-200 dark:ring-teal-800 text-[10px] px-2 py-0.5 rounded-full font-medium">
             {field.files.length} file{field.files.length > 1 ? 's' : ''}
@@ -162,8 +167,17 @@ export default function FieldCard({ field, profileId, onFileUpdate }) {
       {/* Content Area */}
       {field.files?.length > 0 ? (
         <div className="flex flex-col gap-3">
-          <div className="relative aspect-video w-full overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900">
-            {isImage(field.files[0]) ? (
+          <div className={`relative w-full overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 ${
+            field.name === 'Self Video' ? 'aspect-video' : 'aspect-square'
+          }`}>
+            {field.name === 'Self Video' && field.files[0] ? (
+              <video 
+                src={`/api/files/${field.files[0].id}/download`} 
+                controls 
+                className="h-full w-full object-cover rounded"
+                muted
+              />
+            ) : isImage(field.files[0]) ? (
               <img src={`/api/files/${field.files[0].id}/thumbnail`} alt="" className="h-full w-full object-cover" />
             ) : (
               <div className="flex h-full w-full flex-col items-center justify-center text-slate-400 dark:text-slate-500 gap-2">
@@ -203,13 +217,23 @@ export default function FieldCard({ field, profileId, onFileUpdate }) {
         }`}>
           <svg className={`h-8 w-8 transition-colors ${isDragOver ? 'text-teal-500' : 'text-slate-300 dark:text-slate-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
           <label className="cursor-pointer text-xs font-semibold text-teal-700 dark:text-teal-400 hover:text-teal-800 dark:hover:text-teal-300">
-            {uploading ? 'Processing...' : isDragOver ? 'Drop here!' : 'Click or drag to upload'}
+            {uploading ? 'Uploading...' : isDragOver ? 'Drop files here!' : 'Click to upload (multiple files allowed)'}
             <input 
               type="file" 
               ref={fileInputRef} 
               className="hidden" 
-              accept="image/*,application/pdf" 
-              onChange={(e) => handleFileSelect(e.target.files[0])} 
+              accept="image/*,application/pdf,video/*" 
+              multiple
+              onChange={(e) => {
+                if (e.target.files.length > 0) {
+                  if (e.target.files.length === 1) {
+                    handleFileSelect(e.target.files[0])
+                  } else {
+                    // For multiple files, upload one by one
+                    Array.from(e.target.files).forEach(file => handleFileSelect(file))
+                  }
+                }
+              }} 
               disabled={uploading} 
             />
           </label>

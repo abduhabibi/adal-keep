@@ -19,6 +19,8 @@ export async function up(knex) {
     'Experience Form',
     'Employee ID',
     'Client ID',
+    'Self Video',
+    'Photo',
   ]
 
   // Create field_templates table if not exists

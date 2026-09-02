@@ -84,14 +84,14 @@ export default function ChecklistGridView({ checklist, onClose }) {
   }
 
   const handleDownloadCSV = () => {
-    const headers = ['Full Name', 'Phone', 'Status', 'Broker', ...visibleFields]
+    const headers = ['Full Name', 'Phone', 'Status', 'አመቻች', ...visibleFields]
     const rows = checklist.profiles.map(p => {
       const data = profileData[p.id]
       const row = [
         `"${p.full_name}"`,
         `"${p.phone_number || ''}"`,
         `"${p.status || 'Pending'}"`,
-        `"${p.broker_name || 'Unassigned'}"`
+        `"${p.broker_name || 'ያልተመደበ'}"`
       ]
       visibleFields.forEach(field => {
         const fieldObj = data?.fields?.find(f => f.name === field)
@@ -208,7 +208,7 @@ export default function ChecklistGridView({ checklist, onClose }) {
                 <tr key={profile.id} className="hover:bg-slate-50">
                   <td className="sticky left-0 z-10 bg-white border-b border-r border-slate-200 p-3 font-medium text-slate-900">
                     {profile.full_name}
-                    {profile.broker_name && <div className="text-[10px] text-slate-400 font-normal">{profile.broker_name}</div>}
+                    {profile.broker_name && <div className="text-[10px] text-slate-400 font-normal">አመቻች: {profile.broker_name}</div>}
                   </td>
                   <td className="border-b border-r border-slate-200 p-3 text-slate-600">{profile.phone_number || '—'}</td>
                   <td className="border-b border-r border-slate-200 p-3">

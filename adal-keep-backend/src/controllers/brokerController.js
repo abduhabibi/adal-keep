@@ -78,9 +78,16 @@ export async function deleteBroker(req, res) {
 }
 
 export async function assignBroker(req, res) {
-  const { profileId, brokerId } = req.body
-  await db('profiles').where({ id: profileId }).update({ broker_id: brokerId })
-  res.json({ message: 'Assigned' })
+  const profileId = Number(req.body.profileId ?? req.body.profile_id)
+  const brokerId = Number(req.body.brokerId ?? req.body.broker_id)
+  if (!profileId || !brokerId) {
+    return res.status(400).json({ error: 'profileId and brokerId required' })
+  }
+  await db('profiles').where({ id: profileId }).update({
+    broker_id: brokerId,
+    updated_at: db.fn.now()
+  })
+  res.json({ message: 'Assigned', profileId, brokerId })
 }
 
 export async function unassignBroker(req, res) {

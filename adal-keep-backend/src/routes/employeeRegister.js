@@ -4,7 +4,7 @@ import bcrypt from 'bcryptjs'
 const router = express.Router()
 
 router.post('/register', async (req, res) => {
-  const { name, username, phone_whatsapp, phone_work, password } = req.body
+  const { name, username, phone_work, password } = req.body
   if (!name?.trim()) return res.status(400).json({ error: 'ስም ያስፈልጋል' })
   if (!username?.trim() || /\s/.test(username)) return res.status(400).json({ error: 'ትክክለኛ መለያ ስም ያስገቡ (ያለ ክፍተት)' })
   if (!password || password.length < 4) return res.status(400).json({ error: 'የይለፍ ቃል ቢያንስ 4 ፊደል መሆን አለበት' })
@@ -17,18 +17,14 @@ router.post('/register', async (req, res) => {
 
     // FIX: Normalize phone numbers before checking
     const normalizePhone = (p) => p ? p.replace(/\D/g, '').replace(/^0+/, '+251') : null
-    const normWa = normalizePhone(phone_whatsapp)
     const normWork = normalizePhone(phone_work)
 
     if (await db('users').where({ username: username.trim() }).first())
       return res.status(400).json({ error: 'መለያ ስም ቀድሞ ተወስዷል' })
-    if (normWa && await db('users').where({ phone_whatsapp: normWa }).first())
-      return res.status(400).json({ error: 'ስልክ ቁጥር ቀድሞ ተመዝግቧል' })
 
     const [id] = await db('users').insert({
       name: name.trim(),
       username: username.trim(),
-      phone_whatsapp: normWa,
       phone_work: normWork,
       password: await bcrypt.hash(password, 10),
       role: 'employee',

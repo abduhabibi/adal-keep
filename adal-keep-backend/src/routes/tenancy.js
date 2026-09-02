@@ -42,7 +42,7 @@ router.post('/setup/company', async (req, res) => {
   const [companyId] = await db('companies').insert({
     name: companyName, owner_name: ceoName || null,
     phone1: phone1 || null, phone2: phone2 || null, phone3: phone3 || null,
-    intake_whatsapp_number: intakeNumber || null,
+    intake_phone: intakeNumber || null,
     api_key_name: `Adal ${companyName}`, api_key: crypto.randomBytes(16).toString('hex'),
   })
   const [branchId] = await db('branches').insert({ company_id: companyId, name: 'Main Branch' })
@@ -88,7 +88,7 @@ router.post('/auth/login', async (req, res) => {
     // Build dynamic query based on input
     const query = db('users').where('username', username.trim())
     if (norm) {
-      query.orWhere('phone_whatsapp', norm)
+      query.orWhere('phone_work', norm)
       query.orWhere('phone_work', norm)
     }
     const user = await query.first()
@@ -125,7 +125,7 @@ router.get('/auth/me', async (req, res) => {
   const branch = await db('branches').where({ id: data.branchId }).first()
   res.json({
     user: { id: user.id, name: user.name, role: user.role, username: user.username },
-    company: company ? { id: company.id, name: company.name, apiKeyName: company.api_key_name, intakeNumber: company.intake_whatsapp_number } : null,
+    company: company ? { id: company.id, name: company.name, apiKeyName: company.api_key_name, intakeNumber: company.intake_phone } : null,
     branch: branch ? { id: branch.id, name: branch.name } : null,
   })
 })

@@ -1,3 +1,4 @@
+import BrokersAssignPanel from './BrokersAssignPanel'
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
@@ -9,6 +10,7 @@ import Button from '../components/shared/Button'
 import Input from '../components/shared/Input'
 import Modal from '../components/shared/Modal'
 
+/* BrokersAssignPanel: drop zone */
 export default function BrokerDetailPage() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -76,6 +78,26 @@ export default function BrokerDetailPage() {
   if (loading) return <div className="flex h-64 items-center justify-center"><Spinner /></div>
   if (!broker) return null
 
+  const unassignProfile = async (profileId) => {
+    try {
+      await api.post('/brokers/unassign', { profileId })
+      toast.success('ከደላላ ተነጥሏል')
+      if (typeof load === 'function') await load()
+      else if (typeof loadBroker === 'function') await loadBroker()
+      else window.location.reload()
+    } catch (e) {
+      try {
+        await api.patch(`/profiles/${profileId}`, { broker_id: null })
+        toast.success('ከደላላ ተነጥሏል')
+        if (typeof load === 'function') await load()
+        else window.location.reload()
+      } catch {
+        toast.error('ማስወገድ አልተቻለም')
+      }
+    }
+  }
+
+
   return (
     <div className="animate-fade-up space-y-6">
       <PageHeader
@@ -127,9 +149,19 @@ export default function BrokerDetailPage() {
                       <td className="px-5 py-3.5 font-medium">{p.full_name}</td>
                       <td className="px-5 py-3.5 text-slate-500">{p.phone_number || '—'}</td>
                       <td className="px-5 py-3.5 text-right">
-                        <Button variant="ghost" size="sm" onClick={() => navigate(`/profiles/${p.id}`)}>
-                          ይመልከቱ
-                        </Button>
+                        <div className="flex items-center justify-end gap-2">
+                          <Button variant="ghost" size="sm" onClick={() => navigate(`/profiles/${p.id}`)}>
+                            ይመልከቱ
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                            onClick={(e) => { e.stopPropagation(); unassignProfile(p.id) }}
+                          >
+                            አስወግድ
+                          </Button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -155,6 +187,8 @@ export default function BrokerDetailPage() {
           </div>
         </form>
       </Modal>
-    </div>
+    
+      <BrokersAssignPanel brokerId={Number(id)} onAssigned={() => load()} />
+</div>
   )
 }

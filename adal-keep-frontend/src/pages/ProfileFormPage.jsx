@@ -5,6 +5,26 @@ import api from '../services/api'
 import PageHeader from '../components/shared/PageHeader'
 import Spinner from '../components/shared/Spinner'
 
+/** Ethiopia mobile: 251 + 9 digits */
+function normalizeEthPhone(raw) {
+  let d = String(raw || '').replace(/\D/g, '')
+  if (d.startsWith('0') && d.length >= 10) d = '251' + d.slice(1)
+  if (d.startsWith('251')) d = d.slice(0, 12)
+  else if (d.length <= 9) d = ('251' + d).slice(0, 12)
+  else d = d.slice(0, 12)
+  return d
+}
+function formatEthPhoneDisplay(raw) {
+  const d = normalizeEthPhone(raw)
+  if (d.length <= 3) return d
+  const rest = d.slice(3)
+  if (rest.length <= 3) return d.slice(0, 3) + ' ' + rest
+  if (rest.length <= 6) return d.slice(0, 3) + ' ' + rest.slice(0, 3) + ' ' + rest.slice(3)
+  return d.slice(0, 3) + ' ' + rest.slice(0, 3) + ' ' + rest.slice(3, 6) + ' ' + rest.slice(6, 9)
+}
+
+
+
 const STATUS_OPTIONS_AM = [
   { value: 'pending', label: 'በመጠባበቅ ላይ' },
   { value: 'in_progress', label: 'በሂደት ላይ' },
@@ -119,8 +139,23 @@ export default function ProfileFormPage() {
             <input id="full_name" required className={inputClass} value={form.full_name} onChange={setField('full_name')} />
           </div>
           <div>
-            <label className="label mb-1.5 block font-medium text-xs text-slate-600 dark:text-slate-300" htmlFor="phone_number">ስልክ ቁጥር *</label>
-            <input id="phone_number" required type="tel" className={inputClass} value={form.phone_number} onChange={setField('phone_number')} />
+            <label className="label mb-1.5 block font-medium text-xs text-slate-600 dark:text-slate-300" htmlFor="phone_number">ስልክ ቁጥር * (251 + 9 digits)</label>
+            <input
+              id="phone_number"
+              required
+              type="tel"
+              inputMode="numeric"
+              className={inputClass}
+              placeholder="251 9XX XXX XXX"
+              value={formatEthPhoneDisplay(form.phone_number)}
+              onChange={(e) => {
+                const normalized = normalizeEthPhone(e.target.value)
+                setForm((prev) => ({ ...prev, phone_number: normalized }))
+              }}
+            />
+            {form.phone_number && form.phone_number.length !== 12 && (
+              <p className="mt-1 text-xs text-amber-600">Must be 251 followed by 9 digits</p>
+            )}
           </div>
           <div>
             <label className="label mb-1.5 block font-medium text-xs text-slate-600 dark:text-slate-300" htmlFor="status">ሁኔታ</label>

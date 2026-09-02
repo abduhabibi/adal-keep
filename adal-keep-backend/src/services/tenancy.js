@@ -25,7 +25,7 @@ export async function ensureTenancySchema(db) {
     await db.schema.createTable('companies', t => {
       t.increments('id').primary(); t.string('name'); t.string('owner_name')
       t.string('phone1'); t.string('phone2'); t.string('phone3')
-      t.string('intake_whatsapp_number'); t.string('api_key_name'); t.string('api_key')
+      t.string('intake_phone'); t.string('api_key_name'); t.string('api_key')
       t.timestamps(true, true)
     })
   }
@@ -39,11 +39,11 @@ export async function ensureTenancySchema(db) {
     await db.schema.createTable('users', t => {
       t.increments('id').primary(); t.string('username'); t.string('password'); t.string('name')
       t.string('role').defaultTo('employee'); t.integer('company_id').nullable(); t.integer('branch_id').nullable()
-      t.string('phone_whatsapp'); t.string('phone_work'); t.integer('whatsapp_linked').defaultTo(0)
+      t.string('phone_work');
       t.timestamps(true, true)
     })
   } else {
-    for (const [c, fn] of [['name', t => t.string('name')], ['role', t => t.string('role').defaultTo('employee')], ['company_id', t => t.integer('company_id').nullable()], ['branch_id', t => t.integer('branch_id').nullable()], ['phone_whatsapp', t => t.string('phone_whatsapp')], ['phone_work', t => t.string('phone_work')], ['whatsapp_linked', t => t.integer('whatsapp_linked').defaultTo(0)], ['password', t => t.string('password')]]) {
+    for (const [c, fn] of [['name', t => t.string('name')], ['role', t => t.string('role').defaultTo('employee')], ['company_id', t => t.integer('company_id').nullable()], ['branch_id', t => t.integer('branch_id').nullable()], ['phone_work', t => t.string('phone_work')], ['password', t => t.string('password')]]) {
       await ensureCol(db, 'users', c, fn)
     }
   }

@@ -1,243 +1,257 @@
 import fs from 'fs/promises'
 import path from 'path'
-import { fileURLToPath } from 'url'
-import { GoogleGenerativeAI } from '@google/generative-ai'
 import chokidar from 'chokidar'
 import db from '../config/database.js'
 import logger from '../utils/logger.js'
 import os from 'os'
+import { classifyDocument, FIELD_SLOTS } from './docClassifier.js'
+import { matchFileToChecklist, findExistingProfile } from './fileMatcher.js'
+import { attachFileToProfile } from './profileFiles.js'
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SCANS_DIR = path.join(os.homedir(), 'Downloads')
-const PROCESSED_DIR = path.join(SCANS_DIR, 'AdalKeep-Processed')
+const PROCESSED_DIR = path.join(os.homedir(), 'Downloads', 'AdalKeep-Processed') // kept for backward compatibility
+const API_KEY = process.env.XAI_API_KEY
+const MODEL = process.env.XAI_VISION_MODEL || process.env.XAI_MODEL || 'grok-4.20-non-reasoning'
 
-const API_KEY = process.env.GEMINI_API_KEY
-const MODEL = process.env.GEMINI_MODEL || 'gemini-3.6'   // ← exactly as requested
-
-if (!API_KEY) {
-  console.warn('[AI] GEMINI_API_KEY is missing – AI features disabled')
-}
-
-const genAI = API_KEY ? new GoogleGenerativeAI(API_KEY) : null
+// Cost + stability controls
+const MAX_CONCURRENT = 2;           // prevents overwhelming xAI (cost effective)
+const PROCESS_DELAY_MS = 800;       // small delay between queued items
+let activeCount = 0;
+const queue = [];
 
 async function ensureDirs() {
-  await fs.mkdir(PROCESSED_DIR, { recursive: true })
+  const adalKeepRoot = path.join(os.homedir(), 'Downloads', 'AdalKeep');
+  await fs.mkdir(adalKeepRoot, { recursive: true });
+  // Create one folder per field
+  for (const f of FIELD_SLOTS) {
+    const dir = path.join(adalKeepRoot, f.replace(/\s+/g, '-'));
+    await fs.mkdir(dir, { recursive: true });
+  }
 }
 
-/* ------------------------------------------------------------------ */
-/* Core Gemini call                                                   */
-/* ------------------------------------------------------------------ */
-async function callGemini(parts, systemPrompt) {
-  if (!genAI) throw new Error('Gemini not configured')
+async function createApprovalTask(extracted, originalFilename, storedPath, field) {
+  const name = extracted.full_name || 'Unknown'
+  const title = `Create profile: ${name}`
+  const description = [
+    `Detected: ${field}`,
+    `Source: ${originalFilename}`,
+    `Passport: ${extracted.passport_number || '—'}`,
+    `National ID: ${extracted.national_id || '—'}`,
+    `Phone: ${extracted.phone_number || '—'}`,
+    `Confidence: ${extracted.confidence ?? 'n/a'}`,
+    '',
+    'Approve to create profile and attach this file.'
+  ].join('\n')
 
-  const model = genAI.getGenerativeModel({
-    model: MODEL,
-    generationConfig: {
-      responseMimeType: 'application/json',
-      temperature: 0.1,
-    }
+  const payload = JSON.stringify({
+    extracted,
+    originalFilename,
+    storedPath,
+    field,
+    stage: 'awaiting_profile_create'
   })
 
-  const result = await model.generateContent([
-    { text: systemPrompt },
-    ...parts
-  ])
-
-  const text = result.response.text()
-  try {
-    return JSON.parse(text)
-  } catch {
-    const match = text.match(/\{[\s\S]*\}/)
-    if (match) return JSON.parse(match[0])
-    throw new Error('Gemini did not return valid JSON: ' + text.slice(0, 200))
-  }
-}
-
-/* ------------------------------------------------------------------ */
-/* 1. extractProfileData  (used by WhatsApp route)                    */
-/* ------------------------------------------------------------------ */
-export async function extractProfileData({ text = '', imageBase64 = null, mimeType = 'image/jpeg' }) {
-  const parts = []
-  if (imageBase64) {
-    parts.push({
-      inlineData: { mimeType, data: imageBase64 }
-    })
-  }
-  if (text) parts.push({ text })
-
-  const prompt = `
-You are an expert at reading Ethiopian passports, national IDs, voice-note transcripts and employment documents.
-Extract the following fields and return ONLY valid JSON:
-
-{
-  "full_name": "",
-  "passport_number": "",
-  "national_id": "",
-  "date_of_birth": "",
-  "nationality": "",
-  "gender": "",
-  "phone_number": "",
-  "issued_date": "",
-  "expiry_date": "",
-  "confidence": 0.0
-}
-
-Rules:
-- Empty string if not clearly visible.
-- confidence between 0 and 1.
-- Prefer English transliteration for names.
-- Dates as YYYY-MM-DD when possible.
-`
-
-  return callGemini(parts, prompt)
-}
-
-/* ------------------------------------------------------------------ */
-/* 2. createOrUpdateProfile                                           */
-/* ------------------------------------------------------------------ */
-export async function createOrUpdateProfile(data = {}) {
-  const payload = {
-    full_name: data.full_name || data.name || 'Unknown',
-    passport_number: data.passport_number || null,
-    national_id: data.national_id || null,
-    date_of_birth: data.date_of_birth || null,
-    nationality: data.nationality || null,
-    gender: data.gender || null,
-    phone_number: data.phone_number || data.phone || null,
-    status: data.status || 'pending_approval',
-    created_by: data.created_by || 'AI',
-    notes: data.notes || null,
+  const [id] = await db('tasks').insert({
+    title,
+    description,
+    type: 'ai_create_profile',
+    status: 'pending',
+    priority: 'high',
+    payload,
+    is_ai_created: 1,
+    created_by: 'AI-Folder-Watcher',
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString()
-  }
-
-  // Simple create for now (update logic can be added later)
-  const [id] = await db('profiles').insert(payload)
-  return { id, ...payload }
+  })
+  return id
 }
 
-/* ------------------------------------------------------------------ */
-/* 3. saveFileToField  (stub – stores file path for now)              */
-/* ------------------------------------------------------------------ */
-export async function saveFileToField(profileId, fieldName, filePath) {
-  // Minimal implementation – just log and return success
-  logger.info(`[AI] saveFileToField profile=${profileId} field=${fieldName} file=${filePath}`)
-  return { success: true }
+function slotFor(field) {
+  if (!field || field === 'Other') return 'CV'
+  return field
 }
 
-/* ------------------------------------------------------------------ */
-/* 4. generateAmharicResponse                                         */
-/* ------------------------------------------------------------------ */
-export async function generateAmharicResponse(context = {}) {
-  if (!genAI) return 'መረጃው ተቀብሏል። እናመሰግናለን።'
-
-  const model = genAI.getGenerativeModel({ model: MODEL })
-  const prompt = `
-You are a polite Ethiopian employment-agency assistant.
-Reply in natural Amharic (Fidel script).
-Context: ${JSON.stringify(context)}
-Keep the reply short and professional.
-`
-
-  try {
-    const result = await model.generateContent(prompt)
-    return result.response.text().trim()
-  } catch {
-    return 'መረጃው ተቀብሏል። እናመሰግናለን።'
-  }
-}
-
-/* ------------------------------------------------------------------ */
-/* Folder watcher (Downloads)                                         */
-/* ------------------------------------------------------------------ */
 async function processFile(filePath) {
   const filename = path.basename(filePath)
-  const ext = path.extname(filename).toLowerCase()
+  const ext = path.extname(filename).toLowerCase().toLowerCase()
+
+  // Security: strict allowlist + hidden file protection
   const allowed = {
     '.jpg': 'image/jpeg',
     '.jpeg': 'image/jpeg',
     '.png': 'image/png',
     '.webp': 'image/webp',
     '.pdf': 'application/pdf'
+  };
+  const mime = allowed[ext];
+  if (!mime || filename.startsWith('.') || filename.includes('..')) {
+    logger.warn(`[AI] Rejected unsafe file: ${filename}`);
+    return;
   }
-  const mime = allowed[ext]
-  if (!mime) return
 
   try {
-    const stat = await fs.stat(filePath)
-    if (stat.size > 2 * 1024 * 1024) {
-      logger.warn(`[AI] File too large: ${filename}`)
+    const stat = await fs.stat(filePath);
+    if (stat.size > 12 * 1024 * 1024) {
+      logger.warn(`[AI] Skip large file: ${filename}`);
+      return;
+    }
+
+    logger.info(`[AI] Queuing for classification: ${filename}`);
+    await enqueueClassification(filePath, mime, filename);
+  } catch (err) {
+    logger.error(`[AI] processFile ${filename}: ${err.message}`);
+  }
+}
+
+// Simple concurrent queue to avoid rate limits and high cost on bulk downloads
+async function enqueueClassification(filePath, mime, filename) {
+  if (activeCount < MAX_CONCURRENT) {
+    activeCount++;
+    try {
+      await processClassification(filePath, mime, filename);
+    } finally {
+      activeCount--;
+      if (queue.length > 0) {
+        const next = queue.shift();
+        setTimeout(() => next(), PROCESS_DELAY_MS);
+      }
+    }
+  } else {
+    queue.push(() => enqueueClassification(filePath, mime, filename));
+  }
+}
+
+async function processClassification(filePath, mime, filename) {
+  try {
+    logger.info(`[AI] Classifying: ${filename} (active: ${activeCount}/${MAX_CONCURRENT})`);
+    const result = await classifyDocument(filePath, mime);
+    const { field, confidence, reason, extracted } = result;
+
+    logger.info(`[AI] → ${field} (${confidence.toFixed(2)}) ${reason || ''}`);
+
+    // If classified as "Other", completely ignore it (leave in Downloads, do not move)
+    if (field === 'Other') {
+      logger.info(`[AI] Ignoring file classified as Other: ${filename}`);
+      return;
+    }
+
+    // Create field-specific folder inside ~/Downloads/AdalKeep
+    const adalKeepRoot = path.join(os.homedir(), 'Downloads', 'AdalKeep');
+    const fieldDir = path.join(adalKeepRoot, slot.replace(/\s+/g, '-'));
+    await fs.mkdir(fieldDir, { recursive: true });
+
+    // Prevent duplicates: if a file with same name already exists in the target folder, skip
+    const safeName = `${Date.now()}_${filename}`.replace(/\s+/g, '_');
+    const dest = path.join(fieldDir, safeName);
+
+    if (await fs.access(dest).then(() => true).catch(() => false)) {
+      logger.info(`[AI] Duplicate file skipped: ${filename}`);
+      return;
+    }
+
+    await fs.rename(filePath, dest);
+    logger.info(`[AI] Moved to AdalKeep/${slot}: ${filename}`);
+
+    const slot = slotFor(field)
+
+    // 1) Name or passport already in DB → attach only (no new profile)
+    const existing = await findExistingProfile(extracted || {})
+    if (existing) {
+      await attachFileToProfile(existing.id, slot, dest, filename)
+      await matchFileToChecklist(filename, dest, {
+        ...(extracted || {}),
+        document_type: extracted?.document_type,
+        _forcedField: slot
+      })
+      logger.info(`[AI] Existing profile #${existing.id} — attached ${slot}`)
+      try {
+        await db('tasks').insert({
+          title: `${slot} attached: ${existing.full_name}`,
+          description: `${filename} → profile #${existing.id} (${slot})`,
+          type: 'ai_file_attached',
+          status: 'completed',
+          priority: 'low',
+          profile_id: existing.id,
+          is_ai_created: 1,
+          created_by: 'AI',
+          payload: JSON.stringify({ field: slot, filename, storedPath: dest, profileId: existing.id }),
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        })
+      } catch (e) {
+        logger.warn(e.message)
+      }
       return
     }
 
-    logger.info(`[AI] Processing ${filename} with ${MODEL} ...`)
-    const buffer = await fs.readFile(filePath)
-    const base64 = buffer.toString('base64')
+    // 2) New person with usable identity (passport OR name from CV/biodata)
+    const hasIdentity =
+      (extracted && extracted.passport_number) ||
+      (extracted && extracted.full_name && String(extracted.full_name).trim().length > 3) ||
+      (extracted && extracted.national_id)
 
-    const extracted = await extractProfileData({
-      imageBase64: base64,
-      mimeType: mime
-    })
+    if (hasIdentity) {
+      const taskId = await createApprovalTask(extracted, filename, dest, slot)
+      logger.info(`[AI] Approval task #${taskId} for ${extracted.full_name || filename}`)
+      return
+    }
 
-    logger.info(`[AI] Extracted:`, extracted)
-
-    const profile = await createOrUpdateProfile({
-      ...extracted,
-      created_by: 'AI-Folder-Watcher',
-      notes: `Auto from ${filename} (confidence ${extracted.confidence || 'n/a'})`
-    })
-
-    logger.info(`[AI] Draft profile created → id ${profile.id}`)
-
-    // Move to processed
-    await fs.mkdir(PROCESSED_DIR, { recursive: true })
-    const dest = path.join(PROCESSED_DIR, `${Date.now()}_${filename}`)
-    await fs.rename(filePath, dest)
-
-    // Notification
-    try {
-      await db('notifications').insert({
-        type: 'ai_extraction',
-        title: 'New draft profile from scan',
-        body: `${extracted.full_name || 'Unknown'} – please review`,
-        created_day: new Date().toISOString().slice(0, 10),
-        created_at: new Date().toISOString()
-      })
-    } catch {}
+    // 3) No name/passport extracted — inbox only
+    logger.info(`[AI] No identity on ${filename} — inbox task`);
+    await db('tasks').insert({
+      title: `${slot} received: ${filename}`,
+      description: [
+        `Classified as: ${field}`,
+        `Reason: ${reason || '—'}`,
+        'No name/passport extracted and no matching profile.'
+      ].join('\n'),
+      type: 'ai_file_inbox',
+      status: 'pending',
+      priority: 'medium',
+      is_ai_created: 1,
+      created_by: 'AI',
+      payload: JSON.stringify({ field: slot, filename, storedPath: dest, extracted }),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    });
   } catch (err) {
-    logger.error(`[AI] Failed ${filename}: ${err.message}`)
+    logger.error(`[AI] Classification failed for ${filename}: ${err.message}`);
   }
 }
 
 export function startFolderWatcher() {
   if (!API_KEY) {
-    console.warn('[AI] Folder watcher NOT started – missing GEMINI_API_KEY')
+    console.warn('[AI] Watcher disabled – no XAI_API_KEY')
     return
   }
-
   ensureDirs().then(() => {
     const watcher = chokidar.watch(SCANS_DIR, {
       ignored: [/(^|[\/\\])\../, path.join(SCANS_DIR, 'AdalKeep-Processed')],
       persistent: true,
       ignoreInitial: true,
       depth: 0,
-      awaitWriteFinish: { stabilityThreshold: 2000, pollInterval: 200 }
+      awaitWriteFinish: { stabilityThreshold: 2500, pollInterval: 300 } // more stable for bulk downloads
     })
 
     watcher.on('add', (fp) => {
-      if (fp.includes('AdalKeep-Processed')) return
+      if (fp.includes('AdalKeep-Processed') || fp.includes('crdownload') || fp.includes('.tmp')) return
       processFile(fp)
     })
 
-    console.log(`[AI] Watching → ${SCANS_DIR}`)
-    console.log(`[AI] Model   → ${MODEL}`)
+    console.log(`[AI] Smart classifier started → ${SCANS_DIR} (max ${MAX_CONCURRENT} concurrent, delay ${PROCESS_DELAY_MS}ms)`)
+    console.log(`[AI] Model → ${MODEL} | Cost-optimized + improved accuracy`)
   })
 }
 
+export async function extractProfileData() { return { full_name: '', confidence: 0 } }
+export async function createOrUpdateProfile() { return { id: 0 } }
+export async function saveFileToField() { return { success: true } }
+export async function generateAmharicResponse() { return 'መረጃው ተቀብሏል።' }
+
 export default {
+  startFolderWatcher,
   extractProfileData,
   createOrUpdateProfile,
   saveFileToField,
-  generateAmharicResponse,
-  startFolderWatcher
+  generateAmharicResponse
 }

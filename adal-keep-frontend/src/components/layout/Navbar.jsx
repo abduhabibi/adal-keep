@@ -18,11 +18,14 @@ export default function Navbar({ onMenuClick, capturedFiles, setCapturedFiles })
     const fetchCount = async () => {
       try {
         const res = await api.get('/tasks')
-        setUndoneTaskCount(res.data.filter(t => t.status !== 'done').length)
+        setUndoneTaskCount(res.data.filter(t => {
+          const s = t.status
+          return s === 'pending' || s === 'todo' || s === 'in_progress' || s === 'ongoing'
+        }).length)
       } catch {}
     }
     fetchCount()
-    const interval = setInterval(fetchCount, 30000)
+    const interval = setInterval(fetchCount, 10000)
     return () => clearInterval(interval)
   }, [])
 
@@ -52,12 +55,12 @@ export default function Navbar({ onMenuClick, capturedFiles, setCapturedFiles })
     const path = location.pathname
     if (path === '/') return 'ዳሽቦርድ'
     if (path === '/profiles') return 'ፕሮፋይሎች'
-    if (path === '/brokers') return 'ደላሎች'
+    if (path === '/brokers') return 'አመቻቾች'
     if (path === '/checklist') return 'ቼክሊስት'
     if (path === '/tasks') return 'ተግባራት'
     if (path === '/settings') return 'ማስተካከያዎች'
     if (path.startsWith('/profiles/')) return 'የፕሮፋይል ዝርዝር'
-    if (path.startsWith('/brokers/')) return 'የደላላ ዝርዝር'
+    if (path.startsWith('/brokers/')) return 'የአመቻች ዝርዝር'
     return 'አጠቃላይ እይታ'
   }
 
@@ -146,8 +149,12 @@ export default function Navbar({ onMenuClick, capturedFiles, setCapturedFiles })
             </button>
           </div>
 
-          {/* Notification Bell */}
-          <button onClick={() => navigate('/tasks')} className="relative p-2 rounded-full hover:bg-white/10 transition-all duration-200 group" title="ተግባራት">
+          {/* Notification Bell with Duplicate Warning */}
+          <button 
+            onClick={() => navigate('/notifications')} 
+            className="relative p-2 rounded-full hover:bg-white/10 transition-all duration-200 group" 
+            title="Notifications & Duplicates"
+          >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="text-slate-600 dark:text-slate-400 group-hover:text-white transition-colors">
               <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.73 21a2 2 0 0 1-3.46 0" />
             </svg>

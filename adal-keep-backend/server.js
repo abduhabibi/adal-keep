@@ -23,10 +23,12 @@ import tenancyRouter, { attachAuth } from "./src/routes/tenancy.js"
 import employeesRouter from "./src/routes/employees.js"
 import employeeRegisterRouter from "./src/routes/employeeRegister.js"
 import aiRouter from "./src/routes/ai.js"
+import aiConversationsRouter from "./src/routes/aiConversations.js"
+import agentRouter from "./src/routes/agent.js"
+import aiTasksRouter from "./src/routes/aiTasks.js"
 import branchesRouter from "./src/routes/branches.js"
 import { ensureTenancySchema, adoptOrphanData } from "./src/services/tenancy.js"
 import { preCheck, subscriptionGuard, readSide, statusPayload, maybeNotify } from "./src/services/subscription.js"
-import whatsappRouter from "./src/routes/whatsapp.js"
 import authRouter from "./src/routes/auth.js"
 import { startFolderWatcher } from "./src/services/aiIngestion.js"
 
@@ -53,6 +55,10 @@ app.use("/api", tenancyRouter)
 app.use("/api/employees", employeesRouter)
 app.use("/api/employees", employeeRegisterRouter)
 app.use("/api/ai", aiRouter)
+app.use("/api/ai/conversations", aiConversationsRouter)
+app.use("/api/agent", agentRouter)
+app.use("/api/tasks", tasksRouter)
+app.use("/api/ai-tasks", aiTasksRouter)
 app.use("/api/branches", branchesRouter)
 
 // Serve frontend static files
@@ -75,7 +81,6 @@ app.use('/api/tasks', tasksRouter)
 // Updates Routes
 app.use('/api/updates', updatesRouter)
 app.use("/api/quick-links", quickLinksRouter)
-app.use("/api/whatsapp", whatsappRouter)
 app.use("/api/auth", authRouter)
 
 // Utility function to safely check/add missing columns
@@ -137,6 +142,7 @@ async function initSystem() {
     } else {
       await ensureColumn('brokers', 'contact2', (t) => t.string('contact2'))
       await ensureColumn('brokers', 'notes', (t) => t.string('notes'))
+      await ensureColumn('brokers', 'created_by', (t) => t.integer('created_by'))
     }
 
     // Verify License & Hardware Fingerprint
@@ -394,10 +400,49 @@ app.delete('/api/profiles/:id', async (req, res) => {
   }
 })
 
+
+app.post('/api/brokers/assign', async (req, res) => {
+  try {
+    const db = req.app.locals.db
+    const profileId = Number(req.body.profileId ?? req.body.profile_id)
+    const brokerId = Number(req.body.brokerId ?? req.body.broker_id)
+    if (!profileId || !brokerId) {
+      return res.status(400).json({ error: 'profileId and brokerId required' })
+    }
+    await db('profiles').where({ id: profileId }).update({
+      broker_id: brokerId,
+      updated_at: db.fn.now()
+    })
+    res.json({ message: 'Assigned', profileId, brokerId })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.post('/api/brokers/unassign', async (req, res) => {
+  try {
+    const db = req.app.locals.db
+    const profileId = Number(req.body.profileId ?? req.body.profile_id)
+    if (!profileId) return res.status(400).json({ error: 'profileId required' })
+    await db('profiles').where({ id: profileId }).update({ broker_id: null, updated_at: db.fn.now() })
+    res.json({ message: 'Unassigned' })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
 app.get('/api/brokers', async (req, res) => {
   try {
     const { q } = req.query
     let query = db('brokers').select('brokers.*').orderBy('brokers.name')
+    const uid = req.session?.userId || req.auth?.userId
+    const role = req.session?.role || req.auth?.role
+    if (uid && role === 'employee') {
+      query = query.where(function () {
+        this.where('brokers.created_by', uid).orWhereNull('brokers.created_by')
+      })
+    }
 
     if (q && String(q).trim()) {
       const term = `%${String(q).trim()}%`
@@ -525,6 +570,22 @@ app.get('/api/profiles/:id/fields', async (req, res) => {
     const database = req.app.locals.db
 
     const templates = await database('field_templates').where('is_permanent', true).orderBy('id')
+
+    // Force include Photo and Self Video if missing from templates
+    const forcedFields = ['Photo', 'Self Video']
+    for (const f of forcedFields) {
+      const exists = templates.some(t => t.name === f)
+      if (!exists) {
+        const [newTpl] = await database('field_templates').insert({
+          name: f,
+          data_type: 'file',
+          is_permanent: true,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }).returning('*')
+        templates.push(newTpl)
+      }
+    }
 
     const result = []
     for (const template of templates) {
@@ -811,3 +872,17 @@ initSystem().then(() => {
     console.log(`🚀 Backend running on http://localhost:${PORT}`)
   })
 })
+
+// Auto-open Brave workspace (Adal Keep only - Pextran now opened by AI when needed)
+const AUTO_START_BRAVE = process.env.AUTO_START_BRAVE !== 'false'
+if (AUTO_START_BRAVE) {
+  setTimeout(async () => {
+    try {
+      const { startAgent } = await import('./src/services/braveAgent.js')
+      const r = await startAgent({ openPextran: false })
+      console.log('[Brave]', r.ok ? r.message : r.error)
+    } catch (e) {
+      console.warn('[Brave] auto-start skipped:', e.message)
+    }
+  }, 2500)
+}

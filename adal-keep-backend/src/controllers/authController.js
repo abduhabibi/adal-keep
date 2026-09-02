@@ -24,7 +24,7 @@ export async function login(req, res) {
     const db = req.app.locals.db
     const user = await db('users')
       .where('username', username.trim())
-      .orWhere('phone_whatsapp', username.trim())
+      .orWhere('phone_work', username.trim())
       .orWhere('phone_work', username.trim())
       .first()
 

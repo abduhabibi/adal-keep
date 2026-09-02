@@ -184,7 +184,7 @@ export default function EmployeesPage() {
       name: emp.name || '',
       username: emp.username || '',
       wa_cc: '+251',
-      wa_num: (emp.phone_whatsapp || '').replace(/\D/g, '').slice(-9),
+      wa_num: '',
       work_cc: '+251',
       work_num: (emp.phone_work || '').replace(/\D/g, '').slice(-9),
       password: '',
@@ -205,7 +205,7 @@ export default function EmployeesPage() {
       const payload = {
         name: empForm.name.trim(),
         username: empForm.username.trim(),
-        phone_whatsapp: empForm.wa_num ? `${empForm.wa_cc}${digitsOnly(empForm.wa_num)}` : '',
+        phone_whatsapp: '',
         phone_work: empForm.work_num ? `${empForm.work_cc}${digitsOnly(empForm.work_num)}` : ''
       }
       if (empForm.password) payload.password = empForm.password
@@ -498,7 +498,7 @@ export default function EmployeesPage() {
                 <p className="text-sm text-slate-500 mt-0.5">@{emp.username}</p>
                 <div className="mt-3 space-y-1 text-sm text-slate-600 dark:text-slate-300">
                   <div>📞 {emp.phone_work || '—'}</div>
-                  <div>💬 {emp.phone_whatsapp || '—'}</div>
+                  <div>📞 {emp.phone_work || '—'}</div>
                 </div>
                 <div className="mt-4 text-xs text-teal-600 opacity-0 group-hover:opacity-100 transition-opacity">
                   ለመግባት ጠቅ ያድርጉ →
@@ -581,7 +581,7 @@ export default function EmployeesPage() {
             required
           />
           <PhoneField
-            label="WhatsApp ስልክ"
+            label="ስልክ"
             cc={empForm.wa_cc}
             num={empForm.wa_num}
             onChange={p => setEmpForm({ ...empForm, wa_cc: p.cc, wa_num: p.num })}

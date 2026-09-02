@@ -11,7 +11,7 @@ router.get('/', async (req, res) => {
     // If we have a company from the token, filter by it.
     // Otherwise return all employees (no owner required).
     let query = db('users')
-      .select('id', 'name', 'username', 'phone_whatsapp', 'phone_work', 'whatsapp_linked', 'role', 'created_at')
+      .select('id', 'name', 'username', 'phone_work', 'role', 'created_at')
       .orderBy('created_at', 'desc')
 
     if (req.auth?.companyId) {
@@ -28,7 +28,7 @@ router.get('/', async (req, res) => {
 
 // ---------- CREATE (anyone can create) ----------
 router.post('/', async (req, res) => {
-  const { name, username, phone_whatsapp, phone_work, password } = req.body
+  const { name, username, phone_work, password } = req.body
 
   if (!name?.trim()) return res.status(400).json({ error: 'ስም ያስፈልጋል' })
   if (!username?.trim() || /\s/.test(username)) return res.status(400).json({ error: 'ትክክለኛ መለያ ስም ያስገቡ (ያለ ክፍተት)' })
@@ -57,20 +57,15 @@ router.post('/', async (req, res) => {
       return digits ? '+251' + digits : null
     }
 
-    const normWa = normalizePhone(phone_whatsapp)
     const normWork = normalizePhone(phone_work)
 
     if (await db('users').where({ username: username.trim() }).first()) {
       return res.status(400).json({ error: 'መለያ ስም ቀድሞ ተወስዷል' })
     }
-    if (normWa && await db('users').where({ phone_whatsapp: normWa }).first()) {
-      return res.status(400).json({ error: 'ስልክ ቁጥር ቀድሞ ተመዝግቧል' })
-    }
 
     const [id] = await db('users').insert({
       name: name.trim(),
       username: username.trim(),
-      phone_whatsapp: normWa,
       phone_work: normWork,
       password: await bcrypt.hash(password, 10),
       role: 'employee',
@@ -87,7 +82,7 @@ router.post('/', async (req, res) => {
 
 // ---------- UPDATE (anyone can update) ----------
 router.put('/:id', async (req, res) => {
-  const { name, phone_whatsapp, phone_work, password } = req.body
+  const { name, phone_work, password } = req.body
   if (!name?.trim()) return res.status(400).json({ error: 'ስም ያስፈልጋል' })
 
   try {
@@ -103,7 +98,7 @@ router.put('/:id', async (req, res) => {
 
     const update = {
       name: name.trim(),
-      phone_whatsapp: normalizePhone(phone_whatsapp),
+      phone_work: normalizePhone(phone_work),
       phone_work: normalizePhone(phone_work),
       updated_at: new Date().toISOString(),
     }

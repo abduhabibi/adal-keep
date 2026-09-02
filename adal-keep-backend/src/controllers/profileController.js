@@ -11,7 +11,8 @@ const PERMANENT_FIELD_NAMES = [
   'Government ID', 'Passport', 'CV', 'Contract', 'Medical Report',
   'Insurance', 'COC', 'Visa', 'Saudi-letter', 'Musaned',
   'Broker ID', 'Ticket-ongoing', 'Ticket-deported', 'Police Clearance',
-  'Labour ID', 'Slip', 'Experience Form', 'Employee ID', 'Client ID'
+  'Labour ID', 'Slip', 'Experience Form', 'Employee ID', 'Client ID',
+  'Self Video', 'Photo'
 ]
 
 async function createPermanentFields(profileId, employeeName) {

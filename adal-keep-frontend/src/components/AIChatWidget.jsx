@@ -153,7 +153,7 @@ export default function AIChatWidget() {
       create_profile: 'ፕሮፋይል ፍጠር',
       create_task: 'ተግባር ፍጠር',
       create_checklist: 'የክትትል ዝርዝር ፍጠር',
-      assign_broker: 'ደላል መድብ'
+      assign_broker: 'አመቻች መድብ'
     }
     const label = labels[action.type] || action.type
     const details = Object.entries(action.data || {})

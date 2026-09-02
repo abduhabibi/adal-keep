@@ -116,6 +116,12 @@ export default function ProfileDetailPage() {
             <Field label="Phone" value={profile.phone_number} />
             <Field label="National ID" value={profile.national_id} />
             <Field label="Passport" value={profile.passport_number} />
+            <Field label="Date of birth (GE)" value={profile.date_of_birth} />
+            <Field label="Date of birth (EC)" value={profile.date_of_birth_ec} />
+            <Field label="Passport issued" value={profile.passport_issue_date} />
+            <Field label="Passport expiry" value={profile.passport_expiry_date} />
+            <Field label="Gender" value={profile.gender} />
+            <Field label="Nationality" value={profile.nationality} />
             <Field label="Broker" value={profile.broker_name || 'Unassigned'} />
             <Field label="Filing location" value={location || '—'} />
             <Field label="Created" value={formatDate(profile.created_at)} />

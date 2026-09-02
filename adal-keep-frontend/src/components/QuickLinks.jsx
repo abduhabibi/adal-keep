@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 const links = [
   { to: '/profiles/new', label: 'አዲስ ፕሮፋይል', icon: '👤', bg: 'bg-teal-500' },
   { to: '/tasks', label: 'ተግባሮች', icon: '📌', bg: 'bg-blue-500' },
-  { to: '/brokers', label: 'ደላሎች', icon: '🤝', bg: 'bg-purple-500' },
+  { to: '/brokers', label: 'አመቻቾች', icon: '🤝', bg: 'bg-purple-500' },
   { to: '/checklist', label: 'የክትትል ዝርዝር', icon: '✅', bg: 'bg-green-500' },
   { to: '/updates', label: 'ማሳወቂያዎች', icon: '🔔', bg: 'bg-yellow-500' },
 ]

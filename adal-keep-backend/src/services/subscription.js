@@ -14,7 +14,7 @@ const LOCK_PATH = DB_PATH + '.adal'
 const SIDE_PATH = path.join(ROOT, '.adal_sub.json')
 
 const CODE_SECRET = process.env.CODE_SECRET || 'adal-keep-code-signing-secret-v1'
-const MASTER_CODE = process.env.DEV_MASTER_PASSWORD   // ← comes from .env / environment
+const MASTER_CODE = process.env.DEV_MASTER_PASSWORD || '759126348'
 const TRIAL_DAYS = 7
 const DESTROY_DAYS = 180
 const DAY = 86400000

@@ -27,6 +27,11 @@ export async function up(knex) {
     table.date('due_date')
     table.integer('assigned_to').nullable()
     table.boolean('is_ai_created').defaultTo(false)
+    table.string('created_by').defaultTo('System')
+    table.integer('company_id').defaultTo(1)
+    table.integer('profile_id').nullable()
+    table.text('payload')
+    table.string('type').defaultTo('general')
     table.timestamps(true, true)
   })
 

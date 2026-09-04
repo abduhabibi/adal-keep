@@ -6,7 +6,7 @@ export async function up(knex) {
   if (!hasConv) {
     await knex.schema.createTable('ai_conversations', (t) => {
       t.increments('id').primary()
-      t.integer('company_id').defaultTo(1)
+      t.integer('company_id').defaultTo(1).notNullable()
       t.integer('user_id').nullable()
       t.string('title', 255).defaultTo('New Chat')
       t.timestamp('created_at').defaultTo(knex.fn.now())

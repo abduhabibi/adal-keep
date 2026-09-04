@@ -30,9 +30,9 @@ router.get('/setup/status', async (req, res) => {
 
 router.post('/setup/company', async (req, res) => {
   const db = req.app.locals.db
-  const { devPassword, companyName, ceoName, phone1, phone2, phone3, intakeNumber } = req.body
+  const { devPassword, activationCode, companyName, ceoName, phone1, phone2, phone3, intakeNumber } = req.body
   const lic = await db('license').first()
-  if (!lic || !(await bcrypt.compare(devPassword || '', lic.dev_password_hash))) return res.status(401).json({ error: 'የገንቢ የይለፍ ቃል ትክክል አይደለም' })
+  if (!lic || !(await bcrypt.compare(String(devPassword || activationCode || '').trim(), lic.dev_password_hash))) return res.status(401).json({ error: 'የገንቢ የይለፍ ቃል ትክክል አይደለም' })
   if (!companyName?.trim()) return res.status(400).json({ error: 'የኩባንያ ስም ያስፈልጋል' })
   if (await db('companies').first()) return res.status(400).json({ error: 'ኩባንያ ቀድሞ ተዋቅሯል' })
 
@@ -134,7 +134,7 @@ router.post('/auth/reset-owner', async (req, res) => {
   const db = req.app.locals.db
   const { devPassword, newPassword } = req.body
   const lic = await db('license').first()
-  if (!lic || !(await bcrypt.compare(devPassword || '', lic.dev_password_hash))) return res.status(401).json({ error: 'የገንቢ የይለፍ ቃል ትክክል አይደለም' })
+  if (!lic || !(await bcrypt.compare(String(devPassword || activationCode || '').trim(), lic.dev_password_hash))) return res.status(401).json({ error: 'የገንቢ የይለፍ ቃል ትክክል አይደለም' })
   const company = await db('companies').first()
   const hash = await bcrypt.hash(newPassword || '', 10)
   let owner = await db('users').where({ role: 'owner' }).first()

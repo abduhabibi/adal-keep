@@ -51,19 +51,25 @@ async function createApprovalTask(extracted, originalFilename, storedPath, field
     stage: 'awaiting_profile_create'
   })
 
-  const [id] = await db('tasks').insert({
-    title,
-    description,
-    type: 'ai_create_profile',
-    status: 'pending',
-    priority: 'high',
-    payload,
-    is_ai_created: 1,
-    created_by: 'AI-Folder-Watcher',
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString()
-  })
-  return id
+  try {
+    const [id] = await db('tasks').insert({
+      title,
+      description,
+      type: 'ai_create_profile',
+      status: 'pending',
+      priority: 'high',
+      payload,
+      is_ai_created: 1,
+      created_by: 'AI-Folder-Watcher',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    })
+    logger.info(`[AI] createApprovalTask inserted id=${id}`)
+    return id
+  } catch (e) {
+    logger.error(`[AI] createApprovalTask FAILED: ${e.message}`)
+    throw e
+  }
 }
 
 function slotFor(field) {
@@ -137,6 +143,8 @@ async function processClassification(filePath, mime, filename) {
 
     // Create field-specific folder inside ~/Downloads/AdalKeep
     const adalKeepRoot = path.join(os.homedir(), 'Downloads', 'AdalKeep');
+    const slot = slotFor(field)
+
     const fieldDir = path.join(adalKeepRoot, slot.replace(/\s+/g, '-'));
     await fs.mkdir(fieldDir, { recursive: true });
 
@@ -151,8 +159,6 @@ async function processClassification(filePath, mime, filename) {
 
     await fs.rename(filePath, dest);
     logger.info(`[AI] Moved to AdalKeep/${slot}: ${filename}`);
-
-    const slot = slotFor(field)
 
     // 1) Name or passport already in DB → attach only (no new profile)
     const existing = await findExistingProfile(extracted || {})

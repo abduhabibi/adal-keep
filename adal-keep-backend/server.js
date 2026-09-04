@@ -18,6 +18,7 @@ import fs from 'fs'
 import { fileURLToPath } from 'url'
 import tasksRouter from './src/routes/tasks.js'
 import updatesRouter from './src/routes/updates.js'
+import systemUpdateRouter from './src/routes/systemUpdate.js'
 import quickLinksRouter from "./src/routes/quickLinks.js"
 import tenancyRouter, { attachAuth } from "./src/routes/tenancy.js"
 import employeesRouter from "./src/routes/employees.js"
@@ -80,6 +81,7 @@ app.use('/api/tasks', tasksRouter)
 
 // Updates Routes
 app.use('/api/updates', updatesRouter)
+app.use('/api/system', systemUpdateRouter)
 app.use("/api/quick-links", quickLinksRouter)
 app.use("/api/auth", authRouter)
 

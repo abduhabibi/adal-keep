@@ -1,93 +1,130 @@
 import { Router } from 'express'
-
 const router = Router()
 
-// List conversations
+function db(req) {
+  return req.app.locals.db
+}
+
+/** List threads for sidebar */
 router.get('/', async (req, res) => {
   try {
-    const db = req.app.locals.db
     const companyId = req.auth?.companyId || 1
-    const rows = await db('ai_conversations')
-      .where({ company_id: companyId })
-      .orderBy('updated_at', 'desc')
-      .limit(50)
+    const cols = await db(req)('ai_conversations').columnInfo()
+    let q = db(req)('ai_conversations')
+    if (cols.company_id) {
+      q = q.where(function () {
+        this.where({ company_id: companyId }).orWhereNull('company_id')
+      })
+    }
+    if (cols.title) {
+      const withTitle = await q.clone().whereNotNull('title').orderBy('updated_at', 'desc').limit(50)
+      if (withTitle.length) return res.json(withTitle)
+    }
+    const rows = await q.orderBy('updated_at', 'desc').limit(50)
     res.json(rows)
   } catch (err) {
-    console.error(err)
-    res.status(500).json({ error: 'Failed to load conversations' })
+    console.error('[ai_conversations list]', err.message)
+    res.json([])
   }
 })
 
-// Create new conversation
+/** Create chat – always fill NOT NULL legacy columns */
 router.post('/', async (req, res) => {
   try {
-    const db = req.app.locals.db
     const companyId = req.auth?.companyId || 1
     const userId = req.auth?.userId || req.auth?.uid || null
-    const title = (req.body.title || 'New Chat').trim().slice(0, 100)
+    const title = String(req.body?.title || 'New Chat').trim().slice(0, 100) || 'New Chat'
+    const now = new Date().toISOString()
+    const cols = await db(req)('ai_conversations').columnInfo()
 
-    const [id] = await db('ai_conversations').insert({
+    const row = {
       company_id: companyId,
       user_id: userId,
       title,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    })
+      user_message: title,      // NOT NULL in old schema
+      ai_response: '',          // NOT NULL in old schema
+      model: null,
+      created_at: now,
+      updated_at: now
+    }
 
-    const conv = await db('ai_conversations').where({ id }).first()
+    const insert = {}
+    for (const [k, v] of Object.entries(row)) {
+      if (cols[k] !== undefined) insert[k] = v
+    }
+
+    const [id] = await db(req)('ai_conversations').insert(insert)
+    const conv = await db(req)('ai_conversations').where({ id }).first()
     res.status(201).json(conv)
   } catch (err) {
-    console.error(err)
-    res.status(500).json({ error: 'Failed to create conversation' })
+    console.error('[ai_conversations create]', err.message)
+    res.status(500).json({ error: err.message })
   }
 })
 
-// Get messages of one conversation
 router.get('/:id/messages', async (req, res) => {
   try {
-    const db = req.app.locals.db
-    const messages = await db('ai_messages')
-      .where({ conversation_id: req.params.id })
-      .orderBy('id', 'asc')
-    res.json(messages)
+    const hasMsg = await db(req).schema.hasTable('ai_messages')
+    if (hasMsg) {
+      const messages = await db(req)('ai_messages')
+        .where({ conversation_id: req.params.id })
+        .orderBy('id', 'asc')
+      return res.json(messages.map(m => ({
+        id: m.id,
+        role: m.role,
+        content: m.content,
+        created_at: m.created_at
+      })))
+    }
+    const conv = await db(req)('ai_conversations').where({ id: req.params.id }).first()
+    if (!conv) return res.json([])
+    const out = []
+    if (conv.user_message) out.push({ role: 'user', content: conv.user_message })
+    if (conv.ai_response) out.push({ role: 'assistant', content: conv.ai_response })
+    res.json(out)
   } catch (err) {
-    res.status(500).json({ error: 'Failed to load messages' })
+    res.status(500).json({ error: err.message })
   }
 })
 
-// Append a message (used by the chat UI)
 router.post('/:id/messages', async (req, res) => {
   try {
-    const db = req.app.locals.db
-    const { role, content } = req.body
-    if (!role || !content) return res.status(400).json({ error: 'role and content required' })
-
-    await db('ai_messages').insert({
-      conversation_id: req.params.id,
-      role,
-      content,
-      created_at: new Date().toISOString()
-    })
-
-    await db('ai_conversations')
-      .where({ id: req.params.id })
-      .update({ updated_at: new Date().toISOString() })
-
+    const { role, content } = req.body || {}
+    if (!role || content == null || content === '') {
+      return res.status(400).json({ error: 'role and content required' })
+    }
+    const now = new Date().toISOString()
+    const hasMsg = await db(req).schema.hasTable('ai_messages')
+    if (hasMsg) {
+      await db(req)('ai_messages').insert({
+        conversation_id: Number(req.params.id),
+        role,
+        content: String(content),
+        created_at: now
+      })
+    } else {
+      const patch = { updated_at: now }
+      if (role === 'user') patch.user_message = String(content)
+      if (role === 'assistant') patch.ai_response = String(content)
+      await db(req)('ai_conversations').where({ id: req.params.id }).update(patch)
+    }
+    await db(req)('ai_conversations').where({ id: req.params.id }).update({ updated_at: now })
     res.json({ success: true })
   } catch (err) {
-    res.status(500).json({ error: 'Failed to save message' })
+    console.error('[ai_messages]', err.message)
+    res.status(500).json({ error: err.message })
   }
 })
 
-// Delete conversation + its messages
 router.delete('/:id', async (req, res) => {
   try {
-    const db = req.app.locals.db
-    await db('ai_messages').where({ conversation_id: req.params.id }).del()
-    await db('ai_conversations').where({ id: req.params.id }).del()
+    if (await db(req).schema.hasTable('ai_messages')) {
+      await db(req)('ai_messages').where({ conversation_id: req.params.id }).del()
+    }
+    await db(req)('ai_conversations').where({ id: req.params.id }).del()
     res.json({ success: true })
   } catch (err) {
-    res.status(500).json({ error: 'Failed to delete' })
+    res.status(500).json({ error: err.message })
   }
 })
 

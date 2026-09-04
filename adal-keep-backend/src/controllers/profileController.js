@@ -57,7 +57,18 @@ async function ensurePhotoDir() {
 ensurePhotoDir()
 
 function sessionUserId(req) {
-  return req.session.userId || null
+  return req.auth?.uid || req.session?.userId || null
+}
+async function resolveCreatorName(req) {
+  const uid = sessionUserId(req)
+  if (req.auth?.role === 'owner') return 'Owner'
+  if (!uid) return 'System'
+  try {
+    const u = await req.app.locals.db('users').where({ id: uid }).first()
+    return (u?.name || u?.username || String(uid)).trim()
+  } catch {
+    return String(uid)
+  }
 }
 
 // Helper function to prune orphaned physical locations safely
@@ -154,7 +165,7 @@ export async function createProfile(req, res) {
     locationId = loc.id
   }
 
-  const creatorName = employee_name || sessionUserId(req) || 'System'
+  const creatorName = employee_name || (await resolveCreatorName(req)) || 'System'
 
   const [newProfile] = await db('profiles')
     .insert({

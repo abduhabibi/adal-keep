@@ -48,14 +48,6 @@ const emptyEmp = {
   work_cc: '+251', work_num: '',
   password: '', password2: ''
 }
-function getDeviceSerial() {
-  let id = localStorage.getItem('adal_device_serial')
-  if (!id) {
-    id = (crypto.randomUUID && crypto.randomUUID()) || ('dev-' + Date.now() + '-' + Math.random().toString(36).slice(2))
-    localStorage.setItem('adal_device_serial', id)
-  }
-  return id
-}
 
 export default function EmployeesPage() {
   const navigate = useNavigate()
@@ -88,21 +80,7 @@ export default function EmployeesPage() {
   const [brokerForm, setBrokerForm] = useState({ name: '', contact1: '', address: '' })
   const [brokerSaving, setBrokerSaving] = useState(false)
 
-  useEffect(() => {
-    loadEmployees()
-    ;(async () => {
-      try {
-        const res = await api.post('/employees/device-resume', { deviceSerial: getDeviceSerial() })
-        if (res.data?.user) {
-          const u = res.data.user
-          setCurrentUser(u)
-          setActive(u)
-          toast.success(`እንኳን ደህና መጡ፣ ${u.name}`)
-          // workspace loads after employees list if needed
-        }
-      } catch {}
-    })()
-  }, [])
+  useEffect(() => { loadEmployees() }, [])
 
   const loadEmployees = async () => {
     setLoading(true)
@@ -117,24 +95,9 @@ export default function EmployeesPage() {
   }
 
   // ---------- PASSWORD GATE ----------
-  const openGate = async (emp) => {
-    setGateLoading(true)
-    try {
-      const res = await api.post('/employees/device-login', {
-        employeeId: emp.id,
-        deviceSerial: getDeviceSerial()
-      })
-      const u = res.data.user || emp
-      setCurrentUser(u)
-      setActive({ ...emp, ...u })
-      localStorage.setItem('adal_last_employee_id', String(emp.id))
-      toast.success(`እንኳን ደህና መጡ፣ ${emp.name}`)
-      loadWorkspace(emp)
-    } catch (err) {
-      toast.error(err.response?.data?.error || 'መግባት አልተቻለም')
-    } finally {
-      setGateLoading(false)
-    }
+  const openGate = (emp) => {
+    setGateEmployee(emp)
+    setGatePassword('')
   }
 
   const submitGate = async (e) => {
@@ -234,8 +197,8 @@ export default function EmployeesPage() {
     e.preventDefault()
     if (!empForm.name.trim()) return toast.error('ስም ያስፈልጋል')
     if (!empForm.username.trim() || /\s/.test(empForm.username)) return toast.error('መለያ ስም ያለ ክፍተት')
-    // password optional – device serial login
-    if (empForm.password && empForm.password.length > 0 && empForm.password !== empForm.password2) return toast.error('የይለፍ ቃሎች አይመሳሰሉም')
+    if (!editingEmp && empForm.password.length < 4) return toast.error('የይለፍ ቃል ቢያንስ 4 ቁምፊ')
+    if (empForm.password && empForm.password !== empForm.password2) return toast.error('የይለፍ ቃሎች አይመሳሰሉም')
 
     setEmpSaving(true)
     try {

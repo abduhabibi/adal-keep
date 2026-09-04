@@ -85,7 +85,7 @@ router.post('/:id/approve', async (req, res) => {
         gender: ex.gender || null,
         phone_number: ex.phone_number || null,
         status: 'in_progress',
-        created_by: 'AI-Approved',
+        created_by: (req.auth?.uid ? (await req.app.locals.db('users').where({ id: req.auth.uid }).first().then(u => u?.name || 'AI-Approved').catch(() => 'AI-Approved')) : 'AI-Approved'),
         notes: `From ${payload.originalFilename || ''} (task #${task.id})`,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()

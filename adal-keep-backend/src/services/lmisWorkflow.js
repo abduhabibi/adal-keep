@@ -1029,6 +1029,35 @@ async function uploadPaymentSlip(page, ctx) {
   await closeAllModals(page, ctx)
 }
 
+/**
+ * The file LMIS receives in the passport field: a PDF of at most 2 MB.
+ * A stored PDF is used as it is. An image is turned into a PDF (re-encoded and
+ * shrunk until it fits). Stored files are never changed.
+ */
+async function passportUploadFile(srcPath) {
+  const limit = PASSPORT_MAX_MB * 1024 * 1024
+  const mb = (p) => (fs.statSync(p).size / 1024 / 1024).toFixed(1)
+  if (/\.pdf$/i.test(srcPath)) {
+    if (fs.statSync(srcPath).size <= limit) return srcPath
+    throw new Error(`Passport PDF is ${mb(srcPath)} MB and LMIS allows ${PASSPORT_MAX_MB} MB. Upload a smaller PDF.`)
+  }
+  const sharp = (await import('sharp')).default
+  const imageToPdf = (await import('image-to-pdf')).default
+  for (const width of [2000, 1600, 1200, 1000]) {
+    const jpg = path.join(os.tmpdir(), `lmis-passport-${Date.now()}-${width}.jpg`)
+    const pdf = jpg.replace(/\.jpg$/, '.pdf')
+    await sharp(srcPath).rotate().resize({ width, height: width, fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: 85 }).toFile(jpg)
+    await new Promise((resolve, reject) => {
+      imageToPdf([jpg]).pipe(fs.createWriteStream(pdf)).on('finish', resolve).on('error', reject)
+    })
+    try { fs.unlinkSync(jpg) } catch {}
+    if (fs.statSync(pdf).size <= limit) return pdf
+    try { fs.unlinkSync(pdf) } catch {}
+  }
+  throw new Error(`Passport could not be made into a PDF under ${PASSPORT_MAX_MB} MB. Upload a smaller scan.`)
+}
+
 // ---------- PASSPORT ----------
 async function uploadPassport(page, ctx) {
   if (!ctx.passportPath || !fs.existsSync(ctx.passportPath)) {

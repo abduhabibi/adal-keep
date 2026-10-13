@@ -442,6 +442,13 @@ export async function stepDirectNavigate(page, ctx) {
     const elapsed = Math.round((Date.now() - start) / 1000)
     const url = page.url()
 
+    // The portal's own error page: waiting or retrying only logs in again and again.
+    const portalError = await page.evaluate(() => /Something Went Wrong/i.test(document.body?.innerText || '')).catch(() => false)
+    if (portalError) {
+      log(ctx, 'LMIS shows "Something Went Wrong" on the police page — stopping (portal error, not retried)', 'error')
+      throw new Error('LMIS portal error: the police certificate page shows "Something Went Wrong". Try again later.')
+    }
+
     if (url.includes('/auth') || url.includes('/login')) {
       log(ctx, `redirected to login at ${elapsed}s — session lost`, 'error')
       throw new Error('Session lost — LMIS redirected to login')
@@ -1009,37 +1016,65 @@ async function uploadPaymentSlip(page, ctx) {
 
   await waitForUploadComplete(page, 15000, ctx, 'slip')
 
-  const added = await clickButtonInModal(page, 'Upload Police Certificate Payment Slip', /^add$/i)
-  log(ctx, added ? '✓ slip modal submitted (Add clicked)' : '⚠ Add button not found', added ? 'info' : 'warn')
+  // The Add button appears once LMIS finishes the upload; give it several tries.
+  let added = false
+  for (let attempt = 0; attempt < 8 && !added; attempt++) {
+    added = await clickButtonInModal(page, 'Upload Police Certificate Payment Slip', /^add$/i)
+    if (!added) await sleep(2000)
+  }
+  log(ctx, added ? '✓ slip modal submitted (Add clicked)' : '⚠ Add button not found after 8 tries', added ? 'info' : 'warn')
+  if (!added) throw new Error('Payment slip: the Add button never appeared, so the slip was not submitted')
 
   await sleep(2000)
   await closeAllModals(page, ctx)
 }
 
+/**
+ * A copy of `srcPath` that LMIS will accept (max `maxMb`). Images are shrunk
+ * into a temp file; the stored original is never touched. PDFs cannot be
+ * shrunk here, so null is returned and the caller stops the run.
+ */
+async function fileForLmis(srcPath, maxMb = PASSPORT_MAX_MB) {
+  const limit = maxMb * 1024 * 1024
+  if (fs.statSync(srcPath).size <= limit) return srcPath
+  if (!/\.(jpe?g|png|webp)$/i.test(srcPath)) return null
+  const sharp = (await import('sharp')).default
+  for (const [width, quality] of [[2000, 85], [1600, 80], [1200, 75], [1000, 70]]) {
+    const out = path.join(os.tmpdir(), `lmis-${Date.now()}-${width}.jpg`)
+    await sharp(srcPath).rotate().resize({ width, height: width, fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality }).toFile(out)
+    if (fs.statSync(out).size <= limit) return out
+    try { fs.unlinkSync(out) } catch {}
+  }
+  return null
+}
+
 // ---------- PASSPORT ----------
 async function uploadPassport(page, ctx) {
   if (!ctx.passportPath || !fs.existsSync(ctx.passportPath)) {
-    log(ctx, 'passport file missing on profile — skipping', 'warn')
-    return
+    throw new Error('Passport file is missing on the profile — the request would have no passport')
   }
 
-  // Size check — LMIS shows "Max File Size: 2 MB" on the modal
+  // LMIS shows "Max File Size: 2 MB" on the modal. Shrink an image copy; a PDF
+  // that is too big stops the run, because the request would go in without it.
   const passportMb = fs.statSync(ctx.passportPath).size / 1024 / 1024
-  if (passportMb > PASSPORT_MAX_MB) {
-    log(ctx, `passport file is ${passportMb.toFixed(2)}MB — over LMIS ${PASSPORT_MAX_MB}MB limit`, 'warn')
-    await ctx.notify(
-      `❌ ${ctx.profileName}: passport file too large`,
-      `File is ${passportMb.toFixed(1)}MB, LMIS max is ${PASSPORT_MAX_MB}MB.`
-    )
-    return
+  const pPath = await fileForLmis(ctx.passportPath)
+  if (!pPath) {
+    const msg = `Passport file is ${passportMb.toFixed(1)} MB and LMIS allows ${PASSPORT_MAX_MB} MB. Upload a smaller scan.`
+    log(ctx, msg, 'error')
+    await ctx.notify(`❌ ${ctx.profileName}: passport file too large`, msg)
+    throw new Error(msg)
+  }
+  if (pPath !== ctx.passportPath) {
+    log(ctx, `passport shrunk from ${passportMb.toFixed(2)} MB for LMIS's ${PASSPORT_MAX_MB} MB limit`, 'warn')
   }
 
   log(ctx, 'opening Passport modal')
   const opened1 = await clickSectionAdd(page, 'Passport')
-  if (!opened1) { log(ctx, 'Passport Add button not found', 'warn'); return }
+  if (!opened1) throw new Error('Passport: the Add button was not found on the LMIS form')
 
   const opened = await waitForModal(page, 'Upload Passport Document', 20000)
-  if (!opened) { log(ctx, 'Passport modal never appeared', 'warn'); return }
+  if (!opened) throw new Error('Passport: the upload modal never appeared on the LMIS form')
   log(ctx, 'Passport modal open')
   await sleep(800)
 
@@ -1093,7 +1128,7 @@ async function uploadPassport(page, ctx) {
   let uploaded = false
 
   // Attempt 1: scoped to the modal by ancestor text
-  uploaded = await uploadFileInModal(page, 'Upload Passport Document', ctx.passportPath)
+  uploaded = await uploadFileInModal(page, 'Upload Passport Document', pPath)
   log(ctx, `  attempt 1 (scoped to modal): ${uploaded ? '✓ success' : '✗ failed'}`)
 
   // Attempt 2: click the dropzone to reveal / focus the input, then retry
@@ -1102,14 +1137,14 @@ async function uploadPassport(page, ctx) {
     const clickedDz = await clickDropzoneInModal(page, 'Upload Passport Document')
     log(ctx, `  dropzone click: ${clickedDz ? '✓' : '✗'}`)
     await sleep(700)
-    uploaded = await uploadFileInModal(page, 'Upload Passport Document', ctx.passportPath)
+    uploaded = await uploadFileInModal(page, 'Upload Passport Document', pPath)
     log(ctx, `  attempt 2 (after dropzone): ${uploaded ? '✓ success' : '✗ failed'}`)
   }
 
   // Attempt 3: newest file input on the page
   if (!uploaded) {
     log(ctx, '  falling back to newest input on page', 'warn')
-    uploaded = await uploadFileToNewestInput(page, ctx.passportPath)
+    uploaded = await uploadFileToNewestInput(page, pPath)
     log(ctx, `  attempt 3 (newest input): ${uploaded ? '✓ success' : '✗ failed'}`)
   }
 
@@ -1124,7 +1159,7 @@ async function uploadPassport(page, ctx) {
   log(ctx, '✓ passport file attached — waiting for it to render')
 
   // ---- Wait for the file to render in the dropzone ----
-  const rendered = await waitForFileAttached(page, 'Upload Passport Document', ctx.passportPath, 10000)
+  const rendered = await waitForFileAttached(page, 'Upload Passport Document', pPath, 10000)
   log(ctx, rendered ? '✓ file visible in dropzone' : '⚠ file did not render — proceeding anyway', rendered ? 'info' : 'warn')
 
   await sleep(800)
@@ -1742,9 +1777,15 @@ export async function stepUploads(page, ctx) {
       continue
     }
 
+    // LMIS rejects files over 2 MB: shrink passport images, stop if that is not possible
+    let upPath = j.path
+    if (j.label === 'passport') {
+      upPath = await fileForLmis(j.path)
+      if (!upPath) throw new Error(`Passport file is over ${PASSPORT_MAX_MB} MB and cannot be shrunk. Upload a smaller scan.`)
+    }
     try {
-      await inputs[idx].uploadFile(j.path)
-      log(ctx, `✓ uploaded ${j.label} → input[${idx}] (${path.basename(j.path)})`)
+      await inputs[idx].uploadFile(upPath)
+      log(ctx, `✓ uploaded ${j.label} → input[${idx}] (${path.basename(upPath)})`)
     } catch (e) {
       log(ctx, `✗ ${j.label} upload failed: ${e.message}`, 'error')
       await ctx.notify(

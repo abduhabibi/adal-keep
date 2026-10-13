@@ -106,9 +106,27 @@ async function resolveFilePaths(db, profileId) {
     return fs.existsSync(abs) ? abs : path.join(process.cwd(), row.path)
   }
 
+  // The LMIS passport field takes a PDF. Use the newest passport PDF; fall back to
+  // the newest passport file when the profile has no PDF (the job makes one).
+  const getPassportPdf = async () => {
+    const row = await db('files')
+      .join('profile_fields', 'files.profile_field_id', 'profile_fields.id')
+      .where('profile_fields.profile_id', profileId)
+      .andWhere('profile_fields.name', 'Passport')
+      .where(function () {
+        this.where('files.mimetype', 'application/pdf').orWhere('files.path', 'like', '%.pdf')
+      })
+      .select('files.path')
+      .orderBy('files.id', 'desc')
+      .first()
+    if (!row) return null
+    const abs = path.join(SAFE_STORAGE_DIR, path.basename(row.path))
+    return fs.existsSync(abs) ? abs : path.join(process.cwd(), row.path)
+  }
+
   return {
     photoPath: await get('Photo'),
-    passportPath: await get('Passport'),
+    passportPath: (await getPassportPdf()) || (await get('Passport')),
     passportImagePath: await getPassportImage(),
     fullBodyPath: await get('Full Body Photo'),
     slipPath: await get('Slip'),
@@ -314,7 +332,7 @@ async function runJobInLane(db, page, laneId, job) {
     // Permanent errors: retrying will never help. Add LMIS/companion-specific
     // permanent reasons here so they don't burn attempts on a 2-minute loop.
     const isRetryable = !(
-      /Session lost|not found|Not Found|not in the|placed pool|different labor|could not be verified|already_in_other_agency|already attached|already exists|Profile is missing/i
+      /Session lost|not found|Not Found|not in the|placed pool|different labor|could not be verified|already_in_other_agency|already attached|already exists|Profile is missing|LMIS portal error/i
         .test(errText)
     )
     const underLimit  = attempt < MAX_ATTEMPTS

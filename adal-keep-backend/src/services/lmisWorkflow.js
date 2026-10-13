@@ -1029,45 +1029,15 @@ async function uploadPaymentSlip(page, ctx) {
   await closeAllModals(page, ctx)
 }
 
-/**
- * A copy of `srcPath` that LMIS will accept (max `maxMb`). Images are shrunk
- * into a temp file; the stored original is never touched. PDFs cannot be
- * shrunk here, so null is returned and the caller stops the run.
- */
-async function fileForLmis(srcPath, maxMb = PASSPORT_MAX_MB) {
-  const limit = maxMb * 1024 * 1024
-  if (fs.statSync(srcPath).size <= limit) return srcPath
-  if (!/\.(jpe?g|png|webp)$/i.test(srcPath)) return null
-  const sharp = (await import('sharp')).default
-  for (const [width, quality] of [[2000, 85], [1600, 80], [1200, 75], [1000, 70]]) {
-    const out = path.join(os.tmpdir(), `lmis-${Date.now()}-${width}.jpg`)
-    await sharp(srcPath).rotate().resize({ width, height: width, fit: 'inside', withoutEnlargement: true })
-      .jpeg({ quality }).toFile(out)
-    if (fs.statSync(out).size <= limit) return out
-    try { fs.unlinkSync(out) } catch {}
-  }
-  return null
-}
-
 // ---------- PASSPORT ----------
 async function uploadPassport(page, ctx) {
   if (!ctx.passportPath || !fs.existsSync(ctx.passportPath)) {
     throw new Error('Passport file is missing on the profile — the request would have no passport')
   }
 
-  // LMIS shows "Max File Size: 2 MB" on the modal. Shrink an image copy; a PDF
-  // that is too big stops the run, because the request would go in without it.
-  const passportMb = fs.statSync(ctx.passportPath).size / 1024 / 1024
-  const pPath = await fileForLmis(ctx.passportPath)
-  if (!pPath) {
-    const msg = `Passport file is ${passportMb.toFixed(1)} MB and LMIS allows ${PASSPORT_MAX_MB} MB. Upload a smaller scan.`
-    log(ctx, msg, 'error')
-    await ctx.notify(`❌ ${ctx.profileName}: passport file too large`, msg)
-    throw new Error(msg)
-  }
-  if (pPath !== ctx.passportPath) {
-    log(ctx, `passport shrunk from ${passportMb.toFixed(2)} MB for LMIS's ${PASSPORT_MAX_MB} MB limit`, 'warn')
-  }
+  // The passport field takes a PDF of at most 2 MB (see passportUploadFile).
+  const pPath = await passportUploadFile(ctx.passportPath)
+  if (pPath !== ctx.passportPath) log(ctx, `passport sent as PDF: ${path.basename(pPath)}`)
 
   log(ctx, 'opening Passport modal')
   const opened1 = await clickSectionAdd(page, 'Passport')
@@ -1779,10 +1749,7 @@ export async function stepUploads(page, ctx) {
 
     // LMIS rejects files over 2 MB: shrink passport images, stop if that is not possible
     let upPath = j.path
-    if (j.label === 'passport') {
-      upPath = await fileForLmis(j.path)
-      if (!upPath) throw new Error(`Passport file is over ${PASSPORT_MAX_MB} MB and cannot be shrunk. Upload a smaller scan.`)
-    }
+    if (j.label === 'passport') upPath = await passportUploadFile(j.path)
     try {
       await inputs[idx].uploadFile(upPath)
       log(ctx, `✓ uploaded ${j.label} → input[${idx}] (${path.basename(upPath)})`)

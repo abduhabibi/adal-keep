@@ -16,7 +16,7 @@ import os from 'os'
 import path from 'path'
 import { parseTD3 } from './mrz.js'
 import { parseDocumentToMarkdown } from './mineruClient.js'
-import { classifyTextWithDeepSeek, getDeepSeekKey } from './mineruAnalyzer.js'
+import { classifyWithGemini } from './geminiClassifier.js'
 
 // Each rule: doc_type plus patterns. A rule scores by the number of patterns
 // that match; the highest score wins, ties go to the earlier rule.
@@ -283,48 +283,81 @@ export async function analyzeWithMineru(originalPath) {
   const local = await analyzeLocally(originalPath)
   if (local?.doc_type) return local
 
-  let text = local?.text || ''
-  if (!text) {
-    const markdown = await parseDocumentToMarkdown(originalPath)
-    text = String(markdown || '')
+  let text = local?.text || '' // PDF text layer, when there is one
+
+  // 1. Gemini reads the file itself (images, scans) or the PDF's text layer.
+  let result = null
+  let source = 'gemini'
+  try {
+    result = await classifyWithGemini(text ? { text, filename } : { filePath: originalPath, filename })
+  } catch (e) {
+    console.warn('[classify] Gemini could not read the file, trying MinerU:', e.message)
   }
-  if (text.replace(/!\[[^\]]*\]\([^)]*\)|<[^>]+>|\s/g, '').length < 10) {
-    // Nothing readable: an image of a person/object is a personal photo.
-    if (IMAGE_EXT.test(originalPath)) return { doc_type: 'Photo', confidence: 0.6, fields: {}, markdown: '' }
-    throw new Error('MinerU returned no usable text')
+
+  // 2. Gemini failed: MinerU reads the text, Gemini classifies it, keyword rules last.
+  if (!result) {
+    if (!text) {
+      const markdown = await parseDocumentToMarkdown(originalPath)
+      text = String(markdown || '')
+    }
+    if (text.replace(/!\[[^\]]*\]\([^)]*\)|<[^>]+>|\s/g, '').length < 10) {
+      // Nothing readable: an image of a person/object is a personal photo.
+      if (IMAGE_EXT.test(originalPath)) return { doc_type: 'Photo', confidence: 0.6, fields: {}, markdown: '' }
+      throw new Error('MinerU returned no usable text')
+    }
+    try {
+      result = await classifyWithGemini({ text, filename })
+      source = 'gemini-text'
+    } catch (e) {
+      console.warn('[classify] Gemini text classification failed, using keyword rules:', e.message)
+      result = { ...classifyMarkdown(text), fields: {} }
+      source = 'rules'
+    }
   }
+
   // A picture with only a few stray words (no document keywords) is a photo too.
-  if (IMAGE_EXT.test(originalPath) && wordCount(text) < 12) {
+  if (result.doc_type === 'other' && IMAGE_EXT.test(originalPath) && wordCount(text) < 12) {
     return { doc_type: 'Photo', confidence: 0.5, fields: {}, markdown: text, source: 'text-count' }
   }
-  return classifyText(text, filename)
+  return finishResult(result, text, source)
+}
+
+/** Passport fields from two MRZ lines, only when the check digits verify. */
+function passportFromLines(lines) {
+  if (!lines) return null
+  const p = parseTD3(`${lines[0].padEnd(44, '<').slice(0, 44)}\n${lines[1].padEnd(44, '<').slice(0, 44)}`)
+  if (!p || !p.overall_verified) return null
+  return {
+    surname: p.surname,
+    given_names: p.given_names,
+    full_name: `${p.given_names} ${p.surname}`.trim(),
+    passport_number: p.passport_number,
+    date_of_birth: p.date_of_birth,
+    date_of_expiry: p.date_of_expiry,
+    sex: p.sex,
+    gender: p.sex,
+    nationality: p.nationality_code,
+  }
 }
 
 /**
- * DeepSeek classifies the text. If DeepSeek is unavailable (no key, no balance,
- * network), the keyword rules take over so ingestion keeps moving.
+ * The MRZ is the only trusted source for a passport number and dates. A passport
+ * whose MRZ check digits verify takes its fields from the MRZ, whatever the model
+ * said. Without a verified MRZ, a passport is capped at 0.6 (the pipeline reports it).
  */
-async function classifyText(text, filename) {
-  let result
-  let source = 'deepseek'
-  try {
-    result = await classifyTextWithDeepSeek(getDeepSeekKey(), text, filename)
-  } catch (e) {
-    console.warn('[classify] DeepSeek unavailable, using keyword rules:', e.message)
-    result = classifyMarkdown(text)
-    source = 'rules'
-  }
+function finishResult(result, text, source) {
+  const found = findMrz(text)
+  const lines = result.mrzLines || (found ? [found.line1, found.line2] : null)
+  const mrzFields = passportFromLines(lines)
 
-  // The MRZ is the only trusted source for passport numbers and dates, so a
-  // verified MRZ decides the passport case, whatever the classifier said.
-  const pass = passportFromMrz(text)
-  if (pass?.verified) {
-    result = { doc_type: 'Passport', confidence: 0.98, fields: { ...(result.fields || {}), ...pass.fields } }
-  } else if (result.doc_type === 'Passport') {
-    // A passport without a verified MRZ is not trusted (the pipeline reports it).
-    result = { ...result, confidence: Math.min(result.confidence || 0, 0.6) }
+  let out = { doc_type: result.doc_type, confidence: result.confidence, fields: result.fields || {} }
+  if (mrzFields) {
+    out = { doc_type: 'Passport', confidence: 0.98, fields: { ...out.fields, ...mrzFields } }
+  } else if (out.doc_type === 'Passport') {
+    out = { ...out, confidence: Math.min(out.confidence || 0, 0.6) }
   }
-  return { ...result, markdown: text, source }
+  const markdown = text || (lines ? `${lines[0]}\n${lines[1]}` : '')
+  return { ...out, markdown, source }
 }
 
 const IMAGE_EXT = /\.(jpe?g|png|webp|bmp|gif)$/i

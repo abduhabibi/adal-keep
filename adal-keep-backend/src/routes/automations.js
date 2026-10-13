@@ -75,8 +75,9 @@ router.post('/profiles/:profileId/automations/:workflowId/start', async (req, re
       }
       if (!gate.ok) {
         const verification = await getProfileVerification(profileId, { handle: db })
+        const why = (verification?.problems || [])[0]
         return res.status(400).json({
-          error: `Passport verification is ${gate.ticks}/3 green ticks — ` + gate.blockers.join('; '),
+          error: `Passport verification is ${gate.ticks}/3 green ticks — ` + gate.blockers.join('; ') + (why ? `. ${why}` : ''),
           verification_required: true,
           ticks: gate.ticks,
           blockers: gate.blockers,

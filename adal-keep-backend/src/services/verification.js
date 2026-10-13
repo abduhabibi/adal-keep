@@ -131,6 +131,8 @@ export async function findProfileFieldFile(profileId, fieldName, handle = db) {
     .join('profile_fields', 'files.profile_field_id', 'profile_fields.id')
     .where('profile_fields.profile_id', profileId)
     .andWhere('profile_fields.name', fieldName)
+    // Prefer the image copy (the PDF twin has no text layer to read); newest first.
+    .orderByRaw("CASE WHEN files.mimetype LIKE 'image/%' THEN 0 ELSE 1 END")
     .orderBy('files.id', 'desc')
     .select('files.id as fileId', 'files.path as path', 'files.original_name as name')
     .first()

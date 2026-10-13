@@ -335,7 +335,8 @@ export async function runPipeline(filePath, db, analyzer, tag = '[pipeline]') {
     const newNumber = String(ex.passport_number || '').trim().toUpperCase()
     if (fieldName === 'Passport' && newNumber) {
       const prof = await db('profiles').where('id', profileId).first()
-      if (String(prof?.passport_number || '').trim().toUpperCase() === newNumber) {
+      const onFileVerified = prof?.verified_at || Number(prof?.passport_ticks || 0) >= 3
+      if (onFileVerified && String(prof?.passport_number || '').trim().toUpperCase() === newNumber) {
         log(`skip — passport ${newNumber} already on profile #${profileId}`)
         return { ok: false, reason: 'duplicate_in_field', profileId, docType: fieldName }
       }

@@ -1,4 +1,5 @@
 @echo off
+cd /d "%~dp0"
 echo ===================================================
 echo   Adal Keep - SSH Setup for Silent Updates
 echo ===================================================
@@ -10,7 +11,7 @@ pause
 
 :: 1. Check if Git is installed
 where git >nul 2>nul
-if %ERRORLEVEL% NEQ 0 (
+if errorlevel 1 (
     echo ❌ Git is not installed. Please install Git for Windows first:
     echo    https://git-scm.com/download/win
     echo.
@@ -47,7 +48,7 @@ pause
 :: 4. Configure SSH for GitHub
 echo 🔧 Configuring SSH for GitHub...
 echo Host github.com> "%USERPROFILE%\.ssh\config"
-echo   IdentityFile %USERPROFILE%\.ssh\id_ed25519>> "%USERPROFILE%\.ssh\config"
+echo   IdentityFile "%USERPROFILE%\.ssh\id_ed25519">> "%USERPROFILE%\.ssh\config"
 echo   IdentitiesOnly yes>> "%USERPROFILE%\.ssh\config"
 icacls "%USERPROFILE%\.ssh\config" /inheritance:r /grant:r "%USERNAME%:R" /grant:r "%USERNAME%:W" >nul 2>nul
 

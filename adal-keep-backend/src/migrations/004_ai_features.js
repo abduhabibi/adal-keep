@@ -18,7 +18,7 @@ export async function up(knex) {
   })
 
   // Tasks table
-  await knex.schema.createTable('tasks', (table) => {
+  await knex.schema.createTableIfNotExists('tasks', (table) => {
     table.increments('id').primary()
     table.string('title').notNullable()
     table.text('description')

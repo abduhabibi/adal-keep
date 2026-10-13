@@ -1,0 +1,321 @@
+=========================================================
+PASSPORT OCR DIAGNOSTIC
+=========================================================
+Image:  uploads/profiles/4/1788426007022_passport.jpg
+Ran at: 2026-09-14T05:02:52.666Z
+
+Dimensions: 523 x 716
+
+===== PASS A: WHOLE IMAGE | PSM 11 | eng+amh =====
+[cd
+
+A, 0555
+
+የኢትዮጽያ ፌዴራላዊ ደሞክራሲያዊ ፲ፐብለ))
+
+PASSORT
+
+FEDERAL DEMOCRATIC ዘዩ
+
+8፡:(88 THOMA
+
+a.
+
+C1 ony Com
+
+ያሥሥርሶ ቀር) ጠመ:
+
+በህየ
+
+600:87449
+
+Xan
+
+ዘ ከህ oe
+
+ለያ አባቢያ / NESRIVA ABABIVA
+
+መፅ ጨመ
+
+eur
+
+Cos 3m
+
+31.05 1988
+
+መህ ዓዛር፡፡መጩኤ
+
+ሠኤ
+
+| መወልድ ታክመው
+
+ህዛ) 0ሀ፳
+
+“ለይት ህ1/ ከ ሀሰመወ
+
+IMMIGRATION AND.
+
+Ton A my Amt
+
+PATIO #1 Co ሠር,
+
+CITIZENSHIP SERVICE
+
+i  02032698
+
+PPETHHAJI<CNESRIYACABABI የለና<ረሩ<<ሩ<<<<<<ሩ<<ሩሩሩሩ
+
+EDD1874406ETHIBO5312F3603022<<<<<<<<<<<<<<00
+
+
+===== PASS B: WHOLE IMAGE | PSM 6 | eng+amh =====
+[cide
+ታ> ።፡፡
+po i;
+Fa
+ind
+=|2
+ነኣ =
+ብ! ›፣ ሃነ
+ቻስፖፒት የኢትዮጵያ ፌዴራላዊ ዴሞክራሲያዊ CTH
+==, FEDERAY DAMOCKATIC NE የዘር OF ¥THIGRIA
+eis eas, ir
+= ===
+4 ES በመ Be
+4 WX / Ha
++
+NCE አባቢያ / NESRIYA ABABIYA
+oo ብጫ 87:2.
+መ; 55፡5
+ዊሙ “ነ መ
+ውር ጨብ RTE
+=== ር
+8 ኢመ be
+WERE ree
+ዞዞ፻ጀፐዘዘለሀጋ፤ናሩዘዩኢ፳፤ሃልሩለፀለፀ፤ የለ<<<<<ሩሩ<<<<ሩ<ሩ<<ሩ<ሩ<ሩ
+EDD1874406ETHIBO5312F3603022<<<<<<<<<<<<<<00
+
+
+===== PASS C: TOP 88% CROP | PSM 11 | eng+amh =====
+[Lido
+
+.
+
+...
+
+..
+
+..
+
+"-ፍ፦
+
+LJ
+
+...
+
+....
+
+።
+
+=
+
+AS :
+
+የኢትዮጵያ ፌዴራላዊ ዴሞክሪሲያዊሪ፲ፐብለ.ከ
+
+ዞላኣኣዞና)ዚ1
+
+FEDERAL DEMOCRATIC REPUBLIC OF ETHIOPIA
+
+AES Time
+
+PN መላያ፣(ጠወቸሃ ር.ቋጆፎክ
+
+PP
+
+ETH
+
+ያምርጓ ባር) Passat Me
+
+00187440
+
+ኣያቶ ሰም ፡ 8,ሃካዞ
+
+ሀጂ / HAR
+
+ለም RIT | (ቃሙ ዛው->
+
+INCE አባቢያ / NESRIYA ABABIYA
+
+idl apped
+
+ሃቅውለዮ *ነ፣ ጩ of Sem
+
+31 05 1998
+
+መያ ዓጥዊ Pl bs
+
+ries
+
+መመፈያ ቃ /፻፡9፳ of ety
+
+ዞ
+
+SHIRO DIKE
+
+FAAS ወ ' 099 ፪1ካጨ፡፡
+
+03-03-2026
+
+PARI CARA |  ጠክወጎ ኤመመዛኑ
+
+IMMIGRATION AND
+
+he TEE TT.
+
+የሚያየቃበቅ #ነ፣ ህህ #፻ጠኮነ
+
+CITIZENSHIP SERVICE
+
+
+===== PASS D: TOP 96% CROP | PSM 11 | eng+amh =====
+[Lido
+
+.
+
+፦
+
+ዮ
+
+"-ፍ፦
+
+LJ
+
+....
+
+..
+
+->. .
+
+=
+
+a A A
+
+የኢ፡ ፡ ፌዴሩላዊ ዴሞክራሲያዊ ሪፐብለ.ክ
+
+==
+
+FEDERAL DEMOCRATIC REPUBLIC OF ETHICON A
+
+AES Time
+
+PN መላያ፣(ጠወቸሃ ር.ቋጆፎክ
+
+ያዩፖርጓ ፍቀር | የዘህዘህላዛ
+
+PP
+
+ETH
+
+ኣያቶ ሰም ፡ 8,ሃካዞ
+
+00187440
+
+ሀጂ / HAR
+
+ለም RIT | (ቃሙ ዛው->
+
+INCE አባቢያ / NESRIYA ABABIYA
+
+ሃቅውለዮ *ነ፣ ጩ of Sem
+
+iia
+
+31 05 1008
+
+መ።ያ ዓግዊ ? መሠ:
+
+ries
+
+FEAR Cr /፻፡ሥቋ of et
+
+ዞ
+
+SHIRO DIKE
+
+[ERT Tp ጨመ
+
+03.03 2026
+
+IMMIGRATION AND
+
+የኣጣኩ CARA |  ጠክወጎ ኤመመዛኑ
+
+የሚያየቃበቅ #ነ፣ ህህ #፻ጠኮነ
+
+CITIZENSHIP SERVICE
+
+he TEE TT.
+
+ቦዞጀፐዘዘለጋ፤ሩናዘዩደ58፤ሻለልሩለ8ለ8፤ለሩ<<<ሩ<ሩ<<<<<<<<<<<<<<
+
+ይበበ1ከጸፇሬ ልይ በበይ)ዚዊ49፳8ጪስመጠመዉጫጋሪ፡ጋፊ ፊ....... .
+
+
+===== PASS E: BOTTOM 15% CROP | PSM 6 | A-Z 0-9 < =====
+PPETHHAJI<<NESRI YA<ABABI YACCCCCLLCLCCLLCLCCLLLK
+EDD1874406ETHIBO5312F3603022<<<<<<<<<<<<<<00
+
+
+===== LABEL FORENSICS (searched across PASS A/B/C/D) =====
+  "Date of Issue": NOT FOUND
+  "Date of Expiry": NOT FOUND
+  "Date of Birth": NOT FOUND
+  "Issue": NOT FOUND
+  "Issued": NOT FOUND
+  "Expiry": NOT FOUND
+  "Expire": NOT FOUND
+  "Birth": NOT FOUND
+  "Issue ": NOT FOUND
+  "DEC": NOT FOUND
+  "SEP": NOT FOUND
+  "JAN": NOT FOUND
+  "FEB": NOT FOUND
+  "MAR": NOT FOUND
+  "APR": NOT FOUND
+  "MAY": NOT FOUND
+  "JUN": NOT FOUND
+  "JUL": NOT FOUND
+  "AUG": NOT FOUND
+  "OCT": NOT FOUND
+  "NOV": NOT FOUND
+  "MURASA": NOT FOUND
+  "ETHIOPIAN": NOT FOUND
+  "DEB0CH": NOT FOUND
+  "DEBOCH": NOT FOUND
+  "MIHRET": NOT FOUND
+  "19 DEC": NOT FOUND
+  "18 DEC": NOT FOUND
+
+===== PASS C ESCAPED (first 400 chars) =====
+"[Lido\n\n.\n\n...\n\n..\n\n..\n\n\"-ፍ፦\n\nLJ\n\n...\n\n....\n\n።\n\n=\n\nAS :\n\nየኢትዮጵያ ፌዴራላዊ ዴሞክሪሲያዊሪ፲ፐብለ.ከ\n\nዞላኣኣዞና)ዚ1\n\nFEDERAL DEMOCRATIC REPUBLIC OF ETHIOPIA\n\nAES Time\n\nPN መላያ፣(ጠወቸሃ ር.ቋጆፎክ\n\nPP\n\nETH\n\nያምርጓ ባር) Passat Me\n\n00187440\n\nኣያቶ ሰም ፡ 8,ሃካዞ\n\nሀጂ / HAR\n\nለም RIT | (ቃሙ ዛው->\n\nINCE አባቢያ / NESRIYA ABABIYA\n\nidl apped\n\nሃቅውለዮ *ነ፣ ጩ of Sem\n\n31 05 1998\n\nመያ ዓጥዊ Pl bs\n\nries\n\nመመፈያ ቃ /፻፡9፳ of ety\n\nዞ\n\nSHIRO DIKE\n\nFAAS ወ ' 099 ፪1ካጨ፡፡\n"
+
+===== MRZ PARSED =====
+{
+  "doc_type": "passport",
+  "passport_number": "EDD187440",
+  "passport_number_verified": false,
+  "surname": "HAJI",
+  "given_names": "NESRIYA",
+  "nationality_code": "ETH",
+  "date_of_birth": null,
+  "date_of_birth_verified": false,
+  "sex": "F",
+  "date_of_expiry": "2036-03-02",
+  "date_of_expiry_verified": true,
+  "personal_number": null,
+  "issuing_country": "ETH",
+  "overall_verified": false,
+  "mrz_line1": "PPETHHAJI<<NESRIYA<ABABIYACCCCCLLCLCCLLCLCCL",
+  "mrz_line2": "EDD1874406ETHIBO5312F3603022<<<<<<<<<<<<<<00"
+}

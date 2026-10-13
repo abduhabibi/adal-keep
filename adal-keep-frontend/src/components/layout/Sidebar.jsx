@@ -1,4 +1,5 @@
 import { NavLink } from 'react-router-dom'
+import { useAuth } from '../../context/AuthContext'
 
 const links = [
   {
@@ -61,6 +62,16 @@ const links = [
     ),
   },
   {
+    to: '/cvs',
+    label: 'ሲቪዎች',
+    icon: (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    ),
+  },
+  {
     to: '/notifications',
     label: 'ማሳወቂያዎች',
     icon: (
@@ -92,6 +103,10 @@ const settingsLink = {
 }
 
 export default function Sidebar({ isOpen, onToggle, collapsed, onToggleCollapse }) {
+  const { company } = useAuth()
+  // Before setup completes we show "Adal Keep"; afterwards "Adal <Company name>".
+  const brand = company ? `Adal ${company}` : 'Adal Keep'
+
   const getLinkClass = ({ isActive }) =>
     `flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium transition-all duration-200 ${
       isActive
@@ -132,8 +147,11 @@ export default function Sidebar({ isOpen, onToggle, collapsed, onToggleCollapse 
               </div>
             )}
             <div className={`transition-all duration-300 ${collapsed ? 'opacity-0 w-0 overflow-hidden' : 'opacity-100 w-auto'}`}>
-              <div className="font-display text-lg font-extrabold tracking-tight text-slate-900 dark:text-white whitespace-nowrap">
-                አዳል ኬፕ
+              <div
+                className="font-display text-lg font-extrabold tracking-tight text-slate-900 dark:text-white whitespace-nowrap truncate max-w-[168px]"
+                title={brand}
+              >
+                {brand}
               </div>
               <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">ፕሪሚየም CRM</p>
             </div>

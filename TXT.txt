@@ -1,0 +1,17 @@
+understand every bit of information in Documents/Adal_keep folder
+and then make the whole thing work on windows that this project will be in the USB file and transferred to windows PC
+don't try to include the dependencies that can be downloaded in windows >because they might fail if I include them here
+like node modules
+but include every bit of dependencies including brave that this system works on and make a folder called adal keep Main
+[I will immediately double click the installer you include in that folder after I plug the USB in windows PC and it will install the whole system  ]
+and also modify Adal keep companion to just include the folder watcher installed in the PC so that it will be simple for them to just double click the APP and it will open brave with local host or 192.. blabla
+
+and I need it to ask me for a company name and number at the start [as it does right now]
+and change Adal keep in the side bar to Adal[Company name]
+
+ask me any questions as many as you want 
+the right question to understand what I want
+look right now the system doesn't see for the things that he will be uploading before it starts going for doing police clearance
+and the OCR is not seeing and verifying that every data is got from a passport 
+the system should verify weather it have finished uploadin everything before finishing 
+means that it should see 3 right imogi through minerU

@@ -1,0 +1,828 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="Adal Keep — the AI-powered operating system for recruitment agencies. Candidate profiles, document OCR, CV studio, and government-portal automation in one place.">
+<title>Adal Keep — The AI Operating System for Recruitment Agencies</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#070b12; --bg-2:#0b1220; --surface:rgba(255,255,255,.04); --surface-solid:#0e1626;
+  --surface-2:rgba(255,255,255,.07); --border:rgba(255,255,255,.09); --border-strong:rgba(255,255,255,.16);
+  --text:#eef2f7; --text-2:#9aa7bd; --text-3:#6b7788;
+  --primary:#14b8a6; --primary-2:#0d9488; --primary-deep:#0f766e;
+  --accent:#6366f1; --accent-2:#8b5cf6;
+  --amber:#f59e0b; --green:#22c55e; --red:#ef4444; --pink:#ec4899;
+  --shadow:0 20px 60px -20px rgba(0,0,0,.7);
+  --shadow-sm:0 8px 24px -12px rgba(0,0,0,.6);
+  --radius:18px; --radius-sm:12px; --radius-lg:26px;
+  --font:'Inter',-apple-system,BlinkMacSystemFont,system-ui,sans-serif;
+  --mono:'JetBrains Mono',ui-monospace,monospace;
+  --max:1180px;
+}
+html[data-theme="light"]{
+  --bg:#f6f8fb; --bg-2:#eef2f8; --surface:rgba(255,255,255,.75); --surface-solid:#ffffff;
+  --surface-2:rgba(15,23,42,.035); --border:rgba(15,23,42,.09); --border-strong:rgba(15,23,42,.16);
+  --text:#0b1220; --text-2:#4b5768; --text-3:#8592a6;
+  --primary:#0d9488; --primary-2:#0f766e; --primary-deep:#115e59;
+  --shadow:0 24px 60px -28px rgba(15,23,42,.35);
+  --shadow-sm:0 10px 30px -18px rgba(15,23,42,.3);
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{font-family:var(--font);background:var(--bg);color:var(--text);line-height:1.65;-webkit-font-smoothing:antialiased;overflow-x:hidden;position:relative}
+body::before{
+  content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
+  background:
+    radial-gradient(600px 400px at 12% -6%,rgba(20,184,166,.16),transparent 70%),
+    radial-gradient(700px 500px at 92% 4%,rgba(99,102,241,.15),transparent 70%),
+    radial-gradient(600px 500px at 50% 100%,rgba(236,72,153,.08),transparent 70%);
+}
+html[data-theme="light"] body::before{opacity:.7}
+a{text-decoration:none;color:inherit}
+img{max-width:100%;display:block}
+button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
+h1,h2,h3,h4{line-height:1.12;font-weight:800;letter-spacing:-.025em}
+::selection{background:var(--primary);color:#04120f}
+.wrap{max-width:var(--max);margin:0 auto;padding:0 24px;position:relative;z-index:1}
+section{position:relative;z-index:1}
+/* ---------- NAV ---------- */
+nav{position:fixed;top:0;left:0;right:0;z-index:100;transition:all .3s;border-bottom:1px solid transparent}
+nav.scrolled{background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(18px) saturate(160%);-webkit-backdrop-filter:blur(18px) saturate(160%);border-bottom:1px solid var(--border)}
+.nav-inner{display:flex;align-items:center;justify-content:space-between;height:68px}
+.logo{display:flex;align-items:center;gap:11px;font-weight:800;font-size:1.12rem;letter-spacing:-.02em}
+.logo-mark{width:36px;height:36px;border-radius:11px;display:grid;place-items:center;color:#fff;font-weight:800;background:linear-gradient(135deg,var(--primary),var(--accent));font-size:.95rem;box-shadow:0 8px 22px -8px color-mix(in srgb,var(--primary) 70%,transparent)}
+.nav-links{display:flex;gap:30px;align-items:center}
+.nav-links a{font-size:.9rem;font-weight:500;color:var(--text-2);transition:color .2s;position:relative}
+.nav-links a:hover{color:var(--text)}
+.nav-links a::after{content:"";position:absolute;left:0;right:100%;bottom:-6px;height:2px;background:var(--primary);transition:right .25s;border-radius:2px}
+.nav-links a:hover::after{right:0}
+.nav-actions{display:flex;align-items:center;gap:12px}
+.theme-btn{width:38px;height:38px;border-radius:11px;display:grid;place-items:center;border:1px solid var(--border);background:var(--surface);transition:all .2s;font-size:1rem}
+.theme-btn:hover{border-color:var(--border-strong);transform:translateY(-1px)}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:11px 20px;border-radius:12px;font-weight:600;font-size:.9rem;transition:all .22s;white-space:nowrap;border:1px solid transparent}
+.btn-primary{background:linear-gradient(135deg,var(--primary),var(--primary-2));color:#03120f;box-shadow:0 12px 30px -12px color-mix(in srgb,var(--primary) 75%,transparent)}
+.btn-primary:hover{transform:translateY(-2px);box-shadow:0 18px 40px -14px color-mix(in srgb,var(--primary) 80%,transparent)}
+.btn-ghost{background:var(--surface);border-color:var(--border);color:var(--text)}
+.btn-ghost:hover{border-color:var(--border-strong);background:var(--surface-2);transform:translateY(-2px)}
+.btn-lg{padding:15px 30px;font-size:1rem;border-radius:14px}
+.hamburger{display:none;width:40px;height:40px;border-radius:11px;border:1px solid var(--border);background:var(--surface);place-items:center}
+.hamburger span{display:block;width:18px;height:2px;background:var(--text);border-radius:2px;position:relative;transition:.3s}
+.hamburger span::before,.hamburger span::after{content:"";position:absolute;left:0;width:18px;height:2px;background:var(--text);border-radius:2px;transition:.3s}
+.hamburger span::before{top:-6px}.hamburger span::after{top:6px}
+.mobile-menu{display:none;flex-direction:column;gap:4px;padding:14px 24px 22px;background:color-mix(in srgb,var(--bg) 96%,transparent);backdrop-filter:blur(18px);border-bottom:1px solid var(--border)}
+.mobile-menu a{padding:12px 4px;font-weight:600;color:var(--text-2);border-bottom:1px solid var(--border)}
+.mobile-menu.open{display:flex}
+.mobile-menu .btn{justify-content:center;margin-top:12px}
+/* ---------- HERO ---------- */
+.hero{padding:150px 0 70px;text-align:center}
+.pill{display:inline-flex;align-items:center;gap:9px;padding:7px 15px;border-radius:999px;font-size:.8rem;font-weight:600;border:1px solid var(--border);background:var(--surface);color:var(--text-2);margin-bottom:26px;backdrop-filter:blur(10px)}
+.pill .dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 0 4px color-mix(in srgb,var(--green) 25%,transparent);animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
+.hero h1{font-size:clamp(2.4rem,6vw,4.4rem);max-width:920px;margin:0 auto 22px;font-weight:900}
+.grad{background:linear-gradient(120deg,var(--primary),var(--accent) 55%,var(--pink));-webkit-background-clip:text;background-clip:text;color:transparent}
+.hero p.lead{font-size:clamp(1.05rem,2vw,1.28rem);color:var(--text-2);max-width:660px;margin:0 auto 34px}
+.hero-actions{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;margin-bottom:20px}
+.hero-note{font-size:.82rem;color:var(--text-3);font-family:var(--mono)}
+.hero-note b{color:var(--primary);font-weight:600}
+.hero-visual{margin:60px auto 0;max-width:1000px;position:relative;perspective:1600px}
+.mock{border-radius:var(--radius-lg);border:1px solid var(--border);background:var(--surface-solid);box-shadow:var(--shadow);overflow:hidden;transform:rotateX(6deg) scale(.99);transition:transform .6s ease}
+.hero-visual:hover .mock{transform:rotateX(0deg) scale(1)}
+.mock-bar{display:flex;align-items:center;gap:8px;padding:13px 16px;border-bottom:1px solid var(--border);background:var(--surface-2)}
+.tl{width:11px;height:11px;border-radius:50%}
+.tl.r{background:#ff5f57}.tl.y{background:#febc2e}.tl.g{background:#28c840}
+.mock-url{margin-left:12px;font-family:var(--mono);font-size:.72rem;color:var(--text-3);background:var(--bg);padding:5px 14px;border-radius:8px;border:1px solid var(--border)}
+.mock-body{display:grid;grid-template-columns:190px 1fr;min-height:400px}
+.mock-side{border-right:1px solid var(--border);padding:16px;background:var(--surface-2)}
+.mock-side .l{display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:9px;font-size:.79rem;color:var(--text-3);margin-bottom:3px}
+.mock-side .l.active{background:color-mix(in srgb,var(--primary) 16%,transparent);color:var(--primary);font-weight:600}
+.mock-side .l .ic{width:15px;height:15px;border-radius:4px;background:currentColor;opacity:.55}
+.mock-main{padding:22px;display:flex;flex-direction:column;gap:16px}
+.kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.kpi{border:1px solid var(--border);border-radius:13px;padding:14px;background:var(--surface)}
+.kpi .n{font-size:1.5rem;font-weight:800;font-family:var(--mono)}
+.kpi .t{font-size:.68rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em;margin-top:2px}
+.kpi.hl .n{color:var(--primary)}
+.bars{display:flex;align-items:flex-end;gap:9px;height:130px;border:1px solid var(--border);border-radius:13px;padding:16px;background:var(--surface)}
+.bars i{flex:1;border-radius:6px 6px 2px 2px;background:linear-gradient(180deg,var(--primary),color-mix(in srgb,var(--primary) 30%,transparent));animation:grow 1.4s cubic-bezier(.2,.8,.2,1) both}
+@keyframes grow{from{height:0!important;opacity:0}}
+.rows{display:flex;flex-direction:column;gap:8px}
+.row{display:flex;align-items:center;gap:12px;border:1px solid var(--border);border-radius:11px;padding:10px 13px;background:var(--surface);font-size:.8rem}
+.row .av{width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,var(--accent),var(--primary));display:grid;place-items:center;color:#fff;font-weight:700;font-size:.72rem;flex-shrink:0}
+.row .nm{font-weight:600}.row .sub{color:var(--text-3);font-size:.72rem}
+.badge{margin-left:auto;font-size:.68rem;font-weight:700;padding:3px 9px;border-radius:999px;font-family:var(--mono)}
+.badge.ok{background:color-mix(in srgb,var(--green) 18%,transparent);color:var(--green)}
+.badge.warn{background:color-mix(in srgb,var(--amber) 18%,transparent);color:var(--amber)}
+.badge.info{background:color-mix(in srgb,var(--accent) 18%,transparent);color:var(--accent)}
+.float-card{position:absolute;border:1px solid var(--border);background:color-mix(in srgb,var(--surface-solid) 92%,transparent);backdrop-filter:blur(14px);border-radius:15px;padding:13px 16px;box-shadow:var(--shadow);font-size:.78rem;z-index:5;animation:floaty 6s ease-in-out infinite}
+.float-card .fc-t{font-weight:700;display:flex;align-items:center;gap:7px}
+.float-card small{color:var(--text-3);font-family:var(--mono);font-size:.66rem}
+.fc-1{top:-18px;left:-30px;animation-delay:.2s}
+.fc-2{bottom:-20px;right:-26px;animation-delay:1.4s}
+@keyframes floaty{0%,100%{transform:translateY(0)}50%{transform:translateY(-13px)}}
+/* ---------- STATS STRIP ---------- */
+.stats-strip{margin-top:74px;display:grid;grid-template-columns:repeat(4,1fr);gap:20px}
+.stat-card{border:1px solid var(--border);border-radius:var(--radius);padding:26px 22px;background:var(--surface);backdrop-filter:blur(10px);text-align:center;transition:.3s}
+.stat-card:hover{transform:translateY(-4px);border-color:var(--border-strong)}
+.stat-card .v{font-size:clamp(1.9rem,4vw,2.6rem);font-weight:900;font-family:var(--mono);background:linear-gradient(120deg,var(--primary),var(--accent));-webkit-background-clip:text;background-clip:text;color:transparent}
+.stat-card .k{color:var(--text-3);font-size:.82rem;margin-top:6px;font-weight:500}
+
+/* ---------- SECTION HEADS ---------- */
+.head{text-align:center;max-width:680px;margin:0 auto 56px}
+.head .eyebrow{font-family:var(--mono);font-size:.78rem;font-weight:600;color:var(--primary);text-transform:uppercase;letter-spacing:.16em;margin-bottom:14px}
+.head h2{font-size:clamp(1.9rem,4vw,3rem);margin-bottom:16px}
+.head p{color:var(--text-2);font-size:1.06rem}
+.sec{padding:90px 0}
+
+/* ---------- FEATURES ---------- */
+.fgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+.fcard{border:1px solid var(--border);border-radius:var(--radius);padding:28px;background:var(--surface);backdrop-filter:blur(10px);transition:.32s;position:relative;overflow:hidden}
+.fcard::after{content:"";position:absolute;inset:0;border-radius:var(--radius);background:radial-gradient(400px 200px at var(--mx,50%) var(--my,0%),color-mix(in srgb,var(--primary) 12%,transparent),transparent 70%);opacity:0;transition:opacity .3s;pointer-events:none}
+.fcard:hover{transform:translateY(-6px);border-color:color-mix(in srgb,var(--primary) 40%,var(--border));box-shadow:var(--shadow-sm)}
+.fcard:hover::after{opacity:1}
+.fcard .ico{width:50px;height:50px;border-radius:14px;display:grid;place-items:center;font-size:1.5rem;margin-bottom:18px;background:linear-gradient(135deg,color-mix(in srgb,var(--primary) 22%,transparent),color-mix(in srgb,var(--accent) 22%,transparent));border:1px solid var(--border)}
+.fcard h3{font-size:1.15rem;margin-bottom:9px}
+.fcard p{color:var(--text-2);font-size:.92rem}
+.fcard .tag{display:inline-block;margin-top:14px;font-family:var(--mono);font-size:.68rem;color:var(--text-3);border:1px dashed var(--border-strong);padding:3px 9px;border-radius:7px}
+
+/* ---------- STEPS ---------- */
+.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:22px}
+.step{border:1px solid var(--border);border-radius:var(--radius);padding:30px 26px;background:var(--surface);position:relative;transition:.3s}
+.step:hover{transform:translateY(-5px);border-color:var(--border-strong)}
+.step .num{font-family:var(--mono);font-size:.8rem;font-weight:700;color:var(--primary);border:1px solid color-mix(in srgb,var(--primary) 40%,var(--border));width:42px;height:42px;border-radius:12px;display:grid;place-items:center;margin-bottom:18px;background:color-mix(in srgb,var(--primary) 10%,transparent)}
+.step h3{font-size:1.2rem;margin-bottom:8px}
+.step p{color:var(--text-2);font-size:.92rem}
+/* ---------- SHOWCASE TABS ---------- */
+.tabs{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-bottom:32px}
+.tab{padding:10px 20px;border-radius:999px;font-size:.86rem;font-weight:600;border:1px solid var(--border);background:var(--surface);color:var(--text-2);transition:.22s}
+.tab:hover{color:var(--text);border-color:var(--border-strong)}
+.tab.active{background:linear-gradient(135deg,var(--primary),var(--primary-2));color:#03120f;border-color:transparent;box-shadow:0 10px 26px -12px color-mix(in srgb,var(--primary) 75%,transparent)}
+.panel{display:none;border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--surface-solid);overflow:hidden;box-shadow:var(--shadow)}
+.panel.active{display:grid;grid-template-columns:1fr 1fr;animation:fade .4s ease}
+@keyframes fade{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+.panel .ptext{padding:44px 40px;display:flex;flex-direction:column;justify-content:center}
+.panel .ptext .eyebrow{font-family:var(--mono);font-size:.75rem;color:var(--primary);text-transform:uppercase;letter-spacing:.14em;margin-bottom:12px;font-weight:600}
+.panel .ptext h3{font-size:1.7rem;margin-bottom:14px}
+.panel .ptext p{color:var(--text-2);margin-bottom:20px}
+.panel .ptext ul{list-style:none;display:flex;flex-direction:column;gap:11px}
+.panel .ptext li{display:flex;gap:11px;font-size:.93rem;color:var(--text-2);align-items:flex-start}
+.panel .ptext li b{color:var(--text)}
+.panel .ptext li .ck{color:var(--primary);font-weight:800;flex-shrink:0}
+.panel .pvis{padding:30px;background:var(--surface-2);border-left:1px solid var(--border);display:flex;flex-direction:column;gap:12px}
+
+/* ---------- AI SECTION ---------- */
+.ai-grid{display:grid;grid-template-columns:1fr 1fr;gap:48px;align-items:center}
+.chat{border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;background:var(--surface-solid);box-shadow:var(--shadow)}
+.chat-top{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;font-weight:600;font-size:.9rem}
+.chat-top .dot{width:9px;height:9px;border-radius:50%;background:var(--green)}
+.chat-body{padding:20px;display:flex;flex-direction:column;gap:14px;min-height:320px}
+.msg{max-width:82%;padding:12px 15px;border-radius:14px;font-size:.88rem;line-height:1.5}
+.msg.bot{background:var(--surface-2);border:1px solid var(--border);border-bottom-left-radius:4px}
+.msg.user{background:linear-gradient(135deg,var(--primary),var(--primary-2));color:#03120f;margin-left:auto;border-bottom-right-radius:4px;font-weight:500}
+.msg .typing{display:inline-flex;gap:4px}
+.msg .typing i{width:6px;height:6px;border-radius:50%;background:var(--text-2);animation:blink 1.2s infinite}
+.msg .typing i:nth-child(2){animation-delay:.2s}.msg .typing i:nth-child(3){animation-delay:.4s}
+@keyframes blink{0%,60%,100%{opacity:.25}30%{opacity:1}}
+.flow{display:flex;flex-direction:column;gap:12px}
+.flow-step{display:flex;gap:14px;align-items:flex-start;padding:16px;border:1px solid var(--border);border-radius:14px;background:var(--surface);transition:.25s}
+.flow-step:hover{border-color:var(--border-strong);transform:translateX(5px)}
+.flow-step .fi{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;background:color-mix(in srgb,var(--primary) 14%,transparent);color:var(--primary);flex-shrink:0;font-size:1rem}
+.flow-step h4{font-size:.98rem;margin-bottom:3px}
+.flow-step p{color:var(--text-2);font-size:.85rem}
+
+/* ---------- TESTIMONIALS ---------- */
+.tgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+.tcard{border:1px solid var(--border);border-radius:var(--radius);padding:28px;background:var(--surface);transition:.3s}
+.tcard:hover{transform:translateY(-5px);border-color:var(--border-strong)}
+.tcard .stars{color:var(--amber);margin-bottom:14px;letter-spacing:2px}
+.tcard p{color:var(--text-2);font-size:.93rem;margin-bottom:20px}
+.tcard .who{display:flex;align-items:center;gap:12px}
+.tcard .who .av{width:42px;height:42px;border-radius:12px;background:linear-gradient(135deg,var(--accent),var(--primary));display:grid;place-items:center;color:#fff;font-weight:700}
+.tcard .who b{font-size:.9rem}.tcard .who small{color:var(--text-3);font-size:.78rem;display:block}
+/* ---------- PRICING ---------- */
+.pgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:22px;align-items:stretch}
+.pcard{border:1px solid var(--border);border-radius:var(--radius-lg);padding:34px 30px;background:var(--surface);display:flex;flex-direction:column;transition:.3s;position:relative}
+.pcard:hover{transform:translateY(-6px);border-color:var(--border-strong)}
+.pcard.featured{border-color:color-mix(in srgb,var(--primary) 55%,var(--border));box-shadow:var(--shadow);background:linear-gradient(180deg,color-mix(in srgb,var(--primary) 8%,transparent),var(--surface))}
+.pcard .ptag{position:absolute;top:-13px;left:50%;transform:translateX(-50%);background:linear-gradient(135deg,var(--primary),var(--accent));color:#03120f;font-size:.72rem;font-weight:800;padding:5px 16px;border-radius:999px;letter-spacing:.04em}
+.pcard h3{font-size:1.2rem;margin-bottom:6px}
+.pcard .price{font-size:2.6rem;font-weight:900;font-family:var(--mono);margin:14px 0 4px}
+.pcard .price small{font-size:.85rem;color:var(--text-3);font-weight:500}
+.pcard .pdesc{color:var(--text-2);font-size:.88rem;margin-bottom:22px}
+.pcard ul{list-style:none;display:flex;flex-direction:column;gap:12px;margin-bottom:26px;flex:1}
+.pcard li{display:flex;gap:10px;font-size:.9rem;color:var(--text-2)}
+.pcard li .ck{color:var(--primary);font-weight:800}
+.pcard .btn{justify-content:center;width:100%}
+
+/* ---------- FAQ ---------- */
+.faq{max-width:780px;margin:0 auto;display:flex;flex-direction:column;gap:12px}
+.q{border:1px solid var(--border);border-radius:14px;background:var(--surface);overflow:hidden;transition:.25s}
+.q:hover{border-color:var(--border-strong)}
+.q summary{padding:20px 22px;font-weight:600;cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:16px;font-size:1rem}
+.q summary::-webkit-details-marker{display:none}
+.q summary .pm{color:var(--primary);font-size:1.4rem;transition:transform .3s;flex-shrink:0;line-height:1}
+.q[open] summary .pm{transform:rotate(45deg)}
+.q .ans{padding:0 22px 20px;color:var(--text-2);font-size:.93rem}
+
+/* ---------- CTA ---------- */
+.cta{border:1px solid var(--border);border-radius:var(--radius-lg);padding:64px 40px;text-align:center;position:relative;overflow:hidden;background:linear-gradient(135deg,color-mix(in srgb,var(--primary) 12%,var(--surface-solid)),color-mix(in srgb,var(--accent) 12%,var(--surface-solid)))}
+.cta::before{content:"";position:absolute;width:520px;height:520px;border-radius:50%;background:radial-gradient(circle,color-mix(in srgb,var(--primary) 30%,transparent),transparent 65%);top:-260px;left:50%;transform:translateX(-50%);pointer-events:none}
+.cta h2{font-size:clamp(2rem,4vw,3rem);margin-bottom:16px;position:relative}
+.cta p{color:var(--text-2);max-width:520px;margin:0 auto 30px;position:relative}
+.cta .hero-actions{position:relative}
+
+/* ---------- FOOTER ---------- */
+footer{border-top:1px solid var(--border);padding:60px 0 34px;margin-top:40px}
+.foot-grid{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:40px;margin-bottom:44px}
+.foot-brand p{color:var(--text-2);font-size:.9rem;max-width:300px;margin-top:16px}
+.foot-col h4{font-size:.8rem;text-transform:uppercase;letter-spacing:.1em;color:var(--text-3);margin-bottom:16px}
+.foot-col a{display:block;color:var(--text-2);font-size:.9rem;margin-bottom:11px;transition:.2s}
+.foot-col a:hover{color:var(--primary)}
+.foot-bottom{border-top:1px solid var(--border);padding-top:24px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:14px;font-size:.82rem;color:var(--text-3)}
+.foot-bottom .socials{display:flex;gap:10px}
+.foot-bottom .socials a{width:36px;height:36px;border-radius:10px;border:1px solid var(--border);display:grid;place-items:center;transition:.2s}
+.foot-bottom .socials a:hover{border-color:var(--primary);color:var(--primary);transform:translateY(-2px)}
+
+/* ---------- ARCHITECTURE DECK ---------- */
+.deck-wrap{border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;background:var(--surface-solid);box-shadow:var(--shadow);margin-bottom:36px}
+.deck-bar{display:flex;align-items:center;gap:14px;padding:12px 16px;border-bottom:1px solid var(--border);background:var(--surface-2)}
+.deck-dots{display:flex;gap:6px;flex-shrink:0}
+.deck-dots .dd{width:11px;height:11px;border-radius:50%}
+.deck-dots .r{background:#ff5f57}.deck-dots .y{background:#febc2e}.deck-dots .g{background:#28c840}
+.deck-title{font-family:var(--mono);font-size:.78rem;color:var(--text-3);margin-right:auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.deck-bar-actions{display:flex;gap:8px;flex-shrink:0}
+.deck-btn{display:inline-flex;align-items:center;gap:6px;font-size:.78rem;font-weight:600;padding:7px 13px;border-radius:9px;border:1px solid var(--border);background:var(--surface);color:var(--text-2);transition:.2s;white-space:nowrap}
+.deck-btn:hover{color:var(--text);border-color:var(--primary);transform:translateY(-1px)}
+.deck-frame{position:relative;width:100%;aspect-ratio:16/9;background:#0b1220}
+.deck-frame:fullscreen{aspect-ratio:auto;height:100%;width:100%}
+.deck-frame:-webkit-full-screen{aspect-ratio:auto;height:100%;width:100%}
+.deck-frame iframe{position:absolute;inset:0;width:100%;height:100%;border:0;display:block}
+.deck-note{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center;justify-content:center;color:var(--text-3);font-size:.82rem;padding:14px 18px;border-top:1px solid var(--border);background:var(--surface-2)}
+.deck-note a{color:var(--primary);font-weight:600}
+.deck-note a:hover{text-decoration:underline}
+.deck-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
+.deck-card{border:1px solid var(--border);border-radius:var(--radius);padding:22px;background:var(--surface);transition:.3s}
+.deck-card:hover{transform:translateY(-5px);border-color:color-mix(in srgb,var(--primary) 40%,var(--border))}
+.deck-card .dc-n{font-family:var(--mono);font-size:.72rem;font-weight:700;color:var(--primary);letter-spacing:.12em;margin-bottom:10px}
+.deck-card h4{font-size:1rem;margin-bottom:8px}
+.deck-card p{color:var(--text-2);font-size:.87rem}
+.deck-foot{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:32px}
+
+/* ---------- REVEAL ---------- */
+.reveal{opacity:0;transform:translateY(28px);transition:opacity .7s cubic-bezier(.2,.8,.2,1),transform .7s cubic-bezier(.2,.8,.2,1)}
+.reveal.in{opacity:1;transform:none}
+
+/* ---------- RESPONSIVE ---------- */
+@media(max-width:960px){
+  .nav-links{display:none}
+  .hamburger{display:grid}
+  .fgrid,.steps,.tgrid,.pgrid{grid-template-columns:1fr}
+  .ai-grid,.panel.active{grid-template-columns:1fr}
+  .mock-body{grid-template-columns:1fr}
+  .mock-side{display:none}
+  .stats-strip{grid-template-columns:1fr 1fr}
+  .foot-grid{grid-template-columns:1fr 1fr}
+  .panel .pvis{border-left:none;border-top:1px solid var(--border)}
+  .float-card{display:none}
+  .deck-grid{grid-template-columns:1fr 1fr}
+  .deck-title{display:none}
+}
+@media(max-width:560px){
+  .kpis{grid-template-columns:1fr}
+  .stats-strip{grid-template-columns:1fr}
+  .foot-grid{grid-template-columns:1fr}
+  .wrap{padding:0 18px}
+  .hero{padding:120px 0 40px}
+  .sec{padding:64px 0}
+  .deck-grid{grid-template-columns:1fr}
+  .deck-bar{padding:10px 12px;gap:10px}
+  .deck-btn{padding:6px 10px;font-size:.72rem}
+}
+
+
+</style>
+</head>
+<body>
+<nav id="nav">
+  <div class="wrap nav-inner">
+    <a href="#top" class="logo"><span class="logo-mark">አ</span> Adal Keep</a>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#how">How it works</a>
+      <a href="#showcase">Product</a>
+      <a href="#ai">AI &amp; Automation</a>
+      <a href="#slides">Slides</a>
+      <a href="#pricing">Pricing</a>
+      <a href="#faq">FAQ</a>
+    </div>
+    <div class="nav-actions">
+      <button class="theme-btn" id="themeBtn" aria-label="Toggle theme">🌙</button>
+      <a href="demo.html" class="btn btn-primary">Try live demo</a>
+      <button class="hamburger" id="hamburger" aria-label="Menu"><span></span></button>
+    </div>
+  </div>
+</nav>
+<div class="mobile-menu" id="mobileMenu">
+  <a href="#features">Features</a>
+  <a href="#how">How it works</a>
+  <a href="#showcase">Product</a>
+  <a href="#ai">AI &amp; Automation</a>
+  <a href="#slides">Slides</a>
+  <a href="#pricing">Pricing</a>
+  <a href="#faq">FAQ</a>
+  <a href="demo.html" class="btn btn-primary">Try live demo</a>
+</div>
+
+<header class="hero wrap" id="top">
+  <div class="pill"><span class="dot"></span> v2.0 · AI-powered agency OS · runs fully offline</div>
+  <h1>Put your entire agency on <span class="grad">autopilot</span></h1>
+  <p class="lead">Adal Keep unifies candidate profiles, document OCR, CV generation, and government-portal workflows &mdash; while an AI agent quietly clears the busywork for your team.</p>
+  <div class="hero-actions">
+    <a href="demo.html" class="btn btn-primary btn-lg">Explore the live demo</a>
+    <a href="#showcase" class="btn btn-ghost btn-lg">See it in action</a>
+  </div>
+  <p class="hero-note">No cloud required · <b>100% local &amp; encrypted</b> · hardware-locked license</p>
+
+  <div class="hero-visual">
+    <div class="float-card fc-1">
+      <div class="fc-t">📄 Passport OCR</div>
+      <small>1 file ingested · 0.4s</small>
+    </div>
+    <div class="float-card fc-2">
+      <div class="fc-t">🤖 AI agent</div>
+      <small>next action &rarr; make_cv</small>
+    </div>
+    <div class="mock">
+      <div class="mock-bar">
+        <span class="tl r"></span><span class="tl y"></span><span class="tl g"></span>
+        <span class="mock-url">localhost:3000/dashboard</span>
+      </div>
+      <div class="mock-body">
+        <aside class="mock-side">
+          <div class="l active"><span class="ic"></span> Dashboard</div>
+          <div class="l"><span class="ic"></span> Profiles</div>
+          <div class="l"><span class="ic"></span> Brokers</div>
+          <div class="l"><span class="ic"></span> Employees</div>
+          <div class="l"><span class="ic"></span> CV Studio</div>
+          <div class="l"><span class="ic"></span> AI Assistant</div>
+          <div class="l"><span class="ic"></span> Automations</div>
+          <div class="l"><span class="ic"></span> Notifications</div>
+        </aside>
+        <div class="mock-main">
+          <div class="kpis">
+            <div class="kpi hl"><div class="n" data-count="1284">0</div><div class="t">Profiles</div></div>
+            <div class="kpi"><div class="n" data-count="96">0</div><div class="t">Ready</div></div>
+            <div class="kpi"><div class="n" data-count="20">0</div><div class="t">Lanes</div></div>
+          </div>
+          <div class="bars">
+            <i style="height:40%"></i><i style="height:62%"></i><i style="height:48%"></i><i style="height:78%"></i><i style="height:56%"></i><i style="height:90%"></i><i style="height:70%"></i><i style="height:84%"></i>
+          </div>
+          <div class="rows">
+            <div class="row"><span class="av">AB</span><div><div class="nm">Abebe Kebede</div><div class="sub">Kuwait · CV ready</div></div><span class="badge ok">submitted</span></div>
+            <div class="row"><span class="av">SG</span><div><div class="nm">Selam Girma</div><div class="sub">Saudi · missing slip</div></div><span class="badge warn">action</span></div>
+            <div class="row"><span class="av">MT</span><div><div class="nm">Marta Tesfaye</div><div class="sub">Kuwait · police cert</div></div><span class="badge info">queued</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="stats-strip">
+    <div class="stat-card reveal"><div class="v" data-count="20">0</div><div class="k">Automation lanes</div></div>
+    <div class="stat-card reveal"><div class="v" data-count="6" data-suffix="+">0</div><div class="k">Document types OCR'd</div></div>
+    <div class="stat-card reveal"><div class="v" data-count="3">0</div><div class="k">Portals automated</div></div>
+    <div class="stat-card reveal"><div class="v" data-count="100" data-suffix="%">0</div><div class="k">Offline &amp; private</div></div>
+  </div>
+</header>
+
+<section class="sec wrap" id="features">
+  <div class="head reveal">
+    <div class="eyebrow">Everything in one place</div>
+    <h2>A complete operating system for your agency</h2>
+    <p>Stop juggling spreadsheets, WhatsApp groups, and half a dozen portals. Adal Keep brings the entire recruitment lifecycle into a single, fast, offline-first workspace.</p>
+  </div>
+  <div class="fgrid">
+    <div class="fcard reveal"><div class="ico">🧑‍💼</div><h3>Rich candidate profiles</h3><p>Passport data, personal details, emergency contacts, skills, languages, destination country, documents and photos &mdash; all in one structured record.</p><span class="tag">profiles · fields</span></div>
+    <div class="fcard reveal"><div class="ico">📄</div><h3>Document OCR &amp; ingestion</h3><p>Drop a file anywhere &mdash; Adal Keep watches your folders, classifies documents, and reads passports via MRZ, slips, photos and more.</p><span class="tag">tesseract · mrz</span></div>
+    <div class="fcard reveal"><div class="ico">🖨️</div><h3>CV Studio</h3><p>Template-driven CV generation. Design once, then render a polished CV for any candidate in seconds &mdash; ready to print or submit.</p><span class="tag">templates · render</span></div>
+    <div class="fcard reveal"><div class="ico">💬</div><h3>AI assistant</h3><p>Ask questions in natural language. The assistant answers from your live data &mdash; who's ready, what's missing, what happened yesterday.</p><span class="tag">deepseek · chat</span></div>
+    <div class="fcard reveal"><div class="ico">🧠</div><h3>AI decision engine</h3><p>Give the agent a batch of candidates and it decides each one's next action: make a CV, submit a police certificate, message, or wait.</p><span class="tag">jev · decisions</span></div>
+    <div class="fcard reveal"><div class="ico">🌐</div><h3>Government portal autopilot</h3><p>LMIS, Musaned/Tawtheeq and Pextran workflows driven by a real browser &mdash; with human-in-the-loop checkpoints for OTPs and captchas.</p><span class="tag">puppeteer · brave</span></div>
+    <div class="fcard reveal"><div class="ico">✅</div><h3>Tasks &amp; readiness checklists</h3><p>Per-candidate checklists track what's done and what's missing, so nothing falls through the cracks before submission.</p><span class="tag">tasks · checklists</span></div>
+    <div class="fcard reveal"><div class="ico">🔐</div><h3>Security &amp; licensing</h3><p>AES-256 encrypted uploads, hardware-locked licensing, trials and payments, plus multi-tenant data isolation.</p><span class="tag">aes-256 · license</span></div>
+    <div class="fcard reveal"><div class="ico">📊</div><h3>Dashboards &amp; activity log</h3><p>Live KPIs, per-branch breakdowns, notifications and a full audit trail of every action taken by people and by the AI.</p><span class="tag">kpi · audit</span></div>
+  </div>
+</section>
+
+<section class="sec wrap" id="how" style="padding-top:0">
+  <div class="head reveal">
+    <div class="eyebrow">How it works</div>
+    <h2>From installer to autopilot in three steps</h2>
+    <p>Adal Keep installs as a desktop app, runs locally on your machine, and starts working the moment files land in your folders.</p>
+  </div>
+  <div class="steps">
+    <div class="step reveal"><div class="num">01</div><h3>Install &amp; connect</h3><p>Run the installer, lock the license to your machine, and the app boots its own backend, file watcher and companion agent automatically.</p></div>
+    <div class="step reveal"><div class="num">02</div><h3>Capture &amp; organise</h3><p>Save passports, slips and photos as you normally would. Adal Keep detects, encrypts, OCRs and attaches each file to the right candidate.</p></div>
+    <div class="step reveal"><div class="num">03</div><h3>Automate &amp; submit</h3><p>The AI decides each candidate's next action, drafts CVs, drives the portals, and hands you only the steps that truly need a human.</p></div>
+  </div>
+</section>
+
+<section class="sec wrap" id="showcase">
+  <div class="head reveal">
+    <div class="eyebrow">Product tour</div>
+    <h2>See exactly what you get</h2>
+    <p>Four of the tools your team will live in every day. Click through them below.</p>
+  </div>
+  <div class="tabs reveal" id="tabs">
+    <button class="tab active" data-tab="p0">Candidate profiles</button>
+    <button class="tab" data-tab="p1">OCR &amp; ingestion</button>
+    <button class="tab" data-tab="p2">CV Studio</button>
+    <button class="tab" data-tab="p3">Automation lanes</button>
+  </div>
+
+  <div class="panel active" id="p0">
+    <div class="ptext">
+      <div class="eyebrow">Profiles</div>
+      <h3>Every candidate, one structured record</h3>
+      <p>Search, filter and update candidates in a clean, fast table. Open a profile to see documents, checklists and history side by side.</p>
+      <ul>
+        <li><span class="ck">✓</span><span><b>Powerful search</b> &mdash; by name, phone, national ID or passport.</span></li>
+        <li><span class="ck">✓</span><span><b>Status pipeline</b> &mdash; pending, processing, ready, submitted.</span></li>
+        <li><span class="ck">✓</span><span><b>Broker &amp; branch</b> linked to every candidate.</span></li>
+        <li><span class="ck">✓</span><span><b>Attachments</b> auto-organised under the right field.</span></li>
+      </ul>
+    </div>
+    <div class="pvis">
+      <div class="row"><span class="av">AB</span><div><div class="nm">Abebe Kebede</div><div class="sub">+251 911 &middot; Kuwait</div></div><span class="badge ok">ready</span></div>
+      <div class="row"><span class="av">SG</span><div><div class="nm">Selam Girma</div><div class="sub">+251 922 &middot; Saudi</div></div><span class="badge warn">pending</span></div>
+      <div class="row"><span class="av">MT</span><div><div class="nm">Marta Tesfaye</div><div class="sub">+251 933 &middot; Kuwait</div></div><span class="badge info">processing</span></div>
+      <div class="row"><span class="av">HA</span><div><div class="nm">Hana Alemu</div><div class="sub">+251 944 &middot; UAE</div></div><span class="badge ok">submitted</span></div>
+    </div>
+  </div>
+
+  <div class="panel" id="p1">
+    <div class="ptext">
+      <div class="eyebrow">Ingestion</div>
+      <h3>Files land, Adal Keep does the rest</h3>
+      <p>Save a passport scan or a payment slip into any watched folder. The companion agent encrypts it, ships it to the server, and OCR classifies it.</p>
+      <ul>
+        <li><span class="ck">✓</span><span><b>Folder watching</b> across Downloads, Desktop and Documents.</span></li>
+        <li><span class="ck">✓</span><span><b>Passport MRZ</b> reading for name, number and dates.</span></li>
+        <li><span class="ck">✓</span><span><b>Classification</b> of passports, photos, slips and more.</span></li>
+        <li><span class="ck">✓</span><span><b>AES-256</b> encryption in transit, end to end.</span></li>
+      </ul>
+    </div>
+    <div class="pvis">
+      <div class="row"><span class="av">📄</span><div><div class="nm">passport_abebe.jpg</div><div class="sub">MRZ read &middot; 0.4s</div></div><span class="badge ok">attached</span></div>
+      <div class="row"><span class="av">🧾</span><div><div class="nm">slip_marta.pdf</div><div class="sub">classified &middot; payment slip</div></div><span class="badge info">parsed</span></div>
+      <div class="row"><span class="av">🖼️</span><div><div class="nm">photo_selam.png</div><div class="sub">sanitised &middot; encrypted</div></div><span class="badge ok">attached</span></div>
+      <div class="row"><span class="av">📄</span><div><div class="nm">police_cert.pdf</div><div class="sub">queued for review</div></div><span class="badge warn">review</span></div>
+    </div>
+  </div>
+
+  <div class="panel" id="p2">
+    <div class="ptext">
+      <div class="eyebrow">CV Studio</div>
+      <h3>Design a template once, render forever</h3>
+      <p>Build or import a CV template, map candidate fields to it, then generate a pixel-perfect document for any candidate on demand.</p>
+      <ul>
+        <li><span class="ck">✓</span><span><b>Templates</b> with reusable field bindings.</span></li>
+        <li><span class="ck">✓</span><span><b>Live preview</b> before you export.</span></li>
+        <li><span class="ck">✓</span><span><b>Batch generation</b> for an entire shortlist.</span></li>
+        <li><span class="ck">✓</span><span><b>Print &amp; export</b> ready output.</span></li>
+      </ul>
+    </div>
+    <div class="pvis">
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:20px;font-size:.78rem">
+        <div style="display:flex;gap:14px;align-items:center;margin-bottom:14px">
+          <div style="width:56px;height:64px;border-radius:8px;background:linear-gradient(135deg,var(--accent),var(--primary))"></div>
+          <div><div style="font-weight:800;font-size:1rem">ABEBE KEBEDE</div><div style="color:var(--text-3)">Domestic Worker &middot; Kuwait</div></div>
+        </div>
+        <div style="height:8px;border-radius:4px;background:var(--surface-2);margin-bottom:8px;width:92%"></div>
+        <div style="height:8px;border-radius:4px;background:var(--surface-2);margin-bottom:8px;width:78%"></div>
+        <div style="height:8px;border-radius:4px;background:var(--surface-2);margin-bottom:8px;width:85%"></div>
+        <div style="height:8px;border-radius:4px;background:var(--surface-2);width:64%"></div>
+        <div style="margin-top:16px;display:flex;gap:8px"><span class="badge ok">ready</span><span class="badge info">PDF</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel" id="p3">
+    <div class="ptext">
+      <div class="eyebrow">Automations</div>
+      <h3>Twenty lanes working in parallel</h3>
+      <p>Every submission runs in its own isolated browser lane, so dozens of candidates progress at once &mdash; with a clear status for each.</p>
+      <ul>
+        <li><span class="ck">✓</span><span><b>Parallel lanes</b> scale to your workload.</span></li>
+        <li><span class="ck">✓</span><span><b>Human-in-the-loop</b> for OTP, captcha and approvals.</span></li>
+        <li><span class="ck">✓</span><span><b>Retries &amp; queueing</b> so a hiccup never kills a run.</span></li>
+        <li><span class="ck">✓</span><span><b>Full logging</b> of every portal interaction.</span></li>
+      </ul>
+    </div>
+    <div class="pvis">
+      <div class="row"><span class="av">01</span><div><div class="nm">Lane 01 &middot; LMIS</div><div class="sub">police certificate</div></div><span class="badge ok">done</span></div>
+      <div class="row"><span class="av">07</span><div><div class="nm">Lane 07 &middot; Musaned</div><div class="sub">add candidate</div></div><span class="badge info">running</span></div>
+      <div class="row"><span class="av">12</span><div><div class="nm">Lane 12 &middot; Pextran</div><div class="sub">awaiting approval</div></div><span class="badge warn">pause</span></div>
+      <div class="row"><span class="av">18</span><div><div class="nm">Lane 18 &middot; CV</div><div class="sub">rendering document</div></div><span class="badge info">running</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ---------- ARCHITECTURE DECK ---------- -->
+<section class="sec wrap" id="slides">
+  <div class="head reveal">
+    <div class="eyebrow">Technical briefing</div>
+    <h2>See the architecture deck</h2>
+    <p>The full 11-slide technical briefing &mdash; the agency challenges, the local browser-automation architecture, the document pipeline, and the human-in-the-loop safeguards. Flip through it right here, no download required.</p>
+  </div>
+
+  <div class="deck-wrap reveal">
+    <div class="deck-bar">
+      <div class="deck-dots"><span class="dd r"></span><span class="dd y"></span><span class="dd g"></span></div>
+      <div class="deck-title">Adal Keep &mdash; 11-Slide Clean Architecture Deck</div>
+      <div class="deck-bar-actions">
+        <button class="deck-btn" id="deckFull" type="button">&#9974; Fullscreen</button>
+        <a class="deck-btn" href="https://docs.google.com/presentation/d/12TzsHRC4jB95qceXsvESbrA2SmNXM_YPVlzlJg1W6Og/present" target="_blank" rel="noopener">&#9654; Present</a>
+      </div>
+    </div>
+    <div class="deck-frame" id="deckFrame">
+      <iframe id="deckIframe" title="Adal Keep &mdash; 11-slide clean architecture deck"
+        src="https://docs.google.com/presentation/d/12TzsHRC4jB95qceXsvESbrA2SmNXM_YPVlzlJg1W6Og/embed?start=false&amp;loop=false&amp;delayms=4000&amp;rm=minimal"
+        frameborder="0" allowfullscreen="true" mozallowfullscreen="true" webkitallowfullscreen="true" loading="lazy"></iframe>
+    </div>
+    <div class="deck-note">
+      <span>Slides not loading?</span>
+      <a href="https://docs.google.com/presentation/d/12TzsHRC4jB95qceXsvESbrA2SmNXM_YPVlzlJg1W6Og/edit?usp=sharing" target="_blank" rel="noopener">Open in Google Slides &nearr;</a>
+      <a href="https://docs.google.com/presentation/d/12TzsHRC4jB95qceXsvESbrA2SmNXM_YPVlzlJg1W6Og/export/pdf" target="_blank" rel="noopener">Download PDF &nearr;</a>
+    </div>
+  </div>
+
+  <div class="deck-grid">
+    <div class="deck-card reveal"><div class="dc-n">01 &middot; THE PROBLEM</div><h4>Massive data, slow portals</h4><p>Candidate files scattered across disconnected systems, sluggish portals and 100% manual repetition &mdash; with crashes that lose work mid-session.</p></div>
+    <div class="deck-card reveal"><div class="dc-n">02 &middot; ARCHITECTURE</div><h4>Visible browser automation</h4><p>A local desktop app drives a real, visible Brave session over Chrome DevTools Protocol on port 9222, so the operator watches every action live.</p></div>
+    <div class="deck-card reveal"><div class="dc-n">03 &middot; PIPELINE</div><h4>Ingest &amp; deep-vision sort</h4><p>Chokidar watches your inbox with a 3-second write-settle, DeepSeek Vision classifies 22 document types, and Sharp splits merged passport/photo scans.</p></div>
+    <div class="deck-card reveal"><div class="dc-n">04 &middot; WORKFLOWS</div><h4>LMIS &amp; Musaned</h4><p>Police certificates, CV making and Saudi Musaned/Tawtheeq submissions &mdash; around 90% automated, with a graceful handoff for OTP and captcha.</p></div>
+    <div class="deck-card reveal"><div class="dc-n">05 &middot; PRINCIPLES</div><h4>Determinism over AI hype</h4><p>Action &rarr; Read State &rarr; Compare &rarr; Retry loops beat LLMs on speed and cost. AI is reserved for genuine ambiguity, never the happy path.</p></div>
+    <div class="deck-card reveal"><div class="dc-n">06 &middot; SAFEGUARDS</div><h4>Human-in-the-loop</h4><p>Consequential legal filings and reCAPTCHAs stay strictly human-approved, while the Jev decision layer scores risk after submission.</p></div>
+    <div class="deck-card reveal"><div class="dc-n">07 &middot; BY THE NUMBERS</div><h4>Production-grade scale</h4><p>37 services &amp; 31 routes, 25 pages &amp; components, 3 dedicated lanes on 5-second polling, and 90% automation of manual entry.</p></div>
+    <div class="deck-card reveal"><div class="dc-n">08 &middot; ROADMAP</div><h4>From desktop to SaaS</h4><p>Vision-AI profile JSON and WhatsApp/SMS triggers come next, then the hardware-locked single-tenant app evolves into managed multi-tenant SaaS.</p></div>
+  </div>
+
+  <div class="deck-foot">
+    <a class="btn btn-primary btn-lg" href="https://docs.google.com/presentation/d/12TzsHRC4jB95qceXsvESbrA2SmNXM_YPVlzlJg1W6Og/present" target="_blank" rel="noopener">&#9654; Present the deck</a>
+    <a class="btn btn-ghost btn-lg" href="https://docs.google.com/presentation/d/12TzsHRC4jB95qceXsvESbrA2SmNXM_YPVlzlJg1W6Og/export/pdf" target="_blank" rel="noopener">Download PDF</a>
+  </div>
+</section>
+
+<section class="sec wrap" id="ai">
+  <div class="head reveal">
+    <div class="eyebrow">AI &amp; Automation</div>
+    <h2>An agent that actually does the work</h2>
+    <p>Not a chatbot bolted onto the side. Adal Keep's AI reads your live data, decides each candidate's next step, and drives real workflows behind the scenes.</p>
+  </div>
+  <div class="ai-grid">
+    <div class="chat reveal">
+      <div class="chat-top"><span class="dot"></span> Adal Keep Assistant</div>
+      <div class="chat-body" id="chatBody">
+        <div class="msg bot">Hi 👋 Ask me anything about your candidates &mdash; readiness, missing documents, or what to do next.</div>
+        <div class="msg user">Who is ready for Kuwait but still missing a police certificate?</div>
+        <div class="msg bot" id="botReply"><span class="typing"><i></i><i></i><i></i></span></div>
+      </div>
+    </div>
+    <div class="flow reveal">
+      <div class="flow-step"><div class="fi">📥</div><div><h4>1 · Observe</h4><p>Profiles, files and portal state are continuously normalised into a clean snapshot.</p></div></div>
+      <div class="flow-step"><div class="fi">🧠</div><div><h4>2 · Decide</h4><p>The decision engine returns a concrete next action per candidate &mdash; make CV, submit, message, or wait.</p></div></div>
+      <div class="flow-step"><div class="fi">⚙️</div><div><h4>3 · Execute</h4><p>Tasks are queued into automation lanes that drive real browser sessions and government portals.</p></div></div>
+      <div class="flow-step"><div class="fi">🙋</div><div><h4>4 · Escalate</h4><p>Only genuinely human steps &mdash; OTPs, captchas, approvals &mdash; are surfaced to your team as tasks.</p></div></div>
+    </div>
+  </div>
+</section>
+
+<section class="sec wrap" id="testimonials" style="padding-top:0">
+  <div class="head reveal">
+    <div class="eyebrow">Loved by agencies</div>
+    <h2>Built for the people who do the hard work</h2>
+  </div>
+  <div class="tgrid">
+    <div class="tcard reveal"><div class="stars">★★★★★</div><p>"We used to lose track of documents in three different WhatsApp groups. Now everything is attached to the candidate and the AI tells us what's missing."</p><div class="who"><div class="av">HA</div><div><b>Heads of Operations</b><small>Addis Ababa agency</small></div></div></div>
+    <div class="tcard reveal"><div class="stars">★★★★★</div><p>"The automated portals alone save us hours a day. We only step in for the OTP &mdash; the rest just happens in the lanes."</p><div class="who"><div class="av">GM</div><div><b>General Manager</b><small>Gulf recruitment firm</small></div></div></div>
+    <div class="tcard reveal"><div class="stars">★★★★★</div><p>"CVs that used to take twenty minutes now render in seconds, consistently, for every candidate. It just looks professional."</p><div class="who"><div class="av">DO</div><div><b>Documentation Officer</b><small>Licensed agency</small></div></div></div>
+  </div>
+</section>
+
+<section class="sec wrap" id="pricing">
+  <div class="head reveal">
+    <div class="eyebrow">Simple pricing</div>
+    <h2>Start free. Upgrade when you grow.</h2>
+    <p>Every plan runs locally on your hardware. You only pay for the extra capacity and automation.</p>
+  </div>
+  <div class="pgrid">
+    <div class="pcard reveal">
+      <h3>Trial</h3>
+      <div class="pdesc">Kick the tyres with the full feature set.</div>
+      <div class="price">Free<small> / 14 days</small></div>
+      <ul>
+        <li><span class="ck">✓</span> Unlimited profiles</li>
+        <li><span class="ck">✓</span> OCR &amp; CV Studio</li>
+        <li><span class="ck">✓</span> AI assistant</li>
+        <li><span class="ck">✓</span> Community support</li>
+      </ul>
+      <a href="demo.html" class="btn btn-ghost">Start free</a>
+    </div>
+    <div class="pcard featured reveal">
+      <div class="ptag">Most popular</div>
+      <h3>Pro</h3>
+      <div class="pdesc">For a single active agency branch.</div>
+      <div class="price">$49<small> / month</small></div>
+      <ul>
+        <li><span class="ck">✓</span> Everything in Trial</li>
+        <li><span class="ck">✓</span> Automation lanes &amp; portal autopilot</li>
+        <li><span class="ck">✓</span> AI decision engine</li>
+        <li><span class="ck">✓</span> Priority support</li>
+      </ul>
+      <a href="demo.html" class="btn btn-primary">Get started</a>
+    </div>
+    <div class="pcard reveal">
+      <h3>Enterprise</h3>
+      <div class="pdesc">Multi-branch, multi-tenant deployments.</div>
+      <div class="price">Custom</div>
+      <ul>
+        <li><span class="ck">✓</span> Everything in Pro</li>
+        <li><span class="ck">✓</span> Multi-branch &amp; tenancy</li>
+        <li><span class="ck">✓</span> Onboarding &amp; training</li>
+        <li><span class="ck">✓</span> Dedicated support</li>
+      </ul>
+      <a href="#cta" class="btn btn-ghost">Contact sales</a>
+    </div>
+  </div>
+</section>
+
+<section class="sec wrap" id="faq">
+  <div class="head reveal">
+    <div class="eyebrow">Questions</div>
+    <h2>Frequently asked</h2>
+    <p>Everything you need to know before you install Adal Keep.</p>
+  </div>
+  <div class="faq">
+    <details class="q reveal" open><summary>Does Adal Keep need an internet connection?<span class="pm">+</span></summary><div class="ans">No. Adal Keep runs entirely on your own machine and local network. The AI assistant and portal automations only reach the internet when you use those specific features.</div></details>
+    <details class="q reveal"><summary>Where is my data stored?<span class="pm">+</span></summary><div class="ans">In a local database on your computer, plus an encrypted file store. Nothing leaves your machine unless you explicitly send it to a portal or the AI provider.</div></details>
+    <details class="q reveal"><summary>How does licensing work?<span class="pm">+</span></summary><div class="ans">The license is locked to your hardware fingerprint. Trials run for 14 days, then switch to read-only until you enter an access code &mdash; your data is never deleted.</div></details>
+    <details class="q reveal"><summary>Which portals are supported?<span class="pm">+</span></summary><div class="ans">The LMIS police-certificate workflow, Saudi Musaned/Tawtheeq, and Pextran &mdash; with human-in-the-loop checkpoints for any step that needs hands-on input.</div></details>
+    <details class="q reveal"><summary>Can several people use it at once?<span class="pm">+</span></summary><div class="ans">Yes. Adal Keep ships with roles, branches and tenant isolation, so a whole team &mdash; or several branches &mdash; can work from one deployment.</div></details>
+  </div>
+</section>
+
+<section class="sec wrap" id="cta">
+  <div class="cta reveal">
+    <h2>Ready to put your agency on autopilot?</h2>
+    <p>Explore the full interactive demo &mdash; every screen, every feature, no sign-up required.</p>
+    <div class="hero-actions">
+      <a href="demo.html" class="btn btn-primary btn-lg">Open the live demo</a>
+      <a href="#pricing" class="btn btn-ghost btn-lg">View pricing</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-grid">
+      <div class="foot-brand">
+        <a href="#top" class="logo"><span class="logo-mark">አ</span> Adal Keep</a>
+        <p>The AI-powered operating system for recruitment agencies. Profiles, documents, CVs and portals &mdash; in one private, offline-first workspace.</p>
+      </div>
+      <div class="foot-col"><h4>Product</h4><a href="#features">Features</a><a href="#showcase">Product tour</a><a href="#ai">AI &amp; Automation</a><a href="#slides">Architecture deck</a><a href="demo.html">Live demo</a></div>
+      <div class="foot-col"><h4>Company</h4><a href="#pricing">Pricing</a><a href="#testimonials">Customers</a><a href="#faq">FAQ</a><a href="#cta">Contact</a></div>
+      <div class="foot-col"><h4>Resources</h4><a href="#how">How it works</a><a href="#features">Documentation</a><a href="#ai">Security</a><a href="#top">Support</a></div>
+    </div>
+    <div class="foot-bottom">
+      <span>&copy; <span id="year"></span> Adal Keep. All rights reserved. Proprietary license.</span>
+      <div class="socials">
+        <a href="#top" aria-label="GitHub">🐙</a>
+        <a href="#top" aria-label="Email">✉️</a>
+        <a href="#top" aria-label="Chat">💬</a>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function(){
+  document.getElementById('year').textContent = new Date().getFullYear();
+
+  var root = document.documentElement;
+  var themeBtn = document.getElementById('themeBtn');
+  var saved = localStorage.getItem('adal-theme') || 'dark';
+  root.setAttribute('data-theme', saved);
+  themeBtn.textContent = saved === 'dark' ? '🌙' : '☀️';
+  themeBtn.addEventListener('click', function(){
+    var cur = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    root.setAttribute('data-theme', cur);
+    localStorage.setItem('adal-theme', cur);
+    themeBtn.textContent = cur === 'dark' ? '🌙' : '☀️';
+  });
+
+  var nav = document.getElementById('nav');
+  function onScroll(){ nav.classList.toggle('scrolled', window.scrollY > 10); }
+  window.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+
+  var ham = document.getElementById('hamburger');
+  var mm = document.getElementById('mobileMenu');
+  ham.addEventListener('click', function(){ mm.classList.toggle('open'); });
+  Array.prototype.forEach.call(mm.querySelectorAll('a'), function(a){
+    a.addEventListener('click', function(){ mm.classList.remove('open'); });
+  });
+
+  var io = new IntersectionObserver(function(entries){
+    entries.forEach(function(e){
+      if(e.isIntersecting){ e.target.classList.add('in'); io.unobserve(e.target); }
+    });
+  }, { threshold: 0.12 });
+  Array.prototype.forEach.call(document.querySelectorAll('.reveal'), function(el){ io.observe(el); });
+
+  function countUp(el){
+    var target = parseInt(el.getAttribute('data-count'), 10) || 0;
+    var suffix = el.getAttribute('data-suffix') || '';
+    var start = null, dur = 1400;
+    function tick(t){
+      if(!start) start = t;
+      var p = Math.min((t - start) / dur, 1);
+      var eased = 1 - Math.pow(1 - p, 3);
+      el.textContent = Math.round(target * eased).toLocaleString() + suffix;
+      if(p < 1) requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  }
+  var cio = new IntersectionObserver(function(entries){
+    entries.forEach(function(e){ if(e.isIntersecting){ countUp(e.target); cio.unobserve(e.target); } });
+  }, { threshold: 0.4 });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-count]'), function(el){ cio.observe(el); });
+
+  var tabs = document.querySelectorAll('#tabs .tab');
+  Array.prototype.forEach.call(tabs, function(t){
+    t.addEventListener('click', function(){
+      Array.prototype.forEach.call(tabs, function(x){ x.classList.remove('active'); });
+      t.classList.add('active');
+      Array.prototype.forEach.call(document.querySelectorAll('.panel'), function(p){ p.classList.remove('active'); });
+      var el = document.getElementById(t.getAttribute('data-tab'));
+      if(el) el.classList.add('active');
+    });
+  });
+
+  Array.prototype.forEach.call(document.querySelectorAll('.fcard'), function(c){
+    c.addEventListener('mousemove', function(ev){
+      var r = c.getBoundingClientRect();
+      c.style.setProperty('--mx', (ev.clientX - r.left) + 'px');
+      c.style.setProperty('--my', (ev.clientY - r.top) + 'px');
+    });
+  });
+
+  var reply = document.getElementById('botReply');
+  if(reply){
+    var full = 'I found 3 candidates. Abebe and Marta are fully documented and ready for Kuwait — Hana is still waiting on her police certificate. Want me to queue Hana and submit the two who are ready?';
+    var seen = false;
+    var botIO = new IntersectionObserver(function(entries){
+      entries.forEach(function(e){
+        if(e.isIntersecting && !seen){
+          seen = true;
+          botIO.unobserve(e.target);
+          setTimeout(function(){
+            var i = 0;
+            reply.textContent = '';
+            var iv = setInterval(function(){
+              i += 2;
+              reply.textContent = full.slice(0, i);
+              if(i >= full.length){ clearInterval(iv); reply.textContent = full; }
+            }, 16);
+          }, 800);
+        }
+      });
+    }, { threshold: 0.5 });
+    botIO.observe(reply);
+  }
+
+  /* Architecture deck — fullscreen toggle for the embedded slides */
+  var deckFrame = document.getElementById('deckFrame');
+  var deckFull = document.getElementById('deckFull');
+  if(deckFrame && deckFull){
+    var fsEl = function(){ return document.fullscreenElement || document.webkitFullscreenElement || null; };
+    deckFull.addEventListener('click', function(){
+      if(fsEl()){
+        (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+      } else {
+        (deckFrame.requestFullscreen || deckFrame.webkitRequestFullscreen).call(deckFrame);
+      }
+    });
+    var syncDeck = function(){
+      deckFull.innerHTML = fsEl() ? '&#9974; Exit fullscreen' : '&#9974; Fullscreen';
+    };
+    document.addEventListener('fullscreenchange', syncDeck);
+    document.addEventListener('webkitfullscreenchange', syncDeck);
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,818 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="Interactive demo of Adal Keep — explore candidate profiles, OCR ingestion, CV Studio, the AI assistant, automation lanes and more.">
+<title>Adal Keep — Interactive Demo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#070b12; --surface:rgba(255,255,255,.04); --surface-solid:#0e1626; --surface-2:rgba(255,255,255,.07);
+  --border:rgba(255,255,255,.09); --border-strong:rgba(255,255,255,.18);
+  --text:#eef2f7; --text-2:#9aa7bd; --text-3:#6b7788;
+  --primary:#14b8a6; --primary-2:#0d9488; --accent:#6366f1; --accent-2:#8b5cf6;
+  --amber:#f59e0b; --green:#22c55e; --red:#ef4444; --pink:#ec4899;
+  --radius:16px; --radius-sm:11px; --radius-lg:22px;
+  --font:'Inter',-apple-system,BlinkMacSystemFont,system-ui,sans-serif;
+  --mono:'JetBrains Mono',ui-monospace,monospace;
+  --shadow:0 18px 50px -22px rgba(0,0,0,.75);
+  --sidebar:250px;
+}
+html[data-theme="light"]{
+  --bg:#f5f7fb; --surface:#ffffff; --surface-solid:#ffffff; --surface-2:rgba(15,23,42,.035);
+  --border:rgba(15,23,42,.09); --border-strong:rgba(15,23,42,.18);
+  --text:#0b1220; --text-2:#4b5768; --text-3:#8592a6;
+  --primary:#0d9488; --primary-2:#0f766e;
+  --shadow:0 18px 50px -26px rgba(15,23,42,.35);
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:var(--font);background:var(--bg);color:var(--text);line-height:1.5;-webkit-font-smoothing:antialiased}
+button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
+input,textarea,select{font-family:inherit;color:inherit}
+a{color:inherit;text-decoration:none}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:8px;border:2px solid var(--bg)}
+
+/* APP SHELL */
+.app{display:grid;grid-template-columns:var(--sidebar) 1fr;min-height:100vh}
+.sidebar{background:var(--surface-solid);border-right:1px solid var(--border);display:flex;flex-direction:column;position:sticky;top:0;height:100vh;z-index:40}
+.side-brand{display:flex;align-items:center;gap:11px;padding:18px 18px 16px;border-bottom:1px solid var(--border)}
+.logo-mark{width:36px;height:36px;border-radius:11px;display:grid;place-items:center;color:#fff;font-weight:800;background:linear-gradient(135deg,var(--primary),var(--accent));flex-shrink:0}
+.side-brand b{font-size:.98rem;display:block;letter-spacing:-.02em}
+.side-brand small{color:var(--text-3);font-size:.72rem}
+.side-nav{flex:1;overflow-y:auto;padding:12px 10px}
+.side-nav button{display:flex;align-items:center;gap:11px;width:100%;padding:10px 12px;border-radius:10px;font-size:.88rem;font-weight:500;color:var(--text-2);transition:.18s;text-align:left}
+.side-nav button:hover{background:var(--surface-2);color:var(--text)}
+.side-nav button.active{background:linear-gradient(135deg,color-mix(in srgb,var(--primary) 22%,transparent),color-mix(in srgb,var(--accent) 18%,transparent));color:var(--text);font-weight:600}
+.side-nav button .ic{width:18px;text-align:center;font-size:1rem}
+.side-nav button .count{margin-left:auto;font-size:.68rem;font-family:var(--mono);background:var(--surface-2);border:1px solid var(--border);padding:1px 7px;border-radius:999px;color:var(--text-3)}
+.side-nav button.active .count{background:color-mix(in srgb,var(--primary) 25%,transparent);color:var(--primary);border-color:transparent}
+.side-nav .group{font-size:.68rem;text-transform:uppercase;letter-spacing:.12em;color:var(--text-3);padding:14px 12px 6px;font-weight:600}
+.side-foot{padding:14px;border-top:1px solid var(--border)}
+.lic-box{background:var(--surface-2);border:1px solid var(--border);border-radius:12px;padding:12px}
+.lic-box .row1{display:flex;align-items:center;gap:8px;font-size:.8rem;font-weight:600}
+.lic-box .row1 .dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 0 3px color-mix(in srgb,var(--green) 25%,transparent)}
+.lic-box small{color:var(--text-3);font-size:.7rem;font-family:var(--mono);display:block;margin-top:4px}
+
+.main{min-width:0;display:flex;flex-direction:column}
+.topbar{display:flex;align-items:center;gap:16px;padding:14px 24px;border-bottom:1px solid var(--border);background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(14px);position:sticky;top:0;z-index:30}
+.topbar h1{font-size:1.12rem;font-weight:700;letter-spacing:-.02em}
+.topbar p{font-size:.78rem;color:var(--text-3)}
+.top-actions{margin-left:auto;display:flex;align-items:center;gap:10px}
+.icon-btn{width:38px;height:38px;border-radius:11px;border:1px solid var(--border);background:var(--surface);display:grid;place-items:center;transition:.18s;font-size:1rem}
+.icon-btn:hover{border-color:var(--border-strong)}
+#menuBtn{display:none}
+.search{position:relative}
+.search input{width:230px;padding:9px 14px 9px 34px;border-radius:11px;border:1px solid var(--border);background:var(--surface);font-size:.85rem}
+.search input:focus{outline:none;border-color:color-mix(in srgb,var(--primary) 60%,var(--border))}
+.search .s-ic{position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--text-3);font-size:.85rem}
+.avatar{width:38px;height:38px;border-radius:11px;background:linear-gradient(135deg,var(--accent),var(--primary));display:grid;place-items:center;color:#fff;font-weight:700;font-size:.82rem}
+
+/* VIEWS + GENERIC */
+.views{padding:24px;flex:1}
+.view{display:none;animation:fade .35s ease}
+.view.active{display:block}
+@keyframes fade{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+.grid{display:grid;gap:16px}
+.g-4{grid-template-columns:repeat(4,1fr)}
+.g-3{grid-template-columns:repeat(3,1fr)}
+.g-2{grid-template-columns:repeat(2,1fr)}
+.card{background:var(--surface-solid);border:1px solid var(--border);border-radius:var(--radius);padding:18px}
+.card h3{font-size:1rem;margin-bottom:4px}
+.card .muted{color:var(--text-3);font-size:.8rem}
+.sec-title{display:flex;align-items:center;justify-content:space-between;margin:22px 0 12px}
+.sec-title h2{font-size:1.05rem;font-weight:700;letter-spacing:-.01em}
+.sec-title .muted{color:var(--text-3);font-size:.82rem}
+
+.kpi{background:var(--surface-solid);border:1px solid var(--border);border-radius:var(--radius);padding:18px;transition:.25s}
+.kpi:hover{transform:translateY(-3px);border-color:var(--border-strong)}
+.kpi .k-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.kpi .k-ic{width:38px;height:38px;border-radius:11px;display:grid;place-items:center;font-size:1.05rem;background:color-mix(in srgb,var(--primary) 15%,transparent);border:1px solid var(--border)}
+.kpi .k-n{font-size:1.9rem;font-weight:800;font-family:var(--mono);letter-spacing:-.02em}
+.kpi .k-t{color:var(--text-3);font-size:.78rem;margin-top:2px}
+.kpi .k-delta{font-size:.72rem;font-family:var(--mono);font-weight:600;padding:2px 8px;border-radius:999px}
+.kpi .k-delta.up{background:color-mix(in srgb,var(--green) 16%,transparent);color:var(--green)}
+.kpi .k-delta.down{background:color-mix(in srgb,var(--amber) 16%,transparent);color:var(--amber)}
+
+/* CHARTS */
+.chart{display:flex;align-items:flex-end;gap:10px;height:180px;padding:16px;background:var(--surface-solid);border:1px solid var(--border);border-radius:var(--radius)}
+.chart .col{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:6px;height:100%}
+.chart .col .bar{width:100%;border-radius:7px 7px 3px 3px;background:linear-gradient(180deg,var(--primary),color-mix(in srgb,var(--primary) 25%,transparent));transition:height .8s cubic-bezier(.2,.8,.2,1)}
+.chart .col:nth-child(even) .bar{background:linear-gradient(180deg,var(--accent),color-mix(in srgb,var(--accent) 25%,transparent))}
+.chart .col span{font-size:.68rem;color:var(--text-3);font-family:var(--mono)}
+
+/* TOOLBAR */
+.toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px}
+.field{display:flex;align-items:center;gap:8px;background:var(--surface-solid);border:1px solid var(--border);border-radius:11px;padding:8px 12px}
+.field input,.field select{border:none;background:none;font-size:.85rem;min-width:150px}
+.field input:focus,.field select:focus{outline:none}
+.field .ic{color:var(--text-3)}
+.btn{display:inline-flex;align-items:center;gap:7px;padding:9px 16px;border-radius:11px;font-weight:600;font-size:.85rem;transition:.2s;border:1px solid transparent;white-space:nowrap}
+.btn-primary{background:linear-gradient(135deg,var(--primary),var(--primary-2));color:#03120f}
+.btn-primary:hover{transform:translateY(-1px);box-shadow:0 12px 26px -14px color-mix(in srgb,var(--primary) 80%,transparent)}
+.btn-ghost{background:var(--surface-solid);border-color:var(--border);color:var(--text)}
+.btn-ghost:hover{border-color:var(--border-strong)}
+.btn-sm{padding:6px 12px;font-size:.78rem}
+.chips{display:flex;gap:7px;flex-wrap:wrap}
+.chip{padding:6px 13px;border-radius:999px;font-size:.78rem;font-weight:500;border:1px solid var(--border);background:var(--surface-solid);color:var(--text-2);transition:.18s}
+.chip:hover{border-color:var(--border-strong)}
+.chip.active{background:linear-gradient(135deg,var(--primary),var(--primary-2));color:#03120f;border-color:transparent}
+
+/* TABLE */
+.table-wrap{border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--surface-solid)}
+table{width:100%;border-collapse:collapse;font-size:.85rem}
+th{text-align:left;padding:12px 16px;font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:600;background:var(--surface-2);border-bottom:1px solid var(--border)}
+td{padding:13px 16px;border-bottom:1px solid var(--border)}
+tr:last-child td{border-bottom:none}
+tbody tr{transition:.15s;cursor:pointer}
+tbody tr:hover{background:var(--surface-2)}
+.cell-name{display:flex;align-items:center;gap:11px}
+.cell-name .av{width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,var(--accent),var(--primary));display:grid;place-items:center;color:#fff;font-weight:700;font-size:.75rem;flex-shrink:0}
+.cell-name b{font-weight:600;display:block}
+.cell-name small{color:var(--text-3);font-size:.74rem}
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:.72rem;font-weight:600;padding:3px 10px;border-radius:999px;font-family:var(--mono)}
+.badge.ok{background:color-mix(in srgb,var(--green) 16%,transparent);color:var(--green)}
+.badge.warn{background:color-mix(in srgb,var(--amber) 16%,transparent);color:var(--amber)}
+.badge.info{background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--accent)}
+.badge.mut{background:var(--surface-2);color:var(--text-2);border:1px solid var(--border)}
+.badge.red{background:color-mix(in srgb,var(--red) 16%,transparent);color:var(--red)}
+
+
+/* DRAWER (profile detail) */
+.overlay{position:fixed;inset:0;background:rgba(3,7,14,.55);backdrop-filter:blur(4px);opacity:0;pointer-events:none;transition:.3s;z-index:60}
+.overlay.open{opacity:1;pointer-events:auto}
+.drawer{position:fixed;top:0;right:0;height:100vh;width:min(560px,94vw);background:var(--bg);border-left:1px solid var(--border);transform:translateX(100%);transition:transform .35s cubic-bezier(.2,.8,.2,1);z-index:70;display:flex;flex-direction:column}
+.drawer.open{transform:none}
+.drawer-head{padding:20px 22px;border-bottom:1px solid var(--border);display:flex;align-items:flex-start;gap:14px}
+.drawer-head .av{width:54px;height:54px;border-radius:14px;background:linear-gradient(135deg,var(--accent),var(--primary));display:grid;place-items:center;color:#fff;font-weight:800;font-size:1.05rem;flex-shrink:0}
+.drawer-head h2{font-size:1.15rem;letter-spacing:-.02em}
+.drawer-head .muted{color:var(--text-3);font-size:.82rem}
+.drawer-head .close{margin-left:auto;width:34px;height:34px;border-radius:10px;border:1px solid var(--border);display:grid;place-items:center}
+.drawer-tabs{display:flex;gap:6px;padding:12px 18px;border-bottom:1px solid var(--border);flex-wrap:wrap}
+.drawer-tabs button{padding:7px 14px;border-radius:9px;font-size:.82rem;font-weight:600;color:var(--text-2);transition:.18s}
+.drawer-tabs button.active{background:var(--surface-2);color:var(--text)}
+.drawer-body{padding:20px 22px;overflow-y:auto;flex:1}
+.kv{display:grid;grid-template-columns:130px 1fr;gap:10px 14px;font-size:.86rem}
+.kv .k{color:var(--text-3)}
+.kv .v{font-weight:500}
+.doc-item{display:flex;align-items:center;gap:12px;padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--surface-solid);margin-bottom:9px}
+.doc-item .di{width:36px;height:36px;border-radius:10px;display:grid;place-items:center;background:var(--surface-2);font-size:1rem}
+.doc-item b{font-size:.85rem;font-weight:600;display:block}
+.doc-item small{color:var(--text-3);font-size:.72rem;font-family:var(--mono)}
+.doc-item .badge{margin-left:auto}
+.chk{display:flex;align-items:center;gap:11px;padding:11px 12px;border:1px solid var(--border);border-radius:11px;background:var(--surface-solid);margin-bottom:8px;font-size:.86rem;cursor:pointer;transition:.15s}
+.chk:hover{border-color:var(--border-strong)}
+.chk .box{width:20px;height:20px;border-radius:6px;border:1.6px solid var(--border-strong);display:grid;place-items:center;font-size:.7rem;color:transparent;flex-shrink:0;transition:.18s}
+.chk.done .box{background:var(--primary);border-color:var(--primary);color:#03120f}
+.chk.done span{color:var(--text-3);text-decoration:line-through}
+.timeline{position:relative;padding-left:22px}
+.timeline::before{content:"";position:absolute;left:5px;top:6px;bottom:6px;width:2px;background:var(--border)}
+.tl-item{position:relative;margin-bottom:16px;font-size:.85rem}
+.tl-item::before{content:"";position:absolute;left:-21px;top:5px;width:10px;height:10px;border-radius:50%;background:var(--primary);box-shadow:0 0 0 3px var(--bg)}
+.tl-item b{font-weight:600}
+.tl-item small{color:var(--text-3);font-size:.72rem;font-family:var(--mono);display:block}
+
+/* CHAT */
+.chat-shell{display:grid;grid-template-columns:1fr 260px;gap:16px;align-items:start}
+.chat-card{background:var(--surface-solid);border:1px solid var(--border);border-radius:var(--radius);display:flex;flex-direction:column;height:calc(100vh - 210px);min-height:420px}
+.chat-head{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;font-weight:600;font-size:.9rem}
+.chat-head .dot{width:9px;height:9px;border-radius:50%;background:var(--green)}
+.chat-head small{margin-left:auto;color:var(--text-3);font-family:var(--mono);font-size:.72rem}
+.chat-msgs{flex:1;overflow-y:auto;padding:18px;display:flex;flex-direction:column;gap:13px}
+.bubble{max-width:80%;padding:11px 14px;border-radius:14px;font-size:.87rem;line-height:1.5;white-space:pre-wrap}
+.bubble.bot{background:var(--surface-2);border:1px solid var(--border);border-bottom-left-radius:4px}
+.bubble.user{background:linear-gradient(135deg,var(--primary),var(--primary-2));color:#03120f;margin-left:auto;border-bottom-right-radius:4px;font-weight:500}
+.bubble .typing{display:inline-flex;gap:4px}
+.bubble .typing i{width:6px;height:6px;border-radius:50%;background:var(--text-2);animation:blink 1.2s infinite}
+.bubble .typing i:nth-child(2){animation-delay:.2s}.bubble .typing i:nth-child(3){animation-delay:.4s}
+@keyframes blink{0%,60%,100%{opacity:.25}30%{opacity:1}}
+.chat-input{display:flex;gap:10px;padding:14px;border-top:1px solid var(--border)}
+.chat-input input{flex:1;padding:11px 14px;border-radius:11px;border:1px solid var(--border);background:var(--surface);font-size:.87rem}
+.chat-input input:focus{outline:none;border-color:color-mix(in srgb,var(--primary) 60%,var(--border))}
+.suggest{display:flex;flex-direction:column;gap:8px}
+.suggest button{text-align:left;padding:11px 13px;border-radius:11px;border:1px solid var(--border);background:var(--surface-solid);font-size:.82rem;color:var(--text-2);transition:.18s}
+.suggest button:hover{border-color:var(--border-strong);color:var(--text);transform:translateX(3px)}
+
+/* LANES */
+.lanes{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px}
+.lane{background:var(--surface-solid);border:1px solid var(--border);border-radius:var(--radius);padding:16px;transition:.25s}
+.lane:hover{border-color:var(--border-strong)}
+.lane.running{border-color:color-mix(in srgb,var(--accent) 55%,var(--border))}
+.lane.done{border-color:color-mix(in srgb,var(--green) 45%,var(--border))}
+.lane .l-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.lane .l-id{font-family:var(--mono);font-size:.72rem;color:var(--text-3)}
+.lane b{display:block;font-size:.9rem;margin-bottom:2px}
+.lane .l-sub{color:var(--text-3);font-size:.76rem;margin-bottom:12px}
+.progress{height:7px;border-radius:999px;background:var(--surface-2);overflow:hidden}
+.progress i{display:block;height:100%;width:0;border-radius:999px;background:linear-gradient(90deg,var(--primary),var(--accent));transition:width .6s ease}
+
+/* NOTIFICATIONS */
+.notif{display:flex;gap:13px;padding:15px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface-solid);margin-bottom:10px;transition:.2s}
+.notif:hover{border-color:var(--border-strong)}
+.notif .ni{width:38px;height:38px;border-radius:11px;display:grid;place-items:center;flex-shrink:0;background:var(--surface-2);font-size:1rem}
+.notif b{font-size:.88rem;display:block}
+.notif p{color:var(--text-2);font-size:.82rem}
+.notif small{color:var(--text-3);font-size:.72rem;font-family:var(--mono);margin-left:auto;white-space:nowrap}
+.notif.unread{border-left:3px solid var(--primary)}
+
+/* SETTINGS */
+.set-row{display:flex;align-items:center;gap:14px;padding:16px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface-solid);margin-bottom:10px}
+.set-row .si{width:40px;height:40px;border-radius:11px;display:grid;place-items:center;background:var(--surface-2);font-size:1.1rem}
+.set-row b{font-size:.9rem;display:block}
+.set-row small{color:var(--text-3);font-size:.78rem}
+.set-row .ctl{margin-left:auto}
+.switch{width:46px;height:26px;border-radius:999px;background:var(--surface-2);border:1px solid var(--border);position:relative;transition:.25s;flex-shrink:0}
+.switch i{position:absolute;top:2px;left:2px;width:20px;height:20px;border-radius:50%;background:var(--text-3);transition:.25s}
+.switch.on{background:color-mix(in srgb,var(--primary) 40%,transparent);border-color:transparent}
+.switch.on i{left:22px;background:var(--primary)}
+
+/* TOASTS */
+.toasts{position:fixed;bottom:22px;right:22px;z-index:200;display:flex;flex-direction:column;gap:10px}
+.toast{display:flex;align-items:center;gap:11px;padding:13px 16px;border-radius:13px;background:var(--surface-solid);border:1px solid var(--border);box-shadow:var(--shadow);font-size:.85rem;min-width:250px;animation:slideIn .35s cubic-bezier(.2,.8,.2,1)}
+.toast .ti{font-size:1.05rem}
+.toast.out{animation:slideOut .3s ease forwards}
+@keyframes slideIn{from{opacity:0;transform:translateX(40px)}to{opacity:1;transform:none}}
+@keyframes slideOut{to{opacity:0;transform:translateX(40px)}}
+
+/* MISC */
+.empty{padding:40px;text-align:center;color:var(--text-3)}
+.spin{display:inline-block;width:14px;height:14px;border:2px solid var(--border-strong);border-top-color:var(--primary);border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.mono{font-family:var(--mono)}
+.muted{color:var(--text-3)}
+.pill{display:inline-flex;align-items:center;gap:7px;padding:5px 12px;border-radius:999px;font-size:.76rem;font-weight:600;border:1px solid var(--border);background:var(--surface-solid);color:var(--text-2)}
+.pill .dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 0 3px color-mix(in srgb,var(--green) 22%,transparent)}
+.demo-note{display:flex;align-items:center;gap:9px;padding:10px 14px;border-radius:12px;border:1px dashed var(--border-strong);background:var(--surface);color:var(--text-2);font-size:.8rem;margin-bottom:18px}
+.back-link{display:inline-flex;align-items:center;gap:6px;font-size:.82rem;color:var(--text-3);margin-bottom:2px}
+.back-link:hover{color:var(--primary)}
+.crumbs{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.crumbs .back-link{margin-bottom:0}
+
+/* RESPONSIVE */
+@media(max-width:1080px){
+  .g-4{grid-template-columns:repeat(2,1fr)}
+  .chat-shell{grid-template-columns:1fr}
+  .chat-card{height:auto;min-height:380px}
+  .chat-msgs{max-height:340px}
+}
+@media(max-width:820px){
+  .app{grid-template-columns:1fr}
+  .sidebar{position:fixed;left:0;top:0;transform:translateX(-100%);transition:transform .3s;width:260px}
+  .sidebar.open{transform:none}
+  #menuBtn{display:grid}
+  .g-3{grid-template-columns:1fr}
+  .search input{width:150px}
+}
+@media(max-width:560px){
+  .g-4,.g-2{grid-template-columns:1fr}
+  .views{padding:16px}
+  .topbar{padding:12px 16px}
+  .search{display:none}
+}
+
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar">
+    <div class="side-brand"><span class="logo-mark">አ</span><div><b>Adal Keep</b><small>Demo Workspace</small></div></div>
+    <nav class="side-nav" id="sideNav"></nav>
+    <div class="side-foot">
+      <div class="lic-box">
+        <div class="row1"><span class="dot"></span> License active</div>
+        <small>HW&nbsp;ADLK-7F3A-9C21</small>
+        <small>Pro · exp 2026-12-31</small>
+      </div>
+    </div>
+  </aside>
+  <div class="main">
+    <header class="topbar">
+      <button class="icon-btn" id="menuBtn" aria-label="Menu">☰</button>
+      <div>
+        <div class="crumbs">
+          <a href="index.html" class="back-link">← Back to site</a>
+          <a href="index.html#slides" class="back-link">📊 Architecture deck</a>
+        </div>
+        <h1 id="pageTitle">Dashboard</h1>
+        <p id="pageSub">Overview of your agency</p>
+      </div>
+      <div class="top-actions">
+        <div class="search"><span class="s-ic">🔍</span><input id="globalSearch" placeholder="Search candidates…"></div>
+        <button class="icon-btn" id="themeBtn" aria-label="Theme">🌙</button>
+        <div class="avatar">AD</div>
+      </div>
+    </header>
+    <main class="views" id="views"></main>
+  </div>
+</div>
+<div class="overlay" id="overlay"></div>
+<aside class="drawer" id="drawer"></aside>
+<div class="toasts" id="toasts"></div>
+
+<script>
+const CANDIDATES = [
+  {id:1,name:'Abebe Kebede',country:'Kuwait',phone:'+251 911 234 567',idNo:'ETH-3391-8820',passport:'EP0421883',status:'ready',branch:'Addis Ababa',broker:'Selam Brokerage',skill:'Domestic Worker',langs:'Amharic, Arabic',
+    docs:[['Passport','📕',1],['Photo','🖼️',1],['Police Certificate','📜',1],['Medical Certificate','🏥',1]],
+    check:[['Passport scanned',1],['Photo uploaded',1],['Police certificate issued',1],['Medical test completed',1],['CV generated',1]],
+    tl:[['Profile created','2026-08-02'],['Passport read by OCR','2026-08-02'],['CV generated from template','2026-08-05'],['Submitted to Musaned','2026-08-09']]},
+  {id:2,name:'Selam Girma',country:'Saudi Arabia',phone:'+251 922 118 004',idNo:'ETH-5510-2201',passport:'EP0519920',status:'pending',branch:'Addis Ababa',broker:'Nile Recruitment',skill:'Cleaner',langs:'Amharic',
+    docs:[['Passport','📕',1],['Photo','🖼️',1],['Police Certificate','📜',0],['Medical Certificate','🏥',0]],
+    check:[['Passport scanned',1],['Photo uploaded',1],['Police certificate issued',0],['Medical test completed',0],['CV generated',1]],
+    tl:[['Profile created','2026-08-04'],['Passport read by OCR','2026-08-04'],['Awaiting police certificate','2026-08-06']]},
+  {id:3,name:'Marta Tesfaye',country:'Kuwait',phone:'+251 933 771 220',idNo:'ETH-7781-3390',passport:'EP0630117',status:'processing',branch:'Adama',broker:'Selam Brokerage',skill:'Housekeeper',langs:'Amharic, English',
+    docs:[['Passport','📕',1],['Photo','🖼️',1],['Police Certificate','📜',0],['Medical Certificate','🏥',1]],
+    check:[['Passport scanned',1],['Photo uploaded',1],['Police certificate issued',0],['Medical test completed',1],['CV generated',1]],
+    tl:[['Profile created','2026-07-28'],['Medical test completed','2026-08-01'],['Queued for police certificate','2026-08-10']]},
+  {id:4,name:'Hana Alemu',country:'UAE',phone:'+251 944 552 118',idNo:'ETH-2210-7781',passport:'EP0745882',status:'submitted',branch:'Addis Ababa',broker:'Gulf Bridge',skill:'Nanny',langs:'Amharic, Arabic',
+    docs:[['Passport','📕',1],['Photo','🖼️',1],['Police Certificate','📜',1],['Medical Certificate','🏥',1]],
+    check:[['Passport scanned',1],['Photo uploaded',1],['Police certificate issued',1],['Medical test completed',1],['CV generated',1]],
+    tl:[['Profile created','2026-07-20'],['Submitted to Pextran','2026-07-29'],['Approved by employer','2026-08-07']]},
+  {id:5,name:'Yonas Bekele',country:'Qatar',phone:'+251 955 909 331',idNo:'ETH-9902-1144',passport:'EP0801123',status:'ready',branch:'Bahir Dar',broker:'Nile Recruitment',skill:'Driver',langs:'Amharic, English',
+    docs:[['Passport','📕',1],['Photo','🖼️',1],['Police Certificate','📜',1],['Driving License','🚗',1]],
+    check:[['Passport scanned',1],['Photo uploaded',1],['Police certificate issued',1],['Driving license verified',1],['CV generated',1]],
+    tl:[['Profile created','2026-08-01'],['License verified','2026-08-03'],['Ready for submission','2026-08-08']]},
+  {id:6,name:'Tigist Haile',country:'Kuwait',phone:'+251 966 220 778',idNo:'ETH-4411-0092',passport:'EP0912340',status:'pending',branch:'Adama',broker:'Selam Brokerage',skill:'Housekeeper',langs:'Amharic',
+    docs:[['Passport','📕',1],['Photo','🖼️',0],['Police Certificate','📜',0],['Medical Certificate','🏥',0]],
+    check:[['Passport scanned',1],['Photo uploaded',0],['Police certificate issued',0],['Medical test completed',0],['CV generated',0]],
+    tl:[['Profile created','2026-08-11'],['Passport read by OCR','2026-08-11']]},
+  {id:7,name:'Dawit Mengistu',country:'Saudi Arabia',phone:'+251 977 334 001',idNo:'ETH-6620-5512',passport:'EP1022771',status:'processing',branch:'Hawassa',broker:'Gulf Bridge',skill:'Security Guard',langs:'Amharic, Arabic',
+    docs:[['Passport','📕',1],['Photo','🖼️',1],['Police Certificate','📜',1],['Medical Certificate','🏥',0]],
+    check:[['Passport scanned',1],['Photo uploaded',1],['Police certificate issued',1],['Medical test completed',0],['CV generated',1]],
+    tl:[['Profile created','2026-07-25'],['Police certificate issued','2026-08-02'],['Medical test scheduled','2026-08-12']]},
+  {id:8,name:'Rahel Assefa',country:'Kuwait',phone:'+251 988 445 662',idNo:'ETH-3390-7781',passport:'EP1133009',status:'submitted',branch:'Addis Ababa',broker:'Nile Recruitment',skill:'Cook',langs:'Amharic, English',
+    docs:[['Passport','📕',1],['Photo','🖼️',1],['Police Certificate','📜',1],['Medical Certificate','🏥',1]],
+    check:[['Passport scanned',1],['Photo uploaded',1],['Police certificate issued',1],['Medical test completed',1],['CV generated',1]],
+    tl:[['Profile created','2026-07-18'],['Submitted to Musaned','2026-07-27'],['Visa issued','2026-08-06']]},
+  {id:9,name:'Fikadu Tadesse',country:'UAE',phone:'+251 911 887 445',idNo:'ETH-8845-2210',passport:'EP1204778',status:'ready',branch:'Dire Dawa',broker:'Selam Brokerage',skill:'Warehouse Worker',langs:'Amharic',
+    docs:[['Passport','📕',1],['Photo','🖼️',1],['Police Certificate','📜',1],['Medical Certificate','🏥',1]],
+    check:[['Passport scanned',1],['Photo uploaded',1],['Police certificate issued',1],['Medical test completed',1],['CV generated',1]],
+    tl:[['Profile created','2026-08-05'],['Documents complete','2026-08-09'],['Ready for submission','2026-08-10']]},
+  {id:10,name:'Bethlehem Girma',country:'Bahrain',phone:'+251 922 660 118',idNo:'ETH-1120-8890',passport:'EP1355667',status:'pending',branch:'Mekelle',broker:'Gulf Bridge',skill:'Nanny',langs:'Amharic, Tigrinya',
+    docs:[['Passport','📕',1],['Photo','🖼️',1],['Police Certificate','📜',0],['Medical Certificate','🏥',0]],
+    check:[['Passport scanned',1],['Photo uploaded',1],['Police certificate issued',0],['Medical test completed',0],['CV generated',1]],
+    tl:[['Profile created','2026-08-09'],['Passport read by OCR','2026-08-09']]}
+];
+
+
+const BROKERS = [
+  {name:'Selam Brokerage',phone:'+251 911 000 111',candidates:4,branch:'Addis Ababa',status:'active'},
+  {name:'Nile Recruitment',phone:'+251 922 000 222',candidates:3,branch:'Addis Ababa',status:'active'},
+  {name:'Gulf Bridge',phone:'+251 933 000 333',candidates:3,branch:'Adama',status:'active'},
+  {name:'Awash Manpower',phone:'+251 944 000 444',candidates:0,branch:'Dire Dawa',status:'paused'}
+];
+const EMPLOYEES = [
+  {name:'Ato Girma Wolde',role:'Administrator',branch:'Addis Ababa',status:'active'},
+  {name:'Sara Bekele',role:'Documentation Officer',branch:'Addis Ababa',status:'active'},
+  {name:'Kebede Alemu',role:'Branch Manager',branch:'Adama',status:'active'},
+  {name:'Meron Hailu',role:'Data Entry',branch:'Hawassa',status:'active'},
+  {name:'Yared Tesfaye',role:'Viewer',branch:'Addis Ababa',status:'invited'}
+];
+const NOTIFS = [
+  {ic:'✅',t:'Submission complete',b:'Hana Alemu was approved by the employer on Pextran.',time:'2m ago',unread:1},
+  {ic:'⚠️',t:'Missing document',b:'Selam Girma is still missing a police certificate.',time:'26m ago',unread:1},
+  {ic:'🤖',t:'AI queued 4 tasks',b:'Decision engine queued CV generation for 4 candidates.',time:'1h ago',unread:1},
+  {ic:'🔐',t:'License verified',b:'Hardware lock ADLK-7F3A-9C21 validated successfully.',time:'3h ago',unread:0},
+  {ic:'📄',t:'OCR completed',b:'passport_dawit.jpg read in 0.4s (MRZ match 100%).',time:'5h ago',unread:0},
+  {ic:'👥',t:'New employee invited',b:'Yared Tesfaye was invited as a Viewer.',time:'Yesterday',unread:0}
+];
+const ACTIVITY = [
+  {w:'AI assistant',a:'queued 4 CV tasks',time:'1h ago'},
+  {w:'Sara Bekele',a:'uploaded police_cert_rahel.pdf',time:'2h ago'},
+  {w:'Lane 07',a:'completed Musaned add-candidate',time:'3h ago'},
+  {w:'System',a:'encrypted 12 files (AES-256)',time:'4h ago'},
+  {w:'Ato Girma Wolde',a:'updated branch settings',time:'Yesterday'}
+];
+let LANES = [
+  {id:'01',portal:'LMIS',task:'Police certificate',status:'done',progress:100},
+  {id:'02',portal:'LMIS',task:'Police certificate',status:'done',progress:100},
+  {id:'03',portal:'Musaned',task:'Add candidate',status:'running',progress:62},
+  {id:'04',portal:'Musaned',task:'Add candidate',status:'queued',progress:0},
+  {id:'05',portal:'Pextran',task:'Submit application',status:'running',progress:38},
+  {id:'06',portal:'Pextran',task:'Submit application',status:'queued',progress:0},
+  {id:'07',portal:'CV Studio',task:'Render document',status:'done',progress:100},
+  {id:'08',portal:'CV Studio',task:'Render document',status:'queued',progress:0},
+  {id:'09',portal:'Musaned',task:'Await approval',status:'paused',progress:75},
+  {id:'10',portal:'LMIS',task:'Police certificate',status:'queued',progress:0},
+  {id:'11',portal:'Pextran',task:'Verify documents',status:'running',progress:50},
+  {id:'12',portal:'Musaned',task:'Add candidate',status:'queued',progress:0}
+];
+
+const NAV = [
+  {g:'Workspace'},
+  {id:'dashboard',ic:'📊',label:'Dashboard'},
+  {id:'profiles',ic:'🧑',label:'Profiles',count:()=>CANDIDATES.length},
+  {id:'brokers',ic:'🤝',label:'Brokers'},
+  {id:'employees',ic:'👥',label:'Employees'},
+  {id:'cvs',ic:'🖨️',label:'CV Studio'},
+  {g:'Intelligence'},
+  {id:'ai',ic:'💬',label:'AI Assistant'},
+  {id:'automations',ic:'⚙️',label:'Automations',count:()=>LANES.filter(l=>l.status==='running').length},
+  {g:'System'},
+  {id:'notifications',ic:'🔔',label:'Notifications',count:()=>NOTIFS.filter(n=>n.unread).length},
+  {id:'settings',ic:'🔐',label:'Settings'}
+];
+const STATUS_BADGE = {ready:'ok',pending:'warn',processing:'info',submitted:'mut'};
+const $ = (s)=>document.querySelector(s);
+const initials = (n)=>n.split(' ').map(p=>p[0]).slice(0,2).join('').toUpperCase();
+const badge = (st)=>'<span class="badge '+(STATUS_BADGE[st]||'mut')+'">'+st+'</span>';
+function toast(msg,ic){
+  const t=document.createElement('div');
+  t.className='toast';
+  t.innerHTML='<span class="ti">'+(ic||'✅')+'</span><span>'+msg+'</span>';
+  $('#toasts').appendChild(t);
+  setTimeout(()=>{ t.classList.add('out'); setTimeout(()=>t.remove(),300); },3200);
+}
+
+function renderDashboard(){
+  const total=CANDIDATES.length;
+  const ready=CANDIDATES.filter(c=>c.status==='ready').length;
+  const pending=CANDIDATES.filter(c=>c.status==='pending').length;
+  const submitted=CANDIDATES.filter(c=>c.status==='submitted').length;
+  const running=LANES.filter(l=>l.status==='running').length;
+  const weeks=[[42,58],[55,72],[61,80],[70,88],[66,95],[82,104]];
+  const bars=weeks.map((w,i)=>'<div class="col"><div class="bar" style="height:'+w[0]+'%"></div><span>W'+(i+1)+'</span></div>').join('');
+  const recent=CANDIDATES.slice(0,5).map(c=>'<tr onclick="openProfile('+c.id+')"><td><div class="cell-name"><span class="av">'+initials(c.name)+'</span><div><b>'+c.name+'</b><small>'+c.country+' · '+c.skill+'</small></div></div></td><td>'+c.branch+'</td><td>'+badge(c.status)+'</td></tr>').join('');
+  return `
+  <div class="demo-note">🖱️ <span>This is an interactive demo &mdash; click nav items, open a profile, chat with the AI, and run the automation lanes.</span></div>
+  <div class="grid g-4">
+    <div class="kpi"><div class="k-top"><div class="k-ic">🧑</div><span class="k-delta up">+12%</span></div><div class="k-n">${total}</div><div class="k-t">Total profiles</div></div>
+    <div class="kpi"><div class="k-top"><div class="k-ic">✅</div><span class="k-delta up">+8%</span></div><div class="k-n">${ready}</div><div class="k-t">Ready to submit</div></div>
+    <div class="kpi"><div class="k-top"><div class="k-ic">⏳</div><span class="k-delta down">-3%</span></div><div class="k-n">${pending}</div><div class="k-t">Pending documents</div></div>
+    <div class="kpi"><div class="k-top"><div class="k-ic">🚀</div><span class="k-delta up">+21%</span></div><div class="k-n">${submitted}</div><div class="k-t">Submitted this month</div></div>
+  </div>
+  <div class="sec-title"><h2>Throughput</h2><span class="muted">${running} automation lanes running</span></div>
+  <div class="grid g-2">
+    <div class="chart">${bars}</div>
+    <div class="card"><h3>Recent activity</h3><div class="timeline" style="margin-top:14px">${ACTIVITY.map(a=>'<div class="tl-item"><b>'+a.w+'</b> '+a.a+'<small>'+a.time+'</small></div>').join('')}</div></div>
+  </div>
+  <div class="sec-title"><h2>Quick actions</h2></div>
+  <div class="toolbar">
+    <button class="btn btn-primary" onclick="toast(\'New profile form opened\',\'🧑\')">+ New profile</button>
+    <button class="btn btn-ghost" onclick="showView(\'ai\')">💬 Ask the AI</button>
+    <button class="btn btn-ghost" onclick="showView(\'automations\')">⚙️ Automation lanes</button>
+    <button class="btn btn-ghost" onclick="showView(\'cvs\')">🖨️ CV Studio</button>
+  </div>
+  <div class="sec-title"><h2>Recent candidates</h2><span class="muted">click a row to open the profile</span></div>
+  <div class="table-wrap"><table><thead><tr><th>Candidate</th><th>Branch</th><th>Status</th></tr></thead><tbody>${recent}</tbody></table></div>`;
+}
+
+let profileFilter='all', profileQuery='';
+function renderProfiles(){
+  let list=CANDIDATES.filter(c=>profileFilter==='all'||c.status===profileFilter);
+  if(profileQuery) list=list.filter(c=>(c.name+c.phone+c.idNo+c.country+c.skill).toLowerCase().includes(profileQuery.toLowerCase()));
+  const chips=['all','ready','pending','processing','submitted'].map(f=>'<button class="chip '+(profileFilter===f?'active':'')+'" onclick="setProfileFilter(\''+f+'\')">'+f.charAt(0).toUpperCase()+f.slice(1)+' ('+CANDIDATES.filter(c=>f==='all'||c.status===f).length+')</button>').join('');
+  const rows=list.map(c=>'<tr onclick="openProfile('+c.id+')"><td><div class="cell-name"><span class="av">'+initials(c.name)+'</span><div><b>'+c.name+'</b><small>'+c.country+' · '+c.phone+'</small></div></div></td><td class="mono">'+c.passport+'</td><td>'+c.branch+'</td><td>'+c.skill+'</td><td>'+c.broker+'</td><td>'+badge(c.status)+'</td></tr>').join('');
+  return `
+  <div class="toolbar">
+    <div class="field"><span class="ic">🔍</span><input id="pSearch" placeholder="Search name, phone, passport…" value="${profileQuery}" oninput="setProfileQuery(this.value)"></div>
+    <button class="btn btn-primary" onclick="toast(\'New profile form opened\',\'🧑\')">+ Add candidate</button>
+    <button class="btn btn-ghost" onclick="toast(\'Exported profiles.csv\',\'📤\')">📤 Export</button>
+  </div>
+  <div class="chips" style="margin-bottom:16px">${chips}</div>
+  <div class="table-wrap"><table><thead><tr><th>Candidate</th><th>Passport</th><th>Branch</th><th>Skill</th><th>Broker</th><th>Status</th></tr></thead><tbody>${rows||'<tr><td colspan="6" class="empty">No candidates match your search.</td></tr>'}</tbody></table></div>`;
+}
+function setProfileFilter(f){ profileFilter=f; rerender(); }
+function setProfileQuery(q){ profileQuery=q; rerender(); }
+let currentView='dashboard';
+function rerender(){
+  const el=document.getElementById('currentViewBody');
+  if(currentView==='profiles') el.innerHTML=renderProfiles();
+}
+
+function renderBrokers(){
+  const cards=BROKERS.map(b=>`<div class="card"><div style="display:flex;align-items:center;gap:12px;margin-bottom:12px"><div class="k-ic" style="width:42px;height:42px;font-size:1.1rem">🤝</div><div><b>${b.name}</b><div class="muted" style="font-size:.78rem">${b.branch}</div></div><span class="badge ${b.status==='active'?'ok':'warn'}" style="margin-left:auto">${b.status}</span></div><div class="kv"><span class="k">Phone</span><span class="v mono">${b.phone}</span><span class="k">Candidates</span><span class="v">${b.candidates}</span></div><div style="margin-top:14px"><button class="btn btn-ghost btn-sm" onclick="toast('Opening ${b.name}…','🤝')">View broker</button></div></div>`).join('');
+  return `<div class="demo-note">🤝 <span>Every candidate is linked to a broker and a branch, so you always know where business comes from.</span></div><div class="grid g-3">${cards}</div>`;
+}
+
+function renderEmployees(){
+  const rows=EMPLOYEES.map(e=>'<tr onclick="toast(\'Opening '+e.name+'…\',\'👥\')"><td><div class="cell-name"><span class="av">'+initials(e.name)+'</span><div><b>'+e.name+'</b><small>'+e.branch+'</small></div></div></td><td>'+e.role+'</td><td>'+e.branch+'</td><td>'+(e.status==='active'?'<span class="badge ok">active</span>':'<span class="badge warn">invited</span>')+'</td></tr>').join('');
+  return `<div class="demo-note">👥 <span>Role-based access: administrators, documentation officers, branch managers, data entry and viewers.</span></div><div class="toolbar"><button class="btn btn-primary" onclick="toast('Invite employee form opened','✉️')">+ Invite employee</button></div><div class="table-wrap"><table><thead><tr><th>Name</th><th>Role</th><th>Branch</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+
+const CV_TEMPLATES=['Clean Modern','Classic Pro','Gulf Standard'];
+function renderCV(){
+  const tmpl=CV_TEMPLATES.map((t,i)=>`<div class="card" style="cursor:pointer" onclick="selectTemplate(${i},this)"><div style="height:110px;border-radius:10px;background:linear-gradient(135deg,color-mix(in srgb,var(--primary) ${18+i*6}%,transparent),color-mix(in srgb,var(--accent) ${14+i*6}%,transparent));margin-bottom:12px;display:grid;place-items:center;font-size:1.6rem">📄</div><b style="font-size:.9rem">${t}</b><div class="muted" style="font-size:.76rem">${i===0?'Default':'Available'}</div></div>`).join('');
+  const opts=CANDIDATES.map(c=>'<option value="'+c.id+'">'+c.name+' — '+c.country+'</option>').join('');
+  return `
+  <div class="demo-note">🖨️ <span>Pick a template, choose a candidate, and generate a print-ready CV in seconds.</span></div>
+  <div class="grid g-3">${tmpl}</div>
+  <div class="sec-title"><h2>Generate a CV</h2><span class="muted">template-driven rendering</span></div>
+  <div class="grid g-2">
+    <div class="card"><h3>Options</h3>
+      <div class="toolbar" style="margin-top:14px">
+        <div class="field"><select id="cvCandidate">${opts}</select></div>
+        <div class="field"><select id="cvTemplate">${CV_TEMPLATES.map(t=>'<option>'+t+'</option>').join('')}</select></div>
+        <button class="btn btn-primary" id="cvBtn" onclick="generateCV()">Generate CV</button>
+      </div>
+      <div class="kv" style="margin-top:8px"><span class="k">Output</span><span class="v">PDF · A4</span><span class="k">Fields</span><span class="v">14 bound</span><span class="k">Speed</span><span class="v">&lt; 1 second</span></div>
+    </div>
+    <div class="card" id="cvPreview"><h3>Preview</h3><p class="muted" style="font-size:.84rem;margin-top:8px">Generate a CV to see the live preview here.</p></div>
+  </div>`;
+}
+function selectTemplate(i,el){ toast('Template “'+CV_TEMPLATES[i]+'” selected','🎨'); }
+function generateCV(){
+  const id=+document.getElementById('cvCandidate').value;
+  const c=CANDIDATES.find(x=>x.id===id);
+  const tmpl=document.getElementById('cvTemplate').value;
+  const btn=document.getElementById('cvBtn');
+  btn.innerHTML='<span class="spin"></span> Generating…';
+  setTimeout(()=>{
+    btn.textContent='Generate CV';
+    document.getElementById('cvPreview').innerHTML=
+      '<h3>Preview · '+tmpl+'</h3>'+
+      '<div style="background:var(--surface-2);border:1px solid var(--border);border-radius:12px;padding:18px;margin-top:12px;font-size:.78rem">'+
+      '<div style="display:flex;gap:14px;align-items:center;margin-bottom:14px"><div style="width:52px;height:60px;border-radius:8px;background:linear-gradient(135deg,var(--accent),var(--primary))"></div><div><div style="font-weight:800;font-size:1rem">'+c.name.toUpperCase()+'</div><div class="muted">'+c.skill+' · '+c.country+'</div></div></div>'+
+      '<div style="height:7px;border-radius:4px;background:var(--surface);margin-bottom:8px;width:92%"></div>'+
+      '<div style="height:7px;border-radius:4px;background:var(--surface);margin-bottom:8px;width:78%"></div>'+
+      '<div style="height:7px;border-radius:4px;background:var(--surface);margin-bottom:8px;width:85%"></div>'+
+      '<div style="height:7px;border-radius:4px;background:var(--surface);width:60%"></div>'+
+      '<div style="margin-top:14px;display:flex;gap:8px"><span class="badge ok">ready</span><span class="badge info">PDF</span><span class="badge mut">'+tmpl+'</span></div>'+
+      '</div>'+
+      '<button class="btn btn-ghost btn-sm" style="margin-top:12px" onclick="toast(\'CV downloaded\',\'⬇️\')">⬇️ Download</button>';
+    toast('CV generated for '+c.name,'🖨️');
+  },900);
+}
+
+let chatHistory=[{who:'bot',text:'Hi 👋 I am the Adal Keep assistant. I can read your live data — ask me who is ready, what is missing, or what to do next.'}];
+let aiBusy=false;
+const AI_SUGGESTIONS=[
+  'Who is ready for Kuwait?',
+  'Which candidates are missing documents?',
+  'How many profiles do I have?',
+  'What should I do first today?'
+];
+function renderAI(){
+  const msgs=chatHistory.map(m=>'<div class="bubble '+m.who+'">'+m.text+'</div>').join('');
+  const chips=AI_SUGGESTIONS.map(s=>'<button onclick="askAI(\''+s.replace(/'/g,"\\'")+'\')">💡 '+s+'</button>').join('');
+  return `
+  <div class="demo-note">💬 <span>The assistant answers from your real workspace data. Try a suggestion, or type your own question.</span></div>
+  <div class="chat-shell">
+    <div class="chat-card">
+      <div class="chat-head"><span class="dot"></span> Adal Keep Assistant <small>deepseek · local data</small></div>
+      <div class="chat-msgs" id="chatMsgs">${msgs}</div>
+      <div class="chat-input">
+        <input id="chatInput" placeholder="Ask about your candidates…" onkeydown="if(event.key==='Enter')sendChat()">
+        <button class="btn btn-primary" onclick="sendChat()">Send</button>
+      </div>
+    </div>
+    <div>
+      <div class="suggest"><div class="muted" style="font-size:.78rem;margin-bottom:2px">Try asking</div>${chips}</div>
+      <div class="card" style="margin-top:14px"><h3>Context</h3><div class="kv" style="margin-top:10px"><span class="k">Profiles</span><span class="v">${CANDIDATES.length}</span><span class="k">Ready</span><span class="v">${CANDIDATES.filter(c=>c.status==='ready').length}</span><span class="k">Model</span><span class="v mono" style="font-size:.78rem">deepseek-chat</span></div></div>
+    </div>
+  </div>`;
+}
+function paintChat(){
+  const box=document.getElementById('chatMsgs');
+  if(!box) return;
+  box.innerHTML=chatHistory.map(m=>'<div class="bubble '+m.who+'">'+m.text+'</div>').join('');
+  box.scrollTop=box.scrollHeight;
+}
+function sendChat(txt){
+  if(aiBusy) return;
+  const inp=document.getElementById('chatInput');
+  const text=(txt!==undefined&&txt!==null)?txt:(inp?inp.value.trim():'');
+  if(!text) return;
+  if(inp) inp.value='';
+  chatHistory.push({who:'user',text:text});
+  chatHistory.push({who:'bot',text:'<span class="typing"><i></i><i></i><i></i></span>'});
+  aiBusy=true; paintChat();
+  const box=document.getElementById('chatMsgs'); if(box) box.scrollTop=box.scrollHeight;
+  setTimeout(()=>{
+    chatHistory[chatHistory.length-1]={who:'bot',text:aiRespond(text)};
+    aiBusy=false; paintChat();
+  },1100);
+}
+function askAI(q){ showView('ai'); setTimeout(()=>sendChat(q),250); }
+function aiRespond(q){
+  const s=q.toLowerCase();
+  const ready=CANDIDATES.filter(c=>c.status==='ready');
+  const missing=CANDIDATES.filter(c=>c.check.some(x=>!x[1]));
+  if(s.includes('kuwait')){
+    const k=CANDIDATES.filter(c=>c.country==='Kuwait');
+    const kr=k.filter(c=>c.status==='ready').map(c=>c.name).join(', ');
+    return 'For Kuwait I found '+k.length+' candidates. Ready right now: '+(kr||'none')+'. The others are still waiting on documents or approvals. Want me to queue the ready ones for submission?';
+  }
+  if(s.includes('missing')||s.includes('document')){
+    return missing.length+' candidates are missing at least one document:\n'+missing.slice(0,4).map(c=>'• '+c.name+' — '+c.check.filter(x=>!x[1]).map(x=>x[0]).join(', ')).join('\n')+'\nI can queue these tasks automatically.';
+  }
+  if(s.includes('how many')||s.includes('count')||s.includes('profiles')){
+    return 'You currently have '+CANDIDATES.length+' profiles: '+CANDIDATES.filter(c=>c.status==='ready').length+' ready, '+CANDIDATES.filter(c=>c.status==='pending').length+' pending, '+CANDIDATES.filter(c=>c.status==='processing').length+' processing and '+CANDIDATES.filter(c=>c.status==='submitted').length+' submitted.';
+  }
+  if(s.includes('first')||s.includes('today')||s.includes('next')){
+    return 'My suggestion for today:\n1. Submit the '+ready.length+' candidates that are fully ready.\n2. Queue police certificates for the '+CANDIDATES.filter(c=>c.check[2]&&!c.check[2][1]).length+' who need them.\n3. Generate CVs for the newest profiles.\nShall I start with step 1?';
+  }
+  return 'I checked your workspace. '+CANDIDATES.length+' profiles, '+ready.length+' ready to submit, and '+LANES.filter(l=>l.status==='running').length+' automation lanes currently running. Ask me about a country, a document, or what to do next.';
+}
+
+const LANE_BADGE={running:'info',done:'ok',queued:'mut',paused:'warn'};
+function laneCard(l){
+  return '<div class="lane '+l.status+'"><div class="l-top"><span class="l-id">LANE '+l.id+'</span><span class="badge '+LANE_BADGE[l.status]+'">'+l.status+'</span></div><b>'+l.portal+'</b><div class="l-sub">'+l.task+'</div><div class="progress"><i style="width:'+l.progress+'%"></i></div><div class="l-id" style="margin-top:8px">'+l.progress+'% complete</div></div>';
+}
+function renderAutomations(){
+  const running=LANES.filter(l=>l.status==='running').length;
+  const done=LANES.filter(l=>l.status==='done').length;
+  const queued=LANES.filter(l=>l.status==='queued').length;
+  return `
+  <div class="demo-note">⚙️ <span>Each lane is an isolated browser session driving a real portal. Press <b>Run all</b> to watch them progress.</span></div>
+  <div class="grid g-4" style="margin-bottom:16px">
+    <div class="kpi"><div class="k-top"><div class="k-ic">⚡</div></div><div class="k-n">${running}</div><div class="k-t">Running</div></div>
+    <div class="kpi"><div class="k-top"><div class="k-ic">✅</div></div><div class="k-n">${done}</div><div class="k-t">Completed</div></div>
+    <div class="kpi"><div class="k-top"><div class="k-ic">🕒</div></div><div class="k-n">${queued}</div><div class="k-t">Queued</div></div>
+    <div class="kpi"><div class="k-top"><div class="k-ic">🧵</div></div><div class="k-n">${LANES.length}</div><div class="k-t">Total lanes</div></div>
+  </div>
+  <div class="toolbar">
+    <button class="btn btn-primary" onclick="runLanes()">▶ Run all lanes</button>
+    <button class="btn btn-ghost" onclick="pauseLanes()">⏸ Pause running</button>
+    <button class="btn btn-ghost" onclick="resetLanes()">↺ Reset demo</button>
+  </div>
+  <div class="lanes" id="laneGrid">${LANES.map(laneCard).join('')}</div>`;
+}
+function paintLanes(){ const g=document.getElementById('laneGrid'); if(g) g.innerHTML=LANES.map(laneCard).join(''); }
+let laneTimer=null;
+function runLanes(){
+  if(laneTimer){ toast('Automation is already running','⏳'); return; }
+  let started=0;
+  LANES.forEach(l=>{ if(l.status==='queued'||l.status==='paused'){ l.status='running'; started++; } });
+  paintLanes();
+  toast('Started '+Math.max(started,1)+' automation lanes','⚙️');
+  laneTimer=setInterval(()=>{
+    let active=0;
+    LANES.forEach(l=>{ if(l.status==='running'){ l.progress=Math.min(100,l.progress+Math.random()*16); if(l.progress>=100){ l.progress=100; l.status='done'; toast('Lane '+l.id+' finished ('+l.portal+')','✅'); } else active++; } });
+    active+=LANES.filter(l=>l.status==='running').length;
+    paintLanes();
+    if(LANES.filter(l=>l.status==='running').length===0){ clearInterval(laneTimer); laneTimer=null; toast('All lanes complete','🎉'); }
+  },800);
+}
+function pauseLanes(){
+  if(laneTimer){ clearInterval(laneTimer); laneTimer=null; }
+  LANES.forEach(l=>{ if(l.status==='running') l.status='paused'; });
+  paintLanes(); toast('Running lanes paused','⏸');
+}
+function resetLanes(){
+  if(laneTimer){ clearInterval(laneTimer); laneTimer=null; }
+  LANES[0].status='done'; LANES[0].progress=100;
+  LANES[1].status='done'; LANES[1].progress=100;
+  LANES[6].status='done'; LANES[6].progress=100;
+  LANES[2].status='running'; LANES[2].progress=62;
+  LANES[4].status='running'; LANES[4].progress=38;
+  LANES[10].status='running'; LANES[10].progress=50;
+  LANES[8].status='paused'; LANES[8].progress=75;
+  LANES.forEach((l,i)=>{ if([3,5,7,9,11].includes(i)){ l.status='queued'; l.progress=0; } });
+  paintLanes(); toast('Demo lanes reset','↺');
+}
+
+function renderNotifications(){
+  const rows=NOTIFS.map(n=>'<div class="notif '+(n.unread?'unread':'')+'"><div class="ni">'+n.ic+'</div><div><b>'+n.t+'</b><p>'+n.b+'</p></div><small>'+n.time+'</small></div>').join('');
+  return `
+  <div class="demo-note">🔔 <span>Real-time notifications for submissions, missing documents, AI activity and license events.</span></div>
+  <div class="toolbar"><button class="btn btn-ghost" onclick="markAllRead()">Mark all as read</button><button class="btn btn-ghost" onclick="toast('Notification settings opened','🔔')">Notification settings</button></div>
+  <div id="notifList">${rows}</div>`;
+}
+function markAllRead(){ NOTIFS.forEach(n=>n.unread=0); const el=document.getElementById('currentViewBody'); if(el) el.innerHTML=renderNotifications(); buildSidebar(); toast('All notifications marked as read','✅'); }
+
+function renderSettings(){
+  const sw=(t,sub,on,ic)=>'<div class="set-row"><div class="si">'+ic+'</div><div><b>'+t+'</b><small>'+sub+'</small></div><div class="ctl"><div class="switch '+(on?'on':'')+'" onclick="this.classList.toggle(\'on\');toast(this.classList.contains(\'on\')?\''+t+' on\':\''+t+' off\',\'⚙️\')"><i></i></div></div></div>';
+  return `
+  <div class="demo-note">🔐 <span>Everything runs locally. Your data, encryption and license all live on your own machine.</span></div>
+  <div class="sec-title"><h2>Security</h2></div>
+  <div class="grid g-2">
+    <div>
+      ${sw('AES-256 encryption','All uploaded files encrypted at rest',1,'🔒')}
+      ${sw('Folder watching','Auto-detect documents in Downloads & Documents',1,'📁')}
+      ${sw('Automatic OCR','Classify and read documents on ingest',1,'🔎')}
+    </div>
+    <div>
+      ${sw('Offline AI mode','Keep AI requests on the local network',0,'🧠')}
+      ${sw('Human-in-the-loop','Pause automations for OTP & captcha',1,'🙋')}
+      ${sw('Audit logging','Record every action by people and AI',1,'📝')}
+    </div>
+  </div>
+  <div class="sec-title"><h2>License &amp; hardware</h2></div>
+  <div class="card"><div class="kv"><span class="k">Status</span><span class="v"><span class="badge ok">active</span></span><span class="k">Plan</span><span class="v">Pro</span><span class="k">Hardware ID</span><span class="v mono">ADLK-7F3A-9C21</span><span class="k">Expires</span><span class="v mono">2026-12-31</span><span class="k">Branches</span><span class="v">4</span><span class="k">Tenants</span><span class="v">1</span></div>
+  <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap"><button class="btn btn-primary" onclick="toast('License refreshed','🔐')">Refresh license</button><button class="btn btn-ghost" onclick="toast('Enter access code','🔑')">Enter access code</button></div></div>`;
+}
+
+let drawerTab='overview';
+function openProfile(id){
+  const c=CANDIDATES.find(x=>x.id===id);
+  if(!c) return;
+  window._curr=c.id;
+  const d=document.getElementById('drawer');
+  d.innerHTML=drawerHTML(c);
+  d.classList.add('open');
+  document.getElementById('overlay').classList.add('open');
+}
+function closeDrawer(){
+  document.getElementById('drawer').classList.remove('open');
+  document.getElementById('overlay').classList.remove('open');
+}
+function setDrawerTab(t){ drawerTab=t; openProfile(window._curr); }
+function drawerHTML(c){
+  const tabs=[['overview','Overview'],['documents','Documents'],['checklist','Checklist'],['timeline','Timeline']].map(t=>'<button class="'+(drawerTab===t[0]?'active':'')+'" onclick="setDrawerTab(\''+t[0]+'\')">'+t[1]+'</button>').join('');
+  let body='';
+  if(drawerTab==='overview'){
+    body='<div class="kv"><span class="k">Destination</span><span class="v">'+c.country+'</span><span class="k">Phone</span><span class="v mono">'+c.phone+'</span><span class="k">National ID</span><span class="v mono">'+c.idNo+'</span><span class="k">Passport</span><span class="v mono">'+c.passport+'</span><span class="k">Skill</span><span class="v">'+c.skill+'</span><span class="k">Languages</span><span class="v">'+c.langs+'</span><span class="k">Branch</span><span class="v">'+c.branch+'</span><span class="k">Broker</span><span class="v">'+c.broker+'</span><span class="k">Status</span><span class="v">'+badge(c.status)+'</span></div>'+
+      '<div style="margin-top:20px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-primary btn-sm" onclick="toast(\'CV generated for '+c.name+'\',\'🖨️\')">🖨️ Generate CV</button><button class="btn btn-ghost btn-sm" onclick="submitProfile()">🚀 Submit</button><button class="btn btn-ghost btn-sm" onclick="toast(\'Message sent to '+c.name+'\',\'💬\')">💬 Message</button></div>';
+  } else if(drawerTab==='documents'){
+    body=c.docs.map(d=>'<div class="doc-item"><div class="di">'+d[1]+'</div><div><b>'+d[0]+'</b><small>'+(d[2]?'encrypted · verified':'missing')+'</small></div><span class="badge '+(d[2]?'ok':'warn')+'">'+(d[2]?'attached':'needed')+'</span></div>').join('');
+  } else if(drawerTab==='checklist'){
+    body=c.check.map((x,i)=>'<div class="chk '+(x[1]?'done':'')+'" onclick="toggleCheck(this,'+i+')"><span class="box">✓</span><span>'+x[0]+'</span></div>').join('')+'<div class="muted" style="font-size:.76rem;margin-top:10px">Click an item to toggle it in this demo.</div>';
+  } else {
+    body='<div class="timeline">'+c.tl.map(t=>'<div class="tl-item"><b>'+t[0]+'</b><small>'+t[1]+'</small></div>').join('')+'</div>';
+  }
+  return '<div class="drawer-head"><div class="av">'+initials(c.name)+'</div><div><h2>'+c.name+'</h2><div class="muted">'+c.skill+' · '+c.country+'</div></div><button class="close" onclick="closeDrawer()">✕</button></div><div class="drawer-tabs">'+tabs+'</div><div class="drawer-body">'+body+'</div>';
+}
+function toggleCheck(el,i){
+  const c=CANDIDATES.find(x=>x.id===window._curr);
+  c.check[i][1]=c.check[i][1]?0:1;
+  el.classList.toggle('done');
+  toast(c.check[i][0]+(c.check[i][1]?' completed':' reopened'), c.check[i][1]?'✅':'↩️');
+}
+function submitProfile(){
+  const c=CANDIDATES.find(x=>x.id===window._curr);
+  c.status='submitted';
+  toast(c.name+' submitted to '+c.country,'🚀');
+  openProfile(c.id);
+  if(currentView==='profiles') paintProfiles();
+  if(currentView==='dashboard') showView('dashboard');
+}
+
+function buildSidebar(){
+  document.getElementById('sideNav').innerHTML=NAV.map(n=>{
+    if(n.g) return '<div class="group">'+n.g+'</div>';
+    const cnt=n.count?n.count():0;
+    return '<button data-view="'+n.id+'" onclick="showView(\''+n.id+'\')" class="'+(currentView===n.id?'active':'')+'"><span class="ic">'+n.ic+'</span>'+n.label+(cnt?'<span class="count">'+cnt+'</span>':'')+'</button>';
+  }).join('');
+}
+const VIEWS={
+  dashboard:{t:'Dashboard',s:'Overview of your agency',r:renderDashboard},
+  profiles:{t:'Candidate Profiles',s:'Search, filter and open profiles',r:renderProfiles},
+  brokers:{t:'Brokers',s:'Partners who bring candidates',r:renderBrokers},
+  employees:{t:'Employees',s:'Team & access control',r:renderEmployees},
+  cvs:{t:'CV Studio',s:'Design templates and generate CVs',r:renderCV},
+  ai:{t:'AI Assistant',s:'Ask questions about your live data',r:renderAI},
+  automations:{t:'Automation Lanes',s:'Portal and document workflows',r:renderAutomations},
+  notifications:{t:'Notifications',s:'Everything that needs attention',r:renderNotifications},
+  settings:{t:'Settings & License',s:'Security, hardware and plan',r:renderSettings}
+};
+function showView(id){
+  if(!VIEWS[id]) return;
+  currentView=id; drawerTab='overview';
+  document.getElementById('pageTitle').textContent=VIEWS[id].t;
+  document.getElementById('pageSub').textContent=VIEWS[id].s;
+  document.getElementById('views').innerHTML='<section class="view active" id="currentViewBody">'+VIEWS[id].r()+'</section>';
+  buildSidebar();
+  document.getElementById('sidebar').classList.remove('open');
+  if(id==='ai') setTimeout(paintChat,0);
+  window.scrollTo(0,0);
+}
+
+(function(){
+  const root=document.documentElement;
+  const btn=document.getElementById('themeBtn');
+  const saved=localStorage.getItem('adal-theme')||'dark';
+  root.setAttribute('data-theme',saved);
+  btn.textContent=saved==='dark'?'🌙':'☀️';
+  btn.addEventListener('click',function(){
+    const cur=root.getAttribute('data-theme')==='dark'?'light':'dark';
+    root.setAttribute('data-theme',cur);
+    localStorage.setItem('adal-theme',cur);
+    btn.textContent=cur==='dark'?'🌙':'☀️';
+  });
+})();
+document.getElementById('menuBtn').addEventListener('click',function(){ document.getElementById('sidebar').classList.toggle('open'); });
+document.getElementById('overlay').addEventListener('click',closeDrawer);
+document.addEventListener('keydown',function(e){ if(e.key==='Escape') closeDrawer(); });
+document.getElementById('globalSearch').addEventListener('keydown',function(e){
+  if(e.key==='Enter'){ profileQuery=e.target.value; profileFilter='all'; showView('profiles'); }
+});
+buildSidebar();
+showView('dashboard');
+
+
+
+
+/* --- refined profiles view (overrides earlier) --- */
+function profAreaHTML(){
+  let list=CANDIDATES.filter(c=>profileFilter==='all'||c.status===profileFilter);
+  if(profileQuery) list=list.filter(c=>(c.name+c.phone+c.idNo+c.country+c.skill+c.passport).toLowerCase().includes(profileQuery.toLowerCase()));
+  const chips=['all','ready','pending','processing','submitted'].map(f=>'<button class="chip '+(profileFilter===f?'active':'')+'" onclick="setProfileFilter(\''+f+'\')">'+f.charAt(0).toUpperCase()+f.slice(1)+' ('+CANDIDATES.filter(c=>f==='all'||c.status===f).length+')</button>').join('');
+  const rows=list.map(c=>'<tr onclick="openProfile('+c.id+')"><td><div class="cell-name"><span class="av">'+initials(c.name)+'</span><div><b>'+c.name+'</b><small>'+c.country+' · '+c.phone+'</small></div></div></td><td class="mono">'+c.passport+'</td><td>'+c.branch+'</td><td>'+c.skill+'</td><td>'+c.broker+'</td><td>'+badge(c.status)+'</td></tr>').join('');
+  return '<div class="chips" style="margin-bottom:16px">'+chips+'</div><div class="table-wrap"><table><thead><tr><th>Candidate</th><th>Passport</th><th>Branch</th><th>Skill</th><th>Broker</th><th>Status</th></tr></thead><tbody>'+(rows||'<tr><td colspan="6" class="empty">No candidates match your search.</td></tr>')+'</tbody></table></div>';
+}
+function renderProfiles(){
+  return '<div class="demo-note">🧑 <span>Search or filter the roster. Click any row to open the full candidate profile.</span></div>'+
+    '<div class="toolbar"><div class="field"><span class="ic">🔍</span><input id="pSearch" placeholder="Search name, phone, passport…" value="'+profileQuery+'" oninput="setProfileQuery(this.value)"></div>'+
+    '<button class="btn btn-primary" onclick="toast(\'New profile form opened\',\'🧑\')">+ Add candidate</button>'+
+    '<button class="btn btn-ghost" onclick="toast(\'Exported profiles.csv\',\'📤\')">📤 Export</button></div>'+
+    '<div id="profArea">'+profAreaHTML()+'</div>';
+}
+function setProfileFilter(f){ profileFilter=f; paintProfiles(); }
+function setProfileQuery(q){ profileQuery=q; paintProfiles(); }
+function paintProfiles(){ const a=document.getElementById('profArea'); if(a){ a.innerHTML=profAreaHTML(); } }
+</script>
+</body>
+</html>

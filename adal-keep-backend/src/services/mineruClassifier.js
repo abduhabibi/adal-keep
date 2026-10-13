@@ -1,0 +1,335 @@
+/**
+ * mineruClassifier.js
+ *
+ * Classifies a document from the Markdown MinerU produced for it. No LLM call:
+ *   - Passports: the MRZ (two machine-readable lines at the bottom of the data
+ *     page) is parsed with ICAO check digits. Only a fully verified MRZ is
+ *     accepted, so name / passport number / dates come from checksummed data.
+ *   - Everything else: keyword rules taken from the agency's document list.
+ *
+ * Returns the same shape the pipeline already expects:
+ *   { doc_type, confidence, fields }   doc_type 'other' = ignore the file.
+ */
+
+import fs from 'fs'
+import os from 'os'
+import path from 'path'
+import { parseTD3 } from './mrz.js'
+import { parseDocumentToMarkdown } from './mineruClient.js'
+import { classifyTextWithDeepSeek, getDeepSeekKey } from './mineruAnalyzer.js'
+
+// Each rule: doc_type plus patterns. A rule scores by the number of patterns
+// that match; the highest score wins, ties go to the earlier rule.
+const RULES = [
+  { doc_type: 'Police Clearance', patterns: [/certificate of good conduct/i, /police clearance/i, /police certificate/i] },
+  { doc_type: 'COC', patterns: [/certificate of competence/i, /\bCOC\b/] },
+  { doc_type: 'Medical Report', patterns: [/medical report/i, /fit for work/i, /blood group/i, /chest x-?ray/i] },
+  { doc_type: 'Visa', patterns: [/\bentry visa\b/i, /\bvisa (no|number)\b/i, /\bvisa\b/i] },
+  { doc_type: 'Saudi-letter', patterns: [/saudi (embassy|consulate)/i, /kingdom of saudi arabia/i] },
+  { doc_type: 'Musaned', patterns: [/musaned/i] },
+  { doc_type: 'Broker ID', patterns: [/broker/i] },
+  { doc_type: 'Labour ID', patterns: [/labou?r (id|card)/i] },
+  { doc_type: 'Employee ID', patterns: [/employee (id|card)/i] },
+  { doc_type: 'Client ID', patterns: [/client (id|card)/i] },
+  { doc_type: 'Slip', patterns: [/order id/i, /debit account/i, /credit account/i, /\bswift\b/i] },
+  { doc_type: 'Experience Form', patterns: [/experience (form|letter)/i] },
+  { doc_type: 'Insurance', patterns: [/insurance/i, /policy (no|number)/i] },
+  { doc_type: 'CV', patterns: [/curriculum vitae/i, /\bresume\b/i, /\bCV\b/] },
+  { doc_type: 'Contract', patterns: [/employment contract/i, /employer name/i, /\bcontract\b/i] },
+  { doc_type: 'Government ID', patterns: [/kebele/i, /national id/i, /identity card/i] },
+]
+
+// Ticket types need the deported / ongoing split, so they are handled apart.
+const TICKET_PATTERNS = [/e-?ticket/i, /airline/i, /boarding pass/i, /\bflight\b/i]
+
+// Two MRZ lines: TD3 passports are 44 characters per line. Matched loosely
+// because MinerU often drops or adds a character at line ends.
+const MRZ_LINE1 = /P[<A-Z][A-Z]{3}[A-Z<]{30,40}/
+const MRZ_LINE2 = /[A-Z0-9<]{9}[0-9<][A-Z<]{3}[0-9]{6}[0-9<][MFX<][0-9]{6}[0-9<][A-Z0-9<]{14}[0-9<]{2}/
+
+export function findMrz(markdown) {
+  const lines = String(markdown)
+    .split(/\r?\n/)
+    .map(l => l.replace(/\s+/g, '').toUpperCase())
+    .filter(l => l.length >= 30)
+  for (let i = 0; i < lines.length - 1; i++) {
+    const l1 = lines[i].match(MRZ_LINE1)
+    const l2 = lines[i + 1].match(MRZ_LINE2)
+    if (l1 && l2) return { line1: l1[0].padEnd(44, '<').slice(0, 44), line2: l2[0].padEnd(44, '<').slice(0, 44) }
+  }
+
+  // MinerU often returns both MRZ lines run together on one line. Fall back to
+  // scanning the whitespace-free text: a TD3 line 1 is followed by line 2.
+  const flat = String(markdown).replace(/\s+/g, '').toUpperCase()
+  const re = /(?=(P[<A-Z][A-Z]{3}[A-Z<]{30,40}))/g
+  let m
+  while ((m = re.exec(flat))) {
+    const line1 = flat.slice(m.index, m.index + 44)
+    const line2 = flat.slice(m.index + 44, m.index + 88)
+    if (line1.length === 44 && MRZ_LINE2.test(line2)) return { line1, line2 }
+    re.lastIndex = m.index + 1 // zero-width match: step forward by hand
+  }
+  return null
+}
+
+function passportFromMrz(markdown) {
+  const mrz = findMrz(markdown)
+  if (!mrz) return null
+  const p = parseTD3(`${mrz.line1}\n${mrz.line2}`)
+  if (!p || !p.overall_verified) return { verified: false, fields: null }
+
+  const fields = {
+    surname: p.surname,
+    given_names: p.given_names,
+    full_name: `${p.given_names} ${p.surname}`.trim(),
+    passport_number: p.passport_number,
+    date_of_birth: p.date_of_birth,
+    date_of_expiry: p.date_of_expiry,
+    sex: p.sex,
+    gender: p.sex,
+    nationality: p.nationality_code,
+  }
+  return { verified: true, fields }
+}
+
+function ticketType(markdown) {
+  if (!TICKET_PATTERNS.some(re => re.test(markdown))) return null
+  return /deport/i.test(markdown) ? 'Ticket-deported' : 'Ticket-ongoing'
+}
+
+/**
+ * @param {string} markdown  full text MinerU produced for the document
+ * @returns {{doc_type:string, confidence:number, fields:object}}
+ */
+export function classifyMarkdown(markdown) {
+  const text = String(markdown || '')
+
+  // 1. Passport — MRZ is authoritative. An unverified MRZ is not trusted.
+  const pass = passportFromMrz(text)
+  if (pass?.verified) {
+    return { doc_type: 'Passport', confidence: 0.98, fields: pass.fields }
+  }
+
+  // 1b. Passport page without a verified MRZ — accepted at lower confidence,
+  // with no MRZ-derived fields (the name then comes from the filename).
+  // Needs the document title line "PASSPORT" plus its own fields, so visas and
+  // letters that merely mention a passport number do not match.
+  if (/^\s*passport\s*$/im.test(text) && /passport (no|number)/i.test(text) && /(surname|date of birth)/i.test(text)) {
+    return { doc_type: 'Passport', confidence: 0.6, fields: {} }
+  }
+
+  // 2. Keyword rules.
+  let best = null
+  let bestScore = 0
+  for (const rule of RULES) {
+    const score = rule.patterns.reduce((n, re) => n + (re.test(text) ? 1 : 0), 0)
+    if (score > bestScore) { best = rule.doc_type; bestScore = score }
+  }
+
+  const ticket = ticketType(text)
+  if (ticket && bestScore < 2) { best = ticket; bestScore = 1 }
+
+  if (!best || bestScore === 0) {
+    // Blurry passport pages often lose the "PASSPORT" title but keep the field
+    // labels. Three or more passport cues, and no other rule matched, means a
+    // passport at low confidence; the MRZ gate still decides if it is usable.
+    const cues = [/\bPP\b/, /\bETH\b/, /expi?r?y/i, /personal no/i, /nationality/i, /date of birth/i, /surname|given name/i]
+    if (cues.filter(re => re.test(text)).length >= 3) {
+      return { doc_type: 'Passport', confidence: 0.5, fields: {} }
+    }
+    return { doc_type: 'other', confidence: 0, fields: {} }
+  }
+  return { doc_type: best, confidence: Math.min(0.95, 0.5 + 0.15 * bestScore), fields: {} }
+}
+
+/**
+ * Ingestion analyzer: MinerU reads the ORIGINAL file (PDFs included), then the
+ * text is classified. A MinerU failure throws so the queue retries the file;
+ * there is no silent fallback to another paid model.
+ */
+// ---------------------------------------------------------------------------
+// Fast path: local reading first, MinerU only when local reading is not enough
+// ---------------------------------------------------------------------------
+
+// OCR often confuses these letters with digits. Only numeric MRZ positions use it.
+const DIGIT_FIX = { O: '0', D: '0', Q: '0', I: '1', L: '1', B: '8', S: '5', Z: '2', G: '6', T: '7' }
+// TD3 line 2 numeric positions: doc-number check (9), DOB (13-18) + check (19),
+// expiry (21-26) + check (27), personal-number check (42), composite check (43).
+const LINE2_NUMERIC = [9, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 42, 43]
+
+/** Repair the digit positions of an OCR'd MRZ line 2, then let parseTD3 check it. */
+function repairLine2(line2) {
+  const chars = line2.split('')
+  for (const i of LINE2_NUMERIC) if (chars[i] && DIGIT_FIX[chars[i]]) chars[i] = DIGIT_FIX[chars[i]]
+  return chars.join('')
+}
+
+/**
+ * Passport from local OCR (Tesseract). Accepted only when the MRZ check digits
+ * verify after repair, and line 1 has no OCR garbage run that would corrupt names.
+ */
+/** Levenshtein distance, used to allow one OCR slip in a name word. */
+function editDistance(a, b) {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)])
+  for (let j = 1; j <= b.length; j++) d[0][j] = j
+  for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++) {
+    d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1))
+  }
+  return d[a.length][b.length]
+}
+
+/**
+ * Every name word from the MRZ must also appear in the visible printed text.
+ * The MRZ names have no checksum, so this is the check that protects them.
+ * Words of 4+ letters may differ by one letter (OCR slip); shorter must match.
+ */
+function nameConfirmedByVisualText(names, visualText) {
+  const words = String(visualText || '').toUpperCase().split(/[^A-Z]+/).filter(Boolean)
+  if (!words.length) return false
+  return names.split(/\s+/).filter(Boolean).every(tok => {
+    if (tok.length < 3) return true
+    // "<" is often read as a leading letter in the MRZ ("SHABISSO" for "HABISSO").
+    const variants = tok.length >= 6 ? [tok, tok.slice(1)] : [tok]
+    return variants.some(v => words.some(w => (v.length >= 4 ? editDistance(v, w) <= 1 : v === w)))
+  })
+}
+
+async function passportFromLocalOcr(r) {
+  const lines = String(r?.mrzText || '').split(/\r?\n/).map(l => l.replace(/\s+/g, '').toUpperCase())
+  let l1 = lines.find(l => /^P[<A-Z]/.test(l) && l.length >= 40)
+  const l2 = lines.find(l => l !== l1 && l.length >= 40 && /[0-9]{6}/.test(l))
+  if (!l1 || !l2) return null
+  l1 = l1.replace(/(.)\1{2,}.*$/, '') // OCR tail junk ("CCCCCLL") after the name
+  const line1 = l1.padEnd(44, '<').slice(0, 44)
+  const line2 = repairLine2(l2.padEnd(44, '<').slice(0, 44))
+  const mrz = parseTD3(`${line1}\n${line2}`)
+  if (!mrz || !mrz.overall_verified) return null
+  if (!nameConfirmedByVisualText(`${mrz.given_names} ${mrz.surname}`, r?.visualText)) return null
+  return {
+    doc_type: 'Passport',
+    confidence: 0.98,
+    fields: {
+      surname: mrz.surname,
+      given_names: mrz.given_names,
+      full_name: `${mrz.given_names} ${mrz.surname}`.trim(),
+      passport_number: mrz.passport_number,
+      date_of_birth: mrz.date_of_birth,
+      date_of_expiry: mrz.date_of_expiry,
+      sex: mrz.sex,
+      gender: mrz.sex,
+      nationality: mrz.nationality_code,
+    },
+    markdown: `${line1}\n${line2}`, // repaired MRZ, so the verification step can re-read it
+    source: 'local-ocr',
+  }
+}
+
+/** Lower 55% of the image, upscaled, written to a temp file (deleted by the caller). */
+async function lowerPageCrop(imagePath) {
+  try {
+    const sharp = (await import('sharp')).default
+    const meta = await sharp(imagePath).metadata()
+    const out = path.join(os.tmpdir(), `adal-crop-${Date.now()}-${Math.random().toString(36).slice(2)}.png`)
+    await sharp(imagePath).rotate()
+      .extract({ left: 0, top: Math.round(meta.height * 0.45), width: meta.width, height: Math.round(meta.height * 0.55) })
+      .resize({ width: 1600 }).png().toFile(out)
+    return out
+  } catch { return null }
+}
+
+/**
+ * Returns a result without calling MinerU, or null when MinerU is needed.
+ *  - PDF with a text layer: read directly (milliseconds).
+ *  - Image: local OCR; only a checksum-verified passport is accepted here.
+ */
+export async function analyzeLocally(originalPath) {
+  if (/\.pdf$/i.test(originalPath)) {
+    try {
+      const mod = await import('pdf-parse')
+      const parse = mod.default || mod.pdf || mod
+      const res = await parse(fs.readFileSync(originalPath))
+      const text = String(res?.text || '')
+      if (text.replace(/\s/g, '').length >= 60) return { text }
+    } catch { /* no text layer: fall through */ }
+    return null
+  }
+  if (IMAGE_EXT.test(originalPath)) {
+    try {
+      const { extractPassport } = await import('./passportOcr.js')
+      const ocr = await extractPassport(originalPath)
+      // Second pass on the lower part of the page, upscaled: the printed names
+      // are small there, and the crop reads them much better.
+      const crop = await lowerPageCrop(originalPath)
+      if (crop) {
+        try {
+          const more = await extractPassport(crop)
+          ocr.visualText = `${ocr.visualText || ''}\n${more?.visualText || ''}`
+        } finally { try { fs.unlinkSync(crop) } catch {} }
+      }
+      const pass = await passportFromLocalOcr(ocr)
+      if (pass) return pass
+      const visual = String(ocr?.visualText || '')
+      // Almost no printed words and no MRZ: a personal photo, decided locally.
+      if (wordCount(visual) < 5 && !/[0-9]{6}/.test(String(ocr?.mrzText || ''))) {
+        return { doc_type: 'Photo', confidence: 0.6, fields: {}, markdown: '', source: 'local-ocr' }
+      }
+    } catch { /* OCR failure: MinerU decides */ }
+  }
+  return null
+}
+
+export async function analyzeWithMineru(originalPath) {
+  const filename = path.basename(originalPath)
+  const local = await analyzeLocally(originalPath)
+  if (local?.doc_type) return local
+
+  let text = local?.text || ''
+  if (!text) {
+    const markdown = await parseDocumentToMarkdown(originalPath)
+    text = String(markdown || '')
+  }
+  if (text.replace(/!\[[^\]]*\]\([^)]*\)|<[^>]+>|\s/g, '').length < 10) {
+    // Nothing readable: an image of a person/object is a personal photo.
+    if (IMAGE_EXT.test(originalPath)) return { doc_type: 'Photo', confidence: 0.6, fields: {}, markdown: '' }
+    throw new Error('MinerU returned no usable text')
+  }
+  // A picture with only a few stray words (no document keywords) is a photo too.
+  if (IMAGE_EXT.test(originalPath) && wordCount(text) < 12) {
+    return { doc_type: 'Photo', confidence: 0.5, fields: {}, markdown: text, source: 'text-count' }
+  }
+  return classifyText(text, filename)
+}
+
+/**
+ * DeepSeek classifies the text. If DeepSeek is unavailable (no key, no balance,
+ * network), the keyword rules take over so ingestion keeps moving.
+ */
+async function classifyText(text, filename) {
+  let result
+  let source = 'deepseek'
+  try {
+    result = await classifyTextWithDeepSeek(getDeepSeekKey(), text, filename)
+  } catch (e) {
+    console.warn('[classify] DeepSeek unavailable, using keyword rules:', e.message)
+    result = classifyMarkdown(text)
+    source = 'rules'
+  }
+
+  // The MRZ is the only trusted source for passport numbers and dates, so a
+  // verified MRZ decides the passport case, whatever the classifier said.
+  const pass = passportFromMrz(text)
+  if (pass?.verified) {
+    result = { doc_type: 'Passport', confidence: 0.98, fields: { ...(result.fields || {}), ...pass.fields } }
+  } else if (result.doc_type === 'Passport') {
+    // A passport without a verified MRZ is not trusted (the pipeline reports it).
+    result = { ...result, confidence: Math.min(result.confidence || 0, 0.6) }
+  }
+  return { ...result, markdown: text, source }
+}
+
+const IMAGE_EXT = /\.(jpe?g|png|webp|bmp|gif)$/i
+function wordCount(text) {
+  return text.replace(/!\[[^\]]*\]\([^)]*\)|<[^>]+>/g, ' ').split(/\s+/).filter(w => /[A-Za-z0-9\u1200-\u137F]{2,}/.test(w)).length
+}
+
+export default { classifyMarkdown, analyzeWithMineru }

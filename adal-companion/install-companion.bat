@@ -1,4 +1,5 @@
 @echo off
+cd /d "%~dp0"
 title Adal Companion v2.0 - Setup
 color 0B
 echo ============================================

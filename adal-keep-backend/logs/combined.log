@@ -153,3 +153,105 @@
 {"level":"info","message":"[AI] Existing profile #3 — attached Visa","timestamp":"2026-09-03T09:00:38.635Z"}
 {"level":"info","message":"[profileFiles] Ignoring personal media: photo_2026-09-03_07-46-32.jpg","timestamp":"2026-09-03T09:01:14.795Z"}
 {"level":"info","message":"[profileFiles] Ignoring personal media: photo_2026-09-02_19-27-13.jpg","timestamp":"2026-09-03T09:01:15.331Z"}
+{"level":"info","message":"[AI] Queuing for classification: photo_2026-09-04_07-15-23.jpg","timestamp":"2026-09-04T04:15:29.523Z"}
+{"level":"info","message":"[AI] Classifying: photo_2026-09-04_07-15-23.jpg (active: 1/2)","timestamp":"2026-09-04T04:15:29.534Z"}
+{"level":"info","message":"[AI] Queuing for classification: photo_2026-09-04_07-15-32.jpg","timestamp":"2026-09-04T04:15:36.410Z"}
+{"level":"info","message":"[AI] Classifying: photo_2026-09-04_07-15-32.jpg (active: 2/2)","timestamp":"2026-09-04T04:15:36.410Z"}
+{"level":"info","message":"[AI] → Passport (0.98) Official Ethiopian passport booklet page with MRZ (P<ETH), biometric photo, personal data, and machine-readable zone","timestamp":"2026-09-04T04:15:36.437Z"}
+{"level":"info","message":"[AI] Moved to AdalKeep/Passport: photo_2026-09-04_07-15-23.jpg","timestamp":"2026-09-04T04:15:36.441Z"}
+{"level":"info","message":"[AI] createApprovalTask inserted id=16","timestamp":"2026-09-04T04:15:36.470Z"}
+{"level":"info","message":"[AI] Approval task #16 for DEBOCH MIHRET TUMISO","timestamp":"2026-09-04T04:15:36.471Z"}
+{"level":"info","message":"[AI] Queuing for classification: photo_2026-09-04_07-15-37.jpg","timestamp":"2026-09-04T04:15:41.448Z"}
+{"level":"info","message":"[AI] Classifying: photo_2026-09-04_07-15-37.jpg (active: 2/2)","timestamp":"2026-09-04T04:15:41.449Z"}
+{"level":"info","message":"[AI] Queuing for classification: photo_2026-09-04_07-15-41.jpg","timestamp":"2026-09-04T04:15:45.439Z"}
+{"level":"info","message":"[AI] → Other (0.00) Connection error.","timestamp":"2026-09-04T04:15:46.432Z"}
+{"level":"info","message":"[AI] Ignoring file classified as Other: photo_2026-09-04_07-15-37.jpg","timestamp":"2026-09-04T04:15:46.433Z"}
+{"level":"info","message":"[AI] Classifying: photo_2026-09-04_07-15-41.jpg (active: 2/2)","timestamp":"2026-09-04T04:15:47.234Z"}
+{"level":"info","message":"[AI] Queuing for classification: photo_2026-09-04_07-15-46.jpg","timestamp":"2026-09-04T04:15:50.588Z"}
+{"level":"info","message":"[AI] → Other (0.00) Connection error.","timestamp":"2026-09-04T04:15:52.246Z"}
+{"level":"info","message":"[AI] Ignoring file classified as Other: photo_2026-09-04_07-15-41.jpg","timestamp":"2026-09-04T04:15:52.246Z"}
+{"level":"info","message":"[AI] Classifying: photo_2026-09-04_07-15-46.jpg (active: 2/2)","timestamp":"2026-09-04T04:15:53.047Z"}
+{"level":"info","message":"[AI] → Contract (0.95) Standard Employment Contract for Ethiopia Domestic Workers bound for Saudi Arabia with employer details, contract number, and bilingual Arabic/English text","timestamp":"2026-09-04T04:15:56.172Z"}
+{"level":"info","message":"[AI] Moved to AdalKeep/Contract: photo_2026-09-04_07-15-32.jpg","timestamp":"2026-09-04T04:15:56.177Z"}
+{"level":"info","message":"[AI] createApprovalTask inserted id=17","timestamp":"2026-09-04T04:15:56.200Z"}
+{"level":"info","message":"[AI] Approval task #17 for GHAIAH RASHED KH ALZAHRANI","timestamp":"2026-09-04T04:15:56.200Z"}
+{"level":"info","message":"[profileFiles] Passport → profile 11 field 107 file 2","timestamp":"2026-09-04T04:15:59.738Z"}
+{"level":"info","message":"[AI] → COC (0.95) Official Federal Police Crime Investigation Bureau Certificate of Good Conduct with photo, QR code, signature and clearance stamp","timestamp":"2026-09-04T04:16:05.254Z"}
+{"level":"info","message":"[AI] Moved to AdalKeep/COC: photo_2026-09-04_07-15-46.jpg","timestamp":"2026-09-04T04:16:05.257Z"}
+{"level":"info","message":"[AI] createApprovalTask inserted id=18","timestamp":"2026-09-04T04:16:05.277Z"}
+{"level":"info","message":"[AI] Approval task #18 for MEDINA ABAFIRA ADUGNA","timestamp":"2026-09-04T04:16:05.278Z"}
+{"level":"info","message":"[profileFiles] Contract → profile 12 field 108 file 3","timestamp":"2026-09-04T04:16:06.388Z"}
+{"level":"info","message":"[profileFiles] COC → profile 13 field 109 file 4","timestamp":"2026-09-04T04:16:45.656Z"}
+{"level":"info","message":"[AI] Queuing for classification: 1788291728574_EFTU AWOL ABAMECHA -ZM-26-57 (1).pdf","timestamp":"2026-09-04T13:53:18.106Z"}
+{"level":"info","message":"[AI] Classifying: 1788291728574_EFTU AWOL ABAMECHA -ZM-26-57 (1).pdf (active: 1/2)","timestamp":"2026-09-04T13:53:18.119Z"}
+{"level":"info","message":"[AI] Queuing for classification: 1788287612969_Pasted image (2).png","timestamp":"2026-09-04T13:53:22.017Z"}
+{"level":"info","message":"[AI] Classifying: 1788287612969_Pasted image (2).png (active: 2/2)","timestamp":"2026-09-04T13:53:22.019Z"}
+{"level":"info","message":"[AI] Queuing for classification: 1788287193782_1788156600988_passport.png","timestamp":"2026-09-04T13:53:26.397Z"}
+{"level":"info","message":"[AI] Queuing for classification: 1788016795576_CV.pdf","timestamp":"2026-09-04T13:53:30.438Z"}
+{"level":"info","message":"[AI] Queuing for classification: 1788154339503_AMELMAL WOLDESEMAYAT ALEMAYEHU-ZM-26-253.pdf","timestamp":"2026-09-04T13:53:33.590Z"}
+{"level":"info","message":"[AI] → Other (0.00) Request timed out.","timestamp":"2026-09-04T13:54:02.883Z"}
+{"level":"info","message":"[AI] Ignoring file classified as Other: 1788291728574_EFTU AWOL ABAMECHA -ZM-26-57 (1).pdf","timestamp":"2026-09-04T13:54:02.885Z"}
+{"level":"info","message":"[AI] Classifying: 1788287193782_1788156600988_passport.png (active: 2/2)","timestamp":"2026-09-04T13:54:03.686Z"}
+{"level":"info","message":"[AI] → Other (0.00) Request timed out.","timestamp":"2026-09-04T13:54:05.885Z"}
+{"level":"info","message":"[AI] Ignoring file classified as Other: 1788287612969_Pasted image (2).png","timestamp":"2026-09-04T13:54:05.886Z"}
+{"level":"info","message":"[AI] Classifying: 1788016795576_CV.pdf (active: 2/2)","timestamp":"2026-09-04T13:54:06.688Z"}
+{"level":"info","message":"[AI] → Other (0.00) Request timed out.","timestamp":"2026-09-04T13:54:47.347Z"}
+{"level":"info","message":"[AI] Ignoring file classified as Other: 1788287193782_1788156600988_passport.png","timestamp":"2026-09-04T13:54:47.348Z"}
+{"level":"info","message":"[AI] Classifying: 1788154339503_AMELMAL WOLDESEMAYAT ALEMAYEHU-ZM-26-253.pdf (active: 2/2)","timestamp":"2026-09-04T13:54:48.148Z"}
+{"level":"info","message":"[AI] → Other (0.00) Request timed out.","timestamp":"2026-09-04T13:54:51.342Z"}
+{"level":"info","message":"[AI] Ignoring file classified as Other: 1788016795576_CV.pdf","timestamp":"2026-09-04T13:54:51.342Z"}
+{"level":"info","message":"[AI] → Other (0.00) Request timed out.","timestamp":"2026-09-04T13:55:33.616Z"}
+{"level":"info","message":"[AI] Ignoring file classified as Other: 1788154339503_AMELMAL WOLDESEMAYAT ALEMAYEHU-ZM-26-253.pdf","timestamp":"2026-09-04T13:55:33.617Z"}
+{"level":"info","message":"[AI] Queuing for classification: 1788016654729_CV.pdf","timestamp":"2026-09-04T14:02:40.433Z"}
+{"level":"info","message":"[AI] Classifying: 1788016654729_CV.pdf (active: 1/2)","timestamp":"2026-09-04T14:02:40.440Z"}
+{"level":"info","message":"[AI] → CV (0.95) Dar Basel agency biodata form for house maid position with photo, personal details, work experience, salary, and contract period","timestamp":"2026-09-04T14:02:46.297Z"}
+{"level":"info","message":"[AI] Moved to AdalKeep/CV: 1788016654729_CV.pdf","timestamp":"2026-09-04T14:02:46.304Z"}
+{"level":"info","message":"[AI] createApprovalTask inserted id=19","timestamp":"2026-09-04T14:02:46.346Z"}
+{"level":"info","message":"[AI] Approval task #19 for AMELEWORK WUBHET TSEGAYE","timestamp":"2026-09-04T14:02:46.346Z"}
+{"level":"info","message":"[profileFiles] CV → profile 15 field 170 file 5","timestamp":"2026-09-04T14:06:31.874Z"}
+{"level":"info","message":"[AI] Queuing for classification: WhatsApp Image 2026-09-04 at 4.51.41 PM.jpeg","timestamp":"2026-09-04T14:08:45.111Z"}
+{"level":"info","message":"[AI] Classifying: WhatsApp Image 2026-09-04 at 4.51.41 PM.jpeg (active: 1/2)","timestamp":"2026-09-04T14:08:45.113Z"}
+{"level":"info","message":"[AI] → Passport (0.98) Official Ethiopian passport personal data page with MRZ (P<ETH), biometric photo, passport number EP8486052, and all standard passport fields","timestamp":"2026-09-04T14:08:49.549Z"}
+{"level":"info","message":"[AI] Moved to AdalKeep/Passport: WhatsApp Image 2026-09-04 at 4.51.41 PM.jpeg","timestamp":"2026-09-04T14:08:49.555Z"}
+{"level":"info","message":"[AI] createApprovalTask inserted id=20","timestamp":"2026-09-04T14:08:49.582Z"}
+{"level":"info","message":"[AI] Approval task #20 for TENIYA MUSTE AHMED","timestamp":"2026-09-04T14:08:49.583Z"}
+{"level":"info","message":"[profileFiles] Passport → profile 16 field 171 file 6","timestamp":"2026-09-04T14:09:04.085Z"}
+{"level":"warn","message":"[AI] Rejected unsafe file: portfolio.Y-KUR91x.html.part","timestamp":"2026-09-06T07:28:10.032Z"}
+{"level":"warn","message":"[AI] Rejected unsafe file: portfolio.html","timestamp":"2026-09-06T07:28:10.035Z"}
+{"level":"warn","message":"[AI] Rejected unsafe file: Portfolio_Abdurahman_Surur.docx","timestamp":"2026-09-06T07:31:35.286Z"}
+{"level":"warn","message":"[AI] Rejected unsafe file: Portfolio_Abdurahman_Surur.70W6hOQM.docx.part","timestamp":"2026-09-06T07:31:35.320Z"}
+{"level":"warn","message":"[AI] Rejected unsafe file: Portfolio_Abdurahman_Surur(1).docx","timestamp":"2026-09-06T07:31:39.288Z"}
+{"level":"warn","message":"[AI] Rejected unsafe file: Portfolio_Abdurahman_Surur(1).P0XfTqs9.docx.part","timestamp":"2026-09-06T07:31:39.291Z"}
+{"level":"info","message":"[AI] Queuing for classification: Portfolio_Abdurahman_Surur.pdf","timestamp":"2026-09-06T08:37:42.675Z"}
+{"level":"info","message":"[AI] Classifying: Portfolio_Abdurahman_Surur.pdf (active: 1/2)","timestamp":"2026-09-06T08:37:42.678Z"}
+{"level":"info","message":"[AI] → CV (0.98) Personal portfolio/resume document with bio, achievements, statistics (systems built, exam score, leadership), and career narrative. Matches CV category definition.","timestamp":"2026-09-06T08:38:08.249Z"}
+{"level":"info","message":"[AI] Moved to AdalKeep/CV: Portfolio_Abdurahman_Surur.pdf","timestamp":"2026-09-06T08:38:08.256Z"}
+{"level":"info","message":"[AI] createApprovalTask inserted id=21","timestamp":"2026-09-06T08:38:08.288Z"}
+{"level":"info","message":"[AI] Approval task #21 for Abdurahman Muhidin Surur","timestamp":"2026-09-06T08:38:08.289Z"}
+{"level":"warn","message":"[verification] pdf text layer failed: parse is not a function","timestamp":"2026-10-12T19:59:55.446Z"}
+{"level":"error","message":"[verification] tesseract failed: Input file contains unsupported image format","timestamp":"2026-10-12T19:59:55.480Z"}
+{"level":"info","message":"[verification] profile 145: 0/3 ticks (source=none, mrz=false)","timestamp":"2026-10-12T19:59:55.483Z"}
+{"level":"info","message":"[verification] profile 147: 3/3 ticks (source=mineru, mrz=true)","timestamp":"2026-10-12T20:11:37.949Z"}
+{"level":"info","message":"[verification] profile 137: 3/3 ticks (source=mineru, mrz=true)","timestamp":"2026-10-12T20:19:12.637Z"}
+{"level":"info","message":"[verification] profile 137: 3/3 ticks (source=mineru, mrz=true)","timestamp":"2026-10-12T20:19:33.499Z"}
+{"level":"info","message":"[verification] profile 137: 3/3 ticks (source=mineru, mrz=true)","timestamp":"2026-10-12T20:21:02.649Z"}
+{"level":"info","message":"[verification] profile 145: 1/3 ticks (source=mineru, mrz=false)","timestamp":"2026-10-12T20:24:47.539Z"}
+{"level":"info","message":"[verification] profile 145: 1/3 ticks (source=mineru, mrz=false)","timestamp":"2026-10-12T20:24:48.425Z"}
+{"level":"info","message":"[verification] profile 145: 1/3 ticks (source=mineru, mrz=false)","timestamp":"2026-10-12T20:24:49.211Z"}
+{"level":"info","message":"[verification] profile 145: 1/3 ticks (source=mineru, mrz=false)","timestamp":"2026-10-12T20:24:51.336Z"}
+{"level":"info","message":"[verification] profile 145: 1/3 ticks (source=mineru, mrz=false)","timestamp":"2026-10-12T20:24:53.123Z"}
+{"level":"info","message":"[verification] profile 145: 1/3 ticks (source=mineru, mrz=false)","timestamp":"2026-10-12T20:25:01.439Z"}
+{"level":"info","message":"[verification] profile 145: 1/3 ticks (source=mineru, mrz=false)","timestamp":"2026-10-12T20:25:02.964Z"}
+{"level":"info","message":"[verification] profile 145: 1/3 ticks (source=mineru, mrz=false)","timestamp":"2026-10-12T20:25:05.657Z"}
+{"level":"info","message":"[verification] profile 145: 1/3 ticks (source=mineru, mrz=false)","timestamp":"2026-10-12T20:25:08.299Z"}
+{"level":"info","message":"[verification] profile 145: 1/3 ticks (source=mineru, mrz=false)","timestamp":"2026-10-12T20:25:08.534Z"}
+{"level":"warn","message":"[verification] MinerU failed: MinerU timed out after 180000ms (last state: pending)","timestamp":"2026-10-13T05:00:32.428Z"}
+{"level":"warn","message":"[verification] pdf text layer failed: parse is not a function","timestamp":"2026-10-13T05:00:32.901Z"}
+{"level":"error","message":"[verification] tesseract failed: Input file contains unsupported image format","timestamp":"2026-10-13T05:00:32.920Z"}
+{"level":"info","message":"[verification] profile 145: 0/3 ticks (source=none, mrz=false)","timestamp":"2026-10-13T05:00:32.924Z"}
+{"level":"info","message":"[verification] profile 145: 1/3 ticks (source=mineru, mrz=false)","timestamp":"2026-10-13T05:00:38.023Z"}
+{"level":"info","message":"[verification] profile 145: 1/3 ticks (source=mineru, mrz=false)","timestamp":"2026-10-13T05:00:42.638Z"}
+{"level":"info","message":"[verification] profile 145: 1/3 ticks (source=mineru, mrz=false)","timestamp":"2026-10-13T05:00:44.431Z"}
+{"level":"info","message":"[verification] profile 145: 1/3 ticks (source=mineru, mrz=false)","timestamp":"2026-10-13T05:07:28.428Z"}
+{"level":"info","message":"[verification] profile 145: 1/3 ticks (source=mineru, mrz=false)","timestamp":"2026-10-13T05:08:28.640Z"}
+{"level":"info","message":"[verification] profile 145: 1/3 ticks (source=mineru, mrz=false)","timestamp":"2026-10-13T06:02:30.511Z"}

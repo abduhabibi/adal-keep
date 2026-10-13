@@ -33,8 +33,14 @@ var (
 )
 
 func main() {
-	if hostServer == "" {
-		hostServer = "http://192.168.1.100:4000"
+	log.SetFlags(log.LstdFlags)
+	log.Printf("🚀 Adal Companion v3.0 — LAN auto-discovery + tray ingest")
+
+	// Company name first (used in every log line and in the client id).
+	if host := hostServer; host != "" {
+		log.Printf("🌐 Server from ADAL_HOST_URL: %s", host)
+	} else {
+		hostServer = resolveHostURL()
 	}
 	if clientName == "" {
 		h, _ := os.Hostname()
@@ -44,10 +50,23 @@ func main() {
 		encryptKey = "adal-keep-default-key-change-me!!!!"
 	}
 
-	log.Printf("🚀 Adal Companion v2.0 (Light)")
-	log.Printf("   Host: %s", hostServer)
+	log.Printf("   Server: %s", hostServer)
 	log.Printf("   Client: %s", clientName)
-	log.Printf("   Encryption: AES-256-GCM enabled")
+	if os.Getenv("ADAL_ENCRYPT_UPLOAD") == "true" {
+		log.Printf("   Encryption: AES-256-GCM enabled (legacy upload path)")
+	} else {
+		log.Printf("   Upload: /api/companion/ingest (file tray)")
+	}
+
+	// Confirm we reached the right machine, and retry discovery once if not.
+	if !pingServer() {
+		log.Printf("⚠️ %s did not answer /api/companion/info", hostServer)
+		if info := discoverServer(2500 * time.Millisecond); info != nil {
+			hostServer = info.URL
+			log.Printf("👉 Retrying via %s", hostServer)
+			pingServer()
+		}
+	}
 
 	home, _ := os.UserHomeDir()
 	candidates := []string{
@@ -102,7 +121,10 @@ func main() {
 				continue
 			}
 			processed[event.Name] = time.Now()
-			time.Sleep(1 * time.Second)
+			// A scanner writes a file in bursts; never upload it half-way.
+			if !waitForStableFile(event.Name, 20*time.Second) {
+				log.Printf("⚠️ Still changing after 20s — uploading anyway: %s", filepath.Base(event.Name))
+			}
 			log.Printf("📄 Detected: %s", filepath.Base(event.Name))
 			processAndUpload(event.Name)
 
@@ -202,6 +224,15 @@ func sanitizeImage(path string) ([]byte, string, error) {
 func processAndUpload(filePath string) {
 	filename := filepath.Base(filePath)
 
+	// v3 path: hand the raw file to the server's Companion ingest endpoint,
+	// which files it in the tray (or on a pinned profile field) and re-runs
+	// the passport verification ticks. Set ADAL_ENCRYPT_UPLOAD=true to use
+	// the legacy AES upload instead.
+	if os.Getenv("ADAL_ENCRYPT_UPLOAD") != "true" {
+		uploadToIngest(filePath, filename)
+		return
+	}
+
 	// Read and optionally sanitize file
 	data, ext, err := sanitizeImage(filePath)
 	if err != nil {
@@ -255,10 +286,10 @@ func processAndUpload(filePath string) {
 
 	// Send analysis request (server decrypts + sanitizes + analyzes)
 	analyzeData := map[string]interface{}{
-		"image_url":  fileURL,
-		"filename":   filename,
-		"encrypted":  true,
-		"client_id":  fmt.Sprintf("companion-%s", clientName),
+		"image_url": fileURL,
+		"filename":  filename,
+		"encrypted": true,
+		"client_id": fmt.Sprintf("companion-%s", clientName),
 	}
 	analyzeBody, _ := json.Marshal(analyzeData)
 	analyzeResp, err := httpClient.Post(hostServer+"/api/ai/analyze-document", "application/json", bytes.NewReader(analyzeBody))
@@ -299,7 +330,9 @@ func register() {
 		return
 	}
 	defer resp.Body.Close()
-	log.Println("✅ Registered with host")
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		log.Println("✅ Registered with host")
+	}
 }
 
 func heartbeat() {

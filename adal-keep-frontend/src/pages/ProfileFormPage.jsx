@@ -4,26 +4,8 @@ import toast from 'react-hot-toast'
 import api from '../services/api'
 import PageHeader from '../components/shared/PageHeader'
 import Spinner from '../components/shared/Spinner'
-
-/** Ethiopia mobile: 251 + 9 digits */
-function normalizeEthPhone(raw) {
-  let d = String(raw || '').replace(/\D/g, '')
-  if (d.startsWith('0') && d.length >= 10) d = '251' + d.slice(1)
-  if (d.startsWith('251')) d = d.slice(0, 12)
-  else if (d.length <= 9) d = ('251' + d).slice(0, 12)
-  else d = d.slice(0, 12)
-  return d
-}
-function formatEthPhoneDisplay(raw) {
-  const d = normalizeEthPhone(raw)
-  if (d.length <= 3) return d
-  const rest = d.slice(3)
-  if (rest.length <= 3) return d.slice(0, 3) + ' ' + rest
-  if (rest.length <= 6) return d.slice(0, 3) + ' ' + rest.slice(0, 3) + ' ' + rest.slice(3)
-  return d.slice(0, 3) + ' ' + rest.slice(0, 3) + ' ' + rest.slice(3, 6) + ' ' + rest.slice(6, 9)
-}
-
-
+import { REGIONS, regionByName } from '../lib/regions'
+import { useAuth } from '../context/AuthContext'
 
 const STATUS_OPTIONS_AM = [
   { value: 'pending', label: 'በመጠባበቅ ላይ' },
@@ -32,35 +14,59 @@ const STATUS_OPTIONS_AM = [
 ]
 
 const emptyForm = {
+  destination_country: '',
   full_name: '',
+  middle_name: '',
+  order_id: '',
   phone_number: '',
   national_id: '',
   passport_number: '',
   status: 'pending',
   broker_id: '',
   notes: '',
-  room: '',
-  table_name: '',
-  box_number: '',
+  religion: '',
+  marital_status: '',
+  gender: '',
+  children_count: '',
+  weight: 'Normal',
+  height: 'Normal',
+  complexion: '',
+  living_town: '',
+  education_level: '',
+  mother_name: '',
+  father_name: '',
+  spouse_name: '',
+  region: '',
+  zone_subcity: '',
+  labor_id: '',
+  personal_number: '',
+  emergency_name: '',
+  emergency_phone: '',
+  emergency_gender: 'Male',
+  emergency_relationship: 'Father',
+  cooking_skill: 'None',
+  speaks_english: false,
+  speaks_arabic: false,
 }
 
 export default function ProfileFormPage() {
   const { id } = useParams()
   const isEdit = Boolean(id)
   const navigate = useNavigate()
+  const { activeEmployee, user } = useAuth()
   const [form, setForm] = useState(emptyForm)
   const [brokers, setBrokers] = useState([])
   const [loading, setLoading] = useState(isEdit)
   const [saving, setSaving] = useState(false)
+  const [hydrated, setHydrated] = useState(false)
 
   useEffect(() => {
     let alive = true
-
     async function boot() {
       try {
         const brokersRes = await api.get('/brokers')
         if (!alive) return
-        setBrokers(brokersRes.data)
+        setBrokers(brokersRes.data || [])
 
         if (isEdit) {
           const res = await api.get(`/profiles/${id}`)
@@ -68,32 +74,75 @@ export default function ProfileFormPage() {
           const p = res.data
           setForm({
             full_name: p.full_name || '',
+            destination_country: p.destination_country || '',
+            middle_name: p.middle_name || '',
+            order_id: p.order_id || '',
             phone_number: p.phone_number || '',
             national_id: p.national_id || '',
             passport_number: p.passport_number || '',
             status: p.status || 'pending',
             broker_id: p.broker_id ?? '',
             notes: p.notes || '',
-            room: p.room || '',
-            table_name: p.table_name || '',
-            box_number: p.box_number || '',
+            religion: p.religion || '',
+            marital_status: p.marital_status || '',
+            gender: p.gender || '',
+            children_count: p.children_count ?? '',
+            weight: p.weight || 'Normal',
+            height: p.height || 'Normal',
+            complexion: p.complexion || '',
+            living_town: p.living_town || '',
+            education_level: p.education_level || '',
+            mother_name: p.mother_name || '',
+            father_name: p.father_name || '',
+            spouse_name: p.spouse_name || '',
+            region: p.region || '',
+            zone_subcity: p.zone_subcity || '',
+            labor_id: p.labor_id || '',
+            personal_number: p.personal_number || '',
+            emergency_name: p.emergency_name || '',
+            emergency_phone: p.emergency_phone || '',
+            emergency_gender: p.emergency_gender || 'Male',
+            emergency_relationship: p.emergency_relationship || 'Father',
+            cooking_skill: p.cooking_skill || 'None',
+            speaks_english: !!p.speaks_english,
+            speaks_arabic: !!p.speaks_arabic,
           })
         }
       } catch {
         toast.error(isEdit ? 'ፕሮፋይሉን መጫን አልተቻለም' : 'የፎርም መረጃዎችን መጫን አልተቻለም')
         if (isEdit) navigate('/profiles')
       } finally {
-        if (alive) setLoading(false)
+        if (alive) { setLoading(false); setHydrated(true) }
       }
     }
-
     boot()
-    return () => {
-      alive = false
-    }
+    return () => { alive = false }
   }, [id, isEdit, navigate])
 
-  const setField = (key) => (e) => setForm((prev) => ({ ...prev, [key]: e.target.value }))
+  // Defaults from broker — personal number + emergency phone
+  useEffect(() => {
+    if (!hydrated || !form.broker_id) return
+    const broker = brokers.find(b => String(b.id) === String(form.broker_id))
+    if (!broker) return
+    setForm(f => ({
+      ...f,
+      personal_number: f.personal_number || broker.contact1 || '',
+      emergency_phone: f.emergency_phone || broker.contact1 || '',
+    }))
+  }, [hydrated, form.broker_id, brokers])
+
+  // Guardian name from middle; living_town mirrors region
+  useEffect(() => {
+    if (!hydrated) return
+    setForm(f => {
+      const next = { ...f }
+      if (next.region && next.living_town !== next.region) next.living_town = next.region
+      if (!next.emergency_name && next.middle_name) next.emergency_name = next.middle_name
+      return next
+    })
+  }, [hydrated, form.region, form.middle_name])
+
+  const setField = (key) => (e) => setForm(prev => ({ ...prev, [key]: e.target.value }))
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -102,8 +151,14 @@ export default function ProfileFormPage() {
       const payload = {
         ...form,
         broker_id: form.broker_id === '' ? null : Number(form.broker_id),
+        children_count: form.children_count === '' ? null : Number(form.children_count),
       }
-
+      // Tag the creator so this profile shows under the right employee
+      if (!isEdit) {
+        const me = activeEmployee || user || {}
+        const createdByName = String(me.name || me.full_name || me.username || '').trim()
+        payload.created_by = createdByName || 'System'
+      }
       if (isEdit) {
         await api.put(`/profiles/${id}`, payload)
         toast.success('ፕሮፋይሉ በስኬት ተዘምኗል')
@@ -122,98 +177,230 @@ export default function ProfileFormPage() {
 
   if (loading) return <Spinner label={isEdit ? 'ፕሮፋይል በመጫን ላይ…' : 'በመጫን ላይ…'} />
 
-  // Reusable styling for form fields in light & dark mode
   const inputClass = "w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-900/50 p-2.5 text-sm text-slate-800 dark:text-slate-100 focus:bg-white dark:focus:bg-slate-900 focus:border-teal-500 focus:outline-none transition-colors"
+  const labelClass = "label mb-1.5 block font-medium text-xs text-slate-600 dark:text-slate-300"
 
   return (
     <div className="mx-auto max-w-2xl animate-fade-up">
       <PageHeader
         title={isEdit ? 'ፕሮፋይል አርም' : 'አዲስ ፕሮፋይል'}
-        subtitle={isEdit ? 'የደንበኛ ዝርዝሮችን እና የፋይል መረጃዎችን ያዘምኑ' : 'አዲስ ደንበኛ ወደ ስራ ቦታዎ ያክሉ'}
+        subtitle={isEdit ? 'የደንበኛ ዝርዝሮችን ያዘምኑ' : 'አዲስ ደንበኛ ወደ ስራ ቦታዎ ያክሉ'}
       />
 
       <form onSubmit={handleSubmit} className="panel space-y-5 p-5 sm:p-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/60 rounded-xl shadow-sm">
+
+        {/* ---- Core ---- */}
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="sm:col-span-2">
-            <label className="label mb-1.5 block font-medium text-xs text-slate-600 dark:text-slate-300" htmlFor="full_name">ሙሉ ስም *</label>
+            <label className={labelClass} htmlFor="full_name">ሙሉ ስም *</label>
             <input id="full_name" required className={inputClass} value={form.full_name} onChange={setField('full_name')} />
           </div>
           <div>
-            <label className="label mb-1.5 block font-medium text-xs text-slate-600 dark:text-slate-300" htmlFor="phone_number">ስልክ ቁጥር * (251 + 9 digits)</label>
-            <input
-              id="phone_number"
-              required
-              type="tel"
-              inputMode="numeric"
-              className={inputClass}
-              placeholder="251 9XX XXX XXX"
-              value={formatEthPhoneDisplay(form.phone_number)}
-              onChange={(e) => {
-                const normalized = normalizeEthPhone(e.target.value)
-                setForm((prev) => ({ ...prev, phone_number: normalized }))
-              }}
-            />
-            {form.phone_number && form.phone_number.length !== 12 && (
-              <p className="mt-1 text-xs text-amber-600">Must be 251 followed by 9 digits</p>
-            )}
+            <label className={labelClass} htmlFor="middle_name">የአባት ስም (Middle name)</label>
+            <input id="middle_name" className={inputClass} value={form.middle_name} onChange={setField('middle_name')} />
           </div>
           <div>
-            <label className="label mb-1.5 block font-medium text-xs text-slate-600 dark:text-slate-300" htmlFor="status">ሁኔታ</label>
+            <label className={labelClass} htmlFor="order_id">Order ID</label>
+            <input id="order_id" className={inputClass} value={form.order_id} onChange={setField('order_id')} />
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="phone_number">ስልክ ቁጥር *</label>
+            <input id="phone_number" required type="tel" className={inputClass} placeholder="251 9XX XXX XXX" value={form.phone_number} onChange={setField('phone_number')} />
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="status">ሁኔታ</label>
             <select id="status" className={inputClass} value={form.status} onChange={setField('status')}>
-              {STATUS_OPTIONS_AM.map((s) => (
-                <option key={s.value} value={s.value}>{s.label}</option>
-              ))}
+              {STATUS_OPTIONS_AM.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
             </select>
           </div>
           <div>
-            <label className="label mb-1.5 block font-medium text-xs text-slate-600 dark:text-slate-300" htmlFor="national_id">ብሔራዊ መታወቂያ</label>
+            <label className={labelClass} htmlFor="national_id">ብሔራዊ መታወቂያ</label>
             <input id="national_id" className={inputClass} value={form.national_id} onChange={setField('national_id')} />
           </div>
           <div>
-            <label className="label mb-1.5 block font-medium text-xs text-slate-600 dark:text-slate-300" htmlFor="passport_number">ፓስፖርት ቁጥር</label>
+            <label className={labelClass} htmlFor="passport_number">ፓስፖርት ቁጥር</label>
             <input id="passport_number" className={inputClass} value={form.passport_number} onChange={setField('passport_number')} />
           </div>
           <div className="sm:col-span-2">
-            <label className="label mb-1.5 block font-medium text-xs text-slate-600 dark:text-slate-300" htmlFor="broker_id">ደላላ</label>
+            <label className={labelClass} htmlFor="broker_id">ደላላ</label>
             <select id="broker_id" className={inputClass} value={form.broker_id} onChange={setField('broker_id')}>
               <option value="">ያልተመደበ</option>
-              {brokers.map((b) => (
-                <option key={b.id} value={b.id}>{b.name}</option>
-              ))}
+              {brokers.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+          </div>
+        </div>
+
+        {/* ---- CV fields ---- */}
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="sm:col-span-2">
+            <label className={labelClass} htmlFor="destination_country">
+              Destination Country
+              <span className="ml-2 text-[10px] text-teal-600 font-semibold">
+                (Kuwait auto-starts Police Clearance)
+              </span>
+            </label>
+            <select
+              id="destination_country"
+              className={inputClass}
+              value={form.destination_country}
+              onChange={setField('destination_country')}
+            >
+              <option value="">— Select —</option>
+              <option value="Kuwait">Kuwait</option>
+              <option value="Saudi Arabia">Saudi Arabia</option>
+              <option value="Jordan">Jordan</option>
+              <option value="UAE">UAE</option>
+              <option value="Qatar">Qatar</option>
+              <option value="Bahrain">Bahrain</option>
+              <option value="Oman">Oman</option>
+            </select>
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="religion">Religion</label>
+            <select id="religion" className={inputClass} value={form.religion} onChange={setField('religion')}>
+              <option value="">— Select —</option>
+              <option value="Muslim">Muslim</option>
+              <option value="Orthodox">Orthodox</option>
+              <option value="Protestant">Protestant</option>
+            </select>
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="marital_status">Marital status</label>
+            <select id="marital_status" className={inputClass} value={form.marital_status} onChange={setField('marital_status')}>
+              <option value="">— Select —</option>
+              <option value="SINGLE">Single</option>
+              <option value="MARRIED">Married</option>
+            </select>
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="gender">Gender</label>
+            <select id="gender" className={inputClass} value={form.gender} onChange={setField('gender')}>
+              <option value="">— Select —</option>
+              <option value="M">Male</option>
+              <option value="F">Female</option>
+            </select>
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="children_count">Children count</label>
+            <input id="children_count" type="number" className={inputClass} value={form.children_count} onChange={setField('children_count')} />
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="weight">Weight</label>
+            <input id="weight" className={inputClass} value={form.weight} onChange={setField('weight')} placeholder="Normal" />
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="height">Height</label>
+            <input id="height" className={inputClass} value={form.height} onChange={setField('height')} placeholder="Normal" />
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="complexion">Complexion</label>
+            <input id="complexion" className={inputClass} value={form.complexion} onChange={setField('complexion')} />
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="education_level">Education</label>
+            <input id="education_level" className={inputClass} value={form.education_level} onChange={setField('education_level')} />
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="mother_name">Mother's name</label>
+            <input id="mother_name" className={inputClass} value={form.mother_name} onChange={setField('mother_name')} />
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="father_name">Father's name</label>
+            <input id="father_name" className={inputClass} value={form.father_name} onChange={setField('father_name')} />
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="spouse_name">Spouse name</label>
+            <input id="spouse_name" className={inputClass} value={form.spouse_name} onChange={setField('spouse_name')} />
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="region">Region</label>
+            <select id="region" className={inputClass} value={form.region}
+              onChange={e => setForm(f => ({ ...f, region: e.target.value, zone_subcity: '' }))}>
+              <option value="">— Select —</option>
+              {REGIONS.map(r => <option key={r.name} value={r.name}>{r.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="zone_subcity">{regionByName(form.region)?.label || 'Zone / Sub-city'}</label>
+            <select id="zone_subcity" className={inputClass} value={form.zone_subcity} onChange={setField('zone_subcity')} disabled={!form.region}>
+              <option value="">— Select —</option>
+              {(regionByName(form.region)?.areas || []).map(a => <option key={a} value={a}>{a}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="living_town">Living town (auto from Region)</label>
+            <input id="living_town" className={inputClass} value={form.living_town} onChange={setField('living_town')} />
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="labor_id">Labor ID *</label>
+            <input id="labor_id" className={inputClass} value={form.labor_id} onChange={setField('labor_id')} />
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="personal_number">Personal number (auto from broker)</label>
+            <input id="personal_number" className={inputClass} value={form.personal_number} onChange={setField('personal_number')} />
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="cooking_skill">Cooking skill</label>
+            <select id="cooking_skill" className={inputClass} value={form.cooking_skill} onChange={setField('cooking_skill')}>
+              <option value="None">None</option>
+              <option value="Cooking">Cooking</option>
+              <option value="Cooking Helper">Cooking Helper</option>
+            </select>
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="speaks_english">Speaks English</label>
+            <select id="speaks_english" className={inputClass} value={form.speaks_english ? 'yes' : 'no'}
+              onChange={e => setForm(f => ({ ...f, speaks_english: e.target.value === 'yes' }))}>
+              <option value="no">No</option>
+              <option value="yes">Yes</option>
+            </select>
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="speaks_arabic">Speaks Arabic</label>
+            <select id="speaks_arabic" className={inputClass} value={form.speaks_arabic ? 'yes' : 'no'}
+              onChange={e => setForm(f => ({ ...f, speaks_arabic: e.target.value === 'yes' }))}>
+              <option value="no">No</option>
+              <option value="yes">Yes</option>
+            </select>
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="emergency_name">Guardian / Emergency name (auto from middle)</label>
+            <input id="emergency_name" className={inputClass} value={form.emergency_name} onChange={setField('emergency_name')} />
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="emergency_phone">Emergency phone (auto from broker)</label>
+            <input id="emergency_phone" className={inputClass} value={form.emergency_phone} onChange={setField('emergency_phone')} />
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="emergency_gender">Emergency gender</label>
+            <select id="emergency_gender" className={inputClass} value={form.emergency_gender} onChange={setField('emergency_gender')}>
+              <option value="Male">Male</option>
+              <option value="Female">Female</option>
+            </select>
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="emergency_relationship">Emergency relationship</label>
+            <select id="emergency_relationship" className={inputClass} value={form.emergency_relationship} onChange={setField('emergency_relationship')}>
+              <option value="Father">Father</option>
+              <option value="Mother">Mother</option>
+              <option value="Brother">Brother</option>
+              <option value="Sister">Sister</option>
+              <option value="Spouse">Spouse</option>
+              <option value="Other">Other</option>
             </select>
           </div>
         </div>
 
         <div>
-          <p className="label mb-1.5 font-medium text-xs text-slate-600 dark:text-slate-300">የፋይል ቦታ</p>
-          <div className="grid gap-3 sm:grid-cols-3">
-            <input className={inputClass} placeholder="ክፍል" value={form.room} onChange={setField('room')} />
-            <input className={inputClass} placeholder="ጠረጴዛ" value={form.table_name} onChange={setField('table_name')} />
-            <input className={inputClass} placeholder="ሳጥን" value={form.box_number} onChange={setField('box_number')} />
-          </div>
-        </div>
-
-        <div>
-          <label className="label mb-1.5 block font-medium text-xs text-slate-600 dark:text-slate-300" htmlFor="notes">ማስታወሻዎች</label>
-          <textarea
-            id="notes"
-            rows={4}
-            className={`${inputClass} resize-y`}
-            placeholder="ስለዚህ ደንበኛ ጠቃሚ የሆኑ መረጃዎች…"
-            value={form.notes}
-            onChange={setField('notes')}
-          />
+          <label className={labelClass} htmlFor="notes">ማስታወሻዎች</label>
+          <textarea id="notes" rows={4} className={`${inputClass} resize-y`} placeholder="ስለዚህ ደንበኛ ጠቃሚ የሆኑ መረጃዎች…" value={form.notes} onChange={setField('notes')} />
         </div>
 
         <div className="flex flex-wrap gap-3 border-t border-slate-200 dark:border-slate-700 pt-5">
           <button type="submit" className="px-5 py-2.5 rounded-lg bg-teal-600 hover:bg-teal-700 text-white font-medium text-sm transition-colors disabled:opacity-50" disabled={saving}>
             {saving ? 'በማስቀመጥ ላይ…' : isEdit ? 'ለወጦችን አስቀምጥ' : 'ፕሮፋይል ፍጠር'}
           </button>
-          <button
-            type="button"
-            className="px-5 py-2.5 rounded-lg border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 font-medium text-sm transition-colors"
-            onClick={() => navigate(isEdit ? `/profiles/${id}` : '/profiles')}
-          >
+          <button type="button" className="px-5 py-2.5 rounded-lg border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 font-medium text-sm transition-colors" onClick={() => navigate(isEdit ? `/profiles/${id}` : '/profiles')}>
             ሰርዝ
           </button>
         </div>

@@ -48,35 +48,35 @@ func main() {
 		exec.Command(companionExe).Start()
 	}
 
-	// Start backend server
-	fmt.Println("[*] Starting server...")
-	cmd := exec.Command(nodeExe, serverJS)
-	cmd.Dir = filepath.Join(root, "backend")
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-	cmd.Start()
-
-	// Wait for server to be ready
-	fmt.Println("[*] Waiting for server...")
-	ready := false
-	for i := 0; i < 30; i++ {
-		time.Sleep(500 * time.Millisecond)
-		resp, err := http.Get("http://localhost:4000/api/health")
-		if err == nil && resp.StatusCode == 200 {
-			resp.Body.Close()
-			ready = true
-			break
+	// Port 4000 is the one and only Adal Keep port (backend/.env).
+	// If the Run-at-login entry already started the server, do not spawn a
+	// second node process — just open the UI.
+	ready := serverReady(3 * time.Second)
+	if ready {
+		fmt.Println("[✓] Server already running on port 4000.")
+	} else {
+		fmt.Println("[*] Starting server...")
+		cmd := exec.Command(nodeExe, serverJS)
+		cmd.Dir = filepath.Join(root, "backend")
+		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+		if err := cmd.Start(); err != nil {
+			showError("Could not start the server:\n" + err.Error())
+			return
 		}
+
+		fmt.Println("[*] Waiting for server...")
+		ready = serverReady(45 * time.Second)
 	}
 
 	if !ready {
-		fmt.Println("[!] Server may still be starting. Opening browser anyway...")
+		fmt.Println("[!] Server may still be starting. Opening the browser anyway...")
 	} else {
 		fmt.Println("[✓] Server ready!")
 	}
 
-	// Open browser
+	// Open the UI — Brave when installed, otherwise the default browser.
 	fmt.Println("[*] Opening Adal Keep...")
-	exec.Command("cmd", "/c", "start", "http://localhost:3000").Run()
+	openUI("http://localhost:4000")
 
 	fmt.Println()
 	fmt.Println("============================================")
@@ -106,6 +106,47 @@ func main() {
 
 	fmt.Println("[✓] Adal Keep stopped.")
 	time.Sleep(1 * time.Second)
+}
+
+// serverReady polls the health endpoint until it answers or the budget runs out.
+func serverReady(budget time.Duration) bool {
+	deadline := time.Now().Add(budget)
+	for time.Now().Before(deadline) {
+		resp, err := http.Get("http://localhost:4000/api/health")
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == 200 {
+				return true
+			}
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	return false
+}
+
+// braveExe returns the path of an installed Brave browser, or "" if absent.
+func braveExe() string {
+	candidates := []string{
+		filepath.Join(os.Getenv("ProgramFiles"), "BraveSoftware", "Brave-Browser", "Application", "brave.exe"),
+		filepath.Join(os.Getenv("ProgramFiles(x86)"), "BraveSoftware", "Brave-Browser", "Application", "brave.exe"),
+		filepath.Join(os.Getenv("LOCALAPPDATA"), "BraveSoftware", "Brave-Browser", "Application", "brave.exe"),
+	}
+	for _, c := range candidates {
+		if _, err := os.Stat(c); err == nil {
+			return c
+		}
+	}
+	return ""
+}
+
+// openUI opens the Adal Keep web UI in Brave when available.
+func openUI(url string) {
+	if b := braveExe(); b != "" {
+		if err := exec.Command(b, url).Start(); err == nil {
+			return
+		}
+	}
+	exec.Command("cmd", "/c", "start", "", url).Run()
 }
 
 func showError(msg string) {

@@ -5,7 +5,7 @@ import PageHeader from '../components/shared/PageHeader'
 import Button from '../components/shared/Button'
 import Spinner from '../components/shared/Spinner'
 
-const WELCOME = 'ሰላም! እኔ የAdal Keep AI ረዳት ነኝ። ጥያቄ ይጠይቁ።'
+const WELCOME = 'ሰላም! እኔ የAdal AI ረዳት ነኝ። ጥያቄ ይጠይቁ።'
 
 export default function AIPage() {
   const [messages, setMessages] = useState([

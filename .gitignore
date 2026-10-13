@@ -23,6 +23,7 @@ adal-portal/src-tauri/target/
 
 # Uploaded files
 adal-keep-backend/uploads/
+adal-keep-backend/data/
 adal-keep-backend/public/wallpaper.jpg
 backend/uploads/
 backend/public/
@@ -50,3 +51,21 @@ backup_*/
 
 # Misc
 CACHEDIR.TAG
+
+# Update marker written by the software updater
+.adal-version.json
+
+# Personal data and local backups: never commit these (any folder level)
+**/uploads/
+**/SafeStorage/
+**/data/
+**/backups/
+*.sqlite.OLD-*
+adal-keep-backend/data/
+
+# Build output and local tooling (generated; never committed)
+adal-installer/bundle/
+Adal Keep Main/
+.venv/
+adal-keep-backend/.venv/
+database.db

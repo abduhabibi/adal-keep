@@ -3,13 +3,13 @@ import path from 'path'
 import os from 'os'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
-import { grok, models } from './grokClient.js'
+import { deepseek, models } from './deepseekClient.js'
 
 const execFileAsync = promisify(execFile)
 
 export const FIELD_SLOTS = [
   'Passport', 'Government ID', 'CV', 'Contract', 'Medical Report',
-  'Insurance', 'COC', 'Visa', 'Saudi-letter', 'Certificate', 'Other'
+  'Insurance', 'COC (Ethiopian MoLS skills/competence certificate — NOT police clearance)', 'Visa', 'Saudi-letter', 'Certificate', 'Other'
 ]
 
 // Security: Strict allowed extensions and max size (cost + safety)
@@ -53,8 +53,8 @@ async function toVisionPayload(filePath, mimeType) {
 }
 
 export async function classifyDocument(filePath, mimeType = 'image/jpeg') {
-  if (!grok) {
-    return { field: 'Other', confidence: 0, reason: 'No XAI_API_KEY', extracted: {} }
+  if (!deepseek) {
+    return { field: 'Other', confidence: 0, reason: 'No DEEPSEEK_API_KEY', extracted: {} }
   }
 
   const filename = path.basename(filePath)
@@ -98,7 +98,8 @@ Strict classification rules (follow exactly):
 - Contract: Employment contract or agreement.
 - Medical Report: Doctor/lab reports, fitness for work, medical certificate.
 - Insurance: Insurance policy or card.
-- COC: Certificate of Competence / Conduct.
+- COC: Certificate of Competence only (MoLS / TVET skills, units of competence, trade test). NOT police.
+- Police Clearance: Federal Police / criminal record / good conduct / የፖሊስ ክሊራንስ / የፀረ-ወንጀል. NEVER call this COC.
 - Visa: Any visa sticker or approval letter.
 - Saudi-letter: Letter from Saudi employer, embassy, or recruitment agency.
 - Certificate: Educational certificate, training certificate, birth certificate.
@@ -114,7 +115,7 @@ Example output:
 {"field":"CV","confidence":0.92,"reason":"agency biodata form with photo and skills","has_mrz":false,"looks_like_resume":true,"full_name":"Abebe Kebede","passport_number":"EP1234567","national_id":"123456789","date_of_birth":"1995-03-15","date_of_birth_ec":"1987-07-06","nationality":"Ethiopian","gender":"Female","phone_number":"251911223344","issued_date":"","expiry_date":""}`
 
   try {
-    const res = await grok.chat.completions.create({
+    const res = await deepseek.chat.completions.create({
       model: models.vision,
       temperature: 0.0,           // deterministic = more consistent + cost effective
       max_tokens: 600,
@@ -144,6 +145,14 @@ Example output:
     let field = (data.field || 'Other').trim();
     if (data.looks_like_resume && field === 'Passport') field = 'CV';
     if (data.has_mrz && !data.looks_like_resume && field === 'CV') field = 'Passport';
+    {
+      const blob = `${field} ${data.reason || ''}`.toLowerCase()
+      if (/police|clearance|criminal|good conduct|ፖሊስ|ፀረ|ክሊራንስ/.test(blob)) {
+        field = 'Police Clearance'
+      } else if (/competence|mols|tvet|units of competence|ብቃት/.test(blob) && /conduct|clearance/.test(blob) === false) {
+        if (field === 'Police Clearance') field = 'COC'
+      }
+    }
     if (!FIELD_SLOTS.includes(field)) field = 'Other';
 
     const confidence = Math.max(0.3, Number(data.confidence) || 0.65); // floor to avoid overconfidence in failures

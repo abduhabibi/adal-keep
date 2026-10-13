@@ -1,6 +1,8 @@
+import paymentsRouter from './src/routes/payments.js'
 import subscriptionRouter from './src/routes/subscription.js'
 import subscriptionUnlockRouter from "./src/routes/subscriptionUnlock.js"
 import express from 'express'
+import musanedAccountsRouter from './src/routes/musanedAccounts.js'
 import cors from 'cors'
 import knex from 'knex'
 import dotenv from 'dotenv'
@@ -31,7 +33,16 @@ import branchesRouter from "./src/routes/branches.js"
 import { ensureTenancySchema, adoptOrphanData } from "./src/services/tenancy.js"
 import { preCheck, subscriptionGuard, readSide, statusPayload, maybeNotify } from "./src/services/subscription.js"
 import authRouter from "./src/routes/auth.js"
+import cvRouter from './src/routes/cv.js'
+import automationsRouter from './src/routes/automations.js'
+import agentsRouter from './src/routes/agents.js'
+import lmisAccountsRouter from './src/routes/lmisAccounts.js'
+import settingsRouter from './src/routes/settings.js'
 import { startFolderWatcher } from "./src/services/aiIngestion.js"
+import { startWorker } from './src/services/worker.js'
+import { startScanner } from './src/services/autoScanner.js'
+import verificationRouter from './src/routes/verification.js'
+import { startDiscoveryResponder } from './src/services/discovery.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -50,9 +61,16 @@ app.locals.db = db
 
 app.use(cors({ origin: true, credentials: true }))
 app.use(express.json())
+
+// Serve uploaded SafeStorage files statically
+app.use('/uploads', express.static(path.join(process.cwd(), 'data/SafeStorage')))
+
 app.use(subscriptionGuard)
 app.use(attachAuth)
+
+// Core Feature Routes
 app.use("/api", tenancyRouter)
+app.use('/api/payments', paymentsRouter)
 app.use("/api/employees", employeesRouter)
 app.use("/api/employees", employeeRegisterRouter)
 app.use("/api/ai", aiRouter)
@@ -62,28 +80,32 @@ app.use("/api/tasks", tasksRouter)
 app.use("/api/ai-tasks", aiTasksRouter)
 app.use("/api/branches", branchesRouter)
 
-// Serve frontend static files
-const frontendPath = path.join(__dirname, "..", "frontend")
-if (fs.existsSync(frontendPath)) {
-  app.use(express.static(frontendPath))
-  app.get("*", (req, res) => {
-    res.sendFile(path.join(frontendPath, "index.html"))
-  })
-}
-
 // Security headers
 app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }))
+
+// NOTE: the frontend static files AND the SPA fallback are registered at the
+// BOTTOM of this file on purpose. Express matches routes in registration
+// order, so `app.get('*')` here would shadow every route defined below it —
+// which silently broke /api/system/update/check, /api/subscription/status,
+// /api/auth/me, /api/settings, /api/cv/*, /api/lmis/* and /api/musaned/*.
+
+// Subscription & Management Routes
 app.use('/api/subscription', subscriptionRouter)
 app.use("/api/subscription", subscriptionUnlockRouter)
 
-// Tasks Routes
-app.use('/api/tasks', tasksRouter)
-
-// Updates Routes
+// Updates & System Routes
 app.use('/api/updates', updatesRouter)
 app.use('/api/system', systemUpdateRouter)
 app.use("/api/quick-links", quickLinksRouter)
 app.use("/api/auth", authRouter)
+app.use('/api/lmis', lmisAccountsRouter)
+app.use('/api/musaned', musanedAccountsRouter)
+app.use('/api/cv', cvRouter)
+app.use('/api/settings', settingsRouter)
+app.use('/api', automationsRouter)
+app.use('/api/agents', agentsRouter)
+// 3-green-tick verification gate + the LAN endpoints the Employee-PC Companion talks to
+app.use('/api', verificationRouter)
 
 // Utility function to safely check/add missing columns
 async function ensureColumn(table, column, addFn) {
@@ -96,11 +118,11 @@ async function initSystem() {
   const pre = await preCheck()
   if (pre === "destroyed") { app.locals.destroyed = true; console.log("🔐 System archived — awaiting access code."); return }
   try {
-    // Run migrations dynamically (catch corrupt/missing migration errors smoothly)
+    // Run migrations dynamically
     try {
       await db.migrate.latest()
       console.log('✅ Database migrations up to date')
-    await ensureTenancySchema(db)
+      await ensureTenancySchema(db)
     } catch (migErr) {
       console.warn('⚠️ Migration check skipped or non-critical issue:', migErr.message)
     }
@@ -174,6 +196,7 @@ async function initSystem() {
 
 app.locals.runInit = initSystem
 setInterval(async () => { try { if (!app.locals.destroyed) await maybeNotify(app.locals.db, statusPayload(readSide())) } catch {} }, 3600000)
+
 // 2. Apply License Lock Middleware BEFORE core routes
 app.use(licenseLockMiddleware)
 
@@ -314,6 +337,8 @@ app.post('/api/profiles', async (req, res) => {
   try {
     const data = pick(req.body, [
       'full_name',
+      'middle_name',
+      'order_id',
       'phone_number',
       'national_id',
       'passport_number',
@@ -323,6 +348,38 @@ app.post('/api/profiles', async (req, res) => {
       'room',
       'table_name',
       'box_number',
+      'religion',
+      'marital_status',
+      'children_count',
+      'weight',
+      'height',
+      'complexion',
+      'living_town',
+      'mother_name',
+      'father_name',
+      'spouse_name',
+      'education_level',
+      'speaks_english',
+      'speaks_arabic',
+      'skills',
+      'previous_employment',
+      'region',
+      'zone_subcity',
+      'labor_id',
+      'personal_number',
+      'emergency_name',
+      'emergency_phone',
+      'emergency_gender',
+      'emergency_relationship',
+      'cooking_skill',
+      'destination_country',
+      'date_of_birth',
+      'gender',
+      'nationality',
+      'place_of_birth',
+      'passport_issue_date',
+      'passport_expiry_date',
+      'created_by',
     ])
 
     if (!data.full_name?.trim() || !data.phone_number?.trim()) {
@@ -330,6 +387,7 @@ app.post('/api/profiles', async (req, res) => {
     }
 
     data.status = data.status || 'pending'
+    data.created_by = (data.created_by || '').toString().trim() || 'System'
     if (data.broker_id === '' || data.broker_id === null) data.broker_id = null
     else if (data.broker_id !== undefined) data.broker_id = Number(data.broker_id)
 
@@ -339,6 +397,13 @@ app.post('/api/profiles', async (req, res) => {
       .select('profiles.*', 'brokers.name as broker_name')
       .where('profiles.id', id)
       .first()
+
+    try {
+      const { onProfileUpdated } = await import('./src/services/autoTrigger.js')
+      await onProfileUpdated(db, id)
+    } catch (e) {
+      console.error('[profiles] autoTrigger after create:', e.message)
+    }
 
     res.status(201).json(profile)
   } catch (err) {
@@ -354,6 +419,8 @@ app.put('/api/profiles/:id', async (req, res) => {
 
     const data = pick(req.body, [
       'full_name',
+      'middle_name',
+      'order_id',
       'phone_number',
       'national_id',
       'passport_number',
@@ -363,6 +430,37 @@ app.put('/api/profiles/:id', async (req, res) => {
       'room',
       'table_name',
       'box_number',
+      'religion',
+      'marital_status',
+      'children_count',
+      'weight',
+      'height',
+      'complexion',
+      'living_town',
+      'mother_name',
+      'father_name',
+      'spouse_name',
+      'education_level',
+      'speaks_english',
+      'speaks_arabic',
+      'skills',
+      'previous_employment',
+      'region',
+      'zone_subcity',
+      'labor_id',
+      'personal_number',
+      'emergency_name',
+      'emergency_phone',
+      'emergency_gender',
+      'emergency_relationship',
+      'cooking_skill',
+      'destination_country',
+      'date_of_birth',
+      'gender',
+      'nationality',
+      'place_of_birth',
+      'passport_issue_date',
+      'passport_expiry_date',
     ])
 
     if (data.full_name !== undefined && !String(data.full_name).trim()) {
@@ -384,6 +482,14 @@ app.put('/api/profiles/:id', async (req, res) => {
       .where('profiles.id', req.params.id)
       .first()
 
+    // AUTO-TRIGGER HOOK
+    try {
+      const { onProfileUpdated } = await import('./src/services/autoTrigger.js')
+      await onProfileUpdated(db, req.params.id)
+    } catch (e) {
+      console.error('[profiles] autoTrigger after update:', e.message)
+    }
+
     res.json(profile)
   } catch (err) {
     console.error(err)
@@ -401,7 +507,6 @@ app.delete('/api/profiles/:id', async (req, res) => {
     res.status(500).json({ error: 'Failed to delete profile' })
   }
 })
-
 
 app.post('/api/brokers/assign', async (req, res) => {
   try {
@@ -506,10 +611,7 @@ app.post('/api/brokers', async (req, res) => {
       return res.status(400).json({ error: 'Name is required' })
     }
 
-    // Make sure created_by is always saved
     data.created_by = (data.created_by || '').toString().trim() || null
-
-    console.log('[server.js] Creating broker with created_by =', data.created_by)
 
     const [id] = await db('brokers').insert(data)
     const broker = await db('brokers').where('id', id).first()
@@ -573,7 +675,6 @@ app.get('/api/profiles/:id/fields', async (req, res) => {
 
     const templates = await database('field_templates').where('is_permanent', true).orderBy('id')
 
-    // Force include Photo and Self Video if missing from templates
     const forcedFields = ['Photo', 'Self Video']
     for (const f of forcedFields) {
       const exists = templates.some(t => t.name === f)
@@ -629,7 +730,6 @@ app.get('/api/checklist', async (req, res) => {
   try {
     const database = req.app.locals.db
 
-    // Get basic profile info
     const profiles = await database('profiles')
       .leftJoin('brokers', 'profiles.broker_id', 'brokers.id')
       .select(
@@ -645,7 +745,6 @@ app.get('/api/checklist', async (req, res) => {
 
     const result = []
     for (const p of profiles) {
-      // Get field statuses (true if file exists, false otherwise)
       const fields = await database('profile_fields')
         .leftJoin('files', 'profile_fields.id', 'files.profile_field_id')
         .where('profile_fields.profile_id', p.id)
@@ -653,7 +752,7 @@ app.get('/api/checklist', async (req, res) => {
 
       const fieldStatus = {}
       fields.forEach((f) => {
-        fieldStatus[f.name] = !!f.file_id // true if file_id exists
+        fieldStatus[f.name] = !!f.file_id
       })
 
       result.push({ ...p, fieldStatus })
@@ -666,7 +765,7 @@ app.get('/api/checklist', async (req, res) => {
   }
 })
 
-// 1. Get all checklists with their profiles
+// Checklists management
 app.get('/api/checklists', async (req, res) => {
   try {
     const db = req.app.locals.db
@@ -688,7 +787,6 @@ app.get('/api/checklists', async (req, res) => {
   }
 })
 
-// 2. Create a new checklist
 app.post('/api/checklists', async (req, res) => {
   try {
     const { name } = req.body
@@ -700,7 +798,6 @@ app.post('/api/checklists', async (req, res) => {
   }
 })
 
-// 3. Delete a checklist
 app.delete('/api/checklists/:id', async (req, res) => {
   try {
     await req.app.locals.db('checklist_profiles').where('checklist_id', req.params.id).del()
@@ -711,7 +808,6 @@ app.delete('/api/checklists/:id', async (req, res) => {
   }
 })
 
-// 4. Add profile to checklist
 app.post('/api/checklists/:id/profiles', async (req, res) => {
   try {
     const { profile_id } = req.body
@@ -728,7 +824,6 @@ app.post('/api/checklists/:id/profiles', async (req, res) => {
   }
 })
 
-// 5. Remove profile from checklist (Does NOT delete the profile itself)
 app.delete('/api/checklists/:id/profiles/:profileId', async (req, res) => {
   try {
     await req.app.locals.db('checklist_profiles')
@@ -745,23 +840,21 @@ if (!fs.existsSync('./public')) {
   fs.mkdirSync('./public')
 }
 
-// Configure multer specifically for the wallpaper
+// Wallpaper routes
 const wallpaperStorage = multer.diskStorage({
   destination: './public',
-  filename: (req, file, cb) => cb(null, 'wallpaper.jpg') // Always overwrite as wallpaper.jpg
+  filename: (req, file, cb) => cb(null, 'wallpaper.jpg')
 })
 const uploadWallpaper = multer({ 
   storage: wallpaperStorage,
-  limits: { fileSize: 5 * 1024 * 1024 } // 5MB limit
+  limits: { fileSize: 5 * 1024 * 1024 }
 })
 
-// Upload Wallpaper
 app.post('/api/settings/wallpaper', uploadWallpaper.single('wallpaper'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' })
   res.json({ success: true, url: '/api/wallpaper' })
 })
 
-// Serve Wallpaper
 app.get('/api/wallpaper', (req, res) => {
   const filePath = path.resolve('./public/wallpaper.jpg')
   if (fs.existsSync(filePath)) {
@@ -771,7 +864,6 @@ app.get('/api/wallpaper', (req, res) => {
   }
 })
 
-// Remove Wallpaper
 app.delete('/api/settings/wallpaper', (req, res) => {
   const filePath = path.resolve('./public/wallpaper.jpg')
   if (fs.existsSync(filePath)) {
@@ -784,8 +876,6 @@ app.delete('/api/settings/wallpaper', (req, res) => {
 app.post('/api/settings', (req, res) => {
   try {
     const { host, port } = req.body
-
-    // 1. Read existing .env or start with empty string if it doesn't exist
     let envContent = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : ''
 
     const lines = envContent.split('\n').filter((line) => line.trim() !== '')
@@ -807,7 +897,6 @@ app.post('/api/settings', (req, res) => {
     if (!hostUpdated) newLines.push(`HOST=${host}`)
     if (!portUpdated) newLines.push(`PORT=${port}`)
 
-    // 2. Write back to .env
     fs.writeFileSync(envPath, newLines.join('\n') + '\n', 'utf8')
 
     res.json({
@@ -820,26 +909,68 @@ app.post('/api/settings', (req, res) => {
   }
 })
 
-// Check for Updates and Pull from GitHub
-app.post('/api/system/update', (req, res) => {
-  const rootDir = path.join(__dirname, '..')
-  
-  exec('git pull', { cwd: rootDir }, (error, stdout, stderr) => {
-    if (error) {
-      console.error('Update error:', error)
-      return res.status(500).json({ error: stderr || error.message })
-    }
-    
-    if (stdout.includes('Already up to date.')) {
-      return res.json({ success: true, message: 'System is already up to date!' })
-    }
-    
-    res.json({ 
-      success: true, 
-      message: 'Update successful! Please restart the backend server to apply changes.' 
+// --- AI CHAT ENDPOINT ---
+app.post('/api/chat', async (req, res) => {
+  try {
+    const { message } = req.body
+    if (!message) return res.status(400).json({ error: 'Message required' })
+
+    const response = await fetch('https://api.deepseek.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.DEEPSESTREAM_API_KEY || process.env.DEEPSEEK_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: process.env.AI_MODEL || 'deepseek-chat',
+        messages: [
+          { role: 'system', content: 'You are a helpful assistant for Adal, an Ethiopian employment agency CRM. Answer in Amharic or English as appropriate.' },
+          { role: 'user', content: message }
+        ],
+        max_tokens: 500
+      })
     })
-  })
+
+    const data = await response.json()
+    res.json({ reply: data.choices[0].message.content })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
 })
+
+// ---------------------------------------------------------------------------
+// Frontend (SPA) hosting — MUST remain after every API route.
+// ---------------------------------------------------------------------------
+const FRONTEND_CANDIDATES = [
+  path.join(__dirname, '..', 'adal-keep-frontend', 'dist'), // packaged + updater layout
+  path.join(__dirname, '..', 'frontend'),                   // legacy layout
+  path.join(__dirname, '..', 'adal-keep-frontend'),         // source fallback
+]
+
+function resolveFrontendDir() {
+  return FRONTEND_CANDIDATES.find((dir) => fs.existsSync(path.join(dir, 'index.html'))) || null
+}
+
+const frontendDir = process.env.FRONTEND_DIR || resolveFrontendDir()
+
+if (frontendDir) {
+  app.use(express.static(frontendDir))
+  console.log(`🖥️  Serving UI from ${frontendDir}`)
+} else {
+  console.warn('⚠️  No built UI found — run "npm run build" inside adal-keep-frontend')
+}
+
+// Unmatched API calls must return JSON, never the SPA shell.
+app.use('/api', (req, res) => {
+  res.status(404).json({ error: `Unknown API route: ${req.method} ${req.originalUrl}` })
+})
+
+// SPA fallback for every non-API path.
+if (frontendDir) {
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(frontendDir, 'index.html'))
+  })
+}
 
 // Global error handler
 app.use((err, req, res, next) => {
@@ -870,12 +1001,23 @@ cron.schedule('0 2 * * *', async () => {
 // 5. Start Server
 initSystem().then(() => {
   app.listen(PORT, () => {
-  startFolderWatcher()
+    startFolderWatcher(db, 1)     // watches the inbox for new files
+    startWorker(db)               // runs queued jobs in 3 lanes
+    startScanner(db)              // discovers new work every 2 min
     console.log(`🚀 Backend running on http://localhost:${PORT}`)
+    console.log(`🤖 Automation: worker (${process.env.AUTOMATION_LANES || 3} lanes) + scanner running`)
+
+    // Answer Employee PCs that broadcast "where is Adal Keep?" on the LAN.
+    // Best-effort: a busy UDP port or a missing NIC never stops the server.
+    startDiscoveryResponder({
+      port: Number(process.env.DISCOVERY_PORT) || undefined,
+      name: 'Adal Keep',
+      getInfo: () => ({ port: Number(PORT) }),
+    })
   })
 })
 
-// Auto-open Brave workspace (Adal Keep only - Pextran now opened by AI when needed)
+// Auto-open Brave workspace
 const AUTO_START_BRAVE = process.env.AUTO_START_BRAVE !== 'false'
 if (AUTO_START_BRAVE) {
   setTimeout(async () => {

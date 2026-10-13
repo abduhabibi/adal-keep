@@ -18,6 +18,10 @@ import TasksPage from './pages/TasksPage'
 import PaymentLock from './components/PaymentLock'
 import IntroWizard from './pages/IntroWizard'
 import RevivalPage from './pages/RevivalPage'
+import CVsPage from './pages/CVsPage'
+import CVNewPage from './pages/CVNewPage'
+import CVTemplatesPage from './pages/CVTemplatesPage'
+import CVTemplateEditPage from './pages/CVTemplateEditPage'
 
 const toaster = (
   <Toaster
@@ -89,6 +93,11 @@ function Shell() {
             <Route path="notifications" element={<NotificationsPage />} />
             <Route path="ai" element={<AIPage />} />
             <Route path="tasks" element={<TasksPage />} />
+            <Route path="cvs" element={<CVsPage />} />
+            <Route path="cvs/new" element={<CVNewPage />} />
+            <Route path="cvs/templates" element={<CVTemplatesPage />} />
+            <Route path="cvs/templates/new" element={<CVTemplateEditPage />} />
+            <Route path="cvs/templates/:id/edit" element={<CVTemplateEditPage />} />
             <Route path="settings" element={<SettingsPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>

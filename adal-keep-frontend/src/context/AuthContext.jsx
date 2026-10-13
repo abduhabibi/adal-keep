@@ -3,23 +3,51 @@ import api from '../services/api'
 
 const AuthContext = createContext()
 
+function loadStoredEmployee() {
+  try {
+    const raw = localStorage.getItem('adal_active_employee')
+    return raw ? JSON.parse(raw) : null
+  } catch {
+    return null
+  }
+}
+
 export function AuthProvider({ children }) {
-  const [state, setState] = useState('loading') // loading | setup | destroyed | ready | error
+  const [state, setState] = useState('loading')
   const [company, setCompany] = useState(null)
   const [subscription, setSubscription] = useState(null)
   const [user, setUser] = useState(null)
+  const [activeEmployee, setActiveEmployeeState] = useState(loadStoredEmployee)
+
+  const setActiveEmployee = useCallback((emp) => {
+    setActiveEmployeeState(emp)
+    if (emp && emp.id) {
+      localStorage.setItem(
+        'adal_active_employee',
+        JSON.stringify({
+          id: emp.id,
+          name: emp.name,
+          username: emp.username,
+          role: emp.role || 'employee',
+        })
+      )
+    } else {
+      localStorage.removeItem('adal_active_employee')
+    }
+  }, [])
+
+  const setCurrentUser = useCallback((u) => {
+    setUser(u)
+  }, [])
 
   const refresh = useCallback(async () => {
     setState('loading')
     for (let i = 0; i < 5; i++) {
       try {
-        // 1. Company / subscription status
         const st = await api.get('/setup/status')
         setCompany(st.data.companyName)
         setSubscription(st.data.subscription)
         setState(st.data.state)
-
-        // 2. Current logged-in employee (if any)
         try {
           const me = await api.get('/auth/me')
           setUser(me.data)
@@ -28,28 +56,22 @@ export function AuthProvider({ children }) {
         }
         return
       } catch {
-        await new Promise(r => setTimeout(r, 1500))
+        await new Promise((r) => setTimeout(r, 1500))
       }
     }
     setState('error')
   }, [])
 
-  useEffect(() => { refresh() }, [refresh])
-
-  // Live brand swap for the sidebar H2
   useEffect(() => {
-    if (!company || state !== 'ready') return
-    const swap = () => document.querySelectorAll('h2').forEach(el => {
-      const t = el.textContent.trim()
-      if ((t === 'አዳል ኬፕ' || t === 'አዳል ኬ') || t === 'Adal Keep' || el.dataset.adalBrand) {
-        el.textContent = company
-        el.dataset.adalBrand = '1'
-      }
-    })
-    swap()
-    const obs = new MutationObserver(swap)
-    obs.observe(document.body, { childList: true, subtree: true })
-    return () => obs.disconnect()
+    refresh()
+  }, [refresh])
+
+  // Brand the window title once the company is known, e.g. "Adal Sunrise Recruitment".
+  // Components read `company` from this context directly — no DOM patching needed.
+  useEffect(() => {
+    if (state === 'ready' && company) {
+      document.title = `Adal ${company}`
+    }
   }, [state, company])
 
   const completeSetup = async (payload) => {
@@ -64,20 +86,21 @@ export function AuthProvider({ children }) {
     return r.data
   }
 
-  // Helper so any page can force a user refresh after login/logout
-  const setCurrentUser = (u) => setUser(u)
-
   return (
-    <AuthContext.Provider value={{
-      state,
-      company,
-      subscription,
-      user,
-      setCurrentUser,
-      refresh,
-      completeSetup,
-      unlock
-    }}>
+    <AuthContext.Provider
+      value={{
+        state,
+        company,
+        subscription,
+        user,
+        setCurrentUser,
+        activeEmployee,
+        setActiveEmployee,
+        refresh,
+        completeSetup,
+        unlock,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   )

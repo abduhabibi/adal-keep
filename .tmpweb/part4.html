@@ -1,0 +1,51 @@
+<footer>
+  <div class="wrap">
+    <div class="foot-grid">
+      <div class="foot-brand">
+        <a class="brand" href="#top"><span class="logo">AK</span> Adal Keep</a>
+        <p>The offline-first operating system for recruitment agencies. Built in Addis Ababa for agencies everywhere.</p>
+      </div>
+      <div class="foot-col">
+        <h4>Product</h4>
+        <a href="#features">Features</a>
+        <a href="#how">How it works</a>
+        <a href="#why">Why Adal</a>
+      </div>
+      <div class="foot-col">
+        <h4>Company</h4>
+        <a href="#contact">Contact</a>
+        <a href="#contact">Book a demo</a>
+      </div>
+      <div class="foot-col">
+        <h4>Legal</h4>
+        <a href="#">Privacy</a>
+        <a href="#">Terms</a>
+      </div>
+    </div>
+    <div class="foot-bottom">
+      <span>© <span id="yr"></span> Adal Keep. All rights reserved.</span>
+      <span>Made in Addis Ababa 🇪🇹</span>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function(){
+  var root = document.documentElement;
+  var btn = document.getElementById('themeBtn');
+  var saved = null;
+  try { saved = localStorage.getItem('adal-theme'); } catch(e){}
+  if (saved) root.setAttribute('data-theme', saved);
+  function render(){ btn.textContent = root.getAttribute('data-theme') === 'light' ? '☀️' : '🌙'; }
+  render();
+  btn.addEventListener('click', function(){
+    var next = root.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+    root.setAttribute('data-theme', next);
+    try { localStorage.setItem('adal-theme', next); } catch(e){}
+    render();
+  });
+  document.getElementById('yr').textContent = new Date().getFullYear();
+})();
+</script>
+</body>
+</html>

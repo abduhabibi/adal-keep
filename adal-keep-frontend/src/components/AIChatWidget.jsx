@@ -4,7 +4,7 @@ import api from '../services/api'
 export default function AIChatWidget() {
   const [isOpen, setIsOpen] = useState(false)
   const [messages, setMessages] = useState([
-    { role: 'assistant', content: 'ሰላም! እኔ የAdal Keep AI ረዳት ነኝ። ፋይል ይለጥፉ ወይም መልእክት ይጻፉ።' }
+    { role: 'assistant', content: 'ሰላም! እኔ የAdal AI ረዳት ነኝ። ፋይል ይለጥፉ ወይም መልእክት ይጻፉ።' }
   ])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
@@ -183,7 +183,7 @@ export default function AIChatWidget() {
             <div className="flex items-center gap-3">
               <div className="w-8 h-8 rounded-full bg-gradient-to-br from-teal-400 to-teal-600 flex items-center justify-center text-white text-sm font-bold">AI</div>
               <div>
-                <h3 className="font-semibold text-sm">Adal Keep AI</h3>
+                <h3 className="font-semibold text-sm">Adal AI</h3>
                 <p className={`text-xs ${isOnline ? 'text-green-400' : 'text-red-400'}`}>
                   {isOnline ? '● ኦንላይን' : '○ ኦፍላይን'}
                 </p>

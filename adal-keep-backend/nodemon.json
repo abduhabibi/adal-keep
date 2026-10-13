@@ -1,0 +1,14 @@
+{
+  "watch": ["server.js", "src"],
+  "ignore": [
+    "data/",
+    "logs/",
+    "uploads/",
+    "public/",
+    "*.sqlite",
+    "*.sqlite-wal",
+    "*.sqlite-shm",
+    "*.log"
+  ],
+  "ext": "js,mjs,json"
+}

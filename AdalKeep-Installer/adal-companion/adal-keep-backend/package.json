@@ -1,0 +1,44 @@
+{
+  "name": "adal-keep-backend",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "migrate": "knex migrate:latest",
+    "seed": "knex seed:run",
+    "migrate-and-seed": "knex migrate:latest && knex seed:run"
+  },
+  "dependencies": {
+    "@google/genai": "^2.17.1",
+    "@google/generative-ai": "^0.24.1",
+    "@typesafe-ai/sdk": "^0.6.0",
+    "axios": "^1.19.0",
+    "bcryptjs": "^2.4.3",
+    "chokidar": "^5.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^4.19.2",
+    "express-rate-limit": "^8.6.2",
+    "express-session": "^1.18.0",
+    "helmet": "^8.3.0",
+    "image-to-pdf": "^3.0.2",
+    "knex": "^3.1.0",
+    "multer": "^2.2.0",
+    "mupdf": "^1.28.1",
+    "node-cron": "^4.6.0",
+    "openai": "^7.8.0",
+    "pdf-parse": "^2.4.5",
+    "pg": "^8.22.0",
+    "puppeteer-core": "^25.9.0",
+    "replicate": "^1.4.0",
+    "sharp": "^0.35.3",
+    "sqlite3": "^6.0.1",
+    "tesseract.js": "^7.0.0",
+    "uuid": "^14.0.1",
+    "winston": "^3.19.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.3"
+  }
+}

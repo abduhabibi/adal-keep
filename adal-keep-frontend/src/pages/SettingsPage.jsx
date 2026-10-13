@@ -7,20 +7,33 @@ import Card from '../components/shared/Card'
 import Button from '../components/shared/Button'
 import Spinner from '../components/shared/Spinner'
 import Input from '../components/shared/Input'
+import Modal from '../components/shared/Modal'
 
 export default function SettingsPage() {
   const { subscription, refresh } = useAuth()
   const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  
   const [darkMode, setDarkMode] = useState(false)
   const [currentWallpaper, setCurrentWallpaper] = useState(null)
   const [uploadingWallpaper, setUploadingWallpaper] = useState(false)
   const [networkIp, setNetworkIp] = useState('10.134.230.82')
   const [port] = useState('3000')
-  const [updating, setUpdating] = useState(false)
+  const [checking, setChecking] = useState(false)
+  const [hasUpdate, setHasUpdate] = useState(false)
+  const [updateInfo, setUpdateInfo] = useState(null)
+  // Update popup: 'uptodate' | 'available' | 'installing' | 'done' | 'error'
+  const [updateModal, setUpdateModal] = useState(null)
+  const [updateMessage, setUpdateMessage] = useState('')
+  const [applying, setApplying] = useState(false)
   const [accessCode, setAccessCode] = useState('')
   const [unlocking, setUnlocking] = useState(false)
+  
+  // New state for Agency Email
+  const [agencyEmail, setAgencyEmail] = useState('')
 
   useEffect(() => {
+    loadSettings()
     loadWallpaper()
     const savedTheme = localStorage.getItem('adal-theme')
     const isDark = savedTheme === 'dark' || document.documentElement.getAttribute('data-theme') === 'dark'
@@ -30,6 +43,30 @@ export default function SettingsPage() {
     }
     setLoading(false)
   }, [])
+
+  const loadSettings = async () => {
+    try {
+      const res = await api.get('/settings')
+      const settings = res.data || {}
+      setAgencyEmail(settings.agency_email || '')
+    } catch (err) {
+      console.error('Failed to load settings', err)
+    }
+  }
+
+  const saveSettings = async () => {
+    setSaving(true)
+    try {
+      await api.put('/settings', {
+        agency_email: agencyEmail.trim(),
+      })
+      toast.success('Settings saved successfully')
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to save settings')
+    } finally {
+      setSaving(false)
+    }
+  }
 
   const loadWallpaper = async () => {
     try {
@@ -86,14 +123,34 @@ export default function SettingsPage() {
   }
 
   const handleCheckUpdate = async () => {
-    setUpdating(true)
+    setChecking(true)
     try {
-      const res = await api.post('/system/update')
-      toast.success(res.data?.message || 'Up to date')
+      const res = await api.get('/system/update/check')
+      setUpdateInfo(res.data)
+      setHasUpdate(!!res.data.hasUpdate)
+      setUpdateModal(res.data.hasUpdate ? 'available' : 'uptodate')
     } catch (err) {
-      toast.error(err.response?.data?.error || 'Update check failed')
+      setUpdateInfo(null)
+      setUpdateMessage(err.response?.data?.error || 'Could not reach GitHub to check for updates.')
+      setUpdateModal('error')
     } finally {
-      setUpdating(false)
+      setChecking(false)
+    }
+  }
+
+  const handleApplyUpdate = async () => {
+    setApplying(true)
+    setUpdateModal('installing')
+    try {
+      const res = await api.post('/system/update/apply')
+      setUpdateMessage(res.data?.message || 'Update installed.')
+      setHasUpdate(false)
+      setUpdateModal('done')
+    } catch (err) {
+      setUpdateMessage(err.response?.data?.error || 'Update failed.')
+      setUpdateModal('error')
+    } finally {
+      setApplying(false)
     }
   }
 
@@ -129,6 +186,34 @@ export default function SettingsPage() {
         title="የስርዓት ቅንብሮች"
         subtitle="መልክ፣ አውታረ መረብ፣ ምዝገባ እና ማሻሻያዎች"
       />
+
+      {/* NEW: Agency Settings Card */}
+      <Card>
+        <h2 className="font-display text-lg font-bold mb-4 flex items-center gap-2">
+          <span>🏢</span> የኤጀንሲ ቅንብሮች (Agency Settings)
+        </h2>
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
+              Agency Email (for Musaned/Notifications)
+            </label>
+            <Input
+              type="email"
+              placeholder="e.g., admin@youragency.com"
+              value={agencyEmail}
+              onChange={(e) => setAgencyEmail(e.target.value)}
+            />
+            <p className="text-xs text-slate-500 mt-1.5">
+              This email will be used as the default contact for automated workflows like Musaned.
+            </p>
+          </div>
+          <div className="flex justify-end">
+            <Button onClick={saveSettings} isLoading={saving}>
+              Save Settings
+            </Button>
+          </div>
+        </div>
+      </Card>
 
       <Card>
         <h2 className="font-display text-lg font-bold mb-4 flex items-center gap-2">
@@ -222,12 +307,122 @@ export default function SettingsPage() {
         <h2 className="font-display text-lg font-bold mb-4 flex items-center gap-2">
           <span>🔄</span> ማሻሻያዎች
         </h2>
-        <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-800/60 rounded-xl border">
-          <div>
-            <h3 className="font-medium">Check updates</h3>
-            <p className="text-sm text-slate-500">Pull latest system updates</p>
+        <div className="space-y-4">
+      <Modal
+        isOpen={!!updateModal}
+        onClose={() => { if (updateModal !== 'installing') setUpdateModal(null) }}
+        title={{
+          uptodate: 'You are up to date',
+          available: 'Update available',
+          installing: 'Installing update…',
+          done: 'Update installed',
+          error: 'Update problem',
+        }[updateModal] || ''}
+        size="sm"
+      >
+        <div className="space-y-4 text-sm text-slate-600 dark:text-slate-300">
+          {updateModal === 'uptodate' && (
+            <p>This copy already matches the latest version on GitHub{updateInfo?.latest?.short ? ` (${updateInfo.latest.short})` : ''}.</p>
+          )}
+          {updateModal === 'available' && (
+            <>
+              <p>A newer version is published on GitHub.</p>
+              {updateInfo?.latest?.message && (
+                <p className="rounded-lg bg-slate-50 dark:bg-slate-800 p-3 font-mono text-xs">{updateInfo.latest.message}</p>
+              )}
+              <p className="text-xs text-slate-500">
+                Installing downloads the new code and its dependencies. Restart the app afterwards. Your data is kept.
+              </p>
+              <div className="flex justify-end gap-2">
+                <Button variant="secondary" onClick={() => setUpdateModal(null)}>Later</Button>
+                <Button onClick={handleApplyUpdate} className="bg-green-600 hover:bg-green-700">Install update</Button>
+              </div>
+            </>
+          )}
+          {updateModal === 'installing' && (
+            <div className="flex items-center gap-3">
+              <Spinner />
+              <span>Downloading from GitHub and installing. This can take a few minutes.</span>
+            </div>
+          )}
+          {updateModal === 'done' && (
+            <>
+              <p>{updateMessage}</p>
+              <p className="text-xs text-slate-500">Close this window, then restart Adal Keep to use the new version.</p>
+              <div className="flex justify-end"><Button onClick={() => setUpdateModal(null)}>OK</Button></div>
+            </>
+          )}
+          {updateModal === 'error' && (
+            <>
+              <p className="whitespace-pre-wrap break-words">{updateMessage}</p>
+              <div className="flex justify-end"><Button onClick={() => setUpdateModal(null)}>Close</Button></div>
+            </>
+          )}
+          {updateModal === 'uptodate' && (
+            <div className="flex justify-end"><Button onClick={() => setUpdateModal(null)}>OK</Button></div>
+          )}
+        </div>
+      </Modal>
+
+          <div className="flex flex-wrap items-center justify-between gap-4 p-4 bg-slate-50 dark:bg-slate-800/60 rounded-xl border">
+            <div>
+              <h3 className="font-medium">Software Updates</h3>
+              <p className="text-sm text-slate-500">Check GitHub for the latest version and install it</p>
+            </div>
+            <div className="flex gap-2 shrink-0">
+              <Button onClick={handleCheckUpdate} isLoading={checking}>
+                {checking ? 'Checking...' : 'Check for Updates'}
+              </Button>
+              {hasUpdate && (
+                <Button onClick={handleApplyUpdate} isLoading={applying} className="bg-green-600 hover:bg-green-700">
+                  {applying ? 'Installing...' : 'Download & Install Update'}
+                </Button>
+              )}
+            </div>
           </div>
-          <Button onClick={handleCheckUpdate} isLoading={updating}>Check</Button>
+          {updateInfo && (
+            <div className="p-4 rounded-xl border bg-white dark:bg-slate-900 text-sm space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                  updateInfo.hasUpdate ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'
+                }`}>
+                  {updateInfo.hasUpdate ? 'Update available' : 'Up to date'}
+                </span>
+                <span className="text-xs text-slate-500">
+                  branch: <code className="font-mono">{updateInfo.branch}</code>
+                </span>
+              </div>
+              <div className="grid gap-1 text-slate-600 dark:text-slate-300">
+                <div>
+                  <span className="text-slate-400">Installed:</span>{' '}
+                  <code className="font-mono">{updateInfo.installed?.short || 'unknown'}</code>
+                  {updateInfo.installed?.branch ? <> on <code className="font-mono">{updateInfo.installed.branch}</code></> : null}
+                </div>
+                <div>
+                  <span className="text-slate-400">Latest:</span>{' '}
+                  <code className="font-mono">{updateInfo.latest?.short}</code>
+                  {updateInfo.latest?.message ? <> — {updateInfo.latest.message}</> : null}
+                </div>
+                {updateInfo.latest?.date && (
+                  <div>
+                    <span className="text-slate-400">Published:</span>{' '}
+                    {new Date(updateInfo.latest.date).toLocaleString()}
+                  </div>
+                )}
+              </div>
+              <div className="pt-1">
+                <a
+                  href={updateInfo.compareUrl || updateInfo.repoUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-xs text-teal-600 hover:underline"
+                >
+                  {updateInfo.hasUpdate ? 'View changes on GitHub' : 'View repository on GitHub'}
+                </a>
+              </div>
+              {updateInfo.note && <p className="text-xs text-amber-600">{updateInfo.note}</p>}
+            </div>
+          )}
         </div>
       </Card>
     </div>

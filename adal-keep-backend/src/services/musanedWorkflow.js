@@ -18,6 +18,7 @@ import {
 } from './jev/musanedDecisions.js'
 import { pasteText, pasteAndCommit } from './domPaste.js'
 import { ensurePeerTab, isPeerUrl } from './tabManager.js'
+import { musanedMissing } from './musanedPreflight.js'
 
 const MUSANED_ROOT    = 'https://tawtheeq.musaned.com.sa/'
 const DASHBOARD_URL   = 'https://tawtheeq.musaned.com.sa/dashboard'
@@ -881,6 +882,17 @@ async function typeAndCommitDropdown(page, labelText, optionText, ctx) {
   return false
 }
 
+/** Focus a labelled field and press Enter in it (commits the value, like a person does). */
+async function enterInField(page, labelText, ctx) {
+  const { input, reason } = await findInputForLabel(page, labelText)
+  if (!input) { log(ctx, `⚠ Enter: ${labelText} — ${reason}`, 'warn'); return false }
+  await ensureFocus(page, input, ctx, labelText)
+  await page.keyboard.press('Enter').catch(() => {})
+  await sleep(300)
+  log(ctx, `✓ Enter pressed in ${labelText}`)
+  return true
+}
+
 async function fillSkillsByTyping(page, skills, ctx) {
   await closeAnyPanel(page)
   await sleep(300)
@@ -947,17 +959,14 @@ async function fillSkillsByTyping(page, skills, ctx) {
       return { x: r.left + r.width / 2, y: r.top + r.height / 2, text: (m.textContent || '').trim() }
     }, skill)
 
-    if (optBox) {
-      await page.mouse.click(optBox.x, optBox.y, { delay: 30 })
-      await sleep(500)
-    }
-
+    // Enter after the skill: ArrowDown highlights the best match, Enter takes it.
+    await page.keyboard.press('ArrowDown').catch(() => {})
+    await sleep(200)
+    await page.keyboard.press('Enter').catch(() => {})
+    await sleep(500)
     let c1 = await countSkillChips(page)
-    if (c1.count <= c0.count) {
-      // Method B: ArrowDown + Enter
-      await page.keyboard.press('ArrowDown').catch(() => {})
-      await sleep(200)
-      await page.keyboard.press('Enter').catch(() => {})
+    if (c1.count <= c0.count && optBox) {
+      await page.mouse.click(optBox.x, optBox.y, { delay: 30 })
       await sleep(500)
       c1 = await countSkillChips(page)
     }
@@ -1311,7 +1320,7 @@ async function uploadPersonalPhoto(page, ctx) {
   // ── 2) wait for the modal (or a direct chooser) ─────────────────────
   const t0 = Date.now()
   let open = false
-  while (Date.now() - t0 < 8000) {
+  while (Date.now() - t0 < 15000) {
     if (chooserAccepted) break
     open = await photoModalOpen(page)
     if (open) break
@@ -1583,7 +1592,11 @@ export async function stepFillCandidateDetails(page, ctx) {
       `issueDate="${passportIssueDate}" expiryDate="${passportExpiryDate}"`)
 
     // ─── Personal photo first ────────────────────────────────────────
-    await uploadPersonalPhoto(page, ctx)
+    const photo = await uploadPersonalPhoto(page, ctx)
+    if (!photo?.ok) {
+      // Never report the form ready without the photo.
+      throw new Error(`Personal photo was not uploaded to Musaned (${photo?.reason || 'unknown'})`)
+    }
     await sleep(500)
 
     // ─── Radios ──────────────────────────────────────────────────────
@@ -1608,10 +1621,14 @@ export async function stepFillCandidateDetails(page, ctx) {
     await setFieldByLabel(page, 'Mobile Number', mobileNumber, ctx)
     await setFieldByLabel(page, 'E-Mail', agencyEmail, ctx)
     await setFieldByLabel(page, 'Number Of Children', childrenCount, ctx)
+    await enterInField(page, 'Number Of Children', ctx)
 
     // ─── Passport ────────────────────────────────────────────────────
     if (passportIssuePlace) await setFieldByLabel(page, 'Passport Issue Place', passportIssuePlace, ctx)
-    if (passportIssueDate)  await fillDateByLabel(page, 'Passport Issue Date', passportIssueDate, ctx)
+    if (passportIssueDate) {
+      await fillDateByLabel(page, 'Passport Issue Date', passportIssueDate, ctx)
+      await enterInField(page, 'Passport Issue Date', ctx)
+    }
     if (passportExpiryDate) await fillDateByLabel(page, 'Passport Expiry Date', passportExpiryDate, ctx)
 
     // ─── Address + Relative ──────────────────────────────────────────
@@ -1713,6 +1730,16 @@ export async function runMusanedWorkflow(page, ctx) {
   const t0 = Date.now()
   const stage = ctx.musanedStage || 'start'
   log(ctx, `starting musaned workflow (stage=${stage})`)
+
+  // Preflight: Musaned is not opened for a profile missing these items.
+  const photoResolved = await resolvePersonalPhotoPath(ctx).catch(() => ({ path: null }))
+  const missing = musanedMissing(ctx.profile || {}, !!photoResolved.path)
+  if (missing.length) {
+    const msg = 'Musaned not started. Profile is missing: ' + missing.join(', ')
+    log(ctx, msg, 'error')
+    await ctx.notify(`❌ ${ctx.profileName}: Musaned not started`, msg)
+    return { ok: false, step: 'preflight', error: msg, seconds: Math.round((Date.now() - t0) / 1000) }
+  }
   applyGlobalTimeouts(page, ctx)
 
   // Peer check first: worker.js normally selects the tab already, but calling

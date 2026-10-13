@@ -332,7 +332,7 @@ async function runJobInLane(db, page, laneId, job) {
     // Permanent errors: retrying will never help. Add LMIS/companion-specific
     // permanent reasons here so they don't burn attempts on a 2-minute loop.
     const isRetryable = !(
-      /Session lost|not found|Not Found|not in the|placed pool|different labor|could not be verified|already_in_other_agency|already attached|already exists|Profile is missing|LMIS portal error|LMIS blocks/i
+      /Session lost|not found|Not Found|not in the|placed pool|different labor|could not be verified|already_in_other_agency|already attached|already exists|Profile is missing|LMIS portal error|LMIS blocks|Musaned not started/i
         .test(errText)
     )
     const underLimit  = attempt < MAX_ATTEMPTS

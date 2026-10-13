@@ -40,7 +40,16 @@ router.post('/profiles/:profileId/automations/:workflowId/start', async (req, re
     // Preflight — depends on the workflow
     // Musaned workflows need no files
     if (workflowId.startsWith('musaned')) {
-      // skip file preflight
+      // Musaned needs a personal photo, marital status, religion and a mobile number
+      const prof = await db('profiles').where('id', profileId).first()
+      const { musanedMissing, photoOnFile } = await import('../services/musanedPreflight.js')
+      const missing = musanedMissing(prof, await photoOnFile(db, profileId))
+      if (missing.length) {
+        return res.status(400).json({
+          error: 'Musaned not started. Profile is missing: ' + missing.join(', '),
+          missing,
+        })
+      }
     } else if (workflowId === 'police_certificate') {
       const required = ['Photo', 'Passport', 'Slip']
       const missing = []

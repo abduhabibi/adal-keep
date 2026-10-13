@@ -171,6 +171,16 @@ export async function checkAutoTrigger(db, profileId, trigger = 'unknown') {
     return { ready: true, triggered: false, reason: 'already queued', runId: existing.id, status: existing.status }
   }
 
+  // A run that just failed (LMIS blocked it, or the portal erred) is not retried
+  // automatically: every try logs into the government portal again.
+  const recentFailure = await db('automation_queue')
+    .where({ profile_id: profileId, workflow_id: POLICE_WORKFLOW, status: 'failed' })
+    .where('updated_at', '>', new Date(Date.now() - 12 * 3600 * 1000).toISOString())
+    .first()
+  if (recentFailure) {
+    return { ready: true, triggered: false, reason: 'last police run failed within 12 hours — not auto-retried', runId: recentFailure.id }
+  }
+
   // Need an LMIS account
   const account = await db('lmis_accounts').orderBy('is_default', 'desc').first()
   if (!account) {

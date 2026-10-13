@@ -443,7 +443,13 @@ export async function stepDirectNavigate(page, ctx) {
     const url = page.url()
 
     // The portal's own error page: waiting or retrying only logs in again and again.
-    const portalError = await page.evaluate(() => /Something Went Wrong/i.test(document.body?.innerText || '')).catch(() => false)
+    const pageText = await page.evaluate(() => document.body?.innerText || '').catch(() => '')
+    // LMIS blocks the whole police page until the agency's bank account is on file.
+    if (/No Bank Account Found/i.test(pageText)) {
+      log(ctx, 'LMIS blocks the police page: "No Bank Account Found" — the agency must submit its bank account to LMIS (Kazanchis office)', 'error')
+      throw new Error('LMIS blocks this agency: "No Bank Account Found". The agency must submit its bank account to LMIS at the Kazanchis office. Not retried.')
+    }
+    const portalError = /Something Went Wrong/i.test(pageText)
     if (portalError) {
       log(ctx, 'LMIS shows "Something Went Wrong" on the police page — stopping (portal error, not retried)', 'error')
       throw new Error('LMIS portal error: the police certificate page shows "Something Went Wrong". Try again later.')

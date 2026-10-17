@@ -8,6 +8,45 @@ import { upload, generateThumbnail, getRelativePath } from '../services/storage.
 
 const router = express.Router()
 
+// Resolve a DB `path` to an absolute file on disk.
+// Historically two writers used two roots:
+//   - AI pipeline:      data/SafeStorage/<basename>
+//   - UI upload/tray:   uploads/<profileId>/<fieldId>/<uuid>
+// Try every candidate so both work.
+function resolveStoredPath(file) {
+  const cwd = process.cwd()
+  const raw = file.path || ''
+  const base = path.basename(raw)
+  const candidates = [
+    path.join(cwd, 'data/SafeStorage', raw),   // AI files (basename) + data/SafeStorage/<subpath>
+    path.join(cwd, raw),                        // uploads/... paths
+    path.join(cwd, 'data/SafeStorage', base),   // basename fallback
+    path.join(cwd, 'uploads', base),            // last-ditch
+  ]
+  for (const c of candidates) {
+    try { if (c && fs.existsSync(c)) return c } catch {}
+  }
+  return null
+}
+
+// Also try to locate a thumbnail next to the resolved original.
+function resolveThumbPath(originalAbs) {
+  if (!originalAbs) return null
+  const dir = path.dirname(originalAbs)
+  const name = path.basename(originalAbs)
+  const stem = name.replace(/\.\w+$/, '')
+  const candidates = [
+    path.join(dir, 'thumbnails', 'thumb_' + stem + '.jpg'),
+    path.join(dir, 'thumbnails', 'thumb_' + name),
+    path.join(dir, stem + '_thumb.jpg'),
+    path.join(dir, stem + '_thumb' + path.extname(name)),
+  ]
+  for (const c of candidates) {
+    try { if (fs.existsSync(c)) return c } catch {}
+  }
+  return null
+}
+
 // Helper to convert Image to PDF
 const convertImageToPdf = async (inputPath, outputPath) => {
   return new Promise((resolve, reject) => {
@@ -229,13 +268,16 @@ router.delete('/files/:fileId', async (req, res) => {
     const file = await db('files').where('id', fileId).first()
     if (!file) return res.status(404).json({ error: 'File not found' })
 
-    if (fs.existsSync(file.path)) fs.unlinkSync(file.path)
-    const thumbPath = file.path.replace(/(\.\w+)$/, '_thumb$1')
-    if (fs.existsSync(thumbPath)) fs.unlinkSync(thumbPath)
+    const fullPath = resolveStoredPath(file)
+    if (fullPath) try { fs.unlinkSync(fullPath) } catch {}
+    // Also delete a thumbnail if present
+    const thumb = resolveThumbPath(fullPath)
+    if (thumb) try { fs.unlinkSync(thumb) } catch {}
 
     await db('files').where('id', fileId).del()
     res.json({ success: true })
   } catch (err) {
+    console.error('Delete error:', err)
     res.status(500).json({ error: 'Failed to delete file' })
   }
 })
@@ -248,9 +290,12 @@ router.get('/files/:fileId/download', async (req, res) => {
     const file = await db('files').where('id', fileId).first()
     if (!file) return res.status(404).json({ error: 'File not found' })
 
-    const fullPath = path.resolve(file.path)
-    res.download(fullPath, file.original_name)
+    const fullPath = resolveStoredPath(file)
+    if (!fullPath) return res.status(404).json({ error: 'File not found on disk' })
+
+    res.download(fullPath, file.original_name || path.basename(fullPath))
   } catch (err) {
+    console.error('Download error:', err)
     res.status(500).json({ error: 'Failed to download file' })
   }
 })
@@ -263,15 +308,14 @@ router.get('/files/:fileId/thumbnail', async (req, res) => {
     const file = await db('files').where('id', fileId).first()
     if (!file) return res.status(404).json({ error: 'File not found' })
 
-    const thumbPath = file.path.replace(/(\.\w+)$/, '_thumb$1')
-    if (fs.existsSync(thumbPath)) {
-      res.sendFile(path.resolve(thumbPath))
-    } else if (file.mimetype && file.mimetype.startsWith('image/')) {
-      res.sendFile(path.resolve(file.path))
-    } else {
-      res.status(404).json({ error: 'No thumbnail available' })
-    }
+    const fullPath = resolveStoredPath(file)
+    if (!fullPath) return res.status(404).json({ error: 'File not found on disk' })
+
+    // Prefer a real thumbnail if one exists; else send the file itself
+    const thumb = resolveThumbPath(fullPath)
+    res.sendFile(thumb || fullPath)
   } catch (err) {
+    console.error('Thumbnail error:', err)
     res.status(500).json({ error: 'Failed to load thumbnail' })
   }
 })
@@ -321,6 +365,37 @@ router.post('/upload-encrypted', upload.single('file'), async (req, res) => {
   } catch (err) {
     console.error('Encrypted upload error:', err.message)
     res.status(500).json({ error: 'Decryption or storage failed' })
+  }
+})
+
+/* MULTI-FILE-ROUTE-MARKER — appends (does not replace) files to a field */
+router.post('/profiles/:id/fields/:fieldId/files', upload.array('files', 20), async (req, res) => {
+  try {
+    const { id: profileId, fieldId } = req.params
+    if (!req.files || req.files.length === 0) return res.status(400).json({ error: 'No files uploaded' })
+    const db = req.app.locals.db
+    const field = await db('profile_fields').where('id', fieldId).andWhere('profile_id', profileId).first()
+    if (!field) return res.status(404).json({ error: 'Profile field not found' })
+    const inserted = []
+    for (const f of req.files) {
+      if (f.mimetype.startsWith('image/')) {
+        const thumbPath = f.path.replace(/(\.\w+)$/, '_thumb$1')
+        try { await generateThumbnail(f.path, thumbPath) } catch (e) {}
+      }
+      const [fileId] = await db('files').insert({
+        profile_field_id: fieldId,
+        original_name: f.originalname,
+        path: getRelativePath(f.path),
+        mimetype: f.mimetype,
+        size: f.size,
+      })
+      inserted.push(await db('files').where('id', fileId).first())
+    }
+
+    res.status(201).json({ success: true, files: inserted })
+  } catch (err) {
+    console.error('Multi-upload error:', err)
+    res.status(500).json({ error: 'Failed to upload files' })
   }
 })
 

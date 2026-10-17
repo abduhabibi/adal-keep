@@ -1,4 +1,5 @@
 import { NavLink } from 'react-router-dom'
+import { useAuth } from '../../context/AuthContext'
 
 const links = [
   {
@@ -61,20 +62,21 @@ const links = [
     ),
   },
   {
+    to: '/cvs',
+    label: 'ሲቪዎች',
+    icon: (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    ),
+  },
+  {
     to: '/notifications',
     label: 'ማሳወቂያዎች',
     icon: (
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
         <path d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    ),
-  },
-  {
-    to: '/ai',
-    label: 'አርቴፊሻል ኢንተሊጀንስ',
-    icon: (
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
     ),
   },
@@ -92,6 +94,10 @@ const settingsLink = {
 }
 
 export default function Sidebar({ isOpen, onToggle, collapsed, onToggleCollapse }) {
+  const { company } = useAuth()
+  // Before setup completes we show "Adal Keep"; afterwards "Adal <Company name>".
+  const brand = company ? `Adal ${company}` : 'Adal Keep'
+
   const getLinkClass = ({ isActive }) =>
     `flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium transition-all duration-200 ${
       isActive
@@ -132,8 +138,11 @@ export default function Sidebar({ isOpen, onToggle, collapsed, onToggleCollapse 
               </div>
             )}
             <div className={`transition-all duration-300 ${collapsed ? 'opacity-0 w-0 overflow-hidden' : 'opacity-100 w-auto'}`}>
-              <div className="font-display text-lg font-extrabold tracking-tight text-slate-900 dark:text-white whitespace-nowrap">
-                አዳል ኬፕ
+              <div
+                className="font-display text-lg font-extrabold tracking-tight text-slate-900 dark:text-white whitespace-nowrap truncate max-w-[168px]"
+                title={brand}
+              >
+                {brand}
               </div>
               <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">ፕሪሚየም CRM</p>
             </div>

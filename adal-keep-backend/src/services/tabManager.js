@@ -1,0 +1,153 @@
+/**
+ * tabManager.js — every automation run owns exactly one browser tab.
+ *
+ * PROBLEM it solves
+ * -----------------
+ * Runs used to share tabs. A run adopted any tab already on its portal —
+ * including a tab another run was still driving, or one the operator had
+ * open — and the run id was written to localStorage, which every tab on the
+ * same site shares. With two runs at once both ended up in one tab, and the
+ * last one clicked took it over.
+ *
+ * WHAT THIS DOES
+ * --------------
+ *   openRunTab(browser, runId) → the run's own tab. A new run always gets a
+ *                                new tab; a resumed run gets its tab back.
+ *   tabOfRun(runId)            → that tab, or null.
+ *   closeRunTab(runId)         → closes that tab and nothing else.
+ *
+ * This registry (runId → tab) is the only way a tab is ever found. A run
+ * never touches a tab it does not own, and tabs the operator opened are
+ * never adopted, navigated or closed.
+ *
+ * All tabs live in the browser's shared default context, so cookies are
+ * shared: a new tab on a portal the browser is logged into stays logged in.
+ *
+ * Cross-platform: pure Puppeteer/CDP — Windows / macOS / Linux identical.
+ */
+
+export const PEERS = {
+  musaned: { hosts: ['tawtheeq.musaned.com.sa', 'accounts.wahid.sa'], label: 'Musaned' },
+  lmis:    { hosts: ['lmis.gov.et'],                                  label: 'LMIS' },
+}
+
+export function hostOf(url) {
+  try { return new URL(url).hostname.toLowerCase() } catch { return '' }
+}
+
+export function isPeerUrl(url, peer) {
+  const p = PEERS[peer]
+  if (!p) return false
+  const h = hostOf(url)
+  if (!h) return false
+  return p.hosts.some(x => h === x || h.endsWith('.' + x))
+}
+
+function isClosed(page) {
+  try { return !page || (typeof page.isClosed === 'function' && page.isClosed()) } catch { return true }
+}
+
+// --------------------------------------------------------------------------
+// Tab setup (mute + focus emulation + dynamic image interception)
+// --------------------------------------------------------------------------
+/**
+ * Bring a tab up to the standard automation hygiene: muted, focus-emulated
+ * (so Chrome never throttles its timers/network when the user switches away),
+ * and request-intercepted with the dynamic `page.__adalAllowImages` policy.
+ * Idempotent — safe to call on a tab the run already owns.
+ */
+export async function setupTab(page, { runId, mute = true } = {}) {
+  if (!page) return page
+  if (page.__adalSetup) {
+    if (runId !== undefined) page.__adalRunId = runId
+    return page
+  }
+
+  try {
+    const cdp = await page.target().createCDPSession()
+    page.__adalCdp = cdp
+    try { await cdp.send('Page.setAudioMuted', { muted: mute }) } catch {}
+    try { await cdp.send('Emulation.setFocusEmulationEnabled', { enabled: true }) } catch {}
+    page.__adalFocused = true
+  } catch (e) {
+    console.log('[tabManager] cdp setup failed:', e.message)
+  }
+
+  try {
+    await page.setRequestInterception(true)
+    page.on('request', req => {
+      const allowImages = page.__adalAllowImages === true
+      if (!allowImages && req.resourceType() === 'image') req.abort().catch(() => {})
+      else req.continue().catch(() => {})
+    })
+  } catch (e) {
+    console.log('[tabManager] request interception attach failed:', e.message)
+  }
+
+  if (runId !== undefined) page.__adalRunId = runId
+  page.__adalSetup = true
+  return page
+}
+
+// --------------------------------------------------------------------------
+// Run → tab registry
+// --------------------------------------------------------------------------
+const _tabs = new Map() // runId -> Page
+
+/** The tab a run owns, or null when it has none (or it was closed). */
+export function tabOfRun(runId) {
+  const id = Number(runId)
+  const page = _tabs.get(id)
+  if (!page) return null
+  if (isClosed(page)) { _tabs.delete(id); return null }
+  return page
+}
+
+/** Run ids that own an open tab right now. */
+export function runsWithTabs() {
+  return [..._tabs.keys()].filter(id => tabOfRun(id))
+}
+
+/**
+ * The tab this run works in. A run that paused for a person (sign-in, OTP,
+ * Submit) gets the same tab back when it resumes; otherwise a new tab.
+ * Never a tab that belongs to another run or to the operator.
+ */
+export async function openRunTab(browser, runId) {
+  const id = Number(runId)
+  const own = tabOfRun(id)
+  if (own) {
+    await setupTab(own, { runId: id })
+    console.log(`[tabManager] run #${id} back in its own tab`)
+    return own
+  }
+  if (!browser || typeof browser.newPage !== 'function') throw new Error('No browser to open a tab in')
+  const page = await browser.newPage()
+  _tabs.set(id, page)
+  await setupTab(page, { runId: id })
+  console.log(`[tabManager] run #${id} opened its own tab (${runsWithTabs().length} run tab(s) open)`)
+  return page
+}
+
+/**
+ * Let go of a run's tab WITHOUT closing it (a failed run: the operator can
+ * still look at what the portal showed). No run will ever use it again.
+ */
+export function forgetRunTab(runId) {
+  return _tabs.delete(Number(runId))
+}
+
+/** Close the tab this run owns. Returns true when a tab was closed. */
+export async function closeRunTab(runId) {
+  const id = Number(runId)
+  const page = _tabs.get(id)
+  _tabs.delete(id)
+  if (isClosed(page)) return false
+  try {
+    await page.close()
+  } catch {
+    return false
+  }
+  console.log(`[tabManager] run #${id} tab closed`)
+  return true
+}

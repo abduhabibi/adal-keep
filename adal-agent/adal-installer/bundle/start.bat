@@ -1,4 +1,5 @@
 @echo off
+cd /d "%~dp0"
 title Adal Keep - Starting...
 color 0A
 
@@ -9,11 +10,11 @@ echo.
 
 :: Check Node.js
 where node >nul 2>nul
-if %errorlevel% neq 0 (
+if errorlevel 1 (
     echo [!] Node.js not found. Using bundled runtime...
-    set NODE_PATH=%~dp0runtime\node.exe
+    set "NODE_PATH=%~dp0runtime\node.exe"
 ) else (
-    set NODE_PATH=node
+    set "NODE_PATH=node"
 )
 
 :: Install dependencies if needed
@@ -36,7 +37,7 @@ start /min "" "%~dp0adal-agent.exe"
 
 :: Start backend
 echo [*] Starting server...
-start /min "" %NODE_PATH% "%~dp0backend\server.js"
+start /min "" "%NODE_PATH%" "%~dp0backend\server.js"
 
 :: Wait for server
 timeout /t 3 /nobreak >nul

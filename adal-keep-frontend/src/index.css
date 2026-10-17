@@ -385,3 +385,127 @@ body {
 .animate-fade-in-up {
   animation: fadeInUp 0.3s var(--ease-spring) forwards;
 }
+/* =====================================================================
+   Dark mode safety net: text and white boxes hard-coded for light mode
+   (no dark: variant) stay readable when the theme is dark or gradient.
+   Wrap something in .keep-light to opt out.
+   ===================================================================== */
+.dark :is(.text-black, .text-gray-900, .text-gray-800, .text-slate-900, .text-slate-800, .text-zinc-900, .text-neutral-900):not([class*="dark:text"]):not(.keep-light *) {
+  color: #f1f5f9;
+}
+.dark :is(.text-gray-700, .text-slate-700, .text-gray-600, .text-slate-600):not([class*="dark:text"]):not(.keep-light *) {
+  color: #cbd5e1;
+}
+.dark :is(.bg-white, .bg-gray-50, .bg-slate-50, .bg-gray-100, .bg-slate-100):not([class*="dark:bg"]):not(iframe):not(.keep-light):not(.keep-light *) {
+  background-color: var(--surface);
+}
+.dark :is(input, textarea, select):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([class*="dark:bg"]):not(.keep-light *) {
+  background-color: rgba(15, 23, 42, 0.7);
+  color: #f1f5f9;
+  border-color: rgba(148, 163, 184, 0.35);
+}
+.dark :is(input, textarea)::placeholder { color: #94a3b8; }
+.dark option { background: #0f172a; color: #f1f5f9; }
+
+/* =====================================================================
+   Gradient theme — black UI with moving gradients ("the workshop is alive")
+   Built to stay smooth: the colours are ONE pre-painted layer that only
+   moves (transform = GPU, no repaint). No blur filters, no blend modes and
+   no backdrop-filter on panels — those re-render every frame and lagged.
+   ===================================================================== */
+[data-theme="gradient"] {
+  color-scheme: dark;
+  --bg: #050508;
+  --surface: rgba(14, 14, 26, 0.82);
+  --surface-hover: rgba(24, 24, 42, 0.9);
+  --border: rgba(255, 255, 255, 0.09);
+  --text: #f5f5f7;
+  --text-muted: #a1a1aa;
+  --primary: #22d3ee;
+  --primary-glow: rgba(34, 211, 238, 0.18);
+  --shadow-md: 0 8px 30px rgba(0, 0, 0, 0.55);
+  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.6);
+}
+
+.gradient-backdrop { display: none; }
+[data-theme="gradient"] .gradient-backdrop {
+  display: block;
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  background: #050508;
+  contain: strict;
+}
+/* Two big soft-colour layers, painted once, drifting slowly. */
+[data-theme="gradient"] .gradient-backdrop span {
+  position: absolute;
+  inset: -40%;
+  will-change: transform;
+  transform: translate3d(0, 0, 0);
+}
+[data-theme="gradient"] .gradient-backdrop span:nth-child(1) {
+  background:
+    radial-gradient(closest-side at 25% 30%, rgba(20, 184, 166, 0.45), transparent),
+    radial-gradient(closest-side at 75% 65%, rgba(99, 102, 241, 0.42), transparent);
+  animation: adal-drift-a 40s ease-in-out infinite alternate;
+}
+[data-theme="gradient"] .gradient-backdrop span:nth-child(2) {
+  background:
+    radial-gradient(closest-side at 60% 25%, rgba(236, 72, 153, 0.30), transparent),
+    radial-gradient(closest-side at 35% 75%, rgba(245, 158, 11, 0.18), transparent);
+  animation: adal-drift-b 55s ease-in-out infinite alternate;
+}
+[data-theme="gradient"] .gradient-backdrop span:nth-child(n+3) { display: none; }
+
+@keyframes adal-drift-a { from { transform: translate3d(-6%, -4%, 0) rotate(0deg); } to { transform: translate3d(6%, 5%, 0) rotate(25deg); } }
+@keyframes adal-drift-b { from { transform: translate3d(5%, 6%, 0) rotate(0deg); } to { transform: translate3d(-6%, -5%, 0) rotate(-30deg); } }
+
+/* No live blur anywhere in this theme: the app's frosted panels (blur 24px)
+   re-render every frame over a moving background — that was the lag. */
+[data-theme="gradient"] * {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+/* Content sits above the colours as dark glass (no live blur). */
+[data-theme="gradient"] .app-shell { background: transparent !important; position: relative; }
+[data-theme="gradient"] .app-shell > :not(.gradient-backdrop) { position: relative; z-index: 1; }
+[data-theme="gradient"] :is(.panel, .glass-panel, aside, nav, header),
+[data-theme="gradient"] [class*="dark:bg-slate-8"],
+[data-theme="gradient"] [class*="dark:bg-slate-9"],
+[data-theme="gradient"] [class*="dark:bg-gray-8"],
+[data-theme="gradient"] [class*="dark:bg-gray-9"] {
+  background-color: rgba(10, 10, 20, 0.78) !important;
+}
+[data-theme="gradient"] .panel {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: box-shadow 0.3s ease;
+}
+[data-theme="gradient"] .panel:hover {
+  box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.35), 0 10px 32px rgba(99, 102, 241, 0.22);
+}
+
+/* The page title flows with the same colours; buttons get a still gradient. */
+[data-theme="gradient"] h1 {
+  background: linear-gradient(90deg, #5eead4, #a5b4fc, #f9a8d4, #5eead4);
+  background-size: 300% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent !important;
+  animation: adal-flow 12s linear infinite;
+}
+[data-theme="gradient"] :is(.bg-teal-600, .bg-teal-500):not(.keep-light) {
+  background-image: linear-gradient(110deg, #0d9488, #4f46e5);
+}
+@keyframes adal-flow { 0% { background-position: 0% 50%; } 100% { background-position: 300% 50%; } }
+
+.theme-swatch-gradient {
+  background: linear-gradient(120deg, #050508 15%, #14b8a6, #6366f1, #ec4899);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-theme="gradient"] .gradient-backdrop span,
+  [data-theme="gradient"] h1 { animation: none !important; }
+}

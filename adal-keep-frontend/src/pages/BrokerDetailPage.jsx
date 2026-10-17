@@ -9,6 +9,7 @@ import Card from '../components/shared/Card'
 import Button from '../components/shared/Button'
 import Input from '../components/shared/Input'
 import Modal from '../components/shared/Modal'
+import ProfileSearchPad from '../components/ProfileSearchPad'
 
 /* BrokersAssignPanel: drop zone */
 export default function BrokerDetailPage() {
@@ -111,6 +112,9 @@ export default function BrokerDetailPage() {
           </div>
         }
       />
+
+      {/* Inside the broker: search only this broker's profiles */}
+      <ProfileSearchPad title={`${broker.name} — this broker's profiles`} profiles={profiles} maxHeight="max-h-60" />
 
       <div className="grid gap-6 lg:grid-cols-3">
         <Card className="lg:col-span-1 p-6">

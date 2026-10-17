@@ -7,8 +7,12 @@
     <title>Adal Keep</title>
     <script>
       (function() {
-        var t = localStorage.getItem('adal-theme');
-        document.documentElement.setAttribute('data-theme', t === 'dark' ? 'dark' : 'light');
+        var t = 'light';
+        try { t = localStorage.getItem('adal-theme') || 'light'; } catch (e) {}
+        if (t !== 'dark' && t !== 'gradient') t = 'light';
+        document.documentElement.setAttribute('data-theme', t);
+        // Tailwind's dark: styles need the class too, or dark pages get dark text.
+        if (t !== 'light') document.documentElement.classList.add('dark');
       })();
     </script>
   </head>

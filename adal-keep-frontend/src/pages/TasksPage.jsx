@@ -7,14 +7,13 @@ import Spinner from '../components/shared/Spinner'
 
 const COLUMNS = [
   { key: 'pending', label: 'ለመሰራት', color: 'amber' },
-  { key: 'in_progress', label: 'በሂደት ላይ', color: 'blue' },
   { key: 'completed', label: 'ተጠናቋል', color: 'emerald' }
 ]
 
 function normalizeStatus(s) {
   if (!s) return 'pending'
   if (s === 'todo' || s === 'open') return 'pending'
-  if (s === 'ongoing') return 'in_progress'
+  if (s === 'ongoing' || s === 'in_progress') return 'pending'
   if (s === 'done') return 'completed'
   return s
 }
@@ -91,6 +90,19 @@ export default function TasksPage() {
     }
   }
 
+  const removeAllPending = async () => {
+    const todo = tasks.filter(x => normalizeStatus(x.status) === 'pending')
+    if (!todo.length) return
+    if (!confirm('ሁሉንም ለመሰራት ተግባሮች ይሰረዙ?')) return
+    try {
+      await Promise.all(todo.map(x => api.delete(`/tasks/${x.id}`)))
+      toast.success('ለመሰራት ተግባሮች ተሰርዘዋል')
+      await load()
+    } catch {
+      toast.error('Clear failed')
+    }
+  }
+
   const deleteTask = async (id) => {
     if (!confirm('ይህ ተግባር ይሰረዝ?')) return
     try {
@@ -150,7 +162,7 @@ export default function TasksPage() {
         action={<Button onClick={load} variant="secondary">ዳግም ጫን</Button>}
       />
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {COLUMNS.map(col => {
           const list = byCol(col.key)
           const isOver = overCol === col.key
@@ -168,16 +180,15 @@ export default function TasksPage() {
             >
               <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-200 dark:border-slate-700">
                 <span className={`w-2.5 h-2.5 rounded-full ${
-                  col.color === 'amber' ? 'bg-amber-400' :
-                  col.color === 'blue' ? 'bg-blue-400' : 'bg-emerald-400'
+                  col.color === 'amber' ? 'bg-amber-400' : 'bg-emerald-400'
                 }`} />
                 <h3 className="font-semibold text-sm text-slate-800 dark:text-slate-100">{col.label}</h3>
                 <span className="ml-auto text-xs text-slate-500 flex items-center gap-2">
-                  {col.key === 'completed' && list.length > 0 && (
+                  {(col.key === 'completed' || col.key === 'pending') && list.length > 0 && (
                     <button
                       type="button"
                       className="text-[10px] text-red-600 hover:underline"
-                      onClick={(e) => { e.stopPropagation(); removeAllCompleted() }}
+                      onClick={(e) => { e.stopPropagation(); col.key === 'completed' ? removeAllCompleted() : removeAllPending() }}
                     >
                       Remove all
                     </button>

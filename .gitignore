@@ -23,6 +23,7 @@ adal-portal/src-tauri/target/
 
 # Uploaded files
 adal-keep-backend/uploads/
+adal-keep-backend/data/
 adal-keep-backend/public/wallpaper.jpg
 backend/uploads/
 backend/public/
@@ -50,3 +51,38 @@ backup_*/
 
 # Misc
 CACHEDIR.TAG
+
+# Update marker written by the software updater
+.adal-version.json
+
+# Personal data and local backups: never commit these (any folder level)
+**/uploads/
+**/SafeStorage/
+**/data/
+**/backups/
+*.sqlite.OLD-*
+adal-keep-backend/data/
+
+# Build output and local tooling (generated; never committed)
+adal-installer/bundle/
+Adal Keep Main/
+.venv/
+adal-keep-backend/.venv/
+database.db
+
+# USB build output (contains the .env keys)
+Adal Keep USB/
+adal-installer/stage/
+adal-installer/.deps-keep/
+
+# runtime logs
+adal-keep-backend/logs/*.log
+adal-launcher/AdalKeep.exe
+adal-companion/adal-companion.exe
+
+# Personal data / old copies — never publish
+AdalKeep-Installer/
+all_musaned_candidates.json
+adal-keep-backend/samples/
+adal-keep-backend/PASSPORT-DEBUG.txt
+all-source.txt

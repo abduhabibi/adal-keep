@@ -2,6 +2,7 @@ import { approvePextranNext } from '../services/pextranAgent.js'
 import { Router } from 'express'
 import { attachFileToProfile } from '../services/profileFiles.js'
 import { findExistingProfile } from '../services/fileMatcher.js'
+import { getActiveEmployee } from '../services/activeEmployee.js'
 
 const router = Router()
 
@@ -73,6 +74,14 @@ router.post('/:id/approve', async (req, res) => {
       }
 
       const cols = await db('profiles').columnInfo()
+      // Attribute the new profile to the operator who captured/approved it
+      let createdByName = req.auth?.name || req.auth?.username || null
+      if (!createdByName) {
+        try {
+          const active = await getActiveEmployee(db)
+          createdByName = active?.name || null
+        } catch {}
+      }
       const candidate = {
         full_name: ex.full_name || 'Unknown',
         passport_number: ex.passport_number || null,
@@ -85,7 +94,7 @@ router.post('/:id/approve', async (req, res) => {
         gender: ex.gender || null,
         phone_number: ex.phone_number || null,
         status: 'in_progress',
-        created_by: (req.auth?.uid ? (await req.app.locals.db('users').where({ id: req.auth.uid }).first().then(u => u?.name || 'AI-Approved').catch(() => 'AI-Approved')) : 'AI-Approved'),
+        created_by: createdByName || 'AI-System',
         notes: `From ${payload.originalFilename || ''} (task #${task.id})`,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()

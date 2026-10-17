@@ -1,4 +1,5 @@
 import aiService from './ai.js'
+import { getActiveEmployee } from './activeEmployee.js'
 
 function stripQuotes(s) {
   return String(s || '').trim().replace(/^["'“”]+|["'“”]+$/g, '').trim()
@@ -389,6 +390,14 @@ If data missing, ask for missing fields only — one short message.`
       const miss = this.profileMissing(data)
       if (miss.length) return { success: false, message: 'ጎድሏል: ' + miss.join(', ') }
       const cols = await db('profiles').columnInfo()
+      // Attribute to the operator (employee who triggered this) when known
+      let createdBy = 'AI'
+      try {
+        const active = userId
+          ? await db('users').where({ id: userId }).first()
+          : await getActiveEmployee(db)
+        if (active?.name || active?.username) createdBy = active.name || active.username
+      } catch {}
       const row = {
         full_name: data.full_name,
         passport_number: data.passport_number,
@@ -397,7 +406,7 @@ If data missing, ask for missing fields only — one short message.`
         gender: data.gender || null,
         nationality: data.nationality || null,
         status: 'in_progress',
-        created_by: 'AI',
+        created_by: createdBy,
         is_ai_created: 1,
         created_at: now(),
         updated_at: now()

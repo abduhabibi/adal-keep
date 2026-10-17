@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import ProfileSearchPad from '../components/ProfileSearchPad'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import api from '../services/api'
@@ -61,6 +62,9 @@ export default function BrokersPage() {
           </div>
         }
       />
+
+      {/* Outside a broker: search every profile */}
+      <ProfileSearchPad title="All profiles — search" profiles={profiles} maxHeight="max-h-72" />
 
       {filtered.length === 0 ? (
         <div className="text-center py-20 text-slate-400">

@@ -28,7 +28,9 @@ function PhoneField({ label, cc, num, onChange }) {
           onChange={(e) => onChange({ cc: e.target.value, num })}
           className="w-24 px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500/40"
         >
-          {COUNTRY_CODES.map(c => <option key={c} value={c}>{c}</option>)}
+          {COUNTRY_CODES.map((c) => (
+            <option key={c} value={c}>{c}</option>
+          ))}
         </select>
         <input
           inputMode="numeric"
@@ -42,73 +44,53 @@ function PhoneField({ label, cc, num, onChange }) {
   )
 }
 
-const emptyEmp = {
-  name: '', username: '',
-  wa_cc: '+251', wa_num: '',
-  work_cc: '+251', work_num: '',
-  password: '', password2: ''
-}
 function getDeviceSerial() {
   let id = localStorage.getItem('adal_device_serial')
   if (!id) {
-    id = (crypto.randomUUID && crypto.randomUUID()) || ('dev-' + Date.now() + '-' + Math.random().toString(36).slice(2))
+    id =
+      (typeof crypto !== 'undefined' && crypto.randomUUID && crypto.randomUUID()) ||
+      'dev-' + Date.now() + '-' + Math.random().toString(36).slice(2)
     localStorage.setItem('adal_device_serial', id)
   }
   return id
 }
 
+const emptyEmp = {
+  name: '',
+  username: '',
+  work_cc: '+251',
+  work_num: '',
+}
+
 export default function EmployeesPage() {
   const navigate = useNavigate()
-  const { setCurrentUser } = useAuth()
+  const { setCurrentUser, activeEmployee, setActiveEmployee } = useAuth()
 
   const [employees, setEmployees] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
-
-  // Password gate
-  const [gateEmployee, setGateEmployee] = useState(null)
-  const [gatePassword, setGatePassword] = useState('')
   const [gateLoading, setGateLoading] = useState(false)
 
-  // Active workspace
   const [active, setActive] = useState(null)
   const [myBrokers, setMyBrokers] = useState([])
   const [myProfiles, setMyProfiles] = useState([])
   const [wsLoading, setWsLoading] = useState(false)
 
-  // Employee modal (create / edit)
   const [empModal, setEmpModal] = useState(false)
   const [editingEmp, setEditingEmp] = useState(null)
   const [empForm, setEmpForm] = useState(emptyEmp)
   const [empSaving, setEmpSaving] = useState(false)
 
-  // Broker modal (create / edit)
   const [brokerModal, setBrokerModal] = useState(false)
   const [editingBroker, setEditingBroker] = useState(null)
   const [brokerForm, setBrokerForm] = useState({ name: '', contact1: '', address: '' })
   const [brokerSaving, setBrokerSaving] = useState(false)
 
-  useEffect(() => {
-    loadEmployees()
-    ;(async () => {
-      try {
-        const res = await api.post('/employees/device-resume', { deviceSerial: getDeviceSerial() })
-        if (res.data?.user) {
-          const u = res.data.user
-          setCurrentUser(u)
-          setActive(u)
-          toast.success(`እንኳን ደህና መጡ፣ ${u.name}`)
-          // workspace loads after employees list if needed
-        }
-      } catch {}
-    })()
-  }, [])
-
   const loadEmployees = async () => {
     setLoading(true)
     try {
       const res = await api.get('/employees')
-      setEmployees(res.data || [])
+      setEmployees(Array.isArray(res.data) ? res.data : [])
     } catch {
       toast.error('ሰራተኞችን መጫን አልተቻለም')
     } finally {
@@ -116,71 +98,27 @@ export default function EmployeesPage() {
     }
   }
 
-  // ---------- PASSWORD GATE ----------
-  const openGate = async (emp) => {
-    setGateLoading(true)
-    try {
-      const res = await api.post('/employees/device-login', {
-        employeeId: emp.id,
-        deviceSerial: getDeviceSerial()
-      })
-      const u = res.data.user || emp
-      setCurrentUser(u)
-      setActive({ ...emp, ...u })
-      localStorage.setItem('adal_last_employee_id', String(emp.id))
-      toast.success(`እንኳን ደህና መጡ፣ ${emp.name}`)
-      loadWorkspace(emp)
-    } catch (err) {
-      toast.error(err.response?.data?.error || 'መግባት አልተቻለም')
-    } finally {
-      setGateLoading(false)
-    }
-  }
-
-  const submitGate = async (e) => {
-    e.preventDefault()
-    if (!gatePassword) return toast.error('የይለፍ ቃል ያስገቡ')
-    setGateLoading(true)
-    try {
-      const res = await api.post('/auth/login', {
-        username: gateEmployee.username,
-        password: gatePassword
-      })
-      setCurrentUser(res.data)
-      setActive(gateEmployee)
-      setGateEmployee(null)
-      setGatePassword('')
-      toast.success(`እንኳን ደህና መጡ፣ ${gateEmployee.name}`)
-      loadWorkspace(gateEmployee)
-    } catch (err) {
-      toast.error(err.response?.data?.error || 'የይለፍ ቃል ትክክል አይደለም')
-    } finally {
-      setGateLoading(false)
-    }
-  }
-
-  // ---------- WORKSPACE ----------
   const loadWorkspace = async (emp) => {
     if (!emp) return
     setWsLoading(true)
     try {
-      const [bRes, pRes] = await Promise.all([
-        api.get('/brokers'),
-        api.get('/profiles')
-      ])
+      const [bRes, pRes] = await Promise.all([api.get('/brokers'), api.get('/profiles')])
       const allBrokers = bRes.data || []
       const allProfiles = pRes.data || []
-      const name = (emp.name || emp.full_name || '').trim().toLowerCase()
-
-      // Always filter by created_by (case-insensitive)
-      setMyBrokers(
-        allBrokers.filter(b => (b.created_by || '').trim().toLowerCase() === name)
-      )
-      setMyProfiles(
-        allProfiles.filter(p => (p.created_by || '').trim().toLowerCase() === name)
-      )
+      const keys = [
+        (emp.name || emp.full_name || ''),
+        (emp.username || ''),
+        emp.id != null ? String(emp.id) : '',
+      ].map(s => String(s).trim().toLowerCase()).filter(Boolean)
+      const matchCreator = (row) => {
+        const c = String(row.created_by || '').trim().toLowerCase()
+        if (!c) return false
+        return keys.some(k => c === k || c.includes(k) || k.includes(c))
+      }
+      setMyBrokers(allBrokers.filter(matchCreator))
+      setMyProfiles(allProfiles.filter(matchCreator))
     } catch (err) {
-      console.error('loadWorkspace error:', err)
+      console.error('loadWorkspace', err)
       toast.error('መረጃ መጫን አልተቻለም')
       setMyBrokers([])
       setMyProfiles([])
@@ -189,7 +127,52 @@ export default function EmployeesPage() {
     }
   }
 
-  // Assign a profile to a broker (used by drag & drop)
+  // Restore session when returning from Profiles / any page
+  useEffect(() => {
+    loadEmployees()
+    if (activeEmployee?.id) {
+      setActive(activeEmployee)
+      loadWorkspace(activeEmployee)
+      return
+    }
+    ;(async () => {
+      try {
+        const res = await api.post('/employees/device-resume', {
+          deviceSerial: getDeviceSerial(),
+        })
+        if (res.data?.user) {
+          const u = res.data.user
+          setCurrentUser(u)
+          setActiveEmployee(u)
+          setActive(u)
+          loadWorkspace(u)
+        }
+      } catch {}
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  /** One click — bind this PC, no password */
+  const openGate = async (emp) => {
+    setGateLoading(true)
+    try {
+      const res = await api.post('/employees/device-login', {
+        employeeId: emp.id,
+        deviceSerial: getDeviceSerial(),
+      })
+      const u = { ...emp, ...(res.data?.user || {}) }
+      setCurrentUser(u)
+      setActiveEmployee(u)
+      setActive(u)
+      toast.success(`እንኳን ደህና መጡ፣ ${emp.name}`)
+      loadWorkspace(u)
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'መግባት አልተቻለም')
+    } finally {
+      setGateLoading(false)
+    }
+  }
+
   const assignProfileToBroker = async (profileId, brokerId) => {
     try {
       await api.put(`/profiles/${profileId}`, { broker_id: brokerId })
@@ -201,14 +184,19 @@ export default function EmployeesPage() {
   }
 
   const exitWorkspace = async () => {
-    try { await api.post('/auth/logout') } catch {}
+    try {
+      await api.post('/employees/device-logout', { deviceSerial: getDeviceSerial() })
+    } catch {}
+    try {
+      await api.post('/auth/logout')
+    } catch {}
+    setActiveEmployee(null)
     setCurrentUser(null)
     setActive(null)
     setMyBrokers([])
     setMyProfiles([])
   }
 
-  // ---------- EMPLOYEE CRUD ----------
   const openCreateEmp = () => {
     setEditingEmp(null)
     setEmpForm(emptyEmp)
@@ -220,12 +208,8 @@ export default function EmployeesPage() {
     setEmpForm({
       name: emp.name || '',
       username: emp.username || '',
-      wa_cc: '+251',
-      wa_num: '',
       work_cc: '+251',
       work_num: (emp.phone_work || '').replace(/\D/g, '').slice(-9),
-      password: '',
-      password2: ''
     })
     setEmpModal(true)
   }
@@ -233,20 +217,18 @@ export default function EmployeesPage() {
   const saveEmployee = async (e) => {
     e.preventDefault()
     if (!empForm.name.trim()) return toast.error('ስም ያስፈልጋል')
-    if (!empForm.username.trim() || /\s/.test(empForm.username)) return toast.error('መለያ ስም ያለ ክፍተት')
-    // password optional – device serial login
-    if (empForm.password && empForm.password.length > 0 && empForm.password !== empForm.password2) return toast.error('የይለፍ ቃሎች አይመሳሰሉም')
-
+    if (!empForm.username.trim() || /\s/.test(empForm.username)) {
+      return toast.error('መለያ ስም ያለ ክፍተት')
+    }
     setEmpSaving(true)
     try {
       const payload = {
         name: empForm.name.trim(),
         username: empForm.username.trim(),
-        phone_whatsapp: '',
-        phone_work: empForm.work_num ? `${empForm.work_cc}${digitsOnly(empForm.work_num)}` : ''
+        phone_work: empForm.work_num
+          ? `${empForm.work_cc}${digitsOnly(empForm.work_num)}`
+          : '',
       }
-      if (empForm.password) payload.password = empForm.password
-
       if (editingEmp) {
         await api.put(`/employees/${editingEmp.id}`, payload)
         toast.success('ሰራተኛ ተዘምኗል')
@@ -275,7 +257,6 @@ export default function EmployeesPage() {
     }
   }
 
-  // ---------- BROKER CRUD ----------
   const openCreateBroker = () => {
     setEditingBroker(null)
     setBrokerForm({ name: '', contact1: '', address: '' })
@@ -287,7 +268,7 @@ export default function EmployeesPage() {
     setBrokerForm({
       name: b.name || '',
       contact1: b.contact1 || '',
-      address: b.address || ''
+      address: b.address || '',
     })
     setBrokerModal(true)
   }
@@ -299,9 +280,10 @@ export default function EmployeesPage() {
     try {
       const payload = {
         ...brokerForm,
-        created_by: (active && (active.name || active.full_name || active.username || "")).toString().trim() || "unknown"
+        created_by:
+          (active && (active.name || active.full_name || active.username || '')).toString().trim() ||
+          'unknown',
       }
-      console.log("Creating broker with created_by =", payload.created_by)  // temporary debug
       if (editingBroker) {
         await api.put(`/brokers/${editingBroker.id}`, payload)
         toast.success('ደላላ ተዘምኗል')
@@ -319,33 +301,35 @@ export default function EmployeesPage() {
   }
 
   const deleteBroker = async (b) => {
-    if (!confirm(`"${b.name}" ይሰረዝ?\n\nፕሮፋይሎቹ አይጠፉም (ከደላላው ብቻ ይላቀቃሉ)።`)) return
+    if (!confirm(`"${b.name}" ይሰረዝ?\n\nፕሮፋይሎቹ አይጠፉም።`)) return
     try {
-      // Un-assign only
-      const linked = myProfiles.filter(p => p.broker_id === b.id)
+      const linked = myProfiles.filter((p) => p.broker_id === b.id)
       for (const p of linked) {
         await api.put(`/profiles/${p.id}`, { broker_id: null })
       }
       await api.delete(`/brokers/${b.id}`)
-      toast.success('ደላላ ተሰርዟል (ፕሮፋይሎች ተጠብቀዋል)')
+      toast.success('ደላላ ተሰርዟል')
       if (active) loadWorkspace(active)
     } catch {
       toast.error('መሰረዝ አልተቻለም')
     }
   }
 
-  const filtered = employees.filter(e =>
-    (e.name || '').toLowerCase().includes(search.toLowerCase()) ||
-    (e.username || '').toLowerCase().includes(search.toLowerCase())
+  const filtered = employees.filter(
+    (e) =>
+      (e.name || '').toLowerCase().includes(search.toLowerCase()) ||
+      (e.username || '').toLowerCase().includes(search.toLowerCase())
   )
 
-  // ===================== RENDER =====================
-
   if (loading) {
-    return <div className="flex h-64 items-center justify-center"><Spinner /></div>
+    return (
+      <div className="flex h-64 items-center justify-center">
+        <Spinner />
+      </div>
+    )
   }
 
-  // ===== WORKSPACE VIEW =====
+  // ===== WORKSPACE =====
   if (active) {
     return (
       <div className="animate-fade-up space-y-8">
@@ -355,38 +339,47 @@ export default function EmployeesPage() {
           action={
             <div className="flex gap-2">
               <Button onClick={openCreateBroker}>+ ደላላ አክል</Button>
-              <Button variant="secondary" onClick={exitWorkspace}>ውጣ</Button>
+              <Button variant="secondary" onClick={exitWorkspace} disabled={gateLoading}>
+                ውጣ
+              </Button>
             </div>
           }
         />
 
         {wsLoading ? (
-          <div className="flex h-40 items-center justify-center"><Spinner /></div>
+          <div className="flex h-40 items-center justify-center">
+            <Spinner />
+          </div>
         ) : (
           <>
-            {/* Brokers */}
             <section>
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-lg font-bold flex items-center gap-2">
                   🤝 ደላሎች
-                  <span className="text-xs font-medium bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full">{myBrokers.length}</span>
+                  <span className="text-xs font-medium bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full">
+                    {myBrokers.length}
+                  </span>
                 </h2>
               </div>
-
               {myBrokers.length === 0 ? (
                 <div className="text-center py-12 text-slate-400 border border-dashed rounded-2xl">
                   ደላላ የለም · + ደላላ አክል ይጫኑ
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {myBrokers.map(b => {
-                    const count = myProfiles.filter(p => p.broker_id === b.id).length
+                  {myBrokers.map((b) => {
+                    const count = myProfiles.filter((p) => p.broker_id === b.id).length
                     return (
                       <div
                         key={b.id}
                         className="panel p-4 border border-slate-200 dark:border-slate-700 rounded-2xl group relative transition-colors"
-                        onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add('border-teal-500', 'bg-teal-50/50') }}
-                        onDragLeave={(e) => { e.currentTarget.classList.remove('border-teal-500', 'bg-teal-50/50') }}
+                        onDragOver={(e) => {
+                          e.preventDefault()
+                          e.currentTarget.classList.add('border-teal-500', 'bg-teal-50/50')
+                        }}
+                        onDragLeave={(e) => {
+                          e.currentTarget.classList.remove('border-teal-500', 'bg-teal-50/50')
+                        }}
                         onDrop={(e) => {
                           e.preventDefault()
                           e.currentTarget.classList.remove('border-teal-500', 'bg-teal-50/50')
@@ -398,22 +391,31 @@ export default function EmployeesPage() {
                           className="cursor-pointer pr-16"
                           onClick={() => navigate(`/brokers/${b.id}`)}
                         >
-                          <h3 className="font-bold text-teal-700 dark:text-teal-400 hover:underline truncate">{b.name}</h3>
-                          <p className="text-sm text-slate-500 mt-1 truncate">{b.contact1 || 'ስልክ የለም'}</p>
+                          <h3 className="font-bold text-teal-700 dark:text-teal-400 hover:underline truncate">
+                            {b.name}
+                          </h3>
+                          <p className="text-sm text-slate-500 mt-1 truncate">
+                            {b.contact1 || 'ስልክ የለም'}
+                          </p>
                           <p className="text-xs text-slate-400 mt-2">{count} ፕሮፋይል</p>
-                          <p className="text-[10px] text-slate-400 mt-1 opacity-0 group-hover:opacity-100">ፕሮፋይል እዚህ ይጎትቱ</p>
                         </div>
                         <div className="absolute top-3 right-3 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                           <button
+                            type="button"
                             onClick={() => openEditBroker(b)}
-                            className="p-1.5 rounded-lg text-slate-400 hover:text-teal-600 hover:bg-teal-50 dark:hover:bg-teal-900/20"
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-teal-600 hover:bg-teal-50"
                             title="አርም"
-                          >✎</button>
+                          >
+                            ✎
+                          </button>
                           <button
+                            type="button"
                             onClick={() => deleteBroker(b)}
-                            className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50"
                             title="ሰርዝ"
-                          >✕</button>
+                          >
+                            ✕
+                          </button>
                         </div>
                       </div>
                     )
@@ -422,11 +424,12 @@ export default function EmployeesPage() {
               )}
             </section>
 
-            {/* Profiles */}
             <section>
               <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
                 📄 ፕሮፋይሎች
-                <span className="text-xs font-medium bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full">{myProfiles.length}</span>
+                <span className="text-xs font-medium bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full">
+                  {myProfiles.length}
+                </span>
               </h2>
               {myProfiles.length === 0 ? (
                 <div className="text-center py-12 text-slate-400 border border-dashed rounded-2xl">
@@ -434,19 +437,21 @@ export default function EmployeesPage() {
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {myProfiles.map(p => (
+                  {myProfiles.map((p) => (
                     <div
                       key={p.id}
                       draggable
                       onDragStart={(e) => {
-                        e.dataTransfer.setData('profileId', p.id)
+                        e.dataTransfer.setData('profileId', String(p.id))
                         e.dataTransfer.effectAllowed = 'move'
                       }}
                       onClick={() => navigate(`/profiles/${p.id}`)}
                       className="p-4 border border-slate-200 dark:border-slate-700 rounded-xl cursor-grab active:cursor-grabbing hover:border-teal-400 transition-colors"
                     >
                       <div className="font-medium">{p.full_name}</div>
-                      <div className="text-xs text-slate-500 mt-1">{p.phone_number || 'ስልክ የለም'}</div>
+                      <div className="text-xs text-slate-500 mt-1">
+                        {p.phone_number || 'ስልክ የለም'}
+                      </div>
                       {p.broker_id && (
                         <div className="text-[10px] text-teal-600 mt-1">ተመድቧል</div>
                       )}
@@ -458,7 +463,6 @@ export default function EmployeesPage() {
           </>
         )}
 
-        {/* Broker Create/Edit Modal */}
         <Modal
           isOpen={brokerModal}
           onClose={() => setBrokerModal(false)}
@@ -469,24 +473,23 @@ export default function EmployeesPage() {
             <Input
               label="የደላላ ስም *"
               value={brokerForm.name}
-              onChange={e => setBrokerForm({ ...brokerForm, name: e.target.value })}
-              placeholder="አህመድ አሊ"
+              onChange={(e) => setBrokerForm({ ...brokerForm, name: e.target.value })}
               required
             />
             <Input
               label="ስልክ ቁጥር"
               value={brokerForm.contact1}
-              onChange={e => setBrokerForm({ ...brokerForm, contact1: e.target.value })}
-              placeholder="+251 9..."
+              onChange={(e) => setBrokerForm({ ...brokerForm, contact1: e.target.value })}
             />
             <Input
               label="አድራሻ"
               value={brokerForm.address}
-              onChange={e => setBrokerForm({ ...brokerForm, address: e.target.value })}
-              placeholder="አዲስ አበባ"
+              onChange={(e) => setBrokerForm({ ...brokerForm, address: e.target.value })}
             />
             <div className="flex justify-end gap-3 pt-2">
-              <Button type="button" variant="secondary" onClick={() => setBrokerModal(false)}>ሰርዝ</Button>
+              <Button type="button" variant="secondary" onClick={() => setBrokerModal(false)}>
+                ሰርዝ
+              </Button>
               <Button type="submit" isLoading={brokerSaving}>
                 {editingBroker ? 'አስቀምጥ' : 'ፍጠር'}
               </Button>
@@ -497,19 +500,19 @@ export default function EmployeesPage() {
     )
   }
 
-  // ===== MAIN LIST VIEW =====
+  // ===== LIST =====
   return (
     <div className="animate-fade-up space-y-6">
       <PageHeader
         title="ሰራተኞች"
-        subtitle="ካርዱን ጠቅ በማድረግ የይለፍ ቃል ብቻ ያስገቡ"
+        subtitle="ካርዱን ጠቅ በማድረግ ይግቡ — የይለፍ ቃል አያስፈልግም"
         action={
           <div className="flex gap-3 items-center">
             <div className="w-52">
               <Input
                 placeholder="ፈልግ..."
                 value={search}
-                onChange={e => setSearch(e.target.value)}
+                onChange={(e) => setSearch(e.target.value)}
               />
             </div>
             <Button onClick={openCreateEmp}>+ ሰራተኛ አክል</Button>
@@ -523,81 +526,55 @@ export default function EmployeesPage() {
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filtered.map(emp => (
+          {filtered.map((emp) => (
             <div
               key={emp.id}
               className="panel p-5 border border-slate-200 dark:border-slate-700 rounded-2xl hover:border-teal-400/70 transition-all group relative"
             >
-              <div className="cursor-pointer pr-14" onClick={() => openGate(emp)}>
+              <div
+                className="cursor-pointer pr-14"
+                onClick={() => !gateLoading && openGate(emp)}
+              >
                 <h3 className="font-bold text-lg text-slate-800 dark:text-white group-hover:text-teal-600 transition-colors">
                   {emp.name}
                 </h3>
                 <p className="text-sm text-slate-500 mt-0.5">@{emp.username}</p>
-                <div className="mt-3 space-y-1 text-sm text-slate-600 dark:text-slate-300">
-                  <div>📞 {emp.phone_work || '—'}</div>
-                  <div>📞 {emp.phone_work || '—'}</div>
+                <div className="mt-3 text-sm text-slate-600 dark:text-slate-300">
+                  📞 {emp.phone_work || '—'}
                 </div>
                 <div className="mt-4 text-xs text-teal-600 opacity-0 group-hover:opacity-100 transition-opacity">
                   ለመግባት ጠቅ ያድርጉ →
                 </div>
               </div>
-
               <div className="absolute top-3 right-3 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                 <button
-                  onClick={(e) => { e.stopPropagation(); openEditEmp(emp) }}
-                  className="p-1.5 rounded-lg text-slate-400 hover:text-teal-600 hover:bg-teal-50 dark:hover:bg-teal-900/20"
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    openEditEmp(emp)
+                  }}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-teal-600 hover:bg-teal-50"
                   title="አርም"
-                >✎</button>
+                >
+                  ✎
+                </button>
                 <button
-                  onClick={(e) => { e.stopPropagation(); deleteEmployee(emp) }}
-                  className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    deleteEmployee(emp)
+                  }}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50"
                   title="ሰርዝ"
-                >✕</button>
+                >
+                  ✕
+                </button>
               </div>
             </div>
           ))}
         </div>
       )}
 
-      {/* ===== PASSWORD GATE MODAL ===== */}
-      <Modal
-        isOpen={!!gateEmployee}
-        onClose={() => { setGateEmployee(null); setGatePassword('') }}
-        title=""
-        size="sm"
-      >
-        <div className="text-center mb-6">
-          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-teal-500 to-teal-600 text-white text-2xl font-bold flex items-center justify-center mx-auto mb-3 shadow-lg shadow-teal-500/25">
-            {(gateEmployee?.name || '?')[0]}
-          </div>
-          <h2 className="text-xl font-bold text-slate-800 dark:text-white">{gateEmployee?.name}</h2>
-          <p className="text-sm text-slate-500 mt-1">@{gateEmployee?.username}</p>
-        </div>
-
-        <form onSubmit={submitGate} className="space-y-4">
-          <Input
-            label="የይለፍ ቃል"
-            type="password"
-            value={gatePassword}
-            onChange={e => setGatePassword(e.target.value)}
-            placeholder="••••••••"
-            autoFocus
-            required
-          />
-          <Button type="submit" className="w-full" isLoading={gateLoading}>
-            ግባ
-          </Button>
-          <button
-            type="button"
-            onClick={() => { setGateEmployee(null); setGatePassword('') }}
-            className="w-full text-sm text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 py-1"
-          >
-            ሰርዝ
-          </button>
-        </form>
-      </Modal>
-
-      {/* ===== CREATE / EDIT EMPLOYEE MODAL ===== */}
       <Modal
         isOpen={empModal}
         onClose={() => setEmpModal(false)}
@@ -608,45 +585,27 @@ export default function EmployeesPage() {
           <Input
             label="ሙሉ ስም *"
             value={empForm.name}
-            onChange={e => setEmpForm({ ...empForm, name: e.target.value })}
+            onChange={(e) => setEmpForm({ ...empForm, name: e.target.value })}
             required
           />
           <Input
             label="መለያ ስም *"
             value={empForm.username}
-            onChange={e => setEmpForm({ ...empForm, username: e.target.value.replace(/\s/g, '') })}
+            onChange={(e) =>
+              setEmpForm({ ...empForm, username: e.target.value.replace(/\s/g, '') })
+            }
             required
-          />
-          <PhoneField
-            label="ስልክ"
-            cc={empForm.wa_cc}
-            num={empForm.wa_num}
-            onChange={p => setEmpForm({ ...empForm, wa_cc: p.cc, wa_num: p.num })}
           />
           <PhoneField
             label="የስራ ስልክ"
             cc={empForm.work_cc}
             num={empForm.work_num}
-            onChange={p => setEmpForm({ ...empForm, work_cc: p.cc, work_num: p.num })}
+            onChange={(p) => setEmpForm({ ...empForm, work_cc: p.cc, work_num: p.num })}
           />
-          <Input
-            label={editingEmp ? 'አዲስ የይለፍ ቃል (ባዶ ካደረጉ አይቀየርም)' : 'የይለፍ ቃል *'}
-            type="password"
-            value={empForm.password}
-            onChange={e => setEmpForm({ ...empForm, password: e.target.value })}
-            required={!editingEmp}
-          />
-          {( !editingEmp || empForm.password ) && (
-            <Input
-              label="የይለፍ ቃል ያረጋግጡ"
-              type="password"
-              value={empForm.password2}
-              onChange={e => setEmpForm({ ...empForm, password2: e.target.value })}
-              required={!editingEmp || !!empForm.password}
-            />
-          )}
           <div className="flex justify-end gap-3 pt-3">
-            <Button type="button" variant="secondary" onClick={() => setEmpModal(false)}>ሰርዝ</Button>
+            <Button type="button" variant="secondary" onClick={() => setEmpModal(false)}>
+              ሰርዝ
+            </Button>
             <Button type="submit" isLoading={empSaving}>
               {editingEmp ? 'አስቀምጥ' : 'ፍጠር'}
             </Button>

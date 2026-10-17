@@ -53,12 +53,13 @@ export default function NotificationsPage() {
       case 'ai_task': return '🤖'
       case 'employee_created': return '👤'
       case 'captha_detected': return '🔒'
+      case 'passport_unreadable': return '🛂'
       default: return '📢'
     }
   }
 
   const getUrgency = (type) => {
-    if (type === 'trial_expired' || type === 'captha_detected') return 'high'
+    if (type === 'trial_expired' || type === 'captha_detected' || type === 'passport_unreadable') return 'high'
     if (type === 'trial_warning') return 'medium'
     return 'low'
   }

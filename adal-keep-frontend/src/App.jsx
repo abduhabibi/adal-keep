@@ -11,13 +11,16 @@ import BrokerDetailPage from './pages/BrokerDetailPage'
 import ChecklistPage from './pages/ChecklistPage'
 import SettingsPage from './pages/SettingsPage'
 import NotificationsPage from './pages/NotificationsPage'
-import AIPage from './pages/AIPage'
 import { FileCaptureProvider } from './context/FileCaptureContext'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import TasksPage from './pages/TasksPage'
 import PaymentLock from './components/PaymentLock'
 import IntroWizard from './pages/IntroWizard'
 import RevivalPage from './pages/RevivalPage'
+import CVsPage from './pages/CVsPage'
+import CVNewPage from './pages/CVNewPage'
+import CVTemplatesPage from './pages/CVTemplatesPage'
+import CVTemplateEditPage from './pages/CVTemplateEditPage'
 
 const toaster = (
   <Toaster
@@ -87,8 +90,12 @@ function Shell() {
             <Route path="brokers/:id" element={<BrokerDetailPage />} />
             <Route path="checklist" element={<ChecklistPage />} />
             <Route path="notifications" element={<NotificationsPage />} />
-            <Route path="ai" element={<AIPage />} />
             <Route path="tasks" element={<TasksPage />} />
+            <Route path="cvs" element={<CVsPage />} />
+            <Route path="cvs/new" element={<CVNewPage />} />
+            <Route path="cvs/templates" element={<CVTemplatesPage />} />
+            <Route path="cvs/templates/new" element={<CVTemplateEditPage />} />
+            <Route path="cvs/templates/:id/edit" element={<CVTemplateEditPage />} />
             <Route path="settings" element={<SettingsPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>

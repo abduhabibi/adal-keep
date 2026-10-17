@@ -1,12 +1,19 @@
 import { useState, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { createPortal } from 'react-dom'
 import toast from 'react-hot-toast'
 import api from '../../services/api'
 import { useFileCapture } from '../../context/FileCaptureContext'
 
-export default function FieldCard({ field, profileId, onFileUpdate }) {
+export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness = null }) {
+  const navigate = useNavigate()
+  const isCVField = field.name === 'CV'
+  const cvReady = isCVField && cvReadiness?.can_generate
+  const cvBlockers = cvReadiness?.cv_blockers || []
   const { capturedFiles } = useFileCapture()
   const [uploading, setUploading] = useState(false)
   const [pendingFile, setPendingFile] = useState(null)
+  const [previewFile, setPreviewFile] = useState(null) // PREVIEW_MODAL_MARKER
   const [downloadFiles, setDownloadFiles] = useState([])
   const [isDownloadModalOpen, setIsDownloadModalOpen] = useState(false)
   const [isDragOver, setIsDragOver] = useState(false)
@@ -14,6 +21,7 @@ export default function FieldCard({ field, profileId, onFileUpdate }) {
   
   // Counter to prevent flickering when dragging over child elements
   const dragCounter = useRef(0)
+  const multiInputRef = useRef(null) // MULTI_UPLOAD_MARKER
 
   const handleFileSelect = (file) => {
     if (!file) return
@@ -47,6 +55,27 @@ export default function FieldCard({ field, profileId, onFileUpdate }) {
       if (fileInputRef.current) fileInputRef.current.value = ''
     }
   }
+  const handleMultiUpload = async (fileList) => {
+    if (!fileList || fileList.length === 0) return
+    setUploading(true)
+    const fd = new FormData()
+    Array.from(fileList).forEach(f => fd.append('files', f))
+    try {
+      await api.post(`/profiles/${profileId}/fields/${field.id}/files`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      const res = await api.get(`/profiles/${profileId}/fields`)
+      const updated = res.data.find(x => x.id === field.id)
+      onFileUpdate(field.id, updated ? updated.files : [])
+      toast.success(`${fileList.length} file(s) added`)
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Upload failed')
+    } finally {
+      setUploading(false)
+      if (multiInputRef.current) multiInputRef.current.value = ''
+    }
+  }
+
 
   // --- DRAG & DROP HANDLERS ---
 
@@ -139,6 +168,7 @@ export default function FieldCard({ field, profileId, onFileUpdate }) {
 
   return (
     <div
+      data-field-name={field.name}
       className={`panel p-4 flex flex-col gap-3 relative bg-white dark:bg-slate-800 border rounded-xl shadow-sm transition-all duration-200 ${
         isDragOver
           ? 'border-teal-500 ring-2 ring-teal-500/30 bg-teal-50/50 dark:bg-teal-900/10 scale-[1.02]'
@@ -157,12 +187,79 @@ export default function FieldCard({ field, profileId, onFileUpdate }) {
             <span className="text-[10px] px-2 py-0.5 bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300 rounded-full font-medium">Multiple OK</span>
           )}
         </h3>
-        {field.files?.length > 0 && (
+        
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => multiInputRef.current?.click()}
+            disabled={uploading}
+            className="text-[10px] px-2 py-0.5 rounded-md bg-teal-50 text-teal-700 hover:bg-teal-100 dark:bg-teal-900/30 dark:text-teal-400 disabled:opacity-50"
+            title="Add more files to this field"
+          >+ Add files</button>
+          <input
+            ref={multiInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            accept="image/*,application/pdf,video/*"
+            onChange={(e) => handleMultiUpload(e.target.files)}
+          />
+        </div>
+{field.files?.length > 0 && (
           <span className="chip bg-teal-50 dark:bg-teal-900/30 text-teal-700 dark:text-teal-400 ring-1 ring-teal-200 dark:ring-teal-800 text-[10px] px-2 py-0.5 rounded-full font-medium">
             {field.files.length} file{field.files.length > 1 ? 's' : ''}
           </span>
         )}
       </div>
+
+      {/* CV_AUTO_LINK — special panel for CV field */}
+      {isCVField && cvReadiness && (
+        cvReady ? (
+          <div className="rounded-lg border-2 border-teal-400 bg-teal-50/70 dark:bg-teal-900/20 p-3 space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="w-5 h-5 rounded-full bg-teal-500 text-white flex items-center justify-center text-[11px] font-bold">✓</span>
+              <span className="text-xs font-semibold text-teal-800 dark:text-teal-300">Ready to generate</span>
+            </div>
+            <p className="text-[11px] text-slate-600 dark:text-slate-400">All required info is available for this profile.</p>
+            <button
+              type="button"
+              onClick={() => navigate(`/cvs/new?profile=${profileId}&auto=1`)}
+              className="w-full py-2 text-xs font-semibold rounded-lg bg-teal-600 text-white hover:bg-teal-700 transition-colors"
+            >
+              📄 Preview &amp; Download CV
+            </button>
+            <p className="text-[10px] text-slate-400 text-center">Or upload a custom file below</p>
+          </div>
+        ) : (
+          <div className="rounded-lg border-2 border-amber-300 bg-amber-50/70 dark:bg-amber-900/20 p-3 space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="w-5 h-5 rounded-full bg-amber-400 text-white flex items-center justify-center text-[11px] font-bold">!</span>
+              <span className="text-xs font-semibold text-amber-800 dark:text-amber-300">CV not ready</span>
+            </div>
+            <ul className="text-[11px] text-slate-600 dark:text-slate-400 space-y-0.5 list-disc list-inside">
+              {cvBlockers.slice(0, 4).map((b, i) => <li key={i}>{b}</li>)}
+              {cvBlockers.length > 4 && <li>+{cvBlockers.length - 4} more…</li>}
+            </ul>
+            {/* SMART_FIX_MARKER — smart fix button */}
+            <button
+              type="button"
+              onClick={() => {
+                const needsPhoto = cvBlockers.some(b => /photo/i.test(b))
+                if (needsPhoto) {
+                  const el = document.querySelector('[data-field-name="Photo"]')
+                    || document.querySelector('[data-field-name="Full Body Photo"]')
+                  if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); return }
+                }
+                // Otherwise go to the CV form where the fields can be filled inline
+                navigate(`/cvs/new?profile=${profileId}`)
+              }}
+              className="w-full py-1.5 text-[11px] font-semibold rounded-lg border border-amber-400 text-amber-800 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-colors"
+            >
+              {cvBlockers.some(b => /photo/i.test(b)) ? 'Scroll to photo upload ↓' : 'Open CV form to fill →'}
+            </button>
+          </div>
+        )
+      )}
 
       {/* Content Area */}
       {field.files?.length > 0 ? (
@@ -178,7 +275,12 @@ export default function FieldCard({ field, profileId, onFileUpdate }) {
                 muted
               />
             ) : isImage(field.files[0]) ? (
-              <img src={`/api/files/${field.files[0].id}/thumbnail`} alt="" className="h-full w-full object-cover" />
+              <img
+                src={`/api/files/${field.files[0].id}/thumbnail`}
+                alt=""
+                className="h-full w-full object-cover cursor-zoom-in transition-transform hover:scale-[1.02]"
+                onClick={() => setPreviewFile(field.files[0])}
+              />
             ) : (
               <div className="flex h-full w-full flex-col items-center justify-center text-slate-400 dark:text-slate-500 gap-2">
                 <svg className="h-10 w-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>
@@ -300,6 +402,79 @@ export default function FieldCard({ field, profileId, onFileUpdate }) {
           </div>
         </div>
       )}
+
+      {/* Full-screen file preview — Portal + Telegram style */}
+      {previewFile && createPortal(
+        <div
+          className="fixed inset-0 z-[99999] bg-black/95 flex items-center justify-center p-6"
+          onClick={() => setPreviewFile(null)}
+        >
+          {/* Top bar */}
+          <div
+            className="absolute top-0 left-0 right-0 px-6 py-4 flex items-center justify-between z-10"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <span className="text-white/70 text-xs font-medium truncate max-w-[60%]">
+              {previewFile.original_name}
+            </span>
+            <div className="flex items-center gap-2">
+              <a
+                href={`/api/files/${previewFile.id}/download`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors"
+                title="Download"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                    d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+              </a>
+              <button
+                type="button"
+                onClick={() => setPreviewFile(null)}
+                className="w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors"
+                title="Close"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                    d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          {/* Media */}
+          {previewFile.mimetype?.startsWith('image/') ? (
+            <img
+              src={`/api/files/${previewFile.id}/download`}
+              alt={previewFile.original_name}
+              onClick={(e) => e.stopPropagation()}
+              className="max-w-[92vw] max-h-[88vh] object-contain rounded-3xl shadow-2xl select-none"
+              draggable={false}
+            />
+          ) : previewFile.mimetype?.includes('pdf') ? (
+            <iframe
+              src={`/api/files/${previewFile.id}/download#toolbar=1&view=FitH`}
+              title={previewFile.original_name}
+              onClick={(e) => e.stopPropagation()}
+              className="w-[92vw] h-[88vh] rounded-3xl bg-white shadow-2xl border-0"
+            />
+          ) : (
+            <div className="text-center text-white/70" onClick={(e) => e.stopPropagation()}>
+              <p className="text-sm mb-3">No preview available.</p>
+              <a
+                href={`/api/files/${previewFile.id}/download`}
+                className="inline-block px-4 py-2 rounded-lg bg-teal-600 text-white text-sm hover:bg-teal-700"
+              >
+                Download
+              </a>
+            </div>
+          )}
+        </div>,
+        document.body
+      )}
+
     </div>
   )
 }

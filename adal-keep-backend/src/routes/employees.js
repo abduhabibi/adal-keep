@@ -2,11 +2,15 @@ import express from 'express'
 import bcrypt from 'bcryptjs'
 import crypto from 'crypto'
 import { signToken } from '../services/tenancy.js'
+import { setActiveEmployee, clearActiveEmployee } from '../services/activeEmployee.js'
 
 const router = express.Router()
 
 const setTokenCookie = (res, t) =>
-  res.setHeader('Set-Cookie', `adal_token=${t}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000`)
+  res.setHeader(
+    'Set-Cookie',
+    `adal_token=${t}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000`
+  )
 
 async function ensureDeviceColumn(db) {
   try {
@@ -15,7 +19,7 @@ async function ensureDeviceColumn(db) {
       await db.schema.table('users', (t) => t.string('device_serial', 128).nullable())
     }
   } catch (e) {
-    console.warn('[employees] device_serial column:', e.message)
+    console.warn('[employees] device_serial:', e.message)
   }
 }
 
@@ -34,9 +38,9 @@ router.get('/', async (req, res) => {
   }
 })
 
-/** Create employee: name + username required; password OPTIONAL */
+/** name + username only — no password */
 router.post('/', async (req, res) => {
-  const { name, username, phone_work, password } = req.body
+  const { name, username, phone_work } = req.body
   if (!name?.trim()) return res.status(400).json({ error: 'ስም ያስፈልጋል' })
   if (!username?.trim() || /\s/.test(username)) {
     return res.status(400).json({ error: 'ትክክለኛ መለያ ስም ያስገቡ (ያለ ክፍተት)' })
@@ -63,15 +67,11 @@ router.post('/', async (req, res) => {
     if (await db('users').where({ username: username.trim() }).first()) {
       return res.status(400).json({ error: 'መለያ ስም ቀድሞ ተወስዷል' })
     }
-    // Random internal hash if no password (device-serial login only)
-    const plain = password && password.length >= 4
-      ? password
-      : crypto.randomBytes(24).toString('hex')
     const [id] = await db('users').insert({
       name: name.trim(),
       username: username.trim(),
       phone_work: normalizePhone(phone_work),
-      password: await bcrypt.hash(plain, 10),
+      password: await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 10),
       role: 'employee',
       company_id: companyId,
       branch_id: branchId,
@@ -83,12 +83,6 @@ router.post('/', async (req, res) => {
   }
 })
 
-/**
- * POST /api/employees/device-login
- * Body: { employeeId, deviceSerial }
- * - First time on this PC: binds device_serial to that employee
- * - Later: only that device can open that employee without password
- */
 router.post('/device-login', async (req, res) => {
   try {
     const db = req.app.locals.db
@@ -99,42 +93,41 @@ router.post('/device-login', async (req, res) => {
       return res.status(400).json({ error: 'employeeId and deviceSerial required' })
     }
     const user = await db('users').where({ id: employeeId }).first()
-    if (!user || user.role === 'owner') {
-      return res.status(404).json({ error: 'ሰራተኛ አልተገኘም' })
-    }
-    // Another employee already owns this device?
+    if (!user) return res.status(404).json({ error: 'ሰራተኛ አልተገኘም' })
+
     const other = await db('users')
       .where({ device_serial: deviceSerial })
       .whereNot({ id: employeeId })
       .first()
     if (other) {
-      // Allow switching: clear old binding, bind to new choice
       await db('users').where({ id: other.id }).update({ device_serial: null })
     }
+    // Allow this PC to take over the employee session (office PCs share staff)
     if (user.device_serial && user.device_serial !== deviceSerial) {
-      return res.status(403).json({
-        error: 'ይህ ሰራተኛ በሌላ መሣሪያ ተይዟል። ከዚያ መሣሪያ Sign out ያድርጉ ወይም device ይፍቱ።'
-      })
+      console.warn('[device-login] rebind employee', employeeId, 'from other device')
     }
     await db('users').where({ id: employeeId }).update({
       device_serial: deviceSerial,
-      updated_at: new Date().toISOString()
+      updated_at: new Date().toISOString(),
     })
-    const token = signToken({
-      uid: user.id,
-      companyId: user.company_id,
-      branchId: user.branch_id,
-      role: user.role || 'employee'
-    })
-    setTokenCookie(res, token)
+    await setActiveEmployee(db, user)
+    setTokenCookie(
+      res,
+      signToken({
+        uid: user.id,
+        companyId: user.company_id,
+        branchId: user.branch_id,
+        role: user.role || 'employee',
+      })
+    )
     res.json({
       success: true,
       user: {
         id: user.id,
         name: user.name,
         username: user.username,
-        role: user.role || 'employee'
-      }
+        role: user.role || 'employee',
+      },
     })
   } catch (err) {
     console.error('[device-login]', err.message)
@@ -142,7 +135,6 @@ router.post('/device-login', async (req, res) => {
   }
 })
 
-/** Auto-resume: which employee is bound to this device? */
 router.post('/device-resume', async (req, res) => {
   try {
     const db = req.app.locals.db
@@ -151,27 +143,29 @@ router.post('/device-resume', async (req, res) => {
     if (!deviceSerial) return res.json({ user: null })
     const user = await db('users').where({ device_serial: deviceSerial }).first()
     if (!user) return res.json({ user: null })
-    const token = signToken({
-      uid: user.id,
-      companyId: user.company_id,
-      branchId: user.branch_id,
-      role: user.role || 'employee'
-    })
-    setTokenCookie(res, token)
+    await setActiveEmployee(db, user)
+    setTokenCookie(
+      res,
+      signToken({
+        uid: user.id,
+        companyId: user.company_id,
+        branchId: user.branch_id,
+        role: user.role || 'employee',
+      })
+    )
     res.json({
       user: {
         id: user.id,
         name: user.name,
         username: user.username,
-        role: user.role || 'employee'
-      }
+        role: user.role || 'employee',
+      },
     })
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
 })
 
-/** Unbind device (Sign out from this PC) */
 router.post('/device-logout', async (req, res) => {
   try {
     const db = req.app.locals.db
@@ -180,6 +174,7 @@ router.post('/device-logout', async (req, res) => {
     if (deviceSerial) {
       await db('users').where({ device_serial: deviceSerial }).update({ device_serial: null })
     }
+    await clearActiveEmployee(db)
     res.setHeader('Set-Cookie', 'adal_token=; Path=/; HttpOnly; Max-Age=0')
     res.json({ success: true })
   } catch (err) {
@@ -188,7 +183,7 @@ router.post('/device-logout', async (req, res) => {
 })
 
 router.put('/:id', async (req, res) => {
-  const { name, phone_work, password } = req.body
+  const { name, phone_work } = req.body
   if (!name?.trim()) return res.status(400).json({ error: 'ስም ያስፈልጋል' })
   try {
     const db = req.app.locals.db
@@ -199,15 +194,11 @@ router.put('/:id', async (req, res) => {
       if (digits.startsWith('0')) return '+251' + digits.slice(1)
       return digits ? '+251' + digits : null
     }
-    const update = {
+    await db('users').where({ id: req.params.id }).update({
       name: name.trim(),
       phone_work: normalizePhone(phone_work),
-      updated_at: new Date().toISOString()
-    }
-    if (password && password.length >= 4) {
-      update.password = await bcrypt.hash(password, 10)
-    }
-    await db('users').where({ id: req.params.id }).update(update)
+      updated_at: new Date().toISOString(),
+    })
     res.json({ success: true })
   } catch (err) {
     res.status(500).json({ error: 'ማዘመን አልተቻለም' })
@@ -216,8 +207,7 @@ router.put('/:id', async (req, res) => {
 
 router.delete('/:id', async (req, res) => {
   try {
-    const db = req.app.locals.db
-    await db('users').where({ id: req.params.id }).del()
+    await req.app.locals.db('users').where({ id: req.params.id }).del()
     res.json({ success: true })
   } catch (err) {
     res.status(500).json({ error: 'መሰረዝ አልተቻለም' })

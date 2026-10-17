@@ -3,7 +3,7 @@
 #  Unpacks the Windows dependencies that PREPARE put on the USB:
 #     deps\node-win-x64.zip     -> <install>\runtime
 #     deps\backend-modules.zip  -> <install>\backend\node_modules
-#     deps\brave\BraveSetup.exe -> installs Brave when it is missing
+#     deps\brave\BraveSetup.exe -> installs Brave in the background when missing
 #  and checks that the server's native modules load.
 #  Exit code 0 = ready. A log is kept in <install>\install.log.
 # =====================================================================
@@ -58,18 +58,18 @@ try {
     } finally { Pop-Location }
     Write-Host 'OK  native modules load'
 
-    # --- Brave (the automations drive it); never blocks the install
+    # --- Brave (the automations drive it). Installs in the background:
+    #     it takes a few minutes and the install does not need to wait.
     if (Get-Brave) {
         Write-Host 'OK  Brave already installed'
     } else {
         $setup = Join-Path $Deps 'brave\BraveSetup.exe'
         if (Test-Path $setup) {
-            Write-Host '..  installing Brave'
-            try {
-                Start-Process -FilePath $setup -ArgumentList '/silent', '/install' -Wait
-                Start-Sleep -Seconds 5
-                if (Get-Brave) { Write-Host 'OK  Brave installed' } else { Write-Host 'WARN Brave did not install - install it by hand' }
-            } catch { Write-Host "WARN Brave install failed: $($_.Exception.Message)" }
+            # Copied off the USB first, so the USB can be removed meanwhile.
+            $local = Join-Path $env:TEMP 'AdalKeep-BraveSetup.exe'
+            Copy-Item $setup $local -Force
+            Start-Process -FilePath $local -ArgumentList '/silent', '/install' -WindowStyle Hidden
+            Write-Host 'OK  Brave is installing in the background'
         } else {
             Write-Host 'WARN no Brave installer on the USB - install Brave by hand'
         }

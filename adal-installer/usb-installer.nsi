@@ -1,12 +1,12 @@
 ; =====================================================================
 ;  Adal Keep - one-click USB installers (no questions asked)
 ;
-;    makensis usb-installer.nsi               -> "Install Adal Main.exe"
-;    makensis -DCOMPANION usb-installer.nsi   -> "Install Adal Companion.exe"
+;    makensis usb-installer.nsi               -> "2 - Install Adal Main.exe"
+;    makensis -DCOMPANION usb-installer.nsi   -> "3 - Install Adal Companion.exe"
 ;
 ;  Main (server PC): app files are inside the .exe; the Windows Node runtime,
 ;  the server packages and Brave come from the USB's deps\ folder, which
-;  "PREPARE - run once on a PC with internet.bat" fills once.
+;  "1 - PREPARE (once, needs internet).bat" fills once.
 ;  Companion (employee PC): fully self-contained, needs nothing else.
 ;
 ;  Built by build-installer.sh from the stage\ folder it assembles.
@@ -25,12 +25,12 @@
 !ifdef COMPANION
   !define PRODUCT  "Adal Keep Companion"
   !define APP_KEY  "AdalKeepCompanion"
-  OutFile "Install Adal Companion.exe"
+  OutFile "3 - Install Adal Companion.exe"
   InstallDir "C:\AdalKeepCompanion"
 !else
   !define PRODUCT  "Adal Keep"
   !define APP_KEY  "AdalKeep"
-  OutFile "Install Adal Main.exe"
+  OutFile "2 - Install Adal Main.exe"
   InstallDir "C:\AdalKeep"
 !endif
 
@@ -38,8 +38,8 @@ Name "${PRODUCT}"
 RequestExecutionLevel admin
 BrandingText "${APP_PUBLISH} 2026"
 SetCompressor /SOLID lzma
-ShowInstDetails show
-AutoCloseWindow true
+ShowInstDetails hide
+ShowUninstDetails hide
 
 VIProductVersion "1.1.0.0"
 VIAddVersionKey /LANG=1033 "ProductName"     "${PRODUCT}"
@@ -52,8 +52,18 @@ VIAddVersionKey /LANG=1033 "LegalCopyright"  "${APP_PUBLISH} 2026"
 !define MUI_UNICON "..\adal.ico"
 !define MUI_INSTFILESPAGE_FINISHHEADER_TEXT "${PRODUCT} is installed"
 
-; Only the progress page: double-click, approve the admin prompt, done.
+; No questions: a progress bar with plain steps, then "installed".
+!define MUI_FINISHPAGE_TITLE "${PRODUCT} is installed"
+!ifdef COMPANION
+  !define MUI_FINISHPAGE_TEXT "The Companion is running. It starts by itself with Windows and finds the main Adal Keep PC on the network.$\r$\n$\r$\nYou can remove the USB."
+!else
+  !define MUI_FINISHPAGE_TEXT "Adal Keep is running and starts by itself with Windows.$\r$\n$\r$\nOn this PC:  http://localhost:${SERVER_PORT}$\r$\n$\r$\nYou can remove the USB."
+  !define MUI_FINISHPAGE_RUN
+  !define MUI_FINISHPAGE_RUN_TEXT "Open Adal Keep now"
+  !define MUI_FINISHPAGE_RUN_FUNCTION OpenApp
+!endif
 !insertmacro MUI_PAGE_INSTFILES
+!insertmacro MUI_PAGE_FINISH
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "English"
@@ -69,7 +79,7 @@ Function .onInit
 !ifndef COMPANION
   ; The server needs the dependencies PREPARE downloaded onto the USB.
   ${IfNot} ${FileExists} "$EXEDIR\deps\READY.txt"
-    MessageBox MB_ICONSTOP|MB_OK "This USB is not prepared yet.$\r$\n$\r$\nOn a Windows PC with internet, double-click$\r$\n   PREPARE - run once on a PC with internet.bat$\r$\nat the top of the USB, wait for DONE, then run this installer again." /SD IDOK
+    MessageBox MB_ICONSTOP|MB_OK "This USB is not prepared yet.$\r$\n$\r$\nOn a Windows PC with internet, double-click$\r$\n   1 - PREPARE (once, needs internet).bat$\r$\nat the top of the USB, wait for DONE, then run this installer again." /SD IDOK
     SetErrorLevel 2
     Abort
   ${EndIf}
@@ -85,7 +95,7 @@ Section "Install"
   File "stage\stop-adal.ps1"
   ${If} ${FileExists} "$INSTDIR\*.*"
     DetailPrint "Stopping the running ${PRODUCT}..."
-    nsExec::ExecToLog '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\stop-adal.ps1" -InstDir "$INSTDIR"'
+    nsExec::Exec '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\stop-adal.ps1" -InstDir "$INSTDIR"'
     Pop $0
   ${EndIf}
 
@@ -94,16 +104,16 @@ Section "Install"
 
 !ifdef COMPANION
   ; ============================ EMPLOYEE PC ============================
-  DetailPrint "Installing the Adal Keep Companion..."
+  DetailPrint "Copying the Companion..."
   File /r "stage\companion\*"
   ; the Companion saves the discovered server into companion.conf here
-  nsExec::ExecToLog 'icacls "$INSTDIR" /grant *S-1-5-32-545:(OI)(CI)M /T /C /Q'
+  nsExec::Exec 'icacls "$INSTDIR" /grant *S-1-5-32-545:(OI)(CI)M /C /Q'
   Pop $0
 
-  DetailPrint "Allowing the Companion through the firewall (finds the server on the LAN)..."
-  nsExec::ExecToLog 'netsh advfirewall firewall delete rule name="Adal Keep Companion"'
+  DetailPrint "Allowing it through the Windows firewall..."
+  nsExec::Exec 'netsh advfirewall firewall delete rule name="Adal Keep Companion"'
   Pop $0
-  nsExec::ExecToLog 'netsh advfirewall firewall add rule name="Adal Keep Companion" dir=in action=allow program="$INSTDIR\adal-companion.exe"'
+  nsExec::Exec 'netsh advfirewall firewall add rule name="Adal Keep Companion" dir=in action=allow program="$INSTDIR\adal-companion.exe"'
   Pop $0
 
   CreateDirectory "$SMPROGRAMS\${PRODUCT}"
@@ -113,15 +123,15 @@ Section "Install"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "${APP_KEY}" '"$INSTDIR\start-companion.bat"'
 !else
   ; ============================= SERVER PC =============================
-  DetailPrint "Installing the Adal Keep app files..."
+  DetailPrint "Copying Adal Keep..."
   File /r "stage\main\*"
   CreateDirectory "$INSTDIR\backend\data"
   CreateDirectory "$INSTDIR\backend\data\SafeStorage"
   CreateDirectory "$INSTDIR\backend\uploads"
   CreateDirectory "$INSTDIR\inbox"
 
-  DetailPrint "Unpacking Node.js, the server packages and Brave from the USB (a few minutes)..."
-  nsExec::ExecToLog '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\finish-install.ps1" -InstDir "$INSTDIR" -Deps "$EXEDIR\deps"'
+  DetailPrint "Unpacking the server from the USB (about a minute)..."
+  nsExec::Exec '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\finish-install.ps1" -InstDir "$INSTDIR" -Deps "$EXEDIR\deps"'
   Pop $0
   ${If} $0 != 0
     MessageBox MB_ICONSTOP|MB_OK "Adal Keep could not finish installing (step: dependencies).$\r$\n$\r$\nThe details are in $INSTDIR\install.log.$\r$\nRun PREPARE on the USB again, then run this installer again." /SD IDOK
@@ -129,18 +139,20 @@ Section "Install"
     Abort
   ${EndIf}
 
-  DetailPrint "Granting write access to the Adal Keep folder..."
-  nsExec::ExecToLog 'icacls "$INSTDIR" /grant *S-1-5-32-545:(OI)(CI)M /T /C /Q'
+  Delete "$INSTDIR\finish-install.ps1"   ; only needed during the install
+
+  DetailPrint "Setting folder permissions..."
+  nsExec::Exec 'icacls "$INSTDIR" /grant *S-1-5-32-545:(OI)(CI)M /C /Q'
   Pop $0
 
-  DetailPrint "Opening the firewall (TCP ${SERVER_PORT} + UDP ${DISCO_PORT})..."
-  nsExec::ExecToLog 'netsh advfirewall firewall delete rule name="Adal Keep"'
+  DetailPrint "Allowing it through the Windows firewall..."
+  nsExec::Exec 'netsh advfirewall firewall delete rule name="Adal Keep"'
   Pop $0
-  nsExec::ExecToLog 'netsh advfirewall firewall add rule name="Adal Keep" dir=in action=allow protocol=TCP localport=${SERVER_PORT}'
+  nsExec::Exec 'netsh advfirewall firewall add rule name="Adal Keep" dir=in action=allow protocol=TCP localport=${SERVER_PORT}'
   Pop $0
-  nsExec::ExecToLog 'netsh advfirewall firewall delete rule name="Adal Keep Discovery"'
+  nsExec::Exec 'netsh advfirewall firewall delete rule name="Adal Keep Discovery"'
   Pop $0
-  nsExec::ExecToLog 'netsh advfirewall firewall add rule name="Adal Keep Discovery" dir=in action=allow protocol=UDP localport=${DISCO_PORT}'
+  nsExec::Exec 'netsh advfirewall firewall add rule name="Adal Keep Discovery" dir=in action=allow protocol=UDP localport=${DISCO_PORT}'
   Pop $0
 
   CreateShortcut "$DESKTOP\${APP_NAME}.lnk" "$INSTDIR\AdalKeep.exe" "" "$INSTDIR\AdalKeep.exe" 0
@@ -173,11 +185,16 @@ Section "Install"
 !else
   DetailPrint "Starting Adal Keep..."
   Exec '"$INSTDIR\run-server.bat"'
-  Sleep 2000
-  ExecShell "open" "$INSTDIR\AdalKeep.exe"
 !endif
+  DetailPrint "Done."
   done:
 SectionEnd
+
+!ifndef COMPANION
+Function OpenApp
+  ExecShell "open" "$INSTDIR\AdalKeep.exe"
+FunctionEnd
+!endif
 
 Function un.onInit
   SetShellVarContext all
@@ -189,7 +206,7 @@ Section "Uninstall"
   InitPluginsDir
   SetOutPath "$PLUGINSDIR"
   File "stage\stop-adal.ps1"
-  nsExec::ExecToLog '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\stop-adal.ps1" -InstDir "$INSTDIR"'
+  nsExec::Exec '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\stop-adal.ps1" -InstDir "$INSTDIR"'
   Pop $0
   SetOutPath "$TEMP"
 
@@ -198,13 +215,13 @@ Section "Uninstall"
   RMDir /r "$SMPROGRAMS\${PRODUCT}"
 
 !ifdef COMPANION
-  nsExec::ExecToLog 'netsh advfirewall firewall delete rule name="Adal Keep Companion"'
+  nsExec::Exec 'netsh advfirewall firewall delete rule name="Adal Keep Companion"'
   Pop $0
   RMDir /r "$INSTDIR"
 !else
-  nsExec::ExecToLog 'netsh advfirewall firewall delete rule name="Adal Keep"'
+  nsExec::Exec 'netsh advfirewall firewall delete rule name="Adal Keep"'
   Pop $0
-  nsExec::ExecToLog 'netsh advfirewall firewall delete rule name="Adal Keep Discovery"'
+  nsExec::Exec 'netsh advfirewall firewall delete rule name="Adal Keep Discovery"'
   Pop $0
   ; Program files go; the database and uploaded documents STAY
   ; (backend\data.sqlite, backend\data\, backend\uploads\), so a reinstall

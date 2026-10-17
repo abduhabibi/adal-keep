@@ -3,9 +3,9 @@
 #  Adal Keep - build the USB folder
 #
 #  Result:  "<repo>/Adal Keep USB/"   <- copy this whole folder to the USB
-#      Install Adal Main.exe                          server PC, one click
-#      Install Adal Companion.exe                     employee PCs, one click
-#      PREPARE - run once on a PC with internet.bat   fills deps\ once
+#      1 - PREPARE (once, needs internet).bat         fills deps\ once
+#      2 - Install Adal Main.exe                      server PC, one click
+#      3 - Install Adal Companion.exe                 employee PCs, one click
 #      deps\                                          Windows dependencies
 #      README-USB.txt
 #
@@ -79,8 +79,8 @@ rm -rf "$USB"
 mkdir -p "$USB"
 if [ -d "$INST/.deps-keep" ]; then mv "$INST/.deps-keep" "$USB/deps"; fi
 mkdir -p "$USB/deps/source"
-mv -f "$INST/Install Adal Main.exe" "$INST/Install Adal Companion.exe" "$USB/"
-cp -f "$INST/usb/PREPARE - run once on a PC with internet.bat" "$USB/"
+mv -f "$INST/2 - Install Adal Main.exe" "$INST/3 - Install Adal Companion.exe" "$USB/"
+cp -f "$INST/usb/1 - PREPARE (once, needs internet).bat" "$USB/"
 cp -f "$INST/usb/deps/prepare-deps.ps1" "$USB/deps/"
 cp -f "$BACK/package.json" "$BACK/package-lock.json" "$USB/deps/source/"
 cp -f "$INST/README-USB.txt" "$USB/README-USB.txt"

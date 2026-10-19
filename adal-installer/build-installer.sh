@@ -78,6 +78,17 @@ cp -f "$BASE/adal.ico" "$STAGE/main/adal.ico"
 cp -f "$STAGE/main/adal-companion.exe" "$STAGE/companion/adal-companion.exe"
 rm -f "$STAGE/main/run-server.bat" "$STAGE/main/start-companion.bat" "$STAGE/companion/start-companion.bat"
 cp -f "$INST/files/finish-install.ps1" "$STAGE/main/"
+# The version this build is: Settings → "Check for updates" compares it with
+# GitHub (main), so a PC installed from this USB is "up to date" until the next push.
+if [ -z "$(git -C "$BASE" status --porcelain -- . ':!.claude' ':!Adal Keep USB')" ]; then
+  printf '{\n  "sha": "%s",\n  "branch": "main",\n  "message": %s\n}\n' "$(git -C "$BASE" rev-parse HEAD)" \
+    "$(git -C "$BASE" log -1 --pretty=%s | node -e 'process.stdin.on("data",d=>process.stdout.write(JSON.stringify(String(d).trim())))')" \
+    > "$STAGE/main/.adal-version.json"
+  echo "   version: $(git -C "$BASE" rev-parse --short HEAD) (commit this build was made from)"
+else
+  rm -f "$STAGE/main/.adal-version.json"
+  echo "   version: none — there are uncommitted changes, so Check for updates will offer the GitHub version"
+fi
 cp -f "$INST/files/stop-adal.ps1" "$STAGE/"
 file "$STAGE/main/"*.exe | sed 's/^/   /'
 

@@ -3,7 +3,6 @@ import path from 'path'
 import fs from 'fs'
 import sharp from 'sharp'
 import imageToPdf from 'image-to-pdf'
-import crypto from 'crypto'
 import { upload, generateThumbnail, getRelativePath } from '../services/storage.js'
 
 const router = express.Router()
@@ -323,50 +322,6 @@ router.get('/files/:fileId/thumbnail', async (req, res) => {
 /* ==========================================================================
    ENCRYPTED UPLOAD ROUTE
    ========================================================================== */
-
-router.post('/upload-encrypted', upload.single('file'), async (req, res) => {
-  try {
-    if (!req.body.encrypted || req.body.encrypted !== 'true') {
-      return res.status(400).json({ error: 'Encrypted flag required' })
-    }
-
-    const encryptKey = process.env.ADAL_ENCRYPT_KEY || 'adal-keep-default-key-change-me!!!!'
-    const key = crypto.createHash('sha256').update(encryptKey).digest()
-    const encryptedB64 = req.file.buffer ? req.file.buffer.toString('utf8') : fs.readFileSync(req.file.path, 'utf8')
-    const encryptedBytes = Buffer.from(encryptedB64, 'base64')
-
-    const iv = encryptedBytes.subarray(0, 12)
-    const ciphertext = encryptedBytes.subarray(12)
-    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv)
-    const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()])
-
-    const originalExt = req.body.original_ext || '.jpg'
-    const filename = req.body.filename || `upload_${Date.now()}${originalExt}`
-    const safeName = `${crypto.randomUUID()}${originalExt}`
-    const uploadDir = path.resolve('./uploads/temp')
-
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true })
-    }
-
-    const tempPath = path.join(uploadDir, safeName)
-    fs.writeFileSync(tempPath, decrypted)
-
-    const fileUrl = `/uploads/temp/${safeName}`
-
-    res.json({
-      success: true,
-      url: fileUrl,
-      path: tempPath,
-      filename: filename,
-      decrypted: true,
-      message: 'File decrypted and stored securely',
-    })
-  } catch (err) {
-    console.error('Encrypted upload error:', err.message)
-    res.status(500).json({ error: 'Decryption or storage failed' })
-  }
-})
 
 /* MULTI-FILE-ROUTE-MARKER — appends (does not replace) files to a field */
 router.post('/profiles/:id/fields/:fieldId/files', upload.array('files', 20), async (req, res) => {

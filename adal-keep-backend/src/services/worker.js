@@ -21,7 +21,8 @@ import { getBrowser } from './browser.js'
 import { runFullWorkflow } from './lmisWorkflow.js'
 import { decideAgencyActions } from './jev/agencyManager.js'
 import { getActiveEmployee } from './activeEmployee.js'
-import { openRunTab, closeRunTab, forgetRunTab } from './tabManager.js'
+import { isAppLocked } from './subscription.js'
+import { openRunTab, closeRunTab, forgetRunTab, tabOfRun, handTabToPerson } from './tabManager.js'
 import { registerTab, unregisterTab, noteLink } from './bandwidth.js'
 import { createRunQueue } from './runQueue.js'
 import { isCancelled, clearCancelled } from './cancellation.js'
@@ -66,7 +67,7 @@ function playNotificationSound() {
       cmd = 'paplay'
       args = ['/usr/share/sounds/freedesktop/stereo/complete.oga']
     }
-    const child = spawn(cmd, args, { detached: true, stdio: 'ignore' })
+    const child = spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: true })
     child.on('error', () => {})
     child.unref()
   } catch {}
@@ -332,7 +333,9 @@ async function runJob(db, job) {
     try {
       if (row?.status === 'cancelled') await closeRunTab(job.id)
       else if (row?.status === 'failed' || row?.status === 'done') forgetRunTab(job.id)
-      // paused / pending (retry): the tab stays with the run
+      // paused / pending (retry): the tab stays with the run; while a
+      // person works in it, file dialogs open normally again.
+      else { const t = tabOfRun(job.id); if (t) handTabToPerson(t) }
     } catch {}
     try { await unregisterTab(job.id) } catch {}
     clearCancelled(job.id)
@@ -368,6 +371,7 @@ export function readyJobsQuery(db) {
 
 /** Claim the oldest ready run, skipping runs this process is still finishing. */
 export async function claimNextJob(db, exclude = []) {
+  if (isAppLocked()) return null // trial over and not unlocked: no runs start
   for (let i = 0; i < 5; i++) {
     const q = readyJobsQuery(db)
     if (exclude.length) q.whereNotIn('id', exclude)
@@ -448,6 +452,7 @@ async function openTaskExists(db, type, profileId) {
 }
 
 export async function runAgencyManager(db) {
+  if (isAppLocked()) return
   if (_agencyRunning) {
     console.log('[agency] previous run still in flight — skipping')
     return

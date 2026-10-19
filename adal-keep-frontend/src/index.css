@@ -509,3 +509,31 @@ body {
   [data-theme="gradient"] .gradient-backdrop span,
   [data-theme="gradient"] h1 { animation: none !important; }
 }
+
+/* ── Lock screen (after the free trial) ───────────────────────────────────
+   Gradients everywhere, but cheap to draw: the moving blobs only animate
+   transform (GPU), no blur filters or blend modes. */
+.lock-screen { background: #05050b; color: #f1f5f9; }
+.lock-backdrop { position: fixed; inset: 0; overflow: hidden; pointer-events: none; }
+.lock-backdrop span { position: absolute; width: 70vmax; height: 70vmax; border-radius: 50%; opacity: .55; will-change: transform; }
+.lock-backdrop span:nth-child(1) { left: -20vmax; top: -25vmax; background: radial-gradient(circle, #7c3aed 0%, transparent 62%); animation: adal-drift-a 26s ease-in-out infinite alternate; }
+.lock-backdrop span:nth-child(2) { right: -25vmax; bottom: -30vmax; background: radial-gradient(circle, #db2777 0%, transparent 62%); animation: adal-drift-b 32s ease-in-out infinite alternate; }
+.lock-backdrop span:nth-child(3) { left: 30vw; top: 40vh; width: 50vmax; height: 50vmax; background: radial-gradient(circle, #0891b2 0%, transparent 62%); opacity: .4; animation: adal-drift-a 38s ease-in-out infinite alternate-reverse; }
+.lock-frame { border-radius: 28px; padding: 2px; background: linear-gradient(120deg, #22d3ee, #a78bfa, #f472b6, #fb923c, #22d3ee); background-size: 300% 100%; animation: adal-flow 10s linear infinite; }
+.lock-card { position: relative; border-radius: 26px; background: rgba(9, 9, 18, .9); }
+.lock-grad-text { background: linear-gradient(90deg, #22d3ee, #a78bfa, #f472b6, #fb923c, #22d3ee); background-size: 300% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; }
+.lock-flow { animation: adal-flow 8s linear infinite; }
+.lock-caret { display: inline-block; width: 3px; height: 1.1em; margin-left: 3px; vertical-align: -0.15em; border-radius: 2px; background: linear-gradient(#22d3ee, #f472b6); animation: lock-blink 1s steps(1) infinite; }
+@keyframes lock-blink { 50% { opacity: 0; } }
+.lock-pill { display: inline-block; padding: 6px 14px; border-radius: 999px; font-size: 13px; font-weight: 600; color: #fff; background: linear-gradient(90deg, rgba(124,58,237,.55), rgba(219,39,119,.55)); border: 1px solid rgba(255,255,255,.15); }
+.lock-step { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 999px; font-size: 13px; font-weight: 700; color: #fff; background: linear-gradient(135deg, #22d3ee, #a78bfa, #f472b6); }
+.lock-button { width: 100%; padding: 14px 20px; border-radius: 16px; font-size: 17px; font-weight: 700; color: #fff; background: linear-gradient(90deg, #06b6d4, #8b5cf6, #ec4899, #f97316, #06b6d4); background-size: 300% 100%; animation: adal-flow 6s linear infinite; box-shadow: 0 10px 30px -10px rgba(236,72,153,.6); transition: transform .15s; }
+.lock-button:hover:not(:disabled) { transform: translateY(-1px); }
+.lock-glow { background: linear-gradient(135deg, #22d3ee, #a78bfa, #f472b6, #fb923c); box-shadow: 0 20px 60px -20px rgba(167,139,250,.7); }
+.lock-feature { position: relative; padding: 14px; border-radius: 18px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08); transition: border-color .2s, background .2s, transform .2s; animation: lock-rise .5s ease-out both; }
+.lock-feature:hover { transform: translateY(-2px); background: rgba(255,255,255,.07); border-color: rgba(167,139,250,.45); }
+.lock-ai { padding: 2px 8px; border-radius: 999px; font-size: 10px; font-weight: 800; letter-spacing: .08em; color: #fff; background: linear-gradient(90deg, #06b6d4, #8b5cf6, #ec4899); box-shadow: 0 0 14px -2px rgba(139,92,246,.7); }
+@keyframes lock-rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .lock-backdrop span, .lock-frame, .lock-flow, .lock-button, .lock-caret, .lock-feature { animation: none; }
+}

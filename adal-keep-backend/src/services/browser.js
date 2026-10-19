@@ -4,9 +4,9 @@
  * Single persistent Chromium instance shared across all automation lanes.
  * Never spawns more than one browser process.
  *
- * Layout: one maximized browser window, one tab per job.
- * All jobs share the browser's DEFAULT context so they share the same
- * LMIS session — no off-screen windows, no separate processes per lane.
+ * Layout: ONE maximized browser window — the Adal Keep page and one tab
+ * per run. All runs share the browser's default context (one sign-in for
+ * LMIS / Musaned). No extra windows, no separate processes per run.
  *
  * Cross-platform: Windows / macOS / Linux.
  *
@@ -28,6 +28,8 @@
 
 import fs from 'fs'
 import path from 'path'
+import { spawn } from 'child_process'
+import { fileURLToPath } from 'url'
 
 let _browser = null
 
@@ -75,9 +77,52 @@ function findBrowserExecutable() {
   return null
 }
 
+// One browser profile for Adal Keep, kept between restarts (LMIS and Musaned
+// stay signed in). The launcher opens the Adal Keep page with this same
+// profile, so the page and every run are tabs of ONE window.
+export const PROFILE_DIR = process.env.ADAL_BROWSER_PROFILE ||
+  path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'data', 'browser-profile')
+const DEBUG_PORT = 9222
+
+const BROWSER_ARGS = [
+  `--remote-debugging-port=${DEBUG_PORT}`,
+  `--user-data-dir=${PROFILE_DIR}`,
+  '--no-first-run',
+  '--no-default-browser-check',
+  '--hide-crash-restore-bubble',
+  '--start-maximized',
+  '--disable-gpu',
+  '--disable-dev-shm-usage',
+  '--disable-background-networking',
+  // NOTE: do NOT add '--blink-settings=imagesEnabled=false': it is
+  // browser-wide and blanks the Musaned reCAPTCHA images. Image policy is
+  // per tab (`page.__adalAllowImages`, see tabManager.setupTab).
+  '--disable-notifications',
+  '--disable-features=Translate,MediaRouter,OptimizationHints',
+  '--disable-popup-blocking',
+  '--noerrdialogs',
+  '--disable-infobars',
+  // Keep background run tabs fully active: without these Chrome slows the
+  // timers of tabs that are not in front to ~1 tick a minute.
+  '--disable-background-timer-throttling',
+  '--disable-renderer-backgrounding',
+  '--disable-backgrounding-occluded-windows',
+]
+
+async function connectTo(puppeteer, url) {
+  const b = await puppeteer.connect({ browserURL: url, defaultViewport: null })
+  b.on('disconnected', () => {
+    console.log('[browser] disconnected')
+    if (_browser === b) _browser = null
+  })
+  return b
+}
+
 /**
- * Get (or lazily create) the shared browser instance.
- * Idempotent — calling this 100 times returns the same browser.
+ * Get the shared browser. Connects to the Adal Keep browser when it is
+ * already open (the launcher may have opened it); otherwise starts it, with
+ * the Adal Keep page as its first tab. Runs then open tabs in that window —
+ * never a new window. The browser is not closed when the server stops.
  */
 export async function getBrowser() {
   if (_browser && _browser.isConnected && _browser.isConnected()) {
@@ -85,19 +130,13 @@ export async function getBrowser() {
   }
 
   const puppeteer = (await import('puppeteer-core')).default
-
-  // Prefer connecting to an already-running browser with a debugging port
-  // (useful during development: you can watch what's happening).
-  const cdpUrl = process.env.BRAVE_CDP_URL || 'http://localhost:9222'
+  const cdpUrl = process.env.BRAVE_CDP_URL || `http://localhost:${DEBUG_PORT}`
   try {
-    _browser = await puppeteer.connect({
-      browserURL: cdpUrl,
-      defaultViewport: null,
-    })
-    console.log('[browser] connected to existing browser at', cdpUrl)
+    _browser = await connectTo(puppeteer, cdpUrl)
+    console.log('[browser] connected to the open browser at', cdpUrl)
     return _browser
   } catch {
-    // no debugging port available — launch a fresh one
+    // not open yet — start it
   }
 
   const exec = findBrowserExecutable()
@@ -108,56 +147,33 @@ export async function getBrowser() {
     )
   }
 
-  _browser = await puppeteer.launch({
-    executablePath: exec,
-    headless: false,          // show the browser so a human can verify
-    defaultViewport: null,
-    args: [
-      '--remote-debugging-port=9222',
-      '--no-first-run',
-      '--no-default-browser-check',
-      '--disable-gpu',
-      '--disable-dev-shm-usage',
-      '--disable-background-networking',
-      // NOTE: do NOT re-add '--blink-settings=imagesEnabled=false' here.
-      // That flag is browser-wide and cannot be overridden per tab, so it
-      // makes the Musaned reCAPTCHA image challenges render as empty
-      // white squares. Image policy is now per-job, decided in worker.js
-      // via `page.__adalAllowImages` inside the request interceptor.
-      '--mute-audio',
-      '--disable-notifications',
-      '--disable-features=Translate,MediaRouter,OptimizationHints',
-      '--disable-popup-blocking',
-      '--noerrdialogs',
-      '--disable-infobars',
-      '--window-position=-2400,-2400',
+  fs.mkdirSync(PROFILE_DIR, { recursive: true })
+  const ui = `http://localhost:${process.env.PORT || 4000}`
+  const child = spawn(exec, [...BROWSER_ARGS, ui], { detached: true, stdio: 'ignore', windowsHide: true })
+  child.unref()
+  console.log('[browser] started', exec, 'profile', PROFILE_DIR)
 
-      // --- Anti-throttle: keep background lane tabs fully active -----------
-      // Without these, Chrome clamps timers in background/occluded tabs to
-      // ~1 tick/minute, which stalls React state machines and long-running
-      // page scripts (e.g. the LMIS placed-labors flow) in non-focused lanes.
-      '--disable-background-timer-throttling',
-      '--disable-renderer-backgrounding',
-      '--disable-backgrounding-occluded-windows',
-    ],
-  })
-  console.log('[browser] launched fresh browser:', exec)
-
-  _browser.on('disconnected', () => {
-    console.log('[browser] disconnected')
-    _browser = null
-  })
-
-  return _browser
+  const deadline = Date.now() + 30000
+  let lastErr = null
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 500))
+    try {
+      _browser = await connectTo(puppeteer, cdpUrl)
+      return _browser
+    } catch (e) { lastErr = e }
+  }
+  throw new Error(`The browser did not open its control port (${lastErr?.message || 'timeout'}). ` +
+    'If Brave was already open with the Adal Keep profile, close it and try again.')
 }
 
 /**
  * Close everything cleanly. Call on process shutdown.
  */
 export async function closeBrowser() {
+  // Let go of the browser without closing it: the person's tabs stay open.
   if (_browser) {
-    try { await _browser.close() } catch {}
+    try { await _browser.disconnect() } catch {}
     _browser = null
-    console.log('[browser] closed')
+    console.log('[browser] released')
   }
 }

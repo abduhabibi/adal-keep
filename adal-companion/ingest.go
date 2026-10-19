@@ -1,16 +1,12 @@
 package main
 
-// ingest.go — v3 upload path.
+// ingest.go — the upload path.
 //
-// The old path encrypted the file with AES and POSTed it to
-// /api/files/upload-encrypted, which parked it in uploads/temp where nothing
-// picked it up. v3 hands the raw file to /api/companion/ingest instead: the
+// The raw file goes to /api/companion/ingest: the
 // server puts it in the file tray (or straight onto a profile field) and
 // re-runs the passport verification ticks, which is what makes the operator's
 // three green lights move while the employee is still standing at the
 // scanner.
-//
-// Set ADAL_ENCRYPT_UPLOAD=true to fall back to the legacy encrypted upload.
 
 import (
 	"bytes"
@@ -148,6 +144,10 @@ func postIngest(filePath, filename string) error {
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
+	if lockedResponse(resp, body) {
+		setLocked(true)
+		return errLocked
+	}
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		return fmt.Errorf("server rejected the file (%d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
@@ -178,8 +178,14 @@ func postIngest(filePath, filename string) error {
 // uploadToIngest delivers a file and, on transport failure, re-scans the LAN
 // once — a DHCP lease change is the most likely reason a previously working
 // server address stopped answering.
+// errLocked: the main PC refused the file because it is not paid for.
+var errLocked = fmt.Errorf("the main Adal Keep PC is locked")
+
 func uploadToIngest(filePath, filename string) {
 	if err := postIngest(filePath, filename); err == nil {
+		return
+	} else if err == errLocked {
+		log.Printf("🔒 Not sent (%s is locked until it is paid for): %s", serverDisplayName, filename)
 		return
 	} else {
 		log.Printf("⚠️ Ingest failed: %v", err)

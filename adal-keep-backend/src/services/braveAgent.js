@@ -23,7 +23,7 @@ function findBrave() {
     try { if (fs.existsSync(c)) return c } catch {}
   }
   try {
-    return execSync('which brave-browser 2>/dev/null || which brave 2>/dev/null', { encoding: 'utf8' }).trim()
+    return execSync('which brave-browser 2>/dev/null || which brave 2>/dev/null', { encoding: 'utf8', windowsHide: true }).trim()
   } catch {
     return null
   }

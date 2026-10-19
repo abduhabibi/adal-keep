@@ -15,6 +15,8 @@
  *   - No active/completed police_certificate job
  */
 
+import { isAppLocked } from './subscription.js'
+
 const SCAN_INTERVAL_MS = 2 * 60 * 1000        // 2 minutes
 const WORKFLOW_ID = 'police_certificate'
 
@@ -66,6 +68,7 @@ async function getDefaultAccount(db) {
 }
 
 async function scanOnce(db) {
+  if (isAppLocked()) return
   try {
     const ready = await findReadyProfiles(db)
     if (ready.length === 0) return

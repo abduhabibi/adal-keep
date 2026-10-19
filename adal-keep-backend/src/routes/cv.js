@@ -158,22 +158,16 @@ router.get('/profile-readiness/:profileId', async (req, res) => {
     const has_full_body_photo = (fileMap['Full Body Photo'] || 0) > 0
 
     // ---- CV-generation blockers ----
-    let skillsObj = {}
-    try { skillsObj = typeof profile.skills === 'string' ? JSON.parse(profile.skills) : (profile.skills || {}) } catch {}
-    const has_any_skill = Object.values(skillsObj).some(Boolean)
-
     const cv_blockers = []
     if (!profile.broker_id) cv_blockers.push('Broker not assigned')
     if (!has_photo) cv_blockers.push('Photo missing')
     if (!has_full_body_photo) cv_blockers.push('Full body photo missing')
     if (!profile.labor_id || !String(profile.labor_id).trim()) cv_blockers.push('Labor ID missing')
-    if (!has_any_skill) cv_blockers.push('No skills selected')
     if (!profile.religion) cv_blockers.push('Religion missing')
     if (!profile.marital_status) cv_blockers.push('Marital status missing')
 
     const can_generate = cv_blockers.length === 0
 
-    console.log('[CV readiness] profile', profileId, 'files:', JSON.stringify(fileMap), 'can:', can_generate)
 
     res.json({
       profile,
@@ -244,7 +238,7 @@ router.post('/generate', async (req, res) => {
 
     const [cvsId] = await db('generated_cvs').insert({ profile_id: fresh.id, template_id: template.id, filename, data_snapshot: JSON.stringify(data), pdf_path: filename, created_by: 'user', created_at: new Date().toISOString(), updated_at: new Date().toISOString() })
 
-    res.json({ ok: true, generated_cv_id: cvsId, file_id: fileId, filename, download_url: '/api/files/' + fileId + '/download', preview_html: html })
+    res.json({ ok: true, generated_cv_id: cvsId, file_id: fileId, filename, download_url: '/api/files/' + fileId + '/download' })
   } catch (e) {
     console.error('[CV] generate error: ' + e.message)
     res.status(500).json({ error: e.message })
@@ -257,18 +251,40 @@ const headerStorage = multer.diskStorage({
 })
 const headerUpload = multer({ storage: headerStorage, limits: { fileSize: 15 * 1024 * 1024 } })
 
-router.post('/templates/:id/header', headerUpload.single('header'), async (req, res) => {
-  try {
-    const db = req.app.locals.db
-    if (!req.file) return res.status(400).json({ error: 'No header image' })
-    const filename = path.basename(req.file.path)
-    await db('cv_templates').where('id', req.params.id).update({
-      header_path: filename,
-      updated_at: new Date().toISOString(),
-    })
-    res.json({ ok: true, header_path: filename })
-  } catch (e) { res.status(500).json({ error: e.message }) }
-})
+// Header / footer banner: upload (or replace) and remove. The old image is
+// deleted once no template uses it.
+async function dropImage(db, file) {
+  if (!file) return
+  const used = await db('cv_templates').where('header_path', file).orWhere('footer_path', file).first()
+  if (!used) fs.promises.unlink(path.join(SAFE_STORAGE_DIR, path.basename(file))).catch(() => {})
+}
+
+for (const kind of ['header', 'footer']) {
+  const col = kind + '_path'
+  router.post(`/templates/:id/${kind}`, headerUpload.single(kind), async (req, res) => {
+    try {
+      const db = req.app.locals.db
+      if (!req.file) return res.status(400).json({ error: `No ${kind} image` })
+      const tpl = await db('cv_templates').where('id', req.params.id).first()
+      if (!tpl) { fs.promises.unlink(req.file.path).catch(() => {}); return res.status(404).json({ error: 'Template not found' }) }
+      const filename = path.basename(req.file.path)
+      await db('cv_templates').where('id', tpl.id).update({ [col]: filename, updated_at: new Date().toISOString() })
+      await dropImage(db, tpl[col])
+      res.json({ ok: true, [col]: filename })
+    } catch (e) { res.status(500).json({ error: e.message }) }
+  })
+
+  router.delete(`/templates/:id/${kind}`, async (req, res) => {
+    try {
+      const db = req.app.locals.db
+      const tpl = await db('cv_templates').where('id', req.params.id).first()
+      if (!tpl) return res.status(404).json({ error: 'Template not found' })
+      await db('cv_templates').where('id', tpl.id).update({ [col]: null, updated_at: new Date().toISOString() })
+      await dropImage(db, tpl[col])
+      res.json({ ok: true })
+    } catch (e) { res.status(500).json({ error: e.message }) }
+  })
+}
 
 router.patch('/templates/:id', async (req, res) => {
   const db = req.app.locals.db
@@ -313,7 +329,7 @@ router.post('/generated/:id/reformat', async (req, res) => {
     const [fileId] = await db('files').insert({ profile_field_id: cvField.id, original_name: slug + '_' + tslug + '.pdf', path: filename, mimetype: 'application/pdf', size, created_at: new Date().toISOString(), updated_at: new Date().toISOString() })
     const [newId] = await db('generated_cvs').insert({ profile_id: profile.id, template_id: template.id, filename, data_snapshot: JSON.stringify(freshData), pdf_path: filename, created_by: 'reformat', created_at: new Date().toISOString(), updated_at: new Date().toISOString() })
 
-    res.json({ ok: true, generated_cv_id: newId, file_id: fileId, filename, download_url: '/api/files/' + fileId + '/download', preview_html: html })
+    res.json({ ok: true, generated_cv_id: newId, file_id: fileId, filename, download_url: '/api/files/' + fileId + '/download' })
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
@@ -333,19 +349,6 @@ router.get('/templates/:id/footer-image', async (req, res) => {
   const fp = path.join(SAFE_STORAGE_DIR, tpl.footer_path)
   if (!fs.existsSync(fp)) return res.status(404).end()
   res.sendFile(fp)
-})
-
-router.post('/templates/:id/footer', headerUpload.single('footer'), async (req, res) => {
-  try {
-    const db = req.app.locals.db
-    if (!req.file) return res.status(400).json({ error: 'No footer image' })
-    const filename = path.basename(req.file.path)
-    await db('cv_templates').where('id', req.params.id).update({
-      footer_path: filename,
-      updated_at: new Date().toISOString(),
-    })
-    res.json({ ok: true, footer_path: filename })
-  } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
 
@@ -431,10 +434,9 @@ router.post('/templates/preview-html', async (req, res) => {
     const db = req.app.locals.db
     const { html_content, css_content, template_id } = req.body || {}
     let html = html_content, css = css_content
-    if ((!html || !html.trim()) && template_id) {
-      const t = await db('cv_templates').where('id', template_id).first()
-      if (t) { html = t.html_content; css = t.css_content }
-    }
+    // The editor's template: its saved header, footer and passport page, with the HTML being edited.
+    const t = template_id ? await db('cv_templates').where('id', template_id).first() : null
+    if ((!html || !html.trim()) && t) { html = t.html_content; css = t.css_content }
     if (!html) return res.status(400).send('No HTML provided')
 
     const dummy = {
@@ -455,7 +457,8 @@ router.post('/templates/preview-html', async (req, res) => {
       emergency_gender: 'Male', emergency_relationship: 'Father',
       region: 'Addis Ababa', zone_subcity: 'Bole',
     }
-    const dummyTemplate = { salary: 1000, currency: 'SAR', country: 'SA', contract_years: 2 }
+    const dummyTemplate = t ? { ...t, salary: t.salary ?? 1000, currency: t.currency || 'SAR', country: t.country || 'SA', contract_years: t.contract_years || 2 }
+                            : { salary: 1000, currency: 'SAR', country: 'SA', contract_years: 2 }
     const data = await buildTemplateData(db, dummy, dummyTemplate, {})
     const merged = mergeTemplate(html, css || '', data)
     res.set('Content-Type', 'text/html; charset=utf-8').send(merged)

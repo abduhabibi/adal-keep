@@ -171,6 +171,45 @@ export async function pickPrintedName(result, candidates) {
   return { name: candidates[Number(pick.choice.slice(1))], confidence: Number(pick.confidence ?? 0) }
 }
 
+// No credits / bad key: stop asking for a while instead of failing every run.
+let _lookPausedUntil = 0
+let _lookWhy = ''
+
+/** Why the last lookAtPage() got no answer ('' when JEV answered). */
+export function lookUnavailableReason() {
+  if (!jevReady()) return 'JEV is off (no TypeSafe key)'
+  return _lookWhy
+}
+
+/**
+ * Show JEV a screenshot and ask yes/no questions about it.
+ * `questions` is { name: 'question text' }. Returns { name: probability 0..1 }
+ * or null when JEV is off, out of credits or did not answer.
+ */
+export async function lookAtPage(png, questions) {
+  if (!jevReady() || Date.now() < _lookPausedUntil) return null
+  _lookWhy = ''
+  try {
+    const { sdk, api } = await client()
+    const img = await sharp(png).resize({ width: 1600, height: 1600, fit: 'inside', withoutEnlargement: true }).png().toBuffer()
+    const qs = {}
+    for (const [k, text] of Object.entries(questions)) qs[k] = sdk.noul(text)
+    const res = await api.systemOne({ state: { page: sdk.image(img) }, questions: qs })
+    const out = {}
+    for (const k of Object.keys(questions)) {
+      const v = res.answers?.[k]?.noul
+      out[k] = typeof v === 'number' ? v : null
+    }
+    return out
+  } catch (e) {
+    if ([401, 402, 403].includes(e?.status)) _lookPausedUntil = Date.now() + 10 * 60 * 1000
+    _lookWhy = e?.status === 402 ? 'JEV has no TypeSafe credits left'
+      : [401, 403].includes(e?.status) ? 'JEV refused the TypeSafe key' : 'JEV did not answer'
+    console.warn('[jev] look failed:', e?.status || '', String(e?.message || e).slice(0, 120))
+    return null
+  }
+}
+
 /** Delete the temporary page image of a classifyWithJev() result. */
 export function release(result) {
   if (result?._tmp) try { fs.unlinkSync(result._tmp) } catch {}
@@ -198,4 +237,4 @@ export async function cropMrz(result) {
   } catch { return null }
 }
 
-export default { jevReady, classifyWithJev, cropMrz, pickPrintedName, release, JEV_DOC_TYPES }
+export default { jevReady, classifyWithJev, cropMrz, pickPrintedName, lookAtPage, lookUnavailableReason, release, JEV_DOC_TYPES }

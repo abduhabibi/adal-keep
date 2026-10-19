@@ -8,10 +8,23 @@ const api = axios.create({
   withCredentials: true, // Required for cookies/sessions
 })
 
+// Public demo build (vite --mode demo): answer in the browser with made-up
+// data instead of calling a server. See src/demo/server.js.
+if (import.meta.env.VITE_DEMO === '1') {
+  api.interceptors.request.use(async (config) => {
+    config.adapter = (await import('../demo/server.js')).demoAdapter
+    return config
+  })
+}
+
 // Global error handler (optional but helpful for debugging)
 api.interceptors.response.use(
   (response) => response,
   (error) => {
+    // Trial over and not unlocked: the app swaps itself for the lock screen.
+    if (error.response?.status === 402 && error.response?.data?.error === 'locked') {
+      window.dispatchEvent(new Event('adal-locked'))
+    }
     if (error.response?.status === 503) {
       console.error('⚠️ Server is locked due to hardware mismatch.')
     } else if (error.code === 'ERR_NETWORK') {

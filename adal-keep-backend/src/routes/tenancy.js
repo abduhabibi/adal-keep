@@ -2,7 +2,7 @@ import express from 'express'
 import crypto from 'crypto'
 import bcrypt from 'bcryptjs'
 import { signToken, verifyToken, adoptOrphanData } from '../services/tenancy.js'
-import { readSide, statusPayload, applyCode, decryptDatabase, isLockedFile } from '../services/subscription.js'
+import { readSide, statusPayload, applyCode } from '../services/subscription.js'
 
 const router = express.Router()
 const parseCookies = (req) => { const o = {}; (req.headers.cookie || '').split(';').forEach(p => { const [k, ...v] = p.split('='); if (k) o[k.trim()] = decodeURIComponent(v.join('=')) }); return o }
@@ -23,9 +23,8 @@ const normalizePhone = (p) => {
 }
 
 router.get('/setup/status', async (req, res) => {
-  if (req.app.locals.destroyed || isLockedFile()) return res.json({ state: 'destroyed', subscription: statusPayload(readSide()) })
   const company = await req.app.locals.db('companies').first().catch(() => null)
-  res.json({ state: company ? 'ready' : 'setup', companyName: company?.name || null, subscription: statusPayload(readSide()) })
+  res.json({ state: company ? 'ready' : 'setup', companyName: company?.name || null, subscription: statusPayload() })
 })
 
 router.post('/setup/company', async (req, res) => {
@@ -51,17 +50,12 @@ router.post('/setup/company', async (req, res) => {
   res.json({ success: true, apiKeyName: `Adal ${companyName}` })
 })
 
-router.get('/subscription/status', (req, res) => res.json(statusPayload(readSide())))
+router.get('/subscription/status', (req, res) => res.json(statusPayload()))
 
 router.post('/subscription/unlock', async (req, res) => {
-  const { code } = req.body
-  if (!applyCode(code)) return res.status(400).json({ error: 'ልክ ያልሆነ የመዳረሻ ኮድ' })
-  if (isLockedFile()) {
-    await decryptDatabase()
-    if (req.app.locals.runInit) await req.app.locals.runInit()
-    req.app.locals.destroyed = false
-  }
-  res.json({ success: true, subscription: statusPayload(readSide()) })
+  const r = applyCode(req.body?.code)
+  if (!r.ok) return res.status(400).json({ error: r.error })
+  res.json({ success: true, subscription: statusPayload() })
 })
 
 router.get('/notifications', async (req, res) => {

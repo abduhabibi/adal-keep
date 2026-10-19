@@ -1,5 +1,5 @@
 import fs from 'fs'
-import { enqueueFile } from './ingestQueue.js'
+import { enqueueFile, setStage } from './ingestQueue.js'
 import { getActiveEmployee } from './activeEmployee.js'
 import os from 'os'
 import path from 'path'
@@ -132,27 +132,28 @@ async function findSlipProfile(ex, db) {
   return null
 }
 
-async function getOrCreateProfile(ex, fullName, db) {
+/**
+ * The profile a document belongs to: same passport number, same ID number,
+ * or exactly the same name. Only an existing profile — see createProfile.
+ */
+async function findProfile(ex, names, db) {
+  let p = null
+  if (ex.passport_number) p = await db('profiles').where('passport_number', ex.passport_number).first()
+  if (!p && ex.national_id) p = await db('profiles').where('national_id', ex.national_id).first()
+  for (const n of names) {
+    if (p || !n || n.split(' ').length < 2) continue // one word matches too many people
+    p = await db('profiles').where('full_name', n).first()
+  }
+  return p || null
+}
+
+/**
+ * A new profile — only from a passport whose MRZ check digits verified, so
+ * the name and number on it are the ones printed in the passport.
+ */
+async function createProfile(ex, fullName, db) {
   try {
-    let p = null
-    if (ex.passport_number) p = await db('profiles').where('passport_number', ex.passport_number).first()
-    if (!p && ex.national_id) p = await db('profiles').where('national_id', ex.national_id).first()
-    if (!p && fullName) p = await db('profiles').where('full_name', fullName).first()
-
-    if (p) {
-      const updates = {}
-      if (fullName && fullName !== 'Unknown' && fullName !== p.full_name) updates.full_name = fullName
-      if (ex.first_name && ex.first_name !== p.first_name) updates.first_name = ex.first_name
-      if (ex.last_name  && ex.last_name  !== p.last_name)  updates.last_name  = ex.last_name
-      if (Object.keys(updates).length) {
-        updates.updated_at = new Date().toISOString()
-        await db('profiles').where('id', p.id).update(updates)
-        console.log(`[pipeline] repaired profile #${p.id}:`, JSON.stringify(updates))
-      }
-      return { ...p, ...updates }
-    }
-
-    if (!fullName && !ex.passport_number && !ex.national_id) return null
+    if (!fullName || !ex.passport_number) return null
     // Attribute the new profile to the employee currently bound to this machine
     let createdBy = 'Vision-Auto'
     try {
@@ -160,7 +161,7 @@ async function getOrCreateProfile(ex, fullName, db) {
       if (active?.name) createdBy = active.name
     } catch {}
     const [id] = await db('profiles').insert({
-      full_name: fullName || 'Unknown',
+      full_name: fullName,
       first_name: ex.first_name || '',
       last_name: ex.last_name || '',
       passport_number: ex.passport_number || null,
@@ -176,7 +177,7 @@ async function getOrCreateProfile(ex, fullName, db) {
     })
     return { id, full_name: fullName }
   } catch (e) {
-    console.error('[pipeline] profile upsert failed:', e.message)
+    console.error('[pipeline] profile create failed:', e.message)
     return null
   }
 }
@@ -251,6 +252,7 @@ export async function runPipeline(filePath, db, analyzer, tag = '[pipeline]') {
   // until the document is accepted, so ignored files leave no trace on disk.
   const contentHash = sha256File(filePath)
 
+  setStage('reading the document')
   let result
   try {
     result = await analyzer(filePath, filename, ALLOWED_EXTS[ext], filePath)
@@ -283,10 +285,13 @@ export async function runPipeline(filePath, db, analyzer, tag = '[pipeline]') {
   const ex = normalizeNameOrder(result.fields || {})
   ex.phone_number = cleanPhone(ex.phone_number)
 
+  // The name printed in the document. The file's own name ("IMG-2026…",
+  // "WhatsApp Image…") is never a person's name: it only helps find a profile.
   const fullName = sanitizeName(ex.full_name) ||
-                   sanitizeName(`${ex.given_names || ''} ${ex.surname || ''}`) ||
-                   nameFromFilename(filename)
-  log(`final name: "${fullName}" (doc=${result.doc_type}, conf=${result.confidence})`)
+                   sanitizeName(`${ex.given_names || ''} ${ex.surname || ''}`)
+  // Only a passport (its MRZ verified — checked above) names or creates a profile.
+  const isPassport = result.doc_type === 'Passport'
+  log(`name in the document: "${fullName}" (doc=${result.doc_type}, conf=${result.confidence})`)
 
   if (!db) return { ok: false, reason: 'no_db' }
   // Slips must attach to an existing worker profile, matched via reference_name
@@ -306,15 +311,23 @@ export async function runPipeline(filePath, db, analyzer, tag = '[pipeline]') {
       console.log(tag, 'order_id "' + ex.order_id + '" stored on profile #' + profile.id)
     }
   } else {
-    profile = await getOrCreateProfile(ex, fullName, db)
+    profile = await findProfile(ex, [fullName, nameFromFilename(filename)], db)
+    if (!profile && isPassport) { profile = await createProfile(ex, fullName, db); if (profile) profile.created = true }
   }
   if (!profile) {
-    log('could not create profile — no name/IDs')
-    if (result.doc_type === 'Passport') await notifyPassportUnreadable(db, filename, 'No name could be read from it.')
-    return { ok: false, reason: 'no_profile' }
+    if (isPassport) {
+      log('could not create profile — no name/passport number')
+      await notifyPassportUnreadable(db, filename, 'No name could be read from it.')
+      return { ok: false, reason: 'no_profile' }
+    }
+    // Not a passport and no profile it belongs to: leave it alone. New
+    // profiles come from passports only, so names are never guessed.
+    log(`skip — ${result.doc_type} matches no profile (profiles are created from passports only)`)
+    return { ok: false, reason: 'no_profile_match', docType: result.doc_type }
   }
   const profileId = profile.id
 
+  setStage(`saving it to ${profile.full_name || 'the profile'}`)
   // Route to the correct field — doc_type is already the field-template name
   const fieldName = result.doc_type
   let field = await db('profile_fields').where('profile_id', profileId).andWhere('name', fieldName).first()
@@ -378,16 +391,23 @@ export async function runPipeline(filePath, db, analyzer, tag = '[pipeline]') {
     })
   }
 
-  const upd = { updated_at: new Date().toISOString() }
+  // A verified passport sets the details. Any other document only fills
+  // what the profile does not have yet — it never renames anyone.
+  const read = {}
   for (const k of ['first_name','middle_name','last_name','date_of_birth','gender','nationality','order_id',
                    'passport_issue_date','passport_expiry_date','place_of_birth',
                    'surname_am','given_names_am','phone_number']) {
-    if (ex[k]) upd[k] = ex[k]
+    if (ex[k]) read[k] = ex[k]
   }
-  if (ex.sex && !ex.gender) upd.gender = ex.sex
-  if (ex.date_of_issue)      upd.passport_issue_date  = ex.date_of_issue
-  if (ex.date_of_expiry)     upd.passport_expiry_date = ex.date_of_expiry
-  if (fullName && fullName !== 'Unknown') upd.full_name = fullName
+  if (ex.sex && !ex.gender) read.gender = ex.sex
+  if (ex.date_of_issue)      read.passport_issue_date  = ex.date_of_issue
+  if (ex.date_of_expiry)     read.passport_expiry_date = ex.date_of_expiry
+  if (isPassport && fullName) read.full_name = fullName
+  const current = await db('profiles').where('id', profileId).first()
+  const upd = { updated_at: new Date().toISOString() }
+  for (const [k, v] of Object.entries(read)) {
+    if (k in (current || {}) && (isPassport || !current[k])) upd[k] = v
+  }
   await db('profiles').where('id', profileId).update(upd)
 
   // A passport is checked against its MRZ right away, so the police-clearance
@@ -416,7 +436,7 @@ export async function runPipeline(filePath, db, analyzer, tag = '[pipeline]') {
     created_at: new Date().toISOString(),
   })
   log(`done — profile #${profileId}, task #${taskId}, stored ${formats.length} file(s)`)
-  return { ok: true, profileId, taskId, docType: result.doc_type, files: formats.length }
+  return { ok: true, profileId, taskId, docType: result.doc_type, files: formats.length, created: !!profile.created }
 }
 
 export function startWatcher(watchDir, db, processorFn, tag = '[pipeline]') {

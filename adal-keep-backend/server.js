@@ -1,6 +1,4 @@
 import paymentsRouter from './src/routes/payments.js'
-import subscriptionRouter from './src/routes/subscription.js'
-import subscriptionUnlockRouter from "./src/routes/subscriptionUnlock.js"
 import express from 'express'
 import musanedAccountsRouter from './src/routes/musanedAccounts.js'
 import cors from 'cors'
@@ -12,8 +10,6 @@ import helmet from 'helmet'
 import cron from 'node-cron'
 import knexConfig from './knexfile.js'
 import filesRouter from './src/routes/files.js'
-import { generateFingerprint } from './src/services/fingerprints.js'
-import { licenseLockMiddleware } from './src/middleware/licenseLock.js'
 import multer from 'multer'
 import path from 'path'
 import fs from 'fs'
@@ -25,11 +21,10 @@ import quickLinksRouter from "./src/routes/quickLinks.js"
 import tenancyRouter, { attachAuth } from "./src/routes/tenancy.js"
 import employeesRouter from "./src/routes/employees.js"
 import employeeRegisterRouter from "./src/routes/employeeRegister.js"
-import aiRouter from "./src/routes/ai.js"
 import aiTasksRouter from "./src/routes/aiTasks.js"
 import branchesRouter from "./src/routes/branches.js"
 import { ensureTenancySchema, adoptOrphanData } from "./src/services/tenancy.js"
-import { preCheck, subscriptionGuard, readSide, statusPayload, maybeNotify } from "./src/services/subscription.js"
+import { subscriptionGuard, statusPayload, maybeNotify } from "./src/services/subscription.js"
 import authRouter from "./src/routes/auth.js"
 import cvRouter from './src/routes/cv.js'
 import automationsRouter from './src/routes/automations.js'
@@ -59,10 +54,11 @@ app.locals.db = db
 app.use(cors({ origin: true, credentials: true }))
 app.use(express.json())
 
+// Locked after the trial: every API call and stored document is refused.
+app.use(subscriptionGuard)
 // Serve uploaded SafeStorage files statically
 app.use('/uploads', express.static(path.join(process.cwd(), 'data/SafeStorage')))
 
-app.use(subscriptionGuard)
 app.use(attachAuth)
 
 // Core Feature Routes
@@ -70,7 +66,6 @@ app.use("/api", tenancyRouter)
 app.use('/api/payments', paymentsRouter)
 app.use("/api/employees", employeesRouter)
 app.use("/api/employees", employeeRegisterRouter)
-app.use("/api/ai", aiRouter)
 app.use("/api/tasks", tasksRouter)
 app.use("/api/ai-tasks", aiTasksRouter)
 app.use("/api/branches", branchesRouter)
@@ -85,8 +80,6 @@ app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false 
 // /api/auth/me, /api/settings, /api/cv/*, /api/lmis/* and /api/musaned/*.
 
 // Subscription & Management Routes
-app.use('/api/subscription', subscriptionRouter)
-app.use("/api/subscription", subscriptionUnlockRouter)
 
 // Updates & System Routes
 app.use('/api/updates', updatesRouter)
@@ -107,10 +100,8 @@ async function ensureColumn(table, column, addFn) {
   if (!has) await db.schema.table(table, addFn)
 }
 
-// 1. Initialize Database & License Verification on Startup
+// 1. Initialize the database on startup
 async function initSystem() {
-  const pre = await preCheck()
-  if (pre === "destroyed") { app.locals.destroyed = true; console.log("🔐 System archived — awaiting access code."); return }
   try {
     // Run migrations dynamically
     try {
@@ -163,24 +154,11 @@ async function initSystem() {
       await ensureColumn('brokers', 'created_by', (t) => t.integer('created_by'))
     }
 
-    // Verify License & Hardware Fingerprint
-    const currentFingerprint = generateFingerprint()
-    const licenseRecord = await db('license').first()
-
-    if (!licenseRecord) {
+    // The company-setup password (first run). Locking and paying are handled
+    // by subscription.js; the old hardware-fingerprint lock is gone.
+    if (!(await db('license').first())) {
       const defaultDevHash = await bcrypt.hash(process.env.DEV_MASTER_PASSWORD || '759126348', 10)
-      await db('license').insert({
-        fingerprint: currentFingerprint,
-        dev_password_hash: defaultDevHash,
-      })
-      app.locals.licenseLocked = false
-      console.log('✅ License initialized and locked to this machine.')
-    } else if (licenseRecord.fingerprint !== currentFingerprint) {
-      app.locals.licenseLocked = true
-      console.log('⚠️ HARDWARE MISMATCH! Server is LOCKED.')
-    } else {
-      app.locals.licenseLocked = false
-      console.log('✅ License verified. Hardware matches.')
+      await db('license').insert({ fingerprint: '', dev_password_hash: defaultDevHash })
     }
   } catch (err) {
     console.error('❌ System initialization failed:', err)
@@ -189,10 +167,7 @@ async function initSystem() {
 }
 
 app.locals.runInit = initSystem
-setInterval(async () => { try { if (!app.locals.destroyed) await maybeNotify(app.locals.db, statusPayload(readSide())) } catch {} }, 3600000)
-
-// 2. Apply License Lock Middleware BEFORE core routes
-app.use(licenseLockMiddleware)
+setInterval(async () => { try { await maybeNotify(app.locals.db, statusPayload()) } catch {} }, 3600000)
 
 // Helper function to filter object keys
 function pick(obj, keys) {
@@ -205,35 +180,7 @@ function pick(obj, keys) {
   return out
 }
 
-// 3. Unlocked License Management Endpoints
-app.post('/api/license/reset', async (req, res) => {
-  try {
-    const { devPassword } = req.body
-    const licenseRecord = await db('license').first()
-
-    if (!licenseRecord) return res.status(500).json({ error: 'License not initialized' })
-
-    const isValid = await bcrypt.compare(devPassword, licenseRecord.dev_password_hash)
-    if (!isValid) {
-      return res.status(401).json({ error: 'Invalid developer password' })
-    }
-
-    const currentFingerprint = generateFingerprint()
-    await db('license').update({ fingerprint: currentFingerprint })
-    app.locals.licenseLocked = false
-
-    res.json({ success: true, message: 'Hardware fingerprint updated. Server unlocked.' })
-  } catch (err) {
-    console.error(err)
-    res.status(500).json({ error: 'Failed to reset license' })
-  }
-})
-
-app.get('/api/license/status', (req, res) => {
-  res.json({ locked: req.app.locals.licenseLocked })
-})
-
-// 4. Core Application Routes
+// 2. Core Application Routes
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok' })
 })

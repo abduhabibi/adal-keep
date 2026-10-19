@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Toaster } from 'react-hot-toast'
 import MainLayout from './components/layout/MainLayout'
@@ -14,9 +15,8 @@ import NotificationsPage from './pages/NotificationsPage'
 import { FileCaptureProvider } from './context/FileCaptureContext'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import TasksPage from './pages/TasksPage'
-import PaymentLock from './components/PaymentLock'
+import LockScreen from './components/LockScreen'
 import IntroWizard from './pages/IntroWizard'
-import RevivalPage from './pages/RevivalPage'
 import CVsPage from './pages/CVsPage'
 import CVNewPage from './pages/CVNewPage'
 import CVTemplatesPage from './pages/CVTemplatesPage'
@@ -35,6 +35,19 @@ const toaster = (
     }}
   />
 )
+
+function TrialBanner({ days }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)}
+        className="lock-button fixed top-0 left-0 right-0 z-[9999] !rounded-none !py-2 !text-sm">
+        Your free trial ends in {days} day{days === 1 ? '' : 's'} — unlock Adal Keep now →
+      </button>
+      {open && <LockScreen onClose={() => setOpen(false)} />}
+    </>
+  )
+}
 
 function Shell() {
   const { state, subscription, refresh } = useAuth()
@@ -65,19 +78,15 @@ function Shell() {
     )
   }
 
-  if (state === 'destroyed') return <>{toaster}<RevivalPage /></>
+  // After the free trial nothing else is shown until this PC is unlocked.
+  if (subscription?.mode === 'locked') return <>{toaster}<LockScreen /></>
   if (state === 'setup') return <>{toaster}<IntroWizard /></>
 
   return (
     <FileCaptureProvider>
       <BrowserRouter>
         {toaster}
-        {subscription?.mode === 'read_only' && <PaymentLock />}
-        {subscription?.mode === 'trial' && subscription.daysLeft <= 3 && (
-          <div className="fixed top-0 left-0 right-0 z-[9999] bg-amber-500 text-white text-center text-sm font-semibold py-2 shadow-lg">
-            ⚠️ Your trial ends in {subscription.daysLeft} day(s). Contact your provider for an access code.
-          </div>
-        )}
+        {subscription?.mode === 'trial' && subscription.daysLeft <= 3 && <TrialBanner days={subscription.daysLeft} />}
         <Routes>
           <Route path="/" element={<MainLayout />}>
             <Route index element={<DashboardPage />} />

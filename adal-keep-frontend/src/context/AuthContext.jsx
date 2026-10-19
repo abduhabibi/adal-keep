@@ -66,6 +66,15 @@ export function AuthProvider({ children }) {
     refresh()
   }, [refresh])
 
+  // The trial can end while the app is open: check every 5 minutes, and at
+  // once when the server refuses a request because the app is locked.
+  useEffect(() => {
+    const check = () => api.get('/subscription/status').then(r => setSubscription(r.data)).catch(() => {})
+    const t = setInterval(check, 5 * 60000)
+    window.addEventListener('adal-locked', check)
+    return () => { clearInterval(t); window.removeEventListener('adal-locked', check) }
+  }, [])
+
   // Brand the window title once the company is known, e.g. "Adal Sunrise Recruitment".
   // Components read `company` from this context directly — no DOM patching needed.
   useEffect(() => {

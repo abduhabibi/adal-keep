@@ -60,6 +60,7 @@ export async function setupTab(page, { runId, mute = true } = {}) {
   if (!page) return page
   if (page.__adalSetup) {
     if (runId !== undefined) page.__adalRunId = runId
+    await setFileDialogs(page, true) // a resumed run takes the dialogs back
     return page
   }
 
@@ -69,6 +70,7 @@ export async function setupTab(page, { runId, mute = true } = {}) {
     try { await cdp.send('Page.setAudioMuted', { muted: mute }) } catch {}
     try { await cdp.send('Emulation.setFocusEmulationEnabled', { enabled: true }) } catch {}
     page.__adalFocused = true
+    await catchFileDialogs(page, cdp)
   } catch (e) {
     console.log('[tabManager] cdp setup failed:', e.message)
   }
@@ -87,6 +89,70 @@ export async function setupTab(page, { runId, mute = true } = {}) {
   if (runId !== undefined) page.__adalRunId = runId
   page.__adalSetup = true
   return page
+}
+
+// --------------------------------------------------------------------------
+// File dialogs — the system "Open file" window never opens in a run tab
+// --------------------------------------------------------------------------
+/*
+ * Chrome asks the page's DevTools clients first when a page opens a file
+ * dialog. A run tab always answers: with the file the run is attaching
+ * (expectFile), or with nothing — then the dialog simply does not open.
+ * When the run hands the tab to a person, the dialogs are given back
+ * (setFileDialogs(page, false)) so the person can pick files by hand.
+ */
+async function catchFileDialogs(page, cdp) {
+  await cdp.send('Page.enable').catch(() => {})
+  cdp.on('Page.fileChooserOpened', async (ev) => {
+    const want = page.__adalNextFile
+    if (!want) {
+      console.log(`[tabManager] run #${page.__adalRunId} file dialog blocked (no file was expected)`)
+      return
+    }
+    page.__adalNextFile = null
+    let ok = false
+    if (ev.backendNodeId) {
+      try {
+        await cdp.send('DOM.setFileInputFiles', { files: want.files, backendNodeId: ev.backendNodeId })
+        ok = true
+      } catch (e) {
+        console.log(`[tabManager] run #${page.__adalRunId} could not hand the file to the page: ${e.message}`)
+      }
+    }
+    want.resolve(ok)
+  })
+  await setFileDialogs(page, true)
+}
+
+/** true: dialogs are caught (automation). false: a person gets them again. */
+export async function setFileDialogs(page, intercept) {
+  const cdp = page?.__adalCdp
+  if (!cdp) return false
+  try {
+    await cdp.send('Page.setInterceptFileChooserDialog', { enabled: !!intercept })
+    page.__adalDialogsCaught = !!intercept
+    return true
+  } catch { return false }
+}
+
+/**
+ * Arm the tab: the next file dialog it opens receives `filePath`. Click the
+ * page's Browse/dropzone after calling this. Resolves true when the file was
+ * handed over, false when no dialog opened within `timeoutMs`.
+ */
+export function expectFile(page, filePath, timeoutMs = 10000) {
+  disarmFile(page)
+  return new Promise((resolve) => {
+    const t = setTimeout(() => { if (page.__adalNextFile?.resolve === done) page.__adalNextFile = null; resolve(false) }, timeoutMs)
+    const done = (ok) => { clearTimeout(t); resolve(ok) }
+    page.__adalNextFile = { files: [filePath], resolve: done }
+  })
+}
+
+/** Cancel a pending expectFile (it resolves false). */
+export function disarmFile(page) {
+  const prev = page?.__adalNextFile
+  if (prev) { page.__adalNextFile = null; prev.resolve(false) }
 }
 
 // --------------------------------------------------------------------------
@@ -134,7 +200,15 @@ export async function openRunTab(browser, runId) {
  * still look at what the portal showed). No run will ever use it again.
  */
 export function forgetRunTab(runId) {
+  const page = tabOfRun(runId)
+  if (page) handTabToPerson(page)
   return _tabs.delete(Number(runId))
+}
+
+/** The run stops driving this tab (paused for a person, failed, done). */
+export function handTabToPerson(page) {
+  disarmFile(page)
+  setFileDialogs(page, false).catch(() => {})
 }
 
 /** Close the tab this run owns. Returns true when a tab was closed. */

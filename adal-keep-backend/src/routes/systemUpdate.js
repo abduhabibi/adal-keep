@@ -91,6 +91,7 @@ function gitAuthArgs(token) {
 async function run(cmd, cwd, timeout = 5 * 60 * 1000) {
   try {
     const { stdout, stderr } = await execAsync(cmd, {
+      windowsHide: true,
       cwd,
       shell: true,
       maxBuffer: 32 * 1024 * 1024,
@@ -343,9 +344,10 @@ async function handleApply(req, res) {
       await installDependencies(cfg.projectRoot, logs)
 
       writeMarker(cfg.projectRoot, { sha: targetSha, branch: cfg.branch })
-      // USB install: run-server.bat starts the server again when it exits,
-      // so exiting loads the new code. Give the answer time to reach the page.
-      const restarts = fs.existsSync(path.join(cfg.projectRoot, 'run-server.bat'))
+      // USB install: AdalKeep.exe (older installs: run-server.bat) starts the
+      // server again when it exits, so exiting loads the new code. Give the
+      // answer time to reach the page.
+      const restarts = ['AdalKeep.exe', 'run-server.bat'].some(f => fs.existsSync(path.join(cfg.projectRoot, f)))
       if (restarts) setTimeout(() => process.exit(0), 3000)
       return res.json({
         success: true,

@@ -1,3 +1,15 @@
+//go:build windows
+
+// AdalKeep.exe — starts Adal Keep with no command window anywhere.
+//
+//	AdalKeep.exe                   open Adal Keep (starts it first when needed)
+//	AdalKeep.exe --background      start it without opening a window (Windows login)
+//	AdalKeep.exe --set-shortcut-ids <.lnk>...   installer: tag the shortcuts (see brand.go)
+//
+// One copy per signed-in user stays in the background: it keeps the server
+// running (and starts it again when it stops — after an update, for example),
+// starts the Companion and the agent hidden, and puts the Adal Keep logo on
+// the Adal Keep Brave window. Opening Adal Keep again only opens the page.
 package main
 
 import (
@@ -9,128 +21,152 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"golang.org/x/sys/windows"
 )
 
+// uiURL: the one Adal Keep address (backend/.env PORT=4000).
+var uiURL = "http://localhost:4000"
+
+const createNoWindow = 0x08000000
+
+var logFile *os.File
+
 func main() {
-	root, err := os.Executable()
-	if err != nil {
-		fmt.Println("Error: cannot determine install path")
-		fmt.Scanln()
-		os.Exit(1)
+	root := exeDir()
+	os.MkdirAll(filepath.Join(root, "backend", "data"), 0o755)
+	logFile, _ = os.OpenFile(filepath.Join(root, "backend", "data", "launcher.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+
+	args := os.Args[1:]
+	if len(args) > 0 && args[0] == "--set-shortcut-ids" {
+		for _, lnk := range args[1:] {
+			if err := setShortcutAppID(lnk, root); err != nil {
+				logf("shortcut %s: %v", lnk, err)
+			} else {
+				logf("shortcut %s: shows as Adal Keep on the taskbar", lnk)
+			}
+		}
+		return
 	}
-	root = filepath.Dir(root)
+	background := len(args) > 0 && args[0] == "--background"
 
-	nodeExe := filepath.Join(root, "runtime", "node.exe")
-	serverJS := filepath.Join(root, "backend", "server.js")
-	agentExe := filepath.Join(root, "adal-agent.exe")
-	companionExe := filepath.Join(root, "adal-companion.exe")
-
-	// Verify Node exists
-	if _, err := os.Stat(nodeExe); os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(root, "runtime", "node.exe")); err != nil {
 		showError("Node.js runtime not found.\nPlease reinstall Adal Keep.")
 		return
 	}
 
-	fmt.Println("============================================")
-	fmt.Println("   ADAL KEEP - Starting...")
-	fmt.Println("============================================")
-	fmt.Println()
-
-	// Start background agent
-	if _, err := os.Stat(agentExe); err == nil {
-		fmt.Println("[*] Starting background agent...")
-		exec.Command(agentExe).Start()
-	}
-
-	// Start companion if present
-	if _, err := os.Stat(companionExe); err == nil {
-		fmt.Println("[*] Starting companion agent...")
-		exec.Command(companionExe).Start()
-	}
-
-	// Port 4000 is the one and only Adal Keep port (backend/.env).
-	// If the Run-at-login entry already started the server, do not spawn a
-	// second node process — just open the UI.
-	ready := serverReady(3 * time.Second)
-	if ready {
-		fmt.Println("[✓] Server already running on port 4000.")
-	} else {
-		fmt.Println("[*] Starting server...")
-		// Through run-server.bat when present: it restarts the server when it
-		// exits (after an update from the Settings page, for example).
-		cmd := exec.Command(nodeExe, serverJS)
-		cmd.Dir = filepath.Join(root, "backend")
-		if bat := filepath.Join(root, "run-server.bat"); fileExists(bat) {
-			cmd = exec.Command("cmd", "/c", bat)
-			cmd.Dir = root
+	// Already running for this user: just open the page.
+	if !firstCopy() {
+		if !background {
+			serverReady(45 * time.Second)
+			openUI(root)
 		}
-		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-		if err := cmd.Start(); err != nil {
-			showError("Could not start the server:\n" + err.Error())
-			return
+		return
+	}
+
+	logf("Adal Keep starting (background=%v)", background)
+	startHidden(filepath.Join(root, "adal-agent.exe"))
+	startHidden(filepath.Join(root, "adal-companion.exe"))
+	go keepServerRunning(root)
+	go brandWindows(root)
+
+	if !background {
+		serverReady(45 * time.Second)
+		openUI(root)
+	}
+	select {} // stay in the background: server, Companion, logo
+}
+
+func exeDir() string {
+	p, err := os.Executable()
+	if err != nil {
+		return "."
+	}
+	return filepath.Dir(p)
+}
+
+func logf(format string, a ...any) {
+	if logFile != nil {
+		fmt.Fprintf(logFile, "[%s] %s\r\n", time.Now().Format("2006-01-02 15:04:05"), fmt.Sprintf(format, a...))
+	}
+}
+
+// firstCopy is true for the first AdalKeep.exe of this Windows session.
+func firstCopy() bool {
+	name, _ := windows.UTF16PtrFromString(`Local\AdalKeepLauncher`)
+	h, err := windows.CreateMutex(nil, false, name)
+	if err == windows.ERROR_ALREADY_EXISTS {
+		windows.CloseHandle(h)
+		return false
+	}
+	return h != 0 // kept open for the life of the process
+}
+
+func hidden(cmd *exec.Cmd) *exec.Cmd {
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: createNoWindow}
+	return cmd
+}
+
+func startHidden(exe string) {
+	if _, err := os.Stat(exe); err != nil {
+		return
+	}
+	cmd := hidden(exec.Command(exe))
+	cmd.Dir = filepath.Dir(exe)
+	if err := cmd.Start(); err != nil {
+		logf("could not start %s: %v", filepath.Base(exe), err)
+		return
+	}
+	go cmd.Wait()
+}
+
+// keepServerRunning runs the server with no window and starts it again when
+// it stops. Output goes to backend\data\server.log.
+func keepServerRunning(root string) {
+	backend := filepath.Join(root, "backend")
+	for {
+		if serverReady(2 * time.Second) { // another copy (or a developer) runs it
+			time.Sleep(10 * time.Second)
+			continue
 		}
-
-		fmt.Println("[*] Waiting for server...")
-		ready = serverReady(45 * time.Second)
-	}
-
-	if !ready {
-		fmt.Println("[!] Server may still be starting. Opening the browser anyway...")
-	} else {
-		fmt.Println("[✓] Server ready!")
-	}
-
-	// Open the UI — Brave when installed, otherwise the default browser.
-	fmt.Println("[*] Opening Adal Keep...")
-	openUI("http://localhost:4000")
-
-	fmt.Println()
-	fmt.Println("============================================")
-	fmt.Println("   Adal Keep is running!")
-	fmt.Println("   Browser should open automatically.")
-	fmt.Println("   DO NOT close this window.")
-	fmt.Println("============================================")
-	fmt.Println()
-	fmt.Println("Press ENTER to stop Adal Keep...")
-	fmt.Scanln()
-
-	// Cleanup
-	fmt.Println("[*] Stopping services...")
-	exec.Command("taskkill", "/f", "/im", "adal-agent.exe").Run()
-	exec.Command("taskkill", "/f", "/im", "adal-companion.exe").Run()
-
-	// Kill node process listening on port 4000
-	out, _ := exec.Command("cmd", "/c", "netstat -aon | findstr :4000 | findstr LISTENING").Output()
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	for _, line := range lines {
-		parts := strings.Fields(line)
-		if len(parts) >= 5 {
-			pid := parts[len(parts)-1]
-			exec.Command("taskkill", "/f", "/pid", pid).Run()
+		out, _ := os.OpenFile(filepath.Join(backend, "data", "server.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+		cmd := hidden(exec.Command(filepath.Join(root, "runtime", "node.exe"), "server.js"))
+		cmd.Dir = backend
+		cmd.Stdout, cmd.Stderr = out, out
+		logf("starting the server")
+		t0 := time.Now()
+		err := cmd.Run()
+		if out != nil {
+			out.Close()
+		}
+		logf("server stopped (%v) — starting it again", err)
+		if time.Since(t0) < 15*time.Second {
+			time.Sleep(30 * time.Second) // it fails at once: do not spin
+		} else {
+			time.Sleep(3 * time.Second)
 		}
 	}
-
-	fmt.Println("[✓] Adal Keep stopped.")
-	time.Sleep(1 * time.Second)
 }
 
 // serverReady polls the health endpoint until it answers or the budget runs out.
 func serverReady(budget time.Duration) bool {
+	client := &http.Client{Timeout: 2 * time.Second}
 	deadline := time.Now().Add(budget)
-	for time.Now().Before(deadline) {
-		resp, err := http.Get("http://localhost:4000/api/health")
+	for {
+		resp, err := client.Get(uiURL + "/api/health")
 		if err == nil {
 			resp.Body.Close()
-			if resp.StatusCode == 200 {
+			if resp.StatusCode < 500 {
 				return true
 			}
 		}
-		time.Sleep(500 * time.Millisecond)
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(700 * time.Millisecond)
 	}
-	return false
 }
 
-// braveExe returns the path of an installed Brave browser, or "" if absent.
 func braveExe() string {
 	candidates := []string{
 		filepath.Join(os.Getenv("ProgramFiles"), "BraveSoftware", "Brave-Browser", "Application", "brave.exe"),
@@ -145,25 +181,40 @@ func braveExe() string {
 	return ""
 }
 
-// openUI opens the Adal Keep web UI in Brave when available.
-func openUI(url string) {
+func profileDir(root string) string {
+	return filepath.Join(root, "backend", "data", "browser-profile")
+}
+
+// openUI opens the Adal Keep page in Brave with the Adal Keep browser
+// profile — the same profile and control port the server's automations use
+// (backend/src/services/browser.js). So the page and every automation run are
+// tabs of ONE window. When that Brave is already open, the page simply opens
+// as a new tab in it.
+func openUI(root string) {
 	if b := braveExe(); b != "" {
-		if err := exec.Command(b, url).Start(); err == nil {
+		profile := profileDir(root)
+		os.MkdirAll(profile, 0o755)
+		args := []string{
+			"--user-data-dir=" + profile,
+			"--remote-debugging-port=9222",
+			"--no-first-run",
+			"--no-default-browser-check",
+			"--hide-crash-restore-bubble",
+			"--start-maximized",
+			"--disable-background-timer-throttling",
+			"--disable-renderer-backgrounding",
+			"--disable-backgrounding-occluded-windows",
+			uiURL,
+		}
+		if err := exec.Command(b, args...).Start(); err == nil {
 			return
 		}
 	}
-	exec.Command("cmd", "/c", "start", "", url).Run()
+	exec.Command("rundll32", "url.dll,FileProtocolHandler", uiURL).Start()
 }
 
 func showError(msg string) {
-	fmt.Println()
-	fmt.Println("[ERROR]", msg)
-	fmt.Println()
-	fmt.Println("Press ENTER to exit...")
-	fmt.Scanln()
-}
-
-func fileExists(p string) bool {
-	_, err := os.Stat(p)
-	return err == nil
+	title, _ := windows.UTF16PtrFromString("Adal Keep")
+	text, _ := windows.UTF16PtrFromString(strings.ReplaceAll(msg, "\n", "\r\n"))
+	windows.MessageBox(0, text, title, windows.MB_OK|windows.MB_ICONERROR)
 }

@@ -1,16 +1,23 @@
-import { useState } from 'react'
+import { lazy, Suspense, useState } from 'react'
 import { Outlet } from 'react-router-dom'
 import Navbar from './Navbar'
 import Sidebar from './Sidebar'
 import ProfileSearchPad from '../ProfileSearchPad'
+import useReadyChime from '../../hooks/useReadyChime'
 
 const PAD_KEY = 'adal-search-pad'
+
+// Public demo build only (src/demo): the run-tab window and the demo banner.
+const DEMO = import.meta.env.VITE_DEMO === '1'
+const DemoBanner = DEMO ? lazy(() => import('../../demo/DemoBrowser').then(m => ({ default: m.DemoBanner }))) : null
+const DemoBrowser = DEMO ? lazy(() => import('../../demo/DemoBrowser')) : null
 
 function readPad() {
   try { return localStorage.getItem(PAD_KEY) !== 'closed' } catch { return true }
 }
 
 export default function MainLayout() {
+  useReadyChime()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   // The profiles search pad is on every page (docked right); it can be folded away.
@@ -27,6 +34,7 @@ export default function MainLayout() {
         <span /><span /><span /><span />
       </div>
 
+      {DEMO && <Suspense fallback={null}><DemoBrowser /></Suspense>}
       <Sidebar
         isOpen={sidebarOpen}
         onToggle={() => setSidebarOpen(!sidebarOpen)}
@@ -35,6 +43,7 @@ export default function MainLayout() {
       />
 
       <div className="flex flex-col flex-1 min-w-0 h-screen overflow-hidden relative">
+        {DEMO && <Suspense fallback={null}><DemoBanner /></Suspense>}
         <Navbar onToggleSidebar={() => setSidebarOpen(!sidebarOpen)} />
         <div className="flex flex-1 min-h-0">
           <main className="flex-1 min-w-0 overflow-y-auto transition-colors duration-500 custom-scrollbar">

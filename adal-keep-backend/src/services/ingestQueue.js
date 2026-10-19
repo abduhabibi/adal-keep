@@ -6,11 +6,42 @@ const MAX_ATTEMPTS = 5
 const TICK_MS = 2000
 const RETRY_BACKOFF_MS = 8000
 
+// Only files that arrive while Adal Keep runs are read. Windows also reports
+// files that were already in the folder whenever something touches them (the
+// antivirus, search indexing, Explorer thumbnails); those are left alone.
+const NEW_FILE_MS = 10 * 60 * 1000
+
+/** When the file arrived in its folder: created there, or moved/renamed in. */
+export function arrivedAt(stat) {
+  return Math.max(stat.birthtimeMs || 0, stat.ctimeMs || 0)
+}
+
+// The document being read right now (files are read one at a time), so any
+// step of the reading can say what it is doing: setStage('asking Gemini').
+let current = null // { db, id }
+
+export function setStage(text) {
+  if (!current) return
+  current.db('ingest_queue').where('id', current.id)
+    .update({ stage: String(text).slice(0, 120), updated_at: new Date().toISOString() }).catch(() => {})
+}
+
+/** Shown on the Tasks page for a file that is not even read (too big, wrong type). */
+async function noteSkipped(db, filePath, stat, why) {
+  await db('ingest_queue').insert({
+    filename: path.basename(filePath), full_path: filePath, file_size: stat.size,
+    status: 'skipped', attempts: 0, last_error: why,
+    created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+  }).catch(() => {})
+}
+
 export async function enqueueFile(db, filePath) {
   const filename = path.basename(filePath)
   let stat
   try { stat = fs.statSync(filePath) } catch { return }
   if (!stat.isFile()) return
+
+  if (Date.now() - arrivedAt(stat) > NEW_FILE_MS) return // was already there
 
   // Skip non-document file types
   const ext = path.extname(filename).toLowerCase()
@@ -19,10 +50,13 @@ export async function enqueueFile(db, filePath) {
     console.log('[QUEUE] skip by extension:', filename)
     return
   }
+  const { ALLOWED_EXTS } = await import('./docPipeline.js')
+  if (!ALLOWED_EXTS[ext]) return // not a document (installers, archives, partial downloads…)
 
   // Skip large PDFs (likely books/manuals, > 5MB)
   if (ext === '.pdf' && stat.size > 5 * 1024 * 1024) {
     console.log('[QUEUE] skip large PDF:', filename, '(' + Math.round(stat.size / 1024 / 1024) + 'MB)')
+    await noteSkipped(db, filePath, stat, 'large_pdf')
     return
   }
 
@@ -98,6 +132,17 @@ async function processOne(db, processorFn, tag) {
     return true
   }
 
+  // Queued by an older version for a file that was already in the folder.
+  try {
+    const st = fs.statSync(row.full_path)
+    if (new Date(row.created_at).getTime() - arrivedAt(st) > NEW_FILE_MS) {
+      await db('ingest_queue').where('id', row.id).update({
+        status: 'skipped', last_error: 'was already in the folder', updated_at: new Date().toISOString(),
+      })
+      return true
+    }
+  } catch {}
+
   // Atomically claim row to avoid race conditions between parallel workers
   const updatedCount = await db('ingest_queue')
     .where('id', row.id)
@@ -110,6 +155,8 @@ async function processOne(db, processorFn, tag) {
   if (updatedCount === 0) return false
 
   console.log(tag, 'processing', row.filename, '(attempt', row.attempts + 1, ')')
+  current = { db, id: row.id }
+  setStage('starting')
 
   try {
     const result = await processorFn(row.full_path, db)
@@ -117,8 +164,10 @@ async function processOne(db, processorFn, tag) {
     const reason = result?.reason || 'unknown'
 
     if (ok) {
+      const prof = result.profileId ? await db('profiles').where('id', result.profileId).first().catch(() => null) : null
       await db('ingest_queue').where('id', row.id).update({
-        status: 'done', finished_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+        status: 'done', stage: null, finished_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+        result: JSON.stringify({ docType: result.docType, profileId: result.profileId, profileName: prof?.full_name || null, created: !!result.created }),
       })
       console.log(tag, 'done', row.filename)
     } else if (reason === 'analyzer_failed' && !String(row.last_error || '').includes('is not defined')) {
@@ -130,8 +179,10 @@ async function processOne(db, processorFn, tag) {
       console.log(tag, 'will retry', row.filename, '(transient)')
     } else {
       // Permanent skip: other, low_confidence, no_text, already_ingested, no_slip_match, etc.
+      const prof = result?.profileId ? await db('profiles').where('id', result.profileId).first().catch(() => null) : null
       await db('ingest_queue').where('id', row.id).update({
-        status: 'skipped', last_error: reason, updated_at: new Date().toISOString(),
+        status: 'skipped', stage: null, last_error: reason, updated_at: new Date().toISOString(),
+        result: JSON.stringify({ docType: result?.docType || null, profileId: result?.profileId || null, profileName: prof?.full_name || null }),
       })
       console.log(tag, 'skipped', row.filename, '(' + reason + ')')
     }
@@ -142,6 +193,8 @@ async function processOne(db, processorFn, tag) {
       updated_at: new Date().toISOString(),
     })
     console.log(tag, 'error', row.filename, '-', e.message)
+  } finally {
+    current = null
   }
   return true
 }

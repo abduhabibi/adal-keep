@@ -43,6 +43,7 @@ export default function CVTemplateEditPage() {
   })
   const [headerPath, setHeaderPath] = useState(null)
   const [footerPath, setFooterPath] = useState(null)
+  const [imgVersion, setImgVersion] = useState(() => Date.now())
   const headerRef = useRef(null)
   const footerRef = useRef(null)
 
@@ -127,17 +128,15 @@ export default function CVTemplateEditPage() {
     const fd = new FormData()
     fd.append(kind, file)
     try {
-      await api.post(`/cv/templates/${id}/${kind}`, fd, {
+      const r = await api.post(`/cv/templates/${id}/${kind}`, fd, {
         headers: { 'Content-Type': 'multipart/form-data' },
       })
-      if (kind === 'header') setHeaderPath('x')  // placeholder to trigger re-render
-      else setFooterPath('x')
-      // Re-fetch path
-      const r = await api.get(`/cv/templates/${id}`)
-      setHeaderPath(r.data.header_path || null)
-      setFooterPath(r.data.footer_path || null)
-      toast.success(`${kind} uploaded`)
-    } catch (e) { toast.error('Upload failed') }
+      if (kind === 'header') setHeaderPath(r.data.header_path)
+      else setFooterPath(r.data.footer_path)
+      setImgVersion(Date.now())
+      toast.success(kind === 'header' ? 'Header saved' : 'Footer saved')
+    } catch (e) { toast.error(e.response?.data?.error || 'Upload failed') }
+    finally { if (kind === 'header' && headerRef.current) headerRef.current.value = ''; if (kind === 'footer' && footerRef.current) footerRef.current.value = '' }
   }
 
   const removeImage = async (kind) => {
@@ -146,8 +145,8 @@ export default function CVTemplateEditPage() {
       await api.delete(`/cv/templates/${id}/${kind}`)
       if (kind === 'header') setHeaderPath(null)
       else setFooterPath(null)
-      toast.success('Removed')
-    } catch { toast.error('Remove failed') }
+      toast.success(kind === 'header' ? 'Header removed' : 'Footer removed')
+    } catch (e) { toast.error(e.response?.data?.error || 'Remove failed') }
   }
 
   const openPreview = async () => {
@@ -156,6 +155,7 @@ export default function CVTemplateEditPage() {
       const r = await api.post('/cv/templates/preview-html', {
         html_content: form.html_content,
         css_content: form.css_content,
+        template_id: id || undefined,
       }, { responseType: 'text' })
       const blob = new Blob([r.data], { type: 'text/html' })
       const url = URL.createObjectURL(blob)
@@ -167,8 +167,8 @@ export default function CVTemplateEditPage() {
 
   if (loading) return <div className="flex h-64 items-center justify-center"><Spinner /></div>
 
-  const headerUrl = headerPath ? `/api/cv/templates/${id}/header-image?t=${Date.now()}` : null
-  const footerUrl = footerPath ? `/api/cv/templates/${id}/footer-image?t=${Date.now()}` : null
+  const headerUrl = headerPath ? `/api/cv/templates/${id}/header-image?t=${imgVersion}` : null
+  const footerUrl = footerPath ? `/api/cv/templates/${id}/footer-image?t=${imgVersion}` : null
 
   return (
     <div className="animate-fade-up space-y-5 pb-24">

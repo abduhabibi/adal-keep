@@ -48,6 +48,11 @@ done
 # Windows .env: the keys from this PC, minus settings that only make sense
 # here (Linux paths, the removed agent pool). The inbox defaults to
 # C:\AdalKeep\inbox on Windows.
+# Without the licence key no customer could ever be unlocked: stop here.
+if ! grep -qE '^ADAL_LICENSE_KEY=.{32,}' "$BACK/.env" 2>/dev/null; then
+  echo "ERROR: ADAL_LICENSE_KEY is missing from adal-keep-backend/.env" >&2
+  exit 1
+fi
 if [ -f "$BACK/.env" ]; then
   grep -vE '^(WATCH_DIR|AUTOMATION_LANES|AUTOMATION_MIN_AGENTS|AUTOMATION_MAX_AGENTS|NODE_ENV|SQLITE_PATH|FRONTEND_DIR|BRAVE_CDP_URL)=' "$BACK/.env" \
     > "$STAGE/main/backend/.env"
@@ -58,16 +63,23 @@ else
 fi
 
 echo "== [3/6] Windows programs (Go, windows/amd64) =="
-( cd "$BASE/adal-launcher"  && GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o "$STAGE/main/AdalKeep.exe" . )
-( cd "$BASE/adal-companion" && GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o "$STAGE/main/adal-companion.exe" . )
+# -H windowsgui: no command window ever opens for these two.
+( cd "$BASE/adal-launcher"  && GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "-H windowsgui" -o "$STAGE/main/AdalKeep.exe" . )
+( cd "$BASE/adal-companion" && GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "-H windowsgui" -o "$STAGE/main/adal-companion.exe" . )
+# The Adal Keep logo inside both programs (taskbar, shortcuts, Explorer).
+( cd "$INST/tools/seticon" && GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o "$INST/tools/seticon.exe" . )
+for exe in AdalKeep.exe adal-companion.exe; do
+  out=$(WINEDEBUG=-all wine "$INST/tools/seticon.exe" "$STAGE/main/$exe" "$BASE/adal.ico" 2>/dev/null) \
+    || { echo "STOP: could not put the logo into $exe (is Wine installed?)"; exit 1; }
+  echo "   $out" | tr -d '\r'
+done
+cp -f "$BASE/adal.ico" "$STAGE/main/adal.ico"
 ( cd "$BASE/adal-agent"     && GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o "$STAGE/main/adal-agent.exe" ./cmd/agent )
 cp -f "$STAGE/main/adal-companion.exe" "$STAGE/companion/adal-companion.exe"
-cp -f "$INST/files/run-server.bat" "$INST/files/start-companion.bat" "$INST/files/finish-install.ps1" "$STAGE/main/"
-cp -f "$INST/files/start-companion.bat" "$STAGE/companion/"
+rm -f "$STAGE/main/run-server.bat" "$STAGE/main/start-companion.bat" "$STAGE/companion/start-companion.bat"
+cp -f "$INST/files/finish-install.ps1" "$STAGE/main/"
 cp -f "$INST/files/stop-adal.ps1" "$STAGE/"
 file "$STAGE/main/"*.exe | sed 's/^/   /'
-# Windows needs CRLF line endings in .bat files.
-for f in "$STAGE/main/"*.bat "$STAGE/companion/"*.bat; do sed -i 's/\r*$/\r/' "$f"; done
 
 echo "== [4/6] Installers =="
 ( cd "$INST" && makensis -V2 usb-installer.nsi && makensis -V2 -DCOMPANION usb-installer.nsi )

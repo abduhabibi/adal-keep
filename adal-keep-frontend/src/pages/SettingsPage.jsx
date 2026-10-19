@@ -221,11 +221,21 @@ export default function SettingsPage() {
               {isActive ? 'ንቁ' : isTrial ? `ሙከራ (${daysLeft} days)` : 'ጊዜው አልፏል'}
             </span>
           </div>
+          <div className="flex justify-between items-center p-4 bg-slate-50 dark:bg-slate-800/60 rounded-xl border">
+            <span className="text-sm font-medium">PC number</span>
+            <span className="font-mono text-lg font-bold tracking-[0.2em]">{subscription?.pcNumber || '—'}</span>
+          </div>
+          {!isActive && (
+            <p className="text-xs text-slate-500">
+              Call {subscription?.sellerPhone || '0995668080'}, tell them the PC number, and type the 6-digit code they give you.
+            </p>
+          )}
           <form onSubmit={handleUnlock} className="pt-4 border-t flex gap-2">
             <Input
               value={accessCode}
-              onChange={(e) => setAccessCode(e.target.value)}
-              placeholder="የመዳረሻ ኮድ..."
+              onChange={(e) => setAccessCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              inputMode="numeric"
+              placeholder="6-digit code"
               className="flex-1"
             />
             <Button type="submit" isLoading={unlocking}>አንቃ</Button>

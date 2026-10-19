@@ -3,6 +3,7 @@ import path from 'path'
 import { startWatcher } from './docPipeline.js'
 import { startQueueWorker } from './ingestQueue.js'
 import { analyzeWithMineru } from './mineruClassifier.js'
+import { isAppLocked } from './subscription.js'
 
 // Folders watched for new documents. WATCH_DIR may list several, separated
 // by ";". Default: the user's Downloads folder (browser and Telegram saves),
@@ -22,6 +23,8 @@ const WATCH_DIRS = (process.env.WATCH_DIR
  * JEV first (typed answers: field, person, MRZ box), then local OCR / Gemini / MinerU.
  */
 export async function processFile(filePath, db) {
+  // Locked: new documents wait in the queue until the PC is unlocked.
+  while (isAppLocked()) await new Promise(r => setTimeout(r, 60000))
   console.log(`[AI] 📄 Processing: ${filePath}`)
   return runPipeline(filePath, db, (p) => analyzeWithMineru(p, { db }), '[AI]')
 }

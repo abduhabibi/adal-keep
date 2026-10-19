@@ -13,8 +13,8 @@ const DEFAULT_SKILLS = { cleaning: true, ironing: true, washing: true, baby_sitt
 
 const DEFAULT_FORM = {
   religion: '', marital_status: 'SINGLE', children_count: '',
-  weight: 'Normal', height: 'Normal', complexion: '', living_town: '',
-  mother_name: '', father_name: '', spouse_name: '',
+  weight: 'Normal', height: 'Normal',
+  mother_name: '', father_name: '',
   education_level: 'New', speaks_english: false, speaks_arabic: false,
   skills: { ...DEFAULT_SKILLS }, previous_employment: [],
   cooking_skill: 'None', region: '', zone_subcity: '',
@@ -80,6 +80,11 @@ export default function CVNewPage() {
       try { const s = typeof p.skills === 'string' ? JSON.parse(p.skills) : (p.skills || {}); Object.assign(skills, s) } catch {}
       let prev = []
       try { prev = typeof p.previous_employment === 'string' ? JSON.parse(p.previous_employment) : (p.previous_employment || []) } catch {}
+      // The profile's "Have experience" answer fills the first line.
+      if (!prev.length && /^have/i.test(p.work_experience || '') && p.experience_country) {
+        const c = WORK_COUNTRIES.find(w => w.name === p.experience_country)
+        prev = [{ country: p.experience_country, years: p.experience_years || '', from: '', to: '', position: 'HOUSE MAID', salary: c?.salary || 1000, currency: c?.currency || 'SAR' }]
+      }
 
       const base = {
         ...DEFAULT_FORM,
@@ -88,11 +93,8 @@ export default function CVNewPage() {
         children_count: p.children_count ?? '',
         weight: p.weight || 'Normal',
         height: p.height || 'Normal',
-        complexion: p.complexion || '',
-        living_town: p.living_town || p.place_of_birth || '',
         mother_name: p.mother_name || '',
         father_name: p.father_name || '',
-        spouse_name: p.spouse_name || '',
         education_level: p.education_level || 'New',
         phone_number: p.phone_number || brokerObj?.contact1 || '',
         speaks_english: !!p.speaks_english,
@@ -228,14 +230,18 @@ export default function CVNewPage() {
     } finally { setBusy(false) }
   }
 
+  // Makes the PDF and saves it straight to Downloads (no new tab to allow).
   const downloadCurrent = async () => {
-    if (!previewTemplateId) return
+    const tid = (showPreview && previewTemplateId) || templateId
+    const err = validate()
+    if (err) return toast.error(err)
     setSaving(true)
+    const t = toast.loading('Making the PDF…')
     try {
       const primary = form.countries_applying[0] || {}
       const res = await api.post('/cv/generate', {
         profile_id: Number(profileId),
-        template_id: Number(previewTemplateId),
+        template_id: Number(tid),
         overrides: {
           ...form,
           country: primary.country || '',
@@ -243,12 +249,14 @@ export default function CVNewPage() {
           currency: primary.currency || 'SAR',
         },
       })
-      toast.success('PDF saved')
       setGenResult(res.data)
-      // Trigger the browser download
-      window.open(res.data.download_url, '_blank')
+      const a = document.createElement('a')
+      a.href = res.data.download_url
+      a.download = res.data.filename || 'CV.pdf'
+      document.body.appendChild(a); a.click(); a.remove()
+      toast.success('PDF downloaded', { id: t })
       try { localStorage.removeItem('cv-draft-' + profileId) } catch {}
-    } catch (e) { toast.error(e.response?.data?.error || 'Save failed') }
+    } catch (e) { toast.error(e.response?.data?.error || 'Save failed', { id: t }) }
     finally { setSaving(false) }
   }
 
@@ -309,7 +317,8 @@ export default function CVNewPage() {
               className="px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
               title="Reset the form to the last saved profile values"
             >Reset</button>
-            <Button onClick={generate} isLoading={busy} disabled={!!blocker}>Preview &amp; Save</Button>
+            <Button variant="secondary" onClick={generate} isLoading={busy} disabled={!!blocker}>Preview</Button>
+            <Button onClick={downloadCurrent} isLoading={saving} disabled={!!blocker}>⬇ Download PDF</Button>
           </div>
         }
       />
@@ -384,12 +393,9 @@ export default function CVNewPage() {
           <Input label="Children count" value={form.children_count} onChange={e => upd('children_count', e.target.value)} />
           <Input label="Weight" value={form.weight} onChange={e => upd('weight', e.target.value)} />
           <Input label="Height" value={form.height} onChange={e => upd('height', e.target.value)} />
-          <Input label="Complexion" value={form.complexion} onChange={e => upd('complexion', e.target.value)} />
-          <Input label="Living town" value={form.living_town} onChange={e => upd('living_town', e.target.value)} />
           <Input label="Education" value={form.education_level} onChange={e => upd('education_level', e.target.value)} />
           <Input label="Mother's name" value={form.mother_name} onChange={e => upd('mother_name', e.target.value)} />
           <Input label="Father's name" value={form.father_name} onChange={e => upd('father_name', e.target.value)} />
-          <Input label="Spouse name" value={form.spouse_name} onChange={e => upd('spouse_name', e.target.value)} />
           <Input label="Personal number" value={form.personal_number} onChange={e => upd('personal_number', e.target.value)} placeholder={broker?.contact1 || ''} />
           <Input label="Labor ID *" value={form.labor_id} onChange={e => upd('labor_id', e.target.value)} />
         </div>
@@ -542,8 +548,9 @@ export default function CVNewPage() {
           )}
         </div>
 
-        <div className="pt-3 border-t border-slate-100 dark:border-slate-700 flex justify-end">
-          <Button onClick={generate} isLoading={busy} disabled={!!blocker}>Preview &amp; Save</Button>
+        <div className="pt-3 border-t border-slate-100 dark:border-slate-700 flex justify-end gap-2">
+          <Button variant="secondary" onClick={generate} isLoading={busy} disabled={!!blocker}>Preview</Button>
+          <Button onClick={downloadCurrent} isLoading={saving} disabled={!!blocker}>⬇ Download PDF</Button>
         </div>
       </section>
           {/* Preview modal */}

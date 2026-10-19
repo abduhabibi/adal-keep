@@ -7,22 +7,29 @@
  * extracted from it (PDF text layer, MinerU output). It answers with JSON:
  * doc_type, confidence, fields and, for passports, the two MRZ lines as printed.
  *
- * Model order: GEMINI_MODEL (default gemini-3.8-flash), then gemini-3.6-flash
- * and the Flash-Lite models. A temporary error (503 / 429) is retried; a retired or unavailable
- * model moves on to the next one.
+ * Model order: GEMINI_MODEL (default gemini-3.6-flash: a document in seconds),
+ * then gemini-3.8-flash (as good, but it took 20 s to 2 min per answer on
+ * 2026-10-19) and the Flash-Lite models. A temporary error (503 / 429) is
+ * retried; a model that is retired, unavailable or slower than CALL_TIMEOUT_MS
+ * moves on to the next one.
  */
 
 import fs from 'fs'
 import path from 'path'
 import { FIELD_NAMES, tryParse, normalizeResult } from './deepseekVision.js'
+import { setStage } from './ingestQueue.js'
 
 const API = 'https://generativelanguage.googleapis.com/v1beta/models'
 const MODELS = [...new Set([
-  process.env.GEMINI_MODEL || 'gemini-3.8-flash',
-  'gemini-3.6-flash',
+  process.env.GEMINI_MODEL || 'gemini-3.6-flash',
+  'gemini-3.8-flash',
   'gemini-3.5-flash-lite',
   'gemini-3.1-flash-lite',
 ])]
+
+// One answer may take this long; then the next model is asked. Files are
+// sorted one at a time, so a slow model holds up every file behind it.
+const CALL_TIMEOUT_MS = Number(process.env.GEMINI_TIMEOUT_MS || 45000)
 
 // Inline file uploads are capped by the API at about 20 MB per request.
 const MAX_INLINE_BYTES = 18 * 1024 * 1024
@@ -37,8 +44,33 @@ const MIME = {
   '.bmp': 'image/bmp',
 }
 
+// Keys: GEMINI_API_KEY, then the backups in GEMINI_API_KEYS (comma-separated).
+// A key that runs out of quota or is refused rests and the next one is used.
+function geminiKeys() {
+  return [...new Set([process.env.GEMINI_API_KEY, ...String(process.env.GEMINI_API_KEYS || '').split(/[,;\s]+/)]
+    .map(k => String(k || '').trim()).filter(Boolean))]
+}
+const resting = new Map() // key → time it may be used again
+let keyAt = 0
+
+function pickKey() {
+  const keys = geminiKeys()
+  for (let i = 0; i < keys.length; i++) {
+    const k = keys[(keyAt + i) % keys.length]
+    if ((resting.get(k) || 0) <= Date.now()) { keyAt = (keyAt + i) % keys.length; return k }
+  }
+  return keys[keyAt % keys.length] // all resting: try the current one anyway
+}
+
+function restKey(key, ms, why) {
+  const keys = geminiKeys()
+  resting.set(key, Date.now() + ms)
+  keyAt = (keys.indexOf(key) + 1) % keys.length
+  console.warn(`[classify] Gemini key ${keys.indexOf(key) + 1} of ${keys.length} ${why} — using key ${keyAt + 1} for now`)
+}
+
 export function isGeminiConfigured() {
-  return !!(process.env.GEMINI_API_KEY || '').trim()
+  return geminiKeys().length > 0
 }
 
 const PROMPT = `You classify and read documents for an Ethiopian overseas-employment agency.
@@ -81,18 +113,20 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
 
 /** One generateContent call with model fallback and retries for temporary errors. */
 async function generate(parts) {
-  const key = (process.env.GEMINI_API_KEY || '').trim()
-  if (!key) throw new Error('GEMINI_API_KEY not configured')
+  if (!geminiKeys().length) throw new Error('GEMINI_API_KEY not configured')
 
   let lastErr = null
   for (const model of MODELS) {
+    setStage(`asking Gemini (${model})`)
     // Gemini 3 thinks before answering, and the thinking counts against
     // maxOutputTokens: at the default level it used the whole budget and cut
     // the JSON off. Low thinking is plenty for reading a document.
     let thinking = true
+    let keySwitches = 0
     for (let attempt = 1; attempt <= 3; attempt++) {
+      const key = pickKey()
       const ac = new AbortController()
-      const timer = setTimeout(() => ac.abort(), 120000)
+      const timer = setTimeout(() => ac.abort(), CALL_TIMEOUT_MS)
       try {
         const res = await fetch(`${API}/${model}:generateContent`, {
           method: 'POST',
@@ -122,6 +156,17 @@ async function generate(parts) {
         }
         lastErr = new Error(`Gemini ${model} HTTP ${res.status}: ${String(data.error?.message || '').slice(0, 160)}`)
         console.warn(`[classify] ${lastErr.message}`)
+        // This key is out of quota or refused: the next key, same model.
+        const msg = String(data.error?.message || '')
+        const keyProblem = res.status === 429 || res.status === 401 || res.status === 403 ||
+          (res.status === 400 && /api key/i.test(msg))
+        if (keyProblem && geminiKeys().length > 1 && keySwitches < geminiKeys().length) {
+          keySwitches++
+          restKey(key, res.status === 429 ? (/day|daily|per.?day/i.test(msg) ? 6 * 3600000 : 60000) : 6 * 3600000,
+            res.status === 429 ? 'is out of quota' : 'was refused')
+          attempt--
+          continue
+        }
         // A model without thinking levels: ask it again without the setting.
         if (res.status === 400 && thinking && /thinking/i.test(data.error?.message || '')) {
           thinking = false
@@ -135,6 +180,12 @@ async function generate(parts) {
         break
       } catch (e) {
         clearTimeout(timer)
+        if (ac.signal.aborted) {
+          // Too slow: the next model, not the same one again.
+          lastErr = new Error(`Gemini ${model} gave no answer within ${CALL_TIMEOUT_MS / 1000}s`)
+          console.warn(`[classify] ${lastErr.message}`)
+          break
+        }
         lastErr = e
         await sleep(2000 * attempt)
       }

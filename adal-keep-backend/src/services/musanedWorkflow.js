@@ -19,7 +19,7 @@ import {
   reviewMusanedScreen, reviewStageComplete, reviewPreCheckReady,
 } from './jev/musanedDecisions.js'
 import { pasteText, pasteAndCommit } from './domPaste.js'
-import { isPeerUrl } from './tabManager.js'
+import { isPeerUrl, expectFile, disarmFile } from './tabManager.js'
 import { musanedMissing, personalPhotoFile } from './musanedPreflight.js'
 
 const MUSANED_ROOT    = 'https://tawtheeq.musaned.com.sa/'
@@ -1470,14 +1470,12 @@ export async function uploadPersonalPhoto(page, ctx) {
   if (!photoPath) { log(ctx, '⚠ no personal photo resolved — skipping', 'warn'); return { ok: false, reason: 'no-photo-path' } }
   if (!fs.existsSync(photoPath)) { log(ctx, '⚠ resolved photo missing on disk', 'warn'); return { ok: false, reason: 'file-missing' } }
 
-  // chooser listener stays armed for the WHOLE operation (dropzone click fires it)
+  // The run tab catches file dialogs (tabManager): while this is armed, any
+  // dialog the page opens gets the photo and the system window never shows.
   let chooserAccepted = false
-  const onChooser = async (chooser) => {
-    log(ctx, '✓ native file chooser intercepted')
-    try { await chooser.accept([photoPath]); chooserAccepted = true }
-    catch (e) { log(ctx, `✗ chooser accept failed: ${e.message}`, 'warn') }
-  }
-  page.on('filechooser', onChooser)
+  expectFile(page, photoPath, 120000).then(ok => {
+    if (ok) { chooserAccepted = true; log(ctx, '✓ photo handed to the page\'s file dialog') }
+  })
 
   // ── 1) click the "Upload personal photo" link ───────────────────────
   await installPhotoModalFinder(page)
@@ -1493,7 +1491,7 @@ export async function uploadPersonalPhoto(page, ctx) {
     return { tag: el.tagName }
   })
   if (!target) {
-    page.off('filechooser', onChooser)
+    disarmFile(page)
     log(ctx, '✗ "Upload personal photo" not found', 'warn')
     return { ok: false, reason: 'not-found' }
   }
@@ -1540,13 +1538,13 @@ export async function uploadPersonalPhoto(page, ctx) {
     open = await waitForModal(12000)
   }
   if (chooserAccepted && !open) {
-    page.off('filechooser', onChooser)
+    disarmFile(page)
     log(ctx, '✓ photo accepted via native chooser (no modal)')
     await sleep(2500)
     return { ok: true, via: 'filechooser-direct' }
   }
   if (!open) {
-    page.off('filechooser', onChooser)
+    disarmFile(page)
     log(ctx, '✗ Personal Photo Upload modal did not appear', 'warn')
     await diagnoseMusanedPage(page, ctx, 'photo-modal-missing')
     return { ok: false, reason: 'modal-did-not-open' }
@@ -1595,7 +1593,7 @@ export async function uploadPersonalPhoto(page, ctx) {
   await sleep(1500) // let preview render / CONFIRM enable
   if (!uploaded) {
     log(ctx, '✗ could not place photo into modal — cancelling', 'warn')
-    page.off('filechooser', onChooser)
+    disarmFile(page)
     await cancelPhotoModal(page)
     return { ok: false, reason: 'upload-failed' }
   }
@@ -1626,7 +1624,7 @@ export async function uploadPersonalPhoto(page, ctx) {
     confirmed = !(await photoModalOpen(page))
     if (!confirmed) await sleep(800)
   }
-  page.off('filechooser', onChooser)
+  disarmFile(page)
 
   if (!confirmed) {
     log(ctx, '⚠ modal still open after CONFIRM — cancelling', 'warn')

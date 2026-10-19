@@ -30,7 +30,7 @@ export function generateFingerprint() {
     if (platform === 'win32') {
       // Windows BIOS serial
       try {
-        const bios = execSync('wmic bios get serialnumber', { encoding: 'utf8' })
+        const bios = execSync('wmic bios get serialnumber', { encoding: 'utf8', windowsHide: true })
           .split('\n')[1]?.trim()
         if (bios && !['To be filled by O.E.M.', 'Default string', 'None'].includes(bios)) {
           parts.push(bios)

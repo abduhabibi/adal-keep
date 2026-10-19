@@ -11,6 +11,7 @@ function placeholderSvg(label, w = 200, h = 250) {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><rect width="100%" height="100%" fill="#e5e7eb"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" fill="#9ca3af">${label}</text></svg>`
   return 'data:image/svg+xml;base64,' + Buffer.from(svg).toString('base64')
 }
+export const DEFAULT_SKILLS = { cleaning: true, ironing: true, washing: true, baby_sitting: true }
 const PHOTO_PH = placeholderSvg('No photo')
 const BODY_PH  = placeholderSvg('No full-body photo', 200, 400)
 const HEADER_PH = placeholderSvg('No header image', 800, 100)
@@ -28,6 +29,8 @@ function findBrowser() {
       path.join(la, 'Google', 'Chrome', 'Application', 'chrome.exe'),
       path.join(pf, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
       path.join(pf86, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+      path.join(pf, 'BraveSoftware', 'Brave-Browser', 'Application', 'brave.exe'),
+      path.join(la, 'BraveSoftware', 'Brave-Browser', 'Application', 'brave.exe'),
     )
   } else if (process.platform === 'darwin') {
     c.push(
@@ -36,7 +39,7 @@ function findBrowser() {
       '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
     )
   } else {
-    c.push('/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser', '/snap/bin/chromium')
+    c.push('/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser', '/snap/bin/chromium', '/usr/bin/brave-browser')
   }
   return c.find(p => { try { return fs.existsSync(p) } catch { return false } }) || null
 }
@@ -65,6 +68,30 @@ function fileToDataUri(absPath, mime) {
   return `data:${m};base64,${b64}`
 }
 
+// Phone photos are 3-12 MB; a CV prints them a few centimetres wide. Shrink
+// once (cached by path + modified time) so preview and PDF are light and fast.
+const _shrunk = new Map()
+async function imageDataUri(absPath, mime, maxPx) {
+  if (!absPath || !fs.existsSync(absPath)) return ''
+  if (mime && !mime.startsWith('image/')) return fileToDataUri(absPath, mime)
+  const key = absPath + ':' + fs.statSync(absPath).mtimeMs + ':' + maxPx
+  if (_shrunk.has(key)) return _shrunk.get(key)
+  let uri
+  try {
+    const sharp = (await import('sharp')).default
+    const img = sharp(absPath).rotate().resize({ width: maxPx, height: maxPx, fit: 'inside', withoutEnlargement: true })
+    const { hasAlpha } = await sharp(absPath).metadata()
+    uri = hasAlpha   // transparent banners stay PNG
+      ? 'data:image/png;base64,' + (await img.png({ compressionLevel: 9 }).toBuffer()).toString('base64')
+      : 'data:image/jpeg;base64,' + (await img.jpeg({ quality: 85 }).toBuffer()).toString('base64')
+  } catch {
+    uri = fileToDataUri(absPath, mime)
+  }
+  if (_shrunk.size > 200) _shrunk.delete(_shrunk.keys().next().value)
+  _shrunk.set(key, uri)
+  return uri
+}
+
 async function renderPdfFirstPageToDataUri(pdfPath) {
   try {
     const mupdf = await import('mupdf')
@@ -72,9 +99,10 @@ async function renderPdfFirstPageToDataUri(pdfPath) {
     const doc = mupdf.Document.openDocument(data, 'application/pdf')
     if (doc.countPages() === 0) return ''
     const page = doc.loadPage(0)
-    const pix = page.toPixmap([3,0,0,3,0,0], mupdf.ColorSpace.DeviceRGB, false, true)
-    const png = pix.asPNG()
-    return 'data:image/png;base64,' + Buffer.from(png).toString('base64')
+    const pix = page.toPixmap([2,0,0,2,0,0], mupdf.ColorSpace.DeviceRGB, false, true)
+    const sharp = (await import('sharp')).default
+    const jpg = await sharp(Buffer.from(pix.asPNG())).resize({ width: 1600, height: 1600, fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 85 }).toBuffer()
+    return 'data:image/jpeg;base64,' + jpg.toString('base64')
   } catch (e) {
     console.warn('[cvRender] PDF render failed:', e.message)
     return ''
@@ -121,19 +149,12 @@ export async function buildTemplateData(db, profile, template, overrides = {}) {
   const photoAbs    = photoFile    ? resolveStoredPath(photoFile.path)    : null
   const fullBodyAbs = fullBodyFile ? resolveStoredPath(fullBodyFile.path) : null
   const passportAbs = passportFile ? resolveStoredPath(passportFile.path) : null
-  console.log('[PASSPORT_DEBUG_LOG]', JSON.stringify({
-    found: !!passportFile,
-    rawPath: passportFile?.path,
-    mimetype: passportFile?.mimetype,
-    resolved: passportAbs,
-    exists: passportAbs ? fs.existsSync(passportAbs) : false
-  }))
-  const photoUrl    = photoAbs    ? fileToDataUri(photoAbs, photoFile.mimetype)          : PHOTO_PH
-  const fullBodyUrl = fullBodyAbs ? fileToDataUri(fullBodyAbs, fullBodyFile.mimetype)   : BODY_PH
+  const photoUrl    = photoAbs    ? await imageDataUri(photoAbs, photoFile.mimetype, 800)       : PHOTO_PH
+  const fullBodyUrl = fullBodyAbs ? await imageDataUri(fullBodyAbs, fullBodyFile.mimetype, 1400) : BODY_PH
   let passportUrl = ''
   if (passportAbs) {
     if ((passportFile.mimetype || '').startsWith('image/')) {
-      passportUrl = fileToDataUri(passportAbs, passportFile.mimetype)
+      passportUrl = await imageDataUri(passportAbs, passportFile.mimetype, 1600)
     } else if (passportFile.mimetype === 'application/pdf' || passportAbs.toLowerCase().endsWith('.pdf')) {
       passportUrl = await renderPdfFirstPageToDataUri(passportAbs)
     } else {
@@ -143,16 +164,30 @@ export async function buildTemplateData(db, profile, template, overrides = {}) {
 
   const headerFile = template.header_path || null
   const footerFile = template.footer_path || null
-  const headerUrl = headerFile ? fileToDataUri(resolveStoredPath(headerFile), null) : '' /* EMPTY_MEDIA_PATCH */
-  const footerUrl = footerFile ? fileToDataUri(resolveStoredPath(footerFile), null) : ''
-
-  let skills = {}
-  let prev = []
-  try { skills = typeof profile.skills === 'string' ? JSON.parse(profile.skills) : (profile.skills || {}) } catch {}
-  try { prev = typeof profile.previous_employment === 'string' ? JSON.parse(profile.previous_employment) : (profile.previous_employment || []) } catch {}
-  const prev0 = prev[0] || {}
+  // Header/footer banners span the page width: 2000 px is sharp at A4.
+  const headerUrl = headerFile ? await imageDataUri(resolveStoredPath(headerFile), null, 2000) : ''
+  const footerUrl = footerFile ? await imageDataUri(resolveStoredPath(footerFile), null, 2000) : ''
 
   const merged = { ...profile, ...overrides }
+  const parse = (v, fallback) => { try { return typeof v === 'string' ? JSON.parse(v) : (v ?? fallback) } catch { return fallback } }
+
+  // Skills: what the CV form sent; else what the profile saved; else the
+  // form's own defaults (the four housework skills ticked).
+  let skills = parse(overrides.skills, null) || parse(profile.skills, null)
+  if (!skills || !Object.values(skills).some(Boolean)) skills = { ...DEFAULT_SKILLS }
+  const cookingLevel = merged.cooking_skill && merged.cooking_skill !== 'None' ? merged.cooking_skill : ''
+  if (cookingLevel) skills = { ...skills, cooking: true }
+
+  // Experience abroad: the CV form's list, else the profile's
+  // "Have experience" country and years.
+  let prev = parse(overrides.previous_employment, null) || parse(profile.previous_employment, []) || []
+  if (!prev.length && /^have/i.test(merged.work_experience || '') && merged.experience_country) {
+    prev = [{ country: merged.experience_country, years: merged.experience_years }]
+  }
+  const prev0 = prev[0] || {}
+  const prevPeriod = prev0.period ||
+    (prev0.from || prev0.to ? [prev0.from, prev0.to].filter(Boolean).map(d => String(d).slice(0, 4)).join(' – ') : '') ||
+    (prev0.years ? `${prev0.years} year${Number(prev0.years) === 1 ? '' : 's'}` : '')
 
   // BROKER_PHONE_FALLBACK — contact number falls back to broker's phone
   let brokerPhone = ''
@@ -165,33 +200,18 @@ export async function buildTemplateData(db, profile, template, overrides = {}) {
   if (!merged.phone_number && brokerPhone) {
     merged.phone_number = brokerPhone
   }
-  if (!merged.living_town && merged.place_of_birth) {
-    merged.living_town = merged.place_of_birth
-  }
+  // Living town is no longer asked: the region (from the passport) stands in.
+  if (!merged.living_town) merged.living_town = merged.zone_subcity || merged.region || merged.place_of_birth || ''
   if (!merged.height || merged.height === '--') {
     merged.height = 'Normal'
   }
 
-  // AUTO_REMARKS_PATCH — build a summary sentence from checked skills
-  const skillLabels = {
-    cleaning: 'cleaning',
-    ironing: 'ironing',
-    washing: 'washing',
-    baby_sitting: 'baby sitting',
-    cooking: 'cooking',
-  }
-  const checked = Object.keys(skillLabels).filter(k => skills[k])
-  let remarks = ''
-  if (checked.length === 0) remarks = ''
-  else if (checked.length === 1) remarks = 'She can do ' + skillLabels[checked[0]] + '.'
-  else {
-    const last = skillLabels[checked[checked.length - 1]]
-    const rest = checked.slice(0, -1).map(k => skillLabels[k])
-    remarks = 'She can do ' + rest.join(', ') + ', and ' + last + '.'
-  }
-  if (skills.cooking && merged.cooking_skill && merged.cooking_skill !== 'None') {
-    remarks = remarks.replace('and cooking.', 'and ' + merged.cooking_skill.toLowerCase() + '.')
-  }
+  // A sentence from the ticked skills, e.g. "She can do cleaning, ironing and cooking."
+  const skillLabels = { cleaning: 'cleaning', ironing: 'ironing', washing: 'washing', baby_sitting: 'baby sitting', cooking: (cookingLevel || 'cooking').toLowerCase() }
+  const checked = Object.keys(skillLabels).filter(k => skills[k]).map(k => skillLabels[k])
+  const remarks = !checked.length ? ''
+    : checked.length === 1 ? `She can do ${checked[0]}.`
+    : `She can do ${checked.slice(0, -1).join(', ')} and ${checked[checked.length - 1]}.`
 
   return {
     REMARKS:         merged.remarks || remarks,
@@ -233,7 +253,7 @@ export async function buildTemplateData(db, profile, template, overrides = {}) {
     SKILL_BABY_SITTING:  skills.baby_sitting ? '✓' : '',
     SKILL_COOKING:       skills.cooking      ? '✓' : '',
     PREV_COUNTRY:     prev0.country  || '-',
-    PREV_PERIOD:      prev0.period   || '-',
+    PREV_PERIOD:      prevPeriod     || '-',
     PREV_POSITION:    prev0.position || '-',
     PHOTO_URL:        photoUrl,
     FULL_BODY_PHOTO_URL: fullBodyUrl,
@@ -276,6 +296,12 @@ export function mergeTemplate(html, css, data) {
     out = out.replace(/<body[^>]*>[\s\S]*?<\/body>/i, wrapped)
   }
 
+  // No header/footer image on this template: drop the <img> (an empty src
+  // prints a broken-image box with its alt text).
+  for (const k of ['HEADER_IMAGE', 'FOOTER_IMAGE']) {
+    if (!data[k]) out = out.replace(new RegExp(`<img\\b[^>]*\\{\\{${k}\\}\\}[^>]*>`, 'gi'), '')
+  }
+
   // Replace tokens
   out = out.replace(/\{\{([A-Z_]+)\}\}/g, (_, k) => {
     const v = data[k]
@@ -294,10 +320,9 @@ export function mergeTemplate(html, css, data) {
   }
 
   // AUTO_PASSPORT_PAGE — configurable header/footer/H1 per template
-  console.log('[MERGE_DEBUG_LOG]', JSON.stringify({ hasUrl: !!data.PASSPORT_URL, urlLen: (data.PASSPORT_URL||'').length, bodyMatch: /<\/body>/i.test(out) }))
   if (data.PASSPORT_URL && data.PASSPORT_PAGE_INCLUDE) {
-    const includeHeader = data.PASSPORT_PAGE_INCLUDE_HEADER !== false
-    const includeFooter = data.PASSPORT_PAGE_INCLUDE_FOOTER !== false
+    const includeHeader = data.PASSPORT_PAGE_INCLUDE_HEADER !== false && !!data.HEADER_IMAGE
+    const includeFooter = data.PASSPORT_PAGE_INCLUDE_FOOTER !== false && !!data.FOOTER_IMAGE
     const h1 = data.PASSPORT_PAGE_H1 || ''
     const h1Color = data.PASSPORT_PAGE_H1_COLOR || '#000000'
 
@@ -327,25 +352,31 @@ export function mergeTemplate(html, css, data) {
       // No wrapper at all — build one and wrap everything
       out = '<!DOCTYPE html><html><head><meta charset="utf-8"><style>@page{size:A4;margin:0;} html,body{margin:0;padding:0;}</style></head><body>' + out + passportPage + '</body></html>'
     }
-
-    console.log('[PASSPORT_INJECTED]', passportPage.length, 'bytes appended')
   }
 
   return out
 }
 
-export async function htmlToPdf(html, outPath) {
+// One headless browser kept warm for PDFs: starting a browser per CV cost
+// ~3 s. It closes itself after 5 idle minutes.
+let _pdfBrowser = null
+let _idle = null
+async function pdfBrowser() {
+  if (_pdfBrowser?.connected) return _pdfBrowser
   const exec = findBrowser()
   if (!exec) throw new Error('No Chrome/Edge/Chromium found for PDF rendering')
   const puppeteer = (await import('puppeteer-core')).default
-  const browser = await puppeteer.launch({
-    executablePath: exec,
-    headless: true,
-    args: ['--no-sandbox', '--disable-dev-shm-usage'],
-  })
+  _pdfBrowser = await puppeteer.launch({ executablePath: exec, headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage'] })
+  return _pdfBrowser
+}
+
+export async function htmlToPdf(html, outPath) {
+  clearTimeout(_idle)
+  const browser = await pdfBrowser()
+  const page = await browser.newPage()
   try {
-    const page = await browser.newPage()
-    await page.setContent(html, { waitUntil: 'networkidle0', timeout: 60000 })
+    // Everything is inline (data: images), so "load" is enough.
+    await page.setContent(html, { waitUntil: 'load', timeout: 60000 })
     await page.pdf({
       path: outPath,
       format: 'A4',
@@ -353,7 +384,9 @@ export async function htmlToPdf(html, outPath) {
       margin: { top: '0', right: '0', bottom: '0', left: '0' },
     })
   } finally {
-    await browser.close()
+    await page.close().catch(() => {})
+    _idle = setTimeout(() => { _pdfBrowser?.close().catch(() => {}); _pdfBrowser = null }, 5 * 60000)
+    _idle.unref?.()
   }
 }
 

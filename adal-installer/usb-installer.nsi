@@ -117,10 +117,12 @@ Section "Install"
   Pop $0
 
   CreateDirectory "$SMPROGRAMS\${PRODUCT}"
-  CreateShortcut "$SMPROGRAMS\${PRODUCT}\${PRODUCT}.lnk" "$INSTDIR\start-companion.bat" "" "$INSTDIR\adal-companion.exe" 0 SW_SHOWMINIMIZED
-  CreateShortcut "$DESKTOP\${PRODUCT}.lnk" "$INSTDIR\start-companion.bat" "" "$INSTDIR\adal-companion.exe" 0 SW_SHOWMINIMIZED
+  ; The Companion has no window: it runs in the background (log: companion.log).
+  Delete "$INSTDIR\start-companion.bat"
+  CreateShortcut "$SMPROGRAMS\${PRODUCT}\${PRODUCT}.lnk" "$INSTDIR\adal-companion.exe" "" "$INSTDIR\adal-companion.exe" 0
+  CreateShortcut "$DESKTOP\${PRODUCT}.lnk" "$INSTDIR\adal-companion.exe" "" "$INSTDIR\adal-companion.exe" 0
   CreateShortcut "$SMPROGRAMS\${PRODUCT}\Uninstall ${PRODUCT}.lnk" "$INSTDIR\uninstall.exe"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "${APP_KEY}" '"$INSTDIR\start-companion.bat"'
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "${APP_KEY}" '"$INSTDIR\adal-companion.exe"'
 !else
   ; ============================= SERVER PC =============================
   DetailPrint "Copying Adal Keep..."
@@ -158,11 +160,18 @@ Section "Install"
   CreateShortcut "$DESKTOP\${APP_NAME}.lnk" "$INSTDIR\AdalKeep.exe" "" "$INSTDIR\AdalKeep.exe" 0
   CreateDirectory "$SMPROGRAMS\${APP_NAME}"
   CreateShortcut "$SMPROGRAMS\${APP_NAME}\${APP_NAME}.lnk" "$INSTDIR\AdalKeep.exe" "" "$INSTDIR\AdalKeep.exe" 0
-  WriteINIStr "$INSTDIR\Open Adal Keep.url" "InternetShortcut" "URL" "http://localhost:${SERVER_PORT}"
-  CreateShortcut "$SMPROGRAMS\${APP_NAME}\Open ${APP_NAME} in the browser.lnk" "$INSTDIR\Open Adal Keep.url"
+  ; One way in: AdalKeep.exe opens the page in the Adal Keep browser window,
+  ; where the automations open their tabs. (Older installs had a plain link.)
+  Delete "$INSTDIR\Open Adal Keep.url"
+  Delete "$SMPROGRAMS\${APP_NAME}\Open ${APP_NAME} in the browser.lnk"
   CreateShortcut "$SMPROGRAMS\${APP_NAME}\Uninstall ${APP_NAME}.lnk" "$INSTDIR\uninstall.exe"
-  ; start the server with Windows (minimised, restarts itself if it stops)
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "${APP_KEY}" '"$INSTDIR\run-server.bat"'
+  ; The taskbar shows the Adal Keep window as Adal Keep (its logo), not Brave.
+  nsExec::Exec '"$INSTDIR\AdalKeep.exe" --set-shortcut-ids "$DESKTOP\${APP_NAME}.lnk" "$SMPROGRAMS\${APP_NAME}\${APP_NAME}.lnk"'
+  Pop $0
+  ; start the server with Windows: no window, it restarts itself if it stops
+  Delete "$INSTDIR\run-server.bat"
+  Delete "$INSTDIR\start-companion.bat"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "${APP_KEY}" '"$INSTDIR\AdalKeep.exe" --background'
 !endif
 
   WriteRegStr HKLM "Software\${APP_KEY}" "InstallDir" "$INSTDIR"
@@ -181,10 +190,10 @@ Section "Install"
   IfSilent done
 !ifdef COMPANION
   DetailPrint "Starting the Adal Keep Companion..."
-  Exec '"$INSTDIR\start-companion.bat"'
+  Exec '"$INSTDIR\adal-companion.exe"'
 !else
   DetailPrint "Starting Adal Keep..."
-  Exec '"$INSTDIR\run-server.bat"'
+  Exec '"$INSTDIR\AdalKeep.exe" --background'
 !endif
   DetailPrint "Done."
   done:

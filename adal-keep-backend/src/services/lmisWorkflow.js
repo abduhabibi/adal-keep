@@ -24,7 +24,7 @@
  * v13 — uploadPaymentSlip targets hidden file input directly.
  *
  * v14 — Slip upload rewritten for Payment Instructions → Upload form →
- *       file → Add. Adds convertToPdf and closeAllModals.
+ *       file → Add. Adds convertToPdf.
  *
  * v15 — Transaction falls back to labor_id when order_id missing.
  *       closeAllModals escalated.
@@ -49,6 +49,8 @@ import fs from 'fs'
 import path from 'path'
 import os from 'os'
 import { runMusanedWorkflow } from './musanedWorkflow.js'
+import { expectFile } from './tabManager.js'
+import { lookAtPage, lookUnavailableReason } from './jevClassifier.js'
 
 
 const LMIS_BASE = 'https://lmis.gov.et'
@@ -228,20 +230,47 @@ export async function closePopups(page, ctx = null) {
 
     return count
   })
-  if (n > 0 && ctx) log(ctx, `closed ${n} popup(s)`)
-  await sleep(300)
+  if (n > 0) {
+    if (ctx) log(ctx, `closed ${n} popup(s)`)
+    await settle(page, { maxMs: 1500 })
+  }
   return n
 }
 
-async function isLoading(page) {
-  return await page.evaluate(() => {
-    const btns = Array.from(document.querySelectorAll('button'))
-      .filter(b => {
-        const r = b.getBoundingClientRect()
-        return r.width > 5 && r.height > 5
-      })
-    return btns.length === 0
-  })
+/**
+ * Continue as soon as the page is ready instead of sleeping a fixed time:
+ * resolves once nothing in the page has changed for `quietMs` and no spinner
+ * is showing — at most `maxMs`.
+ */
+export async function settle(page, { quietMs = 250, maxMs = 5000 } = {}) {
+  const inPage = page.evaluate((quietMs, maxMs) => new Promise(resolve => {
+    const t0 = performance.now()
+    let last = t0
+    const obs = new MutationObserver(() => { last = performance.now() })
+    obs.observe(document.documentElement, { childList: true, subtree: true, characterData: true })
+    const spinning = () => Array.from(document.querySelectorAll('[class*="spin" i],[class*="loading" i],[aria-busy="true"]'))
+      .some(el => { const r = el.getBoundingClientRect(); return r.width > 4 && r.height > 4 && getComputedStyle(el).visibility !== 'hidden' })
+    const tick = () => {
+      const now = performance.now()
+      if (now - t0 > maxMs || (now - last >= quietMs && !spinning())) { obs.disconnect(); resolve() } else setTimeout(tick, 50)
+    }
+    setTimeout(tick, 50)
+  }), quietMs, maxMs).catch(() => {})       // page navigated away: fine, carry on
+  await Promise.race([inPage, sleep(maxMs + 1000)])
+}
+
+/** True once no window with this title is on screen (within `timeoutMs`). */
+async function waitModalGone(page, title, timeoutMs) {
+  const end = Date.now() + timeoutMs
+  while (Date.now() < end) {
+    const open = await page.evaluate((t) => Array.from(document.querySelectorAll('*')).some(el => {
+      const r = el.getBoundingClientRect()
+      return r.width >= 250 && r.height >= 150 && (el.textContent || '').slice(0, 400).includes(t)
+    }), title).catch(() => true)
+    if (!open) return true
+    await sleep(250)
+  }
+  return false
 }
 
 export async function clickByText(page, label, opts = {}) {
@@ -334,24 +363,6 @@ async function fillByLabel(page, label, value) {
   return false
 }
 
-async function uploadByKeyword(page, keyword, filePath, fallbackIndex = null) {
-  if (!filePath || !fs.existsSync(filePath)) return false
-  const handles = await page.$$('input[type="file"]')
-  for (const handle of handles) {
-    const meta = await page.evaluate(el => ({
-      name: el.name || '', id: el.id || '', accept: el.accept || '', cls: el.className || '',
-    }), handle)
-    const hay = `${meta.name} ${meta.id} ${meta.accept} ${meta.cls}`.toLowerCase()
-    if (hay.includes(keyword.toLowerCase())) {
-      try { await handle.uploadFile(filePath); return true } catch {}
-    }
-  }
-  if (fallbackIndex !== null && handles[fallbackIndex]) {
-    try { await handles[fallbackIndex].uploadFile(filePath); return true } catch {}
-  }
-  return false
-}
-
 export async function dumpPageState(page, ctx, stepName) {
   try {
     const url = page.url()
@@ -374,34 +385,47 @@ export async function dumpPageState(page, ctx, stepName) {
 // ============================================================================
 
 export async function stepLogin(page, ctx) {
-  log(ctx, 'opening login page')
+  // Log in first, always. Never trust the address bar: LMIS shows the police
+  // page's address for a moment before it sends a signed-out tab to login.
+  // Signed in only when LMIS takes the tab off /auth and no login form shows.
+  log(ctx, 'opening the LMIS login page')
   try {
     await page.goto(`${LMIS_BASE}/auth`, { waitUntil: 'domcontentloaded', timeout: 240000 })
   } catch (e) {
-    log(ctx, `login navigation threw: ${e.message}`, 'warn')
+    log(ctx, `navigation threw: ${e.message}`, 'warn')
   }
 
   log(ctx, `checking login state (up to ${LOGIN_STATE_WAIT_MS / 1000}s)`)
   const deadline = Date.now() + LOGIN_STATE_WAIT_MS
+  let reloadAt = Date.now() + 20000
+  let offAuthSince = 0
   let state = 'unknown'
 
   while (Date.now() < deadline) {
-    const url = page.url()
-    if (url.includes('/personal-dashboard') || url.includes('/new-agency')) {
-      state = 'already-logged-in'
-      break
-    }
     const hasPw = await page.$('input[type="password"]').catch(() => null)
-    if (hasPw) {
-      state = 'login-form'
-      break
+    if (hasPw) { state = 'login-form'; break }
+    const url = page.url()
+    const onAuth = url.includes('/auth') || url.includes('/login')
+    if (!onAuth && url.startsWith(LMIS_BASE)) {
+      // Off the login page with no form for 3s: LMIS itself says signed in.
+      if (!offAuthSince) offAuthSince = Date.now()
+      if (Date.now() - offAuthSince > 3000) { state = 'already-logged-in'; break }
+    } else {
+      offAuthSince = 0
+    }
+    // Still blank after 20s: LMIS is slow, load the login page again.
+    if (Date.now() > reloadAt) {
+      reloadAt = Date.now() + 20000
+      log(ctx, 'login page still blank — loading it again', 'warn')
+      await page.goto(`${LMIS_BASE}/auth`, { waitUntil: 'domcontentloaded', timeout: 240000 })
+        .catch(e => log(ctx, `login navigation threw: ${e.message}`, 'warn'))
     }
     await sleep(500)
   }
 
   if (state === 'already-logged-in') {
-    log(ctx, 'already logged in — skipping form fill')
-    await sleep(1500)
+    log(ctx, `already logged in (LMIS opened ${page.url()}) — skipping form fill`)
+    await settle(page)
     await closePopups(page, ctx)
     return
   }
@@ -488,54 +512,14 @@ export async function stepLogin(page, ctx) {
   }
 
   log(ctx, `post-login URL: ${page.url()} (after ${Math.round((Date.now() - t0) / 1000)}s)`)
-  await sleep(2000)
+  await settle(page)
   await closePopups(page, ctx)
   log(ctx, 'logged in')
 }
 
-/**
- * The portal shows a blank page when the police URL is opened cold (recent runs
- * stalled there). A person reaches the page through the dashboard menu, so the
- * job does the same: Organizations -> EOW -> Police Certificate. The menu is
- * logged, so the real labels can be checked from the run log.
- */
-async function openPoliceFromDashboard(page, ctx) {
-  if (!page.url().includes('/personal-dashboard')) return false
-  await page.waitForFunction(() => (document.body?.innerText || '').length > 200, { timeout: 20000 }).catch(() => {})
-
-  const menu = await page.evaluate(() => Array.from(document.querySelectorAll('a,button,[role=menuitem],li,span,div'))
-    .map(el => (el.textContent || '').trim()).filter(t => t && t.length < 50))
-  log(ctx, `dashboard menu: ${[...new Set(menu)].slice(0, 60).join(' | ')}`)
-
-  const clickMenu = (source) => page.evaluate((src) => {
-    const rx = new RegExp(src, 'i')
-    const els = Array.from(document.querySelectorAll('a,button,[role=menuitem],li,span,div'))
-      .filter(el => el.tagName === 'A' || el.tagName === 'BUTTON' || el.children.length === 0)
-    const hit = els.find(el => rx.test((el.textContent || '').trim()) && (el.textContent || '').trim().length < 50)
-    if (!hit) return false
-    hit.click()
-    return true
-  }, source)
-
-  if (await clickMenu('^organi[sz]ations?$')) { log(ctx, 'menu: Organizations'); await sleep(1500) }
-  if (await clickMenu('^EOW$')) { log(ctx, 'menu: EOW'); await sleep(1500) }
-  if (!(await clickMenu('police'))) { log(ctx, 'menu: no Police Certificate item found, using direct URL', 'warn'); return false }
-  log(ctx, 'menu: Police Certificate')
-
-  const deadline = Date.now() + 20000
-  while (Date.now() < deadline) {
-    if (page.url().includes('police-certificate')) return true
-    await sleep(500)
-  }
-  return page.url().includes('police-certificate')
-}
-
 export async function stepDirectNavigate(page, ctx) {
-  const viaMenu = await openPoliceFromDashboard(page, ctx).catch(e => {
-    log(ctx, `menu route failed: ${e.message}`, 'warn')
-    return false
-  })
-  if (!viaMenu) {
+  // Never through the dashboard menus: the police page's own address.
+  if (!page.url().includes('police-certificate')) {
     log(ctx, `navigating to ${POLICE_URL}`)
     try {
       await page.goto(POLICE_URL, { waitUntil: 'domcontentloaded', timeout: STEP_GOTO_TIMEOUT })
@@ -550,6 +534,7 @@ export async function stepDirectNavigate(page, ctx) {
   let ready = false
   let reloggedIn = false
   let bankSince = 0
+  let lastLoad = Date.now()
 
   while (Date.now() - start < PAGE_READY_TIMEOUT) {
     const elapsed = Math.round((Date.now() - start) / 1000)
@@ -584,9 +569,11 @@ export async function stepDirectNavigate(page, ctx) {
         reloggedIn = true
         log(ctx, `redirected to login at ${elapsed}s — signing in again`, 'warn')
         await stepLogin(page, ctx)
-        try {
+        if (!page.url().includes('police-certificate')) {
           await page.goto(POLICE_URL, { waitUntil: 'domcontentloaded', timeout: STEP_GOTO_TIMEOUT })
-        } catch (e) { log(ctx, `navigation threw: ${e.message}`, 'warn') }
+            .catch(e => log(ctx, `navigation threw: ${e.message}`, 'warn'))
+        }
+        lastLoad = Date.now()
         continue
       }
       log(ctx, `redirected to login again at ${elapsed}s — session lost`, 'error')
@@ -621,6 +608,15 @@ export async function stepDirectNavigate(page, ctx) {
       }
     }
 
+    // LMIS sometimes leaves the page blank: load it again every 45s.
+    if (Date.now() - lastLoad > 45000) {
+      lastLoad = Date.now()
+      log(ctx, `police page still not shown at ${elapsed}s — loading it again`, 'warn')
+      await page.goto(POLICE_URL, { waitUntil: 'domcontentloaded', timeout: STEP_GOTO_TIMEOUT })
+        .catch(e => log(ctx, `navigation threw: ${e.message}`, 'warn'))
+      continue
+    }
+
     await sleep(1000)
   }
 
@@ -632,7 +628,7 @@ export async function stepDirectNavigate(page, ctx) {
     throw new Error('Police certificate page never became ready')
   }
 
-  await sleep(500)
+  await settle(page)
   await closePopups(page, ctx)
 }
 
@@ -662,153 +658,8 @@ export async function stepAddNew(page, ctx) {
     120000
   )
   log(ctx, 'modal is up')
-  await sleep(800)
+  await settle(page)
   await closePopups(page, ctx)
-}
-
-export async function stepFillLaborIdAndNext(page, ctx) {
-  log(ctx, `filling Labor ID: "${ctx.labor_id}"`)
-
-  let inp = await page.$('input[placeholder*="labor" i]')
-  if (!inp) inp = await page.$('input[placeholder*="search" i]')
-  if (!inp) {
-    const inputs = await page.$$('input[type="text"], input:not([type])')
-    for (const i of inputs) {
-      const visible = await page.evaluate(el => {
-        const r = el.getBoundingClientRect()
-        return r.width > 20 && r.height > 10 && r.top >= 0 && r.top < window.innerHeight
-      }, i)
-      if (visible) { inp = i; break }
-    }
-  }
-  if (!inp) {
-    await ctx.notify(
-      `❌ ${ctx.profileName}: Labor ID input missing`,
-      'Add New modal opened but no search input was found.'
-    )
-    throw new Error('Labor ID input not found')
-  }
-
-  await inp.click({ clickCount: 3 })
-  await inp.type(String(ctx.labor_id), { delay: 40 })
-  log(ctx, 'labor id typed')
-  await sleep(500)
-
-  log(ctx, 'clicking Search')
-  let sr = await clickByText(page, 'Search', { timeout: 8000, exact: true })
-  if (!sr.ok) {
-    const clicked = await page.evaluate(() => {
-      const btns = Array.from(document.querySelectorAll('button'))
-      const target = btns.find(b => (b.textContent || '').trim().toLowerCase() === 'search')
-      if (target) { target.click(); return true }
-      return false
-    })
-    if (!clicked) {
-      log(ctx, 'Search button not found — pressing Enter instead', 'warn')
-      await page.keyboard.press('Enter')
-    }
-  }
-  log(ctx, 'Search clicked')
-
-  log(ctx, 'waiting for search result (up to 30s)')
-  const deadline = Date.now() + 30000
-  let resultFound = false
-  let emptyMarkers = 0
-
-  while (Date.now() < deadline) {
-    const state = await page.evaluate((laborId) => {
-      const body = document.body?.innerText || ''
-      const stillEmpty = body.includes('Search And Select A Labor To Continue')
-      const noData = body.includes('No data') || body.includes('No result') || body.includes('not found')
-      const hasLabor = body.includes(laborId)
-      return { stillEmpty, noData, hasLabor }
-    }, ctx.labor_id)
-
-    if (state.hasLabor && !state.stillEmpty) { resultFound = true; break }
-    if (state.noData) { emptyMarkers++; if (emptyMarkers >= 3) break }
-    await sleep(500)
-  }
-
-  if (!resultFound) {
-    log(ctx, `no result for labor ID "${ctx.labor_id}"`, 'error')
-    await ctx.notify(
-      `❌ ${ctx.profileName}: Labor ID not found`,
-      `LMIS returned no worker for Labor ID "${ctx.labor_id}". Check the ID and try again.`
-    )
-    throw new Error('Labor ID not found in LMIS')
-  }
-
-  log(ctx, `✓ result found for "${ctx.labor_id}"`)
-
-  const selected = await page.evaluate((laborId) => {
-    const all = Array.from(document.querySelectorAll('div, li, tr, article, [role="button"]'))
-    const candidates = all.filter(e => {
-      const t = e.textContent || ''
-      const r = e.getBoundingClientRect()
-      return r.width > 200 && r.height > 40 && r.top > 0 && r.top < window.innerHeight && t.includes(laborId)
-    })
-    if (candidates.length === 0) return false
-    candidates.sort((a, b) => {
-      const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect()
-      return (ra.width * ra.height) - (rb.width * rb.height)
-    })
-    candidates[0].click()
-    return true
-  }, ctx.labor_id)
-
-  if (!selected) {
-    log(ctx, 'could not click the result card — trying any clickable inside the modal', 'warn')
-    await clickByText(page, ctx.labor_id, { timeout: 5000 })
-  }
-  await sleep(1500)
-
-  log(ctx, 'looking for Next button')
-  let nextRes = await clickByText(page, 'Next', { timeout: 8000, exact: true })
-  if (nextRes.ok) {
-    log(ctx, 'Next clicked')
-    await sleep(1500)
-  } else {
-    log(ctx, 'no Next button — the modal may go straight to agreement', 'warn')
-  }
-  await closePopups(page, ctx)
-
-  log(ctx, 'checking for agreement checkbox')
-  const checkboxState = await page.evaluate(() => {
-    const boxes = Array.from(document.querySelectorAll('input[type="checkbox"]'))
-      .filter(cb => {
-        const r = cb.getBoundingClientRect()
-        return r.width > 3 && r.height > 3 && r.top >= 0 && r.top < window.innerHeight
-      })
-    let clicked = 0
-    for (const cb of boxes) {
-      if (!cb.checked) { cb.click(); clicked++ }
-    }
-    return { found: boxes.length, clicked }
-  })
-  log(ctx, `checkbox scan: found=${checkboxState.found} clicked=${checkboxState.clicked}`)
-
-  if (checkboxState.found === 0) {
-    const agreeClick = await clickByText(page, 'I agree', { timeout: 3000 })
-    if (!agreeClick.ok) await clickByText(page, 'agree', { timeout: 3000 })
-  }
-  await sleep(800)
-
-  log(ctx, 'looking for Continue / Confirm')
-  const continueCandidates = ['Continue', 'Confirm', 'Proceed', 'Next', 'Submit']
-  let advance = null
-  for (const label of continueCandidates) {
-    const r = await clickByText(page, label, { timeout: 3000 })
-    if (r.ok) { advance = label; break }
-  }
-  if (advance) {
-    log(ctx, `clicked "${advance}"`)
-    await sleep(2500)
-  } else {
-    log(ctx, 'no advance button — proceeding to uploads anyway', 'warn')
-  }
-
-  await closePopups(page, ctx)
-  log(ctx, 'labor ID flow complete — ready for uploads')
 }
 
 export async function stepSearchAndFindWorker(page, ctx) {
@@ -878,13 +729,13 @@ export async function stepSearchAndFindWorker(page, ctx) {
 
   if (valueNow !== laborId) {
     log(ctx, 'value mismatch — retrying with native setter', 'warn')
-    await page.evaluate(({ node, val }) => {
+    await page.evaluate((node, val) => {
       const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
       setter.call(node, val)
       node.dispatchEvent(new Event('input', { bubbles: true }))
       node.dispatchEvent(new Event('change', { bubbles: true }))
       node.dispatchEvent(new Event('blur', { bubbles: true }))
-    }, { node: input, val: laborId })
+    }, input, laborId)
     valueNow = await page.evaluate(node => node.value, input)
     log(ctx, `retry value: ${JSON.stringify(valueNow)}`)
     if (valueNow !== laborId) {
@@ -895,8 +746,6 @@ export async function stepSearchAndFindWorker(page, ctx) {
       throw new Error('Labor ID did not land in modal input')
     }
   }
-
-  await sleep(400)
 
   log(ctx, 'clicking Search in the modal')
   const clicked = await page.evaluate(() => {
@@ -1013,7 +862,7 @@ export async function stepSearchAndFindWorker(page, ctx) {
 
   log(ctx, 'Add clicked — waiting for upload slots')
 
-  await sleep(2500)
+  await settle(page)
   await closePopups(page, ctx)
 
   const sectionsDeadline = Date.now() + 15000
@@ -1044,82 +893,59 @@ export async function stepSearchAndFindWorker(page, ctx) {
 
 export async function stepUploadDocuments(page, ctx) {
   log(ctx, '▶ starting document uploads')
+  ctx.__sectionOk = {}
+  for (const [i, sec] of FORM_SECTIONS.entries()) {
+    log(ctx, `[${i + 1}/${FORM_SECTIONS.length}] ${sec.label}`)
+    await runSection(page, ctx, sec)
+  }
+  log(ctx, '▶ uploads done — checking the form')
+}
 
-  log(ctx, '[1/3] payment slip')
-  await uploadPaymentSlip(page, ctx)
-  await sleep(1200)
+/** Upload one section; remember whether it went through. */
+async function runSection(page, ctx, sec) {
+  // The row as it looked before: an upload that took effect changes it.
+  const before = await readPoliceForm(page).catch(() => null)
+  ctx.__rowBefore = { ...(ctx.__rowBefore || {}), [sec.key]: before?.rows?.[sec.key]?.text }
+  try {
+    await sec.redo(page, ctx)
+    ;(ctx.__sectionOk ||= {})[sec.key] = true
+  } catch (e) {
+    if (e.cancelled) throw e
+    ;(ctx.__sectionOk ||= {})[sec.key] = false
+    ctx.__sectionWhy = { ...(ctx.__sectionWhy || {}), [sec.key]: e.message }
+    log(ctx, `✗ ${sec.label}: ${e.message}`, 'warn')
+  }
+  await settle(page)
   await closePopups(page, ctx)
-
-  log(ctx, '[2/3] passport')
-  await uploadPassport(page, ctx)
-  await sleep(1200)
-  await closePopups(page, ctx)
-
-  log(ctx, '[3/3] photo')
-  await uploadPhoto(page, ctx)
-  await sleep(1200)
-  await closePopups(page, ctx)
-
-  log(ctx, '▶ all uploads done — human must click Submit Request')
 }
 
 // ---------- PAYMENT SLIP ----------
 async function uploadPaymentSlip(page, ctx) {
   if (!ctx.slipPath || !fs.existsSync(ctx.slipPath)) {
-    log(ctx, 'slip file not on profile — skipping', 'warn')
-    return
+    throw new Error('Profile is missing the payment slip file')
   }
 
   let slipPath = ctx.slipPath
   if (!/\.pdf$/i.test(slipPath)) {
     log(ctx, 'converting slip to PDF (LMIS requires PDF)')
     const converted = await convertToPdf(slipPath)
-    if (!converted) {
-      log(ctx, 'could not convert slip to PDF — aborting', 'warn')
-      return
-    }
+    if (!converted) throw new Error('Payment slip: could not turn it into a PDF')
     slipPath = converted
   }
   const sizeMb = fs.statSync(slipPath).size / 1024 / 1024
   if (sizeMb > SLIP_MAX_MB) {
-    log(ctx, `slip is ${sizeMb.toFixed(1)}MB — over LMIS ${SLIP_MAX_MB}MB limit`, 'warn')
-    return
+    throw new Error(`Payment slip is ${sizeMb.toFixed(1)} MB — LMIS allows ${SLIP_MAX_MB} MB`)
   }
 
   log(ctx, 'uploading payment slip')
 
-  const clickedUpload = await page.evaluate(() => {
-    const btns = Array.from(document.querySelectorAll('button'))
-      .filter(b => /^upload$/i.test((b.textContent || '').trim()))
-    const withSlip = btns.find(b => {
-      let cur = b
-      for (let d = 0; d < 10 && cur; d++) {
-        if ((cur.textContent || '').includes('Payment Slip')) return true
-        cur = cur.parentElement
-      }
-      return false
-    })
-    const target = withSlip || btns[0]
-    if (target) { target.click(); return true }
-    return false
-  })
-  if (!clickedUpload) { log(ctx, 'Upload button not found on slip row', 'warn'); return }
-  log(ctx, 'clicked Upload — waiting for Payment Instructions modal')
-
-  const instrOpened = await waitForModal(page, 'Payment Instructions', 15000)
-  if (!instrOpened) { log(ctx, 'Payment Instructions modal never appeared', 'warn'); return }
-  log(ctx, 'Payment Instructions modal open')
-  await sleep(600)
-
-  const understood = await clickButtonInModal(page, 'Payment Instructions', /understand|continue/i)
-  if (!understood) { log(ctx, 'I Understand button not found', 'warn'); return }
-  log(ctx, '✓ clicked "I Understand — Continue"')
-  await sleep(1500)
-
-  const formOpened = await waitForModal(page, 'Upload Police Certificate Payment Slip', 15000)
-  if (!formOpened) { log(ctx, 'Upload Payment Slip modal never appeared', 'warn'); return }
-  log(ctx, 'Upload Payment Slip modal open')
-  await sleep(600)
+  // The slip window is still open from an earlier try: carry on in it
+  // (clicking Upload behind it would do nothing).
+  if (await modalOpen(page, SLIP_WINDOW)) {
+    log(ctx, 'the Upload Payment Slip window is already open — finishing it')
+  } else {
+    await openSlipWindow(page, ctx)
+  }
 
   const reasonFilled = await setFieldInModal(page, 'Upload Police Certificate Payment Slip', {
     placeholderIncludes: ['labor is going', 'reason'],
@@ -1149,23 +975,59 @@ async function uploadPaymentSlip(page, ctx) {
     log(ctx, 'no order_id and no labor_id — Transaction field left empty', 'warn')
   }
 
-  let uploaded = await uploadFileInModal(page, 'Upload Police Certificate Payment Slip', slipPath)
-  if (!uploaded) uploaded = await uploadFileToNewestInput(page, slipPath)
-  log(ctx, uploaded ? '✓ slip PDF attached' : '⚠ slip file upload failed', uploaded ? 'info' : 'warn')
-
-  await waitForUploadComplete(page, 15000, ctx, 'slip')
-
-  // The Add button appears once LMIS finishes the upload; give it several tries.
-  let added = false
-  for (let attempt = 0; attempt < 8 && !added; attempt++) {
-    added = await clickButtonInModal(page, 'Upload Police Certificate Payment Slip', /^add$/i)
-    if (!added) await sleep(2000)
+  // A slip LMIS already holds in this window is not sent twice.
+  if (await uploadState(page, SLIP_WINDOW) === 'complete') {
+    log(ctx, '✓ slip already uploaded in this window')
+  } else {
+    const uploaded = await attachFileToModal(page, SLIP_WINDOW, slipPath, ctx, 'slip')
+    log(ctx, uploaded ? '✓ slip PDF attached' : '⚠ slip file upload failed', uploaded ? 'info' : 'warn')
+    if (!uploaded) throw new Error('Payment slip: the file never showed in the slip window')
   }
-  log(ctx, added ? '✓ slip modal submitted (Add clicked)' : '⚠ Add button not found after 8 tries', added ? 'info' : 'warn')
-  if (!added) throw new Error('Payment slip: the Add button never appeared, so the slip was not submitted')
 
-  await sleep(2000)
-  await closeAllModals(page, ctx)
+  // Add only counts once LMIS has finished the upload; LMIS closes the window
+  // itself when it has the slip.
+  if (!(await finishUploadWindow(page, ctx, SLIP_WINDOW, /^add$/i, 'Payment slip Add'))) {
+    throw new Error('Payment slip: the slip window stayed open after Add — the slip was not saved')
+  }
+  log(ctx, '✓ slip modal submitted (Add clicked, window closed)')
+  await settle(page)
+}
+
+const SLIP_WINDOW = 'Upload Police Certificate Payment Slip'
+
+/** Upload → Payment Instructions → "I Understand" → the slip window. */
+async function openSlipWindow(page, ctx) {
+  const clickedUpload = await page.evaluate(() => {
+    const btns = Array.from(document.querySelectorAll('button'))
+      .filter(b => /^upload$/i.test((b.textContent || '').trim()))
+    const withSlip = btns.find(b => {
+      let cur = b
+      for (let d = 0; d < 10 && cur; d++) {
+        if ((cur.textContent || '').includes('Payment Slip')) return true
+        cur = cur.parentElement
+      }
+      return false
+    })
+    const target = withSlip || btns[0]
+    if (target) { target.click(); return true }
+    return false
+  })
+  if (!clickedUpload) throw new Error('Payment slip: Upload button not found')
+  log(ctx, 'clicked Upload — waiting for Payment Instructions modal')
+
+  const instrOpened = await waitForModal(page, 'Payment Instructions', 15000)
+  if (!instrOpened) throw new Error('Payment slip: Payment Instructions window never appeared')
+  log(ctx, 'Payment Instructions modal open')
+  await settle(page)
+
+  const understood = await clickButtonInModal(page, 'Payment Instructions', /understand|continue/i)
+  if (!understood) throw new Error('Payment slip: "I Understand" button not found')
+  log(ctx, '✓ clicked "I Understand — Continue"')
+
+  const formOpened = await waitForModal(page, SLIP_WINDOW, 15000)
+  if (!formOpened) throw new Error('Payment slip: upload window never appeared')
+  log(ctx, 'Upload Payment Slip modal open')
+  await settle(page)
 }
 
 /**
@@ -1197,6 +1059,19 @@ async function passportUploadFile(srcPath) {
   throw new Error(`Passport could not be made into a PDF under ${PASSPORT_MAX_MB} MB. Upload a smaller scan.`)
 }
 
+/** The photo LMIS receives: at most 2 MB (a large photo is re-encoded smaller). */
+async function photoUploadFile(srcPath) {
+  if (fs.statSync(srcPath).size <= PHOTO_MAX_MB * 1024 * 1024) return srcPath
+  const sharp = (await import('sharp')).default
+  for (const width of [1600, 1200, 900]) {
+    const out = path.join(os.tmpdir(), `lmis-photo-${Date.now()}-${width}.jpg`)
+    await sharp(srcPath).rotate().resize({ width, height: width, fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 85 }).toFile(out)
+    if (fs.statSync(out).size <= PHOTO_MAX_MB * 1024 * 1024) return out
+    try { fs.unlinkSync(out) } catch {}
+  }
+  throw new Error(`Photo could not be made smaller than ${PHOTO_MAX_MB} MB`)
+}
+
 // ---------- PASSPORT ----------
 async function uploadPassport(page, ctx) {
   if (!ctx.passportPath || !fs.existsSync(ctx.passportPath)) {
@@ -1214,7 +1089,7 @@ async function uploadPassport(page, ctx) {
   const opened = await waitForModal(page, 'Upload Passport Document', 20000)
   if (!opened) throw new Error('Passport: the upload modal never appeared on the LMIS form')
   log(ctx, 'Passport modal open')
-  await sleep(800)
+  await settle(page)
 
   const profile = ctx.profile || {}
   const issueDate = normalizeDate(profile.passport_issue_date)
@@ -1259,8 +1134,6 @@ async function uploadPassport(page, ctx) {
     log(ctx, dobFilled ? `✓ Date Of Birth = "${dob}"` : '⚠ Date Of Birth not found', dobFilled ? 'info' : 'warn')
   }
 
-  await sleep(500)
-
   // ---- Attach the passport file ----
   log(ctx, 'attaching passport file...')
   const uploaded = await attachFileToModal(page, 'Upload Passport Document', pPath, ctx, 'passport')
@@ -1272,89 +1145,48 @@ async function uploadPassport(page, ctx) {
     throw new Error('Passport file upload failed — the file never showed in the passport window')
   }
 
-  await sleep(800)
-
   // ---- Click Submit ----
-  const submitted = await clickUntilModalCloses(page, 'Upload Passport Document', /^submit$/i, ctx, 'Passport Submit')
-  log(ctx, submitted ? 'Passport modal submitted' : 'Passport modal is still open after clicking Submit — a person must check it', submitted ? 'info' : 'warn')
+  const submitted = await finishUploadWindow(page, ctx, 'Upload Passport Document', /^submit$/i, 'Passport Submit')
+  if (!submitted) throw new Error('Passport: the window stayed open after Submit')
+  log(ctx, 'Passport modal submitted')
 
-  await sleep(2500)
+  await settle(page)
   await closePopups(page, ctx)
 }
 
 // ---------- PHOTO ----------
 async function uploadPhoto(page, ctx) {
-  if (!ctx.photoPath || !fs.existsSync(ctx.photoPath)) {
-    log(ctx, 'photo file missing on profile — skipping', 'warn')
-    return
-  }
-
-  const photoMb = fs.statSync(ctx.photoPath).size / 1024 / 1024
-  if (photoMb > PHOTO_MAX_MB) {
-    log(ctx, `photo file is ${photoMb.toFixed(2)}MB — over LMIS ${PHOTO_MAX_MB}MB limit`, 'warn')
-    await ctx.notify(
-      `❌ ${ctx.profileName}: photo file too large`,
-      `File is ${photoMb.toFixed(1)}MB, LMIS max is ${PHOTO_MAX_MB}MB.`
-    )
-    return
-  }
+  if (!ctx.photoPath || !fs.existsSync(ctx.photoPath)) throw new Error('Profile is missing the photo file')
+  const photoPath = await photoUploadFile(ctx.photoPath)
+  if (photoPath !== ctx.photoPath) log(ctx, `photo made smaller for LMIS: ${path.basename(photoPath)}`)
 
   log(ctx, 'opening Photo instructions modal')
   const clickedAdd = await clickSectionAdd(page, 'Photo')
-  if (!clickedAdd) { log(ctx, 'Photo Add button not found', 'warn'); return }
+  if (!clickedAdd) throw new Error('Photo: Add button not found')
 
   const instructionsOpened = await waitForModal(page, 'Labor Passport Photo Upload Instructions', 20000)
-  if (!instructionsOpened) { log(ctx, 'instructions modal never appeared', 'warn'); return }
+  if (!instructionsOpened) throw new Error('Photo: instructions window never appeared')
   log(ctx, 'instructions modal open')
-  await sleep(800)
+  await settle(page)
 
   const agreed = await clickButtonInModal(page, 'Labor Passport Photo Upload Instructions', /i agree/i)
-  if (!agreed) { log(ctx, 'I Agree button not found', 'warn'); return }
+  if (!agreed) throw new Error('Photo: "I Agree" button not found')
   log(ctx, '✓ clicked "I Agree, Continue"')
 
   const uploadOpened = await waitForModal(page, 'Upload Photo', 15000)
-  if (!uploadOpened) { log(ctx, 'Upload Photo modal did not appear', 'warn'); return }
+  if (!uploadOpened) throw new Error('Photo: Upload Photo window never appeared')
   log(ctx, 'Upload Photo modal open')
-  await sleep(800)
+  await settle(page)
 
-  const uploaded = await attachFileToModal(page, 'Upload Photo', ctx.photoPath, ctx, 'photo')
-  if (!uploaded) {
-    log(ctx, '⚠ photo did not attach — leaving the Upload Photo window for a person', 'warn')
-    await ctx.notify(`⚠ ${ctx.profileName}: photo not attached`, 'Attach the photo in the Upload Photo window, then Submit.')
-    return
-  }
+  const uploaded = await attachFileToModal(page, 'Upload Photo', photoPath, ctx, 'photo')
+  if (!uploaded) throw new Error('Photo: the file never showed in the Upload Photo window')
 
-  // LMIS is slow: give the upload up to a minute to finish.
-  const uploadedDeadline = Date.now() + 60000
-  let uploadComplete = false
-  while (Date.now() < uploadedDeadline) {
-    const done = await page.evaluate(() => {
-      const body = document.body?.innerText || ''
-      return body.includes('Upload Complete') || body.includes('Tap To Undo')
-    })
-    if (done) { uploadComplete = true; break }
-    await sleep(400)
-  }
-  log(ctx, uploadComplete ? 'Upload Complete indicator seen' : 'Upload Complete indicator never appeared', uploadComplete ? 'info' : 'warn')
+  // Submit only counts once LMIS has stored the photo (it can take a while).
+  const closed = await finishUploadWindow(page, ctx, 'Upload Photo', /^(submit|upload|save|confirm|done)\b/i, 'Photo Submit')
+  if (!closed) throw new Error('Photo: the Upload Photo window stayed open after Submit')
+  log(ctx, '✓ Upload Photo modal submitted')
 
-  // The Submit button stays disabled until LMIS has stored the photo, which
-  // can take a while: keep trying for a minute.
-  log(ctx, 'clicking Submit inside Upload Photo modal')
-  let submit = { clicked: false, buttons: [] }
-  const submitDeadline = Date.now() + 60000
-  while (Date.now() < submitDeadline) {
-    submit = await clickEnabledButtonInModal(page, 'Upload Photo', /^(submit|upload|save|confirm|done)\b/i)
-    if (submit.clicked) break
-    await sleep(1500)
-  }
-  if (submit.clicked) {
-    const closed = await clickUntilModalCloses(page, 'Upload Photo', /^(submit|upload|save|confirm|done)\b/i, ctx, 'Photo Submit', true)
-    log(ctx, closed ? '✓ Upload Photo modal submitted' : '⚠ Upload Photo window is still open after clicking Submit', closed ? 'info' : 'warn')
-  } else {
-    log(ctx, `Upload Photo Submit not clickable after 60s — human will click it. Buttons seen: ${JSON.stringify(submit.buttons)}`, 'warn')
-  }
-
-  await sleep(2000)
+  await settle(page)
   await closePopups(page, ctx)
 }
 
@@ -1431,64 +1263,6 @@ async function clickSectionAdd(page, sectionText) {
   return false
 }
 
-async function closeAllModals(page, ctx) {
-  try { await page.keyboard.press('Escape') } catch {}
-  await sleep(300)
-  try { await page.keyboard.press('Escape') } catch {}
-  await sleep(400)
-
-  await page.evaluate(() => {
-    const vw = window.innerWidth
-    const vh = window.innerHeight
-    const candidates = Array.from(document.querySelectorAll('button, [role="button"], [aria-label]'))
-      .filter(b => {
-        const r = b.getBoundingClientRect()
-        if (r.width < 5 || r.height < 5) return false
-        if (r.top > vh * 0.5) return false
-        if (r.left < vw * 0.4) return false
-        const t = (b.textContent || '').trim()
-        const aria = b.getAttribute('aria-label') || ''
-        return t.length <= 3 || /close|dismiss/i.test(aria)
-      })
-    for (const b of candidates) { try { b.click() } catch {} }
-  })
-  await sleep(500)
-
-  let stillBlocking = await page.evaluate(() => {
-    const vw = window.innerWidth
-    const vh = window.innerHeight
-    return Array.from(document.querySelectorAll('*')).some(el => {
-      const r = el.getBoundingClientRect()
-      if (r.width < vw * 0.8 || r.height < vh * 0.8) return false
-      const style = window.getComputedStyle(el)
-      return style.position === 'fixed' && parseFloat(style.zIndex || 0) > 100
-        && style.pointerEvents !== 'none'
-    })
-  })
-
-  if (stillBlocking) {
-    if (ctx) log(ctx, 'overlay still open — clicking outside to dismiss', 'warn')
-    try {
-      await page.mouse.click(30, 200)
-    } catch {}
-    await sleep(500)
-    stillBlocking = await page.evaluate(() => {
-      const vw = window.innerWidth
-      const vh = window.innerHeight
-      return Array.from(document.querySelectorAll('*')).some(el => {
-        const r = el.getBoundingClientRect()
-        if (r.width < vw * 0.8 || r.height < vh * 0.8) return false
-        const style = window.getComputedStyle(el)
-        return style.position === 'fixed' && parseFloat(style.zIndex || 0) > 100
-          && style.pointerEvents !== 'none'
-      })
-    })
-  }
-
-  if (stillBlocking && ctx) log(ctx, 'overlay still open after all dismiss attempts', 'warn')
-  else if (ctx) log(ctx, 'all modals closed', 'info')
-}
-
 async function convertToPdf(srcPath) {
   try {
     const pdfPath = srcPath.replace(/\.[^.]+$/, '') + `_${Date.now()}.pdf`
@@ -1506,44 +1280,6 @@ async function convertToPdf(srcPath) {
   }
 }
 
-async function findFileInputNear(page, containerText, timeoutMs) {
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    const handles = await page.$$('input[type="file"]')
-    for (const h of handles) {
-      const match = await page.evaluate(({ node, needle }) => {
-        let cur = node
-        for (let d = 0; d < 12 && cur; d++) {
-          const t = (cur.textContent || '')
-          if (t.includes(needle)) return true
-          cur = cur.parentElement
-        }
-        return false
-      }, { node: h, needle: containerText })
-      if (match) return h
-    }
-    await sleep(500)
-  }
-  return null
-}
-
-async function waitForUploadComplete(page, timeoutMs, ctx, label) {
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    const done = await page.evaluate(() => {
-      const body = document.body?.innerText || ''
-      return body.includes('Upload Complete') || body.includes('Tap To Undo')
-    })
-    if (done) {
-      log(ctx, `✓ ${label} shows Upload Complete`)
-      return true
-    }
-    await sleep(400)
-  }
-  log(ctx, `${label} Upload Complete indicator did not appear`, 'warn')
-  return false
-}
-
 /**
  * Click the first ENABLED button in the modal whose text matches. Returns
  * { clicked, buttons } where buttons lists what the modal offers (for the log
@@ -1559,12 +1295,14 @@ async function clickEnabledButtonInModal(page, modalTitle, labelRegex) {
       if ((el.textContent || '').slice(0, 400).includes(modalTitle)) modal = el // keep the innermost match
     }
     if (!modal) return { clicked: false, buttons: [] }
-    // footer buttons can sit next to the body: look one level up as well
-    const scope = modal.parentElement || modal
-    const btns = Array.from(scope.querySelectorAll('button, [role="button"], input[type="submit"]'))
+    // The window's own buttons first; footer buttons can sit next to the
+    // body, so one level up only when the window has no such button.
+    const all = (el) => Array.from(el.querySelectorAll('button, [role="button"], input[type="submit"]'))
+    const named = (b) => re.test((b.textContent || b.value || '').trim())
+    let btns = all(modal)
+    if (!btns.some(named) && modal.parentElement) btns = all(modal.parentElement)
     const buttons = btns.map(b => ({ text: (b.textContent || b.value || '').trim().slice(0, 30), disabled: !!b.disabled || b.getAttribute('aria-disabled') === 'true' }))
-    const target = btns.find(b => re.test((b.textContent || b.value || '').trim()) &&
-      !b.disabled && b.getAttribute('aria-disabled') !== 'true')
+    const target = btns.find(b => named(b) && !b.disabled && b.getAttribute('aria-disabled') !== 'true')
     if (target) { target.click(); return { clicked: true, buttons } }
     return { clicked: false, buttons }
   }, { modalTitle, src: labelRegex.source }).catch(() => ({ clicked: false, buttons: [] }))
@@ -1576,10 +1314,7 @@ async function clickEnabledButtonInModal(page, modalTitle, labelRegex) {
  * once the modal has closed. `alreadyClicked` = the first click was done.
  */
 async function clickUntilModalCloses(page, modalTitle, labelRegex, ctx, label, alreadyClicked = false) {
-  const isOpen = () => page.evaluate((t) => Array.from(document.querySelectorAll('*')).some(el => {
-    const r = el.getBoundingClientRect()
-    return r.width >= 250 && r.height >= 150 && (el.textContent || '').slice(0, 400).includes(t)
-  }), modalTitle).catch(() => false)
+  const isOpen = () => modalOpen(page, modalTitle)
   for (let tryNo = 1; tryNo <= 4; tryNo++) {
     if (tryNo > 1 || !alreadyClicked) {
       const r = await clickEnabledButtonInModal(page, modalTitle, labelRegex)
@@ -1592,6 +1327,67 @@ async function clickUntilModalCloses(page, modalTitle, labelRegex, ctx, label, a
     }
   }
   return !(await isOpen())
+}
+
+/** True while a window with this title is on screen. */
+async function modalOpen(page, title) {
+  return page.evaluate((t) => Array.from(document.querySelectorAll('*')).some(el => {
+    const r = el.getBoundingClientRect()
+    return r.width >= 250 && r.height >= 150 && (el.textContent || '').slice(0, 400).includes(t)
+  }), title).catch(() => false)
+}
+
+/**
+ * The upload inside one window (read from that window only, never the form
+ * behind it): 'complete' · 'uploading' · 'error' · 'idle' (no upload shown) ·
+ * 'gone' (the window is closed).
+ */
+async function uploadState(page, title) {
+  return page.evaluate((title) => {
+    let modal = null, area = Infinity
+    for (const el of document.querySelectorAll('*')) {
+      const r = el.getBoundingClientRect()
+      if (r.width < 250 || r.height < 150) continue
+      if ((el.textContent || '').slice(0, 400).includes(title) && r.width * r.height < area) { modal = el; area = r.width * r.height }
+    }
+    if (!modal) return 'gone'
+    const text = (modal.textContent || '').toLowerCase()
+    if (text.includes('error during upload')) return 'error'
+    if (text.includes('upload complete') || text.includes('tap to undo')) return 'complete'
+    if (/uploading|tap to cancel|\d+\s*%/.test(text)) return 'uploading'
+    return 'idle'
+  }, title).catch(() => 'idle')
+}
+
+/**
+ * Press a window's Add/Submit only after LMIS has finished the upload in it —
+ * LMIS ignores the button while the file is still going up — and press it
+ * again until the window closes. Returns true once the window is closed.
+ */
+async function finishUploadWindow(page, ctx, title, buttonRe, label) {
+  const end = Date.now() + 120000
+  let state = 'idle', idleSince = 0
+  while (Date.now() < end) {
+    state = await uploadState(page, title)
+    if (state === 'complete' || state === 'gone') break
+    if (state === 'idle') { idleSince ||= Date.now(); if (Date.now() - idleSince > 2000) break } else idleSince = 0
+    await sleep(400)
+  }
+  if (state === 'gone') return true
+  log(ctx, state === 'complete' ? `  ${label}: LMIS shows Upload Complete`
+    : `  ${label}: upload state "${state}" after waiting — pressing the button anyway`, state === 'complete' || state === 'idle' ? 'info' : 'warn')
+  let first = { clicked: false, buttons: [] }
+  for (const stop = Date.now() + 30000; Date.now() < stop;) {
+    first = await clickEnabledButtonInModal(page, title, buttonRe)
+    if (first.clicked) break
+    await sleep(500)
+  }
+  if (!first.clicked) {
+    log(ctx, `  ${label}: the button never became clickable (buttons: ${JSON.stringify(first.buttons).slice(0, 120)})`, 'warn')
+    return false
+  }
+  log(ctx, `  ${label}: pressed`)
+  return clickUntilModalCloses(page, title, buttonRe, ctx, label, true)
 }
 
 async function clickButtonInModal(page, modalTitle, labelRegex) {
@@ -1805,17 +1601,13 @@ async function attachFileViaChooser(page, modalTitle, filePath, ctx) {
     return { x: r.left + r.width / 2, y: r.top + r.height / 2 }
   }, modalTitle).catch(() => null)
   if (!pt) { log(ctx, '  no Browse / dropzone in the modal', 'warn'); return false }
-  try {
-    const [chooser] = await Promise.all([
-      page.waitForFileChooser({ timeout: 10000 }),
-      page.mouse.click(pt.x, pt.y),
-    ])
-    await chooser.accept([filePath])
-    return true
-  } catch (e) {
-    log(ctx, `  file chooser did not open: ${e.message}`, 'warn')
-    return false
-  }
+  // The run tab catches every file dialog (tabManager), so clicking Browse
+  // never opens the system "Open file" window: the file goes straight in.
+  const handed = expectFile(page, filePath, 10000)
+  await page.mouse.click(pt.x, pt.y).catch(() => {})
+  const ok = await handed
+  if (!ok) log(ctx, '  Browse did not ask for a file', 'warn')
+  return ok
 }
 
 /**
@@ -1835,9 +1627,10 @@ export async function attachFileToModal(page, modalTitle, filePath, ctx, label) 
 }
 
 async function attachOnce(page, modalTitle, filePath, ctx, label) {
+  // The window's own file input first: nothing is clicked, nothing can pop up.
   for (const [how, attach] of [
-    ['Browse (file chooser)', () => attachFileViaChooser(page, modalTitle, filePath, ctx)],
     ['file input inside the modal', () => uploadFileInModal(page, modalTitle, filePath)],
+    ['Browse', () => attachFileViaChooser(page, modalTitle, filePath, ctx)],
   ]) {
     const ok = await attach()
     log(ctx, `  ${label}: ${how} ${ok ? '✓' : '✗'}`)
@@ -1858,7 +1651,7 @@ async function uploadFileInModal(page, modalTitle, filePath) {
   if (handles.length === 0) return false
 
   for (const h of handles) {
-    const inModal = await page.evaluate(({ node, modalTitle }) => {
+    const inModal = await page.evaluate((node, modalTitle) => {
       let cur = node
       for (let d = 0; d < 15 && cur; d++) {
         const t = cur.textContent || ''
@@ -1868,7 +1661,7 @@ async function uploadFileInModal(page, modalTitle, filePath) {
         cur = cur.parentElement
       }
       return false
-    }, { node: h, modalTitle })
+    }, h, modalTitle)
 
     if (inModal) {
       try { await h.uploadFile(filePath); return true } catch {}
@@ -1900,148 +1693,193 @@ async function waitForFileAttached(page, modalTitle, filePath, timeoutMs) {
       }
       if (!modal) return false
       const text = (modal.textContent || '').toLowerCase()
+      // A red "Error During Upload": press its retry button and keep waiting.
+      if (text.includes('error during upload')) {
+        const retry = modal.querySelector('.filepond--action-retry-item-processing, [class*="retry" i]')
+        if (retry) retry.click()
+        return 'retry'
+      }
+      // Wrong type / too big will not fix itself.
+      if (/invalid type|too large|exceeds/.test(text)) return 'rejected'
       return text.includes(needle) ||
              text.includes('upload complete') ||
              text.includes('tap to undo')
     }, { title: modalTitle, needle })
-    if (attached) return true
-    await sleep(400)
+    if (attached === 'rejected') return false
+    if (attached === true) return true
+    await sleep(attached === 'retry' ? 2000 : 400)
   }
   return false
 }
 
-async function uploadFileToNewestInput(page, filePath) {
-  if (!filePath || !fs.existsSync(filePath)) return false
-  const handles = await page.$$('input[type="file"]')
-  if (handles.length === 0) return false
-  for (let i = handles.length - 1; i >= Math.max(0, handles.length - 3); i--) {
-    try { await handles[i].uploadFile(filePath); return true } catch {}
+// ============================================================================
+// FINAL CHECK — the person only ever gets a complete form
+// ============================================================================
+
+const FORM_SECTIONS = [
+  { key: 'slip',     name: 'Payment Slip', label: 'payment slip', file: 'slipPath',
+    modals: ['Payment Instructions', 'Upload Police Certificate Payment Slip'], button: /^add$/i, redo: (p, c) => uploadPaymentSlip(p, c) },
+  { key: 'passport', name: 'Passport',     label: 'passport',     file: 'passportPath',
+    modals: ['Upload Passport Document'], button: /^submit$/i, redo: (p, c) => uploadPassport(p, c) },
+  { key: 'photo',    name: 'Photo',        label: 'photo',        file: 'photoPath',
+    modals: ['Labor Passport Photo Upload Instructions', 'Upload Photo'], button: /^(submit|upload|save|confirm|done)\b/i, redo: (p, c) => uploadPhoto(p, c) },
+]
+const UPLOAD_MODAL_TITLES = FORM_SECTIONS.flatMap(s => s.modals)
+
+/** What the form shows right now, read from the page itself. */
+export async function readPoliceForm(page) {
+  return page.evaluate((sections, modalTitles) => {
+    const visible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 }
+    const exact = (t) => Array.from(document.querySelectorAll('h1,h2,h3,h4,h5,h6,div,span,p,strong,b,label'))
+      .filter(el => (el.textContent || '').trim() === t && el.children.length <= 2 && visible(el))
+    const body = document.body?.innerText || ''
+    const rows = {}
+    for (const s of sections) {
+      const head = Array.from(document.querySelectorAll('*')).find(el => {
+        const t = (el.textContent || '').trim()
+        return (t === s.name || t === s.name + '✓') && el.children.length <= 2 && visible(el)
+      })
+      if (!head) { rows[s.key] = { state: 'unknown' }; continue }
+      // The row: the largest box around the heading that is still one row high.
+      let row = head
+      for (let cur = head.parentElement; cur && cur.getBoundingClientRect().height < 160; cur = cur.parentElement) row = cur
+      const text = (row.innerText || '').replace(/\s+/g, ' ').trim()
+      const startBtn = Array.from(row.querySelectorAll('button')).some(b => /^(add|upload)$/i.test((b.textContent || '').trim()) && visible(b))
+      const required = /required/i.test(text)
+      rows[s.key] = { state: required && startBtn ? 'missing' : 'done', text: text.slice(0, 120) }
+    }
+    return {
+      requestOpen: exact('Add Police Certificate Request').length > 0 || body.includes('Add Police Certificate Request'),
+      openModals: modalTitles.filter(t => exact(t).length > 0),
+      uploadError: /error during upload|invalid type/i.test(body),
+      rows,
+    }
+  }, FORM_SECTIONS.map(s => ({ key: s.key, name: s.name })), UPLOAD_MODAL_TITLES)
+}
+
+/** Close one upload window with its own ✕ (Escape only as a last resort). */
+async function closeUploadModal(page, title, ctx) {
+  const clicked = await page.evaluate((title) => {
+    const head = Array.from(document.querySelectorAll('*'))
+      .find(el => (el.textContent || '').trim() === title && el.children.length <= 2 && el.getBoundingClientRect().width > 0)
+    if (!head) return 'gone'
+    let box = head
+    while (box && (box.getBoundingClientRect().width < 250 || box.getBoundingClientRect().height < 150)) box = box.parentElement
+    if (!box) return false
+    const top = box.getBoundingClientRect().top
+    const x = Array.from(box.querySelectorAll('button,[role=button],[aria-label]')).find(b => {
+      const r = b.getBoundingClientRect()
+      const t = (b.textContent || '').trim()
+      return r.width > 0 && r.top - top < 90 && (t.length <= 2 || /close/i.test(b.getAttribute('aria-label') || ''))
+    })
+    if (!x) return false
+    x.click()
+    return true
+  }, title).catch(() => false)
+  if (clicked === 'gone') return
+  await settle(page, { maxMs: 2000 })
+  if (!clicked || await modalOpen(page, title)) {
+    await page.keyboard.press('Escape').catch(() => {})
+    await waitModalGone(page, title, 3000)
   }
-  return false
+  if (await modalOpen(page, title)) log(ctx, `  could not close the leftover "${title}" window`, 'warn')
+  else log(ctx, `  closed the leftover "${title}" window`)
+}
+
+/**
+ * Before the form is handed to a person: check every section — in the page
+ * and, when JEV is available, on a screenshot — and redo what is missing.
+ * Throws (the run is retried) rather than hand over a half-filled form.
+ */
+export async function stepVerifyForm(page, ctx) {
+  const reasons = {}
+  let missing = []
+  for (let pass = 1; pass <= 3; pass++) {
+    await settle(page)
+    const form = await readPoliceForm(page)
+    if (!form.requestOpen) throw new Error('The Add Police Certificate Request form closed before it was complete — will retry')
+
+    let seen = null
+    const shot = await page.screenshot({ type: 'png' }).catch(() => null)
+    if (shot) {
+      seen = await lookAtPage(shot, {
+        slip: 'Is the "Payment Slip" item of this form completed (uploaded / green), not still required?',
+        passport: 'Is the "Passport" item of this form completed (uploaded / green), not still required?',
+        photo: 'Is the "Photo" item of this form completed (uploaded / green), not still required?',
+        left: 'Is anything on this form still empty, marked "Required", showing a red error, or is an upload window still open?',
+      })
+      if (!seen && !ctx.__jevWhy) {
+        ctx.__jevWhy = lookUnavailableReason() || 'JEV did not answer'
+        log(ctx, `JEV could not look at the form (${ctx.__jevWhy}) — checking it by reading the page only`, 'warn')
+      }
+    }
+
+    missing = []
+    for (const sec of FORM_SECTIONS) {
+      let dom = form.rows[sec.key]?.state || 'unknown'
+      // "Required" still printed, but the row changed after our upload went
+      // through: LMIS just keeps the word — the section is in.
+      if (dom === 'missing' && ctx.__sectionOk?.[sec.key] === true &&
+          ctx.__rowBefore?.[sec.key] && form.rows[sec.key].text !== ctx.__rowBefore[sec.key]) dom = 'done'
+      const jev = seen ? seen[sec.key] : null
+      let gone =
+        (dom === 'missing' && !(jev !== null && jev >= 0.9)) || // page says missing (JEV can overrule only when sure)
+        (dom === 'done' && jev !== null && jev <= 0.1) ||       // JEV sure it is not done
+        (dom === 'unknown' && jev !== null && jev < 0.5)
+      if (sec.modals.some(t => form.openModals.includes(t))) gone = true // its window was left open
+      if (ctx.__sectionOk?.[sec.key] === false) gone = true             // its upload did not go through
+      if (gone) missing.push(sec)
+    }
+    log(ctx, `check ${pass}/3: ${FORM_SECTIONS.map(s => `${s.key}=${form.rows[s.key]?.state}${seen ? `/jev ${seen[s.key] ?? '-'}` : ''}`).join(' ')}` +
+      `${form.openModals.length ? ` open windows: ${form.openModals.join(', ')}` : ''}${form.uploadError ? ' (an upload error is shown)' : ''}` +
+      `${seen?.left != null ? ` jev-left=${seen.left}` : ''}`)
+
+    if (!missing.length) {
+      if (seen?.left != null && seen.left >= 0.9) {
+        log(ctx, 'JEV still sees something unfinished on the form, but every section checks out — telling the person to look', 'warn')
+        ctx.__jevDoubt = true
+      }
+      log(ctx, '✓ form complete — slip, passport and photo are all in')
+      return
+    }
+    if (pass === 3) break
+
+    for (const sec of missing) {
+      // Its upload window is still open with the file in it: press its
+      // button again rather than throw the upload away.
+      const last = sec.modals[sec.modals.length - 1]
+      if (form.openModals.includes(last) && await uploadState(page, last) === 'complete') {
+        log(ctx, `↻ ${sec.label}: its window is still open with the file uploaded — finishing it`, 'warn')
+        if (await finishUploadWindow(page, ctx, last, sec.button, sec.name)) {
+          ;(ctx.__sectionOk ||= {})[sec.key] = true
+          continue
+        }
+      }
+      for (const t of sec.modals) if (await modalOpen(page, t)) await closeUploadModal(page, t, ctx)
+      const file = ctx[sec.file]
+      if (!file || !fs.existsSync(file)) { reasons[sec.key] = `Profile is missing the ${sec.label} file`; continue }
+      log(ctx, `↻ ${sec.label} is not in the form — doing it again`, 'warn')
+      await runSection(page, ctx, sec)
+      if (ctx.__sectionOk[sec.key] === false) reasons[sec.key] = ctx.__sectionWhy?.[sec.key]
+    }
+    // Only missing files left: checking again cannot help.
+    if (missing.every(s => /^Profile is missing/.test(reasons[s.key] || ''))) break
+  }
+
+  const list = missing.map(s => reasons[s.key] || `${s.label} did not stick on LMIS`)
+  throw new Error(`LMIS form not complete: ${list.join('; ')}`)
 }
 
 export async function stepNotifyHumanSubmit(page, ctx) {
   log(ctx, '🖐 reached final step — human must click "Submit Request"', 'warn')
   await ctx.notify(
     `✅ ${ctx.profileName}: police certificate ready for final submit`,
-    `Labor ID ${ctx.labor_id} — slip, passport, and photo uploaded. ` +
-    `Open the LMIS tab, verify, and click "Submit Request" yourself.`,
+    `Labor ID ${ctx.labor_id} — slip, passport and photo uploaded and checked. ` +
+    (ctx.__jevDoubt ? 'JEV thinks something may still be off — look closely. ' : '') +
+    (ctx.__jevWhy ? `JEV did not check this form (${ctx.__jevWhy}) — look it over before you submit. ` : '') +
+    `Open the LMIS tab and click "Submit Request" yourself.`,
     'info'
   )
-}
-
-export async function stepUploads(page, ctx) {
-  log(ctx, 'scanning for file inputs')
-
-  const inputs = await page.$$('input[type="file"]')
-  log(ctx, `found ${inputs.length} file input(s)`)
-
-  const inputsMeta = []
-  for (let i = 0; i < inputs.length; i++) {
-    const meta = await page.evaluate(el => {
-      let context = ''
-      let cur = el
-      for (let d = 0; d < 6 && cur; d++) {
-        const t = (cur.textContent || '').trim()
-        if (t && t.length < 120) { context = t; break }
-        cur = cur.parentElement
-      }
-      return {
-        name: (el.name || '').toLowerCase(),
-        id: (el.id || '').toLowerCase(),
-        accept: (el.accept || '').toLowerCase(),
-        cls: (el.className || '').toLowerCase(),
-        context: context.toLowerCase(),
-        visible: (() => {
-          const r = el.getBoundingClientRect()
-          return r.width > 5 && r.height > 5
-        })(),
-      }
-    }, inputs[i])
-    inputsMeta.push({ index: i, ...meta })
-    log(ctx, `  input[${i}]: name="${meta.name}" id="${meta.id}" accept="${meta.accept}" ctx="${meta.context.slice(0, 60)}" visible=${meta.visible}`)
-  }
-
-  if (inputs.length === 0) {
-    log(ctx, 'no file inputs on the page — uploads cannot proceed', 'warn')
-    await ctx.notify(
-      `⚠️ ${ctx.profileName}: no file upload slots found`,
-      'The police certificate form did not show any upload fields after advancing.'
-    )
-    return
-  }
-
-  const pickInput = (keywords, fallbackIndex) => {
-    for (const kw of keywords) {
-      const hit = inputsMeta.find(m => {
-        const hay = `${m.name} ${m.id} ${m.accept} ${m.cls} ${m.context}`
-        return hay.includes(kw)
-      })
-      if (hit) return hit.index
-    }
-    if (fallbackIndex !== null && inputsMeta[fallbackIndex]) return fallbackIndex
-    return null
-  }
-
-  const jobs = [
-    { label: 'personal photo', path: ctx.photoPath,    keywords: ['photo', 'personal', 'picture', 'portrait'], fallback: 0 },
-    { label: 'passport',       path: ctx.passportPath, keywords: ['passport', 'pdf', 'travel'],                 fallback: 1 },
-    { label: 'full body',      path: ctx.fullBodyPath, keywords: ['body', 'full', 'fullbody'],                  fallback: 2 },
-  ]
-
-  for (const j of jobs) {
-    if (!j.path) { log(ctx, `${j.label}: no file to upload`, 'warn'); continue }
-    if (!fs.existsSync(j.path)) { log(ctx, `${j.label}: file missing on disk`, 'warn'); continue }
-
-    const idx = pickInput(j.keywords, j.fallback)
-    if (idx === null) {
-      log(ctx, `${j.label}: no matching input slot`, 'warn')
-      await ctx.notify(
-        `⚠️ ${ctx.profileName}: ${j.label} could not be uploaded`,
-        'No matching file input was found on the LMIS page.'
-      )
-      continue
-    }
-
-    // LMIS rejects files over 2 MB: shrink passport images, stop if that is not possible
-    let upPath = j.path
-    if (j.label === 'passport') upPath = await passportUploadFile(j.path)
-    try {
-      await inputs[idx].uploadFile(upPath)
-      log(ctx, `✓ uploaded ${j.label} → input[${idx}] (${path.basename(upPath)})`)
-    } catch (e) {
-      log(ctx, `✗ ${j.label} upload failed: ${e.message}`, 'error')
-      await ctx.notify(
-        `❌ ${ctx.profileName}: ${j.label} upload failed`,
-        e.message
-      )
-    }
-    await sleep(1200)
-    await closePopups(page, ctx)
-  }
-
-  log(ctx, 'all uploads attempted')
-
-  await sleep(1500)
-  const previewCount = await page.evaluate(() => {
-    const imgs = Array.from(document.querySelectorAll('img'))
-      .filter(i => {
-        const r = i.getBoundingClientRect()
-        const src = i.src || ''
-        return r.width > 40 && r.height > 40 && (src.startsWith('blob:') || src.startsWith('data:'))
-      })
-    return imgs.length
-  })
-  log(ctx, `${previewCount} upload preview image(s) detected on the page`)
-}
-
-export async function stepHumanConfirm(page, ctx) {
-  log(ctx, 'reached human confirmation — pausing for user', 'warn')
-  await ctx.notify(
-    `✅ ${ctx.profileName}: police certificate ready for your confirmation`,
-    `All steps completed for Labor ID ${ctx.labor_id}. Open the browser, verify the form, and click Submit. Then mark this run as Done from the dashboard.`
-  )
-  return
 }
 
 // ============================================================================
@@ -2066,6 +1904,14 @@ export async function runFullWorkflow(page, ctx) {
     }
   }
 
+  // No point opening LMIS when the form cannot be finished.
+  const noFile = FORM_SECTIONS.filter(sec => !ctx[sec.file] || !fs.existsSync(ctx[sec.file]))
+  if (noFile.length) {
+    const error = `Profile is missing the ${noFile.map(sec => sec.label).join(', ')} file${noFile.length > 1 ? 's' : ''}`
+    log(ctx, error, 'error')
+    return { ok: false, step: 'preflight', error, seconds: 0 }
+  }
+
   try {
     await stepLogin(page, ctx)
   } catch (e) {
@@ -2079,6 +1925,7 @@ export async function runFullWorkflow(page, ctx) {
     ['add-new',          stepAddNew],
     ['search-worker',    stepSearchAndFindWorker],
     ['upload-documents', stepUploadDocuments],
+    ['verify-form',      stepVerifyForm],
     ['notify-human',     stepNotifyHumanSubmit],
   ]
 

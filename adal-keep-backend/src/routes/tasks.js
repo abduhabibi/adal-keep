@@ -12,6 +12,24 @@ router.get('/', async (req, res) => {
   }
 })
 
+// Documents Adal Keep noticed in the last day: waiting, being read (and on
+// which step), added to a profile, or not added and why. The Tasks page shows them.
+router.get('/documents', async (req, res) => {
+  try {
+    const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString()
+    const rows = await req.app.locals.db('ingest_queue')
+      .where('created_at', '>=', since)
+      .where(q => q.whereNull('last_error').orWhereNot('last_error', 'was already in the folder'))
+      .orderBy('id', 'desc').limit(40)
+      .select('id', 'filename', 'status', 'stage', 'result', 'last_error', 'attempts', 'created_at', 'started_at', 'updated_at')
+    res.json({ now: new Date().toISOString(), rows: rows.map(r => {
+      let result = null
+      try { result = r.result ? JSON.parse(r.result) : null } catch {}
+      return { ...r, result }
+    }) })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
 router.post('/', async (req, res) => {
   try {
     const db = req.app.locals.db

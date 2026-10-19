@@ -86,3 +86,11 @@ all_musaned_candidates.json
 adal-keep-backend/samples/
 adal-keep-backend/PASSPORT-DEBUG.txt
 all-source.txt
+
+# Seller page: carries the licence key
+seller/*PRIVATE*
+dist-demo/
+adal-installer/tools/seticon.exe
+
+# Per-PC licence state (trial start, unlock) — never shared
+adal-keep-backend/.adal_sub.json

@@ -221,6 +221,19 @@ router.post('/profiles/:profileId/automations/:workflowId/start', async (req, re
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
+// Police certificate runs that are ready for the person's Submit: the page
+// plays a chime when a new one shows up.
+router.get('/automations/ready-for-submit', async (req, res) => {
+  try {
+    const db = req.app.locals.db
+    const rows = await db('automation_queue')
+      .where({ workflow_id: 'police_certificate', status: 'paused', pause_reason: 'awaiting-human-submit' })
+      .select('id', 'profile_id', 'updated_at')
+      .orderBy('id', 'desc').limit(50)
+    res.json(rows)
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
 // Get one run with its log (and, while it waits, where it stands in line)
 router.get('/automations/:id', async (req, res) => {
   try {

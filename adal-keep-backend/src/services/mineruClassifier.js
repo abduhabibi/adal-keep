@@ -17,6 +17,7 @@ import path from 'path'
 import { parseTD3, fitLine2 } from './mrz.js'
 import { parseDocumentToMarkdown } from './mineruClient.js'
 import { classifyWithGemini } from './geminiClassifier.js'
+import { setStage } from './ingestQueue.js'
 import { jevReady, classifyWithJev, cropMrz, pickPrintedName, release } from './jevClassifier.js'
 
 // Each rule: doc_type plus patterns. A rule scores by the number of patterns
@@ -336,6 +337,7 @@ export function nameCandidates(line1raw) {
  */
 async function analyzeWithJev(originalPath, db) {
   if (!jevReady() || Date.now() < jevPausedUntil) return null
+  setStage('JEV is looking at it')
   let r
   try {
     const profiles = db
@@ -427,6 +429,7 @@ export async function analyzeWithMineru(originalPath, { db = null } = {}) {
 }
 
 async function analyzeUsual(originalPath, filename) {
+  setStage('reading it on this PC (passport lines, text)')
   const local = await analyzeLocally(originalPath)
   if (local?.doc_type) return local
 
@@ -436,6 +439,7 @@ async function analyzeUsual(originalPath, filename) {
   let result = null
   let source = 'gemini'
   try {
+    setStage('asking Gemini')
     result = await classifyWithGemini(text ? { text, filename } : { filePath: originalPath, filename })
   } catch (e) {
     console.warn('[classify] Gemini could not read the file, trying MinerU:', e.message)
@@ -444,6 +448,7 @@ async function analyzeUsual(originalPath, filename) {
   // 2. Gemini failed: MinerU reads the text, Gemini classifies it, keyword rules last.
   if (!result) {
     if (!text) {
+      setStage('MinerU is reading the text')
       const markdown = await parseDocumentToMarkdown(originalPath)
       text = String(markdown || '')
     }

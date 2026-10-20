@@ -33,6 +33,8 @@ function Step($n, $msg) { Write-Host ''; Write-Host " [$n/4] $msg" -ForegroundCo
 function Ok($msg)       { Write-Host "       OK  $msg" -ForegroundColor Green }
 function Note($msg)     { Write-Host "       $msg" -ForegroundColor DarkGray }
 function Fail($msg) {
+    # Into the log too, so the reason can be read later from the USB.
+    try { Add-Content -Path $Log -Value "FAILED $(Get-Date -Format 'HH:mm:ss'): $msg" -ErrorAction Stop } catch {}
     Write-Host ''
     Write-Host "   FAILED: $msg" -ForegroundColor Red
     Write-Host "   Details: $Log"
@@ -187,6 +189,10 @@ try {
         "brave:     $(if ($gotBrave) { 'included' } else { 'missing' })"
     )
     Ok 'ready'
+}
+catch {
+    # Anything unexpected (a USB that fails while writing, for example).
+    Fail "$($_.Exception.Message) (at line $($_.InvocationInfo.ScriptLineNumber))"
 }
 finally {
     if ($braveJob -and -not $braveJob.HasExited) { try { $braveJob.Kill() } catch {} }

@@ -149,8 +149,8 @@ export default function LockScreen({ onClose }) {
               <p className="text-sm text-slate-400 text-center">Scan with your CBE app to pay</p>
               <p className="w-full max-w-sm rounded-2xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-3 text-center text-sm text-emerald-100">
                 <span aria-hidden="true">💚 </span>
-                <strong className="text-emerald-300">30% of your payment goes to charity</strong>
-                <span className="block text-xs text-emerald-200/80 mt-0.5">15,000 ETB of the 50,000 ETB</span>
+                <strong className="text-emerald-300">10% of your payment goes to charity</strong>
+                <span className="block text-xs text-emerald-200/80 mt-0.5">5,000 ETB of the 50,000 ETB</span>
               </p>
             </div>
 

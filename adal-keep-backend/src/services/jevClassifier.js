@@ -23,7 +23,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import sharp from 'sharp'
-import { getSecret } from './secretStore.js'
+import { jevKeys, withJevKey } from './jev/keys.js'
 
 export const JEV_DOC_TYPES = {
   'Passport': 'Ethiopian passport data page: bilingual, PASSPORT heading, photo, two machine-readable lines with <<< at the bottom.',
@@ -49,26 +49,33 @@ export const JEV_DOC_TYPES = {
   'other': 'None of the above, a screenshot, or not a document at all.',
 }
 
+// JEV refuses pictures larger than this on either side ("Invalid image
+// dimensions" at 1600; 1568 is accepted — checked 2026-10-20).
+const JEV_MAX_SIDE = 1568
+
 const IMAGE_IN = /\.(jpe?g|png|webp|bmp|gif|tiff?)$/i
 
 export function jevReady() {
   if (String(process.env.JEV_CLASSIFY || '').toLowerCase() === 'false') return false
-  return !!(getSecret('TYPESAFE_API_KEY') || process.env.TYPESAFE_API_KEY)
+  return jevKeys().length > 0
 }
 
+// The API calls go through withJevKey: a key with no credits left hands over
+// to the next one (TYPESAFE_API_KEYS).
 let _client = null
 async function client() {
   if (_client) return _client
   const sdk = await import('@typesafe-ai/sdk')
+  const make = (sdk, key) => new sdk.TypeSafeClient({
+    apiKey: key,
+    defaultModel: process.env.JEV_MODEL || undefined,
+    timeout: Number(process.env.JEV_TIMEOUT_MS || 30000),
+    // Image input is opt-in on the API.
+    defaultHeaders: { 'TypeSafe-Danger-Zone-Images': 'true' },
+  })
   _client = {
     sdk,
-    api: new sdk.TypeSafeClient({
-      apiKey: getSecret('TYPESAFE_API_KEY') || process.env.TYPESAFE_API_KEY,
-      defaultModel: process.env.JEV_MODEL || undefined,
-      timeout: Number(process.env.JEV_TIMEOUT_MS || 30000),
-      // Image input is opt-in on the API.
-      defaultHeaders: { 'TypeSafe-Danger-Zone-Images': 'true' },
-    }),
+    api: { systemOne: (...args) => withJevKey('classify', make, (api) => api.systemOne(...args)) },
   }
   return _client
 }
@@ -93,7 +100,7 @@ async function pageImage(filePath) {
     throw new Error(`not an image or PDF: ${path.extname(filePath)}`)
   }
   const { data, info } = await sharp(src).rotate()
-    .resize({ width: 2000, height: 2000, fit: 'inside', withoutEnlargement: true })
+    .resize({ width: JEV_MAX_SIDE, height: JEV_MAX_SIDE, fit: 'inside', withoutEnlargement: true })
     .png().toBuffer({ resolveWithObject: true })
   return { buffer: data, width: info.width, height: info.height, tmp, src }
 }
@@ -125,7 +132,9 @@ export async function classifyWithJev(filePath, { profiles = [] } = {}) {
       questions.person = sdk.choice('Which person is this document about? Match the printed name, passport number or ID.', crit)
     }
 
-    const res = await api.systemOne({ state: { document: sdk.image(page.buffer) }, questions })
+    // Box questions (the MRZ) need the jev-preview model (SDK 0.7 README);
+    // the default model refuses the whole request with "Invalid request".
+    const res = await api.systemOne({ state: { document: sdk.image(page.buffer) }, questions, model: process.env.JEV_BOX_MODEL || 'jev-preview' })
     const a = res.answers || {}
     const personLabel = a.person?.choice
     return {
@@ -159,7 +168,7 @@ export async function pickPrintedName(result, candidates) {
   if (!candidates.length) return null
   const { sdk, api } = await client()
   const { data } = await sharp(result._pageSrc).rotate()
-    .resize({ width: 2000, height: 2000, fit: 'inside', withoutEnlargement: true }).png().toBuffer({ resolveWithObject: true })
+    .resize({ width: JEV_MAX_SIDE, height: JEV_MAX_SIDE, fit: 'inside', withoutEnlargement: true }).png().toBuffer({ resolveWithObject: true })
   const crit = { none: 'None of these is the name printed on the passport.' }
   candidates.forEach((c, i) => { crit[`n${i}`] = c })
   const res = await api.systemOne({
@@ -191,7 +200,7 @@ export async function lookAtPage(png, questions) {
   _lookWhy = ''
   try {
     const { sdk, api } = await client()
-    const img = await sharp(png).resize({ width: 1600, height: 1600, fit: 'inside', withoutEnlargement: true }).png().toBuffer()
+    const img = await sharp(png).resize({ width: JEV_MAX_SIDE, height: JEV_MAX_SIDE, fit: 'inside', withoutEnlargement: true }).png().toBuffer()
     const qs = {}
     for (const [k, text] of Object.entries(questions)) qs[k] = sdk.noul(text)
     const res = await api.systemOne({ state: { page: sdk.image(img) }, questions: qs })

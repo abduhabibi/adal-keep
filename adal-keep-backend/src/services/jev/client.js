@@ -11,36 +11,22 @@
  * their simple shape and keep reading `answers.<name>.choice` / `.noul`.
  */
 
-import { getSecret } from '../secretStore.js'
+import { jevKeys, withJevKey } from './keys.js'
 
-let _client = null
 // No credits / bad key: stop calling for a while instead of failing every step.
 let _pausedUntil = 0
 let _pauseReason = ''
 
-function getKey() {
-  return (
-    getSecret('TYPESAFE_API_KEY') ||
-    process.env.TYPESAFE_API_KEY ||
-    ''
-  )
-}
-
 export function isEnabled() {
   if (String(process.env.JEV_ENABLED || '').toLowerCase() === 'false') return false
-  return !!getKey()
+  return jevKeys().length > 0
 }
 
-async function getClient() {
-  if (_client) return _client
-  const sdk = await import('@typesafe-ai/sdk')
-  _client = new sdk.TypeSafeClient({
-    apiKey: getKey(),
-    defaultModel: process.env.JEV_MODEL || undefined,
-    retry: { maxRetries: 1 },
-  })
-  return _client
-}
+const makeClient = (sdk, key) => new sdk.TypeSafeClient({
+  apiKey: key,
+  defaultModel: process.env.JEV_MODEL || undefined,
+  retry: { maxRetries: 1 },
+})
 
 /** Old-style questions → SDK questions (choice / noul / score / box). */
 export function toSdkQuestions(questions) {
@@ -76,11 +62,11 @@ export async function askJev(state, questions, { timeoutMs = 15000 } = {}) {
   if (!isEnabled()) return { ok: false, reason: 'disabled' }
   if (Date.now() < _pausedUntil) return { ok: false, reason: 'paused', error: _pauseReason }
   try {
-    const client = await getClient()
-    const raw = await client.systemOne(
-      { state: state ?? null, questions: toSdkQuestions(questions) },
+    const sdkQuestions = toSdkQuestions(questions)
+    const raw = await withJevKey('ask', makeClient, (client) => client.systemOne(
+      { state: state ?? null, questions: sdkQuestions },
       { timeout: timeoutMs },
-    )
+    ))
     return { ok: true, answers: raw?.answers || {}, raw }
   } catch (e) {
     if ([401, 402, 403].includes(e?.status)) {

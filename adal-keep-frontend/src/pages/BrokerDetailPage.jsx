@@ -9,7 +9,7 @@ import Card from '../components/shared/Card'
 import Button from '../components/shared/Button'
 import Input from '../components/shared/Input'
 import Modal from '../components/shared/Modal'
-import ProfileSearchPad from '../components/ProfileSearchPad'
+import BrokerProfileList from '../components/BrokerProfileList'
 
 /* BrokersAssignPanel: drop zone */
 export default function BrokerDetailPage() {
@@ -113,68 +113,27 @@ export default function BrokerDetailPage() {
         }
       />
 
-      {/* Inside the broker: search only this broker's profiles */}
-      <ProfileSearchPad title={`${broker.name} — this broker's profiles`} profiles={profiles} maxHeight="max-h-60" />
-
-      <div className="grid gap-6 lg:grid-cols-3">
-        <Card className="lg:col-span-1 p-6">
-          <h2 className="font-bold text-lg mb-4">የደላላ መረጃ</h2>
-          <dl className="space-y-4 text-sm">
-            <div>
-              <dt className="text-slate-500 mb-1">ስልክ</dt>
-              <dd className="font-medium">{broker.contact1 || 'የለም'}</dd>
-            </div>
-            <div>
-              <dt className="text-slate-500 mb-1">አድራሻ</dt>
-              <dd className="font-medium">{broker.address || 'የለም'}</dd>
-            </div>
-          </dl>
-        </Card>
-
-        <Card className="lg:col-span-2 p-0 overflow-hidden">
-          <div className="p-5 border-b border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/40">
-            <h2 className="font-bold text-lg">የተመደቡ ፕሮፋይሎች</h2>
+      <Card className="p-5">
+        <h2 className="font-bold text-lg mb-3">የደላላ መረጃ</h2>
+        <dl className="flex flex-wrap gap-x-10 gap-y-3 text-sm">
+          <div>
+            <dt className="text-slate-500 mb-1">ስልክ</dt>
+            <dd className="font-medium">{broker.contact1 || 'የለም'}</dd>
           </div>
-          {profiles.length === 0 ? (
-            <div className="text-center py-14 text-slate-500">ምንም ፕሮፋይል የለም</div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="text-xs text-slate-500 uppercase bg-slate-50 dark:bg-slate-800/50">
-                  <tr>
-                    <th className="px-5 py-3 text-left">ስም</th>
-                    <th className="px-5 py-3 text-left">ስልክ</th>
-                    <th className="px-5 py-3 text-right">ተግባር</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {profiles.map(p => (
-                    <tr key={p.id} className="border-t border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/40">
-                      <td className="px-5 py-3.5 font-medium">{p.full_name}</td>
-                      <td className="px-5 py-3.5 text-slate-500">{p.phone_number || '—'}</td>
-                      <td className="px-5 py-3.5 text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          <Button variant="ghost" size="sm" onClick={() => navigate(`/profiles/${p.id}`)}>
-                            ይመልከቱ
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                            onClick={(e) => { e.stopPropagation(); unassignProfile(p.id) }}
-                          >
-                            አስወግድ
-                          </Button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Card>
-      </div>
+          <div>
+            <dt className="text-slate-500 mb-1">አድራሻ</dt>
+            <dd className="font-medium">{broker.address || 'የለም'}</dd>
+          </div>
+        </dl>
+      </Card>
+
+      {/* One list of this broker's profiles: search, filters and sort */}
+      <Card className="p-0 overflow-hidden">
+        <div className="px-5 pt-5">
+          <h2 className="font-bold text-lg">የተመደቡ ፕሮፋይሎች</h2>
+        </div>
+        <BrokerProfileList profiles={profiles} onUnassign={unassignProfile} />
+      </Card>
 
       {/* Edit Modal */}
       <Modal isOpen={editOpen} onClose={() => setEditOpen(false)} title="ደላላ አርም" size="sm">

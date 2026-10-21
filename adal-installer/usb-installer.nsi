@@ -119,8 +119,8 @@ Section "Install"
   CreateDirectory "$SMPROGRAMS\${PRODUCT}"
   ; The Companion has no window: it runs in the background (log: companion.log).
   Delete "$INSTDIR\start-companion.bat"
-  CreateShortcut "$SMPROGRAMS\${PRODUCT}\${PRODUCT}.lnk" "$INSTDIR\adal-companion.exe" "" "$INSTDIR\adal-companion.exe" 0
-  CreateShortcut "$DESKTOP\${PRODUCT}.lnk" "$INSTDIR\adal-companion.exe" "" "$INSTDIR\adal-companion.exe" 0
+  CreateShortcut "$SMPROGRAMS\${PRODUCT}\${PRODUCT}.lnk" "$INSTDIR\adal-companion.exe" "--show" "$INSTDIR\adal-companion.exe" 0
+  CreateShortcut "$DESKTOP\${PRODUCT}.lnk" "$INSTDIR\adal-companion.exe" "--show" "$INSTDIR\adal-companion.exe" 0
   CreateShortcut "$SMPROGRAMS\${PRODUCT}\Uninstall ${PRODUCT}.lnk" "$INSTDIR\uninstall.exe"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "${APP_KEY}" '"$INSTDIR\adal-companion.exe"'
 !else
@@ -190,7 +190,7 @@ Section "Install"
   IfSilent done
 !ifdef COMPANION
   DetailPrint "Starting the Adal Keep Companion..."
-  Exec '"$INSTDIR\adal-companion.exe"'
+  Exec '"$INSTDIR\adal-companion.exe" --show'
 !else
   DetailPrint "Starting Adal Keep..."
   Exec '"$INSTDIR\AdalKeep.exe" --background'

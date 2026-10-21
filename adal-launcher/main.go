@@ -167,20 +167,6 @@ func serverReady(budget time.Duration) bool {
 	}
 }
 
-func braveExe() string {
-	candidates := []string{
-		filepath.Join(os.Getenv("ProgramFiles"), "BraveSoftware", "Brave-Browser", "Application", "brave.exe"),
-		filepath.Join(os.Getenv("ProgramFiles(x86)"), "BraveSoftware", "Brave-Browser", "Application", "brave.exe"),
-		filepath.Join(os.Getenv("LOCALAPPDATA"), "BraveSoftware", "Brave-Browser", "Application", "brave.exe"),
-	}
-	for _, c := range candidates {
-		if _, err := os.Stat(c); err == nil {
-			return c
-		}
-	}
-	return ""
-}
-
 func profileDir(root string) string {
 	return filepath.Join(root, "backend", "data", "browser-profile")
 }
@@ -191,7 +177,7 @@ func profileDir(root string) string {
 // tabs of ONE window. When that Brave is already open, the page simply opens
 // as a new tab in it.
 func openUI(root string) {
-	if b := braveExe(); b != "" {
+	if b := pickBrowser(); b != "" {
 		profile := profileDir(root)
 		os.MkdirAll(profile, 0o755)
 		args := []string{
@@ -207,7 +193,10 @@ func openUI(root string) {
 			uiURL,
 		}
 		if err := exec.Command(b, args...).Start(); err == nil {
+			logf("opened Adal Keep in %s", filepath.Base(b))
 			return
+		} else {
+			logf("could not start %s: %v", b, err)
 		}
 	}
 	exec.Command("rundll32", "url.dll,FileProtocolHandler", uiURL).Start()

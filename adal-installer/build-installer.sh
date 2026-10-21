@@ -104,6 +104,7 @@ if [ -d "$INST/.deps-keep" ]; then mv "$INST/.deps-keep" "$USB/deps"; fi
 mkdir -p "$USB/deps/source"
 mv -f "$INST/2 - Install Adal Main.exe" "$INST/3 - Install Adal Companion.exe" "$USB/"
 cp -f "$INST/usb/1 - PREPARE (once, needs internet).bat" "$USB/"
+cp -f "$INST/usb/4 - Copy logs to this USB.bat" "$USB/"
 cp -f "$INST/usb/deps/prepare-deps.ps1" "$USB/deps/"
 cp -f "$BACK/package.json" "$BACK/package-lock.json" "$USB/deps/source/"
 cp -f "$INST/README-USB.txt" "$USB/README-USB.txt"

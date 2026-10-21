@@ -54,6 +54,7 @@ func main() {
 	candidates := []string{
 		filepath.Join(home, "Downloads"),
 		filepath.Join(home, "Desktop"),
+		filepath.Join(home, "OneDrive", "Desktop"), // Desktop kept in OneDrive
 	}
 	for _, d := range candidates {
 		if info, err := os.Stat(d); err == nil && info.IsDir() {
@@ -61,6 +62,8 @@ func main() {
 			log.Printf("   📁 Watching: %s", d)
 		}
 	}
+
+	announce(serverReachable(), serverDisplayName+" ("+hostServer+")", watchDirs)
 
 	if len(watchDirs) == 0 {
 		log.Fatal("❌ No directories to watch")
@@ -131,4 +134,24 @@ func processAndUpload(filePath string) {
 		return
 	}
 	uploadToIngest(filePath, filepath.Base(filePath))
+}
+
+// wantsStatus: opened from the shortcut (--show), not at Windows login.
+func wantsStatus() bool {
+	for _, a := range os.Args[1:] {
+		if a == "--show" {
+			return true
+		}
+	}
+	return false
+}
+
+// serverReachable: the Adal Keep server answers right now.
+func serverReachable() bool {
+	resp, err := httpClient.Get(strings.TrimRight(hostServer, "/") + "/api/health")
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return resp.StatusCode < 500
 }

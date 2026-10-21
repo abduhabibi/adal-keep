@@ -217,6 +217,19 @@ export function applyCode(code) {
   return { ok: true }
 }
 
+/**
+ * Adal approved this PC's payment receipt in the admin panel (read from the
+ * chat server, where only Adal can approve): unlocked for good, as with a code.
+ */
+export function unlockApproved() {
+  const s = state()
+  const pc = pcNumber()
+  if (computeMode(s) === 'active') return { ok: true }
+  writeSide({ ...s, tries: [], unlocked_pc: pc, unlock_proof: proofFor(pc), unlocked_at: Date.now(), last_seen: Date.now(), unlocked_by: 'approval' })
+  _cache.at = 0
+  return { ok: true }
+}
+
 // ---------------------------------------------------------------------------
 // Guard
 // ---------------------------------------------------------------------------
@@ -225,6 +238,9 @@ const OPEN_WHEN_LOCKED = [
   ['GET', '/api/subscription/status'],
   ['POST', '/api/subscription/unlock'],
   ['GET', '/api/health'],
+  // The lock screen sends the payment receipt to Adal and waits for approval.
+  ['POST', '/api/chat/unlock-request'],
+  ['GET', '/api/chat/unlock-status'],
 ]
 
 export function subscriptionGuard(req, res, next) {

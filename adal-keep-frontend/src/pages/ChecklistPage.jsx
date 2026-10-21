@@ -181,7 +181,7 @@ export default function ChecklistPage() {
             <h2 className="font-display font-bold text-slate-800 dark:text-white mb-3 flex items-center gap-2">
               <span className="text-lg">📋</span> የኔ ቼክስቶች
             </h2>
-            <form onSubmit={handleCreateChecklist} className="flex gap-2">
+            <form data-tour="new-checklist" onSubmit={handleCreateChecklist} className="flex gap-2">
               <Input 
                 placeholder="አዲስ የቼክሊስት ስም..." 
                 value={newChecklistName} 

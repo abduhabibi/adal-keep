@@ -92,7 +92,7 @@ export default function ProfilesPage() {
         title="ፕሮፋይሎች"
         subtitle={filterLabel}
         action={
-          <Button onClick={() => navigate('/profiles/new')}>
+          <Button data-tour="new-profile" onClick={() => navigate('/profiles/new')}>
             + ፕሮፋይል አክል
           </Button>
         }

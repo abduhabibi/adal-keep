@@ -6,6 +6,7 @@ import DashboardPage from './pages/DashboardPage'
 import ProfilesPage from './pages/ProfilesPage'
 import ProfileDetailPage from './pages/ProfileDetailPage'
 import ProfileFormPage from './pages/ProfileFormPage'
+import ChatPage from './pages/ChatPage'
 import EmployeesPage from './pages/EmployeesPage'
 import BrokersPage from './pages/BrokersPage'
 import BrokerDetailPage from './pages/BrokerDetailPage'
@@ -91,6 +92,7 @@ function Shell() {
           <Route path="/" element={<MainLayout />}>
             <Route index element={<DashboardPage />} />
             <Route path="profiles" element={<ProfilesPage />} />
+            <Route path="chat" element={<ChatPage />} />
             <Route path="profiles/new" element={<ProfileFormPage />} />
             <Route path="profiles/:id/edit" element={<ProfileFormPage />} />
             <Route path="profiles/:id" element={<ProfileDetailPage />} />

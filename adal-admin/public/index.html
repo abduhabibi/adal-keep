@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Adal Keep Admin</title>
+<style>
+  :root { --bg:#f4f6f8; --panel:#fff; --line:#e3e8ee; --text:#14212b; --muted:#64748b; --teal:#0f766e; --teal-soft:#e6f4f2; --red:#dc2626; --amber:#b45309; --mine:#d9f2ee; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#0d1419; --panel:#141e25; --line:#24323c; --text:#e5edf2; --muted:#8aa0ae; --teal-soft:#123532; --mine:#163d39; } }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.45 system-ui, sans-serif; background:var(--bg); color:var(--text); height:100vh; display:flex; }
+  nav { width:300px; background:var(--panel); border-right:1px solid var(--line); display:flex; flex-direction:column; min-height:0; }
+  nav header { padding:16px; font-weight:700; font-size:16px; border-bottom:1px solid var(--line); }
+  .tabs { display:flex; flex-wrap:wrap; gap:4px; padding:8px; border-bottom:1px solid var(--line); }
+  .tabs button { flex:1; border:0; background:transparent; color:var(--muted); padding:7px 6px; border-radius:8px; cursor:pointer; font-weight:600; font-size:12px; }
+  .tabs button.on { background:var(--teal-soft); color:var(--teal); }
+  .list { overflow-y:auto; flex:1; }
+  .item { padding:10px 14px; border-bottom:1px solid var(--line); cursor:pointer; display:flex; gap:8px; align-items:center; }
+  .item:hover, .item.on { background:var(--teal-soft); }
+  .item .t { font-weight:600; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .item .s { color:var(--muted); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .badge { background:var(--teal); color:#fff; border-radius:999px; font-size:11px; padding:1px 7px; font-weight:700; }
+  main { flex:1; display:flex; flex-direction:column; min-width:0; }
+  main > header { padding:14px 18px; background:var(--panel); border-bottom:1px solid var(--line); font-weight:700; }
+  #thread { flex:1; overflow-y:auto; padding:16px 18px; display:flex; flex-direction:column; gap:6px; }
+  .msg { max-width:70%; background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:7px 10px; align-self:flex-start; }
+  .msg.mine { align-self:flex-end; background:var(--mine); }
+  .msg .who { font-size:11px; font-weight:700; color:var(--teal); }
+  .msg .time { font-size:10px; color:var(--muted); text-align:right; }
+  .msg img { max-width:260px; max-height:260px; border-radius:8px; display:block; margin-top:4px; cursor:zoom-in; }
+  .msg .del { font-size:10px; color:var(--red); cursor:pointer; margin-left:8px; }
+  form#compose { display:flex; gap:8px; padding:12px 18px; background:var(--panel); border-top:1px solid var(--line); }
+  form#compose input[type=text] { flex:1; padding:10px 12px; border-radius:10px; border:1px solid var(--line); background:var(--bg); color:var(--text); }
+  button.go { background:var(--teal); color:#fff; border:0; border-radius:10px; padding:9px 16px; font-weight:600; cursor:pointer; }
+  button.ghost { background:transparent; border:1px solid var(--line); color:var(--text); border-radius:8px; padding:5px 10px; cursor:pointer; }
+  button.danger { background:var(--red); color:#fff; border:0; border-radius:8px; padding:5px 10px; cursor:pointer; }
+  table { width:100%; border-collapse:collapse; background:var(--panel); }
+  th, td { text-align:left; padding:9px 12px; border-bottom:1px solid var(--line); vertical-align:middle; }
+  th { font-size:11px; text-transform:uppercase; color:var(--muted); }
+  .wrap { padding:16px 18px; overflow:auto; flex:1; }
+  .code { font-family:ui-monospace, monospace; font-weight:700; letter-spacing:.15em; }
+  .pill { font-size:11px; font-weight:700; padding:2px 8px; border-radius:999px; }
+  .pending { background:#fef3c7; color:var(--amber); } .approved { background:#d1fae5; color:#047857; } .rejected { background:#fee2e2; color:var(--red); }
+  .muted { color:var(--muted); }
+  #zoom { position:fixed; inset:0; background:#000c; display:none; align-items:center; justify-content:center; cursor:zoom-out; }
+  #zoom img { max-width:92vw; max-height:92vh; }
+</style>
+</head>
+<body>
+<nav>
+  <header>Adal Keep — Admin</header>
+  <div class="tabs">
+    <button data-tab="inbox" class="on">Inboxes</button>
+    <button data-tab="chats">All chats</button>
+    <button data-tab="payments">Payments</button>
+    <button data-tab="agencies">Agencies</button>
+  </div>
+  <div class="list" id="list"></div>
+</nav>
+<main>
+  <header id="title">Choose a chat</header>
+  <div id="thread"></div>
+  <div class="wrap" id="table" style="display:none"></div>
+  <form id="compose" style="display:none">
+    <input type="file" id="pic" accept="image/*" hidden>
+    <button type="button" class="ghost" onclick="pic.click()" title="Send a picture">📎</button>
+    <input type="text" id="text" placeholder="Write to the agency… (links are not allowed)" autocomplete="off">
+    <button class="go">Send</button>
+  </form>
+</main>
+<div id="zoom" onclick="this.style.display='none'"><img alt=""></div>
+<script>
+let data = { agencies: [], conversations: [], requests: [] }
+let tab = 'inbox', open = null, lastId = 0
+const $ = (s) => document.querySelector(s)
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+const when = (t) => new Date(t).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })
+const api = async (p, body) => {
+  const r = await fetch(p, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {})
+  const j = await r.json(); if (!r.ok) throw new Error(j.error || r.status); return j
+}
+const name = (id) => data.agencies.find(a => a.id === id)?.name || 'agency'
+const img = (p) => `<img src="/api/image?path=${encodeURIComponent(p)}" onclick="event.stopPropagation(); zoom.querySelector('img').src=this.src; zoom.style.display='flex'">`
+
+document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
+  tab = b.dataset.tab; document.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('on', x === b))
+  if (tab === 'payments' || tab === 'agencies') { open = null; showTable() } else renderList()
+  renderList()
+})
+
+function renderList() {
+  const L = $('#list')
+  if (tab === 'inbox' || tab === 'chats') {
+    const convs = data.conversations.filter(c => tab === 'inbox' ? c.kind === 'admin' : c.kind !== 'admin')
+    L.innerHTML = convs.map(c => `<div class="item ${open?.id === c.id ? 'on' : ''}" data-id="${c.id}">
+      <div style="min-width:0;flex:1"><div class="t">${esc(c.title)}</div>
+      <div class="s">${c.last ? esc(c.last.body || '📷 picture') : '<span class="muted">no messages yet</span>'}</div></div>
+      ${c.unread ? `<span class="badge">${c.unread}</span>` : ''}</div>`).join('') || '<p class="muted" style="padding:14px">Nothing yet.</p>'
+    L.querySelectorAll('.item').forEach(el => el.onclick = () => openConv(data.conversations.find(c => c.id === el.dataset.id)))
+  } else if (tab === 'payments') {
+    const p = data.requests.filter(r => r.status === 'pending').length
+    L.innerHTML = `<p style="padding:14px">${p} receipt(s) waiting.</p>`
+  } else {
+    L.innerHTML = `<p style="padding:14px">${data.agencies.filter(a => !a.is_admin).length} agencies installed Adal Keep.</p>`
+  }
+}
+
+async function openConv(c) {
+  open = c; lastId = 0
+  $('#title').textContent = c.title + (c.kind === 'admin' ? ' — inbox with Adal' : c.kind === 'group' ? ' — all agencies' : ' — private chat')
+  $('#thread').style.display = 'flex'; $('#table').style.display = 'none'
+  $('#compose').style.display = c.kind === 'direct' ? 'none' : 'flex' // Adal reads private chats, writes in inboxes and Everyone
+  $('#thread').innerHTML = ''
+  await loadMessages(); renderList()
+}
+
+async function loadMessages() {
+  if (!open) return
+  const list = await api(`/api/messages?conversation=${open.id}`)
+  const T = $('#thread'), atBottom = T.scrollHeight - T.scrollTop - T.clientHeight < 60
+  T.innerHTML = list.map(m => `<div class="msg ${m.sender_id === data.adminId ? 'mine' : ''}">
+    <div class="who">${esc(m.sender_id === data.adminId ? 'You (Adal Keep)' : name(m.sender_id))}<span class="del" data-id="${m.id}">delete</span></div>
+    ${m.body ? `<div>${esc(m.body)}</div>` : ''}${m.image_path ? img(m.image_path) : ''}
+    <div class="time">${when(m.created_at)}</div></div>`).join('') || '<p class="muted">No messages yet.</p>'
+  T.querySelectorAll('.del').forEach(d => d.onclick = async () => { if (confirm('Delete this message for everyone?')) { await api('/api/delete-message', { id: d.dataset.id }); loadMessages() } })
+  const newest = list.at(-1)?.id || 0
+  if (atBottom || newest !== lastId) T.scrollTop = T.scrollHeight
+  lastId = newest
+}
+
+function showTable() {
+  $('#thread').style.display = 'none'; $('#compose').style.display = 'none'; $('#table').style.display = 'block'
+  if (tab === 'payments') {
+    $('#title').textContent = 'Payment receipts'
+    $('#table').innerHTML = `<table><tr><th>Receipt</th><th>Agency</th><th>PC number</th><th>Sent</th><th>Status</th><th></th></tr>` +
+      data.requests.map(r => `<tr><td>${img(r.image_path).replace('<img', '<img style="max-height:70px;border-radius:6px"')}</td>
+        <td>${esc(r.agency)}</td><td class="code">${esc(r.pc_number)}</td><td>${when(r.created_at)}</td>
+        <td><span class="pill ${r.status}">${r.status}</span>${r.note ? `<div class="muted">${esc(r.note)}</div>` : ''}</td>
+        <td>${r.status === 'pending' ? `<button class="go" data-ok="${r.id}">Approve — unlock</button> <button class="ghost" data-no="${r.id}">Reject</button>`
+          : r.code ? `<span class="muted">code now:</span> <span class="code">${r.code}</span>` : ''}</td></tr>`).join('') + '</table>'
+    $('#table').querySelectorAll('[data-ok]').forEach(b => b.onclick = async () => {
+      if (!confirm('Approve this payment? That PC unlocks for good within a minute.')) return
+      await api('/api/decide', { id: b.dataset.ok, approve: true }); refresh()
+    })
+    $('#table').querySelectorAll('[data-no]').forEach(b => b.onclick = async () => {
+      const note = prompt('Why is it rejected? (the agency sees this)', 'The receipt is not readable')
+      if (note === null) return
+      await api('/api/decide', { id: b.dataset.no, approve: false, note }); refresh()
+    })
+  } else {
+    $('#title').textContent = 'Agencies'
+    $('#table').innerHTML = `<table><tr><th>Agency</th><th>PC number</th><th>Unlock code now</th><th>Joined</th><th>Last seen</th><th></th></tr>` +
+      data.agencies.filter(a => !a.is_admin).map(a => `<tr><td><b>${esc(a.name)}</b>${a.banned ? ' <span class="pill rejected">banned</span>' : ''}</td>
+        <td class="code">${esc(a.pc_number || '—')}</td><td class="code">${a.code || '—'}</td><td>${when(a.created_at)}</td><td>${when(a.last_seen)}</td>
+        <td>${a.banned ? `<button class="ghost" data-unban="${a.id}">Unban</button>` : `<button class="danger" data-ban="${a.id}">Ban</button>`}</td></tr>`).join('') + '</table>' +
+      '<p class="muted">A banned agency cannot write in Everyone or in private chats; it can still write to you.</p>'
+    $('#table').querySelectorAll('[data-ban]').forEach(b => b.onclick = async () => { if (confirm(`Ban ${name(b.dataset.ban)}?`)) { await api('/api/ban', { id: b.dataset.ban, banned: true }); refresh() } })
+    $('#table').querySelectorAll('[data-unban]').forEach(b => b.onclick = async () => { await api('/api/ban', { id: b.dataset.unban, banned: false }); refresh() })
+  }
+}
+
+$('#compose').onsubmit = async (e) => {
+  e.preventDefault()
+  const body = $('#text').value.trim()
+  if (!body || !open) return
+  await api('/api/send', { conversation: open.id, body }).catch(err => alert(err.message))
+  $('#text').value = ''; loadMessages()
+}
+$('#pic').onchange = () => {
+  const f = $('#pic').files[0]; if (!f || !open) return
+  const r = new FileReader(); r.onload = async () => { await api('/api/send', { conversation: open.id, image: r.result }); loadMessages() }; r.readAsDataURL(f)
+  $('#pic').value = ''
+}
+
+async function refresh() {
+  try {
+    data = await api('/api/overview')
+    if (open) open = data.conversations.find(c => c.id === open.id) || open
+    renderList()
+    if (tab === 'payments' || tab === 'agencies') showTable()
+    else await loadMessages()
+    const waiting = data.requests.filter(r => r.status === 'pending').length
+    document.title = (waiting ? `(${waiting}) ` : '') + 'Adal Keep Admin'
+    document.querySelector('[data-tab=payments]').textContent = waiting ? `Payments (${waiting})` : 'Payments'
+  } catch (e) { $('#title').textContent = 'Cannot reach Supabase: ' + e.message }
+}
+refresh(); setInterval(refresh, 5000)
+</script>
+</body>
+</html>

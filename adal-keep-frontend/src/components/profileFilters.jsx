@@ -1,8 +1,10 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import api from '../services/api'
 
 /**
  * Filters and sort for a list of profiles (Profiles page, broker page):
- * date range, experience, age, married, country, skill, religion, and sort
+ * date range, experience, age, married, country, skill, religion (each with
+ * "Unfilled", to find what still needs filling), browser run, and sort
  * by last updated / date added / name / age either way. Runs on the rows
  * already loaded, so it answers at once.
  */
@@ -63,7 +65,27 @@ export function Select({ title, value, onChange, options }) {
   )
 }
 
-const EMPTY = { range: '', experience: '', age: '', married: '', country: '', skill: '', religion: '' }
+const EMPTY = { range: '', experience: '', age: '', married: '', country: '', skill: '', religion: '', run: '' }
+// "Unfilled": the field is empty on the profile.
+const NONE = '__none__'
+const RUNS = [['', 'Any'], ['running', 'Running now'], ['waiting', 'Waiting for you'], ['idle', 'Not running']]
+const empty = (v) => !norm(v)
+const match = (want, value) => (want === NONE ? empty(value) : same(value, want))
+
+/** Which profiles have a Musaned / police run working or waiting (refreshed every 10 s). */
+function useRunStates() {
+  const [states, setStates] = useState({})
+  useEffect(() => {
+    let alive = true
+    const load = () => api.get('/automations/active')
+      .then(r => { if (alive) setStates(Object.fromEntries((r.data || []).map(x => [x.profile_id, x.state]))) })
+      .catch(() => {})
+    load()
+    const t = setInterval(load, 10000)
+    return () => { alive = false; clearInterval(t) }
+  }, [])
+  return states
+}
 
 
 export function useProfileFilters(profiles) {
@@ -71,6 +93,7 @@ export function useProfileFilters(profiles) {
   const [sort, setSort] = useState('updated_at')
   const [dir, setDir] = useState('desc')
   const set = (k) => (v) => setF(prev => ({ ...prev, [k]: v }))
+  const runStates = useRunStates()
 
   // The choices come from the profiles themselves.
   const choices = useMemo(() => ({
@@ -94,10 +117,11 @@ export function useProfileFilters(profiles) {
         const a = ageOf(p.date_of_birth)
         if (a === null || a < lo || a > hi) return false
       }
-      if (f.married && !same(p.marital_status, f.married)) return false
-      if (f.country && !same(p.destination_country, f.country)) return false
-      if (f.skill && !skillsOf(p.skills).some(s => same(s, f.skill))) return false
-      if (f.religion && !same(p.religion, f.religion)) return false
+      if (f.married && !match(f.married, p.marital_status)) return false
+      if (f.country && !match(f.country, p.destination_country)) return false
+      if (f.skill && (f.skill === NONE ? skillsOf(p.skills).length > 0 : !skillsOf(p.skills).some(s => same(s, f.skill)))) return false
+      if (f.religion && !match(f.religion, p.religion)) return false
+      if (f.run && (runStates[p.id] || 'idle') !== f.run) return false
       return true
     })
     const key = (p) => sort === 'age' ? (ageOf(p.date_of_birth) ?? -1)
@@ -109,9 +133,10 @@ export function useProfileFilters(profiles) {
       return dir === 'asc' ? c : -c
     })
     return out
-  }, [profiles, f, sort, dir])
+  }, [profiles, f, sort, dir, runStates])
 
   const opts = (any, list) => [['', any], ...list.map(v => [v, label(v)])]
+  const withNone = (any, list) => [['', any], [NONE, 'Unfilled'], ...list.map(v => [v, label(v)])]
 
   const sortBar = (
     <div className="flex items-center gap-2 text-sm">
@@ -130,14 +155,15 @@ export function useProfileFilters(profiles) {
   )
 
   const filterBar = (
-    <div className="grid gap-3 grid-cols-2 sm:grid-cols-4 xl:grid-cols-7">
+    <div className="grid gap-3 grid-cols-2 sm:grid-cols-4 xl:grid-cols-8">
       <Select title="Date Range" value={f.range} onChange={set('range')} options={DATE_RANGES} />
       <Select title="Experience" value={f.experience} onChange={set('experience')} options={opts('Any', choices.experience)} />
       <Select title="Age" value={f.age} onChange={set('age')} options={AGES} />
-      <Select title="Married" value={f.married} onChange={set('married')} options={opts('Any', choices.married)} />
-      <Select title="Country" value={f.country} onChange={set('country')} options={opts('Any', choices.country)} />
-      <Select title="Skill" value={f.skill} onChange={set('skill')} options={opts('Any', choices.skill)} />
-      <Select title="Religion" value={f.religion} onChange={set('religion')} options={opts('Any', choices.religion)} />
+      <Select title="Married" value={f.married} onChange={set('married')} options={withNone('Any', choices.married)} />
+      <Select title="Country" value={f.country} onChange={set('country')} options={withNone('Any', choices.country)} />
+      <Select title="Skill" value={f.skill} onChange={set('skill')} options={withNone('Any', choices.skill)} />
+      <Select title="Religion" value={f.religion} onChange={set('religion')} options={withNone('Any', choices.religion)} />
+      <Select title="Run" value={f.run} onChange={set('run')} options={RUNS} />
     </div>
   )
 

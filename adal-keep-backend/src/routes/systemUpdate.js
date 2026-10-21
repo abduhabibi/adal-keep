@@ -26,7 +26,7 @@ const MARKER = '.adal-version.json'
 const PROTECTED = new Set([
   '.git', '.env', '.env.bak', 'data', 'uploads', 'logs', 'node_modules', MARKER,
   // Licensing / activation state
-  '.adal_sub.json', '.subscription_lock',
+  '.adal_sub.json', '.subscription_lock', '.adal_chat.json',
   // Live database + WAL sidecars
   'data.sqlite', 'data.sqlite-shm', 'data.sqlite-wal',
   // Portable Node runtime shipped by the installer

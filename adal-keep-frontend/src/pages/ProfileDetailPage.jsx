@@ -95,6 +95,7 @@ export default function ProfileDetailPage() {
             <Button variant="secondary" onClick={() => navigate('/profiles')}>← Back</Button>
             <Button
               className="bg-purple-600 hover:bg-purple-700 text-white"
+              data-tour="cv-create"
               onClick={() => navigate(`/cvs/new?profile=${id}`)}
             >
               📄 Create CV

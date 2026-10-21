@@ -537,3 +537,26 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .lock-backdrop span, .lock-frame, .lock-flow, .lock-button, .lock-caret, .lock-feature { animation: none; }
 }
+
+/* ---- Daily tutor "Show me" spotlight (lib/tutor.js) ---- */
+.adal-spot-ring {
+  position: fixed; z-index: 60; pointer-events: none; border-radius: 12px;
+  border: 3px solid #14b8a6;
+  box-shadow: 0 0 0 9999px rgba(15, 23, 42, 0.45), 0 0 18px rgba(20, 184, 166, 0.8);
+  transition: left .2s, top .2s, width .2s, height .2s;
+  animation: adal-spot-pulse 1.4s ease-in-out infinite;
+}
+@keyframes adal-spot-pulse { 50% { border-color: #6366f1; } }
+.adal-spot-bubble {
+  position: fixed; z-index: 61; width: 320px; max-width: calc(100vw - 24px);
+  background: #fff; color: #0f172a; border-radius: 14px; padding: 12px 14px;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.3); font-size: 13px; line-height: 1.45;
+}
+.adal-spot-bubble strong { display: block; font-size: 14px; margin-bottom: 4px; color: #0f766e; }
+.adal-spot-bubble p { margin: 0 0 10px; }
+.adal-spot-bubble small { display: block; font-size: 11px; color: #64748b; font-weight: 600; margin-bottom: 2px; }
+.adal-spot-actions { display: flex; gap: 8px; align-items: center; }
+.adal-spot-bubble button {
+  background: #0d9488; color: #fff; border: 0; border-radius: 8px; padding: 6px 14px; font-weight: 600; cursor: pointer;
+}
+.adal-spot-bubble button.stop { background: transparent; color: #64748b; padding: 6px 4px; font-weight: 500; }

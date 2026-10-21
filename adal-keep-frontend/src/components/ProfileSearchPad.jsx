@@ -23,6 +23,9 @@ export default function ProfileSearchPad({
   const navigate = useNavigate()
   const [loaded, setLoaded] = useState(null)
   const [q, setQ] = useState('')
+  // All / running (a browser run working or waiting) / not running
+  const [run, setRun] = useState('')
+  const [runs, setRuns] = useState({})
   const inputRef = useRef(null)
 
   useEffect(() => {
@@ -36,6 +39,16 @@ export default function ProfileSearchPad({
     const t = setInterval(load, 30000)
     return () => { alive = false; clearInterval(t) }
   }, [given, brokerId])
+
+  useEffect(() => {
+    let alive = true
+    const load = () => api.get('/automations/active')
+      .then(r => { if (alive) setRuns(Object.fromEntries((r.data || []).map(x => [x.profile_id, x.state]))) })
+      .catch(() => {})
+    load()
+    const t = setInterval(load, 10000)
+    return () => { alive = false; clearInterval(t) }
+  }, [])
 
   // Ctrl+K (or ⌘K) jumps to the global pad.
   useEffect(() => {
@@ -53,17 +66,18 @@ export default function ProfileSearchPad({
   const list = given || loaded || []
   const shown = useMemo(() => {
     const words = norm(q).split(' ').filter(Boolean)
+    const byRun = run ? list.filter(p => (run === 'on') === !!runs[p.id]) : list
     const rows = words.length
-      ? list.filter(p => {
+      ? byRun.filter(p => {
           const hay = norm([p.full_name, p.passport_number, p.labor_id, p.phone_number, p.order_id, p.broker_name].join(' '))
           return words.every(w => hay.includes(w))
         })
-      : list
+      : byRun
     return [...rows].sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || ''))).slice(0, 200)
-  }, [list, q])
+  }, [list, q, run, runs])
 
   return (
-    <section className={`panel p-3 flex flex-col min-h-0 ${className}`}>
+    <section data-tour={autoFocusKey ? 'search-pad' : undefined} className={`panel p-3 flex flex-col min-h-0 ${className}`}>
       <div className="flex items-center justify-between gap-2 mb-2">
         <h3 className="text-xs font-bold uppercase tracking-wide text-slate-600 dark:text-slate-300">{title}</h3>
         <span className="text-[10px] text-slate-400">
@@ -84,6 +98,14 @@ export default function ProfileSearchPad({
           className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white/80 dark:bg-slate-900/60 pl-7 pr-2 py-1.5 text-sm text-slate-800 dark:text-slate-100 placeholder:text-slate-400 focus:border-teal-500 focus:outline-none"
         />
       </div>
+      <div className="flex gap-1 mb-2" role="group" aria-label="Run">
+        {[['', 'All'], ['on', 'Running'], ['off', 'Not running']].map(([v, t]) => (
+          <button key={v} type="button" onClick={() => setRun(v)}
+            className={`flex-1 rounded-md px-1.5 py-1 text-[11px] font-semibold ${run === v ? 'bg-teal-600 text-white' : 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300'}`}>
+            {t}
+          </button>
+        ))}
+      </div>
       <ul className={`overflow-y-auto custom-scrollbar -mx-1 ${maxHeight}`}>
         {shown.map(p => (
           <li key={p.id}>
@@ -92,7 +114,10 @@ export default function ProfileSearchPad({
               onClick={() => navigate(`/profiles/${p.id}`)}
               className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-teal-50 dark:hover:bg-teal-900/30 transition-colors"
             >
-              <span className="block text-sm font-medium text-slate-800 dark:text-slate-100 truncate">{p.full_name || `Profile #${p.id}`}</span>
+              <span className="flex items-center gap-1.5 text-sm font-medium text-slate-800 dark:text-slate-100">
+                {runs[p.id] && <span title={runs[p.id] === 'running' ? 'Run working now' : 'Run waiting'} className={`flex-none w-2 h-2 rounded-full ${runs[p.id] === 'running' ? 'bg-blue-500 animate-pulse' : 'bg-amber-500'}`} />}
+                <span className="truncate">{p.full_name || `Profile #${p.id}`}</span>
+              </span>
               <span className="block text-[11px] text-slate-500 dark:text-slate-400 truncate">
                 {[p.labor_id, p.passport_number, p.phone_number].filter(Boolean).join(' · ') || `#${p.id}`}
               </span>

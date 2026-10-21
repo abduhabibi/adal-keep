@@ -43,7 +43,7 @@ export default function CVsPage() {
         action={
           <div className="flex gap-2">
             <Button variant="secondary" onClick={() => navigate('/cvs/templates')}>Templates</Button>
-            <Button onClick={openNew}>+ New CV</Button>
+            <Button data-tour="new-cv" onClick={openNew}>+ New CV</Button>
           </div>
         }
       />

@@ -1,8 +1,9 @@
-import { lazy, Suspense, useState } from 'react'
-import { Outlet } from 'react-router-dom'
+import { lazy, Suspense, useEffect, useState } from 'react'
+import { Outlet, useLocation } from 'react-router-dom'
 import Navbar from './Navbar'
 import Sidebar from './Sidebar'
 import ProfileSearchPad from '../ProfileSearchPad'
+import { TutorTracker } from '../TutorCard'
 import useReadyChime from '../../hooks/useReadyChime'
 import useNewVersion from '../../hooks/useNewVersion'
 
@@ -22,6 +23,10 @@ export default function MainLayout() {
   const newVersion = useNewVersion()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  // The chat needs the room: the sidebar folds the moment it opens.
+  const { pathname } = useLocation()
+  const inChat = pathname.startsWith('/chat')
+  useEffect(() => { if (inChat) setSidebarCollapsed(true) }, [inChat])
   // The profiles search pad is on every page (docked right); it can be folded away.
   const [padOpen, setPadOpen] = useState(readPad)
   const togglePad = () => setPadOpen(o => {
@@ -43,6 +48,7 @@ export default function MainLayout() {
       </div>
 
       {DEMO && <Suspense fallback={null}><DemoBrowser /></Suspense>}
+      {!DEMO && <TutorTracker />}
       <Sidebar
         isOpen={sidebarOpen}
         onToggle={() => setSidebarOpen(!sidebarOpen)}
@@ -55,26 +61,26 @@ export default function MainLayout() {
         <Navbar onToggleSidebar={() => setSidebarOpen(!sidebarOpen)} />
         <div className="flex flex-1 min-h-0">
           <main className="flex-1 min-w-0 overflow-y-auto transition-colors duration-500 custom-scrollbar">
-            <div className="p-6">
+            <div className={inChat ? 'h-full' : 'p-6'}>
               <Outlet />
             </div>
           </main>
 
-          {padOpen && (
+          {padOpen && !inChat && (
             <aside className="hidden md:flex w-72 shrink-0 flex-col p-3 pl-0 min-h-0">
               <ProfileSearchPad title="Profiles — search" autoFocusKey maxHeight="max-h-none" className="flex-1" />
             </aside>
           )}
         </div>
 
-        <button
+        {!inChat && <button
           type="button"
           onClick={togglePad}
           title={padOpen ? 'Hide the profiles search pad' : 'Show the profiles search pad (Ctrl+K)'}
           className="hidden md:flex absolute right-3 bottom-3 z-30 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold shadow-lg bg-teal-600 text-white hover:bg-teal-700"
         >
           ⌕ {padOpen ? 'Hide search' : 'Search profiles'}
-        </button>
+        </button>}
       </div>
     </div>
   )

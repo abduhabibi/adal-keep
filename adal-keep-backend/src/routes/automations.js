@@ -235,6 +235,23 @@ router.get('/automations/ready-for-submit', async (req, res) => {
 })
 
 // Get one run with its log (and, while it waits, where it stands in line)
+// Profiles with a run working now ('running') or waiting ('waiting': queued,
+// or paused for a person). Used by the "Run" filter on the profile lists.
+router.get('/automations/active', async (req, res) => {
+  try {
+    const db = req.app.locals.db
+    const rows = await db('automation_queue').whereIn('status', ['running', 'pending', 'paused']).select('profile_id', 'status')
+    const by = new Map()
+    for (const r of rows) {
+      const st = r.status === 'running' ? 'running' : 'waiting'
+      if (by.get(r.profile_id) !== 'running') by.set(r.profile_id, st)
+    }
+    res.json([...by].map(([profile_id, state]) => ({ profile_id, state })))
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
 router.get('/automations/:id', async (req, res) => {
   try {
     const db = req.app.locals.db

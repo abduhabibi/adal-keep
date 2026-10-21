@@ -1,5 +1,6 @@
 import { NavLink } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
+import TutorCard from '../TutorCard'
 
 const links = [
   {
@@ -68,6 +69,15 @@ const links = [
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
         <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    ),
+  },
+  {
+    to: '/chat',
+    label: 'ቻት',
+    icon: (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
     ),
   },
@@ -195,6 +205,8 @@ export default function Sidebar({ isOpen, onToggle, collapsed, onToggleCollapse 
               <span className="shrink-0">{settingsLink.icon}</span>
               {!collapsed && <span className="truncate">{settingsLink.label}</span>}
             </NavLink>
+            {/* Daily tutor: hover to open (public demo has none) */}
+            {import.meta.env.VITE_DEMO !== '1' && <div className="mt-1"><TutorCard floating collapsed={collapsed} /></div>}
           </div>
         </nav>
 

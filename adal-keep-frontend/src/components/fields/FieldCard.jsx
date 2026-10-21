@@ -191,6 +191,7 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
         <div className="flex items-center gap-2">
           <button
             type="button"
+            data-tour="field-upload"
             onClick={() => multiInputRef.current?.click()}
             disabled={uploading}
             className="text-[10px] px-2 py-0.5 rounded-md bg-teal-50 text-teal-700 hover:bg-teal-100 dark:bg-teal-900/30 dark:text-teal-400 disabled:opacity-50"

@@ -112,12 +112,12 @@ mrz_line1 and mrz_line2 (use < for filler). If they are not visible, leave both 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
 
 /** One generateContent call with model fallback and retries for temporary errors. */
-async function generate(parts, models = MODELS) {
+async function generate(parts, models = MODELS, { system = PROMPT, json = true } = {}) {
   if (!geminiKeys().length) throw new Error('GEMINI_API_KEY not configured')
 
   let lastErr = null
   for (const model of models) {
-    setStage(`asking Gemini (${model})`)
+    if (system === PROMPT) setStage(`asking Gemini (${model})`)
     // Gemini 3 thinks before answering, and the thinking counts against
     // maxOutputTokens: at the default level it used the whole budget and cut
     // the JSON off. Low thinking is plenty for reading a document.
@@ -132,10 +132,10 @@ async function generate(parts, models = MODELS) {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
           body: JSON.stringify({
-            systemInstruction: { parts: [{ text: PROMPT }] },
+            systemInstruction: { parts: [{ text: system }] },
             contents: [{ role: 'user', parts }],
             generationConfig: {
-              temperature: 0, responseMimeType: 'application/json', maxOutputTokens: 8192,
+              temperature: json ? 0 : 0.3, responseMimeType: json ? 'application/json' : 'text/plain', maxOutputTokens: 8192,
               ...(thinking ? { thinkingConfig: { thinkingLevel: 'low' } } : {}),
             },
           }),
@@ -235,4 +235,13 @@ export async function classifyWithGemini({ text = '', filePath = null, filename,
   }
 }
 
-export default { classifyWithGemini, isGeminiConfigured }
+/**
+ * A short plain-text answer (used by the in-app tutor). Same keys, models and
+ * fallbacks as classification. Throws when no model answers.
+ */
+export async function askGemini(system, question) {
+  const { text } = await generate([{ text: question }], MODELS, { system, json: false })
+  return text.trim()
+}
+
+export default { classifyWithGemini, isGeminiConfigured, askGemini }

@@ -9,6 +9,8 @@ import Spinner from '../components/shared/Spinner'
 import Input from '../components/shared/Input'
 import Modal from '../components/shared/Modal'
 import { getTheme, applyTheme } from '../lib/theme'
+import TutorCard from '../components/TutorCard'
+import TutorAdoption from '../components/TutorAdoption'
 
 export default function SettingsPage() {
   const { subscription, refresh } = useAuth()
@@ -269,7 +271,7 @@ export default function SettingsPage() {
         <h2 className="font-display text-lg font-bold mb-4 flex items-center gap-2">
           <span>🎨</span> መልክ
         </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div data-tour="theme-picker" className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           {[
             { id: 'light', label: 'Light', am: 'ብርሃን', swatch: 'bg-gradient-to-br from-white to-slate-200' },
             { id: 'dark', label: 'Dark', am: 'ጨለማ', swatch: 'bg-gradient-to-br from-slate-800 to-black' },
@@ -382,7 +384,7 @@ export default function SettingsPage() {
               <p className="text-sm text-slate-500">Check GitHub for the latest version and install it</p>
             </div>
             <div className="flex gap-2 shrink-0">
-              <Button onClick={handleCheckUpdate} isLoading={checking}>
+              <Button data-tour="check-updates" onClick={handleCheckUpdate} isLoading={checking}>
                 {checking ? 'Checking...' : 'Check for Updates'}
               </Button>
               {hasUpdate && (
@@ -437,6 +439,10 @@ export default function SettingsPage() {
           )}
         </div>
       </Card>
+
+      {/* Daily tutor and who uses what — at the bottom of Settings */}
+      <TutorCard />
+      <TutorAdoption />
     </div>
   )
 }

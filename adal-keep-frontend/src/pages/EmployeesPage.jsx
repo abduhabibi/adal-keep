@@ -338,7 +338,7 @@ export default function EmployeesPage() {
           subtitle="የስራ ቦታ · ደላሎች እና ፕሮፋይሎች"
           action={
             <div className="flex gap-2">
-              <Button onClick={openCreateBroker}>+ ደላላ አክል</Button>
+              <Button data-tour="new-broker" onClick={openCreateBroker}>+ ደላላ አክል</Button>
               <Button variant="secondary" onClick={exitWorkspace} disabled={gateLoading}>
                 ውጣ
               </Button>
@@ -515,7 +515,7 @@ export default function EmployeesPage() {
                 onChange={(e) => setSearch(e.target.value)}
               />
             </div>
-            <Button onClick={openCreateEmp}>+ ሰራተኛ አክል</Button>
+            <Button data-tour="new-employee" onClick={openCreateEmp}>+ ሰራተኛ አክል</Button>
           </div>
         }
       />

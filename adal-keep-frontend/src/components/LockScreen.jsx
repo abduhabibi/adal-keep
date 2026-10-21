@@ -57,6 +57,69 @@ function Features() {
   )
 }
 
+/**
+ * Or: send the picture of the payment receipt to Adal from here (it lands in
+ * Adal's admin panel with this PC's number). When Adal approves it, this PC
+ * unlocks by itself — no code to type.
+ */
+function ReceiptToAdal({ pc, onUnlocked }) {
+  const [state, setState] = useState(null)   // null | 'sending' | { status, note }
+  const [err, setErr] = useState('')
+  const fileRef = useRef(null)
+
+  const check = async () => {
+    try {
+      const { data } = await api.get('/chat/unlock-status')
+      if (data?.configured === false) return
+      if (data?.unlocked) return onUnlocked()
+      if (data?.status && data.status !== 'none') setState(data)
+    } catch {}
+  }
+  useEffect(() => { check() }, [])
+  useEffect(() => {
+    if (state?.status !== 'pending') return
+    const t = setInterval(check, 10000)
+    return () => clearInterval(t)
+  }, [state?.status])
+
+  const send = async (file) => {
+    if (!file) return
+    if (!/^image\//.test(file.type)) { setErr('Choose a picture (photo or screenshot) of the receipt.'); return }
+    setErr(''); setState('sending')
+    try {
+      const fd = new FormData()
+      fd.append('image', file, file.name || 'receipt.jpg')
+      await api.post('/chat/unlock-request', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+      setState({ status: 'pending' })
+    } catch (e) {
+      setState(null)
+      setErr(e.response?.data?.error || 'Could not send it. Check the internet and try again.')
+    }
+  }
+
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-300">
+      <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={e => { send(e.target.files?.[0]); e.target.value = '' }} />
+      {state?.status === 'pending' ? (
+        <p><span className="mr-2 inline-block h-2 w-2 animate-pulse rounded-full bg-amber-400" />
+          Receipt sent to Adal with PC number <b className="text-white">{pc}</b>. This PC unlocks by itself as soon as Adal approves it — keep this open.</p>
+      ) : (
+        <>
+          {state?.status === 'rejected' && (
+            <p className="mb-2 text-rose-300">Adal could not accept the last receipt{state.note ? `: ${state.note}` : '.'} Send it again.</p>
+          )}
+          <p className="mb-2"><b className="text-white">Or send the receipt to Adal from here.</b> Adal checks it and unlocks this PC — no phone call, no code.</p>
+          <button type="button" disabled={state === 'sending'} onClick={() => fileRef.current?.click()}
+            className="w-full rounded-xl border border-white/20 bg-white/10 px-4 py-2.5 font-semibold text-white hover:bg-white/20 disabled:opacity-50">
+            {state === 'sending' ? 'Sending…' : '📎 Choose the receipt picture'}
+          </button>
+        </>
+      )}
+      {err && <p className="mt-2 text-rose-300">{err}</p>}
+    </div>
+  )
+}
+
 function Typewriter({ items }) {
   const [text, setText] = useState('')
   const [reduced] = useState(() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches)
@@ -218,6 +281,8 @@ export default function LockScreen({ onClose }) {
                   </p>
                 </form>
               )}
+
+              {!done && <ReceiptToAdal pc={pc} onUnlocked={() => { setDone(true); setTimeout(() => window.location.reload(), 1400) }} />}
             </div>
 
             <Features />

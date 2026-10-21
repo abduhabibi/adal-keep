@@ -58,6 +58,7 @@ export default function Navbar({ onMenuClick, capturedFiles, setCapturedFiles })
     if (path === '/brokers') return 'አመቻቾች'
     if (path === '/checklist') return 'ቼክሊስት'
     if (path === '/tasks') return 'ተግባራት'
+    if (path.startsWith('/chat')) return 'ቻት'
     if (path === '/settings') return 'ማስተካከያዎች'
     if (path.startsWith('/profiles/')) return 'የፕሮፋይል ዝርዝር'
     if (path.startsWith('/brokers/')) return 'የአመቻች ዝርዝር'

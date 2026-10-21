@@ -16,6 +16,7 @@ import fs from 'fs'
 import { fileURLToPath } from 'url'
 import tasksRouter from './src/routes/tasks.js'
 import updatesRouter from './src/routes/updates.js'
+import tutorRouter from './src/routes/tutor.js'
 import systemUpdateRouter from './src/routes/systemUpdate.js'
 import quickLinksRouter from "./src/routes/quickLinks.js"
 import tenancyRouter, { attachAuth } from "./src/routes/tenancy.js"
@@ -35,6 +36,7 @@ import { startWorker } from './src/services/worker.js'
 import { startScanner } from './src/services/autoScanner.js'
 import verificationRouter from './src/routes/verification.js'
 import newProfileRouter from './src/routes/newProfile.js'
+import chatRouter from './src/routes/chat.js'
 import { startDiscoveryResponder } from './src/services/discovery.js'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -84,6 +86,7 @@ app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false 
 
 // Updates & System Routes
 app.use('/api/updates', updatesRouter)
+app.use('/api', tutorRouter)   // daily in-app tutor
 app.use('/api/system', systemUpdateRouter)
 app.use("/api/quick-links", quickLinksRouter)
 app.use("/api/auth", authRouter)
@@ -95,6 +98,7 @@ app.use('/api', automationsRouter)
 // 3-green-tick verification gate + the LAN endpoints the Employee-PC Companion talks to
 app.use('/api', verificationRouter)
 app.use('/api', newProfileRouter)
+app.use('/api', chatRouter)
 
 // Utility function to safely check/add missing columns
 async function ensureColumn(table, column, addFn) {

@@ -238,6 +238,7 @@ export default function ProfileAutomations({ profileId }) {
           return (
             <button
               key={w.id}
+              data-tour={`run-${w.id}`}
               onClick={() => {
                 // Every click says at once what is happening. A live run opens
                 // its panel; a finished one too, with "Run again" (a second

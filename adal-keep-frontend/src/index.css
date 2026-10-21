@@ -560,3 +560,11 @@ body {
   background: #0d9488; color: #fff; border: 0; border-radius: 8px; padding: 6px 14px; font-weight: 600; cursor: pointer;
 }
 .adal-spot-bubble button.stop { background: transparent; color: #64748b; padding: 6px 4px; font-weight: 500; }
+
+/* Daily tutor card: always solid, in every theme, so the page behind never
+   shows through it or takes its clicks (TutorCard floating). */
+.tutor-solid { background-color: #ffffff !important; opacity: 1 !important; isolation: isolate; }
+.dark .tutor-solid, [data-theme="dark"] .tutor-solid { background-color: #111827 !important; }
+[data-theme="gradient"] .tutor-solid { background-color: #0b0b14 !important; border-color: rgba(255,255,255,.14) !important; }
+.adal-spot-bubble { z-index: 80 !important; opacity: 1 !important; }
+.adal-spot-ring { z-index: 79 !important; }

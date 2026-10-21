@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useLocation, useNavigate } from 'react-router-dom'
 import api from '../services/api'
 import { showMe, startTracking, trackPage, whoAmI } from '../lib/tutor'
@@ -49,13 +50,18 @@ export default function TutorCard({ floating = false, collapsed = false }) {
   const rowRef = useRef(null)
   const closeTimer = useRef(null)
   const [pos, setPos] = useState(null)
+  // Clicked (or opened by itself at start): stays open until a click outside or ✕.
+  const [pinned, setPinned] = useState(false)
   const place = useCallback(() => {
     const r = rowRef.current?.getBoundingClientRect()
     const edge = rowRef.current?.closest('aside')?.getBoundingClientRect().right ?? r?.right
     if (r) setPos({ left: edge + 10, bottom: Math.max(12, window.innerHeight - r.bottom - 8) })
   }, [])
   const show = () => { clearTimeout(closeTimer.current); place(); setOpen(true) }
-  const hideSoon = () => { clearTimeout(closeTimer.current); closeTimer.current = setTimeout(() => setOpen(false), 300) }
+  const hideSoon = () => { clearTimeout(closeTimer.current); if (!pinnedRef.current) closeTimer.current = setTimeout(() => setOpen(false), 300) }
+  const pinnedRef = useRef(false)
+  useEffect(() => { pinnedRef.current = pinned }, [pinned])
+  const close = () => { clearTimeout(closeTimer.current); setPinned(false); setOpen(false) }
 
   const load = useCallback(async () => {
     try {
@@ -70,8 +76,8 @@ export default function TutorCard({ floating = false, collapsed = false }) {
       if (!floating || !d) return
       // Opens by itself every time the app is opened, until the tour is complete.
       try {
-        if (!d.tour.done && !sessionStorage.getItem(POPPED)) { setTimeout(show, 300); sessionStorage.setItem(POPPED, '1') }
-      } catch { if (!d.tour.done) setTimeout(show, 300) }
+        if (!d.tour.done && !sessionStorage.getItem(POPPED)) { setTimeout(() => { setPinned(true); show() }, 300); sessionStorage.setItem(POPPED, '1') }
+      } catch { if (!d.tour.done) setTimeout(() => { setPinned(true); show() }, 300) }
     })
     const onChange = () => load()
     window.addEventListener('adal-tutor-changed', onChange)
@@ -83,7 +89,7 @@ export default function TutorCard({ floating = false, collapsed = false }) {
     if (!floating || !open || touring) return
     const onDown = (e) => {
       if (rowRef.current?.contains(e.target) || e.target.closest?.('[data-tutor-card]')) return
-      setOpen(false)
+      close()
     }
     document.addEventListener('mousedown', onDown)
     return () => document.removeEventListener('mousedown', onDown)
@@ -98,7 +104,7 @@ export default function TutorCard({ floating = false, collapsed = false }) {
     try { const r = await api.post(path, { who: data.who, ...body }); setData(r.data); return r.data } catch { return null }
   }
   const lessonShow = async (lesson) => {
-    if (floating) setOpen(false)
+    if (floating) close()
     await showMe(lesson, navigate, data.lang)
     await post('/tutor/seen', { lesson: lesson.id })
     if (lesson.id === data.lesson.id) await post('/tutor/goal', { goal: 'lesson' })
@@ -109,7 +115,7 @@ export default function TutorCard({ floating = false, collapsed = false }) {
     const list = tour.remaining.length ? tour.remaining : []
     if (!list.length) return
     setTouring(true); stopRef.current = false
-    if (floating) setOpen(false)
+    if (floating) close()
     let step = tour.seen
     for (const lesson of list) {
       step++
@@ -118,7 +124,7 @@ export default function TutorCard({ floating = false, collapsed = false }) {
       if (how === 'stop' || stopRef.current) break
     }
     setTouring(false)
-    if (floating) show()
+    if (floating) { setPinned(true); show() }
   }
   const setLang = async (lang) => { await post('/tutor/lang', { lang }); setAnswer(null) }
   const ask = async (e) => {
@@ -140,7 +146,7 @@ export default function TutorCard({ floating = false, collapsed = false }) {
       type="button"
       onMouseEnter={show}
       onMouseLeave={hideSoon}
-      onClick={() => (open ? setOpen(false) : show())}
+      onClick={() => (open && pinned ? close() : (setPinned(true), show()))}
       title={collapsed ? t.title : ''}
       className={`w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 ${open ? 'bg-slate-100 dark:bg-slate-800' : ''} ${collapsed ? 'justify-center px-0' : ''}`}
     >
@@ -157,7 +163,7 @@ export default function TutorCard({ floating = false, collapsed = false }) {
   if (floating && !open) return row
 
   const shell = floating
-    ? 'fixed z-[60] w-[min(360px,calc(100vw-24px))] max-h-[calc(100vh-24px)] overflow-y-auto rounded-2xl shadow-2xl border border-slate-200 bg-white text-slate-800 dark:bg-slate-800 dark:text-slate-100 dark:border-slate-600'
+    ? 'tutor-solid fixed z-[70] w-[min(360px,calc(100vw-24px))] max-h-[calc(100vh-24px)] overflow-y-auto rounded-2xl shadow-2xl border border-slate-200 text-slate-800 dark:text-slate-100 dark:border-slate-600'
     : 'panel overflow-hidden text-slate-800 dark:text-slate-100'
 
   const card = (
@@ -180,7 +186,7 @@ export default function TutorCard({ floating = false, collapsed = false }) {
               {l === 'am' ? 'አማ' : 'EN'}
             </button>
           ))}
-          {floating && <button type="button" onClick={() => setOpen(false)} className="ml-1 px-1.5 text-slate-400 hover:text-slate-600" title={t.hide}>—</button>}
+          {floating && <button type="button" onClick={close} className="ml-1 px-1.5 text-base leading-none text-slate-400 hover:text-slate-600" title={t.hide}>✕</button>}
         </div>
       </div>
 
@@ -222,7 +228,7 @@ export default function TutorCard({ floating = false, collapsed = false }) {
               <span className={`flex-1 ${g.done ? 'line-through text-slate-400' : ''}`}>{g.text}</span>
               {!g.done && (g.lesson
                 ? <button type="button" onClick={() => lessonShow(data.lesson)} className="text-teal-700 dark:text-teal-300 font-semibold">{t.show}</button>
-                : <button type="button" onClick={() => { post('/tutor/goal', { goal: g.id }); if (floating) setOpen(false); navigate(g.route) }} className="text-teal-700 dark:text-teal-300 font-semibold">{t.go} →</button>)}
+                : <button type="button" onClick={() => { post('/tutor/goal', { goal: g.id }); if (floating) close(); navigate(g.route) }} className="text-teal-700 dark:text-teal-300 font-semibold">{t.go} →</button>)}
             </li>
           ))}
         </ul>
@@ -258,5 +264,7 @@ export default function TutorCard({ floating = false, collapsed = false }) {
       </form>
     </section>
   )
-  return floating ? <>{row}{card}</> : card
+  // Drawn at the top of the page, above every layer (inside the sidebar it was
+  // trapped under the page in the dark/gradient themes).
+  return floating ? <>{row}{createPortal(card, document.body)}</> : card
 }

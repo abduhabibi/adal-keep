@@ -98,3 +98,6 @@ adal-keep-backend/.adal_sub.json
 # This PC's chat account (made on first use) — never shared
 adal-keep-backend/.adal_chat.json
 adal-admin/.env
+
+# admin panel log
+adal-admin/admin.log

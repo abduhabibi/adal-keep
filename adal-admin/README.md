@@ -31,10 +31,10 @@ Make `adal-admin/.env` (never shared, never committed):
     ADAL_LICENSE_KEY=<the same as in adal-keep-backend/.env>
     ADMIN_PASSWORD=<choose one>
 
-Start it and open http://localhost:4100 (the browser asks for the password;
-any user name):
-
-    node server.mjs
+Open it: **Adal Keep Admin** in the app menu (or double-click
+`start-admin.sh`) — it starts the panel when it is not running and opens
+http://localhost:4100. The browser asks for the password (any user name).
+By hand: `node server.mjs` in this folder.
 
 - **Inboxes** — every agency's chat with you; answer, send pictures.
 - **All chats** — the Everyone group and every private chat; delete messages.

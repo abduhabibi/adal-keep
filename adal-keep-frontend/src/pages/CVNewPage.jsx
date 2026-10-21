@@ -197,7 +197,6 @@ export default function CVNewPage() {
     if (!readiness.profile?.broker_id) return 'Assign a broker to this profile first'
     if (!readiness.has_photo) return 'Upload a Photo for this profile'
     if (!readiness.has_full_body_photo) return 'Upload a Full Body Photo'
-    if (!form.labor_id?.trim()) return 'Labor ID is required'
     if (!form.religion || !form.religion.trim()) return 'Religion is required'
     if (!form.marital_status || !form.marital_status.trim()) return 'Marital status is required'
     if (!templateId) return 'Pick a template'
@@ -397,7 +396,7 @@ export default function CVNewPage() {
           <Input label="Mother's name" value={form.mother_name} onChange={e => upd('mother_name', e.target.value)} />
           <Input label="Father's name" value={form.father_name} onChange={e => upd('father_name', e.target.value)} />
           <Input label="Personal number" value={form.personal_number} onChange={e => upd('personal_number', e.target.value)} placeholder={broker?.contact1 || ''} />
-          <Input label="Labor ID *" value={form.labor_id} onChange={e => upd('labor_id', e.target.value)} />
+          <Input label="Labor ID (optional)" value={form.labor_id} onChange={e => upd('labor_id', e.target.value)} />
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2 pt-2 border-t border-slate-100 dark:border-slate-700">

@@ -162,7 +162,7 @@ router.get('/profile-readiness/:profileId', async (req, res) => {
     if (!profile.broker_id) cv_blockers.push('Broker not assigned')
     if (!has_photo) cv_blockers.push('Photo missing')
     if (!has_full_body_photo) cv_blockers.push('Full body photo missing')
-    if (!profile.labor_id || !String(profile.labor_id).trim()) cv_blockers.push('Labor ID missing')
+    // No labor ID needed: the CV goes to Musaned, which does not use one.
     if (!profile.religion) cv_blockers.push('Religion missing')
     if (!profile.marital_status) cv_blockers.push('Marital status missing')
 

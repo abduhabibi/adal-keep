@@ -44,7 +44,7 @@ export const LESSONS = [
     en: ['Make a checklist', "Give it a name (e.g. this week's travellers) and add workers: it shows which documents each one still needs, and it prints."] },
   { id: 'cv_create', route: '/profiles/:cv', target: 'cv-create',
     am: ['ከፕሮፋይሉ ሲቪ ያዘጋጁ', 'ፕሮፋይሉ ፎቶ፣ ሙሉ ሰውነት ፎቶ፣ የሌበር መታወቂያ እና ክህሎቶች ሲኖሩት Create CV ሲቪውን ያዘጋጅልዎታል።'],
-    en: ['Make a CV from the profile', 'When a profile has a photo, a full-body photo, a labor ID and skills, Create CV builds the CV for you.'] },
+    en: ['Make a CV from the profile', 'When a profile has a photo, a full-body photo and skills, Create CV builds the CV for you.'] },
   { id: 'cv_page', route: '/cvs', target: 'new-cv',
     am: ['ሁሉም ሲቪዎች በአንድ ቦታ', '+ New CV ይጫኑ፣ ሰራተኛ እና ቴምፕሌት ይምረጡ። የተዘጋጁትን ሲቪዎች እዚህ ያውርዱ ወይም በሌላ ቴምፕሌት ይቀይሩ።'],
     en: ['All CVs in one place', 'Press + New CV, pick a worker and a template. Download the CVs made, or switch one to another template.'] },
@@ -292,11 +292,16 @@ On the LAST line write exactly "LESSON: <id>" with the feature id that shows the
 
 /** The owner's view: each person's progress. */
 export async function adoption(db) {
-  const people = [{ who: 'owner', name: 'Owner (no employee signed in)' }]
+  // Everyone the tutor has seen: employees by name, others by their browser's id.
+  const names = new Map()
   try {
-    const users = await db('users').select('id', 'name', 'username')
-    for (const u of users) people.push({ who: String(u.id), name: u.name || u.username })
+    for (const u of await db('users').select('id', 'name', 'username')) names.set(String(u.id), u.name || u.username)
   } catch {}
+  const whos = new Set([
+    ...(await db('tutor_usage').distinct('who')).map(r => r.who),
+    ...(await db('tutor_days').distinct('who')).map(r => r.who),
+  ])
+  const people = [...whos].map(who => ({ who, name: names.get(who) || `Not signed in · ${who === 'owner' ? 'old shared' : who.replace(/^pc-/, 'PC ')}` }))
   const usage = (await db('tutor_usage').select('who', 'feature', 'last_at')).filter(u => LESSON_IDS.has(u.feature))
   const out = []
   for (const p of people) {
@@ -311,5 +316,5 @@ export async function adoption(db) {
       last_active: last,
     })
   }
-  return out.filter(p => p.who !== 'owner' || p.used > 0 || p.streak > 0)
+  return out.sort((a, b) => b.used - a.used)
 }

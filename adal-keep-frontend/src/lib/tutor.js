@@ -1,18 +1,37 @@
 /**
  * Daily tutor, browser side (backend: routes/tutor.js).
- *   whoAmI()      the employee signed in on this PC, or 'owner'
+ *   whoAmI()      the employee signed in here, or this browser's own private id
  *   startTracking the features a person uses (pages + tagged buttons)
  *   showMe()      open the lesson's page and point at the real button
  * The tutor only explains and points; it never clicks anything itself.
  */
 import api from '../services/api'
 
+// Not signed in as an employee: a private id for this browser on this PC, made
+// once and kept. Everyone starts fresh with their own streak and tour; nobody
+// shares one ("owner" used to be shared by every PC on an install).
+const SELF_KEY = 'adal-tutor-self'
+let selfId = null
+function selfOf() {
+  if (selfId) return selfId
+  try {
+    selfId = localStorage.getItem(SELF_KEY)
+    if (!selfId) {
+      selfId = 'pc-' + Math.random().toString(36).slice(2, 10)
+      localStorage.setItem(SELF_KEY, selfId)
+    }
+  } catch {
+    selfId = selfId || 'pc-' + Math.random().toString(36).slice(2, 10)
+  }
+  return selfId
+}
+
 export function whoAmI() {
   try {
     const e = JSON.parse(localStorage.getItem('adal_active_employee') || 'null')
     if (e?.id != null) return String(e.id)
   } catch {}
-  return 'owner'
+  return selfOf()
 }
 
 // data-tour value → feature (lesson id)

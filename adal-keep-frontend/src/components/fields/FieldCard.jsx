@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom'
 import toast from 'react-hot-toast'
 import api from '../../services/api'
 import { useFileCapture } from '../../context/FileCaptureContext'
+import FullBodyCropper from '../FullBodyCropper'
 
 export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness = null }) {
   const navigate = useNavigate()
@@ -13,6 +14,9 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
   const { capturedFiles } = useFileCapture()
   const [uploading, setUploading] = useState(false)
   const [pendingFile, setPendingFile] = useState(null)
+  // Full Body Photo: cropped to the CV's 1:3 shape before it is uploaded.
+  const [cropFile, setCropFile] = useState(null)
+  const isFullBody = field.name === 'Full Body Photo'
   const [previewFile, setPreviewFile] = useState(null) // PREVIEW_MODAL_MARKER
   const [downloadFiles, setDownloadFiles] = useState([])
   const [isDownloadModalOpen, setIsDownloadModalOpen] = useState(false)
@@ -31,6 +35,7 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
       toast.error('Invalid file type')
       return
     }
+    if (isFullBody && /^image\//.test(file.type || '')) { setCropFile(file); return }
     setPendingFile(file)
   }
 
@@ -57,6 +62,9 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
   }
   const handleMultiUpload = async (fileList) => {
     if (!fileList || fileList.length === 0) return
+    // One full body photo, cropped like any other upload of it.
+    const firstImage = isFullBody && Array.from(fileList).find(f => /^image\//.test(f.type || ''))
+    if (firstImage) { if (multiInputRef.current) multiInputRef.current.value = ''; setCropFile(firstImage); return }
     setUploading(true)
     const fd = new FormData()
     Array.from(fileList).forEach(f => fd.append('files', f))
@@ -345,6 +353,14 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
       )}
 
       {/* Upload Format Modal */}
+      {cropFile && (
+        <FullBodyCropper
+          file={cropFile}
+          onCancel={() => { setCropFile(null); if (fileInputRef.current) fileInputRef.current.value = '' }}
+          onDone={(f) => { setCropFile(null); setPendingFile(f) }}
+        />
+      )}
+
       {pendingFile && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden border border-slate-200 dark:border-slate-700">

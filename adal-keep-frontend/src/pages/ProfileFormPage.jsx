@@ -247,7 +247,7 @@ export default function ProfileFormPage() {
         {/* ---- Labor ID first ---- */}
         <div className="rounded-xl p-[2px] bg-gradient-to-r from-teal-500 via-sky-500 to-indigo-500">
           <div className="rounded-[10px] bg-white dark:bg-slate-900 p-3">
-            <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide bg-gradient-to-r from-teal-600 via-sky-600 to-indigo-600 bg-clip-text text-transparent" htmlFor="labor_id">Labor ID *</label>
+            <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide bg-gradient-to-r from-teal-600 via-sky-600 to-indigo-600 bg-clip-text text-transparent" htmlFor="labor_id">Labor ID <span className="normal-case font-medium tracking-normal">(for the police certificate — Musaned does not need it)</span></label>
             <input id="labor_id" className={inputClass + ' font-mono text-base font-semibold'} value={form.labor_id} onChange={setField('labor_id')} />
           </div>
         </div>

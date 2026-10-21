@@ -7,10 +7,10 @@
  *   SUPABASE_URL=https://xxxx.supabase.co
  *   SUPABASE_SERVICE_KEY=...        (Supabase → Project Settings → API → service_role)
  *   ADAL_LICENSE_KEY=...            (the same as in adal-keep-backend/.env: shows unlock codes)
- *   ADMIN_PASSWORD=...              (asked by the browser before the panel opens)
  *
  * The service key can read and change everything, so this panel only listens
- * on this PC (127.0.0.1) and asks for ADMIN_PASSWORD.
+ * on this PC (127.0.0.1) and asks for a password (chosen the first time it
+ * opens; kept as ADMIN_PASSWORD_HASH).
  */
 import http from 'node:http'
 import fs from 'node:fs'
@@ -28,12 +28,10 @@ for (const line of (fs.existsSync(path.join(HERE, '.env')) ? fs.readFileSync(pat
 }
 const URL_ = String(process.env.SUPABASE_URL || '').replace(/\/+$/, '')
 const KEY = process.env.SUPABASE_SERVICE_KEY || ''
-const PASSWORD = process.env.ADMIN_PASSWORD || ''
 if (!URL_ || !KEY) {
   console.error('adal-admin/.env needs SUPABASE_URL and SUPABASE_SERVICE_KEY (see the top of server.mjs).')
   process.exit(1)
 }
-if (!PASSWORD) console.warn('No ADMIN_PASSWORD in adal-admin/.env — anyone using this PC can open the panel.')
 
 // ----------------------------------------------------------- unlock codes --
 // The same Google Authenticator codes the customers' PCs accept
@@ -159,21 +157,85 @@ async function image(res, p) {
 }
 
 // ---------------------------------------------------------------- server --
-function authorized(req) {
-  if (!PASSWORD) return true
-  const [, b64] = String(req.headers.authorization || '').split(' ')
-  const pass = Buffer.from(b64 || '', 'base64').toString().split(':').slice(1).join(':')
-  const a = Buffer.from(pass), b = Buffer.from(PASSWORD)
+// Sign-in: a password Adal chooses the first time the panel opens (kept in
+// .env as a salted hash), then a cookie for 12 hours.
+const ENV_FILE = path.join(HERE, '.env')
+const hashOf = (pw, salt) => crypto.scryptSync(pw, salt, 32).toString('hex')
+let passHash = process.env.ADMIN_PASSWORD_HASH || ''   // "salt:hash"
+const sessions = new Map()                             // token → expires
+
+function setPassword(pw) {
+  const salt = crypto.randomBytes(16).toString('hex')
+  passHash = `${salt}:${hashOf(pw, salt)}`
+  const lines = fs.readFileSync(ENV_FILE, 'utf8').split('\n').filter(l => !/^ADMIN_PASSWORD(_HASH)?=/.test(l) && l.trim())
+  fs.writeFileSync(ENV_FILE, [...lines, `ADMIN_PASSWORD_HASH=${passHash}`].join('\n') + '\n', { mode: 0o600 })
+}
+function passwordRight(pw) {
+  const [salt, h] = passHash.split(':')
+  if (!salt || !h) return false
+  const a = Buffer.from(hashOf(String(pw || '').trim(), salt), 'hex'), b = Buffer.from(h, 'hex')
   return a.length === b.length && crypto.timingSafeEqual(a, b)
+}
+function signedIn(req) {
+  const t = String(req.headers.cookie || '').match(/adal_admin=([a-f0-9]{64})/)?.[1]
+  return !!t && (sessions.get(t) || 0) > Date.now()
+}
+function startSession(res) {
+  const t = crypto.randomBytes(32).toString('hex')
+  sessions.set(t, Date.now() + 12 * 3600 * 1000)
+  res.setHeader('Set-Cookie', `adal_admin=${t}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200`)
+}
+async function formBody(req) {
+  const chunks = []; for await (const c of req) chunks.push(c)
+  return Object.fromEntries(new URLSearchParams(Buffer.concat(chunks).toString()))
+}
+function loginPage(res, { first = false, error = '' } = {}) {
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(`<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>Adal Keep Admin</title>
+<style>body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;font:15px system-ui,sans-serif;background:#0d1419;color:#e5edf2}
+form{background:#141e25;border:1px solid #24323c;border-radius:16px;padding:28px;width:min(360px,90vw)}
+h1{margin:0 0 4px;font-size:20px}p{margin:0 0 18px;color:#8aa0ae;font-size:13px}
+label{display:block;font-size:12px;color:#8aa0ae;margin:12px 0 4px}
+input.pw{width:100%;box-sizing:border-box;padding:11px 12px;border-radius:10px;border:1px solid #24323c;background:#0d1419;color:#fff;font-size:15px}
+button{margin-top:18px;width:100%;padding:11px;border:0;border-radius:10px;background:#0f766e;color:#fff;font-weight:700;font-size:15px;cursor:pointer}
+.err{color:#fca5a5;font-size:13px;margin-top:10px}.show{display:flex;gap:6px;align-items:center;margin-top:10px}</style></head><body>
+<form method="post" action="${first ? '/set-password' : '/login'}">
+<h1>Adal Keep Admin</h1>
+<p>${first ? 'Choose the password for your admin panel (at least 6 characters). You will type it each time you open the panel.' : 'Type your admin password.'}</p>
+<label>Password</label><input class="pw" type="password" name="password" autofocus required minlength="${first ? 6 : 1}" autocomplete="${first ? 'new-password' : 'current-password'}">
+${first ? '<label>Type it again</label><input class="pw" type="password" name="again" required autocomplete="new-password">' : ''}
+<label class="show"><input type="checkbox" onclick="document.querySelectorAll('input.pw').forEach(i=>i.type=this.checked?'text':'password')"> Show the password</label>
+<button>${first ? 'Save and open the panel' : 'Open the panel'}</button>
+${error ? `<div class="err">${error}</div>` : ''}
+</form></body></html>`)
 }
 
 http.createServer(async (req, res) => {
-  if (!authorized(req)) {
-    res.writeHead(401, { 'WWW-Authenticate': 'Basic realm="Adal Keep admin"' }).end('Password needed')
-    return
-  }
   const u = new URL(req.url, 'http://localhost')
   try {
+    if (req.method === 'POST' && u.pathname === '/set-password') {
+      if (passHash) return loginPage(res, { error: 'A password is already set.' })
+      const b = await formBody(req)
+      const pw = String(b.password || '').trim()
+      if (pw.length < 6) return loginPage(res, { first: true, error: 'Use at least 6 characters.' })
+      if (pw !== String(b.again || '').trim()) return loginPage(res, { first: true, error: 'The two passwords are not the same.' })
+      setPassword(pw); startSession(res)
+      res.writeHead(303, { Location: '/' }).end(); return
+    }
+    if (req.method === 'POST' && u.pathname === '/login') {
+      const b = await formBody(req)
+      if (!passwordRight(b.password)) return loginPage(res, { error: 'That password is not right. (Check Caps Lock.)' })
+      startSession(res)
+      res.writeHead(303, { Location: '/' }).end(); return
+    }
+    if (u.pathname === '/logout') {
+      res.writeHead(303, { 'Set-Cookie': 'adal_admin=; Path=/; Max-Age=0', Location: '/' }).end(); return
+    }
+    if (!signedIn(req)) {
+      if (u.pathname.startsWith('/api/')) { res.writeHead(401).end(); return }
+      return loginPage(res, { first: !passHash })
+    }
+
     if (u.pathname === '/' || u.pathname === '/index.html') {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(fs.readFileSync(path.join(HERE, 'public', 'index.html')))
       return

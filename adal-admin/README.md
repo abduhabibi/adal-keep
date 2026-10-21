@@ -29,11 +29,12 @@ Make `adal-admin/.env` (never shared, never committed):
     SUPABASE_URL=https://xxxx.supabase.co
     SUPABASE_SERVICE_KEY=<service_role key>
     ADAL_LICENSE_KEY=<the same as in adal-keep-backend/.env>
-    ADMIN_PASSWORD=<choose one>
 
 Open it: **Adal Keep Admin** in the app menu (or double-click
 `start-admin.sh`) — it starts the panel when it is not running and opens
-http://localhost:4100. The browser asks for the password (any user name).
+http://localhost:4100. The first time, it asks you to choose your password;
+after that it asks for it (12 hours per sign-in). Forgot it? Delete the
+`ADMIN_PASSWORD_HASH=` line in `.env`, restart the panel and choose a new one.
 By hand: `node server.mjs` in this folder.
 
 - **Inboxes** — every agency's chat with you; answer, send pictures.

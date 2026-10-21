@@ -818,11 +818,57 @@ async function countSkillChips(page) {
  * v16.7 — Dropdown: type + ArrowDown + Enter, then fallback to real mouse
  * click on the highlighted panel item.
  */
+/**
+ * Chips of a multi-choice autocomplete (Education level is one): the chosen
+ * values show as chips and the typing box empties again, so "the box is
+ * empty" does not mean nothing was chosen. Returns null for a single-choice field.
+ */
+async function chosenChips(page, labelText) {
+  return page.evaluate((w) => {
+    const norm = (x) => (x || '').toLowerCase().replace(/\*/g, '').replace(/\s+/g, ' ').trim()
+    const label = Array.from(document.querySelectorAll('label')).find(l => norm(l.textContent) === norm(w))
+    const forId = label?.getAttribute('for')
+    const host = (forId && (document.getElementById(forId) || document.querySelector(`[formcontrolname="${forId}"]`))) ||
+      label?.parentElement?.querySelector('p-autocomplete')
+    if (!host?.querySelector('.p-autocomplete-input-multiple, .p-autocomplete-multiple-container')) return null
+    return Array.from(host.querySelectorAll('.p-autocomplete-chip-item, .p-autocomplete-token, li.p-autocomplete-chip'))
+      .map(ch => (ch.querySelector('.p-chip-label, .p-autocomplete-token-label') || ch).textContent.trim()).filter(Boolean)
+  }, labelText).catch(() => null)
+}
+
+/** Remove repeated chips of the same value (left by earlier tries). */
+async function removeDuplicateChips(page, labelText, optionText) {
+  return page.evaluate((w, opt) => {
+    const norm = (x) => (x || '').toLowerCase().replace(/\*/g, '').replace(/\s+/g, ' ').trim()
+    const label = Array.from(document.querySelectorAll('label')).find(l => norm(l.textContent) === norm(w))
+    const forId = label?.getAttribute('for')
+    const host = (forId && (document.getElementById(forId) || document.querySelector(`[formcontrolname="${forId}"]`))) ||
+      label?.parentElement?.querySelector('p-autocomplete')
+    const same = Array.from(host?.querySelectorAll('.p-autocomplete-chip-item, .p-autocomplete-token, li.p-autocomplete-chip') || [])
+      .filter(ch => norm((ch.querySelector('.p-chip-label, .p-autocomplete-token-label') || ch).textContent) === norm(opt))
+    let removed = 0
+    for (const ch of same.slice(1)) {
+      const x = ch.querySelector('.p-chip-remove-icon, .p-autocomplete-chip-icon, .p-autocomplete-token-icon, [data-pc-section="removeicon"], svg')
+      if (x) { x.dispatchEvent(new MouseEvent('click', { bubbles: true })); removed++ }
+    }
+    return removed
+  }, labelText, optionText).catch(() => 0)
+}
+
 async function typeAndCommitDropdown(page, labelText, optionText, ctx) {
   if (!optionText) { log(ctx, `⚠ ${labelText}: no value — skipped`, 'warn'); return false }
   log(ctx, `typing dropdown ${labelText} → "${optionText}"`)
 
   await closeAnyPanel(page)
+
+  // Multi-choice: already chosen → done (choosing again would add it twice).
+  const norm = (x) => String(x || '').toLowerCase().replace(/\s+/g, ' ').trim()
+  const chipsBefore = await chosenChips(page, labelText)
+  if (chipsBefore) {
+    const have = chipsBefore.filter(c => norm(c) === norm(optionText)).length
+    if (have > 1) log(ctx, `  ${labelText}: "${optionText}" was chosen ${have} times — removed ${await removeDuplicateChips(page, labelText, optionText)} extra`)
+    if (have >= 1) { log(ctx, `✓ ${labelText} = "${optionText}" (already chosen)`); return true }
+  }
 
   const { input, reason } = await findInputForLabel(page, labelText)
   if (!input) { log(ctx, `✗ ${labelText}: ${reason}`, 'warn'); return false }
@@ -882,7 +928,8 @@ async function typeAndCommitDropdown(page, labelText, optionText, ctx) {
     await sleep(500)
 
     v = await input.evaluate(n => n.value).catch(() => '')
-    if (!v || !v.trim()) {
+    const chipped = chipsBefore && (await chosenChips(page, labelText) || []).some(c => norm(c) === norm(optionText))
+    if (!chipped && (!v || !v.trim() || chipsBefore)) {
       // Attempt 2: real mouse click at the panel item's coordinates
       log(ctx, `  ${labelText}: ArrowDown+Enter didn't stick, trying mouse click on "${panelInfo.text}"`)
       await page.mouse.click(panelInfo.x, panelInfo.y, { delay: 30 })
@@ -892,6 +939,15 @@ async function typeAndCommitDropdown(page, labelText, optionText, ctx) {
   }
 
   await closeAnyPanel(page)
+
+  if (chipsBefore) {
+    const now = (await chosenChips(page, labelText)) || []
+    const n = now.filter(c => norm(c) === norm(optionText)).length
+    if (n > 1) await removeDuplicateChips(page, labelText, optionText)
+    if (n >= 1) { log(ctx, `✓ ${labelText} = "${optionText}" (chosen)`); return true }
+    log(ctx, `✗ ${labelText}: "${optionText}" was not chosen — chips: ${JSON.stringify(now)}`, 'warn')
+    return false
+  }
 
   v = await input.evaluate(n => n.value).catch(() => '')
   if (v && v.trim()) {
@@ -979,6 +1035,11 @@ async function readFieldValues(page, labels) {
       if (!el) { out[w] = ''; continue }
       const inp = el.matches('input, textarea') ? el : el.querySelector('.p-autocomplete-input, .p-datepicker-input, input, textarea')
       if (inp && String(inp.value || '').trim()) { out[w] = String(inp.value).trim(); continue }
+      // Multi-choice field: the chosen values are chips, the input stays empty.
+      const host = el.closest?.('p-autocomplete') || el.querySelector?.('p-autocomplete') || el
+      const chips = Array.from(host.querySelectorAll?.('.p-autocomplete-chip-item, .p-autocomplete-token, li.p-autocomplete-chip') || [])
+        .map(ch => (ch.querySelector('.p-chip-label, .p-autocomplete-token-label') || ch).textContent.trim()).filter(Boolean)
+      if (chips.length) { out[w] = chips.join(', '); continue }
       const shown = el.querySelector('.p-select-label, .p-dropdown-label')
       out[w] = shown && !shown.classList.contains('p-placeholder') ? shown.textContent.trim() : ''
     }
@@ -1179,7 +1240,135 @@ async function fillSkillsByTyping(page, skills, ctx) {
  * v16.7 — Date with DIAGNOSTIC when typing fails.
  * Logs the label HTML, every candidate input, and which one we picked.
  */
+/**
+ * Musaned's passport dates are ng-bootstrap calendars (<app-calendar> with a
+ * read-only input[ngbDatepicker]). Text put into that input shows, but the
+ * form never gets the date — Save stays blocked. So the date is picked the
+ * way a person does: open the calendar, choose year and month, click the day.
+ */
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+
+function dateParts(value) {
+  const s = String(value || '').trim()
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/)
+  if (m) return { y: +m[1], m: +m[2], d: +m[3] }
+  const t = new Date(s)
+  return isNaN(t) ? null : { y: t.getFullYear(), m: t.getMonth() + 1, d: t.getDate() }
+}
+
+async function isNgbCalendar(page, labelText) {
+  return page.evaluate((w) => {
+    const norm = (x) => (x || '').toLowerCase().replace(/\*/g, '').replace(/\s+/g, ' ').trim()
+    const label = Array.from(document.querySelectorAll('label')).find(l => norm(l.textContent) === norm(w))
+    const forId = label?.getAttribute('for')
+    const host = (forId && document.querySelector(`app-calendar[formcontrolname="${forId}"]`)) || label?.parentElement?.querySelector('app-calendar')
+    if (!host) return null
+    const inp = host.querySelector('input')
+    return { ngb: !!inp?.hasAttribute('ngbdatepicker'), disabled: !!inp?.disabled, value: inp?.value || '' }
+  }, labelText).catch(() => null)
+}
+
+async function fillNgbDate(page, labelText, dateValue, ctx) {
+  const want = dateParts(dateValue)
+  if (!want) { log(ctx, `✗ ${labelText}: cannot read the date "${dateValue}"`, 'warn'); return false }
+  let cal = await isNgbCalendar(page, labelText)
+  // Expiry opens a moment after the issue date is picked: give it 3 s.
+  for (let i = 0; cal?.disabled && i < 6; i++) { await sleep(500); cal = await isNgbCalendar(page, labelText) }
+  if (cal?.disabled) { log(ctx, `  ${labelText}: Musaned keeps this date locked (it fills it itself) — left as it is`); return true }
+
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    await page.keyboard.press('Escape').catch(() => {})
+    // Open the calendar (its icon, else the input).
+    const opened = await page.evaluate((w) => {
+      const norm = (x) => (x || '').toLowerCase().replace(/\*/g, '').replace(/\s+/g, ' ').trim()
+      const label = Array.from(document.querySelectorAll('label')).find(l => norm(l.textContent) === norm(w))
+      const forId = label?.getAttribute('for')
+      const host = (forId && document.querySelector(`app-calendar[formcontrolname="${forId}"]`)) || label?.parentElement?.querySelector('app-calendar')
+      if (!host) return false
+      host.scrollIntoView({ block: 'center' })
+      const icon = host.querySelector('em, i, .fa-calendar, button')
+      ;(icon || host.querySelector('input'))?.click()
+      return true
+    }, labelText).catch(() => false)
+    if (!opened) { log(ctx, `✗ ${labelText}: calendar not found`, 'warn'); return false }
+    const shown = await page.waitForSelector('ngb-datepicker', { visible: true, timeout: 4000 }).then(() => true, () => false)
+    if (!shown) {
+      // the icon did nothing: try the input itself
+      await page.evaluate((w) => {
+        const norm = (x) => (x || '').toLowerCase().replace(/\*/g, '').replace(/\s+/g, ' ').trim()
+        const label = Array.from(document.querySelectorAll('label')).find(l => norm(l.textContent) === norm(w))
+        const forId = label?.getAttribute('for')
+        document.querySelector(`app-calendar[formcontrolname="${forId}"] input`)?.click()
+      }, labelText).catch(() => {})
+      if (!(await page.waitForSelector('ngb-datepicker', { visible: true, timeout: 3000 }).then(() => true, () => false))) {
+        log(ctx, `  ${labelText}: the calendar did not open (try ${attempt}/3)`, 'warn'); continue
+      }
+    }
+
+    // Year and month: the calendar's own selects (else its arrows).
+    const nav = await page.evaluate(async ({ y, m }) => {
+      const dp = document.querySelector('ngb-datepicker')
+      const sleep = (ms) => new Promise(r => setTimeout(r, ms))
+      const sels = Array.from(dp.querySelectorAll('select'))
+      const yearSel = sels.find(s => /year/i.test(s.title || s.getAttribute('aria-label') || '')) || sels[1]
+      const monthSel = sels.find(s => /month/i.test(s.title || s.getAttribute('aria-label') || '')) || sels[0]
+      const choose = (sel, v) => {
+        const opt = Array.from(sel.options).find(o => Number(o.value) === v || o.textContent.trim() === String(v))
+        if (!opt) return false
+        sel.value = opt.value
+        sel.dispatchEvent(new Event('change', { bubbles: true }))
+        return true
+      }
+      if (yearSel && monthSel) {
+        const okY = choose(yearSel, y); await sleep(150)
+        const okM = choose(monthSel, m); await sleep(250)
+        return { how: 'selects', okY, okM }
+      }
+      // Arrows: step until the shown month is the wanted one.
+      const months = ['january','february','march','april','may','june','july','august','september','october','november','december']
+      for (let i = 0; i < 1500; i++) {
+        const title = (dp.querySelector('.ngb-dp-month-name, .ngb-dp-navigation-select, .ngb-dp-header')?.textContent || '').toLowerCase()
+        const ty = Number((title.match(/(19|20)\d{2}/) || [])[0]); const tm = months.findIndex(x => title.includes(x)) + 1
+        if (ty === y && tm === m) return { how: 'arrows', okY: true, okM: true }
+        const back = ty > y || (ty === y && tm > m)
+        const btn = dp.querySelector(back ? '.ngb-dp-arrow:not(.right) button, [aria-label*="Previous" i]' : '.ngb-dp-arrow.right button, [aria-label*="Next" i]')
+        if (!btn || !ty || !tm) return { how: 'arrows', okY: false, okM: false }
+        btn.click(); await sleep(20)
+      }
+      return { how: 'arrows', okY: false, okM: false }
+    }, want).catch(e => ({ how: 'error ' + e.message }))
+
+    // The day: by its label ("Friday, March 6, 2026"), else by its number in this month.
+    const clicked = await page.evaluate(({ y, m, d, monthName }) => {
+      const dp = document.querySelector('ngb-datepicker')
+      const days = Array.from(dp.querySelectorAll('.ngb-dp-day, [ngbdatepickerdayview]'))
+      const usable = (el) => !el.classList.contains('disabled') && !el.classList.contains('hidden') &&
+        !el.querySelector('.text-muted, .outside') && el.getAttribute('aria-disabled') !== 'true'
+      let t = days.find(el => (el.getAttribute('aria-label') || '').includes(`${monthName} ${d}, ${y}`))
+      if (!t) t = days.find(el => usable(el) && (el.textContent || '').trim() === String(d))
+      if (!t) return false
+      ;(t.querySelector('[ngbdatepickerdayview], .btn-light, div') || t).click()
+      t.click()
+      return true
+    }, { ...want, monthName: MONTHS[want.m - 1] }).catch(() => false)
+    await sleep(500)
+
+    const after = await isNgbCalendar(page, labelText)
+    if (clicked && after?.value) {
+      log(ctx, `✓ ${labelText} = "${after.value}" (picked in the calendar: ${nav.how})`)
+      await page.keyboard.press('Escape').catch(() => {})
+      return true
+    }
+    log(ctx, `  ${labelText}: calendar pick did not stick (try ${attempt}/3, ${nav.how}, year ${nav.okY}, month ${nav.okM}, day ${clicked})`, 'warn')
+  }
+  log(ctx, `✗ ${labelText}: could not be picked — please choose it in the calendar by hand`, 'warn')
+  return false
+}
+
 async function fillDateByLabel(page, labelText, dateValue, ctx) {
+  // ng-bootstrap calendar (passport dates): pick it, never type into it.
+  if ((await isNgbCalendar(page, labelText))?.ngb) return fillNgbDate(page, labelText, dateValue, ctx)
+
   if (!dateValue) { log(ctx, `⚠ ${labelText}: no value — skipped`, 'warn'); return false }
   log(ctx, `filling date ${labelText} → "${dateValue}"`)
 
@@ -1846,7 +2035,6 @@ export async function stepFillCandidateDetails(page, ctx) {
     if (passportIssuePlace) await setFieldByLabel(page, 'Passport Issue Place', passportIssuePlace, ctx)
     if (passportIssueDate) {
       await fillDateByLabel(page, 'Passport Issue Date', passportIssueDate, ctx)
-      await enterInField(page, 'Passport Issue Date', ctx)
     }
     if (passportExpiryDate) await fillDateByLabel(page, 'Passport Expiry Date', passportExpiryDate, ctx)
 
@@ -2075,3 +2263,5 @@ async function waitForDashboard(page, ctx, timeoutMs) {
   }
   return last
 }
+// For tests (mock Musaned pages): the field fillers.
+export { typeAndCommitDropdown, fillDateByLabel, readFieldValues, chosenChips }

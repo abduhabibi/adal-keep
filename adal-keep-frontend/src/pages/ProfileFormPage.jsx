@@ -6,6 +6,7 @@ import PageHeader from '../components/shared/PageHeader'
 import Spinner from '../components/shared/Spinner'
 import { REGIONS, regionByName } from '../lib/regions'
 import { useAuth } from '../context/AuthContext'
+import PassportFirst from '../components/PassportFirst'
 
 const STATUS_OPTIONS_AM = [
   { value: 'pending', label: 'በመጠባበቅ ላይ' },
@@ -27,6 +28,7 @@ const emptyForm = {
   full_name: '',
   order_id: '',
   phone_number: '',
+  phone_number_2: '',
   national_id: '',
   passport_number: '',
   status: 'pending',
@@ -67,6 +69,10 @@ export default function ProfileFormPage() {
   const [loading, setLoading] = useState(isEdit)
   const [saving, setSaving] = useState(false)
   const [hydrated, setHydrated] = useState(false)
+  // New profile: the passport comes first (PassportFirst), then a short form.
+  const [step, setStep] = useState(isEdit ? 'form' : 'passport')
+  const [passport, setPassport] = useState(null)   // what was read + the waiting upload
+  const [showAll, setShowAll] = useState(isEdit)
 
   useEffect(() => {
     let alive = true
@@ -85,6 +91,7 @@ export default function ProfileFormPage() {
             destination_country: p.destination_country || '',
             order_id: p.order_id || '',
             phone_number: p.phone_number || '',
+            phone_number_2: p.phone_number_2 || '',
             national_id: p.national_id || '',
             passport_number: p.passport_number || '',
             status: p.status || 'pending',
@@ -140,6 +147,36 @@ export default function ProfileFormPage() {
 
   const setField = (key) => (e) => setForm(prev => ({ ...prev, [key]: e.target.value }))
 
+  // The passport was read: fill what it says. The person adds the rest.
+  const fromPassport = (r) => {
+    const f = r.fields || {}
+    const place = String(f.place_of_birth || '').trim()
+    const low = place.toLowerCase()
+    const region = low && REGIONS.find(x => x.name.toLowerCase() === low || x.areas.some(a => a.toLowerCase() === low))
+    const zone = region && region.areas.find(a => a.toLowerCase() === low)
+    const sex = String(f.gender || '').toUpperCase().startsWith('F') ? 'F' : String(f.gender || '').toUpperCase().startsWith('M') ? 'M' : ''
+    setForm(prev => ({
+      ...prev,
+      full_name: f.full_name || prev.full_name,
+      first_name: f.first_name || '',
+      middle_name: f.middle_name || '',
+      last_name: f.last_name || '',
+      passport_number: f.passport_number || prev.passport_number,
+      date_of_birth: f.date_of_birth || '',
+      gender: sex || prev.gender,
+      place_of_birth: place,
+      passport_issue_date: f.passport_issue_date || '',
+      passport_expiry_date: f.passport_expiry_date || '',
+      ...(f.nationality ? { nationality: f.nationality } : {}),
+      ...(region ? { region: region.name, zone_subcity: zone || '' } : {}),
+      // The middle name is the father's name: the guardian by default.
+      emergency_name: prev.emergency_name || f.middle_name || '',
+      father_name: prev.father_name || f.middle_name || '',
+    }))
+    setPassport(r)
+    setStep('form')
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     setSaving(true)
@@ -165,6 +202,11 @@ export default function ProfileFormPage() {
         navigate(`/profiles/${id}`)
       } else {
         const res = await api.post('/profiles', payload)
+        if (passport?.upload) {
+          try {
+            await api.post('/new-profile/attach', { upload: passport.upload, profileId: res.data.id, filename: passport.filename })
+          } catch { toast.error('The profile was made, but the passport file could not be added — drop it on the Passport field.') }
+        }
         toast.success('አዲስ ፕሮፋይል ተፈጥሯል')
         navigate(`/profiles/${res.data.id}`)
       }
@@ -179,6 +221,19 @@ export default function ProfileFormPage() {
 
   const inputClass = "w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-900/50 p-2.5 text-sm text-slate-800 dark:text-slate-100 focus:bg-white dark:focus:bg-slate-900 focus:border-teal-500 focus:outline-none transition-colors"
   const labelClass = "label mb-1.5 block font-medium text-xs text-slate-600 dark:text-slate-300"
+
+  if (!isEdit && step === 'passport') {
+    return (
+      <div className="mx-auto max-w-2xl animate-fade-up">
+        <PageHeader title="አዲስ ፕሮፋይል" subtitle="Start with the passport — the form fills itself" />
+        <PassportFirst onRead={fromPassport} onSkip={() => { setShowAll(true); setStep('form') }} />
+      </div>
+    )
+  }
+
+  // After the passport: only what the passport cannot tell. "More details" opens the rest.
+  const quick = !isEdit && passport && !showAll
+  const pf = passport?.fields || {}
 
   return (
     <div className="mx-auto max-w-2xl animate-fade-up">
@@ -197,6 +252,69 @@ export default function ProfileFormPage() {
           </div>
         </div>
 
+        {passport && !isEdit && (
+          <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50/60 dark:bg-emerald-900/20 p-4">
+            <p className="mb-3 text-xs font-semibold text-emerald-800 dark:text-emerald-200">
+              {passport.verified ? '✓ Read from the passport (its check digits match)' : 'Read from the passport — check these, the passport lines did not fully verify'}
+              <span className="ml-2 font-normal text-emerald-700/70 dark:text-emerald-300/70">
+                {(passport.ms / 1000).toFixed(1)}s{passport.source ? ` · ${passport.source}` : ''}
+              </span>
+            </p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {quick && (
+                <div className="sm:col-span-2">
+                  <label className={labelClass} htmlFor="full_name_q">ሙሉ ስም *</label>
+                  <input id="full_name_q" required className={inputClass} value={form.full_name} onChange={setField('full_name')} />
+                </div>
+              )}
+              {[['Passport number', form.passport_number], ['Date of birth', form.date_of_birth], ['Sex', form.gender === 'F' ? 'Female' : form.gender === 'M' ? 'Male' : ''],
+                ['Place of birth', form.place_of_birth], ['Region', [form.region, form.zone_subcity].filter(Boolean).join(' · ')], ['Passport expires', pf.passport_expiry_date]]
+                .map(([k, v]) => (
+                  <div key={k} className="text-sm">
+                    <span className="block text-[11px] text-slate-500">{k}</span>
+                    <span className="font-medium text-slate-800 dark:text-slate-100">{v || '—'}</span>
+                  </div>
+                ))}
+            </div>
+          </div>
+        )}
+
+        {quick && (
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className={labelClass} htmlFor="phone_number">ስልክ ቁጥር *</label>
+              <input id="phone_number" required type="tel" className={inputClass} placeholder="09XX XXX XXX" value={form.phone_number} onChange={setField('phone_number')} />
+            </div>
+            <div>
+              <label className={labelClass} htmlFor="phone_number_2">Second phone</label>
+              <input id="phone_number_2" type="tel" className={inputClass} placeholder="09XX XXX XXX" value={form.phone_number_2} onChange={setField('phone_number_2')} />
+            </div>
+            <div>
+              <label className={labelClass} htmlFor="religion">Religion</label>
+              <select id="religion" className={inputClass} value={form.religion} onChange={setField('religion')}>
+                <option value="">— Select —</option>
+                <option value="Muslim">Muslim</option>
+                <option value="Orthodox">Orthodox</option>
+                <option value="Protestant">Protestant</option>
+              </select>
+            </div>
+            <div>
+              <label className={labelClass} htmlFor="marital_status">Marital status</label>
+              <select id="marital_status" className={inputClass} value={form.marital_status} onChange={setField('marital_status')}>
+                <option value="">— Select —</option>
+                <option value="SINGLE">Single</option>
+                <option value="MARRIED">Married</option>
+              </select>
+            </div>
+            <div className="sm:col-span-2">
+              <button type="button" onClick={() => setShowAll(true)} className="text-xs text-teal-700 dark:text-teal-300 hover:underline">
+                More details (broker, destination, experience, guardian…) ▸
+              </button>
+            </div>
+          </div>
+        )}
+
+        {!quick && <>
         {/* ---- Core ---- */}
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="sm:col-span-2">
@@ -210,6 +328,10 @@ export default function ProfileFormPage() {
           <div>
             <label className={labelClass} htmlFor="phone_number">ስልክ ቁጥር *</label>
             <input id="phone_number" required type="tel" className={inputClass} placeholder="251 9XX XXX XXX" value={form.phone_number} onChange={setField('phone_number')} />
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="phone_number_2">Second phone</label>
+            <input id="phone_number_2" type="tel" className={inputClass} value={form.phone_number_2} onChange={setField('phone_number_2')} />
           </div>
           <div>
             <label className={labelClass} htmlFor="status">ሁኔታ</label>
@@ -405,10 +527,12 @@ export default function ProfileFormPage() {
           </div>
         </div>
 
-        <div>
+        </>}
+
+        {!quick && <div>
           <label className={labelClass} htmlFor="notes">ማስታወሻዎች</label>
           <textarea id="notes" rows={4} className={`${inputClass} resize-y`} placeholder="ስለዚህ ደንበኛ ጠቃሚ የሆኑ መረጃዎች…" value={form.notes} onChange={setField('notes')} />
-        </div>
+        </div>}
 
         <div className="flex flex-wrap gap-3 border-t border-slate-200 dark:border-slate-700 pt-5">
           <button type="submit" className="px-5 py-2.5 rounded-lg bg-teal-600 hover:bg-teal-700 text-white font-medium text-sm transition-colors disabled:opacity-50" disabled={saving}>

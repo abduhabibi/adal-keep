@@ -8,6 +8,7 @@ import Spinner from '../components/shared/Spinner'
 import StatusBadge from '../components/shared/StatusBadge'
 import Button from '../components/shared/Button'
 import Input from '../components/shared/Input'
+import { useProfileFilters } from '../components/profileFilters'
 
 const STATUS_OPTIONS_AM = [
   { value: 'pending', label: 'በመጠባበቅ ላይ' },
@@ -51,6 +52,9 @@ export default function ProfilesPage() {
     const t = setTimeout(load, 200)
     return () => clearTimeout(t)
   }, [load])
+
+  // Date range, experience, age, married, country, skill, religion + sort.
+  const { rows, filterBar, sortBar, active: filtering, clear } = useProfileFilters(profiles)
 
   const updateFilter = (key, value) => {
     const next = new URLSearchParams(searchParams)
@@ -137,15 +141,30 @@ export default function ProfilesPage() {
             </option>
           ))}
         </select>
+
+        <div className="sm:col-span-3 space-y-3 border-t border-slate-100 dark:border-slate-700 pt-3">
+          {filterBar}
+          <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500">
+            <span>
+              {rows.length} of {profiles.length} profiles
+              {filtering && (
+                <button type="button" className="ml-3 text-teal-700 dark:text-teal-300 hover:underline" onClick={clear}>
+                  Clear filters
+                </button>
+              )}
+            </span>
+            {sortBar}
+          </div>
+        </div>
       </div>
 
       {loading ? (
         <Spinner />
-      ) : profiles.length === 0 ? (
+      ) : rows.length === 0 ? (
         <EmptyState
           title="ምንም ፕሮፋይል አልተገኘም"
           description={
-            query || status !== 'all' || brokerId
+            query || status !== 'all' || brokerId || filtering
               ? 'እባክዎ ማጣሪያዎችን ያጽዱ ወይም ሌላ ነገር ይፈልጉ።'
               : 'የሰነዶች እና የሁኔታ ክትትል ለመጀመር የደንበኛ ፕሮፋይል ያክሉ።'
           }
@@ -157,7 +176,7 @@ export default function ProfilesPage() {
         />
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {profiles.map((p, i) => (
+          {rows.map((p, i) => (
             <article
               key={p.id}
               className="panel group cursor-pointer p-4 transition hover:-translate-y-0.5 hover:shadow-soft animate-fade-up"

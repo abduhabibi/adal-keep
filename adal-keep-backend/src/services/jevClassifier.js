@@ -69,7 +69,10 @@ async function client() {
   const make = (sdk, key) => new sdk.TypeSafeClient({
     apiKey: key,
     defaultModel: process.env.JEV_MODEL || undefined,
-    timeout: Number(process.env.JEV_TIMEOUT_MS || 30000),
+    // JEV answers in 1–3 s when it is up; waiting longer only holds the file up.
+    timeout: Number(process.env.JEV_TIMEOUT_MS || 8000),
+    // One try: when JEV is down, Gemini answers instead of waiting for retries.
+    retry: { maxRetries: 0 },
     // Image input is opt-in on the API.
     defaultHeaders: { 'TypeSafe-Danger-Zone-Images': 'true' },
   })

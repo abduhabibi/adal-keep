@@ -112,11 +112,11 @@ mrz_line1 and mrz_line2 (use < for filler). If they are not visible, leave both 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
 
 /** One generateContent call with model fallback and retries for temporary errors. */
-async function generate(parts) {
+async function generate(parts, models = MODELS) {
   if (!geminiKeys().length) throw new Error('GEMINI_API_KEY not configured')
 
   let lastErr = null
-  for (const model of MODELS) {
+  for (const model of models) {
     setStage(`asking Gemini (${model})`)
     // Gemini 3 thinks before answering, and the thinking counts against
     // maxOutputTokens: at the default level it used the whole budget and cut
@@ -202,7 +202,7 @@ async function generate(parts) {
  * @param {string} input.filename
  * @returns {Promise<{doc_type:string, confidence:number, fields:object, mrzLines:string[]|null, model:string}>}
  */
-export async function classifyWithGemini({ text = '', filePath = null, filename }) {
+export async function classifyWithGemini({ text = '', filePath = null, filename, models }) {
   const parts = [{ text: `Filename: ${filename}` }]
 
   if (filePath) {
@@ -218,7 +218,7 @@ export async function classifyWithGemini({ text = '', filePath = null, filename 
   parts.push({ text: 'Return the JSON object only.' })
 
   const t0 = Date.now()
-  const { text: out, model } = await generate(parts)
+  const { text: out, model } = await generate(parts, models)
   console.log(`[classify] Gemini ${model} answered in ${Date.now() - t0}ms`)
   const parsed = tryParse(out)
   if (!parsed) throw new Error(`no JSON in Gemini answer (${model})`)

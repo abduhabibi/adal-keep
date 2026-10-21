@@ -34,6 +34,7 @@ import { startFolderWatcher } from "./src/services/aiIngestion.js"
 import { startWorker } from './src/services/worker.js'
 import { startScanner } from './src/services/autoScanner.js'
 import verificationRouter from './src/routes/verification.js'
+import newProfileRouter from './src/routes/newProfile.js'
 import { startDiscoveryResponder } from './src/services/discovery.js'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -93,6 +94,7 @@ app.use('/api/settings', settingsRouter)
 app.use('/api', automationsRouter)
 // 3-green-tick verification gate + the LAN endpoints the Employee-PC Companion talks to
 app.use('/api', verificationRouter)
+app.use('/api', newProfileRouter)
 
 // Utility function to safely check/add missing columns
 async function ensureColumn(table, column, addFn) {
@@ -240,6 +242,7 @@ app.get('/api/profiles', async (req, res) => {
           .orWhere('profiles.phone_number', 'like', term)
           .orWhere('profiles.national_id', 'like', term)
           .orWhere('profiles.passport_number', 'like', term)
+          .orWhere('profiles.labor_id', 'like', term)
       })
     }
 
@@ -323,6 +326,9 @@ app.post('/api/profiles', async (req, res) => {
       'place_of_birth',
       'passport_issue_date',
       'passport_expiry_date',
+      'first_name',
+      'last_name',
+      'phone_number_2',
       'created_by',
     ])
 
@@ -408,6 +414,9 @@ app.put('/api/profiles/:id', async (req, res) => {
       'place_of_birth',
       'passport_issue_date',
       'passport_expiry_date',
+      'first_name',
+      'last_name',
+      'phone_number_2',
     ])
 
     if (data.full_name !== undefined && !String(data.full_name).trim()) {

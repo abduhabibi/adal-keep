@@ -4,6 +4,7 @@ import Navbar from './Navbar'
 import Sidebar from './Sidebar'
 import ProfileSearchPad from '../ProfileSearchPad'
 import useReadyChime from '../../hooks/useReadyChime'
+import useNewVersion from '../../hooks/useNewVersion'
 
 const PAD_KEY = 'adal-search-pad'
 
@@ -18,6 +19,7 @@ function readPad() {
 
 export default function MainLayout() {
   useReadyChime()
+  const newVersion = useNewVersion()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   // The profiles search pad is on every page (docked right); it can be folded away.
@@ -29,6 +31,12 @@ export default function MainLayout() {
 
   return (
     <div className="app-shell flex h-screen overflow-hidden bg-slate-50 dark:bg-slate-900">
+      {newVersion && (
+        <button type="button" onClick={() => window.location.reload()}
+          className="fixed bottom-4 left-1/2 z-[9990] -translate-x-1/2 rounded-full bg-teal-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg hover:bg-teal-700">
+          Adal Keep was updated — click to reload ↻
+        </button>
+      )}
       {/* Moving gradients — only painted in the Gradient theme */}
       <div className="gradient-backdrop" aria-hidden="true">
         <span /><span /><span /><span />

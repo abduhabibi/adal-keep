@@ -346,7 +346,9 @@ async function analyzeWithJev(originalPath, db) {
     r = await classifyWithJev(originalPath, { profiles })
   } catch (e) {
     // No credits / bad key: stop asking for a while instead of failing every file.
-    if ([401, 402, 403].includes(e.status)) jevPausedUntil = Date.now() + 10 * 60 * 1000
+    // No credits / bad key: 10 minutes. Slow or unreachable: 2 minutes, so
+    // the next files do not wait for JEV either — they go straight on.
+    jevPausedUntil = Date.now() + ([401, 402, 403].includes(e.status) ? 10 : 2) * 60 * 1000
     console.warn(`[classify] JEV unavailable (${e.status || ''} ${e.message.slice(0, 80)}) — using the usual path`)
     return null
   }
@@ -412,9 +414,14 @@ async function analyzeWithJev(originalPath, db) {
 export async function analyzeWithMineru(originalPath, { db = null } = {}) {
   const filename = path.basename(originalPath)
 
+  // JEV and the usual readers start together: JEV's settled answer wins when
+  // it has one; when JEV is slow or down nobody waited for it.
+  const usualP = analyzeUsual(originalPath, filename).then(r => ({ r }), e => ({ e }))
   const jev = await analyzeWithJev(originalPath, db)
   if (jev?.result) return jev.result
-  const decided = await analyzeUsual(originalPath, filename)
+  const usual = await usualP
+  if (usual.e) throw usual.e
+  const decided = usual.r
   // JEV was sure of the type (or the person) but the text had to be read:
   // keep JEV's type and person, take the text fields from the usual path.
   if (jev?.hint && jev.hint.confidence >= JEV_MIN && decided.doc_type !== 'Passport') {
@@ -428,9 +435,44 @@ export async function analyzeWithMineru(originalPath, { db = null } = {}) {
   return decided
 }
 
+const GEMINI_QUICK_MODEL = process.env.GEMINI_QUICK_MODEL || 'gemini-3.5-flash-lite'
+
+/** The first promise that gives a truthy value (null when none does). */
+function firstTruthy(promises) {
+  return new Promise(resolve => {
+    let left = promises.length
+    const done = () => { if (--left === 0) resolve(null) }
+    for (const p of promises) p.then(v => (v ? resolve(v) : done()), done)
+  })
+}
+
 async function analyzeUsual(originalPath, filename) {
-  setStage('reading it on this PC (passport lines, text)')
-  const local = await analyzeLocally(originalPath)
+  setStage('reading it on this PC and asking Gemini at the same time')
+  // A photo or scan goes to Gemini at once, while this PC reads it too: the
+  // first answer that is sure (a passport whose check digits verify, or a
+  // settled local read) is used — no waiting for the slower one.
+  // Two Gemini models race: the light one is often quicker, and a passport
+  // reading only counts when its check digits match, so speed costs nothing.
+  const gemCalls = IMAGE_EXT.test(originalPath)
+    ? [GEMINI_QUICK_MODEL, null].map(m => classifyWithGemini({ filePath: originalPath, filename, ...(m ? { models: [m] } : {}) })
+        .catch(e => { console.warn(`[classify] Gemini${m ? ` ${m}` : ''} could not read the file:`, e.message); return null }))
+    : null
+  const gemEarly = gemCalls ? Promise.all(gemCalls).then(([quick, full]) => full || quick) : null
+  const localP = analyzeLocally(originalPath).catch(() => null)
+  if (gemCalls) {
+    const verified = (g) => {
+      if (!g) return null
+      const f = finishResult(g, '', 'gemini')
+      return f.doc_type === 'Passport' && f.confidence >= 0.9 ? { gem: f } : null
+    }
+    const first = await firstTruthy([
+      localP.then(l => (l?.doc_type ? { local: l } : null)),
+      ...gemCalls.map(p => p.then(verified)),
+    ])
+    if (first?.local) return first.local
+    if (first?.gem) return first.gem
+  }
+  const local = await localP
   if (local?.doc_type) return local
 
   let text = local?.text || '' // PDF text layer, when there is one
@@ -440,7 +482,9 @@ async function analyzeUsual(originalPath, filename) {
   let source = 'gemini'
   try {
     setStage('asking Gemini')
-    result = await classifyWithGemini(text ? { text, filename } : { filePath: originalPath, filename })
+    result = gemEarly && !text ? await gemEarly
+      : await classifyWithGemini(text ? { text, filename } : { filePath: originalPath, filename })
+    if (!result) throw new Error('no answer')
   } catch (e) {
     console.warn('[classify] Gemini could not read the file, trying MinerU:', e.message)
   }

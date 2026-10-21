@@ -6,6 +6,9 @@
 //	AdalKeep.exe --background      start it without opening a window (Windows login)
 //	AdalKeep.exe --set-shortcut-ids <.lnk>...   installer: tag the shortcuts (see brand.go)
 //
+// On an employee PC (Companion install, no server) it opens the main PC's
+// Adal Keep instead: see employee.go.
+//
 // One copy per signed-in user stays in the background: it keeps the server
 // running (and starts it again when it stops — after an update, for example),
 // starts the Companion and the agent hidden, and puts the Adal Keep logo on
@@ -34,8 +37,13 @@ var logFile *os.File
 
 func main() {
 	root := exeDir()
-	os.MkdirAll(filepath.Join(root, "backend", "data"), 0o755)
-	logFile, _ = os.OpenFile(filepath.Join(root, "backend", "data", "launcher.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	logDir := filepath.Join(root, "backend", "data")
+	if employeePC(root) {
+		logDir = root
+	} else {
+		os.MkdirAll(logDir, 0o755)
+	}
+	logFile, _ = os.OpenFile(filepath.Join(logDir, "launcher.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 
 	args := os.Args[1:]
 	if len(args) > 0 && args[0] == "--set-shortcut-ids" {
@@ -49,6 +57,11 @@ func main() {
 		return
 	}
 	background := len(args) > 0 && args[0] == "--background"
+
+	if employeePC(root) {
+		runEmployee(root)
+		return
+	}
 
 	if _, err := os.Stat(filepath.Join(root, "runtime", "node.exe")); err != nil {
 		showError("Node.js runtime not found.\nPlease reinstall Adal Keep.")
@@ -168,6 +181,9 @@ func serverReady(budget time.Duration) bool {
 }
 
 func profileDir(root string) string {
+	if employeePC(root) {
+		return filepath.Join(root, "browser-profile")
+	}
 	return filepath.Join(root, "backend", "data", "browser-profile")
 }
 

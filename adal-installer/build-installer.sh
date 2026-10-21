@@ -76,6 +76,8 @@ done
 cp -f "$BASE/adal.ico" "$STAGE/main/adal.ico"
 ( cd "$BASE/adal-agent"     && GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o "$STAGE/main/adal-agent.exe" ./cmd/agent )
 cp -f "$STAGE/main/adal-companion.exe" "$STAGE/companion/adal-companion.exe"
+# Employee PCs open the main PC's Adal Keep through AdalKeep.exe (employee mode).
+cp -f "$STAGE/main/AdalKeep.exe" "$STAGE/main/adal.ico" "$STAGE/companion/"
 rm -f "$STAGE/main/run-server.bat" "$STAGE/main/start-companion.bat" "$STAGE/companion/start-companion.bat"
 cp -f "$INST/files/finish-install.ps1" "$STAGE/main/"
 # The version this build is: Settings → "Check for updates" compares it with

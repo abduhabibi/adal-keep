@@ -116,13 +116,28 @@ Section "Install"
   nsExec::Exec 'netsh advfirewall firewall add rule name="Adal Keep Companion" dir=in action=allow program="$INSTDIR\adal-companion.exe"'
   Pop $0
 
-  CreateDirectory "$SMPROGRAMS\${PRODUCT}"
-  ; The Companion has no window: it runs in the background (log: companion.log).
+  ; Employees use Adal Keep through this PC: AdalKeep.exe opens the main PC's
+  ; Adal Keep in an app-style Brave window with the Adal Keep logo, and runs the
+  ; Companion (sends new scans) in the background. Opens at Windows login too.
+  ; Brave from the USB when it is missing (in the background, like the main PC).
+  ${IfNot} ${FileExists} "$PROGRAMFILES64\BraveSoftware\Brave-Browser\Application\brave.exe"
+  ${AndIf} ${FileExists} "$EXEDIR\deps\brave\BraveSetup.exe"
+    DetailPrint "Installing Brave in the background..."
+    CopyFiles /SILENT "$EXEDIR\deps\brave\BraveSetup.exe" "$TEMP\AdalKeep-BraveSetup.exe"
+    Exec '"$TEMP\AdalKeep-BraveSetup.exe" /silent /install'
+  ${EndIf}
+
+  CreateDirectory "$SMPROGRAMS\${APP_NAME}"
   Delete "$INSTDIR\start-companion.bat"
-  CreateShortcut "$SMPROGRAMS\${PRODUCT}\${PRODUCT}.lnk" "$INSTDIR\adal-companion.exe" "--show" "$INSTDIR\adal-companion.exe" 0
-  CreateShortcut "$DESKTOP\${PRODUCT}.lnk" "$INSTDIR\adal-companion.exe" "--show" "$INSTDIR\adal-companion.exe" 0
-  CreateShortcut "$SMPROGRAMS\${PRODUCT}\Uninstall ${PRODUCT}.lnk" "$INSTDIR\uninstall.exe"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "${APP_KEY}" '"$INSTDIR\adal-companion.exe"'
+  Delete "$SMPROGRAMS\${PRODUCT}\${PRODUCT}.lnk"
+  Delete "$DESKTOP\${PRODUCT}.lnk"
+  CreateShortcut "$DESKTOP\${APP_NAME}.lnk" "$INSTDIR\AdalKeep.exe" "" "$INSTDIR\AdalKeep.exe" 0
+  CreateShortcut "$SMPROGRAMS\${APP_NAME}\${APP_NAME}.lnk" "$INSTDIR\AdalKeep.exe" "" "$INSTDIR\AdalKeep.exe" 0
+  CreateShortcut "$SMPROGRAMS\${APP_NAME}\Uninstall ${PRODUCT}.lnk" "$INSTDIR\uninstall.exe"
+  ; The taskbar shows the Adal Keep window as Adal Keep (its logo), not Brave.
+  nsExec::Exec '"$INSTDIR\AdalKeep.exe" --set-shortcut-ids "$DESKTOP\${APP_NAME}.lnk" "$SMPROGRAMS\${APP_NAME}\${APP_NAME}.lnk"'
+  Pop $0
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "${APP_KEY}" '"$INSTDIR\AdalKeep.exe"'
 !else
   ; ============================= SERVER PC =============================
   DetailPrint "Copying Adal Keep..."
@@ -189,8 +204,8 @@ Section "Install"
   ; --- start it now (a silent IT install leaves that to the next login)
   IfSilent done
 !ifdef COMPANION
-  DetailPrint "Starting the Adal Keep Companion..."
-  Exec '"$INSTDIR\adal-companion.exe" --show'
+  DetailPrint "Opening Adal Keep..."
+  Exec '"$INSTDIR\AdalKeep.exe"'
 !else
   DetailPrint "Starting Adal Keep..."
   Exec '"$INSTDIR\AdalKeep.exe" --background'
@@ -224,6 +239,9 @@ Section "Uninstall"
   RMDir /r "$SMPROGRAMS\${PRODUCT}"
 
 !ifdef COMPANION
+  ; the employee PC's "Adal Keep" shortcuts (they open the main PC's Adal Keep)
+  Delete "$DESKTOP\${APP_NAME}.lnk"
+  RMDir /r "$SMPROGRAMS\${APP_NAME}"
   nsExec::Exec 'netsh advfirewall firewall delete rule name="Adal Keep Companion"'
   Pop $0
   RMDir /r "$INSTDIR"

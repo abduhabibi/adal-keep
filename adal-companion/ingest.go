@@ -17,7 +17,6 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 )
@@ -148,8 +147,12 @@ func postIngest(filePath, filename string) error {
 		setLocked(true)
 		return errLocked
 	}
+	if resp.StatusCode >= 400 && resp.StatusCode < 500 {
+		// The main PC answered and does not want this file: sending it again will not help.
+		return rejectedError{fmt.Sprintf("server rejected the file (%d): %s", resp.StatusCode, strings.TrimSpace(string(body)))}
+	}
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		return fmt.Errorf("server rejected the file (%d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return serverError{fmt.Sprintf("server could not store the file (%d): %s", resp.StatusCode, strings.TrimSpace(string(body)))}
 	}
 
 	var out struct {
@@ -182,23 +185,47 @@ func postIngest(filePath, filename string) error {
 var errLocked = fmt.Errorf("the main Adal Keep PC is locked")
 
 func uploadToIngest(filePath, filename string) {
-	if err := postIngest(filePath, filename); err == nil {
+	err := postIngest(filePath, filename)
+	switch {
+	case err == nil:
 		return
-	} else if err == errLocked {
-		log.Printf("🔒 Not sent (%s is locked until it is paid for): %s", serverDisplayName, filename)
+	case err == errLocked:
+		log.Printf("🔒 Not sent yet (%s is locked until it is paid for): %s", serverDisplayName, filename)
+		queueForRetry(filePath, filename)
 		return
-	} else {
-		log.Printf("⚠️ Ingest failed: %v", err)
+	case isRejected(err):
+		log.Printf("❌ %s: %v", filename, err)
+		return
 	}
+	log.Printf("⚠️ Ingest failed: %v", err)
+	if rediscover() {
+		if postIngest(filePath, filename) == nil {
+			return
+		}
+	}
+	// Never dropped: it waits and is sent as soon as the main PC answers.
+	queueForRetry(filePath, filename)
+}
 
+// rediscover looks for the main PC on the LAN again (a DHCP lease change is
+// the usual reason a known address stops answering). True when it moved.
+func rediscover() bool {
 	log.Println("🔁 Re-scanning the LAN for the Adal Keep server...")
 	if info := discoverServer(2500 * time.Millisecond); info != nil && strings.TrimRight(info.URL, "/") != strings.TrimRight(hostServer, "/") {
 		log.Printf("👉 Server found at %s", info.URL)
 		hostServer = info.URL
-		if err := postIngest(filePath, filename); err == nil {
-			return
-		}
+		return true
 	}
-
-	log.Printf("❌ Could not deliver %s — the file stays in place and the next change retries it", filepath.Base(filePath))
+	return false
 }
+
+// serverError: the main PC answered but failed (5xx) — it is reachable.
+type serverError struct{ msg string }
+
+func (e serverError) Error() string { return e.msg }
+
+type rejectedError struct{ msg string }
+
+func (e rejectedError) Error() string { return e.msg }
+
+func isRejected(err error) bool { _, ok := err.(rejectedError); return ok }

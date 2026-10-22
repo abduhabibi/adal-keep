@@ -80,6 +80,10 @@ func broadcastTargets() []*net.UDPAddr {
 // discoverServer asks the LAN for an Adal Keep server and returns the first
 // valid answer, or nil when nobody replies within the timeout.
 func discoverServer(timeout time.Duration) *serverInfo {
+	// Tests (and PCs pinned to one server) can switch the LAN search off.
+	if os.Getenv("ADAL_NO_DISCOVERY") == "1" {
+		return nil
+	}
 	conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: 0})
 	if err != nil {
 		log.Printf("⚠️ Discovery socket unavailable: %v", err)

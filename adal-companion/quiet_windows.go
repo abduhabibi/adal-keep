@@ -6,6 +6,7 @@ package main
 // goes to companion.log next to the program, and only one copy runs.
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -52,6 +53,10 @@ func announce(connected bool, server string, dirs []string) {
 	} else {
 		msg += "The Adal Keep server was not found yet (" + server + ") — it keeps looking.\r\n"
 	}
-	msg += "Watching: " + strings.Join(dirs, ", ") + "\r\n\r\nYou can close this message; it keeps working."
+	msg += "Watching: " + strings.Join(dirs, ", ") + "\r\n"
+	if n := pendingCount(); n > 0 {
+		msg += fmt.Sprintf("%d file(s) waiting to be sent — they go as soon as the main PC answers.\r\n", n)
+	}
+	msg += "\r\nYou can close this message; it keeps working."
 	go messageBox(msg)
 }

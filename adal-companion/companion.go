@@ -49,6 +49,8 @@ func main() {
 
 	// Not paid for: stop and show the payment popup on this PC too.
 	watchLock()
+	// Files that could not be sent before wait in the outbox until delivered.
+	watchOutbox()
 
 	home, _ := os.UserHomeDir()
 	candidates := []string{
@@ -129,7 +131,8 @@ func main() {
 // checks run again.
 func processAndUpload(filePath string) {
 	if serverLocked() {
-		log.Printf("🔒 Not sent (%s is locked until it is paid for): %s", serverDisplayName, filepath.Base(filePath))
+		log.Printf("🔒 Not sent yet (%s is locked until it is paid for): %s", serverDisplayName, filepath.Base(filePath))
+		queueForRetry(filePath, filepath.Base(filePath)) // sent once it is unlocked
 		showPayPopup(popupOnFileGap)
 		return
 	}

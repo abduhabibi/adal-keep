@@ -5,7 +5,7 @@
 import express from 'express'
 import multer from 'multer'
 import * as chat from '../services/chatCloud.js'
-import { unlockApproved } from '../services/subscription.js'
+import { unlockApproved, statusPayload } from '../services/subscription.js'
 
 const router = express.Router()
 const upload = multer({
@@ -48,5 +48,18 @@ router.get('/chat/unlock-status', wrap(async (req, db) => {
   if (r?.status === 'approved') { unlockApproved(); return { ...r, unlocked: true } }
   return r || { status: 'none' }
 }))
+
+// A PC Adal marked paid unlocks itself, also during the trial (not only
+// from the lock screen): checked a minute after start, then every 30 minutes.
+export function watchPaid(db) {
+  const check = async () => {
+    try {
+      if (!chat.chatConfigured() || statusPayload().mode === 'active') return
+      if (await chat.paidByAdal(db)) { unlockApproved(); console.log('[chat] Adal marked this PC paid — unlocked') }
+    } catch {}
+  }
+  setTimeout(check, 60 * 1000).unref?.()
+  setInterval(check, 30 * 60 * 1000).unref?.()
+}
 
 export default router

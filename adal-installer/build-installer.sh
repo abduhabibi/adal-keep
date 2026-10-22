@@ -54,9 +54,13 @@ if ! grep -qE '^ADAL_LICENSE_KEY=.{32,}' "$BACK/.env" 2>/dev/null; then
   exit 1
 fi
 if [ -f "$BACK/.env" ]; then
-  grep -vE '^(WATCH_DIR|AUTOMATION_LANES|AUTOMATION_MIN_AGENTS|AUTOMATION_MAX_AGENTS|NODE_ENV|SQLITE_PATH|FRONTEND_DIR|BRAVE_CDP_URL)=' "$BACK/.env" \
+  grep -vE '^(WATCH_DIR|AUTOMATION_LANES|AUTOMATION_MIN_AGENTS|AUTOMATION_MAX_AGENTS|NODE_ENV|SQLITE_PATH|FRONTEND_DIR|BRAVE_CDP_URL|GITHUB_BRANCH)=' "$BACK/.env" \
     > "$STAGE/main/backend/.env"
   echo "NODE_ENV=production" >> "$STAGE/main/backend/.env"
+  # Installed PCs follow the "release" branch, which moves only when a build goes
+  # onto the USB (see the end of this script): pushing a fix to main does not
+  # make every PC offer an update.
+  echo "GITHUB_BRANCH=release" >> "$STAGE/main/backend/.env"
   echo "   .env: $(grep -cE '^[A-Z_]+=' "$STAGE/main/backend/.env") settings (values not shown)"
 else
   echo "   WARN no backend .env - the AI keys must be added on the server PC"
@@ -81,9 +85,10 @@ cp -f "$STAGE/main/AdalKeep.exe" "$STAGE/main/adal.ico" "$STAGE/companion/"
 rm -f "$STAGE/main/run-server.bat" "$STAGE/main/start-companion.bat" "$STAGE/companion/start-companion.bat"
 cp -f "$INST/files/finish-install.ps1" "$STAGE/main/"
 # The version this build is: Settings → "Check for updates" compares it with
-# GitHub (main), so a PC installed from this USB is "up to date" until the next push.
+# GitHub's "release" branch, which is moved to this commit when the build goes
+# onto the USB — so a PC installed from the USB is "up to date".
 if [ -z "$(git -C "$BASE" status --porcelain -- . ':!.claude' ':!Adal Keep USB')" ]; then
-  printf '{\n  "sha": "%s",\n  "branch": "main",\n  "message": %s\n}\n' "$(git -C "$BASE" rev-parse HEAD)" \
+  printf '{\n  "sha": "%s",\n  "branch": "release",\n  "message": %s\n}\n' "$(git -C "$BASE" rev-parse HEAD)" \
     "$(git -C "$BASE" log -1 --pretty=%s | node -e 'process.stdin.on("data",d=>process.stdout.write(JSON.stringify(String(d).trim())))')" \
     > "$STAGE/main/.adal-version.json"
   echo "   version: $(git -C "$BASE" rev-parse --short HEAD) (commit this build was made from)"

@@ -77,8 +77,8 @@ function ReceiptToAdal({ pc, onUnlocked }) {
   }
   useEffect(() => { check() }, [])
   useEffect(() => {
-    if (state?.status !== 'pending') return
-    const t = setInterval(check, 10000)
+    // Waiting for Adal: every 10 s; otherwise every 30 s (Adal may mark this PC paid).
+    const t = setInterval(check, state?.status === 'pending' ? 10000 : 30000)
     return () => clearInterval(t)
   }, [state?.status])
 

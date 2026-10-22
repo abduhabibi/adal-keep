@@ -36,7 +36,7 @@ import { startWorker } from './src/services/worker.js'
 import { startScanner } from './src/services/autoScanner.js'
 import verificationRouter from './src/routes/verification.js'
 import newProfileRouter from './src/routes/newProfile.js'
-import chatRouter from './src/routes/chat.js'
+import chatRouter, { watchPaid } from './src/routes/chat.js'
 import { startDiscoveryResponder } from './src/services/discovery.js'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -99,6 +99,7 @@ app.use('/api', automationsRouter)
 app.use('/api', verificationRouter)
 app.use('/api', newProfileRouter)
 app.use('/api', chatRouter)
+watchPaid(db)
 
 // Utility function to safely check/add missing columns
 async function ensureColumn(table, column, addFn) {

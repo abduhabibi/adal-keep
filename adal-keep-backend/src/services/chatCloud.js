@@ -197,9 +197,15 @@ export async function sendUnlockRequest(db, image) {
   return { ok: true }
 }
 
+/** Adal added this PC (by its number) in the admin panel and marked it paid. */
+export async function paidByAdal(db) {
+  await me(db)
+  return (await rpc(db, 'my_invite_paid').catch(() => false)) === true
+}
+
 /** The newest unlock request of this PC: pending / approved / rejected (+ note). */
 export async function unlockStatus(db) {
-  await me(db)
+  if (await paidByAdal(db)) return { status: 'approved', note: 'Marked paid by Adal' }
   const rows = await call(db, 'GET',
     `/rest/v1/unlock_requests?agency_id=eq.${sess.user_id}&pc_number=eq.${pcNumber()}&select=id,status,note,created_at,decided_at&order=id.desc&limit=1`)
   return rows?.[0] || null

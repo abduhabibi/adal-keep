@@ -45,6 +45,18 @@ function totp(secret, step) {
   const o = h[19] & 15
   return String((h.readUInt32BE(o) & 0x7fffffff) % 1000000).padStart(6, '0')
 }
+// The PC number's last digit is a Luhn check digit (subscription.js): a
+// mistyped number is caught before it is saved.
+function luhnOk(pc) {
+  const digits = pc.slice(0, 5)
+  let sum = 0
+  for (let i = 0; i < digits.length; i++) {
+    let d = Number(digits[digits.length - 1 - i])
+    if (i % 2 === 0) { d *= 2; if (d > 9) d -= 9 }
+    sum += d
+  }
+  return String((10 - (sum % 10)) % 10) === pc[5]
+}
 const codeFor = (pc) => process.env.ADAL_LICENSE_KEY && /^\d{6}$/.test(pc || '') ? totp(pcSecret(pc), Math.floor(Date.now() / 30000)) : null
 
 // -------------------------------------------------------------- supabase --
@@ -90,6 +102,7 @@ const api = {
       rest('GET', 'conversations?select=id,kind,key,last_message_at&order=last_message_at.desc'),
       rest('GET', 'unlock_requests?select=id,agency_id,pc_number,image_path,status,note,created_at,decided_at&order=id.desc&limit=200'),
     ])
+    const invites = await rest('GET', 'agency_invites?select=pc_number,name,paid,created_at&order=created_at.desc').catch(() => null)
     const name = Object.fromEntries(agencies.map(a => [a.id, a.name]))
     const reads = await rest('GET', `members?agency_id=eq.${ADMIN_ID}&select=conversation_id,last_read_id`)
     const lastRead = Object.fromEntries((reads || []).map(r => [r.conversation_id, r.last_read_id]))
@@ -108,6 +121,8 @@ const api = {
       agencies: agencies.map(a => ({ ...a, code: a.is_admin ? null : codeFor(a.pc_number) })),
       conversations: convs.map(c => ({ ...c, title: title(c), last: latest[c.id] || null, unread: unread[c.id] || (c.kind === 'admin' && lastRead[c.id] === undefined ? 0 : 0) })),
       requests: requests.map(r => ({ ...r, agency: name[r.agency_id] || '?', code: codeFor(r.pc_number) })),
+      // null = the agency_invites table is not in Supabase yet (run schema.sql again)
+      invites: invites && invites.map(i => ({ ...i, joined: agencies.find(a => a.pc_number === i.pc_number)?.name || null, code: codeFor(i.pc_number) })),
     }
   },
   'GET /api/messages': async (q) => {
@@ -134,6 +149,39 @@ const api = {
   'POST /api/ban': async (q, b) => {
     await rest('PATCH', `agencies?id=eq.${encodeURIComponent(b.id)}`, { banned: !!b.banned }, { Prefer: 'return=minimal' })
     return { ok: true }
+  },
+  // Add an agency by its PC number (it may not have installed yet).
+  'POST /api/invite': async (q, b) => {
+    const pc = String(b.pc || '').replace(/\D/g, '')
+    if (!/^\d{6}$/.test(pc) || !luhnOk(pc)) throw new Error('That PC number is not right (6 digits; the last one is a check digit — check it again).')
+    const nm = String(b.name || '').trim()
+    if (!nm) throw new Error('Give the agency a name.')
+    await rest('POST', 'agency_invites?on_conflict=pc_number', { pc_number: pc, name: nm, paid: !!b.paid },
+      { Prefer: 'resolution=merge-duplicates,return=minimal' })
+    // Already installed: it shows under that name right away.
+    await rest('PATCH', `agencies?pc_number=eq.${pc}&is_admin=eq.false`, { name: nm }, { Prefer: 'return=minimal' })
+    return { ok: true }
+  },
+  'POST /api/invite-paid': async (q, b) => {
+    await rest('PATCH', `agency_invites?pc_number=eq.${encodeURIComponent(b.pc)}`, { paid: !!b.paid }, { Prefer: 'return=minimal' })
+    return { ok: true }
+  },
+  'POST /api/invite-delete': async (q, b) => {
+    await rest('DELETE', `agency_invites?pc_number=eq.${encodeURIComponent(b.pc)}`)
+    return { ok: true }
+  },
+  // Delete an agency: its account, chats, receipts and pictures. If that PC
+  // opens the chat again it comes back as a new, empty agency (ban to keep it out).
+  'POST /api/delete-agency': async (q, b) => {
+    const id = String(b.id || '')
+    if (!/^[0-9a-f-]{36}$/i.test(id) || id === ADMIN_ID) throw new Error('bad agency')
+    const listed = await sb('POST', '/storage/v1/object/list/chat', { prefix: id, limit: 1000 }).catch(() => [])
+    const files = (listed || []).map(f => `${id}/${f.name}`)
+    if (files.length) await sb('DELETE', '/storage/v1/object/chat', { prefixes: files }).catch(() => {})
+    await rest('DELETE', `conversations?key=eq.admin:${id}`)
+    await rest('DELETE', `conversations?kind=eq.direct&key=like.*${id}*`)
+    await sb('DELETE', `/auth/v1/admin/users/${id}`) // the agency row, its messages and receipts go with it
+    return { ok: true, pictures: files.length }
   },
   'POST /api/decide': async (q, b) => {
     const status = b.approve ? 'approved' : 'rejected'

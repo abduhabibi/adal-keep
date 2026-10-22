@@ -62,6 +62,16 @@ create table if not exists public.unlock_requests (
   decided_at  timestamptz
 );
 
+-- Agencies Adal adds by PC number (before or after they install): the name
+-- they appear under, and whether they paid (then that PC unlocks itself).
+-- Only the admin panel (service key) reads or writes this table.
+create table if not exists public.agency_invites (
+  pc_number   text primary key check (pc_number ~ '^[0-9]{6}$'),
+  name        text not null check (char_length(name) between 1 and 120),
+  paid        boolean not null default false,
+  created_at  timestamptz not null default now()
+);
+
 -- ------------------------------------------------------------- helpers ----
 create or replace function public.is_admin() returns boolean
 language sql stable security definer set search_path = public as $$
@@ -91,6 +101,8 @@ returns uuid language plpgsql security definer set search_path = public as $$
 declare me uuid := auth.uid(); conv uuid;
 begin
   if me is null then raise exception 'not signed in'; end if;
+  -- Added by Adal with this PC number: that name wins.
+  select coalesce((select name from agency_invites where pc_number = p_pc), btrim(p_name)) into p_name;
   insert into agencies (id, name, pc_number) values (me, btrim(p_name), p_pc)
     on conflict (id) do update set name = btrim(excluded.name), pc_number = excluded.pc_number, last_seen = now();
 
@@ -105,6 +117,13 @@ begin
     select conv, id from agencies where is_admin on conflict do nothing;
   return me;
 end $$;
+
+-- Adal marked this PC (by its number) as paid in the admin panel.
+create or replace function public.my_invite_paid() returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (select 1 from agency_invites i join agencies a on a.pc_number = i.pc_number
+                 where a.id = auth.uid() and i.paid)
+$$;
 
 -- The private chat between me and another agency (made the first time).
 create or replace function public.open_direct(other uuid)
@@ -168,6 +187,7 @@ alter table public.conversations   enable row level security;
 alter table public.members         enable row level security;
 alter table public.messages        enable row level security;
 alter table public.unlock_requests enable row level security;
+alter table public.agency_invites  enable row level security;  -- no rules: only the admin panel
 
 drop policy if exists agencies_self on public.agencies;
 create policy agencies_self on public.agencies for select using (id = auth.uid() or public.is_admin());
@@ -204,7 +224,7 @@ grant update (last_read_id) on public.members to authenticated;
 grant insert (conversation_id, body, image_path) on public.messages to authenticated;
 grant insert (pc_number, image_path) on public.unlock_requests to authenticated;
 grant execute on function public.join_agency(text, text), public.open_direct(uuid), public.list_agencies(),
-  public.my_conversations(), public.is_admin(), public.is_banned(), public.is_member(uuid), public.has_link(text)
+  public.my_conversations(), public.my_invite_paid(), public.is_admin(), public.is_banned(), public.is_member(uuid), public.has_link(text)
   to authenticated;
 
 -- ------------------------------------------------------- picture storage ---

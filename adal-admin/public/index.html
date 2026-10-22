@@ -42,6 +42,14 @@
   .pill { font-size:11px; font-weight:700; padding:2px 8px; border-radius:999px; }
   .pending { background:#fef3c7; color:var(--amber); } .approved { background:#d1fae5; color:#047857; } .rejected { background:#fee2e2; color:var(--red); }
   .muted { color:var(--muted); }
+  #dlg { position:fixed; inset:0; background:#0009; display:none; align-items:center; justify-content:center; z-index:50; }
+  #dlg .box { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:20px; width:min(420px,92vw); }
+  #dlg h3 { margin:0 0 6px; } #dlg p { margin:0 0 12px; color:var(--muted); }
+  #dlg input { width:100%; padding:9px 10px; border-radius:8px; border:1px solid var(--line); background:var(--bg); color:var(--text); margin-bottom:12px; }
+  #dlg .row { display:flex; gap:8px; justify-content:flex-end; }
+  .addform { display:grid; grid-template-columns:140px 1fr auto auto; gap:8px; align-items:center; background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:12px; margin-bottom:16px; }
+  .addform input[type=text] { padding:9px 10px; border-radius:8px; border:1px solid var(--line); background:var(--bg); color:var(--text); }
+  h4 { margin:18px 0 8px; }
   #zoom { position:fixed; inset:0; background:#000c; display:none; align-items:center; justify-content:center; cursor:zoom-out; }
   #zoom img { max-width:92vw; max-height:92vh; }
 </style>
@@ -69,6 +77,7 @@
   </form>
 </main>
 <div id="zoom" onclick="this.style.display='none'"><img alt=""></div>
+<div id="dlg"><div class="box"><h3 id="dlgT"></h3><p id="dlgP"></p><input id="dlgI" type="text" style="display:none"><div class="row"><button class="ghost" id="dlgNo">Cancel</button><button class="go" id="dlgOk">OK</button></div></div></div>
 <script>
 let data = { agencies: [], conversations: [], requests: [] }
 let tab = 'inbox', open = null, lastId = 0
@@ -79,6 +88,22 @@ const api = async (p, body) => {
   const r = await fetch(p, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {})
   const j = await r.json(); if (!r.ok) throw new Error(j.error || r.status); return j
 }
+// The panel's own questions: the browser's confirm() can be switched off
+// ("Don't allow localhost:4100 to ask again") and then silently says No.
+function ask({ title, text = '', ok = 'OK', danger = false, input = null }) {
+  return new Promise(resolve => {
+    $('#dlgT').textContent = title; $('#dlgP').textContent = text
+    const I = $('#dlgI'); I.style.display = input === null ? 'none' : 'block'; I.value = input ?? ''
+    const okB = $('#dlgOk'); okB.textContent = ok; okB.className = danger ? 'danger' : 'go'
+    const done = (v) => { $('#dlg').style.display = 'none'; resolve(v) }
+    okB.onclick = () => done(input === null ? true : I.value)
+    $('#dlgNo').onclick = () => done(input === null ? false : null)
+    $('#dlgNo').style.display = ok === 'Close' ? 'none' : ''
+    $('#dlg').style.display = 'flex'
+    ;(input === null ? okB : I).focus()
+  })
+}
+const tell = (title, text) => ask({ title, text, ok: 'Close' })
 const name = (id) => data.agencies.find(a => a.id === id)?.name || 'agency'
 const img = (p) => `<img src="/api/image?path=${encodeURIComponent(p)}" onclick="event.stopPropagation(); zoom.querySelector('img').src=this.src; zoom.style.display='flex'">`
 
@@ -122,7 +147,7 @@ async function loadMessages() {
     <div class="who">${esc(m.sender_id === data.adminId ? 'You (Adal Keep)' : name(m.sender_id))}<span class="del" data-id="${m.id}">delete</span></div>
     ${m.body ? `<div>${esc(m.body)}</div>` : ''}${m.image_path ? img(m.image_path) : ''}
     <div class="time">${when(m.created_at)}</div></div>`).join('') || '<p class="muted">No messages yet.</p>'
-  T.querySelectorAll('.del').forEach(d => d.onclick = async () => { if (confirm('Delete this message for everyone?')) { await api('/api/delete-message', { id: d.dataset.id }); loadMessages() } })
+  T.querySelectorAll('.del').forEach(d => d.onclick = async () => { if (await ask({ title: 'Delete this message?', text: 'It disappears for everyone.', ok: 'Delete', danger: true })) { await api('/api/delete-message', { id: d.dataset.id }); loadMessages() } })
   const newest = list.at(-1)?.id || 0
   if (atBottom || newest !== lastId) T.scrollTop = T.scrollHeight
   lastId = newest
@@ -139,23 +164,60 @@ function showTable() {
         <td>${r.status === 'pending' ? `<button class="go" data-ok="${r.id}">Approve — unlock</button> <button class="ghost" data-no="${r.id}">Reject</button>`
           : r.code ? `<span class="muted">code now:</span> <span class="code">${r.code}</span>` : ''}</td></tr>`).join('') + '</table>'
     $('#table').querySelectorAll('[data-ok]').forEach(b => b.onclick = async () => {
-      if (!confirm('Approve this payment? That PC unlocks for good within a minute.')) return
+      if (!(await ask({ title: 'Approve this payment?', text: 'That PC unlocks for good within a minute.', ok: 'Approve — unlock' }))) return
       await api('/api/decide', { id: b.dataset.ok, approve: true }); refresh()
     })
     $('#table').querySelectorAll('[data-no]').forEach(b => b.onclick = async () => {
-      const note = prompt('Why is it rejected? (the agency sees this)', 'The receipt is not readable')
+      const note = await ask({ title: 'Reject this receipt', text: 'Why? (the agency sees this)', ok: 'Reject', danger: true, input: 'The receipt is not readable' })
       if (note === null) return
       await api('/api/decide', { id: b.dataset.no, approve: false, note }); refresh()
     })
   } else {
     $('#title').textContent = 'Agencies'
-    $('#table').innerHTML = `<table><tr><th>Agency</th><th>PC number</th><th>Unlock code now</th><th>Joined</th><th>Last seen</th><th></th></tr>` +
+    const inv = data.invites
+    $('#table').innerHTML = `
+      <form class="addform" id="addf">
+        <input type="text" id="addPc" placeholder="PC number" inputmode="numeric" maxlength="7" autocomplete="off">
+        <input type="text" id="addName" placeholder="Agency name" autocomplete="off">
+        <label class="muted"><input type="checkbox" id="addPaid"> paid (unlocks)</label>
+        <button class="go">Add agency</button>
+      </form>
+      ${inv === null ? '<p class="muted">To add agencies by PC number, run <b>supabase/schema.sql</b> once more in Supabase (SQL Editor).</p>' : ''}
+      ${inv && inv.length ? `<h4>Added by you (${inv.length})</h4><table><tr><th>PC number</th><th>Name</th><th>Status</th><th>Paid</th><th>Unlock code now</th><th></th></tr>` +
+        inv.map(i => `<tr><td class="code">${esc(i.pc_number)}</td><td><b>${esc(i.name)}</b></td>
+          <td>${i.joined ? '<span class="pill approved">installed</span>' : '<span class="pill pending">not installed yet</span>'}</td>
+          <td><label><input type="checkbox" data-paid="${i.pc_number}" ${i.paid ? 'checked' : ''}> ${i.paid ? 'paid — unlocked' : 'not paid'}</label></td>
+          <td class="code">${i.code || '—'}</td>
+          <td><button class="ghost" data-uninvite="${i.pc_number}">Remove</button></td></tr>`).join('') + '</table>' : ''}
+      <h4>Installed agencies (${data.agencies.filter(a => !a.is_admin).length})</h4>
+      <table><tr><th>Agency</th><th>PC number</th><th>Unlock code now</th><th>Joined</th><th>Last seen</th><th></th></tr>` +
       data.agencies.filter(a => !a.is_admin).map(a => `<tr><td><b>${esc(a.name)}</b>${a.banned ? ' <span class="pill rejected">banned</span>' : ''}</td>
         <td class="code">${esc(a.pc_number || '—')}</td><td class="code">${a.code || '—'}</td><td>${when(a.created_at)}</td><td>${when(a.last_seen)}</td>
-        <td>${a.banned ? `<button class="ghost" data-unban="${a.id}">Unban</button>` : `<button class="danger" data-ban="${a.id}">Ban</button>`}</td></tr>`).join('') + '</table>' +
-      '<p class="muted">A banned agency cannot write in Everyone or in private chats; it can still write to you.</p>'
-    $('#table').querySelectorAll('[data-ban]').forEach(b => b.onclick = async () => { if (confirm(`Ban ${name(b.dataset.ban)}?`)) { await api('/api/ban', { id: b.dataset.ban, banned: true }); refresh() } })
+        <td style="white-space:nowrap">${a.banned ? `<button class="ghost" data-unban="${a.id}">Unban</button>` : `<button class="danger" data-ban="${a.id}">Ban</button>`}
+        <button class="ghost" data-del="${a.id}">Delete</button></td></tr>`).join('') + '</table>' +
+      '<p class="muted">Ban: the agency can no longer write in Everyone or private chats (it can still write to you). Delete: removes the agency with its chats, receipts and pictures — if that PC opens the chat again it comes back as a new agency.</p>'
+    $('#addf').onsubmit = async (e) => {
+      e.preventDefault()
+      try {
+        await api('/api/invite', { pc: $('#addPc').value, name: $('#addName').value, paid: $('#addPaid').checked })
+        refresh()
+      } catch (err) { tell('Not added', err.message) }
+    }
+    $('#table').querySelectorAll('[data-paid]').forEach(c => c.onchange = async () => {
+      if (c.checked && !(await ask({ title: 'Mark as paid?', text: `PC ${c.dataset.paid} unlocks for good the next time it is online.`, ok: 'Mark paid' }))) { c.checked = false; return }
+      await api('/api/invite-paid', { pc: c.dataset.paid, paid: c.checked }); refresh()
+    })
+    $('#table').querySelectorAll('[data-uninvite]').forEach(b => b.onclick = async () => {
+      if (await ask({ title: 'Remove from your list?', text: `PC ${b.dataset.uninvite}. An installed agency stays installed; it only leaves this list.`, ok: 'Remove', danger: true })) { await api('/api/invite-delete', { pc: b.dataset.uninvite }); refresh() }
+    })
+    $('#table').querySelectorAll('[data-ban]').forEach(b => b.onclick = async () => {
+      if (await ask({ title: `Ban ${name(b.dataset.ban)}?`, text: 'It can no longer write in Everyone or private chats.', ok: 'Ban', danger: true })) { await api('/api/ban', { id: b.dataset.ban, banned: true }); refresh() }
+    })
     $('#table').querySelectorAll('[data-unban]').forEach(b => b.onclick = async () => { await api('/api/ban', { id: b.dataset.unban, banned: false }); refresh() })
+    $('#table').querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
+      if (!(await ask({ title: `Delete ${name(b.dataset.del)}?`, text: 'Its account, chats, receipts and pictures are removed for good.', ok: 'Delete', danger: true }))) return
+      try { await api('/api/delete-agency', { id: b.dataset.del }); refresh() } catch (err) { tell('Not deleted', err.message) }
+    })
   }
 }
 
@@ -163,7 +225,7 @@ $('#compose').onsubmit = async (e) => {
   e.preventDefault()
   const body = $('#text').value.trim()
   if (!body || !open) return
-  await api('/api/send', { conversation: open.id, body }).catch(err => alert(err.message))
+  await api('/api/send', { conversation: open.id, body }).catch(err => tell('Not sent', err.message))
   $('#text').value = ''; loadMessages()
 }
 $('#pic').onchange = () => {

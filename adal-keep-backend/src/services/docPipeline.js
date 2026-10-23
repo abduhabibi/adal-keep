@@ -458,6 +458,6 @@ export function startWatcher(watchDir, db, processorFn, tag = '[pipeline]') {
     timers.set(fname, setTimeout(async () => {
       timers.delete(fname)
       try { const s = await fs.promises.stat(fp); if (s.isFile()) await enqueueFile(db, fp) } catch {}
-    }, 3000))
+    }, 2000)) // 2 s without a change: the download or copy has finished
   })
 }

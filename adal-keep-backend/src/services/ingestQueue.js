@@ -1,9 +1,9 @@
 import fs from 'fs'
 import path from 'path'
 
-const SETTLE_MS = 3000
+const SETTLE_MS = 1000 // the watcher already waited for the file to stop changing
 const MAX_ATTEMPTS = 5
-const TICK_MS = 2000
+const TICK_MS = 1000
 const RETRY_BACKOFF_MS = 8000
 
 // Only files that arrive while Adal Keep runs are read. Windows also reports

@@ -16,7 +16,7 @@ import os from 'os'
 import path from 'path'
 import { parseTD3, fitLine2 } from './mrz.js'
 import { parseDocumentToMarkdown } from './mineruClient.js'
-import { classifyWithGemini } from './geminiClassifier.js'
+import { classifyWithGemini as geminiClassify } from './geminiClassifier.js'
 import { setStage } from './ingestQueue.js'
 import { jevReady, classifyWithJev, cropMrz, pickPrintedName, release } from './jevClassifier.js'
 
@@ -286,7 +286,10 @@ export async function analyzeLocally(originalPath) {
 const JEV_MIN = Number(process.env.JEV_MIN_CONFIDENCE || 0.8)
 const JEV_PERSON_MIN = Number(process.env.JEV_PROFILE_MIN_CONFIDENCE || 0.85)
 // These documents carry text the system needs (order ID, dates): Gemini still reads them.
-const NEEDS_TEXT = new Set(['Slip', 'Contract', 'Police Clearance'])
+const NEEDS_TEXT = new Set(['Slip', 'Contract'])
+// Gemini waits this long for JEV (usually 1–2 s): a file JEV settles costs no
+// Gemini call. When JEV is unsure, down or slower, Gemini starts at once.
+const JEV_HEADSTART_MS = Number(process.env.JEV_HEADSTART_MS || 2500)
 let jevPausedUntil = 0
 
 /**
@@ -335,7 +338,7 @@ export function nameCandidates(line1raw) {
  * path must decide (JEV unsure, or the text itself is needed), or null when
  * JEV is not available.
  */
-async function analyzeWithJev(originalPath, db) {
+async function analyzeWithJev(originalPath, db, { unsure = () => {} } = {}) {
   if (!jevReady() || Date.now() < jevPausedUntil) return null
   setStage('JEV is looking at it')
   let r
@@ -359,6 +362,9 @@ async function analyzeWithJev(originalPath, db) {
     const person = db && r.person && r.person.confidence >= JEV_PERSON_MIN
       ? await db('profiles').where('id', r.person.id).first()
       : null
+    // A passport (its text is read next) or a slip/contract: the usual
+    // readers start now and race JEV's own reading.
+    if (r.doc_type === 'Passport' || NEEDS_TEXT.has(r.doc_type)) unsure()
 
     if (r.doc_type === 'Passport') {
       // The text comes from the page itself: crop the MRZ JEV located, read it
@@ -414,12 +420,30 @@ async function analyzeWithJev(originalPath, db) {
 export async function analyzeWithMineru(originalPath, { db = null } = {}) {
   const filename = path.basename(originalPath)
 
-  // JEV and the usual readers start together: JEV's settled answer wins when
-  // it has one; when JEV is slow or down nobody waited for it.
-  const usualP = analyzeUsual(originalPath, filename).then(r => ({ r }), e => ({ e }))
-  const jev = await analyzeWithJev(originalPath, db)
-  if (jev?.result) return jev.result
+  // This PC starts reading at once (free). Gemini (paid) waits until JEV is
+  // unsure, down or slower than JEV_HEADSTART_MS; when JEV settles the file,
+  // Gemini is never asked. A passport whose check digits verify wins from
+  // whichever side reads it first.
+  const gate = {}
+  gate.open = new Promise(res => { gate.go = res })
+  const timer = setTimeout(() => gate.go(true), JEV_HEADSTART_MS)
+  const usualP = analyzeUsual(originalPath, filename, gate).then(r => ({ r }), e => ({ e }))
+  const jevP = analyzeWithJev(originalPath, db, { unsure: () => gate.go(true) })
+    .then(j => { if (!j?.result) gate.go(true); return j })
+  const verifiedPassport = (u) => u.r?.doc_type === 'Passport' && u.r.confidence >= 0.9 ? u.r : null
+  const first = await firstTruthy([
+    jevP.then(j => (j?.result ? { jev: j.result } : null)),
+    usualP.then(u => (verifiedPassport(u) ? { usual: u.r } : null)),
+  ])
+  if (first) {
+    clearTimeout(timer)
+    gate.cancelled = true
+    gate.go(false)
+    return first.jev || first.usual
+  }
+  const jev = await jevP
   const usual = await usualP
+  clearTimeout(timer)
   if (usual.e) throw usual.e
   const decided = usual.r
   // JEV was sure of the type (or the person) but the text had to be read:
@@ -446,18 +470,23 @@ function firstTruthy(promises) {
   })
 }
 
-async function analyzeUsual(originalPath, filename) {
+async function analyzeUsual(originalPath, filename, gate = { open: Promise.resolve(true) }) {
   setStage('reading it on this PC and asking Gemini at the same time')
+  // Every paid call waits for the gate; once the file is settled elsewhere
+  // (gate.cancelled) nothing more is asked.
+  const classifyWithGemini = (args) => gate.open.then(ok => (ok && !gate.cancelled ? geminiClassify(args) : null))
   // A photo or scan goes to Gemini at once, while this PC reads it too: the
   // first answer that is sure (a passport whose check digits verify, or a
   // settled local read) is used — no waiting for the slower one.
   // Two Gemini models race: the light one is often quicker, and a passport
   // reading only counts when its check digits match, so speed costs nothing.
+  // Only the quick (cheap) model here; the full model is asked below only
+  // when the quick one gives no answer.
   const gemCalls = IMAGE_EXT.test(originalPath)
-    ? [GEMINI_QUICK_MODEL, null].map(m => classifyWithGemini({ filePath: originalPath, filename, ...(m ? { models: [m] } : {}) })
-        .catch(e => { console.warn(`[classify] Gemini${m ? ` ${m}` : ''} could not read the file:`, e.message); return null }))
+    ? [classifyWithGemini({ filePath: originalPath, filename, models: [GEMINI_QUICK_MODEL] })
+        .catch(e => { console.warn(`[classify] Gemini ${GEMINI_QUICK_MODEL} could not read the file:`, e.message); return null })]
     : null
-  const gemEarly = gemCalls ? Promise.all(gemCalls).then(([quick, full]) => full || quick) : null
+  const gemEarly = gemCalls ? gemCalls[0] : null
   const localP = analyzeLocally(originalPath).catch(() => null)
   if (gemCalls) {
     const verified = (g) => {
@@ -474,6 +503,7 @@ async function analyzeUsual(originalPath, filename) {
   }
   const local = await localP
   if (local?.doc_type) return local
+  if (gate.cancelled) return { doc_type: 'other', confidence: 0, fields: {}, markdown: '', source: 'cancelled' }
 
   let text = local?.text || '' // PDF text layer, when there is one
 
@@ -482,14 +512,15 @@ async function analyzeUsual(originalPath, filename) {
   let source = 'gemini'
   try {
     setStage('asking Gemini')
-    result = gemEarly && !text ? await gemEarly
-      : await classifyWithGemini(text ? { text, filename } : { filePath: originalPath, filename })
+    result = (gemEarly && !text ? await gemEarly : null)
+      || await classifyWithGemini(text ? { text, filename } : { filePath: originalPath, filename })
     if (!result) throw new Error('no answer')
   } catch (e) {
     console.warn('[classify] Gemini could not read the file, trying MinerU:', e.message)
   }
 
   // 2. Gemini failed: MinerU reads the text, Gemini classifies it, keyword rules last.
+  if (!result && gate.cancelled) return { doc_type: 'other', confidence: 0, fields: {}, markdown: '', source: 'cancelled' }
   if (!result) {
     if (!text) {
       setStage('MinerU is reading the text')

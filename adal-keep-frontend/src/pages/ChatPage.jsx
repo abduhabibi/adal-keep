@@ -429,7 +429,7 @@ export default function ChatPage() {
                           {quoted && !m.deleted_at && (
                             <button type="button" onClick={() => jumpTo(quoted.id)} className="mb-1 block w-full rounded-md border-l-4 border-teal-500 bg-black/5 px-2 py-1 text-left dark:bg-white/10">
                               <span className="block text-[11px] font-bold text-teal-700 dark:text-teal-300">{quoted.sender_id === me?.id ? 'You' : names[quoted.sender_id] || 'Agency'}</span>
-                              <span className="block truncate text-xs text-slate-600 dark:text-slate-300">{preview(quoted)}</span>
+                              <span translate="no" className="block truncate text-xs text-slate-600 dark:text-slate-300">{preview(quoted)}</span>
                             </button>
                           )}
                           {m.deleted_at ? (
@@ -449,7 +449,7 @@ export default function ChatPage() {
                                   <span className="min-w-0"><span className="block truncate text-sm font-semibold">{m.file_name}</span><span className="text-[11px] text-slate-500">{m.file_size ? sizeOf(m.file_size) : ''} · open</span></span>
                                 </a>
                               )}
-                              {m.body && <p className="whitespace-pre-wrap break-words text-sm">{m.body}</p>}
+                              {m.body && <p translate="no" className="whitespace-pre-wrap break-words text-sm">{m.body}</p>}
                             </>
                           )}
                           <p className="mt-0.5 flex items-center justify-end gap-1 text-[10px] text-slate-500">
@@ -586,7 +586,7 @@ function ChatRow({ active, kind, title, sub, time, unread, online, onClick }) {
           {time && <span className="shrink-0 text-[10px] text-slate-400">{shortWhen(time)}</span>}
         </span>
         <span className="flex items-center justify-between gap-2">
-          <span className="truncate text-xs text-slate-500">{sub}</span>
+          <span translate="no" className="truncate text-xs text-slate-500">{sub}</span>
           {Number(unread) > 0 && <span className="shrink-0 rounded-full bg-teal-600 px-1.5 text-[10px] font-bold text-white">{unread}</span>}
         </span>
       </span>

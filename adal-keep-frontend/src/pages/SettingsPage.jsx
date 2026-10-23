@@ -9,6 +9,8 @@ import Spinner from '../components/shared/Spinner'
 import Input from '../components/shared/Input'
 import Modal from '../components/shared/Modal'
 import { getTheme, applyTheme } from '../lib/theme'
+import { getLang, setLang } from '../lib/i18n'
+import { whoAmI } from '../lib/tutor'
 import TutorCard from '../components/TutorCard'
 import TutorAdoption from '../components/TutorAdoption'
 
@@ -265,6 +267,27 @@ export default function SettingsPage() {
           Pextran login is saved inside <strong>Brave password manager</strong> only.
           Log in once in the agent Brave window; Brave will autofill next time.
         </p>
+      </Card>
+
+      <Card>
+        <h2 className="font-display text-lg font-bold mb-4 flex items-center gap-2">
+          <span>🌐</span> Language · ቋንቋ
+        </h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {[['am', 'አማርኛ', 'Amharic'], ['en', 'English', 'እንግሊዝኛ']].map(([id, label, other]) => (
+            <button key={id} type="button" onClick={async () => {
+                if (getLang() === id) return
+                // The tips panel follows the app's language.
+                await api.post('/tutor/lang', { who: whoAmI(), lang: id }).catch(() => {})
+                setLang(id)
+              }}
+              className={`rounded-xl border-2 p-4 text-left transition ${getLang() === id ? 'border-teal-500 bg-teal-50/60 dark:bg-teal-900/20' : 'border-slate-200 dark:border-slate-700 hover:border-teal-300'}`}>
+              <span className="block font-semibold" translate="no">{label}</span>
+              <span className="block text-xs text-slate-500 dark:text-slate-400" translate="no">{other}{getLang() === id ? ' · on' : ''}</span>
+            </button>
+          ))}
+        </div>
+        <p className="mt-2 text-xs text-slate-500" translate="no">Saved on this PC. Profile data and chat messages stay as they were written.</p>
       </Card>
 
       <Card>

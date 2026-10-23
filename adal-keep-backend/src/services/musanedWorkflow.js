@@ -2287,6 +2287,8 @@ async function waitForPersonCaptcha(page, ctx) {
  * ('dashboard' when signed in; 'otp' when no key is saved or it was refused).
  */
 async function passOtp(page, ctx) {
+  // The first time Musaned shows its authenticator QR code: the key is read from it.
+  if (!hasTotp('musaned')) await serveTab(page).catch(() => {})
   if (!hasTotp('musaned')) return 'otp'
   log(ctx, '🔑 typing the Musaned authenticator code')
   const deadline = Date.now() + 75000

@@ -18,6 +18,7 @@ import crypto from 'crypto'
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import { createRequire } from 'module'
 import { getSecret, setSecret } from './secretStore.js'
 import { openBrowserIfAny } from './browser.js'
 
@@ -237,6 +238,32 @@ async function typeCode(page, code, host) {
   return true
 }
 
+let _jsqr = null
+const jsQR = () => (_jsqr ||= ((m) => m.default || m)(createRequire(import.meta.url)('../vendor/jsQR.cjs')))
+
+/**
+ * Musaned shows a QR code once, when it asks to set up an authenticator.
+ * The key is read straight from that QR code on the page (nobody copies
+ * anything): returns the otpauth:// text, or null.
+ */
+export async function qrOnPage(page) {
+  const looks = await page.evaluate(() =>
+    /authenticator|scan|qr|barcode/i.test(document.body?.innerText || '') && !!document.querySelector('img, canvas, svg')
+  ).catch(() => false)
+  if (!looks) return null
+  const sharp = (await import('sharp')).default
+  const png = await page.screenshot({ type: 'png', fullPage: true })
+  const meta = await sharp(png).metadata()
+  for (const scale of [1, 0.5, 2]) {
+    const width = Math.round(meta.width * scale)
+    if (width < 200 || width * Math.round(meta.height * scale) > 16e6) continue
+    const { data, info } = await sharp(png).resize({ width }).ensureAlpha().raw().toBuffer({ resolveWithObject: true })
+    const r = jsQR()(new Uint8ClampedArray(data.buffer, data.byteOffset, data.length), info.width, info.height, { inversionAttempts: 'attemptBoth' })
+    if (r?.data && /^otpauth(-migration)?:\/\//i.test(r.data)) return r.data
+  }
+  return null
+}
+
 const filled = new Map() // tab → { code, at }
 
 /** One look at one tab: a code page gets its code. */
@@ -252,6 +279,18 @@ export async function serveTab(page) {
   }
   const now = Date.now()
   if (portal === 'musaned') {
+    if (!hasTotp('musaned')) {
+      // First time: Musaned shows its authenticator QR code — keep the key.
+      const uri = await qrOnPage(page).catch(() => null)
+      if (!uri) return false
+      saveTotp('musaned', uri)
+      console.log('[otp] Musaned authenticator key read from its QR code and saved')
+      // Keycloak may ask a name for the device.
+      await page.evaluate(() => {
+        const n = document.querySelector('input[name="userLabel"], #userLabel')
+        if (n && !n.value) { n.value = 'Adal Keep'; n.dispatchEvent(new Event('input', { bubbles: true })) }
+      }).catch(() => {})
+    }
     const t = totpNow('musaned')
     if (!t) return false
     // A code about to expire may be refused on arrival: wait for the next one.
@@ -286,7 +325,6 @@ export function startOtpWatcher() {
   let busy = false
   timer = setInterval(async () => {
     if (busy) return
-    if (!hasTotp('musaned') && !smsStatus.phone_seen_at) return // nothing set up yet
     busy = true
     try {
       const browser = await openBrowserIfAny()

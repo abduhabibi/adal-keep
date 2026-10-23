@@ -42,6 +42,8 @@ function Qr({ text }) {
   return src ? <img src={src} alt="QR code for the phone" width={220} height={220} className="rounded-lg border border-slate-200 bg-white" /> : null
 }
 
+const fmtOffset = (s) => { const a = Math.abs(s); const h = Math.floor(a / 3600), m = Math.round((a % 3600) / 60); return `${h ? `${h} h ` : ''}${m ? `${m} min` : h ? "" : `${a} s`}`.trim() + (s > 0 ? ' behind' : ' ahead') }
+
 export default function SignInCodesCard() {
   const [c, setC] = useState(null)
   const [now, setNow] = useState(null)
@@ -122,6 +124,21 @@ export default function SignInCodesCard() {
               await api.delete('/otp/totp'); load()
             }}>Remove</button>}
           </div>
+        )}
+        {now?.clock && Math.abs(now.clock.offset_s) >= 10 && (
+          <p className="mt-2 rounded-lg bg-amber-50 dark:bg-amber-900/20 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
+            ⏰ The main PC's clock is {fmtOffset(now.clock.offset_s)}. Adal Keep corrects it for the codes; also fix it in
+            Windows: Settings → Time &amp; language → Date &amp; time → <b>Set time automatically</b> and the right time zone (Nairobi, UTC+3).
+          </p>
+        )}
+        {now && (
+          <details className="mt-2 text-xs text-slate-500">
+            <summary className="cursor-pointer">Musaned says the code is wrong?</summary>
+            <ul className="list-disc pl-5 mt-1 space-y-0.5">
+              <li>Adal Keep tries every authenticator device Musaned lists (“Adal Keep” first) and the next code, by itself.</li>
+              <li>The QR code must be the one that was finished on Musaned (its code typed and saved). A QR picture from a setup page that was closed or reloaded is not known to Musaned — then remove the authenticator in Musaned, sign in again in the Adal Keep browser, and Adal Keep reads the new QR code by itself.</li>
+            </ul>
+          </details>
         )}
       </section>
 

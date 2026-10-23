@@ -3,6 +3,24 @@ import ReactDOM from 'react-dom/client'
 import App from './App'
 import './index.css'
 
+// A page in a hidden tab does not need its every-few-seconds refreshes: they
+// are skipped until the page is seen again (and done at once then). This keeps
+// low-end PCs and the main PC quiet.
+if (typeof document !== 'undefined') {
+  const every = window.setInterval.bind(window)
+  const later = new Set()
+  window.setInterval = (fn, ms, ...args) => {
+    if (typeof fn !== 'function' || !(ms < 60000)) return every(fn, ms, ...args)
+    const run = () => fn(...args)
+    return every(() => { if (document.hidden) later.add(run); else run() }, ms)
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) return
+    const due = [...later]; later.clear()
+    due.forEach(run => { try { run() } catch {} })
+  })
+}
+
 // Public demo: start the in-browser file server and draw the demo documents first.
 async function boot() {
   if (import.meta.env.VITE_DEMO !== '1') return

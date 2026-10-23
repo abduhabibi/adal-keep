@@ -91,7 +91,9 @@ const BROWSER_ARGS = [
   '--no-default-browser-check',
   '--hide-crash-restore-bubble',
   '--start-maximized',
-  '--disable-gpu',
+  // Windows / Mac: drawing pages on the graphics chip leaves the processor
+  // free (low-end PCs slowed down with everything drawn by the processor).
+  ...(process.platform === 'linux' ? ['--disable-gpu'] : []),
   '--disable-dev-shm-usage',
   '--disable-background-networking',
   // NOTE: do NOT add '--blink-settings=imagesEnabled=false': it is

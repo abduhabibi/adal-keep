@@ -53,7 +53,7 @@ export function parseTotpInput(input) {
     secret = u.searchParams.get('secret') || ''
     digits = Number(u.searchParams.get('digits') || 6)
     period = Number(u.searchParams.get('period') || 30)
-    algorithm = (u.searchParams.get('algorithm') || 'SHA1').toUpperCase()
+    algorithm = (u.searchParams.get('algorithm') || 'SHA1').toUpperCase().replace(/^HMAC|-/g, '')
   }
   secret = secret.toUpperCase().replace(/[\s=-]/g, '')
   if (base32Decode(secret).length < 10) throw new Error('This key is too short — copy the whole key.')
@@ -100,7 +100,35 @@ function fromGoogleExport(uri) {
   return { secret: a.secret, digits: a.digits, period: 30, algorithm: a.algorithm }
 }
 
-export function totpAt(cfg, time = Date.now()) {
+/**
+ * The real time. Authenticator codes depend on the clock: a PC whose clock
+ * (or time zone) is wrong makes codes Musaned refuses. The difference to
+ * the internet's time is measured and added, whatever the PC's clock says.
+ */
+let clockOffset = 0
+let clockCheckedAt = 0
+export const realNow = () => Date.now() + clockOffset
+export const clockInfo = () => ({ offset_s: Math.round(clockOffset / 1000), checked_at: clockCheckedAt || null })
+export async function syncClock() {
+  for (const u of ['https://accounts.wahid.sa/', 'https://www.google.com/', 'https://www.cloudflare.com/']) {
+    try {
+      const t0 = Date.now()
+      const r = await fetch(u, { method: 'HEAD', redirect: 'manual', signal: AbortSignal.timeout(6000) })
+      const t1 = Date.now()
+      const d = Date.parse(r.headers.get('date') || '')
+      if (!d) continue
+      // The Date header is in whole seconds: +500 ms is its middle.
+      clockOffset = d + 500 - (t0 + t1) / 2
+      if (Math.abs(clockOffset) < 1500) clockOffset = 0
+      clockCheckedAt = t1
+      if (clockOffset) console.log(`[otp] this PC's clock is ${Math.round(clockOffset / 1000)} s off — codes use the internet time`)
+      return clockOffset
+    } catch {}
+  }
+  return null
+}
+
+export function totpAt(cfg, time = realNow()) {
   const counter = Math.floor(time / 1000 / cfg.period)
   const msg = Buffer.alloc(8)
   msg.writeBigUInt64BE(BigInt(counter))
@@ -123,7 +151,7 @@ export function totpNow(portal = 'musaned') {
   const raw = getSecret(totpName(portal))
   if (!raw) return null
   const cfg = JSON.parse(raw)
-  const left = cfg.period - Math.floor(Date.now() / 1000) % cfg.period
+  const left = cfg.period - Math.floor(realNow() / 1000) % cfg.period
   return { code: totpAt(cfg), seconds_left: left }
 }
 
@@ -224,7 +252,11 @@ async function typeCode(page, code, host) {
   }
   await els[els.length - 1].press('Enter').catch(() => {})
   await new Promise(r => setTimeout(r, 1500))
-  if (await markOtpInputs(page)) {
+  // Enter did not send it (the code is still in the box): press the button.
+  // A new, empty code page means it was sent and answered — nothing more.
+  const still = (await markOtpInputs(page)) && await page.evaluate((c) =>
+    [...document.querySelectorAll('[data-adal-otp]')].map(e => e.value).join('') === c, code).catch(() => false)
+  if (still) {
     // Still there: press the page's own button. On LMIS never a "Submit"
     // button (that word is kept for application forms).
     await page.evaluate((host) => {
@@ -264,7 +296,8 @@ export async function qrOnPage(page) {
   return null
 }
 
-const filled = new Map() // tab → { code, at }
+const filled = new Map() // tab → { code, at, tries }
+const now0 = () => Date.now()
 
 /** One look at one tab: a code page gets its code. */
 export async function serveTab(page) {
@@ -274,7 +307,9 @@ export async function serveTab(page) {
   const key = page.target()._targetId || url
   const seen = filled.get(key)
   if (!(await markOtpInputs(page))) {
-    if (seen && !seen.pageSince) filled.delete(key)
+    // Between two code pages (the page reloads after a code) what was tried is
+    // kept, so a refused code is never sent twice; forgotten after 2 minutes.
+    if (seen && !seen.pageSince && now0() - (seen.at || 0) > 120000) filled.delete(key)
     return false
   }
   const now = Date.now()
@@ -296,10 +331,47 @@ export async function serveTab(page) {
     // Only a code with more than 4 seconds left: one about to change may be
     // refused on arrival, so wait for the next one.
     if (t.seconds_left <= 4) return false
-    if (seen?.code === t.code && now - seen.at < 30000) return false
+    // Musaned may list several authenticator devices (the phone, Adal Keep…):
+    // the code is checked against the chosen one. "Adal Keep" first, then the
+    // others; a refused code is tried on the next device at once, and when
+    // all refused it, the next code is typed as soon as it comes.
+    const st = await page.evaluate(() => {
+      const err = [...document.querySelectorAll('#input-error-otp-code, #input-error, .kc-feedback-text, .alert-error, .pf-m-danger, [class*="error"]')]
+        .map(e => (e.innerText || '').trim()).find(x => /invalid|wrong|incorrect|غير صحيح|خاطئ/i.test(x)) || ''
+      const devices = [...document.querySelectorAll('input[name="selectedCredentialId"]')].map(r => ({
+        id: r.value,
+        label: ((r.id && document.querySelector(`label[for="${r.id}"]`)?.innerText) || r.closest('label, .pf-c-tile, div')?.innerText || '').trim(),
+      }))
+      return { err, devices }
+    }).catch(() => ({ err: '', devices: [] }))
+    const tries = seen?.tries || new Set()
+    if (st.err && seen?.code && !seen.reported) {
+      seen.reported = true
+      console.log(`[otp] Musaned refused code ${seen.code}${seen.device ? ` (device ${seen.device})` : ''} — trying again`)
+      if (Date.now() - clockCheckedAt > 60000) syncClock().catch(() => {})
+    }
+    const devices = st.devices.length
+      ? [...st.devices].sort((a, b) => (/adal/i.test(b.label) ? 1 : 0) - (/adal/i.test(a.label) ? 1 : 0))
+      : [{ id: '', label: '' }]
+    // Never more than 6 tries in a row: Musaned may lock the account after many.
+    if (tries.size >= 6) {
+      if (!seen.gaveUp) { seen.gaveUp = true; console.log('[otp] Musaned refused 6 codes — stopped; check the PC clock and the QR code in Settings') }
+      return false
+    }
+    const dev = devices.find(d => !tries.has(`${d.id}|${t.code}`))
+    if (!dev) return false
+    // Just sent and the page has not answered yet: give it a moment.
+    if (seen?.at && !st.err && now - seen.at < 4000) return false
+    if (dev.id) {
+      await page.evaluate((id) => {
+        const r = [...document.querySelectorAll('input[name="selectedCredentialId"]')].find(x => x.value === id)
+        if (r && !r.checked) r.click()
+      }, dev.id).catch(() => {})
+    }
+    tries.add(`${dev.id}|${t.code}`)
     if (await typeCode(page, t.code, MUSANED_HOST)) {
-      filled.set(key, { code: t.code, at: now })
-      console.log('[otp] Musaned authenticator code typed')
+      filled.set(key, { code: t.code, device: dev.label, at: now, tries })
+      console.log(`[otp] Musaned authenticator code typed${dev.label ? ` (device ${dev.label})` : ''}`)
       return true
     }
     return false
@@ -407,7 +479,11 @@ export function startOtpWatcher(opts = {}) {
     try {
       const browser = await openBrowserIfAny()
       if (!browser) return
-      for (const page of await browser.pages()) {
+      // Only the Musaned / LMIS tabs are looked at (no work for the other tabs).
+      const targets = browser.targets().filter(t => t.type() === 'page' && (t.url().includes(MUSANED_HOST) || t.url().includes(LMIS_HOST)))
+      for (const target of targets) {
+        const page = await target.page().catch(() => null)
+        if (!page) continue
         const u = page.url()
         if (u.includes(MUSANED_HOST) && opts.getAccount) await serveMusanedLogin(page, opts).catch(() => {})
         if (u.includes(MUSANED_HOST) || u.includes(LMIS_HOST)) await serveTab(page).catch(() => {})
@@ -415,5 +491,7 @@ export function startOtpWatcher(opts = {}) {
     } catch {} finally { busy = false }
   }, 2000)
   timer.unref?.()
+  syncClock().catch(() => {})
+  setInterval(() => syncClock().catch(() => {}), 30 * 60 * 1000).unref?.()
   console.log('🔑 Sign-in codes: Musaned authenticator + LMIS SMS watcher on')
 }

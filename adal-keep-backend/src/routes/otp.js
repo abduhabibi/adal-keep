@@ -10,7 +10,7 @@
  */
 import express from 'express'
 import { onThisPC } from './trash.js'
-import { hasTotp, saveTotp, removeTotp, totpNow, smsKey, newSmsKey, smsKeyOk, receiveSms, smsStatus, phoneSeen } from '../services/otp.js'
+import { hasTotp, saveTotp, removeTotp, totpNow, clockInfo, smsKey, newSmsKey, smsKeyOk, receiveSms, smsStatus, phoneSeen } from '../services/otp.js'
 import { describe } from '../services/mainPC.js'
 import { openBrowserIfAny } from '../services/browser.js'
 
@@ -124,7 +124,7 @@ router.get('/otp/musaned-tab-shots', here, async (req, res) => {
     res.json({ shots, why: tabs.length ? '' : 'No Musaned tab is open in the Adal Keep browser.' })
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
-router.get('/otp/totp/now', (req, res) => res.json(totpNow('musaned')))
+router.get('/otp/totp/now', (req, res) => { const t = totpNow('musaned'); res.json(t && { ...t, clock: clockInfo() }) })
 router.delete('/otp/totp', here, (req, res) => { removeTotp('musaned'); res.json({ ok: true }) })
 router.post('/otp/sms-key', here, (req, res) => { newSmsKey(); res.json({ ok: true }) })
 

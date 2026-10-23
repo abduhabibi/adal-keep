@@ -44,6 +44,7 @@ import wafidRouter from './src/routes/wafid.js'
 import backupRouter from './src/routes/backup.js'
 import contractsRouter from './src/routes/contracts.js'
 import otpRouter from './src/routes/otp.js'
+import { diagMiddleware, diagReport } from './src/services/diag.js'
 import { startOtpWatcher } from './src/services/otp.js'
 import { startContractChecker } from './src/services/musanedContracts.js'
 import { startBackupSchedule, applyRestoredDatabase } from './src/services/telegramBackup.js'
@@ -68,6 +69,7 @@ const db = knex(knexConfig.development)
 // Store db in app.locals for routes to access
 app.locals.db = db
 
+app.use(diagMiddleware)
 app.use(cors({ origin: true, credentials: true }))
 app.use(express.json())
 
@@ -209,6 +211,7 @@ function pick(obj, keys) {
 }
 
 // 2. Core Application Routes
+app.get('/api/system/diag', (req, res) => res.json(diagReport(app.locals.db)))
 app.get('/api/health', (req, res) => {
   // role/instance let another PC check it is choosing a real main PC.
   res.json({ status: 'ok', role: isFollower() ? 'follower' : 'main', main_url: mainURL() || undefined, instance: instanceId() })

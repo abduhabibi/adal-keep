@@ -2300,9 +2300,11 @@ async function passOtp(page, ctx) {
   log(ctx, '🔑 typing the Musaned authenticator code')
   const deadline = Date.now() + 75000
   let screen = 'otp'
+  // Fast: the code goes in as soon as the page asks, and a refused code is
+  // retried (next device, then the next code) within a second or two.
   while (Date.now() < deadline && screen === 'otp') {
-    await serveTab(page).catch(() => {})
-    await sleep(3000)
+    const sent = await serveTab(page).catch(() => false)
+    await sleep(sent ? 1500 : 700)
     screen = (await classifyScreen(page, ctx)).screen
   }
   if (screen === 'agency-picker') { await stepClickAgencyCard(page, ctx); screen = await waitForDashboard(page, ctx, 30000) }

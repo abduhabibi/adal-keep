@@ -2,7 +2,7 @@ import express from 'express'
 import { listWorkflows } from '../services/workflows.js'
 import { dispatchRun, runStatus, queueSnapshot } from '../services/worker.js'
 import { markCancelled, isCancelled } from '../services/cancellation.js'
-import { closeRunTab } from '../services/tabManager.js'
+import { forgetRunTab } from '../services/tabManager.js'
 import { assertPoliceReady, getProfileVerification, runPassportVerification } from '../services/verification.js'
 
 const router = express.Router()
@@ -348,9 +348,9 @@ router.post('/automations/:id/cancel', async (req, res) => {
       updated_at: new Date().toISOString(),
     })
 
-    // 3. Close the tab this run owns, found through the run → tab registry.
-    let tabClosed = false
-    try { tabClosed = await closeRunTab(runId) } catch (e) { console.warn('[cancel] could not close tab:', e.message) }
+    // 3. The run lets go of its tab; the tab stays open for the person.
+    const tabClosed = false
+    try { forgetRunTab(runId) } catch {}
 
     // Runs cancelled a moment ago are still unwinding: they do not count.
     const others = queueSnapshot().running.filter(r => r.runId !== runId && !isCancelled(r.runId)).length
@@ -362,7 +362,7 @@ router.post('/automations/:id/cancel', async (req, res) => {
 })
 
 // Mark a paused run as fully complete (the person pressed Submit / SAVE in its
-// tab): closes that tab, sets status=done.
+// tab): sets status=done. Its tab stays open.
 router.post('/automations/:id/complete', async (req, res) => {
   try {
     const db = req.app.locals.db
@@ -374,8 +374,9 @@ router.post('/automations/:id/complete', async (req, res) => {
       return res.status(409).json({ error: `Run #${runId} is ${row.status} — only a run waiting for you can be marked complete.` })
     }
 
-    let tabClosed = false
-    try { tabClosed = await closeRunTab(runId) } catch (e) { console.warn('[complete] could not close tab:', e.message) }
+    // The tab stays open (the person may still need it); no run uses it again.
+    const tabClosed = false
+    try { forgetRunTab(runId) } catch {}
 
     await db('automation_queue').where('id', runId).update({
       status: 'done',

@@ -7,6 +7,7 @@ import { TutorTracker } from '../TutorCard'
 import useReadyChime from '../../hooks/useReadyChime'
 import useNewVersion from '../../hooks/useNewVersion'
 import api from '../../services/api'
+import UpdateBanner from '../UpdateBanner'
 
 const PAD_KEY = 'adal-search-pad'
 
@@ -60,6 +61,7 @@ export default function MainLayout() {
       <div className="flex flex-col flex-1 min-w-0 h-screen overflow-hidden relative">
         {DEMO && <Suspense fallback={null}><DemoBanner /></Suspense>}
         {!DEMO && <FollowerBanner />}
+        {!DEMO && <UpdateBanner />}
         <Navbar onToggleSidebar={() => setSidebarOpen(!sidebarOpen)} />
         <div className="flex flex-1 min-h-0">
           <main className="flex-1 min-w-0 overflow-y-auto transition-colors duration-500 custom-scrollbar">

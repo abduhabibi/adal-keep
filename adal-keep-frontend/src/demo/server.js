@@ -287,7 +287,7 @@ on('post', '/automations/:id/:action', ({ id, action }) => {
     return { ok: true, ...status(r), message: message(r, 'continued') }
   }
   if (action === 'complete') { finish(r); save(); return { ok: true, message: `Run #${r.id} marked complete.` } }
-  if (action === 'cancel') { r.status = 'cancelled'; r.updated_at = now(); save(); return { ok: true, tabClosed: true, message: `Run #${r.id} cancelled — its tab was closed.` } }
+  if (action === 'cancel') { r.status = 'cancelled'; r.updated_at = now(); save(); return { ok: true, tabClosed: false, message: `Run #${r.id} cancelled — its tab stays open.` } }
   if (action === 'pause') throw new HttpError(409, 'A working run cannot be paused — cancel it or let it finish.')
   notFound()
 })

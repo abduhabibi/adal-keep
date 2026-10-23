@@ -176,49 +176,97 @@ function describeCommit(commit) {
 // ---------------------------------------------------------------------------
 // GET /api/system/update/check  — compare installed revision with GitHub
 // ---------------------------------------------------------------------------
-async function handleCheck(req, res) {
+/**
+ * Compare this PC with the published version. One update always goes
+ * straight to the newest version, however many changes were published since:
+ * `changes` lists all of them (newest first) so the person sees what is new.
+ */
+export async function checkForUpdate() {
   const cfg = config()
-  try {
-    const commit = await github(`/commits/${encodeURIComponent(cfg.branch)}`)
-    const latest = describeCommit(commit)
-    const installed = await getInstalled()
-    const known = Boolean(installed.sha)
-    let upToDate = known && installed.sha === latest.sha
-    let note = known ? null : 'Installed revision could not be detected; showing the latest published revision.'
+  const commit = await github(`/commits/${encodeURIComponent(cfg.branch)}`)
+  const latest = describeCommit(commit)
+  const installed = await getInstalled()
+  const known = Boolean(installed.sha)
+  let upToDate = known && installed.sha === latest.sha
+  let note = known ? null : 'Installed revision could not be detected; showing the latest published revision.'
+  let changes = []
+  let count = 0
 
-    // Different is not the same as newer: ask GitHub which side is ahead, so
-    // a PC that is newer than the published version is never "updated" back.
-    if (known && !upToDate) {
-      try {
-        const cmp = await github(`/compare/${installed.sha}...${latest.sha}`)
-        if (cmp.status === 'behind' || cmp.status === 'identical') {
-          upToDate = true
-          note = cmp.status === 'behind' ? `This PC is newer than the published version (${cmp.behind_by} change(s) ahead).` : null
-        } else if (cmp.status === 'diverged') {
+  // Different is not the same as newer: ask GitHub which side is ahead, so
+  // a PC that is newer than the published version is never "updated" back.
+  if (known && !upToDate) {
+    try {
+      const cmp = await github(`/compare/${installed.sha}...${latest.sha}`)
+      if (cmp.status === 'behind' || cmp.status === 'identical') {
+        upToDate = true
+        note = cmp.status === 'behind' ? `This PC is newer than the published version (${cmp.behind_by} change(s) ahead).` : null
+      } else {
+        if (cmp.status === 'diverged') {
           note = `This PC has ${cmp.behind_by} change(s) that are not published; updating replaces them with the published version.`
         }
-      } catch {
-        // The installed commit is not on GitHub (made on this PC, never pushed).
-        upToDate = true
-        note = 'This PC runs a version that is not published on GitHub — nothing to update to.'
+        count = cmp.ahead_by || (cmp.commits || []).length
+        changes = (cmp.commits || []).map(describeCommit).reverse().slice(0, 40)
+          .map(c => ({ short: c.short, message: c.message, date: c.date }))
       }
+    } catch {
+      // The installed commit is not on GitHub (made on this PC, never pushed).
+      upToDate = true
+      note = 'This PC runs a version that is not published on GitHub — nothing to update to.'
     }
+  } else if (!known) {
+    changes = [{ short: latest.short, message: latest.message, date: latest.date }]
+    count = 1
+  }
 
-    res.json({
-      hasUpdate: !upToDate,
-      upToDate,
-      installed,
-      latest,
-      repo: cfg.repo,
-      branch: cfg.branch,
-      repoUrl: `https://github.com/${cfg.repo}`,
-      compareUrl: known ? `https://github.com/${cfg.repo}/compare/${installed.sha}...${latest.sha}` : null,
-      note,
-    })
+  return {
+    hasUpdate: !upToDate,
+    upToDate,
+    installed,
+    latest,
+    changes,
+    count,
+    repo: cfg.repo,
+    branch: cfg.branch,
+    repoUrl: `https://github.com/${cfg.repo}`,
+    compareUrl: known ? `https://github.com/${cfg.repo}/compare/${installed.sha}...${latest.sha}` : null,
+    note,
+  }
+}
+
+// The last answer of the background check (every UPDATE_CHECK_MINUTES).
+export const updateNotice = { checkedAt: null, result: null, error: null, applying: false, applyingSince: null }
+
+async function handleCheck(req, res) {
+  try {
+    const result = await checkForUpdate()
+    Object.assign(updateNotice, { checkedAt: new Date().toISOString(), result, error: null })
+    res.json(result)
   } catch (err) {
     console.error('[system/update/check]', err.message)
     res.status(502).json({ error: 'Could not reach GitHub for updates.', details: err.message })
   }
+}
+
+let watcher = null
+/** Looks for a new version now and then; the page shows a banner when there is one. */
+export function startUpdateWatcher() {
+  if (watcher) return
+  const every = Number(process.env.UPDATE_CHECK_MINUTES || 30) * 60 * 1000
+  const tick = async () => {
+    if (updateNotice.applying) return
+    try {
+      const result = await checkForUpdate()
+      if (result.hasUpdate && result.latest.sha !== updateNotice.result?.latest?.sha) {
+        console.log(`🆕 Update available: ${result.count} change(s), newest ${result.latest.short}`)
+      }
+      Object.assign(updateNotice, { checkedAt: new Date().toISOString(), result, error: null })
+    } catch (e) {
+      Object.assign(updateNotice, { checkedAt: new Date().toISOString(), error: e.message })
+    }
+  }
+  setTimeout(tick, 60 * 1000).unref?.()
+  watcher = setInterval(tick, every)
+  watcher.unref?.()
 }
 
 /** Quote a filesystem path for safe use in a shell command. */
@@ -287,13 +335,17 @@ async function installDependencies(projectRoot, logs) {
 
 /** Fallback for installs that are not a git checkout: download the source
  *  tarball straight from GitHub and copy it over the app, preserving data. */
-async function installFromTarball(cfg, logs) {
+async function installFromTarball(cfg, logs, sha = '') {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'adal-update-'))
   try {
     const archive = path.join(tmp, 'source.tar.gz')
+    // Exactly the version that is recorded as installed afterwards (a change
+    // published during the download must not make the next check offer the
+    // same update again).
+    const ref = sha || `refs/heads/${cfg.branch}`
     const url = cfg.token
-      ? `https://api.github.com/repos/${cfg.repo}/tarball/${encodeURIComponent(cfg.branch)}`
-      : `https://codeload.github.com/${cfg.repo}/tar.gz/refs/heads/${encodeURIComponent(cfg.branch)}`
+      ? `https://api.github.com/repos/${cfg.repo}/tarball/${encodeURIComponent(sha || cfg.branch)}`
+      : `https://codeload.github.com/${cfg.repo}/tar.gz/${ref.split('/').map(encodeURIComponent).join('/')}`
     const headers = { 'User-Agent': 'adal-keep-updater' }
     if (cfg.token) headers.Authorization = `Bearer ${cfg.token}`
 
@@ -338,6 +390,19 @@ async function installFromTarball(cfg, logs) {
 // POST /api/system/update/apply — fetch + install the latest revision
 // ---------------------------------------------------------------------------
 async function handleApply(req, res) {
+  // Pressed again (or on two PCs at once): the update that is running is enough.
+  if (updateNotice.applying) {
+    return res.status(409).json({ error: 'The update is already being installed — wait for the page to reload by itself.', applying: true })
+  }
+  updateNotice.applying = true
+  updateNotice.applyingSince = new Date().toISOString()
+  try { return await applyUpdate(req, res) } finally {
+    updateNotice.applying = false
+    updateNotice.result = null // the next look compares again with the new version
+  }
+}
+
+async function applyUpdate(req, res) {
   const cfg = config()
   const logs = []
   try {
@@ -356,7 +421,7 @@ async function handleApply(req, res) {
     // --- Non-git install (packaged/USB install): pull the GitHub tarball ---
     if (!installed.isRepo) {
       logs.push(`Not a git checkout (${cfg.projectRoot}); fetching source from GitHub.`)
-      await installFromTarball(cfg, logs)
+      await installFromTarball(cfg, logs, targetSha)
 
       // Copying source files is not enough: the backend needs its new
       // dependencies and the frontend has to be re-bundled.
@@ -441,6 +506,18 @@ router.post('/update/apply', handleApply)
 router.get('/check', handleCheck)
 router.post('/apply', handleApply)
 router.post('/update', handleApply)
+
+// What the banner shows: the background check's last answer (no GitHub call).
+router.get('/update/notice', async (req, res) => {
+  let running = 0
+  try { const { queueSnapshot } = await import('../services/worker.js'); running = queueSnapshot().running.length } catch {}
+  const r = updateNotice.result
+  res.json({
+    hasUpdate: !!r?.hasUpdate, count: r?.count || 0, changes: r?.changes || [], latest: r?.latest || null,
+    installed: r?.installed || null, note: r?.note || null, checkedAt: updateNotice.checkedAt,
+    applying: updateNotice.applying, running,
+  })
+})
 
 router.get('/update/status', async (req, res) => {
   const cfg = config()

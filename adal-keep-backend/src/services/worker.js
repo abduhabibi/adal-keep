@@ -22,7 +22,7 @@ import { runFullWorkflow } from './lmisWorkflow.js'
 import { decideAgencyActions } from './jev/agencyManager.js'
 import { getActiveEmployee } from './activeEmployee.js'
 import { isAppLocked } from './subscription.js'
-import { openRunTab, closeRunTab, forgetRunTab, tabOfRun, handTabToPerson } from './tabManager.js'
+import { openRunTab, forgetRunTab, tabOfRun, handTabToPerson } from './tabManager.js'
 import { registerTab, unregisterTab, noteLink } from './bandwidth.js'
 import { createRunQueue } from './runQueue.js'
 import { isCancelled, clearCancelled } from './cancellation.js'
@@ -340,8 +340,8 @@ async function runJob(db, job) {
   } finally {
     const row = await db('automation_queue').where('id', job.id).first().catch(() => null)
     try {
-      if (row?.status === 'cancelled') await closeRunTab(job.id)
-      else if (row?.status === 'failed' || row?.status === 'done') forgetRunTab(job.id)
+      // Done, failed or cancelled: the tab stays open for the person.
+      if (['cancelled', 'failed', 'done'].includes(row?.status)) forgetRunTab(job.id)
       // paused / pending (retry): the tab stays with the run; while a
       // person works in it, file dialogs open normally again.
       else { const t = tabOfRun(job.id); if (t) handTabToPerson(t) }

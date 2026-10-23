@@ -17,7 +17,7 @@ import { fileURLToPath } from 'url'
 import tasksRouter from './src/routes/tasks.js'
 import updatesRouter from './src/routes/updates.js'
 import tutorRouter from './src/routes/tutor.js'
-import systemUpdateRouter from './src/routes/systemUpdate.js'
+import systemUpdateRouter, { startUpdateWatcher } from './src/routes/systemUpdate.js'
 import quickLinksRouter from "./src/routes/quickLinks.js"
 import tenancyRouter, { attachAuth } from "./src/routes/tenancy.js"
 import employeesRouter from "./src/routes/employees.js"
@@ -985,6 +985,7 @@ cron.schedule('0 2 * * *', async () => {
 initSystem().then(() => {
   app.listen(PORT, () => {
     console.log(`🚀 Backend running on http://localhost:${PORT}`)
+    startUpdateWatcher()          // a new version? the page shows how to update
     if (isFollower()) {
       // Another PC is the main PC: all work happens there, nothing here.
       console.log(`🔗 This PC follows the main PC at ${mainURL()} — no automations, no discovery here`)

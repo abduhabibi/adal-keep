@@ -43,9 +43,11 @@ func main() {
 		if info := discoverServer(2500 * time.Millisecond); info != nil {
 			hostServer = info.URL
 			log.Printf("👉 Retrying via %s", hostServer)
+			rememberHostURL(info.URL)
 			pingServer()
 		}
 	}
+	go keepFindingServer()
 
 	// Not paid for: stop and show the payment popup on this PC too.
 	watchLock()

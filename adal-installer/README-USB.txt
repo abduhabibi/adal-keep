@@ -21,8 +21,37 @@ The files are numbered in the order you use them.
    http://localhost:4000 . Brave installs by itself in the background.
 
 3. EMPLOYEE PCs
-   Double-click, click YES. The Companion starts with Windows and
-   finds the main PC on the network by itself.
+   Double-click, click YES. An "Adal Keep" icon appears on the
+   desktop and it starts with Windows. It finds the main PC on the
+   network by itself and opens the main PC's Adal Keep.
+   If it cannot find it, a page "Looking for the main Adal Keep PC"
+   opens: on the MAIN PC open Settings > Main PC, copy the address
+   under "Addresses of this main PC" (e.g. 192.168.1.20:4000) and
+   type it there.
+
+
+4. PHONES (optional)
+   Turn on https first (see TAILSCALE, step 3). On the phone open the
+   main PC's https address in Chrome (Android) or Safari (iPhone),
+   then menu > "Add to Home screen". The Adal Keep icon is the app.
+
+
+TAILSCALE - another branch, home, phones  (free)
+   A private link between the agency's devices, from anywhere.
+   Nothing is opened to the internet.
+   1. Main PC: tailscale.com > Download > Windows. Install, sign in
+      with ONE agency Google or Microsoft account.
+   2. Every other PC / laptop / phone: install Tailscale (phones:
+      App Store / Play Store) and sign in with the SAME account.
+   3. Phones only: login.tailscale.com > DNS > MagicDNS on and
+      HTTPS Certificates > Enable. Then on the main PC: Settings >
+      Main PC > "Turn on https for phones".
+   4. Main PC: Settings > Main PC shows its Tailscale address
+      (100.x.x.x:4000). Type it on the other device:
+        - employee PC: the "Looking for the main PC" page
+        - full install in a branch: Settings > Main PC >
+          "Another PC is the main PC"
+        - laptop / phone: open it in the browser.
 
 
 UPDATES
@@ -35,9 +64,14 @@ IF SOMETHING GOES WRONG
    Install failed                     read C:\AdalKeep\install.log.
    Server problems                    C:\AdalKeep\backend\data\server.log
    Employee PC cannot find the main PC:
-      same network? main PC on? Or create
-      C:\AdalKeepCompanion\companion.conf with one line
-      ADAL_HOST_URL=http://<main PC IP>:4000   and restart the PC.
+      - main PC on, Adal Keep open on it?
+      - run "2 - Install Adal Main.exe" again on the MAIN PC once:
+        it fixes the Windows firewall there (data is kept).
+      - type the main PC's address on the "Looking for the main
+        PC" page (see step 3).
+      - still nothing from the same Wi-Fi: the router keeps Wi-Fi
+        PCs apart ("guest network" / "AP isolation"). Use a cable,
+        the normal (not guest) Wi-Fi, or Tailscale.
 
 NEEDS
    Windows 10 (1803+) or 11, 64-bit, admin password, all PCs on the

@@ -171,6 +171,14 @@ Section "Install"
   Pop $0
   nsExec::Exec 'netsh advfirewall firewall add rule name="Adal Keep Discovery" dir=in action=allow protocol=UDP localport=${DISCO_PORT}'
   Pop $0
+  ; The first time node.exe listens, Windows may ask "Allow access?" on the
+  ; screen (or, with nobody there, add a BLOCK rule for it by itself). A block
+  ; rule beats every allow rule, and employee PCs then never find this PC:
+  ; remove those and allow node.exe on every network type (Public Wi-Fi too).
+  nsExec::Exec 'netsh advfirewall firewall delete rule name=all program="$INSTDIR\runtime\node.exe"'
+  Pop $0
+  nsExec::Exec 'netsh advfirewall firewall add rule name="Adal Keep Server" dir=in action=allow program="$INSTDIR\runtime\node.exe" profile=any'
+  Pop $0
 
   CreateShortcut "$DESKTOP\${APP_NAME}.lnk" "$INSTDIR\AdalKeep.exe" "" "$INSTDIR\AdalKeep.exe" 0
   CreateDirectory "$SMPROGRAMS\${APP_NAME}"
@@ -249,6 +257,8 @@ Section "Uninstall"
   nsExec::Exec 'netsh advfirewall firewall delete rule name="Adal Keep"'
   Pop $0
   nsExec::Exec 'netsh advfirewall firewall delete rule name="Adal Keep Discovery"'
+  Pop $0
+  nsExec::Exec 'netsh advfirewall firewall delete rule name="Adal Keep Server"'
   Pop $0
   ; Program files go; the database and uploaded documents STAY
   ; (backend\data.sqlite, backend\data\, backend\uploads\), so a reinstall

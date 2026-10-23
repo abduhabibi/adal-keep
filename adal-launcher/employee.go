@@ -76,7 +76,8 @@ func runEmployee(root string) {
 		if u := waitForMainPC(root, 8*time.Second); u != "" {
 			openAppWindow(root, u)
 		} else {
-			showError(unreachableMsg)
+			// The first copy serves the "Looking for the main PC" page.
+			openAppWindow(root, connectURL)
 		}
 		return
 	}
@@ -88,7 +89,12 @@ func runEmployee(root string) {
 	// The Companion may still be searching the network: give it a moment.
 	u := waitForMainPC(root, 40*time.Second)
 	if u == "" {
-		logf("main PC not reachable yet — telling the user, still trying")
+		logf("main PC not reachable yet — showing the connect page, still trying")
+		if startConnectPage(root) {
+			// The page opens Adal Keep itself once the main PC answers.
+			openAppWindow(root, connectURL)
+			select {}
+		}
 		go showError(unreachableMsg) // does not stop the retries
 		for u == "" {
 			u = waitForMainPC(root, 15*time.Second)

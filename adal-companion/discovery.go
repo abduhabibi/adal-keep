@@ -80,6 +80,17 @@ func broadcastTargets() []*net.UDPAddr {
 // discoverServer asks the LAN for an Adal Keep server and returns the first
 // valid answer, or nil when nobody replies within the timeout.
 func discoverServer(timeout time.Duration) *serverInfo {
+	if info := askByBroadcast(timeout); info != nil {
+		return info
+	}
+	if os.Getenv("ADAL_NO_DISCOVERY") == "1" {
+		return nil
+	}
+	return scanForServer(4000)
+}
+
+// askByBroadcast: the UDP question to the whole network (see the top).
+func askByBroadcast(timeout time.Duration) *serverInfo {
 	// Tests (and PCs pinned to one server) can switch the LAN search off.
 	if os.Getenv("ADAL_NO_DISCOVERY") == "1" {
 		return nil
@@ -210,18 +221,23 @@ func pinnedHostURL() string {
 	return ""
 }
 
+const autoConfHeader = "# Written by the Adal Keep Companion."
+
 // rememberHostURL writes the discovered server into companion.conf so the next
-// boot skips discovery. An existing file (an IT pin) is never overwritten, and
-// a read-only install folder simply keeps re-discovering.
+// boot skips discovery (and AdalKeep.exe knows where to open). A file the
+// Companion wrote itself is updated when the main PC moves (new address from
+// the router); a file someone wrote by hand is never overwritten.
 func rememberHostURL(url string) {
 	path, err := companionConfPath()
 	if err != nil {
 		return
 	}
-	if _, err := os.Stat(path); err == nil {
-		return
+	if old, err := os.ReadFile(path); err == nil {
+		if !strings.HasPrefix(string(old), autoConfHeader) || pinnedHostURL() == url {
+			return
+		}
 	}
-	body := "# Written by the Adal Keep Companion. Edit ADAL_HOST_URL or delete\n" +
+	body := autoConfHeader + " Edit ADAL_HOST_URL or delete\n" +
 		"# this file to let the Companion search the LAN again.\n" +
 		"ADAL_HOST_URL=" + url + "\n"
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
@@ -258,4 +274,30 @@ func itoa(n int) string {
 		b[i] = '-'
 	}
 	return string(b[i:])
+}
+
+// keepFindingServer: while the main PC does not answer (turned off, moved to
+// a new address), look for it again every 30 seconds and remember where it is.
+func keepFindingServer() {
+	for {
+		time.Sleep(30 * time.Second)
+		if pingServer() {
+			continue
+		}
+		// An address typed on this PC (the "cannot find the main PC" page).
+		if pinned := pinnedHostURL(); pinned != "" && pinned != strings.TrimRight(hostServer, "/") {
+			log.Printf("👉 Using the saved address %s", pinned)
+			hostServer = pinned
+			os.Setenv("ADAL_HOST_URL", pinned)
+			if pingServer() {
+				continue
+			}
+		}
+		if info := discoverServer(2500 * time.Millisecond); info != nil {
+			log.Printf("👉 Server found at %s", info.URL)
+			hostServer = info.URL
+			os.Setenv("ADAL_HOST_URL", info.URL)
+			rememberHostURL(info.URL)
+		}
+	}
 }

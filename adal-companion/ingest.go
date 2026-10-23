@@ -214,6 +214,7 @@ func rediscover() bool {
 	if info := discoverServer(2500 * time.Millisecond); info != nil && strings.TrimRight(info.URL, "/") != strings.TrimRight(hostServer, "/") {
 		log.Printf("👉 Server found at %s", info.URL)
 		hostServer = info.URL
+		rememberHostURL(info.URL)
 		return true
 	}
 	return false

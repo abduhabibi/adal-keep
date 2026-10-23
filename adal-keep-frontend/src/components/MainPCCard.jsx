@@ -30,7 +30,7 @@ const STEPS = [
   ['Turn on the private names and https (once)',
     'On login.tailscale.com → DNS: make sure MagicDNS is on, then under HTTPS Certificates press Enable. Then press "Turn on https for phones" below on the main PC. Phones need https to install the Adal Keep app and to record voice messages.'],
   ['Branch PCs follow the main PC',
-    'On each PC in the other branch that has Adal Keep installed: Settings → Main PC → "Another PC is the main PC" → type the main PC\'s Tailscale address shown below → Save. From then on that PC opens the main PC\'s Adal Keep and sends its scans there. Employee PCs (Companion only): put ADAL_HOST_URL=<that address> in companion.conf.'],
+    'On each PC in the other branch that has Adal Keep installed: Settings → Main PC → "Another PC is the main PC" → type the main PC\'s Tailscale address shown below → Save. From then on that PC opens the main PC\'s Adal Keep and sends its scans there. Employee PCs (Companion only): when they cannot find the main PC, a page “Looking for the main Adal Keep PC” opens — type that address there.'],
   ['Branch had its own data? Bring it in once',
     'On the main PC, under "Bring in another branch", type the branch PC\'s address, press Check, then Merge. Nothing on the main PC is overwritten; the same document is never copied twice. Afterwards make the branch PC follow the main PC (step 4).'],
   ['From home',

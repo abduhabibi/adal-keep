@@ -41,6 +41,10 @@ import trashRouter from './src/routes/trash.js'
 import mainPCRouter from './src/routes/mainPC.js'
 import branchMergeRouter from './src/routes/branchMerge.js'
 import wafidRouter from './src/routes/wafid.js'
+import backupRouter from './src/routes/backup.js'
+import contractsRouter from './src/routes/contracts.js'
+import { startContractChecker } from './src/services/musanedContracts.js'
+import { startBackupSchedule, applyRestoredDatabase } from './src/services/telegramBackup.js'
 import { startWafidChecker } from './src/services/wafidStatus.js'
 import { isFollower, mainURL, instanceId } from './src/services/mainPC.js'
 import { moveToTrash } from './src/services/trash.js'
@@ -56,6 +60,7 @@ const app = express()
 const PORT = process.env.PORT || 4000
 
 // Initialize Knex with configuration
+applyRestoredDatabase() // a database restored from the Telegram backup goes in first
 const db = knex(knexConfig.development)
 
 // Store db in app.locals for routes to access
@@ -110,6 +115,8 @@ app.use('/api', trashRouter)
 app.use('/api', mainPCRouter)
 app.use('/api', branchMergeRouter)
 app.use('/api', wafidRouter)
+app.use('/api', backupRouter)
+app.use('/api', contractsRouter)
 watchPaid(db)
 
 // Utility function to safely check/add missing columns
@@ -434,6 +441,10 @@ app.put('/api/profiles/:id', async (req, res) => {
       'first_name',
       'last_name',
       'phone_number_2',
+      // Visa & Contract (filled by the Musaned contract check, editable by hand)
+      'musaned_stage', 'musaned_payment', 'musaned_pro', 'contract_number', 'visa_number', 'tawassut_number',
+      'employer_name', 'employer_id', 'employer_phone', 'employer_address', 'work_city', 'salary',
+      'contract_date', 'issuing_authority', 'job_title',
     ])
 
     if (data.full_name !== undefined && !String(data.full_name).trim()) {
@@ -980,6 +991,8 @@ initSystem().then(() => {
     startWorker(db)               // runs queued jobs, each in its own tab
     startScanner(db)              // discovers new work every 2 min
     startWafidChecker(db)         // Medical · Applied → Fit / Rejected from wafid.com
+    startBackupSchedule(db)       // locked copy to Telegram in the lunch break
+    startContractChecker(db)      // chosen by a Saudi employer? contract + PDFs from Musaned
     console.log('🤖 Automation: worker + scanner running')
 
     // Answer Employee PCs that broadcast "where is Adal Keep?" on the LAN.

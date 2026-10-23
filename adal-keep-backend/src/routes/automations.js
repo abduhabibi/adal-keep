@@ -392,9 +392,8 @@ router.post('/automations/:id/complete', async (req, res) => {
         await db('profiles').where('id', row.profile_id).update({ status: 'medical_applied', updated_at: new Date().toISOString() })
         next = ' Status: Medical · Applied — Adal Keep checks the result on Wafid by itself.'
       } else if (String(row.workflow_id).startsWith('musaned')) {
-        const { queueWafidBooking } = await import('../services/wafidStatus.js')
-        const q = await queueWafidBooking(db, row.profile_id, 'musaned')
-        if (q.queued) next = ` Wafid medical booking started (run #${q.runId}).`
+        // She is on Musaned now: the 4-hourly contract check watches for an employer.
+        next = ' Adal Keep now checks every 4 hours whether a Saudi employer chooses her.'
       }
     } catch (e) { console.warn('[complete] next step:', e.message) }
 

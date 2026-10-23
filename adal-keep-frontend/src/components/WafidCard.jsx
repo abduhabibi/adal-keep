@@ -38,7 +38,7 @@ export default function WafidCard() {
       <h2 className="font-display text-lg font-bold mb-1 flex items-center gap-2" translate="no"><span>🩺</span> Wafid medical</h2>
       <p className="text-sm text-slate-500 mb-4" translate="no">
         “Book Wafid medical” fills the whole Wafid form and ticks “I confirm…”, then rings. You check it, press Save And Continue, enter the SMS code and pay.
-        It starts by itself when a Musaned run is marked done.
+        It starts by itself when a Saudi employer chooses her on Musaned.
       </p>
       <div className="grid gap-3 sm:grid-cols-3" translate="no">
         <label className="text-sm">City of the medical

@@ -15,6 +15,7 @@ import TutorCard from '../components/TutorCard'
 import TutorAdoption from '../components/TutorAdoption'
 import MainPCCard from '../components/MainPCCard'
 import WafidCard from '../components/WafidCard'
+import BackupCard from '../components/BackupCard'
 
 export default function SettingsPage() {
   const { subscription, refresh } = useAuth()
@@ -273,6 +274,7 @@ export default function SettingsPage() {
 
       {import.meta.env.VITE_DEMO !== '1' && <WafidCard />}
       {import.meta.env.VITE_DEMO !== '1' && <MainPCCard />}
+      {import.meta.env.VITE_DEMO !== '1' && <BackupCard />}
 
       <Card>
         <h2 className="font-display text-lg font-bold mb-4 flex items-center gap-2">

@@ -2,7 +2,7 @@
  * wafidStatus.js — Wafid booking queue + the medical result checker.
  *
  *   queueWafidBooking(db, profileId)  a "Book Wafid medical" run (the button,
- *                                     or by itself once Musaned is done)
+ *                                     or by itself once an employer chose her)
  *   checkAll(db)                      every "Medical · Applied" profile is
  *                                     looked up on wafid.com: FIT → Medical ·
  *                                     Fit, UNFIT → Medical · Rejected
@@ -31,7 +31,7 @@ export async function queueWafidBooking(db, profileId, trigger = 'button') {
   const now = new Date().toISOString()
   const [runId] = await db('automation_queue').insert({
     profile_id: profileId, workflow_id: WAFID_BOOK, status: 'pending', current_step: 0,
-    context: '{}', log: JSON.stringify([{ ts: Date.now(), level: 'info', msg: trigger === 'musaned' ? 'Started by itself: Musaned is done' : 'Started from the Wafid button' }]),
+    context: '{}', log: JSON.stringify([{ ts: Date.now(), level: 'info', msg: trigger === 'chosen' ? 'Started by itself: a Saudi employer chose her on Musaned' : 'Started from the Wafid button' }]),
     created_at: now, updated_at: now,
   })
   try { const { drainQueue } = await import('./worker.js'); drainQueue(db).catch(() => {}) } catch {}

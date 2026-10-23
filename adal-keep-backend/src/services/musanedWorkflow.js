@@ -11,6 +11,7 @@
  *         adopts another tab, so two runs at once cannot meet in one tab.
  */
 
+import { hasTotp, serveTab } from './otp.js'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
@@ -2187,8 +2188,11 @@ export async function runMusanedWorkflow(page, ctx) {
       else if (review.screen === 'landing') { await stepClickGoToDashboard(page, ctx); await waitForDashboard(page, ctx, 30000) }
       else if (review.screen === 'captcha') return { ok: true, pauseReason: 'awaiting-musaned-captcha', seconds: Math.round((Date.now() - t0) / 1000) }
       else if (review.screen === 'otp') {
-        await ctx.notify(`🖐 ${ctx.profileName}: Musaned needs OTP`, 'Enter the code from your phone.')
-        return { ok: true, pauseReason: 'awaiting-musaned-otp', seconds: Math.round((Date.now() - t0) / 1000) }
+        const after = await passOtp(page, ctx)
+        if (after !== 'dashboard') {
+          await ctx.notify(`🖐 ${ctx.profileName}: Musaned needs OTP`, 'Enter the code from your phone.')
+          return { ok: true, pauseReason: `awaiting-musaned-${after === 'captcha' ? 'captcha' : 'otp'}`, seconds: Math.round((Date.now() - t0) / 1000) }
+        }
       } else if (review.screen === 'login-error') { await dumpPageState(page, ctx, 'login-rejected'); throw new Error('Musaned rejected the credentials') }
     } else {
       const open = await stepOpenMusaned(page, ctx)
@@ -2209,8 +2213,11 @@ export async function runMusanedWorkflow(page, ctx) {
         await ctx.notify(`🖐 ${ctx.profileName}: Musaned needs reCAPTCHA`, 'Solve it then click Sign In.')
         return { ok: true, pauseReason: 'awaiting-musaned-captcha', seconds: Math.round((Date.now() - t0) / 1000) }
       } else if (review.screen === 'otp') {
-        await ctx.notify(`🖐 ${ctx.profileName}: Musaned needs OTP`, 'Enter the code from your phone.')
-        return { ok: true, pauseReason: 'awaiting-musaned-otp', seconds: Math.round((Date.now() - t0) / 1000) }
+        const after = await passOtp(page, ctx)
+        if (after !== 'dashboard') {
+          await ctx.notify(`🖐 ${ctx.profileName}: Musaned needs OTP`, 'Enter the code from your phone.')
+          return { ok: true, pauseReason: `awaiting-musaned-${after === 'captcha' ? 'captcha' : 'otp'}`, seconds: Math.round((Date.now() - t0) / 1000) }
+        }
       } else if (review.screen === 'login-error') { await dumpPageState(page, ctx, 'login-rejected'); throw new Error('Musaned rejected the credentials') }
       else {
         await ctx.notify(`🖐 ${ctx.profileName}: Musaned needs attention`, `Screen unclassified (${review.source}).`)
@@ -2251,6 +2258,27 @@ export async function runMusanedWorkflow(page, ctx) {
     await dumpPageState(page, ctx, 'musaned')
     return { ok: false, step: 'musaned', error: e.message, seconds: secs }
   }
+}
+
+/**
+ * Musaned asks for the authenticator code: typed from the key saved in
+ * Settings → Sign-in codes (services/otp.js). Returns the screen after it
+ * ('dashboard' when signed in; 'otp' when no key is saved or it was refused).
+ */
+async function passOtp(page, ctx) {
+  if (!hasTotp('musaned')) return 'otp'
+  log(ctx, '🔑 typing the Musaned authenticator code')
+  const deadline = Date.now() + 75000
+  let screen = 'otp'
+  while (Date.now() < deadline && screen === 'otp') {
+    await serveTab(page).catch(() => {})
+    await sleep(3000)
+    screen = (await classifyScreen(page, ctx)).screen
+  }
+  if (screen === 'agency-picker') { await stepClickAgencyCard(page, ctx); screen = await waitForDashboard(page, ctx, 30000) }
+  else if (screen === 'landing') { await stepClickGoToDashboard(page, ctx); screen = await waitForDashboard(page, ctx, 30000) }
+  log(ctx, screen === 'dashboard' ? '✓ signed in with the authenticator code' : `after the code: ${screen}`, screen === 'dashboard' ? 'info' : 'warn')
+  return screen
 }
 
 async function waitForDashboard(page, ctx, timeoutMs) {

@@ -11,8 +11,8 @@ The files are numbered in the order you use them.
 
 1. PREPARE  (once per USB, on any Windows PC with internet)
    Double-click it and wait for DONE in green (about 5 minutes).
-   It downloads Node.js, the server packages and the Brave browser
-   into deps\. Running it again later is quick: what is already on
+   It downloads Node.js, the server packages, the Brave browser and
+   Tailscale into deps\. Running it again later is quick: what is already on
    the USB is kept.
 
 2. MAIN PC
@@ -39,9 +39,10 @@ The files are numbered in the order you use them.
 TAILSCALE - another branch, home, phones  (free)
    A private link between the agency's devices, from anywhere.
    Nothing is opened to the internet.
-   1. Main PC: tailscale.com > Download > Windows. Install, sign in
-      with ONE agency Google or Microsoft account.
-   2. Every other PC / laptop / phone: install Tailscale (phones:
+   1. Both installers (2 and 3) install Tailscale from the USB. On
+      each PC click the Tailscale icon (bottom right, near the clock)
+      > Log in, and sign in with the agency's Google account.
+   2. Laptops at home and phones: install Tailscale (tailscale.com,
       App Store / Play Store) and sign in with the SAME account.
    3. Phones only: login.tailscale.com > DNS > MagicDNS on and
       HTTPS Certificates > Enable. Then on the main PC: Settings >
@@ -52,6 +53,12 @@ TAILSCALE - another branch, home, phones  (free)
         - full install in a branch: Settings > Main PC >
           "Another PC is the main PC"
         - laptop / phone: open it in the browser.
+
+
+SIGN-IN CODES  (Settings > Sign-in codes, on the main PC)
+   Musaned: paste the authenticator key once; Adal Keep types the
+   6-digit code itself. LMIS: a phone in the office forwards the
+   SMS codes (the card shows how, Android or iPhone).
 
 
 UPDATES

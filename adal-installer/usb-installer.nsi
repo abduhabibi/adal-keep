@@ -102,6 +102,18 @@ Section "Install"
   SetOutPath "$INSTDIR"
   SetOverwrite on
 
+  ; Tailscale — the private link to the main PC from another branch, from home
+  ; and from the SMS phone — from the USB when it is missing. It keeps running
+  ; while nobody is signed in to Windows (TS_UNATTENDEDMODE). Signing in to it
+  ; (the agency's Google account) is done once in its tray icon.
+  ${IfNot} ${FileExists} "$PROGRAMFILES64\Tailscale\tailscale-ipn.exe"
+  ${AndIf} ${FileExists} "$EXEDIR\deps\tailscale\tailscale-setup.msi"
+    DetailPrint "Installing Tailscale (the private link)..."
+    nsExec::Exec 'msiexec /i "$EXEDIR\deps\tailscale\tailscale-setup.msi" /quiet /norestart TS_UNATTENDEDMODE=always'
+    Pop $0
+    DetailPrint "Tailscale: $0 (0 = installed)"
+  ${EndIf}
+
 !ifdef COMPANION
   ; ============================ EMPLOYEE PC ============================
   DetailPrint "Copying the Companion..."

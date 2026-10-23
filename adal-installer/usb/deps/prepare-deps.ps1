@@ -9,6 +9,7 @@
 #     node-win-x64.zip        Node.js runtime for Windows
 #     backend-modules.zip     the server's node_modules, built FOR WINDOWS
 #     brave\BraveSetup.exe    Brave browser installer (used by the automations)
+#     tailscale\tailscale-setup.msi  the private link (other branch, home, phones)
 #     prepare.log             full output, for when something fails
 #     READY.txt               written last - the installer checks for it
 #
@@ -22,6 +23,7 @@ $ProgressPreference    = 'SilentlyContinue'
 
 $NodeVersion = '24.14.1'          # keep in step with the Node used for development
 $BraveUrl    = 'https://github.com/brave/brave-browser/releases/latest/download/BraveBrowserStandaloneSilentSetup.exe'
+$TailscaleUrl = 'https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi'
 $Deps   = $PSScriptRoot
 $Work   = Join-Path $env:TEMP ('adal-deps-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
 $Ready  = Join-Path $Deps 'READY.txt'
@@ -29,7 +31,7 @@ $Log    = Join-Path $Deps 'prepare.log'
 $Curl   = (Get-Command curl.exe -ErrorAction SilentlyContinue).Source
 $Start  = Get-Date
 
-function Step($n, $msg) { Write-Host ''; Write-Host " [$n/4] $msg" -ForegroundColor Cyan }
+function Step($n, $msg) { Write-Host ''; Write-Host " [$n/5] $msg" -ForegroundColor Cyan }
 function Ok($msg)       { Write-Host "       OK  $msg" -ForegroundColor Green }
 function Note($msg)     { Write-Host "       $msg" -ForegroundColor DarkGray }
 function Fail($msg) {
@@ -181,12 +183,28 @@ try {
     else { Write-Host '       WARN  Brave could not be downloaded. Installs still work; install Brave by hand.' -ForegroundColor Yellow }
 
     # ------------------------------------------------------------------
-    Step 4 'Marking the USB ready'
+    Step 4 'Tailscale (the private link between branches, home and phones)'
+    $tsDir = Join-Path $Deps 'tailscale'
+    $tsMsi = Join-Path $tsDir 'tailscale-setup.msi'
+    New-Item -ItemType Directory -Force -Path $tsDir | Out-Null
+    $gotTs = (Test-Path $tsMsi) -and ((Get-Item $tsMsi).Length -gt 10MB)
+    if ($gotTs) { Note 'already on the USB - kept' }
+    else {
+        $tsTmp = Join-Path $Work 'tailscale-setup.msi'
+        $gotTs = Download $TailscaleUrl $tsTmp
+        if ($gotTs) { Copy-Item $tsTmp $tsMsi -Force }
+    }
+    if ($gotTs) { Ok ("tailscale-setup.msi  ($(MB $tsMsi) MB)") }
+    else { Write-Host '       WARN  Tailscale could not be downloaded. Install it from tailscale.com by hand.' -ForegroundColor Yellow }
+
+    # ------------------------------------------------------------------
+    Step 5 'Marking the USB ready'
     Set-Content -Path $Ready -Encoding ASCII -Value @(
         'Adal Keep USB dependencies - ready',
         "prepared:  $(Get-Date -Format 'yyyy-MM-dd HH:mm') on $env:COMPUTERNAME",
         "node:      $NodeVersion",
-        "brave:     $(if ($gotBrave) { 'included' } else { 'missing' })"
+        "brave:     $(if ($gotBrave) { 'included' } else { 'missing' })",
+        "tailscale: $(if ($gotTs) { 'included' } else { 'missing' })"
     )
     Ok 'ready'
 }

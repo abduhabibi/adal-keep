@@ -24,7 +24,7 @@ const Addr = ({ label, url, note }) => (
 
 const STEPS = [
   ['One Tailscale account for the agency',
-    'On the main PC, open tailscale.com → Download → Windows, install it, and sign in with ONE agency Google/Microsoft account. Use that same account on every PC and phone of the agency (not personal accounts).'],
+    'The Adal Keep installers (USB) install Tailscale. On the main PC click the Tailscale icon near the clock → Log in, with ONE agency Google account. Use that same account on every PC and phone of the agency (not personal accounts).'],
   ['Install Tailscale on every other PC and phone',
     'Branch PCs, the manager\'s laptop at home, phones (App Store / Play Store: "Tailscale"). Sign in with the same agency account. Every device now sees the main PC, from anywhere, as if it were in the office. Nothing is opened to the internet.'],
   ['Turn on the private names and https (once)',

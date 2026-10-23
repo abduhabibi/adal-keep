@@ -167,6 +167,19 @@ export async function getBrowser() {
 }
 
 /**
+ * The Adal Keep browser when it is open — never starts it. For watchers
+ * that only act on tabs a person or a run already opened.
+ */
+export async function openBrowserIfAny() {
+  if (_browser && _browser.isConnected && _browser.isConnected()) return _browser
+  try {
+    const puppeteer = (await import('puppeteer-core')).default
+    _browser = await connectTo(puppeteer, process.env.BRAVE_CDP_URL || `http://localhost:${DEBUG_PORT}`)
+    return _browser
+  } catch { return null }
+}
+
+/**
  * Close everything cleanly. Call on process shutdown.
  */
 export async function closeBrowser() {

@@ -16,6 +16,7 @@ import TutorAdoption from '../components/TutorAdoption'
 import MainPCCard from '../components/MainPCCard'
 import WafidCard from '../components/WafidCard'
 import BackupCard from '../components/BackupCard'
+import SignInCodesCard from '../components/SignInCodesCard'
 
 export default function SettingsPage() {
   const { subscription, refresh } = useAuth()
@@ -274,6 +275,7 @@ export default function SettingsPage() {
 
       {import.meta.env.VITE_DEMO !== '1' && <WafidCard />}
       {import.meta.env.VITE_DEMO !== '1' && <MainPCCard />}
+      {import.meta.env.VITE_DEMO !== '1' && <SignInCodesCard />}
       {import.meta.env.VITE_DEMO !== '1' && <BackupCard />}
 
       <Card>

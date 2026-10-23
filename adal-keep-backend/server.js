@@ -43,6 +43,8 @@ import branchMergeRouter from './src/routes/branchMerge.js'
 import wafidRouter from './src/routes/wafid.js'
 import backupRouter from './src/routes/backup.js'
 import contractsRouter from './src/routes/contracts.js'
+import otpRouter from './src/routes/otp.js'
+import { startOtpWatcher } from './src/services/otp.js'
 import { startContractChecker } from './src/services/musanedContracts.js'
 import { startBackupSchedule, applyRestoredDatabase } from './src/services/telegramBackup.js'
 import { startWafidChecker } from './src/services/wafidStatus.js'
@@ -117,6 +119,7 @@ app.use('/api', branchMergeRouter)
 app.use('/api', wafidRouter)
 app.use('/api', backupRouter)
 app.use('/api', contractsRouter)
+app.use('/api', otpRouter)
 watchPaid(db)
 
 // Utility function to safely check/add missing columns
@@ -993,6 +996,7 @@ initSystem().then(() => {
     startWafidChecker(db)         // Medical · Applied → Fit / Rejected from wafid.com
     startBackupSchedule(db)       // locked copy to Telegram in the lunch break
     startContractChecker(db)      // chosen by a Saudi employer? contract + PDFs from Musaned
+    startOtpWatcher()             // Musaned authenticator + LMIS SMS codes typed by themselves
     console.log('🤖 Automation: worker + scanner running')
 
     // Answer Employee PCs that broadcast "where is Adal Keep?" on the LAN.

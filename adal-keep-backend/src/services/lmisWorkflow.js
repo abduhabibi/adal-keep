@@ -45,6 +45,7 @@
  *       dead contract_import_labour branch and its lazy loader.
  */
 
+import { pageWantsCode, serveTab, smsStatus } from './otp.js'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
@@ -474,9 +475,24 @@ export async function stepLogin(page, ctx) {
   let lastClick = t0
   let reclicks = 0
   let signedIn = false
+  let codeSince = 0
   while (Date.now() - t0 < LOGIN_WAIT_MS) {
     const url = page.url()
     if (!url.includes('/auth') && !url.includes('/login')) { signedIn = true; break }
+    // LMIS sent a code by SMS: the phone forwards it (Settings → Sign-in
+    // codes) and it is typed here. Sign In is never pressed again meanwhile.
+    if (await pageWantsCode(page)) {
+      if (!codeSince) {
+        codeSince = Date.now()
+        log(ctx, smsStatus.count
+          ? '📱 LMIS asks for the SMS code — waiting for the phone to forward it'
+          : '📱 LMIS asks for the SMS code — type it in the LMIS tab (or set up the SMS phone in Settings → Sign-in codes)')
+      }
+      if (await serveTab(page).catch(() => false)) log(ctx, '✓ SMS code typed')
+      lastClick = Date.now()
+      await sleep(1000)
+      continue
+    }
     // Sign In did nothing for 20s: click it again (refill if LMIS cleared the form).
     if (Date.now() - lastClick > 20000 && reclicks < 5) {
       reclicks++

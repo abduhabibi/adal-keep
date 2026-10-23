@@ -115,6 +115,17 @@ mv -f "$INST/2 - Install Adal Main.exe" "$INST/3 - Install Adal Companion.exe" "
 cp -f "$INST/usb/1 - PREPARE (once, needs internet).bat" "$USB/"
 cp -f "$INST/usb/4 - Copy logs to this USB.bat" "$USB/"
 cp -f "$INST/usb/deps/prepare-deps.ps1" "$USB/deps/"
+# Tailscale (the private link) for both installers: fetched here when this PC
+# has internet, so an already prepared USB need not run PREPARE again.
+TS="$USB/deps/tailscale/tailscale-setup.msi"
+if [ ! -s "$TS" ]; then
+  mkdir -p "$USB/deps/tailscale"
+  if curl -fsSL --retry 2 -o "$TS.part" https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi; then
+    mv "$TS.part" "$TS"; echo "   Tailscale: $(du -h "$TS" | cut -f1)"
+  else
+    rm -f "$TS.part"; echo "   WARN Tailscale not downloaded (PREPARE fetches it on Windows)"
+  fi
+fi
 cp -f "$BACK/package.json" "$BACK/package-lock.json" "$USB/deps/source/"
 cp -f "$INST/README-USB.txt" "$USB/README-USB.txt"
 # A previous PREPARE built node_modules for an older package.json: say so.

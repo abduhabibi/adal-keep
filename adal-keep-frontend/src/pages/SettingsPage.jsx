@@ -16,7 +16,6 @@ import TutorAdoption from '../components/TutorAdoption'
 import MainPCCard from '../components/MainPCCard'
 import WafidCard from '../components/WafidCard'
 import BackupCard from '../components/BackupCard'
-import SignInCodesCard from '../components/SignInCodesCard'
 
 export default function SettingsPage() {
   const { subscription, refresh } = useAuth()
@@ -188,7 +187,6 @@ export default function SettingsPage() {
       />
 
       {/* NEW: Agency Settings Card */}
-      {import.meta.env.VITE_DEMO !== '1' && <SignInCodesCard />}
       <Card>
         <h2 className="font-display text-lg font-bold mb-4 flex items-center gap-2">
           <span>🏢</span> የኤጀንሲ ቅንብሮች (Agency Settings)

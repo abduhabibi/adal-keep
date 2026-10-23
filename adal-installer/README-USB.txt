@@ -55,10 +55,12 @@ TAILSCALE - another branch, home, phones  (free)
         - laptop / phone: open it in the browser.
 
 
-SIGN-IN CODES  (Settings > Sign-in codes, on the main PC)
-   Musaned: paste the authenticator key once; Adal Keep types the
-   6-digit code itself. LMIS: a phone in the office forwards the
-   SMS codes (the card shows how, Android or iPhone).
+SIGN-IN CODES
+   Musaned and LMIS codes are typed by a person. When a run needs
+   one, its tab comes to the front and Adal Keep rings once; type
+   the code and the run continues by itself. Runs share one
+   sign-in: while LMIS (or Musaned) is signed in in one tab, the
+   next runs use it and ask for no new code.
 
 
 UPDATES

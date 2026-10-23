@@ -225,3 +225,63 @@ export async function closeRunTab(runId) {
   console.log(`[tabManager] run #${id} tab closed`)
   return true
 }
+
+// --------------------------------------------------------------------------
+// One sign-in shared by every tab
+// --------------------------------------------------------------------------
+/**
+ * Runs on the same portal take turns signing in: a second run waits while
+ * the first one signs in (and a person types the code), then finds the
+ * portal signed in and asks for no new code. Returns a release function.
+ */
+const _turns = {}
+export function signInTurn(peer) {
+  const before = _turns[peer] || Promise.resolve()
+  let release
+  const mine = new Promise(r => { release = r })
+  _turns[peer] = before.then(() => mine)
+  let done = false
+  return before.then(() => () => { if (!done) { done = true; release() } })
+}
+
+/** A tab that is signed in to the portal (the person's or another run's). */
+const signedInHere = {
+  lmis: (url) => isPeerUrl(url, 'lmis') && !/\/(auth|login)/i.test(new URL(url).pathname),
+  musaned: (url) => hostOf(url) === 'tawtheeq.musaned.com.sa',
+}
+
+/**
+ * Before a run signs in: when another tab is already signed in to this
+ * portal, its sign-in is used. Cookies are shared by every tab; what a portal
+ * keeps per tab (sessionStorage) is copied into this tab before its pages
+ * load. Returns the address of that signed-in tab, or null.
+ */
+export async function borrowSignIn(page, peer) {
+  const isIn = signedInHere[peer]
+  if (!isIn || !page?.browser) return null
+  const self = page.target()
+  for (const t of page.browser().targets()) {
+    if (t === self || t.type() !== 'page') continue
+    let url = ''
+    try { url = t.url() } catch { continue }
+    if (!isIn(url)) continue
+    const other = await t.page().catch(() => null)
+    if (!other) continue
+    const st = await other.evaluate(() => ({
+      pw: !!document.querySelector('input[type="password"]'),
+      data: JSON.stringify(Object.fromEntries(Object.keys(sessionStorage).map(k => [k, sessionStorage.getItem(k)]))),
+    })).catch(() => null)
+    if (!st || st.pw) continue
+    await page.evaluateOnNewDocument((data, hosts) => {
+      try {
+        const h = location.hostname
+        if (!hosts.some(x => h === x || h.endsWith('.' + x))) return
+        const o = JSON.parse(data)
+        for (const k of Object.keys(o)) if (sessionStorage.getItem(k) === null) sessionStorage.setItem(k, o[k])
+      } catch {}
+    }, st.data, PEERS[peer].hosts).catch(() => {})
+    return url
+  }
+  return null
+}
+

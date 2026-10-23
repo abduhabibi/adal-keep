@@ -45,12 +45,11 @@
  *       dead contract_import_labour branch and its lazy loader.
  */
 
-import { pageWantsCode, serveTab, smsStatus } from './otp.js'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
 import { runMusanedWorkflow } from './musanedWorkflow.js'
-import { expectFile } from './tabManager.js'
+import { expectFile, signInTurn, borrowSignIn } from './tabManager.js'
 import { lookAtPage, lookUnavailableReason } from './jevClassifier.js'
 
 
@@ -385,7 +384,57 @@ export async function dumpPageState(page, ctx, stepName) {
 // STEPS
 // ============================================================================
 
+/** True when the LMIS page is asking for the SMS code. */
+async function asksForCode(page) {
+  return page.evaluate(() => {
+    const seen = (i) => { const r = i.getBoundingClientRect(); return r.width > 0 && r.height > 0 && !i.disabled }
+    const all = [...document.querySelectorAll('input')].filter(i => seen(i) && !/^(hidden|password|checkbox|radio|submit|button|file)$/i.test(i.type))
+    if (all.filter(i => i.maxLength === 1).length >= 4) return true
+    const hint = (i) => [i.name, i.id, i.placeholder, i.getAttribute('aria-label'), i.autocomplete].filter(Boolean).join(' ')
+    return all.some(i => i.autocomplete === 'one-time-code' || /otp|one.?time|verification|code/i.test(hint(i)))
+  }).catch(() => false)
+}
+
+/**
+ * Sign in to LMIS, once for everyone: runs take turns, and a run uses an LMIS
+ * tab that is already signed in (the person's or another run's) instead of
+ * signing in again and asking for a new SMS code.
+ */
 export async function stepLogin(page, ctx) {
+  const release = await waitTurn(ctx)
+  try { return await stepLoginNow(page, ctx) } finally { release() }
+}
+
+async function waitTurn(ctx) {
+  let waiting = true
+  const note = setTimeout(() => { if (waiting) log(ctx, '⏳ another run is signing in to LMIS — waiting for it, then using its sign-in') }, 1000)
+  const release = await signInTurn('lmis')
+  waiting = false; clearTimeout(note)
+  return release
+}
+
+async function stepLoginNow(page, ctx) {
+  const shared = await borrowSignIn(page, 'lmis')
+  if (shared) {
+    log(ctx, '🔗 LMIS is already signed in in another tab — using that sign-in (no new SMS code)')
+    try { await page.goto(shared, { waitUntil: 'domcontentloaded', timeout: 240000 }) } catch (e) { log(ctx, `navigation threw: ${e.message}`, 'warn') }
+    const until = Date.now() + 15000
+    let offSince = 0
+    while (Date.now() < until) {
+      const pw = await page.$('input[type="password"]').catch(() => null)
+      const u = page.url()
+      if (pw || /\/(auth|login)/i.test(u)) break
+      if (!offSince) offSince = Date.now()
+      if (Date.now() - offSince > 3000) {
+        log(ctx, `✓ signed in with the shared LMIS sign-in (${u})`)
+        await settle(page)
+        await closePopups(page, ctx)
+        return
+      }
+      await sleep(500)
+    }
+    log(ctx, 'the shared sign-in did not carry over — signing in here', 'warn')
+  }
   // Log in first, always. Never trust the address bar: LMIS shows the police
   // page's address for a moment before it sends a signed-out tab to login.
   // Signed in only when LMIS takes the tab off /auth and no login form shows.
@@ -476,19 +525,21 @@ export async function stepLogin(page, ctx) {
   let reclicks = 0
   let signedIn = false
   let codeSince = 0
-  while (Date.now() - t0 < LOGIN_WAIT_MS) {
+  while (Date.now() - t0 < LOGIN_WAIT_MS || (codeSince && Date.now() - codeSince < 10 * 60 * 1000)) {
     const url = page.url()
     if (!url.includes('/auth') && !url.includes('/login')) { signedIn = true; break }
-    // LMIS sent a code by SMS: the phone forwards it (Settings → Sign-in
-    // codes) and it is typed here. Sign In is never pressed again meanwhile.
-    if (await pageWantsCode(page)) {
+    // LMIS sent a code by SMS: a person types it (Adal Keep never handles
+    // codes). The tab comes to the front, it rings once, and the run waits up
+    // to 10 minutes. Sign In is never pressed again meanwhile.
+    if (await asksForCode(page)) {
       if (!codeSince) {
         codeSince = Date.now()
-        log(ctx, smsStatus.count
-          ? '📱 LMIS asks for the SMS code — waiting for the phone to forward it'
-          : '📱 LMIS asks for the SMS code — type it in the LMIS tab (or set up the SMS phone in Settings → Sign-in codes)')
+        log(ctx, '📱 LMIS asks for the SMS code — waiting for a person to type it (up to 10 min)')
+        await page.bringToFront().catch(() => {})
+        await ctx.notify(`🖐 ${ctx.profileName}: type the LMIS SMS code`,
+          'LMIS sent a code by SMS. Type it in the LMIS tab; Adal Keep continues by itself.').catch(() => {})
       }
-      if (await serveTab(page).catch(() => false)) log(ctx, '✓ SMS code typed')
+      if (Date.now() - codeSince > 10 * 60 * 1000) throw new Error('Nobody typed the LMIS SMS code within 10 minutes')
       lastClick = Date.now()
       await sleep(1000)
       continue

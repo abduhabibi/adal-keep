@@ -11,7 +11,6 @@
  *         adopts another tab, so two runs at once cannot meet in one tab.
  */
 
-import { hasTotp, serveTab, tickRememberMe, holdTab } from './otp.js'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
@@ -20,7 +19,7 @@ import {
   reviewMusanedScreen, reviewStageComplete, reviewPreCheckReady,
 } from './jev/musanedDecisions.js'
 import { pasteText, pasteAndCommit } from './domPaste.js'
-import { isPeerUrl, expectFile, disarmFile } from './tabManager.js'
+import { isPeerUrl, expectFile, disarmFile, signInTurn, borrowSignIn } from './tabManager.js'
 import { musanedMissing, personalPhotoFile } from './musanedPreflight.js'
 
 const MUSANED_ROOT    = 'https://tawtheeq.musaned.com.sa/'
@@ -384,7 +383,12 @@ export async function stepFillMusanedLogin(page, ctx) {
   const passInput = await page.$('#password, input[name="password"], input[type="password"]')
   if (!passInput) return { filled: false }
   await fillField(page, passInput, password, 'password', ctx)
-  if (await tickRememberMe(page)) log(ctx, '✓ "Remember me" ticked')
+  const remembered = await page.evaluate(() => {
+    const b = document.querySelector('#rememberMe, input[name="rememberMe"]')
+    if (b && !b.checked) { b.click(); return true }
+    return false
+  }).catch(() => false)
+  if (remembered) log(ctx, '✓ "Remember me" ticked')
   if (hasCaptcha) return { filled: true, captcha: true }
   const submitted = await page.evaluate(() => {
     const byId = document.querySelector('#kc-login'); if (byId) { byId.click(); return 'kc-login' }
@@ -2136,9 +2140,17 @@ export async function stepSubmitCandidateForm(page, ctx) { return { ok: true } }
 // ============================================================================
 
 export async function runMusanedWorkflow(page, ctx) {
-  // This run signs in itself: the sign-in watcher (otp.js) leaves the tab alone.
-  holdTab(page, true)
-  try { return await musanedRun(page, ctx) } finally { holdTab(page, false) }
+  // Musaned runs take turns signing in; a run uses a Musaned tab that is
+  // already signed in (the person's or another run's) instead of signing in
+  // again. The turn is let go as soon as this run is signed in.
+  let waiting = true
+  const note = setTimeout(() => { if (waiting) log(ctx, '⏳ another run is signing in to Musaned — waiting for it, then using its sign-in') }, 1000)
+  ctx.releaseSignIn = await signInTurn('musaned')
+  waiting = false; clearTimeout(note)
+  try {
+    if (await borrowSignIn(page, 'musaned')) log(ctx, '🔗 Musaned is already signed in in another tab — using that sign-in')
+    return await musanedRun(page, ctx)
+  } finally { ctx.releaseSignIn() }
 }
 
 async function musanedRun(page, ctx) {
@@ -2179,7 +2191,6 @@ async function musanedRun(page, ctx) {
       else if (review.screen === 'otp') {
         const after = await passOtp(page, ctx)
         if (after !== 'dashboard') {
-          await ctx.notify(`🖐 ${ctx.profileName}: Musaned needs OTP`, 'Enter the code from your phone.')
           return { ok: true, pauseReason: `awaiting-musaned-${after === 'captcha' ? 'captcha' : 'otp'}`, seconds: Math.round((Date.now() - t0) / 1000) }
         }
       } else if (review.screen === 'login-error') { await dumpPageState(page, ctx, 'login-rejected'); throw new Error('Musaned rejected the credentials') }
@@ -2209,7 +2220,6 @@ async function musanedRun(page, ctx) {
       } else if (review.screen === 'otp') {
         const after = await passOtp(page, ctx)
         if (after !== 'dashboard') {
-          await ctx.notify(`🖐 ${ctx.profileName}: Musaned needs OTP`, 'Enter the code from your phone.')
           return { ok: true, pauseReason: `awaiting-musaned-${after === 'captcha' ? 'captcha' : 'otp'}`, seconds: Math.round((Date.now() - t0) / 1000) }
         }
       } else if (review.screen === 'login-error') { await dumpPageState(page, ctx, 'login-rejected'); throw new Error('Musaned rejected the credentials') }
@@ -2219,6 +2229,7 @@ async function musanedRun(page, ctx) {
       }
     }
 
+    ctx.releaseSignIn?.() // signed in: the next run may go
     await stepClickHrPool(page, ctx)
     await stepClickAddNewCandidate(page, ctx)
 
@@ -2289,27 +2300,26 @@ async function waitForPersonCaptcha(page, ctx) {
 }
 
 /**
- * Musaned asks for the authenticator code: typed from the key saved in
- * Settings → Sign-in codes (services/otp.js). Returns the screen after it
- * ('dashboard' when signed in; 'otp' when no key is saved or it was refused).
+ * Musaned asks for the authenticator code: a person types it (Adal Keep keeps
+ * no authenticator key). The tab comes to the front, it rings once, and the
+ * run waits up to 10 minutes, then carries on by itself. Returns the screen
+ * after it ('dashboard' when signed in; 'otp' when nobody typed it).
  */
 async function passOtp(page, ctx) {
-  // The first time Musaned shows its authenticator QR code: the key is read from it.
-  if (!hasTotp('musaned')) await serveTab(page).catch(() => {})
-  if (!hasTotp('musaned')) return 'otp'
-  log(ctx, '🔑 typing the Musaned authenticator code')
-  const deadline = Date.now() + 75000
+  await page.bringToFront().catch(() => {})
+  await ctx.notify(`🖐 ${ctx.profileName}: type the Musaned code`,
+    'Type the code from the authenticator app in the Musaned tab and press Sign In. Adal Keep continues by itself.')
+  log(ctx, '🖐 waiting for a person to type the Musaned authenticator code (up to 10 min)')
+  const deadline = Date.now() + 10 * 60 * 1000
   let screen = 'otp'
-  // Fast: the code goes in as soon as the page asks, and a refused code is
-  // retried (next device, then the next code) within a second or two.
   while (Date.now() < deadline && screen === 'otp') {
-    const sent = await serveTab(page).catch(() => false)
-    await sleep(sent ? 1500 : 700)
+    if (typeof ctx.isCancelled === 'function' && ctx.isCancelled()) { const e = new Error('Cancelled by user'); e.cancelled = true; throw e }
+    await sleep(1500)
     screen = (await classifyScreen(page, ctx)).screen
   }
   if (screen === 'agency-picker') { await stepClickAgencyCard(page, ctx); screen = await waitForDashboard(page, ctx, 30000) }
   else if (screen === 'landing') { await stepClickGoToDashboard(page, ctx); screen = await waitForDashboard(page, ctx, 30000) }
-  log(ctx, screen === 'dashboard' ? '✓ signed in with the authenticator code' : `after the code: ${screen}`, screen === 'dashboard' ? 'info' : 'warn')
+  log(ctx, screen === 'dashboard' ? '✓ signed in — continuing' : `after the code: ${screen}`, screen === 'dashboard' ? 'info' : 'warn')
   return screen
 }
 

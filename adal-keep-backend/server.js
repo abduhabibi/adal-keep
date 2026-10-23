@@ -32,7 +32,7 @@ import automationsRouter from './src/routes/automations.js'
 import lmisAccountsRouter from './src/routes/lmisAccounts.js'
 import settingsRouter from './src/routes/settings.js'
 import { startFolderWatcher } from "./src/services/aiIngestion.js"
-import { startWorker, playNotificationSound } from './src/services/worker.js'
+import { startWorker } from './src/services/worker.js'
 import { startScanner } from './src/services/autoScanner.js'
 import verificationRouter from './src/routes/verification.js'
 import newProfileRouter from './src/routes/newProfile.js'
@@ -43,9 +43,8 @@ import branchMergeRouter from './src/routes/branchMerge.js'
 import wafidRouter from './src/routes/wafid.js'
 import backupRouter from './src/routes/backup.js'
 import contractsRouter from './src/routes/contracts.js'
-import otpRouter from './src/routes/otp.js'
 import { diagMiddleware, diagReport } from './src/services/diag.js'
-import { startOtpWatcher } from './src/services/otp.js'
+import { removeSecret } from './src/services/secretStore.js'
 import { startContractChecker } from './src/services/musanedContracts.js'
 import { startBackupSchedule, applyRestoredDatabase } from './src/services/telegramBackup.js'
 import { startWafidChecker } from './src/services/wafidStatus.js'
@@ -121,7 +120,6 @@ app.use('/api', branchMergeRouter)
 app.use('/api', wafidRouter)
 app.use('/api', backupRouter)
 app.use('/api', contractsRouter)
-app.use('/api', otpRouter)
 watchPaid(db)
 
 // Utility function to safely check/add missing columns
@@ -209,6 +207,11 @@ function pick(obj, keys) {
   }
   return out
 }
+
+// Sign-in codes are typed by people only: what an older version kept (the
+// Musaned authenticator key, the SMS link key, the phone mark) is deleted.
+for (const name of ['totp_musaned', 'otp_sms_key']) { try { if (removeSecret(name)) console.log(`🧹 removed the saved ${name}`) } catch {} }
+try { fs.rmSync(path.join(__dirname, 'data/otp-phone.json'), { force: true }) } catch {}
 
 // 2. Core Application Routes
 app.get('/api/system/diag', (req, res) => res.json(diagReport(app.locals.db)))
@@ -1000,13 +1003,6 @@ initSystem().then(() => {
     startWafidChecker(db)         // Medical · Applied → Fit / Rejected from wafid.com
     startBackupSchedule(db)       // locked copy to Telegram in the lunch break
     startContractChecker(db)      // chosen by a Saudi employer? contract + PDFs from Musaned
-    startOtpWatcher({             // Musaned authenticator + LMIS SMS codes typed by themselves
-      getAccount: () => db('musaned_accounts').orderBy('is_default', 'desc').first(),
-      notify: async (title, body) => {
-        await db('tasks').insert({ type: 'automation', title, description: body, status: 'pending', assigned_to: 1, is_ai_created: true, created_at: new Date().toISOString() })
-        playNotificationSound()
-      },
-    })
     console.log('🤖 Automation: worker + scanner running')
 
     // Answer Employee PCs that broadcast "where is Adal Keep?" on the LAN.

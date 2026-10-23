@@ -26,6 +26,15 @@ export function setSecret(name, plaintext) {
   writeStore(store)
 }
 
+/** Removes a secret completely (nothing of it stays in the file). */
+export function removeSecret(name) {
+  const store = readStore()
+  if (!(name in store)) return false
+  delete store[name]
+  writeStore(store)
+  return true
+}
+
 export function getSecret(name) {
   const store = readStore()
   const blob = store[name]

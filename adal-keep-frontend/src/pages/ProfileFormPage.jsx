@@ -247,8 +247,8 @@ export default function ProfileFormPage() {
         {/* ---- Labor ID first ---- */}
         <div className="rounded-xl p-[2px] bg-gradient-to-r from-teal-500 via-sky-500 to-indigo-500">
           <div className="rounded-[10px] bg-white dark:bg-slate-900 p-3">
-            <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide bg-gradient-to-r from-teal-600 via-sky-600 to-indigo-600 bg-clip-text text-transparent" htmlFor="labor_id">Labor ID <span className="normal-case font-medium tracking-normal">(for the police certificate — Musaned does not need it)</span></label>
-            <input id="labor_id" className={inputClass + ' font-mono text-base font-semibold'} value={form.labor_id} onChange={setField('labor_id')} />
+            <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide bg-gradient-to-r from-teal-600 via-sky-600 to-indigo-600 bg-clip-text text-transparent" htmlFor="labor_id">Labor ID *</label>
+            <input id="labor_id" required className={inputClass + ' font-mono text-base font-semibold'} value={form.labor_id} onChange={setField('labor_id')} />
           </div>
         </div>
 
@@ -290,8 +290,8 @@ export default function ProfileFormPage() {
               <input id="phone_number_2" type="tel" className={inputClass} placeholder="09XX XXX XXX" value={form.phone_number_2} onChange={setField('phone_number_2')} />
             </div>
             <div>
-              <label className={labelClass} htmlFor="religion">Religion</label>
-              <select id="religion" className={inputClass} value={form.religion} onChange={setField('religion')}>
+              <label className={labelClass} htmlFor="religion">Religion *</label>
+              <select id="religion" required className={inputClass} value={form.religion} onChange={setField('religion')}>
                 <option value="">— Select —</option>
                 <option value="Muslim">Muslim</option>
                 <option value="Orthodox">Orthodox</option>
@@ -299,16 +299,30 @@ export default function ProfileFormPage() {
               </select>
             </div>
             <div>
-              <label className={labelClass} htmlFor="marital_status">Marital status</label>
-              <select id="marital_status" className={inputClass} value={form.marital_status} onChange={setField('marital_status')}>
+              <label className={labelClass} htmlFor="marital_status">Marital status *</label>
+              <select id="marital_status" required className={inputClass} value={form.marital_status} onChange={setField('marital_status')}>
                 <option value="">— Select —</option>
                 <option value="SINGLE">Single</option>
                 <option value="MARRIED">Married</option>
               </select>
             </div>
+            <div>
+              <label className={labelClass} htmlFor="destination_country_q">Destination country *</label>
+              <select id="destination_country_q" required className={inputClass} value={form.destination_country} onChange={setField('destination_country')}>
+                <option value="">— Select —</option>
+                {['Kuwait', 'Saudi Arabia', 'Jordan', 'UAE', 'Qatar', 'Bahrain', 'Oman'].map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className={labelClass} htmlFor="broker_id_q">ደላላ *</label>
+              <select id="broker_id_q" required className={inputClass} value={form.broker_id} onChange={setField('broker_id')}>
+                <option value="">— Select —</option>
+                {brokers.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+            </div>
             <div className="sm:col-span-2">
               <button type="button" onClick={() => setShowAll(true)} className="text-xs text-teal-700 dark:text-teal-300 hover:underline">
-                More details (broker, destination, experience, guardian…) ▸
+                More details (experience, guardian, languages…) ▸
               </button>
             </div>
           </div>
@@ -348,8 +362,8 @@ export default function ProfileFormPage() {
             <input id="passport_number" className={inputClass} value={form.passport_number} onChange={setField('passport_number')} />
           </div>
           <div className="sm:col-span-2">
-            <label className={labelClass} htmlFor="broker_id">ደላላ</label>
-            <select id="broker_id" className={inputClass} value={form.broker_id} onChange={setField('broker_id')}>
+            <label className={labelClass} htmlFor="broker_id">ደላላ *</label>
+            <select id="broker_id" required className={inputClass} value={form.broker_id} onChange={setField('broker_id')}>
               <option value="">ያልተመደበ</option>
               {brokers.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select>
@@ -360,13 +374,14 @@ export default function ProfileFormPage() {
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="sm:col-span-2">
             <label className={labelClass} htmlFor="destination_country">
-              Destination Country
+              Destination Country *
               <span className="ml-2 text-[10px] text-teal-600 font-semibold">
                 (Kuwait auto-starts Police Clearance)
               </span>
             </label>
             <select
               id="destination_country"
+              required
               className={inputClass}
               value={form.destination_country}
               onChange={setField('destination_country')}
@@ -382,8 +397,8 @@ export default function ProfileFormPage() {
             </select>
           </div>
           <div>
-            <label className={labelClass} htmlFor="religion">Religion</label>
-            <select id="religion" className={inputClass} value={form.religion} onChange={setField('religion')}>
+            <label className={labelClass} htmlFor="religion">Religion *</label>
+            <select id="religion" required className={inputClass} value={form.religion} onChange={setField('religion')}>
               <option value="">— Select —</option>
               <option value="Muslim">Muslim</option>
               <option value="Orthodox">Orthodox</option>
@@ -391,8 +406,8 @@ export default function ProfileFormPage() {
             </select>
           </div>
           <div>
-            <label className={labelClass} htmlFor="marital_status">Marital status</label>
-            <select id="marital_status" className={inputClass} value={form.marital_status} onChange={setField('marital_status')}>
+            <label className={labelClass} htmlFor="marital_status">Marital status *</label>
+            <select id="marital_status" required className={inputClass} value={form.marital_status} onChange={setField('marital_status')}>
               <option value="">— Select —</option>
               <option value="SINGLE">Single</option>
               <option value="MARRIED">Married</option>

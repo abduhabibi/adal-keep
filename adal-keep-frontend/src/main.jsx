@@ -17,3 +17,8 @@ boot().finally(() => ReactDOM.createRoot(document.getElementById('root')).render
     <App />
   </React.StrictMode>
 ))
+
+// Installable app (Install Adal Keep in the browser menu). Not in the demo build.
+if ('serviceWorker' in navigator && import.meta.env.PROD && import.meta.env.VITE_DEMO !== '1') {
+  window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}))
+}

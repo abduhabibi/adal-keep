@@ -72,7 +72,16 @@ router.post('/new-profile/read', upload.single('file'), async (req, res) => {
       existing: existing ? { id: existing.id, full_name: existing.full_name } : null,
     })
   } catch (e) {
-    res.json({ upload: path.basename(req.file.path), filename: req.file.originalname, error: e.message, ms: Date.now() - t0 })
+    // Say which reader failed and why (also in server.log for Adal).
+    const { isGeminiConfigured, lastGeminiError } = await import('../services/geminiClassifier.js')
+    const { jevReady, lookUnavailableReason } = await import('../services/jevClassifier.js')
+    const why = [
+      e.message,
+      isGeminiConfigured() ? (lastGeminiError ? `Gemini: ${lastGeminiError}` : null) : 'Gemini has no key on this PC',
+      jevReady() ? null : 'JEV has no key on this PC',
+    ].filter(Boolean).join(' · ')
+    console.error(`[new-profile] passport not read (${req.file.originalname}, ${req.file.size} bytes): ${why}\n${e.stack || ''}`)
+    res.json({ upload: path.basename(req.file.path), filename: req.file.originalname, error: why, ms: Date.now() - t0 })
   }
 })
 

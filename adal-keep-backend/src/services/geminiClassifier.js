@@ -69,6 +69,9 @@ function restKey(key, ms, why) {
   console.warn(`[classify] Gemini key ${keys.indexOf(key) + 1} of ${keys.length} ${why} — using key ${keyAt + 1} for now`)
 }
 
+/** Why the last Gemini call failed ('' after a success) — shown to the person. */
+export let lastGeminiError = ''
+
 export function isGeminiConfigured() {
   return geminiKeys().length > 0
 }
@@ -152,6 +155,7 @@ async function generate(parts, models = MODELS, { system = PROMPT, json = true }
             console.warn(`[classify] ${lastErr.message}`)
             break
           }
+          lastGeminiError = ''
           return { text, model }
         }
         lastErr = new Error(`Gemini ${model} HTTP ${res.status}: ${String(data.error?.message || '').slice(0, 160)}`)
@@ -191,6 +195,7 @@ async function generate(parts, models = MODELS, { system = PROMPT, json = true }
       }
     }
   }
+  lastGeminiError = String((lastErr || {}).message || 'no model answered').slice(0, 200)
   throw lastErr || new Error('Gemini: no model answered')
 }
 

@@ -51,30 +51,34 @@ async function candidates(db, onlyId) {
     .select('*')
 }
 
+/**
+ * Musaned passes through /login (and the Wahid sign-in) while it checks the
+ * session: wait until it lands on the list, or stays on the sign-in page.
+ */
 async function signedIn(page) {
-  const u = page.url()
-  return /tawtheeq\.musaned\.com\.sa/.test(u) && !/login|auth/.test(u)
+  const onList = () => /tawtheeq\.musaned\.com\.sa\/employment-requests/.test(page.url())
+  for (let i = 0; i < 40 && !onList(); i++) await sleep(500)
+  return onList()
 }
 
 /** Search one passport on the list page. Returns the cards' text (0 cards = not chosen). */
 async function search(page, passport) {
   await page.goto(LIST_URL, { waitUntil: 'networkidle2', timeout: 60000 })
-  await sleep(1500)
   if (!(await signedIn(page))) return { signedOut: true }
-  // "Passport Number" filter → its input → passport → Enter.
-  const opened = await page.evaluate(() => {
-    const el = [...document.querySelectorAll('button, a, span, div, li')].find(e => e.children.length <= 3 && /^\s*Passport Number\s*$/i.test(e.innerText || ''))
-    if (!el) return false
-    el.click(); return true
-  })
-  if (!opened) throw new Error('Musaned: the "Passport Number" filter was not found')
-  const input = await page.waitForFunction(() => {
-    const inputs = [...document.querySelectorAll('input')].filter(i => i.offsetParent !== null && !i.disabled && (i.type === 'text' || i.type === 'search' || !i.type))
-    return inputs.find(i => document.activeElement === i) || inputs.find(i => /passport/i.test(i.placeholder + i.name + i.id)) || inputs[inputs.length - 1]
-  }, { timeout: 10000 })
-  await input.asElement().click({ clickCount: 3 })
-  await input.asElement().type(passport, { delay: 40 })
-  await page.keyboard.press('Enter')
+  await sleep(1500)
+  // "Passport Number" filter (an <app-filter-search>): its header button
+  // opens it; its own input takes the passport; Enter applies it.
+  await page.waitForFunction(() => [...document.querySelectorAll('app-filter-search')].some(f => /Passport Number/i.test(f.textContent || '')), { timeout: 30000 }).catch(() => {})
+  const filter = await page.evaluateHandle(() =>
+    [...document.querySelectorAll('app-filter-search')].find(f => /Passport Number/i.test(f.textContent || '')))
+  if (!filter.asElement()) throw new Error('Musaned: the "Passport Number" filter was not found')
+  await filter.asElement().evaluate(f => f.querySelector('button.app-filter-header, .app-filter-header')?.click())
+  await sleep(700)
+  const input = await filter.asElement().$('input')
+  if (!input) throw new Error('Musaned: the passport search box did not open')
+  await input.evaluate(i => { i.focus(); i.value = '' })
+  await input.type(passport, { delay: 40 })
+  await input.press('Enter')
   // Wait for the list to follow the filter (the chip with the passport shows).
   await page.waitForFunction((p) => (document.body.innerText || '').includes(`Passport Number:`) && (document.body.innerText || '').includes(p), { timeout: 20000 }, passport).catch(() => {})
   await page.waitForNetworkIdle({ idleTime: 800, timeout: 20000 }).catch(() => {})

@@ -54,7 +54,9 @@ if ! grep -qE '^ADAL_LICENSE_KEY=.{32,}' "$BACK/.env" 2>/dev/null; then
   exit 1
 fi
 if [ -f "$BACK/.env" ]; then
-  grep -vE '^(WATCH_DIR|AUTOMATION_LANES|AUTOMATION_MIN_AGENTS|AUTOMATION_MAX_AGENTS|NODE_ENV|SQLITE_PATH|FRONTEND_DIR|BRAVE_CDP_URL|GITHUB_BRANCH)=' "$BACK/.env" \
+  # GITHUB_TOKEN stays on this PC: the repository is public, and a token on
+  # every installed PC could be copied by anyone who opens its files.
+  grep -vE '^(WATCH_DIR|AUTOMATION_LANES|AUTOMATION_MIN_AGENTS|AUTOMATION_MAX_AGENTS|NODE_ENV|SQLITE_PATH|FRONTEND_DIR|BRAVE_CDP_URL|GITHUB_BRANCH|GITHUB_TOKEN)=' "$BACK/.env" \
     > "$STAGE/main/backend/.env"
   echo "NODE_ENV=production" >> "$STAGE/main/backend/.env"
   # Installed PCs follow the "release" branch, which moves only when a build goes

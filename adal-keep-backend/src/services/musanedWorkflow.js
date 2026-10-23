@@ -1988,7 +1988,8 @@ export async function stepFillCandidateDetails(page, ctx) {
       'Washing & ironing clothes', 'Dusting & cleaning', 'Washing kitchen dishes',
     ]
     const skills = Array.isArray(ctx.defaultSkills) && ctx.defaultSkills.length ? ctx.defaultSkills : DEFAULT_SKILLS
-    const passportIssuePlace = String(profile.place_of_birth || '').trim()
+    // Ethiopian passports are issued in Addis Ababa (not the birth place).
+    const passportIssuePlace = 'Addis Ababa'
     const passportIssueDate  = formatMusanedDate(profile.passport_issue_date)
     const passportExpiryDate = formatMusanedDate(profile.passport_expiry_date)
 

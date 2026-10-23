@@ -183,7 +183,26 @@ async function handleCheck(req, res) {
     const latest = describeCommit(commit)
     const installed = await getInstalled()
     const known = Boolean(installed.sha)
-    const upToDate = known && installed.sha === latest.sha
+    let upToDate = known && installed.sha === latest.sha
+    let note = known ? null : 'Installed revision could not be detected; showing the latest published revision.'
+
+    // Different is not the same as newer: ask GitHub which side is ahead, so
+    // a PC that is newer than the published version is never "updated" back.
+    if (known && !upToDate) {
+      try {
+        const cmp = await github(`/compare/${installed.sha}...${latest.sha}`)
+        if (cmp.status === 'behind' || cmp.status === 'identical') {
+          upToDate = true
+          note = cmp.status === 'behind' ? `This PC is newer than the published version (${cmp.behind_by} change(s) ahead).` : null
+        } else if (cmp.status === 'diverged') {
+          note = `This PC has ${cmp.behind_by} change(s) that are not published; updating replaces them with the published version.`
+        }
+      } catch {
+        // The installed commit is not on GitHub (made on this PC, never pushed).
+        upToDate = true
+        note = 'This PC runs a version that is not published on GitHub — nothing to update to.'
+      }
+    }
 
     res.json({
       hasUpdate: !upToDate,
@@ -194,7 +213,7 @@ async function handleCheck(req, res) {
       branch: cfg.branch,
       repoUrl: `https://github.com/${cfg.repo}`,
       compareUrl: known ? `https://github.com/${cfg.repo}/compare/${installed.sha}...${latest.sha}` : null,
-      note: known ? null : 'Installed revision could not be detected; showing the latest published revision.',
+      note,
     })
   } catch (err) {
     console.error('[system/update/check]', err.message)

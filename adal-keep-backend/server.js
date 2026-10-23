@@ -38,6 +38,9 @@ import verificationRouter from './src/routes/verification.js'
 import newProfileRouter from './src/routes/newProfile.js'
 import chatRouter, { watchPaid } from './src/routes/chat.js'
 import trashRouter from './src/routes/trash.js'
+import mainPCRouter from './src/routes/mainPC.js'
+import branchMergeRouter from './src/routes/branchMerge.js'
+import { isFollower, mainURL, instanceId } from './src/services/mainPC.js'
 import { moveToTrash } from './src/services/trash.js'
 import { startDiscoveryResponder } from './src/services/discovery.js'
 
@@ -102,6 +105,8 @@ app.use('/api', verificationRouter)
 app.use('/api', newProfileRouter)
 app.use('/api', chatRouter)
 app.use('/api', trashRouter)
+app.use('/api', mainPCRouter)
+app.use('/api', branchMergeRouter)
 watchPaid(db)
 
 // Utility function to safely check/add missing columns
@@ -192,7 +197,8 @@ function pick(obj, keys) {
 
 // 2. Core Application Routes
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok' })
+  // role/instance let another PC check it is choosing a real main PC.
+  res.json({ status: 'ok', role: isFollower() ? 'follower' : 'main', main_url: mainURL() || undefined, instance: instanceId() })
 })
 
 app.get('/api/dashboard', async (req, res) => {
@@ -961,10 +967,15 @@ cron.schedule('0 2 * * *', async () => {
 // 5. Start Server
 initSystem().then(() => {
   app.listen(PORT, () => {
+    console.log(`🚀 Backend running on http://localhost:${PORT}`)
+    if (isFollower()) {
+      // Another PC is the main PC: all work happens there, nothing here.
+      console.log(`🔗 This PC follows the main PC at ${mainURL()} — no automations, no discovery here`)
+      return
+    }
     startFolderWatcher(db, 1)     // watches the inbox for new files
     startWorker(db)               // runs queued jobs, each in its own tab
     startScanner(db)              // discovers new work every 2 min
-    console.log(`🚀 Backend running on http://localhost:${PORT}`)
     console.log('🤖 Automation: worker + scanner running')
 
     // Answer Employee PCs that broadcast "where is Adal Keep?" on the LAN.
@@ -978,7 +989,7 @@ initSystem().then(() => {
 })
 
 // Auto-open Brave workspace
-const AUTO_START_BRAVE = process.env.AUTO_START_BRAVE !== 'false'
+const AUTO_START_BRAVE = process.env.AUTO_START_BRAVE !== 'false' && !isFollower()
 if (AUTO_START_BRAVE) {
   setTimeout(async () => {
     try {

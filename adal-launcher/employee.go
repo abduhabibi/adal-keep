@@ -12,7 +12,9 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"os"
+	"net/http"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -121,4 +123,43 @@ func openAppWindow(root, url string) {
 		return
 	}
 	logf("opened %s in %s (app window)", url, filepath.Base(b))
+}
+
+// followedMainURL: on a full install, the main PC chosen in Settings → Main PC
+// (backend/data/main-pc.json). "" when this PC is the main PC itself.
+func followedMainURL(root string) string {
+	b, err := os.ReadFile(filepath.Join(root, "backend", "data", "main-pc.json"))
+	if err != nil {
+		return ""
+	}
+	var f struct {
+		MainURL string `json:"main_url"`
+	}
+	if json.Unmarshal(b, &f) != nil {
+		return ""
+	}
+	return strings.TrimRight(strings.TrimSpace(f.MainURL), "/")
+}
+
+// openMainOrFollowed opens this PC's Adal Keep, or — when this PC follows
+// another main PC — that PC's Adal Keep in an app window. When the main PC
+// does not answer, this PC's own page opens: it says which PC it follows and
+// lets the person change it in Settings.
+func openMainOrFollowed(root string) {
+	u := followedMainURL(root)
+	if u == "" {
+		openUI(root)
+		return
+	}
+	client := &http.Client{Timeout: 4 * time.Second}
+	if resp, err := client.Get(u + "/api/health"); err == nil {
+		resp.Body.Close()
+		if resp.StatusCode < 500 {
+			logf("this PC follows the main PC at %s", u)
+			openAppWindow(root, u)
+			return
+		}
+	}
+	logf("main PC %s does not answer — opening this PC's page", u)
+	openUI(root)
 }

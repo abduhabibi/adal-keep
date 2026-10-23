@@ -13,6 +13,7 @@ import { getLang, setLang } from '../lib/i18n'
 import { whoAmI } from '../lib/tutor'
 import TutorCard from '../components/TutorCard'
 import TutorAdoption from '../components/TutorAdoption'
+import MainPCCard from '../components/MainPCCard'
 
 export default function SettingsPage() {
   const { subscription, refresh } = useAuth()
@@ -268,6 +269,8 @@ export default function SettingsPage() {
           Log in once in the agent Brave window; Brave will autofill next time.
         </p>
       </Card>
+
+      {import.meta.env.VITE_DEMO !== '1' && <MainPCCard />}
 
       <Card>
         <h2 className="font-display text-lg font-bold mb-4 flex items-center gap-2">

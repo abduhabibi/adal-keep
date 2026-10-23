@@ -105,7 +105,8 @@ export function whoFrom(req) {
   let name = String(req.get?.('x-adal-who') || '')
   try { name = decodeURIComponent(name) } catch {}
   name = name.slice(0, 80)
-  let ip = String(req.socket?.remoteAddress || '').replace(/^::ffff:/, '')
+  const fwd = String(req.headers?.['x-forwarded-for'] || '').split(',')[0].trim()
+  let ip = (fwd || String(req.socket?.remoteAddress || '')).replace(/^::ffff:/, '')
   if (ip === '::1' || ip === '127.0.0.1') ip = 'this PC'
   return { deleted_by: name || null, deleted_from: ip || null }
 }

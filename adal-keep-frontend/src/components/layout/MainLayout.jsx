@@ -6,6 +6,7 @@ import ProfileSearchPad from '../ProfileSearchPad'
 import { TutorTracker } from '../TutorCard'
 import useReadyChime from '../../hooks/useReadyChime'
 import useNewVersion from '../../hooks/useNewVersion'
+import api from '../../services/api'
 
 const PAD_KEY = 'adal-search-pad'
 
@@ -58,6 +59,7 @@ export default function MainLayout() {
 
       <div className="flex flex-col flex-1 min-w-0 h-screen overflow-hidden relative">
         {DEMO && <Suspense fallback={null}><DemoBanner /></Suspense>}
+        {!DEMO && <FollowerBanner />}
         <Navbar onToggleSidebar={() => setSidebarOpen(!sidebarOpen)} />
         <div className="flex flex-1 min-h-0">
           <main className="flex-1 min-w-0 overflow-y-auto transition-colors duration-500 custom-scrollbar">
@@ -82,6 +84,23 @@ export default function MainLayout() {
           ⌕ {padOpen ? 'Hide search' : 'Search profiles'}
         </button>}
       </div>
+    </div>
+  )
+}
+
+// On a PC that follows another main PC, this PC's own page holds no current
+// data: say so and point to the main PC.
+function FollowerBanner() {
+  const [main, setMain] = useState('')
+  useEffect(() => {
+    api.get('/health').then(r => setMain(r.data?.role === 'follower' ? r.data.main_url || '' : '')).catch(() => {})
+  }, [])
+  if (!main) return null
+  return (
+    <div translate="no" className="flex flex-wrap items-center gap-3 bg-amber-100 dark:bg-amber-900/40 text-amber-900 dark:text-amber-100 px-4 py-2 text-sm">
+      <span>This PC follows the main PC — the agency's data is there, not here.</span>
+      <a href={main} className="rounded-md bg-amber-600 px-3 py-1 font-semibold text-white hover:bg-amber-700">Open the main PC</a>
+      <a href="/settings" className="underline">Change in Settings</a>
     </div>
   )
 }

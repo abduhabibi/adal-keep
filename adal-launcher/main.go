@@ -72,7 +72,7 @@ func main() {
 	if !firstCopy() {
 		if !background {
 			serverReady(45 * time.Second)
-			openUI(root)
+			openMainOrFollowed(root)
 		}
 		return
 	}
@@ -85,7 +85,7 @@ func main() {
 
 	if !background {
 		serverReady(45 * time.Second)
-		openUI(root)
+		openMainOrFollowed(root)
 	}
 	select {} // stay in the background: server, Companion, logo
 }

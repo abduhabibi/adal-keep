@@ -1971,6 +1971,20 @@ export async function runFullWorkflow(page, ctx) {
     }
   }
 
+  // LMIS contract: Contract → her Labor ID → Open → Create Contract.
+  if (workflowId === 'lmis_contract') {
+    try {
+      const { runLmisContract } = await import('./lmisContract.js')
+      return await runLmisContract(page, ctx)
+    } catch (e) {
+      if (e?.cancelled) throw e
+      const secs = Math.round((Date.now() - t0) / 1000)
+      log(ctx, `LMIS contract failed after ${secs}s: ${e.message}`, 'error')
+      await dumpPageState(page, ctx, 'lmis-contract')
+      return { ok: false, step: 'lmis-contract', error: e.message, seconds: secs }
+    }
+  }
+
   // Every Musaned workflow (musaned_add_candidate, musaned_login) runs the
   // Musaned runner. Matching only one id sent Musaned jobs into the LMIS login.
   if (String(workflowId).startsWith('musaned')) {

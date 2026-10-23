@@ -132,6 +132,11 @@ router.post('/profiles/:profileId/automations/:workflowId/start', async (req, re
       if (missing.length) {
         return res.status(400).json({ error: 'Profile is missing for Wafid: ' + missing.join(', '), missing })
       }
+    } else if (workflowId === 'lmis_contract') {
+      const prof = await db('profiles').where('id', profileId).first()
+      if (!prof?.labor_id || !String(prof.labor_id).trim()) {
+        return res.status(400).json({ error: 'Profile is missing the Labor ID', missing: ['Labor ID'] })
+      }
     } else if (workflowId === 'contract_import_labour') {
       const prof = await db('profiles').where('id', profileId).first()
       const missing = []

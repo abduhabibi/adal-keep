@@ -27,6 +27,16 @@ export const WORKFLOWS = {
     stepCount: 4,
   },
 
+  lmis_contract: {
+    id: 'lmis_contract',
+    name: 'Create LMIS contract',
+    description:
+      'LMIS → Contract → search her Labor ID → Open → Create Contract (by itself once an employer chose her and Wafid is FIT); a person continues the contract',
+    target: 'https://lmis.gov.et/organization/register/',
+    consts: {},
+    stepCount: 5,
+  },
+
   wafid_book: {
     id: 'wafid_book',
     name: 'Book Wafid medical',

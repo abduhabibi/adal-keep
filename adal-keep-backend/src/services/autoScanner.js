@@ -7,6 +7,9 @@
  * profile. This means the system keeps discovering new work as files
  * arrive, without any user action.
  *
+ * LMIS contract (lmis_contract): chosen by an employer on Musaned
+ * (profiles.chosen_at) + Wafid FIT (status medical_fit) + labor_id.
+ *
  * Trigger conditions for a Kuwait police clearance:
  *   - profiles.destination_country === 'Kuwait'
  *   - profiles.labor_id present
@@ -48,11 +51,11 @@ async function findReadyProfiles(db) {
   return ready
 }
 
-async function isAlreadyQueued(db, profileId) {
+async function isAlreadyQueued(db, profileId, workflowId = WORKFLOW_ID) {
   // Block re-enqueue if there is any active OR recently-failed OR done run.
   const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString()
   const row = await db('automation_queue')
-    .where({ profile_id: profileId, workflow_id: WORKFLOW_ID })
+    .where({ profile_id: profileId, workflow_id: workflowId })
     .andWhere(function () {
       this.whereIn('status', ['pending', 'running', 'paused', 'done'])
         .orWhere(function () {
@@ -63,6 +66,19 @@ async function isAlreadyQueued(db, profileId) {
   return !!row
 }
 
+/**
+ * LMIS contract: an employer chose her on Musaned (chosen_at, set by the
+ * contract check) and Wafid says FIT (status medical_fit), and she has a
+ * Labor ID → "Create LMIS contract" is queued once.
+ */
+async function findContractReady(db) {
+  return db('profiles')
+    .whereNotNull('chosen_at')
+    .where('status', 'medical_fit')
+    .whereNotNull('labor_id').whereNot('labor_id', '')
+    .select('id', 'full_name', 'labor_id')
+}
+
 async function getDefaultAccount(db) {
   return await db('lmis_accounts').orderBy('is_default', 'desc').first()
 }
@@ -70,7 +86,8 @@ async function getDefaultAccount(db) {
 async function scanOnce(db) {
   if (isAppLocked()) return
   try {
-    const ready = await findReadyProfiles(db)
+    const ready = (await findReadyProfiles(db)).map(p => ({ ...p, wf: WORKFLOW_ID, why: 'Kuwait + labor_id + order_id + all 4 files present' }))
+    for (const p of await findContractReady(db)) ready.push({ ...p, wf: 'lmis_contract', why: 'chosen by an employer on Musaned + Wafid FIT + Labor ID' })
     if (ready.length === 0) return
 
     const account = await getDefaultAccount(db)
@@ -81,7 +98,7 @@ async function scanOnce(db) {
 
     let enqueued = 0
     for (const p of ready) {
-      if (await isAlreadyQueued(db, p.id)) continue
+      if (await isAlreadyQueued(db, p.id, p.wf)) continue
 
       const accountContext = {
         login_value: account.login_value || account.phone || '',
@@ -92,7 +109,7 @@ async function scanOnce(db) {
 
       await db('automation_queue').insert({
         profile_id: p.id,
-        workflow_id: WORKFLOW_ID,
+        workflow_id: p.wf,
         account_id: account.id,
         status: 'pending',
         current_step: 0,
@@ -100,13 +117,13 @@ async function scanOnce(db) {
         log: JSON.stringify([{
           ts: Date.now(),
           level: 'info',
-          msg: `Auto-discovered by scanner — Kuwait + labor_id + order_id + all 4 files present`,
+          msg: `Auto-discovered by scanner — ${p.why}`,
         }]),
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })
       enqueued++
-      console.log(`[scanner] ✓ enqueued ${WORKFLOW_ID} for profile ${p.id} (${p.full_name})`)
+      console.log(`[scanner] ✓ enqueued ${p.wf} for profile ${p.id} (${p.full_name})`)
     }
 
     if (enqueued > 0) {

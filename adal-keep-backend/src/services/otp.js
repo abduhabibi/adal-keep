@@ -293,8 +293,9 @@ export async function serveTab(page) {
     }
     const t = totpNow('musaned')
     if (!t) return false
-    // A code about to expire may be refused on arrival: wait for the next one.
-    if (t.seconds_left < 4) return false
+    // Only a code with more than 4 seconds left: one about to change may be
+    // refused on arrival, so wait for the next one.
+    if (t.seconds_left <= 4) return false
     if (seen?.code === t.code && now - seen.at < 30000) return false
     if (await typeCode(page, t.code, MUSANED_HOST)) {
       filled.set(key, { code: t.code, at: now })
@@ -319,8 +320,85 @@ export async function serveTab(page) {
 /** True when this tab is asking for a code now (used by the LMIS sign-in). */
 export async function pageWantsCode(page) { return (await markOtpInputs(page)) > 0 }
 
+/** Ticks Musaned's "Remember me" when it is not ticked yet. */
+export async function tickRememberMe(page) {
+  return page.evaluate(() => {
+    const labelOf = (c) => (c.closest('label')?.textContent || (c.id && document.querySelector(`label[for="${c.id}"]`)?.textContent) || '')
+    const b = document.querySelector('#rememberMe, input[name="rememberMe"]') ||
+      [...document.querySelectorAll('input[type=checkbox]')].find(c => /remember|تذكر/i.test(labelOf(c)))
+    if (b && !b.checked) { b.click(); return true }
+    return false
+  }).catch(() => false)
+}
+
+// Tabs a Musaned run signs in itself (musanedWorkflow.js): the watcher leaves them alone.
+const held = new Set()
+const tabKey = (page) => page.target()._targetId || page.url()
+export function holdTab(page, on) { const k = tabKey(page); if (on) held.add(k); else held.delete(k) }
+
+/**
+ * A Musaned sign-in page opened by hand in the Adal Keep browser: the saved
+ * Musaned user name and password are filled, "Remember me" is ticked, and
+ * once a person has ticked "I'm not a robot" Sign In is pressed. Adal Keep
+ * never ticks "I'm not a robot" itself; when nobody has after 20 seconds it
+ * rings once to ask.
+ */
+const logins = new Map() // tab → what was done on this sign-in page
+async function serveMusanedLogin(page, { getAccount, notify }) {
+  const k = tabKey(page)
+  if (held.has(k)) return
+  const st = await page.evaluate(() => {
+    const pw = document.querySelector('#password, input[name="password"], input[type="password"]')
+    if (!pw || !pw.getBoundingClientRect().width) return null
+    const user = document.querySelector('#username, input[name="username"], input[autocomplete="username"]')
+    return {
+      href: location.href,
+      user: user?.value || '', pw: pw.value || '',
+      captcha: !!document.querySelector('.g-recaptcha, iframe[src*="recaptcha"]'),
+      token: [...document.querySelectorAll('textarea[name="g-recaptcha-response"]')].map(t => t.value || '').find(v => v.length > 20) || '',
+    }
+  }).catch(() => null)
+  if (!st) { logins.delete(k); return }
+  let s = logins.get(k)
+  if (!s || s.href !== st.href) { s = { href: st.href, since: Date.now() }; logins.set(k, s) }
+
+  if (!s.filled) {
+    s.filled = true
+    if (!st.user && !st.pw) {
+      const acct = await getAccount().catch(() => null)
+      if (acct?.username && acct?.password) {
+        await page.evaluate((u, p) => {
+          const set = (el, v) => {
+            if (!el) return
+            Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, v)
+            el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true }))
+          }
+          set(document.querySelector('#username, input[name="username"], input[autocomplete="username"]'), u)
+          set(document.querySelector('#password, input[name="password"], input[type="password"]'), p)
+        }, acct.username, acct.password).catch(() => {})
+        st.user = acct.username; st.pw = acct.password
+        console.log('[otp] Musaned sign-in page: user name and password filled')
+      }
+    }
+  }
+  if (!s.remembered) { s.remembered = true; if (await tickRememberMe(page)) console.log('[otp] Musaned "Remember me" ticked') }
+  if (!st.user || !st.pw) return
+
+  if (st.token && st.token !== s.token) {
+    s.token = st.token
+    console.log('[otp] Musaned "I\'m not a robot" is ticked — pressing Sign In')
+    await page.evaluate(() => (document.querySelector('#kc-login') || document.querySelector('button[type="submit"], input[type="submit"]'))?.click()).catch(() => {})
+    return
+  }
+  if (st.captcha && !st.token && !s.told && Date.now() - s.since > 20000) {
+    s.told = true
+    await notify('🖐 Musaned: tick "I\'m not a robot"',
+      'The Musaned sign-in page is filled. Tick "I\'m not a robot" (and the pictures, if Google shows some); Adal Keep presses Sign In and types the code.').catch(() => {})
+  }
+}
+
 let timer = null
-export function startOtpWatcher() {
+export function startOtpWatcher(opts = {}) {
   if (timer) return
   let busy = false
   timer = setInterval(async () => {
@@ -331,6 +409,7 @@ export function startOtpWatcher() {
       if (!browser) return
       for (const page of await browser.pages()) {
         const u = page.url()
+        if (u.includes(MUSANED_HOST) && opts.getAccount) await serveMusanedLogin(page, opts).catch(() => {})
         if (u.includes(MUSANED_HOST) || u.includes(LMIS_HOST)) await serveTab(page).catch(() => {})
       }
     } catch {} finally { busy = false }

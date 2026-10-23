@@ -11,7 +11,7 @@
  *         adopts another tab, so two runs at once cannot meet in one tab.
  */
 
-import { hasTotp, serveTab } from './otp.js'
+import { hasTotp, serveTab, tickRememberMe, holdTab } from './otp.js'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
@@ -384,6 +384,7 @@ export async function stepFillMusanedLogin(page, ctx) {
   const passInput = await page.$('#password, input[name="password"], input[type="password"]')
   if (!passInput) return { filled: false }
   await fillField(page, passInput, password, 'password', ctx)
+  if (await tickRememberMe(page)) log(ctx, '✓ "Remember me" ticked')
   if (hasCaptcha) return { filled: true, captcha: true }
   const submitted = await page.evaluate(() => {
     const byId = document.querySelector('#kc-login'); if (byId) { byId.click(); return 'kc-login' }
@@ -2135,6 +2136,12 @@ export async function stepSubmitCandidateForm(page, ctx) { return { ok: true } }
 // ============================================================================
 
 export async function runMusanedWorkflow(page, ctx) {
+  // This run signs in itself: the sign-in watcher (otp.js) leaves the tab alone.
+  holdTab(page, true)
+  try { return await musanedRun(page, ctx) } finally { holdTab(page, false) }
+}
+
+async function musanedRun(page, ctx) {
   const t0 = Date.now()
   const stage = ctx.musanedStage || 'start'
   log(ctx, `starting musaned workflow (stage=${stage})`)

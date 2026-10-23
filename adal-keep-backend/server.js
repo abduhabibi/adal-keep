@@ -32,7 +32,7 @@ import automationsRouter from './src/routes/automations.js'
 import lmisAccountsRouter from './src/routes/lmisAccounts.js'
 import settingsRouter from './src/routes/settings.js'
 import { startFolderWatcher } from "./src/services/aiIngestion.js"
-import { startWorker } from './src/services/worker.js'
+import { startWorker, playNotificationSound } from './src/services/worker.js'
 import { startScanner } from './src/services/autoScanner.js'
 import verificationRouter from './src/routes/verification.js'
 import newProfileRouter from './src/routes/newProfile.js'
@@ -997,7 +997,13 @@ initSystem().then(() => {
     startWafidChecker(db)         // Medical · Applied → Fit / Rejected from wafid.com
     startBackupSchedule(db)       // locked copy to Telegram in the lunch break
     startContractChecker(db)      // chosen by a Saudi employer? contract + PDFs from Musaned
-    startOtpWatcher()             // Musaned authenticator + LMIS SMS codes typed by themselves
+    startOtpWatcher({             // Musaned authenticator + LMIS SMS codes typed by themselves
+      getAccount: () => db('musaned_accounts').orderBy('is_default', 'desc').first(),
+      notify: async (title, body) => {
+        await db('tasks').insert({ type: 'automation', title, description: body, status: 'pending', assigned_to: 1, is_ai_created: true, created_at: new Date().toISOString() })
+        playNotificationSound()
+      },
+    })
     console.log('🤖 Automation: worker + scanner running')
 
     // Answer Employee PCs that broadcast "where is Adal Keep?" on the LAN.

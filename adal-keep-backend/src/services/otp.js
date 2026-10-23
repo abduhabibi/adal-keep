@@ -43,6 +43,7 @@ export function parseTotpInput(input) {
   const s = String(input || '').trim()
   if (!s) throw new Error('Paste the key (or the otpauth:// link) from the QR code.')
   let secret = s, digits = 6, period = 30, algorithm = 'SHA1'
+  if (/^otpauth-migration:\/\//i.test(s)) return fromGoogleExport(s)
   if (/^otpauth:\/\//i.test(s)) {
     const u = new URL(s)
     secret = u.searchParams.get('secret') || ''
@@ -53,6 +54,46 @@ export function parseTotpInput(input) {
   secret = secret.toUpperCase().replace(/[\s=-]/g, '')
   if (base32Decode(secret).length < 10) throw new Error('This key is too short — copy the whole key.')
   return { secret, digits, period, algorithm }
+}
+
+function base32Encode(buf) {
+  let bits = '', out = ''
+  for (const b of buf) bits += b.toString(2).padStart(8, '0')
+  for (let i = 0; i < bits.length; i += 5) out += B32[parseInt(bits.slice(i, i + 5).padEnd(5, '0'), 2)]
+  return out
+}
+
+/**
+ * Google Authenticator → Transfer accounts → Export shows a QR code with
+ * "otpauth-migration://offline?data=…" (a small protobuf). The Musaned entry
+ * (or the only one) is taken from it.
+ */
+function fromGoogleExport(uri) {
+  const data = Buffer.from(decodeURIComponent(new URL(uri).searchParams.get('data') || ''), 'base64')
+  const fields = (buf) => {
+    const out = []
+    let i = 0
+    const varint = () => { let n = 0, sh = 0, b; do { b = buf[i++]; n += (b & 0x7f) * 2 ** sh; sh += 7 } while (b & 0x80); return n }
+    while (i < buf.length) {
+      const key = varint(), no = Math.floor(key / 8), type = key & 7
+      if (type === 0) out.push([no, varint()])
+      else if (type === 2) { const len = varint(); out.push([no, buf.subarray(i, i + len)]); i += len }
+      else throw new Error('This QR code could not be read.')
+    }
+    return out
+  }
+  const accounts = fields(data).filter(([no]) => no === 1).map(([, b]) => {
+    const f = Object.fromEntries(fields(b).map(([no, v]) => [no, v]))
+    return {
+      secret: base32Encode(f[1] || Buffer.alloc(0)),
+      label: `${f[3] ? f[3].toString() : ''} ${f[2] ? f[2].toString() : ''}`.trim(),
+      digits: f[5] === 2 ? 8 : 6,
+      algorithm: ({ 2: 'SHA256', 3: 'SHA512' })[f[4]] || 'SHA1',
+    }
+  }).filter(a => a.secret)
+  const a = accounts.find(a => /musaned|wahid|mol|hrsd/i.test(a.label)) || (accounts.length === 1 ? accounts[0] : null)
+  if (!a) throw new Error(`This export has ${accounts.length} accounts (${accounts.map(a => a.label).join(', ')}). Export only the Musaned one.`)
+  return { secret: a.secret, digits: a.digits, period: 30, algorithm: a.algorithm }
 }
 
 export function totpAt(cfg, time = Date.now()) {

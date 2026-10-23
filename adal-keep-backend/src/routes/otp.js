@@ -12,6 +12,7 @@ import express from 'express'
 import { onThisPC } from './trash.js'
 import { hasTotp, saveTotp, removeTotp, totpNow, smsKey, newSmsKey, smsKeyOk, receiveSms, smsStatus } from '../services/otp.js'
 import { describe } from '../services/mainPC.js'
+import { openBrowserIfAny } from '../services/browser.js'
 
 const router = express.Router()
 const here = (req, res, next) => (onThisPC(req) ? next() : res.status(403).json({ error: 'Sign-in codes are set up on the main PC itself.' }))
@@ -53,6 +54,20 @@ router.post('/otp/totp', here, (req, res) => {
     saveTotp('musaned', req.body?.secret)
     res.json({ ok: true, now: totpNow('musaned') })
   } catch (e) { res.status(400).json({ error: e.message }) }
+})
+// Pictures of the open Musaned tabs: the page finds the QR code in them and
+// reads the authenticator key from it (Musaned shows no "Unable to scan?").
+router.get('/otp/musaned-tab-shots', here, async (req, res) => {
+  try {
+    const browser = await openBrowserIfAny()
+    if (!browser) return res.json({ shots: [], why: 'The Adal Keep browser is not open.' })
+    const tabs = (await browser.pages()).filter(p => /wahid\.sa|musaned/i.test(p.url())).slice(0, 3)
+    const shots = []
+    for (const p of tabs) {
+      try { shots.push(await p.screenshot({ type: 'png', encoding: 'base64', fullPage: true })) } catch {}
+    }
+    res.json({ shots, why: tabs.length ? '' : 'No Musaned tab is open in the Adal Keep browser.' })
+  } catch (e) { res.status(500).json({ error: e.message }) }
 })
 router.get('/otp/totp/now', here, (req, res) => res.json(totpNow('musaned')))
 router.delete('/otp/totp', here, (req, res) => { removeTotp('musaned'); res.json({ ok: true }) })

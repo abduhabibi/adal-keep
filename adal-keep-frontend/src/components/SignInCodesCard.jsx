@@ -7,9 +7,32 @@ import toast from 'react-hot-toast'
 import api from '../services/api'
 import Card from './shared/Card'
 import Button from './shared/Button'
+import jsQR from 'jsqr'
 
 const field = 'w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm'
 const err = (e) => e?.response?.data?.error || e.message
+
+/** The text inside the first QR code found in a picture (Blob or data URL), or null. */
+async function readQr(src) {
+  const url = typeof src === 'string' ? src : URL.createObjectURL(src)
+  try {
+    const img = new Image()
+    img.src = url
+    await img.decode()
+    for (const scale of [1, 0.5, 2, 0.25]) {
+      const w = Math.round(img.naturalWidth * scale), h = Math.round(img.naturalHeight * scale)
+      if (w < 50 || h < 50 || w * h > 16e6) continue
+      const c = document.createElement('canvas')
+      c.width = w; c.height = h
+      const g = c.getContext('2d', { willReadFrequently: true })
+      g.fillStyle = '#fff'; g.fillRect(0, 0, w, h)
+      g.drawImage(img, 0, 0, w, h)
+      const found = jsQR(g.getImageData(0, 0, w, h).data, w, h, { inversionAttempts: 'attemptBoth' })
+      if (found?.data) return found.data
+    }
+    return null
+  } finally { if (typeof src !== 'string') URL.revokeObjectURL(url) }
+}
 
 function Copy({ text }) {
   return (
@@ -25,6 +48,37 @@ export default function SignInCodesCard() {
   const [key, setKey] = useState('')
   const [now, setNow] = useState(null)
   const [tab, setTab] = useState('android')
+  const [reading, setReading] = useState(false)
+
+  const saveKey = async (secret, ok = 'Saved — now type the code below into Musaned') => {
+    try { await api.post('/otp/totp', { secret }); setKey(''); toast.success(ok, { duration: 7000 }); load(); return true }
+    catch (e) { toast.error(err(e), { duration: 9000 }); return false }
+  }
+  const fromPictures = async (pictures) => {
+    setReading(true)
+    try {
+      for (const p of pictures) {
+        const text = await readQr(p).catch(() => null)
+        if (!text) continue
+        if (!/^otpauth(-migration)?:\/\//i.test(text)) { toast.error('That QR code is not an authenticator QR code.'); return }
+        await saveKey(text)
+        return
+      }
+      toast.error('No QR code found in it. Make the QR code bigger on the screen (zoom in), take the picture again.', { duration: 8000 })
+    } finally { setReading(false) }
+  }
+  const fromMusanedTab = async () => {
+    setReading(true)
+    try {
+      const r = (await api.get('/otp/musaned-tab-shots')).data
+      if (!r.shots?.length) { toast.error(r.why || 'No Musaned tab found.', { duration: 8000 }); return }
+      await fromPictures(r.shots.map(b => `data:image/png;base64,${b}`))
+    } catch (e) { toast.error(err(e)) } finally { setReading(false) }
+  }
+  const onPaste = (e) => {
+    const files = [...(e.clipboardData?.items || [])].filter(i => i.type.startsWith('image/')).map(i => i.getAsFile())
+    if (files.length) { e.preventDefault(); fromPictures(files) }
+  }
 
   const load = () => api.get('/otp').then(r => setC(r.data)).catch(() => setC(false))
   useEffect(() => { load() }, [])
@@ -53,18 +107,32 @@ export default function SignInCodesCard() {
       <section className="mb-5" translate="no">
         <h3 className="font-semibold">Musaned — authenticator {c.musaned_totp && <span className="text-teal-600">✓ set up</span>}</h3>
         <ol className="list-decimal pl-5 text-sm text-slate-600 dark:text-slate-300 space-y-1 my-2">
-          <li>In Musaned, open the page that adds an authenticator app (it shows a QR code). Sign in → account / security → “Authenticator”, or the QR page Musaned shows when it first asks.</li>
-          <li>Scan the QR code with the phone app as usual (Google or Microsoft Authenticator) — the phone keeps working too.</li>
-          <li>Under the QR code press <b>“Unable to scan?”</b> (or “Enter key manually”). Copy the key it shows (letters and digits, like <code>JBSW Y3DP EHPK 3PXP…</code>) and paste it here.</li>
-          <li>Finish Musaned's page with the code from the phone. Then compare: the number below must be the same as the phone's.</li>
+          <li>Open Musaned until it shows the <b>QR code</b> for the authenticator. Do not finish that page yet.</li>
+          <li>Musaned open in the Adal Keep browser? Press <b>Read the QR from Musaned</b>. Somewhere else (another browser, a phone)? Take a picture of the QR code — on Windows <b>Windows + Shift + S</b> — and press <b>Ctrl + V</b> in the box below, or choose the picture.</li>
+          <li>Also scan the same QR code with the phone app (Google or Microsoft Authenticator), so the phone works too.</li>
+          <li>Type the <b>code shown below</b> into Musaned's box under the QR code and finish. From now on Adal Keep types it by itself.</li>
         </ol>
-        <div className="flex gap-2">
-          <input className={field} type="password" value={key} onChange={e => setKey(e.target.value)} autoComplete="off"
-            placeholder={c.musaned_totp ? 'Saved — paste a new key to change it' : 'Authenticator key or otpauth:// link'} />
-          <Button size="sm" disabled={!key.trim()} onClick={async () => {
-            try { await api.post('/otp/totp', { secret: key }); setKey(''); toast.success('Saved — compare the number with the phone'); load() } catch (e) { toast.error(err(e), { duration: 8000 }) }
-          }}>Save</Button>
+        <div className="flex flex-wrap gap-2 items-center">
+          <Button size="sm" disabled={reading} onClick={fromMusanedTab}>{reading ? 'Reading…' : 'Read the QR from Musaned'}</Button>
+          <label className="cursor-pointer rounded-lg border border-slate-300 dark:border-slate-600 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-800">
+            Choose a picture
+            <input type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) fromPictures([f]) }} />
+          </label>
         </div>
+        <div tabIndex={0} onPaste={onPaste} onDragOver={e => e.preventDefault()}
+          onDrop={e => { e.preventDefault(); const f = [...e.dataTransfer.files].filter(x => x.type.startsWith('image/')); if (f.length) fromPictures(f) }}
+          className="mt-2 rounded-lg border-2 border-dashed border-slate-300 dark:border-slate-600 px-3 py-4 text-center text-sm text-slate-500 focus:border-teal-500 focus:outline-none">
+          Click here, then press <b>Ctrl + V</b> to paste the picture of the QR code (or drop it here)
+        </div>
+        <details className="mt-2 text-sm">
+          <summary className="cursor-pointer text-slate-500">Have the key as text instead?</summary>
+          <div className="flex gap-2 mt-2">
+            <input className={field} type="password" value={key} onChange={e => setKey(e.target.value)} autoComplete="off"
+              placeholder={c.musaned_totp ? 'Saved — paste a new key to change it' : 'Authenticator key or otpauth:// link'} />
+            <Button size="sm" disabled={!key.trim()} onClick={() => saveKey(key)}>Save</Button>
+          </div>
+        </details>
+        <p className="text-xs text-slate-500 mt-1">Phone already set up and Musaned shows no QR code any more? In Google Authenticator: menu → Transfer accounts → Export → choose Musaned; take a picture of that QR code and paste it here.</p>
         {now && (
           <div className="mt-2 flex items-center gap-3 text-sm">
             <span>Code now:</span>

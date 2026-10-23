@@ -141,42 +141,121 @@ export const agencies = (db) => rpc(db, 'list_agencies')
 export const conversations = async (db) => { await me(db); return rpc(db, 'my_conversations') }
 export const openDirect = (db, other) => rpc(db, 'open_direct', { other })
 
-export async function messages(db, conversationId, afterId = 0) {
+const MSG_FIELDS_V2 = 'id,sender_id,body,image_path,created_at,reply_to,edited_at,deleted_at,updated_at,forwarded_from,kind,file_path,file_name,file_mime,file_size'
+const MSG_FIELDS_V1 = 'id,sender_id,body,image_path,created_at'
+// Until Adal runs the new schema.sql in Supabase the v2 columns are missing:
+// the chat keeps working with the old ones.
+let v2 = true
+let MSG_FIELDS = MSG_FIELDS_V2
+const missingColumn = (e) => /column|schema cache|could not find/i.test(String(e?.message || ''))
+function dropToV1() { v2 = false; MSG_FIELDS = MSG_FIELDS_V1; console.warn('[chat] Supabase has the old chat schema — run adal-admin/supabase/schema.sql again for groups, replies, files…') }
+
+/**
+ * New messages after `afterId`, plus older ones changed (edited, deleted)
+ * since `since`. Marks the chat read up to the newest.
+ */
+export async function messages(db, conversationId, afterId = 0, since = null) {
+  try { return await messagesOnce(db, conversationId, afterId, since) }
+  catch (e) { if (v2 && missingColumn(e)) { dropToV1(); return messagesOnce(db, conversationId, afterId, since) } throw e }
+}
+
+async function messagesOnce(db, conversationId, afterId = 0, since = null) {
+  const conv = encodeURIComponent(conversationId)
   const rows = await call(db, 'GET',
-    `/rest/v1/messages?conversation_id=eq.${encodeURIComponent(conversationId)}&id=gt.${Number(afterId) || 0}` +
-    `&select=id,sender_id,body,image_path,created_at&order=id.desc&limit=${afterId ? 200 : 80}`)
+    `/rest/v1/messages?conversation_id=eq.${conv}&id=gt.${Number(afterId) || 0}` +
+    `&select=${MSG_FIELDS}&order=id.desc&limit=${afterId ? 200 : 100}`)
   const list = (rows || []).reverse()
+  let changed = []
+  if (v2 && afterId && since) {
+    changed = await call(db, 'GET',
+      `/rest/v1/messages?conversation_id=eq.${conv}&id=lte.${Number(afterId)}&updated_at=gt.${encodeURIComponent(since)}&select=${MSG_FIELDS}`) || []
+  }
   if (list.length) {
-    // Read up to the newest one.
     await call(db, 'PATCH',
-      `/rest/v1/members?conversation_id=eq.${encodeURIComponent(conversationId)}&agency_id=eq.${sess.user_id}`,
+      `/rest/v1/members?conversation_id=eq.${conv}&agency_id=eq.${sess.user_id}`,
       { last_read_id: list[list.length - 1].id }, { headers: { Prefer: 'return=minimal' } }).catch(() => {})
   }
-  return list
+  return { messages: list, changed, now: new Date().toISOString() }
 }
 
-async function uploadImage(db, buffer, mimetype) {
-  const ext = { 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif', 'application/pdf': 'pdf' }[mimetype] || 'jpg'
-  const name = `${sess.user_id}/${Date.now()}-${crypto.randomBytes(6).toString('hex')}.${ext}`
-  await call(db, 'POST', `/storage/v1/object/${BUCKET}/${name}`, buffer, { headers: { 'Content-Type': mimetype || 'image/jpeg' } })
-  return name
+const EXT = { 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif', 'image/jpeg': 'jpg', 'application/pdf': 'pdf', 'audio/webm': 'webm', 'audio/ogg': 'ogg', 'audio/mpeg': 'mp3', 'audio/mp4': 'm4a' }
+async function uploadFile(db, buffer, mimetype, name = '') {
+  const ext = EXT[mimetype] || (String(name).match(/\.([a-z0-9]{1,5})$/i)?.[1] || 'bin').toLowerCase()
+  const key = `${sess.user_id}/${Date.now()}-${crypto.randomBytes(6).toString('hex')}.${ext}`
+  await call(db, 'POST', `/storage/v1/object/${BUCKET}/${key}`, buffer, { headers: { 'Content-Type': mimetype || 'application/octet-stream' } })
+  return key
 }
+const uploadImage = (db, buffer, mimetype) => uploadFile(db, buffer, mimetype)
 
-export async function send(db, conversationId, body, image) {
+/**
+ * Send a message: text, a picture, a file or a voice note; optionally a reply
+ * (`replyTo`) or a forward (`forward`: the original message — its picture or
+ * file is reused, not uploaded again).
+ */
+export async function send(db, conversationId, body, file, { kind = null, replyTo = null, forward = null } = {}) {
   const text = String(body || '').trim()
   if (LINK_RE.test(text)) throw new ChatError('Links are not allowed in the chat.', 400)
-  if (!text && !image) throw new ChatError('Nothing to send.', 400)
+  if (!text && !file && !forward) throw new ChatError('Nothing to send.', 400)
   await me(db)
-  const image_path = image ? await uploadImage(db, image.buffer, image.mimetype) : null
-  const rows = await call(db, 'POST', '/rest/v1/messages',
-    { conversation_id: conversationId, body: text || null, image_path },
-    { headers: { Prefer: 'return=representation' } })
-  return rows?.[0]
+  const row = { conversation_id: conversationId, body: text || null, kind: 'text' }
+  if (replyTo) row.reply_to = Number(replyTo)
+  if (forward) {
+    const [orig] = await call(db, 'GET', `/rest/v1/messages?id=eq.${Number(forward)}&select=${MSG_FIELDS}`) || []
+    if (!orig || orig.deleted_at) throw new ChatError('That message is gone.', 404)
+    const names = Object.fromEntries((await agencies(db) || []).map(a => [a.id, a.is_admin ? 'Adal Keep' : a.name]))
+    Object.assign(row, {
+      body: orig.body, kind: orig.kind || 'text', image_path: orig.image_path, file_path: orig.file_path,
+      file_name: orig.file_name, file_mime: orig.file_mime, file_size: orig.file_size,
+      forwarded_from: orig.forwarded_from || names[orig.sender_id] || 'an agency',
+    })
+  } else if (file) {
+    const isImage = /^image\//.test(file.mimetype || '')
+    const k = kind === 'voice' ? 'voice' : isImage ? 'image' : 'file'
+    const key = await uploadFile(db, file.buffer, file.mimetype, file.name)
+    row.kind = k
+    if (k === 'image') row.image_path = key
+    else Object.assign(row, { file_path: key, file_name: String(file.name || (k === 'voice' ? 'voice.webm' : 'file')).slice(0, 200), file_mime: file.mimetype, file_size: file.buffer.length })
+  }
+  if (!v2) {
+    if (row.kind !== 'text' && row.kind !== 'image') throw new ChatError('Files and voice messages need the new chat database (Adal runs schema.sql once more).', 400)
+    for (const k of ['kind', 'reply_to', 'forwarded_from', 'file_path', 'file_name', 'file_mime', 'file_size']) delete row[k]
+  }
+  try {
+    const rows = await call(db, 'POST', '/rest/v1/messages', row, { headers: { Prefer: 'return=representation' } })
+    return rows?.[0]
+  } catch (e) {
+    if (v2 && missingColumn(e)) { dropToV1(); return send(db, conversationId, body, file, { replyTo, forward }) }
+    throw e
+  }
+}
+
+export const editMessage = (db, id, body) => {
+  if (LINK_RE.test(String(body || ''))) throw new ChatError('Links are not allowed in the chat.', 400)
+  return rpc(db, 'edit_message', { msg: Number(id), p_body: String(body || '') })
+}
+export const deleteMessage = (db, id) => rpc(db, 'delete_message', { msg: Number(id) })
+export const pinMessage = (db, conv, id) => rpc(db, 'pin_message', { conv, msg: id ? Number(id) : null })
+export const createGroup = (db, title, members) => rpc(db, 'create_group', { p_title: String(title || ''), p_members: members || [] })
+export const addMembers = (db, conv, members) => rpc(db, 'add_group_members', { conv, p_members: members || [] })
+export const removeMember = (db, conv, who) => rpc(db, 'remove_group_member', { conv, who })
+export const setAdmin = (db, conv, who, makeAdmin) => rpc(db, 'set_group_admin', { conv, who, make_admin: !!makeAdmin })
+export const renameGroup = (db, conv, title) => rpc(db, 'rename_group', { conv, p_title: String(title || '') })
+export const groupMembers = (db, conv) => rpc(db, 'group_members', { conv })
+export const setTyping = (db, conv) => rpc(db, 'set_typing', { conv }).catch(() => null)
+export const typingIn = (db, conv) => rpc(db, 'typing_in', { conv }).catch(() => [])
+export const ping = (db) => rpc(db, 'ping').catch(() => null)
+
+/** Messages in any of my chats containing `q` (the database only shows my chats). */
+export async function search(db, q) {
+  const term = String(q || '').trim().replace(/[%*,()]/g, ' ')
+  if (term.length < 2) return []
+  await me(db)
+  return await call(db, 'GET', `/rest/v1/messages?body=ilike.*${encodeURIComponent(term)}*&deleted_at=is.null&select=id,conversation_id,sender_id,body,created_at&order=id.desc&limit=50`) || []
 }
 
 /** A picture from the chat, streamed through this PC (the browser never needs the key). */
 export async function image(db, imagePath) {
-  if (!/^[0-9a-f-]{36}\/[\w.-]+$/i.test(String(imagePath || ''))) throw new ChatError('bad picture', 400)
+  if (!/^[0-9a-f-]{36}\/[\w.-]+$/i.test(String(imagePath || ''))) throw new ChatError('bad file', 400)
   const res = await call(db, 'GET', `/storage/v1/object/authenticated/${BUCKET}/${imagePath}`, undefined, { raw: true })
   if (!res.ok) throw new ChatError('picture not found', 404)
   return { type: res.headers.get('content-type') || 'image/jpeg', body: Buffer.from(await res.arrayBuffer()) }

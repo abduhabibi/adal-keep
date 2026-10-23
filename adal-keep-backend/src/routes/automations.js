@@ -124,6 +124,14 @@ router.post('/profiles/:profileId/automations/:workflowId/start', async (req, re
           verification,
         })
       }
+    } else if (workflowId === 'wafid_book') {
+      const prof = await db('profiles').where('id', profileId).first()
+      const { bookingValues, missingForBooking } = await import('../services/wafidWorkflow.js')
+      const em = await db('settings').where('key', 'agency_email').first().catch(() => null)
+      const missing = missingForBooking(bookingValues(prof || {}, { email: em?.value || '' }))
+      if (missing.length) {
+        return res.status(400).json({ error: 'Profile is missing for Wafid: ' + missing.join(', '), missing })
+      }
     } else if (workflowId === 'contract_import_labour') {
       const prof = await db('profiles').where('id', profileId).first()
       const missing = []
@@ -182,7 +190,7 @@ router.post('/profiles/:profileId/automations/:workflowId/start', async (req, re
         await db('musaned_accounts').where('id', acct.id).update({ last_used_at: new Date().toISOString() })
         console.log('[AUTO] loaded musaned account:', acct.name, 'username:', acct.username)
       }
-    } else {
+    } else if (!workflowId.startsWith('wafid')) {
       // LMIS path (existing logic)
       let lid = accountId
       if (!lid) {
@@ -376,10 +384,24 @@ router.post('/automations/:id/complete', async (req, res) => {
       updated_at: new Date().toISOString(),
     })
 
+    // What finishing this run starts next.
+    let next = ''
+    try {
+      if (row.workflow_id === 'wafid_book') {
+        // Booked and paid on Wafid: the result checker now watches it.
+        await db('profiles').where('id', row.profile_id).update({ status: 'medical_applied', updated_at: new Date().toISOString() })
+        next = ' Status: Medical · Applied — Adal Keep checks the result on Wafid by itself.'
+      } else if (String(row.workflow_id).startsWith('musaned')) {
+        const { queueWafidBooking } = await import('../services/wafidStatus.js')
+        const q = await queueWafidBooking(db, row.profile_id, 'musaned')
+        if (q.queued) next = ` Wafid medical booking started (run #${q.runId}).`
+      }
+    } catch (e) { console.warn('[complete] next step:', e.message) }
+
     res.json({
       ok: true,
       tabClosed,
-      message: `Run #${runId} marked complete${tabClosed ? ' — its tab was closed' : ''}.`,
+      message: `Run #${runId} marked complete${tabClosed ? ' — its tab was closed' : ''}.${next}`,
     })
   } catch (e) {
     res.status(500).json({ error: e.message })

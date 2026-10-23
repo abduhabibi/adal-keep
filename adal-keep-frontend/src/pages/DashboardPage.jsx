@@ -96,10 +96,16 @@ export default function DashboardPage() {
                   <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
                     profile.status === 'completed' ? 'bg-green-500/20 text-green-300' :
                     profile.status === 'in_progress' ? 'bg-blue-500/20 text-blue-300' :
+                    profile.status === 'medical_fit' ? 'bg-green-500/20 text-green-300' :
+                    profile.status === 'medical_rejected' ? 'bg-red-500/20 text-red-300' :
+                    profile.status === 'medical_applied' ? 'bg-violet-500/20 text-violet-300' :
                     'bg-yellow-500/20 text-yellow-300'
                   }`}>
                     {profile.status === 'completed' ? 'ተጠናቋል' :
-                     profile.status === 'in_progress' ? 'በሂደት' : 'በመጠባበቅ'}
+                     profile.status === 'in_progress' ? 'በሂደት' :
+                     profile.status === 'medical_applied' ? 'ሕክምና · ተመዝግቧል' :
+                     profile.status === 'medical_fit' ? 'ሕክምና · ብቁ' :
+                     profile.status === 'medical_rejected' ? 'ሕክምና · ውድቅ' : 'በመጠባበቅ'}
                   </span>
                 </div>
               </Link>

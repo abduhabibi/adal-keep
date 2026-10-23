@@ -1891,6 +1891,19 @@ export async function runFullWorkflow(page, ctx) {
   const workflowId = ctx.workflowId || 'police_certificate'
   const t0 = Date.now()
 
+  // Wafid medical booking: fills the form and waits for a person to save.
+  if (String(workflowId).startsWith('wafid')) {
+    try {
+      const { runWafidBooking } = await import('./wafidWorkflow.js')
+      return await runWafidBooking(page, ctx)
+    } catch (e) {
+      if (e?.cancelled) throw e
+      const secs = Math.round((Date.now() - t0) / 1000)
+      log(ctx, `wafid booking failed after ${secs}s: ${e.message}`, 'error')
+      return { ok: false, step: 'wafid', error: e.message, seconds: secs }
+    }
+  }
+
   // Every Musaned workflow (musaned_add_candidate, musaned_login) runs the
   // Musaned runner. Matching only one id sent Musaned jobs into the LMIS login.
   if (String(workflowId).startsWith('musaned')) {

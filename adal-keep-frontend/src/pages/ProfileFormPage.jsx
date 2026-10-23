@@ -12,6 +12,9 @@ const STATUS_OPTIONS_AM = [
   { value: 'pending', label: 'በመጠባበቅ ላይ' },
   { value: 'in_progress', label: 'በሂደት ላይ' },
   { value: 'completed', label: 'የተጠናቀቀ' },
+  { value: 'medical_applied', label: 'ሕክምና › ተመዝግቧል (Applied)', group: 'medical' },
+  { value: 'medical_fit', label: 'ሕክምና › ብቁ (Fit)', group: 'medical' },
+  { value: 'medical_rejected', label: 'ሕክምና › ውድቅ (Rejected)', group: 'medical' },
 ]
 
 // Work experience: Musaned's "Experience" field. Countries A→Z.
@@ -350,7 +353,10 @@ export default function ProfileFormPage() {
           <div>
             <label className={labelClass} htmlFor="status">ሁኔታ</label>
             <select id="status" className={inputClass} value={form.status} onChange={setField('status')}>
-              {STATUS_OPTIONS_AM.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+              {STATUS_OPTIONS_AM.filter(s => !s.group).map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+              <optgroup label="ሕክምና · Medical (Wafid)">
+                {STATUS_OPTIONS_AM.filter(s => s.group === 'medical').map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+              </optgroup>
             </select>
           </div>
           <div>

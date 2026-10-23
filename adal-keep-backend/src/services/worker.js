@@ -137,6 +137,13 @@ async function resolveFilePaths(db, profileId) {
   }
 }
 
+/** Agency choices the Wafid form uses (Settings → Wafid). */
+async function wafidSettings(db) {
+  const rows = await db('settings').whereIn('key', ['agency_email', 'wafid_city', 'wafid_issue_place', 'wafid_position']).catch(() => [])
+  const get = (k) => String(rows.find(r => r.key === k)?.value || '').trim()
+  return { email: get('agency_email'), city: get('wafid_city') || 'Addis Ababa', issuePlace: get('wafid_issue_place') || 'ADDIS ABABA', position: get('wafid_position') || 'House Maid' }
+}
+
 // --------------------------------------------------------------------------
 // Run execution — one run, one tab
 // --------------------------------------------------------------------------
@@ -213,10 +220,11 @@ async function executeRun(db, page, job) {
   })()
 
   const isMusaned = job.workflow_id.startsWith('musaned')
-  page.__adalAllowImages = isMusaned
+  const isWafid = job.workflow_id.startsWith('wafid')
+  page.__adalAllowImages = isMusaned || isWafid
   console.log(
     `[worker] run #${runId} image policy: ` +
-    (isMusaned
+    (isMusaned || isWafid
       ? `ALLOW (${job.workflow_id} — reCAPTCHA needs images)`
       : 'BLOCK (bandwidth saver)')
   )
@@ -262,6 +270,7 @@ async function executeRun(db, page, job) {
     slipPath:     files.slipPath,
     onLog,
     notify,
+    wafid: isWafid ? await wafidSettings(db) : null,
   }
 
   ctx.page = page

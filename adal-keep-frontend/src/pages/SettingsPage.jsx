@@ -14,6 +14,7 @@ import { whoAmI } from '../lib/tutor'
 import TutorCard from '../components/TutorCard'
 import TutorAdoption from '../components/TutorAdoption'
 import MainPCCard from '../components/MainPCCard'
+import WafidCard from '../components/WafidCard'
 
 export default function SettingsPage() {
   const { subscription, refresh } = useAuth()
@@ -270,6 +271,7 @@ export default function SettingsPage() {
         </p>
       </Card>
 
+      {import.meta.env.VITE_DEMO !== '1' && <WafidCard />}
       {import.meta.env.VITE_DEMO !== '1' && <MainPCCard />}
 
       <Card>

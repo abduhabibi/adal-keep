@@ -27,6 +27,16 @@ export const WORKFLOWS = {
     stepCount: 4,
   },
 
+  wafid_book: {
+    id: 'wafid_book',
+    name: 'Book Wafid medical',
+    description:
+      'Wafid → appointment location → Standard Appointment → fill every detail + "I confirm…" → a person presses Save And Continue, enters the SMS code and pays',
+    target: 'https://wafid.com/en/book-appointment/',
+    consts: {},
+    stepCount: 3,
+  },
+
 }
 
 export function listWorkflows() {

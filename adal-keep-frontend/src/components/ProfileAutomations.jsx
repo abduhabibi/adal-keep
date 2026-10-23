@@ -7,7 +7,7 @@ import MusanedAccountPicker from './MusanedAccountPicker'
 // What a paused run is waiting for, in words.
 const PAUSE_TEXT = {
   'awaiting-human-submit':    'waiting for you to check the LMIS form and press Submit',
-  'awaiting-human-save':      'waiting for you to check the Musaned form and press SAVE',
+  'awaiting-human-save':      'waiting for you to check the form and press SAVE',
   'awaiting-musaned-login':   'waiting for you to sign in to Musaned',
   'awaiting-musaned-captcha': 'waiting for you to solve the reCAPTCHA',
   'awaiting-musaned-otp':     'waiting for the OTP code from your phone',

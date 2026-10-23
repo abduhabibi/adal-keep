@@ -2,6 +2,9 @@ export const STATUS_OPTIONS = [
   { value: 'pending', label: 'Pending', className: 'bg-amber-50 text-amber-800 ring-1 ring-amber-200' },
   { value: 'in_progress', label: 'In progress', className: 'bg-sky-50 text-sky-800 ring-1 ring-sky-200' },
   { value: 'completed', label: 'Completed', className: 'bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200' },
+  { value: 'medical_applied', label: 'Medical · Applied', className: 'bg-violet-50 text-violet-800 ring-1 ring-violet-200' },
+  { value: 'medical_fit', label: 'Medical · Fit', className: 'bg-green-50 text-green-800 ring-1 ring-green-200' },
+  { value: 'medical_rejected', label: 'Medical · Rejected', className: 'bg-red-50 text-red-800 ring-1 ring-red-200' },
 ]
 
 export function statusMeta(status) {

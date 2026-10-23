@@ -40,6 +40,8 @@ import chatRouter, { watchPaid } from './src/routes/chat.js'
 import trashRouter from './src/routes/trash.js'
 import mainPCRouter from './src/routes/mainPC.js'
 import branchMergeRouter from './src/routes/branchMerge.js'
+import wafidRouter from './src/routes/wafid.js'
+import { startWafidChecker } from './src/services/wafidStatus.js'
 import { isFollower, mainURL, instanceId } from './src/services/mainPC.js'
 import { moveToTrash } from './src/services/trash.js'
 import { startDiscoveryResponder } from './src/services/discovery.js'
@@ -107,6 +109,7 @@ app.use('/api', chatRouter)
 app.use('/api', trashRouter)
 app.use('/api', mainPCRouter)
 app.use('/api', branchMergeRouter)
+app.use('/api', wafidRouter)
 watchPaid(db)
 
 // Utility function to safely check/add missing columns
@@ -976,6 +979,7 @@ initSystem().then(() => {
     startFolderWatcher(db, 1)     // watches the inbox for new files
     startWorker(db)               // runs queued jobs, each in its own tab
     startScanner(db)              // discovers new work every 2 min
+    startWafidChecker(db)         // Medical · Applied → Fit / Rejected from wafid.com
     console.log('🤖 Automation: worker + scanner running')
 
     // Answer Employee PCs that broadcast "where is Adal Keep?" on the LAN.

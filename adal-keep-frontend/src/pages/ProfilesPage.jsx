@@ -14,6 +14,9 @@ const STATUS_OPTIONS_AM = [
   { value: 'pending', label: 'በመጠባበቅ ላይ' },
   { value: 'in_progress', label: 'በሂደት ላይ' },
   { value: 'completed', label: 'የተጠናቀቀ' },
+  { value: 'medical_applied', label: 'ሕክምና › ተመዝግቧል (Applied)', group: 'medical' },
+  { value: 'medical_fit', label: 'ሕክምና › ብቁ (Fit)', group: 'medical' },
+  { value: 'medical_rejected', label: 'ሕክምና › ውድቅ (Rejected)', group: 'medical' },
 ]
 
 export default function ProfilesPage() {

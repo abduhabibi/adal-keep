@@ -8,6 +8,7 @@ import api from '../services/api'
 import Card from './shared/Card'
 import Button from './shared/Button'
 import jsQR from 'jsqr'
+import QRCode from 'qrcode'
 
 const field = 'w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm'
 const err = (e) => e?.response?.data?.error || e.message
@@ -34,13 +35,11 @@ async function readQr(src) {
   } finally { if (typeof src !== 'string') URL.revokeObjectURL(url) }
 }
 
-function Copy({ text }) {
-  return (
-    <div className="flex gap-2 items-center">
-      <code className="flex-1 min-w-0 truncate rounded bg-slate-100 dark:bg-slate-900 px-2 py-1 text-xs">{text}</code>
-      <Button size="sm" variant="secondary" onClick={() => navigator.clipboard.writeText(text).then(() => toast.success('Copied'))}>Copy</Button>
-    </div>
-  )
+/** A QR code the phone camera opens. */
+function Qr({ text }) {
+  const [src, setSrc] = useState('')
+  useEffect(() => { QRCode.toDataURL(text, { margin: 2, width: 220 }).then(setSrc).catch(() => setSrc('')) }, [text])
+  return src ? <img src={src} alt="QR code for the phone" width={220} height={220} className="rounded-lg border border-slate-200 bg-white" /> : null
 }
 
 export default function SignInCodesCard() {
@@ -48,6 +47,7 @@ export default function SignInCodesCard() {
   const [now, setNow] = useState(null)
   const [tab, setTab] = useState('android')
   const [reading, setReading] = useState(false)
+  const [via, setVia] = useState(0)
 
   const saveKey = async (secret, ok = 'QR code saved. If Musaned is waiting for a code now, type the one shown here.') => {
     try { await api.post('/otp/totp', { secret }); toast.success(ok, { duration: 7000 }); load(); return true }
@@ -84,8 +84,12 @@ export default function SignInCodesCard() {
   }, [c?.musaned_totp])
 
   if (!c) return null // not the main PC itself
-  const urls = [...(c.sms_urls?.office || []), ...(c.sms_urls?.tailscale ? [c.sms_urls.tailscale] : [])]
-  const phoneUrl = c.sms_urls?.tailscale || c.sms_urls?.office?.[0] || ''
+  const pages = [
+    ...(c.phone_pages?.office || []).map(u => ({ u, label: 'Phone on the office Wi-Fi' })),
+    ...(c.phone_pages?.tailscale ? [{ u: c.phone_pages.tailscale, label: 'Phone with Tailscale (Wi-Fi or mobile data)' }] : []),
+  ]
+  const page = pages[Math.min(via, Math.max(0, pages.length - 1))]
+  const seen = c.sms?.phone_seen_at
 
   return (
     <Card>
@@ -122,12 +126,45 @@ export default function SignInCodesCard() {
       </section>
 
       {c.here && <section translate="no">
-        <h3 className="font-semibold">LMIS — SMS codes from a phone {c.sms?.count > 0 && <span className="text-teal-600">✓ messages arriving</span>}</h3>
-        <p className="text-sm text-slate-500 my-2">
-          The phone with the SIM that gets the LMIS codes stays in the office, charging, with internet (Wi-Fi or mobile data).
-          Each SMS it gets is sent to this PC, which types the code into LMIS. With Tailscale on the phone it works on mobile data too.
+        <h3 className="font-semibold">LMIS — SMS codes from a phone</h3>
+        <div className={`my-2 rounded-lg px-3 py-2 text-sm ${seen ? 'bg-teal-50 text-teal-800 dark:bg-teal-900/30 dark:text-teal-200' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}>
+          {seen ? <>📱 <b>Phone connected</b> — last heard {new Date(seen).toLocaleString()}</> : <>📱 No phone connected yet — do step 1.</>}
+          {c.sms?.last_at && <> · last SMS {new Date(c.sms.last_at).toLocaleString()}{c.sms.last_from ? ` from ${c.sms.last_from}` : ''}</>}
+        </div>
+        <p className="text-sm text-slate-500 mb-3">
+          Use the phone with the SIM that gets the LMIS codes. It stays in the office, charging, with internet. Each SMS it gets is sent to this PC, which types the code into LMIS.
         </p>
-        <div className="flex gap-2 mb-2">
+
+        <p className="font-semibold text-sm">Step 1 — connect the phone (1 minute)</p>
+        <div className="flex flex-wrap gap-4 items-start mt-1">
+          {page ? <Qr text={page.u} /> : <p className="text-sm text-red-600">This PC has no network address yet.</p>}
+          <ol className="list-decimal pl-5 text-sm text-slate-600 dark:text-slate-300 space-y-1 flex-1 min-w-[220px]">
+            <li>Put the phone on the <b>office Wi-Fi</b> (the same one as this PC).</li>
+            <li>Open the phone's <b>camera</b>, point it at this QR code and tap the link that appears.</li>
+            <li>The phone shows <b>“✅ This phone reaches Adal Keep”</b> and this card turns green: <b>Phone connected</b>.</li>
+            <li>Keep that page open — step 2 copies the link from it.</li>
+          </ol>
+        </div>
+        {pages.length > 1 && (
+          <div className="flex flex-wrap gap-2 mt-2">
+            {pages.map((p, n) => (
+              <button key={p.u} type="button" onClick={() => setVia(n)}
+                className={`rounded-lg px-2 py-1 text-xs border ${n === via ? 'border-teal-500 bg-teal-50 dark:bg-teal-900/20' : 'border-slate-300 dark:border-slate-600'}`}>{p.label}{p.u.includes('//100.') ? '' : ` · ${new URL(p.u).hostname}`}</button>
+            ))}
+          </div>
+        )}
+        <details className="mt-2 text-sm">
+          <summary className="cursor-pointer text-slate-600 dark:text-slate-300">The page does not open on the phone?</summary>
+          <ul className="list-disc pl-5 mt-1 text-slate-500 space-y-0.5">
+            <li>The phone must be on the same Wi-Fi as this PC — not mobile data, not a guest Wi-Fi.</li>
+            <li>Try the other address button above the QR code (if there is one).</li>
+            <li>Run “2 - Install Adal Main.exe” from the USB once on this PC: it opens the Windows firewall for Adal Keep.</li>
+            <li>For mobile data: install Tailscale on the phone, sign in with the agency Google account, then use the Tailscale button.</li>
+          </ul>
+        </details>
+
+        <p className="font-semibold text-sm mt-4">Step 2 — the SMS app</p>
+        <div className="flex gap-2 my-1">
           {['android', 'iphone'].map(t => (
             <button key={t} type="button" onClick={() => setTab(t)}
               className={`rounded-lg px-3 py-1 text-sm border ${tab === t ? 'border-teal-500 bg-teal-50 dark:bg-teal-900/20' : 'border-slate-300 dark:border-slate-600'}`}>
@@ -137,35 +174,26 @@ export default function SignInCodesCard() {
         </div>
         {tab === 'android' ? (
           <ol className="list-decimal pl-5 text-sm text-slate-600 dark:text-slate-300 space-y-1">
-            <li>Play Store → install <b>“SMS to URL Forwarder”</b> (by Konstantin Bogomolov, free, no account). Allow it to read SMS.</li>
-            <li>Press <b>+</b>. Sender: <b>*</b> (or the LMIS sender name once you have seen one). URL: the link below.</li>
-            <li>JSON template: <code>{'{"from":"%from%","text":"%text%"}'}</code> — keep it as the app shows it.</li>
-            <li>Phone Settings → Apps → SMS to URL Forwarder → Battery → <b>Unrestricted</b>, so Android never stops it.</li>
-            <li>Send the phone any SMS with a number in it (e.g. “test 1234”): “Last message” below changes.</li>
+            <li>Play Store → search <b>“SMS to URL Forwarder”</b> → Install → Open. Allow it to <b>read SMS</b> and send notifications.</li>
+            <li>On the page from step 1 press <b>Copy the link</b>.</li>
+            <li>In the app press <b>+</b>. <b>Sender</b>: <code>*</code> (every sender). <b>URL</b>: paste the link. Leave the rest as it is. Press <b>Save</b>.</li>
+            <li>Phone Settings → Apps → SMS to URL Forwarder → Battery → <b>Unrestricted</b> (so Android never stops it).</li>
           </ol>
         ) : (
           <ol className="list-decimal pl-5 text-sm text-slate-600 dark:text-slate-300 space-y-1">
-            <li>Open <b>Shortcuts</b> → Automation → <b>+</b> → <b>Message</b>. Sender: the LMIS sender (after the first LMIS SMS), or “Message contains: code”. Choose <b>Run Immediately</b>.</li>
-            <li>Add the action <b>Get Contents of URL</b>: the link below, Method <b>POST</b>, Request Body <b>JSON</b>, field <code>text</code> = <b>Shortcut Input</b> (the message).</li>
-            <li>Send the phone an SMS with a number in it: “Last message” below changes.</li>
+            <li>On the page from step 1 press <b>Copy the link</b>.</li>
+            <li>Open <b>Shortcuts</b> → <b>Automation</b> → <b>+</b> → <b>Message</b> → “Message contains”: <code>code</code> (or choose the LMIS sender) → <b>Run Immediately</b> → Next.</li>
+            <li>New blank automation → add action <b>Get Contents of URL</b>. URL: paste the link. Tap ▸: Method <b>POST</b>, Request Body <b>JSON</b>, add field <code>text</code> → value: <b>Shortcut Input</b> (Message). Done.</li>
           </ol>
         )}
-        <div className="mt-3 space-y-1">
-          <p className="text-xs text-slate-500">Link for the phone ({c.sms_urls?.tailscale ? 'the Tailscale one works on Wi-Fi and mobile data' : 'office Wi-Fi only — install Tailscale on the phone for mobile data'}):</p>
-          {phoneUrl ? <Copy text={phoneUrl} /> : <p className="text-sm text-red-600">This PC has no network address yet.</p>}
-          {urls.length > 1 && (
-            <details className="text-xs text-slate-500"><summary className="cursor-pointer">Other addresses of this PC</summary>
-              <div className="mt-1 space-y-1">{urls.filter(u => u !== phoneUrl).map(u => <Copy key={u} text={u} />)}</div>
-            </details>
-          )}
-          <p className="text-sm mt-2">
-            Last message: {c.sms?.last_at ? <b>{new Date(c.sms.last_at).toLocaleString()}{c.sms.last_from ? ` from ${c.sms.last_from}` : ''}</b> : <span className="text-slate-500">none yet</span>}
-          </p>
-          <button type="button" className="text-xs text-slate-500 hover:underline" onClick={async () => {
-            if (!confirm('Make a new link? The phone must then get the new link, the old one stops working.')) return
-            await api.post('/otp/sms-key'); load()
-          }}>Phone lost? Make a new link</button>
-        </div>
+
+        <p className="font-semibold text-sm mt-4">Step 3 — test</p>
+        <p className="text-sm text-slate-600 dark:text-slate-300">From another phone, send this phone an SMS (any text). Within a few seconds “last SMS” above shows it. Done — LMIS codes now arrive the same way.</p>
+
+        <button type="button" className="mt-3 text-xs text-slate-500 hover:underline" onClick={async () => {
+          if (!confirm('Make a new link? The phone must scan the new QR code again; the old link stops working.')) return
+          await api.post('/otp/sms-key'); load()
+        }}>Phone lost or changed? Make a new link</button>
       </section>}
     </Card>
   )

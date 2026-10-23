@@ -15,6 +15,9 @@
  * hand. The reCAPTCHA is never touched: a person solves it.
  */
 import crypto from 'crypto'
+import fs from 'fs'
+import path from 'path'
+import { fileURLToPath } from 'url'
 import { getSecret, setSecret } from './secretStore.js'
 import { openBrowserIfAny } from './browser.js'
 
@@ -126,7 +129,17 @@ export function totpNow(portal = 'musaned') {
 // ----------------------------------------------------------------- SMS ----
 
 const sms = [] // { code, from, at, used } — kept in memory for 10 minutes only
-export const smsStatus = { last_at: null, last_from: null, count: 0 }
+export const smsStatus = { last_at: null, last_from: null, count: 0, phone_seen_at: null }
+
+// When the phone was last heard from (its check page or an SMS), kept across
+// restarts so Settings can say "phone connected".
+const PHONE_FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../data/otp-phone.json')
+try { Object.assign(smsStatus, JSON.parse(fs.readFileSync(PHONE_FILE, 'utf8'))) } catch {}
+export function phoneSeen(extra = {}) {
+  smsStatus.phone_seen_at = new Date().toISOString()
+  Object.assign(smsStatus, extra)
+  try { fs.writeFileSync(PHONE_FILE, JSON.stringify({ phone_seen_at: smsStatus.phone_seen_at, last_at: smsStatus.last_at, last_from: smsStatus.last_from, count: smsStatus.count })) } catch {}
+}
 
 export function smsKey() {
   let k = getSecret('otp_sms_key')
@@ -149,10 +162,12 @@ export function codeFromText(text) {
 
 /** An SMS the phone forwarded. Returns the code found, or null. */
 export function receiveSms({ from = '', text = '' }) {
-  const code = codeFromText(text)
+  // The test button on the phone page: counts as "phone works", never as a code.
+  const code = /ADAL-KEEP-TEST/.test(text) ? null : codeFromText(text)
   smsStatus.last_at = new Date().toISOString()
   smsStatus.last_from = String(from || '').slice(0, 40)
   smsStatus.count++
+  phoneSeen()
   if (!code) return null
   const now = Date.now()
   while (sms.length && now - sms[0].at > SMS_KEEP_MS) sms.shift()
@@ -271,7 +286,7 @@ export function startOtpWatcher() {
   let busy = false
   timer = setInterval(async () => {
     if (busy) return
-    if (!hasTotp('musaned') && !smsStatus.count) return // nothing set up yet
+    if (!hasTotp('musaned') && !smsStatus.phone_seen_at) return // nothing set up yet
     busy = true
     try {
       const browser = await openBrowserIfAny()

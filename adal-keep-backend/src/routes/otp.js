@@ -10,7 +10,7 @@
  */
 import express from 'express'
 import { onThisPC } from './trash.js'
-import { hasTotp, saveTotp, removeTotp, totpNow, smsKey, newSmsKey, smsKeyOk, receiveSms, smsStatus } from '../services/otp.js'
+import { hasTotp, saveTotp, removeTotp, totpNow, smsKey, newSmsKey, smsKeyOk, receiveSms, smsStatus, phoneSeen } from '../services/otp.js'
 import { describe } from '../services/mainPC.js'
 import { openBrowserIfAny } from '../services/browser.js'
 
@@ -34,6 +34,44 @@ router.post('/otp/sms', anyBody, (req, res) => {
   res.json({ ok: true, code_found: !!code })
 })
 
+/**
+ * The page the SMS phone opens (from the QR code in Settings). Opening it
+ * proves the phone reaches this PC; it shows the link for the SMS app with a
+ * Copy button and a "Send a test" button.
+ */
+router.get('/otp/phone', (req, res) => {
+  const ok = smsKeyOk(req.query.key)
+  if (ok) phoneSeen()
+  const host = String(req.get('host') || '').replace(/[^A-Za-z0-9.:\-\[\]]/g, '')
+  const link = `http://${host}/api/otp/sms?key=${encodeURIComponent(String(req.query.key || ''))}`
+  const tpl = '{"from":"%from%","text":"%text%"}'
+  const esc = (t) => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
+  res.set('Content-Type', 'text/html; charset=utf-8').send(`<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Adal Keep phone</title>
+<style>body{font:17px/1.5 system-ui,sans-serif;margin:0;padding:16px;background:#f8fafc;color:#0f172a}
+.ok{background:#dcfce7;border-radius:14px;padding:14px;font-weight:600}.bad{background:#fee2e2;border-radius:14px;padding:14px;font-weight:600}
+h2{font-size:18px;margin:22px 0 6px}textarea{width:100%;box-sizing:border-box;font:14px monospace;padding:8px;border:1px solid #cbd5e1;border-radius:10px;height:70px}
+button{display:block;width:100%;margin-top:8px;padding:14px;font:600 17px system-ui;border:0;border-radius:12px;background:#0d9488;color:#fff}
+.s{color:#475569;font-size:15px}#r{margin-top:8px;font-weight:600}</style></head><body>
+${ok ? `<div class="ok">✅ This phone reaches Adal Keep.</div>
+<h2>1. Copy the link for the SMS app</h2>
+<textarea id="l" readonly>${esc(link)}</textarea><button onclick="cp('l',this)">Copy the link</button>
+<h2>2. Copy the message template</h2>
+<p class="s">Only needed if the app asks for a “JSON template”.</p>
+<textarea id="t" readonly>${esc(tpl)}</textarea><button onclick="cp('t',this)">Copy the template</button>
+<h2>3. Test the link</h2>
+<button onclick="test()">Send a test to Adal Keep</button><div id="r"></div>
+<p class="s">Then open the SMS forwarder app and paste the link there (see the guide in Settings → Sign-in codes).</p>`
+  : `<div class="bad">❌ This link is old or wrong. Scan the QR code in Adal Keep → Settings → Sign-in codes again.</div>`}
+<script>
+function cp(id,b){var e=document.getElementById(id);e.focus();e.select();e.setSelectionRange(0,99999);var ok=false;try{ok=document.execCommand('copy')}catch(x){}
+b.textContent=ok?'Copied ✓':'Press and hold the text to copy it'}
+function test(){var r=document.getElementById('r');r.textContent='Sending…';
+fetch(${JSON.stringify(link)},{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from:'test',text:'ADAL-KEEP-TEST'})})
+.then(function(x){r.textContent=x.ok?'✅ Adal Keep got the test. Settings now says the phone is connected.':'❌ Adal Keep said '+x.status}).catch(function(e){r.textContent='❌ '+e})}
+</script></body></html>`)
+})
+
 router.get('/otp', async (req, res) => {
   // Other PCs see only the Musaned QR part; the SMS link stays on the main PC.
   if (!onThisPC(req)) return res.json({ here: false, musaned_totp: hasTotp('musaned') })
@@ -48,6 +86,11 @@ router.get('/otp', async (req, res) => {
     sms_urls: {
       office: (info.lan || []).map(u => u + path),
       tailscale: ts.ip ? `http://${ts.ip}:${info.port || 4000}${path}` : null,
+    },
+    // What the phone scans: its own page with the link, Copy and Test buttons.
+    phone_pages: {
+      office: (info.lan || []).map(u => `${u}/api/otp/phone?key=${key}`),
+      tailscale: ts.ip ? `http://${ts.ip}:${info.port || 4000}/api/otp/phone?key=${key}` : null,
     },
   })
 })

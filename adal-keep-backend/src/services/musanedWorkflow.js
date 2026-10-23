@@ -2179,7 +2179,12 @@ export async function runMusanedWorkflow(page, ctx) {
 
   try {
     if (stage === 'awaiting-musaned-captcha' || stage === 'awaiting-musaned-otp') {
-      const review = await classifyScreen(page, ctx)
+      let review = await classifyScreen(page, ctx)
+      if (review.screen === 'captcha') {
+        const w = await waitForPersonCaptcha(page, ctx)
+        if (w === 'timeout') return { ok: true, pauseReason: 'awaiting-musaned-captcha', seconds: Math.round((Date.now() - t0) / 1000) }
+        review = await classifyScreen(page, ctx)
+      }
       if (review.screen === 'agency-picker') {
         await stepClickAgencyCard(page, ctx)
         const after = await waitForDashboard(page, ctx, 30000)
@@ -2202,7 +2207,12 @@ export async function runMusanedWorkflow(page, ctx) {
         if (fill.filled) await sleep(1500)
       }
       await sleep(2000)
-      const review = await classifyScreen(page, ctx)
+      let review = await classifyScreen(page, ctx)
+      if (review.screen === 'captcha') {
+        const w = await waitForPersonCaptcha(page, ctx)
+        if (w === 'timeout') return { ok: true, pauseReason: 'awaiting-musaned-captcha', seconds: Math.round((Date.now() - t0) / 1000) }
+        review = await classifyScreen(page, ctx)
+      }
       if (review.screen === 'agency-picker') {
         await stepClickAgencyCard(page, ctx)
         const after = await waitForDashboard(page, ctx, 30000)
@@ -2258,6 +2268,43 @@ export async function runMusanedWorkflow(page, ctx) {
     await dumpPageState(page, ctx, 'musaned')
     return { ok: false, step: 'musaned', error: e.message, seconds: secs }
   }
+}
+
+/**
+ * Musaned's "I'm not a robot" is answered by a person — Adal Keep never
+ * ticks it. The run brings its tab to the front, rings and waits (up to 10
+ * minutes). As soon as the box is ticked it presses Sign In itself and
+ * carries on: the authenticator code and the rest of the work follow.
+ */
+async function waitForPersonCaptcha(page, ctx) {
+  await page.bringToFront().catch(() => {})
+  await ctx.notify(`🖐 ${ctx.profileName}: tick "I'm not a robot" on Musaned`,
+    'Only the tick (and the pictures, if Google shows some). Adal Keep signs in and continues by itself.')
+  log(ctx, '🖐 waiting for a person to tick "I\'m not a robot" (up to 10 min)')
+  const deadline = Date.now() + 10 * 60 * 1000
+  while (Date.now() < deadline) {
+    if (typeof ctx.isCancelled === 'function' && ctx.isCancelled()) { const e = new Error('Cancelled by user'); e.cancelled = true; throw e }
+    const st = await page.evaluate(() => ({
+      ticked: [...document.querySelectorAll('textarea[name="g-recaptcha-response"]')].some(t => (t.value || '').length > 20),
+      onLogin: !!document.querySelector('input[type="password"]'),
+    })).catch(() => null)
+    if (st && !st.onLogin) { log(ctx, '✓ the person signed in'); return 'signed-in' }
+    if (st?.ticked) {
+      log(ctx, '✓ "I\'m not a robot" ticked — pressing Sign In')
+      // Musaned may have cleared the password meanwhile: fill it again.
+      const pw = await page.$('#password, input[name="password"], input[type="password"]')
+      if (pw && !(await pw.evaluate(e => e.value).catch(() => ''))) await fillField(page, pw, String(ctx.musaned_password || ''), 'password', ctx)
+      await page.evaluate(() => {
+        const b = document.querySelector('#kc-login') || document.querySelector('button[type="submit"], input[type="submit"]')
+        b?.click()
+      }).catch(() => {})
+      await sleep(3000)
+      return 'submitted'
+    }
+    await sleep(1000)
+  }
+  log(ctx, 'nobody ticked "I\'m not a robot" within 10 minutes', 'warn')
+  return 'timeout'
 }
 
 /**

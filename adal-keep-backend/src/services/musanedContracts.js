@@ -74,7 +74,7 @@ async function search(page, passport) {
   if (!filter.asElement()) throw new Error('Musaned: the "Passport Number" filter was not found')
   await filter.asElement().evaluate(f => f.querySelector('button.app-filter-header, .app-filter-header')?.click())
   await sleep(700)
-  const input = await filter.asElement().$('input')
+  const input = await filter.asElement().$('textarea, input') // Musaned uses a <textarea>
   if (!input) throw new Error('Musaned: the passport search box did not open')
   await input.evaluate(i => { i.focus(); i.value = '' })
   await input.type(passport, { delay: 40 })
@@ -99,44 +99,57 @@ async function search(page, passport) {
 /** The card: "SENT TO SAUDI EMBASSY … 2005575571 1908448891 … Paid 2026-09-21 11:40". */
 export function parseCard(text) {
   const t = String(text || '')
-  const stage = (t.split('\n')[0] || '').trim()
-  const nums = t.match(/\b\d{10}\b/g) || []
-  const pay = t.match(/\b(Unpaid|Paid)\b/i)?.[1]
-  const date = t.match(/\b(\d{4}-\d{2}-\d{2})\b/)?.[1]
-  return { stage: /CONTRACT NUMBER/i.test(stage) ? '' : stage.toUpperCase(), contract_number: nums[0] || '', visa_number: nums[1] || '', payment: pay ? pay[0].toUpperCase() + pay.slice(1).toLowerCase() : '', created: date || '' }
+  const lines = t.split('\n').map(x => x.trim()).filter(Boolean)
+  const after = (label) => { const i = lines.findIndex(x => x.toUpperCase() === label); return i >= 0 ? (lines[i + 1] || '') : '' }
+  const stage = lines[0] || ''
+  const employer = after('EMPLOYER')            // "1111702179 - ABDULLAH ALIHMADI"
+  const pay = after('PAYMENT')
+  return {
+    stage: /CONTRACT NUMBER/i.test(stage) ? '' : stage.toUpperCase(),
+    contract_number: after('CONTRACT NUMBER'),
+    visa_number: after('VISA NUMBER'),
+    employer_id: employer.match(/^(\d{6,})\s*-/)?.[1] || '',
+    employer_name: employer.replace(/^\d{6,}\s*-\s*/, ''),
+    job: after('JOB'),
+    pro: after('PRO'),
+    payment: /^unpaid$/i.test(pay) ? 'Unpaid' : /^paid$/i.test(pay) ? 'Paid' : pay,
+    created: after('CREATION DATE').match(/\d{4}-\d{2}-\d{2}/)?.[0] || '',
+  }
 }
 
-/** Label → value pairs from the contract page (labels like "VISA NUMBER:" / "City of Work:"). */
+/**
+ * Label → value pairs from the contract page. Musaned shows each detail as a
+ * label element (.form-label / .app-info-partial-label) followed by its value.
+ * The employer box comes first; a label seen again (Mobile Number, Visa
+ * Number in the candidate box) is kept as "Candidate · <label>".
+ */
 function readDetails() {
   const pairs = {}
   const clean = (s) => String(s || '').replace(/\s+/g, ' ').trim()
-  const els = [...document.querySelectorAll('body *')].filter(e => e.children.length === 0 && /:\s*$/.test(e.textContent || '') && (e.textContent || '').length < 60)
-  for (const el of els) {
+  for (const el of document.querySelectorAll('.form-label, .app-info-partial-label')) {
     const label = clean(el.textContent).replace(/:$/, '')
-    // The value is the next element with text (same parent first, then the parent's next sibling).
-    let v = ''
-    let n = el.nextElementSibling
-    while (n && !v) { v = clean(n.innerText); n = n.nextElementSibling }
-    if (!v) { let p = el.parentElement?.nextElementSibling; while (p && !v) { v = clean(p.innerText); p = p.nextElementSibling } }
-    if (label && v && v.length < 300 && !(label in pairs)) pairs[label] = v
+    const v = clean(el.nextElementSibling?.innerText)
+    if (!label || !v || v.length > 300) continue
+    if (/\.pdf$/i.test(v) || /^Attachments$/i.test(label)) continue
+    pairs[label in pairs ? `Candidate · ${label}` : label] = v
   }
   const body = document.body.innerText || ''
-  const stages = [...document.querySelectorAll('*')].filter(e => e.children.length <= 1 && /^\s*✓/.test(e.textContent || '') && (e.textContent || '').length < 40).map(e => clean(e.textContent).replace(/^✓\s*/, ''))
+  const stages = [...document.querySelectorAll('.app-status-wizard-item.done')].map(e => clean(e.textContent))
   const tawassut = body.match(/Tawassut Contract Number\s*(\d+)/i)?.[1] || ''
   const contract = body.match(/Contract\s*#\s*(\d+)/i)?.[1] || ''
-  // Party boxes: "EMPLOYER INFO" heading then the name.
   const employerName = (() => {
     const h = [...document.querySelectorAll('*')].find(e => e.children.length === 0 && /^\s*EMPLOYER INFO\s*$/i.test(e.textContent || ''))
-    let n = h?.parentElement?.nextElementSibling || h?.nextElementSibling
-    return n ? clean(n.innerText).split('\n')[0].slice(0, 120) : ''
+    let box = h?.parentElement
+    for (let i = 0; i < 3 && box && clean(box.innerText).replace(/EMPLOYER INFO/i, '').trim().length < 3; i++) box = box.parentElement
+    const lines = String(box?.innerText || '').split('\n').map(clean).filter(x => x && !/^EMPLOYER INFO$/i.test(x))
+    return (lines[0] || '').slice(0, 120)
   })()
-  const pdfs = [...document.querySelectorAll('a, span, button')].filter(a => /\.pdf\s*$/i.test(a.textContent || '')).map(a => {
-    // The label above the link: "Generated contract template:" …
-    let lab = ''
-    let p = a
-    for (let i = 0; i < 4 && p && !lab; i++) {
-      let s = p.previousElementSibling
-      while (s && !lab) { if (/:\s*$/.test(s.textContent || '')) lab = clean(s.textContent); s = s.previousElementSibling }
+  const pdfs = [...document.querySelectorAll('a, span, button')].filter(a => a.children.length === 0 && /\.pdf\s*$/i.test(a.textContent || '')).map(a => {
+    // The label above the link: "Generated contract template", "PRO and EMPLOYER signed contract" …
+    let lab = '', p = a
+    for (let i = 0; i < 5 && p && !lab; i++) {
+      let sib = p.previousElementSibling
+      while (sib && !lab) { const t = clean(sib.innerText); if (t && !/\.pdf$/i.test(t)) lab = t; sib = sib.previousElementSibling }
       p = p.parentElement
     }
     return { name: clean(a.textContent), label: lab }
@@ -240,20 +253,20 @@ async function checkOne(db, browser, page, p) {
   const now = new Date().toISOString()
   const first = !p.chosen_at
   const update = {
-    musaned_stage: card.stage || d.stages[d.stages.length - 1] || p.musaned_stage,
-    musaned_payment: card.payment || pick(d.pairs, 'Payment'),
-    musaned_pro: pick(d.pairs, 'PRO', 'Recruitment Office') || p.musaned_pro,
+    musaned_stage: card.stage || (d.stages.length ? d.stages[d.stages.length - 1].toUpperCase() : p.musaned_stage),
+    musaned_payment: card.payment || (d.stages.some(x => /^paid$/i.test(x)) ? 'Paid' : p.musaned_payment),
+    musaned_pro: card.pro || p.musaned_pro,
     contract_number: d.contract || card.contract_number,
-    visa_number: pick(d.pairs, 'VISA NUMBER', 'Visa Number') || card.visa_number,
+    visa_number: pick(d.pairs, 'Visa Number') || card.visa_number,
     tawassut_number: d.tawassut || p.tawassut_number,
-    employer_name: d.employerName || p.employer_name,
-    employer_id: pick(d.pairs, 'National ID', 'National ID Number', 'Employer ID', 'ID Number') || p.employer_id,
-    employer_phone: pick(d.pairs, 'MOBILE NUMBER', 'Mobile Number', 'Phone') || p.employer_phone,
-    employer_address: pick(d.pairs, 'LOCATION', 'Location', 'Address') || p.employer_address,
+    employer_name: d.employerName || card.employer_name || p.employer_name,
+    employer_id: card.employer_id || p.employer_id,
+    employer_phone: pick(d.pairs, 'Mobile Number') || p.employer_phone,
+    employer_address: pick(d.pairs, 'Location') || p.employer_address,
     work_city: pick(d.pairs, 'City of Work') || p.work_city,
     salary: pick(d.pairs, 'Salary') || p.salary,
     issuing_authority: pick(d.pairs, 'Issuing Authority') || p.issuing_authority,
-    job_title: pick(d.pairs, 'Job', 'Occupation', 'Profession') || p.job_title,
+    job_title: card.job || pick(d.pairs, 'Job') || p.job_title,
     contract_date: card.created || p.contract_date,
     contract_data: JSON.stringify({ ...JSON.parse(p.contract_data || '{}'), ...d.pairs, stages: d.stages, card: s.cards[0] }),
     contract_checked_at: now,

@@ -73,24 +73,32 @@ fetch(${JSON.stringify(link)},{method:'POST',headers:{'Content-Type':'applicatio
 })
 
 router.get('/otp', async (req, res) => {
-  // Other PCs see only the Musaned QR part; the SMS link stays on the main PC.
-  if (!onThisPC(req)) return res.json({ here: false, musaned_totp: hasTotp('musaned') })
+  // Every agency PC shows the phone QR code; only the main PC can make a new link
+  // or remove the Musaned key.
   const info = await describe().catch(() => ({ lan: [], tailscale: {} }))
   const key = smsKey()
   const path = `/api/otp/sms?key=${key}`
   const ts = info.tailscale || {}
+  const port = info.port || 4000
+  const office = [...(info.lan || [])]
+  // The address this browser used to reach the main PC reaches it from the phone too.
+  const host = String(req.headers.host || '')
+  if (host && !/^(localhost|127\.|\[::1\])/.test(host) && !host.startsWith('100.')) {
+    const u = `http://${host}`
+    if (!office.includes(u)) office.unshift(u)
+  }
   res.json({
-    here: true,
+    here: onThisPC(req),
     musaned_totp: hasTotp('musaned'),
     sms: { ...smsStatus },
     sms_urls: {
-      office: (info.lan || []).map(u => u + path),
-      tailscale: ts.ip ? `http://${ts.ip}:${info.port || 4000}${path}` : null,
+      office: office.map(u => u + path),
+      tailscale: ts.ip ? `http://${ts.ip}:${port}${path}` : null,
     },
     // What the phone scans: its own page with the link, Copy and Test buttons.
     phone_pages: {
-      office: (info.lan || []).map(u => `${u}/api/otp/phone?key=${key}`),
-      tailscale: ts.ip ? `http://${ts.ip}:${info.port || 4000}/api/otp/phone?key=${key}` : null,
+      office: office.map(u => `${u}/api/otp/phone?key=${key}`),
+      tailscale: ts.ip ? `http://${ts.ip}:${port}/api/otp/phone?key=${key}` : null,
     },
   })
 })

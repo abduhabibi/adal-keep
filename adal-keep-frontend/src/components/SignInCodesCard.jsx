@@ -125,21 +125,21 @@ export default function SignInCodesCard() {
         )}
       </section>
 
-      {c.here && <section translate="no">
+      <section translate="no">
         <h3 className="font-semibold">LMIS — SMS codes from a phone</h3>
         <div className={`my-2 rounded-lg px-3 py-2 text-sm ${seen ? 'bg-teal-50 text-teal-800 dark:bg-teal-900/30 dark:text-teal-200' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}>
           {seen ? <>📱 <b>Phone connected</b> — last heard {new Date(seen).toLocaleString()}</> : <>📱 No phone connected yet — do step 1.</>}
           {c.sms?.last_at && <> · last SMS {new Date(c.sms.last_at).toLocaleString()}{c.sms.last_from ? ` from ${c.sms.last_from}` : ''}</>}
         </div>
         <p className="text-sm text-slate-500 mb-3">
-          Use the phone with the SIM that gets the LMIS codes. It stays in the office, charging, with internet. Each SMS it gets is sent to this PC, which types the code into LMIS.
+          Use the phone with the SIM that gets the LMIS codes. It stays in the office, charging, with internet. Each SMS it gets is sent to the main PC, which types the code into LMIS.
         </p>
 
         <p className="font-semibold text-sm">Step 1 — connect the phone (1 minute)</p>
         <div className="flex flex-wrap gap-4 items-start mt-1">
-          {page ? <Qr text={page.u} /> : <p className="text-sm text-red-600">This PC has no network address yet.</p>}
+          {page ? <Qr text={page.u} /> : <p className="text-sm text-red-600">The main PC has no Wi-Fi/network address yet — connect it to the office Wi-Fi, then reopen Settings.</p>}
           <ol className="list-decimal pl-5 text-sm text-slate-600 dark:text-slate-300 space-y-1 flex-1 min-w-[220px]">
-            <li>Put the phone on the <b>office Wi-Fi</b> (the same one as this PC).</li>
+            <li>Put the phone on the <b>office Wi-Fi</b> (the same one as the main PC).</li>
             <li>Open the phone's <b>camera</b>, point it at this QR code and tap the link that appears.</li>
             <li>The phone shows <b>“✅ This phone reaches Adal Keep”</b> and this card turns green: <b>Phone connected</b>.</li>
             <li>Keep that page open — step 2 copies the link from it.</li>
@@ -190,11 +190,11 @@ export default function SignInCodesCard() {
         <p className="font-semibold text-sm mt-4">Step 3 — test</p>
         <p className="text-sm text-slate-600 dark:text-slate-300">From another phone, send this phone an SMS (any text). Within a few seconds “last SMS” above shows it. Done — LMIS codes now arrive the same way.</p>
 
-        <button type="button" className="mt-3 text-xs text-slate-500 hover:underline" onClick={async () => {
+        {c.here && <button type="button" className="mt-3 text-xs text-slate-500 hover:underline" onClick={async () => {
           if (!confirm('Make a new link? The phone must scan the new QR code again; the old link stops working.')) return
           await api.post('/otp/sms-key'); load()
-        }}>Phone lost or changed? Make a new link</button>
-      </section>}
+        }}>Phone lost or changed? Make a new link</button>}
+      </section>
     </Card>
   )
 }

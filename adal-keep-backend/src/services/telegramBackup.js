@@ -17,6 +17,7 @@
  *
  * Without the password nobody — not Telegram, not Adal — can read a backup.
  */
+import { runsWorking } from './busy.js'
 import fs from 'fs'
 import path from 'path'
 import zlib from 'zlib'
@@ -291,6 +292,7 @@ export function startBackupSchedule(db) {
     const cfg = getConfig()
     if (!cfg.enabled || !cfg.has_token || !cfg.has_password || !cfg.chat_id || progress.running) return
     if (!inWindow(cfg)) return
+    if (runsWorking() > 0) return // the runs get the internet; the backup waits
     const s = readState()
     const pending = cfg.files_sent < cfg.files_total
     if (s.last_day === today() && !pending) return

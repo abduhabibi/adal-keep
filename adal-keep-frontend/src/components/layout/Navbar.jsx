@@ -171,7 +171,7 @@ export default function Navbar({ onMenuClick, capturedFiles, setCapturedFiles })
 
       {/* Add/Edit Modal */}
       {showAddModal && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50">
           <div ref={modalRef} className="glass-panel p-6 w-full max-w-md mx-4 animate-fade-in-up">
             <h3 className="text-lg font-bold mb-4">{editingLink ? 'ማገናኛ አርትዕ' : 'አዲስ ማገናኛ ጨምር'}</h3>
             <div className="space-y-3">

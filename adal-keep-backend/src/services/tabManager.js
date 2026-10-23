@@ -43,6 +43,8 @@ export function isPeerUrl(url, peer) {
   return p.hosts.some(x => h === x || h.endsWith('.' + x))
 }
 
+const TRACKERS = /(^|\.)(google-analytics\.com|googletagmanager\.com|doubleclick\.net|facebook\.net|facebook\.com|hotjar\.com|clarity\.ms|tiktok\.com|snapchat\.com|twitter\.com|linkedin\.com|youtube\.com)$/i
+
 function isClosed(page) {
   try { return !page || (typeof page.isClosed === 'function' && page.isClosed()) } catch { return true }
 }
@@ -78,8 +80,12 @@ export async function setupTab(page, { runId, mute = true } = {}) {
   try {
     await page.setRequestInterception(true)
     page.on('request', req => {
+      // Only what the work needs comes down: no tracking scripts, videos or
+      // sounds (and no pictures, except where the reCAPTCHA needs them). With
+      // 3–4 runs at once every run gets more of the internet connection.
+      const type = req.resourceType()
       const allowImages = page.__adalAllowImages === true
-      if (!allowImages && req.resourceType() === 'image') req.abort().catch(() => {})
+      if ((!allowImages && type === 'image') || type === 'media' || TRACKERS.test(hostOf(req.url()))) req.abort().catch(() => {})
       else req.continue().catch(() => {})
     })
   } catch (e) {

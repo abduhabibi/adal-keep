@@ -554,7 +554,7 @@ export default function CVNewPage() {
       </section>
           {/* Preview modal */}
       {showPreview && previewUrl && createPortal(
-<div className="fixed inset-0 z-[9999] bg-black/80 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4"
+<div className="fixed inset-0 z-[9999] bg-black/80 flex items-center justify-center p-2 sm:p-4"
           onClick={() => setShowPreview(false)}>
           <div className="relative bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 w-[98vw] max-w-[1600px] h-[96vh] overflow-hidden flex flex-col"
             onClick={e => e.stopPropagation()}>

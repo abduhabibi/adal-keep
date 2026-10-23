@@ -163,7 +163,7 @@ export default function ChecklistPage() {
                 draggable="true"
                 onDragStart={(e) => handleDragStart(e, profile.id)}
                 onDragEnd={handleDragEnd}
-                className="p-3 bg-white/70 dark:bg-slate-800/70 backdrop-blur-sm border border-slate-200/60 dark:border-slate-700/60 rounded-xl shadow-sm cursor-grab active:cursor-grabbing hover:border-teal-400/50 dark:hover:border-teal-400/30 hover:shadow-md transition-all group"
+                className="p-3 bg-white/70 dark:bg-slate-800/70 border border-slate-200/60 dark:border-slate-700/60 rounded-xl shadow-sm cursor-grab active:cursor-grabbing hover:border-teal-400/50 dark:hover:border-teal-400/30 hover:shadow-md transition-all group"
               >
                 <div className="font-semibold text-slate-800 dark:text-white text-sm">{profile.full_name}</div>
                 <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">{profile.phone_number || 'ስልክ የለም'}</div>
@@ -244,7 +244,7 @@ export default function ChecklistPage() {
                       checklist.profiles.map(profile => (
                         <div
                           key={profile.id}
-                          className="p-2.5 bg-white/70 dark:bg-slate-800/70 backdrop-blur-sm border border-slate-200/60 dark:border-slate-700/60 rounded-lg shadow-sm flex justify-between items-center group hover:border-teal-400/50 dark:hover:border-teal-400/30 transition-all"
+                          className="p-2.5 bg-white/70 dark:bg-slate-800/70 border border-slate-200/60 dark:border-slate-700/60 rounded-lg shadow-sm flex justify-between items-center group hover:border-teal-400/50 dark:hover:border-teal-400/30 transition-all"
                         >
                           <div>
                             <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">

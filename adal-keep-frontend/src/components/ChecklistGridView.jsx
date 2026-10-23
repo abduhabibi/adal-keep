@@ -359,7 +359,7 @@ export default function ChecklistGridView({ checklist, onClose }) {
       </div>
 
       {isColumnModalOpen && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[60] p-4 no-print">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4 no-print">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
             <div className="p-4 border-b border-slate-100 flex justify-between items-center">
               <h3 className="font-bold text-slate-800">Manage Columns</h3>

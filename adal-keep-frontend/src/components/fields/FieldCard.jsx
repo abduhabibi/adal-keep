@@ -362,7 +362,7 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
       )}
 
       {pendingFile && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 animate-fade-in">
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden border border-slate-200 dark:border-slate-700">
             <div className="p-5 border-b border-slate-100 dark:border-slate-700">
               <h4 className="font-bold text-slate-800 dark:text-white text-lg">Choose Save Format</h4>
@@ -390,7 +390,7 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
 
       {/* Download Format Modal */}
       {isDownloadModalOpen && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 animate-fade-in">
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden border border-slate-200 dark:border-slate-700">
             <div className="p-5 border-b border-slate-100 dark:border-slate-700 flex justify-between items-center">
               <h3 className="font-bold text-slate-800 dark:text-white text-lg">Download Format</h3>

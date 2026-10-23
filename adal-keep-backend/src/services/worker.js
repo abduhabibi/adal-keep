@@ -25,6 +25,7 @@ import { isAppLocked } from './subscription.js'
 import { openRunTab, forgetRunTab, tabOfRun, handTabToPerson } from './tabManager.js'
 import { registerTab, unregisterTab, noteLink } from './bandwidth.js'
 import { createRunQueue } from './runQueue.js'
+import { reportRuns } from './busy.js'
 import { isCancelled, clearCancelled } from './cancellation.js'
 import { assertPoliceReady } from './verification.js'
 
@@ -32,7 +33,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SAFE_STORAGE_DIR = path.join(__dirname, '../../data/SafeStorage')
 
 // How many runs may work at the same time, each in its own tab.
-const MAX_RUNS           = Math.max(1, Number(process.env.AUTOMATION_MAX_RUNS || 3))
+const MAX_RUNS           = Math.max(1, Number(process.env.AUTOMATION_MAX_RUNS || 4))
 const POLL_MS            = 5000
 const MAX_ATTEMPTS       = 3
 // Retry backoff: attempt 1 waits this long, attempt 2 waits 4× this.
@@ -408,6 +409,7 @@ function runs(db) {
       claimNext: (exclude) => claimNextJob(db, exclude),
       runJob: (job) => runJob(db, job),
     })
+    reportRuns(() => _runs.snapshot().running.length)
   }
   return _runs
 }

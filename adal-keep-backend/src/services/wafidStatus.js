@@ -9,6 +9,7 @@
  *   startWafidChecker(db)             checkAll every few hours, in a
  *                                     background tab of the agency's Brave
  */
+import { whenRunsIdle } from './busy.js'
 import { getBrowser } from './browser.js'
 import { setupTab } from './tabManager.js'
 import { checkMedicalStatus } from './wafidWorkflow.js'
@@ -98,7 +99,7 @@ export async function checkAll(db, { onlyId = null } = {}) {
 let timer = null
 export function startWafidChecker(db) {
   if (timer) return
-  const tick = () => checkAll(db).catch(e => console.warn('[wafid] check failed:', e.message))
+  const tick = () => whenRunsIdle(() => checkAll(db).catch(e => console.warn('[wafid] check failed:', e.message)), '[wafid]')
   setTimeout(tick, 3 * 60 * 1000) // a few minutes after start
   timer = setInterval(tick, EVERY_MS)
   console.log(`🩺 Wafid medical results checked every ${EVERY_MS / 3600000} h`)

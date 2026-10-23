@@ -44,7 +44,7 @@ export default function IntroWizard() {
       {/* Animated background elements */}
       <div className="absolute inset-0 bg-[radial-gradient(#0ea5e9_0.8px,transparent_1px)] [background-size:40px_40px] opacity-10"></div>
 
-      <div className="max-w-md w-full bg-white/95 dark:bg-slate-900/95 backdrop-blur-2xl rounded-3xl shadow-2xl border border-white/20 p-10 relative z-10">
+      <div className="max-w-md w-full bg-white/95 dark:bg-slate-900/95 rounded-3xl shadow-2xl border border-white/20 p-10 relative z-10">
         <div className="text-center mb-10">
           <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-gradient-to-br from-teal-500 to-cyan-600 text-white text-5xl font-bold mb-6 shadow-inner">አ</div>
           <h1 className="text-4xl font-bold text-slate-900 dark:text-white tracking-tight">Welcome to Adal</h1>

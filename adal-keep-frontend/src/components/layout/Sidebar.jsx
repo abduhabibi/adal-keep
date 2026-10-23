@@ -131,7 +131,7 @@ export default function Sidebar({ isOpen, onToggle, collapsed, onToggleCollapse 
     <>
       {/* Mobile overlay */}
       <div
-        className={`fixed inset-0 z-40 bg-black/30 backdrop-blur-sm transition-all duration-300 lg:hidden ${
+        className={`fixed inset-0 z-40 bg-black/30 transition-all duration-300 lg:hidden ${
           isOpen ? 'opacity-100' : 'pointer-events-none opacity-0'
         }`}
         onClick={onToggle}
@@ -141,7 +141,7 @@ export default function Sidebar({ isOpen, onToggle, collapsed, onToggleCollapse 
       <aside
         className={`
           flex flex-col shrink-0
-          bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl
+          bg-white/80 dark:bg-slate-900/80
           border-r border-slate-200/60 dark:border-slate-800/60
           transition-all duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)]
           h-screen sticky top-0

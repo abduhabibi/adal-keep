@@ -177,8 +177,8 @@ export default function FileTray() {
     <>
       {/* Global drop overlay (external files only) */}
       {showGlobalOverlay && createPortal(
-        <div className="fixed inset-0 z-[99998] bg-teal-500/10 backdrop-blur-sm border-4 border-dashed border-teal-500 flex items-center justify-center pointer-events-none animate-fade-in">
-          <div className="bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl px-8 py-6 rounded-2xl shadow-2xl border border-teal-200 dark:border-teal-800 text-center">
+        <div className="fixed inset-0 z-[99998] bg-teal-500/10 border-4 border-dashed border-teal-500 flex items-center justify-center pointer-events-none animate-fade-in">
+          <div className="bg-white/95 dark:bg-slate-900/95 px-8 py-6 rounded-2xl shadow-2xl border border-teal-200 dark:border-teal-800 text-center">
             <svg className="w-12 h-12 text-teal-500 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
             <p className="text-lg font-bold text-teal-700 dark:text-teal-300">Drop files to add to tray</p>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Release to capture</p>
@@ -213,7 +213,7 @@ export default function FileTray() {
           ref={dropdownRef}
           onDragOver={handleTrayDragOver}
           onDrop={handleTrayDrop}
-          className="fixed w-80 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border border-slate-200/60 dark:border-slate-800/60 rounded-2xl shadow-2xl overflow-hidden"
+          className="fixed w-80 bg-white/95 dark:bg-slate-900/95 border border-slate-200/60 dark:border-slate-800/60 rounded-2xl shadow-2xl overflow-hidden"
           style={{ top: dropdownPos.top, right: dropdownPos.right, zIndex: 99999 }}
         >
           <div className="p-4 border-b border-slate-200/60 dark:border-slate-800/60 flex justify-between items-center">

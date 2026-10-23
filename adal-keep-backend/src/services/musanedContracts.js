@@ -18,6 +18,7 @@
  * always a person's). Signed out → one reminder task, and the check waits.
  * Nothing on Musaned is ever changed: it only searches, reads and downloads.
  */
+import { whenRunsIdle } from './busy.js'
 import fs from 'fs'
 import path from 'path'
 import crypto from 'crypto'
@@ -330,7 +331,7 @@ export async function checkContracts(db, { onlyId = null } = {}) {
 let timer = null
 export function startContractChecker(db) {
   if (timer) return
-  const tick = () => checkContracts(db).catch(e => console.warn('[contracts] failed:', e.message))
+  const tick = () => whenRunsIdle(() => checkContracts(db).catch(e => console.warn('[contracts] failed:', e.message)), '[contracts]')
   setTimeout(tick, 6 * 60 * 1000)
   timer = setInterval(tick, EVERY_MS)
   console.log(`📄 Musaned contracts checked every ${EVERY_MS / 3600000} h`)

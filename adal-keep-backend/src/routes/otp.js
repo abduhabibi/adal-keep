@@ -34,12 +34,15 @@ router.post('/otp/sms', anyBody, (req, res) => {
   res.json({ ok: true, code_found: !!code })
 })
 
-router.get('/otp', here, async (req, res) => {
+router.get('/otp', async (req, res) => {
+  // Other PCs see only the Musaned QR part; the SMS link stays on the main PC.
+  if (!onThisPC(req)) return res.json({ here: false, musaned_totp: hasTotp('musaned') })
   const info = await describe().catch(() => ({ lan: [], tailscale: {} }))
   const key = smsKey()
   const path = `/api/otp/sms?key=${key}`
   const ts = info.tailscale || {}
   res.json({
+    here: true,
     musaned_totp: hasTotp('musaned'),
     sms: { ...smsStatus },
     sms_urls: {
@@ -49,7 +52,8 @@ router.get('/otp', here, async (req, res) => {
   })
 })
 
-router.post('/otp/totp', here, (req, res) => {
+// The QR code can be uploaded from any agency PC; the key is kept on the main PC.
+router.post('/otp/totp', (req, res) => {
   try {
     saveTotp('musaned', req.body?.secret)
     res.json({ ok: true, now: totpNow('musaned') })
@@ -69,7 +73,7 @@ router.get('/otp/musaned-tab-shots', here, async (req, res) => {
     res.json({ shots, why: tabs.length ? '' : 'No Musaned tab is open in the Adal Keep browser.' })
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
-router.get('/otp/totp/now', here, (req, res) => res.json(totpNow('musaned')))
+router.get('/otp/totp/now', (req, res) => res.json(totpNow('musaned')))
 router.delete('/otp/totp', here, (req, res) => { removeTotp('musaned'); res.json({ ok: true }) })
 router.post('/otp/sms-key', here, (req, res) => { newSmsKey(); res.json({ ok: true }) })
 

@@ -188,6 +188,7 @@ export default function SettingsPage() {
       />
 
       {/* NEW: Agency Settings Card */}
+      {import.meta.env.VITE_DEMO !== '1' && <SignInCodesCard />}
       <Card>
         <h2 className="font-display text-lg font-bold mb-4 flex items-center gap-2">
           <span>🏢</span> የኤጀንሲ ቅንብሮች (Agency Settings)
@@ -275,7 +276,6 @@ export default function SettingsPage() {
 
       {import.meta.env.VITE_DEMO !== '1' && <WafidCard />}
       {import.meta.env.VITE_DEMO !== '1' && <MainPCCard />}
-      {import.meta.env.VITE_DEMO !== '1' && <SignInCodesCard />}
       {import.meta.env.VITE_DEMO !== '1' && <BackupCard />}
 
       <Card>

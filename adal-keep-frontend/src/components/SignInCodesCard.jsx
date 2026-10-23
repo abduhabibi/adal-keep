@@ -113,15 +113,15 @@ export default function SignInCodesCard() {
             <span>Code now:</span>
             <span className="font-mono text-2xl tracking-widest">{now.code.slice(0, 3)} {now.code.slice(3)}</span>
             <span className="text-xs text-slate-500">{now.seconds_left}s</span>
-            <button type="button" className="ml-auto text-xs text-red-600 hover:underline" onClick={async () => {
+            {c.here && <button type="button" className="ml-auto text-xs text-red-600 hover:underline" onClick={async () => {
               if (!confirm('Remove the Musaned authenticator key from Adal Keep?')) return
               await api.delete('/otp/totp'); load()
-            }}>Remove</button>
+            }}>Remove</button>}
           </div>
         )}
       </section>
 
-      <section translate="no">
+      {c.here && <section translate="no">
         <h3 className="font-semibold">LMIS — SMS codes from a phone {c.sms?.count > 0 && <span className="text-teal-600">✓ messages arriving</span>}</h3>
         <p className="text-sm text-slate-500 my-2">
           The phone with the SIM that gets the LMIS codes stays in the office, charging, with internet (Wi-Fi or mobile data).
@@ -166,7 +166,7 @@ export default function SignInCodesCard() {
             await api.post('/otp/sms-key'); load()
           }}>Phone lost? Make a new link</button>
         </div>
-      </section>
+      </section>}
     </Card>
   )
 }

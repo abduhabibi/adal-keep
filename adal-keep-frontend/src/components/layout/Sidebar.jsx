@@ -92,6 +92,18 @@ const links = [
   },
 ]
 
+// The Trash: only in the menu on the main PC itself (it opens only there).
+export const onMainPC = () => ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname)
+const trashLink = {
+  to: '/trash',
+  label: 'Trash',
+  icon: (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  ),
+}
+
 const settingsLink = {
   to: '/settings',
   label: 'ማስተካከያዎች',
@@ -193,6 +205,15 @@ export default function Sidebar({ isOpen, onToggle, collapsed, onToggleCollapse 
           ))}
 
           <div className={`pt-4 mt-4 border-t border-slate-200/60 dark:border-slate-800/60 ${collapsed ? 'px-0' : ''}`}>
+            {onMainPC() && [trashLink].map(link => (
+              <NavLink key={link.to} to={link.to}
+                onClick={() => { if (window.innerWidth < 1024) onToggle() }}
+                className={({ isActive }) => { const base = getLinkClass({ isActive }); return collapsed ? `${base} justify-center px-0` : base }}
+                title={collapsed ? link.label : ''}>
+                <span className="shrink-0">{link.icon}</span>
+                {!collapsed && <span className="truncate">{link.label}</span>}
+              </NavLink>
+            ))}
             <NavLink
               to={settingsLink.to}
               onClick={() => { if (window.innerWidth < 1024) onToggle() }}

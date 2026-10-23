@@ -267,13 +267,9 @@ router.delete('/files/:fileId', async (req, res) => {
     const file = await db('files').where('id', fileId).first()
     if (!file) return res.status(404).json({ error: 'File not found' })
 
-    const fullPath = resolveStoredPath(file)
-    if (fullPath) try { fs.unlinkSync(fullPath) } catch {}
-    // Also delete a thumbnail if present
-    const thumb = resolveThumbPath(fullPath)
-    if (thumb) try { fs.unlinkSync(thumb) } catch {}
-
-    await db('files').where('id', fileId).del()
+    // To the Trash (the file and its thumbnail move there), restorable from the main PC.
+    const { moveToTrash } = await import('../services/trash.js')
+    await moveToTrash(db, 'file', fileId, req)
     res.json({ success: true })
   } catch (err) {
     console.error('Delete error:', err)

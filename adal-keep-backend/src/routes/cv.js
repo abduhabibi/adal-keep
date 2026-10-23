@@ -82,7 +82,8 @@ router.get('/templates/:id', async (req, res) => {
 
 router.delete('/templates/:id', async (req, res) => {
   const db = req.app.locals.db
-  await db('cv_templates').where('id', req.params.id).del()
+  const { moveToTrash } = await import('../services/trash.js')
+  await moveToTrash(db, 'cv_template', req.params.id, req)
   res.json({ ok: true })
 })
 
@@ -124,10 +125,8 @@ router.delete('/generated/:id', async (req, res) => {
   const db = req.app.locals.db
   const row = await db('generated_cvs').where('id', req.params.id).first()
   if (!row) return res.status(404).json({ error: 'Not found' })
-  const fullPath = path.join(SAFE_STORAGE_DIR, row.pdf_path)
-  if (fs.existsSync(fullPath)) try { fs.unlinkSync(fullPath) } catch {}
-  await db('files').where('path', row.pdf_path).del()
-  await db('generated_cvs').where('id', row.id).del()
+  const { moveToTrash } = await import('../services/trash.js')
+  await moveToTrash(db, 'generated_cv', row.id, req)
   res.json({ ok: true })
 })
 

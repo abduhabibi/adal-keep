@@ -37,6 +37,8 @@ import { startScanner } from './src/services/autoScanner.js'
 import verificationRouter from './src/routes/verification.js'
 import newProfileRouter from './src/routes/newProfile.js'
 import chatRouter, { watchPaid } from './src/routes/chat.js'
+import trashRouter from './src/routes/trash.js'
+import { moveToTrash } from './src/services/trash.js'
 import { startDiscoveryResponder } from './src/services/discovery.js'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -99,6 +101,7 @@ app.use('/api', automationsRouter)
 app.use('/api', verificationRouter)
 app.use('/api', newProfileRouter)
 app.use('/api', chatRouter)
+app.use('/api', trashRouter)
 watchPaid(db)
 
 // Utility function to safely check/add missing columns
@@ -460,7 +463,8 @@ app.put('/api/profiles/:id', async (req, res) => {
 
 app.delete('/api/profiles/:id', async (req, res) => {
   try {
-    const deleted = await db('profiles').where('id', req.params.id).del()
+    // To the Trash (with its documents), restorable from the main PC.
+    const deleted = await moveToTrash(db, 'profile', req.params.id, req)
     if (!deleted) return res.status(404).json({ error: 'Not found' })
     res.json({ success: true })
   } catch (err) {
@@ -614,12 +618,8 @@ app.put('/api/brokers/:id', async (req, res) => {
 
 app.delete('/api/brokers/:id', async (req, res) => {
   try {
-    const linked = await db('profiles').where('broker_id', req.params.id).count('id as count').first()
-    if (Number(linked?.count) > 0) {
-      await db('profiles').where('broker_id', req.params.id).update({ broker_id: null })
-    }
-
-    const deleted = await db('brokers').where('id', req.params.id).del()
+    // To the Trash; its profiles are kept (and get the broker back on restore).
+    const deleted = await moveToTrash(db, 'broker', req.params.id, req)
     if (!deleted) return res.status(404).json({ error: 'Not found' })
     res.json({ success: true })
   } catch (err) {
@@ -761,8 +761,7 @@ app.post('/api/checklists', async (req, res) => {
 
 app.delete('/api/checklists/:id', async (req, res) => {
   try {
-    await req.app.locals.db('checklist_profiles').where('checklist_id', req.params.id).del()
-    await req.app.locals.db('checklists').where('id', req.params.id).del()
+    await moveToTrash(req.app.locals.db, 'checklist', req.params.id, req)
     res.json({ success: true })
   } catch (err) {
     res.status(500).json({ error: 'Failed to delete checklist' })

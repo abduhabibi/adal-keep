@@ -49,7 +49,8 @@ router.patch('/accounts/:id', async (req, res) => {
 
 router.delete('/accounts/:id', async (req, res) => {
   try {
-    await req.app.locals.db('musaned_accounts').where('id', req.params.id).del()
+    const { moveToTrash } = await import('../services/trash.js')
+    await moveToTrash(req.app.locals.db, 'musaned_account', req.params.id, req)
     res.json({ ok: true })
   } catch (e) { res.status(500).json({ error: e.message }) }
 })

@@ -8,6 +8,16 @@ const api = axios.create({
   withCredentials: true, // Required for cookies/sessions
 })
 
+// Who is working (the employee chosen on this PC): the Trash shows who deleted what.
+api.interceptors.request.use((config) => {
+  try {
+    const e = JSON.parse(localStorage.getItem('adal_active_employee') || 'null')
+    const who = e?.name || e?.full_name || e?.username
+    if (who) config.headers['X-Adal-Who'] = encodeURIComponent(String(who).slice(0, 80))
+  } catch {}
+  return config
+})
+
 // Public demo build (vite --mode demo): answer in the browser with made-up
 // data instead of calling a server. See src/demo/server.js.
 if (import.meta.env.VITE_DEMO === '1') {

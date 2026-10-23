@@ -82,7 +82,8 @@ router.put('/:id', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   try {
     const db = req.app.locals.db
-    const deleted = await db('quick_links').where('id', req.params.id).del()
+    const { moveToTrash } = await import('../services/trash.js')
+    const deleted = await moveToTrash(db, 'quick_link', req.params.id, req)
     if (!deleted) return res.status(404).json({ error: 'Link not found' })
     res.json({ success: true })
   } catch (err) {

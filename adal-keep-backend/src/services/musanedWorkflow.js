@@ -1846,29 +1846,6 @@ async function clickAcknowledge(page, ctx) {
   return !!verified
 }
 
-async function playReadyBeep(page, ctx) {
-  try {
-    const ok = await page.evaluate(() => {
-      try {
-        const AC = window.AudioContext || window.webkitAudioContext
-        if (!AC) return false
-        const ac = new AC()
-        const beep = (f, s, d) => {
-          const osc = ac.createOscillator(), gain = ac.createGain()
-          osc.type = 'sine'; osc.frequency.value = f; gain.gain.value = 0.18
-          osc.connect(gain); gain.connect(ac.destination)
-          osc.start(ac.currentTime + s); osc.stop(ac.currentTime + s + d)
-        }
-        beep(880, 0, 0.18); beep(1320, 0.28, 0.22)
-        setTimeout(() => { try { ac.close() } catch {} }, 900)
-        return true
-      } catch { return false }
-    })
-    log(ctx, ok ? '🔔 beep played' : 'beep unavailable', ok ? 'info' : 'warn')
-  } catch (e) { log(ctx, `beep error: ${e.message}`, 'warn') }
-  try { process.stdout.write('\x07') } catch {}
-}
-
 // ============================================================================
 // STEP 6.5 — Details (v16.7)
 // ============================================================================
@@ -2136,7 +2113,7 @@ export async function stepFillCandidateDetails(page, ctx) {
     else log(ctx, '✓ URL unchanged — no accidental submission')
 
     await diagnoseMusanedPage(page, ctx, 'details-final')
-    await playReadyBeep(page, ctx)
+    // One sound only: the notification below rings (no extra beep in the tab).
     await ctx.notify(
       `🔔 ${ctx.profileName}: Candidate form ready for manual SAVE`,
       stillEmpty.length
@@ -2256,10 +2233,7 @@ export async function runMusanedWorkflow(page, ctx) {
     log(ctx, `stage verification -> complete=${verify.complete} (${verify.source})`)
 
     const secs = Math.round((Date.now() - t0) / 1000)
-    await ctx.notify(
-      `✅ ${ctx.profileName}: Musaned candidate form is ready`,
-      `All fields filled, acknowledge checked. Click SAVE in the tab to submit.`
-    )
+    // The form step already said "ready for SAVE" (and rang): no second notice.
     return { ok: true, pauseReason: 'awaiting-human-save', seconds: secs }
   } catch (e) {
     const secs = Math.round((Date.now() - t0) / 1000)

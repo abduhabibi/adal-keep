@@ -53,7 +53,11 @@ let _agencyRunning = false
 // --------------------------------------------------------------------------
 // Notifications
 // --------------------------------------------------------------------------
+let _lastSound = 0
 function playNotificationSound() {
+  // Several notices at the same moment ring once.
+  if (Date.now() - _lastSound < 10000) return
+  _lastSound = Date.now()
   try {
     const platform = process.platform
     let cmd, args

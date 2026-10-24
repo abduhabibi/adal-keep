@@ -29,6 +29,7 @@
 export const PEERS = {
   musaned: { hosts: ['tawtheeq.musaned.com.sa', 'accounts.wahid.sa'], label: 'Musaned' },
   lmis:    { hosts: ['lmis.gov.et'],                                  label: 'LMIS' },
+  mofa:    { hosts: ['visa.mofa.gov.sa'],                             label: 'Visa platform' },
 }
 
 export function hostOf(url) {
@@ -254,6 +255,7 @@ export function signInTurn(peer) {
 const signedInHere = {
   lmis: (url) => isPeerUrl(url, 'lmis') && !/\/(auth|login)/i.test(new URL(url).pathname),
   musaned: (url) => hostOf(url) === 'tawtheeq.musaned.com.sa',
+  mofa: (url) => isPeerUrl(url, 'mofa') && !/\/account\/login/i.test(new URL(url).pathname),
 }
 
 /**

@@ -93,6 +93,8 @@ const emptyForm = {
   issuing_authority: '',
   job_title: '',
   musaned_pro: '',
+  visa_stage: '',
+  visa_application_number: '',
 }
 
 export default function ProfileFormPage() {
@@ -198,6 +200,8 @@ export default function ProfileFormPage() {
             issuing_authority: p.issuing_authority || '',
             job_title: p.job_title || '',
             musaned_pro: p.musaned_pro || '',
+            visa_stage: p.visa_stage || '',
+            visa_application_number: p.visa_application_number || '',
           })
           setContract(contractView(p))
         }
@@ -732,6 +736,14 @@ export default function ProfileFormPage() {
             <div>
               <label className={labelClass} htmlFor="musaned_pro">PRO / recruitment office</label>
               <input id="musaned_pro" className={inputClass} value={form.musaned_pro} onChange={setField('musaned_pro')} />
+            </div>
+            <div>
+              <label className={labelClass} htmlFor="visa_stage">Visa stage (visa platform)</label>
+              <input id="visa_stage" className={inputClass} value={form.visa_stage} onChange={setField('visa_stage')} />
+            </div>
+            <div>
+              <label className={labelClass} htmlFor="visa_application_number">Visa application number</label>
+              <input id="visa_application_number" className={inputClass} value={form.visa_application_number} onChange={setField('visa_application_number')} />
             </div>
             </div>
             {contract.extra.length > 0 && (

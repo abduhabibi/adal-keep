@@ -1,6 +1,6 @@
 import paymentsRouter from './src/routes/payments.js'
 import express from 'express'
-import musanedAccountsRouter from './src/routes/musanedAccounts.js'
+import musanedAccountsRouter, { accountsRouter } from './src/routes/musanedAccounts.js'
 import cors from 'cors'
 import knex from 'knex'
 import dotenv from 'dotenv'
@@ -107,6 +107,7 @@ app.use("/api/quick-links", quickLinksRouter)
 app.use("/api/auth", authRouter)
 app.use('/api/lmis', lmisAccountsRouter)
 app.use('/api/musaned', musanedAccountsRouter)
+app.use('/api/visa', accountsRouter('visa_accounts', 'visa_account'))
 app.use('/api/cv', cvRouter)
 app.use('/api/settings', settingsRouter)
 app.use('/api', automationsRouter)
@@ -352,6 +353,7 @@ app.post('/api/profiles', async (req, res) => {
       'emergency_gender',
       'emergency_relationship',
       'emergency_labor_id',
+      'visa_stage', 'visa_application_number',
       'cooking_skill',
       'destination_country',
       'date_of_birth',
@@ -441,6 +443,7 @@ app.put('/api/profiles/:id', async (req, res) => {
       'emergency_gender',
       'emergency_relationship',
       'emergency_labor_id',
+      'visa_stage', 'visa_application_number',
       'cooking_skill',
       'destination_country',
       'date_of_birth',

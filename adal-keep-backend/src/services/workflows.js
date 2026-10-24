@@ -37,6 +37,16 @@ export const WORKFLOWS = {
     stepCount: 5,
   },
 
+  mofa_visa: {
+    id: 'mofa_visa',
+    name: 'Make visa',
+    description:
+      'Visa platform (visa.mofa.gov.sa) → a person types the sign-in captcha → New Application → Agree → the whole form from the profile and her Musaned contract → a person types the captcha and presses Save',
+    target: 'https://visa.mofa.gov.sa/Account/Login',
+    consts: {},
+    stepCount: 4,
+  },
+
   wafid_book: {
     id: 'wafid_book',
     name: 'Book Wafid medical',

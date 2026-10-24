@@ -2,14 +2,15 @@ import { useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
 import api from '../services/api'
 
-export default function MusanedAccountPicker({ value, onChange }) {
+/** Login accounts of a portal: Musaned by default, or another (`endpoint`, `what`). */
+export default function MusanedAccountPicker({ value, onChange, endpoint = '/musaned/accounts', what = 'Musaned', placeholder = 'Nuzla Musaned', userLabel = 'Username (email or ID)' }) {
   const [accounts, setAccounts] = useState([])
   const [editing, setEditing] = useState(null)
   const [showAdd, setShowAdd] = useState(false)
 
   const load = async () => {
     try {
-      const r = await api.get('/musaned/accounts')
+      const r = await api.get(endpoint)
       setAccounts(r.data || [])
     } catch {}
   }
@@ -18,8 +19,8 @@ export default function MusanedAccountPicker({ value, onChange }) {
 
   const save = async (acct) => {
     try {
-      if (acct.id) await api.patch(`/musaned/accounts/${acct.id}`, acct)
-      else await api.post('/musaned/accounts', acct)
+      if (acct.id) await api.patch(`${endpoint}/${acct.id}`, acct)
+      else await api.post(endpoint, acct)
       toast.success('Saved')
       load()
       setEditing(null)
@@ -30,9 +31,9 @@ export default function MusanedAccountPicker({ value, onChange }) {
   }
 
   const remove = async (id) => {
-    if (!confirm('Delete this Musaned account?')) return
+    if (!confirm(`Delete this ${what} account?`)) return
     try {
-      await api.delete(`/musaned/accounts/${id}`)
+      await api.delete(`${endpoint}/${id}`)
       toast.success('Deleted')
       // If we just deleted the selected account, clear the selection
       if (Number(value) === Number(id)) onChange?.(null)
@@ -58,7 +59,7 @@ export default function MusanedAccountPicker({ value, onChange }) {
           value={value || ''}
           onChange={e => onChange(e.target.value ? Number(e.target.value) : null)}
         >
-          <option value="">— Pick Musaned account —</option>
+          <option value="">— Pick {what} account —</option>
           {accounts.map(a => (
             <option key={a.id} value={a.id}>
               {a.name}
@@ -135,6 +136,8 @@ export default function MusanedAccountPicker({ value, onChange }) {
         <MusanedAccountForm
           key={editing?.id || 'new'}
           initial={editing || { name: '', username: '', password: '', phone: '', notes: '', is_default: accounts.length === 0 }}
+          placeholder={placeholder}
+          userLabel={userLabel}
           onSave={save}
           onCancel={() => { setShowAdd(false); setEditing(null) }}
         />
@@ -143,7 +146,7 @@ export default function MusanedAccountPicker({ value, onChange }) {
   )
 }
 
-function MusanedAccountForm({ initial, onSave, onCancel }) {
+function MusanedAccountForm({ initial, onSave, onCancel, placeholder, userLabel }) {
   const [form, setForm] = useState(initial)
   const upd = (k, v) => setForm(f => ({ ...f, [k]: v }))
   const field = 'w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-xs'
@@ -154,10 +157,10 @@ function MusanedAccountForm({ initial, onSave, onCancel }) {
       <div className="space-y-2">
         <div>
           <label className={lbl}>Name</label>
-          <input className={field} value={form.name || ''} onChange={e => upd('name', e.target.value)} placeholder="Nuzla Musaned" />
+          <input className={field} value={form.name || ''} onChange={e => upd('name', e.target.value)} placeholder={placeholder} />
         </div>
         <div>
-          <label className={lbl}>Username (email or ID)</label>
+          <label className={lbl}>{userLabel}</label>
           <input className={field} value={form.username || ''} onChange={e => upd('username', e.target.value)} />
         </div>
         <div>

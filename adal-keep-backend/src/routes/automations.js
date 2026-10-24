@@ -132,6 +132,18 @@ router.post('/profiles/:profileId/automations/:workflowId/start', async (req, re
       if (missing.length) {
         return res.status(400).json({ error: 'Profile is missing for Wafid: ' + missing.join(', '), missing })
       }
+    } else if (workflowId === 'mofa_visa') {
+      const prof = await db('profiles').where('id', profileId).first()
+      const { visaValues, missingForVisa } = await import('../services/mofaVisa.js')
+      const photo = await db('files')
+        .join('profile_fields', 'files.profile_field_id', 'profile_fields.id')
+        .where('profile_fields.profile_id', profileId).andWhere('profile_fields.name', 'Photo').first()
+      const missing = missingForVisa(visaValues(prof || {}, { photoPath: photo ? 'yes' : '' }))
+      if (missing.length) {
+        return res.status(400).json({ error: 'Profile is missing for the visa: ' + missing.join(', '), missing })
+      }
+      const acct = await db('visa_accounts').first()
+      if (!acct) return res.status(400).json({ error: 'No visa platform account yet — add one under "Visa platform login account"', missing: ['Visa platform account'] })
     } else if (workflowId === 'lmis_contract') {
       const prof = await db('profiles').where('id', profileId).first()
       if (!prof?.labor_id || !String(prof.labor_id).trim()) {
@@ -166,6 +178,12 @@ router.post('/profiles/:profileId/automations/:workflowId/start', async (req, re
           message: `Run #${runId} is already working in its own tab — not started a second time. ${otherRunsText(s.running - 1)}`,
         })
       }
+      if (active.pause_reason === 'awaiting-visa-save') {
+        return res.json({
+          ok: true, runId, resumed: true, state: 'paused',
+          message: `Run #${runId} filled the visa form already — press Save in its tab, then "✔️ Visa saved".`,
+        })
+      }
       if (isRetryWait(active)) {
         return res.json({
           ok: true, runId, resumed: true, state: 'queued',
@@ -194,6 +212,17 @@ router.post('/profiles/:profileId/automations/:workflowId/start', async (req, re
         accountContext.account_id = acct.id
         await db('musaned_accounts').where('id', acct.id).update({ last_used_at: new Date().toISOString() })
         console.log('[AUTO] loaded musaned account:', acct.name, 'username:', acct.username)
+      }
+    } else if (workflowId.startsWith('mofa')) {
+      // One visa platform account for every visa run.
+      let acct = accountId ? await db('visa_accounts').where('id', accountId).first() : null
+      if (!acct) acct = await db('visa_accounts').orderBy('is_default', 'desc').first()
+      if (acct) {
+        accountContext.visa_username = acct.username
+        accountContext.visa_password = acct.password
+        accountContext.visa_name = acct.name
+        accountContext.account_id = acct.id
+        await db('visa_accounts').where('id', acct.id).update({ last_used_at: new Date().toISOString() })
       }
     } else if (!workflowId.startsWith('wafid')) {
       // LMIS path (existing logic)
@@ -265,6 +294,53 @@ router.get('/automations/active', async (req, res) => {
   }
 })
 
+// Where every profile stands in the whole journey (Musaned → employer →
+// Wafid → LMIS contract → visa). Used by the "Stage" filter on the lists.
+export const STAGES = [
+  ['visa_applied', 'Visa applied'],
+  ['visa', 'Visa — form filled, waiting for Save'],
+  ['visa_ready', 'LMIS contract done — ready for visa'],
+  ['lmis_contract', 'LMIS contract in progress'],
+  ['contract_ready', 'Wafid FIT — ready for LMIS contract'],
+  ['medical_fit', 'Wafid FIT — no employer yet'],
+  ['wafid', 'Wafid booked'],
+  ['chosen', 'Chosen by an employer'],
+  ['musaned', 'On Musaned — waiting for an employer'],
+  ['other_agency', 'Registered by another agency'],
+  ['new', 'Not on Musaned yet'],
+]
+
+export function stageOf(p, runs = {}) {
+  const live = (r) => r && ['running', 'pending', 'paused'].includes(r.status)
+  const visa = String(p.visa_stage || '')
+  if (/applied/i.test(visa)) return 'visa_applied'
+  if (live(runs.mofa_visa) || /waiting|filled/i.test(visa)) return 'visa'
+  if (runs.lmis_contract?.status === 'done') return 'visa_ready'
+  if (live(runs.lmis_contract)) return 'lmis_contract'
+  if (p.status === 'medical_fit') return p.chosen_at ? 'contract_ready' : 'medical_fit'
+  if (p.status === 'medical_applied' || live(runs.wafid_book) || runs.wafid_book?.status === 'done') return 'wafid'
+  if (p.chosen_at) return 'chosen'
+  if (/another agency/i.test(p.musaned_stage || '')) return 'other_agency'
+  if (p.musaned_stage || runs.musaned_add_candidate?.status === 'done') return 'musaned'
+  return 'new'
+}
+
+router.get('/automations/stages', async (req, res) => {
+  try {
+    const db = req.app.locals.db
+    const profiles = await db('profiles').select('id', 'status', 'musaned_stage', 'chosen_at', 'visa_stage')
+    const rows = await db('automation_queue').select('id', 'profile_id', 'workflow_id', 'status').orderBy('id', 'asc')
+    const latest = new Map()
+    for (const r of rows) {
+      if (!latest.has(r.profile_id)) latest.set(r.profile_id, {})
+      latest.get(r.profile_id)[r.workflow_id] = r
+    }
+    res.json({ stages: STAGES, profiles: profiles.map(p => ({ profile_id: p.id, stage: stageOf(p, latest.get(p.id)) })) })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
 router.get('/automations/:id', async (req, res) => {
   try {
     const db = req.app.locals.db
@@ -292,6 +368,10 @@ router.post('/automations/:id/resume', async (req, res) => {
     }
     if (row.status !== 'paused' && row.status !== 'pending') {
       return res.status(409).json({ error: `Run #${runId} is ${row.status} — nothing to continue. Start it again from its card.` })
+    }
+    // Running the visa form again would make a second application.
+    if (row.pause_reason === 'awaiting-visa-save') {
+      return res.status(409).json({ error: `Run #${runId} filled the visa form already. Press Save in its tab, then "✔️ Visa saved" — or Cancel it to start over.` })
     }
     if (row.status === 'paused') {
       await db('automation_queue').where('id', runId).andWhere('status', 'paused')
@@ -397,6 +477,11 @@ router.post('/automations/:id/complete', async (req, res) => {
         // Booked and paid on Wafid: the result checker now watches it.
         await db('profiles').where('id', row.profile_id).update({ status: 'medical_applied', updated_at: new Date().toISOString() })
         next = ' Status: Medical · Applied — Adal Keep checks the result on Wafid by itself.'
+      } else if (row.workflow_id === 'mofa_visa') {
+        // The person pressed Save on the visa platform.
+        const { VISA_STAGES } = await import('../services/mofaVisa.js')
+        await db('profiles').where('id', row.profile_id).update({ visa_stage: VISA_STAGES.applied, visa_applied_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+        next = ' Visa stage: Visa applied.'
       } else if (String(row.workflow_id).startsWith('musaned')) {
         // She is on Musaned now: the 4-hourly contract check watches for an employer.
         next = ' Adal Keep now checks every 4 hours whether a Saudi employer chooses her.'

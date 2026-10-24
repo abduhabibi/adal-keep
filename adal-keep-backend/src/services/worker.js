@@ -45,7 +45,7 @@ const AGENCY_PROFILE_LIMIT = Number(process.env.AGENCY_PROFILE_LIMIT || 200)
 // Errors retrying can never fix. Add LMIS/companion-specific permanent
 // reasons here so they don't burn attempts on a 2-minute loop.
 const PERMANENT_ERROR =
-  /refused the login|not found|Not Found|not in the|placed pool|different labor|could not be verified|already_in_other_agency|already attached|already exists|Profile is missing|LMIS portal error|LMIS blocks|Musaned not started/i
+  /refused the login|not found|Not Found|not in the|placed pool|different labor|could not be verified|already_in_other_agency|already attached|already exists|Profile is missing|LMIS portal error|LMIS blocks|Musaned not started|No visa platform account|Nobody signed in/i
 
 let _interval      = null
 let _agencyTimer   = null
@@ -54,23 +54,47 @@ let _agencyRunning = false
 // --------------------------------------------------------------------------
 // Notifications
 // --------------------------------------------------------------------------
-let _lastSound = 0
-export function playNotificationSound() {
-  // Several notices at the same moment ring once.
-  if (Date.now() - _lastSound < 10000) return
-  _lastSound = Date.now()
+// Each kind of run rings with its own sound, so a person hears which task
+// calls them without looking (Windows: C:\Windows\Media, then beeps).
+const SOUNDS = {
+  police:  { win: 'chimes.wav',  beeps: [[880, 180], [660, 180]],                         linux: 'complete.oga',            mac: 'Glass' },
+  musaned: { win: 'notify.wav',  beeps: [[660, 150], [880, 150], [1100, 200]],           linux: 'message-new-instant.oga', mac: 'Ping' },
+  lmis:    { win: 'tada.wav',    beeps: [[523, 160], [523, 160], [784, 300]],            linux: 'bell.oga',                mac: 'Hero' },
+  wafid:   { win: 'Ring02.wav',  beeps: [[1000, 120], [0, 80], [1000, 120]],             linux: 'phone-incoming-call.oga', mac: 'Submarine' },
+  visa:    { win: 'Alarm02.wav', beeps: [[784, 140], [988, 140], [1175, 140], [1568, 320]], linux: 'alarm-clock-elapsed.oga', mac: 'Funk' },
+}
+
+/** Which sound a workflow rings with. */
+export function soundKind(workflowId = '') {
+  const w = String(workflowId)
+  if (w.startsWith('mofa') || w.startsWith('visa')) return 'visa'
+  if (w.startsWith('wafid')) return 'wafid'
+  if (w.startsWith('musaned')) return 'musaned'
+  if (w === 'lmis_contract') return 'lmis'
+  return 'police'
+}
+
+const _lastSound = {}
+export function playNotificationSound(workflowId = '') {
+  const kind = soundKind(workflowId)
+  const s = SOUNDS[kind]
+  // Several notices of one kind at the same moment ring once.
+  if (Date.now() - (_lastSound[kind] || 0) < 10000) return
+  _lastSound[kind] = Date.now()
   try {
     const platform = process.platform
     let cmd, args
     if (platform === 'darwin') {
       cmd = 'afplay'
-      args = ['/System/Library/Sounds/Glass.aiff']
+      args = [`/System/Library/Sounds/${s.mac}.aiff`]
     } else if (platform === 'win32') {
+      const beeps = s.beeps.map(([f, ms]) => f ? `[console]::beep(${f},${ms})` : `Start-Sleep -Milliseconds ${ms}`).join('; ')
+      const wav = `$env:WINDIR\\Media\\${s.win}`
       cmd = 'powershell'
-      args = ['-NoProfile', '-Command', '[console]::beep(880,180); [console]::beep(660,180)']
+      args = ['-NoProfile', '-Command', `$f="${wav}"; if (Test-Path $f) { (New-Object Media.SoundPlayer $f).PlaySync() } else { ${beeps} }`]
     } else {
       cmd = 'paplay'
-      args = ['/usr/share/sounds/freedesktop/stereo/complete.oga']
+      args = [`/usr/share/sounds/freedesktop/stereo/${s.linux}`]
     }
     const child = spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: true })
     child.on('error', () => {})
@@ -154,6 +178,12 @@ async function wafidSettings(db) {
   return { email: get('agency_email'), city: get('wafid_city') || 'Addis Ababa', issuePlace: get('wafid_issue_place') || 'ADDIS ABABA', position: get('wafid_position') || 'House Maid' }
 }
 
+/** Agency choices the visa form uses (Settings, keys visa_*). */
+async function visaSettings(db) {
+  const rows = await db('settings').where('key', 'like', 'visa_%').orWhere('key', 'agency_email').catch(() => [])
+  return Object.fromEntries(rows.map(r => [r.key, String(r.value ?? '').trim()]))
+}
+
 // --------------------------------------------------------------------------
 // Run execution — one run, one tab
 // --------------------------------------------------------------------------
@@ -231,11 +261,13 @@ async function executeRun(db, page, job) {
 
   const isMusaned = job.workflow_id.startsWith('musaned')
   const isWafid = job.workflow_id.startsWith('wafid')
-  page.__adalAllowImages = isMusaned || isWafid
+  const isVisa = job.workflow_id.startsWith('mofa')
+  // The visa platform's sign-in captcha is a picture a person reads.
+  page.__adalAllowImages = isMusaned || isWafid || isVisa
   console.log(
     `[worker] run #${runId} image policy: ` +
-    (isMusaned || isWafid
-      ? `ALLOW (${job.workflow_id} — reCAPTCHA needs images)`
+    (isMusaned || isWafid || isVisa
+      ? `ALLOW (${job.workflow_id} — the captcha needs images)`
       : 'BLOCK (bandwidth saver)')
   )
 
@@ -248,7 +280,7 @@ async function executeRun(db, page, job) {
       })
       console.log(`[notify] ${level.toUpperCase()} ${title}`)
       if (onLog) await onLog(level, `🔔 ${title}`)
-      playNotificationSound()
+      playNotificationSound(job.workflow_id)
     } catch (e) {
       console.error('[notify] failed:', e.message)
     }
@@ -270,6 +302,9 @@ async function executeRun(db, page, job) {
     musaned_username:  savedCtx.musaned_username || '',
     musaned_password:  savedCtx.musaned_password || '',
     musaned_name:      savedCtx.musaned_name || '',
+    visa_username:     savedCtx.visa_username || '',
+    visa_password:     savedCtx.visa_password || '',
+    visa_name:         savedCtx.visa_name || '',
     musanedStage,
     labor_id:          profile.labor_id || '',
     destination_country: profile.destination_country || '',
@@ -285,6 +320,7 @@ async function executeRun(db, page, job) {
     onLog,
     notify,
     wafid: isWafid ? await wafidSettings(db) : null,
+    visa: isVisa ? await visaSettings(db) : null,
   }
 
   ctx.page = page
@@ -314,6 +350,18 @@ async function executeRun(db, page, job) {
 
     if (isCancelled(runId)) {
       await handleCancelled()
+      return false
+    }
+
+    // The person finished the last step themselves and the run saw it.
+    if (result.ok && result.done) {
+      await db('automation_queue').where('id', runId).update({
+        status: 'done',
+        pause_reason: null,
+        finished_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      console.log(`[worker] run #${runId} done`)
       return false
     }
 

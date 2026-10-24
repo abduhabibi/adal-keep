@@ -8,6 +8,7 @@ import MusanedAccountPicker from './MusanedAccountPicker'
 const PAUSE_TEXT = {
   'awaiting-human-submit':    'waiting for you to check the LMIS form and press Submit',
   'awaiting-human-save':      'waiting for you to check the form and press SAVE',
+  'awaiting-visa-save':       'waiting for you to type the captcha and press Save on the visa platform',
   'awaiting-musaned-login':   'waiting for you to sign in to Musaned',
   'awaiting-musaned-captcha': 'waiting for you to solve the reCAPTCHA',
   'awaiting-musaned-otp':     'waiting for the OTP code from your phone',
@@ -25,7 +26,11 @@ const CONTINUE_LABEL = {
 const COMPLETE_LABEL = {
   'awaiting-human-submit': '✔️ Submit done',
   'awaiting-human-save':   '✔️ SAVE done',
+  'awaiting-visa-save':    '✔️ Visa saved',
 }
+
+// Waits that must not run again (a second run would make a second application).
+const NO_CONTINUE = new Set(['awaiting-visa-save'])
 
 const isRetry = (run) => run?.status === 'pending' && String(run.pause_reason || '').startsWith('Retry ')
 
@@ -59,6 +64,7 @@ export default function ProfileAutomations({ profileId }) {
   const [open, setOpen] = useState(null)
   const [accountId, setAccountId] = useState(null)
   const [musanedAccountId, setMusanedAccountId] = useState(null)
+  const [visaAccountId, setVisaAccountId] = useState(null)
   const [detail, setDetail] = useState(null)
   // Workflows whose click is on its way to the server (one request per card).
   const [sending, setSending] = useState({})
@@ -109,7 +115,9 @@ export default function ProfileAutomations({ profileId }) {
 
   // Musaned workflows use the Musaned account picker; everything else LMIS.
   const accountFor = (workflowId) =>
-    workflowId.startsWith('musaned') ? musanedAccountId : accountId
+    workflowId.startsWith('musaned') ? musanedAccountId
+      : workflowId.startsWith('mofa') ? visaAccountId
+      : accountId
 
   // Show what the server said about a click. A queued run gets an hourglass:
   // it starts by itself when a slot frees.
@@ -214,7 +222,7 @@ export default function ProfileAutomations({ profileId }) {
         </p>
       </div>
 
-      <div className="mb-4 grid sm:grid-cols-2 gap-3">
+      <div className="mb-4 grid sm:grid-cols-2 xl:grid-cols-3 gap-3">
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-2">LMIS login account</p>
           <LmisAccountPicker value={accountId} onChange={setAccountId} />
@@ -222,6 +230,11 @@ export default function ProfileAutomations({ profileId }) {
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-2">Musaned login account</p>
           <MusanedAccountPicker value={musanedAccountId} onChange={setMusanedAccountId} />
+        </div>
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-2">Visa platform login account</p>
+          <MusanedAccountPicker value={visaAccountId} onChange={setVisaAccountId}
+            endpoint="/visa/accounts" what="visa platform" placeholder="Nuzla visa" userLabel="Login Name" />
         </div>
       </div>
 
@@ -294,6 +307,7 @@ export default function ProfileAutomations({ profileId }) {
                   <span className="text-[10px] font-semibold text-amber-700 dark:text-amber-400">
                     {latest.pause_reason === 'awaiting-human-submit' ? '⏳ Awaiting your Submit'
                       : latest.pause_reason === 'awaiting-human-save' ? '⏳ Awaiting your SAVE'
+                      : latest.pause_reason === 'awaiting-visa-save' ? '⏳ Awaiting your visa Save'
                       : '● Paused'}
                   </span>
                 )}
@@ -329,7 +343,7 @@ export default function ProfileAutomations({ profileId }) {
               )}
             </div>
             <div className="flex flex-wrap justify-end gap-2 shrink-0">
-              {detail.status === 'paused' && (
+              {detail.status === 'paused' && !NO_CONTINUE.has(detail.pause_reason) && (
                 <button
                   onClick={resume}
                   className="px-3 py-1.5 rounded-lg bg-teal-600 text-white text-xs font-semibold hover:bg-teal-700"

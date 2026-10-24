@@ -65,7 +65,7 @@ export function Select({ title, value, onChange, options }) {
   )
 }
 
-const EMPTY = { range: '', experience: '', age: '', married: '', country: '', skill: '', religion: '', run: '' }
+const EMPTY = { range: '', experience: '', age: '', married: '', country: '', skill: '', religion: '', run: '', stage: '' }
 // "Unfilled": the field is empty on the profile.
 const NONE = '__none__'
 const RUNS = [['', 'Any'], ['running', 'Running now'], ['waiting', 'Waiting for you'], ['idle', 'Not running']]
@@ -87,6 +87,23 @@ function useRunStates() {
   return states
 }
 
+/**
+ * Where every profile stands (Musaned → employer → Wafid → LMIS contract →
+ * visa), refreshed every 30 s. { names: [[key, label]…], of: {profileId: key} }
+ */
+function useStages() {
+  const [st, setSt] = useState({ names: [], of: {} })
+  useEffect(() => {
+    let alive = true
+    const load = () => api.get('/automations/stages')
+      .then(r => { if (alive) setSt({ names: r.data?.stages || [], of: Object.fromEntries((r.data?.profiles || []).map(x => [x.profile_id, x.stage])) }) })
+      .catch(() => {})
+    load()
+    const t = setInterval(load, 30000)
+    return () => { alive = false; clearInterval(t) }
+  }, [])
+  return st
+}
 
 export function useProfileFilters(profiles) {
   const [f, setF] = useState(EMPTY)
@@ -94,6 +111,7 @@ export function useProfileFilters(profiles) {
   const [dir, setDir] = useState('desc')
   const set = (k) => (v) => setF(prev => ({ ...prev, [k]: v }))
   const runStates = useRunStates()
+  const stages = useStages()
 
   // The choices come from the profiles themselves.
   const choices = useMemo(() => ({
@@ -122,6 +140,7 @@ export function useProfileFilters(profiles) {
       if (f.skill && (f.skill === NONE ? skillsOf(p.skills).length > 0 : !skillsOf(p.skills).some(s => same(s, f.skill)))) return false
       if (f.religion && !match(f.religion, p.religion)) return false
       if (f.run && (runStates[p.id] || 'idle') !== f.run) return false
+      if (f.stage && (stages.of[p.id] || 'new') !== f.stage) return false
       return true
     })
     const key = (p) => sort === 'age' ? (ageOf(p.date_of_birth) ?? -1)
@@ -133,7 +152,7 @@ export function useProfileFilters(profiles) {
       return dir === 'asc' ? c : -c
     })
     return out
-  }, [profiles, f, sort, dir, runStates])
+  }, [profiles, f, sort, dir, runStates, stages])
 
   const opts = (any, list) => [['', any], ...list.map(v => [v, label(v)])]
   const withNone = (any, list) => [['', any], [NONE, 'Unfilled'], ...list.map(v => [v, label(v)])]
@@ -155,7 +174,7 @@ export function useProfileFilters(profiles) {
   )
 
   const filterBar = (
-    <div className="grid gap-3 grid-cols-2 sm:grid-cols-4 xl:grid-cols-8">
+    <div className="grid gap-3 grid-cols-2 sm:grid-cols-4 xl:grid-cols-9">
       <Select title="Date Range" value={f.range} onChange={set('range')} options={DATE_RANGES} />
       <Select title="Experience" value={f.experience} onChange={set('experience')} options={opts('Any', choices.experience)} />
       <Select title="Age" value={f.age} onChange={set('age')} options={AGES} />
@@ -164,6 +183,10 @@ export function useProfileFilters(profiles) {
       <Select title="Skill" value={f.skill} onChange={set('skill')} options={withNone('Any', choices.skill)} />
       <Select title="Religion" value={f.religion} onChange={set('religion')} options={withNone('Any', choices.religion)} />
       <Select title="Run" value={f.run} onChange={set('run')} options={RUNS} />
+      <Select title="Stage" value={f.stage} onChange={set('stage')} options={[['', 'Any stage'], ...stages.names.map(([k, t]) => {
+        const n = profiles.filter(p => (stages.of[p.id] || 'new') === k).length
+        return [k, `${t} (${n})`]
+      })]} />
     </div>
   )
 

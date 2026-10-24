@@ -94,11 +94,15 @@ const KINDS = {
     const a = await db('musaned_accounts').where('id', id).first()
     return a && { title: `Musaned account ${a.name}`, tables: { musaned_accounts: [a] }, paths: [] }
   },
+  async visa_account(db, id) {
+    const a = await db('visa_accounts').where('id', id).first()
+    return a && { title: `Visa platform account ${a.name}`, tables: { visa_accounts: [a] }, paths: [] }
+  },
 }
 
 // Restore parents before children; delete children before parents.
 const ORDER = ['brokers', 'users', 'cv_templates', 'checklists', 'profiles', 'profile_fields', 'files', 'generated_cvs',
-  'document_verifications', 'checklist_profiles', 'tasks', 'quick_links', 'lmis_accounts', 'musaned_accounts']
+  'document_verifications', 'checklist_profiles', 'tasks', 'quick_links', 'lmis_accounts', 'musaned_accounts', 'visa_accounts']
 
 /** Who deleted it: the employee name the page sends, and from which PC. */
 export function whoFrom(req) {

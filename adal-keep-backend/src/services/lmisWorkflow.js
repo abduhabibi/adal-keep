@@ -1971,6 +1971,20 @@ export async function runFullWorkflow(page, ctx) {
     }
   }
 
+  // Visa on the Saudi visa platform: sign-in, the long form, a person saves.
+  if (workflowId === 'mofa_visa') {
+    try {
+      const { runMofaVisa } = await import('./mofaVisa.js')
+      return await runMofaVisa(page, ctx)
+    } catch (e) {
+      if (e?.cancelled) throw e
+      const secs = Math.round((Date.now() - t0) / 1000)
+      log(ctx, `visa application failed after ${secs}s: ${e.message}`, 'error')
+      await dumpPageState(page, ctx, 'mofa-visa')
+      return { ok: false, step: 'mofa-visa', error: e.message, seconds: secs }
+    }
+  }
+
   // LMIS contract: Contract → her Labor ID → Open → Create Contract.
   if (workflowId === 'lmis_contract') {
     try {

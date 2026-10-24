@@ -139,6 +139,11 @@ async function resolveFilePaths(db, profileId) {
     passportImagePath: await getPassportImage(),
     fullBodyPath: await get('Full Body Photo'),
     slipPath: await get('Slip'),
+    // LMIS contract documents (lmisContract.js).
+    contractPath: (await get('Contract (EPRO + Candidate signed)')) || (await get('Contract (PRO + Employer signed)')) || (await get('Contract')),
+    insurancePath: await get('Insurance'),
+    governmentIdPath: await get('Government ID'),
+    visaPath: await get('Visa'),
   }
 }
 
@@ -273,6 +278,10 @@ async function executeRun(db, page, job) {
     passportImagePath: files.passportImagePath,
     fullBodyPath: files.fullBodyPath,
     slipPath:     files.slipPath,
+    contractPath: files.contractPath,
+    insurancePath: files.insurancePath,
+    governmentIdPath: files.governmentIdPath,
+    visaPath:     files.visaPath,
     onLog,
     notify,
     wafid: isWafid ? await wafidSettings(db) : null,

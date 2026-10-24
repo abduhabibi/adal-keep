@@ -70,6 +70,7 @@ const emptyForm = {
   emergency_phone: '',
   emergency_gender: 'Male',
   emergency_relationship: 'Father',
+  emergency_labor_id: '',
   cooking_skill: 'None',
   speaks_english: false,
   speaks_arabic: false,
@@ -174,6 +175,7 @@ export default function ProfileFormPage() {
             emergency_phone: p.emergency_phone || '',
             emergency_gender: p.emergency_gender || 'Male',
             emergency_relationship: p.emergency_relationship || 'Father',
+            emergency_labor_id: p.emergency_labor_id || '',
             cooking_skill: p.cooking_skill || 'None',
             speaks_english: !!p.speaks_english,
             speaks_arabic: !!p.speaks_arabic,
@@ -474,6 +476,14 @@ export default function ProfileFormPage() {
               <option value="Oman">Oman</option>
             </select>
           </div>
+          {form.destination_country === 'Saudi Arabia' && (
+            <div className="sm:col-span-2 rounded-lg border border-amber-300 bg-amber-50/60 dark:bg-amber-900/10 p-3">
+              <label className={labelClass} htmlFor="emergency_labor_id">Emergency contact person — LMIS Labor ID *</label>
+              <input id="emergency_labor_id" className={inputClass} placeholder="EM13001783" value={form.emergency_labor_id}
+                onChange={e => setForm(f => ({ ...f, emergency_labor_id: e.target.value.toUpperCase().trim() }))} />
+              <p className="text-xs text-slate-500 mt-1">The Saudi LMIS contract adds this person on its Emergency Contact tab. Register them on LMIS first, then type their Labor ID here.</p>
+            </div>
+          )}
           <div>
             <label className={labelClass} htmlFor="religion">Religion *</label>
             <select id="religion" required className={inputClass} value={form.religion} onChange={setField('religion')}>

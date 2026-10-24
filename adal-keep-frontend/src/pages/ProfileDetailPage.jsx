@@ -158,6 +158,10 @@ export default function ProfileDetailPage() {
         </div>
       )}
 
+      {profile.destination_country === 'Saudi Arabia' && (
+        <SaudiEmergency profile={profile} onSaved={(v) => setProfile(p => ({ ...p, emergency_labor_id: v }))} />
+      )}
+
       <div className="grid gap-6 lg:grid-cols-3">
         {/* Left: client details */}
         <section className="panel p-6 lg:col-span-1">
@@ -198,6 +202,7 @@ export default function ProfileDetailPage() {
             <Field label="Emergency name" value={profile.emergency_name} />
             <Field label="Emergency phone" value={profile.emergency_phone} />
             <Field label="Emergency relationship" value={profile.emergency_relationship} />
+            {profile.destination_country === 'Saudi Arabia' && <Field label="Emergency Labor ID (LMIS)" value={profile.emergency_labor_id} />}
             <Field label="Destination Country" value={profile.destination_country} />
             <Field label="Broker" value={profile.broker_name || 'Unassigned'} />
             <Field label="Created" value={formatDate(profile.created_at)} />
@@ -309,6 +314,36 @@ function Field({ label, value }) {
     <div className="p-2.5 rounded-lg bg-slate-50/80 dark:bg-slate-900/40 border border-slate-200/60 dark:border-slate-800">
       <dt className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">{label}</dt>
       <dd className="mt-0.5 text-sm font-medium text-slate-900 dark:text-slate-100">{value || '—'}</dd>
+    </div>
+  )
+}
+/** Saudi Arabia: the LMIS contract needs the emergency contact person's Labor ID. */
+function SaudiEmergency({ profile, onSaved }) {
+  const [value, setValue] = useState(profile.emergency_labor_id || '')
+  const [editing, setEditing] = useState(!profile.emergency_labor_id)
+  const [saving, setSaving] = useState(false)
+  const save = async () => {
+    const v = value.toUpperCase().trim()
+    if (!v) return toast.error('Type the Labor ID of the emergency contact person')
+    setSaving(true)
+    try {
+      await api.put(`/profiles/${profile.id}`, { emergency_labor_id: v })
+      onSaved(v); setEditing(false); toast.success('Emergency contact saved')
+    } catch (e) { toast.error(e?.response?.data?.error || 'Could not save') } finally { setSaving(false) }
+  }
+  return (
+    <div className={`panel p-4 border-l-4 ${profile.emergency_labor_id && !editing ? 'border-l-emerald-500' : 'border-l-amber-400 bg-amber-50/30 dark:bg-amber-900/10'}`}>
+      <p className="text-sm font-semibold">🇸🇦 Saudi Arabia — emergency contact person for the LMIS contract</p>
+      {editing ? (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <input className="rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-1.5 text-sm w-48"
+            placeholder="EM13001783" value={value} onChange={e => setValue(e.target.value)} onKeyDown={e => e.key === 'Enter' && save()} />
+          <Button size="sm" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</Button>
+          <span className="text-xs text-slate-500">Their LMIS Labor ID (register the person on LMIS first). The contract run adds them on the Emergency Contact tab.</span>
+        </div>
+      ) : (
+        <p className="text-xs text-slate-500 mt-1">Labor ID <b>{profile.emergency_labor_id}</b> — added on the LMIS contract's Emergency Contact tab. <button type="button" className="underline" onClick={() => setEditing(true)}>Change</button></p>
+      )}
     </div>
   )
 }

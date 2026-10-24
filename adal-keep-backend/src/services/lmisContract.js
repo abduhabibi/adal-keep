@@ -16,8 +16,13 @@
  *      passport and visa numbers, employer city / full name / phone, house
  *      number (the first number of the employer's address)
  *
- * The window's own Create Contract is pressed by a person (Adal Keep never
- * presses it).
+ *   7. the window's Create Contract — only when everything needed is filled
+ *      (else a person finishes the window)
+ *   8. Emergency Contact tab: her emergency contact person (profile
+ *      emergency_labor_id) → search → Add
+ *   9. Documents tab: Employment Contract (Musaned contract PDF), Passport,
+ *      Working Visa, Insurance, Original ID (Government ID) — never Submit
+ *  10. a person pays (Payment tab): Adal Keep rings once
  * A labor that already has an employment contract is left as it is.
  */
 import { log, settle, closePopups, stepLogin } from './lmisWorkflow.js'
@@ -195,12 +200,160 @@ export async function runLmisContract(page, ctx) {
   }
   const left = await fillContractWindow(page, ctx, p)
 
-  await ctx.notify(`🔔 ${ctx.profileName}: LMIS contract ready to create`,
-    left.length
-      ? `Filled on her LMIS contract window (${laborId}). Please fill by hand: ${left.join(', ')}. Then check and press Create Contract.`
-      : `Everything is filled on her LMIS contract window (${laborId}). Check it and press Create Contract.`)
-  log(ctx, `✅ done — WAITING for a person to press Create Contract${left.length ? ` (left for the person: ${left.join(', ')})` : ''}`)
-  return { ok: true, note: 'contract window filled — awaiting the person', seconds: secs() }
+  // Something needed is still empty: a person finishes the window.
+  const blocking = left.filter(x => !/^Alternative Phone/i.test(x))
+  if (blocking.length) {
+    await ctx.notify(`🔔 ${ctx.profileName}: LMIS contract — please finish the window`,
+      `Filled on her LMIS contract window (${laborId}). Please fill by hand: ${left.join(', ')}. Then press Create Contract.`)
+    log(ctx, `✅ stopped — WAITING for a person (left: ${left.join(', ')})`)
+    return { ok: true, note: 'contract window filled — awaiting the person', seconds: secs() }
+  }
+
+  // 7. Create Contract (the window's own button) → the contract page.
+  const pressed = await page.evaluate(() => {
+    const dialog = [...document.querySelectorAll('[role="dialog"], .modal, [class*="modal"]')].find(d => /Select A Job Order/i.test(d.innerText || '')) || document.body
+    const b = [...dialog.querySelectorAll('button')].filter(x => /^\s*Create Contract\s*$/i.test(x.innerText || '') && x.getBoundingClientRect().width > 0 && !x.disabled).pop()
+    if (!b) return false
+    b.scrollIntoView({ block: 'center' }); b.click(); return true
+  })
+  if (!pressed) throw new Error('The window\'s Create Contract button was not found (or is disabled)')
+  log(ctx, '✓ pressed Create Contract in the window — waiting for the contract page')
+  const opened = await until(async () => /Emergency Contact/i.test(await text(page)) && /Documents/i.test(await text(page)) && !/Select A Job Order/i.test(await text(page)), 120000, ctx)
+  if (!opened) {
+    const t = await text(page)
+    const why = (t.match(/[^\n]*(required|invalid|error|failed|already)[^\n]*/i) || [])[0]
+    throw new Error(`LMIS did not open the contract page after Create Contract${why ? `: ${why.trim().slice(0, 140)}` : ''}`)
+  }
+  await settle(page)
+  log(ctx, '✓ contract created — the contract page is open')
+
+  // 8. Emergency Contact tab: the emergency contact person (by Labor ID).
+  const todo = []
+  const em = String(p.emergency_labor_id || '').trim().toUpperCase()
+  if (!em) { log(ctx, 'the profile has no emergency contact Labor ID — left for the person', 'warn'); todo.push('Emergency Contact (no Labor ID on the profile)') }
+  else if (!(await addEmergencyContact(page, ctx, em))) todo.push(`Emergency Contact (${em})`)
+
+  // 9. Documents tab: every document Adal Keep has.
+  todo.push(...await uploadDocuments(page, ctx))
+
+  // 10. Payment: a person pays.
+  await clickText(page, /^Payment$/).catch(() => {})
+  await ctx.notify(`💳 ${ctx.profileName}: LMIS contract — pay now`,
+    `Her LMIS contract (${laborId}) is created${todo.length ? `; still to do by hand: ${todo.join(', ')}` : ' with the emergency contact and documents'}. Open the Payment tab in the LMIS tab and pay.`)
+  log(ctx, `✅ done — WAITING for the payment${todo.length ? ` (also by hand: ${todo.join(', ')})` : ''}`)
+  return { ok: true, note: 'contract created — awaiting payment', seconds: secs() }
+}
+
+// --------------------------------------------------------------------------
+// After Create Contract: Emergency Contact and Documents tabs
+// --------------------------------------------------------------------------
+async function addEmergencyContact(page, ctx, em) {
+  await clickText(page, /^Emergency Contact$/)
+  await sleep(1500)
+  const added = async () => {
+    const t = (await text(page)).toUpperCase()
+    return /EMERGENCY CONTACT PERSON/.test(t) && t.includes(em)
+  }
+  if (await added()) { log(ctx, `✓ emergency contact ${em} is already added`); return true }
+
+  // Search their Labor ID.
+  const box = await page.evaluateHandle(() => [...document.querySelectorAll('input')]
+    .find(i => { const r = i.getBoundingClientRect(); return r.width > 40 && !i.disabled && /^(text|search|)$/i.test(i.type) }) || null)
+  const el = box.asElement()
+  if (!el) { log(ctx, 'no search box on the Emergency Contact tab — left for the person', 'warn'); return false }
+  await el.click({ clickCount: 3 })
+  await page.keyboard.press('Backspace')
+  await el.type(em, { delay: 40 })
+  await el.press('Enter').catch(() => {})
+  await page.evaluate(() => [...document.querySelectorAll('button')].find(b => /^\s*search\s*$/i.test(b.innerText || '') && b.getBoundingClientRect().width > 0)?.click())
+  log(ctx, `searching the emergency contact ${em}`)
+
+  // Add: the Add button next to that Labor ID.
+  const found = await until(() => page.evaluate((em) => {
+    const adds = [...document.querySelectorAll('button, a, [role="button"]')].filter(b => /^\s*\+?\s*add\s*$/i.test(b.innerText || '') && b.getBoundingClientRect().width > 0)
+    const b = adds.find(b => { let box = b; for (let i = 0; i < 6 && box; i++, box = box.parentElement) if ((box.innerText || '').toUpperCase().includes(em)) return true; return false })
+    if (!b) return false
+    b.setAttribute('data-adal-add', '1'); return true
+  }, em), 45000, ctx)
+  if (!found) { log(ctx, `emergency contact ${em} was not found on LMIS — left for the person`, 'warn'); return false }
+  await page.click('[data-adal-add="1"]')
+  if (await until(added, 30000, ctx)) { log(ctx, `✓ emergency contact ${em} added`); return true }
+  log(ctx, `pressed Add for ${em} but LMIS does not show the person yet — left for the person`, 'warn')
+  return false
+}
+
+// LMIS document rows → the profile documents (worker.js resolveFilePaths).
+const DOCS = [
+  ['Employment Contract', 'contractPath'],
+  ['Passport', 'passportPath'],
+  ['Working Visa', 'visaPath'],
+  ['Insurance', 'insurancePath'],
+  ['Original ID', 'governmentIdPath'],
+]
+
+async function uploadDocuments(page, ctx) {
+  const { expectFile, disarmFile } = await import('./tabManager.js')
+  await clickText(page, /^Documents$/)
+  await until(async () => /Document Type/i.test(await text(page)), 20000, ctx)
+  await sleep(1000)
+  const todo = []
+  for (const [row, key] of DOCS) {
+    const file = ctx[key]
+    if (!file) { todo.push(`${row} (not on the profile)`); log(ctx, `${row}: the profile has no such document — left for the person`, 'warn'); continue }
+    // Open the row (its arrow) and find where its file goes.
+    const where = await page.evaluate((row) => {
+      const title = [...document.querySelectorAll('*')].find(e => e.children.length === 0 && new RegExp(`^\\s*${row}\\s*$`, 'i').test(e.textContent || ''))
+      if (!title) return 'no-row'
+      let box = title
+      for (let i = 0; i < 6 && box.parentElement; i++) { box = box.parentElement; if (box.getBoundingClientRect().width > 500) break }
+      box.setAttribute('data-adal-row', row)
+      const arrow = box.querySelector('svg, [class*="chevron"], [class*="arrow"], button')
+      ;(arrow?.closest('button') || arrow || box).dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      return 'ok'
+    }, row)
+    if (where === 'no-row') { todo.push(row); log(ctx, `${row}: no such row on the Documents tab`, 'warn'); continue }
+    await sleep(1200)
+    const sel = `[data-adal-row="${row}"]`
+    const input = await page.$(`${sel} input[type="file"]`) || await page.$(`${sel} ~ * input[type="file"]`)
+    let sent = false
+    if (input) {
+      await input.uploadFile(file).then(() => { sent = true }).catch(() => {})
+    } else {
+      const btn = await page.evaluateHandle((sel) => {
+        const row = document.querySelector(sel)
+        const scope = [row, row?.nextElementSibling].filter(Boolean)
+        for (const s of scope) {
+          const b = [...s.querySelectorAll('button, a, label, [role="button"]')].find(x => /upload|choose|browse|attach|add file|select file|replace/i.test(x.innerText || x.getAttribute('aria-label') || '') && x.getBoundingClientRect().width > 0)
+          if (b) return b
+        }
+        return null
+      }, sel)
+      if (btn.asElement()) {
+        const chosen = expectFile(page, file, 10000)
+        await btn.asElement().click().catch(() => {})
+        sent = await chosen
+        if (!sent) disarmFile(page)
+      }
+    }
+    if (!sent) { todo.push(row); log(ctx, `${row}: no upload button found — left for the person`, 'warn'); continue }
+    // Wait for the upload; then its own Upload / Save button (never Submit).
+    const done = await until(() => page.evaluate((sel, name) => {
+      const row = document.querySelector(sel)
+      const t = `${row?.innerText || ''} ${row?.nextElementSibling?.innerText || ''}`
+      return /upload(ed)? complete|success|uploaded/i.test(t) || t.includes(name)
+    }, sel, file.split(/[\\/]/).pop()), 120000, ctx)
+    await page.evaluate((sel) => {
+      const row = document.querySelector(sel)
+      for (const s of [row, row?.nextElementSibling].filter(Boolean)) {
+        const b = [...s.querySelectorAll('button')].find(x => /^\s*(upload|save)\s*$/i.test(x.innerText || '') && !x.disabled && x.getBoundingClientRect().width > 0)
+        if (b) { b.click(); return }
+      }
+    }, sel)
+    await sleep(1500)
+    log(ctx, done ? `✓ ${row} uploaded` : `${row}: the file was given but LMIS did not confirm it — check it`, done ? 'info' : 'warn')
+    if (!done) todo.push(`${row} (check the upload)`)
+  }
+  return todo
 }
 
 // --------------------------------------------------------------------------

@@ -601,6 +601,58 @@ export async function stepFillCandidatePreCheck(page, ctx) {
   }
 }
 
+/**
+ * Musaned says she is registered already:
+ *   - "This candidate has already been added to your list" (red message):
+ *     she is in this agency's HR Pool → { kind: 'ours' }
+ *   - "<NAME> already exists! Kindly contact EPRO to delete this candidate"
+ *     with the EPRO's name, email and number → { kind: 'other', epro… }
+ * Returns null when neither shows within `ms`.
+ */
+export async function readAlreadyRegistered(page, ms = 8000) {
+  const end = Date.now() + ms
+  while (Date.now() < end) {
+    const r = await page.evaluate(() => {
+      const t = document.body?.innerText || ''
+      if (/already\s+exists!?[\s\S]{0,80}contact\s+EPRO/i.test(t)) {
+        const after = (label) => {
+          const m = t.match(new RegExp(`${label}\\s*:?\\s*\\n+\\s*([^\\n]+)`, 'i'))
+          return m ? m[1].trim() : ''
+        }
+        return {
+          kind: 'other',
+          who: (t.match(/([^\n]+?)\s+already\s+exists!?/i) || [])[1]?.trim() || '',
+          epro: after('EPRO Name'), email: after('EPRO Email'), phone: after('EPRO Contact Number'),
+        }
+      }
+      if (/already\s+been\s+added\s+to\s+your\s+list/i.test(t)) return { kind: 'ours' }
+      return null
+    }).catch(() => null)
+    if (r) return r
+    await sleep(500)
+  }
+  return null
+}
+
+/** Writes it into her profile, closes Musaned's message and ends the run. */
+async function stopAlreadyRegistered(page, ctx, r, secs) {
+  if (r.kind === 'ours') {
+    const text = 'Musaned: already registered in our list (HR Pool) — "This candidate has already been added to your list". Not added again.'
+    log(ctx, `ℹ️ ${text}`)
+    await ctx.noteProfile?.(text, ctx.profile?.musaned_stage ? {} : { musaned_stage: 'IN OUR LIST' })
+    await ctx.notify(`ℹ️ ${ctx.profileName}: already on Musaned`, 'She is already in our Musaned list (HR Pool). Nothing was added again.')
+    await page.evaluate(() => document.querySelectorAll('.p-toast-icon-close, [class*="toast"] button').forEach(b => b.click())).catch(() => {})
+    return { ok: true, note: 'already registered on Musaned (our list)', seconds: secs }
+  }
+  const where = [r.epro && `EPRO: ${r.epro}`, r.email && `email ${r.email}`, r.phone && `phone ${r.phone}`].filter(Boolean).join(', ')
+  const text = `Musaned: ${r.who || 'she'} already exists — registered by another agency (${where || 'EPRO not shown'}). Ask that agency to delete her before adding her here.`
+  log(ctx, `⚠ ${text}`, 'warn')
+  await ctx.noteProfile?.(text, { musaned_stage: 'REGISTERED BY ANOTHER AGENCY' })
+  await ctx.notify(`⚠️ ${ctx.profileName}: registered by another agency on Musaned`, text)
+  await page.evaluate(() => [...document.querySelectorAll('button')].find(b => /^\s*OK\s*$/i.test(b.innerText || ''))?.click()).catch(() => {})
+  return { ok: false, step: 'pre-check', error: `Musaned: she already exists — registered by another agency (${where})`, seconds: secs }
+}
+
 // ============================================================================
 // v16.7 HELPERS
 // ============================================================================
@@ -2234,6 +2286,9 @@ async function musanedRun(page, ctx) {
     await stepClickAddNewCandidate(page, ctx)
 
     const pre = await stepFillCandidatePreCheck(page, ctx)
+    // Registered already (in our list, or by another agency): noted, stopped.
+    const already = await readAlreadyRegistered(page, 6000)
+    if (already) return await stopAlreadyRegistered(page, ctx, already, Math.round((Date.now() - t0) / 1000))
     if (!pre || !pre.ok) {
       log(ctx, `pre-check failed (${pre?.error || 'unknown'}) — running diagnostics before details`, 'warn')
       await diagnoseMusanedPage(page, ctx, 'post-pre-check-failure')
@@ -2249,6 +2304,9 @@ async function musanedRun(page, ctx) {
       observed: { on_candidates_page: true, modal_open: true, url: page.url() },
     })
     log(ctx, `stage verification -> complete=${verify.complete} (${verify.source})`)
+
+    const late = await readAlreadyRegistered(page, 500)
+    if (late) return await stopAlreadyRegistered(page, ctx, late, Math.round((Date.now() - t0) / 1000))
 
     const secs = Math.round((Date.now() - t0) / 1000)
     // The form step already said "ready for SAVE" (and rang): no second notice.

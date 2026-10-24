@@ -289,6 +289,16 @@ async function executeRun(db, page, job) {
 
   ctx.page = page
   ctx.isCancelled = () => isCancelled(runId)
+  // A run writes what it found into the profile's notes (dated), and may set
+  // a few profile fields with it.
+  ctx.noteProfile = async (text, fields = {}) => {
+    try {
+      const row = await db('profiles').where('id', job.profile_id).first('notes')
+      const line = `[${new Date().toISOString().slice(0, 10)}] ${text}`
+      const notes = row?.notes ? `${row.notes}\n${line}` : line
+      await db('profiles').where('id', job.profile_id).update({ ...fields, notes, updated_at: new Date().toISOString() })
+    } catch (e) { console.error('[worker] note failed:', e.message) }
+  }
 
   try { await noteLink(page) } catch {}
   try { await registerTab(runId, page) } catch {}

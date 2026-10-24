@@ -12,10 +12,12 @@
  *   5. on her page (Labor ID checked again): Create Contract
  *   6. the contract window: Experienced / Non Experienced (profile), the job
  *      order of her Musaned recruitment office (PRO), Beginning of Contract
- *      = today, passport and visa numbers
+ *      = today, Ending = 2 years later, and from her Musaned contract:
+ *      passport and visa numbers, employer city / full name / phone, house
+ *      number (the first number of the employer's address)
  *
  * The window's own Create Contract is pressed by a person (Adal Keep never
- * presses it), after filling Ending of Contract.
+ * presses it).
  * A labor that already has an employment contract is left as it is.
  */
 import { log, settle, closePopups, stepLogin } from './lmisWorkflow.js'
@@ -261,6 +263,72 @@ function markByLabel(page, label, mark) {
   }, label, mark)
 }
 
+const hasLabel = (page, label) => page.evaluate((label) =>
+  [...document.querySelectorAll('label, p, span, div')].some(e => e.children.length === 0 && new RegExp(`^\\s*${label}\\s*$`, 'i').test(e.textContent || '')), label)
+
+// Saudi cities: the names LMIS may list, and how the contract may write them.
+const CITIES = [
+  ['Riyadh', /riyad|الرياض/i], ['Jeddah', /jedd?ah|jidd?ah|jidda|جدة|جده/i], ['Makkah', /makk?ah|mecca|مكة/i],
+  ['Madinah', /madinah|medina|المدينة/i], ['Dammam', /dammam|الدمام/i], ['Khobar', /khobar|الخبر/i],
+  ['Taif', /ta'?if|الطائف/i], ['Abha', /abha|أبها|ابها/i], ['Khamis Mushait', /khamis|خميس/i],
+  ['Buraydah', /buraid|buraydah|بريدة/i], ['Hail', /\bh[aā]'?il\b|حائل/i], ['Tabuk', /tabuk|تبوك/i],
+  ['Jazan', /jazan|jizan|جازان|جيزان/i], ['Najran', /najran|نجران/i], ['Al Ahsa', /ahsa|hofuf|الأحساء|الاحساء|الهفوف/i],
+  ['Qatif', /qatif|القطيف/i], ['Yanbu', /yanbu|ينبع/i], ['Al Kharj', /kharj|الخرج/i], ['Jubail', /jubail|الجبيل/i],
+  ['Al Qassim', /qass?im|القصيم/i], ['Unaizah', /unaizah|onaizah|عنيزة/i], ['Al Baha', /baha|الباحة/i],
+  ['Arar', /\barar\b|عرعر/i], ['Sakaka', /sakaka|سكاكا/i], ['Hafar Al Batin', /hafar|حفر الباطن/i],
+]
+const cityPattern = (name) => (CITIES.find(([n, re]) => re.test(name) || n.toLowerCase() === String(name).toLowerCase()) || [null, null])[1]
+const citiesIn = (text) => CITIES.filter(([, re]) => re.test(text)).map(([n]) => n)
+
+/** Opens the Employer city list, types the city and picks the matching entry. */
+async function pickCity(page, ctx, wanted) {
+  const control = await page.evaluateHandle(() => {
+    const lab = [...document.querySelectorAll('label, p, span, div')].find(e => e.children.length === 0 && /^\s*Employer city\s*$/i.test(e.textContent || ''))
+    let box = lab?.parentElement
+    for (let i = 0; i < 3 && box; i++, box = box.parentElement) {
+      const c = box.querySelector('select, [class*="control"], [role="combobox"], input')
+      if (c) return c
+    }
+    return null
+  })
+  const el = control.asElement()
+  if (!el) return null
+  for (const name of wanted) {
+    const re = cityPattern(name)
+    const tag = await el.evaluate(e => e.tagName)
+    if (tag === 'SELECT') {
+      const v = await el.evaluate((e, src, name) => {
+        const r = src ? new RegExp(src, 'i') : null
+        const o = [...e.options].find(o => (r ? r.test(o.text) : o.text.trim().toLowerCase() === name.toLowerCase()))
+        if (!o) return null
+        e.value = o.value; e.dispatchEvent(new Event('change', { bubbles: true })); return o.text.trim()
+      }, re?.source || null, name)
+      if (v) return v
+      continue
+    }
+    await el.click().catch(() => {})
+    await sleep(500)
+    // react-select: typing narrows the list.
+    const typed = (CITIES.find(([n, r]) => r.test(name)) || [name])[0]
+    await page.keyboard.type(typed.split(' ')[0].slice(0, 5), { delay: 60 })
+    await sleep(1200)
+    const got = await page.evaluate((src, name) => {
+      const r = src ? new RegExp(src, 'i') : null
+      const o = [...document.querySelectorAll('[role="option"], [class*="option"]')]
+        .filter(x => x.getBoundingClientRect().height > 0)
+        .find(x => (r ? r.test(x.innerText || '') : (x.innerText || '').trim().toLowerCase() === name.toLowerCase()))
+      if (!o) return null
+      o.scrollIntoView({ block: 'center' }); o.click(); return (o.innerText || '').trim()
+    }, re?.source || null, name)
+    if (got) return got
+    // Not this one: clear what was typed and try the next name.
+    for (let i = 0; i < 6; i++) await page.keyboard.press('Backspace')
+    await page.keyboard.press('Escape').catch(() => {})
+  }
+  log(ctx, `no Employer city entry matches ${wanted.join(' / ') || '(no city on the contract)'} — left for the person`, 'warn')
+  return null
+}
+
 async function fillContractWindow(page, ctx, p) {
   const left = []
 
@@ -316,23 +384,45 @@ async function fillContractWindow(page, ctx, p) {
   if (remaining && Number(remaining[1]) === 0) { log(ctx, 'this job order has 0 remaining', 'warn'); left.push('a job order with places left (Remaining is 0)') }
   await sleep(600)
 
-  // Beginning of Contract: today (this PC's date).
+  // Beginning of Contract: today; Ending of Contract: 2 years later (this PC's date).
   const d = new Date()
-  const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-  if (await markByLabel(page, 'Beginning of Contract', 'begin') && await setInput(page, '[data-adal="begin"]', today)) log(ctx, `✓ Beginning of Contract: ${today}`)
-  else left.push('Beginning of Contract')
+  const ymd = (y, m, day) => `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+  const today = ymd(d.getFullYear(), d.getMonth() + 1, d.getDate())
+  const end = new Date(d); end.setFullYear(d.getFullYear() + 2)
+  const ending = ymd(end.getFullYear(), end.getMonth() + 1, end.getDate())
 
-  // Passport and visa numbers from the profile, when the window asks for them.
-  for (const [label, value, name] of [['Passport Number', p.passport_number, 'passport'], ['Visa Number', p.visa_number, 'visa']]) {
-    if (!(await markByLabel(page, label, name))) continue
+  // What her Musaned contract says (saved by the contract check).
+  let c = {}
+  try { c = JSON.parse(p.contract_data || '{}') } catch {}
+  const address = String(p.employer_address || c.Location || '')
+  const values = [
+    ['Beginning of Contract', today],
+    ['Ending of Contract', ending],
+    ['Passport Number', p.passport_number || c['Passport Number']],
+    ['Visa Number', p.visa_number || c['Visa Number'] || c['Candidate · Visa Number']],
+    ['Employer Full Name', p.employer_name],
+    ['Employer Phone number', p.employer_phone || c['Mobile Number']],
+    ['House Number', (address.match(/^\s*(\d{1,6})\b/) || [])[1]],
+  ]
+  for (const [label, value] of values) {
+    const mark = label.toLowerCase().replace(/\W+/g, '-')
+    if (!(await markByLabel(page, label, mark))) continue // this window does not ask it
+    const sel = `[data-adal="${mark}"]`
+    if (await page.$eval(sel, e => e.value).catch(() => '')) { log(ctx, `${label} already filled — kept`); continue }
     const v = String(value || '').trim()
-    const cur = await page.$eval(`[data-adal="${name}"]`, e => e.value).catch(() => '')
-    if (cur) continue
-    if (v && await setInput(page, `[data-adal="${name}"]`, v)) log(ctx, `✓ ${label}: ${v}`)
+    if (v && await setInput(page, sel, v)) log(ctx, `✓ ${label}: ${v}`)
     else left.push(label)
   }
 
-  // Ending of Contract is left to the person; the final Create Contract too.
-  left.push('Ending of Contract')
+  // Employer city: the city of work on the contract, else the city in the employer's address.
+  if (await hasLabel(page, 'Employer city')) {
+    const wanted = [p.work_city, c['City of Work'], ...citiesIn(address)].filter(Boolean)
+    const city = await pickCity(page, ctx, wanted)
+    if (city) log(ctx, `✓ Employer city: ${city}`)
+    else left.push(`Employer city${wanted.length ? ` (contract: ${wanted[0]})` : ''}`)
+  }
+
+  // The employer's second phone is not on the Musaned contract.
+  if (await hasLabel(page, 'Alternative Phone Number')) left.push('Alternative Phone Number (if LMIS needs it)')
   return left
 }

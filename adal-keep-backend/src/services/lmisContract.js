@@ -10,8 +10,12 @@
  *   3. search her Labor ID
  *   4. Open her row (only the row with exactly that Labor ID)
  *   5. on her page (Labor ID checked again): Create Contract
+ *   6. the contract window: Experienced / Non Experienced (profile), the job
+ *      order of her Musaned recruitment office (PRO), Beginning of Contract
+ *      = today, passport and visa numbers
  *
- * Then the tab is handed to a person, who continues the contract there.
+ * The window's own Create Contract is pressed by a person (Adal Keep never
+ * presses it), after filling Ending of Contract.
  * A labor that already has an employment contract is left as it is.
  */
 import { log, settle, closePopups, stepLogin } from './lmisWorkflow.js'
@@ -179,12 +183,156 @@ export async function runLmisContract(page, ctx) {
     const b = [...document.querySelectorAll('button, a')].find(x => /create contract/i.test(x.innerText || '') && x.getBoundingClientRect().width > 0)
     b?.scrollIntoView({ block: 'center' }); b?.click()
   })
-  log(ctx, '✓ pressed Create Contract')
-  await sleep(2500)
-  await settle(page)
+  log(ctx, '✓ pressed Create Contract — the contract window opens')
 
-  await ctx.notify(`🔔 ${ctx.profileName}: LMIS contract started`,
-    `Create Contract was pressed on her LMIS page (${laborId}). Continue the contract in the LMIS tab.`)
-  log(ctx, '✅ done — the contract continues by hand in this tab')
-  return { ok: true, note: 'Create Contract pressed — continue by hand', seconds: secs() }
+  // 6. The contract window.
+  const form = await until(async () => /Select A Job Order/i.test(await text(page)), 30000, ctx)
+  if (!form) {
+    await ctx.notify(`🖐 ${ctx.profileName}: LMIS contract window did not open`, `Create Contract was pressed on her LMIS page (${laborId}); continue in the LMIS tab.`)
+    return { ok: true, note: 'Create Contract pressed — the window did not show', seconds: secs() }
+  }
+  const left = await fillContractWindow(page, ctx, p)
+
+  await ctx.notify(`🔔 ${ctx.profileName}: LMIS contract ready to create`,
+    left.length
+      ? `Filled on her LMIS contract window (${laborId}). Please fill by hand: ${left.join(', ')}. Then check and press Create Contract.`
+      : `Everything is filled on her LMIS contract window (${laborId}). Check it and press Create Contract.`)
+  log(ctx, `✅ done — WAITING for a person to press Create Contract${left.length ? ` (left for the person: ${left.join(', ')})` : ''}`)
+  return { ok: true, note: 'contract window filled — awaiting the person', seconds: secs() }
+}
+
+// --------------------------------------------------------------------------
+// The contract window: experience, job order, beginning date, passport, visa
+// --------------------------------------------------------------------------
+const experienced = (p) => /have|yes/i.test(String(p.work_experience || '')) || Number(p.experience_years) > 0
+
+// Words that say nothing about which office it is.
+const COMMON = new Set(['recruitment', 'office', 'offices', 'company', 'co', 'est', 'establishment', 'for', 'the', 'and', 'of', 'manpower', 'services', 'agency', 'llc', 'ltd'])
+const words = (s) => String(s || '').toLowerCase().replace(/^job\d+\s*-\s*/i, '').replace(/^al[-\s]/, 'al').split(/[^a-z0-9؀-ۿ]+/).filter(w => w.length > 1 && !COMMON.has(w))
+
+/** The job order whose office is her Musaned recruitment office (PRO), or null. */
+export function pickJobOrder(options, pro) {
+  const want = new Set(words(pro))
+  if (!want.size) return null
+  const scored = options.map(o => {
+    const have = words(o)
+    const shared = have.filter(w => want.has(w)).length
+    return { o, shared, score: shared / Math.max(1, Math.min(want.size, have.length)) }
+  }).filter(x => x.shared >= 2 || (x.shared === 1 && x.score === 1)).sort((a, b) => b.score - a.score || b.shared - a.shared)
+  if (!scored.length) return null
+  if (scored[1] && scored[1].score === scored[0].score && scored[1].shared === scored[0].shared) return null // two equally good: a person chooses
+  return scored[0].o
+}
+
+async function clickText(page, re) {
+  return page.evaluate((src) => {
+    const re = new RegExp(src, 'i')
+    const b = [...document.querySelectorAll('button, [role="tab"], [role="button"], label, span, div')]
+      .filter(e => re.test((e.innerText || '').trim()) && e.getBoundingClientRect().width > 0)
+      .sort((a, b) => a.innerText.length - b.innerText.length)[0]
+    if (!b) return false
+    b.click(); return true
+  }, re.source)
+}
+
+/** Sets an input's value the way React notices it. */
+async function setInput(page, selector, value) {
+  return page.evaluate((sel, v) => {
+    const el = typeof sel === 'string' ? document.querySelector(sel) : null
+    if (!el) return false
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, v)
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+    el.dispatchEvent(new Event('change', { bubbles: true }))
+    el.dispatchEvent(new Event('blur', { bubbles: true }))
+    return el.value === v
+  }, selector, value)
+}
+
+/** Marks the input under a label ("Beginning of Contract", "Visa Number"…). */
+function markByLabel(page, label, mark) {
+  return page.evaluate((label, mark) => {
+    const lab = [...document.querySelectorAll('label, p, span, div')]
+      .find(e => e.children.length === 0 && new RegExp(`^\\s*${label}\\s*$`, 'i').test(e.textContent || ''))
+    let box = lab?.parentElement, input = null
+    for (let i = 0; i < 3 && box && !input; i++, box = box.parentElement) input = box.querySelector('input')
+    if (!input) return false
+    input.setAttribute('data-adal', mark)
+    return true
+  }, label, mark)
+}
+
+async function fillContractWindow(page, ctx, p) {
+  const left = []
+
+  // Experienced / Non Experienced, from the profile.
+  const exp = experienced(p)
+  if (await clickText(page, exp ? /^Experienced$/ : /^Non Experienced$/)) log(ctx, `✓ ${exp ? 'Experienced' : 'Non Experienced'} (profile: ${p.work_experience || 'no experience'})`)
+  else left.push('Experienced / Non Experienced')
+  await sleep(600)
+
+  // Job order: the one of her Musaned recruitment office.
+  const pro = String(p.musaned_pro || '').trim()
+  const control = await page.evaluateHandle(() => {
+    const lab = [...document.querySelectorAll('label, p, span, div')].find(e => e.children.length === 0 && /^\s*Select A Job Order\s*$/i.test(e.textContent || ''))
+    let box = lab?.parentElement
+    for (let i = 0; i < 3 && box; i++, box = box.parentElement) {
+      const c = box.querySelector('[class*="control"], [role="combobox"], input, select')
+      if (c) return c
+    }
+    return null
+  })
+  let chosen = null
+  if (control.asElement()) {
+    await control.asElement().click().catch(() => {})
+    await sleep(1200)
+    const options = await page.evaluate(() => {
+      const sel = document.querySelector('select')
+      if (sel && sel.options.length > 1) return [...sel.options].map(o => o.text.trim()).filter(Boolean)
+      return [...document.querySelectorAll('[role="option"], [class*="option"]')].map(o => (o.innerText || '').trim()).filter(t => /^JOB/i.test(t))
+    })
+    log(ctx, `job orders: ${options.length ? options.join(' | ') : 'none listed'}`)
+    chosen = pickJobOrder(options, pro)
+    if (chosen) {
+      await page.evaluate((want) => {
+        const sel = document.querySelector('select')
+        if (sel && [...sel.options].some(o => o.text.trim() === want)) {
+          sel.value = [...sel.options].find(o => o.text.trim() === want).value
+          sel.dispatchEvent(new Event('change', { bubbles: true })); return
+        }
+        const o = [...document.querySelectorAll('[role="option"], [class*="option"]')].find(x => (x.innerText || '').trim() === want)
+        o?.scrollIntoView({ block: 'center' }); o?.click()
+      }, chosen)
+    } else {
+      await page.keyboard.press('Escape').catch(() => {})
+    }
+  }
+  const picked = chosen && await until(async () => /Selected Job Position/i.test(await text(page)), 10000, ctx)
+  if (picked) log(ctx, `✓ job order: ${chosen} (her Musaned office: ${pro})`)
+  else {
+    log(ctx, pro ? `no job order matches her Musaned office "${pro}" for sure — left for the person` : 'her Musaned office (PRO) is not known — the job order is left for the person', 'warn')
+    left.push(pro ? `Job Order (her office: ${pro})` : 'Job Order')
+  }
+  const remaining = (await text(page)).match(/Remaining:\s*(\d+)/i)
+  if (remaining && Number(remaining[1]) === 0) { log(ctx, 'this job order has 0 remaining', 'warn'); left.push('a job order with places left (Remaining is 0)') }
+  await sleep(600)
+
+  // Beginning of Contract: today (this PC's date).
+  const d = new Date()
+  const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  if (await markByLabel(page, 'Beginning of Contract', 'begin') && await setInput(page, '[data-adal="begin"]', today)) log(ctx, `✓ Beginning of Contract: ${today}`)
+  else left.push('Beginning of Contract')
+
+  // Passport and visa numbers from the profile, when the window asks for them.
+  for (const [label, value, name] of [['Passport Number', p.passport_number, 'passport'], ['Visa Number', p.visa_number, 'visa']]) {
+    if (!(await markByLabel(page, label, name))) continue
+    const v = String(value || '').trim()
+    const cur = await page.$eval(`[data-adal="${name}"]`, e => e.value).catch(() => '')
+    if (cur) continue
+    if (v && await setInput(page, `[data-adal="${name}"]`, v)) log(ctx, `✓ ${label}: ${v}`)
+    else left.push(label)
+  }
+
+  // Ending of Contract is left to the person; the final Create Contract too.
+  left.push('Ending of Contract')
+  return left
 }

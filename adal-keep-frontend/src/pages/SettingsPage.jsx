@@ -30,6 +30,8 @@ export default function SettingsPage() {
   const [port] = useState('3000')
   const [checking, setChecking] = useState(false)
   const [hasUpdate, setHasUpdate] = useState(false)
+  // Updates install by themselves (when no run is working) unless turned off.
+  const [autoUpdate, setAutoUpdate] = useState(true)
   const [updateInfo, setUpdateInfo] = useState(null)
   // Update popup: 'uptodate' | 'available' | 'installing' | 'done' | 'error'
   const [updateModal, setUpdateModal] = useState(null)
@@ -55,6 +57,7 @@ export default function SettingsPage() {
       const res = await api.get('/settings')
       const settings = res.data || {}
       setAgencyEmail(settings.agency_email || '')
+      setAutoUpdate(String(settings.auto_update || 'on').toLowerCase() !== 'off')
     } catch (err) {
       console.error('Failed to load settings', err)
     }
@@ -414,6 +417,15 @@ export default function SettingsPage() {
             <div>
               <h3 className="font-medium">Software Updates</h3>
               <p className="text-sm text-slate-500">Check GitHub for the latest version and install it</p>
+              <label className="mt-2 flex items-center gap-2 text-sm cursor-pointer">
+                <input type="checkbox" checked={autoUpdate} onChange={async (e) => {
+                  const on = e.target.checked
+                  setAutoUpdate(on)
+                  try { await api.put('/settings', { auto_update: on ? 'on' : 'off' }); toast.success(on ? 'Updates install by themselves' : 'Updates wait for you') }
+                  catch { setAutoUpdate(!on); toast.error('Could not save') }
+                }} />
+                <span><b>Update by itself</b> — a new version installs as soon as no automation run is working (checked every 15 minutes)</span>
+              </label>
             </div>
             <div className="flex gap-2 shrink-0">
               <Button data-tour="check-updates" onClick={handleCheckUpdate} isLoading={checking}>

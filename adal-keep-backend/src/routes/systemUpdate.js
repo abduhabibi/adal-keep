@@ -234,7 +234,7 @@ export async function checkForUpdate() {
 }
 
 // The last answer of the background check (every UPDATE_CHECK_MINUTES).
-export const updateNotice = { checkedAt: null, result: null, error: null, applying: false, applyingSince: null }
+export const updateNotice = { checkedAt: null, result: null, error: null, applying: false, applyingSince: null, auto: false, autoError: null }
 
 async function handleCheck(req, res) {
   try {
@@ -248,24 +248,92 @@ async function handleCheck(req, res) {
 }
 
 let watcher = null
-/** Looks for a new version now and then; the page shows a banner when there is one. */
-export function startUpdateWatcher() {
+
+/**
+ * Updates by itself: an installed PC (USB install, not a developer's git
+ * checkout) installs a new version as soon as no automation run is working
+ * or waiting in line — a restart in the middle would cut a run off. Settings
+ * → "Update by itself" (auto_update = off) or ADAL_AUTO_UPDATE=0 turns it off.
+ * A failed install is tried again after 2 hours, never in a loop.
+ */
+const autoState = { failedSha: '', failedAt: 0, waitingSince: 0 }
+async function autoUpdateOn(db) {
+  if (String(process.env.ADAL_AUTO_UPDATE || '').trim() === '0') return false
+  try {
+    const row = db ? await db('settings').where('key', 'auto_update').first() : null
+    if (row && String(row.value).toLowerCase() === 'off') return false
+  } catch {}
+  return true
+}
+
+async function busyNow(db) {
+  let running = 0, waiting = 0
+  try { const { runsWorking } = await import('../services/busy.js'); running = runsWorking() } catch {}
+  try { if (db) waiting = Number((await db('automation_queue').where('status', 'pending').count({ c: '*' }).first())?.c || 0) } catch {}
+  return { running, waiting, busy: running > 0 || waiting > 0 }
+}
+
+async function autoUpdate(db, result) {
+  if (!result?.hasUpdate || updateNotice.applying) return
+  if (!(await autoUpdateOn(db))) return
+  const installed = result.installed || await getInstalled()
+  if (installed.isRepo) return // a developer's copy: never pulled by itself
+  const sha = result.latest?.sha || ''
+  if (sha && sha === autoState.failedSha && Date.now() - autoState.failedAt < 2 * 3600 * 1000) return
+  const b = await busyNow(db)
+  if (b.busy) {
+    if (!autoState.waitingSince) autoState.waitingSince = Date.now()
+    console.log(`🆕 Update ${result.latest?.short} waits: ${b.running} run(s) working, ${b.waiting} in line`)
+    return
+  }
+  autoState.waitingSince = 0
+  console.log(`🆕 Installing update ${result.latest?.short} by itself (${result.count} change(s))`)
+  updateNotice.auto = true
+  // applyUpdate answers like a route; this collects its answer.
+  const res = { code: 200, body: null, status(c) { this.code = c; return this }, json(b) { this.body = b; return this } }
+  updateNotice.applying = true
+  updateNotice.applyingSince = new Date().toISOString()
+  try { await applyUpdate(null, res) } finally {
+    updateNotice.applying = false
+    updateNotice.auto = false
+  }
+  if (res.code >= 400 || !res.body?.success) {
+    Object.assign(autoState, { failedSha: sha, failedAt: Date.now() })
+    updateNotice.autoError = res.body?.error || 'the update did not install'
+    console.error(`[update] automatic update failed: ${updateNotice.autoError}`)
+  } else {
+    updateNotice.autoError = null
+    updateNotice.result = null
+    console.log(`✅ Update ${result.latest?.short} installed by itself — ${res.body.message}`)
+  }
+}
+
+/** Looks for a new version now and then, and installs it by itself (see autoUpdate). */
+export function startUpdateWatcher(db = null) {
   if (watcher) return
-  const every = Number(process.env.UPDATE_CHECK_MINUTES || 30) * 60 * 1000
+  const every = Number(process.env.UPDATE_CHECK_MINUTES || 15) * 60 * 1000
+  let lastCheck = 0
   const tick = async () => {
     if (updateNotice.applying) return
     try {
-      const result = await checkForUpdate()
-      if (result.hasUpdate && result.latest.sha !== updateNotice.result?.latest?.sha) {
-        console.log(`🆕 Update available: ${result.count} change(s), newest ${result.latest.short}`)
+      // GitHub is asked every UPDATE_CHECK_MINUTES; a found update is tried
+      // again every minute until the runs are idle.
+      let result = updateNotice.result
+      if (!result || Date.now() - lastCheck >= every) {
+        result = await checkForUpdate()
+        lastCheck = Date.now()
+        if (result.hasUpdate && result.latest.sha !== updateNotice.result?.latest?.sha) {
+          console.log(`🆕 Update available: ${result.count} change(s), newest ${result.latest.short}`)
+        }
+        Object.assign(updateNotice, { checkedAt: new Date().toISOString(), result, error: null })
       }
-      Object.assign(updateNotice, { checkedAt: new Date().toISOString(), result, error: null })
+      await autoUpdate(db, result)
     } catch (e) {
       Object.assign(updateNotice, { checkedAt: new Date().toISOString(), error: e.message })
     }
   }
   setTimeout(tick, 60 * 1000).unref?.()
-  watcher = setInterval(tick, every)
+  watcher = setInterval(tick, 60 * 1000)
   watcher.unref?.()
 }
 
@@ -497,6 +565,10 @@ async function applyUpdate(req, res) {
 }
 
 // ---------------------------------------------------------------------------
+// The version this process started with (read once).
+let BOOT_VERSION = ''
+getInstalled().then(i => { BOOT_VERSION = i.sha || '' }).catch(() => {})
+
 // Routes (mounted at /api/system)
 // ---------------------------------------------------------------------------
 router.get('/update/check', handleCheck)
@@ -516,6 +588,9 @@ router.get('/update/notice', async (req, res) => {
     hasUpdate: !!r?.hasUpdate, count: r?.count || 0, changes: r?.changes || [], latest: r?.latest || null,
     installed: r?.installed || null, note: r?.note || null, checkedAt: updateNotice.checkedAt,
     applying: updateNotice.applying, running,
+    // The version this server runs now: an open page reloads when it changes.
+    version: BOOT_VERSION, auto: updateNotice.auto, autoError: updateNotice.autoError,
+    autoUpdate: await autoUpdateOn(req.app.locals.db),
   })
 })
 

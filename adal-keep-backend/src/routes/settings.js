@@ -51,9 +51,9 @@ router.put('/', authenticate, async (req, res) => {
       }
     }
 
-    // Run choices (visa_*, insurance_*): any of these keys, as text.
+    // Run choices (visa_*, insurance_*) and auto_update (on/off): any of these keys, as text.
     for (const [key, value] of Object.entries(req.body || {})) {
-      if (!/^(visa|insurance)_[a-z_]{1,40}$/.test(key)) continue
+      if (!/^(visa|insurance)_[a-z_]{1,40}$/.test(key) && key !== 'auto_update') continue
       const v = String(value ?? '').trim().slice(0, 300)
       const db = req.app.locals.db
       if (await db('settings').where({ key }).first()) await db('settings').where({ key }).update({ value: v })

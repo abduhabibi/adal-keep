@@ -998,7 +998,7 @@ cron.schedule('0 2 * * *', async () => {
 initSystem().then(() => {
   app.listen(PORT, () => {
     console.log(`🚀 Backend running on http://localhost:${PORT}`)
-    startUpdateWatcher()          // a new version? the page shows how to update
+    startUpdateWatcher(app.locals.db) // a new version installs by itself when no run is working
     if (isFollower()) {
       // Another PC is the main PC: all work happens there, nothing here.
       console.log(`🔗 This PC follows the main PC at ${mainURL()} — no automations, no discovery here`)

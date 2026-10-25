@@ -28,6 +28,8 @@ import { setupTab } from './tabManager.js'
 
 const SAFE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'data', 'SafeStorage')
 const LIST_URL = 'https://tawtheeq.musaned.com.sa/employment-requests?sort=createdAt,DESC&page=0&size=10'
+// A request the employer made that waits for our (EPRO) approval.
+const PENDING_URL = 'https://tawtheeq.musaned.com.sa/employment-requests/pending'
 const EVERY_MS = Number(process.env.MUSANED_CHECK_HOURS || 4) * 3600 * 1000
 const BETWEEN_MS = 8000
 const FINAL = /ARRIVED|REJECTED|CANCELED|CANCELLED|OUTSIDE KSA/i
@@ -63,8 +65,8 @@ async function signedIn(page) {
 }
 
 /** Search one passport on the list page. Returns the cards' text (0 cards = not chosen). */
-async function search(page, passport) {
-  await page.goto(LIST_URL, { waitUntil: 'networkidle2', timeout: 60000 })
+async function search(page, passport, url = LIST_URL) {
+  await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 })
   if (!(await signedIn(page))) return { signedOut: true }
   await sleep(1500)
   // "Passport Number" filter (an <app-filter-search>): its header button
@@ -202,6 +204,105 @@ async function downloadPdf(browser, page, name) {
   }
 }
 
+/** The text of a PDF (pdf-parse). */
+async function pdfText(buf) {
+  const m = await import('pdf-parse')
+  if (m.PDFParse) { const p = new m.PDFParse({ data: buf }); try { return (await p.getText()).text } finally { await p.destroy?.() } }
+  return (await (m.default || m)(buf)).text
+}
+
+/**
+ * Musaned's standard contract (template.pdf), English side: the parties,
+ * each "Label: value", the values before the Arabic half of the line.
+ */
+export function parseTemplateText(text) {
+  const lines = String(text || '').split('\n').map(l => l.split('\t')[0].trim())
+  const arabic = /[\u0600-\u06FF\uFB50-\uFEFF]/
+  const sections = { employer: [], saudiAgency: [], worker: [], ourAgency: [] }
+  let at = null
+  for (const l of lines) {
+    if (/^A\.\s*Employer:/i.test(l)) { at = 'employer'; continue }
+    if (/Saudi Recruiting Agency:/i.test(l)) { at = 'saudiAgency'; continue }
+    if (/^B\.\s*Domestic Service Worker:/i.test(l)) { at = 'worker'; continue }
+    if (/country by Recruitment Agency:|^Recruitment Agency:/i.test(l)) { at = 'ourAgency'; continue }
+    if (/^The employer and the DSW|^1\.\s*Preamble/i.test(l)) { at = null; continue }
+    if (at) sections[at].push(l)
+  }
+  const field = (sec, label) => {
+    const ls = sections[sec]
+    const i = ls.findIndex(l => new RegExp(`^${label}\\s*:`, 'i').test(l))
+    if (i < 0) return ''
+    let v = ls[i].replace(new RegExp(`^${label}\\s*:\\s*`, 'i'), '').replace(arabic.test(ls[i]) ? /\s*[^\x00-\x7F].*$/ : /$^/, '').trim()
+    // A name that goes on to the next line ("Essam … Alahmadi" / "Recruitment Office").
+    for (let j = i + 1; j < ls.length && /^[A-Za-z][A-Za-z .&'-]*$/.test(ls[j]) && !/:/.test(ls[j]) && !/^(Address|Contact Numbers|Hereinafter)/i.test(ls[j]); j++) v += ` ${ls[j]}`
+    return v.trim()
+  }
+  const date = String(text).match(/corresponding to \((\d{2})\/(\d{2})\/(\d{4})\)/i)
+  return {
+    contractNumber: (String(text).match(/CONTRACT\s*#\s*(\d+)/i) || [])[1] || '',
+    visaNumber: (String(text).match(/VISA NUMBER\s*#\s*(\d+)/i) || [])[1] || '',
+    contractDate: date ? `${date[3]}-${date[2]}-${date[1]}` : '',
+    employer: { name: field('employer', 'Name'), id: field('employer', 'National ID Number'), city: field('employer', 'City'), mobile: field('employer', 'Mobile'), telephone: field('employer', 'Telephone') },
+    saudiAgency: { name: field('saudiAgency', 'Name'), license: field('saudiAgency', 'License no'), phone: field('saudiAgency', 'Telephone'), city: field('saudiAgency', 'City'), email: field('saudiAgency', 'Email') },
+    worker: { name: field('worker', 'Name'), position: field('worker', 'Position'), nextOfKin: field('worker', 'Next of kin'), relationship: field('worker', 'Relationship') },
+    ourAgency: { name: field('ourAgency', 'Name'), license: field('ourAgency', 'License No') },
+  }
+}
+
+/** Writes what template.pdf says into the profile (keeps what is there). */
+export async function applyTemplate(db, profileId, buf) {
+  const t = parseTemplateText(await pdfText(buf))
+  if (!t.contractNumber && !t.employer.name) return null
+  const now = await db('profiles').where('id', profileId).first('contract_data', 'employer_name', 'musaned_pro', 'employer_phone', 'employer_id', 'contract_date', 'contract_number', 'visa_number', 'chosen_at')
+  let data = {}
+  try { data = JSON.parse(now.contract_data || '{}') || {} } catch {}
+  const upd = { contract_data: JSON.stringify({ ...data, ...templateFields(t).data }) }
+  // The contract's full name (LMIS asks the employer's full name).
+  if (t.employer.name && t.employer.name.length > String(now.employer_name || '').length) upd.employer_name = t.employer.name
+  if (!now.musaned_pro && t.saudiAgency.name) upd.musaned_pro = t.saudiAgency.name
+  if (!now.employer_phone && t.employer.mobile) upd.employer_phone = t.employer.mobile
+  if (!now.employer_id && t.employer.id) upd.employer_id = t.employer.id
+  if (!now.contract_date && t.contractDate) upd.contract_date = t.contractDate
+  if (!now.contract_number && t.contractNumber) upd.contract_number = t.contractNumber
+  if (!now.visa_number && t.visaNumber) upd.visa_number = t.visaNumber
+  if (!now.chosen_at) upd.chosen_at = new Date().toISOString() // a contract means an employer chose her
+  await db('profiles').where('id', profileId).update(upd)
+  return t
+}
+
+/**
+ * Once at start: profiles whose template.pdf was saved before Adal Keep read
+ * it get its details now (no Musaned needed).
+ */
+export async function readSavedTemplates(db) {
+  const rows = await db('files').join('profile_fields', 'files.profile_field_id', 'profile_fields.id')
+    .where('profile_fields.name', 'Contract').where('files.original_name', 'like', '%template%')
+    .select('profile_fields.profile_id', 'files.path').orderBy('files.id', 'desc').catch(() => [])
+  const seen = new Set()
+  for (const r of rows) {
+    if (seen.has(r.profile_id)) continue
+    seen.add(r.profile_id)
+    const p = await db('profiles').where('id', r.profile_id).first('contract_data', 'full_name')
+    if (!p || /Employer Full Name/.test(p.contract_data || '')) continue
+    const file = path.join(SAFE, path.basename(r.path))
+    if (!fs.existsSync(file)) continue
+    try { if (await applyTemplate(db, r.profile_id, fs.readFileSync(file))) console.log(`[contracts] ${p.full_name}: details read from template.pdf`) }
+    catch (e) { console.warn(`[contracts] ${p.full_name}: template.pdf not read — ${e.message}`) }
+  }
+}
+
+/** The contract's details as profile contract_data labels. */
+function templateFields(t) {
+  const data = {
+    'Employer Full Name': t.employer.name, 'Employer City': t.employer.city, 'Employer Telephone': t.employer.telephone,
+    'Saudi Agency': t.saudiAgency.name, 'Saudi Agency License': t.saudiAgency.license, 'Saudi Agency Phone': t.saudiAgency.phone,
+    'Saudi Agency City': t.saudiAgency.city, 'Saudi Agency Email': t.saudiAgency.email,
+    'Our Agency': t.ourAgency.name, 'Our Agency License': t.ourAgency.license, 'Contract Date': t.contractDate,
+  }
+  for (const k of Object.keys(data)) if (!data[k]) delete data[k]
+  return { data }
+}
+
 /** Store a PDF in a profile field unless the same bytes are there already. */
 async function savePdf(db, profileId, fieldName, buf, original) {
   const hash = crypto.createHash('sha256').update(buf).digest('hex')
@@ -232,13 +333,21 @@ async function task(db, profileId, title, description) {
 /** Look one profile up in the open tab and save what Musaned shows. */
 async function checkOne(db, browser, page, p) {
   const passport = String(p.passport_number).trim().toUpperCase()
-  const s = await search(page, passport)
+  let s = await search(page, passport)
   if (s.signedOut) return { state: 'signed-out' }
+  // Not in Employment Requests: an employer's request may still wait for our
+  // approval under Pending Employment Requests — she is chosen all the same.
+  let pending = false
+  if (!s.cards.length) {
+    const sp = await search(page, passport, PENDING_URL).catch(e => { console.warn('[contracts] pending:', e.message); return { cards: [] } })
+    if (sp.cards?.length) { s = sp; pending = true }
+  }
   if (!s.cards.length) {
     await db('profiles').where('id', p.id).update({ contract_checked_at: new Date().toISOString() })
     return { state: 'not-chosen' }
   }
   const card = parseCard(s.cards[0])
+  if (pending && !card.stage) card.stage = 'EPRO APPROVAL'
 
   // DETAILS → the contract page.
   await Promise.all([
@@ -278,12 +387,20 @@ async function checkOne(db, browser, page, p) {
 
   // The PDFs at the bottom.
   const saved = []
+  let template = null
   for (const pdf of d.pdfs) {
     const fieldName = (PDF_FIELDS.find(([re]) => re.test(pdf.label) || re.test(pdf.name)) || [null, 'Contract'])[1]
     try {
       const buf = await downloadPdf(browser, page, pdf.name)
+      if (fieldName === 'Contract') template = buf
       if (await savePdf(db, p.id, fieldName, buf, pdf.name)) saved.push(pdf.name)
     } catch (e) { console.warn(`[contracts] ${p.full_name}: ${e.message}`) }
+  }
+
+  // What the contract (template.pdf) itself says: the employer's full name,
+  // city and phones, the Saudi recruitment agency, the contract date …
+  if (template) {
+    try { await applyTemplate(db, p.id, template) } catch (e) { console.warn(`[contracts] ${p.full_name}: template.pdf not read — ${e.message}`) }
   }
 
   if (first) {
@@ -354,6 +471,7 @@ export async function checkContracts(db, { onlyId = null } = {}) {
 let timer = null
 export function startContractChecker(db) {
   if (timer) return
+  setTimeout(() => readSavedTemplates(db).catch(e => console.warn('[contracts] templates:', e.message)), 20000)
   const tick = () => whenRunsIdle(() => checkContracts(db).catch(e => console.warn('[contracts] failed:', e.message)), '[contracts]')
   setTimeout(tick, 6 * 60 * 1000)
   timer = setInterval(tick, EVERY_MS)

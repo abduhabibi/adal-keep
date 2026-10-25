@@ -163,6 +163,8 @@ export default function ProfileDetailPage() {
 
       <ProfileJourney profileId={id} />
 
+      {(profile.chosen_at || profile.contract_number) && <ContractCard profile={profile} />}
+
       <div className="grid gap-6 lg:grid-cols-3">
         {/* Left: client details */}
         <section className="panel p-6 lg:col-span-1">
@@ -318,6 +320,50 @@ function Field({ label, value }) {
     </div>
   )
 }
+/** Chosen on Musaned: the employer, the Saudi agency and the contract, as Musaned and template.pdf say. */
+function ContractCard({ profile: p }) {
+  let c = {}
+  try { c = JSON.parse(p.contract_data || '{}') || {} } catch {}
+  const rows = [
+    ['Employer', c['Employer Full Name'] || p.employer_name],
+    ['Employer ID', p.employer_id],
+    ['Employer mobile', p.employer_phone],
+    ['Employer telephone', c['Employer Telephone']],
+    ['Employer city', c['Employer City']],
+    ['City of work', p.work_city],
+    ['Employer address', p.employer_address],
+    ['Saudi agency (PRO)', p.musaned_pro || c['Saudi Agency']],
+    ['Agency license', c['Saudi Agency License']],
+    ['Agency phone', c['Saudi Agency Phone']],
+    ['Agency email', c['Saudi Agency Email']],
+    ['Contract no.', p.contract_number],
+    ['Visa no.', p.visa_number],
+    ['Tawassut no.', p.tawassut_number],
+    ['Contract date', p.contract_date || c['Contract Date']],
+    ['Salary', p.salary && `${p.salary} SAR`],
+    ['Job', p.job_title],
+  ].filter(([, v]) => v)
+  return (
+    <section className="panel p-4">
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        <h2 className="font-display text-base font-bold text-slate-900 dark:text-white">🤝 Chosen by an employer</h2>
+        {p.chosen_at && <span className="rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300 px-2.5 py-0.5 text-xs font-semibold">{new Date(p.chosen_at).toLocaleDateString()}</span>}
+        {p.musaned_stage && <span className="rounded-full bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300 px-2.5 py-0.5 text-xs font-semibold">{p.musaned_stage}</span>}
+        {p.musaned_payment && <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${/^paid$/i.test(p.musaned_payment) ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300' : 'bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300'}`}>{p.musaned_payment}</span>}
+        <span className="ml-auto text-[11px] text-slate-400">from Musaned and template.pdf · the PDFs are in the Contract documents</span>
+      </div>
+      <dl className="grid gap-x-6 gap-y-2 sm:grid-cols-2 xl:grid-cols-3 text-sm">
+        {rows.map(([k, v]) => (
+          <div key={k} className="min-w-0">
+            <dt className="text-[11px] uppercase tracking-wide text-slate-400">{k}</dt>
+            <dd className="font-medium text-slate-800 dark:text-slate-200 break-words" dir="auto">{v}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  )
+}
+
 /** The Labor ID, changed right here (Enter or ✓ saves, Esc cancels). */
 function LaborIdEdit({ profile, onSaved }) {
   const [editing, setEditing] = useState(false)

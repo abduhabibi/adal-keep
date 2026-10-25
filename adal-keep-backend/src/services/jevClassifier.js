@@ -222,6 +222,34 @@ export async function lookAtPage(png, questions) {
   }
 }
 
+/**
+ * Show JEV one page image and ask where things are. `boxes` is
+ * { name: 'what to find' }. Returns { name: { top, left, bottom, right,
+ * confidence } (0..1 of the page) | null }, or null when JEV is off or did not
+ * answer. The reading itself is done locally (OCR) on the parts it points to.
+ */
+export async function findOnPage(png, boxes) {
+  if (!jevReady() || Date.now() < _lookPausedUntil) return null
+  try {
+    const { sdk, api } = await client()
+    const img = await sharp(png).resize({ width: JEV_MAX_SIDE, height: JEV_MAX_SIDE, fit: 'inside', withoutEnlargement: true }).png().toBuffer()
+    const qs = {}
+    for (const [k, text] of Object.entries(boxes)) qs[k] = sdk.box(text)
+    // Box questions need the jev-preview model.
+    const res = await api.systemOne({ state: { page: sdk.image(img) }, questions: qs, model: process.env.JEV_BOX_MODEL || 'jev-preview' })
+    const out = {}
+    for (const k of Object.keys(boxes)) {
+      const a = res.answers?.[k]
+      out[k] = a?.box ? { ...a.box, confidence: Number(a.confidence ?? 0) } : null
+    }
+    return out
+  } catch (e) {
+    if ([401, 402, 403].includes(e?.status)) _lookPausedUntil = Date.now() + 10 * 60 * 1000
+    console.warn('[jev] find on page failed:', e?.status || '', String(e?.message || e).slice(0, 120))
+    return null
+  }
+}
+
 /** Delete the temporary page image of a classifyWithJev() result. */
 export function release(result) {
   if (result?._tmp) try { fs.unlinkSync(result._tmp) } catch {}
@@ -249,4 +277,4 @@ export async function cropMrz(result) {
   } catch { return null }
 }
 
-export default { jevReady, classifyWithJev, cropMrz, pickPrintedName, lookAtPage, lookUnavailableReason, release, JEV_DOC_TYPES }
+export default { jevReady, findOnPage, classifyWithJev, cropMrz, pickPrintedName, lookAtPage, lookUnavailableReason, release, JEV_DOC_TYPES }

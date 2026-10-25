@@ -20,6 +20,7 @@
  */
 import { whenRunsIdle } from './busy.js'
 import fs from 'fs'
+import sharp from 'sharp'
 import path from 'path'
 import crypto from 'crypto'
 import { fileURLToPath } from 'url'
@@ -204,6 +205,36 @@ async function downloadPdf(browser, page, name) {
   }
 }
 
+/**
+ * Reads a contract that is a scan / photo (no text inside): each of its first
+ * pages is rendered, JEV points to the English column, Tesseract reads it
+ * (JEV off → the left half of the page). Returns the text.
+ */
+async function readContractScan(buf) {
+  const mupdf = await import('mupdf')
+  const { createWorker } = await import('tesseract.js')
+  const { findOnPage } = await import('./jevClassifier.js')
+  const doc = mupdf.Document.openDocument(buf, 'application/pdf')
+  const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
+  const worker = await createWorker(['eng'], 1, { langPath: root, cachePath: path.join(root, 'data', 'tessdata'), gzip: false })
+  let text = ''
+  try {
+    await worker.setParameters({ tessedit_pageseg_mode: '4' })
+    // The parties are on the first two pages.
+    for (let i = 0; i < Math.min(2, doc.countPages()); i++) {
+      const png = Buffer.from(doc.loadPage(i).toPixmap([3, 0, 0, 3, 0, 0], mupdf.ColorSpace.DeviceRGB, false, true).asPNG())
+      const meta = await sharp(png).metadata()
+      const b = (await findOnPage(png, { english: 'The whole English-language column of this bilingual contract page (all the English text, not the Arabic).' }))?.english
+      const use = b && b.confidence >= 0.2 && b.right - b.left > 0.25 ? b : { left: 0, right: 0.52, top: 0, bottom: 1 }
+      const L = Math.max(0, Math.floor((use.left - 0.02) * meta.width)), R = Math.min(meta.width, Math.ceil((use.right + 0.02) * meta.width))
+      const T = Math.max(0, Math.floor((use.top - 0.02) * meta.height)), B = Math.min(meta.height, Math.ceil((use.bottom + 0.02) * meta.height))
+      const col = await sharp(png).extract({ left: L, top: T, width: R - L, height: B - T }).grayscale().normalise().png().toBuffer()
+      text += (await worker.recognize(col)).data.text + '\n'
+    }
+  } finally { await worker.terminate().catch(() => {}) }
+  return text
+}
+
 /** The text of a PDF (pdf-parse). */
 async function pdfText(buf) {
   const m = await import('pdf-parse')
@@ -251,8 +282,15 @@ export function parseTemplateText(text) {
 
 /** Writes what template.pdf says into the profile (keeps what is there). */
 export async function applyTemplate(db, profileId, buf) {
-  const text = await pdfText(buf)
-  const t = parseTemplateText(text)
+  let text = await pdfText(buf).catch(() => '')
+  let t = parseTemplateText(text)
+  // A scan or photo has no text inside: JEV finds the English half of each
+  // page, the local OCR reads it, and the same code sorts it out.
+  if (!t.employer.name) {
+    const scanned = await readContractScan(buf).catch(e => { console.warn('[contracts] scan read failed:', e.message); return '' })
+    const ts = parseTemplateText(scanned)
+    if (ts.employer.name || ts.contractNumber) { text = scanned; t = ts }
+  }
   if (!t.contractNumber && !t.employer.name) return null
   // Hers? The contract prints her passport number.
   const own = await db('profiles').where('id', profileId).first('passport_number', 'full_name')
@@ -397,6 +435,7 @@ async function checkOne(db, browser, page, p) {
   // The PDFs at the bottom.
   const saved = []
   let template = null
+  let signed = null
   for (const pdf of d.pdfs) {
     // template.pdf is always the Contract; the signed ones go by Musaned's label.
     const fieldName = /template/i.test(pdf.name) ? 'Contract'
@@ -404,12 +443,15 @@ async function checkOne(db, browser, page, p) {
     try {
       const buf = await downloadPdf(browser, page, pdf.name)
       if (fieldName === 'Contract') template = buf
+      else if (!signed) signed = buf
       if (await savePdf(db, p.id, fieldName, buf, pdf.name)) saved.push(pdf.name)
     } catch (e) { console.warn(`[contracts] ${p.full_name}: ${e.message}`) }
   }
 
   // What the contract (template.pdf) itself says: the employer's full name,
   // city and phones, the Saudi recruitment agency, the contract date …
+  // No template.pdf this time: a signed copy says the same (read as a scan if it is one).
+  if (!template) template = signed
   if (template) {
     try { await applyTemplate(db, p.id, template) } catch (e) { console.warn(`[contracts] ${p.full_name}: template.pdf not read — ${e.message}`) }
   }

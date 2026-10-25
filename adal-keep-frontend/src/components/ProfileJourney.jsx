@@ -8,7 +8,7 @@
  * profile list each step shows how many profiles finished it, and a click
  * picks it as a filter (lit green), a second click lets it go.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import api from '../services/api'
 
 export const SHARED = [['cv', 'CV'], ['musaned', 'Musaned'], ['wafid', 'Wafid']]
@@ -25,66 +25,111 @@ const LOOK = {
   soon:   { dot: 'bg-white dark:bg-slate-900 border-2 border-dashed border-slate-300 dark:border-slate-600 text-slate-400', text: 'text-slate-400', line: 'bg-slate-200 dark:bg-slate-700' },
 }
 const ICON = { done: '✓', active: '•', failed: '!' }
-const ROW = 58 // px: one row of steps (circle + title + note)
-const ROW_COMPACT = 38 // px: the list's version (small circle + one-line title)
 
-function Node({ k, title, n, state, note, count, selected, dim, onSelect, compact }) {
+// Where each step sits: x as a share of the width, row 0 = LMIS (top),
+// 1 = the shared start (middle), 2 = Embassy (bottom).
+const SPOT = {
+  cv: [0, 1], musaned: [0.17, 1], wafid: [0.34, 1],
+  lmis: [0.62, 0],
+  tasheer: [0.62, 2], insurance: [0.81, 2], visa: [1, 2],
+}
+const EDGE = 30   // px kept at the left for the first step's name
+const LABELS = 78 // px kept at the right for the branches' names
+// Each step's step before it (the wires), and how each wire is drawn.
+const PARENT = { musaned: 'cv', wafid: 'musaned', lmis: 'wafid', tasheer: 'wafid', insurance: 'tasheer', visa: 'insurance' }
+const WIRES = Object.entries(PARENT).map(([to, from]) => ({ from, to, curve: from === 'wafid' }))
+const SIZE = {
+  compact: { r: 11, rowGap: 26, block: 36 },
+  full:    { r: 14, rowGap: 42, block: 60 },
+}
+
+function Node({ k, title, n, state, note, count, selected, dim, onSelect, compact, left, top }) {
   const pick = !!onSelect
   const l = pick ? (selected ? LOOK.done : LOOK.todo) : (LOOK[state] || LOOK.todo)
   return (
     <button type="button" title={note || title}
       onClick={() => onSelect?.(k)}
-      className={`relative z-10 flex flex-col items-center shrink-0 text-center transition-all duration-300 ${compact ? 'px-0.5' : 'w-[62px]'} ${dim ? 'opacity-40 hover:opacity-80' : ''} ${pick || state ? 'cursor-pointer' : 'cursor-default'}`}
-      style={{ height: compact ? ROW_COMPACT : ROW }}>
-      <span className={`${compact ? 'w-[22px] h-[22px] text-[10px]' : 'w-7 h-7'} rounded-full flex items-center justify-center text-[11px] font-bold transition-all duration-300 ${l.dot} ${selected ? 'ring-4 ring-emerald-300/70 shadow-[0_0_14px_rgba(16,185,129,.7)] scale-110' : ''}`}>
+      className={`absolute z-10 -translate-x-1/2 flex flex-col items-center text-center transition-all duration-300 ${dim ? 'opacity-40 hover:opacity-80' : ''} ${pick || state ? 'cursor-pointer' : 'cursor-default'}`}
+      style={{ left, top }}>
+      <span className={`${compact ? 'w-[22px] h-[22px] text-[10px]' : 'w-7 h-7 text-[11px]'} rounded-full flex items-center justify-center font-bold transition-all duration-300 ${l.dot} ${selected ? 'ring-4 ring-emerald-300/70 shadow-[0_0_16px_rgba(16,185,129,.8)] scale-110' : ''}`}>
         {pick ? (count ?? 0) : (ICON[state] || n)}
       </span>
-      <span className={`${compact ? 'mt-0.5 text-[10px] whitespace-nowrap' : 'mt-1 text-[11px]'} font-semibold leading-tight ${l.text}`}>{title}</span>
-      {note && <span className="text-[10px] text-slate-400 leading-tight truncate max-w-full">{note}</span>}
+      <span className={`${compact ? 'mt-0.5 text-[10px]' : 'mt-1 text-[11px]'} whitespace-nowrap font-semibold leading-tight ${l.text}`}>{title}</span>
+      {note && <span className="text-[10px] text-slate-400 leading-tight whitespace-nowrap max-w-[96px] truncate">{note}</span>}
     </button>
   )
 }
 
-const Line = ({ on, compact }) => <span className={`h-0.5 shrink-0 self-start transition-colors ${compact ? 'w-1.5 mt-[10px]' : 'w-3 sm:w-5 mt-3.5'} duration-300 ${on ? LOOK.done.line : LOOK.todo.line}`} />
-
 /**
  * states: { stepKey: 'done' | 'active' | 'failed' | 'todo' | 'soon' }, notes: { stepKey: text }
  * — or, on the list — counts: { stepKey: n }, selected, onSelect(stepKey).
+ * The steps are joined by wires; from Wafid two curved wires fork to LMIS
+ * (up) and the Embassy (down). Lit wires glow green with a pulse running along.
  */
 export function JourneyFork({ states = {}, notes = {}, counts, selected, onSelect, compact = false }) {
   const pick = !!onSelect
-  const row = compact ? ROW_COMPACT : ROW
-  const mid = compact ? 11 : 14 // the circles' middle
-  const node = ([k, title, short], n) => (
-    <Node key={k} k={k} title={compact && short ? short : title} n={n} state={states[k]} note={pick ? '' : notes[k]} count={counts?.[k]}
-      selected={selected === k} dim={pick && selected && selected !== k} onSelect={onSelect} compact={compact} />
-  )
-  const lit = (k) => pick ? selected === k : states[k] === 'done'
+  const z = compact ? SIZE.compact : SIZE.full
+  const ref = useRef(null)
+  const [w, setW] = useState(0)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const ro = new ResizeObserver(() => setW(el.clientWidth))
+    ro.observe(el)
+    setW(el.clientWidth)
+    return () => ro.disconnect()
+  }, [])
+  const height = z.rowGap * 2 + z.block
+  const cx = (k) => EDGE + SPOT[k][0] * Math.max(0, w - EDGE - LABELS - EDGE)
+  const cy = (k) => SPOT[k][1] * z.rowGap + z.r
+
+  // The path to the picked step lights up (on the list); on a profile a wire
+  // is lit when both its ends are done, and pulses towards a step in progress.
+  const chain = new Set()
+  for (let k = selected; k; k = PARENT[k]) chain.add(k)
+  const lit = (wire) => pick ? chain.has(wire.to) : states[wire.from] === 'done' && ['done', 'active'].includes(states[wire.to])
+  const pulse = (wire) => pick ? chain.has(wire.to) : states[wire.from] === 'done' && states[wire.to] === 'active'
+
+  const path = ({ from, to, curve }) => {
+    const x1 = cx(from) + z.r + 1, y1 = cy(from), x2 = cx(to) - z.r - 1, y2 = cy(to)
+    if (!curve) return `M${x1},${y1} L${x2},${y2}`
+    const d = (x2 - x1) * 0.55
+    return `M${x1},${y1} C${x1 + d},${y1} ${x2 - d},${y2} ${x2},${y2}`
+  }
+  const steps = [...SHARED, ...BRANCHES.flatMap(b => b.steps)]
+
   return (
-    <div className="flex items-start overflow-x-auto pb-1 [scrollbar-width:thin]">
-      {/* the shared start */}
-      {SHARED.map((s, i) => (
-        <div key={s[0]} className="flex items-start">
-          {node(s, i + 1)}
-          <Line on={lit(s[0])} compact={compact} />
-        </div>
-      ))}
-      {/* the fork: a line down to the second branch */}
-      <div className={`relative flex flex-col ${compact ? 'gap-1 pl-2' : 'gap-2 pl-3 sm:pl-4'}`}>
-        <span className={`absolute left-0 w-0.5 ${lit('wafid') ? LOOK.done.line : LOOK.todo.line}`} style={{ top: mid, height: row + (compact ? 4 : 8) + 1 }} />
-        {BRANCHES.map(b => (
-          <div key={b.key} className="relative flex items-start" style={{ height: row }}>
-            <span className={`absolute h-0.5 ${compact ? '-left-2 w-2' : '-left-3 sm:-left-4 w-3 sm:w-4'} ${lit('wafid') ? LOOK.done.line : LOOK.todo.line}`} style={{ top: mid }} />
-            {compact
-              ? <span title={b.title} className="self-start mt-[3px] mr-0.5 text-[12px] leading-none w-[18px]">{b.icon}</span>
-              : <span className="self-start mr-1 text-[9px] font-bold uppercase tracking-wide text-slate-400 whitespace-nowrap mt-2 w-[52px]">{b.title}</span>}
-            {b.steps.map((s, i) => (
-              <div key={s[0]} className="flex items-start">
-                {i > 0 && <Line on={lit(b.steps[i - 1][0])} compact={compact} />}
-                {node(s, SHARED.length + i + 1)}
-              </div>
-            ))}
-          </div>
+    <div className="overflow-x-auto overflow-y-hidden">
+      <div ref={ref} className="relative" style={{ height, minWidth: compact ? 380 : 460 }}>
+        {w > 0 && (
+          <svg className="absolute inset-0 pointer-events-none" width={w} height={height} aria-hidden="true">
+            {WIRES.map(wire => {
+              const on = lit(wire)
+              return (
+                <g key={wire.to}>
+                  <path d={path(wire)} fill="none" strokeLinecap="round"
+                    className={`transition-all duration-500 ${on ? 'stroke-emerald-500 journey-glow' : 'stroke-slate-300 dark:stroke-slate-600'}`}
+                    strokeWidth={on ? 2.5 : 2} />
+                  {pulse(wire) && (
+                    <path d={path(wire)} fill="none" strokeLinecap="round" pathLength="100"
+                      className="stroke-emerald-100 journey-pulse" strokeWidth={3} />
+                  )}
+                </g>
+              )
+            })}
+          </svg>
+        )}
+        {w > 0 && steps.map(([k, title, short], i) => (
+          <Node key={k} k={k} title={compact && short ? short : title} n={i + 1} state={states[k]} note={pick ? '' : notes[k]}
+            count={counts?.[k]} selected={selected === k} dim={pick && selected && !chain.has(k)} onSelect={onSelect}
+            compact={compact} left={cx(k)} top={SPOT[k][1] * z.rowGap} />
+        ))}
+        {/* the two branches' names, at the right end of their rows */}
+        {BRANCHES.map((b, i) => (
+          <span key={b.key} className="absolute right-0 text-[10px] font-bold uppercase tracking-wide text-slate-400 whitespace-nowrap text-right"
+            style={{ top: (i === 0 ? 0 : 2) * z.rowGap + z.r - 7 }}>
+            {b.icon} {b.title}
+          </span>
         ))}
       </div>
     </div>

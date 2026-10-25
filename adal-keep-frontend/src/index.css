@@ -577,3 +577,9 @@ body {
 .acct-compact select { font-size: 12px; padding: 4px 8px; height: 30px; min-width: 0; }
 .acct-compact button { padding: 3px 8px; font-size: 11px; }
 .acct-compact details { font-size: 10px; }
+
+/* Journey wires: a lit wire glows, and a pulse runs along it. */
+.journey-glow { filter: drop-shadow(0 0 3px rgba(16, 185, 129, .85)) drop-shadow(0 0 7px rgba(16, 185, 129, .45)); }
+.journey-pulse { stroke-dasharray: 10 90; animation: journey-run 1.6s linear infinite; filter: drop-shadow(0 0 4px rgba(167, 243, 208, .95)); }
+@keyframes journey-run { from { stroke-dashoffset: 100; } to { stroke-dashoffset: 0; } }
+@media (prefers-reduced-motion: reduce) { .journey-pulse { animation: none; stroke-dasharray: none; opacity: .5; } }

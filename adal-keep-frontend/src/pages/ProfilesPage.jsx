@@ -98,7 +98,7 @@ export default function ProfilesPage() {
         title="ፕሮፋይሎች"
         subtitle={filterLabel}
         middle={
-          <div className="panel px-3 pt-2 pb-0.5 max-w-full" data-tour="journey-filter">
+          <div className="panel px-4 py-2 w-full" data-tour="journey-filter">
             <JourneyFork compact counts={stepCounts} selected={step} onSelect={setStep} />
           </div>
         }

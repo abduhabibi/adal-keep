@@ -13,8 +13,8 @@ import api from '../services/api'
 
 export const SHARED = [['cv', 'CV'], ['musaned', 'Musaned'], ['wafid', 'Wafid']]
 export const BRANCHES = [
-  { key: 'lmis-track', title: 'LMIS', steps: [['lmis', 'LMIS contract']] },
-  { key: 'embassy-track', title: 'Embassy', steps: [['tasheer', 'Tasheer'], ['insurance', 'Insurance'], ['visa', 'Enjaz · Visa']] },
+  { key: 'lmis-track', title: 'LMIS', icon: '🏛', steps: [['lmis', 'LMIS contract', 'Contract']] },
+  { key: 'embassy-track', title: 'Embassy', icon: '🇸🇦', steps: [['tasheer', 'Tasheer'], ['insurance', 'Insurance'], ['visa', 'Enjaz · Visa', 'Visa']] },
 ]
 
 const LOOK = {
@@ -34,7 +34,7 @@ function Node({ k, title, n, state, note, count, selected, dim, onSelect, compac
   return (
     <button type="button" title={note || title}
       onClick={() => onSelect?.(k)}
-      className={`relative z-10 flex flex-col items-center shrink-0 text-center transition-all duration-300 ${compact ? 'px-1' : 'w-[62px]'} ${dim ? 'opacity-40 hover:opacity-80' : ''} ${pick || state ? 'cursor-pointer' : 'cursor-default'}`}
+      className={`relative z-10 flex flex-col items-center shrink-0 text-center transition-all duration-300 ${compact ? 'px-0.5' : 'w-[62px]'} ${dim ? 'opacity-40 hover:opacity-80' : ''} ${pick || state ? 'cursor-pointer' : 'cursor-default'}`}
       style={{ height: compact ? ROW_COMPACT : ROW }}>
       <span className={`${compact ? 'w-[22px] h-[22px] text-[10px]' : 'w-7 h-7'} rounded-full flex items-center justify-center text-[11px] font-bold transition-all duration-300 ${l.dot} ${selected ? 'ring-4 ring-emerald-300/70 shadow-[0_0_14px_rgba(16,185,129,.7)] scale-110' : ''}`}>
         {pick ? (count ?? 0) : (ICON[state] || n)}
@@ -45,7 +45,7 @@ function Node({ k, title, n, state, note, count, selected, dim, onSelect, compac
   )
 }
 
-const Line = ({ on, compact }) => <span className={`h-0.5 shrink-0 self-start transition-colors ${compact ? 'w-2.5 mt-[10px]' : 'w-3 sm:w-5 mt-3.5'} duration-300 ${on ? LOOK.done.line : LOOK.todo.line}`} />
+const Line = ({ on, compact }) => <span className={`h-0.5 shrink-0 self-start transition-colors ${compact ? 'w-1.5 mt-[10px]' : 'w-3 sm:w-5 mt-3.5'} duration-300 ${on ? LOOK.done.line : LOOK.todo.line}`} />
 
 /**
  * states: { stepKey: 'done' | 'active' | 'failed' | 'todo' | 'soon' }, notes: { stepKey: text }
@@ -55,8 +55,8 @@ export function JourneyFork({ states = {}, notes = {}, counts, selected, onSelec
   const pick = !!onSelect
   const row = compact ? ROW_COMPACT : ROW
   const mid = compact ? 11 : 14 // the circles' middle
-  const node = ([k, title], n) => (
-    <Node key={k} k={k} title={title} n={n} state={states[k]} note={pick ? '' : notes[k]} count={counts?.[k]}
+  const node = ([k, title, short], n) => (
+    <Node key={k} k={k} title={compact && short ? short : title} n={n} state={states[k]} note={pick ? '' : notes[k]} count={counts?.[k]}
       selected={selected === k} dim={pick && selected && selected !== k} onSelect={onSelect} compact={compact} />
   )
   const lit = (k) => pick ? selected === k : states[k] === 'done'
@@ -70,12 +70,14 @@ export function JourneyFork({ states = {}, notes = {}, counts, selected, onSelec
         </div>
       ))}
       {/* the fork: a line down to the second branch */}
-      <div className={`relative flex flex-col pl-3 sm:pl-4 ${compact ? 'gap-1' : 'gap-2'}`}>
+      <div className={`relative flex flex-col ${compact ? 'gap-1 pl-2' : 'gap-2 pl-3 sm:pl-4'}`}>
         <span className={`absolute left-0 w-0.5 ${lit('wafid') ? LOOK.done.line : LOOK.todo.line}`} style={{ top: mid, height: row + (compact ? 4 : 8) + 1 }} />
         {BRANCHES.map(b => (
           <div key={b.key} className="relative flex items-start" style={{ height: row }}>
-            <span className={`absolute -left-3 sm:-left-4 w-3 sm:w-4 h-0.5 ${lit('wafid') ? LOOK.done.line : LOOK.todo.line}`} style={{ top: mid }} />
-            <span className={`self-start mr-1 text-[9px] font-bold uppercase tracking-wide text-slate-400 whitespace-nowrap ${compact ? 'mt-[5px] w-[46px]' : 'mt-2 w-[52px]'}`}>{b.title}</span>
+            <span className={`absolute h-0.5 ${compact ? '-left-2 w-2' : '-left-3 sm:-left-4 w-3 sm:w-4'} ${lit('wafid') ? LOOK.done.line : LOOK.todo.line}`} style={{ top: mid }} />
+            {compact
+              ? <span title={b.title} className="self-start mt-[3px] mr-0.5 text-[12px] leading-none w-[18px]">{b.icon}</span>
+              : <span className="self-start mr-1 text-[9px] font-bold uppercase tracking-wide text-slate-400 whitespace-nowrap mt-2 w-[52px]">{b.title}</span>}
             {b.steps.map((s, i) => (
               <div key={s[0]} className="flex items-start">
                 {i > 0 && <Line on={lit(b.steps[i - 1][0])} compact={compact} />}

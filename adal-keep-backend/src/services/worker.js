@@ -57,13 +57,14 @@ let _agencyRunning = false
 // Each kind of run rings with its own sound, so a person hears which task
 // calls them without looking (Windows: C:\Windows\Media, then beeps).
 const SOUNDS = {
-  police:  { win: 'chimes.wav',  beeps: [[880, 180], [660, 180]],                         linux: 'complete.oga',            mac: 'Glass' },
-  musaned: { win: 'notify.wav',  beeps: [[660, 150], [880, 150], [1100, 200]],           linux: 'message-new-instant.oga', mac: 'Ping' },
-  lmis:    { win: 'tada.wav',    beeps: [[523, 160], [523, 160], [784, 300]],            linux: 'bell.oga',                mac: 'Hero' },
-  wafid:   { win: 'Ring02.wav',  beeps: [[1000, 120], [0, 80], [1000, 120]],             linux: 'phone-incoming-call.oga', mac: 'Submarine' },
-  insurance: { win: 'Ring05.wav', beeps: [[440, 250], [554, 250], [659, 400]],          linux: 'window-attention.oga',    mac: 'Blow' },
-  tasheer: { win: 'Ring06.wav',  beeps: [[1200, 90], [900, 90], [1200, 90], [900, 90]], linux: 'dialog-information.oga',  mac: 'Pop' },
-  visa:    { win: 'Alarm02.wav', beeps: [[784, 140], [988, 140], [1175, 140], [1568, 320]], linux: 'alarm-clock-elapsed.oga', mac: 'Funk' },
+  // linux: [file, times] — loud enough to hear across the room (short ones repeat).
+  police:  { win: 'chimes.wav',  beeps: [[880, 180], [660, 180]],                         linux: ['complete', 1],               mac: 'Glass' },
+  musaned: { win: 'notify.wav',  beeps: [[660, 150], [880, 150], [1100, 200]],           linux: ['message', 2],                mac: 'Ping' },
+  lmis:    { win: 'tada.wav',    beeps: [[523, 160], [523, 160], [784, 300]],            linux: ['bell', 3],                   mac: 'Hero' },
+  wafid:   { win: 'Ring02.wav',  beeps: [[1000, 120], [0, 80], [1000, 120]],             linux: ['phone-incoming-call', 1],    mac: 'Submarine' },
+  insurance: { win: 'Ring05.wav', beeps: [[440, 250], [554, 250], [659, 400]],          linux: ['service-login', 1],          mac: 'Blow' },
+  tasheer: { win: 'Ring06.wav',  beeps: [[1200, 90], [900, 90], [1200, 90], [900, 90]], linux: ['phone-outgoing-calling', 1], mac: 'Pop' },
+  visa:    { win: 'Alarm02.wav', beeps: [[784, 140], [988, 140], [1175, 140], [1568, 320]], linux: ['alarm-clock-elapsed', 1], mac: 'Funk' },
 }
 
 /** Which sound a workflow rings with. */
@@ -97,8 +98,10 @@ export function playNotificationSound(workflowId = '') {
       cmd = 'powershell'
       args = ['-NoProfile', '-Command', `$f="${wav}"; if (Test-Path $f) { (New-Object Media.SoundPlayer $f).PlaySync() } else { ${beeps} }`]
     } else {
-      cmd = 'paplay'
-      args = [`/usr/share/sounds/freedesktop/stereo/${s.linux}`]
+      const [file, times] = s.linux
+      const one = `paplay /usr/share/sounds/freedesktop/stereo/${file}.oga`
+      cmd = 'sh'
+      args = ['-c', Array(times).fill(one).join('; ')]
     }
     const child = spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: true })
     child.on('error', () => {})
@@ -224,11 +227,15 @@ async function recordFailure(db, job, errText, retryable) {
 async function executeRun(db, page, job) {
   const runId = job.id
 
-  const onLog = async (level, msg) => {
+  // One write at a time: steps log without waiting, and two read-modify-writes
+  // at once used to drop lines.
+  let logChain = Promise.resolve()
+  const onLog = (level, msg) => { const ts = Date.now(); return (logChain = logChain.then(() => writeLog(level, msg, ts)).catch(() => {})) }
+  const writeLog = async (level, msg, ts) => {
     const row = await db('automation_queue').where('id', runId).first()
     let log = []
     try { log = JSON.parse(row?.log || '[]') } catch {}
-    log.push({ ts: Date.now(), level, msg })
+    log.push({ ts, level, msg })
     if (log.length > 200) log = log.slice(-200)
     await db('automation_queue').where('id', runId).update({ log: JSON.stringify(log) })
   }

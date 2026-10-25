@@ -69,8 +69,9 @@ export function insuranceValues(profile, settings = {}) {
     // Local form: 0911544555 (profiles may keep 251911544555 or +251…).
     phone: (() => { const d = String(p.phone_number || '').replace(/\D/g, ''); return d.startsWith('251') ? `0${d.slice(3)}` : d.length === 9 ? `0${d}` : d })(),
     email: settings.agency_email || '',
-    woreda: '',
-    sub_city: String(p.zone_subcity || '').trim(),
+    // Her own sub city when the profile has one, else the one chosen in Settings → Insurance.
+    woreda: settings.insurance_woreda || '',
+    sub_city: String(p.zone_subcity || '').trim() || settings.insurance_sub_city || '',
     region: 'addis',
     destination: dest ? dest.split(/\s+/)[0].toLowerCase() : 'saudi',
   }

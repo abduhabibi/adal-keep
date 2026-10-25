@@ -94,6 +94,14 @@ const KINDS = {
     const a = await db('musaned_accounts').where('id', id).first()
     return a && { title: `Musaned account ${a.name}`, tables: { musaned_accounts: [a] }, paths: [] }
   },
+  async tasheer_account(db, id) {
+    const a = await db('tasheer_accounts').where('id', id).first()
+    return a && { title: `Tasheer account ${a.name}`, tables: { tasheer_accounts: [a] }, paths: [] }
+  },
+  async insurance_account(db, id) {
+    const a = await db('insurance_accounts').where('id', id).first()
+    return a && { title: `Insurance account ${a.name}`, tables: { insurance_accounts: [a] }, paths: [] }
+  },
   async visa_account(db, id) {
     const a = await db('visa_accounts').where('id', id).first()
     return a && { title: `Visa platform account ${a.name}`, tables: { visa_accounts: [a] }, paths: [] }
@@ -102,7 +110,7 @@ const KINDS = {
 
 // Restore parents before children; delete children before parents.
 const ORDER = ['brokers', 'users', 'cv_templates', 'checklists', 'profiles', 'profile_fields', 'files', 'generated_cvs',
-  'document_verifications', 'checklist_profiles', 'tasks', 'quick_links', 'lmis_accounts', 'musaned_accounts', 'visa_accounts']
+  'document_verifications', 'checklist_profiles', 'tasks', 'quick_links', 'lmis_accounts', 'musaned_accounts', 'visa_accounts', 'tasheer_accounts', 'insurance_accounts']
 
 /** Who deleted it: the employee name the page sends, and from which PC. */
 export function whoFrom(req) {

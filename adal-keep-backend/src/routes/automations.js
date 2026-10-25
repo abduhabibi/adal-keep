@@ -137,6 +137,17 @@ router.post('/profiles/:profileId/automations/:workflowId/start', async (req, re
       if (missing.length) {
         return res.status(400).json({ error: 'Profile is missing for Wafid: ' + missing.join(', '), missing })
       }
+    } else if (workflowId === 'wafid_check') {
+      const prof = await db('profiles').where('id', profileId).first()
+      if (!prof?.passport_number || !String(prof.passport_number).trim()) {
+        return res.status(400).json({ error: 'Profile is missing the passport number', missing: ['Passport number'] })
+      }
+    } else if (workflowId === 'insurance_certificate') {
+      const prof = await db('profiles').where('id', profileId).first()
+      const { insuranceValues, missingForInsurance } = await import('../services/insuranceCertificate.js')
+      const missing = missingForInsurance(insuranceValues(prof || {}))
+      if (missing.length) return res.status(400).json({ error: 'Profile is missing for the insurance: ' + missing.join(', '), missing })
+      if (!(await db('insurance_accounts').first())) return res.status(400).json({ error: 'No insurance account yet — add one under "Insurance login account"', missing: ['Insurance account'] })
     } else if (workflowId === 'mofa_visa') {
       const prof = await db('profiles').where('id', profileId).first()
       const { visaValues, missingForVisa } = await import('../services/mofaVisa.js')
@@ -217,6 +228,16 @@ router.post('/profiles/:profileId/automations/:workflowId/start', async (req, re
         accountContext.account_id = acct.id
         await db('musaned_accounts').where('id', acct.id).update({ last_used_at: new Date().toISOString() })
         console.log('[AUTO] loaded musaned account:', acct.name, 'username:', acct.username)
+      }
+    } else if (workflowId.startsWith('insurance')) {
+      let acct = accountId ? await db('insurance_accounts').where('id', accountId).first() : null
+      if (!acct) acct = await db('insurance_accounts').orderBy('is_default', 'desc').first()
+      if (acct) {
+        accountContext.insurance_username = acct.username
+        accountContext.insurance_password = acct.password
+        accountContext.insurance_name = acct.name
+        accountContext.account_id = acct.id
+        await db('insurance_accounts').where('id', acct.id).update({ last_used_at: new Date().toISOString() })
       }
     } else if (workflowId.startsWith('mofa')) {
       // One visa platform account for every visa run.
@@ -306,6 +327,8 @@ export const STAGES = [
   ['visa', 'Visa — form filled, waiting for Save'],
   ['visa_ready', 'LMIS contract done — ready for visa'],
   ['lmis_contract', 'LMIS contract in progress'],
+  ['insured', 'Insurance certificate done'],
+  ['insurance', 'Insurance certificate — waiting for you'],
   ['contract_ready', 'Wafid FIT — ready for LMIS contract'],
   ['medical_fit', 'Wafid FIT — no employer yet'],
   ['wafid', 'Wafid booked'],
@@ -322,6 +345,8 @@ export function stageOf(p, runs = {}) {
   if (live(runs.mofa_visa) || /waiting|filled/i.test(visa)) return 'visa'
   if (runs.lmis_contract?.status === 'done') return 'visa_ready'
   if (live(runs.lmis_contract)) return 'lmis_contract'
+  if (runs.insurance_certificate?.status === 'done') return 'insured'
+  if (live(runs.insurance_certificate)) return 'insurance'
   if (p.status === 'medical_fit') return p.chosen_at ? 'contract_ready' : 'medical_fit'
   if (p.status === 'medical_applied' || live(runs.wafid_book) || runs.wafid_book?.status === 'done') return 'wafid'
   if (p.chosen_at) return 'chosen'
@@ -375,6 +400,9 @@ router.post('/automations/:id/resume', async (req, res) => {
       return res.status(409).json({ error: `Run #${runId} is ${row.status} — nothing to continue. Start it again from its card.` })
     }
     // Running the visa form again would make a second application.
+    if (row.pause_reason === 'awaiting-insurance-save') {
+      return res.status(409).json({ error: `Run #${runId} filled the certificate form already. Finish it in its tab, then "✔️ Insurance done" — or Cancel it to start over.` })
+    }
     if (row.pause_reason === 'awaiting-visa-save') {
       return res.status(409).json({ error: `Run #${runId} filled the visa form already. Press Save in its tab, then "✔️ Visa saved" — or Cancel it to start over.` })
     }

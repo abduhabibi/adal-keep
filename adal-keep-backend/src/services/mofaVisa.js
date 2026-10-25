@@ -170,7 +170,7 @@ export function missingForVisa(v) {
 // Page helpers
 // ---------------------------------------------------------------------------
 /** Clicks the visible link/button whose text matches (the last one when `last`). */
-async function clickText(page, re, { last = false } = {}) {
+export async function clickText(page, re, { last = false } = {}) {
   const h = await page.evaluateHandle((src, last) => {
     const re = new RegExp(src, 'i')
     const seen = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(e).visibility !== 'hidden' }
@@ -191,7 +191,7 @@ async function clickText(page, re, { last = false } = {}) {
  * nearest box that has one. Returns the control's kind, or '' when the form
  * does not ask it.
  */
-function markField(page, labelSrc, key, kinds = 'input, select, textarea') {
+export function markField(page, labelSrc, key, kinds = 'input, select, textarea') {
   return page.evaluate((labelSrc, key, kinds) => {
     const re = new RegExp(`^\\s*\\*?\\s*(?:${labelSrc})\\s*\\*?\\s*:?\\s*$`, 'i')
     const own = (e) => [...e.childNodes].filter(n => n.nodeType === 3).map(n => n.textContent).join(' ').replace(/\s+/g, ' ')
@@ -214,7 +214,7 @@ function markField(page, labelSrc, key, kinds = 'input, select, textarea') {
 }
 
 /** Types a value into a text box (React/jQuery/plain pages all hear it). */
-function setText(page, key, value) {
+export function setText(page, key, value) {
   return page.evaluate((key, v) => {
     const el = document.querySelector(`[data-adal-v="${key}"]`)
     if (!el) return false
@@ -229,7 +229,7 @@ function setText(page, key, value) {
 }
 
 /** Chooses the option whose text matches; waits for the list to load first. */
-async function setSelect(page, key, src, ctx) {
+export async function setSelect(page, key, src, ctx) {
   let opts = []
   await until(async () => {
     opts = await page.evaluate((key) => [...(document.querySelector(`[data-adal-v="${key}"]`)?.options || [])]

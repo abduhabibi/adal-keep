@@ -572,3 +572,8 @@ body {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
+
+/* AI Actions: small login-account slots. */
+.acct-compact select { font-size: 12px; padding: 4px 8px; height: 30px; min-width: 0; }
+.acct-compact button { padding: 3px 8px; font-size: 11px; }
+.acct-compact details { font-size: 10px; }

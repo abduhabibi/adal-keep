@@ -57,6 +57,24 @@ export const WORKFLOWS = {
     stepCount: 4,
   },
 
+  wafid_check: {
+    id: 'wafid_check',
+    name: 'Check Wafid result',
+    description: 'wafid.com/en/medical-status-search → her passport + nationality → Check → FIT / UNFIT written on the profile',
+    target: 'https://wafid.com/en/medical-status-search/',
+    consts: {},
+    stepCount: 2,
+  },
+
+  insurance_certificate: {
+    id: 'insurance_certificate',
+    name: 'Insurance certificate',
+    description: 'FetaP (agency.niscofetap.com) sign-in → Draft Certificates → New Certificate → the whole form (Region Addis Ababa) → a person adds the member, the beneficiary and finishes it',
+    target: 'https://agency.niscofetap.com/certificate/draft',
+    consts: {},
+    stepCount: 3,
+  },
+
   wafid_book: {
     id: 'wafid_book',
     name: 'Book Wafid medical',

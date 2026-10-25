@@ -45,7 +45,7 @@ const AGENCY_PROFILE_LIMIT = Number(process.env.AGENCY_PROFILE_LIMIT || 200)
 // Errors retrying can never fix. Add LMIS/companion-specific permanent
 // reasons here so they don't burn attempts on a 2-minute loop.
 const PERMANENT_ERROR =
-  /refused the login|not found|Not Found|not in the|placed pool|different labor|could not be verified|already_in_other_agency|already attached|already exists|Profile is missing|LMIS portal error|LMIS blocks|Musaned not started|No visa platform account|Nobody signed in/i
+  /refused the login|not found|Not Found|not in the|placed pool|different labor|could not be verified|already_in_other_agency|already attached|already exists|Profile is missing|LMIS portal error|LMIS blocks|Musaned not started|No visa platform account|No insurance account|Nobody signed in/i
 
 let _interval      = null
 let _agencyTimer   = null
@@ -61,6 +61,8 @@ const SOUNDS = {
   musaned: { win: 'notify.wav',  beeps: [[660, 150], [880, 150], [1100, 200]],           linux: 'message-new-instant.oga', mac: 'Ping' },
   lmis:    { win: 'tada.wav',    beeps: [[523, 160], [523, 160], [784, 300]],            linux: 'bell.oga',                mac: 'Hero' },
   wafid:   { win: 'Ring02.wav',  beeps: [[1000, 120], [0, 80], [1000, 120]],             linux: 'phone-incoming-call.oga', mac: 'Submarine' },
+  insurance: { win: 'Ring05.wav', beeps: [[440, 250], [554, 250], [659, 400]],          linux: 'window-attention.oga',    mac: 'Blow' },
+  tasheer: { win: 'Ring06.wav',  beeps: [[1200, 90], [900, 90], [1200, 90], [900, 90]], linux: 'dialog-information.oga',  mac: 'Pop' },
   visa:    { win: 'Alarm02.wav', beeps: [[784, 140], [988, 140], [1175, 140], [1568, 320]], linux: 'alarm-clock-elapsed.oga', mac: 'Funk' },
 }
 
@@ -68,6 +70,8 @@ const SOUNDS = {
 export function soundKind(workflowId = '') {
   const w = String(workflowId)
   if (w.startsWith('mofa') || w.startsWith('visa')) return 'visa'
+  if (w.startsWith('insurance')) return 'insurance'
+  if (w.startsWith('tasheer')) return 'tasheer'
   if (w.startsWith('wafid')) return 'wafid'
   if (w.startsWith('musaned')) return 'musaned'
   if (w === 'lmis_contract') return 'lmis'
@@ -178,9 +182,9 @@ async function wafidSettings(db) {
   return { email: get('agency_email'), city: get('wafid_city') || 'Addis Ababa', issuePlace: get('wafid_issue_place') || 'ADDIS ABABA', position: get('wafid_position') || 'House Maid' }
 }
 
-/** Agency choices the visa form uses (Settings, keys visa_*). */
+/** Agency choices the visa and insurance forms use (Settings, keys visa_* / insurance_*). */
 async function visaSettings(db) {
-  const rows = await db('settings').where('key', 'like', 'visa_%').orWhere('key', 'agency_email').catch(() => [])
+  const rows = await db('settings').where('key', 'like', 'visa_%').orWhere('key', 'like', 'insurance_%').orWhere('key', 'agency_email').catch(() => [])
   return Object.fromEntries(rows.map(r => [r.key, String(r.value ?? '').trim()]))
 }
 
@@ -262,11 +266,12 @@ async function executeRun(db, page, job) {
   const isMusaned = job.workflow_id.startsWith('musaned')
   const isWafid = job.workflow_id.startsWith('wafid')
   const isVisa = job.workflow_id.startsWith('mofa')
+  const isInsurance = job.workflow_id.startsWith('insurance')
   // The visa platform's sign-in captcha is a picture a person reads.
-  page.__adalAllowImages = isMusaned || isWafid || isVisa
+  page.__adalAllowImages = isMusaned || isWafid || isVisa || isInsurance
   console.log(
     `[worker] run #${runId} image policy: ` +
-    (isMusaned || isWafid || isVisa
+    (isMusaned || isWafid || isVisa || isInsurance
       ? `ALLOW (${job.workflow_id} — the captcha needs images)`
       : 'BLOCK (bandwidth saver)')
   )
@@ -305,6 +310,9 @@ async function executeRun(db, page, job) {
     visa_username:     savedCtx.visa_username || '',
     visa_password:     savedCtx.visa_password || '',
     visa_name:         savedCtx.visa_name || '',
+    insurance_username: savedCtx.insurance_username || '',
+    insurance_password: savedCtx.insurance_password || '',
+    insurance_name:    savedCtx.insurance_name || '',
     musanedStage,
     labor_id:          profile.labor_id || '',
     destination_country: profile.destination_country || '',
@@ -321,6 +329,7 @@ async function executeRun(db, page, job) {
     notify,
     wafid: isWafid ? await wafidSettings(db) : null,
     visa: isVisa ? await visaSettings(db) : null,
+    insurance: isInsurance ? await visaSettings(db) : null,
   }
 
   ctx.page = page

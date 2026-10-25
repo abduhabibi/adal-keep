@@ -9,6 +9,8 @@ const PAUSE_TEXT = {
   'awaiting-human-submit':    'waiting for you to check the LMIS form and press Submit',
   'awaiting-human-save':      'waiting for you to check the form and press SAVE',
   'awaiting-visa-save':       'waiting for you to type the captcha and press Save on the visa platform',
+  'awaiting-insurance-save':  'waiting for you to finish the insurance certificate on FetaP',
+  'awaiting-wafid-robot':     'waiting for you to answer Wafid\'s "I am not a robot"',
   'awaiting-musaned-login':   'waiting for you to sign in to Musaned',
   'awaiting-musaned-captcha': 'waiting for you to solve the reCAPTCHA',
   'awaiting-musaned-otp':     'waiting for the OTP code from your phone',
@@ -27,13 +29,14 @@ const COMPLETE_LABEL = {
   'awaiting-human-submit': '✔️ Submit done',
   'awaiting-human-save':   '✔️ SAVE done',
   'awaiting-visa-save':    '✔️ Visa saved',
+  'awaiting-insurance-save': '✔️ Insurance done',
 }
 
 // Runs that are simply run again when clicked after they finished.
-const REPEATABLE = new Set(['musaned_check_chosen'])
+const REPEATABLE = new Set(['musaned_check_chosen', 'wafid_check'])
 
 // Waits that must not run again (a second run would make a second application).
-const NO_CONTINUE = new Set(['awaiting-visa-save'])
+const NO_CONTINUE = new Set(['awaiting-visa-save', 'awaiting-insurance-save'])
 
 const isRetry = (run) => run?.status === 'pending' && String(run.pause_reason || '').startsWith('Retry ')
 
@@ -68,6 +71,8 @@ export default function ProfileAutomations({ profileId }) {
   const [accountId, setAccountId] = useState(null)
   const [musanedAccountId, setMusanedAccountId] = useState(null)
   const [visaAccountId, setVisaAccountId] = useState(null)
+  const [tasheerAccountId, setTasheerAccountId] = useState(null)
+  const [insuranceAccountId, setInsuranceAccountId] = useState(null)
   const [detail, setDetail] = useState(null)
   // Workflows whose click is on its way to the server (one request per card).
   const [sending, setSending] = useState({})
@@ -120,6 +125,8 @@ export default function ProfileAutomations({ profileId }) {
   const accountFor = (workflowId) =>
     workflowId.startsWith('musaned') ? musanedAccountId
       : workflowId.startsWith('mofa') ? visaAccountId
+      : workflowId.startsWith('insurance') ? insuranceAccountId
+      : workflowId.startsWith('tasheer') ? tasheerAccountId
       : accountId
 
   // Show what the server said about a click. A queued run gets an hourglass:
@@ -224,7 +231,7 @@ export default function ProfileAutomations({ profileId }) {
               <div className="flex items-center gap-2">
                 {n ? <span className="w-5 h-5 shrink-0 rounded-full bg-indigo-600 text-white text-[11px] font-bold flex items-center justify-center">{n}</span> : null}
                 <span className="text-lg">{isDone ? '✔️' : '🤖'}</span>
-                <span className={`font-semibold text-sm truncate ${
+                <span className={`font-semibold text-sm leading-tight ${
                   isDone ? 'text-emerald-800 dark:text-emerald-300' : 'text-slate-900 dark:text-white'
                 }`}>{w.name}</span>
               </div>
@@ -252,6 +259,7 @@ export default function ProfileAutomations({ profileId }) {
                     {latest.pause_reason === 'awaiting-human-submit' ? '⏳ Awaiting your Submit'
                       : latest.pause_reason === 'awaiting-human-save' ? '⏳ Awaiting your SAVE'
                       : latest.pause_reason === 'awaiting-visa-save' ? '⏳ Awaiting your visa Save'
+                      : latest.pause_reason === 'awaiting-insurance-save' ? '⏳ Awaiting you on FetaP'
                       : '● Paused'}
                   </span>
                 )}
@@ -268,9 +276,15 @@ export default function ProfileAutomations({ profileId }) {
           )
   }
 
-  const MUSANED_ORDER = ['musaned_add_candidate', 'musaned_check_chosen']
-  const musanedFlows = MUSANED_ORDER.map(id => workflows.find(w => w.id === id)).filter(Boolean)
-  const otherFlows = workflows.filter(w => !MUSANED_ORDER.includes(w.id))
+  // CV (done on the profile) → Musaned → Wafid → Tasheer → Insurance → the rest.
+  const GROUPS = [
+    { title: 'Musaned', ids: ['musaned_add_candidate', 'musaned_check_chosen'], box: 'border-indigo-200 dark:border-indigo-800', head: 'text-indigo-700 dark:text-indigo-300' },
+    { title: 'Wafid medical', ids: ['wafid_book', 'wafid_check'], box: 'border-emerald-200 dark:border-emerald-800', head: 'text-emerald-700 dark:text-emerald-300' },
+    { title: 'Tasheer', ids: [], empty: 'Coming soon — the Tasheer steps are added next.', box: 'border-amber-200 dark:border-amber-800 border-dashed', head: 'text-amber-700 dark:text-amber-300' },
+    { title: 'Insurance', ids: ['insurance_certificate'], box: 'border-rose-200 dark:border-rose-800', head: 'text-rose-700 dark:text-rose-300' },
+  ]
+  const grouped = GROUPS.flatMap(g => g.ids)
+  const otherFlows = workflows.filter(w => !grouped.includes(w.id))
 
   if (loading) return null
 
@@ -318,35 +332,47 @@ export default function ProfileAutomations({ profileId }) {
         </p>
       </div>
 
-      <div className="mb-4 grid sm:grid-cols-2 xl:grid-cols-3 gap-3">
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-2">LMIS login account</p>
-          <LmisAccountPicker value={accountId} onChange={setAccountId} />
-        </div>
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-2">Musaned login account</p>
-          <MusanedAccountPicker value={musanedAccountId} onChange={setMusanedAccountId} />
-        </div>
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-2">Visa platform login account</p>
-          <MusanedAccountPicker value={visaAccountId} onChange={setVisaAccountId}
-            endpoint="/visa/accounts" what="visa platform" placeholder="Nuzla visa" userLabel="Login Name" />
-        </div>
+      {/* Login accounts: one small slot per portal. */}
+      <div className="acct-compact mb-4 grid gap-2 grid-cols-1 sm:grid-cols-2 xl:grid-cols-5">
+        {[
+          ['LMIS', <LmisAccountPicker value={accountId} onChange={setAccountId} />],
+          ['Musaned', <MusanedAccountPicker value={musanedAccountId} onChange={setMusanedAccountId} />],
+          ['Tasheer', <MusanedAccountPicker value={tasheerAccountId} onChange={setTasheerAccountId}
+            endpoint="/tasheer/accounts" what="Tasheer" placeholder="Nuzla Tasheer" userLabel="Username" />],
+          ['Insurance (FetaP)', <MusanedAccountPicker value={insuranceAccountId} onChange={setInsuranceAccountId}
+            endpoint="/insurance/accounts" what="insurance" placeholder="Nuzla FetaP" userLabel="Username / email" />],
+          ['Visa platform', <MusanedAccountPicker value={visaAccountId} onChange={setVisaAccountId}
+            endpoint="/visa/accounts" what="visa platform" placeholder="Nuzla visa" userLabel="Login Name" />],
+        ].map(([title, picker]) => (
+          <div key={title} className="min-w-0">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 mb-1">{title} login</p>
+            {picker}
+          </div>
+        ))}
       </div>
 
-      {/* Musaned: both of its actions in one box, in order. */}
-      {musanedFlows.length > 0 && (
-        <div className="mb-3 rounded-xl border-2 border-indigo-200 dark:border-indigo-800 p-3">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-indigo-700 dark:text-indigo-300 mb-2">Musaned</p>
-          <div className="grid gap-2 sm:grid-cols-2">
-            {musanedFlows.map((w, i) => renderCard(w, i + 1))}
+      {/* The journey, in order: each portal's actions in one box. */}
+      {GROUPS.map(g => {
+        const flows = g.ids.map(id => workflows.find(w => w.id === id)).filter(Boolean)
+        return (
+          <div key={g.title} className={`mb-3 rounded-xl border-2 p-3 ${g.box}`}>
+            <p className={`text-[11px] font-semibold uppercase tracking-wide mb-2 ${g.head}`}>{g.title}</p>
+            {flows.length ? (
+              <div className="grid gap-2 sm:grid-cols-2">
+                {flows.map((w, i) => renderCard(w, flows.length > 1 ? i + 1 : 0))}
+              </div>
+            ) : (
+              <p className="text-xs text-slate-400 py-3 text-center">{g.empty}</p>
+            )}
           </div>
+        )
+      })}
+
+      {otherFlows.length > 0 && (
+        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+          {otherFlows.map(w => renderCard(w))}
         </div>
       )}
-
-      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-        {otherFlows.map(w => renderCard(w))}
-      </div>
 
       {open && detail && (
         <div className="mt-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-900/40 p-4 space-y-3">

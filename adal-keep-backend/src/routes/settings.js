@@ -51,6 +51,15 @@ router.put('/', authenticate, async (req, res) => {
       }
     }
 
+    // Run choices (visa_*, insurance_*): any of these keys, as text.
+    for (const [key, value] of Object.entries(req.body || {})) {
+      if (!/^(visa|insurance)_[a-z_]{1,40}$/.test(key)) continue
+      const v = String(value ?? '').trim().slice(0, 300)
+      const db = req.app.locals.db
+      if (await db('settings').where({ key }).first()) await db('settings').where({ key }).update({ value: v })
+      else await db('settings').insert({ key, value: v })
+    }
+
     res.json({ success: true })
   } catch (err) {
     console.error('Settings update error:', err)

@@ -273,3 +273,36 @@ export async function checkMedicalStatus(page, passport, nationality = 'Ethiopia
   }
   return { state: 'unknown', text: (res.card[0] || top.slice(0, 160)) }
 }
+
+/**
+ * "Check Wafid result" run (wafid_check), in the run's own tab:
+ * wafid.com/en/medical-status-search → passport + nationality → Check.
+ * FIT / UNFIT is written on the profile (Medical · Fit / Rejected). Wafid's
+ * "I am not a robot" is a person's: the run waits for them, then reads again.
+ */
+export async function runWafidCheck(page, ctx) {
+  const t0 = Date.now()
+  const secs = () => Math.round((Date.now() - t0) / 1000)
+  const passport = String(ctx.profile?.passport_number || '').trim().toUpperCase()
+  if (!passport) return { ok: false, step: 'preflight', error: 'Profile is missing the passport number', seconds: 0 }
+  page.__adalAllowImages = true
+  log(ctx, `🩺 Wafid result for passport ${passport}`)
+  let r = await checkMedicalStatus(page, passport)
+  if (r.state === 'challenge') {
+    await page.bringToFront().catch(() => {})
+    await ctx.notify?.(`🩺 ${ctx.profileName}: Wafid asks "I am not a robot"`, 'Answer it in the Wafid tab and press Check; Adal Keep reads the result by itself.', 'warn')
+    const end = Date.now() + 5 * 60 * 1000
+    while (Date.now() < end && await challengeShown(page)) await sleep(2000)
+    await sleep(2500)
+    r = await checkMedicalStatus(page, passport)
+  }
+  const said = { fit: 'FIT ✅', unfit: 'UNFIT ❌', pending: `not final yet (${r.text})`, none: r.text || 'no record', challenge: 'robot check not answered', unknown: `could not read (${r.text})` }[r.state] || r.state
+  log(ctx, `Wafid says: ${said}`)
+  const status = { fit: 'medical_fit', unfit: 'medical_rejected' }[r.state]
+  if (status) {
+    await ctx.noteProfile?.(`Wafid medical: ${r.state === 'fit' ? 'FIT' : 'UNFIT'} (passport ${passport})`, { status })
+    if (r.state === 'fit') await ctx.notify?.(`🩺 ${ctx.profileName}: Wafid FIT ✅`, `wafid.com shows FIT for passport ${passport}.`)
+  }
+  if (r.state === 'challenge') return { ok: true, pauseReason: 'awaiting-wafid-robot', seconds: secs() }
+  return { ok: true, done: true, note: said, seconds: secs() }
+}

@@ -15,6 +15,7 @@ import TutorCard from '../components/TutorCard'
 import TutorAdoption from '../components/TutorAdoption'
 import MainPCCard from '../components/MainPCCard'
 import WafidCard from '../components/WafidCard'
+import InsuranceCard from '../components/InsuranceCard'
 import BackupCard from '../components/BackupCard'
 
 export default function SettingsPage() {
@@ -273,6 +274,7 @@ export default function SettingsPage() {
       </Card>
 
       {import.meta.env.VITE_DEMO !== '1' && <WafidCard />}
+      {import.meta.env.VITE_DEMO !== '1' && <InsuranceCard />}
       {import.meta.env.VITE_DEMO !== '1' && <MainPCCard />}
       {import.meta.env.VITE_DEMO !== '1' && <BackupCard />}
 

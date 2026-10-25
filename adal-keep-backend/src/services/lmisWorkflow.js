@@ -1961,7 +1961,8 @@ export async function runFullWorkflow(page, ctx) {
   // Wafid medical booking: fills the form and waits for a person to save.
   if (String(workflowId).startsWith('wafid')) {
     try {
-      const { runWafidBooking } = await import('./wafidWorkflow.js')
+      const { runWafidBooking, runWafidCheck } = await import('./wafidWorkflow.js')
+      if (workflowId === 'wafid_check') return await runWafidCheck(page, ctx)
       return await runWafidBooking(page, ctx)
     } catch (e) {
       if (e?.cancelled) throw e
@@ -1982,6 +1983,20 @@ export async function runFullWorkflow(page, ctx) {
       log(ctx, `visa application failed after ${secs}s: ${e.message}`, 'error')
       await dumpPageState(page, ctx, 'mofa-visa')
       return { ok: false, step: 'mofa-visa', error: e.message, seconds: secs }
+    }
+  }
+
+  // Insurance certificate on FetaP (agency.niscofetap.com).
+  if (workflowId === 'insurance_certificate') {
+    try {
+      const { runInsuranceCertificate } = await import('./insuranceCertificate.js')
+      return await runInsuranceCertificate(page, ctx)
+    } catch (e) {
+      if (e?.cancelled) throw e
+      const secs = Math.round((Date.now() - t0) / 1000)
+      log(ctx, `insurance certificate failed after ${secs}s: ${e.message}`, 'error')
+      await dumpPageState(page, ctx, 'insurance')
+      return { ok: false, step: 'insurance', error: e.message, seconds: secs }
     }
   }
 

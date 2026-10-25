@@ -20,6 +20,7 @@
  */
 import { whenRunsIdle } from './busy.js'
 import fs from 'fs'
+import os from 'os'
 import path from 'path'
 import crypto from 'crypto'
 import { fileURLToPath } from 'url'
@@ -204,6 +205,33 @@ async function downloadPdf(browser, page, name) {
   }
 }
 
+/**
+ * JEV looks at a Musaned contract PDF (first and last page) and says which
+ * of the three it is. Returns { field, confidence } — field only when JEV is
+ * sure (≥ 0.7; Musaned's own label decides otherwise) — or null when JEV is off.
+ */
+const CONTRACT_KINDS = {
+  template: ['Contract', "Musaned's generated standard employment contract, printed clean: no handwritten signatures, no stamps."],
+  pro_employer: ['Contract (PRO + Employer signed)', 'The contract signed or stamped by the Saudi recruitment office (PRO) and the Saudi employer.'],
+  epro_candidate: ['Contract (EPRO + Candidate signed)', 'The contract signed by the Ethiopian agency (EPRO) and the domestic worker (candidate); often a scan or photo with signatures.'],
+  other: [null, 'Not an employment contract.'],
+}
+async function jevLooksAtContract(buf, p) {
+  let jevMod
+  try { jevMod = await import('./jevClassifier.js') } catch { return null }
+  if (!jevMod.jevReady()) return null
+  const tmp = path.join(os.tmpdir(), `adal-contract-${Date.now()}-${Math.random().toString(36).slice(2)}.pdf`)
+  try {
+    fs.writeFileSync(tmp, buf)
+    const a = await jevMod.askAboutDocument(tmp, {
+      kind: { text: 'Which document is this?', choice: Object.fromEntries(Object.entries(CONTRACT_KINDS).map(([k, [, d]]) => [k, d])) },
+    })
+    if (!a) return null
+    const conf = a.kind?.confidence ?? 0
+    return { field: conf >= 0.7 ? CONTRACT_KINDS[a.kind.choice]?.[0] || null : null, confidence: conf }
+  } finally { try { fs.unlinkSync(tmp) } catch {} }
+}
+
 /** The text of a PDF (pdf-parse). */
 async function pdfText(buf) {
   const m = await import('pdf-parse')
@@ -251,8 +279,17 @@ export function parseTemplateText(text) {
 
 /** Writes what template.pdf says into the profile (keeps what is there). */
 export async function applyTemplate(db, profileId, buf) {
-  const t = parseTemplateText(await pdfText(buf))
+  const text = await pdfText(buf)
+  const t = parseTemplateText(text)
   if (!t.contractNumber && !t.employer.name) return null
+  // Hers? The contract prints her passport number.
+  const own = await db('profiles').where('id', profileId).first('passport_number', 'full_name')
+  const pp = String(own?.passport_number || '').trim().toUpperCase()
+  const printed = (String(text).match(/Passport No:\s*([A-Z]{1,3}\d{6,9})/i) || [])[1]?.toUpperCase()
+  if (pp && printed && printed !== pp) {
+    console.warn(`[contracts] ${own.full_name}: template.pdf is for passport ${printed}, not ${pp} — not used`)
+    return null
+  }
   const now = await db('profiles').where('id', profileId).first('contract_data', 'employer_name', 'musaned_pro', 'employer_phone', 'employer_id', 'contract_date', 'contract_number', 'visa_number', 'chosen_at')
   let data = {}
   try { data = JSON.parse(now.contract_data || '{}') || {} } catch {}
@@ -389,9 +426,15 @@ async function checkOne(db, browser, page, p) {
   const saved = []
   let template = null
   for (const pdf of d.pdfs) {
-    const fieldName = (PDF_FIELDS.find(([re]) => re.test(pdf.label) || re.test(pdf.name)) || [null, 'Contract'])[1]
+    let fieldName = (PDF_FIELDS.find(([re]) => re.test(pdf.label) || re.test(pdf.name)) || [null, 'Contract'])[1]
     try {
       const buf = await downloadPdf(browser, page, pdf.name)
+      // JEV looks at it: which contract is it, and is it hers?
+      const jev = await jevLooksAtContract(buf, p)
+      if (jev?.field && jev.field !== fieldName) {
+        console.log(`[contracts] ${p.full_name}: JEV sorts ${pdf.name} as ${jev.field} (Musaned's label said ${fieldName})`)
+        fieldName = jev.field
+      }
       if (fieldName === 'Contract') template = buf
       if (await savePdf(db, p.id, fieldName, buf, pdf.name)) saved.push(pdf.name)
     } catch (e) { console.warn(`[contracts] ${p.full_name}: ${e.message}`) }

@@ -222,6 +222,57 @@ export async function lookAtPage(png, questions) {
   }
 }
 
+/**
+ * Show JEV pages of a document (a PDF's first and last page, or an image) and
+ * ask typed questions about it. `questions` is { name: { choice: { label:
+ * description, … } } | { noul: 'yes/no question' } }. Returns
+ * { name: { choice, confidence } | { noul } } or null when JEV is off or did
+ * not answer.
+ */
+export async function askAboutDocument(filePath, questions) {
+  if (!jevReady() || Date.now() < _lookPausedUntil) return null
+  const tmps = []
+  try {
+    const { sdk, api } = await client()
+    const state = {}
+    if (/\.pdf$/i.test(filePath)) {
+      const mupdf = await import('mupdf')
+      const doc = mupdf.Document.openDocument(fs.readFileSync(filePath), 'application/pdf')
+      const n = doc.countPages()
+      if (!n) return null
+      const pages = n > 1 ? [['first_page', 0], ['last_page', n - 1]] : [['page', 0]]
+      for (const [name, i] of pages) {
+        const pix = doc.loadPage(i).toPixmap([1.5, 0, 0, 1.5, 0, 0], mupdf.ColorSpace.DeviceRGB, false, true)
+        const png = await sharp(Buffer.from(pix.asPNG())).resize({ width: JEV_MAX_SIDE, height: JEV_MAX_SIDE, fit: 'inside', withoutEnlargement: true }).png().toBuffer()
+        state[name] = sdk.image(png)
+      }
+    } else {
+      const page = await pageImage(filePath)
+      if (page.tmp) tmps.push(page.tmp)
+      state.page = sdk.image(page.buffer)
+    }
+    const qs = {}
+    for (const [k, q] of Object.entries(questions)) {
+      qs[k] = q.choice ? sdk.choice(q.text || 'Which of these is it?', q.choice) : sdk.noul(q.noul)
+    }
+    const res = await api.systemOne({ state, questions: qs })
+    const out = {}
+    for (const k of Object.keys(questions)) {
+      const a = res.answers?.[k]
+      out[k] = questions[k].choice
+        ? { choice: a?.choice ?? null, confidence: Number(a?.confidence ?? 0) }
+        : { noul: typeof a?.noul === 'number' ? a.noul : null }
+    }
+    return out
+  } catch (e) {
+    if ([401, 402, 403].includes(e?.status)) _lookPausedUntil = Date.now() + 10 * 60 * 1000
+    console.warn('[jev] document question failed:', e?.status || '', String(e?.message || e).slice(0, 120))
+    return null
+  } finally {
+    for (const t of tmps) try { fs.unlinkSync(t) } catch {}
+  }
+}
+
 /** Delete the temporary page image of a classifyWithJev() result. */
 export function release(result) {
   if (result?._tmp) try { fs.unlinkSync(result._tmp) } catch {}
@@ -249,4 +300,4 @@ export async function cropMrz(result) {
   } catch { return null }
 }
 
-export default { jevReady, classifyWithJev, cropMrz, pickPrintedName, lookAtPage, lookUnavailableReason, release, JEV_DOC_TYPES }
+export default { jevReady, askAboutDocument, classifyWithJev, cropMrz, pickPrintedName, lookAtPage, lookUnavailableReason, release, JEV_DOC_TYPES }

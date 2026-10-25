@@ -341,6 +341,15 @@ async function executeRun(db, page, job) {
 
   ctx.page = page
   ctx.db = db
+  // A follow-up task for a person (no sound: notify rings).
+  ctx.addTask = async (title, description = '') => {
+    try {
+      await db('tasks').insert({
+        type: 'automation', title, description, status: 'pending', profile_id: job.profile_id,
+        assigned_to: 1, is_ai_created: true, created_at: new Date().toISOString(),
+      })
+    } catch (e) { console.error('[worker] task failed:', e.message) }
+  }
   ctx.isCancelled = () => isCancelled(runId)
   // A run writes what it found into the profile's notes (dated), and may set
   // a few profile fields with it.

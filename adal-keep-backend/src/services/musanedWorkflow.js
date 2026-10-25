@@ -609,48 +609,125 @@ export async function stepFillCandidatePreCheck(page, ctx) {
  *     with the EPRO's name, email and number → { kind: 'other', epro… }
  * Returns null when neither shows within `ms`.
  */
+/**
+ * Musaned's "already registered" messages can flash for a second (a toast)
+ * and vanish. This watcher, put in the run's tab from the start, keeps the
+ * first one it sees in window.__adalAlready, so it is never missed.
+ */
+const WATCH_ALREADY = () => {
+  if (window.__adalAlreadyWatch) return
+  window.__adalAlreadyWatch = setInterval(() => {
+    if (window.__adalAlready) return
+    const t = document.body?.innerText || ''
+    const other = /already\s+exists!?[\s\S]{0,120}contact\s+EPRO/i.test(t)
+    const ours = /already\s+been\s+added\s+to\s+(your|our)\s+list/i.test(t)
+    if (!other && !ours) return
+    // The message's own box (dialog / toast), for the profile notes.
+    const needle = other ? /already\s+exists/i : /already\s+been\s+added/i
+    let box = [...document.querySelectorAll('[role="dialog"], [role="alert"], .p-dialog, .p-toast-message, .modal, .mat-dialog-container, .swal2-popup, .p-confirm-dialog')]
+      .find(e => needle.test(e.innerText || ''))
+    const text = (box?.innerText || t.split('\n').filter(l => needle.test(l)).join(' ')).replace(/\s+\n/g, '\n').trim().slice(0, 600)
+    window.__adalAlready = { kind: other ? 'other' : 'ours', text, at: Date.now() }
+  }, 250)
+}
+
+export async function watchAlreadyRegistered(page) {
+  if (!page.__adalAlreadyArmed) { page.__adalAlreadyArmed = true; await page.evaluateOnNewDocument(WATCH_ALREADY).catch(() => {}) }
+  // A fresh look for this candidate: forget anything seen before.
+  await page.evaluate(() => { window.__adalAlready = null }).catch(() => {})
+  await page.evaluate(WATCH_ALREADY).catch(() => {})
+}
+
+/** Reads the details of "… already exists — contact EPRO" (the agency that has her). */
+function parseOther(t) {
+  const after = (label) => {
+    const m = String(t).match(new RegExp(`${label}\\s*:?\\s*\\n*\\s*([^\\n]+)`, 'i'))
+    return m ? m[1].trim() : ''
+  }
+  return {
+    kind: 'other',
+    who: (String(t).match(/([^\n]+?)\s+already\s+exists!?/i) || [])[1]?.trim() || '',
+    epro: after('EPRO\\s*Name') || after('Agency\\s*Name') || after('Office\\s*Name'),
+    email: after('EPRO\\s*E-?mail') || after('E-?mail'),
+    phone: after('EPRO\\s*Contact\\s*Number') || after('Contact\\s*Number') || after('Phone'),
+    text: String(t).slice(0, 600),
+  }
+}
+
 export async function readAlreadyRegistered(page, ms = 8000) {
   const end = Date.now() + ms
-  while (Date.now() < end) {
+  do {
     const r = await page.evaluate(() => {
       const t = document.body?.innerText || ''
-      if (/already\s+exists!?[\s\S]{0,80}contact\s+EPRO/i.test(t)) {
-        const after = (label) => {
-          const m = t.match(new RegExp(`${label}\\s*:?\\s*\\n+\\s*([^\\n]+)`, 'i'))
-          return m ? m[1].trim() : ''
-        }
-        return {
-          kind: 'other',
-          who: (t.match(/([^\n]+?)\s+already\s+exists!?/i) || [])[1]?.trim() || '',
-          epro: after('EPRO Name'), email: after('EPRO Email'), phone: after('EPRO Contact Number'),
-        }
-      }
-      if (/already\s+been\s+added\s+to\s+your\s+list/i.test(t)) return { kind: 'ours' }
-      return null
+      if (/already\s+exists!?[\s\S]{0,120}contact\s+EPRO/i.test(t)) return { kind: 'other', text: t }
+      if (/already\s+been\s+added\s+to\s+(your|our)\s+list/i.test(t)) return { kind: 'ours' }
+      // Seen earlier and gone again (a toast).
+      return window.__adalAlready || null
     }).catch(() => null)
-    if (r) return r
+    if (r) return r.kind === 'other' ? parseOther(r.text) : r
+    if (Date.now() >= end) break
     await sleep(500)
-  }
+  } while (true)
   return null
+}
+
+/**
+ * The Add Candidate form did not open and Musaned said nothing we could
+ * read: look for her passport in our HR Pool list. Found = she is in our list.
+ */
+async function findInOurList(page, ctx, passport) {
+  if (!passport) return false
+  try {
+    log(ctx, `🔎 looking for passport ${passport} in our HR Pool list`)
+    await page.goto('https://tawtheeq.musaned.com.sa/hr-pool', { waitUntil: 'networkidle2', timeout: 60000 }).catch(() => {})
+    await page.waitForFunction(() => [...document.querySelectorAll('app-filter-search')].some(f => /Passport Number/i.test(f.textContent || '')), { timeout: 30000 })
+    const filter = (await page.evaluateHandle(() => [...document.querySelectorAll('app-filter-search')].find(f => /Passport Number/i.test(f.textContent || '')))).asElement()
+    await filter.evaluate(f => f.querySelector('button.app-filter-header, .app-filter-header')?.click())
+    await sleep(700)
+    const input = await filter.$('textarea, input')
+    if (!input) return false
+    await input.evaluate(i => { i.focus(); i.value = '' })
+    await input.type(passport, { delay: 40 })
+    await input.press('Enter')
+    await page.waitForNetworkIdle({ idleTime: 800, timeout: 20000 }).catch(() => {})
+    await sleep(1200)
+    return await page.evaluate((pp) => [...document.querySelectorAll('button, a')]
+      .filter(b => /^\s*VIEW\s*$/i.test(b.innerText || ''))
+      .some(b => { let c = b; for (let i = 0; i < 8 && c && !/PASSPORT NUMBER/i.test(c.innerText || ''); i++) c = c.parentElement; return !!c && (c.innerText || '').toUpperCase().includes(pp) }), passport)
+  } catch (e) {
+    log(ctx, `HR Pool search did not finish: ${e.message}`, 'warn')
+    return false
+  }
+}
+
+/** The Add Candidate form (its title / fields) is on screen. */
+function addFormOpen(page) {
+  return page.evaluate(() => /add\s+candidate/i.test(document.title || '') ||
+    [...document.querySelectorAll('label')].some(l => /personal photo|marital status|religion/i.test(l.textContent || ''))).catch(() => false)
 }
 
 /** Writes it into her profile, closes Musaned's message and ends the run. */
 async function stopAlreadyRegistered(page, ctx, r, secs) {
   if (r.kind === 'ours') {
-    const text = 'Musaned: already registered in our list (HR Pool) — "This candidate has already been added to your list". Not added again.'
+    const text = `Musaned: already registered in our list (HR Pool)${r.found ? ' — her passport is in our HR Pool list' : ' — "This candidate has already been added to your list"'}. Not added again; Musaned marked done.`
     log(ctx, `ℹ️ ${text}`)
     await ctx.noteProfile?.(text, ctx.profile?.musaned_stage ? {} : { musaned_stage: 'IN OUR LIST' })
     await ctx.notify(`ℹ️ ${ctx.profileName}: already on Musaned`, 'She is already in our Musaned list (HR Pool). Nothing was added again.')
     await page.evaluate(() => document.querySelectorAll('.p-toast-icon-close, [class*="toast"] button').forEach(b => b.click())).catch(() => {})
-    return { ok: true, note: 'already registered on Musaned (our list)', seconds: secs }
+    // She is on Musaned already: this step is done.
+    return { ok: true, done: true, note: 'already registered on Musaned (our list) — Musaned done', seconds: secs }
   }
+  const agency = r.epro || 'another agency'
   const where = [r.epro && `EPRO: ${r.epro}`, r.email && `email ${r.email}`, r.phone && `phone ${r.phone}`].filter(Boolean).join(', ')
-  const text = `Musaned: ${r.who || 'she'} already exists — registered by another agency (${where || 'EPRO not shown'}). Ask that agency to delete her before adding her here.`
+  const said = r.text ? ` Musaned says: "${String(r.text).replace(/\s+/g, ' ').trim().slice(0, 400)}"` : ''
+  const text = `Musaned: ${r.who || 'she'} is registered by ${agency}${where ? ` (${where})` : ''}. Ask that agency to delete her before adding her here.${said}`
   log(ctx, `⚠ ${text}`, 'warn')
   await ctx.noteProfile?.(text, { musaned_stage: 'REGISTERED BY ANOTHER AGENCY' })
-  await ctx.notify(`⚠️ ${ctx.profileName}: registered by another agency on Musaned`, text)
+  // A ringing notice, and a task to follow up with that agency.
+  await ctx.notify(`⚠️ ${ctx.profileName}: registered on Musaned by ${agency}`, text, 'warn')
+  await ctx.addTask?.(`Ask ${agency} to delete ${ctx.profileName} on Musaned`, `${where || 'EPRO contact not shown'} — then run "Make Musaned" again.`)
   await page.evaluate(() => [...document.querySelectorAll('button')].find(b => /^\s*OK\s*$/i.test(b.innerText || ''))?.click()).catch(() => {})
-  return { ok: false, step: 'pre-check', error: `Musaned: she already exists — registered by another agency (${where})`, seconds: secs }
+  return { ok: false, step: 'pre-check', error: `Musaned: she already exists — registered by ${agency}${where ? ` (${where})` : ''}`, seconds: secs }
 }
 
 // ============================================================================
@@ -2288,6 +2365,7 @@ async function musanedRun(page, ctx) {
       const { checkChosenInRun } = await import('./musanedContracts.js')
       return await checkChosenInRun(page, ctx)
     }
+    await watchAlreadyRegistered(page)
     await stepClickHrPool(page, ctx)
     await stepClickAddNewCandidate(page, ctx)
 
@@ -2295,6 +2373,19 @@ async function musanedRun(page, ctx) {
     // Registered already (in our list, or by another agency): noted, stopped.
     const already = await readAlreadyRegistered(page, 6000)
     if (already) return await stopAlreadyRegistered(page, ctx, already, Math.round((Date.now() - t0) / 1000))
+    // The form did not open and Musaned said nothing: is she in our list?
+    let formOpen = false
+    for (let i = 0; i < 24 && !formOpen; i++) {
+      formOpen = await addFormOpen(page)
+      if (!formOpen) { if (await readAlreadyRegistered(page, 0)) break; await sleep(500) }
+    }
+    if (!formOpen) {
+      const passport = String(ctx.profile?.passport_number || '').trim().toUpperCase()
+      log(ctx, 'the Add Candidate form did not open after the passport check', 'warn')
+      const seen = await readAlreadyRegistered(page, 1500)
+      if (seen) return await stopAlreadyRegistered(page, ctx, seen, Math.round((Date.now() - t0) / 1000))
+      if (await findInOurList(page, ctx, passport)) return await stopAlreadyRegistered(page, ctx, { kind: 'ours', found: true }, Math.round((Date.now() - t0) / 1000))
+    }
     if (!pre || !pre.ok) {
       log(ctx, `pre-check failed (${pre?.error || 'unknown'}) — running diagnostics before details`, 'warn')
       await diagnoseMusanedPage(page, ctx, 'post-pre-check-failure')
@@ -2319,6 +2410,10 @@ async function musanedRun(page, ctx) {
     return { ok: true, pauseReason: 'awaiting-human-save', seconds: secs }
   } catch (e) {
     const secs = Math.round((Date.now() - t0) / 1000)
+    if (e?.cancelled) throw e
+    // A step failed because Musaned said she is registered already.
+    const already = await readAlreadyRegistered(page, 500)
+    if (already) return await stopAlreadyRegistered(page, ctx, already, secs)
     log(ctx, `musaned failed after ${secs}s: ${e.message}`, 'error')
     await diagnoseMusanedPage(page, ctx, 'workflow-error')
     await dumpPageState(page, ctx, 'musaned')

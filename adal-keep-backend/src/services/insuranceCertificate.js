@@ -15,7 +15,7 @@
  *      pay): Adal Keep rings with the insurance sound and waits.
  */
 import { signInTurn } from './tabManager.js'
-import { visaNames, markField, setText, setSelect, clickText } from './mofaVisa.js'
+import { visaNames, clickText } from './mofaVisa.js'
 
 export const INSURANCE_CERTIFICATE = 'insurance_certificate'
 const HOME = 'https://agency.niscofetap.com/'
@@ -66,7 +66,8 @@ export function insuranceValues(profile, settings = {}) {
     dob: isoDate(p.date_of_birth),
     passport: String(p.passport_number || '').trim().toUpperCase().replace(/\s+/g, ''),
     labor_id: String(p.labor_id || '').trim(),
-    phone: String(p.phone_number || '').trim(),
+    // Local form: 0911544555 (profiles may keep 251911544555 or +251…).
+    phone: (() => { const d = String(p.phone_number || '').replace(/\D/g, ''); return d.startsWith('251') ? `0${d.slice(3)}` : d.length === 9 ? `0${d}` : d })(),
     email: settings.agency_email || '',
     woreda: '',
     sub_city: String(p.zone_subcity || '').trim(),
@@ -137,60 +138,115 @@ async function signIn(page, ctx) {
   } finally { release() }
 }
 
-/** Sets a date box (the browser's own date input takes yyyy-mm-dd). */
-function setDate(page, key, iso) {
-  return page.evaluate((key, iso) => {
-    const el = document.querySelector(`[data-adal-v="${key}"]`)
-    if (!el || !iso) return ''
-    const [y, m, d] = iso.split('-')
-    const v = el.type === 'date' ? iso : `${m}/${d}/${y}`
+/**
+ * FetaP's form (a Vue modal, .modal-parent): every text box is named by its
+ * placeholder, every list by its first option ("Title", "Gender", "Region"…),
+ * the two date boxes are, in order, Date Of Birth and Effective Date.
+ */
+function fillBox(page, placeholder, value) {
+  return page.evaluate((ph, v) => {
+    const root = document.querySelector('.modal-parent') || document
+    const el = [...root.querySelectorAll('input, textarea')].find(i => (i.placeholder || '').trim().toLowerCase() === ph.toLowerCase() && i.offsetParent !== null)
+    if (!el) return 'missing'
+    if (el.value) return 'kept'
+    const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
     el.focus()
-    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, v)
+    Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, v)
+    for (const t of ['input', 'change']) el.dispatchEvent(new Event(t, { bubbles: true }))
+    el.blur()
+    return el.value === v ? 'ok' : 'failed'
+  }, placeholder, value)
+}
+
+function chooseIn(page, firstOption, src) {
+  return page.evaluate((first, src) => {
+    const root = document.querySelector('.modal-parent') || document
+    const el = [...root.querySelectorAll('select')].find(s => (s.options[0]?.text || '').trim().toLowerCase() === first.toLowerCase())
+    if (!el) return { state: 'missing' }
+    const re = new RegExp(src, 'i')
+    const o = [...el.options].slice(1).find(o => re.test(o.text.trim()))
+    if (!o) return { state: 'no-match', options: [...el.options].slice(1, 10).map(o => o.text.trim()) }
+    el.value = o.value
+    o.selected = true
+    for (const t of ['input', 'change']) el.dispatchEvent(new Event(t, { bubbles: true }))
+    return { state: el.selectedIndex > 0 ? 'ok' : 'failed', text: o.text.trim() }
+  }, firstOption, src)
+}
+
+function setDateNth(page, n, iso) {
+  return page.evaluate((n, iso) => {
+    const root = document.querySelector('.modal-parent') || document
+    const el = [...root.querySelectorAll('input[type="date"]')].filter(i => i.offsetParent !== null)[n]
+    if (!el || !iso) return ''
+    el.focus()
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, iso)
     for (const t of ['input', 'change']) el.dispatchEvent(new Event(t, { bubbles: true }))
     el.blur()
     return el.value
-  }, key, iso)
+  }, n, iso)
 }
 
 async function fillCertificate(page, ctx, v) {
   const left = []
-  const select = async (label, key, src, name = label) => {
-    if (!(await markField(page, label, key, 'select'))) return left.push(name)
+  const select = async (first, src, name = first) => {
     if (!src) return left.push(name)
-    const r = await setSelect(page, key, src, ctx)
-    if (r.ok) { log(ctx, `✓ ${name}: ${r.text}`); await sleep(500) }
-    else left.push(`${name}${r.options?.length ? ` (choices: ${r.options.slice(0, 8).join(', ')})` : ''}`)
+    const r = await chooseIn(page, first, src)
+    if (r.state === 'ok') { log(ctx, `✓ ${name}: ${r.text}`); await sleep(400) }
+    else left.push(`${name}${r.options?.length ? ` (choices: ${r.options.join(', ')})` : ''}`)
   }
-  const text = async (label, key, value, name = label) => {
-    if (!(await markField(page, label, key, 'input, textarea'))) return left.push(name)
-    const cur = await page.$eval(`[data-adal-v="${key}"]`, e => e.value).catch(() => '')
-    if (cur) return log(ctx, `${name} already filled — kept`)
+  const text = async (placeholder, value, name = placeholder) => {
     if (!value) return left.push(name)
-    if (await setText(page, key, value)) log(ctx, `✓ ${name}: ${value}`)
+    const r = await fillBox(page, placeholder, value)
+    if (r === 'ok') log(ctx, `✓ ${name}: ${value}`)
+    else if (r === 'kept') log(ctx, `${name} already filled — kept`)
     else left.push(name)
   }
 
-  await select('insurance branch', 'branch', v.branch, `Insurance Branch${v.branchName ? '' : ' (set it in Settings → Insurance)'}`)
-  await text('number of insured', 'insured', v.insured, 'Number Of Insured')
+  await select('Insurance Branch', v.branch, `Insurance Branch${v.branchName ? '' : ' (choose it in Settings → Insurance)'}`)
+  await text('Number Of Insured', v.insured)
   log(ctx, '✍️ Add Insured')
-  await select('title', 'title', v.title, 'Title')
-  await text('first name', 'first', v.first, 'First Name')
-  await text('father name', 'father', v.father, 'Father Name')
-  await text('grand ?father name', 'gfather', v.grandfather, 'Grand Father Name')
-  await select('gender', 'gender', v.gender, 'Gender')
-  if (await markField(page, 'date of birth', 'dob', 'input')) {
-    const got = await setDate(page, 'dob', v.dob)
-    if (got) log(ctx, `✓ Date Of Birth: ${got}`); else left.push('Date Of Birth')
-  } else left.push('Date Of Birth')
-  await text('passport (?:number|no\\.?)', 'passport', v.passport, 'Passport Number')
-  await text('labou?r id', 'labor', v.labor_id, 'Labor ID')
-  await text('phone', 'phone', v.phone, 'Phone')
-  await text('e-?mail', 'email', v.email, 'Email')
-  await text('woreda', 'woreda', v.woreda, 'Woreda')
-  await text('sub ?city', 'subcity', v.sub_city, 'Sub City')
-  await select('region', 'region', v.region, 'Region')
-  await select('country of destination', 'dest', v.destination, 'Country Of Destination')
+  await select('Title', v.title)
+  await text('First Name', v.first)
+  await text('Father Name', v.father)
+  await text('Grand Father Name', v.grandfather)
+  await select('Gender', v.gender)
+  const dob = await setDateNth(page, 0, v.dob)
+  if (dob) log(ctx, `✓ Date Of Birth: ${dob}`); else left.push('Date Of Birth')
+  await text('Passport Number', v.passport)
+  await text('Labor ID', v.labor_id)
+  await text('Phone', v.phone)
+  await text('Email', v.email)
+  await text('Woreda', v.woreda)
+  await text('Sub city', v.sub_city, 'Sub City')
+  await select('Region', v.region)
+  await select('Country Of Destination', v.destination)
   return left
+}
+
+/** "+ New certificate" is a clickable <div>: click it like a person, until the form shows. */
+async function openNewCertificate(page, ctx) {
+  const formOpen = () => page.evaluate(() => {
+    const m = document.querySelector('.modal-parent')
+    const first = [...document.querySelectorAll('input')].find(i => i.placeholder === 'First Name')
+    return (!m || !m.classList.contains('hidden')) && !!first && first.offsetParent !== null
+  })
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const h = await page.evaluateHandle(() => {
+      const hits = [...document.querySelectorAll('div, span, button, a')]
+        .filter(e => /^\s*\+?\s*new certificate\s*$/i.test(e.innerText || '') && e.offsetParent !== null)
+      const el = hits[hits.length - 1] // the innermost
+      if (!el) return null
+      let c = el
+      while (c && c.parentElement && getComputedStyle(c).cursor !== 'pointer' && c.tagName !== 'BUTTON') c = c.parentElement
+      return getComputedStyle(c).cursor === 'pointer' || c.tagName === 'BUTTON' ? c : el
+    })
+    const el = h.asElement()
+    if (!el) throw new Error('FetaP shows no "+ New certificate" button')
+    log(ctx, `+ New certificate${attempt > 1 ? ` (again, ${attempt})` : ''}`)
+    await el.click().catch(() => el.evaluate(e => e.click()))
+    if (await until(formOpen, 15000, ctx)) return
+  }
+  throw new Error('The New Certificate form did not open after clicking "+ New certificate"')
 }
 
 export async function runInsuranceCertificate(page, ctx) {
@@ -207,12 +263,8 @@ export async function runInsuranceCertificate(page, ctx) {
   if (!(await until(async () => /new certificate/i.test(await page.evaluate(() => document.body?.innerText || '')), 60000, ctx))) {
     throw new Error('The Draft Certificates page did not show "New Certificate"')
   }
-  log(ctx, 'New Certificate')
-  await clickText(page, /^\s*\+?\s*new certificate\s*$/)
-  if (!(await until(async () => /add insured/i.test(await page.evaluate(() => document.body?.innerText || '')) && !!(await page.$('input')), 30000, ctx))) {
-    throw new Error('The New Certificate form did not open')
-  }
-  await sleep(1000)
+  await openNewCertificate(page, ctx)
+  await sleep(800)
   const left = await fillCertificate(page, ctx, v)
 
   await ctx.noteProfile?.(`Insurance: the FetaP certificate form is filled — waiting for a person${left.length ? ` (also to fill: ${left.join('; ')})` : ''}`)

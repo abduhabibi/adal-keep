@@ -9,6 +9,7 @@ import StatusBadge from '../components/shared/StatusBadge'
 import Button from '../components/shared/Button'
 import Input from '../components/shared/Input'
 import { useProfileFilters } from '../components/profileFilters'
+import { JourneyFork } from '../components/ProfileJourney'
 
 const STATUS_OPTIONS_AM = [
   { value: 'pending', label: 'በመጠባበቅ ላይ' },
@@ -57,7 +58,9 @@ export default function ProfilesPage() {
   }, [load])
 
   // Date range, experience, age, married, country, skill, religion + sort.
-  const { rows, filterBar, sortBar, active: filtering, clear } = useProfileFilters(profiles)
+  const { rows, filterBar, sortBar, active: filtering, clear, step, setStep, stepCounts, activeCount } = useProfileFilters(profiles)
+  // The nine filters fold away: the search line stays one line high.
+  const [showFilters, setShowFilters] = useState(false)
 
   const updateFilter = (key, value) => {
     const next = new URLSearchParams(searchParams)
@@ -94,6 +97,11 @@ export default function ProfilesPage() {
       <PageHeader
         title="ፕሮፋይሎች"
         subtitle={filterLabel}
+        middle={
+          <div className="panel px-3 pt-2 pb-0.5 max-w-full" data-tour="journey-filter">
+            <JourneyFork compact counts={stepCounts} selected={step} onSelect={setStep} />
+          </div>
+        }
         action={
           <Button data-tour="new-profile" onClick={() => navigate('/profiles/new')}>
             + ፕሮፋይል አክል
@@ -101,7 +109,7 @@ export default function ProfilesPage() {
         }
       />
 
-      <div className="panel mb-5 grid gap-3 p-4 sm:grid-cols-[1fr_auto_auto] animate-fade-up">
+      <div className="panel mb-5 grid gap-2 p-3 sm:grid-cols-[1fr_auto_auto_auto] items-center animate-fade-up">
         <Input
           placeholder="በስም፣ በስልክ ወይም በመታወቂያ ይፈልጉ..."
           value={query}
@@ -145,19 +153,23 @@ export default function ProfilesPage() {
           ))}
         </select>
 
-        <div className="sm:col-span-3 space-y-3 border-t border-slate-100 dark:border-slate-700 pt-3">
-          {filterBar}
-          <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500">
-            <span>
-              {rows.length} of {profiles.length} profiles
-              {filtering && (
-                <button type="button" className="ml-3 text-teal-700 dark:text-teal-300 hover:underline" onClick={clear}>
-                  Clear filters
-                </button>
-              )}
-            </span>
-            {sortBar}
-          </div>
+        <button type="button" onClick={() => setShowFilters(v => !v)}
+          className={`field whitespace-nowrap text-sm font-semibold ${activeCount ? 'border-teal-400 text-teal-700 dark:text-teal-300' : ''}`}>
+          ⚙ Filters{activeCount ? ` · ${activeCount}` : ''} {showFilters ? '▴' : '▾'}
+        </button>
+
+        {showFilters && <div className="sm:col-span-4 border-t border-slate-100 dark:border-slate-700 pt-3">{filterBar}</div>}
+
+        <div className="sm:col-span-4 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+          <span>
+            {rows.length} of {profiles.length} profiles
+            {filtering && (
+              <button type="button" className="ml-3 text-teal-700 dark:text-teal-300 hover:underline" onClick={clear}>
+                Clear filters
+              </button>
+            )}
+          </span>
+          {sortBar}
         </div>
       </div>
 
@@ -178,7 +190,7 @@ export default function ProfilesPage() {
           }
         />
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <div key={step || 'all'} className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {rows.map((p, i) => (
             <article
               key={p.id}

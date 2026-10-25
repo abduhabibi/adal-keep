@@ -65,7 +65,7 @@ export function Select({ title, value, onChange, options }) {
   )
 }
 
-const EMPTY = { range: '', experience: '', age: '', married: '', country: '', skill: '', religion: '', run: '', stage: '' }
+const EMPTY = { range: '', experience: '', age: '', married: '', country: '', skill: '', religion: '', run: '', stage: '', step: '' }
 // "Unfilled": the field is empty on the profile.
 const NONE = '__none__'
 const RUNS = [['', 'Any'], ['running', 'Running now'], ['waiting', 'Waiting for you'], ['idle', 'Not running']]
@@ -92,11 +92,19 @@ function useRunStates() {
  * visa), refreshed every 30 s. { names: [[key, label]…], of: {profileId: key} }
  */
 function useStages() {
-  const [st, setSt] = useState({ names: [], of: {} })
+  const [st, setSt] = useState({ names: [], of: {}, steps: {} })
   useEffect(() => {
     let alive = true
     const load = () => api.get('/automations/stages')
-      .then(r => { if (alive) setSt({ names: r.data?.stages || [], of: Object.fromEntries((r.data?.profiles || []).map(x => [x.profile_id, x.stage])) }) })
+      .then(r => {
+        if (!alive) return
+        const list = r.data?.profiles || []
+        setSt({
+          names: r.data?.stages || [],
+          of: Object.fromEntries(list.map(x => [x.profile_id, x.stage])),
+          steps: Object.fromEntries(list.map(x => [x.profile_id, x.steps || {}])),
+        })
+      })
       .catch(() => {})
     load()
     const t = setInterval(load, 30000)
@@ -141,6 +149,8 @@ export function useProfileFilters(profiles) {
       if (f.religion && !match(f.religion, p.religion)) return false
       if (f.run && (runStates[p.id] || 'idle') !== f.run) return false
       if (f.stage && (stages.of[p.id] || 'new') !== f.stage) return false
+      // Journey step picked above the list: only profiles that finished it.
+      if (f.step && stages.steps[p.id]?.[f.step] !== 'done') return false
       return true
     })
     const key = (p) => sort === 'age' ? (ageOf(p.date_of_birth) ?? -1)
@@ -190,5 +200,17 @@ export function useProfileFilters(profiles) {
     </div>
   )
 
-  return { rows, filterBar, sortBar, active: Object.values(f).some(Boolean), clear: () => setF(EMPTY) }
+  // How many of these profiles finished each journey step.
+  const stepCounts = useMemo(() => {
+    const c = {}
+    for (const p of profiles) for (const [k, v] of Object.entries(stages.steps[p.id] || {})) if (v === 'done') c[k] = (c[k] || 0) + 1
+    return c
+  }, [profiles, stages])
+
+  return {
+    rows, filterBar, sortBar, active: Object.values(f).some(Boolean), clear: () => setF(EMPTY),
+    // Filters set below the search line (the journey step is shown above the list).
+    activeCount: Object.entries(f).filter(([k, v]) => v && k !== 'step').length,
+    step: f.step, setStep: (k) => setF(prev => ({ ...prev, step: prev.step === k ? '' : k })), stepCounts,
+  }
 }

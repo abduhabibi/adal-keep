@@ -406,14 +406,20 @@ router.get('/profiles/:profileId/journey', async (req, res) => {
 router.get('/automations/stages', async (req, res) => {
   try {
     const db = req.app.locals.db
-    const profiles = await db('profiles').select('id', 'status', 'musaned_stage', 'chosen_at', 'visa_stage')
+    const profiles = await db('profiles').select('id', 'status', 'musaned_stage', 'chosen_at', 'visa_stage', 'visa_application_number')
     const rows = await db('automation_queue').select('id', 'profile_id', 'workflow_id', 'status').orderBy('id', 'asc')
     const latest = new Map()
     for (const r of rows) {
       if (!latest.has(r.profile_id)) latest.set(r.profile_id, {})
       latest.get(r.profile_id)[r.workflow_id] = r
     }
-    res.json({ stages: STAGES, profiles: profiles.map(p => ({ profile_id: p.id, stage: stageOf(p, latest.get(p.id)) })) })
+    const withCv = new Set((await db('generated_cvs').distinct('profile_id').catch(() => [])).map(r => r.profile_id))
+    // Every journey step's state per profile: { cv: 'done', musaned: 'active', … }.
+    const stepsOf = (p) => {
+      const j = journeyOf(p, latest.get(p.id) || {}, withCv.has(p.id))
+      return Object.fromEntries([...j.lmis, ...j.embassy].map(s => [s.key, s.state]))
+    }
+    res.json({ stages: STAGES, profiles: profiles.map(p => ({ profile_id: p.id, stage: stageOf(p, latest.get(p.id)), steps: stepsOf(p) })) })
   } catch (e) {
     res.status(500).json({ error: e.message })
   }

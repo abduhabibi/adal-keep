@@ -276,12 +276,16 @@ export default function ProfileAutomations({ profileId }) {
           )
   }
 
-  // CV (done on the profile) → Musaned → Wafid → Tasheer → Insurance → the rest.
+  // CV (done on the profile) → Musaned → Wafid → Tasheer → Insurance → Enjaz · Visa,
+  // then the LMIS steps, each on its own.
   const GROUPS = [
     { title: 'Musaned', ids: ['musaned_add_candidate', 'musaned_check_chosen'], box: 'border-indigo-200 dark:border-indigo-800', head: 'text-indigo-700 dark:text-indigo-300' },
     { title: 'Wafid medical', ids: ['wafid_book', 'wafid_check'], box: 'border-emerald-200 dark:border-emerald-800', head: 'text-emerald-700 dark:text-emerald-300' },
     { title: 'Tasheer', ids: [], empty: 'Coming soon — the Tasheer steps are added next.', box: 'border-amber-200 dark:border-amber-800 border-dashed', head: 'text-amber-700 dark:text-amber-300' },
     { title: 'Insurance', ids: ['insurance_certificate'], box: 'border-rose-200 dark:border-rose-800', head: 'text-rose-700 dark:text-rose-300' },
+    { title: 'Enjaz · Visa', ids: ['mofa_visa'], box: 'border-sky-200 dark:border-sky-800', head: 'text-sky-700 dark:text-sky-300' },
+    { title: 'LMIS · Contract', ids: ['lmis_contract'], box: 'border-teal-200 dark:border-teal-800', head: 'text-teal-700 dark:text-teal-300' },
+    { title: 'LMIS · Police clearance', ids: ['police_certificate'], box: 'border-slate-200 dark:border-slate-700', head: 'text-slate-600 dark:text-slate-300' },
   ]
   const grouped = GROUPS.flatMap(g => g.ids)
   const otherFlows = workflows.filter(w => !grouped.includes(w.id))
@@ -341,7 +345,7 @@ export default function ProfileAutomations({ profileId }) {
             endpoint="/tasheer/accounts" what="Tasheer" placeholder="Nuzla Tasheer" userLabel="Username" />],
           ['Insurance (FetaP)', <MusanedAccountPicker value={insuranceAccountId} onChange={setInsuranceAccountId}
             endpoint="/insurance/accounts" what="insurance" placeholder="Nuzla FetaP" userLabel="Username / email" />],
-          ['Visa platform', <MusanedAccountPicker value={visaAccountId} onChange={setVisaAccountId}
+          ['Enjaz · Visa', <MusanedAccountPicker value={visaAccountId} onChange={setVisaAccountId}
             endpoint="/visa/accounts" what="visa platform" placeholder="Nuzla visa" userLabel="Login Name" />],
         ].map(([title, picker]) => (
           <div key={title} className="min-w-0">

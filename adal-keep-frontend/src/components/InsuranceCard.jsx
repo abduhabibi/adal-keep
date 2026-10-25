@@ -8,7 +8,11 @@ import api from '../services/api'
 import Card from './shared/Card'
 
 // FetaP's branch names, as its "Insurance Branch" list shows them.
-export const INSURANCE_BRANCHES = []
+export const INSURANCE_BRANCHES = [
+  'Arada', 'Head Office (LH)', 'Main Wuhalimat', 'Beklobet CXH', 'Bole CXH', 'Eastern (Gerji)', 'Gola Sefer',
+  'Kera', 'Kality', 'Merkato', 'Kazanchis', 'Megenagna', 'Lafto', 'Lideta', 'Ras Desta', 'Beherawi',
+  'Arada Giorgis', 'Misrak Ber-Lemi Kur', 'Arat Kilo',
+]
 
 export default function InsuranceCard() {
   const [branch, setBranch] = useState(null)

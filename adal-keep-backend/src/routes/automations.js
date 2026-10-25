@@ -355,6 +355,54 @@ export function stageOf(p, runs = {}) {
   return 'new'
 }
 
+/**
+ * One profile's journey, two tracks from the same start:
+ *   LMIS:    CV → Musaned → Wafid → LMIS contract
+ *   Embassy: CV → Musaned → Wafid → Tasheer → Insurance → Enjaz · Visa
+ *            (Enjaz is the visa platform: one step)
+ * Each step: state 'done' | 'active' (working or waiting for a person) |
+ * 'failed' | 'todo' | 'soon' (not built yet), and a short note.
+ */
+export function journeyOf(p, runs = {}, hasCv = false) {
+  const live = (r) => r && ['running', 'pending', 'paused'].includes(r.status)
+  const step = (key, title, state, note = '', workflow = '') => ({ key, title, state, note, workflow })
+  const fromRun = (r, doneNote = '') => r?.status === 'done' ? ['done', doneNote]
+    : live(r) ? ['active', r.status === 'paused' ? 'waiting for you' : r.status === 'running' ? 'working now' : 'in line']
+    : r?.status === 'failed' ? ['failed', 'last run failed'] : ['todo', '']
+  const cv = step('cv', 'CV', hasCv ? 'done' : 'todo', hasCv ? 'made' : '')
+  const added = runs.musaned_add_candidate?.status === 'done' || !!p.musaned_stage
+  const m = live(runs.musaned_add_candidate) ? fromRun(runs.musaned_add_candidate)
+    : /another agency/i.test(p.musaned_stage || '') ? ['failed', 'registered by another agency']
+    : added ? ['done', p.chosen_at ? `chosen ${String(p.chosen_at).slice(0, 10)}` : 'not chosen yet'] : ['todo', '']
+  const musaned = step('musaned', 'Musaned', m[0], m[1], 'musaned_add_candidate')
+  const w = p.status === 'medical_fit' ? ['done', 'FIT'] : p.status === 'medical_rejected' ? ['failed', 'UNFIT']
+    : p.status === 'medical_applied' ? ['active', 'booked — waiting for the result'] : fromRun(runs.wafid_book)
+  const wafid = step('wafid', 'Wafid', w[0], w[1], 'wafid_book')
+  const lmis = step('lmis', 'LMIS contract', ...fromRun(runs.lmis_contract, 'created'), 'lmis_contract')
+  const visa = /applied/i.test(p.visa_stage || '') ? ['done', p.visa_application_number ? `no. ${p.visa_application_number}` : 'applied']
+    : fromRun(runs.mofa_visa)
+  return {
+    lmis: [cv, musaned, wafid, lmis],
+    embassy: [cv, musaned, wafid,
+      step('tasheer', 'Tasheer', 'soon', 'coming'),
+      step('insurance', 'Insurance', ...fromRun(runs.insurance_certificate, 'certificate done'), 'insurance_certificate'),
+      step('visa', 'Enjaz · Visa', visa[0], visa[1], 'mofa_visa')],
+  }
+}
+
+router.get('/profiles/:profileId/journey', async (req, res) => {
+  try {
+    const db = req.app.locals.db
+    const id = Number(req.params.profileId)
+    const p = await db('profiles').where('id', id).first()
+    if (!p) return res.status(404).json({ error: 'Profile not found' })
+    const runs = {}
+    for (const r of await db('automation_queue').where('profile_id', id).select('workflow_id', 'status').orderBy('id', 'asc')) runs[r.workflow_id] = r
+    const cv = await db('generated_cvs').where('profile_id', id).first().catch(() => null)
+    res.json(journeyOf(p, runs, !!cv))
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
 router.get('/automations/stages', async (req, res) => {
   try {
     const db = req.app.locals.db

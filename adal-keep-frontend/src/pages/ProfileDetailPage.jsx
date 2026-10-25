@@ -9,6 +9,7 @@ import Button from '../components/shared/Button'
 import { formatDate } from '../lib/utils'
 import FieldCard from '../components/fields/FieldCard'
 import ProfileAutomations from '../components/ProfileAutomations'
+import ProfileJourney from '../components/ProfileJourney'
 
 export default function ProfileDetailPage() {
   const { id } = useParams()
@@ -120,9 +121,7 @@ export default function ProfileDetailPage() {
       <div className="rounded-2xl p-[2px] bg-gradient-to-r from-teal-500 via-sky-500 to-indigo-500 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-[14px] bg-gradient-to-r from-teal-50 via-sky-50 to-indigo-50 dark:from-slate-900 dark:via-slate-900 dark:to-slate-900 px-5 py-3">
           <span className="text-xs font-bold uppercase tracking-widest bg-gradient-to-r from-teal-600 via-sky-600 to-indigo-600 bg-clip-text text-transparent">Labor ID</span>
-          <span className="font-mono text-xl font-extrabold bg-gradient-to-r from-teal-600 via-sky-600 to-indigo-600 bg-clip-text text-transparent">
-            {profile.labor_id || '— not set —'}
-          </span>
+          <LaborIdEdit profile={profile} onSaved={(v) => setProfile(p => ({ ...p, labor_id: v }))} />
         </div>
       </div>
 
@@ -161,6 +160,8 @@ export default function ProfileDetailPage() {
       {profile.destination_country === 'Saudi Arabia' && (
         <SaudiEmergency profile={profile} onSaved={(v) => setProfile(p => ({ ...p, emergency_labor_id: v }))} />
       )}
+
+      <ProfileJourney profileId={id} />
 
       <div className="grid gap-6 lg:grid-cols-3">
         {/* Left: client details */}
@@ -288,7 +289,7 @@ export default function ProfileDetailPage() {
           </div>
         </section>
       </div>
-      <ProfileAutomations profileId={id} />
+      <div id="ai-actions" className="scroll-mt-24"><ProfileAutomations profileId={id} /></div>
 
       {/* Notes */}
       <section className="panel p-6">
@@ -317,6 +318,45 @@ function Field({ label, value }) {
     </div>
   )
 }
+/** The Labor ID, changed right here (Enter or ✓ saves, Esc cancels). */
+function LaborIdEdit({ profile, onSaved }) {
+  const [editing, setEditing] = useState(false)
+  const [value, setValue] = useState(profile.labor_id || '')
+  const [saving, setSaving] = useState(false)
+  const big = 'font-mono text-xl font-extrabold bg-gradient-to-r from-teal-600 via-sky-600 to-indigo-600 bg-clip-text text-transparent'
+  const save = async () => {
+    const v = value.trim()
+    if (v === (profile.labor_id || '')) return setEditing(false)
+    setSaving(true)
+    try {
+      await api.put(`/profiles/${profile.id}`, { labor_id: v })
+      onSaved(v)
+      toast.success(v ? `Labor ID saved: ${v}` : 'Labor ID cleared')
+      setEditing(false)
+    } catch (e) {
+      toast.error(e.response?.data?.error || 'Could not save the Labor ID')
+    } finally { setSaving(false) }
+  }
+  if (!editing) {
+    return (
+      <button type="button" title="Click to change the Labor ID" onClick={() => { setValue(profile.labor_id || ''); setEditing(true) }}
+        className="flex items-center gap-2 group">
+        <span className={big}>{profile.labor_id || '— not set —'}</span>
+        <span className="text-xs text-slate-400 group-hover:text-teal-600">✏️ edit</span>
+      </button>
+    )
+  }
+  return (
+    <div className="flex items-center gap-2">
+      <input autoFocus value={value} onChange={e => setValue(e.target.value.toUpperCase())}
+        onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setEditing(false) }}
+        placeholder="EF…" className="field font-mono text-lg w-56" />
+      <button type="button" disabled={saving} onClick={save} className="px-3 py-1.5 rounded-lg bg-teal-600 text-white text-sm font-semibold disabled:opacity-50">{saving ? '…' : '✓ Save'}</button>
+      <button type="button" onClick={() => setEditing(false)} className="px-2 py-1.5 rounded-lg border text-sm">✕</button>
+    </div>
+  )
+}
+
 /** Saudi Arabia: the LMIS contract needs the emergency contact person's Labor ID. */
 function SaudiEmergency({ profile, onSaved }) {
   const [value, setValue] = useState(profile.emergency_labor_id || '')

@@ -29,6 +29,9 @@ const COMPLETE_LABEL = {
   'awaiting-visa-save':    '✔️ Visa saved',
 }
 
+// Runs that are simply run again when clicked after they finished.
+const REPEATABLE = new Set(['musaned_check_chosen'])
+
 // Waits that must not run again (a second run would make a second application).
 const NO_CONTINUE = new Set(['awaiting-visa-save'])
 
@@ -176,6 +179,99 @@ export default function ProfileAutomations({ profileId }) {
     act('cancel', 'Cancelled', () => { setOpen(null); setDetail(null) })
   }
 
+  // One workflow's card. `n` numbers the steps inside a group box.
+  const renderCard = (w, n) => {
+          const latest = w.latest
+          const st = latest?.status
+          const isRunning = st === 'running'
+          const isQueued = st === 'pending'
+          const isPaused = st === 'paused'
+          const isDone = st === 'done'
+          const isActive = isRunning || isQueued || isPaused
+          const isSending = !!sending[w.id]
+          return (
+            <button
+              key={w.id}
+              data-tour={`run-${w.id}`}
+              onClick={() => {
+                // Every click says at once what is happening. A live run opens
+                // its panel; a finished one too, with "Run again" (a second
+                // police/Musaned run should be deliberate). Anything else starts.
+                if (isActive) {
+                  setOpen(latest.id)
+                  return toast(describeRun(latest), { icon: isQueued ? '⏳' : 'ℹ️', duration: 5000 })
+                }
+                // Checking again is normal: a done check simply runs again.
+                if (isDone && REPEATABLE.has(w.id)) return start(w.id)
+                if (isDone) {
+                  setOpen(latest.id)
+                  return toast(`${w.name} is already complete for this profile. Press "Run again" below to repeat it.`, { icon: 'ℹ️', duration: 6000 })
+                }
+                start(w.id)
+              }}
+              className={`text-left p-3 rounded-xl border transition-colors ${
+                isDone
+                  ? 'border-emerald-400 bg-emerald-50 dark:bg-emerald-900/20'
+                  : isPaused
+                  ? 'border-amber-400 bg-amber-50 dark:bg-amber-900/20'
+                  : isRunning
+                  ? 'border-blue-400 bg-blue-50 dark:bg-blue-900/20 ring-2 ring-blue-300'
+                  : isQueued
+                  ? 'border-sky-300 bg-sky-50 dark:bg-sky-900/20'
+                  : 'border-slate-200 dark:border-slate-700 hover:border-teal-400 hover:bg-teal-50/40 dark:hover:bg-teal-900/20'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                {n ? <span className="w-5 h-5 shrink-0 rounded-full bg-indigo-600 text-white text-[11px] font-bold flex items-center justify-center">{n}</span> : null}
+                <span className="text-lg">{isDone ? '✔️' : '🤖'}</span>
+                <span className={`font-semibold text-sm truncate ${
+                  isDone ? 'text-emerald-800 dark:text-emerald-300' : 'text-slate-900 dark:text-white'
+                }`}>{w.name}</span>
+              </div>
+
+              {isDone ? (
+                <p className="text-[11px] text-emerald-700 dark:text-emerald-400 mt-1 font-medium">
+                  ✓ {REPEATABLE.has(w.id) ? 'Checked' : 'Completed'} {latest.finished_at ? '· ' + new Date(latest.finished_at).toLocaleDateString() : ''}
+                </p>
+              ) : (
+                <p className="text-[11px] text-slate-500 mt-1 line-clamp-2">{w.description}</p>
+              )}
+
+              <div className="flex items-center justify-between mt-2">
+                <span className="text-[10px] text-slate-400">
+                  {latest && isActive ? `Run #${latest.id}` : `${w.stepCount} steps`}
+                </span>
+                {isSending && (
+                  <span className="text-[10px] font-semibold text-slate-500">Sending…</span>
+                )}
+                {!isSending && isDone && (
+                  <span className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-400">{REPEATABLE.has(w.id) ? '↻ Click to check again' : '✔️ Submitted'}</span>
+                )}
+                {!isSending && isPaused && (
+                  <span className="text-[10px] font-semibold text-amber-700 dark:text-amber-400">
+                    {latest.pause_reason === 'awaiting-human-submit' ? '⏳ Awaiting your Submit'
+                      : latest.pause_reason === 'awaiting-human-save' ? '⏳ Awaiting your SAVE'
+                      : latest.pause_reason === 'awaiting-visa-save' ? '⏳ Awaiting your visa Save'
+                      : '● Paused'}
+                  </span>
+                )}
+                {!isSending && isRunning && (
+                  <span className="text-[10px] font-semibold text-blue-700 dark:text-blue-400">● Working · own tab</span>
+                )}
+                {!isSending && isQueued && (
+                  <span className="text-[10px] font-semibold text-sky-700 dark:text-sky-400">
+                    {isRetry(latest) ? '↻ Retrying soon' : '⏳ Waiting in line'}
+                  </span>
+                )}
+              </div>
+            </button>
+          )
+  }
+
+  const MUSANED_ORDER = ['musaned_add_candidate', 'musaned_check_chosen']
+  const musanedFlows = MUSANED_ORDER.map(id => workflows.find(w => w.id === id)).filter(Boolean)
+  const otherFlows = workflows.filter(w => !MUSANED_ORDER.includes(w.id))
+
   if (loading) return null
 
   const running = queue?.running || []
@@ -238,91 +334,18 @@ export default function ProfileAutomations({ profileId }) {
         </div>
       </div>
 
+      {/* Musaned: both of its actions in one box, in order. */}
+      {musanedFlows.length > 0 && (
+        <div className="mb-3 rounded-xl border-2 border-indigo-200 dark:border-indigo-800 p-3">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-indigo-700 dark:text-indigo-300 mb-2">Musaned</p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {musanedFlows.map((w, i) => renderCard(w, i + 1))}
+          </div>
+        </div>
+      )}
+
       <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-        {workflows.map(w => {
-          const latest = w.latest
-          const st = latest?.status
-          const isRunning = st === 'running'
-          const isQueued = st === 'pending'
-          const isPaused = st === 'paused'
-          const isDone = st === 'done'
-          const isActive = isRunning || isQueued || isPaused
-          const isSending = !!sending[w.id]
-          return (
-            <button
-              key={w.id}
-              data-tour={`run-${w.id}`}
-              onClick={() => {
-                // Every click says at once what is happening. A live run opens
-                // its panel; a finished one too, with "Run again" (a second
-                // police/Musaned run should be deliberate). Anything else starts.
-                if (isActive) {
-                  setOpen(latest.id)
-                  return toast(describeRun(latest), { icon: isQueued ? '⏳' : 'ℹ️', duration: 5000 })
-                }
-                if (isDone) {
-                  setOpen(latest.id)
-                  return toast(`${w.name} is already complete for this profile. Press "Run again" below to repeat it.`, { icon: 'ℹ️', duration: 6000 })
-                }
-                start(w.id)
-              }}
-              className={`text-left p-3 rounded-xl border transition-colors ${
-                isDone
-                  ? 'border-emerald-400 bg-emerald-50 dark:bg-emerald-900/20'
-                  : isPaused
-                  ? 'border-amber-400 bg-amber-50 dark:bg-amber-900/20'
-                  : isRunning
-                  ? 'border-blue-400 bg-blue-50 dark:bg-blue-900/20 ring-2 ring-blue-300'
-                  : isQueued
-                  ? 'border-sky-300 bg-sky-50 dark:bg-sky-900/20'
-                  : 'border-slate-200 dark:border-slate-700 hover:border-teal-400 hover:bg-teal-50/40 dark:hover:bg-teal-900/20'
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <span className="text-lg">{isDone ? '✔️' : '🤖'}</span>
-                <span className={`font-semibold text-sm truncate ${
-                  isDone ? 'text-emerald-800 dark:text-emerald-300' : 'text-slate-900 dark:text-white'
-                }`}>{w.name}</span>
-              </div>
-
-              {isDone ? (
-                <p className="text-[11px] text-emerald-700 dark:text-emerald-400 mt-1 font-medium">
-                  ✓ Completed {latest.finished_at ? '· ' + new Date(latest.finished_at).toLocaleDateString() : ''}
-                </p>
-              ) : (
-                <p className="text-[11px] text-slate-500 mt-1 line-clamp-2">{w.description}</p>
-              )}
-
-              <div className="flex items-center justify-between mt-2">
-                <span className="text-[10px] text-slate-400">
-                  {latest && isActive ? `Run #${latest.id}` : `${w.stepCount} steps`}
-                </span>
-                {isSending && (
-                  <span className="text-[10px] font-semibold text-slate-500">Sending…</span>
-                )}
-                {!isSending && isDone && (
-                  <span className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-400">✔️ Submitted</span>
-                )}
-                {!isSending && isPaused && (
-                  <span className="text-[10px] font-semibold text-amber-700 dark:text-amber-400">
-                    {latest.pause_reason === 'awaiting-human-submit' ? '⏳ Awaiting your Submit'
-                      : latest.pause_reason === 'awaiting-human-save' ? '⏳ Awaiting your SAVE'
-                      : latest.pause_reason === 'awaiting-visa-save' ? '⏳ Awaiting your visa Save'
-                      : '● Paused'}
-                  </span>
-                )}
-                {!isSending && isRunning && (
-                  <span className="text-[10px] font-semibold text-blue-700 dark:text-blue-400">● Working · own tab</span>
-                )}
-                {!isSending && isQueued && (
-                  <span className="text-[10px] font-semibold text-sky-700 dark:text-sky-400">
-                    {isRetry(latest) ? '↻ Retrying soon' : '⏳ Waiting in line'}
-                  </span>
-                )}
-              </div>
-            </button>
-          )
-        })}
+        {otherFlows.map(w => renderCard(w))}
       </div>
 
       {open && detail && (

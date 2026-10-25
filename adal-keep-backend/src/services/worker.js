@@ -324,6 +324,7 @@ async function executeRun(db, page, job) {
   }
 
   ctx.page = page
+  ctx.db = db
   ctx.isCancelled = () => isCancelled(runId)
   // A run writes what it found into the profile's notes (dated), and may set
   // a few profile fields with it.

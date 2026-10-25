@@ -19,12 +19,22 @@ export const WORKFLOWS = {
 
   musaned_add_candidate: {
     id: 'musaned_add_candidate',
-    name: 'Add Candidate on Musaned',
+    name: 'Make Musaned (add candidate)',
     description:
       'Log in to Musaned (you solve reCAPTCHA + OTP), then auto-click agency → ADD NEW CANDIDATE → fill the pre-check form',
     target: 'https://tawtheeq.musaned.com.sa',
     consts: {},
     stepCount: 4,
+  },
+
+  musaned_check_chosen: {
+    id: 'musaned_check_chosen',
+    name: 'Check if chosen',
+    description:
+      'Musaned sign-in (a person types the code) → Employment Requests → search her passport → if she is there: DETAILS → contract details and the PDFs (template.pdf and the signed contracts) saved to the profile',
+    target: 'https://tawtheeq.musaned.com.sa/employment-requests',
+    consts: {},
+    stepCount: 3,
   },
 
   lmis_contract: {

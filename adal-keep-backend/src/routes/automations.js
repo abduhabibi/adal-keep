@@ -70,7 +70,12 @@ router.post('/profiles/:profileId/automations/:workflowId/start', async (req, re
 
     // Preflight — depends on the workflow
     // Musaned workflows need no files
-    if (workflowId.startsWith('musaned')) {
+    if (workflowId === 'musaned_check_chosen') {
+      const prof = await db('profiles').where('id', profileId).first()
+      if (!prof?.passport_number || !String(prof.passport_number).trim()) {
+        return res.status(400).json({ error: 'Profile is missing the passport number', missing: ['Passport number'] })
+      }
+    } else if (workflowId.startsWith('musaned')) {
       // Musaned needs a personal photo, marital status, religion and a mobile number
       const prof = await db('profiles').where('id', profileId).first()
       const { musanedMissing, photoOnFile } = await import('../services/musanedPreflight.js')
@@ -482,7 +487,7 @@ router.post('/automations/:id/complete', async (req, res) => {
         const { VISA_STAGES } = await import('../services/mofaVisa.js')
         await db('profiles').where('id', row.profile_id).update({ visa_stage: VISA_STAGES.applied, visa_applied_at: new Date().toISOString(), updated_at: new Date().toISOString() })
         next = ' Visa stage: Visa applied.'
-      } else if (String(row.workflow_id).startsWith('musaned')) {
+      } else if (row.workflow_id === 'musaned_add_candidate') {
         // She is on Musaned now: the 4-hourly contract check watches for an employer.
         next = ' Adal Keep now checks every 4 hours whether a Saudi employer chooses her.'
       }

@@ -2211,8 +2211,10 @@ async function musanedRun(page, ctx) {
   log(ctx, `starting musaned workflow (stage=${stage})`)
 
   // Preflight: Musaned is not opened for a profile missing these items.
-  const photoResolved = await resolvePersonalPhotoPath(ctx).catch(() => ({ path: null }))
-  const missing = musanedMissing(ctx.profile || {}, photoResolved.path ? true : (photoResolved.passportCropOnly ? 'passport-crop' : false))
+  // (Checking whether she was chosen only needs her passport number.)
+  const checkOnly = ctx.workflowId === 'musaned_check_chosen'
+  const photoResolved = checkOnly ? { path: true } : await resolvePersonalPhotoPath(ctx).catch(() => ({ path: null }))
+  const missing = checkOnly ? (ctx.profile?.passport_number ? [] : ['passport number']) : musanedMissing(ctx.profile || {}, photoResolved.path ? true : (photoResolved.passportCropOnly ? 'passport-crop' : false))
   if (missing.length) {
     const msg = 'Musaned not started. Profile is missing: ' + missing.join(', ')
     log(ctx, msg, 'error')
@@ -2282,6 +2284,10 @@ async function musanedRun(page, ctx) {
     }
 
     ctx.releaseSignIn?.() // signed in: the next run may go
+    if (checkOnly) {
+      const { checkChosenInRun } = await import('./musanedContracts.js')
+      return await checkChosenInRun(page, ctx)
+    }
     await stepClickHrPool(page, ctx)
     await stepClickAddNewCandidate(page, ctx)
 

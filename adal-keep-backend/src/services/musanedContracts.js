@@ -46,7 +46,7 @@ export const contractCheck = { running: false, last: null, results: [], signedOu
 async function candidates(db, onlyId) {
   let q = db('profiles').whereNotNull('passport_number').whereNot('passport_number', '')
   if (onlyId) return q.where('id', onlyId).select('*')
-  const onMusaned = db('automation_queue').where('workflow_id', 'like', 'musaned%').where('status', 'done').select('profile_id')
+  const onMusaned = db('automation_queue').where('workflow_id', 'musaned_add_candidate').where('status', 'done').select('profile_id')
   return q.where(function () { this.whereIn('id', onMusaned).orWhereNotNull('contract_number') })
     .where(function () { this.whereNull('musaned_stage').orWhereNot('musaned_stage', 'like', '%ARRIVED%') })
     .select('*')
@@ -293,6 +293,29 @@ async function checkOne(db, browser, page, p) {
     await task(db, p.id, `Musaned: ${p.full_name} → ${update.musaned_stage}`, `Was ${p.musaned_stage}.`)
   }
   return { state: 'chosen', stage: update.musaned_stage, contract: update.contract_number, pdfs: saved, first }
+}
+
+/**
+ * The "Check if chosen" run (musaned_check_chosen): the run has signed in to
+ * Musaned in its own tab; look her passport up there the same way.
+ * Returns the worker's result.
+ */
+export async function checkChosenInRun(page, ctx) {
+  const db = ctx.db
+  const p = await db('profiles').where('id', ctx.profileId).first()
+  if (!p?.passport_number) return { ok: false, error: 'Profile is missing the passport number' }
+  page.__adalAllowImages = true
+  ctx.onLog?.('info', `🔎 Employment Requests → passport ${p.passport_number}`)
+  const r = await checkOne(db, page.browser(), page, p)
+  if (r.state === 'signed-out') return { ok: false, error: 'Musaned signed out during the check' }
+  if (r.state === 'not-chosen') {
+    ctx.onLog?.('info', 'No employment request with her passport — nobody has chosen her yet')
+    return { ok: true, done: true, note: 'not chosen yet' }
+  }
+  const msg = `Chosen on Musaned — contract ${r.contract || '?'} · ${r.stage || ''}${r.pdfs?.length ? ` · ${r.pdfs.length} PDF(s) saved (${r.pdfs.join(', ')})` : ''}`
+  ctx.onLog?.('info', `✅ ${msg}`)
+  if (r.first) await ctx.notify?.(`🎉 ${ctx.profileName}: chosen by an employer on Musaned`, msg)
+  return { ok: true, done: true, note: msg }
 }
 
 /** Check every profile (or one). */

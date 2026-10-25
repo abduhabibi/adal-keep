@@ -429,7 +429,7 @@ async function checkOne(db, browser, page, p) {
     let fieldName = (PDF_FIELDS.find(([re]) => re.test(pdf.label) || re.test(pdf.name)) || [null, 'Contract'])[1]
     try {
       const buf = await downloadPdf(browser, page, pdf.name)
-      // JEV looks at it: which contract is it, and is it hers?
+      // JEV looks at it: which of the three contracts is it?
       const jev = await jevLooksAtContract(buf, p)
       if (jev?.field && jev.field !== fieldName) {
         console.log(`[contracts] ${p.full_name}: JEV sorts ${pdf.name} as ${jev.field} (Musaned's label said ${fieldName})`)

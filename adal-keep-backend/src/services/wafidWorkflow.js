@@ -16,6 +16,10 @@
  * touches it: the run works in the agency's own Brave like a person. If
  * Wafid ever shows a challenge, the run stops and calls a person.
  */
+import fs from 'fs'
+import os from 'os'
+import path from 'path'
+
 const BOOK_URL = 'https://wafid.com/en/book-appointment/'
 const STATUS_URL = 'https://wafid.com/en/medical-status-search/'
 
@@ -275,6 +279,91 @@ export async function checkMedicalStatus(page, passport, nationality = 'Ethiopia
 }
 
 /**
+ * The result card's PDF button → the PDF's bytes (or null). Wafid may link the
+ * PDF, download it, or open it in a new tab: whichever happens is caught.
+ */
+export async function downloadResultPdf(page) {
+  const isPdf = (b) => b && b.length > 100 && b.subarray(0, 4).toString() === '%PDF'
+  const btn = await page.evaluateHandle(() => {
+    const seen = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 }
+    return [...document.querySelectorAll('a, button, input[type="submit"], [role="button"]')]
+      .filter(seen).find(e => /^\s*pdf\s*$/i.test(e.innerText || e.value || '')) || null
+  })
+  const el = btn.asElement()
+  if (!el) return null
+  // 1. A link: fetch it with the page's own cookies.
+  const href = await el.evaluate(e => (e.tagName === 'A' && e.href && !/^javascript:|#$/.test(e.href)) ? e.href : '')
+  if (href) {
+    const b64 = await page.evaluate(async (u) => {
+      try {
+        const r = await fetch(u, { credentials: 'include' })
+        const a = new Uint8Array(await r.arrayBuffer())
+        let s = ''
+        for (let i = 0; i < a.length; i += 0x8000) s += String.fromCharCode(...a.subarray(i, i + 0x8000))
+        return btoa(s)
+      } catch { return '' }
+    }, href)
+    const buf = b64 ? Buffer.from(b64, 'base64') : null
+    if (isPdf(buf)) return buf
+  }
+  // 2. Anything else: click, then catch a PDF response, a download or a new tab.
+  const browser = page.browser()
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'adal-wafid-'))
+  const cdp = await page.createCDPSession().catch(() => null)
+  await cdp?.send('Browser.setDownloadBehavior', { behavior: 'allowAndName', downloadPath: dir, eventsEnabled: true }).catch(() => {})
+  let got = null
+  const onResponse = async (r) => {
+    if (got || !/application\/pdf/i.test(r.headers()['content-type'] || '')) return
+    const b = await r.buffer().catch(() => null)
+    if (isPdf(b)) got = b
+  }
+  const watched = [page]
+  const onTarget = async (t) => {
+    if (t.opener() !== page.target()) return
+    const p = await t.page().catch(() => null)
+    if (!p) return
+    watched.push(p)
+    p.on('response', onResponse)
+  }
+  page.on('response', onResponse)
+  browser.on('targetcreated', onTarget)
+  const startUrl = page.url()
+  try {
+    await el.evaluate(e => { e.scrollIntoView({ block: 'center' }); e.click() })
+    for (let i = 0; i < 60 && !got; i++) {
+      await sleep(500)
+      for (const f of fs.readdirSync(dir)) {
+        const b = fs.readFileSync(path.join(dir, f))
+        if (isPdf(b)) { got = b; break }
+      }
+      // A new tab (or this tab) showing the PDF: read it from there.
+      for (const p of watched) {
+        if (got || (p === page && page.url() === startUrl)) continue
+        const b64 = await p.evaluate(async () => {
+          if (document.contentType !== 'application/pdf' && !/pdf/i.test(location.href)) return ''
+          try {
+            const a = new Uint8Array(await (await fetch(location.href, { credentials: 'include' })).arrayBuffer())
+            let s = ''
+            for (let i = 0; i < a.length; i += 0x8000) s += String.fromCharCode(...a.subarray(i, i + 0x8000))
+            return btoa(s)
+          } catch { return '' }
+        }).catch(() => '')
+        const b = b64 ? Buffer.from(b64, 'base64') : null
+        if (isPdf(b)) got = b
+      }
+    }
+  } finally {
+    page.off('response', onResponse)
+    browser.off('targetcreated', onTarget)
+    for (const p of watched.slice(1)) await p.close().catch(() => {})
+    await cdp?.send('Browser.setDownloadBehavior', { behavior: 'default' }).catch(() => {})
+    await cdp?.detach().catch(() => {})
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+  return got
+}
+
+/**
  * "Check Wafid result" run (wafid_check), in the run's own tab:
  * wafid.com/en/medical-status-search → passport + nationality → Check.
  * FIT / UNFIT is written on the profile (Medical · Fit / Rejected). Wafid's
@@ -301,7 +390,17 @@ export async function runWafidCheck(page, ctx) {
   const status = { fit: 'medical_fit', unfit: 'medical_rejected' }[r.state]
   if (status) {
     await ctx.noteProfile?.(`Wafid medical: ${r.state === 'fit' ? 'FIT' : 'UNFIT'} (passport ${passport})`, { status })
-    if (r.state === 'fit') await ctx.notify?.(`🩺 ${ctx.profileName}: Wafid FIT ✅`, `wafid.com shows FIT for passport ${passport}.`)
+    // The result's PDF goes into her Medical Report.
+    try {
+      const pdf = await downloadResultPdf(page)
+      if (!pdf) log(ctx, 'the result\'s PDF could not be downloaded', 'warn')
+      else if (ctx.db) {
+        const { savePdf } = await import('./musanedContracts.js')
+        const added = await savePdf(ctx.db, ctx.profileId, 'Medical Report', pdf, `wafid-medical-${passport}.pdf`)
+        log(ctx, added ? `📄 Wafid result PDF saved in Medical Report (${Math.round(pdf.length / 1024)} KB)` : '📄 the same Wafid PDF is already in Medical Report')
+      }
+    } catch (e) { log(ctx, `the result's PDF was not saved: ${e.message}`, 'warn') }
+    if (r.state === 'fit') await ctx.notify?.(`🩺 ${ctx.profileName}: Wafid FIT ✅`, `wafid.com shows FIT for passport ${passport}. The result PDF is in Medical Report.`)
   }
   if (r.state === 'challenge') return { ok: true, pauseReason: 'awaiting-wafid-robot', seconds: secs() }
   return { ok: true, done: true, note: said, seconds: secs() }

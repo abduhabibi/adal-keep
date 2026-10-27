@@ -351,7 +351,7 @@ function templateFields(t) {
 }
 
 /** Store a PDF in a profile field unless the same bytes are there already. */
-async function savePdf(db, profileId, fieldName, buf, original) {
+export async function savePdf(db, profileId, fieldName, buf, original) {
   const hash = crypto.createHash('sha256').update(buf).digest('hex')
   let field = await db('profile_fields').where({ profile_id: profileId, name: fieldName }).first()
   const now = new Date().toISOString()

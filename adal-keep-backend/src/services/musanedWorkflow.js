@@ -2346,7 +2346,7 @@ async function musanedRun(page, ctx) {
       } else if (review.screen === 'dashboard') { log(ctx, '✓ already on dashboard') }
       else if (review.screen === 'landing') { await stepClickGoToDashboard(page, ctx); await waitForDashboard(page, ctx, 30000) }
       else if (review.screen === 'captcha') {
-        await ctx.notify(`🖐 ${ctx.profileName}: Musaned needs reCAPTCHA`, 'Solve it then click Sign In.')
+        await ctx.notify(`🖐 ${ctx.profileName}: Musaned needs reCAPTCHA`, 'Solve it then click Sign In.', 'info', { login: page })
         return { ok: true, pauseReason: 'awaiting-musaned-captcha', seconds: Math.round((Date.now() - t0) / 1000) }
       } else if (review.screen === 'otp') {
         const after = await passOtp(page, ctx)
@@ -2430,7 +2430,7 @@ async function musanedRun(page, ctx) {
 async function waitForPersonCaptcha(page, ctx) {
   await page.bringToFront().catch(() => {})
   await ctx.notify(`🖐 ${ctx.profileName}: tick "I'm not a robot" on Musaned`,
-    'Only the tick (and the pictures, if Google shows some). Adal Keep signs in and continues by itself.')
+    'Only the tick (and the pictures, if Google shows some). Adal Keep signs in and continues by itself.', 'info', { login: page })
   log(ctx, '🖐 waiting for a person to tick "I\'m not a robot" (up to 10 min)')
   const deadline = Date.now() + 10 * 60 * 1000
   while (Date.now() < deadline) {
@@ -2467,7 +2467,7 @@ async function waitForPersonCaptcha(page, ctx) {
 async function passOtp(page, ctx) {
   await page.bringToFront().catch(() => {})
   await ctx.notify(`🖐 ${ctx.profileName}: type the Musaned code`,
-    'Type the code from the authenticator app in the Musaned tab and press Sign In. Adal Keep continues by itself.')
+    'Type the code from the authenticator app in the Musaned tab and press Sign In. Adal Keep continues by itself.', 'info', { login: page })
   log(ctx, '🖐 waiting for a person to type the Musaned authenticator code (up to 10 min)')
   const deadline = Date.now() + 10 * 60 * 1000
   let screen = 'otp'

@@ -1,7 +1,7 @@
 /**
  * mofaVisa.js — "Make visa" on the Saudi visa platform (workflow id: mofa_visa).
  *
- *   1. visa.mofa.gov.sa/Account/Login: Login Name and Password from the visa
+ *   1. visa.mofa.gov.sa/Account/Login/enjazcompany: Login Name and Password from the visa
  *      platform account (Settings / AI Actions — one account for every run).
  *      A person types the picture captcha and presses Login: the tab comes to
  *      the front and rings (the visa sound). Runs take turns signing in, and
@@ -25,7 +25,7 @@ import path from 'path'
 import { signInTurn } from './tabManager.js'
 
 export const MOFA_VISA = 'mofa_visa'
-const LOGIN_URL = 'https://visa.mofa.gov.sa/Account/Login'
+const LOGIN_URL = 'https://visa.mofa.gov.sa/Account/Login/enjazcompany'
 const LIST_URL = 'https://visa.mofa.gov.sa/SmartForm'
 const LOGIN_WAIT_MS = 10 * 60 * 1000
 const SAVE_WAIT_MS = 15 * 60 * 1000
@@ -391,7 +391,7 @@ async function signIn(page, ctx) {
     await ctx.notify(
       `🛂 ${ctx.profileName}: visa platform — type the captcha`,
       'The visa platform tab is in front with the Login Name and Password filled. Type the captcha picture\'s numbers and press Login; Adal Keep continues by itself.',
-      'warn'
+      'warn', { login: page }
     )
     const t0 = Date.now()
     while (Date.now() - t0 < LOGIN_WAIT_MS) {

@@ -537,7 +537,7 @@ async function stepLoginNow(page, ctx) {
         log(ctx, '📱 LMIS asks for the SMS code — waiting for a person to type it (up to 10 min)')
         await page.bringToFront().catch(() => {})
         await ctx.notify(`🖐 ${ctx.profileName}: type the LMIS SMS code`,
-          'LMIS sent a code by SMS. Type it in the LMIS tab; Adal Keep continues by itself.').catch(() => {})
+          'LMIS sent a code by SMS. Type it in the LMIS tab; Adal Keep continues by itself.', 'info', { login: page }).catch(() => {})
       }
       if (Date.now() - codeSince > 10 * 60 * 1000) throw new Error('Nobody typed the LMIS SMS code within 10 minutes')
       lastClick = Date.now()

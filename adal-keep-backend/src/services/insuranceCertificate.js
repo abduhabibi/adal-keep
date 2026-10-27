@@ -120,7 +120,7 @@ async function signIn(page, ctx) {
       await clickText(page, /^\s*(log ?in|sign ?in|login)\s*$/)
     } else {
       await page.bringToFront().catch(() => {})
-      await ctx.notify(`🛡 ${ctx.profileName}: insurance sign-in needs you`, 'The FetaP tab is in front with the name and password filled. Finish the sign-in; Adal Keep continues by itself.', 'warn')
+      await ctx.notify(`🛡 ${ctx.profileName}: insurance sign-in needs you`, 'The FetaP tab is in front with the name and password filled. Finish the sign-in; Adal Keep continues by itself.', 'warn', { login: page })
     }
     const t0 = Date.now()
     let asked = f.extra
@@ -131,7 +131,7 @@ async function signIn(page, ctx) {
       if (!asked && Date.now() - t0 > 15000) {
         asked = true
         await page.bringToFront().catch(() => {})
-        await ctx.notify(`🛡 ${ctx.profileName}: insurance sign-in needs you`, 'FetaP is still on its sign-in page. Finish the sign-in in that tab; Adal Keep continues by itself.', 'warn')
+        await ctx.notify(`🛡 ${ctx.profileName}: insurance sign-in needs you`, 'FetaP is still on its sign-in page. Finish the sign-in in that tab; Adal Keep continues by itself.', 'warn', { login: page })
       }
     }
     if (await hasPassword(page)) throw new Error('Nobody signed in to FetaP within 10 minutes')

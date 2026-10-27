@@ -14,6 +14,7 @@
  */
 
 import fs from 'fs'
+import os from 'os'
 import path from 'path'
 import { spawn } from 'child_process'
 import { fileURLToPath } from 'url'
@@ -106,6 +107,88 @@ export function playNotificationSound(workflowId = '') {
     const child = spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: true })
     child.on('error', () => {})
     child.unref()
+  } catch {}
+}
+
+// --------------------------------------------------------------------------
+// The sign-in alarm: one sound for every "come and sign in" call (captcha,
+// code, robot tick), like a digital watch: beep-beep-beep-beep, again and
+// again, until a person clicks or types on that sign-in page, or 1 minute.
+// --------------------------------------------------------------------------
+let watchWav = null
+function watchAlarmFile() {
+  if (watchWav && fs.existsSync(watchWav)) return watchWav
+  const rate = 22050, len = rate                    // 1 second
+  const data = Buffer.alloc(len * 2)
+  for (let b = 0; b < 4; b++) {                     // 4 beeps of 70 ms, 60 ms apart
+    const from = Math.round(rate * b * 0.13), n = Math.round(rate * 0.07)
+    for (let i = 0; i < n; i++) {
+      const fade = Math.min(1, i / 60, (n - i) / 60)
+      const v = Math.sin(2 * Math.PI * 2800 * i / rate) * 0.7 * fade
+      data.writeInt16LE(Math.round(v * 32767), (from + i) * 2)
+    }
+  }
+  const head = Buffer.alloc(44)
+  head.write('RIFF', 0); head.writeUInt32LE(36 + data.length, 4); head.write('WAVE', 8)
+  head.write('fmt ', 12); head.writeUInt32LE(16, 16); head.writeUInt16LE(1, 20); head.writeUInt16LE(1, 22)
+  head.writeUInt32LE(rate, 24); head.writeUInt32LE(rate * 2, 28); head.writeUInt16LE(2, 32); head.writeUInt16LE(16, 34)
+  head.write('data', 36); head.writeUInt32LE(data.length, 40)
+  watchWav = path.join(os.tmpdir(), 'adal-keep-watch-alarm.wav')
+  fs.writeFileSync(watchWav, Buffer.concat([head, data]))
+  return watchWav
+}
+
+function playOnce(file) {
+  const cmd = process.platform === 'darwin' ? 'afplay' : 'paplay'
+  const child = spawn(cmd, [file], { stdio: 'ignore', windowsHide: true })
+  child.on('error', () => {})
+}
+
+let alarm = null
+export function stopLoginAlarm() {
+  const a = alarm
+  if (!a) return
+  alarm = null
+  clearInterval(a.timer)
+  if (a.child?.pid) {
+    if (process.platform === 'win32') spawn('taskkill', ['/PID', String(a.child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true }).on('error', () => {})
+    else try { a.child.kill() } catch {}
+  }
+}
+
+/** Ring the watch alarm until a person touches `page` (click, key, or a reCAPTCHA frame) or 1 minute. */
+export function ringUntilTouched(page, log) {
+  stopLoginAlarm()
+  try {
+    const file = watchAlarmFile()
+    const a = { started: Date.now() }
+    alarm = a
+    // Real clicks and keys only: Adal Keep fills sign-in forms without events.
+    const arm = () => page.evaluate(() => {
+      if (window.__adalTouched === undefined) {
+        window.__adalTouched = false
+        const on = (e) => { if (e.isTrusted) window.__adalTouched = true }
+        for (const ev of ['pointerdown', 'mousedown', 'keydown', 'touchstart']) document.addEventListener(ev, on, true)
+        // A click into the reCAPTCHA box lands in its own frame: the page only sees focus leave.
+        window.addEventListener('blur', () => setTimeout(() => { if (document.activeElement?.tagName === 'IFRAME') window.__adalTouched = true }, 0))
+      }
+      return window.__adalTouched
+    }).catch(() => null)
+    arm()
+    if (process.platform === 'win32') {
+      const f = file.replace(/'/g, "''")
+      a.child = spawn('powershell', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', `$p = New-Object Media.SoundPlayer '${f}'; $p.PlayLooping(); Start-Sleep -Seconds 61`], { stdio: 'ignore', windowsHide: true })
+      a.child.on('error', () => {})
+    } else {
+      playOnce(file)
+    }
+    a.timer = setInterval(async () => {
+      if (alarm !== a) return clearInterval(a.timer)
+      if (Date.now() - a.started > 60000) { log?.('⏰ nobody came for 1 minute — the sign-in alarm stopped'); return stopLoginAlarm() }
+      if (page.isClosed?.()) return stopLoginAlarm()
+      if (await arm() === true) { log?.('✓ a person is on the sign-in page — the alarm stopped'); return stopLoginAlarm() }
+      if (alarm === a && process.platform !== 'win32') playOnce(file)
+    }, 1100)
   } catch {}
 }
 
@@ -321,7 +404,7 @@ async function executeRun(db, page, job) {
       : 'BLOCK (bandwidth saver)')
   )
 
-  const notify = async (title, body, level = 'info') => {
+  const notify = async (title, body, level = 'info', opts = {}) => {
     try {
       await db('tasks').insert({
         type: 'automation', title, description: body || '',
@@ -330,7 +413,10 @@ async function executeRun(db, page, job) {
       })
       console.log(`[notify] ${level.toUpperCase()} ${title}`)
       if (onLog) await onLog(level, `🔔 ${title}`)
-      playNotificationSound(job.workflow_id)
+      // A sign-in call rings the one watch alarm until a person touches that
+      // page (or 1 minute); every other call rings its task's own sound.
+      if (opts.login) ringUntilTouched(opts.login, (m) => onLog?.('info', m))
+      else playNotificationSound(job.workflow_id)
       showDesktopNotice(title, body)
     } catch (e) {
       console.error('[notify] failed:', e.message)

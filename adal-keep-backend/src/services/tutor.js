@@ -98,8 +98,8 @@ export const LESSONS = [
     am: ['የLMIS ውል', 'LMIS ውስጥ ውሉን ይሞላል፣ ሰነዶቹን ይጭናል፤ Submit የሚጫኑት እርስዎ ነዎት።'],
     en: ['The LMIS contract', 'It fills the contract in LMIS and uploads the documents; you are the one who presses Submit.'] },
   { id: 'sounds', route: '', target: null,   // any page: no need to move
-    am: ['እያንዳንዱ ስራ የራሱ ድምፅ አለው', 'ሰው ሲያስፈልግ ስራው በራሱ ድምፅ ይጠራል፣ በዴስክቶፑ ላይም መልእክት ይወጣል። ድምፁን ለይተው የትኛው ስራ እንደሚጠራዎ ያውቃሉ።'],
-    en: ['Each task has its own sound', 'When a run needs a person it rings with its own sound and pops up on the desktop, so you know which task calls you without looking.'] },
+    am: ['ድምፁን ይለዩ', 'ለመግባት (ካፕቻ፣ ኮድ) ሲጠራ እንደ ሰዓት ማንቂያ ይጮኻል፤ በገጹ ላይ ሲጫኑ ወይም 1 ደቂቃ ሲያልፍ ይቆማል። Submit ወይም Save ሲጠራ እያንዳንዱ ስራ የራሱ ድምፅ አለው። በዴስክቶፑ ላይም መልእክት ይወጣል።'],
+    en: ['Know the sounds', 'A sign-in call (captcha, code) beeps like a watch alarm until you click on that page, or 1 minute. A call to Submit or Save rings with the task\'s own sound. Both pop up on the desktop.'] },
 ]
 const LESSON_IDS = new Set(LESSONS.map(l => l.id))
 

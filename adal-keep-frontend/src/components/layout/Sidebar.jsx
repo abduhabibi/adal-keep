@@ -130,7 +130,7 @@ export default function Sidebar({ isOpen, onToggle, collapsed, onToggleCollapse 
     <>
       {/* Mobile overlay */}
       <div
-        className={`fixed inset-0 z-40 bg-black/30 transition-all duration-300 md:hidden ${
+        className={`fixed inset-0 z-[75] bg-black/40 transition-all duration-300 md:hidden ${
           isOpen ? 'opacity-100' : 'pointer-events-none opacity-0'
         }`}
         onClick={onToggle}
@@ -140,12 +140,12 @@ export default function Sidebar({ isOpen, onToggle, collapsed, onToggleCollapse 
       <aside
         className={`
           flex flex-col shrink-0
-          bg-white/80 dark:bg-slate-900/80
+          bg-white dark:bg-slate-900 md:bg-white/80 md:dark:bg-slate-900/80
           border-r border-slate-200/60 dark:border-slate-800/60
           transition-all duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)]
           h-screen
           ${collapsed ? 'w-[72px]' : 'w-[260px]'}
-          fixed inset-y-0 left-0 z-50 shadow-xl
+          fixed inset-y-0 left-0 z-[80] shadow-xl
           ${isOpen ? 'translate-x-0' : '-translate-x-full'}
           md:relative md:translate-x-0 md:shadow-none md:z-auto
         `}
@@ -191,7 +191,7 @@ export default function Sidebar({ isOpen, onToggle, collapsed, onToggleCollapse 
               key={link.to}
               to={link.to}
               end={link.end}
-              onClick={() => { if (window.innerWidth < 1024) onToggle() }}
+              onClick={() => { if (window.innerWidth < 768) onToggle() }}
               className={({ isActive }) => {
                 const base = getLinkClass({ isActive })
                 return collapsed ? `${base} justify-center px-0` : base
@@ -206,7 +206,7 @@ export default function Sidebar({ isOpen, onToggle, collapsed, onToggleCollapse 
           <div className={`pt-4 mt-4 border-t border-slate-200/60 dark:border-slate-800/60 ${collapsed ? 'px-0' : ''}`}>
             {onMainPC() && [trashLink].map(link => (
               <NavLink key={link.to} to={link.to}
-                onClick={() => { if (window.innerWidth < 1024) onToggle() }}
+                onClick={() => { if (window.innerWidth < 768) onToggle() }}
                 className={({ isActive }) => { const base = getLinkClass({ isActive }); return collapsed ? `${base} justify-center px-0` : base }}
                 title={collapsed ? link.label : ''}>
                 <span className="shrink-0">{link.icon}</span>
@@ -215,7 +215,7 @@ export default function Sidebar({ isOpen, onToggle, collapsed, onToggleCollapse 
             ))}
             <NavLink
               to={settingsLink.to}
-              onClick={() => { if (window.innerWidth < 1024) onToggle() }}
+              onClick={() => { if (window.innerWidth < 768) onToggle() }}
               className={({ isActive }) => {
                 const base = getLinkClass({ isActive })
                 return collapsed ? `${base} justify-center px-0` : base

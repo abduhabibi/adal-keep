@@ -64,7 +64,7 @@ export default function MainLayout() {
         {DEMO && <Suspense fallback={null}><DemoBanner /></Suspense>}
         {!DEMO && <FollowerBanner />}
         {!DEMO && <UpdateBanner />}
-        <Navbar onToggleSidebar={() => setSidebarOpen(!sidebarOpen)} />
+        <Navbar onMenuClick={() => setSidebarOpen(!sidebarOpen)} />
         <div className="flex flex-1 min-h-0">
           <main className="flex-1 min-w-0 overflow-y-auto transition-colors duration-500 custom-scrollbar">
             <div className={inChat ? 'h-full' : 'p-6'}>

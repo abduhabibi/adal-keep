@@ -116,12 +116,12 @@ export function visaValues(profile, files = {}, settings = {}) {
   const address = String(p.employer_address || c.Location || p.work_city || '').trim()
   const travelled = /have|yes/i.test(p.work_experience || '') && String(p.experience_country || '').trim()
   return {
-    visa_type: pick('visa_type', 'work|عمل'),
+    visa_type: pick('visa_type', '^\\s*(work|عمل)\\s*$'),
     nationality: 'ethiopia',
     mission: pick('visa_mission', 'addis'),
     entries: pick('visa_entries', 'single|واحدة|مفردة'),
-    validity: settings.visa_validity ? pick('visa_validity') : '',
-    duration: settings.visa_duration ? pick('visa_duration') : '',
+    validity: pick('visa_validity', '^\\s*90\\b|^\\s*٩٠'),     // 90 Days
+    duration: pick('visa_duration', '^\\s*90\\b|^\\s*٩٠'),     // 90
     first: n.first, father: n.father, grandfather: n.grandfather, family: n.family,
     previous_nationality: 'no',
     passport: String(p.passport_number || c['Passport Number'] || '').trim().toUpperCase().replace(/\s+/g, ''),
@@ -135,7 +135,7 @@ export function visaValues(profile, files = {}, settings = {}) {
     religion: !rel ? '' : /muslim|islam/.test(rel) && !/non/.test(rel) ? 'muslim|islam|مسلم' : 'christ|مسيح',
     marital: !m ? '' : m.startsWith('MARRIED') ? '^\\s*married|متزوج' : m.startsWith('DIVORC') ? 'divorc|مطلق' : m.startsWith('WIDOW') ? 'widow|أرمل|ارمل' : 'single|أعزب|عزباء',
     gender: g.startsWith('F') ? 'female|أنثى|انثى' : g.startsWith('M') ? '^\\s*male|ذكر' : '',
-    occupation: pick('visa_occupation', 'house ?maid|domestic|housekeeper|عاملة منزلية|خادمة'),
+    occupation: pick('visa_occupation', 'house ?work|house ?maid|domestic|housekeeper|عاملة منزلية|خادمة'),
     qualification: settings.visa_qualification || String(p.education_level || c['Education level'] || '').trim() || 'None',
     degree_source: settings.visa_degree_source || 'Ethiopia',
     ksa_address: address,
@@ -441,15 +441,16 @@ async function openForm(page, ctx) {
  * DocumentNumber = her visa number (10 digits, from Musaned). Typing it makes
  * the platform look the visa up and list its occupations; the one matching
  * her job is chosen. No list (the visa is not found): Classify Occupations →
- * "Domestic, hotel and office cleaners and helpers", then her occupation.
+ * "Building and housekeeping…", then "House work".
  */
 async function documentAndOccupation(page, ctx, v, left) {
   if (!(await page.$('#DocumentNumber'))) return
-  const want = new RegExp(v.occupation || 'house ?maid|domestic|housekeeper|عاملة منزلية|خادمة', 'i')
+  const want = new RegExp(v.occupation || 'house ?work|house ?maid|domestic|housekeeper|عاملة منزلية|خادمة', 'i')
   const options = () => page.$$eval('#JOB_OR_RELATION_Id option', os => os.map(o => ({ v: o.value, t: o.text.trim() })).filter(o => o.v && o.v !== '0')).catch(() => [])
   const choose = async () => {
     const os = await options()
-    const o = os.find(x => want.test(x.t)) || (os.length === 1 ? os[0] : null)
+    // "House work" first; then the other house-help names.
+    const o = os.find(x => /house ?work/i.test(x.t)) || os.find(x => want.test(x.t)) || (os.length === 1 ? os[0] : null)
     if (!o) return null
     await page.evaluate((val) => {
       const s = document.getElementById('JOB_OR_RELATION_Id')
@@ -473,10 +474,10 @@ async function documentAndOccupation(page, ctx, v, left) {
   for (let i = 0; i < 24 && !(await options()).length; i++) await sleep(500)
   let got = await choose()
   if (!got) {
-    const cls = await page.$$eval('#ddlClassifyOccupations option', os => (os.find(o => /domestic|housekeep/i.test(o.text)) || {}).value || '').catch(() => '')
+    const cls = await page.$$eval('#ddlClassifyOccupations option', os => (os.find(o => /building and housekeep/i.test(o.text)) || os.find(o => /housekeep|domestic/i.test(o.text)) || {}).value || '').catch(() => '')
     if (cls) {
       await page.evaluate((val) => { const s = document.getElementById('ddlClassifyOccupations'); if (window.jQuery) window.jQuery(s).val(val).trigger('change'); else { s.value = val; s.dispatchEvent(new Event('change', { bubbles: true })) } }, cls)
-      log(ctx, '✓ Classify Occupations: Domestic, hotel and office cleaners and helpers')
+      log(ctx, '✓ Classify Occupations: Building and housekeeping')
       for (let i = 0; i < 24 && !(await options()).length; i++) await sleep(500)
       got = await choose()
     }

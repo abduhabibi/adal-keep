@@ -282,6 +282,7 @@ async function syncOnce(db) {
     }
     // Listed as an agency (name + PC number) for Adal Keep Admin, chat or not.
     if (!joined) { await joinAgency(db).then(() => { joined = true }).catch(e => console.warn('[cloud] agency:', e.message)) }
+    await publishPC(db).catch(e => console.warn('[cloud] PC number:', e.message))
     const applied = await applyChanges(db, agency)
     const state = await stateOf(db)
     await pushAnswers(db, agency, state)
@@ -316,6 +317,7 @@ export function startCloudSync(db) {
   timer = setInterval(tick, EVERY_MS)
   startRelay(db)
   watchStorageChat()
+  setTimeout(() => setInterval(() => watchJoins(db), 4000), 15000)
   console.log('☁️  Online copy for phones: synced every minute (when on)')
 }
 export const syncNow = (db) => syncOnce(db)
@@ -457,8 +459,9 @@ export async function setPhonePassword(db, pc, password) {
 }
 export async function phonePasswordSet(db) {
   const agency = await cloudAgencyId(db)
-  const rows = await cloudCall(db, 'GET', `/rest/v1/keep_pairing?agency_id=eq.${agency}&select=pc_number,updated_at`).catch(() => [])
-  return rows?.[0] || null
+  const rows = await cloudCall(db, 'GET', `/rest/v1/keep_pairing?agency_id=eq.${agency}&select=pc_number,updated_at,pass_hash`).catch(() => [])
+  const r = rows?.[0]
+  return r ? { pc_number: r.pc_number, updated_at: r.updated_at, pass_set: !!r.pass_hash } : null
 }
 
 // ------------------------------------------------------------ Telegram channel
@@ -481,4 +484,44 @@ function watchStorageChat() {
       console.log(`[cloud] Telegram channel "${c.title}" saved — documents go there from now on`)
     } catch (e) { console.warn('[cloud] Telegram channel:', e.message) }
   }, 30000)
+}
+
+// ------------------------------------------------------------ joining
+let published = null
+async function publishPC(db) {
+  const { pcNumber } = await import('./mainPC.js')
+  if (published === pcNumber()) return
+  await cloudCall(db, 'POST', '/rest/v1/rpc/keep_publish_pc', { p_pc: pcNumber(), p_open: false })
+  published = pcNumber()
+}
+
+/**
+ * Phones asking to join (they typed this PC's number): shown on the PC —
+ * "Phone X wants to join — Yes, it's me / No" — and as a desktop notice.
+ */
+export const joinRequests = { list: [], error: null }
+const announced = new Set()
+async function watchJoins(db) {
+  try {
+    if (!(await cloudOn(db))) { joinRequests.list = []; return }
+    const agency = await cloudAgencyId(db)
+    await publishPC(db)
+    const rows = await cloudCall(db, 'GET', `/rest/v1/keep_join_requests?agency_id=eq.${agency}&status=eq.pending&order=created_at.asc&select=id,name,created_at`)
+    // Old requests (over 10 minutes) are not shown: the phone asks again.
+    joinRequests.list = (rows || []).filter(r => Date.now() - new Date(r.created_at).getTime() < 10 * 60000)
+    joinRequests.error = null
+    for (const r of joinRequests.list) {
+      if (announced.has(r.id)) continue
+      announced.add(r.id)
+      console.log(`[cloud] phone "${r.name}" asks to join`)
+      try {
+        const { showDesktopNotice } = await import('./worker.js')
+        showDesktopNotice(`📱 ${r.name || 'A phone'} wants to join`, 'Open Adal Keep and press "Yes, it\'s me" — or No if you do not know this phone.')
+      } catch {}
+    }
+  } catch (e) { joinRequests.error = e.message }
+}
+export async function answerJoin(db, id, ok) {
+  await cloudCall(db, 'POST', '/rest/v1/rpc/keep_answer_join', { p_id: id, p_ok: !!ok })
+  joinRequests.list = joinRequests.list.filter(r => r.id !== id)
 }

@@ -257,3 +257,80 @@ grant execute on function public.keep_set_phone_password(text, text) to authenti
 -- The PC may leave a big live answer for a phone in keep_calls.
 drop policy if exists keep_calls_owner_add on public.keep_calls;
 create policy keep_calls_owner_add on public.keep_calls for insert with check (agency_id = auth.uid());
+
+-- --------------------------------------- pairing: PC number + "Yes, it's me" ---
+-- The main PC publishes its 5-digit number. A phone types it and asks to
+-- join; the PC shows "Phone X wants to join — Yes, it's me / No"; Yes lets
+-- it in and the phone goes on by itself. 5 wrong numbers lock a phone an hour.
+alter table public.keep_pairing alter column pass_hash drop not null;
+alter table public.keep_pairing add column if not exists open boolean not null default false;
+create table if not exists public.keep_join_tries (
+  user_id uuid primary key references auth.users on delete cascade,
+  n int not null default 0,
+  since timestamptz not null default now()
+);
+alter table public.keep_join_tries enable row level security;
+
+create table if not exists public.keep_join_requests (
+  id         uuid primary key default gen_random_uuid(),
+  user_id    uuid not null default auth.uid() references auth.users on delete cascade,  -- the phone
+  agency_id  uuid not null references auth.users on delete cascade,
+  name       text,
+  status     text not null default 'pending',          -- pending · approved · denied
+  created_at timestamptz not null default now(),
+  decided_at timestamptz
+);
+create index if not exists keep_join_requests_open on public.keep_join_requests (agency_id, status);
+alter table public.keep_join_requests enable row level security;
+drop policy if exists keep_join_requests_read on public.keep_join_requests;
+create policy keep_join_requests_read on public.keep_join_requests for select using (user_id = auth.uid() or agency_id = auth.uid());
+
+create or replace function public.keep_publish_pc(p_pc text, p_open boolean) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  if exists (select 1 from keep_devices where user_id = auth.uid()) then raise exception 'phones cannot do this'; end if;
+  delete from keep_pairing where agency_id = auth.uid() and pc_number <> p_pc;
+  insert into keep_pairing (pc_number, agency_id, open, updated_at) values (p_pc, auth.uid(), false, now())
+    on conflict (pc_number) do update set updated_at = now() where keep_pairing.agency_id = auth.uid();
+end $$;
+grant execute on function public.keep_publish_pc(text, boolean) to authenticated;
+
+-- The phone asks to join (the PC number only); returns the request id.
+create or replace function public.keep_request_join(p_pc text, p_name text) returns uuid
+language plpgsql security definer set search_path = public, extensions as $$
+declare r keep_pairing; t keep_join_tries; rid uuid;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into t from keep_join_tries where user_id = auth.uid();
+  if t.n >= 5 and t.since > now() - interval '1 hour' then raise exception 'Too many wrong numbers — try again in an hour.'; end if;
+  select * into r from keep_pairing where pc_number = p_pc;
+  if r is null then
+    insert into keep_join_tries (user_id, n, since) values (auth.uid(), 1, now())
+      on conflict (user_id) do update set n = case when keep_join_tries.since > now() - interval '1 hour' then keep_join_tries.n + 1 else 1 end,
+        since = case when keep_join_tries.since > now() - interval '1 hour' then keep_join_tries.since else now() end;
+    raise exception 'No Adal Keep has that PC number. Check it on the main PC (Settings → Main PC).';
+  end if;
+  update keep_join_requests set status = 'denied', decided_at = now() where user_id = auth.uid() and status = 'pending';
+  insert into keep_join_requests (user_id, agency_id, name) values (auth.uid(), r.agency_id, left(coalesce(nullif(p_name, ''), 'Phone'), 60)) returning id into rid;
+  return rid;
+end $$;
+grant execute on function public.keep_request_join(text, text) to authenticated;
+
+-- The PC answers: Yes lets the phone in.
+create or replace function public.keep_answer_join(p_id uuid, p_ok boolean) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+declare q keep_join_requests;
+begin
+  select * into q from keep_join_requests where id = p_id and agency_id = auth.uid() and status = 'pending';
+  if q is null then raise exception 'That request is gone.'; end if;
+  update keep_join_requests set status = case when p_ok then 'approved' else 'denied' end, decided_at = now() where id = p_id;
+  if p_ok then
+    insert into keep_devices (user_id, agency_id, name) values (q.user_id, q.agency_id, q.name)
+      on conflict (user_id) do update set agency_id = excluded.agency_id, name = excluded.name, revoked = false;
+  end if;
+end $$;
+grant execute on function public.keep_answer_join(uuid, boolean) to authenticated;
+
+-- Number-only joining without the PC's Yes is closed.
+update public.keep_pairing set open = false;

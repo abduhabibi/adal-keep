@@ -15,7 +15,7 @@ import { fileURLToPath } from 'url'
 import { pcNumber, isFollower, tailscaleInfo } from '../services/mainPC.js'
 import { getLanAddresses } from '../services/discovery.js'
 import { liveStatus } from '../services/liveChannel.js'
-import { setPhonePassword, phonePasswordSet, relayStatus, cloudOn, cloudStatus, makeDevice, listDevices, setDeviceRevoked, syncNow } from '../services/cloudSync.js'
+import { joinRequests, answerJoin, setPhonePassword, phonePasswordSet, relayStatus, cloudOn, cloudStatus, makeDevice, listDevices, setDeviceRevoked, syncNow } from '../services/cloudSync.js'
 import { onThisPC } from './trash.js'
 
 const router = express.Router()
@@ -82,6 +82,13 @@ router.post('/mobile/phone-password', async (req, res) => {
   if (isFollower()) return res.status(403).json({ error: 'This PC follows the main PC — set it there.' })
   try { await setPhonePassword(req.app.locals.db, pcNumber(), req.body?.password); res.json({ ok: true }) }
   catch (e) { res.status(400).json({ error: /keep_set_phone_password|schema cache|PGRST/i.test(e.message) ? 'Run adal-admin/supabase/keep-sync.sql in Supabase once more first.' : e.message }) }
+})
+// Phones asking to join: the PC answers "Yes, it's me" / No (never a phone itself).
+router.get('/mobile/join-requests', (req, res) => res.json(isFollower() ? [] : joinRequests.list))
+router.post('/mobile/join-requests/:id', async (req, res) => {
+  if (req.headers['x-adal-cloud']) return res.status(403).json({ error: 'Answer on a PC of the agency.' })
+  try { await answerJoin(req.app.locals.db, req.params.id, req.body?.ok === true); res.json({ ok: true }) }
+  catch (e) { res.status(400).json({ error: e.message }) }
 })
 router.post('/mobile/cloud/sync', async (req, res) => {
   syncNow(req.app.locals.db).catch(() => {})

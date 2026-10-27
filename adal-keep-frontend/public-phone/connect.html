@@ -34,13 +34,11 @@
     <h1>Adal Keep</h1>
 
     <section id="pair" class="hidden">
-      <p>የኮምፒውተሩን ቁጥር እና የስልክ የይለፍ ቃል ያስገቡ<br>The PC's number and the agency's phone password</p>
-      <p style="font-size:12px">The office PC shows both in Settings → Main PC → “Pair phones from anywhere”. Any internet works — no office Wi-Fi needed.</p>
+      <p>የኮምፒውተሩን ቁጥር ያስገቡ<br>Type the PC's number</p>
+      <p style="font-size:12px">Settings → Main PC on the office PC shows it. Any internet works — the PC then asks “Yes, it's me?”.</p>
       <div class="digits" id="digits">
         <input inputmode="numeric" maxlength="1" autocomplete="off"><input inputmode="numeric" maxlength="1" autocomplete="off"><input inputmode="numeric" maxlength="1" autocomplete="off"><input inputmode="numeric" maxlength="1" autocomplete="off"><input inputmode="numeric" maxlength="1" autocomplete="off">
       </div>
-      <input id="pw" class="field" type="password" placeholder="Phone password" autocomplete="current-password">
-      <input id="who" class="field" type="text" placeholder="Your name (shown to the agency)" autocomplete="name">
       <button id="go" disabled>ክፈት · Open</button>
       <div class="msg" id="pairMsg"></div>
     </section>

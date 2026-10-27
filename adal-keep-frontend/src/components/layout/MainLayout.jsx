@@ -5,6 +5,7 @@ import Sidebar from './Sidebar'
 import ProfileSearchPad from '../ProfileSearchPad'
 import { TutorTracker } from '../TutorCard'
 import PhoneCalls from '../PhoneCalls'
+import JoinRequests from '../JoinRequests'
 import useReadyChime from '../../hooks/useReadyChime'
 import useNewVersion from '../../hooks/useNewVersion'
 import api from '../../services/api'
@@ -52,6 +53,7 @@ export default function MainLayout() {
 
       {DEMO && <Suspense fallback={null}><DemoBrowser /></Suspense>}
       {!DEMO && <TutorTracker />}
+      {!DEMO && <JoinRequests />}
       {!DEMO && <PhoneCalls />}
       <Sidebar
         isOpen={sidebarOpen}

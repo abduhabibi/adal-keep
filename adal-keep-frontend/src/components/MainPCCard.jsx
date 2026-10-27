@@ -47,14 +47,7 @@ const ago = (t) => {
 /** The online copy phones use when this PC is off, and the phones allowed to see it. */
 function PhonesOnline({ here }) {
   const [c, setC] = useState(null)
-  const [pw, setPw] = useState('')
-  const [pwMsg, setPwMsg] = useState('')
-  const savePw = async (e) => {
-    e.preventDefault()
-    if (pw.trim().length < 6) return setPwMsg('Use at least 6 characters.')
-    try { await api.post('/mobile/phone-password', { password: pw.trim() }); setPw(''); setPwMsg('✓ Saved. Phones can pair now with the PC number and this password.'); load() }
-    catch (err) { setPwMsg(err.response?.data?.error || err.message) }
-  }
+
   const load = () => api.get('/mobile/cloud').then(r => setC(r.data)).catch(() => {})
   useEffect(() => { load(); const t = setInterval(load, 15000); return () => clearInterval(t) }, [])
   if (!c) return null
@@ -84,20 +77,11 @@ function PhonesOnline({ here }) {
       {c.on && <p className="text-[11px] text-slate-500 rounded-lg bg-amber-50 dark:bg-amber-900/20 text-amber-900 dark:text-amber-200 px-2 py-1.5">
         🛡️ Adal support can see this online copy — your profiles, documents, runs and tasks — to help you and supervise the work, and can act in Adal Keep for you (marked “Adal support” in the Trash and logs).
       </p>}
-      {c.on && here && (
-        <form onSubmit={savePw} className="rounded-lg border border-indigo-200 dark:border-indigo-800 p-2 space-y-1.5">
-          <p className="text-xs font-semibold">📱 Pair phones from anywhere</p>
-          <p className="text-[11px] text-slate-500">
-            In the Adal Keep app: PC number <b className="font-mono">{c.pcNumber}</b> + this password. No office Wi-Fi needed.
-            {c.pairing ? <> A password is set ({new Date(c.pairing.updated_at).toLocaleDateString()}) — a new one replaces it.</> : <> No password yet: phones cannot pair.</>}
-          </p>
-          <div className="flex gap-1.5">
-            <input type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder={c.pairing ? 'New phone password' : 'Phone password (6+ characters)'}
-              autoComplete="new-password" className="flex-1 min-w-0 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-2.5 py-1.5 text-sm" />
-            <Button size="sm" type="submit">Save</Button>
-          </div>
-          {pwMsg && <p className="text-[11px] text-slate-600 dark:text-slate-300">{pwMsg}</p>}
-        </form>
+      {c.on && (
+        <p className="rounded-lg border border-indigo-200 dark:border-indigo-800 p-2 text-[11px] text-slate-600 dark:text-slate-300">
+          📱 <b>Add a phone from anywhere:</b> in the Adal Keep app type this PC's number <b className="font-mono text-sm">{c.pcNumber}</b>.
+          This PC then asks <i>“… wants to join — Yes, it's me / No”</i>; after Yes the phone goes on by itself.
+        </p>
       )}
       {c.devices?.length > 0 && (
         <ul className="divide-y divide-slate-100 dark:divide-slate-800">

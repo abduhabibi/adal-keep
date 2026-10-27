@@ -437,6 +437,54 @@ async function openForm(page, ctx) {
   log(ctx, '✓ the visa application form is open')
 }
 
+/**
+ * DocumentNumber = her visa number (10 digits, from Musaned). Typing it makes
+ * the platform look the visa up and list its occupations; the one matching
+ * her job is chosen. No list (the visa is not found): Classify Occupations →
+ * "Domestic, hotel and office cleaners and helpers", then her occupation.
+ */
+async function documentAndOccupation(page, ctx, v, left) {
+  if (!(await page.$('#DocumentNumber'))) return
+  const want = new RegExp(v.occupation || 'house ?maid|domestic|housekeeper|عاملة منزلية|خادمة', 'i')
+  const options = () => page.$$eval('#JOB_OR_RELATION_Id option', os => os.map(o => ({ v: o.value, t: o.text.trim() })).filter(o => o.v && o.v !== '0')).catch(() => [])
+  const choose = async () => {
+    const os = await options()
+    const o = os.find(x => want.test(x.t)) || (os.length === 1 ? os[0] : null)
+    if (!o) return null
+    await page.evaluate((val) => {
+      const s = document.getElementById('JOB_OR_RELATION_Id')
+      if (window.jQuery) window.jQuery(s).val(val).trigger('change'); else { s.value = val; s.dispatchEvent(new Event('change', { bubbles: true })) }
+    }, o.v)
+    return o.t
+  }
+
+  const cur = await page.$eval('#DocumentNumber', e => e.value).catch(() => '')
+  const doc = String(v.visa_number || '').replace(/\D/g, '')
+  if (!cur) {
+    if (!doc) left.push('DocumentNumber (her visa number — not on the profile yet)')
+    else {
+      await page.click('#DocumentNumber', { clickCount: 3 }).catch(() => {})
+      await page.type('#DocumentNumber', doc, { delay: 40 })
+      await page.evaluate(() => { const e = document.getElementById('DocumentNumber'); e.dispatchEvent(new Event('change', { bubbles: true })); e.blur() })
+      log(ctx, `✓ DocumentNumber: ${doc} (her visa number)`)
+    }
+  }
+  // The visa's own occupations come back after a moment.
+  for (let i = 0; i < 24 && !(await options()).length; i++) await sleep(500)
+  let got = await choose()
+  if (!got) {
+    const cls = await page.$$eval('#ddlClassifyOccupations option', os => (os.find(o => /domestic|housekeep/i.test(o.text)) || {}).value || '').catch(() => '')
+    if (cls) {
+      await page.evaluate((val) => { const s = document.getElementById('ddlClassifyOccupations'); if (window.jQuery) window.jQuery(s).val(val).trigger('change'); else { s.value = val; s.dispatchEvent(new Event('change', { bubbles: true })) } }, cls)
+      log(ctx, '✓ Classify Occupations: Domestic, hotel and office cleaners and helpers')
+      for (let i = 0; i < 24 && !(await options()).length; i++) await sleep(500)
+      got = await choose()
+    }
+  }
+  if (got) log(ctx, `✓ Occupation: ${got}`)
+  else left.push(`Occupation${(await options()).length ? ` (choices: ${(await options()).slice(0, 5).map(o => o.t).join(', ')})` : ''}`)
+}
+
 /** Fills the long form. Returns what is still for a person to fill. */
 async function fillForm(page, ctx, v) {
   const left = []
@@ -474,6 +522,7 @@ async function fillForm(page, ctx, v) {
   await select('visa validity', 'validity', v.validity, 'Visa Validity')
   await select('duration of stay', 'duration', v.duration, 'Duration Of Stay')
   if (v.visa_number) await text('visa (?:no\\.?|number)', 'vnum', v.visa_number, 'Visa Number')
+  await documentAndOccupation(page, ctx, v, left)
 
   // Personal information.
   log(ctx, '✍️ Personal information')
@@ -486,14 +535,21 @@ async function fillForm(page, ctx, v) {
   if (v.photoPath && fs.existsSync(v.photoPath)) {
     const jpg = await photoJpeg(v.photoPath, ctx.runId)
     const input = (await page.evaluateHandle(() => {
+      // The personal photo's own box (#PersonalImage, "Select Image") — not
+      // the hidden passport-image boxes of other visa kinds.
       const files = [...document.querySelectorAll('input[type="file"]')]
-      return files.find(f => /image|jpe?g|png/i.test(f.accept || '')) || files[0] || null
+      return document.getElementById('PersonalImage')
+        || files.find(f => f.offsetParent !== null && /image|jpe?g|png/i.test(f.accept || ''))
+        || files.find(f => f.offsetParent !== null) || null
     })).asElement()
     if (input) {
+      const before = await page.$eval('#image', i => i.src).catch(() => '')
+      // The box sends the picture to the platform by itself (blueimp upload)
+      // and shows it in the frame above "Select Image".
       await input.uploadFile(jpg)
-      await input.evaluate(e => { e.dispatchEvent(new Event('change', { bubbles: true })); if (window.jQuery) window.jQuery(e).trigger('change') })
-      await sleep(1500)
-      log(ctx, '✓ Personal photo chosen')
+      const shown = await page.waitForFunction((b) => { const i = document.getElementById('image'); return i && i.src !== b && i.complete && i.naturalWidth > 0 }, { timeout: 30000, polling: 500 }, before).then(() => true).catch(() => false)
+      if (shown || !before) log(ctx, '✓ Personal photo uploaded')
+      else left.push('Personal photo (Select Image — the platform did not show it)')
     } else left.push('Personal photo (Select Image)')
   } else left.push('Personal photo (no Photo file on the profile)')
 
@@ -513,7 +569,9 @@ async function fillForm(page, ctx, v) {
   await select('religion', 'religion', v.religion, 'Religion')
   await select('marital status', 'marital', v.marital, 'Marital Status')
   await select('gender', 'gender', v.gender, 'Gender')
-  await select('occupation', 'occupation', v.occupation, 'Occupation')
+  if (!(await page.$eval('#JOB_OR_RELATION_Id', e => e.value && e.value !== '0').catch(() => false))) {
+    await select('occupation', 'occupation', v.occupation, 'Occupation')
+  }
   await text('qualification', 'qual', v.qualification, 'Qualification')
   await text('source of degree', 'degree', v.degree_source, 'Source of Degree')
   await text('ksa home address', 'ksaaddr', v.ksa_address, 'KSA Home Address')

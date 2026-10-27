@@ -409,8 +409,20 @@ export async function runWafidCheck(page, ctx) {
         const { savePdf } = await import('./musanedContracts.js')
         const added = await savePdf(ctx.db, ctx.profileId, 'Medical Report', pdf, `wafid-medical-${passport}.pdf`)
         log(ctx, added ? `📄 Wafid result PDF saved in Medical Report (${Math.round(pdf.length / 1024)} KB)` : '📄 the same Wafid PDF is already in Medical Report')
+        // Her deadline: the medical examination date + 2 months (the battery).
+        const { applyMedicalRecord } = await import('./medicalValidity.js')
+        const d = await applyMedicalRecord(ctx.db, ctx.profileId, pdf).catch(() => null)
+        if (d) log(ctx, `🔋 medical examination ${d.exam} → valid till ${d.until}`)
       }
     } catch (e) { log(ctx, `the result's PDF was not saved: ${e.message}`, 'warn') }
+    if (r.state === 'fit' && ctx.db) {
+      // FIT means she was booked: the Book card shows ✓ (whoever booked it).
+      const { markBookingDone, queueWafidSlip } = await import('./wafidStatus.js')
+      if (await markBookingDone(ctx.db, ctx.profileId).catch(() => false)) log(ctx, '✓ Book Wafid medical marked done (she is FIT)')
+      const slip = await ctx.db('files').join('profile_fields', 'files.profile_field_id', 'profile_fields.id')
+        .where({ 'profile_fields.profile_id': ctx.profileId, 'profile_fields.name': 'Appointment Slip' }).first('files.id').catch(() => null)
+      if (!slip) { await queueWafidSlip(ctx.db, ctx.profileId, 'missing').catch(() => {}); log(ctx, '🧾 her appointment slip is fetched next') }
+    }
     if (r.state === 'fit') await ctx.notify?.(`🩺 ${ctx.profileName}: Wafid FIT ✅`, `wafid.com shows FIT for passport ${passport}. The result PDF is in Medical Report.`)
   }
   if (r.state === 'challenge') return { ok: true, pauseReason: 'awaiting-wafid-robot', seconds: secs() }
@@ -458,12 +470,12 @@ export async function runWafidSlip(page, ctx) {
     .some(b => /^\s*pdf\s*$/i.test(b.innerText || '') && b.getBoundingClientRect().width > 0), { timeout: 20000, polling: 500 }).then(() => true).catch(() => false)
 
   await search()
+  // Wafid's robot check (rare here): the run never calls anyone for the slip —
+  // it tries once more a little later, then leaves it for the next try.
   if (await challengeShown(page)) {
-    await page.bringToFront().catch(() => {})
-    await ctx.notify?.(`🧾 ${ctx.profileName}: Wafid asks "I am not a robot"`, 'Answer it in the Wafid tab and press Search; Adal Keep saves the slip by itself.', 'warn', { login: page })
-    const end = Date.now() + 5 * 60 * 1000
-    while (Date.now() < end && await challengeShown(page)) await sleep(2000)
-    await sleep(2500)
+    log(ctx, 'Wafid asks "I am not a robot" — trying again in a moment', 'warn')
+    await sleep(20000)
+    await search()
   }
   let shown = await slipShown()
   if (!shown && !(await challengeShown(page))) { await search(); shown = await slipShown() }
@@ -473,21 +485,11 @@ export async function runWafidSlip(page, ctx) {
     return { ok: false, step: 'search', error: `Wafid showed no appointment slip for passport ${passport}${said ? ` (${said})` : ''}`, seconds: secs() }
   }
   log(ctx, '✓ the appointment slip popped up — pressing PDF')
-  // How long the slip (and so her medical) is valid: the battery on her profile.
-  const dates = await page.evaluate(() => {
-    const t = document.body.innerText || ''
-    return { from: t.match(/Generated dat\w*\s*(\d{1,2}\/[A-Za-z]{3}\/\d{4})/i)?.[1] || '', till: t.match(/valid only till\s*(\d{1,2}\/[A-Za-z]{3}\/\d{4})/i)?.[1] || '' }
-  }).catch(() => ({}))
-  const iso = (d) => { const x = d ? new Date(d.replace(/\//g, ' ') + ' 12:00 UTC') : null; return x && !isNaN(x) ? x.toISOString().slice(0, 10) : null }
-  if (iso(dates.till) && ctx.db) {
-    await ctx.db('profiles').where('id', ctx.profileId).update({ medical_valid_from: iso(dates.from), medical_valid_until: iso(dates.till) }).catch(e => log(ctx, `slip dates not saved: ${e.message}`, 'warn'))
-    log(ctx, `🔋 medical valid ${iso(dates.from) || '?'} → ${iso(dates.till)}`)
-  }
   const pdf = await downloadResultPdf(page)
   if (!pdf) return { ok: false, step: 'pdf', error: 'The slip\'s PDF could not be downloaded', seconds: secs() }
   const { savePdf } = await import('./musanedContracts.js')
   const added = await savePdf(ctx.db, ctx.profileId, 'Appointment Slip', pdf, `wafid-slip-${passport}.pdf`)
+  // No call: the slip simply appears in her profile, ready to print.
   log(ctx, added ? `📄 appointment slip saved (${Math.round(pdf.length / 1024)} KB) — ready to print` : '📄 the same slip is already in Appointment Slip')
-  await ctx.notify?.(`🧾 ${ctx.profileName}: appointment slip ready to print`, `The Wafid slip for passport ${passport} is in her Appointment Slip — press Print there.`)
   return { ok: true, done: true, note: 'slip saved', seconds: secs() }
 }

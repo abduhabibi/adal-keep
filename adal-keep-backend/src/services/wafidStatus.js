@@ -40,6 +40,39 @@ export async function queueWafidBooking(db, profileId, trigger = 'button') {
   return { queued: true, runId }
 }
 
+/**
+ * The appointment slip, fetched by itself (no call for a person): after the
+ * booking, and when a check finds her booked but no slip in her profile yet.
+ */
+export async function queueWafidSlip(db, profileId, trigger = 'booked') {
+  const busy = await db('automation_queue').where({ profile_id: profileId, workflow_id: 'wafid_slip' })
+    .whereIn('status', ['pending', 'running', 'paused']).first()
+  if (busy) return { queued: false, runId: busy.id }
+  const now = new Date().toISOString()
+  const [runId] = await db('automation_queue').insert({
+    profile_id: profileId, workflow_id: 'wafid_slip', status: 'pending', current_step: 0,
+    context: '{}', log: JSON.stringify([{ ts: Date.now(), level: 'info', msg: trigger === 'booked' ? 'Started by itself: the Wafid booking is done' : 'Started by itself: her slip is not in her profile yet' }]),
+    created_at: now, updated_at: now,
+  })
+  try { const { drainQueue } = await import('./worker.js'); drainQueue(db).catch(() => {}) } catch {}
+  console.log(`[wafid] appointment slip queued for profile ${profileId} (run #${runId}, ${trigger})`)
+  return { queued: true, runId }
+}
+
+/** She is FIT on Wafid: her booking is done, whoever booked it — the Book card shows ✓. */
+export async function markBookingDone(db, profileId, why = 'She is FIT on Wafid — the booking is done') {
+  const done = await db('automation_queue').where({ profile_id: profileId, workflow_id: WAFID_BOOK, status: 'done' }).first()
+  if (done) return false
+  const open = await db('automation_queue').where({ profile_id: profileId, workflow_id: WAFID_BOOK }).whereIn('status', ['pending', 'paused']).first()
+  if (open) { await db('automation_queue').where({ id: open.id }).update({ status: 'done', pause_reason: why, updated_at: new Date().toISOString() }); return true }
+  const now = new Date().toISOString()
+  await db('automation_queue').insert({
+    profile_id: profileId, workflow_id: WAFID_BOOK, status: 'done', current_step: 3, context: '{}', pause_reason: why,
+    log: JSON.stringify([{ ts: Date.now(), level: 'info', msg: `✓ ${why}` }]), created_at: now, updated_at: now, started_at: now,
+  })
+  return true
+}
+
 const STATE_TO_STATUS = { fit: 'medical_fit', unfit: 'medical_rejected' }
 
 export const checker = { running: false, last: null, results: [] }

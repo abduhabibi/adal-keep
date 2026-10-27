@@ -19,3 +19,12 @@ test('one warning per step, the smallest step reached', () => {
   assert.equal(dueAlert(0, []).text, 'has run out')
   assert.equal(dueAlert(0, ['0']), null)
 })
+
+import { medicalDeadline } from '../src/services/medicalValidity.js'
+
+test('deadline = medical examination date + 2 months', () => {
+  const rec = 'Medical center code\n09/01/08\nMedical examination date\n29/09/2026\nDate of examination in GCC'
+  assert.deepEqual(medicalDeadline(rec), { exam: '2026-09-29', until: '2026-11-29' })
+  assert.deepEqual(medicalDeadline('Medical examination date\n31/12/2026'), { exam: '2026-12-31', until: '2027-02-28' })
+  assert.equal(medicalDeadline('no date here'), null)
+})

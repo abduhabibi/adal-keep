@@ -365,6 +365,14 @@ export async function savePdf(db, profileId, fieldName, buf, original) {
   fs.mkdirSync(SAFE, { recursive: true })
   const stored = `${Date.now()}_${String(original || 'contract.pdf').replace(/[^\w.\-]+/g, '_')}`
   fs.writeFileSync(path.join(SAFE, stored), buf)
+  // A newer copy of the same document (Wafid makes its PDFs anew each time):
+  // it takes the old copy's place instead of piling up.
+  const older = original ? await db('files').where({ profile_field_id: field.id, original_name: original }).orderBy('id', 'desc').first() : null
+  if (older) {
+    await db('files').where({ id: older.id }).update({ path: stored, size: buf.length, content_hash: hash, updated_at: now })
+    try { if (older.path && !older.path.includes('/') && older.path !== stored) fs.unlinkSync(path.join(SAFE, older.path)) } catch {}
+    return true
+  }
   await db('files').insert({ profile_field_id: field.id, original_name: original, path: stored, mimetype: 'application/pdf', size: buf.length, content_hash: hash, created_at: now, updated_at: now })
   return true
 }
@@ -489,6 +497,40 @@ export async function checkChosenInRun(page, ctx) {
 }
 
 /** Check every profile (or one). */
+/**
+ * The check found Musaned signed out: open its sign-in in this tab, fill the
+ * Musaned account's username and password, bring the tab to the front and
+ * ring the sign-in alarm. A person types the captcha and the code; the check
+ * waits up to 10 minutes. Returns true once Musaned is signed in.
+ */
+async function signInForCheck(db, page) {
+  const acct = await db('musaned_accounts').orderBy('is_default', 'desc').first().catch(() => null)
+  const log = (level, msg) => console.log(`[contracts] ${msg}`)
+  const ctx = { musaned_username: acct?.username || '', musaned_password: acct?.password || '', onLog: log, profileName: 'Contract check' }
+  try {
+    const { stepOpenMusaned, stepFillMusanedLogin } = await import('./musanedWorkflow.js')
+    const open = await stepOpenMusaned(page, ctx)
+    if (open.onKeycloak) {
+      const f = await stepFillMusanedLogin(page, ctx)
+      console.log(`[contracts] Musaned sign-in ${f.filled ? 'filled' : 'NOT filled (no Musaned account in AI Actions)'}`)
+    }
+    await page.bringToFront().catch(() => {})
+    const { ringUntilTouched, showDesktopNotice } = await import('./worker.js')
+    ringUntilTouched(page, (m) => console.log(`[contracts] ${m}`))
+    const title = 'Musaned: sign in for the contract check'
+    const body = 'The Musaned tab is in front with the name and password filled. Type the captcha and the code; Adal Keep goes on checking who was chosen by itself.'
+    showDesktopNotice(title, body)
+    await task(db, null, title, body)
+    const end = Date.now() + 10 * 60 * 1000
+    while (Date.now() < end) {
+      await sleep(3000)
+      const u = page.url()
+      if (/tawtheeq\.musaned\.com\.sa/.test(u) && !/accounts\.wahid\.sa|\/login|\/auth/.test(u)) { console.log('[contracts] ✓ Musaned signed in — checking goes on'); return true }
+    }
+  } catch (e) { console.warn('[contracts] sign-in:', e.message) }
+  return false
+}
+
 export async function checkContracts(db, { onlyId = null } = {}) {
   if (contractCheck.running) return { busy: true }
   Object.assign(contractCheck, { running: true, results: [], signedOut: false })
@@ -506,6 +548,12 @@ export async function checkContracts(db, { onlyId = null } = {}) {
       try { r = await checkOne(db, browser, page, p) } catch (e) { r = { state: 'error', error: e.message } }
       contractCheck.results.push({ id: p.id, name: p.full_name, passport: p.passport_number, ...r })
       console.log(`[contracts] ${p.full_name} (${p.passport_number}): ${r.state}${r.stage ? ' · ' + r.stage : ''}${r.error ? ' — ' + r.error : ''}`)
+      // Musaned signed out: fill the sign-in and ring for a person (captcha +
+      // code are theirs), then go on with the same girl.
+      if (r.state === 'signed-out' && await signInForCheck(db, page)) {
+        try { r = await checkOne(db, browser, page, p) } catch (e) { r = { state: 'error', error: e.message } }
+        contractCheck.results[contractCheck.results.length - 1] = { id: p.id, name: p.full_name, passport: p.passport_number, ...r }
+      }
       if (r.state === 'signed-out') {
         contractCheck.signedOut = true
         await task(db, null, 'Sign in to Musaned for the contract check',

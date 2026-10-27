@@ -609,6 +609,8 @@ router.post('/automations/:id/complete', async (req, res) => {
         // Booked and paid on Wafid: the result checker now watches it.
         await db('profiles').where('id', row.profile_id).update({ status: 'medical_applied', updated_at: new Date().toISOString() })
         next = ' Status: Medical · Applied — Adal Keep checks the result on Wafid by itself.'
+        // The appointment slip comes into her profile by itself (to print).
+        try { const { queueWafidSlip } = await import('../services/wafidStatus.js'); await queueWafidSlip(db, row.profile_id, 'booked') } catch {}
       } else if (row.workflow_id === 'mofa_visa') {
         // The person pressed Save on the visa platform.
         const { VISA_STAGES } = await import('../services/mofaVisa.js')

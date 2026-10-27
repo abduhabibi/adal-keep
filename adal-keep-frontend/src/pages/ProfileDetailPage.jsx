@@ -178,6 +178,8 @@ export default function ProfileDetailPage() {
             <Field label="Phone" value={profile.phone_number} />
             <Field label="National ID" value={profile.national_id} />
             <Field label="Passport" value={profile.passport_number} />
+            {profile.visa_number && <Field label="Visa number (Musaned)" value={profile.visa_number} />}
+            {profile.contract_number && <Field label="Contract number (Musaned)" value={profile.contract_number} />}
             <Field label="Date of birth (GE)" value={profile.date_of_birth} />
             <Field label="Passport issued" value={profile.passport_issue_date} />
             <Field label="Passport expiry" value={profile.passport_expiry_date} />

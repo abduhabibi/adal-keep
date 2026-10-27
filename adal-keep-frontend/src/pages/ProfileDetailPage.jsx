@@ -118,7 +118,7 @@ export default function ProfileDetailPage() {
       />
 
       {/* Labor ID — first thing on the page */}
-      <div className="rounded-2xl p-[2px] bg-gradient-to-r from-teal-500 via-sky-500 to-indigo-500 shadow-sm">
+      <div data-tour="labor-id" className="rounded-2xl p-[2px] bg-gradient-to-r from-teal-500 via-sky-500 to-indigo-500 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-[14px] bg-gradient-to-r from-teal-50 via-sky-50 to-indigo-50 dark:from-slate-900 dark:via-slate-900 dark:to-slate-900 px-5 py-3">
           <span className="text-xs font-bold uppercase tracking-widest bg-gradient-to-r from-teal-600 via-sky-600 to-indigo-600 bg-clip-text text-transparent">Labor ID</span>
           <LaborIdEdit profile={profile} onSaved={(v) => setProfile(p => ({ ...p, labor_id: v }))} />

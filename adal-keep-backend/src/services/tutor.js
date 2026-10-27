@@ -1,18 +1,13 @@
 /**
- * tutor.js — the daily in-app tutor.
+ * tutor.js — the Adal tour.
  *
- * Each day, for each person (employee id, or 'owner'):
- *   - one LESSON: a feature they have not used yet, picked by JEV from a fixed
- *     list (a typed choice the app acts on), or by simple rules when JEV is
- *     unavailable. "Show me" opens the page and points at the real button.
- *   - up to two GOALS from today's real work (runs waiting for a person,
- *     a profile ready for its CV).
- *   - a STREAK: days in a row with at least one goal done.
- * "Ask Adal" answers how-to questions with Gemini, in Amharic or English, and
- * points to the matching lesson. The tutor only explains and points: it never
- * presses buttons, starts runs or changes data.
+ * Once a day, the first page a person opens shows up to 3 things worth
+ * knowing (the page they are on first), with Next and Skip tour. Everything
+ * is shown within 2 weeks: when days are missed the day's share grows.
+ * A lesson counts as known once it was shown or its feature was used.
+ * "Show me" opens the page and points at the real button; the tour only
+ * explains and points: it never presses buttons, starts runs or changes data.
  */
-import { askJev } from './jev/client.js'
 import { askGemini, isGeminiConfigured } from './geminiClassifier.js'
 
 // target = the element's data-tour value. route ':p' / ':cv' / ':police' /
@@ -67,13 +62,48 @@ export const LESSONS = [
     am: ['መልክዎን ይምረጡ', 'ብርሃን፣ ጨለማ ወይም የሚንቀሳቀሰው ቀለማት።'],
     en: ['Pick your look', 'Light, Dark or the moving Gradient theme.'] },
   { id: 'updates', route: '/settings', target: 'check-updates',
-    am: ['ሁልጊዜ የቅርብ ጊዜውን ይጠቀሙ', 'Check updates አዲሱን አዳል ኪፕ ያለ USB ይጭናል።'],
-    en: ['Stay up to date', 'Check updates installs the newest Adal Keep without the USB.'] },
+    am: ['ሁልጊዜ የቅርብ ጊዜውን ይጠቀሙ', 'ምንም ስራ በማይሰራበት ጊዜ አዳል ኪፕ አዲሱን ስሪት በራሱ ይጭናል። Check updates አሁኑኑ ያደርገዋል።'],
+    en: ['Stay up to date', 'Adal Keep installs new versions by itself when no run is working. Check updates does it right now.'] },
+  { id: 'journey_filter', route: '/profiles', target: 'journey-filter',
+    am: ['ማን የት እንደደረሰ በአንድ ጠቅታ', 'ከፕሮፋይሎች ርዕስ አጠገብ ያለው መስመር CV → ሙሳነድ → ዋፊድ ከዚያ LMIS እና ኤምባሲ ይከፈላል። አንዱን ደረጃ ይጫኑ፡ ያንን የጨረሱት ብቻ ይቀራሉ፤ እንደገና ሲጫኑ ይለቀቃል።'],
+    en: ['See who reached which step in one click', 'The line beside the Profiles title goes CV → Musaned → Wafid, then splits to LMIS and the Embassy. Click a step: only the profiles that finished it stay; click again to let go.'] },
+  { id: 'journey_profile', route: '/profiles/:p', target: 'profile-journey',
+    am: ['የእሷ ጉዞ በፕሮፋይሉ ላይ', 'በእያንዳንዱ ፕሮፋይል ላይ ያለው መስመር የተጠናቀቀውን (አረንጓዴ)፣ እየሄደ ያለውን (ቢጫ) እና የቀረውን ያሳያል። ደረጃውን ሲጫኑ ወደ AI ስራዎቹ ይወስድዎታል።'],
+    en: ['Her journey on the profile', 'The line on each profile shows what is done (green), running (amber) and still to do. Click a step to jump to its AI actions.'] },
+  { id: 'labor_id', route: '/profiles/:p', target: 'labor-id',
+    am: ['የሌበር መታወቂያውን እዚሁ ይቀይሩ', 'Edit ሳይጫኑ፣ በፕሮፋይሉ አናት ያለውን Labor ID ይጫኑ፣ ይጻፉ እና ያስቀምጡ።'],
+    en: ['Change the labor ID right here', 'No need for Edit: click the Labor ID at the top of the profile, type it and save.'] },
+  { id: 'accounts', route: '/profiles/:p', target: null,
+    am: ['በየትኛው አካውንት እንደሚገባ ይምረጡ', 'እያንዳንዱ ሳጥን (LMIS፣ ሙሳነድ፣ ኢንሹራንስ፣ ቪዛ) የራሱ ትንሽ የአካውንት ቦታ አለው። ስራው በዚያ አካውንት ይገባል፤ ኮዱን እና ካፕቻውን እርስዎ ይጽፋሉ።'],
+    en: ['Pick which account a run signs in with', 'Each box (LMIS, Musaned, Insurance, Visa) has its own small account slot. The run signs in with it; you type the code and the captcha.'] },
+  { id: 'musaned_check', route: '/profiles/:musaned', target: 'run-musaned_check_chosen',
+    am: ['ተመርጣለች ወይ? ሲስተሙ ይፈትሽ', 'Check if chosen ሙሳነድ ውስጥ በፓስፖርቷ ይፈልጋል። ከተመረጠች ምልክት ያደርጋል፣ template.pdf ን ወደ Contract ያወርዳል፣ አሰሪውን እና ኤጀንሲውን ይሞላል።'],
+    en: ['Has she been chosen? Let the system check', 'Check if chosen searches Musaned by her passport. If she was chosen it marks her, downloads template.pdf into Contract and fills in the employer and the agencies.'] },
+  { id: 'musaned_taken', route: '/profiles/:musaned', target: null,
+    am: ['ሙሳነድ ላይ ቀድሞ ካለች', 'ቀድሞ በዝርዝራችን ካለች ሙሳነድ ራሱ ተጠናቀቀ ይባላል። በሌላ ኤጀንሲ ከተያዘች የያዛት ኤጀንሲ በማስታወሻ ይጻፋል፣ ማሳወቂያ እና ተግባር ይደርስዎታል።'],
+    en: ['When she is already on Musaned', 'Already on our list: Musaned is marked done by itself. Held by another agency: that agency is written in her notes and you get a notification and a task.'] },
+  { id: 'wafid_book', route: '/profiles/:p', target: 'run-wafid_book',
+    am: ['የዋፊድ ቀጠሮ ይያዙ', 'Book appointment ፎርሙን ይሞላል፣ ካፕቻውን እና ክፍያውን እርስዎ ይጨርሳሉ።'],
+    en: ['Book the Wafid appointment', 'Book appointment fills the form; you finish the captcha and the payment.'] },
+  { id: 'wafid_check', route: '/profiles/:p', target: 'run-wafid_check',
+    am: ['የህክምና ውጤቱን ይፈትሹ', 'Check appointment በwafid.com ላይ በፓስፖርቷ ይፈልጋል፣ Fit ወይም Unfit መሆኗን በፕሮፋይሉ ላይ ይጽፋል።'],
+    en: ['Check the medical result', 'Check appointment searches wafid.com by her passport and writes Fit or Unfit on her profile.'] },
+  { id: 'insurance_run', route: '/profiles/:p', target: 'run-insurance_certificate',
+    am: ['የኢንሹራንስ ሰርተፊኬት', 'ፌታፕ ውስጥ ይገባል፣ + New certificate ይጫናል፣ ቅርንጫፍ፣ ክፍለ ከተማ እና ወረዳን ከSettings ጨምሮ ይሞላል፣ Save እንዲጫኑ ይጠራዎታል።'],
+    en: ['The insurance certificate', 'It signs in to FetaP, presses + New certificate, fills it (branch, sub city and woreda from Settings) and calls you to press Save.'] },
+  { id: 'visa_run', route: '/profiles/:p', target: 'run-mofa_visa',
+    am: ['ቪዛ (እንጃዝ)', 'visa.mofa.gov.sa ውስጥ ይገባል (ካፕቻውን እርስዎ)፣ New Application ይከፍታል፣ ፎቶን ጨምሮ ሙሉ ፎርሙን ይሞላል፣ ካፕቻ እና Save እንዲያደርጉ ይጠራዎታል።'],
+    en: ['The visa (Enjaz)', 'It signs in to visa.mofa.gov.sa (you type the captcha), opens a New Application, fills the whole form with her photo and calls you for the captcha and Save.'] },
+  { id: 'lmis_contract', route: '/profiles/:p', target: 'run-lmis_contract',
+    am: ['የLMIS ውል', 'LMIS ውስጥ ውሉን ይሞላል፣ ሰነዶቹን ይጭናል፤ Submit የሚጫኑት እርስዎ ነዎት።'],
+    en: ['The LMIS contract', 'It fills the contract in LMIS and uploads the documents; you are the one who presses Submit.'] },
+  { id: 'sounds', route: '', target: null,   // any page: no need to move
+    am: ['እያንዳንዱ ስራ የራሱ ድምፅ አለው', 'ሰው ሲያስፈልግ ስራው በራሱ ድምፅ ይጠራል፣ በዴስክቶፑ ላይም መልእክት ይወጣል። ድምፁን ለይተው የትኛው ስራ እንደሚጠራዎ ያውቃሉ።'],
+    en: ['Each task has its own sound', 'When a run needs a person it rings with its own sound and pops up on the desktop, so you know which task calls you without looking.'] },
 ]
 const LESSON_IDS = new Set(LESSONS.map(l => l.id))
 
 const today = () => new Date().toLocaleDateString('en-CA') // YYYY-MM-DD, local
-const dayBefore = (d) => { const t = new Date(d + 'T12:00:00'); t.setDate(t.getDate() - 1); return t.toLocaleDateString('en-CA') }
 
 export async function getLang(db, who) {
   const r = await db('tutor_prefs').where({ who }).first()
@@ -93,7 +123,6 @@ export async function track(db, who, feature) {
   const n = await db('tutor_usage').where({ who, feature }).update({ count: db.raw('count + 1'), last_at: now })
   if (!n) await db('tutor_usage').insert({ who, feature, count: 1, first_at: now, last_at: now })
   // Using the feature of today's lesson completes the lesson.
-  await db('tutor_days').where({ who, day: today(), lesson_id: feature }).update({ lesson_done: true })
   return true
 }
 
@@ -103,7 +132,6 @@ export async function markSeen(db, who, lessonId) {
   const feature = `seen:${lessonId}`, now = new Date().toISOString()
   const n = await db('tutor_usage').where({ who, feature }).update({ count: db.raw('count + 1'), last_at: now })
   if (!n) await db('tutor_usage').insert({ who, feature, count: 1, first_at: now, last_at: now })
-  await db('tutor_days').where({ who, day: today(), lesson_id: lessonId }).update({ lesson_done: true })
   return true
 }
 
@@ -148,105 +176,41 @@ function lessonOut(l, lang, ex) {
   return { id: l.id, title, body, route: route.endsWith('/') && route !== '/' ? '/profiles' : route, target: l.target }
 }
 
-/** Today's work that needs a person: becomes the day's goals. */
-async function dataGoals(db, lang) {
-  const t = (am, en) => (lang === 'en' ? en : am)
-  const goals = []
-  const waiting = await db('automation_queue').where('status', 'paused').orderBy('updated_at', 'desc').select('id', 'profile_id', 'pause_reason')
-  if (waiting.length) {
-    goals.push({ id: 'runs', text: t(`እርስዎን የሚጠብቁ ${waiting.length} ስራዎችን ይጨርሱ`, `Finish ${waiting.length} run${waiting.length > 1 ? 's' : ''} waiting for you`), route: `/profiles/${waiting[0].profile_id}`, open: waiting.length })
-  }
-  // No "approve tasks" goal: new documents are filed (and their tasks approved) by themselves.
-  if (goals.length < 2) {
-    const ex = await exampleProfiles(db)
-    if (ex.cv) {
-      const p = await db('profiles').where('id', ex.cv).first('id', 'full_name')
-      const hasCv = await db('generated_cvs').where('profile_id', ex.cv).first('id').catch(() => null)
-      if (p && !hasCv) goals.push({ id: `cv-${p.id}`, text: t(`ለ${p.full_name} ሲቪ ያዘጋጁ`, `Make the CV for ${p.full_name}`), route: `/profiles/${p.id}`, open: 1 })
-    }
-  }
-  return goals.slice(0, 2)
-}
+const TOUR_DAYS = 14
+const PER_DAY = 3
+const daysBetween = (a, b) => Math.round((new Date(b + 'T12:00:00') - new Date(a + 'T12:00:00')) / 86400000)
+const onPage = (route, page) => route.includes(':')
+  ? /^\/profiles\/\d+\/?$/.test(page)
+  : page.replace(/\/+$/, '') === route.replace(/\/+$/, '') || (route === '/' && page === '')
 
-/** The lesson for today: JEV chooses among unused features; rules otherwise. */
-async function chooseLesson(db, who, used, goals) {
-  const todo = LESSONS.filter(l => !used.has(l.id))
-  if (!todo.length) return LESSONS[(new Date().getDate()) % LESSONS.length].id   // all used: a refresher
-  if (todo.length === 1) return todo[0].id
-  // Done lessons from earlier days stay out unless nothing else is left.
-  const past = new Set((await db('tutor_days').where({ who, lesson_done: true }).select('lesson_id')).map(r => r.lesson_id))
-  const fresh = todo.filter(l => !past.has(l.id))
-  const pool = fresh.length ? fresh : todo
-  const jev = await askJev(
-    { role: who === 'owner' ? 'agency owner' : 'agency employee', features_used: [...used], todays_work: goals.map(g => g.text) },
-    { lesson: { type: 'Choice', options: pool.map(l => l.id), instructions: 'Which ONE feature of this recruitment-agency app should this person learn today to get the most out of it? Prefer features they have never used that today\'s work needs.' } },
-    { timeoutMs: 8000 },
-  ).catch(() => null)
-  const pick = jev?.ok ? jev.answers?.lesson?.choice : null
-  if (pick && pool.some(l => l.id === pick)) return pick
-  return pool[0].id   // the library is ordered from most to least useful
-}
-
-async function streakOf(db, who) {
-  const rows = await db('tutor_days').where({ who }).orderBy('day', 'desc').limit(400).select('day', 'lesson_done', 'goals_done')
-  const active = new Set(rows.filter(r => r.lesson_done || (JSON.parse(r.goals_done || '[]').length)).map(r => r.day))
-  let d = today()
-  if (!active.has(d)) d = dayBefore(d)     // today not done yet: the streak still counts
-  let n = 0
-  while (active.has(d)) { n++; d = dayBefore(d) }
-  return { days: n, todayDone: active.has(today()) }
-}
-
-/** Everything the daily card shows. */
-export async function todayFor(db, who) {
+/**
+ * Today's part of the tour: up to 3 lessons not known yet, the page the person
+ * is on first. `show` is false once today's part was shown (or all is known).
+ */
+export async function tourFor(db, who, page = '') {
   const lang = await getLang(db, who)
-  const used = await usedFeatures(db, who)
-  const goals = await dataGoals(db, lang)
-  let row = await db('tutor_days').where({ who, day: today() }).first()
-  if (row && !LESSON_IDS.has(row.lesson_id)) {
-    // A lesson that was removed from the library: pick today's again.
-    await db('tutor_days').where({ id: row.id }).update({ lesson_id: await chooseLesson(db, who, used, goals), lesson_done: false })
-    row = await db('tutor_days').where({ id: row.id }).first()
-  }
-  if (!row) {
-    const lesson_id = await chooseLesson(db, who, used, goals)
-    await db('tutor_days').insert({ who, day: today(), lesson_id, lesson_done: false, goals_done: '[]', opened_at: new Date().toISOString() }).catch(() => {})
-    row = await db('tutor_days').where({ who, day: today() }).first()
-  }
-  const done = new Set(JSON.parse(row.goals_done || '[]'))
-  const lessonDef = LESSONS.find(l => l.id === row.lesson_id) || LESSONS[0]
-  const lesson = { ...lessonOut(lessonDef, lang, await exampleProfiles(db)), done: !!row.lesson_done }
-  const goalList = [
-    { id: 'lesson', text: (lang === 'en' ? 'Learn: ' : 'ይማሩ፦ ') + lesson.title, done: lesson.done, lesson: true },
-    ...goals.map(g => ({ ...g, done: done.has(g.id) })),
-  ]
+  const seen = await seenLessons(db, who)
+  const remaining = LESSONS.filter(l => !seen.has(l.id))
+  const days = (await db('tutor_days').where({ who, lesson_id: 'tour' }).orderBy('day').select('day')).map(r => r.day)
+  const shownToday = days.includes(today())
+  const day = days.length ? daysBetween(days[0], today()) + 1 : 1
+  const left = Math.max(1, TOUR_DAYS - day + 1)
+  const quota = Math.min(6, Math.max(PER_DAY, Math.ceil(remaining.length / left)))
+  const here = remaining.filter(l => onPage(l.route, String(page)))
+  const ex = await exampleProfiles(db)
+  const lessons = [...here, ...remaining.filter(l => !here.includes(l))].slice(0, quota).map(l => lessonOut(l, lang, ex))
   return {
-    who, lang, day: row.day,
-    lesson,
-    goals: goalList,
-    allDone: goalList.every(g => g.done),
-    streak: await streakOf(db, who),
-    progress: { used: LESSONS.filter(l => used.has(l.id)).length, total: LESSONS.length },
-    tour: await (async () => {
-      const seen = await seenLessons(db, who)
-      const ex = await exampleProfiles(db)
-      const remaining = LESSONS.filter(l => !seen.has(l.id)).map(l => lessonOut(l, lang, ex))
-      return { total: LESSONS.length, seen: LESSONS.length - remaining.length, remaining, done: remaining.length === 0 }
-    })(),
-    ai: { jev: !!(await import('./jev/client.js')).isEnabled(), gemini: isGeminiConfigured() },
+    who, lang, show: !shownToday && lessons.length > 0, lessons,
+    day: Math.min(day, TOUR_DAYS), days: TOUR_DAYS,
+    seen: LESSONS.length - remaining.length, total: LESSONS.length, done: remaining.length === 0,
   }
 }
 
-export async function markGoal(db, who, goalId) {
-  const row = await db('tutor_days').where({ who, day: today() }).first()
-  if (!row) return
-  if (goalId === 'lesson') {
-    await db('tutor_days').where({ id: row.id }).update({ lesson_done: true })
-    if (row.lesson_id) await track(db, who, row.lesson_id)
-    return
-  }
-  const done = new Set(JSON.parse(row.goals_done || '[]')); done.add(String(goalId))
-  await db('tutor_days').where({ id: row.id }).update({ goals_done: JSON.stringify([...done]) })
+/** Today's part of the tour was shown (seen through or skipped): no more today. */
+export async function markTourShown(db, who) {
+  const now = new Date().toISOString()
+  const n = await db('tutor_days').where({ who, day: today() }).update({ lesson_id: 'tour', lesson_done: true })
+  if (!n) await db('tutor_days').insert({ who, day: today(), lesson_id: 'tour', lesson_done: true, goals_done: '[]', opened_at: now }).catch(() => {})
 }
 
 /** "Ask Adal": a short how-to answer, and the lesson that shows it. */
@@ -312,7 +276,6 @@ export async function adoption(db) {
       ...p,
       used: used.size, total: LESSONS.length,
       never: LESSONS.filter(l => !used.has(l.id)).map(l => l.en[0]),
-      streak: (await streakOf(db, p.who)).days,
       last_active: last,
     })
   }

@@ -484,7 +484,7 @@ export default function SettingsPage() {
         </div>
       </Card>
 
-      {/* Daily tutor and who uses what — at the bottom of Settings */}
+      {/* The Adal tour and who uses what — at the bottom of Settings */}
       <TutorCard />
       <TutorAdoption />
     </div>

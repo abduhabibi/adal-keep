@@ -1,5 +1,5 @@
 /**
- * Daily tutor, browser side (backend: routes/tutor.js).
+ * The Adal tour, browser side (backend: routes/tutor.js).
  *   whoAmI()      the employee signed in here, or this browser's own private id
  *   startTracking the features a person uses (pages + tagged buttons)
  *   showMe()      open the lesson's page and point at the real button
@@ -8,7 +8,7 @@
 import api from '../services/api'
 
 // Not signed in as an employee: a private id for this browser on this PC, made
-// once and kept. Everyone starts fresh with their own streak and tour; nobody
+// once and kept. Everyone has their own tour; nobody
 // shares one ("owner" used to be shared by every PC on an install).
 const SELF_KEY = 'adal-tutor-self'
 let selfId = null
@@ -98,16 +98,16 @@ function bubble(lesson, lang, onClose, tour) {
   b.className = 'adal-spot-bubble'
   b.setAttribute('role', 'dialog')
   b.innerHTML = `<small></small><strong></strong><p></p><div class="adal-spot-actions"><button type="button" class="ok"></button></div>`
-  b.querySelector('small').textContent = tour ? `${en ? 'Tour' : 'ጉብኝት'} ${tour.step} / ${tour.total}` : ''
+  b.querySelector('small').textContent = tour ? `${en ? `Adal tour · day ${tour.day} of ${tour.days}` : `የአዳል ጉብኝት · ቀን ${tour.day} / ${tour.days}`} · ${tour.step}/${tour.total}` : ''
   b.querySelector('strong').textContent = lesson.title
   b.querySelector('p').textContent = lesson.body
   const ok = b.querySelector('.ok')
-  ok.textContent = tour ? (tour.step < tour.total ? (en ? 'Next →' : 'ቀጣይ →') : (en ? 'Finish' : 'ጨርስ')) : (en ? 'Got it' : 'ገባኝ')
+  ok.textContent = tour ? (tour.step < tour.total ? (en ? 'Next →' : 'ቀጣይ →') : (en ? 'Done' : 'ጨርስ')) : (en ? 'Got it' : 'ገባኝ')
   ok.onclick = () => onClose('next')
   if (tour) {
     const stop = document.createElement('button')
     stop.type = 'button'; stop.className = 'stop'
-    stop.textContent = en ? 'Stop the tour' : 'ጉብኝቱን አቁም'
+    stop.textContent = en ? 'Skip tour' : 'ጉብኝቱን ዝለል'
     stop.onclick = () => onClose('stop')
     b.querySelector('.adal-spot-actions').appendChild(stop)
   }

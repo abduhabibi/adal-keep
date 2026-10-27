@@ -1,6 +1,5 @@
 import { NavLink } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
-import TutorCard from '../TutorCard'
 
 const links = [
   {
@@ -227,7 +226,6 @@ export default function Sidebar({ isOpen, onToggle, collapsed, onToggleCollapse 
               {!collapsed && <span className="truncate">{settingsLink.label}</span>}
             </NavLink>
             {/* Daily tutor: hover to open (public demo has none) */}
-            {import.meta.env.VITE_DEMO !== '1' && <div className="mt-1"><TutorCard floating collapsed={collapsed} /></div>}
           </div>
         </nav>
 

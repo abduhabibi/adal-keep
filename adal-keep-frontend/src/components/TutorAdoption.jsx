@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import api from '../services/api'
 
-/** Owner view: how much of Adal Keep each person uses (from the daily tutor). */
+/** Owner view: how much of Adal Keep each person uses (from the Adal tour). */
 export default function TutorAdoption() {
   const [rows, setRows] = useState(null)
   useEffect(() => {
@@ -12,7 +12,7 @@ export default function TutorAdoption() {
   return (
     <section className="panel p-5">
       <h2 className="font-bold text-slate-900 dark:text-white">🎓 የስርዓቱ አጠቃቀም · Feature use</h2>
-      <p className="text-xs text-slate-500 mt-0.5">ከዕለታዊ አስተማሪው · from the daily tutor</p>
+      <p className="text-xs text-slate-500 mt-0.5">ከአዳል ጉብኝት · from the Adal tour</p>
       <div className="mt-4 space-y-3">
         {rows.map(p => {
           const pct = Math.round(100 * p.used / p.total)
@@ -21,7 +21,6 @@ export default function TutorAdoption() {
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                 <span className="font-semibold text-sm text-slate-800 dark:text-slate-100">{p.name}</span>
                 <span className="text-xs text-slate-500">{p.used} / {p.total} ባህሪያት · features</span>
-                {p.streak > 0 && <span className="text-xs font-semibold text-orange-600 dark:text-orange-400">🔥 {p.streak}</span>}
                 {p.last_active && <span className="text-[11px] text-slate-400 ml-auto">{new Date(p.last_active).toLocaleDateString()}</span>}
               </div>
               <div className="h-1.5 mt-2 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">

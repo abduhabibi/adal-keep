@@ -151,7 +151,7 @@ export default function ProfileJourney({ profileId }) {
   const states = Object.fromEntries(all.map(s => [s.key, s.state]))
   const notes = Object.fromEntries(all.map(s => [s.key, s.note]))
   return (
-    <section className="panel p-4" onClick={(e) => { if (e.target.closest('button')) document.getElementById('ai-actions')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }}>
+    <section data-tour="profile-journey" className="panel p-4" onClick={(e) => { if (e.target.closest('button')) document.getElementById('ai-actions')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }}>
       <JourneyFork states={states} notes={notes} />
     </section>
   )

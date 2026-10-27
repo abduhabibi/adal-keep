@@ -1,7 +1,7 @@
 import { Router } from 'express'
-import { todayFor, track, markGoal, markSeen, ask, adoption, setLang } from '../services/tutor.js'
+import { tourFor, markTourShown, track, markSeen, ask, adoption, setLang } from '../services/tutor.js'
 
-// The daily tutor (services/tutor.js). `who` = the employee id signed in on
+// The Adal tour (services/tutor.js). `who` = the employee id signed in on
 // this PC, or 'owner'.
 const router = Router()
 const whoOf = (req) => {
@@ -13,11 +13,11 @@ const wrap = (fn) => async (req, res) => {
   catch (e) { console.error('[tutor]', e.message); res.status(500).json({ error: e.message }) }
 }
 
-router.get('/tutor/today', wrap((db, who) => todayFor(db, who)))
+router.get('/tutor/tour', wrap((db, who, req) => tourFor(db, who, String(req.query.page || ''))))
+router.post('/tutor/tour/shown', wrap(async (db, who) => { await markTourShown(db, who); return { ok: true } }))
 router.post('/tutor/event', wrap(async (db, who, req) => ({ ok: await track(db, who, String(req.body?.feature || '')) })))
-router.post('/tutor/seen', wrap(async (db, who, req) => { await markSeen(db, who, String(req.body?.lesson || '')); return todayFor(db, who) }))
-router.post('/tutor/goal', wrap(async (db, who, req) => { await markGoal(db, who, String(req.body?.goal || '')); return todayFor(db, who) }))
-router.post('/tutor/lang', wrap(async (db, who, req) => { await setLang(db, who, req.body?.lang); return todayFor(db, who) }))
+router.post('/tutor/seen', wrap(async (db, who, req) => ({ ok: await markSeen(db, who, String(req.body?.lesson || '')) })))
+router.post('/tutor/lang', wrap(async (db, who, req) => ({ lang: await setLang(db, who, req.body?.lang) })))
 router.post('/tutor/ask', wrap((db, who, req) => ask(db, who, String(req.body?.question || ''), req.body?.lang)))
 router.get('/tutor/adoption', wrap((db) => adoption(db)))
 

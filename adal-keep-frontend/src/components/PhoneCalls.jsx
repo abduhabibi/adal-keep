@@ -42,7 +42,7 @@ export default function PhoneCalls() {
             last.current = Math.max(last.current, c.id)
             ring(/captcha|code|robot|sign-in|sign in|reCAPTCHA/i.test(c.title))
             toast((t) => (
-              <button type="button" className="text-left" onClick={() => { toast.dismiss(t.id); if (c.profile_id) navigate(`/profiles/${c.profile_id}#ai-actions`) }}>
+              <button type="button" className="text-left" onClick={() => { toast.dismiss(t.id); if (c.profile_id) navigate(`/profiles/${c.profile_id}?attention=1`) }}>
                 <b className="block text-sm">{c.title}</b>
                 <span className="block text-xs text-slate-500 mt-0.5">{c.description?.slice(0, 140)}</span>
                 <span className="block text-xs text-teal-700 font-semibold mt-1">Tap to open →</span>

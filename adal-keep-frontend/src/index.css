@@ -613,3 +613,8 @@ body {
     radial-gradient(circle at 70% 60%, rgba(255,255,255,.03) 0 2px, transparent 3px);
   background-size: 46px 46px, 64px 64px;
 }
+
+/* Run buttons stay small on a phone so they fit in one or two rows. */
+@media (max-width: 639px) {
+  .run-actions > button { padding: 0.3rem 0.6rem; font-size: 11px; }
+}

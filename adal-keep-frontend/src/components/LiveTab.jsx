@@ -24,7 +24,9 @@ export default function LiveTab({ runId }) {
         last.current = url
         setSrc(url); setErr(null)
       } catch (e) {
-        if (alive) setErr(e.response?.status === 404 ? 'The run has no open tab right now.' : 'The PC tab did not answer.')
+        if (alive) setErr(e.response?.status === 404
+          ? 'This run\'s tab on the PC was closed. Press ▶ Continue — the run opens it again and it shows here.'
+          : 'The PC tab did not answer.')
       }
       if (alive) timer = setTimeout(tick, document.hidden ? 4000 : 900)
     }

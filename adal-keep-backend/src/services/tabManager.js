@@ -62,6 +62,11 @@ function isClosed(page) {
  */
 export async function setupTab(page, { runId, mute = true } = {}) {
   if (!page) return page
+  // The tab remembers its run in the page itself (window.name survives
+  // navigations), so after a server restart Adal Keep finds it again.
+  if (runId !== undefined && runId !== null) {
+    try { page.evaluate?.((id) => { window.name = `adal-run-${id}` }, String(runId))?.catch?.(() => {}) } catch {}
+  }
   if (page.__adalSetup) {
     if (runId !== undefined) page.__adalRunId = runId
     await setFileDialogs(page, true) // a resumed run takes the dialogs back
@@ -175,6 +180,40 @@ export function tabOfRun(runId) {
   if (!page) return null
   if (isClosed(page)) { _tabs.delete(id); return null }
   return page
+}
+
+// Which site each kind of run works on (to find its tab when nothing else does).
+const RUN_HOSTS = [
+  [/^musaned/, /musaned\.com\.sa|wahid\.sa/], [/^mofa|^visa/, /visa\.mofa\.gov\.sa/], [/^wafid/, /wafid\.com/],
+  [/^insurance/, /niscofetap\.com/], [/^(police|lmis)/, /lmis\.gov\.et/],
+]
+
+/**
+ * The run's tab even after a server restart (when the registry above is
+ * empty): the tab named after the run, or the only tab on the run's site.
+ * Found tabs are adopted, so the run also resumes in them.
+ */
+export async function findRunTab(browser, runId, workflowId = '', { bySite = true } = {}) {
+  const known = tabOfRun(runId)
+  if (known) return known
+  if (!browser) return null
+  const pages = await browser.pages().catch(() => [])
+  let found = null
+  for (const p of pages) {
+    const name = await p.evaluate(() => window.name).catch(() => '')
+    if (name === `adal-run-${runId}`) { found = p; break }
+  }
+  if (!found && bySite) {
+    const host = RUN_HOSTS.find(([w]) => w.test(String(workflowId)))?.[1]
+    const onSite = host ? pages.filter(p => host.test(p.url())) : []
+    if (onSite.length === 1) found = onSite[0]
+  }
+  if (found) {
+    _tabs.set(Number(runId), found)
+    await setupTab(found, { runId: Number(runId) }).catch(() => {})
+    console.log(`[tabManager] run #${runId} found its tab again (${found.url().slice(0, 60)})`)
+  }
+  return found
 }
 
 /** Run ids that own an open tab right now. */

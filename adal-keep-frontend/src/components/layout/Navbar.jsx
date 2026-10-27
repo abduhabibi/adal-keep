@@ -163,7 +163,7 @@ export default function Navbar({ onMenuClick, capturedFiles, setCapturedFiles })
           </button>
 
           {/* User Avatar */}
-          <button onClick={() => navigate('/settings')} className="w-9 h-9 rounded-full bg-gradient-to-br from-teal-500 to-teal-600 flex items-center justify-center text-white font-semibold text-sm shadow-lg shadow-teal-500/25 ring-2 ring-white dark:ring-slate-800 transition-all duration-200 hover:scale-105" title="ማስተካከያዎች">A</button>
+          <button onClick={() => navigate('/settings')} className="w-8 h-8 rounded-full overflow-hidden shadow ring-1 ring-black/10 dark:ring-white/20 transition-transform duration-200 hover:scale-105" title="ማስተካከያዎች"><img src="/adal-logo.png" alt="Adal" className="h-full w-full object-cover" draggable={false} /></button>
 
           <FileTray capturedFiles={capturedFiles} setCapturedFiles={setCapturedFiles} />
         </div>

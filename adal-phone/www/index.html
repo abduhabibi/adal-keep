@@ -10,7 +10,7 @@
   * { box-sizing: border-box; }
   body { margin: 0; min-height: 100vh; font-family: system-ui, "Noto Sans Ethiopic", sans-serif; background: var(--bg); color: var(--ink); display: flex; align-items: center; justify-content: center; padding: 24px 16px; }
   .card { width: 100%; max-width: 380px; background: var(--card); border-radius: 20px; padding: 28px 22px; box-shadow: 0 10px 40px rgba(0,0,0,.08); text-align: center; }
-  .logo { width: 64px; height: 64px; border-radius: 18px; background: var(--teal); color: #fff; font-size: 34px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
+  .logo { width: 76px; height: 76px; border-radius: 20px; object-fit: cover; box-shadow: 0 6px 20px rgba(0,0,0,.12); }
   h1 { font-size: 22px; margin: 14px 0 4px; }
   p { color: var(--muted); font-size: 14px; line-height: 1.5; margin: 6px 0; }
   .digits { display: flex; gap: 8px; justify-content: center; margin: 22px 0 8px; }
@@ -28,7 +28,7 @@
 </head>
 <body>
   <main class="card">
-    <div class="logo">አ</div>
+    <img class="logo" src="adal-logo.png" alt="Adal">
     <h1>Adal Keep</h1>
 
     <section id="pair" class="hidden">

@@ -2,7 +2,8 @@ import express from 'express'
 import { listWorkflows } from '../services/workflows.js'
 import { dispatchRun, runStatus, queueSnapshot } from '../services/worker.js'
 import { markCancelled, isCancelled } from '../services/cancellation.js'
-import { forgetRunTab, tabOfRun } from '../services/tabManager.js'
+import { forgetRunTab, findRunTab } from '../services/tabManager.js'
+import { getBrowser } from '../services/browser.js'
 import { assertPoliceReady, getProfileVerification, runPassportVerification } from '../services/verification.js'
 
 const router = express.Router()
@@ -447,8 +448,14 @@ router.get('/automations/:id', async (req, res) => {
  * Clicks and keys reach the tab as a person's own (the run never presses
  * Submit / Save itself; a person can, from here).
  */
+const liveTab = async (req) => {
+  const run = await req.app.locals.db('automation_queue').where('id', req.params.id).first('id', 'workflow_id').catch(() => null)
+  if (!run) return null
+  return findRunTab(await getBrowser().catch(() => null), run.id, run.workflow_id)
+}
+
 router.get('/automations/:id/screen', async (req, res) => {
-  const page = tabOfRun(req.params.id)
+  const page = await liveTab(req)
   if (!page) return res.status(404).json({ error: 'This run has no open tab.' })
   try {
     const shot = await Promise.race([
@@ -462,7 +469,7 @@ router.get('/automations/:id/screen', async (req, res) => {
 })
 
 router.post('/automations/:id/input', async (req, res) => {
-  const page = tabOfRun(req.params.id)
+  const page = await liveTab(req)
   if (!page) return res.status(404).json({ error: 'This run has no open tab.' })
   const b = req.body || {}
   try {

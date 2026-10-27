@@ -23,7 +23,7 @@ import { runFullWorkflow } from './lmisWorkflow.js'
 import { decideAgencyActions } from './jev/agencyManager.js'
 import { getActiveEmployee } from './activeEmployee.js'
 import { isAppLocked } from './subscription.js'
-import { openRunTab, forgetRunTab, tabOfRun, handTabToPerson } from './tabManager.js'
+import { openRunTab, forgetRunTab, tabOfRun, handTabToPerson, findRunTab } from './tabManager.js'
 import { registerTab, unregisterTab, noteLink } from './bandwidth.js'
 import { createRunQueue } from './runQueue.js'
 import { reportRuns } from './busy.js'
@@ -554,6 +554,9 @@ async function executeRun(db, page, job) {
 async function runJob(db, job) {
   try {
     const browser = await getBrowser()
+    // After a server restart the run finds the tab it worked in again.
+    // (by its name only: a new run never takes over another tab on the same site)
+    await findRunTab(browser, job.id, job.workflow_id, { bySite: false }).catch(() => null)
     const page = await openRunTab(browser, job.id)
     await executeRun(db, page, job)
   } catch (e) {

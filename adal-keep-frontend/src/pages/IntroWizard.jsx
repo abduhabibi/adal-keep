@@ -46,7 +46,7 @@ export default function IntroWizard() {
 
       <div className="max-w-md w-full bg-white/95 dark:bg-slate-900/95 rounded-3xl shadow-2xl border border-white/20 p-10 relative z-10">
         <div className="text-center mb-10">
-          <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-gradient-to-br from-teal-500 to-cyan-600 text-white text-5xl font-bold mb-6 shadow-inner">አ</div>
+          <div className="inline-flex w-20 h-20 rounded-2xl overflow-hidden mb-6 shadow-lg"><img src="/adal-logo.png" alt="Adal" className="h-full w-full object-cover" draggable={false} /></div>
           <h1 className="text-4xl font-bold text-slate-900 dark:text-white tracking-tight">Welcome to Adal</h1>
           <p className="text-slate-500 dark:text-slate-400 mt-3 text-lg">Let's set up your agency</p>
         </div>

@@ -154,8 +154,8 @@ export default function Sidebar({ isOpen, onToggle, collapsed, onToggleCollapse 
         <div className="flex items-center justify-between px-4 py-5 border-b border-slate-200/60 dark:border-slate-800/60 min-h-[72px]">
           <div className={`flex items-center gap-3 overflow-hidden ${collapsed ? 'justify-center w-full' : ''}`}>
             {!collapsed && (
-              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-teal-500 to-teal-600 flex items-center justify-center text-white font-bold text-lg shadow-lg shadow-teal-500/25 shrink-0">
-                አ
+              <div className="w-9 h-9 rounded-xl overflow-hidden shadow-md shrink-0 ring-1 ring-black/5">
+                <img src="/adal-logo.png" alt="Adal" className="h-full w-full object-cover" draggable={false} />
               </div>
             )}
             <div className={`transition-all duration-300 ${collapsed ? 'opacity-0 w-0 overflow-hidden' : 'opacity-100 w-auto'}`}>

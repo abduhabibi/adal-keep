@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
 import api from '../services/api'
@@ -20,6 +21,7 @@ function normalizeStatus(s) {
 }
 
 export default function TasksPage() {
+  const navigate = useNavigate()
   const [tasks, setTasks] = useState([])
   const [loading, setLoading] = useState(true)
   const [busyId, setBusyId] = useState(null)
@@ -233,6 +235,13 @@ export default function TasksPage() {
                         )}
                       </div>
 
+                      {t.type === 'automation' && t.profile_id && (
+                        <button type="button"
+                          onClick={(e) => { e.stopPropagation(); navigate(`/profiles/${t.profile_id}?attention=1`) }}
+                          className="mt-2 mr-3 rounded-lg bg-teal-600 px-3 py-1 text-xs font-semibold text-white hover:bg-teal-700">
+                          Open where it needs you →
+                        </button>
+                      )}
                       {normalizeStatus(t.status) === 'completed' && (
                         <button
                           type="button"

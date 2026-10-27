@@ -83,6 +83,8 @@ export default function ProfileAutomations({ profileId }) {
   const [sending, setSending] = useState({})
   const pollRef = useRef(null)
   const lastStatus = useRef(null)
+  const panelRef = useRef(null)
+  const shownFor = useRef(null)
 
   const load = async ({ quiet = false } = {}) => {
     try {
@@ -97,6 +99,28 @@ export default function ProfileAutomations({ profileId }) {
   }
 
   useEffect(() => { load() }, [profileId])
+
+  // Opened from a call or a notification (?attention=1 or ?run=<id>): the run
+  // that waits for a person opens by itself.
+  const attended = useRef(false)
+  useEffect(() => {
+    if (attended.current || !workflows.length) return
+    const q = new URLSearchParams(window.location.search)
+    const runId = Number(q.get('run')) || null
+    const waiting = workflows.map(w => w.latest).filter(Boolean)
+      .find(r => r.status === 'paused') || workflows.map(w => w.latest).filter(Boolean).find(r => r.status === 'running')
+    const pick = runId || (q.has('attention') ? waiting?.id : null)
+    if (pick) { attended.current = true; setOpen(pick) }
+  }, [workflows])
+
+  // The run's panel scrolls into view when it opens (on a phone it is far below the cards).
+  useEffect(() => {
+    if (!open || !detail || detail.id !== open || shownFor.current === open) return
+    shownFor.current = open
+    // Twice: the page above may still be growing (pictures, the journey) at first.
+    const go = () => panelRef.current?.scrollIntoView({ block: 'start' })
+    setTimeout(go, 150); setTimeout(go, 1200)
+  }, [open, detail])
 
   // Keep the cards and the "working now" list current: a queued run starts by
   // itself when a slot frees, and the card should show it without a reload.
@@ -384,8 +408,8 @@ export default function ProfileAutomations({ profileId }) {
       )}
 
       {open && detail && (
-        <div className="mt-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-900/40 p-4 space-y-3">
-          <div className="flex items-center justify-between gap-3">
+        <div ref={panelRef} className="scroll-mt-24 mt-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-900/40 p-4 space-y-3">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
             <div className="min-w-0">
               <p className="text-sm font-semibold text-slate-900 dark:text-white truncate">
                 {wfName(detail.workflow_id)} · Run #{detail.id}
@@ -400,7 +424,7 @@ export default function ProfileAutomations({ profileId }) {
                 <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-2">{detail.pause_reason}</p>
               )}
             </div>
-            <div className="flex flex-wrap justify-end gap-2 shrink-0">
+            <div className="run-actions flex flex-wrap gap-1.5 sm:justify-end sm:gap-2 sm:shrink-0">
               {detail.status === 'paused' && !NO_CONTINUE.has(detail.pause_reason) && (
                 <button
                   onClick={resume}

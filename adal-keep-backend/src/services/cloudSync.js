@@ -309,7 +309,7 @@ export async function setDeviceRevoked(db, userId, revoked = true) {
  * main-PC-only pages (Trash, system, phones) stay closed to them.
  */
 export const relayStatus = { on: false, lastCall: 0, answered: 0, error: null }
-const RELAY_FAST_MS = 600, RELAY_SLOW_MS = 2500, RELAY_LATE_MS = 30000, MAX_BIN = 8 * 1024 * 1024
+const RELAY_FAST_MS = 600, RELAY_SLOW_MS = 6000, RELAY_LATE_MS = 30000, MAX_BIN = 8 * 1024 * 1024
 const working = new Set()
 let relayTimer = null, lastBeat = 0, lastClean = 0, deviceNames = new Map(), namesAt = 0
 

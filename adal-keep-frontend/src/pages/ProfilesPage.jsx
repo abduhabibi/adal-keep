@@ -81,6 +81,8 @@ export default function ProfilesPage() {
       }
       const fresh = (s.results || []).filter(x => x.first).map(x => x.name)
       const moved = (s.results || []).filter(x => !x.first && x.state === 'chosen' && !x.unchanged).length
+      const added = s.added || []
+      if (added.length) toast.success(`Added to Adal Keep from Musaned: ${added.map(a => a.name).join(', ')}`, { duration: 10000 })
       if (s.signedOut) toast.error('Musaned is signed out — sign in in the Adal Keep Brave; the check goes on by itself.', { id, duration: 8000 })
       else if (fresh.length) toast.success(`Newly chosen: ${fresh.join(', ')} — contracts saved.`, { id, duration: 10000 })
       else toast.success(`No one new.${moved ? ` ${moved} moved to a new stage.` : ''}${s.unknown?.length ? ` ${s.unknown.length} on Musaned are not in Adal Keep.` : ''}`, { id, duration: 6000 })
@@ -128,25 +130,29 @@ export default function ProfilesPage() {
       <PageHeader
         title="ፕሮፋይሎች"
         subtitle={filterLabel}
-        middle={
-          <div className="panel px-4 py-2 w-full" data-tour="journey-filter">
-            <JourneyFork compact counts={stepCounts} selected={step} onSelect={setStep} />
-          </div>
-        }
         action={
-          <div className="flex flex-wrap gap-2 justify-end">
-            <Button variant={selectedOnly ? 'primary' : 'secondary'} onClick={() => updateFilter('chosen', selectedOnly ? '' : '1')} title="The girls an employer chose on Musaned">
-              🤝 Selected ({chosenCount})
-            </Button>
-            <Button variant="secondary" onClick={scanMusaned} disabled={scanning} title="Reads the Musaned Employment Requests list: anyone newly chosen gets her contract saved and a task">
-              {scanning ? '🔎 Checking Musaned…' : '🔎 Check for new selections'}
-            </Button>
-            <Button data-tour="new-profile" onClick={() => navigate('/profiles/new')}>
+          <div className="grid grid-cols-1 sm:grid-cols-[auto_auto] gap-2 sm:justify-end">
+            <div className="flex flex-col gap-2">
+              <Button variant="secondary" className="w-full whitespace-nowrap" onClick={scanMusaned} disabled={scanning} title="Reads the Musaned Employment Requests list: anyone newly chosen gets her contract saved and a task; girls not in Adal Keep are added">
+                {scanning ? '🔎 Checking Musaned…' : '🔎 Check for new selections'}
+              </Button>
+              <Button variant={selectedOnly ? 'primary' : 'secondary'} className="w-full whitespace-nowrap" onClick={() => updateFilter('chosen', selectedOnly ? '' : '1')} title="The girls an employer chose on Musaned">
+                🤝 Selected ({chosenCount})
+              </Button>
+            </div>
+            <Button data-tour="new-profile" className="w-full sm:w-auto self-start whitespace-nowrap" onClick={() => navigate('/profiles/new')}>
               + ፕሮፋይል አክል
             </Button>
           </div>
         }
       />
+
+      {/* The journey: its own full-width line, scrolling sideways on narrow screens. */}
+      <div className="panel mb-5 px-4 py-3 overflow-x-auto" data-tour="journey-filter">
+        <div className="min-w-[560px]">
+          <JourneyFork counts={stepCounts} selected={step} onSelect={setStep} />
+        </div>
+      </div>
 
       <div className="panel mb-5 grid gap-2 p-3 sm:grid-cols-[1fr_auto_auto_auto] items-center animate-fade-up">
         <Input

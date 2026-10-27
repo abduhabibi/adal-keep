@@ -105,6 +105,12 @@ function readCards(page) {
 }
 
 const nameWords = (s) => String(s || '').toUpperCase().replace(/[^A-Z\s]/g, ' ').split(/\s+/).filter(w => w.length > 1)
+/** Profiles whose name shares 2+ words with the card's (a new profile is made only when none does). */
+export function nameLookalikes(card, profiles) {
+  const c = nameWords(card.candidate)
+  return profiles.filter(p => { const w = nameWords(p.full_name); return c.filter(x => w.includes(x)).length >= Math.min(2, c.length) })
+}
+
 /** The profile a Musaned card is about: its contract number, else her name. */
 export function matchCard(card, profiles) {
   if (card.contract_number) {
@@ -164,7 +170,8 @@ export async function scanContracts(db) {
       if (n) await open(LIST_URL.replace('size=10', 'size=50').replace('page=0', `page=${n}`))
       await page.waitForFunction(() => /CONTRACT NUMBER|No (data|records|results)/i.test(document.body.innerText || ''), { timeout: 20000 }).catch(() => {})
       await sleep(1200)
-      const here = (await readCards(page)).map(t => ({ ...parseCard(t), text: t }))
+      const url = page.url()
+      const here = (await readCards(page)).map(t => ({ ...parseCard(t), text: t, url }))
       if (!here.length) break
       cards.push(...here)
       const allKnown = here.every(c => { const p = matchCard(c, profiles); return p && !cardIsNew(p, c) })
@@ -174,7 +181,7 @@ export async function scanContracts(db) {
     try {
       if (await open(PENDING_URL)) {
         await sleep(1500)
-        for (const t of await readCards(page)) { const c = parseCard(t); cards.push({ ...c, stage: c.stage || 'EPRO APPROVAL', text: t, pending: true }) }
+        for (const t of await readCards(page)) { const c = parseCard(t); cards.push({ ...c, stage: c.stage || 'EPRO APPROVAL', text: t, pending: true, url: PENDING_URL }) }
       }
     } catch (e) { console.warn('[contracts] pending list:', e.message) }
     console.log(`[contracts] Musaned list: ${cards.length} requests`)
@@ -182,7 +189,7 @@ export async function scanContracts(db) {
     const seen = new Set()
     for (const c of cards) {
       const p = matchCard(c, profiles)
-      if (!p) { contractCheck.unknown.push({ candidate: c.candidate, contract: c.contract_number, stage: c.stage }); continue }
+      if (!p) { contractCheck.unknown.push({ candidate: c.candidate, contract: c.contract_number, stage: c.stage, card: c }); continue }
       if (seen.has(p.id)) continue
       seen.add(p.id)
       if (!cardIsNew(p, c)) { contractCheck.results.push({ id: p.id, name: p.full_name, state: 'chosen', stage: c.stage, unchanged: true }); continue }
@@ -192,6 +199,30 @@ export async function scanContracts(db) {
       try { r = await checkOne(db, browser, page, p) } catch (e) { r = { state: 'error', error: e.message } }
       contractCheck.results.push({ id: p.id, name: p.full_name, passport: p.passport_number, ...r })
       console.log(`[contracts] ${p.full_name}: ${r.state}${r.first ? ' (NEW)' : ''}${r.stage ? ' · ' + r.stage : ''}${r.error ? ' — ' + r.error : ''}`)
+    }
+    // On Musaned but not in Adal Keep: her profile is made from Musaned's
+    // contract page (names, passport, birth, …) with the contract and PDFs.
+    contractCheck.added = []
+    const done = new Set()
+    for (const u of contractCheck.unknown) {
+      const c = u.card
+      delete u.card
+      if (!c.contract_number || done.has(c.contract_number)) continue
+      done.add(c.contract_number)
+      const alike = nameLookalikes(c, profiles)
+      if (alike.length) { u.note = `not added — looks like ${alike.slice(0, 2).map(p => p.full_name).join(' / ')}`; continue }
+      try {
+        await sleep(BETWEEN_MS / 2)
+        await page.goto(c.url, { waitUntil: 'networkidle2', timeout: 60000 })
+        if (!(await signedIn(page))) break
+        await page.waitForFunction((n) => (document.body.innerText || '').includes(n), { timeout: 20000 }, c.contract_number).catch(() => {})
+        const d = await openDetails(page, c.contract_number)
+        const r = await addFromMusaned(db, browser, page, c, d)
+        u.note = r.existing ? `matched by passport: ${r.name}` : `added as a new profile`
+        if (!r.existing) contractCheck.added.push({ id: r.id, name: r.name, stage: c.stage })
+        contractCheck.results.push({ id: r.id, name: r.name, ...r.result })
+        console.log(`[contracts] ${c.candidate}: ${u.note}`)
+      } catch (e) { u.note = `not added — ${e.message}`; console.warn(`[contracts] ${c.candidate}: ${e.message}`) }
     }
     await doneSignInTasks(db)
     const fresh = contractCheck.results.filter(r => r.first)
@@ -507,17 +538,65 @@ async function checkOne(db, browser, page, p) {
   }
   const card = parseCard(s.cards[0])
   if (pending && !card.stage) card.stage = 'EPRO APPROVAL'
+  const d = await openDetails(page)
+  return saveDetails(db, browser, page, p, card, s.cards[0], d)
+}
 
-  // DETAILS → the contract page.
+/** DETAILS (of the card holding `contract`, else the first) → the contract page, read. */
+async function openDetails(page, contract = '') {
   await Promise.all([
     page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 45000 }).catch(() => null),
-    page.evaluate(() => [...document.querySelectorAll('button, a')].find(b => /^\s*DETAILS\s*$/i.test(b.innerText || ''))?.click()),
+    page.evaluate((contract) => {
+      const buttons = [...document.querySelectorAll('button, a')].filter(b => /^\s*DETAILS\s*$/i.test(b.innerText || ''))
+      const inCard = (b) => { let c = b; for (let i = 0; i < 8 && c && !/CONTRACT NUMBER/i.test(c.innerText || ''); i++) c = c.parentElement; return c?.innerText || '' }
+      ;(contract ? buttons.find(b => inCard(b).includes(contract)) : buttons[0])?.click()
+    }, contract),
   ])
   await page.waitForFunction(() => /Contract\s*#\s*\d+/i.test(document.body.innerText || ''), { timeout: 30000 }).catch(() => {})
   // "Expand" opens the hidden candidate/employer details.
   await page.evaluate(() => [...document.querySelectorAll('button, a, span, div')].filter(e => /^\s*Expand\s*$/i.test(e.textContent || '') && e.children.length <= 2).forEach(e => e.click())).catch(() => {})
   await sleep(1200)
-  const d = await page.evaluate(readDetails)
+  return page.evaluate(readDetails)
+}
+
+/**
+ * A girl on Musaned who is not in Adal Keep: her passport may still be here
+ * (another name spelling) — else a new profile from the contract page.
+ */
+export async function addFromMusaned(db, browser, page, card, d) {
+  const passport = String(pick(d.pairs, 'Passport Number') || '').trim().toUpperCase().replace(/\s+/g, '')
+  let p = passport ? await db('profiles').whereRaw("upper(replace(passport_number, ' ', '')) = ?", [passport]).first() : null
+  const existing = !!p
+  if (!p) {
+    const given = String(pick(d.pairs, 'Given Names') || '').trim().toUpperCase()
+    const sur = String(pick(d.pairs, 'Surname') || '').trim().toUpperCase()
+    const name = [given, sur].filter(Boolean).join(' ') || card.candidate
+    const g = String(pick(d.pairs, 'Gender') || '').toUpperCase()
+    const iso = (v) => (String(v || '').match(/\d{4}-\d{2}-\d{2}/) || [null])[0]
+    const now = new Date().toISOString()
+    const company = await db('companies').first('id').catch(() => null)
+    const row = {
+      full_name: name, status: 'active', passport_number: passport || null, nationality: 'Ethiopian',
+      first_name: given.split(' ')[0] || null, last_name: sur || null,
+      date_of_birth: iso(pick(d.pairs, 'Date of Birth')), gender: g.startsWith('F') ? 'F' : g.startsWith('M') ? 'M' : null,
+      marital_status: pick(d.pairs, 'Marital Status') || null, religion: pick(d.pairs, 'Religion') || null,
+      passport_issue_date: iso(pick(d.pairs, 'Passport Issue Date')), passport_expiry_date: iso(pick(d.pairs, 'Passport Expiry Date')),
+      place_of_birth: pick(d.pairs, 'Passport Issue Place') || null, education_level: pick(d.pairs, 'Education level') || null,
+      phone_number: pick(d.pairs, 'Candidate · Mobile Number') || null, children_count: Number(pick(d.pairs, 'Number Of Children')) || 0,
+      notes: `Added from the Musaned list (contract ${card.contract_number}) — not in Adal Keep before. Check her details and add her documents.`,
+      company_id: company?.id || 1, created_by: 'Musaned list', created_at: now, updated_at: now,
+    }
+    for (const k of Object.keys(row)) if (row[k] === null || row[k] === '') delete row[k]
+    const [id] = await db('profiles').insert(row)
+    p = await db('profiles').where('id', id).first()
+    await task(db, id, `On Musaned, added to Adal Keep: ${name}`, `She was on the Musaned list (${card.stage || 'request'}, contract ${card.contract_number}) but not in Adal Keep. Her profile was made from Musaned — check it and add her documents.`)
+  }
+  const result = await saveDetails(db, browser, page, p, card, card.text, d)
+  return { id: p.id, name: p.full_name, existing, result }
+}
+
+/** What the contract page says goes into her profile, with its PDFs; tasks for news. */
+async function saveDetails(db, browser, page, p, card, cardText, d) {
 
   const now = new Date().toISOString()
   // A cancelled or rejected request: the employer did not keep her — not chosen.
@@ -539,7 +618,7 @@ async function checkOne(db, browser, page, p) {
     issuing_authority: pick(d.pairs, 'Issuing Authority') || p.issuing_authority,
     job_title: card.job || pick(d.pairs, 'Job') || p.job_title,
     contract_date: card.created || p.contract_date,
-    contract_data: JSON.stringify({ ...JSON.parse(p.contract_data || '{}'), ...d.pairs, stages: d.stages, card: s.cards[0] }),
+    contract_data: JSON.stringify({ ...JSON.parse(p.contract_data || '{}'), ...d.pairs, stages: d.stages, card: cardText }),
     contract_checked_at: now,
     ...(first ? { chosen_at: now } : {}),
   }

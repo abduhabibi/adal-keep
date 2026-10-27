@@ -62,7 +62,7 @@ const SOUNDS = {
   musaned: { win: 'notify.wav',  beeps: [[660, 150], [880, 150], [1100, 200]],           linux: ['message', 2],                mac: 'Ping' },
   lmis:    { win: 'tada.wav',    beeps: [[523, 160], [523, 160], [784, 300]],            linux: ['bell', 3],                   mac: 'Hero' },
   wafid:   { win: 'Ring02.wav',  beeps: [[1000, 120], [0, 80], [1000, 120]],             linux: ['phone-incoming-call', 1],    mac: 'Submarine' },
-  insurance: { win: 'Ring05.wav', beeps: [[440, 250], [554, 250], [659, 400]],          linux: ['service-login', 1],          mac: 'Blow' },
+  insurance: { win: 'Ring05.wav', beeps: [[440, 250], [554, 250], [659, 400]],          linux: ['suspend-error', 2],          mac: 'Blow' },
   tasheer: { win: 'Ring06.wav',  beeps: [[1200, 90], [900, 90], [1200, 90], [900, 90]], linux: ['phone-outgoing-calling', 1], mac: 'Pop' },
   visa:    { win: 'Alarm02.wav', beeps: [[784, 140], [988, 140], [1175, 140], [1568, 320]], linux: ['alarm-clock-elapsed', 1], mac: 'Funk' },
 }
@@ -102,6 +102,44 @@ export function playNotificationSound(workflowId = '') {
       const one = `paplay /usr/share/sounds/freedesktop/stereo/${file}.oga`
       cmd = 'sh'
       args = ['-c', Array(times).fill(one).join('; ')]
+    }
+    const child = spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: true })
+    child.on('error', () => {})
+    child.unref()
+  } catch {}
+}
+
+/**
+ * A popup on the desktop next to the sound, so a call is seen even when the
+ * speakers are low (Windows: a tray balloon; Linux: notify-send). Best effort.
+ */
+export function showDesktopNotice(title, body = '') {
+  try {
+    const t = String(title || 'Adal Keep').slice(0, 63)
+    const b = String(body || title || '').slice(0, 250)
+    let cmd, args
+    if (process.platform === 'win32') {
+      const q = (x) => `'${x.replace(/'/g, "''")}'`
+      const ps = [
+        'Add-Type -AssemblyName System.Windows.Forms, System.Drawing',
+        '$n = New-Object System.Windows.Forms.NotifyIcon',
+        '$n.Icon = [System.Drawing.SystemIcons]::Information',
+        '$n.BalloonTipIcon = "Info"',
+        `$n.BalloonTipTitle = ${q(t)}`,
+        `$n.BalloonTipText = ${q(b)}`,
+        '$n.Visible = $true',
+        '$n.ShowBalloonTip(15000)',
+        'Start-Sleep -Seconds 16',
+        '$n.Dispose()',
+      ].join('; ')
+      cmd = 'powershell'
+      args = ['-NoProfile', '-WindowStyle', 'Hidden', '-EncodedCommand', Buffer.from(ps, 'utf16le').toString('base64')]
+    } else if (process.platform === 'darwin') {
+      cmd = 'osascript'
+      args = ['-e', `display notification ${JSON.stringify(b)} with title ${JSON.stringify(t)}`]
+    } else {
+      cmd = 'notify-send'
+      args = ['-a', 'Adal Keep', '-u', 'critical', t, b]
     }
     const child = spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: true })
     child.on('error', () => {})
@@ -293,6 +331,7 @@ async function executeRun(db, page, job) {
       console.log(`[notify] ${level.toUpperCase()} ${title}`)
       if (onLog) await onLog(level, `🔔 ${title}`)
       playNotificationSound(job.workflow_id)
+      showDesktopNotice(title, body)
     } catch (e) {
       console.error('[notify] failed:', e.message)
     }

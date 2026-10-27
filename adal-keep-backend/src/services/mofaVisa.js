@@ -356,18 +356,31 @@ async function fillLogin(page, ctx) {
   }, ctx.visa_username, ctx.visa_password)
 }
 
+/**
+ * Signed in: the platform left the login page, or it greets the user
+ * ("Welcome …") and shows no password box.
+ */
+async function signedIn(page) {
+  const st = await page.evaluate(() => ({
+    pw: [...document.querySelectorAll('input[type="password"]')].some(i => i.offsetParent !== null),
+    welcome: /\bWelcome\s+\S+/i.test(document.body?.innerText || ''),
+  })).catch(() => null)
+  if (!st) return false
+  if (st.pw) return false
+  return !onLogin(page) || st.welcome
+}
+
 async function signIn(page, ctx) {
   const release = await signInTurn('mofa')
   try {
-    log(ctx, 'opening the visa platform')
-    await page.goto(LIST_URL, { waitUntil: 'domcontentloaded', timeout: 120000 })
+    log(ctx, `opening ${LOGIN_URL}`)
+    await page.goto(LOGIN_URL, { waitUntil: 'domcontentloaded', timeout: 120000 })
       .catch(e => log(ctx, `navigation threw: ${e.message}`, 'warn'))
-    await sleep(1500)
-    if (!onLogin(page) && !(await page.$('input[type="password"]'))) {
+    await sleep(2500)
+    if (await signedIn(page)) {
       log(ctx, '✓ already signed in to the visa platform (shared sign-in)')
       return
     }
-    if (!onLogin(page)) await page.goto(LOGIN_URL, { waitUntil: 'domcontentloaded', timeout: 120000 }).catch(() => {})
     if (!ctx.visa_username || !ctx.visa_password) {
       throw new Error('No visa platform account — add one under AI Actions → Visa platform login account')
     }
@@ -383,12 +396,12 @@ async function signIn(page, ctx) {
     const t0 = Date.now()
     while (Date.now() - t0 < LOGIN_WAIT_MS) {
       if (cancelled(ctx)) { const e = new Error('Cancelled by user'); e.cancelled = true; throw e }
-      if (!onLogin(page) && !(await page.$('input[type="password"]').catch(() => null))) break
+      if (await signedIn(page)) break
       // A wrong captcha reloads the form empty: fill it again.
       await fillLogin(page, ctx).catch(() => {})
       await sleep(2000)
     }
-    if (onLogin(page)) throw new Error('Nobody signed in to the visa platform within 10 minutes')
+    if (!(await signedIn(page))) throw new Error('Nobody signed in to the visa platform within 10 minutes')
     log(ctx, '✓ signed in to the visa platform')
   } finally { release() }
 }
@@ -591,7 +604,15 @@ export async function runMofaVisa(page, ctx) {
 
   log(ctx, `🛂 Visa application for ${ctx.profileName}`)
   await signIn(page, ctx)
-  await openForm(page, ctx)
+  try {
+    await openForm(page, ctx)
+  } catch (e) {
+    if (e?.cancelled || !onLogin(page)) throw e
+    // Signed out on the way (an old session): sign in again, then go on.
+    log(ctx, 'the visa platform asked to sign in again', 'warn')
+    await signIn(page, ctx)
+    await openForm(page, ctx)
+  }
   const left = await fillForm(page, ctx, v)
 
   // Leave the captcha box ready for the person.

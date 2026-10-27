@@ -108,6 +108,7 @@ const nameWords = (s) => String(s || '').toUpperCase().replace(/[^A-Z\s]/g, ' ')
 /** Profiles whose name shares 2+ words with the card's (a new profile is made only when none does). */
 export function nameLookalikes(card, profiles) {
   const c = nameWords(card.candidate)
+  if (c.length < 2) return []
   return profiles.filter(p => { const w = nameWords(p.full_name); return c.filter(x => w.includes(x)).length >= Math.min(2, c.length) })
 }
 
@@ -116,6 +117,10 @@ export function matchCard(card, profiles) {
   if (card.contract_number) {
     const byContract = profiles.find(p => String(p.contract_number || '') === card.contract_number)
     if (byContract) return byContract
+  }
+  if (card.passport) {
+    const byPassport = profiles.find(p => String(p.passport_number || '').toUpperCase().replace(/\s+/g, '') === card.passport)
+    if (byPassport) return byPassport
   }
   const c = nameWords(card.candidate)
   if (c.length < 2) return null
@@ -189,7 +194,7 @@ export async function scanContracts(db) {
     const seen = new Set()
     for (const c of cards) {
       const p = matchCard(c, profiles)
-      if (!p) { contractCheck.unknown.push({ candidate: c.candidate, contract: c.contract_number, stage: c.stage, card: c }); continue }
+      if (!p) { contractCheck.unknown.push({ candidate: c.candidate || c.passport, contract: c.contract_number, stage: c.stage, card: c }); continue }
       if (seen.has(p.id)) continue
       seen.add(p.id)
       if (!cardIsNew(p, c)) { contractCheck.results.push({ id: p.id, name: p.full_name, state: 'chosen', stage: c.stage, unchanged: true }); continue }
@@ -249,6 +254,7 @@ export function parseCard(text) {
     employer_id: employer.match(/^(\d{6,})\s*-/)?.[1] || '',
     employer_name: employer.replace(/^\d{6,}\s*-\s*/, ''),
     candidate: after('CANDIDATE').toUpperCase(),
+    passport: after('PASSPORT NUMBER').toUpperCase().replace(/\s+/g, ''),   // the Pending list shows this instead of her name
     job: after('JOB'),
     pro: after('PRO'),
     payment: /^unpaid$/i.test(pay) ? 'Unpaid' : /^paid$/i.test(pay) ? 'Paid' : pay,
@@ -704,9 +710,10 @@ async function musanedSignedInSomewhere(browser, log = () => {}) {
   const { snapshotState, stepClickAgencyCard, stepClickGoToDashboard } = await import('./musanedWorkflow.js')
   for (const t of await browser.pages().catch(() => [])) {
     const u = t.url()
-    if (!/musaned\.com\.sa/.test(u) || /accounts\.wahid\.sa|\/login|\/auth|\/realms\//.test(u)) continue
+    if (!/musaned\.com\.sa/.test(u) || /accounts\.wahid\.sa|\/realms\//.test(u)) continue
     const s = await snapshotState(t)
     if (!s || s.onKeycloak || s.hasPassword || s.hasOtp) continue
+    // Signed in, Musaned asks which establishment — still on …/login.
     if (s.hasAgencyPicker) {
       log('Musaned signed in — choosing the agency')
       try { await stepClickAgencyCard(t, {}); await sleep(2500) } catch {}
@@ -715,6 +722,7 @@ async function musanedSignedInSomewhere(browser, log = () => {}) {
       return true
     }
     if (s.hasGoToDashboard) { await stepClickGoToDashboard(t, {}).catch(() => {}); return true }
+    if (/\/login|\/auth/.test(u)) continue
     if (s.hasDashboardNav || /employment-requests|dashboard/.test(u)) return true
   }
   return false

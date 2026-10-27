@@ -193,7 +193,10 @@ const api = {
       rest('GET', 'keep_devices?select=agency_id,revoked').catch(() => []),
     ])
     const of = (id, key) => meta.find(m => m.agency_id === id && m.key === key)
-    return agencies.map(a => {
+    // PCs that follow a main PC ("<agency> · branch PC 123456") belong to that agency.
+    const BRANCH = /\s·\s*branch PC (\d{6})$/
+    const branches = agencies.filter(a => BRANCH.test(a.name || ''))
+    return agencies.filter(a => !BRANCH.test(a.name || '')).map(a => {
       const pc = of(a.id, '/_pc')?.data?.at || null
       return {
         ...a,
@@ -201,6 +204,7 @@ const api = {
         pcSeen: pc,
         summary: of(a.id, '/_summary')?.data || null,
         phones: phones.filter(d => d.agency_id === a.id && !d.revoked).length,
+        branchPCs: branches.filter(b => b.name.replace(BRANCH, '') === a.name).map(b => b.name.match(BRANCH)[1]),
       }
     })
   },

@@ -6,8 +6,35 @@ import express from 'express'
 import multer from 'multer'
 import * as chat from '../services/chatCloud.js'
 import { unlockApproved, statusPayload } from '../services/subscription.js'
+import { mainURL } from '../services/mainPC.js'
 
 const router = express.Router()
+
+/**
+ * A PC that follows the main PC (Settings → Main PC) is part of the main
+ * PC's agency: its chat is the main PC's chat. Every chat call goes there —
+ * one agency, one account, every message through the main PC.
+ */
+router.use('/chat', async (req, res, next) => {
+  const main = mainURL()
+  // The licence (receipt → unlock) stays this PC's own.
+  if (!main || /^\/(unlock-request|unlock-status)\b/.test(req.path)) return next()
+  try {
+    const headers = {}
+    for (const h of ['content-type', 'x-adal-who', 'accept']) if (req.headers[h]) headers[h] = req.headers[h]
+    let body
+    if (!['GET', 'HEAD'].includes(req.method)) {
+      if (/json/i.test(req.headers['content-type'] || '')) body = JSON.stringify(req.body ?? {})
+      else { const c = []; for await (const x of req) c.push(x); body = Buffer.concat(c) }
+    }
+    const r = await fetch(`${main}/api${req.originalUrl.replace(/^\/api/, '')}`, { method: req.method, headers, body, signal: AbortSignal.timeout(60000) })
+    res.status(r.status)
+    for (const h of ['content-type', 'content-disposition', 'cache-control']) { const v = r.headers.get(h); if (v) res.setHeader(h, v) }
+    res.end(Buffer.from(await r.arrayBuffer()))
+  } catch (e) {
+    res.status(502).json({ error: `The chat is on the main PC (${main}), and it did not answer: ${e.message}` })
+  }
+})
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 20 * 1024 * 1024 },

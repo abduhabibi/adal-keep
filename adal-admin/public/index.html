@@ -198,7 +198,7 @@ function workTable() {
   let html = `<div class="cards">${cards.map(([t, v, c]) => `<div class="card ${c}"><b>${v}</b><span>${t}</span></div>`).join('')}</div>
     <table><tr><th>Agency</th><th>PC</th><th>Profiles</th><th>Chosen</th><th>Waiting</th><th>Failed 7 d</th><th>Tasks</th><th>Medical ≤ 14 d</th><th>Phones</th><th>Copied</th><th></th></tr>` +
     work.map(a => { const s = a.summary; return `<tr class="ag ${workOpen === a.id ? 'on' : ''}" data-row="${a.id}">
-      <td><b>${esc(a.name)}</b> <span class="muted code" style="letter-spacing:0">${esc(a.pc_number || '')}</span>${a.banned ? ' <span class="pill rejected">banned</span>' : ''}</td>
+      <td><b>${esc(a.name)}</b> <span class="muted code" style="letter-spacing:0">${esc(a.pc_number || '')}</span>${a.branchPCs?.length ? `<div class="muted" style="font-size:11px">+ ${a.branchPCs.length} PC(s) following it: ${a.branchPCs.join(', ')}</div>` : ''}${a.banned ? ' <span class="pill rejected">banned</span>' : ''}</td>
       <td><span class="dot ${a.pcOnline ? 'on' : ''}"></span>${a.pcOnline ? 'on' : `off ${a.pcSeen ? ago(a.pcSeen) : ''}`}</td>
       ${s ? `<td>${s.profiles}</td><td>${s.chosen}</td><td class="${cls(s.runs.paused + s.runs.pending, 5, 15)}">${s.runs.paused + s.runs.pending}</td>
       <td class="${cls(s.runs.failed7d, 1, 5)}">${s.runs.failed7d}</td><td class="${cls(s.tasks.open, 5, 20)}">${s.tasks.open}</td>

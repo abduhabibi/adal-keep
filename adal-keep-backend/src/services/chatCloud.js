@@ -8,6 +8,7 @@
  * backend/.adal_chat.json) and is named after the company. What an agency may
  * read or send is enforced by the database rules (adal-admin/supabase/schema.sql).
  */
+import { isFollower } from './mainPC.js'
 import crypto from 'crypto'
 import fs from 'fs'
 import path from 'path'
@@ -125,10 +126,22 @@ async function call(db, method, pathAndQuery, body, { headers = {}, raw = false 
 const rpc = (db, name, args = {}) => call(db, 'POST', `/rest/v1/rpc/${name}`, args)
 
 /** Sign in, and join (or rename) this agency: Everyone group + inbox with Adal. */
+let mainName = null
+async function mainAgencyName() {
+  if (mainName) return mainName
+  const { mainURL } = await import('./mainPC.js')
+  const r = await fetch(`${mainURL()}/api/setup/status`, { signal: AbortSignal.timeout(5000) })
+  mainName = (await r.json()).companyName || null
+  return mainName
+}
+
 export async function me(db) {
   await token(db)
   const company = await db('companies').first().catch(() => null)
-  const name = String(company?.name || 'Adal Keep agency').trim()
+  let name = String(company?.name || 'Adal Keep agency').trim()
+  // A PC that follows the main PC keeps an account only for its own licence
+  // (unlock); its chat is the main PC's. Named after the main agency.
+  if (isFollower()) name = `${await mainAgencyName().catch(() => null) || name} · branch PC ${pcNumber()}`
   if (joinedAs !== name) {
     await rpc(db, 'join_agency', { p_name: name, p_pc: pcNumber() })
     joinedAs = name

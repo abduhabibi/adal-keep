@@ -12,7 +12,6 @@ import { getTheme, applyTheme } from '../lib/theme'
 import { getLang, setLang } from '../lib/i18n'
 import { whoAmI } from '../lib/tutor'
 import TutorCard from '../components/TutorCard'
-import TutorAdoption from '../components/TutorAdoption'
 import MainPCCard from '../components/MainPCCard'
 import WafidCard from '../components/WafidCard'
 import InsuranceCard from '../components/InsuranceCard'
@@ -26,8 +25,6 @@ export default function SettingsPage() {
   const [theme, setTheme] = useState(getTheme)
   const [currentWallpaper, setCurrentWallpaper] = useState(null)
   const [uploadingWallpaper, setUploadingWallpaper] = useState(false)
-  const [networkIp, setNetworkIp] = useState('10.134.230.82')
-  const [port] = useState('3000')
   const [checking, setChecking] = useState(false)
   const [hasUpdate, setHasUpdate] = useState(false)
   // Updates install by themselves (when no run is working) unless turned off.
@@ -46,9 +43,6 @@ export default function SettingsPage() {
   useEffect(() => {
     loadSettings()
     loadWallpaper()
-    if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-      setNetworkIp(window.location.hostname)
-    }
     setLoading(false)
   }, [])
 
@@ -120,11 +114,6 @@ export default function SettingsPage() {
     }
   }
 
-  const handleCopy = (t) => {
-    navigator.clipboard.writeText(t)
-    toast.success('Copied')
-  }
-
   const handleCheckUpdate = async () => {
     setChecking(true)
     try {
@@ -177,8 +166,6 @@ export default function SettingsPage() {
     return <div className="flex h-64 items-center justify-center"><Spinner /></div>
   }
 
-  const localUrl = `http://localhost:${port}`
-  const networkUrl = `http://${networkIp}:${port}`
   const daysLeft = subscription?.daysLeft
   const isTrial = subscription?.mode === 'trial'
   const isActive = subscription?.mode === 'active'
@@ -254,27 +241,6 @@ export default function SettingsPage() {
         </div>
       </Card>
 
-      <Card>
-        <h2 className="font-display text-lg font-bold mb-2 flex items-center gap-2">
-          <span>🌐</span> የአውታረ መረብ
-        </h2>
-        <div className="space-y-3 p-4 bg-slate-50 dark:bg-slate-800/60 rounded-xl border">
-          <div className="flex items-center gap-4">
-            <span className="text-sm w-20">አካባቢያዊ</span>
-            <code className="flex-1 text-sm text-teal-600 font-mono">{localUrl}</code>
-            <Button variant="secondary" onClick={() => handleCopy(localUrl)}>ቅዳ</Button>
-          </div>
-          <div className="flex items-center gap-4">
-            <span className="text-sm w-20">አውታረ መረብ</span>
-            <code className="flex-1 text-sm text-teal-600 font-mono">{networkUrl}</code>
-            <Button variant="secondary" onClick={() => handleCopy(networkUrl)}>ቅዳ</Button>
-          </div>
-        </div>
-        <p className="text-xs text-slate-500 mt-3">
-          Pextran login is saved inside <strong>Brave password manager</strong> only.
-          Log in once in the agent Brave window; Brave will autofill next time.
-        </p>
-      </Card>
 
       {import.meta.env.VITE_DEMO !== '1' && <WafidCard />}
       {import.meta.env.VITE_DEMO !== '1' && <InsuranceCard />}
@@ -484,9 +450,8 @@ export default function SettingsPage() {
         </div>
       </Card>
 
-      {/* The Adal tour and who uses what — at the bottom of Settings */}
+      {/* The Adal tour — at the bottom of Settings */}
       <TutorCard />
-      <TutorAdoption />
     </div>
   )
 }

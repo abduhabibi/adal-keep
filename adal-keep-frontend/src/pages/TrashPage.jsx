@@ -47,7 +47,7 @@ export default function TrashPage() {
           {rows === null ? <p className="p-6 text-sm text-slate-400">Loading…</p>
             : list.length === 0 ? <p className="p-10 text-center text-sm text-slate-400">{rows.length ? 'Nothing matches.' : 'The Trash is empty.'}</p>
             : (
-              <table className="w-full text-sm">
+              <div className="overflow-x-auto"><table className="w-full text-sm">
                 <thead className="bg-slate-50 text-xs uppercase text-slate-500 dark:bg-slate-900/50">
                   <tr><th className="px-4 py-2 text-left">What</th><th className="px-4 py-2 text-left">Deleted by</th><th className="px-4 py-2 text-left">When</th><th className="px-4 py-2" /></tr>
                 </thead>
@@ -67,7 +67,7 @@ export default function TrashPage() {
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </table></div>
             )}
         </div>
       )}

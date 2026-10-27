@@ -1,6 +1,14 @@
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Syne:wght@600;700;800&display=swap');
 
 @tailwind base;
+
+/* A grid with no column count of its own (e.g. only "sm:grid-cols-2") is one
+   column that may shrink — on a phone a wide card must not push the page
+   wider than the screen. Tailwind's grid-cols-* utilities still win. */
+@layer base {
+  .grid { grid-template-columns: minmax(0, 1fr); }
+}
+
 @tailwind components;
 @tailwind utilities;
 
@@ -468,7 +476,12 @@ body {
 
 /* Content sits above the colours as dark glass (no live blur). */
 [data-theme="gradient"] .app-shell { background: transparent !important; position: relative; }
-[data-theme="gradient"] .app-shell > :not(.gradient-backdrop) { position: relative; z-index: 1; }
+[data-theme="gradient"] .app-shell > :not(.gradient-backdrop):not(.fixed) { position: relative; z-index: 1; }
+/* The sidebar: a floating menu on phones (keeps its own fixed place and
+   z-index), part of the row on PCs. */
+@media (min-width: 768px) {
+  [data-theme="gradient"] .app-shell > aside { position: relative; z-index: 1; }
+}
 [data-theme="gradient"] :is(.panel, .glass-panel, aside, nav, header),
 [data-theme="gradient"] [class*="dark:bg-slate-8"],
 [data-theme="gradient"] [class*="dark:bg-slate-9"],
@@ -583,3 +596,20 @@ body {
 .journey-pulse { stroke-dasharray: 10 90; animation: journey-run 1.6s linear infinite; filter: drop-shadow(0 0 4px rgba(167, 243, 208, .95)); }
 @keyframes journey-run { from { stroke-dashoffset: 100; } to { stroke-dashoffset: 0; } }
 @media (prefers-reduced-motion: reduce) { .journey-pulse { animation: none; stroke-dasharray: none; opacity: .5; } }
+
+/* Chat, like Telegram: a soft patterned wall behind the bubbles, and bubble tails. */
+.tg-wall {
+  background-color: #a7c08a;
+  background-image:
+    radial-gradient(circle at 20% 20%, rgba(255,255,255,.25) 0 2px, transparent 3px),
+    radial-gradient(circle at 70% 60%, rgba(255,255,255,.18) 0 2px, transparent 3px),
+    linear-gradient(135deg, #c5d6a0 0%, #95b98c 50%, #c2d29a 100%);
+  background-size: 46px 46px, 64px 64px, 100% 100%;
+}
+.dark .tg-wall, [data-theme="dark"] .tg-wall, [data-theme="gradient"] .tg-wall {
+  background-color: #0e1621;
+  background-image:
+    radial-gradient(circle at 20% 20%, rgba(255,255,255,.035) 0 2px, transparent 3px),
+    radial-gradient(circle at 70% 60%, rgba(255,255,255,.03) 0 2px, transparent 3px);
+  background-size: 46px 46px, 64px 64px;
+}

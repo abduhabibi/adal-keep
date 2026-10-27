@@ -39,16 +39,21 @@ function presence(lastSeen, now) {
 const sizeOf = (n) => (n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`)
 const preview = (m) => !m ? '' : m.deleted_at ? 'Message deleted' : m.kind === 'image' ? `📷 ${m.body || 'Picture'}` : m.kind === 'voice' ? '🎤 Voice message' : m.kind === 'file' ? `📎 ${m.file_name || 'File'}` : (m.body || '')
 
-const SIZES = { 8: 'h-8 w-8', 10: 'h-10 w-10' }
+const SIZES = { 8: 'h-8 w-8 text-xs', 10: 'h-10 w-10 text-sm', 12: 'h-[52px] w-[52px] text-lg' }
+// Like Telegram: every name has its own colour.
+const TONES = ['from-rose-400 to-red-500', 'from-orange-300 to-orange-500', 'from-violet-400 to-purple-600', 'from-lime-400 to-green-600',
+  'from-cyan-300 to-sky-500', 'from-sky-400 to-blue-600', 'from-pink-400 to-fuchsia-500']
+const toneOf = (name) => TONES[[...String(name || '?')].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % TONES.length]
 function Avatar({ name, kind, size = 10, online }) {
-  const bg = kind === 'everyone' ? 'bg-gradient-to-br from-teal-500 to-sky-500'
-    : kind === 'admin' ? 'bg-gradient-to-br from-violet-500 to-pink-500'
-    : kind === 'group' ? 'bg-gradient-to-br from-amber-500 to-orange-500' : 'bg-slate-400 dark:bg-slate-600'
-  const letter = kind === 'everyone' ? '👥' : kind === 'admin' ? 'A' : (name || '?').trim()[0]?.toUpperCase()
+  const bg = kind === 'everyone' ? 'from-teal-400 to-sky-500'
+    : kind === 'admin' ? 'from-violet-500 to-pink-500'
+    : kind === 'group' ? 'from-amber-400 to-orange-500' : toneOf(name)
+  const words = String(name || '?').trim().split(/\s+/)
+  const letter = kind === 'everyone' ? '👥' : kind === 'admin' ? 'A' : ((words[0]?.[0] || '?') + (words[1]?.[0] || '')).toUpperCase()
   return (
-    <span className={`relative flex ${SIZES[size] || SIZES[10]} shrink-0 items-center justify-center rounded-full text-sm font-bold text-white ${bg}`}>
+    <span className={`relative flex ${SIZES[size] || SIZES[10]} shrink-0 items-center justify-center rounded-full bg-gradient-to-b font-semibold text-white ${bg}`}>
       {letter}
-      {online && <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-white bg-emerald-500 dark:border-slate-900" />}
+      {online && <span className="absolute bottom-0.5 right-0.5 h-3.5 w-3.5 rounded-full border-2 border-white bg-sky-500 dark:border-[#17212b]" />}
     </span>
   )
 }
@@ -330,17 +335,18 @@ export default function ChatPage() {
   const byId = Object.fromEntries(msgs.map(m => [m.id, m]))
 
   return (
-    <div className="flex h-full min-h-0 bg-white dark:bg-slate-900" onClick={() => menu && setMenu(null)}>
+    <div className="flex h-full min-h-0 bg-white dark:bg-[#17212b]" onClick={() => menu && setMenu(null)}>
       <AskHost />
       {/* ======================================================= chat list */}
-      <aside className="flex w-80 shrink-0 flex-col border-r border-slate-200 dark:border-slate-700 min-h-0">
-        <div className="border-b border-slate-200 dark:border-slate-700 p-3 space-y-2">
+      {/* Phones: the list OR the open chat, like Telegram. PCs: both. */}
+      <aside className={`${current ? 'hidden md:flex' : 'flex'} w-full md:w-80 lg:w-96 shrink-0 flex-col border-r border-slate-200 dark:border-black/40 min-h-0 bg-white dark:bg-[#17212b]`}>
+        <div className="p-3 space-y-2">
           <div className="flex items-center justify-between">
-            <h1 className="text-lg font-bold">ቻት {unreadTotal > 0 && <span className="ml-1 rounded-full bg-teal-600 px-2 py-0.5 text-xs text-white">{unreadTotal}</span>}</h1>
-            <button type="button" onClick={() => setNewGroup(true)} className="rounded-full bg-teal-600 px-3 py-1 text-xs font-semibold text-white hover:bg-teal-700">+ New group</button>
+            <h1 className="text-xl font-bold">ቻት {unreadTotal > 0 && <span className="ml-1 rounded-full bg-sky-500 px-2 py-0.5 text-xs text-white align-middle">{unreadTotal}</span>}</h1>
+            <button type="button" onClick={() => setNewGroup(true)} className="rounded-full bg-sky-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-sky-600">✎ New group</button>
           </div>
           <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search chats, agencies, messages…"
-            className="w-full rounded-full border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500/40" />
+            className="w-full rounded-full border-0 bg-slate-100 dark:bg-[#242f3d] px-4 py-2 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-500/50" />
           <p className="truncate text-[11px] text-slate-400" title="This agency">You are: {me?.name}</p>
         </div>
         <div className="flex-1 overflow-y-auto">
@@ -375,7 +381,7 @@ export default function ChatPage() {
       </aside>
 
       {/* ========================================================= thread */}
-      <section className="relative flex min-w-0 flex-1 flex-col"
+      <section className={`relative ${current ? 'flex' : 'hidden md:flex'} min-w-0 flex-1 flex-col`}
         onDragOver={e => { if (current && Array.from(e.dataTransfer?.types || []).includes('Files')) { e.preventDefault(); setDragging(true) } }}
         onDragLeave={() => setDragging(false)}
         onDrop={e => { if (!current) return; e.preventDefault(); setDragging(false); takeFile(e.dataTransfer.files?.[0]) }}>
@@ -387,12 +393,14 @@ export default function ChatPage() {
           </div>
         ) : (
           <>
-            <header className="flex items-center gap-3 border-b border-slate-200 dark:border-slate-700 px-5 py-2.5">
+            <header className="flex items-center gap-3 border-b border-slate-200 bg-white px-3 py-2 dark:border-black/40 dark:bg-[#17212b] md:px-5">
+              <button type="button" onClick={() => setOpen(null)} title="Back to the chats"
+                className="md:hidden -ml-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-2xl text-slate-500 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/10">←</button>
               <button type="button" className="flex min-w-0 flex-1 items-center gap-3 text-left" onClick={() => isGroup && setInfo(v => !v)}>
                 <Avatar name={current.title} kind={kindOf(current)} online={current.kind === 'direct' && subtitle() === 'online'} />
                 <span className="min-w-0">
                   <span className="block truncate font-bold">{current.title}</span>
-                  <span className={`block truncate text-xs ${/typing|online/.test(subtitle()) ? 'text-teal-600' : 'text-slate-500'}`}>{subtitle()}</span>
+                  <span className={`block truncate text-xs ${/typing|online/.test(subtitle()) ? 'text-sky-500' : 'text-slate-500 dark:text-slate-400'}`}>{subtitle()}</span>
                 </span>
               </button>
               {isGroup && <button type="button" onClick={() => setInfo(v => !v)} className="rounded-lg px-2 py-1 text-xs text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800">Group info</button>}
@@ -408,8 +416,8 @@ export default function ChatPage() {
             )}
 
             <div className="flex min-h-0 flex-1">
-              <div ref={threadRef} className="flex-1 overflow-y-auto bg-[#eef3f1] px-4 py-3 dark:bg-slate-950/40">
-                {msgs.length === 0 && <p className="mt-10 text-center text-sm text-slate-400">No messages yet — say hello.</p>}
+              <div ref={threadRef} className="tg-wall flex-1 overflow-y-auto px-2 py-3 sm:px-6">
+                {msgs.length === 0 && <p className="mx-auto mt-10 w-fit rounded-2xl bg-black/25 px-4 py-2 text-center text-sm text-white">No messages yet — say hello.</p>}
                 {msgs.map((m, i) => {
                   const mine = m.sender_id === me?.id
                   const prev = msgs[i - 1]
@@ -418,13 +426,13 @@ export default function ChatPage() {
                   const quoted = m.reply_to ? byId[m.reply_to] : null
                   return (
                     <div key={m.id}>
-                      {newDay && <div className="my-3 text-center"><span className="rounded-full bg-white/80 px-3 py-0.5 text-[11px] text-slate-500 shadow-sm dark:bg-slate-800">{dayLabel(m.created_at)}</span></div>}
+                      {newDay && <div className="sticky top-1 z-[1] my-3 text-center"><span className="rounded-full bg-black/25 px-3 py-1 text-xs font-medium text-white dark:bg-black/40">{dayLabel(m.created_at)}</span></div>}
                       <div className={`mb-1 flex ${mine ? 'justify-end' : 'justify-start'}`}>
                         <div id={`msg-${m.id}`}
                           onContextMenu={e => { e.preventDefault(); if (!m.deleted_at) setMenu({ m, x: e.clientX, y: e.clientY }) }}
                           onDoubleClick={() => !m.deleted_at && act('reply', m)}
-                          className={`group relative max-w-[72%] rounded-2xl px-3 py-1.5 shadow-sm transition ${mine ? 'rounded-br-md bg-[#d9fdd3] dark:bg-teal-800' : 'rounded-bl-md bg-white dark:bg-slate-800'}`}>
-                          {showName && <p className="text-xs font-bold text-teal-700 dark:text-teal-300">{names[m.sender_id] || 'Agency'}</p>}
+                          className={`tg-bubble group relative max-w-[85%] sm:max-w-[65%] rounded-2xl px-2.5 pb-1 pt-1.5 shadow-sm transition ${mine ? 'tg-out rounded-br-[4px] bg-[#effdde] dark:bg-[#2b5278]' : 'tg-in rounded-bl-[4px] bg-white dark:bg-[#182533]'}`}>
+                          {showName && <p className="text-[13px] font-semibold text-sky-600 dark:text-sky-400">{names[m.sender_id] || 'Agency'}</p>}
                           {m.forwarded_from && !m.deleted_at && <p className="text-[11px] italic text-sky-700 dark:text-sky-300">Forwarded from {m.forwarded_from}</p>}
                           {quoted && !m.deleted_at && (
                             <button type="button" onClick={() => jumpTo(quoted.id)} className="mb-1 block w-full rounded-md border-l-4 border-teal-500 bg-black/5 px-2 py-1 text-left dark:bg-white/10">
@@ -449,13 +457,13 @@ export default function ChatPage() {
                                   <span className="min-w-0"><span className="block truncate text-sm font-semibold">{m.file_name}</span><span className="text-[11px] text-slate-500">{m.file_size ? sizeOf(m.file_size) : ''} · open</span></span>
                                 </a>
                               )}
-                              {m.body && <p translate="no" className="whitespace-pre-wrap break-words text-sm">{m.body}</p>}
+                              {m.body && <p translate="no" className="whitespace-pre-wrap break-words text-[15px] leading-snug text-slate-900 dark:text-slate-100">{m.body}</p>}
                             </>
                           )}
-                          <p className="mt-0.5 flex items-center justify-end gap-1 text-[10px] text-slate-500">
+                          <p className={`-mb-0.5 ml-3 flex items-center justify-end gap-1 text-[11px] ${mine ? 'text-emerald-600 dark:text-sky-200/70' : 'text-slate-400'}`}>
                             {m.edited_at && !m.deleted_at && <span>edited</span>}
                             <span>{timeOf(m.created_at)}</span>
-                            {mine && !m.deleted_at && <span className={m.id <= seenUpTo ? 'text-sky-500' : ''} title={m.id <= seenUpTo ? 'Seen' : 'Sent'}>{m.id <= seenUpTo ? '✓✓' : '✓'}</span>}
+                            {mine && !m.deleted_at && <span className="font-semibold tracking-[-0.2em]" title={m.id <= seenUpTo ? 'Seen' : 'Sent'}>{m.id <= seenUpTo ? '✓✓' : '✓'}</span>}
                           </p>
                           {!m.deleted_at && (
                             <button type="button" onClick={e => { e.stopPropagation(); setMenu({ m, x: e.clientX, y: e.clientY }) }}
@@ -481,7 +489,7 @@ export default function ChatPage() {
                 Adal blocked this agency from writing here. You can still write to Adal Keep.
               </p>
             ) : (
-              <div className="border-t border-slate-200 px-4 py-2.5 dark:border-slate-700">
+              <div className="border-t border-slate-200 bg-white px-2 py-2 dark:border-black/40 dark:bg-[#17212b] sm:px-4">
                 {(replyTo || editing) && (
                   <div className="mb-2 flex items-center gap-2 rounded-lg border-l-4 border-teal-500 bg-slate-100 px-3 py-1.5 text-xs dark:bg-slate-800">
                     <span className="min-w-0 flex-1 truncate">
@@ -509,7 +517,7 @@ export default function ChatPage() {
                 ) : (
                   <div className="flex items-end gap-2">
                     <button type="button" title="Send a picture or document" onClick={() => fileRef.current?.click()}
-                      className="h-10 w-10 shrink-0 rounded-full text-xl text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800">📎</button>
+                      className="h-11 w-11 shrink-0 rounded-full text-xl text-slate-400 hover:bg-slate-100 hover:text-sky-500 dark:hover:bg-white/10">📎</button>
                     <input ref={fileRef} type="file" className="hidden" onChange={e => { takeFile(e.target.files?.[0]); e.target.value = '' }} />
                     <textarea ref={inputRef} rows={1} value={text}
                       onChange={e => onType(e.target.value)}
@@ -520,14 +528,16 @@ export default function ChatPage() {
                       }}
                       onPaste={e => { const f = e.clipboardData?.files?.[0]; if (f) { e.preventDefault(); e.stopPropagation(); takeFile(f) } }}
                       placeholder={editing ? 'Edit the message…' : 'Write a message…'}
-                      className="max-h-40 min-h-[40px] flex-1 resize-none rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500/40 dark:border-slate-700 dark:bg-slate-800" />
+                      className="max-h-40 min-h-[44px] flex-1 resize-none rounded-3xl border-0 bg-slate-100 px-4 py-3 text-[15px] focus:outline-none dark:bg-[#242f3d]" />
                     {!text.trim() && !attach && !editing ? (
                       <button type="button" title="Record a voice message" onClick={startVoice}
-                        className="h-10 w-10 shrink-0 rounded-full bg-teal-600 text-lg text-white hover:bg-teal-700">🎤</button>
+                        className="h-11 w-11 shrink-0 rounded-full bg-sky-500 text-lg text-white shadow hover:bg-sky-600">🎤</button>
                     ) : (
-                      <button type="button" onClick={send} disabled={sending || hasLink}
-                        className="h-10 shrink-0 rounded-full bg-teal-600 px-5 text-sm font-semibold text-white hover:bg-teal-700 disabled:opacity-40">
-                        {sending ? '…' : editing ? 'Save' : 'Send'}
+                      <button type="button" onClick={send} disabled={sending || hasLink} title={editing ? 'Save' : 'Send'}
+                        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-sky-500 text-white shadow hover:bg-sky-600 disabled:opacity-40">
+                        {sending ? '…' : editing ? '✓' : (
+                          <svg viewBox="0 0 24 24" className="h-5 w-5 translate-x-[1px]" fill="currentColor" aria-hidden="true"><path d="M3.4 20.4 20.85 12.9a1 1 0 0 0 0-1.8L3.4 3.6a.99.99 0 0 0-1.38 1.17L4.3 11 13 12l-8.7 1-2.28 6.23a.99.99 0 0 0 1.38 1.17Z" /></svg>
+                        )}
                       </button>
                     )}
                   </div>
@@ -578,16 +588,16 @@ export default function ChatPage() {
 function ChatRow({ active, kind, title, sub, time, unread, online, onClick }) {
   return (
     <button type="button" onClick={onClick}
-      className={`flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors ${active ? 'bg-teal-50 dark:bg-teal-900/30' : 'hover:bg-slate-50 dark:hover:bg-slate-800'}`}>
-      <Avatar name={title} kind={kind} online={online} />
+      className={`flex w-full items-center gap-3 px-2.5 py-2 text-left transition-colors md:mx-1.5 md:w-[calc(100%-12px)] md:rounded-xl ${active ? 'bg-sky-500 text-white' : 'hover:bg-slate-100 dark:hover:bg-[#202b36]'}`}>
+      <Avatar name={title} kind={kind} online={online} size={12} />
       <span className="min-w-0 flex-1">
         <span className="flex items-baseline justify-between gap-2">
-          <span className="truncate text-sm font-semibold">{title}</span>
-          {time && <span className="shrink-0 text-[10px] text-slate-400">{shortWhen(time)}</span>}
+          <span className="truncate text-[15px] font-semibold">{title}</span>
+          {time && <span className={`shrink-0 text-xs ${active ? 'text-white/80' : 'text-slate-400'}`}>{shortWhen(time)}</span>}
         </span>
-        <span className="flex items-center justify-between gap-2">
-          <span translate="no" className="truncate text-xs text-slate-500">{sub}</span>
-          {Number(unread) > 0 && <span className="shrink-0 rounded-full bg-teal-600 px-1.5 text-[10px] font-bold text-white">{unread}</span>}
+        <span className="mt-0.5 flex items-center justify-between gap-2">
+          <span translate="no" className={`truncate text-sm ${active ? 'text-white/85' : 'text-slate-500 dark:text-slate-400'}`}>{sub}</span>
+          {Number(unread) > 0 && <span className={`shrink-0 min-w-[22px] rounded-full px-1.5 text-center text-xs font-semibold leading-[22px] ${active ? 'bg-white text-sky-600' : 'bg-sky-500 text-white'}`}>{unread}</span>}
         </span>
       </span>
     </button>

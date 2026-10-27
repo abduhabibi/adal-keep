@@ -188,3 +188,72 @@ create policy keep_calls_answer on public.keep_calls for update
   using (agency_id = auth.uid()) with check (agency_id = auth.uid());
 drop policy if exists keep_calls_clean on public.keep_calls;
 create policy keep_calls_clean on public.keep_calls for delete using (agency_id = auth.uid());
+
+-- ------------------------------------------------- files, pairing, live ---
+-- Each agency's secrets: the key its documents are encrypted with before
+-- they go to Telegram (Supabase keeps no files), and the name of its live
+-- channel (phones ↔ PC, instant). Only the agency's PC and phones read them.
+create table if not exists public.keep_secrets (
+  agency_id  uuid primary key references auth.users on delete cascade,
+  file_key   text not null,                 -- base64, AES-256-GCM
+  live       text not null,                 -- random channel name part
+  created_at timestamptz not null default now()
+);
+alter table public.keep_secrets add column if not exists bot text;   -- the storage bot (phones download with it)
+alter table public.keep_secrets enable row level security;
+drop policy if exists keep_secrets_read on public.keep_secrets;
+create policy keep_secrets_read on public.keep_secrets for select using (agency_id = public.keep_agency());
+drop policy if exists keep_secrets_write on public.keep_secrets;
+create policy keep_secrets_write on public.keep_secrets for all using (agency_id = auth.uid()) with check (agency_id = auth.uid());
+
+-- Pairing from anywhere: PC number + the agency's phone password (set on
+-- the main PC). Only a hash is kept; 10 wrong tries lock it for an hour.
+create table if not exists public.keep_pairing (
+  pc_number   text primary key,
+  agency_id   uuid not null references auth.users on delete cascade,
+  pass_hash   text not null,
+  fails       int not null default 0,
+  fail_since  timestamptz,
+  updated_at  timestamptz not null default now()
+);
+alter table public.keep_pairing enable row level security;
+drop policy if exists keep_pairing_owner on public.keep_pairing;
+create policy keep_pairing_owner on public.keep_pairing for select using (agency_id = auth.uid());
+
+create or replace function public.keep_set_phone_password(p_pc text, p_password text) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  if exists (select 1 from keep_devices where user_id = auth.uid()) then raise exception 'phones cannot do this'; end if;
+  if length(coalesce(p_password, '')) < 6 then raise exception 'use at least 6 characters'; end if;
+  delete from keep_pairing where agency_id = auth.uid() and pc_number <> p_pc;
+  insert into keep_pairing (pc_number, agency_id, pass_hash, fails, fail_since, updated_at)
+    values (p_pc, auth.uid(), crypt(p_password, gen_salt('bf')), 0, null, now())
+    on conflict (pc_number) do update set agency_id = excluded.agency_id, pass_hash = excluded.pass_hash, fails = 0, fail_since = null, updated_at = now()
+    where keep_pairing.agency_id = auth.uid();
+end $$;
+
+-- A new phone (signed in with its own new account) joins the agency.
+create or replace function public.keep_join(p_pc text, p_password text, p_name text) returns uuid
+language plpgsql security definer set search_path = public, extensions as $$
+declare r keep_pairing;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into r from keep_pairing where pc_number = p_pc;
+  if r is null then raise exception 'No Adal Keep with that PC number has phones turned on.'; end if;
+  if r.fails >= 10 and r.fail_since > now() - interval '1 hour' then raise exception 'Too many wrong passwords — try again in an hour.'; end if;
+  if r.pass_hash <> crypt(coalesce(p_password, ''), r.pass_hash) then
+    update keep_pairing set fails = case when fail_since > now() - interval '1 hour' then fails + 1 else 1 end,
+      fail_since = case when fail_since > now() - interval '1 hour' then fail_since else now() end where pc_number = p_pc;
+    raise exception 'Wrong password.';
+  end if;
+  insert into keep_devices (user_id, agency_id, name) values (auth.uid(), r.agency_id, left(coalesce(nullif(p_name, ''), 'Phone'), 60))
+    on conflict (user_id) do update set agency_id = excluded.agency_id, name = excluded.name, revoked = false;
+  update keep_pairing set fails = 0, fail_since = null where pc_number = p_pc;
+  return r.agency_id;
+end $$;
+grant execute on function public.keep_join(text, text, text) to authenticated;
+grant execute on function public.keep_set_phone_password(text, text) to authenticated;
+-- The PC may leave a big live answer for a phone in keep_calls.
+drop policy if exists keep_calls_owner_add on public.keep_calls;
+create policy keep_calls_owner_add on public.keep_calls for insert with check (agency_id = auth.uid());

@@ -140,16 +140,16 @@ export default function ProfilesPage() {
           <Button data-tour="new-profile" className="col-span-2 lg:col-span-1 w-full whitespace-nowrap" onClick={() => navigate('/profiles/new')}>
             + ፕሮፋይል አክል
           </Button>
-          <Button variant="secondary" className="w-full whitespace-nowrap" onClick={scanMusaned} disabled={scanning} title="Reads the Musaned Employment Requests list: anyone newly chosen gets her contract saved and a task; girls not in Adal Keep are added">
+          <Button variant="secondary" className="w-full whitespace-nowrap !px-2 text-xs sm:text-sm" onClick={scanMusaned} disabled={scanning} title="Reads the Musaned Employment Requests list: anyone newly chosen gets her contract saved and a task; girls not in Adal Keep are added">
             {scanning ? '🔎 Checking…' : '🔎 Check for new selections'}
           </Button>
-          <Button variant={selectedOnly ? 'primary' : 'secondary'} className="w-full whitespace-nowrap" onClick={() => updateFilter('chosen', selectedOnly ? '' : '1')} title="The girls an employer chose on Musaned">
+          <Button variant={selectedOnly ? 'primary' : 'secondary'} className="w-full whitespace-nowrap !px-2 text-xs sm:text-sm" onClick={() => updateFilter('chosen', selectedOnly ? '' : '1')} title="The girls an employer chose on Musaned">
             🤝 Selected ({chosenCount})
           </Button>
         </div>
       </div>
 
-      <div className="panel mb-5 grid gap-2 p-3 sm:grid-cols-[1fr_auto_auto_auto] items-center animate-fade-up">
+      <div className="panel mb-4 sm:mb-5 grid grid-cols-[1fr_auto] gap-2 p-2 sm:p-3 sm:grid-cols-[1fr_auto_auto_auto] items-center animate-fade-up">
         <Input
           placeholder="በስም፣ በስልክ ወይም በመታወቂያ ይፈልጉ..."
           value={query}
@@ -168,7 +168,7 @@ export default function ProfilesPage() {
         />
 
         <select
-          className="field"
+          className={`field col-span-2 sm:col-span-1 ${showFilters ? '' : 'hidden sm:block'}`}
           value={status}
           onChange={(e) => updateFilter('status', e.target.value)}
         >
@@ -181,7 +181,7 @@ export default function ProfilesPage() {
         </select>
 
         <select
-          className="field"
+          className={`field col-span-2 sm:col-span-1 ${showFilters ? '' : 'hidden sm:block'}`}
           value={brokerId}
           onChange={(e) => updateFilter('broker_id', e.target.value)}
         >
@@ -230,25 +230,29 @@ export default function ProfilesPage() {
           }
         />
       ) : (
-        <div key={step || 'all'} className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <div key={step || 'all'} className="grid grid-cols-1 gap-2 sm:gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {rows.map((p, i) => (
             <article
               key={p.id}
-              className="panel group cursor-pointer p-4 transition hover:-translate-y-0.5 hover:shadow-soft animate-fade-up"
+              className="panel group cursor-pointer px-3 py-2.5 sm:p-4 transition hover:-translate-y-0.5 hover:shadow-soft animate-fade-up"
               style={{ animationDelay: `${Math.min(i, 8) * 40}ms` }}
               onClick={() => navigate(`/profiles/${p.id}`)}
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <h3 className="truncate font-display text-lg font-bold text-slate-900">
+                  <h3 className="truncate font-display text-sm sm:text-lg font-bold text-slate-900">
                     {p.full_name}
                   </h3>
-                  <p className="mt-0.5 truncate text-sm text-slate-500">{p.phone_number || 'ስልክ የለም'}</p>
+                  <p className="mt-0.5 truncate text-xs sm:text-sm text-slate-500">
+                    {p.phone_number || 'ስልክ የለም'}
+                    {/* Phones: the passport on the same line — the card stays one short row. */}
+                    <span className="sm:hidden">{p.passport_number ? ` · ${p.passport_number}` : ''}{p.broker_name ? ` · ${p.broker_name}` : ''}</span>
+                  </p>
                 </div>
                 <StatusBadge status={p.status} />
               </div>
 
-              <dl className="mt-4 space-y-1.5 text-sm text-slate-600">
+              <dl className="hidden sm:block mt-4 space-y-1.5 text-sm text-slate-600">
                 <div className="flex justify-between gap-2">
                   <dt className="text-slate-400">ደላላ</dt>
                   <dd className="truncate font-medium">{p.broker_name || 'ያልተመደበ'}</dd>
@@ -267,7 +271,7 @@ export default function ProfilesPage() {
                 )}
               </dl>
 
-              <div className="mt-4 flex gap-2 border-t border-slate-100 dark:border-slate-700 pt-3">
+              <div className="hidden sm:flex mt-4 gap-2 border-t border-slate-100 dark:border-slate-700 pt-3">
                 <button
                   type="button"
                   className="btn-secondary flex-1 py-2 text-xs"

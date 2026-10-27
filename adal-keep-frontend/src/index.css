@@ -618,3 +618,9 @@ body {
 @media (max-width: 639px) {
   .run-actions > button { padding: 0.3rem 0.6rem; font-size: 11px; }
 }
+
+/* Phones: everything a size smaller (the app's sizes are in rem). */
+@media (max-width: 640px) {
+  html { font-size: 14px; }
+  .panel { border-radius: 14px; }
+}

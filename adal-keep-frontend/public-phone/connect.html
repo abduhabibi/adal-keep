@@ -24,6 +24,8 @@
   .spin { width: 34px; height: 34px; border: 4px solid var(--line); border-top-color: var(--teal); border-radius: 50%; animation: s 0.9s linear infinite; margin: 22px auto 8px; }
   @keyframes s { to { transform: rotate(360deg); } }
   .hidden { display: none; }
+  .field { width: 100%; margin-top: 10px; padding: 13px 12px; border: 2px solid var(--line); border-radius: 12px; font-size: 16px; background: transparent; color: var(--ink); }
+  .field:focus { outline: none; border-color: var(--teal); }
 </style>
 </head>
 <body>
@@ -32,11 +34,13 @@
     <h1>Adal Keep</h1>
 
     <section id="pair" class="hidden">
-      <p>የኮምፒውተሩን ቁጥር ያስገቡ<br>Type the PC's number</p>
-      <p style="font-size:12px">Settings → Main PC on the office PC shows it. The phone must be on the same Wi-Fi as that PC.</p>
+      <p>የኮምፒውተሩን ቁጥር እና የስልክ የይለፍ ቃል ያስገቡ<br>The PC's number and the agency's phone password</p>
+      <p style="font-size:12px">The office PC shows both in Settings → Main PC → “Pair phones from anywhere”. Any internet works — no office Wi-Fi needed.</p>
       <div class="digits" id="digits">
         <input inputmode="numeric" maxlength="1" autocomplete="off"><input inputmode="numeric" maxlength="1" autocomplete="off"><input inputmode="numeric" maxlength="1" autocomplete="off"><input inputmode="numeric" maxlength="1" autocomplete="off"><input inputmode="numeric" maxlength="1" autocomplete="off">
       </div>
+      <input id="pw" class="field" type="password" placeholder="Phone password" autocomplete="current-password">
+      <input id="who" class="field" type="text" placeholder="Your name (shown to the agency)" autocomplete="name">
       <button id="go" disabled>ክፈት · Open</button>
       <div class="msg" id="pairMsg"></div>
     </section>
@@ -46,12 +50,8 @@
       <p id="waitMsg">Connecting…</p>
     </section>
 
-    <section id="fail" class="hidden">
-      <p class="msg bad" id="failMsg"></p>
-      <button id="retry">↻ እንደገና · Try again</button>
-      <button id="repair" class="ghost">⇄ Pair with another PC</button>
-    </section>
   </main>
+<script src="config.js"></script>
 <script src="connect.js"></script>
 </body>
 </html>

@@ -448,11 +448,12 @@ router.get('/automations/:id', async (req, res) => {
  * Clicks and keys reach the tab as a person's own (the run never presses
  * Submit / Save itself; a person can, from here).
  */
-const liveTab = async (req) => {
-  const run = await req.app.locals.db('automation_queue').where('id', req.params.id).first('id', 'workflow_id').catch(() => null)
+export async function runTab(db, runId) {
+  const run = await db('automation_queue').where('id', runId).first('id', 'workflow_id').catch(() => null)
   if (!run) return null
   return findRunTab(await getBrowser().catch(() => null), run.id, run.workflow_id)
 }
+const liveTab = (req) => runTab(req.app.locals.db, req.params.id)
 
 router.get('/automations/:id/screen', async (req, res) => {
   const page = await liveTab(req)
@@ -468,26 +469,36 @@ router.get('/automations/:id/screen', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
+export const LIVE_KEYS = ['Enter', 'Backspace', 'Tab', 'Escape', 'ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Delete', 'PageDown', 'PageUp', 'Home', 'End', 'Space']
+/** One tap, key, scroll or move in a run's tab (the phone's / Admin's live view). */
+export async function liveInput(page, b = {}) {
+  if (b.kind === 'click') {
+    const [w, h] = await page.evaluate(() => [window.innerWidth, window.innerHeight])
+    const x = Math.max(0, Math.min(1, Number(b.x))) * w, y = Math.max(0, Math.min(1, Number(b.y))) * h
+    await page.mouse.click(x, y)
+  } else if (b.kind === 'type') {
+    await page.keyboard.type(String(b.text || '').slice(0, 500), { delay: 20 })
+  } else if (b.kind === 'key') {
+    const key = String(b.key || '')
+    if (!LIVE_KEYS.includes(key)) throw Object.assign(new Error('Unknown key'), { status: 400 })
+    await page.keyboard.press(key === 'Space' ? ' ' : key)
+  } else if (b.kind === 'scroll') {
+    await page.mouse.wheel({ deltaX: Math.max(-2000, Math.min(2000, Number(b.dx) || 0)), deltaY: Math.max(-3000, Math.min(3000, Number(b.dy) || 0)) })
+  } else if (b.kind === 'nav') {
+    let u = String(b.url || '').trim()
+    if (!/^https?:\/\//i.test(u)) u = /\s/.test(u) || !/\./.test(u) ? `https://www.google.com/search?q=${encodeURIComponent(u)}` : `https://${u}`
+    await page.goto(u, { waitUntil: 'domcontentloaded', timeout: 45000 })
+  } else if (b.kind === 'back') await page.goBack({ timeout: 20000 }).catch(() => {})
+  else if (b.kind === 'forward') await page.goForward({ timeout: 20000 }).catch(() => {})
+  else if (b.kind === 'reload') await page.reload({ waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {})
+  else throw Object.assign(new Error('Unknown input'), { status: 400 })
+}
+
 router.post('/automations/:id/input', async (req, res) => {
   const page = await liveTab(req)
   if (!page) return res.status(404).json({ error: 'This run has no open tab.' })
-  const b = req.body || {}
-  try {
-    if (b.kind === 'click') {
-      const [w, h] = await page.evaluate(() => [window.innerWidth, window.innerHeight])
-      const x = Math.max(0, Math.min(1, Number(b.x))) * w, y = Math.max(0, Math.min(1, Number(b.y))) * h
-      await page.mouse.click(x, y)
-    } else if (b.kind === 'type') {
-      await page.keyboard.type(String(b.text || '').slice(0, 200), { delay: 30 })
-    } else if (b.kind === 'key') {
-      const key = String(b.key || '')
-      if (!['Enter', 'Backspace', 'Tab', 'Escape', 'ArrowDown', 'ArrowUp', 'Delete'].includes(key)) return res.status(400).json({ error: 'Unknown key' })
-      await page.keyboard.press(key)
-    } else if (b.kind === 'scroll') {
-      await page.mouse.wheel({ deltaY: Math.max(-2000, Math.min(2000, Number(b.dy) || 0)) })
-    } else return res.status(400).json({ error: 'Unknown input' })
-    res.json({ ok: true })
-  } catch (e) { res.status(500).json({ error: e.message }) }
+  try { await liveInput(page, req.body || {}); res.json({ ok: true }) }
+  catch (e) { res.status(e.status || 500).json({ error: e.message }) }
 })
 
 router.post('/automations/:id/resume', async (req, res) => {

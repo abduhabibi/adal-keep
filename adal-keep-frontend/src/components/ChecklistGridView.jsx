@@ -1,7 +1,8 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import api from '../services/api'
+import { usePickFile } from './shared/PickFile'
 
 const ALL_FIELDS = [
   'Government ID', 'Passport', 'CV', 'Contract', 'Medical Report', 'Insurance', 'COC',
@@ -52,6 +53,8 @@ export default function ChecklistGridView({ checklist, onClose }) {
     return m
   })
   const [newCol, setNewCol] = useState({ label: '', type: 'tick' })
+  const target = useRef(null)   // { profileId, fieldId } the next picked file goes to
+  const pick = usePickFile({ onFiles: (files) => target.current && handleUpload(target.current.profileId, target.current.fieldId, files[0]) })
 
   useEffect(() => { loadData() }, [checklist])
 
@@ -266,11 +269,10 @@ export default function ChecklistGridView({ checklist, onClose }) {
                             ? <img src={`/api/files/${file.id}/thumbnail`} className="w-12 h-12 object-cover rounded mx-auto border border-slate-200" alt="" />
                             : <div className="w-12 h-12 bg-slate-100 dark:bg-slate-800 rounded mx-auto flex items-center justify-center text-slate-400">📄</div>
                         ) : fieldObj ? (
-                          <label className="flex flex-col items-center justify-center w-12 h-12 mx-auto border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-lg cursor-pointer hover:border-teal-400 hover:bg-teal-50">
+                          <button type="button" onClick={() => { target.current = { profileId: profile.id, fieldId: fieldObj.id }; pick.open() }}
+                            className="flex flex-col items-center justify-center w-12 h-12 mx-auto border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-lg cursor-pointer hover:border-teal-400 hover:bg-teal-50">
                             <span className="text-slate-300 text-lg">+</span>
-                            <input type="file" className="hidden" accept="image/*,application/pdf"
-                              onChange={(e) => { if (e.target.files[0]) handleUpload(profile.id, fieldObj.id, e.target.files[0]) }} />
-                          </label>
+                          </button>
                         ) : <span className="text-slate-300">—</span>}
                       </td>
                     )
@@ -281,6 +283,8 @@ export default function ChecklistGridView({ checklist, onClose }) {
           </tbody>
         </table>
       </div>
+
+      {pick.element}
 
       {manage && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-3" onClick={(e) => { if (e.target === e.currentTarget) setManage(false) }}>

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import api from '../services/api'
 import { useFileCapture } from '../context/FileCaptureContext'
+import { CameraShot } from './shared/PickFile'
 
 /**
  * Step 1 of a new profile: the passport. Drag it in (from the tray, the
@@ -18,7 +19,16 @@ export default function PassportFirst({ onRead, onSkip }) {
   const [problem, setProblem] = useState(null)  // { text, result }
   const [, tick] = useState(0)
   const inputRef = useRef(null)
+  const cameraRef = useRef(null)
+  const galleryRef = useRef(null)
   const busyRef = useRef(false)
+  const [camera, setCamera] = useState(false)
+  // Camera: the live camera here when the browser allows it (phone app,
+  // this PC's webcam), else the phone's own camera app.
+  const openCamera = () => {
+    if (navigator.mediaDevices?.getUserMedia && window.isSecureContext) setCamera(true)
+    else cameraRef.current?.click()
+  }
 
   const read = async (file) => {
     if (!file || busyRef.current) return
@@ -118,6 +128,22 @@ export default function PassportFirst({ onRead, onSkip }) {
           onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; read(f) }} />
       </div>
 
+      {!busy && (
+        <div className="grid grid-cols-3 gap-2">
+          {[['📷', 'Camera', openCamera], ['🖼️', 'Gallery', () => galleryRef.current?.click()], ['📁', 'Files', () => inputRef.current?.click()]].map(([icon, label, fn]) => (
+            <button key={label} type="button" onClick={fn}
+              className="flex flex-col items-center gap-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 py-3 text-sm font-semibold hover:border-teal-400 hover:bg-teal-50 dark:hover:bg-teal-900/20 active:scale-[.98]">
+              <span className="text-2xl">{icon}</span>{label}
+            </button>
+          ))}
+          <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden"
+            onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; read(f) }} />
+          <input ref={galleryRef} type="file" accept="image/*" className="hidden"
+            onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; read(f) }} />
+        </div>
+      )}
+      {camera && <CameraShot onShot={(f) => { setCamera(false); read(f) }} onClose={() => setCamera(false)} onFail={() => { setCamera(false); cameraRef.current?.click() }} />}
+
       {!busy && trayPics.length > 0 && (
         <div>
           <p className="mb-2 text-xs font-medium text-slate-500">In your tray — click the passport:</p>
@@ -156,3 +182,4 @@ export default function PassportFirst({ onRead, onSkip }) {
     </div>
   )
 }
+

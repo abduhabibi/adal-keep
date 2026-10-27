@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react'
+import { usePickFile } from '../shared/PickFile'
 import { useNavigate } from 'react-router-dom'
 import { createPortal } from 'react-dom'
 import toast from 'react-hot-toast'
@@ -43,6 +44,9 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
   const [isDownloadModalOpen, setIsDownloadModalOpen] = useState(false)
   const [isDragOver, setIsDragOver] = useState(false)
   const fileInputRef = useRef(null)
+  // Camera · Gallery · Files — one file goes through the crop, several go straight in.
+  const pick = usePickFile({ accept: 'image/*,application/pdf,video/*', multiple: true,
+    onFiles: (files) => { if (field.files?.length || files.length > 1) handleMultiUpload(files); else handleFileSelect(files[0]) } })
   
   // Counter to prevent flickering when dragging over child elements
   const dragCounter = useRef(0)
@@ -229,7 +233,7 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
           <button
             type="button"
             data-tour="field-upload"
-            onClick={() => multiInputRef.current?.click()}
+            onClick={pick.open}
             disabled={uploading}
             className="text-[10px] px-2 py-0.5 rounded-md bg-teal-50 text-teal-700 hover:bg-teal-100 dark:bg-teal-900/30 dark:text-teal-400 disabled:opacity-50"
             title="Add more files to this field"
@@ -356,30 +360,16 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
           isDragOver ? 'border-teal-500 bg-teal-50 dark:bg-teal-900/20' : 'border-slate-200 dark:border-slate-700 hover:border-teal-400 hover:bg-teal-50/50 dark:hover:bg-teal-900/10'
         }`}>
           <svg className={`h-8 w-8 transition-colors ${isDragOver ? 'text-teal-500' : 'text-slate-300 dark:text-slate-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
-          <label className="cursor-pointer text-xs font-semibold text-teal-700 dark:text-teal-400 hover:text-teal-800 dark:hover:text-teal-300">
-            {uploading ? 'Uploading...' : isDragOver ? 'Drop files here!' : 'Click to upload (multiple files allowed)'}
-            <input 
-              type="file" 
-              ref={fileInputRef} 
-              className="hidden" 
-              accept="image/*,application/pdf,video/*" 
-              multiple
-              onChange={(e) => {
-                if (e.target.files.length > 0) {
-                  if (e.target.files.length === 1) {
-                    handleFileSelect(e.target.files[0])
-                  } else {
-                    // For multiple files, upload one by one
-                    Array.from(e.target.files).forEach(file => handleFileSelect(file))
-                  }
-                }
-              }} 
-              disabled={uploading} 
-            />
-          </label>
+          <button type="button" onClick={pick.open} disabled={uploading}
+            className="cursor-pointer text-xs font-semibold text-teal-700 dark:text-teal-400 hover:text-teal-800 dark:hover:text-teal-300 disabled:opacity-60">
+            {uploading ? 'Uploading...' : isDragOver ? 'Drop files here!' : '📷 Camera · 🖼️ Gallery · 📁 Files'}
+          </button>
+          <input type="file" ref={fileInputRef} className="hidden" />
           <span className="text-[10px] text-slate-400 dark:text-slate-500">Max 10MB (Image or PDF)</span>
         </div>
       )}
+
+      {pick.element}
 
       {/* Upload Format Modal */}
       {cropFile && (

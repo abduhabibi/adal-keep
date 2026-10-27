@@ -14,7 +14,8 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import { pcNumber, isFollower, tailscaleInfo } from '../services/mainPC.js'
 import { getLanAddresses } from '../services/discovery.js'
-import { relayStatus, cloudOn, cloudStatus, makeDevice, listDevices, setDeviceRevoked, syncNow } from '../services/cloudSync.js'
+import { liveStatus } from '../services/liveChannel.js'
+import { setPhonePassword, phonePasswordSet, relayStatus, cloudOn, cloudStatus, makeDevice, listDevices, setDeviceRevoked, syncNow } from '../services/cloudSync.js'
 import { onThisPC } from './trash.js'
 
 const router = express.Router()
@@ -72,7 +73,15 @@ router.get('/mobile/cloud', async (req, res) => {
   let devices = []
   let error = cloudStatus.error
   try { if (await cloudOn(db)) devices = await listDevices(db) } catch (e) { error = error || e.message }
-  res.json({ ...cloudStatus, on: await cloudOn(db).catch(() => false), devices, error, relay: relayStatus })
+  const pairing = await phonePasswordSet(db).catch(() => null)
+  res.json({ ...cloudStatus, on: await cloudOn(db).catch(() => false), devices, error, relay: relayStatus, live: liveStatus, pcNumber: pcNumber(), pairing })
+})
+// The agency's phone password (pairing from anywhere). Set on the main PC itself.
+router.post('/mobile/phone-password', async (req, res) => {
+  if (!onThisPC(req)) return res.status(403).json({ error: 'Set the phone password on the main PC itself.' })
+  if (isFollower()) return res.status(403).json({ error: 'This PC follows the main PC — set it there.' })
+  try { await setPhonePassword(req.app.locals.db, pcNumber(), req.body?.password); res.json({ ok: true }) }
+  catch (e) { res.status(400).json({ error: /keep_set_phone_password|schema cache|PGRST/i.test(e.message) ? 'Run adal-admin/supabase/keep-sync.sql in Supabase once more first.' : e.message }) }
 })
 router.post('/mobile/cloud/sync', async (req, res) => {
   syncNow(req.app.locals.db).catch(() => {})

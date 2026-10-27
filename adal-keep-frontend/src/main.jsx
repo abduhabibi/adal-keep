@@ -32,9 +32,9 @@ async function boot() {
   await seedFiles(demoDb())
 }
 
-// Phone app (vite --mode phone, inside adal-phone): connect.html finds the PC
-// and opens it; when the PC cannot be reached it comes back here (?cloud=1)
-// and the same pages work on the online copy.
+// Phone app (vite --mode phone, inside adal-phone): connect.html pairs the
+// phone (once, from anywhere) and opens these same pages, which work only
+// through Supabase: live with the PC while it is on, else its online copy.
 async function phoneBoot() {
   const q = new URLSearchParams(location.search)
   if (q.has('cloud')) sessionStorage.setItem('adal-cloud', '1')
@@ -43,23 +43,25 @@ async function phoneBoot() {
     await new Promise(() => {})       // the page is leaving
   }
   window.__ADAL_CLOUD = true
-  const { startCloudDocuments } = await import('./cloud/adapter.js')
+  const { startCloudDocuments, startLive } = await import('./cloud/adapter.js')
   startCloudDocuments()
+  startLive().catch(() => {})
+  // A slim line at the bottom: is the office PC on (live) or not (online copy)?
   const bar = document.createElement('div')
   bar.id = 'adal-cloud-bar'
-  const OFF = '☁️ The PC is off — you see the online copy. Changes are done when the PC is on.'
-  const ON = '🌐 Connected to the office PC through the internet — everything works.'
-  bar.innerHTML = `<span>${OFF}</span> <button type="button">Try the PC</button>`
+  const OFF = '☁️ PC off — online copy; changes are done when it is on'
+  const ON = '⚡ Live with the office PC'
+  bar.innerHTML = `<span>${OFF}</span> <button type="button" title="Pair with another agency">⋯</button>`
+  bar.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:9999;background:#0f766e;color:#fff;font:11px/1.2 system-ui,sans-serif;padding:4px 10px calc(4px + env(safe-area-inset-bottom));display:flex;gap:8px;align-items:center;justify-content:space-between'
+  const btn = bar.querySelector('button')
+  btn.style.cssText = 'background:transparent;color:#fff;border:0;font-size:16px;line-height:1;padding:0 4px'
+  btn.onclick = () => { if (confirm('Pair this phone with another agency (PC number + phone password)?')) { sessionStorage.removeItem('adal-cloud'); location.replace('/connect.html?pair=1') } }
   window.addEventListener('adal-pc-online', (e) => {
     bar.querySelector('span').textContent = e.detail ? ON : OFF
     bar.style.background = e.detail ? '#4338ca' : '#0f766e'
   })
-  bar.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:9999;background:#0f766e;color:#fff;font:12px/1.3 system-ui,sans-serif;padding:6px 10px;display:flex;gap:8px;align-items:center;justify-content:space-between'
-  const btn = bar.querySelector('button')
-  btn.style.cssText = 'background:#fff;color:#0f766e;border:0;border-radius:6px;padding:4px 8px;font-weight:600;white-space:nowrap'
-  btn.onclick = () => { sessionStorage.removeItem('adal-cloud'); location.replace('/connect.html') }
   document.body.appendChild(bar)
-  document.body.style.paddingBottom = '40px'
+  document.body.style.paddingBottom = '26px'
 }
 
 // Adal Keep Admin (vite --mode admin, served by adal-admin on :4101): one

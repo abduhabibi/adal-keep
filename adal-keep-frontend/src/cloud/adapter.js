@@ -9,6 +9,8 @@
  *   uploads → the files go to online storage first, then a request
  * Documents open from online storage (/api/files/<id>/… links are rewritten).
  */
+import { connectLive, liveCall, liveReady, pcLive } from './live.js'
+
 const SAVED = 'adal-pc'
 // Adal Keep Admin opens one agency per window (window.__ADAL_CREDS): its own copies.
 const SUFFIX = typeof window !== 'undefined' && window.__ADAL_CREDS ? `-${window.__ADAL_CREDS.agency}` : ''
@@ -38,6 +40,14 @@ async function token() {
   if (!r.ok || !d.access_token) throw httpError(401, 'This phone was removed from the agency, or cannot sign in online.')
   sess = { access_token: d.access_token, refresh_token: d.refresh_token, expires_at: Date.now() + (Number(d.expires_in || 3600) - 60) * 1000 }
   return sess.access_token
+}
+
+export const getToken = () => token()
+
+async function gunzipJSON(b64) {
+  const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0))
+  const text = await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).text()
+  return JSON.parse(text)
 }
 
 async function rest(method, p, body, headers = {}) {
@@ -89,6 +99,15 @@ function withPending(key, data, updatedAt) {
 }
 
 async function answer(key) {
+  // Fast: the copy on the phone at once; the newer one is fetched behind it.
+  if (key in cache && !answer.busy?.has(key)) {
+    (answer.busy ||= new Set()).add(key)
+    fresh(key).catch(() => {}).finally(() => answer.busy.delete(key))
+    return cache[key]
+  }
+  return fresh(key)
+}
+async function fresh(key) {
   try {
     const rows = await rest('GET', `/rest/v1/keep_meta?key=eq.${encodeURIComponent(key)}&select=data,updated_at`)
     if (rows?.length) { const d = withPending(key, rows[0].data, rows[0].updated_at); remember(key, d); return d }
@@ -179,6 +198,7 @@ async function change(method, path, body) {
 // chat, everything. Off: the online copy above.
 let alive = { at: 0, on: false }
 export async function pcOnline() {
+  if (pcLive()) return true
   if (Date.now() - alive.at < 10000) return alive.on
   let on = false
   try {
@@ -247,8 +267,17 @@ export async function cloudAdapter(config) {
         return reply(200, { ok: true, success: true, queued: true, files: [], message: 'Uploaded — the PC files it in a moment.' })
       }
       let a = null
-      try { a = await relay(method, path + qs, method === 'get' ? undefined : sendBody, method === 'get' ? 12000 : 25000) }
-      catch (e) { if (method !== 'get') throw e }
+      // The live link first (a fraction of a second), else the slower way.
+      if (liveReady()) {
+        const m = await liveCall(method, path + qs, method === 'get' ? undefined : sendBody, method === 'get' ? 9000 : 20000)
+        if (m?.row) a = (await rest('GET', `/rest/v1/keep_calls?id=eq.${m.row}&select=status,answer,answer_bin,answer_type,answer_head,answer_code`))?.[0] || null
+        else if (m) a = { answer_code: m.code, answer_type: m.type, answer_head: m.head, answer: m.gz ? await gunzipJSON(m.gz) : m.data, answer_bin: m.bin }
+        if (!m && method !== 'get') throw httpError(504, 'The PC did not answer in time — it may still do it. Look again in a moment.')
+      }
+      if (!a) {
+        try { a = await relay(method, path + qs, method === 'get' ? undefined : sendBody, method === 'get' ? 12000 : 25000) }
+        catch (e) { if (method !== 'get') throw e }
+      }
       if (a) { const r = relayed(a, config); return reply(r.status, r.data, r.headers) }
       if (method !== 'get') throw httpError(504, 'The PC did not answer in time — it may still do it. Look again in a moment.')
       // A GET with no answer: the online copy below.
@@ -267,12 +296,35 @@ export async function cloudAdapter(config) {
 // ---------------------------------------------------------------- documents
 // <img src="/api/files/12/download">, <a href="/api/files/12/download"> … → a
 // short-lived link to the same file in online storage.
+// The agency's secrets: the documents' key and the Telegram bot that keeps them.
+let secretsP = null
+export const cloudSecrets = () => (secretsP ||= rest('GET', '/rest/v1/keep_secrets?select=file_key,live,bot').then(r => r?.[0] || null).catch(() => { secretsP = null; return null }))
+
+/** A document kept in Telegram: download, decrypt here (AES-GCM), a local link. */
+async function telegramFile(object, mimetype) {
+  const s = await cloudSecrets()
+  if (!s?.bot) return null
+  const fileId = object.split(':')[1]
+  const f = await (await fetch(`https://api.telegram.org/bot${s.bot}/getFile?file_id=${encodeURIComponent(fileId)}`)).json()
+  if (!f.ok) return null
+  const buf = new Uint8Array(await (await fetch(`https://api.telegram.org/file/bot${s.bot}/${f.result.file_path}`)).arrayBuffer())
+  if (buf[0] !== 65 || buf[1] !== 75 || buf[2] !== 49) return null          // "AK1"
+  const raw = Uint8Array.from(atob(s.file_key), ch => ch.charCodeAt(0))
+  const key = await crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['decrypt'])
+  // Node writes iv | tag | data; WebCrypto wants data | tag.
+  const iv = buf.slice(3, 15), tag = buf.slice(15, 31), data = buf.slice(31)
+  const joined = new Uint8Array(data.length + tag.length); joined.set(data); joined.set(tag, data.length)
+  const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, joined)
+  return URL.createObjectURL(new Blob([plain], { type: mimetype || 'application/octet-stream' }))
+}
+
 const signed = new Map()
 async function signedUrl(fileId) {
   if (signed.has(fileId)) return signed.get(fileId)
   const p = (async () => {
-    const rows = await rest('GET', `/rest/v1/keep_files?id=eq.${fileId}&select=object`)
+    const rows = await rest('GET', `/rest/v1/keep_files?id=eq.${fileId}&select=object,mimetype`)
     if (!rows?.[0]?.object) return null
+    if (rows[0].object.startsWith('tg:')) return telegramFile(rows[0].object, rows[0].mimetype)
     const c = cloudCreds()
     const s = await rest('POST', `/storage/v1/object/sign/keep/${rows[0].object}`, { expiresIn: 6 * 3600 })
     return s?.signedURL ? `${c.url}/storage/v1${s.signedURL.startsWith('/') ? '' : '/'}${s.signedURL}` : null
@@ -289,6 +341,14 @@ function fixNode(el) {
     el.dataset.cloudFixed = v
     signedUrl(m[1]).then(url => { if (url && el.getAttribute(attr) === v) el.setAttribute(attr, url) })
   }
+}
+
+/** The live link to the PC (phones; Admin windows use the slower way). */
+export async function startLive() {
+  const c = cloudCreds()
+  if (!c || !/^https:/.test(c.url)) return
+  const s = await cloudSecrets()
+  if (s?.live) connectLive({ url: c.url, anon: c.anon, live: s.live, token })
 }
 
 export function startCloudDocuments() {

@@ -1,4 +1,5 @@
 import paymentsRouter from './src/routes/payments.js'
+import zlib from 'zlib'
 import express from 'express'
 import musanedAccountsRouter, { accountsRouter } from './src/routes/musanedAccounts.js'
 import cors from 'cors'
@@ -20,6 +21,7 @@ import tutorRouter from './src/routes/tutor.js'
 import systemUpdateRouter, { startUpdateWatcher } from './src/routes/systemUpdate.js'
 import { startMedicalWatcher } from './src/services/medicalValidity.js'
 import { startCloudSync } from './src/services/cloudSync.js'
+import { startLiveChannel } from './src/services/liveChannel.js'
 import quickLinksRouter from "./src/routes/quickLinks.js"
 import tenancyRouter, { attachAuth } from "./src/routes/tenancy.js"
 import employeesRouter from "./src/routes/employees.js"
@@ -74,6 +76,18 @@ app.locals.db = db
 app.use(diagMiddleware)
 app.use(cors({ origin: true, credentials: true }))
 app.use(express.json())
+// Big answers (profile lists, journeys …) go gzipped: much faster over Wi-Fi and Tailscale.
+app.use((req, res, next) => {
+  if (!/\bgzip\b/.test(req.headers['accept-encoding'] || '')) return next()
+  const json = res.json.bind(res)
+  res.json = (body) => {
+    const text = JSON.stringify(body)
+    if (text === undefined || text.length < 16384 || res.headersSent) return json(body)
+    res.set({ 'Content-Type': 'application/json; charset=utf-8', 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding' })
+    return res.end(zlib.gzipSync(text, { level: 5 }))
+  }
+  next()
+})
 
 // Locked after the trial: every API call and stored document is refused.
 app.use(subscriptionGuard)
@@ -987,7 +1001,25 @@ function resolveFrontendDir() {
 const frontendDir = process.env.FRONTEND_DIR || resolveFrontendDir()
 
 if (frontendDir) {
-  app.use(express.static(frontendDir))
+  // Fast pages: the built files (their names change with every build) are
+  // kept by the browser for good and sent gzipped; index.html is always fresh.
+  const gz = new Map()
+  app.use('/assets', (req, res, next) => {
+    if (!/\bgzip\b/.test(req.headers['accept-encoding'] || '')) return next()
+    const file = path.join(frontendDir, 'assets', path.normalize(decodeURIComponent(req.path)).replace(/^([/\\])+/, ''))
+    if (!file.startsWith(path.join(frontendDir, 'assets')) || !/\.(js|css|svg|json)$/.test(file)) return next()
+    let hit = gz.get(file)
+    if (!hit) {
+      try { hit = { body: zlib.gzipSync(fs.readFileSync(file), { level: 9 }), type: file.endsWith('.css') ? 'text/css' : file.endsWith('.svg') ? 'image/svg+xml' : file.endsWith('.json') ? 'application/json' : 'text/javascript' } }
+      catch { return next() }
+      gz.set(file, hit)
+    }
+    res.set({ 'Content-Encoding': 'gzip', 'Content-Type': `${hit.type}; charset=utf-8`, 'Cache-Control': 'public, max-age=31536000, immutable', Vary: 'Accept-Encoding' })
+    res.end(hit.body)
+  })
+  app.use(express.static(frontendDir, {
+    setHeaders: (res, file) => res.setHeader('Cache-Control', /[\\/]assets[\\/]/.test(file) ? 'public, max-age=31536000, immutable' : 'no-cache'),
+  }))
   console.log(`🖥️  Serving UI from ${frontendDir}`)
 } else {
   console.warn('⚠️  No built UI found — run "npm run build" inside adal-keep-frontend')
@@ -1038,6 +1070,7 @@ initSystem().then(() => {
     startUpdateWatcher(app.locals.db) // a new version installs by itself when no run is working
     startMedicalWatcher(app.locals.db) // the medical's battery: warnings as it runs out
     startCloudSync(app.locals.db)      // the online copy phones use when this PC is off
+    startLiveChannel(app.locals.db)    // phones ↔ this PC, instant (Supabase Realtime)
     if (isFollower()) {
       // Another PC is the main PC: all work happens there, nothing here.
       console.log(`🔗 This PC follows the main PC at ${mainURL()} — no automations, no discovery here`)

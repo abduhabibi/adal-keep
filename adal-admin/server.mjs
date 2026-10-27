@@ -243,7 +243,7 @@ async function agencyCall(agency, method, p, body, ms = 25000) {
 // that agency's rows (the window names it as its apikey), with the service key.
 const KEEP_APP = path.join(HERE, 'keep-app')
 const AGENCY_PORT = PORT + 1
-const SB_TABLES = /^(keep_meta|keep_files|keep_calls|keep_changes)$/
+const SB_TABLES = /^(keep_meta|keep_files|keep_calls|keep_changes|keep_secrets)$/
 const TYPES = { '.js': 'text/javascript', '.css': 'text/css', '.html': 'text/html; charset=utf-8', '.png': 'image/png', '.ico': 'image/x-icon', '.svg': 'image/svg+xml', '.webp': 'image/webp', '.json': 'application/json', '.woff2': 'font/woff2', '.webmanifest': 'application/manifest+json' }
 let knownAgencies = { at: 0, ids: new Set() }
 async function agencyExists(id) {

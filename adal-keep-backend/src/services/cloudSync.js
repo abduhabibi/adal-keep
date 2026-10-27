@@ -17,6 +17,10 @@
 import crypto from 'crypto'
 import { me as joinAgency, chatConfigured, cloudCall, cloudAuth, cloudAgencyId, cloudConfig } from './chatCloud.js'
 import { isFollower } from './mainPC.js'
+import { tgReady, tgPut, tgDelete, TG_MAX_DOWNLOAD, findStorageChat } from './tgStore.js'
+import fs from 'fs'
+import path from 'path'
+import { fileURLToPath } from 'url'
 
 const PORT = () => Number(process.env.PORT) || 4000
 const EVERY_MS = 60 * 1000
@@ -83,6 +87,8 @@ async function applyChangesNow(db, agency) {
           form.append(f.field || 'file', new Blob([Buffer.from(await res.arrayBuffer())], { type: f.mimetype || 'application/octet-stream' }), f.name || 'file')
         }
         r = await local('POST', p.path, { body: form, headers: who })
+        // Filed on this PC: the phone's upload leaves Supabase storage.
+        if (r.ok) for (const f of p.files || []) await cloudCall(db, 'DELETE', `/storage/v1/object/keep/${f.object}`).catch(() => {})
       } else {
         r = await local(String(p.method || 'POST').toUpperCase(), p.path, { body: p.body, headers: who })
       }
@@ -174,8 +180,37 @@ async function pushAnswers(db, agency, state) {
   }
 }
 
+// ------------------------------------------------------------ secrets
+/** The agency's file key, live channel name and storage bot (made once). */
+let secretsCache = null
+export async function agencySecrets(db, agency) {
+  if (secretsCache?.agency_id === agency && secretsCache.bot === (process.env.TELEGRAM_BOT_TOKEN || null)) return secretsCache
+  let [row] = await cloudCall(db, 'GET', `/rest/v1/keep_secrets?agency_id=eq.${agency}&select=agency_id,file_key,live,bot`)
+  const bot = process.env.TELEGRAM_BOT_TOKEN || null
+  if (!row) {
+    row = { agency_id: agency, file_key: crypto.randomBytes(32).toString('base64'), live: crypto.randomBytes(18).toString('base64url'), bot }
+    await cloudCall(db, 'POST', '/rest/v1/keep_secrets', row, { headers: { Prefer: 'return=minimal' } })
+  } else if (row.bot !== bot) {
+    await cloudCall(db, 'PATCH', `/rest/v1/keep_secrets?agency_id=eq.${agency}`, { bot }, { headers: { Prefer: 'return=minimal' } })
+    row.bot = bot
+  }
+  secretsCache = row
+  return row
+}
+
 // ------------------------------------------------------------ 3. documents
 async function pushFiles(db, agency, state) {
+  // Documents go to Telegram (encrypted) once it is set up; the copies in
+  // Supabase storage are moved there and removed — Supabase keeps no files.
+  const tg = tgReady()
+  if (tg && state.get('storage') !== 'tg') {
+    await db('cloud_sync').where('key', 'like', 'file:%').del()
+    await setState(db, 'storage', 'tg')
+    for (const k of [...state.keys()]) if (k.startsWith('file:')) state.delete(k)
+    console.log('[cloud] documents now go to Telegram — moving them out of Supabase')
+  }
+  const secret = tg ? await agencySecrets(db, agency) : null
+  const LIMIT = tg ? TG_MAX_DOWNLOAD : MAX_FILE
   const rows = await db('files').join('profile_fields', 'files.profile_field_id', 'profile_fields.id')
     .select('files.id', 'files.original_name', 'files.mimetype', 'files.size', 'files.created_at', 'files.updated_at',
       'profile_fields.profile_id', 'profile_fields.name as field')
@@ -185,14 +220,24 @@ async function pushFiles(db, agency, state) {
   for (const f of todo.slice(0, FILES_PER_ROUND)) {
     const sig = `${f.size}|${f.updated_at}`
     try {
-      if (Number(f.size) > MAX_FILE) { await setState(db, `file:${f.id}`, sig); continue }
+      if (Number(f.size) > LIMIT) { await setState(db, `file:${f.id}`, sig); continue }
       const r = await local('GET', `/files/${f.id}/download`)
       if (!r.ok) { await setState(db, `file:${f.id}`, sig); continue }   // not on disk: nothing to copy
       const buf = Buffer.from(await r.arrayBuffer())
       const safe = String(f.original_name || 'file').replace(/[^\w.\-]+/g, '_').slice(-80)
-      const object = `${agency}/${f.profile_id}/${f.id}-${safe}`
-      await cloudCall(db, 'POST', `/storage/v1/object/keep/${object}`, buf,
-        { headers: { 'Content-Type': f.mimetype || 'application/octet-stream', 'x-upsert': 'true' } })
+      const [old] = await cloudCall(db, 'GET', `/rest/v1/keep_files?agency_id=eq.${agency}&id=eq.${f.id}&select=object`).catch(() => []) || []
+      let object
+      if (tg) object = await tgPut(buf, `${f.id}-${safe}`, secret.file_key)
+      else {
+        object = `${agency}/${f.profile_id}/${f.id}-${safe}`
+        await cloudCall(db, 'POST', `/storage/v1/object/keep/${object}`, buf,
+          { headers: { 'Content-Type': f.mimetype || 'application/octet-stream', 'x-upsert': 'true' } })
+      }
+      // The older copy (Supabase storage, or an older Telegram post) goes.
+      if (old?.object && old.object !== object) {
+        if (old.object.startsWith('tg:')) await tgDelete(old.object)
+        else await cloudCall(db, 'DELETE', `/storage/v1/object/keep/${old.object}`).catch(() => {})
+      }
       await upsert(db, 'keep_files', [{
         agency_id: agency, id: f.id, profile_id: f.profile_id, field: f.field, name: f.original_name,
         mimetype: f.mimetype, size: buf.length, object, created_at: f.created_at || null, updated_at: new Date().toISOString(), deleted: false,
@@ -211,7 +256,8 @@ async function pushFiles(db, agency, state) {
     const id = key.slice(5)
     try {
       const [row] = await cloudCall(db, 'GET', `/rest/v1/keep_files?agency_id=eq.${agency}&id=eq.${id}&select=object`) || []
-      if (row?.object) await cloudCall(db, 'DELETE', `/storage/v1/object/keep/${row.object}`).catch(() => {})
+      if (row?.object?.startsWith('tg:')) await tgDelete(row.object)
+      else if (row?.object) await cloudCall(db, 'DELETE', `/storage/v1/object/keep/${row.object}`).catch(() => {})
       await cloudCall(db, 'DELETE', `/rest/v1/keep_files?agency_id=eq.${agency}&id=eq.${id}`, undefined, { headers: { Prefer: 'return=minimal' } })
     } catch {}
     await db('cloud_sync').where({ key }).del()
@@ -269,6 +315,7 @@ export function startCloudSync(db) {
   setTimeout(tick, 45000)
   timer = setInterval(tick, EVERY_MS)
   startRelay(db)
+  watchStorageChat()
   console.log('☁️  Online copy for phones: synced every minute (when on)')
 }
 export const syncNow = (db) => syncOnce(db)
@@ -314,9 +361,20 @@ const working = new Set()
 let relayTimer = null, lastBeat = 0, lastClean = 0, deviceNames = new Map(), namesAt = 0
 
 async function answerCall(db, agency, c) {
-  const patch = { status: 'done', answered_at: new Date().toISOString() }
+  let patch = { status: 'done', answered_at: new Date().toISOString() }
   try {
     if (Date.now() - new Date(c.created_at).getTime() > RELAY_LATE_MS) { patch.status = 'late'; return }
+    patch = { ...patch, ...(await runCall(db, agency, c)) }
+  } finally {
+    await cloudCall(db, 'PATCH', `/rest/v1/keep_calls?id=eq.${c.id}`, patch, { headers: { Prefer: 'return=minimal' } }).catch(() => {})
+    relayStatus.answered++
+  }
+}
+
+/** One phone/Admin call on this PC's own API → { answer_code, answer_type, answer_head, answer | answer_bin }. */
+export async function runCall(db, agency, c) {
+  const patch = {}
+  try {
     const method = String(c.method || 'GET').toUpperCase()
     const p = String(c.path || '')
     if (!p.startsWith('/') || p.includes('..')) throw Object.assign(new Error('bad path'), { code: 400 })
@@ -344,10 +402,8 @@ async function answerCall(db, agency, c) {
   } catch (e) {
     patch.answer_code = e.code || 500
     patch.answer = { error: e.message }
-  } finally {
-    await cloudCall(db, 'PATCH', `/rest/v1/keep_calls?id=eq.${c.id}`, patch, { headers: { Prefer: 'return=minimal' } }).catch(() => {})
-    relayStatus.answered++
   }
+  return patch
 }
 
 async function relayOnce(db) {
@@ -392,4 +448,37 @@ export function startRelay(db) {
     relayTimer = setTimeout(loop, wait)
   }
   relayTimer = setTimeout(loop, 15000)
+}
+
+// ------------------------------------------------------------ pairing
+/** Phones pair from anywhere: this PC's number + the agency's phone password. */
+export async function setPhonePassword(db, pc, password) {
+  await cloudCall(db, 'POST', '/rest/v1/rpc/keep_set_phone_password', { p_pc: String(pc), p_password: String(password || '') })
+}
+export async function phonePasswordSet(db) {
+  const agency = await cloudAgencyId(db)
+  const rows = await cloudCall(db, 'GET', `/rest/v1/keep_pairing?agency_id=eq.${agency}&select=pc_number,updated_at`).catch(() => [])
+  return rows?.[0] || null
+}
+
+// ------------------------------------------------------------ Telegram channel
+/**
+ * The bot is set (TELEGRAM_BOT_TOKEN) but not its channel yet: once someone
+ * adds the bot to a private channel and writes in it, that channel is saved
+ * in .env and documents start going there.
+ */
+function watchStorageChat() {
+  if (!process.env.TELEGRAM_BOT_TOKEN || process.env.TELEGRAM_STORAGE_CHAT) return
+  const envFile = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '.env')
+  const t = setInterval(async () => {
+    try {
+      const c = await findStorageChat()
+      if (!c) return
+      clearInterval(t)
+      process.env.TELEGRAM_STORAGE_CHAT = c.id
+      const lines = (fs.existsSync(envFile) ? fs.readFileSync(envFile, 'utf8') : '').split('\n').filter(l => !/^TELEGRAM_STORAGE_CHAT=/.test(l))
+      fs.writeFileSync(envFile, [...lines.filter((l, i) => l.trim() || i < lines.length - 1), `TELEGRAM_STORAGE_CHAT=${c.id}`, ''].join('\n'))
+      console.log(`[cloud] Telegram channel "${c.title}" saved — documents go there from now on`)
+    } catch (e) { console.warn('[cloud] Telegram channel:', e.message) }
+  }, 30000)
 }

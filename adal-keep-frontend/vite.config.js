@@ -26,6 +26,13 @@ export default defineConfig(({ mode }) => ({
         const out = path.resolve('../adal-phone/www')
         for (const f of fs.readdirSync('public-phone')) fs.copyFileSync(path.join('public-phone', f), path.join(out, f))
         for (const f of ['sw.js', 'manifest.webmanifest']) fs.rmSync(path.join(out, f), { force: true })
+        // The online address (Supabase URL + its public anon key) and where
+        // new apps are published — from the backend's .env, never committed.
+        const env = Object.fromEntries((fs.existsSync('../adal-keep-backend/.env') ? fs.readFileSync('../adal-keep-backend/.env', 'utf8') : '')
+          .split('\n').map(l => l.match(/^\s*([A-Z_]+)\s*=\s*(.*)\s*$/)).filter(Boolean).map(m => [m[1], m[2].replace(/^['"]|['"]$/g, '')]))
+        const cfg = { url: (env.SUPABASE_URL || '').replace(/\/+$/, ''), anon: env.SUPABASE_ANON_KEY || '',
+          updates: 'https://raw.githubusercontent.com/abduhabibi/adal-keep/release/adal-keep-backend/src/phone-app' }
+        fs.writeFileSync(path.join(out, 'config.js'), `window.ADAL_CLOUD_CONFIG = ${JSON.stringify(cfg)}\n`)
       },
     },
   ].filter(Boolean),

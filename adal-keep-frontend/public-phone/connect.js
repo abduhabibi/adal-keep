@@ -1,93 +1,64 @@
 /*
- * Adal Keep phone app — the start screen (connect.html; the app itself is the
- * same Adal Keep pages, built in: index.html).
- *   1. First time: the person types the PC's 5-digit number. The phone asks
- *      the office Wi-Fi "where is Adal Keep?" (UDP, the same question Adal
- *      Keep PCs ask), and the PC with that number answers with its addresses.
- *   2. Every time after: the app opens that PC — on the office Wi-Fi by its
- *      Wi-Fi address, from anywhere else by its Tailscale address.
- * Everything else (profiles, runs, files) is the PC's own Adal Keep page.
+ * Adal Keep phone app — the start screen (connect.html). The app itself is
+ * the same Adal Keep pages, built in (index.html), working through Supabase
+ * only: the agency's online copy, and its PC live while that PC is on.
+ *
+ * Pairing, from anywhere: the PC's 5-digit number + the agency's phone
+ * password (set on the main PC: Settings → Main PC). The phone makes its own
+ * online account and joins the agency (Supabase keep_join) — the PC does not
+ * need to be on, and no Wi-Fi is shared.
+ * config.js (written when the app is built) gives the Supabase address.
  */
 const KEY = 'adal-pc'
+const CFG = window.ADAL_CLOUD_CONFIG || {}
 const $ = (id) => document.getElementById(id)
-const show = (id) => ['pair', 'wait', 'fail'].forEach(s => $(s).classList.toggle('hidden', s !== id))
+const show = (id) => ['pair', 'wait'].forEach(s => $(s).classList.toggle('hidden', s !== id))
 const saved = () => { try { return JSON.parse(localStorage.getItem(KEY) || 'null') } catch { return null } }
 
-async function getJSON(url, opts = {}, ms = 3000) {
-  const c = new AbortController()
-  const t = setTimeout(() => c.abort(), ms)
-  try {
-    const r = await fetch(url, { ...opts, signal: c.signal, headers: { 'Content-Type': 'application/json' } })
-    const body = await r.json().catch(() => ({}))
-    return { ok: r.ok, status: r.status, body }
-  } catch { return { ok: false, status: 0, body: {} } } finally { clearTimeout(t) }
+async function sb(path, { method = 'POST', body, token } = {}) {
+  const r = await fetch(`${CFG.url}${path}`, {
+    method,
+    headers: { apikey: CFG.anon, 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  })
+  const t = await r.text()
+  let j = null; try { j = t ? JSON.parse(t) : null } catch { j = t }
+  if (!r.ok) throw new Error(j?.message || j?.msg || j?.error_description || `Error ${r.status}`)
+  return j
+}
+const rand = (n) => Array.from(crypto.getRandomValues(new Uint8Array(n)), b => b.toString(16).padStart(2, '0')).join('')
+
+async function pair(number, password, name) {
+  // This phone's own online account …
+  const creds = { email: `phone-${rand(5)}@agency.adalkeep.app`, password: rand(24) }
+  let s = await sb('/auth/v1/signup', { body: creds })
+  if (!s?.access_token) s = await sb('/auth/v1/token?grant_type=password', { body: creds })
+  // … which the agency's password lets into the agency.
+  const agency = await sb('/rest/v1/rpc/keep_join', { body: { p_pc: number, p_password: password, p_name: name }, token: s.access_token })
+  const pc = { number, name: name || null, cloud: { url: CFG.url, anon: CFG.anon, email: creds.email, password: creds.password, agency, device: s.user?.id || null } }
+  localStorage.setItem(KEY, JSON.stringify(pc))
+  return pc
 }
 
-/** Adal Keep PCs on this Wi-Fi: [{url, name}] (native UDP broadcast). */
-async function discover() {
-  const plugin = window.Capacitor?.Plugins?.AdalDiscovery
-  if (!plugin) return []
-  try { return (await plugin.find({ timeoutMs: 2500 })).servers || [] } catch { return [] }
-}
-
-/** Find the PC with this number on the Wi-Fi; returns its info or null. */
-async function pairOnWifi(number) {
-  const servers = await discover()
-  for (const s of servers) {
-    const old = saved()
-    const device = old?.cloud ? null : `Phone ${new Date().toLocaleDateString('en-GB')}`
-    const r = await getJSON(`${s.url}/api/mobile/pair`, { method: 'POST', body: JSON.stringify({ number, device }) }, 15000)
-    if (r.ok && r.body.ok) {
-      // r.body.cloud: this phone's own online account — the app works from the
-      // agency's online copy when the PC cannot be reached.
-      const pc = { number, name: r.body.name, lan: [s.url, ...(r.body.lan || [])].filter((v, i, a) => a.indexOf(v) === i), tailscale: r.body.tailscale || null,
-        cloud: r.body.cloud || (old?.number === number ? old.cloud : null) || null }
-      localStorage.setItem(KEY, JSON.stringify(pc))
-      return { pc }
-    }
-    if (r.status === 403 || r.status === 429) return { error: r.body.error || 'Wrong number.' }
-  }
-  return { error: servers.length ? 'No Adal Keep PC with that number on this Wi-Fi.' : 'No Adal Keep PC found on this Wi-Fi. Connect the phone to the office Wi-Fi (the same one as the PC).' }
-}
-
-async function open(pc) {
+function open() {
   show('wait')
-  $('waitMsg').textContent = `${pc.name || 'Adal Keep'} · connecting…`
-  const tryUrls = async (urls) => {
-    for (const u of urls.filter(Boolean)) if ((await getJSON(`${u}/api/mobile/ping`, {}, 2500)).ok) return u
-    return null
-  }
-  // Office Wi-Fi first, then Tailscale (anywhere), then look again on the
-  // Wi-Fi (the PC's Wi-Fi address may have changed).
-  let url = await tryUrls(pc.lan || []) || await tryUrls([pc.tailscale])
-  if (!url) {
-    const again = await pairOnWifi(pc.number)
-    if (again.pc) url = await tryUrls([...(again.pc.lan || []), again.pc.tailscale])
-  }
-  if (url) { await updateFrom(url); location.href = `${url}/`; return }
-  // The PC is off or far away: the built-in Adal Keep on the online copy.
-  if (pc.cloud) { location.replace('/?cloud=1'); return }
-  show('fail')
-  $('failMsg').innerHTML = `Cannot reach <b>${pc.name || 'the PC'}</b>.<br><br>In the office: connect to the office Wi-Fi.<br>Away: open the Tailscale app and turn it on.<br>The PC must be on.`
+  $('waitMsg').textContent = 'Opening Adal Keep…'
+  location.replace('/?cloud=1')
 }
 
-/**
- * The PC hands out the newest Adal Keep app (it updates itself from GitHub).
- * A newer one is downloaded and Android's installer opens ("Update?").
- * Asked again at most every 6 hours if the person said no.
- */
-async function updateFrom(base) {
+/** The newest app is published with Adal Keep itself (GitHub); Android asks "Update?". */
+async function checkUpdate() {
   const plugin = window.Capacitor?.Plugins?.AdalDiscovery
-  if (!plugin?.getVersion) return
+  if (!plugin?.getVersion || !CFG.updates) return
   try {
-    const last = Number(localStorage.getItem('adal-update-asked') || 0)
+    if (Date.now() - Number(localStorage.getItem('adal-update-asked') || 0) < 6 * 3600 * 1000) return
     const mine = await plugin.getVersion()
-    const r = await getJSON(`${base}/api/mobile/app`, {}, 4000)
-    if (!r.ok || !(r.body.versionCode > mine.versionCode)) return
-    if (Date.now() - last < 6 * 3600 * 1000) return
+    const v = await (await fetch(`${CFG.updates}/version.json`, { cache: 'no-store' })).json()
+    if (!(v.versionCode > mine.versionCode)) return
     localStorage.setItem('adal-update-asked', String(Date.now()))
-    $('waitMsg').textContent = `Updating Adal Keep to ${r.body.versionName || 'the new version'}…`
-    const res = await plugin.installUpdate({ url: `${base}/api/mobile/app.apk` })
+    show('wait')
+    $('waitMsg').textContent = `Updating Adal Keep to ${v.versionName || 'the new version'}…`
+    const res = await plugin.installUpdate({ url: `${CFG.updates}/AdalKeep.apk` })
     if (res?.needsPermission) {
       $('waitMsg').textContent = 'Allow "Install unknown apps" for Adal Keep, then come back — the update installs next time.'
       localStorage.removeItem('adal-update-asked')
@@ -101,35 +72,34 @@ function startPair(msg = '') {
   $('pairMsg').textContent = msg
   $('pairMsg').className = 'msg' + (msg ? ' bad' : '')
   const boxes = [...$('digits').querySelectorAll('input')]
-  const value = () => boxes.map(b => b.value).join('')
+  const number = () => boxes.map(b => b.value).join('')
+  const ready = () => { $('go').disabled = number().length !== 5 || $('pw').value.length < 6 }
   boxes.forEach((b, i) => {
-    b.value = ''
     b.oninput = () => {
       b.value = b.value.replace(/\D/g, '').slice(-1)
       if (b.value && boxes[i + 1]) boxes[i + 1].focus()
-      $('go').disabled = value().length !== 5
-      if (value().length === 5) $('go').click()
+      else if (b.value && i === boxes.length - 1) $('pw').focus()
+      ready()
     }
     b.onkeydown = (e) => { if (e.key === 'Backspace' && !b.value && boxes[i - 1]) boxes[i - 1].focus() }
   })
-  boxes[0].focus()
-  $('go').disabled = true
+  $('pw').oninput = ready
+  $('pw').onkeydown = (e) => { if (e.key === 'Enter' && !$('go').disabled) $('go').click() }
+  if (!number()) boxes[0].focus()
+  ready()
   $('go').onclick = async () => {
-    const number = value()
-    if (number.length !== 5) return
+    if (!CFG.url) return startPair('This app was built without the online address — ask Adal for a new app.')
     $('go').disabled = true
     $('pairMsg').className = 'msg'
-    $('pairMsg').textContent = 'Looking for the PC on this Wi-Fi…'
-    const r = await pairOnWifi(number)
-    if (r.pc) return open(r.pc)
-    startPair(r.error)
+    $('pairMsg').textContent = 'Joining the agency…'
+    try { await pair(number(), $('pw').value, $('who').value.trim()); open() }
+    catch (e) { startPair(/fetch|network/i.test(e.message) ? 'No internet — connect the phone to the internet and try again.' : e.message) }
   }
 }
 
-$('retry').onclick = () => { const pc = saved(); pc ? open(pc) : startPair() }
-$('repair').onclick = () => startPair()
-// "Try the PC again" from the app: straight back to connecting.
-
-const pc = saved()
-if (pc && !new URLSearchParams(location.search).has('pair')) open(pc)
-else startPair()
+;(async () => {
+  await checkUpdate()
+  const pc = saved()
+  if (pc?.cloud && !new URLSearchParams(location.search).has('pair')) open()
+  else startPair()
+})()

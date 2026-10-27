@@ -1,10 +1,11 @@
 /**
  * /api/contracts — the Musaned contract check (who was chosen by an employer).
  *   POST /contracts/check {profile_id?}  look now (one profile, or all on Musaned)
+ *   POST /contracts/scan                 the whole Musaned list: who is newly chosen
  *   GET  /contracts/check                the last look
  */
 import express from 'express'
-import { checkContracts, contractCheck } from '../services/musanedContracts.js'
+import { checkContracts, scanContracts, contractCheck } from '../services/musanedContracts.js'
 
 const router = express.Router()
 
@@ -16,6 +17,11 @@ router.post('/contracts/check', async (req, res) => {
     try { return res.json(await checkContracts(db, { onlyId })) } catch (e) { return res.status(500).json({ error: e.message }) }
   }
   checkContracts(db).catch(e => console.warn('[contracts] failed:', e.message))
+  res.json({ started: true })
+})
+router.post('/contracts/scan', async (req, res) => {
+  if (contractCheck.running) return res.json({ busy: true, ...contractCheck })
+  scanContracts(req.app.locals.db).catch(e => console.warn('[contracts] list failed:', e.message))
   res.json({ started: true })
 })
 router.get('/contracts/check', (req, res) => res.json(contractCheck))

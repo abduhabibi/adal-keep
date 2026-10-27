@@ -58,7 +58,38 @@ export default function ProfilesPage() {
   }, [load])
 
   // Date range, experience, age, married, country, skill, religion + sort.
-  const { rows, filterBar, sortBar, active: filtering, clear, step, setStep, stepCounts, activeCount } = useProfileFilters(profiles)
+  const { rows: allRows, filterBar, sortBar, active: filtering, clear, step, setStep, stepCounts, activeCount } = useProfileFilters(profiles)
+  // 🤝 Selected: the girls an employer chose on Musaned.
+  const selectedOnly = searchParams.get('chosen') === '1'
+  const isChosen = (p) => !!(p.chosen_at || p.contract_number)
+  const chosenCount = useMemo(() => profiles.filter(isChosen).length, [profiles])
+  const rows = selectedOnly ? allRows.filter(isChosen) : allRows
+
+  // 🔎 The whole Musaned Employment Requests list: who is newly chosen.
+  const [scanning, setScanning] = useState(false)
+  const scanMusaned = async () => {
+    setScanning(true)
+    const id = toast.loading('Looking at the Musaned list… (sign in if Musaned asks)')
+    try {
+      const r = await api.post('/contracts/scan')
+      if (!r.data.started && !r.data.busy) throw new Error(r.data.error || 'Could not start')
+      let s
+      for (;;) {
+        await new Promise(res => setTimeout(res, 4000))
+        s = (await api.get('/contracts/check')).data
+        if (!s.running) break
+      }
+      const fresh = (s.results || []).filter(x => x.first).map(x => x.name)
+      const moved = (s.results || []).filter(x => !x.first && x.state === 'chosen' && !x.unchanged).length
+      if (s.signedOut) toast.error('Musaned is signed out — sign in in the Adal Keep Brave; the check goes on by itself.', { id, duration: 8000 })
+      else if (fresh.length) toast.success(`Newly chosen: ${fresh.join(', ')} — contracts saved.`, { id, duration: 10000 })
+      else toast.success(`No one new.${moved ? ` ${moved} moved to a new stage.` : ''}${s.unknown?.length ? ` ${s.unknown.length} on Musaned are not in Adal Keep.` : ''}`, { id, duration: 6000 })
+      load()
+    } catch (e) {
+      toast.error(e.response?.data?.error || e.message, { id })
+    } finally { setScanning(false) }
+  }
+
   // The nine filters fold away: the search line stays one line high.
   const [showFilters, setShowFilters] = useState(false)
 
@@ -103,9 +134,17 @@ export default function ProfilesPage() {
           </div>
         }
         action={
-          <Button data-tour="new-profile" onClick={() => navigate('/profiles/new')}>
-            + ፕሮፋይል አክል
-          </Button>
+          <div className="flex flex-wrap gap-2 justify-end">
+            <Button variant={selectedOnly ? 'primary' : 'secondary'} onClick={() => updateFilter('chosen', selectedOnly ? '' : '1')} title="The girls an employer chose on Musaned">
+              🤝 Selected ({chosenCount})
+            </Button>
+            <Button variant="secondary" onClick={scanMusaned} disabled={scanning} title="Reads the Musaned Employment Requests list: anyone newly chosen gets her contract saved and a task">
+              {scanning ? '🔎 Checking Musaned…' : '🔎 Check for new selections'}
+            </Button>
+            <Button data-tour="new-profile" onClick={() => navigate('/profiles/new')}>
+              + ፕሮፋይል አክል
+            </Button>
+          </div>
         }
       />
 

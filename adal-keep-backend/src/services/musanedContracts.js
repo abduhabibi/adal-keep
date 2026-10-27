@@ -87,7 +87,12 @@ async function search(page, passport, url = LIST_URL) {
   await page.waitForFunction((p) => (document.body.innerText || '').includes(`Passport Number:`) && (document.body.innerText || '').includes(p), { timeout: 20000 }, passport).catch(() => {})
   await page.waitForNetworkIdle({ idleTime: 800, timeout: 20000 }).catch(() => {})
   await sleep(1000)
-  const cards = await page.evaluate(() => {
+  return { cards: await readCards(page) }
+}
+
+/** Every request card on the page (its text, as parseCard reads it). */
+function readCards(page) {
+  return page.evaluate(() => {
     const out = []
     for (const b of document.querySelectorAll('button, a')) {
       if (!/^\s*DETAILS\s*$/i.test(b.innerText || '')) continue
@@ -97,7 +102,102 @@ async function search(page, passport, url = LIST_URL) {
     }
     return out
   })
-  return { cards }
+}
+
+const nameWords = (s) => String(s || '').toUpperCase().replace(/[^A-Z\s]/g, ' ').split(/\s+/).filter(w => w.length > 1)
+/** The profile a Musaned card is about: its contract number, else her name. */
+export function matchCard(card, profiles) {
+  if (card.contract_number) {
+    const byContract = profiles.find(p => String(p.contract_number || '') === card.contract_number)
+    if (byContract) return byContract
+  }
+  const c = nameWords(card.candidate)
+  if (c.length < 2) return null
+  let best = null, bestScore = 0
+  for (const p of profiles) {
+    const w = nameWords(p.full_name)
+    if (w.length < 2) continue
+    const same = c.filter(x => w.includes(x)).length
+    const need = Math.min(3, c.length, w.length)
+    // Musaned puts the names in another order (KEMAL TESHULA AHMED = TESHULA
+    // AHMED KEMAL): at least 3 of the words, in any order (all of a shorter name).
+    if (same < need) continue
+    const score = same * 10 - Math.abs(w.length - c.length)
+    if (score > bestScore) { best = p; bestScore = score } else if (score === bestScore) best = null   // two girls alike: not sure
+  }
+  return best
+}
+
+/**
+ * The whole Employment Requests list (and Pending), newest first, instead of
+ * searching every passport: a card that is new to Adal Keep — a girl newly
+ * chosen — or whose stage moved is opened (checkOne: contract, PDFs, task,
+ * Wafid booking). Stops paging once a whole page is already known.
+ */
+export async function scanContracts(db) {
+  if (contractCheck.running) return { busy: true }
+  Object.assign(contractCheck, { running: true, results: [], signedOut: false, mode: 'list', unknown: [] })
+  let page = null
+  try {
+    const profiles = await db('profiles').select('*')
+    const browser = await getBrowser()
+    page = await browser.newPage()
+    await setupTab(page, { runId: 'musaned-contracts' })
+    page.__adalAllowImages = true
+    const open = async (url) => {
+      await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 })
+      return signedIn(page)
+    }
+    let ok = await open(LIST_URL.replace('size=10', 'size=50'))
+    if (!ok && await signInForCheck(db, page)) ok = await open(LIST_URL.replace('size=10', 'size=50'))
+    if (!ok) {
+      contractCheck.signedOut = true
+      await task(db, null, SIGN_IN_TASKS[1], 'Adal Keep looks at the Musaned list for newly chosen girls, but Musaned is signed out. Sign in to Musaned in the Adal Keep Brave whenever you can (captcha + code) — Adal Keep notices it by itself and checks again.')
+      return { signedOut: true }
+    }
+    const cards = []
+    for (let n = 0; n < 10; n++) {
+      if (n) await open(LIST_URL.replace('size=10', 'size=50').replace('page=0', `page=${n}`))
+      await page.waitForFunction(() => /CONTRACT NUMBER|No (data|records|results)/i.test(document.body.innerText || ''), { timeout: 20000 }).catch(() => {})
+      await sleep(1200)
+      const here = (await readCards(page)).map(t => ({ ...parseCard(t), text: t }))
+      if (!here.length) break
+      cards.push(...here)
+      const allKnown = here.every(c => { const p = matchCard(c, profiles); return p && p.chosen_at && (p.musaned_stage || '') === c.stage })
+      if (allKnown || here.length < 50) break
+    }
+    // Requests that wait for our approval (one page).
+    try {
+      if (await open(PENDING_URL)) {
+        await sleep(1500)
+        for (const t of await readCards(page)) { const c = parseCard(t); cards.push({ ...c, stage: c.stage || 'EPRO APPROVAL', text: t, pending: true }) }
+      }
+    } catch (e) { console.warn('[contracts] pending list:', e.message) }
+    console.log(`[contracts] Musaned list: ${cards.length} requests`)
+
+    const seen = new Set()
+    for (const c of cards) {
+      const p = matchCard(c, profiles)
+      if (!p) { contractCheck.unknown.push({ candidate: c.candidate, contract: c.contract_number, stage: c.stage }); continue }
+      if (seen.has(p.id)) continue
+      seen.add(p.id)
+      const changed = !p.chosen_at || (c.stage && (p.musaned_stage || '') !== c.stage) || (c.contract_number && p.contract_number !== c.contract_number)
+      if (!changed) { contractCheck.results.push({ id: p.id, name: p.full_name, state: 'chosen', stage: c.stage, unchanged: true }); continue }
+      if (!p.passport_number) { contractCheck.results.push({ id: p.id, name: p.full_name, state: 'error', error: 'no passport number on the profile' }); continue }
+      await sleep(BETWEEN_MS / 2)
+      let r
+      try { r = await checkOne(db, browser, page, p) } catch (e) { r = { state: 'error', error: e.message } }
+      contractCheck.results.push({ id: p.id, name: p.full_name, passport: p.passport_number, ...r })
+      console.log(`[contracts] ${p.full_name}: ${r.state}${r.first ? ' (NEW)' : ''}${r.stage ? ' · ' + r.stage : ''}${r.error ? ' — ' + r.error : ''}`)
+    }
+    await doneSignInTasks(db)
+    const fresh = contractCheck.results.filter(r => r.first)
+    return { checked: cards.length, newlyChosen: fresh.map(r => r.name), results: contractCheck.results, unknown: contractCheck.unknown }
+  } finally {
+    try { await page?.close() } catch {}
+    contractCheck.running = false
+    contractCheck.last = new Date().toISOString()
+  }
 }
 
 /** The card: "SENT TO SAUDI EMBASSY … 2005575571 1908448891 … Paid 2026-09-21 11:40". */
@@ -114,6 +214,7 @@ export function parseCard(text) {
     visa_number: after('VISA NUMBER'),
     employer_id: employer.match(/^(\d{6,})\s*-/)?.[1] || '',
     employer_name: employer.replace(/^\d{6,}\s*-\s*/, ''),
+    candidate: after('CANDIDATE').toUpperCase(),
     job: after('JOB'),
     pro: after('PRO'),
     payment: /^unpaid$/i.test(pay) ? 'Unpaid' : /^paid$/i.test(pay) ? 'Paid' : pay,
@@ -611,7 +712,7 @@ let timer = null
 export function startContractChecker(db) {
   if (timer) return
   setTimeout(() => readSavedTemplates(db).catch(e => console.warn('[contracts] templates:', e.message)), 20000)
-  const tick = () => whenRunsIdle(() => checkContracts(db).catch(e => console.warn('[contracts] failed:', e.message)), '[contracts]')
+  const tick = () => whenRunsIdle(() => scanContracts(db).catch(e => console.warn('[contracts] failed:', e.message)), '[contracts]')
   setTimeout(tick, 6 * 60 * 1000)
   timer = setInterval(tick, EVERY_MS)
   // Left signed out: as soon as Musaned is signed in anywhere in the Adal Keep
@@ -622,7 +723,7 @@ export function startContractChecker(db) {
       if (!(await musanedSignedInSomewhere(await getBrowser(), (m) => console.log(`[contracts] ${m}`)))) return
       console.log('[contracts] ✓ Musaned is signed in again — checking now')
       await doneSignInTasks(db)
-      whenRunsIdle(() => checkContracts(db).catch(e => console.warn('[contracts] failed:', e.message)), '[contracts]')
+      whenRunsIdle(() => scanContracts(db).catch(e => console.warn('[contracts] failed:', e.message)), '[contracts]')
     } catch {}
   }, 30000)
   console.log(`📄 Musaned contracts checked every ${EVERY_MS / 3600000} h`)

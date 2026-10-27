@@ -270,7 +270,7 @@ async function fillField(page, input, value, label, ctx) {
   return { ok: actual === value }
 }
 
-async function snapshotState(page) {
+export async function snapshotState(page) {
   return await page.evaluate(({ keycloakHost }) => {
     const url = location.href
     const body = (document.body?.innerText || '')

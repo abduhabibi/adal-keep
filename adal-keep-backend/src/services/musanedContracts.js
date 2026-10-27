@@ -503,31 +503,68 @@ export async function checkChosenInRun(page, ctx) {
  * ring the sign-in alarm. A person types the captcha and the code; the check
  * waits up to 10 minutes. Returns true once Musaned is signed in.
  */
+const SIGN_IN_TASKS = ['Musaned: sign in for the contract check', 'Sign in to Musaned for the contract check']
+const doneSignInTasks = (db) => db('tasks').whereIn('title', SIGN_IN_TASKS).where({ status: 'pending' })
+  .update({ status: 'completed', updated_at: new Date().toISOString() }).catch(() => {})
+
+/**
+ * Is Musaned signed in, in any Adal Keep Brave tab? The person may sign in in
+ * the tab Adal Keep opened or in one of their own. Musaned's "select the
+ * establishment" screen after the sign-in is picked here too (the agency
+ * card, then Go to dashboard), so nobody has to tell Adal Keep "I signed in".
+ */
+async function musanedSignedInSomewhere(browser, log = () => {}) {
+  const { snapshotState, stepClickAgencyCard, stepClickGoToDashboard } = await import('./musanedWorkflow.js')
+  for (const t of await browser.pages().catch(() => [])) {
+    const u = t.url()
+    if (!/musaned\.com\.sa/.test(u) || /accounts\.wahid\.sa|\/login|\/auth|\/realms\//.test(u)) continue
+    const s = await snapshotState(t)
+    if (!s || s.onKeycloak || s.hasPassword || s.hasOtp) continue
+    if (s.hasAgencyPicker) {
+      log('Musaned signed in — choosing the agency')
+      try { await stepClickAgencyCard(t, {}); await sleep(2500) } catch {}
+      const again = await snapshotState(t)
+      if (again?.hasGoToDashboard) await stepClickGoToDashboard(t, {}).catch(() => {})
+      return true
+    }
+    if (s.hasGoToDashboard) { await stepClickGoToDashboard(t, {}).catch(() => {}); return true }
+    if (s.hasDashboardNav || /employment-requests|dashboard/.test(u)) return true
+  }
+  return false
+}
+
 async function signInForCheck(db, page) {
   const acct = await db('musaned_accounts').orderBy('is_default', 'desc').first().catch(() => null)
-  const log = (level, msg) => console.log(`[contracts] ${msg}`)
-  const ctx = { musaned_username: acct?.username || '', musaned_password: acct?.password || '', onLog: log, profileName: 'Contract check' }
+  const log = (msg) => console.log(`[contracts] ${msg}`)
+  const ctx = { musaned_username: acct?.username || '', musaned_password: acct?.password || '', onLog: (l, m) => log(m), profileName: 'Contract check' }
+  const { ringUntilTouched, stopLoginAlarm, showDesktopNotice } = await import('./worker.js')
   try {
     const { stepOpenMusaned, stepFillMusanedLogin } = await import('./musanedWorkflow.js')
     const open = await stepOpenMusaned(page, ctx)
     if (open.onKeycloak) {
       const f = await stepFillMusanedLogin(page, ctx)
-      console.log(`[contracts] Musaned sign-in ${f.filled ? 'filled' : 'NOT filled (no Musaned account in AI Actions)'}`)
+      log(`Musaned sign-in ${f.filled ? 'filled' : 'NOT filled (no Musaned account in AI Actions)'}`)
     }
+    if (await musanedSignedInSomewhere(page.browser(), log)) { log('✓ Musaned was already signed in'); return true }
     await page.bringToFront().catch(() => {})
-    const { ringUntilTouched, showDesktopNotice } = await import('./worker.js')
-    ringUntilTouched(page, (m) => console.log(`[contracts] ${m}`))
-    const title = 'Musaned: sign in for the contract check'
-    const body = 'The Musaned tab is in front with the name and password filled. Type the captcha and the code; Adal Keep goes on checking who was chosen by itself.'
+    ringUntilTouched(page, log)
+    const title = SIGN_IN_TASKS[0]
+    const body = 'The Musaned tab is in front with the name and password filled. Type the captcha and the code — that is all: Adal Keep sees the sign-in by itself, picks the agency and goes on.'
     showDesktopNotice(title, body)
     await task(db, null, title, body)
-    const end = Date.now() + 10 * 60 * 1000
+    const end = Date.now() + 30 * 60 * 1000
     while (Date.now() < end) {
       await sleep(3000)
-      const u = page.url()
-      if (/tawtheeq\.musaned\.com\.sa/.test(u) && !/accounts\.wahid\.sa|\/login|\/auth/.test(u)) { console.log('[contracts] ✓ Musaned signed in — checking goes on'); return true }
+      if (await musanedSignedInSomewhere(page.browser(), log)) {
+        stopLoginAlarm()
+        await doneSignInTasks(db)
+        log('✓ Musaned signed in — checking goes on')
+        await sleep(2000)
+        return true
+      }
     }
   } catch (e) { console.warn('[contracts] sign-in:', e.message) }
+  stopLoginAlarm()
   return false
 }
 
@@ -556,11 +593,12 @@ export async function checkContracts(db, { onlyId = null } = {}) {
       }
       if (r.state === 'signed-out') {
         contractCheck.signedOut = true
-        await task(db, null, 'Sign in to Musaned for the contract check',
-          'Adal Keep looks every 4 hours whether a Saudi employer chose a girl, but Musaned is signed out. Open Musaned in the Adal Keep Brave and sign in (captcha + OTP), then press "Check contracts now" in Settings.')
+        await task(db, null, SIGN_IN_TASKS[1],
+          'Adal Keep looks every 4 hours whether a Saudi employer chose a girl, but Musaned is signed out. Sign in to Musaned in the Adal Keep Brave whenever you can (captcha + code) — Adal Keep notices it by itself and checks again.')
         break
       }
     }
+    if (!contractCheck.signedOut && contractCheck.results.length) await doneSignInTasks(db)
     return { checked: contractCheck.results.length, results: contractCheck.results }
   } finally {
     try { await page?.close() } catch {}
@@ -576,5 +614,16 @@ export function startContractChecker(db) {
   const tick = () => whenRunsIdle(() => checkContracts(db).catch(e => console.warn('[contracts] failed:', e.message)), '[contracts]')
   setTimeout(tick, 6 * 60 * 1000)
   timer = setInterval(tick, EVERY_MS)
+  // Left signed out: as soon as Musaned is signed in anywhere in the Adal Keep
+  // Brave (by a person or a run), the check goes on by itself.
+  setInterval(async () => {
+    if (!contractCheck.signedOut || contractCheck.running) return
+    try {
+      if (!(await musanedSignedInSomewhere(await getBrowser(), (m) => console.log(`[contracts] ${m}`)))) return
+      console.log('[contracts] ✓ Musaned is signed in again — checking now')
+      await doneSignInTasks(db)
+      whenRunsIdle(() => checkContracts(db).catch(e => console.warn('[contracts] failed:', e.message)), '[contracts]')
+    } catch {}
+  }, 30000)
   console.log(`📄 Musaned contracts checked every ${EVERY_MS / 3600000} h`)
 }

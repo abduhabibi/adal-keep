@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import api from '../services/api'
-import PageHeader from '../components/shared/PageHeader'
 import EmptyState from '../components/shared/EmptyState'
 import Spinner from '../components/shared/Spinner'
 import StatusBadge from '../components/shared/StatusBadge'
@@ -127,30 +126,26 @@ export default function ProfilesPage() {
 
   return (
     <div>
-      <PageHeader
-        title="ፕሮፋይሎች"
-        subtitle={filterLabel}
-        action={
-          <div className="grid grid-cols-1 sm:grid-cols-[auto_auto] gap-2 sm:justify-end">
-            <div className="flex flex-col gap-2">
-              <Button variant="secondary" className="w-full whitespace-nowrap" onClick={scanMusaned} disabled={scanning} title="Reads the Musaned Employment Requests list: anyone newly chosen gets her contract saved and a task; girls not in Adal Keep are added">
-                {scanning ? '🔎 Checking Musaned…' : '🔎 Check for new selections'}
-              </Button>
-              <Button variant={selectedOnly ? 'primary' : 'secondary'} className="w-full whitespace-nowrap" onClick={() => updateFilter('chosen', selectedOnly ? '' : '1')} title="The girls an employer chose on Musaned">
-                🤝 Selected ({chosenCount})
-              </Button>
-            </div>
-            <Button data-tour="new-profile" className="w-full sm:w-auto self-start whitespace-nowrap" onClick={() => navigate('/profiles/new')}>
-              + ፕሮፋይል አክል
-            </Button>
-          </div>
-        }
-      />
-
-      {/* The journey: its own full-width line, scrolling sideways on narrow screens. */}
-      <div className="panel mb-5 px-4 py-3 overflow-x-auto" data-tour="journey-filter">
-        <div className="min-w-[560px]">
-          <JourneyFork counts={stepCounts} selected={step} onSelect={setStep} />
+      {/* Title · the journey (fills the space between) · the buttons — one
+          line on wide screens; stacked on narrow ones, the journey scrolling sideways. */}
+      <div className="mb-5 flex flex-col lg:flex-row lg:items-center gap-3 lg:gap-4">
+        <div className="shrink-0">
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">ፕሮፋይሎች</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{filterLabel}</p>
+        </div>
+        <div className="panel min-w-0 flex-1 px-2 py-2" data-tour="journey-filter">
+          <JourneyFork compact counts={stepCounts} selected={step} onSelect={setStep} />
+        </div>
+        <div className="shrink-0 grid grid-cols-2 lg:grid-cols-1 lg:w-56 gap-2">
+          <Button data-tour="new-profile" className="col-span-2 lg:col-span-1 w-full whitespace-nowrap" onClick={() => navigate('/profiles/new')}>
+            + ፕሮፋይል አክል
+          </Button>
+          <Button variant="secondary" className="w-full whitespace-nowrap" onClick={scanMusaned} disabled={scanning} title="Reads the Musaned Employment Requests list: anyone newly chosen gets her contract saved and a task; girls not in Adal Keep are added">
+            {scanning ? '🔎 Checking…' : '🔎 Check for new selections'}
+          </Button>
+          <Button variant={selectedOnly ? 'primary' : 'secondary'} className="w-full whitespace-nowrap" onClick={() => updateFilter('chosen', selectedOnly ? '' : '1')} title="The girls an employer chose on Musaned">
+            🤝 Selected ({chosenCount})
+          </Button>
         </div>
       </div>
 

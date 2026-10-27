@@ -283,7 +283,7 @@ export default function ChecklistPage() {
       {viewChecklist && (
         <ChecklistGridView 
           checklist={viewChecklist} 
-          onClose={() => setViewChecklist(null)} 
+          onClose={() => { setViewChecklist(null); loadData() }} 
         />
       )}
     </div>

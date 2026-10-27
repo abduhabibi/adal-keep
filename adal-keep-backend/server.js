@@ -779,7 +779,10 @@ app.get('/api/checklists', async (req, res) => {
         .leftJoin('brokers', 'profiles.broker_id', 'brokers.id')
         .where('checklist_id', c.id)
         .select('profiles.*', 'brokers.name as broker_name')
-      result.push({ ...c, profiles })
+      let columns = null
+      try { columns = c.columns ? JSON.parse(c.columns) : null } catch {}
+      const cells = await db('checklist_cells').where('checklist_id', c.id).select('profile_id', 'column', 'value').catch(() => [])
+      result.push({ ...c, columns, cells, profiles })
     }
     res.json(result)
   } catch (err) {
@@ -805,6 +808,36 @@ app.delete('/api/checklists/:id', async (req, res) => {
     res.json({ success: true })
   } catch (err) {
     res.status(500).json({ error: 'Failed to delete checklist' })
+  }
+})
+
+// The checklist's columns: [{ key, kind: 'doc' | 'info' | 'own', label, type?: 'tick' | 'text' }].
+app.put('/api/checklists/:id/columns', async (req, res) => {
+  try {
+    const cols = Array.isArray(req.body?.columns) ? req.body.columns.slice(0, 80).map(c => ({
+      key: String(c.key || '').slice(0, 80), kind: ['doc', 'info', 'own'].includes(c.kind) ? c.kind : 'own',
+      label: String(c.label || c.key || '').slice(0, 60), ...(c.kind === 'own' ? { type: c.type === 'text' ? 'text' : 'tick' } : {}),
+    })).filter(c => c.key) : null
+    await req.app.locals.db('checklists').where('id', req.params.id).update({ columns: cols ? JSON.stringify(cols) : null, updated_at: new Date().toISOString() })
+    res.json({ success: true, columns: cols })
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to save the columns' })
+  }
+})
+
+// What is written in one of the checklist's own columns for one profile.
+app.put('/api/checklists/:id/cells', async (req, res) => {
+  try {
+    const db = req.app.locals.db
+    const { profile_id, column } = req.body || {}
+    const value = req.body?.value == null ? '' : String(req.body.value).slice(0, 500)
+    const where = { checklist_id: Number(req.params.id), profile_id: Number(profile_id), column: String(column || '').slice(0, 80) }
+    if (!where.profile_id || !where.column) return res.status(400).json({ error: 'profile_id and column are needed' })
+    const n = await db('checklist_cells').where(where).update({ value })
+    if (!n) await db('checklist_cells').insert({ ...where, value })
+    res.json({ success: true })
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to save' })
   }
 })
 

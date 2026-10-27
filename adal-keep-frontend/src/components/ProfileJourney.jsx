@@ -100,7 +100,7 @@ export function JourneyFork({ states = {}, notes = {}, counts, selected, onSelec
 
   return (
     <div className="overflow-x-auto overflow-y-hidden">
-      <div ref={ref} className="relative" style={{ height, minWidth: compact ? 470 : 460 }}>
+      <div ref={ref} className="relative" style={{ height, minWidth: compact ? 440 : 460 }}>
         {w > 0 && (
           <svg className="absolute inset-0 pointer-events-none" width={w} height={height} aria-hidden="true">
             {WIRES.map(wire => {

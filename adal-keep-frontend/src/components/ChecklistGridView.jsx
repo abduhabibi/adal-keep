@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import api from '../services/api'
@@ -9,39 +9,59 @@ const ALL_FIELDS = [
   'Ticket-deported', 'Labour ID', 'Slip', 'Experience Form', 'Employee ID', 'Client ID'
 ]
 
+// Profile details that can be columns too.
+const daysLeft = (d) => d ? Math.ceil((new Date(d).getTime() - Date.now()) / 86400000) : null
+const INFO = {
+  phone: ['Phone', p => p.phone_number],
+  status: ['Status', p => p.status || 'Pending'],
+  broker: ['Broker', p => p.broker_name],
+  passport: ['Passport no.', p => p.passport_number],
+  labor_id: ['Labor ID', p => p.labor_id],
+  dob: ['Date of birth', p => p.date_of_birth],
+  religion: ['Religion', p => p.religion],
+  marital: ['Marital status', p => p.marital_status],
+  stage: ['Musaned stage', p => p.musaned_stage],
+  contract: ['Contract no.', p => p.contract_number],
+  visa: ['Visa no.', p => p.visa_number],
+  employer: ['Employer', p => p.employer_name],
+  city: ['City of work', p => p.work_city],
+  medical: ['Medical days left', p => { const n = daysLeft(p.medical_valid_until); return n === null ? '' : n < 0 ? 'expired' : String(n) }],
+  visa_stage: ['Visa', p => p.visa_stage],
+}
+
+const docCol = (name) => ({ key: name, kind: 'doc', label: name })
+const infoCol = (k) => ({ key: k, kind: 'info', label: INFO[k][0] })
+
+function defaultColumns() {
+  let docs = ALL_FIELDS
+  try { const saved = JSON.parse(localStorage.getItem('adal_visible_fields') || 'null'); if (Array.isArray(saved)) docs = saved } catch {}
+  return [infoCol('phone'), infoCol('status'), ...docs.map(docCol)]
+}
+
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+
 export default function ChecklistGridView({ checklist, onClose }) {
   const navigate = useNavigate()
   const [profileData, setProfileData] = useState({})
   const [loading, setLoading] = useState(true)
-  const [isColumnModalOpen, setIsColumnModalOpen] = useState(false)
-  const [visibleFields, setVisibleFields] = useState(() => {
-    try {
-      const saved = localStorage.getItem('adal_visible_fields')
-      return saved ? JSON.parse(saved) : ALL_FIELDS
-    } catch {
-      return ALL_FIELDS
-    }
+  const [manage, setManage] = useState(false)
+  const [columns, setColumns] = useState(() => checklist.columns?.length ? checklist.columns : defaultColumns())
+  const [cells, setCells] = useState(() => {
+    const m = {}
+    for (const c of checklist.cells || []) m[`${c.profile_id}|${c.column}`] = c.value
+    return m
   })
+  const [newCol, setNewCol] = useState({ label: '', type: 'tick' })
 
-  useEffect(() => {
-    localStorage.setItem('adal_visible_fields', JSON.stringify(visibleFields))
-  }, [visibleFields])
-
-  useEffect(() => {
-    loadData()
-  }, [checklist])
+  useEffect(() => { loadData() }, [checklist])
 
   const loadData = async () => {
     setLoading(true)
     try {
-      const promises = checklist.profiles.map((p) =>
-        api.get(`/profiles/${p.id}/fields`).then((res) => ({ profile: p, fields: res.data }))
-      )
-      const results = await Promise.all(promises)
+      const results = await Promise.all(checklist.profiles.map((p) =>
+        api.get(`/profiles/${p.id}/fields`).then((res) => ({ profile: p, fields: res.data }))))
       const dataMap = {}
-      results.forEach(({ profile, fields }) => {
-        dataMap[profile.id] = { profile, fields }
-      })
+      results.forEach(({ profile, fields }) => { dataMap[profile.id] = { profile, fields } })
       setProfileData(dataMap)
     } catch {
       toast.error('Failed to load checklist data')
@@ -50,28 +70,53 @@ export default function ChecklistGridView({ checklist, onClose }) {
     }
   }
 
+  // Every document field the profiles have (Appointment Slip, Medical Report …).
+  const docNames = useMemo(() => {
+    const names = new Set(ALL_FIELDS)
+    for (const d of Object.values(profileData)) for (const f of d.fields || []) if (f.name) names.add(f.name)
+    return [...names]
+  }, [profileData])
+
+  const saveColumns = async (next) => {
+    setColumns(next)
+    try { await api.put(`/checklists/${checklist.id}/columns`, { columns: next }) }
+    catch { toast.error('The columns were not saved') }
+  }
+  const has = (kind, key) => columns.some(c => c.kind === kind && c.key === key)
+  const toggle = (col) => saveColumns(has(col.kind, col.key) ? columns.filter(c => !(c.kind === col.kind && c.key === col.key)) : [...columns, col])
+  const move = (i, d) => {
+    const j = i + d
+    if (j < 0 || j >= columns.length) return
+    const next = [...columns];[next[i], next[j]] = [next[j], next[i]]
+    saveColumns(next)
+  }
+  const addOwn = (e) => {
+    e.preventDefault()
+    const label = newCol.label.trim()
+    if (!label) return
+    if (columns.some(c => c.kind === 'own' && c.key.toLowerCase() === label.toLowerCase())) return toast.error('There is a column with that name')
+    saveColumns([...columns, { key: label, kind: 'own', label, type: newCol.type }])
+    setNewCol({ label: '', type: newCol.type })
+  }
+
+  const setCell = async (profileId, column, value) => {
+    setCells(c => ({ ...c, [`${profileId}|${column}`]: value }))
+    try { await api.put(`/checklists/${checklist.id}/cells`, { profile_id: profileId, column, value }) }
+    catch { toast.error('Not saved') }
+  }
+
   const handleUpload = async (profileId, fieldId, file) => {
+    if (!fieldId) return toast.error('This profile has no such document field')
     try {
       const formData = new FormData()
       formData.append('file', file)
-      await api.post(`/profiles/${profileId}/fields/${fieldId}/upload`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      })
+      await api.post(`/profiles/${profileId}/fields/${fieldId}/upload`, formData, { headers: { 'Content-Type': 'multipart/form-data' } })
       toast.success('Uploaded successfully')
       const res = await api.get(`/profiles/${profileId}/fields`)
-      setProfileData((prev) => ({
-        ...prev,
-        [profileId]: { ...prev[profileId], fields: res.data },
-      }))
+      setProfileData((prev) => ({ ...prev, [profileId]: { ...prev[profileId], fields: res.data } }))
     } catch {
       toast.error('Upload failed')
     }
-  }
-
-  const handleDrop = (e, profileId, fieldId) => {
-    e.preventDefault()
-    const file = e.dataTransfer.files?.[0]
-    if (file) handleUpload(profileId, fieldId, file)
   }
 
   const handleDeleteChecklist = async () => {
@@ -86,201 +131,102 @@ export default function ChecklistGridView({ checklist, onClose }) {
     }
   }
 
+  // What a cell says, as text (CSV and print).
+  const textOf = (profile, col) => {
+    if (col.kind === 'info') return String(INFO[col.key]?.[1](profile) ?? '')
+    if (col.kind === 'own') { const v = cells[`${profile.id}|${col.key}`] || ''; return col.type === 'tick' ? (v ? '✓' : '') : v }
+    const f = profileData[profile.id]?.fields?.find(x => x.name === col.key)
+    return f?.files?.length ? '✓' : ''
+  }
+
   const handleDownloadCSV = () => {
-    const headers = ['Full Name', 'Phone', 'Status', 'Broker', ...visibleFields]
-    const rows = checklist.profiles.map((p) => {
-      const data = profileData[p.id]
-      const row = [
-        `"${p.full_name}"`,
-        `"${p.phone_number || ''}"`,
-        `"${p.status || 'Pending'}"`,
-        `"${p.broker_name || ''}"`,
-      ]
-      visibleFields.forEach((field) => {
-        const fieldObj = data?.fields?.find((f) => f.name === field)
-        const hasFile = fieldObj?.files?.length > 0
-        row.push(hasFile ? '"YES"' : '"NO"')
-      })
-      return row.join(',')
-    })
-    const csvContent = [headers.join(','), ...rows].join('\n')
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
+    const q = (s) => `"${String(s ?? '').replace(/"/g, '""')}"`
+    const rows = checklist.profiles.map(p => [q(p.full_name), ...columns.map(c => q(c.kind === 'doc' || c.type === 'tick' ? (textOf(p, c) ? 'YES' : 'NO') : textOf(p, c)))].join(','))
+    const csv = [['Full Name', ...columns.map(c => c.label)].map(q).join(','), ...rows].join('\n')
+    const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' }))
     const link = document.createElement('a')
-    link.setAttribute('href', url)
-    link.setAttribute('download', `${checklist.name.replace(/\s+/g, '_')}_Checklist.csv`)
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
+    link.href = url
+    link.download = `${checklist.name.replace(/\s+/g, '_')}_Checklist.csv`
+    document.body.appendChild(link); link.click(); link.remove()
     URL.revokeObjectURL(url)
     toast.success('CSV downloaded')
   }
 
-  const handlePrint = () => window.print()
-
-  const toggleField = (field) => {
-    if (visibleFields.includes(field)) {
-      setVisibleFields(visibleFields.filter((f) => f !== field))
-    } else {
-      setVisibleFields([...visibleFields, field])
-    }
-  }
-
-  const resetColumns = () => {
-    setVisibleFields(ALL_FIELDS)
-    toast.success('All columns restored')
+  /**
+   * Print: a clean page with only the table, filling the whole sheet —
+   * landscape when there are many columns, the letters as big as fit.
+   */
+  const handlePrint = () => {
+    const n = columns.length
+    const landscape = n > 7
+    const font = Math.max(6.5, Math.min(12, (landscape ? 150 : 105) / (n + 3)))
+    const head = `<tr><th class="no">#</th><th class="name">Name</th>${columns.map(c => `<th>${esc(c.label)}</th>`).join('')}</tr>`
+    const body = checklist.profiles.map((p, i) => `<tr><td class="no">${i + 1}</td><td class="name">${esc(p.full_name)}</td>${columns.map(c => {
+      const t = textOf(p, c)
+      const mark = c.kind === 'doc' || c.type === 'tick'
+      return `<td class="${mark ? 'mark' : ''}">${mark ? (t ? '✓' : '<span class="box"></span>') : esc(t)}</td>`
+    }).join('')}</tr>`).join('')
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>${esc(checklist.name)} — Checklist</title><style>
+      @page { size: A4 ${landscape ? 'landscape' : 'portrait'}; margin: 7mm; }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; padding: 0; background: #fff; color: #000; font-family: "Noto Sans Ethiopic", Arial, sans-serif; }
+      .bar { display: flex; justify-content: space-between; align-items: baseline; margin: 0 0 3mm; }
+      h1 { font-size: ${Math.round(font * 1.6)}pt; margin: 0; } .meta { font-size: ${font}pt; color: #444; }
+      table { width: 100%; border-collapse: collapse; table-layout: auto; font-size: ${font.toFixed(1)}pt; }
+      thead { display: table-header-group; } tr { page-break-inside: avoid; }
+      th, td { border: 1px solid #222; padding: ${(font / 3).toFixed(1)}pt ${(font / 2.5).toFixed(1)}pt; text-align: center; vertical-align: middle; }
+      th { background: #e9e9e9; font-weight: 700; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      td.name, th.name { text-align: left; font-weight: 600; white-space: nowrap; }
+      td.no, th.no { width: 1%; color: #555; }
+      td.mark { font-size: ${(font * 1.3).toFixed(1)}pt; font-weight: 700; }
+      .box { display: inline-block; width: ${font}pt; height: ${font}pt; border: 1px solid #555; }
+      @media screen { body { padding: 16px; } .tip { font: 13px Arial; color: #555; margin-bottom: 10px; } }
+      @media print { .tip { display: none; } }
+    </style></head><body>
+      <div class="tip">This is the clean page for printing. The print window opens by itself; close this tab when you are done.</div>
+      <div class="bar"><h1>${esc(checklist.name)}</h1><span class="meta">${checklist.profiles.length} profiles · ${new Date().toLocaleDateString()}</span></div>
+      <table><thead>${head}</thead><tbody>${body}</tbody></table>
+      <script>window.onload = () => setTimeout(() => window.print(), 300)</script>
+    </body></html>`
+    const w = window.open('', '_blank')
+    if (w) { w.document.open(); w.document.write(html); w.document.close(); return }
+    // Pop-ups blocked: print the same page from a hidden frame.
+    const f = document.createElement('iframe')
+    f.style.cssText = 'position:fixed;width:0;height:0;border:0;right:0;bottom:0'
+    document.body.appendChild(f)
+    f.contentDocument.open(); f.contentDocument.write(html.replace(/<script>[\s\S]*?<\/script>/, '')); f.contentDocument.close()
+    setTimeout(() => { f.contentWindow.focus(); f.contentWindow.print(); setTimeout(() => f.remove(), 2000) }, 400)
   }
 
   if (loading) {
-    return (
-      <div className="flex h-full items-center justify-center text-slate-500">
-        Loading grid data...
-      </div>
-    )
+    return <div className="fixed inset-0 z-50 bg-white dark:bg-slate-950 flex items-center justify-center text-slate-500">Loading grid data...</div>
   }
 
+  const btn = 'px-3 py-2 text-sm font-medium rounded-lg border whitespace-nowrap'
   return (
-    <div className="fixed inset-0 z-50 bg-white flex flex-col">
-      <style
-        dangerouslySetInnerHTML={{
-          __html: `
-            @media print {
-              @page { size: A4 landscape; margin: 4mm; }
-              html, body {
-                width: 100% !important;
-                height: auto !important;
-                margin: 0 !important;
-                padding: 0 !important;
-                overflow: visible !important;
-              }
-              body * { visibility: hidden !important; }
-              .print-table-area, .print-table-area * { visibility: visible !important; }
-              .print-table-area {
-                position: fixed !important;
-                left: 0 !important;
-                top: 0 !important;
-                right: auto !important;
-                margin: 0 !important;
-                padding: 2mm !important;
-                width: 100% !important;
-                max-width: 100% !important;
-                transform: none !important;
-                overflow: visible !important;
-              }
-              .print-title {
-                visibility: visible !important;
-                display: block !important;
-                text-align: left !important;
-                font-size: 12pt;
-                font-weight: bold;
-                margin: 0 0 3mm 0 !important;
-                padding: 0 !important;
-              }
-              .print-table-area table {
-                width: 100% !important;
-                max-width: 100% !important;
-                margin: 0 !important;
-                border-collapse: collapse !important;
-                table-layout: fixed !important;
-                font-size: 7pt !important;
-              }
-              .print-table-area th,
-              .print-table-area td {
-                border: 1px solid #333 !important;
-                padding: 2px 2px !important;
-                text-align: center !important;
-                vertical-align: middle !important;
-                overflow: hidden !important;
-                word-wrap: break-word !important;
-                white-space: normal !important;
-              }
-              .print-table-area th {
-                background: #e8e8e8 !important;
-                -webkit-print-color-adjust: exact !important;
-                print-color-adjust: exact !important;
-                font-size: 6pt !important;
-                line-height: 1.15 !important;
-              }
-              .print-table-area td.print-name {
-                text-align: left !important;
-                font-weight: 600 !important;
-                width: 18% !important;
-              }
-              .print-mark { font-size: 10pt !important; line-height: 1 !important; }
-              .no-print, .screen-only, .print-table-area input, .print-table-area label {
-                display: none !important;
-              }
-            }
-            @media screen {
-              .print-title { display: none; }
-              .print-mark { display: none; }
-            }
-          `,
-        }}
-      />
-
-      <div className="h-16 border-b border-slate-200 flex items-center justify-between px-6 bg-slate-50 shrink-0 no-print">
-        <div>
-          <h2 className="font-display text-xl font-bold text-slate-900">{checklist.name}</h2>
-          <p className="text-xs text-slate-500">
-            {visibleFields.length} of {ALL_FIELDS.length} columns · print landscape
-          </p>
+    <div className="fixed inset-0 z-50 bg-white dark:bg-slate-950 flex flex-col">
+      <div className="border-b border-slate-200 dark:border-slate-800 flex flex-wrap gap-2 items-center justify-between px-4 sm:px-6 py-3 bg-slate-50 dark:bg-slate-900 shrink-0">
+        <div className="min-w-0">
+          <h2 className="font-display text-xl font-bold text-slate-900 dark:text-white truncate">{checklist.name}</h2>
+          <p className="text-xs text-slate-500">{checklist.profiles.length} profiles · {columns.length} columns</p>
         </div>
         <div className="flex gap-2 flex-wrap justify-end">
-          <button
-            type="button"
-            onClick={handleDownloadCSV}
-            className="px-4 py-2 text-sm font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100"
-          >
-            CSV
-          </button>
-          <button
-            type="button"
-            onClick={handlePrint}
-            className="px-4 py-2 text-sm font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100"
-          >
-            Print
-          </button>
-          <button
-            type="button"
-            onClick={() => setIsColumnModalOpen(true)}
-            className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50"
-          >
-            Columns
-          </button>
-          <button
-            type="button"
-            onClick={handleDeleteChecklist}
-            className="px-4 py-2 text-sm font-medium text-red-700 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100"
-          >
-            Delete
-          </button>
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50"
-          >
-            Close
-          </button>
+          <button type="button" onClick={() => setManage(true)} className={`${btn} text-white bg-teal-600 border-teal-600 hover:bg-teal-700`}>＋ Columns</button>
+          <button type="button" onClick={handlePrint} className={`${btn} text-blue-700 bg-blue-50 border-blue-200 hover:bg-blue-100`}>🖨 Print</button>
+          <button type="button" onClick={handleDownloadCSV} className={`${btn} text-emerald-700 bg-emerald-50 border-emerald-200 hover:bg-emerald-100`}>CSV</button>
+          <button type="button" onClick={handleDeleteChecklist} className={`${btn} text-red-700 bg-red-50 border-red-200 hover:bg-red-100`}>Delete</button>
+          <button type="button" onClick={onClose} className={`${btn} text-slate-700 bg-white border-slate-300 hover:bg-slate-50`}>Close</button>
         </div>
       </div>
 
-      <div className="flex-1 overflow-auto custom-scrollbar print-table-area">
-        <div className="print-title">{checklist.name} — Checklist</div>
+      <div className="flex-1 overflow-auto custom-scrollbar">
         <table className="border-collapse w-full text-xs">
-          <thead className="bg-slate-100 sticky top-0 z-10">
+          <thead className="bg-slate-100 dark:bg-slate-800 sticky top-0 z-10">
             <tr>
-              <th className="sticky left-0 z-20 bg-slate-100 border-b border-r border-slate-300 p-3 text-left min-w-[140px]">
-                Profile
-              </th>
-              <th className="border-b border-r border-slate-300 p-2 min-w-[90px]">Phone</th>
-              <th className="border-b border-r border-slate-300 p-2 min-w-[70px]">Status</th>
-              {visibleFields.map((field) => (
-                <th
-                  key={field}
-                  className="border-b border-r border-slate-300 p-1 text-center font-semibold text-slate-600 bg-slate-50"
-                >
-                  {field}
+              <th className="sticky left-0 z-20 bg-slate-100 dark:bg-slate-800 border-b border-r border-slate-300 dark:border-slate-700 p-3 text-left min-w-[150px]">Profile</th>
+              {columns.map((c) => (
+                <th key={`${c.kind}:${c.key}`} className={`border-b border-r border-slate-300 dark:border-slate-700 p-1.5 text-center font-semibold ${c.kind === 'own' ? 'text-teal-700 dark:text-teal-300' : 'text-slate-600 dark:text-slate-300'}`}>
+                  {c.label}
                 </th>
               ))}
             </tr>
@@ -290,64 +236,42 @@ export default function ChecklistGridView({ checklist, onClose }) {
               const data = profileData[profile.id]
               if (!data) return null
               return (
-                <tr key={profile.id} className="hover:bg-slate-50">
-                  <td className="sticky left-0 z-10 bg-white border-b border-r border-slate-200 p-2 font-medium text-slate-900 print-name">
+                <tr key={profile.id} className="hover:bg-slate-50 dark:hover:bg-slate-900">
+                  <td className="sticky left-0 z-10 bg-white dark:bg-slate-950 border-b border-r border-slate-200 dark:border-slate-800 p-2 font-medium text-slate-900 dark:text-white">
                     {profile.full_name}
-                    {profile.broker_name && (
-                      <div className="text-[10px] text-slate-400 font-normal screen-only">
-                        {profile.broker_name}
-                      </div>
-                    )}
+                    {profile.broker_name && <div className="text-[10px] text-slate-400 font-normal">{profile.broker_name}</div>}
                   </td>
-                  <td className="border-b border-r border-slate-200 p-2 text-slate-600">
-                    {profile.phone_number || '—'}
-                  </td>
-                  <td className="border-b border-r border-slate-200 p-2">
-                    <span className="screen-only px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100">
-                      {profile.status || 'Pending'}
-                    </span>
-                    <span className="print-mark">{profile.status || 'Pending'}</span>
-                  </td>
-                  {visibleFields.map((fieldName) => {
-                    const fieldObj = data.fields.find((f) => f.name === fieldName)
+                  {columns.map((c) => {
+                    const k = `${c.kind}:${c.key}`
+                    const cell = 'border-b border-r border-slate-200 dark:border-slate-800 p-1 text-center align-middle'
+                    if (c.kind === 'info') return <td key={k} className={`${cell} text-slate-600 dark:text-slate-300 px-2`}>{textOf(profile, c) || '—'}</td>
+                    if (c.kind === 'own') {
+                      const v = cells[`${profile.id}|${c.key}`] || ''
+                      return (
+                        <td key={k} className={cell}>
+                          {c.type === 'tick'
+                            ? <input type="checkbox" checked={!!v} onChange={(e) => setCell(profile.id, c.key, e.target.checked ? '1' : '')} className="w-5 h-5 accent-teal-600 cursor-pointer" />
+                            : <input defaultValue={v} onBlur={(e) => { if (e.target.value !== v) setCell(profile.id, c.key, e.target.value) }}
+                                className="w-28 rounded border border-slate-200 dark:border-slate-700 bg-transparent px-1.5 py-1 text-xs" />}
+                        </td>
+                      )
+                    }
+                    const fieldObj = data.fields.find((f) => f.name === c.key)
                     const file = fieldObj?.files?.[0]
                     return (
-                      <td
-                        key={fieldName}
-                        className="border-b border-r border-slate-200 p-1 text-center align-middle"
-                        onDragOver={(e) => e.preventDefault()}
-                        onDrop={(e) => handleDrop(e, profile.id, fieldObj?.id)}
-                      >
-                        <span className="print-mark">{file ? '✅' : '☐'}</span>
-                        <div className="screen-only">
-                          {file ? (
-                            file.mimetype?.startsWith('image/') ? (
-                              <img
-                                src={`/api/files/${file.id}/thumbnail`}
-                                className="w-12 h-12 object-cover rounded mx-auto border border-slate-200"
-                                alt=""
-                              />
-                            ) : (
-                              <div className="w-12 h-12 bg-slate-100 rounded mx-auto flex items-center justify-center text-slate-400">
-                                📄
-                              </div>
-                            )
-                          ) : (
-                            <label className="flex flex-col items-center justify-center w-12 h-12 mx-auto border-2 border-dashed border-slate-200 rounded-lg cursor-pointer hover:border-teal-400 hover:bg-teal-50 no-print">
-                              <span className="text-slate-300 text-lg">+</span>
-                              <input
-                                type="file"
-                                className="hidden"
-                                accept="image/*,application/pdf"
-                                onChange={(e) => {
-                                  if (e.target.files[0]) {
-                                    handleUpload(profile.id, fieldObj?.id, e.target.files[0])
-                                  }
-                                }}
-                              />
-                            </label>
-                          )}
-                        </div>
+                      <td key={k} className={cell} onDragOver={(e) => e.preventDefault()}
+                        onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) handleUpload(profile.id, fieldObj?.id, f) }}>
+                        {file ? (
+                          file.mimetype?.startsWith('image/')
+                            ? <img src={`/api/files/${file.id}/thumbnail`} className="w-12 h-12 object-cover rounded mx-auto border border-slate-200" alt="" />
+                            : <div className="w-12 h-12 bg-slate-100 dark:bg-slate-800 rounded mx-auto flex items-center justify-center text-slate-400">📄</div>
+                        ) : fieldObj ? (
+                          <label className="flex flex-col items-center justify-center w-12 h-12 mx-auto border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-lg cursor-pointer hover:border-teal-400 hover:bg-teal-50">
+                            <span className="text-slate-300 text-lg">+</span>
+                            <input type="file" className="hidden" accept="image/*,application/pdf"
+                              onChange={(e) => { if (e.target.files[0]) handleUpload(profile.id, fieldObj.id, e.target.files[0]) }} />
+                          </label>
+                        ) : <span className="text-slate-300">—</span>}
                       </td>
                     )
                   })}
@@ -358,44 +282,70 @@ export default function ChecklistGridView({ checklist, onClose }) {
         </table>
       </div>
 
-      {isColumnModalOpen && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4 no-print">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
-            <div className="p-4 border-b border-slate-100 flex justify-between items-center">
-              <h3 className="font-bold text-slate-800">Manage Columns</h3>
-              <button type="button" onClick={() => setIsColumnModalOpen(false)} className="text-slate-400">
-                ✕
-              </button>
+      {manage && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-3" onClick={(e) => { if (e.target === e.currentTarget) setManage(false) }}>
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden">
+            <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center">
+              <h3 className="font-bold text-slate-800 dark:text-white">Columns of “{checklist.name}”</h3>
+              <button type="button" onClick={() => setManage(false)} className="text-slate-400 text-lg">✕</button>
             </div>
-            <div className="p-4 max-h-[60vh] overflow-y-auto">
-              <div className="grid grid-cols-2 gap-2">
-                {ALL_FIELDS.map((field) => (
-                  <label
-                    key={field}
-                    className="flex items-center gap-2 p-2 rounded hover:bg-slate-50 cursor-pointer text-sm"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={visibleFields.includes(field)}
-                      onChange={() => toggleField(field)}
-                      className="w-4 h-4 text-teal-600 rounded border-slate-300"
-                    />
-                    <span className="text-slate-700 truncate">{field}</span>
-                  </label>
-                ))}
+            <div className="p-4 overflow-y-auto grid gap-5 md:grid-cols-2">
+              <div className="space-y-4">
+                <section>
+                  <h4 className="text-xs font-bold uppercase text-slate-500 mb-2">➕ Your own column</h4>
+                  <form onSubmit={addOwn} className="flex flex-wrap gap-2">
+                    <input value={newCol.label} onChange={(e) => setNewCol({ ...newCol, label: e.target.value })} placeholder="Name, e.g. Paid, Called, Note"
+                      className="flex-1 min-w-[150px] rounded-lg border border-slate-300 dark:border-slate-700 bg-transparent px-3 py-2 text-sm" />
+                    <select value={newCol.type} onChange={(e) => setNewCol({ ...newCol, type: e.target.value })}
+                      className="rounded-lg border border-slate-300 dark:border-slate-700 bg-transparent px-2 py-2 text-sm">
+                      <option value="tick">✓ tick</option>
+                      <option value="text">✎ text</option>
+                    </select>
+                    <button className="rounded-lg bg-teal-600 text-white px-3 py-2 text-sm font-semibold">Add</button>
+                  </form>
+                </section>
+                <section>
+                  <h4 className="text-xs font-bold uppercase text-slate-500 mb-2">👤 Profile details</h4>
+                  <div className="grid grid-cols-2 gap-1">
+                    {Object.keys(INFO).map(k => (
+                      <label key={k} className="flex items-center gap-2 p-1.5 rounded hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer text-sm">
+                        <input type="checkbox" checked={has('info', k)} onChange={() => toggle(infoCol(k))} className="w-4 h-4 accent-teal-600" />
+                        <span className="truncate">{INFO[k][0]}</span>
+                      </label>
+                    ))}
+                  </div>
+                </section>
+                <section>
+                  <h4 className="text-xs font-bold uppercase text-slate-500 mb-2">📄 Documents</h4>
+                  <div className="grid grid-cols-2 gap-1">
+                    {docNames.map(n => (
+                      <label key={n} className="flex items-center gap-2 p-1.5 rounded hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer text-sm">
+                        <input type="checkbox" checked={has('doc', n)} onChange={() => toggle(docCol(n))} className="w-4 h-4 accent-teal-600" />
+                        <span className="truncate">{n}</span>
+                      </label>
+                    ))}
+                  </div>
+                </section>
               </div>
+              <section>
+                <h4 className="text-xs font-bold uppercase text-slate-500 mb-2">↕ Order (as printed)</h4>
+                <ol className="space-y-1">
+                  {columns.map((c, i) => (
+                    <li key={`${c.kind}:${c.key}`} className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 px-2 py-1.5 text-sm">
+                      <span className="text-xs">{c.kind === 'doc' ? '📄' : c.kind === 'info' ? '👤' : c.type === 'tick' ? '✓' : '✎'}</span>
+                      <span className="flex-1 truncate">{c.label}</span>
+                      <button type="button" onClick={() => move(i, -1)} disabled={i === 0} className="px-1.5 text-slate-500 disabled:opacity-30">↑</button>
+                      <button type="button" onClick={() => move(i, 1)} disabled={i === columns.length - 1} className="px-1.5 text-slate-500 disabled:opacity-30">↓</button>
+                      <button type="button" onClick={() => saveColumns(columns.filter((_, j) => j !== i))} className="px-1.5 text-red-500">✕</button>
+                    </li>
+                  ))}
+                  {!columns.length && <li className="text-sm text-slate-400">No columns — tick some on the left.</li>}
+                </ol>
+              </section>
             </div>
-            <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-between">
-              <button type="button" onClick={resetColumns} className="text-sm text-red-600 font-medium">
-                Reset
-              </button>
-              <button
-                type="button"
-                onClick={() => setIsColumnModalOpen(false)}
-                className="px-4 py-2 text-sm font-medium bg-teal-600 text-white rounded-lg"
-              >
-                Done
-              </button>
+            <div className="p-3 bg-slate-50 dark:bg-slate-800 border-t border-slate-100 dark:border-slate-700 flex justify-between">
+              <button type="button" onClick={() => saveColumns(defaultColumns())} className="text-sm text-red-600 font-medium">Reset</button>
+              <button type="button" onClick={() => setManage(false)} className="px-4 py-2 text-sm font-medium bg-teal-600 text-white rounded-lg">Done</button>
             </div>
           </div>
         </div>

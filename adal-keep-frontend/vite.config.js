@@ -18,8 +18,18 @@ export default defineConfig(({ mode }) => ({
         fs.writeFileSync(path.join(out, '_redirects'), '/* /index.html 200\n')
       },
     },
+    // `vite build --mode phone`: the pages built into the phone app
+    // (adal-phone/www) for when its PC is off; connect.html finds the PC.
+    mode === 'phone' && {
+      name: 'adal-phone-files',
+      closeBundle() {
+        const out = path.resolve('../adal-phone/www')
+        for (const f of fs.readdirSync('public-phone')) fs.copyFileSync(path.join('public-phone', f), path.join(out, f))
+        for (const f of ['sw.js', 'manifest.webmanifest']) fs.rmSync(path.join(out, f), { force: true })
+      },
+    },
   ].filter(Boolean),
-  build: mode === 'demo' ? { outDir: 'dist-demo' } : {},
+  build: mode === 'demo' ? { outDir: 'dist-demo' } : mode === 'phone' ? { outDir: '../adal-phone/www', emptyOutDir: true } : {},
   server: {
     host: '0.0.0.0',
     port: 3000,

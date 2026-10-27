@@ -23,11 +23,36 @@ if (typeof document !== 'undefined') {
 
 // Public demo: start the in-browser file server and draw the demo documents first.
 async function boot() {
+  if (import.meta.env.VITE_PHONE === '1') return phoneBoot()
   if (import.meta.env.VITE_DEMO !== '1') return
   const { startFileWorker, seedFiles } = await import('./demo/files.js')
   const { demoDb } = await import('./demo/server.js')
   await startFileWorker()
   await seedFiles(demoDb())
+}
+
+// Phone app (vite --mode phone, inside adal-phone): connect.html finds the PC
+// and opens it; when the PC cannot be reached it comes back here (?cloud=1)
+// and the same pages work on the online copy.
+async function phoneBoot() {
+  const q = new URLSearchParams(location.search)
+  if (q.has('cloud')) sessionStorage.setItem('adal-cloud', '1')
+  if (sessionStorage.getItem('adal-cloud') !== '1') {
+    location.replace('/connect.html' + location.search)
+    await new Promise(() => {})       // the page is leaving
+  }
+  window.__ADAL_CLOUD = true
+  const { startCloudDocuments } = await import('./cloud/adapter.js')
+  startCloudDocuments()
+  const bar = document.createElement('div')
+  bar.id = 'adal-cloud-bar'
+  bar.innerHTML = '☁️ Online copy — the PC is off or far away. Changes are done when the PC is on. <button type="button">Try the PC</button>'
+  bar.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:9999;background:#0f766e;color:#fff;font:12px/1.3 system-ui,sans-serif;padding:6px 10px;display:flex;gap:8px;align-items:center;justify-content:space-between'
+  const btn = bar.querySelector('button')
+  btn.style.cssText = 'background:#fff;color:#0f766e;border:0;border-radius:6px;padding:4px 8px;font-weight:600;white-space:nowrap'
+  btn.onclick = () => { sessionStorage.removeItem('adal-cloud'); location.replace('/connect.html') }
+  document.body.appendChild(bar)
+  document.body.style.paddingBottom = '40px'
 }
 
 boot().finally(() => ReactDOM.createRoot(document.getElementById('root')).render(
@@ -37,7 +62,7 @@ boot().finally(() => ReactDOM.createRoot(document.getElementById('root')).render
 ))
 
 // Installable app (Install Adal Keep in the browser menu). Not in the demo build.
-if ('serviceWorker' in navigator && import.meta.env.PROD && import.meta.env.VITE_DEMO !== '1') {
+if ('serviceWorker' in navigator && import.meta.env.PROD && import.meta.env.VITE_DEMO !== '1' && import.meta.env.VITE_PHONE !== '1') {
   window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}))
 }
 

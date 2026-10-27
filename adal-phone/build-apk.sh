@@ -8,6 +8,8 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 OUT="$HERE/../adal-keep-backend/src/phone-app"
 export ANDROID_HOME="${ANDROID_HOME:-$HOME/Android/Sdk}"
+# The app's own pages (for when the PC is off) + the connect screen.
+( cd "$HERE/../adal-keep-frontend" && npm run -s build:phone >/dev/null )
 cd "$HERE"
 npx cap sync android >/dev/null
 ( cd android && ./gradlew assembleRelease -q )

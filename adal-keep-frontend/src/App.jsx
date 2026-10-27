@@ -76,6 +76,20 @@ function Shell() {
     )
   }
 
+  if (state === 'error' && window.__ADAL_CLOUD === true) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-900 gap-4 p-6 text-center">
+        <div className="text-5xl">☁️</div>
+        <h1 className="text-xl font-bold text-slate-800 dark:text-white">The online copy is not ready</h1>
+        <p className="text-sm text-slate-500 dark:text-slate-400 max-w-md">
+          The phone has no internet, or the office PC has not copied the data online yet
+          (it does so every minute while it is on with internet).
+        </p>
+        <button onClick={refresh} className="px-6 py-3 bg-teal-600 hover:bg-teal-700 text-white font-semibold rounded-xl">Retry →</button>
+      </div>
+    )
+  }
+
   if (state === 'error') {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-900 gap-4 p-6 text-center">

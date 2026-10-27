@@ -27,6 +27,15 @@ if (import.meta.env.VITE_DEMO === '1') {
   })
 }
 
+// Phone app with its PC off or far away: the pages work on the agency's
+// online copy (src/cloud/adapter.js) instead of the PC.
+if (import.meta.env.VITE_PHONE === '1') {
+  api.interceptors.request.use(async (config) => {
+    if (window.__ADAL_CLOUD === true) config.adapter = (await import('../cloud/adapter.js')).cloudAdapter
+    return config
+  })
+}
+
 // Global error handler (optional but helpful for debugging)
 api.interceptors.response.use(
   (response) => response,

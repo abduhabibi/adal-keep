@@ -289,3 +289,9 @@ export async function unlockStatus(db) {
     `/rest/v1/unlock_requests?agency_id=eq.${sess.user_id}&pc_number=eq.${pcNumber()}&select=id,status,note,created_at,decided_at&order=id.desc&limit=1`)
   return rows?.[0] || null
 }
+
+// The same Supabase connection, for the agency's online copy (cloudSync.js).
+export const cloudCall = (db, method, pathAndQuery, body, opts) => call(db, method, pathAndQuery, body, opts)
+export const cloudAuth = (pathAndQuery, body) => auth(pathAndQuery, body)
+export async function cloudAgencyId(db) { await token(db); return sess?.user_id || null }
+export const cloudConfig = () => cfg()

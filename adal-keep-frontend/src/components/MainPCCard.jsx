@@ -38,6 +38,57 @@ const STEPS = [
     'Turn on Tailscale on the laptop or phone and open the main PC\'s Tailscale address (or the https one on phones). The data never leaves the office PC — home devices only look at it.'],
 ]
 
+const ago = (t) => {
+  if (!t) return 'not yet'
+  const m = Math.round((Date.now() - new Date(t)) / 60000)
+  return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : new Date(t).toLocaleDateString()
+}
+
+/** The online copy phones use when this PC is off, and the phones allowed to see it. */
+function PhonesOnline({ here }) {
+  const [c, setC] = useState(null)
+  const load = () => api.get('/mobile/cloud').then(r => setC(r.data)).catch(() => {})
+  useEffect(() => { load(); const t = setInterval(load, 15000); return () => clearInterval(t) }, [])
+  if (!c) return null
+  const sync = async () => { await api.post('/mobile/cloud/sync').catch(() => {}); setTimeout(load, 3000) }
+  const remove = async (d) => {
+    if (!d.revoked && !window.confirm(`Remove "${d.name || 'this phone'}"? It can no longer see the agency's data.`)) return
+    await api.post(`/mobile/devices/${d.user_id}/revoke`, { revoked: !d.revoked }).catch(e => window.alert(e.response?.data?.error || e.message))
+    load()
+  }
+  return (
+    <div translate="no" className="rounded-xl p-3 mb-4 border border-slate-200 dark:border-slate-700 text-sm space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xl">☁️</span>
+        <p className="font-semibold flex-1 min-w-[160px]">Online copy for phones</p>
+        {c.on && <Button size="sm" variant="secondary" onClick={sync} disabled={c.running}>{c.running ? 'Copying…' : 'Copy now'}</Button>}
+      </div>
+      {!c.on
+        ? <p className="text-xs text-slate-500">Off — sign this PC in to the chat (Chat page) first; the online copy uses the same agency account.</p>
+        : c.error
+          ? <p className="text-xs text-red-600 dark:text-red-400">{c.error}</p>
+          : <p className="text-xs text-slate-500">
+              Profiles, runs, tasks and all documents are copied online every minute, so paired phones work at home and at night even when this PC is off.
+              Changes made on a phone are done here when this PC is on again. Last copy: <b>{ago(c.last)}</b>
+              {c.filesLeft > 0 && <> · {c.filesLeft} documents still to upload</>}
+              {c.applied > 0 && <> · {c.applied} phone changes done</>}
+            </p>}
+      {c.devices?.length > 0 && (
+        <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+          {c.devices.map(d => (
+            <li key={d.user_id} className="flex items-center gap-2 py-1.5">
+              <span>📱</span>
+              <span className={`flex-1 truncate ${d.revoked ? 'line-through text-slate-400' : ''}`}>{d.name || 'Phone'}</span>
+              <span className="text-xs text-slate-400">paired {new Date(d.created_at).toLocaleDateString()}</span>
+              {here && <button type="button" onClick={() => remove(d)} className={`text-xs font-semibold ${d.revoked ? 'text-teal-600' : 'text-red-600'} hover:underline`}>{d.revoked ? 'Allow again' : 'Remove'}</button>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
 export default function MainPCCard() {
   const [info, setInfo] = useState(null)
   const [mode, setMode] = useState('main')
@@ -118,12 +169,14 @@ export default function MainPCCard() {
           <span className="text-2xl">📱</span>
           <div className="flex-1 min-w-[180px]">
             <p className="text-sm font-semibold">Phone app — this PC's number</p>
-            <p className="text-xs text-slate-500">On the office Wi-Fi, open the Adal Keep app on the phone and type this number once. Away from the office it works through Tailscale.</p>
+            <p className="text-xs text-slate-500">On the office Wi-Fi, open the Adal Keep app on the phone and type this number once. Away from the office (PC off too) it works from the online copy below.</p>
           </div>
           <span className="font-mono text-3xl font-bold tracking-[0.3em] text-indigo-700 dark:text-indigo-300">{info.pc_number}</span>
           {IN_PHONE_APP && <a href={PAIR_PAGE} className="w-full text-center rounded-lg border border-indigo-300 py-1.5 text-xs font-semibold text-indigo-700">⇄ Pair this phone with another PC</a>}
         </div>
       )}
+
+      {!follower && <PhonesOnline here={here} />}
 
       {!follower && (
         <div className="space-y-1.5 mb-5" translate="no">

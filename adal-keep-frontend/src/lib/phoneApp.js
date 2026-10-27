@@ -4,4 +4,4 @@
  * http://localhost/ inside the phone.
  */
 export const IN_PHONE_APP = typeof navigator !== 'undefined' && /AdalKeepPhone/.test(navigator.userAgent || '')
-export const PAIR_PAGE = 'http://localhost/?pair=1'
+export const PAIR_PAGE = 'http://localhost/connect.html?pair=1'

@@ -1,5 +1,6 @@
 /*
- * Adal Keep phone app — the start screen.
+ * Adal Keep phone app — the start screen (connect.html; the app itself is the
+ * same Adal Keep pages, built in: index.html).
  *   1. First time: the person types the PC's 5-digit number. The phone asks
  *      the office Wi-Fi "where is Adal Keep?" (UDP, the same question Adal
  *      Keep PCs ask), and the PC with that number answers with its addresses.
@@ -33,9 +34,14 @@ async function discover() {
 async function pairOnWifi(number) {
   const servers = await discover()
   for (const s of servers) {
-    const r = await getJSON(`${s.url}/api/mobile/pair`, { method: 'POST', body: JSON.stringify({ number }) })
+    const old = saved()
+    const device = old?.cloud ? null : `Phone ${new Date().toLocaleDateString('en-GB')}`
+    const r = await getJSON(`${s.url}/api/mobile/pair`, { method: 'POST', body: JSON.stringify({ number, device }) }, 15000)
     if (r.ok && r.body.ok) {
-      const pc = { number, name: r.body.name, lan: [s.url, ...(r.body.lan || [])].filter((v, i, a) => a.indexOf(v) === i), tailscale: r.body.tailscale || null }
+      // r.body.cloud: this phone's own online account — the app works from the
+      // agency's online copy when the PC cannot be reached.
+      const pc = { number, name: r.body.name, lan: [s.url, ...(r.body.lan || [])].filter((v, i, a) => a.indexOf(v) === i), tailscale: r.body.tailscale || null,
+        cloud: r.body.cloud || (old?.number === number ? old.cloud : null) || null }
       localStorage.setItem(KEY, JSON.stringify(pc))
       return { pc }
     }
@@ -59,6 +65,8 @@ async function open(pc) {
     if (again.pc) url = await tryUrls([...(again.pc.lan || []), again.pc.tailscale])
   }
   if (url) { await updateFrom(url); location.href = `${url}/`; return }
+  // The PC is off or far away: the built-in Adal Keep on the online copy.
+  if (pc.cloud) { location.replace('/?cloud=1'); return }
   show('fail')
   $('failMsg').innerHTML = `Cannot reach <b>${pc.name || 'the PC'}</b>.<br><br>In the office: connect to the office Wi-Fi.<br>Away: open the Tailscale app and turn it on.<br>The PC must be on.`
 }
@@ -120,6 +128,7 @@ function startPair(msg = '') {
 
 $('retry').onclick = () => { const pc = saved(); pc ? open(pc) : startPair() }
 $('repair').onclick = () => startPair()
+// "Try the PC again" from the app: straight back to connecting.
 
 const pc = saved()
 if (pc && !new URLSearchParams(location.search).has('pair')) open(pc)

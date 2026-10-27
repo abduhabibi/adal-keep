@@ -19,6 +19,7 @@ import updatesRouter from './src/routes/updates.js'
 import tutorRouter from './src/routes/tutor.js'
 import systemUpdateRouter, { startUpdateWatcher } from './src/routes/systemUpdate.js'
 import { startMedicalWatcher } from './src/services/medicalValidity.js'
+import { startCloudSync } from './src/services/cloudSync.js'
 import quickLinksRouter from "./src/routes/quickLinks.js"
 import tenancyRouter, { attachAuth } from "./src/routes/tenancy.js"
 import employeesRouter from "./src/routes/employees.js"
@@ -1003,6 +1004,7 @@ initSystem().then(() => {
     console.log(`🚀 Backend running on http://localhost:${PORT}`)
     startUpdateWatcher(app.locals.db) // a new version installs by itself when no run is working
     startMedicalWatcher(app.locals.db) // the medical's battery: warnings as it runs out
+    startCloudSync(app.locals.db)      // the online copy phones use when this PC is off
     if (isFollower()) {
       // Another PC is the main PC: all work happens there, nothing here.
       console.log(`🔗 This PC follows the main PC at ${mainURL()} — no automations, no discovery here`)

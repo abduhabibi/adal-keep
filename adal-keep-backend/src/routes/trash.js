@@ -16,7 +16,7 @@ const router = express.Router()
 export function onThisPC(req) {
   const ip = String(req.socket?.remoteAddress || '')
   const local = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1'
-  const forwarded = ['x-forwarded-for', 'forwarded', 'x-real-ip', 'tailscale-user-login', 'tailscale-headers-info']
+  const forwarded = ['x-adal-cloud', 'x-forwarded-for', 'forwarded', 'x-real-ip', 'tailscale-user-login', 'tailscale-headers-info']
     .some(h => req.headers?.[h] !== undefined)
   return local && !forwarded
 }

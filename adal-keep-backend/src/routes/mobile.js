@@ -14,7 +14,7 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import { pcNumber, isFollower, tailscaleInfo } from '../services/mainPC.js'
 import { getLanAddresses } from '../services/discovery.js'
-import { cloudOn, cloudStatus, makeDevice, listDevices, setDeviceRevoked, syncNow } from '../services/cloudSync.js'
+import { relayStatus, cloudOn, cloudStatus, makeDevice, listDevices, setDeviceRevoked, syncNow } from '../services/cloudSync.js'
 import { onThisPC } from './trash.js'
 
 const router = express.Router()
@@ -72,7 +72,7 @@ router.get('/mobile/cloud', async (req, res) => {
   let devices = []
   let error = cloudStatus.error
   try { if (await cloudOn(db)) devices = await listDevices(db) } catch (e) { error = error || e.message }
-  res.json({ ...cloudStatus, on: await cloudOn(db).catch(() => false), devices, error })
+  res.json({ ...cloudStatus, on: await cloudOn(db).catch(() => false), devices, error, relay: relayStatus })
 })
 router.post('/mobile/cloud/sync', async (req, res) => {
   syncNow(req.app.locals.db).catch(() => {})

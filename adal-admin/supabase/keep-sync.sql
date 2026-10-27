@@ -154,3 +154,37 @@ create policy keep_docs_change on storage.objects for update to authenticated
 drop policy if exists keep_docs_remove on storage.objects;
 create policy keep_docs_remove on storage.objects for delete to authenticated
   using (bucket_id = 'keep' and (storage.foldername(name))[1] = auth.uid()::text);
+
+-- ----------------------------------------------------------------- relay ---
+-- A phone away from the office talks to its PC through here while the PC is
+-- on: the phone writes a call (method + API path), the PC answers it within a
+-- second or two. Live run tabs (captchas), chat, everything — no Tailscale.
+create table if not exists public.keep_calls (
+  id          bigserial primary key,
+  agency_id   uuid not null,
+  device_id   uuid not null default auth.uid(),
+  method      text not null,
+  path        text not null,
+  body        jsonb,
+  created_at  timestamptz not null default now(),
+  status      text not null default 'new',     -- new · done · late
+  answer      jsonb,
+  answer_bin  text,                            -- base64 (pictures, PDFs)
+  answer_type text,
+  answer_head jsonb,
+  answer_code int,
+  answered_at timestamptz
+);
+create index if not exists keep_calls_new on public.keep_calls (agency_id, status, id);
+alter table public.keep_calls enable row level security;
+drop policy if exists keep_calls_add on public.keep_calls;
+create policy keep_calls_add on public.keep_calls for insert
+  with check (agency_id = public.keep_agency() and device_id = auth.uid());
+drop policy if exists keep_calls_read on public.keep_calls;
+create policy keep_calls_read on public.keep_calls for select
+  using (device_id = auth.uid() or agency_id = auth.uid());
+drop policy if exists keep_calls_answer on public.keep_calls;
+create policy keep_calls_answer on public.keep_calls for update
+  using (agency_id = auth.uid()) with check (agency_id = auth.uid());
+drop policy if exists keep_calls_clean on public.keep_calls;
+create policy keep_calls_clean on public.keep_calls for delete using (agency_id = auth.uid());

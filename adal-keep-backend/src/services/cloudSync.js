@@ -61,7 +61,9 @@ function clean(key, data) {
 }
 
 // ------------------------------------------------------------ 1. requests
-async function applyChanges(db, agency) {
+let applying = null
+const applyChanges = (db, agency) => (applying ||= applyChangesNow(db, agency).finally(() => { applying = null }))
+async function applyChangesNow(db, agency) {
   const list = await cloudCall(db, 'GET', `/rest/v1/keep_changes?agency_id=eq.${agency}&applied_at=is.null&order=id.asc&limit=50`)
   let names = null
   for (const c of list || []) {
@@ -213,6 +215,7 @@ export function startCloudSync(db) {
   }
   setTimeout(tick, 45000)
   timer = setInterval(tick, EVERY_MS)
+  startRelay(db)
   console.log('☁️  Online copy for phones: synced every minute (when on)')
 }
 export const syncNow = (db) => syncOnce(db)
@@ -241,4 +244,99 @@ export async function listDevices(db) {
 export async function setDeviceRevoked(db, userId, revoked = true) {
   const agency = await cloudAgencyId(db)
   await cloudCall(db, 'PATCH', `/rest/v1/keep_devices?agency_id=eq.${agency}&user_id=eq.${userId}`, { revoked: !!revoked }, { headers: { Prefer: 'return=minimal' } })
+}
+
+// ------------------------------------------------------------ relay
+/**
+ * Phones away from the office reach this PC through the online copy while it
+ * is on (keep_calls): a phone writes a call — method + API path — and this PC
+ * answers it on its own API within a second or two. Live run tabs (captcha,
+ * codes), chat, starting runs: everything works as in the office, no
+ * Tailscale. Calls are treated as NOT made on this PC (X-Adal-Cloud), so the
+ * main-PC-only pages (Trash, system, phones) stay closed to them.
+ */
+export const relayStatus = { on: false, lastCall: 0, answered: 0, error: null }
+const RELAY_FAST_MS = 600, RELAY_SLOW_MS = 2500, RELAY_LATE_MS = 30000, MAX_BIN = 8 * 1024 * 1024
+const working = new Set()
+let relayTimer = null, lastBeat = 0, lastClean = 0, deviceNames = new Map(), namesAt = 0
+
+async function answerCall(db, agency, c) {
+  const patch = { status: 'done', answered_at: new Date().toISOString() }
+  try {
+    if (Date.now() - new Date(c.created_at).getTime() > RELAY_LATE_MS) { patch.status = 'late'; return }
+    const method = String(c.method || 'GET').toUpperCase()
+    const p = String(c.path || '')
+    if (!p.startsWith('/') || p.includes('..')) throw Object.assign(new Error('bad path'), { code: 400 })
+    if (method !== 'GET' && NOT_FROM_PHONES.test(p) && !/^\/chat\b/.test(p)) throw Object.assign(new Error('Not from a phone: do this on the main PC.'), { code: 403 })
+    if (Date.now() - namesAt > 60000) {
+      deviceNames = new Map(((await cloudCall(db, 'GET', `/rest/v1/keep_devices?agency_id=eq.${agency}&select=user_id,name`)) || []).map(d => [d.user_id, d.name]))
+      namesAt = Date.now()
+    }
+    const r = await local(method, p, { body: method === 'GET' ? undefined : (c.body ?? undefined), headers: { 'X-Adal-Who': encodeURIComponent(`${deviceNames.get(c.device_id) || 'Phone'} (phone)`) } })
+    patch.answer_code = r.status
+    const type = r.headers.get('content-type') || ''
+    patch.answer_type = type
+    patch.answer_head = Object.fromEntries(['x-tab-size', 'x-tab-url', 'content-disposition'].map(h => [h, r.headers.get(h)]).filter(([, v]) => v))
+    if (/json/.test(type)) {
+      let data = await r.json().catch(() => null)
+      if (p.split('?')[0] === '/settings') data = clean('/settings', data)
+      patch.answer = data
+    } else if (/^text\//.test(type)) {
+      patch.answer = await r.text()
+    } else {
+      const buf = Buffer.from(await r.arrayBuffer())
+      if (buf.length > MAX_BIN) throw Object.assign(new Error('Too big to send to the phone.'), { code: 413 })
+      patch.answer_bin = buf.toString('base64')
+    }
+  } catch (e) {
+    patch.answer_code = e.code || 500
+    patch.answer = { error: e.message }
+  } finally {
+    await cloudCall(db, 'PATCH', `/rest/v1/keep_calls?id=eq.${c.id}`, patch, { headers: { Prefer: 'return=minimal' } }).catch(() => {})
+    relayStatus.answered++
+  }
+}
+
+async function relayOnce(db) {
+  const agency = await cloudAgencyId(db)
+  if (!agency) return
+  const calls = await cloudCall(db, 'GET', `/rest/v1/keep_calls?agency_id=eq.${agency}&status=eq.new&order=id.asc&limit=12&select=id,device_id,method,path,body,created_at`)
+  // "The PC is on": (only once keep_calls answers) phones send their calls here instead of queueing them.
+  if (Date.now() - lastBeat > 15000) {
+    await upsert(db, 'keep_meta', [{ agency_id: agency, key: '/_pc', data: { at: new Date().toISOString() }, updated_at: new Date().toISOString() }], 'agency_id,key')
+    lastBeat = Date.now()
+  }
+  // A phone is busy: its uploads are filed at once too, not at the next minute.
+  if (Date.now() - relayStatus.lastCall < 3 * 60000) await applyChanges(db, agency).catch(() => {})
+  const todo = (calls || []).filter(c => !working.has(c.id))
+  if (todo.length) relayStatus.lastCall = Date.now()
+  await Promise.all(todo.map(async c => {
+    working.add(c.id)
+    try { await answerCall(db, agency, c) } finally { setTimeout(() => working.delete(c.id), 10000) }
+  }))
+  if (Date.now() - lastClean > 5 * 60000) {
+    lastClean = Date.now()
+    const old = new Date(Date.now() - 10 * 60000).toISOString()
+    await cloudCall(db, 'DELETE', `/rest/v1/keep_calls?agency_id=eq.${agency}&created_at=lt.${old}`, undefined, { headers: { Prefer: 'return=minimal' } }).catch(() => {})
+  }
+}
+
+export function startRelay(db) {
+  if (relayTimer) return
+  const loop = async () => {
+    let wait = RELAY_SLOW_MS
+    try {
+      relayStatus.on = await cloudOn(db)
+      if (relayStatus.on) {
+        await relayOnce(db)
+        relayStatus.error = null
+        if (Date.now() - relayStatus.lastCall < 3 * 60000) wait = RELAY_FAST_MS
+      } else wait = 30000
+    } catch (e) {
+      relayStatus.error = e.message
+      wait = /keep_calls|schema cache|PGRST/i.test(e.message) ? 60000 : 10000
+    }
+    relayTimer = setTimeout(loop, wait)
+  }
+  relayTimer = setTimeout(loop, 15000)
 }

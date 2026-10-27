@@ -170,6 +170,59 @@ async function change(method, path, body) {
   return optimistic(method, path, body)
 }
 
+// ---------------------------------------------------------------- relay
+// The PC is on (it says so every 15 s): the phone's calls go to the PC itself
+// through keep_calls and come back in a second or two — live tabs, captchas,
+// chat, everything. Off: the online copy above.
+let alive = { at: 0, on: false }
+export async function pcOnline() {
+  if (Date.now() - alive.at < 10000) return alive.on
+  let on = false
+  try {
+    const rows = await rest('GET', '/rest/v1/keep_meta?key=eq./_pc&select=data')
+    on = !!rows?.[0] && Date.now() - new Date(rows[0].data.at).getTime() < 45000
+  } catch {}
+  alive = { at: Date.now(), on }
+  try { window.dispatchEvent(new CustomEvent('adal-pc-online', { detail: on })) } catch {}
+  return on
+}
+
+const wait = (ms) => new Promise(r => setTimeout(r, ms))
+async function relay(method, pathAndQuery, body, ms) {
+  const c = cloudCreds()
+  const [row] = await rest('POST', '/rest/v1/keep_calls?select=id', { agency_id: c.agency, method: method.toUpperCase(), path: pathAndQuery, body: body ?? null }, { Prefer: 'return=representation' })
+  const end = Date.now() + ms
+  for (let n = 0; Date.now() < end; n++) {
+    await wait(n < 3 ? 350 : 500)
+    const [a] = await rest('GET', `/rest/v1/keep_calls?id=eq.${row.id}&select=status,answer,answer_bin,answer_type,answer_head,answer_code`)
+    if (!a || a.status === 'new') continue
+    if (a.status === 'late') break
+    return a
+  }
+  alive = { at: 0, on: false }      // no answer: ask again whether the PC is on
+  return null
+}
+
+function relayed(a, config) {
+  let data = a.answer
+  if (a.answer_bin != null) {
+    const bin = atob(a.answer_bin)
+    const bytes = new Uint8Array(bin.length)
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+    data = new Blob([bytes], { type: a.answer_type || 'application/octet-stream' })
+  } else if (config.responseType === 'blob' && data != null && !(data instanceof Blob)) {
+    data = new Blob([typeof data === 'string' ? data : JSON.stringify(data)], { type: a.answer_type || 'application/json' })
+  }
+  const headers = { 'content-type': a.answer_type || '', ...(a.answer_head || {}) }
+  if (a.answer_code >= 400) {
+    const msg = a.answer?.error || a.answer?.message || `Error ${a.answer_code}`
+    const e = httpError(a.answer_code, msg)
+    e.response = { status: a.answer_code, data: a.answer, headers }
+    throw e
+  }
+  return { data, status: a.answer_code || 200, headers }
+}
+
 // ---------------------------------------------------------------- adapter
 export async function cloudAdapter(config) {
   const method = (config.method || 'get').toLowerCase()
@@ -178,8 +231,25 @@ export async function cloudAdapter(config) {
   const query = { ...Object.fromEntries(u.searchParams), ...(config.params || {}) }
   let body = config.data
   if (typeof body === 'string') { try { body = JSON.parse(body) } catch {} }
-  const reply = (status, data) => ({ data, status, statusText: String(status), headers: {}, config, request: {} })
+  const reply = (status, data, headers = {}) => ({ data, status, statusText: String(status), headers, config, request: {} })
   try {
+    if (await pcOnline()) {
+      const qs = u.search || (config.params ? '?' + new URLSearchParams(Object.entries(config.params).filter(([, v]) => v != null)).toString() : '')
+      // Uploads: the files go online first; the PC files them at once.
+      let sendBody = body
+      if (body instanceof FormData) {
+        const parts = await uploadParts(body)
+        const pid = Number(path.match(/^\/profiles\/(\d+)/)?.[1]) || null
+        await request('upload', { path, ...parts }, pid)
+        return reply(200, { ok: true, success: true, queued: true, files: [], message: 'Uploaded — the PC files it in a moment.' })
+      }
+      let a = null
+      try { a = await relay(method, path + qs, method === 'get' ? undefined : sendBody, method === 'get' ? 12000 : 25000) }
+      catch (e) { if (method !== 'get') throw e }
+      if (a) { const r = relayed(a, config); return reply(r.status, r.data, r.headers) }
+      if (method !== 'get') throw httpError(504, 'The PC did not answer in time — it may still do it. Look again in a moment.')
+      // A GET with no answer: the online copy below.
+    }
     const data = method === 'get' ? await get(path, query) : await change(method, path, body)
     if (config.responseType === 'blob' && !(data instanceof Blob)) throw httpError(503, 'This needs the PC.')
     return reply(200, data)

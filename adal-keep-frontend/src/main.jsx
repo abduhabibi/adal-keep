@@ -46,7 +46,13 @@ async function phoneBoot() {
   startCloudDocuments()
   const bar = document.createElement('div')
   bar.id = 'adal-cloud-bar'
-  bar.innerHTML = '☁️ Online copy — the PC is off or far away. Changes are done when the PC is on. <button type="button">Try the PC</button>'
+  const OFF = '☁️ The PC is off — you see the online copy. Changes are done when the PC is on.'
+  const ON = '🌐 Connected to the office PC through the internet — everything works.'
+  bar.innerHTML = `<span>${OFF}</span> <button type="button">Try the PC</button>`
+  window.addEventListener('adal-pc-online', (e) => {
+    bar.querySelector('span').textContent = e.detail ? ON : OFF
+    bar.style.background = e.detail ? '#4338ca' : '#0f766e'
+  })
   bar.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:9999;background:#0f766e;color:#fff;font:12px/1.3 system-ui,sans-serif;padding:6px 10px;display:flex;gap:8px;align-items:center;justify-content:space-between'
   const btn = bar.querySelector('button')
   btn.style.cssText = 'background:#fff;color:#0f766e;border:0;border-radius:6px;padding:4px 8px;font-weight:600;white-space:nowrap'

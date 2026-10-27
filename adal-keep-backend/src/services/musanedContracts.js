@@ -134,6 +134,10 @@ export function matchCard(card, profiles) {
  * chosen — or whose stage moved is opened (checkOne: contract, PDFs, task,
  * Wafid booking). Stops paging once a whole page is already known.
  */
+// Worth opening: she is newly chosen, or her request moved on.
+const cardIsNew = (p, c) => (!p.chosen_at && !/CANCEL|REJECT/i.test(c.stage || '')) ||
+  (c.stage && (p.musaned_stage || '') !== c.stage) || (c.contract_number && p.contract_number !== c.contract_number)
+
 export async function scanContracts(db) {
   if (contractCheck.running) return { busy: true }
   Object.assign(contractCheck, { running: true, results: [], signedOut: false, mode: 'list', unknown: [] })
@@ -163,7 +167,7 @@ export async function scanContracts(db) {
       const here = (await readCards(page)).map(t => ({ ...parseCard(t), text: t }))
       if (!here.length) break
       cards.push(...here)
-      const allKnown = here.every(c => { const p = matchCard(c, profiles); return p && p.chosen_at && (p.musaned_stage || '') === c.stage })
+      const allKnown = here.every(c => { const p = matchCard(c, profiles); return p && !cardIsNew(p, c) })
       if (allKnown || here.length < 50) break
     }
     // Requests that wait for our approval (one page).
@@ -181,8 +185,7 @@ export async function scanContracts(db) {
       if (!p) { contractCheck.unknown.push({ candidate: c.candidate, contract: c.contract_number, stage: c.stage }); continue }
       if (seen.has(p.id)) continue
       seen.add(p.id)
-      const changed = !p.chosen_at || (c.stage && (p.musaned_stage || '') !== c.stage) || (c.contract_number && p.contract_number !== c.contract_number)
-      if (!changed) { contractCheck.results.push({ id: p.id, name: p.full_name, state: 'chosen', stage: c.stage, unchanged: true }); continue }
+      if (!cardIsNew(p, c)) { contractCheck.results.push({ id: p.id, name: p.full_name, state: 'chosen', stage: c.stage, unchanged: true }); continue }
       if (!p.passport_number) { contractCheck.results.push({ id: p.id, name: p.full_name, state: 'error', error: 'no passport number on the profile' }); continue }
       await sleep(BETWEEN_MS / 2)
       let r
@@ -517,7 +520,9 @@ async function checkOne(db, browser, page, p) {
   const d = await page.evaluate(readDetails)
 
   const now = new Date().toISOString()
-  const first = !p.chosen_at
+  // A cancelled or rejected request: the employer did not keep her — not chosen.
+  const dead = /CANCEL|REJECT/i.test(card.stage || '')
+  const first = !p.chosen_at && !dead
   const update = {
     musaned_stage: card.stage || (d.stages.length ? d.stages[d.stages.length - 1].toUpperCase() : p.musaned_stage),
     musaned_payment: card.payment || (d.stages.some(x => /^paid$/i.test(x)) ? 'Paid' : p.musaned_payment),
@@ -568,6 +573,8 @@ async function checkOne(db, browser, page, p) {
   if (first) {
     await task(db, p.id, `Chosen on Musaned: ${p.full_name}`, `Contract ${update.contract_number || ''} · ${update.employer_name || ''} · ${update.musaned_stage || ''}. Wafid medical booking started.`)
     try { const { queueWafidBooking } = await import('./wafidStatus.js'); await queueWafidBooking(db, p.id, 'chosen') } catch (e) { console.warn('[contracts] wafid:', e.message) }
+  } else if (dead && p.chosen_at && !/CANCEL|REJECT/i.test(p.musaned_stage || '')) {
+    await task(db, p.id, `Musaned: ${p.full_name}'s contract was ${update.musaned_stage}`, `Contract ${update.contract_number || ''} · ${update.employer_name || ''}. She is free for another employer.`)
   } else if (p.musaned_stage && update.musaned_stage && p.musaned_stage !== update.musaned_stage) {
     await task(db, p.id, `Musaned: ${p.full_name} → ${update.musaned_stage}`, `Was ${p.musaned_stage}.`)
   }

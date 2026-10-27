@@ -29,7 +29,8 @@ export default defineConfig(({ mode }) => ({
       },
     },
   ].filter(Boolean),
-  build: mode === 'demo' ? { outDir: 'dist-demo' } : mode === 'phone' ? { outDir: '../adal-phone/www', emptyOutDir: true } : {},
+  build: mode === 'demo' ? { outDir: 'dist-demo' } : mode === 'phone' ? { outDir: '../adal-phone/www', emptyOutDir: true }
+    : mode === 'admin' ? { outDir: '../adal-admin/keep-app', emptyOutDir: true } : {},
   server: {
     host: '0.0.0.0',
     port: 3000,

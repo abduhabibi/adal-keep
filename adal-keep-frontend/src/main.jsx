@@ -23,6 +23,7 @@ if (typeof document !== 'undefined') {
 
 // Public demo: start the in-browser file server and draw the demo documents first.
 async function boot() {
+  if (import.meta.env.VITE_ADMIN === '1') return adminBoot()
   if (import.meta.env.VITE_PHONE === '1') return phoneBoot()
   if (import.meta.env.VITE_DEMO !== '1') return
   const { startFileWorker, seedFiles } = await import('./demo/files.js')
@@ -61,6 +62,33 @@ async function phoneBoot() {
   document.body.style.paddingBottom = '40px'
 }
 
+// Adal Keep Admin (vite --mode admin, served by adal-admin on :4101): one
+// agency's whole Adal Keep in its own window — through the relay while its PC
+// is on, else its online copy. adal-admin answers /sb/… for that agency only.
+async function adminBoot() {
+  const q = new URLSearchParams(location.search)
+  if (q.get('agency')) sessionStorage.setItem('adal-admin-agency', JSON.stringify({ id: q.get('agency'), name: q.get('name') || '' }))
+  const a = JSON.parse(sessionStorage.getItem('adal-admin-agency') || 'null')
+  if (!a?.id) { document.body.innerHTML = '<p style="font:16px system-ui;padding:40px">Open an agency from Adal Keep Admin.</p>'; await new Promise(() => {}) }
+  window.__ADAL_CREDS = { url: `${location.origin}/sb`, anon: a.id, email: 'admin', password: 'admin', agency: a.id }
+  window.__ADAL_CLOUD = true
+  // The person working here is Adal support, not one of the agency's employees.
+  try { localStorage.setItem('adal_active_employee', JSON.stringify({ id: -1, name: 'Adal support', username: 'adal', role: 'admin' })) } catch {}
+  document.title = `${a.name || 'Agency'} — Adal Keep Admin`
+  const { startCloudDocuments } = await import('./cloud/adapter.js')
+  startCloudDocuments()
+  const bar = document.createElement('div')
+  bar.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:9999;background:#7c2d12;color:#fff;font:12px/1.3 system-ui,sans-serif;padding:6px 10px;display:flex;gap:8px;align-items:center'
+  bar.innerHTML = `<b>👑 Adal Admin</b><span>· ${(a.name || 'Agency').replace(/[<>&]/g, '')} ·</span><span id="adal-admin-pc">…</span>`
+  window.addEventListener('adal-pc-online', (e) => {
+    bar.querySelector('#adal-admin-pc').textContent = e.detail ? 'its PC is on — changes happen at once' : 'its PC is off — online copy; changes wait for the PC'
+    bar.style.background = e.detail ? '#4338ca' : '#7c2d12'
+  })
+  document.body.appendChild(bar)
+  document.body.style.paddingBottom = '40px'
+  if (q.get('to')) history.replaceState(null, '', q.get('to'))
+}
+
 boot().finally(() => ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <App />
@@ -68,7 +96,7 @@ boot().finally(() => ReactDOM.createRoot(document.getElementById('root')).render
 ))
 
 // Installable app (Install Adal Keep in the browser menu). Not in the demo build.
-if ('serviceWorker' in navigator && import.meta.env.PROD && import.meta.env.VITE_DEMO !== '1' && import.meta.env.VITE_PHONE !== '1') {
+if ('serviceWorker' in navigator && import.meta.env.PROD && import.meta.env.VITE_DEMO !== '1' && import.meta.env.VITE_PHONE !== '1' && import.meta.env.VITE_ADMIN !== '1') {
   window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}))
 }
 

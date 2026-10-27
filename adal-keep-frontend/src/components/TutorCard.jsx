@@ -27,6 +27,7 @@ let touring = false
 /** Today's tips, one after another. force: even when today's were shown. */
 async function runTour(navigate, page, force = false) {
   if (touring) return
+  if (import.meta.env.VITE_ADMIN === '1' && !force) return   // Adal Keep Admin: no tour
   touring = true
   try {
     const { data } = await api.get('/tutor/tour', { params: { who: whoAmI(), page } })

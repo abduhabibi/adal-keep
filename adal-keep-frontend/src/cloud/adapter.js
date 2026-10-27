@@ -10,10 +10,13 @@
  * Documents open from online storage (/api/files/<id>/… links are rewritten).
  */
 const SAVED = 'adal-pc'
-const CACHE = 'adal-cloud-cache'
-const PENDING = 'adal-cloud-pending'   // profile edits the PC has not copied back yet
+// Adal Keep Admin opens one agency per window (window.__ADAL_CREDS): its own copies.
+const SUFFIX = typeof window !== 'undefined' && window.__ADAL_CREDS ? `-${window.__ADAL_CREDS.agency}` : ''
+const CACHE = 'adal-cloud-cache' + SUFFIX
+const PENDING = 'adal-cloud-pending' + SUFFIX   // profile edits the PC has not copied back yet
 
 export function cloudCreds() {
+  if (typeof window !== 'undefined' && window.__ADAL_CREDS) return window.__ADAL_CREDS
   try { return JSON.parse(localStorage.getItem(SAVED) || 'null')?.cloud || null } catch { return null }
 }
 export const inCloudMode = () => typeof window !== 'undefined' && window.__ADAL_CLOUD === true

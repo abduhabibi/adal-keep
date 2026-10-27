@@ -2,6 +2,7 @@
  * Adal Keep — admin panel (only for Adal, on Adal's own PC).
  *
  *   node server.mjs          then open http://localhost:4100
+ *                            (one agency's own Adal Keep opens on :4101)
  *
  * Needs adal-admin/.env (never shared, never committed):
  *   SUPABASE_URL=https://xxxx.supabase.co
@@ -183,6 +184,28 @@ const api = {
     await sb('DELETE', `/auth/v1/admin/users/${id}`) // the agency row, its messages and receipts go with it
     return { ok: true, pictures: files.length }
   },
+  // Agencies' work: how each agency's work stands (their PCs send a summary
+  // with the online copy, adal-keep-backend services/cloudSync.js).
+  'GET /api/work': async () => {
+    const [agencies, meta, phones] = await Promise.all([
+      rest('GET', 'agencies?is_admin=eq.false&select=id,name,pc_number,banned,last_seen&order=name.asc'),
+      rest('GET', 'keep_meta?key=in.(/_summary,/_pc)&select=agency_id,key,data,updated_at').catch(() => []),
+      rest('GET', 'keep_devices?select=agency_id,revoked').catch(() => []),
+    ])
+    const of = (id, key) => meta.find(m => m.agency_id === id && m.key === key)
+    return agencies.map(a => {
+      const pc = of(a.id, '/_pc')?.data?.at || null
+      return {
+        ...a,
+        pcOnline: !!pc && Date.now() - new Date(pc).getTime() < 60000,
+        pcSeen: pc,
+        summary: of(a.id, '/_summary')?.data || null,
+        phones: phones.filter(d => d.agency_id === a.id && !d.revoked).length,
+      }
+    })
+  },
+  // Do something in an agency's Adal Keep now (its PC must be on): the relay.
+  'POST /api/agency-call': async (q, b) => agencyCall(String(b.agency || ''), String(b.method || 'POST'), String(b.path || ''), b.body ?? null),
   'POST /api/decide': async (q, b) => {
     const status = b.approve ? 'approved' : 'rejected'
     const [r] = await rest('PATCH', `unlock_requests?id=eq.${Number(b.id)}`, { status, note: b.note || null, decided_at: new Date().toISOString() }, { Prefer: 'return=representation' })
@@ -196,6 +219,91 @@ const api = {
     return { ok: true }
   },
 }
+
+const isAgency = (id) => /^[0-9a-f-]{36}$/i.test(id || '') && id !== ADMIN_ID
+async function agencyCall(agency, method, p, body, ms = 25000) {
+  if (!isAgency(agency) || !p.startsWith('/')) throw new Error('bad call')
+  const [row] = await rest('POST', 'keep_calls?select=id', { agency_id: agency, device_id: ADMIN_ID, method: method.toUpperCase(), path: p, body }, { Prefer: 'return=representation' })
+  for (const end = Date.now() + ms; Date.now() < end;) {
+    await new Promise(r => setTimeout(r, 500))
+    const [a] = await rest('GET', `keep_calls?id=eq.${row.id}&select=status,answer,answer_code`)
+    if (a?.status === 'done') { if (a.answer_code >= 400) throw new Error(a.answer?.error || `Error ${a.answer_code}`); return a.answer }
+    if (a?.status === 'late') break
+  }
+  throw new Error("The agency's PC did not answer — it is off or has no internet.")
+}
+
+// ------------------------------------------------------- agency windows --
+// :4101 serves the Adal Keep pages (adal-keep-frontend `npm run build:admin`
+// → keep-app/) for one agency per window. Its "Supabase" is /sb here: only
+// that agency's rows (the window names it as its apikey), with the service key.
+const KEEP_APP = path.join(HERE, 'keep-app')
+const AGENCY_PORT = PORT + 1
+const SB_TABLES = /^(keep_meta|keep_files|keep_calls|keep_changes)$/
+const TYPES = { '.js': 'text/javascript', '.css': 'text/css', '.html': 'text/html; charset=utf-8', '.png': 'image/png', '.ico': 'image/x-icon', '.svg': 'image/svg+xml', '.webp': 'image/webp', '.json': 'application/json', '.woff2': 'font/woff2', '.webmanifest': 'application/manifest+json' }
+let knownAgencies = { at: 0, ids: new Set() }
+async function agencyExists(id) {
+  if (Date.now() - knownAgencies.at > 60000) knownAgencies = { at: Date.now(), ids: new Set((await rest('GET', 'agencies?select=id')).map(a => a.id)) }
+  return knownAgencies.ids.has(id)
+}
+async function rawBody(req) { const c = []; for await (const x of req) c.push(x); return Buffer.concat(c) }
+
+async function sbProxy(req, res, u) {
+  const send = (code, data, type = 'application/json') => res.writeHead(code, { 'Content-Type': type }).end(typeof data === 'string' || Buffer.isBuffer(data) ? data : JSON.stringify(data))
+  const p = u.pathname.slice(3)                     // /sb/rest/v1/… → /rest/v1/…
+  if (p.startsWith('/auth/v1/token')) return send(200, { access_token: 'admin', refresh_token: 'admin', expires_in: 3600 })
+  // Signed document links carry their own token.
+  if (req.method === 'GET' && p.startsWith('/storage/v1/object/sign/keep/')) {
+    const r = await fetch(`${URL_}${p}${u.search}`)
+    res.writeHead(r.status, { 'Content-Type': r.headers.get('content-type') || 'application/octet-stream', 'Cache-Control': 'private, max-age=3600' })
+    return res.end(Buffer.from(await r.arrayBuffer()))
+  }
+  const agency = String(req.headers.apikey || '')
+  if (!isAgency(agency) || !(await agencyExists(agency))) return send(403, { message: 'unknown agency' })
+  const fwd = async (method, target, body, headers = {}) => {
+    const r = await fetch(`${URL_}${target}`, { method, headers: { apikey: KEY, Authorization: `Bearer ${KEY}`, ...headers }, body })
+    res.writeHead(r.status, { 'Content-Type': r.headers.get('content-type') || 'application/json' })
+    res.end(Buffer.from(await r.arrayBuffer()))
+  }
+  const table = p.match(/^\/rest\/v1\/([a-z_]+)$/)?.[1]
+  if (table && SB_TABLES.test(table)) {
+    if (req.method === 'GET') return fwd('GET', `${p}${u.search ? u.search + '&' : '?'}agency_id=eq.${agency}`)
+    if (req.method === 'POST' && /^keep_(calls|changes)$/.test(table)) {
+      let b = JSON.parse((await rawBody(req)).toString() || '{}')
+      const fix = (r) => ({ ...r, agency_id: agency, device_id: ADMIN_ID })
+      b = Array.isArray(b) ? b.map(fix) : fix(b)
+      return fwd('POST', `${p}${u.search}`, JSON.stringify(b), { 'Content-Type': 'application/json', ...(req.headers.prefer ? { Prefer: req.headers.prefer } : {}) })
+    }
+    return send(405, { message: 'not allowed' })
+  }
+  const obj = p.match(/^\/storage\/v1\/object\/(sign\/)?keep\/(.+)$/)
+  if (obj && req.method === 'POST' && decodeURIComponent(obj[2]).startsWith(`${agency}/`)) {
+    const body = await rawBody(req)
+    return fwd('POST', p, body, { 'Content-Type': req.headers['content-type'] || 'application/octet-stream' })
+  }
+  return send(403, { message: 'not allowed' })
+}
+
+http.createServer(async (req, res) => {
+  const u = new URL(req.url, 'http://localhost')
+  try {
+    if (!signedIn(req)) {
+      if (u.pathname.startsWith('/sb/')) { res.writeHead(401).end(); return }
+      res.writeHead(303, { Location: `http://localhost:${PORT}/` }).end(); return
+    }
+    if (u.pathname.startsWith('/sb/')) return await sbProxy(req, res, u)
+    if (!fs.existsSync(path.join(KEEP_APP, 'index.html'))) {
+      res.writeHead(503, { 'Content-Type': 'text/plain' }).end('The agency pages are not built yet: in adal-keep-frontend run  npm run build:admin'); return
+    }
+    let f = path.normalize(path.join(KEEP_APP, decodeURIComponent(u.pathname)))
+    if (!f.startsWith(KEEP_APP) || !fs.existsSync(f) || fs.statSync(f).isDirectory()) f = path.join(KEEP_APP, 'index.html')
+    res.writeHead(200, { 'Content-Type': TYPES[path.extname(f)] || 'application/octet-stream', 'Cache-Control': f.endsWith('index.html') ? 'no-store' : 'public, max-age=31536000' })
+    fs.createReadStream(f).pipe(res)
+  } catch (e) {
+    if (!res.headersSent) res.writeHead(500, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ error: e.message }))
+  }
+}).listen(AGENCY_PORT, '127.0.0.1')
 
 async function image(res, p) {
   if (!/^[0-9a-f-]{36}\/[\w.-]+$/i.test(p || '')) { res.writeHead(400).end(); return }

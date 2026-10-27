@@ -15,7 +15,7 @@
  * src/cloud/adapter.js). Secrets (passwords, tokens) never leave the PC.
  */
 import crypto from 'crypto'
-import { chatConfigured, cloudCall, cloudAuth, cloudAgencyId, cloudConfig } from './chatCloud.js'
+import { me as joinAgency, chatConfigured, cloudCall, cloudAuth, cloudAgencyId, cloudConfig } from './chatCloud.js'
 import { isFollower } from './mainPC.js'
 
 const PORT = () => Number(process.env.PORT) || 4000
@@ -70,7 +70,7 @@ async function applyChangesNow(db, agency) {
     let result = ''
     try {
       names ||= new Map(((await cloudCall(db, 'GET', `/rest/v1/keep_devices?agency_id=eq.${agency}&select=user_id,name`)) || []).map(d => [d.user_id, d.name]))
-      const who = { 'X-Adal-Who': encodeURIComponent(`${names.get(c.device_id) || 'Phone'} (phone)`) }
+      const who = { 'X-Adal-Who': encodeURIComponent(names.has(c.device_id) ? `${names.get(c.device_id)} (phone)` : 'Adal support') }
       const p = c.payload || {}
       if (!String(p.path || '').startsWith('/') || NOT_FROM_PHONES.test(p.path)) throw new Error('not allowed from a phone')
       let r
@@ -98,6 +98,39 @@ async function applyChangesNow(db, agency) {
 }
 
 // ------------------------------------------------------------ 2. answers
+const daysTo = (d) => d ? Math.ceil((new Date(d).getTime() - Date.now()) / 86400000) : null
+/**
+ * How this agency's work stands, for Adal Keep Admin's "Agencies' work":
+ * runs waiting for a person, failures, open tasks, medicals running out,
+ * profiles per journey stage.
+ */
+async function summary(db) {
+  const names = new Map((await db('profiles').select('id', 'full_name')).map(p => [p.id, p.full_name]))
+  const runs = await db('automation_queue').select('id', 'profile_id', 'workflow_id', 'status', 'pause_reason', 'current_step', 'updated_at')
+  const weekAgo = Date.now() - 7 * 86400000
+  const run = (r) => ({ id: r.id, profile_id: r.profile_id, name: names.get(r.profile_id) || null, workflow: r.workflow_id, reason: r.pause_reason || r.current_step || null, at: r.updated_at })
+  const by = (s) => runs.filter(r => r.status === s)
+  const failed = by('failed').filter(r => new Date(r.updated_at).getTime() > weekAgo)
+  const tasks = await db('tasks').where({ status: 'pending' }).orderBy('id', 'desc').select('id', 'title', 'profile_id', 'created_at')
+  const meds = (await db('profiles').whereNotNull('medical_valid_until').select('id', 'full_name', 'medical_valid_until'))
+    .map(p => ({ id: p.id, name: p.full_name, days: daysTo(p.medical_valid_until) })).filter(m => m.days !== null && m.days <= 14).sort((a, b) => a.days - b.days)
+  let stages = {}
+  try {
+    const r = await local('GET', '/automations/stages')
+    if (r.ok) for (const p of (await r.json()).profiles || []) stages[p.stage] = (stages[p.stage] || 0) + 1
+  } catch {}
+  return {
+    profiles: names.size,
+    chosen: (await db('profiles').whereNotNull('chosen_at').count({ n: '*' }))[0].n,
+    stages,
+    runs: { running: by('running').length, pending: by('pending').length, paused: by('paused').length, failed7d: failed.length },
+    waiting: by('paused').concat(by('pending')).sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at))).slice(0, 40).map(run),
+    failed: failed.sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at))).slice(0, 25).map(run),
+    tasks: { open: tasks.length, latest: tasks.slice(0, 15) },
+    medicals: meds.slice(0, 25),
+  }
+}
+
 async function pushAnswers(db, agency, state) {
   const ids = (await db('profiles').select('id')).map(r => r.id)
   const keys = [...GLOBAL, ...ids.flatMap(PER_PROFILE)]
@@ -123,10 +156,19 @@ async function pushAnswers(db, agency, state) {
     batch.push({ row: { agency_id: agency, key, data, updated_at: new Date().toISOString() }, hash })
     if (batch.length >= 20) await flush()
   }
+  // The work summary (Adal Keep Admin).
+  try {
+    const data = await summary(db)
+    const hash = sha(JSON.stringify(data))
+    if (state.get('/_summary') !== hash) {
+      await upsert(db, 'keep_meta', [{ agency_id: agency, key: '/_summary', data: { ...data, at: new Date().toISOString() }, updated_at: new Date().toISOString() }], 'agency_id,key')
+      await setState(db, '/_summary', hash)
+    }
+  } catch (e) { console.warn('[cloud] summary:', e.message) }
   await flush()
   // Profiles that are gone: their answers go too.
   for (const key of state.keys()) {
-    if (!key.startsWith('/') || wanted.has(key)) continue
+    if (!key.startsWith('/') || wanted.has(key) || key === '/_summary') continue
     await cloudCall(db, 'DELETE', `/rest/v1/keep_meta?agency_id=eq.${agency}&key=eq.${encodeURIComponent(key)}`, undefined, { headers: { Prefer: 'return=minimal' } }).catch(() => {})
     await db('cloud_sync').where({ key }).del()
   }
@@ -177,12 +219,23 @@ async function pushFiles(db, agency, state) {
 }
 
 // ------------------------------------------------------------ the loop
+let joined = false
 async function syncOnce(db) {
   if (cloudStatus.running) return
   cloudStatus.running = true
   try {
     const agency = await cloudAgencyId(db)
     if (!agency) throw new Error('this PC has no online account yet')
+    // Another online account than last time (the old one was deleted): the
+    // online copy is empty — copy everything again.
+    const was = await db('cloud_sync').where({ key: 'agency' }).first().catch(() => null)
+    if (was?.hash !== agency) {
+      if (was) console.log('[cloud] new online account — copying everything again')
+      await db('cloud_sync').del()
+      await setState(db, 'agency', agency)
+    }
+    // Listed as an agency (name + PC number) for Adal Keep Admin, chat or not.
+    if (!joined) { await joinAgency(db).then(() => { joined = true }).catch(e => console.warn('[cloud] agency:', e.message)) }
     const applied = await applyChanges(db, agency)
     const state = await stateOf(db)
     await pushAnswers(db, agency, state)
@@ -272,7 +325,7 @@ async function answerCall(db, agency, c) {
       deviceNames = new Map(((await cloudCall(db, 'GET', `/rest/v1/keep_devices?agency_id=eq.${agency}&select=user_id,name`)) || []).map(d => [d.user_id, d.name]))
       namesAt = Date.now()
     }
-    const r = await local(method, p, { body: method === 'GET' ? undefined : (c.body ?? undefined), headers: { 'X-Adal-Who': encodeURIComponent(`${deviceNames.get(c.device_id) || 'Phone'} (phone)`) } })
+    const r = await local(method, p, { body: method === 'GET' ? undefined : (c.body ?? undefined), headers: { 'X-Adal-Who': encodeURIComponent(deviceNames.has(c.device_id) ? `${deviceNames.get(c.device_id)} (phone)` : 'Adal support') } })
     patch.answer_code = r.status
     const type = r.headers.get('content-type') || ''
     patch.answer_type = type

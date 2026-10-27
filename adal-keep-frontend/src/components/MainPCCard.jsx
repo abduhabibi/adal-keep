@@ -73,6 +73,9 @@ function PhonesOnline({ here }) {
               {c.filesLeft > 0 && <> · {c.filesLeft} documents still to upload</>}
               {c.applied > 0 && <> · {c.applied} phone changes done</>}
             </p>}
+      {c.on && <p className="text-[11px] text-slate-500 rounded-lg bg-amber-50 dark:bg-amber-900/20 text-amber-900 dark:text-amber-200 px-2 py-1.5">
+        🛡️ Adal support can see this online copy — your profiles, documents, runs and tasks — to help you and supervise the work, and can act in Adal Keep for you (marked “Adal support” in the Trash and logs).
+      </p>}
       {c.devices?.length > 0 && (
         <ul className="divide-y divide-slate-100 dark:divide-slate-800">
           {c.devices.map(d => (

@@ -61,7 +61,7 @@ export default function ProfilesPage() {
   const { rows: allRows, filterBar, sortBar, active: filtering, clear, step, setStep, stepCounts, activeCount } = useProfileFilters(profiles)
   // 🤝 Selected: the girls an employer chose on Musaned.
   const selectedOnly = searchParams.get('chosen') === '1'
-  const isChosen = (p) => !!(p.chosen_at || p.contract_number)
+  const isChosen = (p) => !!p.chosen_at && !/CANCEL|REJECT/i.test(p.musaned_stage || '')
   const chosenCount = useMemo(() => profiles.filter(isChosen).length, [profiles])
   const rows = selectedOnly ? allRows.filter(isChosen) : allRows
 

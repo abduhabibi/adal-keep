@@ -50,6 +50,18 @@
   .addform { display:grid; grid-template-columns:140px 1fr auto auto; gap:8px; align-items:center; background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:12px; margin-bottom:16px; }
   .addform input[type=text] { padding:9px 10px; border-radius:8px; border:1px solid var(--line); background:var(--bg); color:var(--text); }
   h4 { margin:18px 0 8px; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin-bottom:16px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:12px; }
+  .card b { font-size:24px; display:block; } .card span { color:var(--muted); font-size:12px; }
+  .card.warn b { color:var(--amber); } .card.bad b { color:var(--red); }
+  tr.ag { cursor:pointer; } tr.ag:hover, tr.ag.on { background:var(--teal-soft); }
+  .dot { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:6px; background:#94a3b8; } .dot.on { background:#16a34a; }
+  .num.warn { color:var(--amber); font-weight:700; } .num.bad { color:var(--red); font-weight:700; }
+  .detail { display:grid; grid-template-columns:repeat(auto-fit,minmax(340px,1fr)); gap:12px; margin-top:14px; }
+  .box2 { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:12px; min-width:0; }
+  .box2 h4 { margin:0 0 8px; } .row2 { display:flex; gap:8px; align-items:center; padding:6px 0; border-bottom:1px solid var(--line); font-size:13px; }
+  .row2:last-child { border:0; } .row2 .grow { flex:1; min-width:0; } .row2 .why { color:var(--muted); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .stages { display:flex; flex-wrap:wrap; gap:6px; } .stages span { background:var(--teal-soft); color:var(--teal); border-radius:999px; padding:2px 9px; font-size:12px; font-weight:600; }
   #zoom { position:fixed; inset:0; background:#000c; display:none; align-items:center; justify-content:center; cursor:zoom-out; }
   #zoom img { max-width:92vw; max-height:92vh; }
 </style>
@@ -58,7 +70,8 @@
 <nav>
   <header>Adal Keep — Admin</header>
   <div class="tabs">
-    <button data-tab="inbox" class="on">Inboxes</button>
+    <button data-tab="work" class="on">Work</button>
+    <button data-tab="inbox">Inboxes</button>
     <button data-tab="chats">All chats</button>
     <button data-tab="payments">Payments</button>
     <button data-tab="agencies">Agencies</button>
@@ -80,7 +93,7 @@
 <div id="dlg"><div class="box"><h3 id="dlgT"></h3><p id="dlgP"></p><input id="dlgI" type="text" style="display:none"><div class="row"><button class="ghost" id="dlgNo">Cancel</button><button class="go" id="dlgOk">OK</button></div></div></div>
 <script>
 let data = { agencies: [], conversations: [], requests: [] }
-let tab = 'inbox', open = null, lastId = 0
+let tab = 'work', open = null, lastId = 0, work = [], workOpen = null
 const $ = (s) => document.querySelector(s)
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
 const when = (t) => new Date(t).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })
@@ -109,7 +122,7 @@ const img = (p) => `<img src="/api/image?path=${encodeURIComponent(p)}" onclick=
 
 document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
   tab = b.dataset.tab; document.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('on', x === b))
-  if (tab === 'payments' || tab === 'agencies') { open = null; showTable() } else renderList()
+  if (tab === 'payments' || tab === 'agencies' || tab === 'work') { open = null; showTable() } else renderList()
   renderList()
 })
 
@@ -122,6 +135,11 @@ function renderList() {
       <div class="s">${c.last ? esc(c.last.body || '📷 picture') : '<span class="muted">no messages yet</span>'}</div></div>
       ${c.unread ? `<span class="badge">${c.unread}</span>` : ''}</div>`).join('') || '<p class="muted" style="padding:14px">Nothing yet.</p>'
     L.querySelectorAll('.item').forEach(el => el.onclick = () => openConv(data.conversations.find(c => c.id === el.dataset.id)))
+  } else if (tab === 'work') {
+    L.innerHTML = work.map(a => `<div class="item ${workOpen === a.id ? 'on' : ''}" data-w="${a.id}"><span class="dot ${a.pcOnline ? 'on' : ''}"></span>
+      <div style="min-width:0;flex:1"><div class="t">${esc(a.name)}</div><div class="s">${a.summary ? `${a.summary.profiles} profiles · ${a.summary.runs.paused + a.summary.runs.pending} waiting` : 'no online copy yet'}</div></div>
+      ${a.summary && (a.summary.runs.paused + a.summary.tasks.open) ? `<span class="badge">${a.summary.runs.paused + a.summary.tasks.open}</span>` : ''}</div>`).join('') || '<p class="muted" style="padding:14px">No agencies yet.</p>'
+    L.querySelectorAll('[data-w]').forEach(el => el.onclick = () => { workOpen = el.dataset.w; showTable(); renderList() })
   } else if (tab === 'payments') {
     const p = data.requests.filter(r => r.status === 'pending').length
     L.innerHTML = `<p style="padding:14px">${p} receipt(s) waiting.</p>`
@@ -153,8 +171,78 @@ async function loadMessages() {
   lastId = newest
 }
 
+// One agency's own Adal Keep, in its own window (served on :4101).
+function openAgency(id, to = '') {
+  const a = work.find(x => x.id === id) || data.agencies.find(x => x.id === id) || {}
+  const url = `http://localhost:${Number(location.port) + 1}/?agency=${id}&name=${encodeURIComponent(a.name || '')}${to ? `&to=${encodeURIComponent(to)}` : ''}`
+  window.open(url, `agency-${id}`, 'popup,width=1280,height=860')
+}
+const WF = { musaned_add_candidate: 'Musaned', musaned_check_chosen: 'Musaned check', wafid_book: 'Wafid booking', wafid_check: 'Wafid result', wafid_slip: 'Wafid slip',
+  lmis_contract: 'LMIS contract', insurance_certificate: 'Insurance', mofa_visa: 'Visa', cv_generate: 'CV' }
+const wf = (w) => WF[w] || String(w || '').replace(/_/g, ' ')
+const ago = (t) => { if (!t) return '—'; const m = Math.round((Date.now() - new Date(t)) / 60000); return m < 1 ? 'now' : m < 60 ? `${m} min` : m < 1440 ? `${Math.round(m / 60)} h` : `${Math.round(m / 1440)} d` }
+const cls = (n, warn, bad) => n >= bad ? 'num bad' : n >= warn ? 'num warn' : 'num'
+
+function workTable() {
+  $('#title').textContent = "Agencies' work — every agency, live"
+  const S = work.map(a => a.summary).filter(Boolean)
+  const sum = (f) => S.reduce((n, s) => n + (f(s) || 0), 0)
+  const cards = [
+    ['Agencies with PC on', `${work.filter(a => a.pcOnline).length} / ${work.length}`, ''],
+    ['Runs waiting for a person', sum(s => s.runs.paused + s.runs.pending), sum(s => s.runs.paused) > 10 ? 'warn' : ''],
+    ['Failed this week', sum(s => s.runs.failed7d), sum(s => s.runs.failed7d) ? 'bad' : ''],
+    ['Open tasks', sum(s => s.tasks.open), ''],
+    ['Medicals ending ≤ 7 days', sum(s => s.medicals.filter(m => m.days <= 7).length), sum(s => s.medicals.filter(m => m.days <= 7).length) ? 'bad' : ''],
+    ['Profiles', sum(s => s.profiles), ''], ['Chosen by employers', sum(s => Number(s.chosen)), ''],
+  ]
+  let html = `<div class="cards">${cards.map(([t, v, c]) => `<div class="card ${c}"><b>${v}</b><span>${t}</span></div>`).join('')}</div>
+    <table><tr><th>Agency</th><th>PC</th><th>Profiles</th><th>Chosen</th><th>Waiting</th><th>Failed 7 d</th><th>Tasks</th><th>Medical ≤ 14 d</th><th>Phones</th><th>Copied</th><th></th></tr>` +
+    work.map(a => { const s = a.summary; return `<tr class="ag ${workOpen === a.id ? 'on' : ''}" data-row="${a.id}">
+      <td><b>${esc(a.name)}</b> <span class="muted code" style="letter-spacing:0">${esc(a.pc_number || '')}</span>${a.banned ? ' <span class="pill rejected">banned</span>' : ''}</td>
+      <td><span class="dot ${a.pcOnline ? 'on' : ''}"></span>${a.pcOnline ? 'on' : `off ${a.pcSeen ? ago(a.pcSeen) : ''}`}</td>
+      ${s ? `<td>${s.profiles}</td><td>${s.chosen}</td><td class="${cls(s.runs.paused + s.runs.pending, 5, 15)}">${s.runs.paused + s.runs.pending}</td>
+      <td class="${cls(s.runs.failed7d, 1, 5)}">${s.runs.failed7d}</td><td class="${cls(s.tasks.open, 5, 20)}">${s.tasks.open}</td>
+      <td class="${cls(s.medicals.length, 1, 3)}">${s.medicals.length}</td><td>${a.phones}</td><td class="muted">${ago(s.at)}</td>`
+      : `<td colspan="8" class="muted">No online copy yet (needs the newest Adal Keep and its chat signed in)</td>`}
+      <td><button class="go" data-open="${a.id}">Open Adal Keep</button></td></tr>` }).join('') + '</table>'
+  const a = work.find(x => x.id === workOpen)
+  if (a?.summary) {
+    const s = a.summary
+    const runRow = (r, failed) => `<div class="row2"><div class="grow"><b>${esc(r.name || `profile ${r.profile_id}`)}</b> · ${esc(wf(r.workflow))} <span class="muted">${ago(r.at)}</span>
+        <div class="why" title="${esc(r.reason)}">${esc(r.reason || '')}</div></div>
+      <button class="ghost" data-goto="/profiles/${r.profile_id}?run=${r.id}">Open</button>
+      ${failed ? '' : `<button class="ghost" data-act="resume" data-run="${r.id}">Continue</button><button class="ghost" data-act="cancel" data-run="${r.id}">Cancel</button>`}</div>`
+    html += `<div class="detail">
+      <div class="box2"><h4>⏸ Waiting for a person (${s.runs.paused + s.runs.pending})</h4>${s.waiting.map(r => runRow(r, false)).join('') || '<p class="muted">Nothing waiting.</p>'}</div>
+      <div class="box2"><h4>❌ Failed this week (${s.runs.failed7d})</h4>${s.failed.map(r => runRow(r, true)).join('') || '<p class="muted">No failures.</p>'}</div>
+      <div class="box2"><h4>📋 Open tasks (${s.tasks.open})</h4>${s.tasks.latest.map(t => `<div class="row2"><div class="grow">${esc(t.title)} <span class="muted">${ago(t.created_at)}</span></div>
+        ${t.profile_id ? `<button class="ghost" data-goto="/profiles/${t.profile_id}">Open</button>` : ''}<button class="ghost" data-task="${t.id}">Done</button></div>`).join('') || '<p class="muted">No open tasks.</p>'}
+        <form id="addTask" style="display:flex;gap:6px;margin-top:8px"><input type="text" id="taskT" placeholder="Give this agency a task…" style="flex:1;padding:7px 9px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--text)"><button class="go">Add</button></form></div>
+      <div class="box2"><h4>🩺 Medicals running out (${s.medicals.length})</h4>${s.medicals.map(m => `<div class="row2"><div class="grow"><b>${esc(m.name)}</b></div>
+        <span class="${m.days <= 3 ? 'num bad' : 'num warn'}">${m.days < 0 ? 'expired' : `${m.days} days`}</span><button class="ghost" data-goto="/profiles/${m.id}">Open</button></div>`).join('') || '<p class="muted">None within 14 days.</p>'}
+        <h4 style="margin-top:14px">🧭 Where its profiles stand</h4><div class="stages">${Object.entries(s.stages || {}).sort((x, y) => y[1] - x[1]).map(([k, v]) => `<span>${esc(k.replace(/_/g, ' '))} · ${v}</span>`).join('')}</div></div>
+    </div>`
+  }
+  $('#table').innerHTML = html
+  const T = $('#table')
+  T.querySelectorAll('[data-row]').forEach(r => r.onclick = (e) => { if (e.target.closest('button')) return; workOpen = r.dataset.row; showTable(); renderList() })
+  T.querySelectorAll('[data-open]').forEach(b => b.onclick = () => openAgency(b.dataset.open))
+  T.querySelectorAll('[data-goto]').forEach(b => b.onclick = () => openAgency(workOpen, b.dataset.goto))
+  const call = async (method, path, body, done) => {
+    if (!a.pcOnline && !(await ask({ title: "The agency's PC is off", text: 'It is done when that PC is on again… if it is on within 30 seconds. Try anyway?', ok: 'Try' }))) return
+    try { await api('/api/agency-call', { agency: workOpen, method, path, body }); tell('Done', done) } catch (err) { tell('Not done', err.message) }
+  }
+  T.querySelectorAll('[data-act]').forEach(b => b.onclick = async () => {
+    if (b.dataset.act === 'cancel' && !(await ask({ title: 'Cancel this run?', text: 'It stops; the agency can start it again later.', ok: 'Cancel the run', danger: true }))) return
+    call('POST', `/automations/${b.dataset.run}/${b.dataset.act}`, {}, b.dataset.act === 'resume' ? 'The run goes on on their PC.' : 'The run was cancelled.')
+  })
+  T.querySelectorAll('[data-task]').forEach(b => b.onclick = () => call('PATCH', `/tasks/${b.dataset.task}`, { status: 'completed' }, 'The task is done.'))
+  const f = $('#addTask'); if (f) f.onsubmit = (e) => { e.preventDefault(); const t = $('#taskT').value.trim(); if (t) call('POST', '/tasks', { title: t, description: 'From Adal support', type: 'manual', priority: 'high' }, 'The task is on their Tasks page.') }
+}
+
 function showTable() {
   $('#thread').style.display = 'none'; $('#compose').style.display = 'none'; $('#table').style.display = 'block'
+  if (tab === 'work') return workTable()
   if (tab === 'payments') {
     $('#title').textContent = 'Payment receipts'
     $('#table').innerHTML = `<table><tr><th>Receipt</th><th>Agency</th><th>PC number</th><th>Sent</th><th>Status</th><th></th></tr>` +
@@ -194,7 +282,7 @@ function showTable() {
       data.agencies.filter(a => !a.is_admin).map(a => `<tr><td><b>${esc(a.name)}</b>${a.banned ? ' <span class="pill rejected">banned</span>' : ''}</td>
         <td class="code">${esc(a.pc_number || '—')}</td><td class="code">${a.code || '—'}</td><td>${when(a.created_at)}</td><td>${when(a.last_seen)}</td>
         <td style="white-space:nowrap">${a.banned ? `<button class="ghost" data-unban="${a.id}">Unban</button>` : `<button class="danger" data-ban="${a.id}">Ban</button>`}
-        <button class="ghost" data-del="${a.id}">Delete</button></td></tr>`).join('') + '</table>' +
+        <button class="go" onclick="openAgency('${a.id}')">Open Adal Keep</button> <button class="ghost" data-del="${a.id}">Delete</button></td></tr>`).join('') + '</table>' +
       '<p class="muted">Ban: the agency can no longer write in Everyone or private chats (it can still write to you). Delete: removes the agency with its chats, receipts and pictures — if that PC opens the chat again it comes back as a new agency.</p>'
     $('#addf').onsubmit = async (e) => {
       e.preventDefault()
@@ -237,16 +325,18 @@ $('#pic').onchange = () => {
 async function refresh() {
   try {
     data = await api('/api/overview')
+    work = await api('/api/work').catch(() => work)
     if (open) open = data.conversations.find(c => c.id === open.id) || open
     renderList()
-    if (tab === 'payments' || tab === 'agencies') showTable()
+    if (tab === 'work') { if (!document.querySelector('#table input:focus')) showTable() }
+    else if (tab === 'payments' || tab === 'agencies') showTable()
     else await loadMessages()
     const waiting = data.requests.filter(r => r.status === 'pending').length
     document.title = (waiting ? `(${waiting}) ` : '') + 'Adal Keep Admin'
     document.querySelector('[data-tab=payments]').textContent = waiting ? `Payments (${waiting})` : 'Payments'
   } catch (e) { $('#title').textContent = 'Cannot reach Supabase: ' + e.message }
 }
-refresh(); setInterval(refresh, 5000)
+showTable(); refresh(); setInterval(refresh, 5000)
 </script>
 </body>
 </html>

@@ -12,6 +12,19 @@ router.get('/', async (req, res) => {
   }
 })
 
+// The phone app asks every few seconds: "any new call for a person?" —
+// runs' notices (type 'automation') newer than `after` (a task id).
+router.get('/calls', async (req, res) => {
+  try {
+    const db = req.app.locals.db
+    const after = Number(req.query.after) || 0
+    const q = db('tasks').where('type', 'automation').orderBy('id', 'desc').limit(20).select('id', 'title', 'description', 'profile_id', 'created_at')
+    res.json(after ? await q.where('id', '>', after) : await q.limit(1))
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to load calls' })
+  }
+})
+
 // Documents Adal Keep noticed in the last day: waiting, being read (and on
 // which step), added to a profile, or not added and why. The Tasks page shows them.
 router.get('/documents', async (req, res) => {

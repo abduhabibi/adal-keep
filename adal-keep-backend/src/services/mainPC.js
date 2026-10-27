@@ -33,6 +33,18 @@ function writeFile(obj) {
   fs.writeFileSync(FILE, JSON.stringify(obj, null, 2))
 }
 
+/**
+ * This PC's number for the phone app: 5 digits, made once and kept. A phone
+ * on the same Wi-Fi types it once to pair with this PC.
+ */
+export function pcNumber() {
+  const f = readFile()
+  if (/^\d{5}$/.test(f.pc_number || '')) return f.pc_number
+  f.pc_number = String(crypto.randomInt(10000, 100000))
+  writeFile(f)
+  return f.pc_number
+}
+
 /** A random id for this install, so a PC can never choose itself as main. */
 export function instanceId() {
   const f = readFile()
@@ -166,6 +178,7 @@ export async function describe() {
   const port = Number(process.env.PORT) || 4000
   return {
     role: isFollower() ? 'follower' : 'main',
+    pc_number: isFollower() ? null : pcNumber(),
     main_url: mainURL(),
     instance: instanceId(),
     port,

@@ -4,6 +4,7 @@ import Navbar from './Navbar'
 import Sidebar from './Sidebar'
 import ProfileSearchPad from '../ProfileSearchPad'
 import { TutorTracker } from '../TutorCard'
+import PhoneCalls from '../PhoneCalls'
 import useReadyChime from '../../hooks/useReadyChime'
 import useNewVersion from '../../hooks/useNewVersion'
 import api from '../../services/api'
@@ -51,6 +52,7 @@ export default function MainLayout() {
 
       {DEMO && <Suspense fallback={null}><DemoBrowser /></Suspense>}
       {!DEMO && <TutorTracker />}
+      {!DEMO && <PhoneCalls />}
       <Sidebar
         isOpen={sidebarOpen}
         onToggle={() => setSidebarOpen(!sidebarOpen)}

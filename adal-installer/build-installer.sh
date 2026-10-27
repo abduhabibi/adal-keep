@@ -126,6 +126,33 @@ if [ ! -s "$TS" ]; then
     rm -f "$TS.part"; echo "   WARN Tailscale not downloaded (PREPARE fetches it on Windows)"
   fi
 fi
+# The phone app (adal-phone): built here when the Android tools are on this
+# PC, with adb for Windows so a phone on a USB cable installs it by double-click.
+PHONE="$BASE/adal-phone"
+APK="$PHONE/android/app/build/outputs/apk/release/app-release.apk"
+if [ -d "$HOME/Android/Sdk" ] && [ -d "$PHONE/node_modules" ]; then
+  ( cd "$PHONE" && ANDROID_HOME="$HOME/Android/Sdk" npx cap sync android >/dev/null 2>&1 \
+    && cd android && ANDROID_HOME="$HOME/Android/Sdk" ./gradlew assembleRelease -q >/dev/null 2>&1 ) \
+    || echo "   WARN the phone app was not rebuilt (the last one is used)"
+fi
+if [ -s "$APK" ]; then
+  mkdir -p "$USB/5 - Phone app"
+  cp -f "$APK" "$USB/5 - Phone app/Adal Keep.apk"
+  cp -f "$INST/usb/phone/"* "$USB/5 - Phone app/"
+  sed -i 's/\r*$/\r/' "$USB/5 - Phone app/"*.bat "$USB/5 - Phone app/"*.txt
+  ADB="$USB/deps/platform-tools/adb.exe"
+  if [ ! -s "$ADB" ]; then
+    if curl -fsSL --retry 2 -o "$INST/pt.zip" https://dl.google.com/android/repository/platform-tools-latest-windows.zip; then
+      rm -rf "$USB/deps/platform-tools" && unzip -q -o "$INST/pt.zip" -d "$USB/deps/" && rm -f "$INST/pt.zip"
+      echo "   adb for Windows: $(du -sh "$USB/deps/platform-tools" | cut -f1)"
+    else
+      rm -f "$INST/pt.zip"; echo "   WARN adb for Windows not downloaded (send the APK with Xender instead)"
+    fi
+  fi
+  echo "   Phone app: $(du -h "$USB/5 - Phone app/Adal Keep.apk" | cut -f1)"
+else
+  echo "   WARN no phone app yet (adal-phone not built)"
+fi
 cp -f "$BACK/package.json" "$BACK/package-lock.json" "$USB/deps/source/"
 cp -f "$INST/README-USB.txt" "$USB/README-USB.txt"
 # A previous PREPARE built node_modules for an older package.json: say so.

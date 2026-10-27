@@ -167,11 +167,11 @@ export default function ProfileDetailPage() {
 
       {(profile.chosen_at || profile.contract_number) && <ContractCard profile={profile} />}
 
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* Left: client details */}
         <section className="panel p-6 lg:col-span-1">
           <h2 className="font-display text-lg font-bold text-slate-900 dark:text-white border-b border-slate-100 dark:border-slate-700/50 pb-3">Client details</h2>
-          <dl className="mt-4 grid gap-3">
+          <dl className="mt-4 grid grid-cols-1 gap-3">
             <Field label="Full name" value={profile.full_name} />
             <Field label="Order ID" value={profile.order_id} />
             {amharicName && <Field label="Full name (AM)" value={amharicName} />}
@@ -219,7 +219,7 @@ export default function ProfileDetailPage() {
         <section className="panel p-6 lg:col-span-2 space-y-6">
           <div>
             <h2 className="font-display text-lg font-bold text-slate-900 dark:text-white mb-4 pb-3 border-b border-slate-100 dark:border-slate-700/50">Documents & Fields</h2>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {fields.map(field => (
                 <FieldCard
                   id={`field-${field.name.replace(/\s+/g, '-')}`}
@@ -318,7 +318,7 @@ function Field({ label, value }) {
   return (
     <div className="p-2.5 rounded-lg bg-slate-50/80 dark:bg-slate-900/40 border border-slate-200/60 dark:border-slate-800">
       <dt className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">{label}</dt>
-      <dd className="mt-0.5 text-sm font-medium text-slate-900 dark:text-slate-100">{value || '—'}</dd>
+      <dd className="mt-0.5 text-sm font-medium text-slate-900 dark:text-slate-100 break-words">{value || '—'}</dd>
     </div>
   )
 }

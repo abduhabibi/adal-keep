@@ -1,0 +1,15 @@
+{
+  "appId": "com.adalkeep.phone",
+  "appName": "Adal Keep",
+  "webDir": "www",
+  "appendUserAgent": "AdalKeepPhone",
+  "server": {
+    "androidScheme": "http",
+    "hostname": "localhost",
+    "cleartext": true,
+    "allowNavigation": ["*"]
+  },
+  "android": {
+    "allowMixedContent": true
+  }
+}

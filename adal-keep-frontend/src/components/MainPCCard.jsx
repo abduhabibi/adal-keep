@@ -3,6 +3,7 @@
  * Which PC holds the agency's data, the addresses other PCs and phones use,
  * bringing another branch's data in, and how to set up the private link.
  */
+import { IN_PHONE_APP, PAIR_PAGE } from '../lib/phoneApp'
 import { useEffect, useState } from 'react'
 import api from '../services/api'
 import Card from './shared/Card'
@@ -111,6 +112,18 @@ export default function MainPCCard() {
           ? <>This PC follows the main PC at <b className="font-mono">{info.main_url}</b>. Data, automations and the Trash are there.</>
           : <>✅ This PC is the <b>main PC</b>. The data, the files and the Trash are here.</>}
       </div>
+
+      {!follower && info.pc_number && (
+        <div translate="no" className="rounded-xl p-3 mb-4 border-2 border-dashed border-indigo-300 dark:border-indigo-700 flex flex-wrap items-center gap-3">
+          <span className="text-2xl">📱</span>
+          <div className="flex-1 min-w-[180px]">
+            <p className="text-sm font-semibold">Phone app — this PC's number</p>
+            <p className="text-xs text-slate-500">On the office Wi-Fi, open the Adal Keep app on the phone and type this number once. Away from the office it works through Tailscale.</p>
+          </div>
+          <span className="font-mono text-3xl font-bold tracking-[0.3em] text-indigo-700 dark:text-indigo-300">{info.pc_number}</span>
+          {IN_PHONE_APP && <a href={PAIR_PAGE} className="w-full text-center rounded-lg border border-indigo-300 py-1.5 text-xs font-semibold text-indigo-700">⇄ Pair this phone with another PC</a>}
+        </div>
+      )}
 
       {!follower && (
         <div className="space-y-1.5 mb-5" translate="no">

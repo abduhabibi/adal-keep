@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="am">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Adal Keep</title>
+<style>
+  :root { --teal: #0d9488; --ink: #0f172a; --muted: #64748b; --bg: #f0fdfa; --card: #fff; --line: #cbd5e1; --bad: #dc2626; }
+  @media (prefers-color-scheme: dark) { :root { --ink: #e2e8f0; --muted: #94a3b8; --bg: #0b1220; --card: #111827; --line: #334155; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; font-family: system-ui, "Noto Sans Ethiopic", sans-serif; background: var(--bg); color: var(--ink); display: flex; align-items: center; justify-content: center; padding: 24px 16px; }
+  .card { width: 100%; max-width: 380px; background: var(--card); border-radius: 20px; padding: 28px 22px; box-shadow: 0 10px 40px rgba(0,0,0,.08); text-align: center; }
+  .logo { width: 64px; height: 64px; border-radius: 18px; background: var(--teal); color: #fff; font-size: 34px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
+  h1 { font-size: 22px; margin: 14px 0 4px; }
+  p { color: var(--muted); font-size: 14px; line-height: 1.5; margin: 6px 0; }
+  .digits { display: flex; gap: 8px; justify-content: center; margin: 22px 0 8px; }
+  .digits input { width: 50px; height: 60px; border: 2px solid var(--line); border-radius: 12px; font-size: 28px; font-weight: 700; text-align: center; background: transparent; color: var(--ink); }
+  .digits input:focus { outline: none; border-color: var(--teal); }
+  button { width: 100%; margin-top: 14px; padding: 14px; border: 0; border-radius: 12px; background: var(--teal); color: #fff; font-size: 16px; font-weight: 600; }
+  button.ghost { background: transparent; color: var(--teal); border: 1.5px solid var(--teal); }
+  button:disabled { opacity: .6; }
+  .msg { min-height: 20px; font-size: 14px; margin-top: 12px; }
+  .msg.bad { color: var(--bad); }
+  .spin { width: 34px; height: 34px; border: 4px solid var(--line); border-top-color: var(--teal); border-radius: 50%; animation: s 0.9s linear infinite; margin: 22px auto 8px; }
+  @keyframes s { to { transform: rotate(360deg); } }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+  <main class="card">
+    <div class="logo">አ</div>
+    <h1>Adal Keep</h1>
+
+    <section id="pair" class="hidden">
+      <p>የኮምፒውተሩን ቁጥር ያስገቡ<br>Type the PC's number</p>
+      <p style="font-size:12px">Settings → Main PC on the office PC shows it. The phone must be on the same Wi-Fi as that PC.</p>
+      <div class="digits" id="digits">
+        <input inputmode="numeric" maxlength="1" autocomplete="off"><input inputmode="numeric" maxlength="1" autocomplete="off"><input inputmode="numeric" maxlength="1" autocomplete="off"><input inputmode="numeric" maxlength="1" autocomplete="off"><input inputmode="numeric" maxlength="1" autocomplete="off">
+      </div>
+      <button id="go" disabled>ክፈት · Open</button>
+      <div class="msg" id="pairMsg"></div>
+    </section>
+
+    <section id="wait" class="hidden">
+      <div class="spin"></div>
+      <p id="waitMsg">Connecting…</p>
+    </section>
+
+    <section id="fail" class="hidden">
+      <p class="msg bad" id="failMsg"></p>
+      <button id="retry">↻ እንደገና · Try again</button>
+      <button id="repair" class="ghost">⇄ Pair with another PC</button>
+    </section>
+  </main>
+<script src="app.js"></script>
+</body>
+</html>

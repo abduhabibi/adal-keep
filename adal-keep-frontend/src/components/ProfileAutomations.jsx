@@ -1,3 +1,5 @@
+import LiveTab from './LiveTab'
+import { IN_PHONE_APP } from '../lib/phoneApp'
 import { useEffect, useState, useRef } from 'react'
 import toast from 'react-hot-toast'
 import api from '../services/api'
@@ -68,6 +70,9 @@ export default function ProfileAutomations({ profileId }) {
   const [queue, setQueue] = useState(null)
   const [loading, setLoading] = useState(true)
   const [open, setOpen] = useState(null)
+  // The PC's tab, live (on the phone app it opens by itself).
+  const [liveOpen, setLiveOpen] = useState(null)
+  useEffect(() => { if (open && IN_PHONE_APP) setLiveOpen(open) }, [open])
   const [accountId, setAccountId] = useState(null)
   const [musanedAccountId, setMusanedAccountId] = useState(null)
   const [visaAccountId, setVisaAccountId] = useState(null)
@@ -430,6 +435,15 @@ export default function ProfileAutomations({ profileId }) {
               <button onClick={() => { setOpen(null); setDetail(null) }} className="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs">Close</button>
             </div>
           </div>
+
+          {['running', 'paused'].includes(detail.status) && (
+            liveOpen === detail.id
+              ? <LiveTab runId={detail.id} />
+              : <button type="button" onClick={() => setLiveOpen(detail.id)}
+                  className="w-full rounded-lg border-2 border-dashed border-indigo-300 dark:border-indigo-700 py-2 text-xs font-semibold text-indigo-700 dark:text-indigo-300">
+                  📱 Show the PC's tab here (answer a captcha or press Submit from this screen)
+                </button>
+          )}
 
           <div className="max-h-72 overflow-y-auto rounded-lg bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 p-3 font-mono text-[11px] leading-relaxed">
             {(detail.log || []).map((l, i) => (

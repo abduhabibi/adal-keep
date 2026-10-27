@@ -143,7 +143,7 @@ export default function Sidebar({ isOpen, onToggle, collapsed, onToggleCollapse 
           bg-white/80 dark:bg-slate-900/80
           border-r border-slate-200/60 dark:border-slate-800/60
           transition-all duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)]
-          h-screen sticky top-0
+          h-screen
           ${collapsed ? 'w-[72px]' : 'w-[260px]'}
           fixed inset-y-0 left-0 z-50 shadow-xl
           ${isOpen ? 'translate-x-0' : '-translate-x-full'}

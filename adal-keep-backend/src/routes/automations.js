@@ -2,7 +2,7 @@ import express from 'express'
 import { listWorkflows } from '../services/workflows.js'
 import { dispatchRun, runStatus, queueSnapshot } from '../services/worker.js'
 import { markCancelled, isCancelled } from '../services/cancellation.js'
-import { forgetRunTab } from '../services/tabManager.js'
+import { forgetRunTab, tabOfRun } from '../services/tabManager.js'
 import { assertPoliceReady, getProfileVerification, runPassportVerification } from '../services/verification.js'
 
 const router = express.Router()
@@ -438,6 +438,51 @@ router.get('/automations/:id', async (req, res) => {
 })
 
 // Continue a paused run (after the person signed in, entered the OTP, ...)
+/**
+ * The run's tab, live, for a person who is not at the PC (the phone app):
+ *   GET  /automations/:id/screen  a JPEG of the tab as it is now
+ *   POST /automations/:id/input   {kind:'click', x, y} (0–1 of the picture) ·
+ *                                 {kind:'type', text} · {kind:'key', key} ·
+ *                                 {kind:'scroll', dy}
+ * Clicks and keys reach the tab as a person's own (the run never presses
+ * Submit / Save itself; a person can, from here).
+ */
+router.get('/automations/:id/screen', async (req, res) => {
+  const page = tabOfRun(req.params.id)
+  if (!page) return res.status(404).json({ error: 'This run has no open tab.' })
+  try {
+    const shot = await Promise.race([
+      page.screenshot({ type: 'jpeg', quality: 60, captureBeyondViewport: false }),
+      new Promise((_, no) => setTimeout(() => no(new Error('The tab did not answer.')), 8000)),
+    ])
+    const size = await page.evaluate(() => [window.innerWidth, window.innerHeight]).catch(() => [0, 0])
+    res.set({ 'Content-Type': 'image/jpeg', 'Cache-Control': 'no-store', 'X-Tab-Size': size.join('x'), 'X-Tab-Url': encodeURI(page.url()).slice(0, 300), 'Access-Control-Expose-Headers': 'X-Tab-Size, X-Tab-Url' })
+    res.end(shot)
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+router.post('/automations/:id/input', async (req, res) => {
+  const page = tabOfRun(req.params.id)
+  if (!page) return res.status(404).json({ error: 'This run has no open tab.' })
+  const b = req.body || {}
+  try {
+    if (b.kind === 'click') {
+      const [w, h] = await page.evaluate(() => [window.innerWidth, window.innerHeight])
+      const x = Math.max(0, Math.min(1, Number(b.x))) * w, y = Math.max(0, Math.min(1, Number(b.y))) * h
+      await page.mouse.click(x, y)
+    } else if (b.kind === 'type') {
+      await page.keyboard.type(String(b.text || '').slice(0, 200), { delay: 30 })
+    } else if (b.kind === 'key') {
+      const key = String(b.key || '')
+      if (!['Enter', 'Backspace', 'Tab', 'Escape', 'ArrowDown', 'ArrowUp', 'Delete'].includes(key)) return res.status(400).json({ error: 'Unknown key' })
+      await page.keyboard.press(key)
+    } else if (b.kind === 'scroll') {
+      await page.mouse.wheel({ deltaY: Math.max(-2000, Math.min(2000, Number(b.dy) || 0)) })
+    } else return res.status(400).json({ error: 'Unknown input' })
+    res.json({ ok: true })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
 router.post('/automations/:id/resume', async (req, res) => {
   try {
     const db = req.app.locals.db

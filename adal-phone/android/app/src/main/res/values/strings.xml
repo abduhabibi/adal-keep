@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Adal Keep</string>
+    <string name="title_activity_main">Adal Keep</string>
+    <string name="package_name">com.adalkeep.phone</string>
+    <string name="custom_url_scheme">com.adalkeep.phone</string>
+</resources>

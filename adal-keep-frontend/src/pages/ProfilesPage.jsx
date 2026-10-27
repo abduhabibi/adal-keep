@@ -190,7 +190,7 @@ export default function ProfilesPage() {
           }
         />
       ) : (
-        <div key={step || 'all'} className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <div key={step || 'all'} className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {rows.map((p, i) => (
             <article
               key={p.id}

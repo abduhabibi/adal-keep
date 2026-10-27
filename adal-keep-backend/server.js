@@ -40,6 +40,7 @@ import newProfileRouter from './src/routes/newProfile.js'
 import chatRouter, { watchPaid } from './src/routes/chat.js'
 import trashRouter from './src/routes/trash.js'
 import mainPCRouter from './src/routes/mainPC.js'
+import mobileRouter from './src/routes/mobile.js'
 import branchMergeRouter from './src/routes/branchMerge.js'
 import wafidRouter from './src/routes/wafid.js'
 import backupRouter from './src/routes/backup.js'
@@ -120,6 +121,7 @@ app.use('/api', newProfileRouter)
 app.use('/api', chatRouter)
 app.use('/api', trashRouter)
 app.use('/api', mainPCRouter)
+app.use('/api', mobileRouter)   // the phone app pairs with this PC
 app.use('/api', branchMergeRouter)
 app.use('/api', wafidRouter)
 app.use('/api', backupRouter)

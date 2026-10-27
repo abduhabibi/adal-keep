@@ -101,3 +101,7 @@ adal-admin/.env
 
 # admin panel log
 adal-admin/admin.log
+
+# Android signing keys (kept in ~/.adal-keep)
+*.jks
+*.keystore

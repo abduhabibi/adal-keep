@@ -33,7 +33,7 @@ const COMPLETE_LABEL = {
 }
 
 // Runs that are simply run again when clicked after they finished.
-const REPEATABLE = new Set(['musaned_check_chosen', 'wafid_check'])
+const REPEATABLE = new Set(['musaned_check_chosen', 'wafid_check', 'wafid_slip'])
 
 // Waits that must not run again (a second run would make a second application).
 const NO_CONTINUE = new Set(['awaiting-visa-save', 'awaiting-insurance-save'])
@@ -280,7 +280,7 @@ export default function ProfileAutomations({ profileId }) {
   // then the LMIS steps, each on its own.
   const GROUPS = [
     { title: 'Musaned', ids: ['musaned_add_candidate', 'musaned_check_chosen'], box: 'border-indigo-200 dark:border-indigo-800', head: 'text-indigo-700 dark:text-indigo-300' },
-    { title: 'Wafid medical', ids: ['wafid_book', 'wafid_check'], box: 'border-emerald-200 dark:border-emerald-800', head: 'text-emerald-700 dark:text-emerald-300' },
+    { title: 'Wafid medical', ids: ['wafid_book', 'wafid_slip', 'wafid_check'], box: 'border-emerald-200 dark:border-emerald-800', head: 'text-emerald-700 dark:text-emerald-300' },
     { title: 'Tasheer', ids: [], empty: 'Coming soon — the Tasheer steps are added next.', box: 'border-amber-200 dark:border-amber-800 border-dashed', head: 'text-amber-700 dark:text-amber-300' },
     { title: 'Insurance', ids: ['insurance_certificate'], box: 'border-rose-200 dark:border-rose-800', head: 'text-rose-700 dark:text-rose-300' },
     { title: 'Enjaz · Visa', ids: ['mofa_visa'], box: 'border-sky-200 dark:border-sky-800', head: 'text-sky-700 dark:text-sky-300' },

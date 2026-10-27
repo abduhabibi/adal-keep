@@ -46,7 +46,7 @@ const AGENCY_PROFILE_LIMIT = Number(process.env.AGENCY_PROFILE_LIMIT || 200)
 // Errors retrying can never fix. Add LMIS/companion-specific permanent
 // reasons here so they don't burn attempts on a 2-minute loop.
 const PERMANENT_ERROR =
-  /refused the login|not found|Not Found|not in the|placed pool|different labor|could not be verified|already_in_other_agency|already attached|already exists|Profile is missing|LMIS portal error|LMIS blocks|Musaned not started|No visa platform account|No insurance account|Nobody signed in/i
+  /refused the login|not found|Not Found|not in the|placed pool|different labor|could not be verified|already_in_other_agency|already attached|already exists|Profile is missing|LMIS portal error|LMIS blocks|Musaned not started|No visa platform account|No insurance account|Nobody signed in|showed no appointment slip/i
 
 let _interval      = null
 let _agencyTimer   = null

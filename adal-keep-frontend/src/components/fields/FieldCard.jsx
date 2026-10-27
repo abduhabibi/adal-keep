@@ -6,6 +6,27 @@ import api from '../../services/api'
 import { useFileCapture } from '../../context/FileCaptureContext'
 import FullBodyCropper from '../FullBodyCropper'
 
+/** Print a stored file (the slip's PDF) straight from the page. */
+async function printFile(f) {
+  const url = `/api/files/${f.id}/download`
+  try {
+    const blob = await (await fetch(url)).blob()
+    const src = URL.createObjectURL(new Blob([blob], { type: f.mimetype || blob.type || 'application/pdf' }))
+    const frame = document.createElement('iframe')
+    frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0'
+    frame.src = src
+    frame.onload = () => {
+      setTimeout(() => {
+        try { frame.contentWindow.focus(); frame.contentWindow.print() } catch { window.open(src, '_blank') }
+      }, 300)
+      setTimeout(() => { frame.remove(); URL.revokeObjectURL(src) }, 60000)
+    }
+    document.body.appendChild(frame)
+  } catch {
+    window.open(url, '_blank')
+  }
+}
+
 export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness = null }) {
   const navigate = useNavigate()
   const isCVField = field.name === 'CV'
@@ -197,6 +218,14 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
         </h3>
         
         <div className="flex items-center gap-2">
+          {field.name === 'Appointment Slip' && field.files?.length > 0 && (
+            <button
+              type="button"
+              onClick={() => printFile(field.files.reduce((a, b) => (b.id > a.id ? b : a)))}
+              className="text-[10px] px-2 py-0.5 rounded-md bg-slate-800 text-white hover:bg-slate-700 dark:bg-slate-600 dark:hover:bg-slate-500 font-semibold"
+              title="Print the newest slip"
+            >🖨 Print</button>
+          )}
           <button
             type="button"
             data-tour="field-upload"

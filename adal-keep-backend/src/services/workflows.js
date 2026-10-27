@@ -66,6 +66,15 @@ export const WORKFLOWS = {
     stepCount: 2,
   },
 
+  wafid_slip: {
+    id: 'wafid_slip',
+    name: 'Appointment slip',
+    description: 'wafid.com/en/search-slip → her passport + nationality → Search → the slip pops up → PDF → saved in Appointment Slip, ready to print',
+    target: 'https://wafid.com/en/search-slip/',
+    consts: {},
+    stepCount: 2,
+  },
+
   insurance_certificate: {
     id: 'insurance_certificate',
     name: 'Insurance certificate',

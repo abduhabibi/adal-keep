@@ -22,6 +22,7 @@ import path from 'path'
 
 const BOOK_URL = 'https://wafid.com/en/book-appointment/'
 const STATUS_URL = 'https://wafid.com/en/medical-status-search/'
+const SLIP_URL = 'https://wafid.com/en/search-slip/'
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 
@@ -404,4 +405,69 @@ export async function runWafidCheck(page, ctx) {
   }
   if (r.state === 'challenge') return { ok: true, pauseReason: 'awaiting-wafid-robot', seconds: secs() }
   return { ok: true, done: true, note: said, seconds: secs() }
+}
+
+/**
+ * "Appointment slip" run (wafid_slip), in the run's own tab:
+ * wafid.com/en/search-slip → her passport + nationality → Search → the slip
+ * pops up → its PDF button → the PDF is saved in her Appointment Slip (to print).
+ * Wafid's "I am not a robot" is a person's: the run waits, then searches again.
+ */
+export async function runWafidSlip(page, ctx) {
+  const t0 = Date.now()
+  const secs = () => Math.round((Date.now() - t0) / 1000)
+  const passport = String(ctx.profile?.passport_number || '').trim().toUpperCase()
+  if (!passport) return { ok: false, step: 'preflight', error: 'Profile is missing the passport number', seconds: 0 }
+  page.__adalAllowImages = true
+  log(ctx, `🧾 Wafid appointment slip for passport ${passport}`)
+
+  const search = async () => {
+    await page.goto(SLIP_URL, { waitUntil: 'domcontentloaded', timeout: 60000 })
+    await page.waitForSelector('#id_passport', { timeout: 30000 })
+    await page.waitForFunction(() => !!document.querySelector('#id_captcha')?.value, { timeout: 15000, polling: 300 }).catch(() => {})
+    const filled = await page.evaluate((passport) => {
+      const p = document.getElementById('id_passport')
+      p.focus(); p.value = passport; p.dispatchEvent(new Event('input', { bubbles: true })); p.dispatchEvent(new Event('change', { bubbles: true }))
+      const sel = document.getElementById('id_nationality')
+      const o = [...sel.options].find(o => o.text.trim().toLowerCase() === 'ethiopian')
+      if (!o) return false
+      if (window.jQuery) window.jQuery(sel).val(o.value).trigger('change'); else { sel.value = o.value; sel.dispatchEvent(new Event('change', { bubbles: true })) }
+      return true
+    }, passport)
+    if (!filled) throw new Error('"Ethiopian" is not in Wafid\'s nationality list')
+    const btn = await page.evaluateHandle(() => [...document.querySelectorAll('form button[type="submit"]')].find(b => /search/i.test(b.innerText)))
+    if (!btn.asElement()) throw new Error('Wafid\'s Search button was not found')
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => null),
+      btn.asElement().click(),
+    ])
+    await sleep(1500)
+  }
+  // The slip pops up with Close / PDF / Print at its bottom.
+  const slipShown = () => page.waitForFunction(() => [...document.querySelectorAll('a, button')]
+    .some(b => /^\s*pdf\s*$/i.test(b.innerText || '') && b.getBoundingClientRect().width > 0), { timeout: 20000, polling: 500 }).then(() => true).catch(() => false)
+
+  await search()
+  if (await challengeShown(page)) {
+    await page.bringToFront().catch(() => {})
+    await ctx.notify?.(`🧾 ${ctx.profileName}: Wafid asks "I am not a robot"`, 'Answer it in the Wafid tab and press Search; Adal Keep saves the slip by itself.', 'warn', { login: page })
+    const end = Date.now() + 5 * 60 * 1000
+    while (Date.now() < end && await challengeShown(page)) await sleep(2000)
+    await sleep(2500)
+  }
+  let shown = await slipShown()
+  if (!shown && !(await challengeShown(page))) { await search(); shown = await slipShown() }
+  if (!shown) {
+    if (await challengeShown(page)) return { ok: true, pauseReason: 'awaiting-wafid-robot', seconds: secs() }
+    const said = await page.evaluate(() => (document.querySelector('.errorlist, .ui.error, .ui.message, .error')?.innerText || '').trim().slice(0, 160)).catch(() => '')
+    return { ok: false, step: 'search', error: `Wafid showed no appointment slip for passport ${passport}${said ? ` (${said})` : ''}`, seconds: secs() }
+  }
+  log(ctx, '✓ the appointment slip popped up — pressing PDF')
+  const pdf = await downloadResultPdf(page)
+  if (!pdf) return { ok: false, step: 'pdf', error: 'The slip\'s PDF could not be downloaded', seconds: secs() }
+  const { savePdf } = await import('./musanedContracts.js')
+  const added = await savePdf(ctx.db, ctx.profileId, 'Appointment Slip', pdf, `wafid-slip-${passport}.pdf`)
+  log(ctx, added ? `📄 appointment slip saved (${Math.round(pdf.length / 1024)} KB) — ready to print` : '📄 the same slip is already in Appointment Slip')
+  await ctx.notify?.(`🧾 ${ctx.profileName}: appointment slip ready to print`, `The Wafid slip for passport ${passport} is in her Appointment Slip — press Print there.`)
+  return { ok: true, done: true, note: 'slip saved', seconds: secs() }
 }

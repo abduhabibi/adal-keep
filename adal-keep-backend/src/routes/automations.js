@@ -137,7 +137,7 @@ router.post('/profiles/:profileId/automations/:workflowId/start', async (req, re
       if (missing.length) {
         return res.status(400).json({ error: 'Profile is missing for Wafid: ' + missing.join(', '), missing })
       }
-    } else if (workflowId === 'wafid_check') {
+    } else if (workflowId === 'wafid_check' || workflowId === 'wafid_slip') {
       const prof = await db('profiles').where('id', profileId).first()
       if (!prof?.passport_number || !String(prof.passport_number).trim()) {
         return res.status(400).json({ error: 'Profile is missing the passport number', missing: ['Passport number'] })

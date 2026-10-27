@@ -1961,8 +1961,9 @@ export async function runFullWorkflow(page, ctx) {
   // Wafid medical booking: fills the form and waits for a person to save.
   if (String(workflowId).startsWith('wafid')) {
     try {
-      const { runWafidBooking, runWafidCheck } = await import('./wafidWorkflow.js')
+      const { runWafidBooking, runWafidCheck, runWafidSlip } = await import('./wafidWorkflow.js')
       if (workflowId === 'wafid_check') return await runWafidCheck(page, ctx)
+      if (workflowId === 'wafid_slip') return await runWafidSlip(page, ctx)
       return await runWafidBooking(page, ctx)
     } catch (e) {
       if (e?.cancelled) throw e

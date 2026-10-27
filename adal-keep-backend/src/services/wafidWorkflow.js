@@ -284,7 +284,12 @@ export async function checkMedicalStatus(page, passport, nationality = 'Ethiopia
  * PDF, download it, or open it in a new tab: whichever happens is caught.
  */
 export async function downloadResultPdf(page) {
-  const isPdf = (b) => b && b.length > 100 && b.subarray(0, 4).toString() === '%PDF'
+  // Wafid's server sometimes writes its own warnings ("Fontconfig error …")
+  // before the PDF: keep the PDF from "%PDF" on.
+  const clean = (b) => {
+    const i = b ? b.indexOf('%PDF') : -1
+    return i >= 0 && i < 8192 && b.length - i > 100 ? b.subarray(i) : null
+  }
   const btn = await page.evaluateHandle(() => {
     const seen = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 }
     return [...document.querySelectorAll('a, button, input[type="submit"], [role="button"]')]
@@ -293,7 +298,12 @@ export async function downloadResultPdf(page) {
   const el = btn.asElement()
   if (!el) return null
   // 1. A link: fetch it with the page's own cookies.
-  const href = await el.evaluate(e => (e.tagName === 'A' && e.href && !/^javascript:|#$/.test(e.href)) ? e.href : '')
+  // (Wafid's PDF is <a href="#" onclick="window.open('/en/appointment/…/slip/download/', '_self')">.)
+  const href = await el.evaluate(e => {
+    const m = (e.getAttribute('onclick') || '').match(/(?:window\.open|location(?:\.href)?\s*=)\s*\(?\s*['"]([^'"]+)['"]/)
+    if (m) return new URL(m[1], location.href).href
+    return (e.tagName === 'A' && e.href && !/^javascript:|#$/.test(e.href)) ? e.href : ''
+  })
   if (href) {
     const b64 = await page.evaluate(async (u) => {
       try {
@@ -305,7 +315,7 @@ export async function downloadResultPdf(page) {
       } catch { return '' }
     }, href)
     const buf = b64 ? Buffer.from(b64, 'base64') : null
-    if (isPdf(buf)) return buf
+    if (clean(buf)) return clean(buf)
   }
   // 2. Anything else: click, then catch a PDF response, a download or a new tab.
   const browser = page.browser()
@@ -316,7 +326,7 @@ export async function downloadResultPdf(page) {
   const onResponse = async (r) => {
     if (got || !/application\/pdf/i.test(r.headers()['content-type'] || '')) return
     const b = await r.buffer().catch(() => null)
-    if (isPdf(b)) got = b
+    if (clean(b)) got = clean(b)
   }
   const watched = [page]
   const onTarget = async (t) => {
@@ -335,7 +345,7 @@ export async function downloadResultPdf(page) {
       await sleep(500)
       for (const f of fs.readdirSync(dir)) {
         const b = fs.readFileSync(path.join(dir, f))
-        if (isPdf(b)) { got = b; break }
+        if (clean(b)) { got = clean(b); break }
       }
       // A new tab (or this tab) showing the PDF: read it from there.
       for (const p of watched) {
@@ -350,7 +360,7 @@ export async function downloadResultPdf(page) {
           } catch { return '' }
         }).catch(() => '')
         const b = b64 ? Buffer.from(b64, 'base64') : null
-        if (isPdf(b)) got = b
+        if (clean(b)) got = clean(b)
       }
     }
   } finally {
@@ -463,6 +473,16 @@ export async function runWafidSlip(page, ctx) {
     return { ok: false, step: 'search', error: `Wafid showed no appointment slip for passport ${passport}${said ? ` (${said})` : ''}`, seconds: secs() }
   }
   log(ctx, '✓ the appointment slip popped up — pressing PDF')
+  // How long the slip (and so her medical) is valid: the battery on her profile.
+  const dates = await page.evaluate(() => {
+    const t = document.body.innerText || ''
+    return { from: t.match(/Generated dat\w*\s*(\d{1,2}\/[A-Za-z]{3}\/\d{4})/i)?.[1] || '', till: t.match(/valid only till\s*(\d{1,2}\/[A-Za-z]{3}\/\d{4})/i)?.[1] || '' }
+  }).catch(() => ({}))
+  const iso = (d) => { const x = d ? new Date(d.replace(/\//g, ' ') + ' 12:00 UTC') : null; return x && !isNaN(x) ? x.toISOString().slice(0, 10) : null }
+  if (iso(dates.till) && ctx.db) {
+    await ctx.db('profiles').where('id', ctx.profileId).update({ medical_valid_from: iso(dates.from), medical_valid_until: iso(dates.till) }).catch(e => log(ctx, `slip dates not saved: ${e.message}`, 'warn'))
+    log(ctx, `🔋 medical valid ${iso(dates.from) || '?'} → ${iso(dates.till)}`)
+  }
   const pdf = await downloadResultPdf(page)
   if (!pdf) return { ok: false, step: 'pdf', error: 'The slip\'s PDF could not be downloaded', seconds: secs() }
   const { savePdf } = await import('./musanedContracts.js')

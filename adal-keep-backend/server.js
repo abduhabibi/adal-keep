@@ -18,6 +18,7 @@ import tasksRouter from './src/routes/tasks.js'
 import updatesRouter from './src/routes/updates.js'
 import tutorRouter from './src/routes/tutor.js'
 import systemUpdateRouter, { startUpdateWatcher } from './src/routes/systemUpdate.js'
+import { startMedicalWatcher } from './src/services/medicalValidity.js'
 import quickLinksRouter from "./src/routes/quickLinks.js"
 import tenancyRouter, { attachAuth } from "./src/routes/tenancy.js"
 import employeesRouter from "./src/routes/employees.js"
@@ -355,7 +356,7 @@ app.post('/api/profiles', async (req, res) => {
       'emergency_gender',
       'emergency_relationship',
       'emergency_labor_id',
-      'visa_stage', 'visa_application_number',
+      'visa_stage', 'visa_application_number', 'medical_valid_from', 'medical_valid_until',
       'cooking_skill',
       'destination_country',
       'date_of_birth',
@@ -445,7 +446,7 @@ app.put('/api/profiles/:id', async (req, res) => {
       'emergency_gender',
       'emergency_relationship',
       'emergency_labor_id',
-      'visa_stage', 'visa_application_number',
+      'visa_stage', 'visa_application_number', 'medical_valid_from', 'medical_valid_until',
       'cooking_skill',
       'destination_country',
       'date_of_birth',
@@ -999,6 +1000,7 @@ initSystem().then(() => {
   app.listen(PORT, () => {
     console.log(`🚀 Backend running on http://localhost:${PORT}`)
     startUpdateWatcher(app.locals.db) // a new version installs by itself when no run is working
+    startMedicalWatcher(app.locals.db) // the medical's battery: warnings as it runs out
     if (isFollower()) {
       // Another PC is the main PC: all work happens there, nothing here.
       console.log(`🔗 This PC follows the main PC at ${mainURL()} — no automations, no discovery here`)

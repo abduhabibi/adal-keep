@@ -10,6 +10,7 @@ import { formatDate } from '../lib/utils'
 import FieldCard from '../components/fields/FieldCard'
 import ProfileAutomations from '../components/ProfileAutomations'
 import ProfileJourney from '../components/ProfileJourney'
+import MedicalBattery from '../components/MedicalBattery'
 
 export default function ProfileDetailPage() {
   const { id } = useParams()
@@ -137,6 +138,7 @@ export default function ProfileDetailPage() {
             {profile.nationality}
           </span>
         )}
+        <span className="ml-auto"><MedicalBattery profile={profile} onSaved={(v) => setProfile(p => ({ ...p, ...v }))} /></span>
       </div>
 
       {/* Auto-trigger status */}

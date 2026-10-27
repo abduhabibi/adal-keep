@@ -107,7 +107,7 @@ export default function Navbar({ onMenuClick, capturedFiles, setCapturedFiles })
     <>
       <nav className="glass-panel mx-4 mt-4 px-6 py-3 flex items-center justify-between transition-all duration-300 relative z-50" style={{ '--radius-lg': '16px' }}>
         <div className="flex items-center gap-4">
-          <button onClick={onMenuClick} className="lg:hidden p-2 text-slate-500 dark:text-slate-400 rounded-lg hover:bg-white/10 transition-all" aria-label="ሜኑ">
+          <button onClick={onMenuClick} className="md:hidden p-2 text-slate-500 dark:text-slate-400 rounded-lg hover:bg-white/10 transition-all" aria-label="ሜኑ">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" />
             </svg>

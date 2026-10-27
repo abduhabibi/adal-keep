@@ -88,10 +88,13 @@ export async function checkMedicalValidity(db) {
     // Every bigger step counts as given too: one warning at a time, never a burst.
     const given = new Set([...sent, a.key, ...STEPS.filter(([d]) => d > Number(a.key) || a.key === '0').map(([d]) => String(d))])
     await db('profiles').where('id', p.id).update({ medical_alerts_sent: JSON.stringify({ until: p.medical_valid_until, keys: [...given] }) })
-    const title = `🔋 ${p.full_name}: medical ${a.text}`
+    // Always the exact number of days left (never "2 months" for 34 days).
+    const title = left > 0
+      ? `🔋 ${p.full_name}: medical — ${left} day${left === 1 ? '' : 's'} left`
+      : `🔋 ${p.full_name}: medical has run out`
     const body = left > 0
-      ? `Her Wafid medical is valid till ${p.medical_valid_until} (${left} day${left === 1 ? '' : 's'} left).`
-      : `Her Wafid medical was valid till ${p.medical_valid_until}.`
+      ? `Her medical deadline is ${p.medical_valid_until}: ${left} day${left === 1 ? '' : 's'} left.`
+      : `Her medical deadline was ${p.medical_valid_until}.`
     await db('tasks').insert({ type: 'automation', title, description: body, status: 'pending', profile_id: p.id, assigned_to: 1, is_ai_created: true, created_at: new Date().toISOString() }).catch(() => {})
     try { const { showDesktopNotice } = await import('./worker.js'); showDesktopNotice(title, body) } catch {}
     console.log(`[medical] ${title}`)

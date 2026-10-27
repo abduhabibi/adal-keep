@@ -130,7 +130,7 @@ export default function Sidebar({ isOpen, onToggle, collapsed, onToggleCollapse 
     <>
       {/* Mobile overlay */}
       <div
-        className={`fixed inset-0 z-40 bg-black/30 transition-all duration-300 lg:hidden ${
+        className={`fixed inset-0 z-40 bg-black/30 transition-all duration-300 md:hidden ${
           isOpen ? 'opacity-100' : 'pointer-events-none opacity-0'
         }`}
         onClick={onToggle}
@@ -147,7 +147,7 @@ export default function Sidebar({ isOpen, onToggle, collapsed, onToggleCollapse 
           ${collapsed ? 'w-[72px]' : 'w-[260px]'}
           fixed inset-y-0 left-0 z-50 shadow-xl
           ${isOpen ? 'translate-x-0' : '-translate-x-full'}
-          lg:relative lg:translate-x-0 lg:shadow-none lg:z-auto
+          md:relative md:translate-x-0 md:shadow-none md:z-auto
         `}
       >
         {/* Header */}
@@ -172,7 +172,7 @@ export default function Sidebar({ isOpen, onToggle, collapsed, onToggleCollapse 
           <button
             type="button"
             onClick={onToggleCollapse}
-            className={`hidden lg:flex p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 rounded-lg hover:bg-slate-100/60 dark:hover:bg-white/5 transition-all duration-200 shrink-0 ${
+            className={`hidden md:flex p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 rounded-lg hover:bg-slate-100/60 dark:hover:bg-white/5 transition-all duration-200 shrink-0 ${
               collapsed ? 'absolute right-2 top-6' : ''
             }`}
             aria-label="ሳይድባር ቀይር"

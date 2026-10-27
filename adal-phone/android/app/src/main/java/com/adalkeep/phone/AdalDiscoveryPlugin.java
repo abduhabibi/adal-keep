@@ -1,6 +1,17 @@
 package com.adalkeep.phone;
 
 import android.content.Context;
+import android.content.Intent;
+import android.content.pm.PackageInfo;
+import android.net.Uri;
+import android.os.Build;
+import android.provider.Settings;
+import androidx.core.content.FileProvider;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import android.net.DhcpInfo;
 import android.net.wifi.WifiManager;
 import com.getcapacitor.JSArray;
@@ -87,6 +98,67 @@ public class AdalDiscoveryPlugin extends Plugin {
             JSObject ret = new JSObject();
             ret.put("servers", servers);
             call.resolve(ret);
+        }).start();
+    }
+
+    /** This app's own version: { versionCode, versionName }. */
+    @PluginMethod
+    public void getVersion(PluginCall call) {
+        try {
+            PackageInfo pi = getContext().getPackageManager().getPackageInfo(getContext().getPackageName(), 0);
+            JSObject r = new JSObject();
+            r.put("versionCode", Build.VERSION.SDK_INT >= 28 ? (int) pi.getLongVersionCode() : pi.versionCode);
+            r.put("versionName", pi.versionName);
+            call.resolve(r);
+        } catch (Exception e) {
+            call.reject(e.getMessage());
+        }
+    }
+
+    /**
+     * Update this app: download the newer APK from the PC and open Android's
+     * installer ("Update?"). The first time, Android asks to allow installing
+     * apps from Adal Keep. installUpdate({url}) → { started: true }
+     */
+    @PluginMethod
+    public void installUpdate(final PluginCall call) {
+        final String url = call.getString("url");
+        if (url == null) { call.reject("no url"); return; }
+        new Thread(() -> {
+            try {
+                Context ctx = getContext();
+                if (Build.VERSION.SDK_INT >= 26 && !ctx.getPackageManager().canRequestPackageInstalls()) {
+                    Intent allow = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + ctx.getPackageName()));
+                    allow.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    ctx.startActivity(allow);
+                    JSObject r = new JSObject();
+                    r.put("started", false);
+                    r.put("needsPermission", true);
+                    call.resolve(r);
+                    return;
+                }
+                File dir = new File(ctx.getExternalCacheDir(), "updates");
+                dir.mkdirs();
+                File apk = new File(dir, "adal-keep.apk");
+                HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+                c.setConnectTimeout(8000);
+                c.setReadTimeout(60000);
+                try (InputStream in = c.getInputStream(); FileOutputStream out = new FileOutputStream(apk)) {
+                    byte[] buf = new byte[64 * 1024];
+                    int n;
+                    while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+                }
+                Uri uri = FileProvider.getUriForFile(ctx, ctx.getPackageName() + ".fileprovider", apk);
+                Intent install = new Intent(Intent.ACTION_VIEW);
+                install.setDataAndType(uri, "application/vnd.android.package-archive");
+                install.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+                ctx.startActivity(install);
+                JSObject r = new JSObject();
+                r.put("started", true);
+                call.resolve(r);
+            } catch (Exception e) {
+                call.reject(e.getMessage());
+            }
         }).start();
     }
 

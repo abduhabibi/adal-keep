@@ -45,5 +45,7 @@
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <!-- add profile: take a photo of the passport -->
     <uses-permission android:name="android.permission.CAMERA" />
+    <!-- install a newer Adal Keep the PC hands out (Android asks the person once) -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 </manifest>

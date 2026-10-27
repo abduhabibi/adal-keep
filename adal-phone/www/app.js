@@ -58,9 +58,34 @@ async function open(pc) {
     const again = await pairOnWifi(pc.number)
     if (again.pc) url = await tryUrls([...(again.pc.lan || []), again.pc.tailscale])
   }
-  if (url) { location.href = `${url}/`; return }
+  if (url) { await updateFrom(url); location.href = `${url}/`; return }
   show('fail')
   $('failMsg').innerHTML = `Cannot reach <b>${pc.name || 'the PC'}</b>.<br><br>In the office: connect to the office Wi-Fi.<br>Away: open the Tailscale app and turn it on.<br>The PC must be on.`
+}
+
+/**
+ * The PC hands out the newest Adal Keep app (it updates itself from GitHub).
+ * A newer one is downloaded and Android's installer opens ("Update?").
+ * Asked again at most every 6 hours if the person said no.
+ */
+async function updateFrom(base) {
+  const plugin = window.Capacitor?.Plugins?.AdalDiscovery
+  if (!plugin?.getVersion) return
+  try {
+    const last = Number(localStorage.getItem('adal-update-asked') || 0)
+    const mine = await plugin.getVersion()
+    const r = await getJSON(`${base}/api/mobile/app`, {}, 4000)
+    if (!r.ok || !(r.body.versionCode > mine.versionCode)) return
+    if (Date.now() - last < 6 * 3600 * 1000) return
+    localStorage.setItem('adal-update-asked', String(Date.now()))
+    $('waitMsg').textContent = `Updating Adal Keep to ${r.body.versionName || 'the new version'}…`
+    const res = await plugin.installUpdate({ url: `${base}/api/mobile/app.apk` })
+    if (res?.needsPermission) {
+      $('waitMsg').textContent = 'Allow "Install unknown apps" for Adal Keep, then come back — the update installs next time.'
+      localStorage.removeItem('adal-update-asked')
+      await new Promise(r => setTimeout(r, 6000))
+    } else await new Promise(r => setTimeout(r, 1500))
+  } catch {}
 }
 
 function startPair(msg = '') {

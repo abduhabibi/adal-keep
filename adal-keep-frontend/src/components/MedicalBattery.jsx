@@ -51,7 +51,7 @@ export default function MedicalBattery({ profile, onSaved }) {
   const total = from ? Math.max(1, Math.round((end - new Date(from + 'T00:00:00')) / DAY)) : 61
   const pct = Math.max(0, Math.min(100, Math.round(100 * left / total)))
   const color = left === 0 ? 'bg-red-600' : left <= 7 ? 'bg-red-500' : left <= 14 ? 'bg-amber-500' : pct <= 50 ? 'bg-lime-500' : 'bg-emerald-500'
-  const text = left === 0 ? 'medical ran out' : left === 1 ? '1 day left' : left < 60 ? `${left} days left` : `${Math.floor(left / 30)} months left`
+  const text = left === 0 ? 'medical ran out' : left === 1 ? '1 day left' : `${left} days left`
 
   return (
     <button type="button" onClick={() => setEditing(true)} title={`${from ? `Medical examination ${nice(from)} · ` : ''}deadline ${nice(until)} · click to change`}

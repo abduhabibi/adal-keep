@@ -126,15 +126,10 @@ if [ ! -s "$TS" ]; then
     rm -f "$TS.part"; echo "   WARN Tailscale not downloaded (PREPARE fetches it on Windows)"
   fi
 fi
-# The phone app (adal-phone): built here when the Android tools are on this
-# PC, with adb for Windows so a phone on a USB cable installs it by double-click.
-PHONE="$BASE/adal-phone"
-APK="$PHONE/android/app/build/outputs/apk/release/app-release.apk"
-if [ -d "$HOME/Android/Sdk" ] && [ -d "$PHONE/node_modules" ]; then
-  ( cd "$PHONE" && ANDROID_HOME="$HOME/Android/Sdk" npx cap sync android >/dev/null 2>&1 \
-    && cd android && ANDROID_HOME="$HOME/Android/Sdk" ./gradlew assembleRelease -q >/dev/null 2>&1 ) \
-    || echo "   WARN the phone app was not rebuilt (the last one is used)"
-fi
+# The phone app: adal-phone/build-apk.sh puts the newest signed APK in
+# backend/src/phone-app (PCs hand it to phones, which update themselves);
+# the USB gets the same file, with adb for Windows for a phone on a cable.
+APK="$BACK/src/phone-app/AdalKeep.apk"
 if [ -s "$APK" ]; then
   mkdir -p "$USB/5 - Phone app"
   cp -f "$APK" "$USB/5 - Phone app/Adal Keep.apk"

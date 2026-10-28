@@ -32,7 +32,7 @@ const STATE = process.env.ADAL_BACKUP_STATE || path.join(DATA, 'backup-state.jso
 const TMP = path.join(DATA, 'backup-tmp')
 const DB_FILE = process.env.SQLITE_PATH ? path.resolve(process.env.SQLITE_PATH) : path.join(BACKEND, 'data.sqlite')
 
-const PART = 19 * 1024 * 1024          // a bot downloads ≤ 20 MB per file
+const PART = 4 * 1024 * 1024           // small pieces: each one gets through a slow office line (a bot downloads ≤ 20 MB)
 const SET_TARGET = 18 * 1024 * 1024    // documents are grouped into sets of about this size
 const MAGIC = Buffer.from('ADALBK1')
 
@@ -93,10 +93,18 @@ export function saveConfig({ bot_token, password, chat_id, window_start, window_
 // ── Telegram ─────────────────────────────────────────────────────────────────
 
 async function tg(token, method, body, timeoutMs = 60000, tries = 0) {
-  const r = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+  let r
+  try {
+    r = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
     method: 'POST', body, signal: AbortSignal.timeout(timeoutMs),
     ...(body instanceof FormData ? {} : { headers: { 'content-type': 'application/json' } }),
   })
+  } catch (e) {
+    // The line dropped: wait a little and send it again (a few times).
+    if (tries >= 4) throw new Error(`No connection to Telegram (${e.cause?.code || e.message})`)
+    await new Promise(ok => setTimeout(ok, [5, 15, 30, 60][tries] * 1000))
+    return tg(token, method, body, timeoutMs, tries + 1)
+  }
   const j = await r.json().catch(() => ({}))
   // One channel serves many agencies: when Telegram says "too many", wait as it asks.
   if (j.error_code === 429 && tries < 6) {
@@ -282,7 +290,8 @@ export async function runBackup(db, { force = false } = {}) {
     const indexId = await sendPiece(token, chat_id, lock(zlib.gzipSync(index), password), 'adal-backup-index.enc',
       `🗂 Adal Keep backup index · ${(await db('companies').first().catch(() => null))?.name || 'agency'} · ${new Date().toLocaleString()} · keep the NEWEST one — it is what a restore needs`)
     s.index_file_id = indexId
-    await rememberIndexOnline(db, indexId).catch(() => {})
+    const done = listDocuments()
+    await publishBackup(db, { file_id: indexId, key: password, at: new Date().toISOString(), files_sent: Object.keys(s.sent).length, files_total: done.length, error: null }).catch(() => {})
 
     const left = listDocuments().filter(n => !s.sent[n]).length
     s.last_ok = new Date().toISOString(); s.last_day = today(); s.last_error = null
@@ -291,6 +300,7 @@ export async function runBackup(db, { force = false } = {}) {
   } catch (e) {
     const st = readState(); st.last_error = e.message; writeState(st)
     progress.error = e.message
+    publishBackup(db, { error: e.message, error_at: new Date().toISOString() }).catch(() => {})
     throw e
   } finally {
     progress.running = false
@@ -299,39 +309,54 @@ export async function runBackup(db, { force = false } = {}) {
   }
 }
 
-// The newest index's Telegram file id also waits in the agency's own
-// Supabase rows: a new PC of the agency restores without opening the channel.
-// (It is locked with the backup password; the id alone opens nothing.)
-const INDEX_KEY = '/_backup_index'
-async function rememberIndexOnline(db, fileId) {
+// Adal can always recover an agency: after every backup the agency's own
+// Supabase rows hold the newest index's Telegram file id AND the key it is
+// locked with (keep_meta "/_backup" — only that agency and Adal read it).
+// Adal Keep Admin restores it on the agency's PC, onto a new PC, or downloads
+// everything to Adal's own PC; a new PC of the agency finds it by itself.
+const BACKUP_KEY = '/_backup'
+async function cloudOf(db) {
   const { cloudOn } = await import('./cloudSync.js')
-  if (!(await cloudOn(db))) return
+  if (!(await cloudOn(db))) return null
   const { cloudCall, cloudAgencyId } = await import('./chatCloud.js')
-  const agency = await cloudAgencyId(db)
-  await cloudCall(db, 'POST', '/rest/v1/keep_meta?on_conflict=agency_id,key',
-    [{ agency_id: agency, key: INDEX_KEY, data: { file_id: fileId, at: new Date().toISOString() }, updated_at: new Date().toISOString() }],
+  return { cloudCall, agency: await cloudAgencyId(db) }
+}
+async function publishBackup(db, data) {
+  const c = await cloudOf(db)
+  if (!c?.agency) return
+  const [old] = await c.cloudCall(db, 'GET', `/rest/v1/keep_meta?agency_id=eq.${c.agency}&key=eq.${encodeURIComponent(BACKUP_KEY)}&select=data`).catch(() => [])
+  await c.cloudCall(db, 'POST', '/rest/v1/keep_meta?on_conflict=agency_id,key',
+    [{ agency_id: c.agency, key: BACKUP_KEY, data: { ...(old?.data || {}), ...data }, updated_at: new Date().toISOString() }],
     { headers: { Prefer: 'resolution=merge-duplicates,return=minimal' } })
 }
-/** The newest index, from this PC's notes or the agency's online rows. */
-export async function newestIndex(db) {
-  let id = readState().index_file_id
-  if (!id) {
-    const { cloudOn } = await import('./cloudSync.js')
-    if (await cloudOn(db)) {
-      const { cloudCall, cloudAgencyId } = await import('./chatCloud.js')
-      const agency = await cloudAgencyId(db)
-      const [row] = await cloudCall(db, 'GET', `/rest/v1/keep_meta?agency_id=eq.${agency}&key=eq.${encodeURIComponent(INDEX_KEY)}&select=data`).catch(() => [])
-      id = row?.data?.file_id
+/** The newest backup: { index (buffer), key } — from this PC's notes or the agency's online rows. */
+export async function newestBackup(db, { file_id, key } = {}) {
+  if (!file_id) {
+    const c = await cloudOf(db)
+    if (c?.agency) {
+      const rows = await c.cloudCall(db, 'GET', `/rest/v1/keep_meta?agency_id=eq.${c.agency}&key=in.(${BACKUP_KEY},/_backup_index)&select=key,data`).catch(() => [])
+      const b = rows.find(r => r.key === BACKUP_KEY)?.data || rows.find(r => r.key === '/_backup_index')?.data
+      if (b?.file_id) { file_id = b.file_id; key ||= b.key }
     }
+    file_id ||= readState().index_file_id
   }
-  if (!id) throw new Error('No backup was found for this agency yet. Choose the "adal-backup-index.enc" file instead.')
-  return fetchPiece(botToken(), id)
+  if (!file_id) throw new Error('No backup was found for this agency yet.')
+  return { index: await fetchPiece(botToken(), file_id), key: key || getSecret('backup_password') }
+}
+export async function newestIndex(db) { return (await newestBackup(db)).index }
+
+/** Every agency is backed up without setting anything up: no password yet → the PC makes a strong key itself. */
+export function ensureBackupKey() {
+  if (getSecret('backup_password')) return
+  setSecret('backup_password', crypto.randomBytes(24).toString('base64url'))
+  console.log('💾 Backup key made (Adal keeps a copy online for recovery)')
 }
 
 let timer = null
 /** Every minute: in the window, once a day, run (and resume after a stop). */
 export function startBackupSchedule(db) {
   if (timer) return
+  if (botToken()) ensureBackupKey()
   timer = setInterval(() => {
     const cfg = getConfig()
     if (!cfg.enabled || !cfg.has_token || !cfg.has_password || !cfg.chat_id || progress.running) return
@@ -356,7 +381,7 @@ export function startBackupSchedule(db) {
  */
 export async function restoreFrom(indexBuf, { bot_token, password }) {
   const token = String(bot_token || botToken() || '').trim()
-  if (!token || !password) throw new Error('The bot token and the backup password are needed.')
+  if (!token || !password) throw new Error('The backup key is needed.')
   const index = JSON.parse(zlib.gunzipSync(unlock(indexBuf, password)).toString())
   if (!index.adal_backup) throw new Error('That is not an Adal Keep backup index.')
   Object.assign(progress, { running: true, step: 'restore', files_done: 0, error: null })

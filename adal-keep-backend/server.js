@@ -1,3 +1,7 @@
+import net from 'net'
+// Slow or busy office lines: give a connection 2.5 s to open (Node's 250 ms
+// default makes calls to Supabase / Telegram fail with ETIMEDOUT).
+net.setDefaultAutoSelectFamilyAttemptTimeout?.(2500)
 import paymentsRouter from './src/routes/payments.js'
 import zlib from 'zlib'
 import express from 'express'

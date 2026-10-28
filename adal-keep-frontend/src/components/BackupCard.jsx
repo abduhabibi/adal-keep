@@ -36,6 +36,21 @@ export default function BackupCard() {
   const p = c.progress || {}
   const ready = c.has_token && c.has_password && c.chat_id
 
+  const pwStep = (
+        <div>
+          <p className="font-semibold">{c.shared ? '' : '3. '}Choose the backup password {c.has_password && <span className="text-teal-600">✓</span>}</p>
+          <p className="text-slate-500 mb-1">
+            {c.shared ? <>Adal keeps a copy of the key, so Adal can always restore your data for you.</> : <><b className="text-red-600">Write it on paper and keep it outside the office.</b> Without it nobody — not even Adal — can open the backup.</>}
+          </p>
+          <div className="grid sm:grid-cols-[1fr_1fr_auto] gap-2">
+            <input className={field} type="password" value={pw} onChange={e => setPw(e.target.value)} placeholder={c.has_password ? 'Saved — type a new one to change it' : 'At least 8 characters'} autoComplete="new-password" />
+            <input className={field} type="password" value={pw2} onChange={e => setPw2(e.target.value)} placeholder="Type it again" autoComplete="new-password" />
+            <Button size="sm" disabled={pw.length < 8 || pw !== pw2} onClick={async () => { if (await save({ password: pw }, 'Backup password saved')) { setPw(''); setPw2('') } }}>Save</Button>
+          </div>
+          {c.has_password && <p className="text-xs text-amber-700 mt-1">Changing it starts a fresh full backup (older pieces stay locked with the old password).</p>}
+        </div>
+  )
+
   return (
     <Card>
       <h2 className="font-display text-lg font-bold mb-1 flex items-center gap-2" translate="no"><span>💾</span> Backup to Telegram</h2>
@@ -46,7 +61,7 @@ export default function BackupCard() {
 
       {c.shared && (
         <p className="mb-4 rounded-lg bg-teal-50 dark:bg-teal-900/20 text-teal-800 dark:text-teal-300 px-3 py-2 text-sm" translate="no">
-          {c.shared_ready ? '✓' : '⏳'} Backups go to Adal's private storage channel — nothing to set up. They are locked with <b>your</b> backup password: nobody else, not even Adal, can open them.
+          {c.shared_ready ? '✓' : '⏳'} Backed up every day to Adal's private storage — nothing to set up. The backup is locked; only this agency and Adal can open it, so if anything is ever lost, <b>Adal can bring it back for you</b>.
         </p>
       )}
       <ol className="space-y-4 text-sm" translate="no">
@@ -81,19 +96,12 @@ export default function BackupCard() {
         </li>
         </>}
         <li>
-          <p className="font-semibold">{c.shared ? 1 : 3}. Choose the backup password {c.has_password && <span className="text-teal-600">✓</span>}</p>
-          <p className="text-slate-500 mb-1">
-            <b className="text-red-600">Write it on paper and keep it outside the office.</b> Without it nobody — not even Adal — can open the backup.
-          </p>
-          <div className="grid sm:grid-cols-[1fr_1fr_auto] gap-2">
-            <input className={field} type="password" value={pw} onChange={e => setPw(e.target.value)} placeholder={c.has_password ? 'Saved — type a new one to change it' : 'At least 8 characters'} autoComplete="new-password" />
-            <input className={field} type="password" value={pw2} onChange={e => setPw2(e.target.value)} placeholder="Type it again" autoComplete="new-password" />
-            <Button size="sm" disabled={pw.length < 8 || pw !== pw2} onClick={async () => { if (await save({ password: pw }, 'Backup password saved')) { setPw(''); setPw2('') } }}>Save</Button>
-          </div>
-          {c.has_password && <p className="text-xs text-amber-700 mt-1">Changing it starts a fresh full backup (older pieces stay locked with the old password).</p>}
+          {c.shared
+            ? <details><summary className="cursor-pointer font-semibold">Use your own backup password (not needed)</summary><div className="mt-2">{pwStep}</div></details>
+            : pwStep}
         </li>
         <li>
-          <p className="font-semibold">{c.shared ? 2 : 4}. When</p>
+          <p className="font-semibold">{c.shared ? 1 : 4}. When</p>
           <div className="flex flex-wrap items-center gap-2">
             <span>Every day between</span>
             <input type="time" className={`${field} w-32`} defaultValue={c.window_start} onBlur={e => e.target.value !== c.window_start && save({ window_start: e.target.value })} />

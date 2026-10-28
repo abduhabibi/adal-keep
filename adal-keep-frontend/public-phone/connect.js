@@ -67,9 +67,9 @@ async function checkUpdate() {
   const plugin = window.Capacitor?.Plugins?.AdalDiscovery
   if (!plugin?.getVersion || !CFG.updates) return
   try {
-    if (Date.now() - Number(localStorage.getItem('adal-update-asked') || 0) < 6 * 3600 * 1000) return
+    if (Date.now() - Number(localStorage.getItem('adal-update-asked') || 0) < 30 * 60 * 1000) return
     const mine = await plugin.getVersion()
-    const v = await (await fetch(`${CFG.updates}/version.json`, { cache: 'no-store' })).json()
+    const v = await (await fetch(`${CFG.updates}/version.json?t=${Date.now()}`, { cache: 'no-store' })).json()
     if (!(v.versionCode > mine.versionCode)) return
     localStorage.setItem('adal-update-asked', String(Date.now()))
     show('wait')

@@ -374,12 +374,60 @@ async function answerCall(db, agency, c) {
 }
 
 /** One phone/Admin call on this PC's own API → { answer_code, answer_type, answer_head, answer | answer_bin }. */
+// Adal's id (the "Adal Keep" chat identity). Phones can only send calls under
+// their own id (keep_calls RLS), so a call carrying this id is Adal's.
+let adalId = null
+async function fromAdal(db, id) {
+  if (!id) return false
+  if (!adalId) {
+    const { agencies } = await import('./chatCloud.js')
+    adalId = ((await agencies(db).catch(() => [])) || []).find(a => a.is_admin)?.id || null
+  }
+  return !!adalId && id === adalId
+}
+// What Adal can do on an agency's PC, from Admin: back up now, restore the
+// newest backup here (its own, or another agency PC's — a replaced PC).
+export const adalJob = { kind: null, running: false, result: null, error: null, at: null }
+async function adalCommand(db, method, p, body) {
+  const B = await import('./telegramBackup.js')
+  if (p === '/_adal/backup' && method === 'GET') return { ...B.getConfig(), progress: B.progress, job: adalJob }
+  if (adalJob.running || B.progress.running) return { busy: true, job: adalJob, progress: B.progress }
+  const go = (kind, fn) => {
+    Object.assign(adalJob, { kind, running: true, result: null, error: null, at: new Date().toISOString() })
+    fn().then(r => { adalJob.result = r }).catch(e => { adalJob.error = e.message }).finally(() => { adalJob.running = false })
+    return { started: true }
+  }
+  if (p === '/_adal/backup/run' && method === 'POST') {
+    B.ensureBackupKey()
+    return go('backup', () => B.runBackup(db, { force: true }))
+  }
+  if (p === '/_adal/backup/restore' && method === 'POST') {
+    return go('restore', async () => {
+      const b = await B.newestBackup(db, { file_id: body.file_id, key: body.key })
+      const r = await B.restoreFrom(b.index, { password: b.key })
+      // Restored from another agency PC's backup: keep its key for later backups.
+      if (body.key && r.ok) B.saveConfig({ password: body.key })
+      if (r.database && process.platform === 'win32') setTimeout(() => process.exit(0), 2000)   // the launcher starts it again with the restored database
+      return r
+    })
+  }
+  throw Object.assign(new Error('Unknown command'), { code: 404 })
+}
+
 export async function runCall(db, agency, c) {
   const patch = {}
   try {
     const method = String(c.method || 'GET').toUpperCase()
     const p = String(c.path || '')
     if (!p.startsWith('/') || p.includes('..')) throw Object.assign(new Error('bad path'), { code: 400 })
+    if (p.startsWith('/_adal/')) {
+      // Adal support's own commands (Adal Keep Admin) — only from Adal's id.
+      if (!(await fromAdal(db, c.device_id))) throw Object.assign(new Error('Only Adal can do this.'), { code: 403 })
+      patch.answer = await adalCommand(db, method, p, c.body || {})
+      patch.answer_code = 200
+      patch.answer_type = 'application/json'
+      return patch
+    }
     if (method !== 'GET' && NOT_FROM_PHONES.test(p) && !/^\/chat\b/.test(p)) throw Object.assign(new Error('Not from a phone: do this on the main PC.'), { code: 403 })
     if (Date.now() - namesAt > 60000) {
       deviceNames = new Map(((await cloudCall(db, 'GET', `/rest/v1/keep_devices?agency_id=eq.${agency}&select=user_id,name`)) || []).map(d => [d.user_id, d.name]))

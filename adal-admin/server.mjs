@@ -18,6 +18,10 @@ import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { fileURLToPath } from 'node:url'
+import os from 'node:os'
+import zlib from 'node:zlib'
+import net from 'node:net'
+net.setDefaultAutoSelectFamilyAttemptTimeout?.(2500)   // slow lines: 250 ms is too short to connect
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const PORT = Number(process.env.ADMIN_PORT || 4100)
@@ -189,7 +193,7 @@ const api = {
   'GET /api/work': async () => {
     const [agencies, meta, phones] = await Promise.all([
       rest('GET', 'agencies?is_admin=eq.false&select=id,name,pc_number,banned,last_seen&order=name.asc'),
-      rest('GET', 'keep_meta?key=in.(/_summary,/_pc)&select=agency_id,key,data,updated_at').catch(() => []),
+      rest('GET', 'keep_meta?key=in.(/_summary,/_pc,/_backup)&select=agency_id,key,data,updated_at').catch(() => []),
       rest('GET', 'keep_devices?select=agency_id,revoked').catch(() => []),
     ])
     const of = (id, key) => meta.find(m => m.agency_id === id && m.key === key)
@@ -203,11 +207,24 @@ const api = {
         pcOnline: !!pc && Date.now() - new Date(pc).getTime() < 60000,
         pcSeen: pc,
         summary: of(a.id, '/_summary')?.data || null,
+        backup: (({ key, ...b }) => ({ ...b, hasKey: !!key }))(of(a.id, '/_backup')?.data || {}),
         phones: phones.filter(d => d.agency_id === a.id && !d.revoked).length,
         branchPCs: branches.filter(b => b.name.replace(BRANCH, '') === a.name).map(b => b.name.match(BRANCH)[1]),
       }
     })
   },
+  // Backups (Telegram, locked with the agency's key, which Adal holds too).
+  'POST /api/backup-run': async (q, b) => agencyCall(String(b.agency || ''), 'POST', '/_adal/backup/run', {}),
+  'POST /api/backup-status': async (q, b) => agencyCall(String(b.agency || ''), 'GET', '/_adal/backup', null),
+  // Restore the newest backup of `from` on the PC of `to` (the same agency, or a replacement PC).
+  'POST /api/backup-restore': async (q, b) => {
+    const from = String(b.from || ''), to = String(b.to || b.from || '')
+    const bk = await backupOf(from)
+    return agencyCall(to, 'POST', '/_adal/backup/restore', { file_id: bk.file_id, key: bk.key })
+  },
+  // Everything to Adal's own PC: ~/Adal Backups/<agency>/<date>/ (data.sqlite + documents/).
+  'POST /api/backup-download': async (q, b) => startDownload(String(b.agency || '')),
+  'GET /api/backup-download': async (q) => downloads[q.agency] || null,
   // Do something in an agency's Adal Keep now (its PC must be on): the relay.
   'POST /api/agency-call': async (q, b) => agencyCall(String(b.agency || ''), String(b.method || 'POST'), String(b.path || ''), b.body ?? null),
   'POST /api/decide': async (q, b) => {
@@ -235,6 +252,66 @@ async function agencyCall(agency, method, p, body, ms = 25000) {
     if (a?.status === 'late') break
   }
   throw new Error("The agency's PC did not answer — it is off or has no internet.")
+}
+
+// ---------------------------------------------------------------- backups --
+// The same format as adal-keep-backend/src/services/telegramBackup.js:
+// pieces "ADALBK1" + salt(16) + iv(12) + tag(16) + AES-256-GCM(data), key = scrypt(password).
+const BOT = () => process.env.TELEGRAM_BOT_TOKEN || ''
+async function backupOf(agency) {
+  if (!isAgency(agency)) throw new Error('bad agency')
+  const [row] = await rest('GET', `keep_meta?agency_id=eq.${agency}&key=eq.${encodeURIComponent('/_backup')}&select=data`)
+  if (!row?.data?.file_id || !row.data.key) throw new Error('This agency has no backup yet (its PC needs the newest Adal Keep and one backup run).')
+  return row.data
+}
+async function tgPiece(fileId) {
+  for (let i = 0; ; i++) {
+    const j = await (await fetch(`https://api.telegram.org/bot${BOT()}/getFile`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ file_id: fileId }) })).json()
+    if (j.ok) {
+      const r = await fetch(`https://api.telegram.org/file/bot${BOT()}/${j.result.file_path}`)
+      if (!r.ok) throw new Error(`Telegram download ${r.status}`)
+      return Buffer.from(await r.arrayBuffer())
+    }
+    if (j.error_code === 429 && i < 6) { await new Promise(ok => setTimeout(ok, ((j.parameters?.retry_after || 5) + 1) * 1000)); continue }
+    throw new Error(`Telegram: ${j.description || 'error'}`)
+  }
+}
+function unlockPiece(buf, password) {
+  if (buf.subarray(0, 7).toString() !== 'ADALBK1') throw new Error('Not an Adal Keep backup piece')
+  const salt = buf.subarray(7, 23), iv = buf.subarray(23, 35), tag = buf.subarray(35, 51)
+  const d = crypto.createDecipheriv('aes-256-gcm', crypto.scryptSync(password, salt, 32), iv)
+  d.setAuthTag(tag)
+  try { return Buffer.concat([d.update(buf.subarray(51)), d.final()]) } catch { throw new Error('Wrong key (or a damaged piece)') }
+}
+const downloads = {}
+async function startDownload(agency) {
+  if (downloads[agency]?.running) return downloads[agency]
+  if (!BOT()) throw new Error('adal-admin/.env needs TELEGRAM_BOT_TOKEN.')
+  const bk = await backupOf(agency)
+  const [ag] = await rest('GET', `agencies?id=eq.${agency}&select=name`)
+  const name = String(ag?.name || agency).replace(/[\\/:*?"<>|]+/g, '_').trim()
+  const dir = path.join(os.homedir(), 'Adal Backups', name, new Date(bk.at || Date.now()).toISOString().slice(0, 10))
+  const job = downloads[agency] = { running: true, dir, step: 'index', files: 0, error: null, done: false }
+  ;(async () => {
+    const index = JSON.parse(zlib.gunzipSync(unlockPiece(await tgPiece(bk.file_id), bk.key)).toString())
+    const get = async (set) => unlockPiece(Buffer.concat(await Promise.all(set.parts.map(tgPiece))), bk.key)
+    fs.mkdirSync(path.join(dir, 'documents'), { recursive: true })
+    const db = index.sets.find(x => x.type === 'db')
+    if (db) { job.step = 'database'; fs.writeFileSync(path.join(dir, 'data.sqlite'), zlib.gunzipSync(await get(db))) }
+    job.step = 'documents'
+    for (const set of index.sets.filter(x => x.type === 'files')) {
+      const buf = await get(set)
+      for (let off = 0; off < buf.length;) {
+        const hl = buf.readUInt32BE(off); off += 4
+        const { name: f, size } = JSON.parse(buf.subarray(off, off + hl).toString()); off += hl
+        fs.writeFileSync(path.join(dir, 'documents', path.basename(f)), buf.subarray(off, off + size)); off += size
+        job.files++
+      }
+    }
+    fs.writeFileSync(path.join(dir, 'README.txt'), `Adal Keep backup of ${name}, made ${index.made}.\ndata.sqlite = the database, documents/ = every document (${job.files}).\nTo put it on a PC: Admin → Work → the agency → Backup → "Restore on its PC" (or onto another PC).\n`)
+    job.done = true
+  })().catch(e => { job.error = e.message }).finally(() => { job.running = false })
+  return job
 }
 
 // ------------------------------------------------------- agency windows --

@@ -64,6 +64,50 @@ async function phoneBoot() {
   })
   document.body.appendChild(bar)
   document.body.style.paddingBottom = '26px'
+  phoneUpdates(bar)
+}
+
+// A newer phone app (published with Adal Keep on GitHub): looked for at the
+// start, whenever the app is opened again (at most every 10 minutes) and every
+// 30 minutes. Android's "Update?" opens by itself once per new version; a red
+// button in the bottom bar stays until it is installed.
+const UPDATES = 'https://raw.githubusercontent.com/abduhabibi/adal-keep/release/adal-keep-backend/src/phone-app'
+function phoneUpdates(bar) {
+  const plugin = window.Capacitor?.Plugins?.AdalDiscovery
+  if (!plugin?.getVersion) return
+  let last = 0, busy = false
+  const btn = document.createElement('button')
+  btn.type = 'button'
+  btn.style.cssText = 'display:none;background:#dc2626;color:#fff;border:0;border-radius:999px;font:bold 11px system-ui;padding:3px 10px'
+  bar.insertBefore(btn, bar.lastChild)
+  const install = async (v) => {
+    if (busy) return
+    busy = true
+    btn.textContent = '⬇ Downloading…'
+    try {
+      const r = await plugin.installUpdate({ url: `${UPDATES}/AdalKeep.apk?v=${v.versionCode}` })
+      btn.textContent = r?.needsPermission ? '⬆ Allow, then tap here' : `⬆ Update to ${v.versionName}`
+    } catch { btn.textContent = `⬆ Update to ${v.versionName}` }
+    busy = false
+  }
+  const check = async () => {
+    if (document.hidden || Date.now() - last < 10 * 60000) return
+    last = Date.now()
+    try {
+      const mine = await plugin.getVersion()
+      const v = await (await fetch(`${UPDATES}/version.json?t=${Date.now()}`, { cache: 'no-store' })).json()
+      if (!(v.versionCode > mine.versionCode)) { btn.style.display = 'none'; return }
+      btn.style.display = ''
+      btn.textContent = `⬆ Update to ${v.versionName}`
+      btn.onclick = () => install(v)
+      const asked = `adal-update-${v.versionCode}`
+      if (!sessionStorage.getItem(asked)) { sessionStorage.setItem(asked, '1'); install(v) }
+    } catch {}
+  }
+  const tick = () => check(); tick.__always = true
+  setTimeout(check, 3000)
+  setInterval(tick, 30 * 60000)
+  document.addEventListener('visibilitychange', check)
 }
 
 // The phone does no work while the app is in the background: repeating

@@ -43,7 +43,7 @@ const SIZE = {
   full:    { r: 14, rowGap: 42, block: 60 },
 }
 
-function Node({ k, title, n, state, note, count, selected, dim, onSelect, compact, left, top }) {
+function Node({ k, title, n, state, note, count, selected, dim, onSelect, compact, narrow, left, top }) {
   const pick = !!onSelect
   const l = pick ? (selected ? LOOK.done : LOOK.todo) : (LOOK[state] || LOOK.todo)
   return (
@@ -54,7 +54,7 @@ function Node({ k, title, n, state, note, count, selected, dim, onSelect, compac
       <span className={`${compact ? 'w-[22px] h-[22px] text-[10px]' : 'w-7 h-7 text-[11px]'} rounded-full flex items-center justify-center font-bold transition-all duration-300 ${l.dot} ${selected ? 'ring-4 ring-emerald-300/70 shadow-[0_0_16px_rgba(16,185,129,.8)] scale-110' : ''}`}>
         {pick ? (count ?? 0) : (ICON[state] || n)}
       </span>
-      <span className={`${compact ? 'mt-0.5 text-[10px]' : 'mt-1 text-[11px]'} whitespace-nowrap font-semibold leading-tight ${l.text}`}>{title}</span>
+      <span className={`${narrow ? 'mt-0.5 text-[9px] tracking-tight' : compact ? 'mt-0.5 text-[10px]' : 'mt-1 text-[11px]'} whitespace-nowrap font-semibold leading-tight ${l.text}`}>{title}</span>
       {note && <span className="text-[10px] text-slate-400 leading-tight whitespace-nowrap max-w-[96px] truncate">{note}</span>}
     </button>
   )
@@ -80,7 +80,11 @@ export function JourneyFork({ states = {}, notes = {}, counts, selected, onSelec
     return () => ro.disconnect()
   }, [])
   const height = z.rowGap * 2 + z.block
-  const cx = (k) => EDGE + SPOT[k][0] * Math.max(0, w - EDGE - LABELS - EDGE)
+  // Compact (the list's filter) fits any width — no sideways scrolling: on a
+  // narrow screen the branches show only their icons.
+  const narrow = compact && w > 0 && w < 520
+  const edge = compact ? 22 : EDGE, labels = narrow ? 18 : LABELS
+  const cx = (k) => edge + SPOT[k][0] * Math.max(0, w - edge - labels - edge)
   const cy = (k) => SPOT[k][1] * z.rowGap + z.r
 
   // The path to the picked step lights up (on the list); on a profile a wire
@@ -99,8 +103,8 @@ export function JourneyFork({ states = {}, notes = {}, counts, selected, onSelec
   const steps = [...SHARED, ...BRANCHES.flatMap(b => b.steps)]
 
   return (
-    <div className="overflow-x-auto overflow-y-hidden">
-      <div ref={ref} className="relative" style={{ height, minWidth: compact ? 440 : 460 }}>
+    <div className={compact ? 'overflow-hidden' : 'overflow-x-auto overflow-y-hidden'}>
+      <div ref={ref} className="relative" style={{ height, minWidth: compact ? 0 : 460 }}>
         {w > 0 && (
           <svg className="absolute inset-0 pointer-events-none" width={w} height={height} aria-hidden="true">
             {WIRES.map(wire => {
@@ -122,13 +126,13 @@ export function JourneyFork({ states = {}, notes = {}, counts, selected, onSelec
         {w > 0 && steps.map(([k, title, short], i) => (
           <Node key={k} k={k} title={compact && short ? short : title} n={i + 1} state={states[k]} note={pick ? '' : notes[k]}
             count={counts?.[k]} selected={selected === k} dim={pick && selected && !chain.has(k)} onSelect={onSelect}
-            compact={compact} left={cx(k)} top={SPOT[k][1] * z.rowGap} />
+            compact={compact} narrow={narrow} left={cx(k)} top={SPOT[k][1] * z.rowGap} />
         ))}
         {/* the two branches' names, at the right end of their rows */}
         {BRANCHES.map((b, i) => (
           <span key={b.key} className="absolute right-0 text-[10px] font-bold uppercase tracking-wide text-slate-400 whitespace-nowrap text-right"
             style={{ top: (i === 0 ? 0 : 2) * z.rowGap + z.r - 7 }}>
-            {b.icon} {b.title}
+            {b.icon}{!narrow && ` ${b.title}`}
           </span>
         ))}
       </div>

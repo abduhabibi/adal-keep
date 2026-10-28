@@ -94,6 +94,7 @@
 <script>
 let data = { agencies: [], conversations: [], requests: [] }
 let tab = 'work', open = null, lastId = 0, work = [], workOpen = null
+let downloads = {}   // agency → its backup download to this PC
 const $ = (s) => document.querySelector(s)
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
 const when = (t) => new Date(t).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })
@@ -196,7 +197,7 @@ function workTable() {
     ['Profiles', sum(s => s.profiles), ''], ['Chosen by employers', sum(s => Number(s.chosen)), ''],
   ]
   let html = `<div class="cards">${cards.map(([t, v, c]) => `<div class="card ${c}"><b>${v}</b><span>${t}</span></div>`).join('')}</div>
-    <table><tr><th>Agency</th><th>PC</th><th>Profiles</th><th>Chosen</th><th>Waiting</th><th>Failed 7 d</th><th>Tasks</th><th>Medical ≤ 14 d</th><th>Phones</th><th>Copied</th><th></th></tr>` +
+    <table><tr><th>Agency</th><th>PC</th><th>Profiles</th><th>Chosen</th><th>Waiting</th><th>Failed 7 d</th><th>Tasks</th><th>Medical ≤ 14 d</th><th>Phones</th><th>Copied</th><th>Backup</th><th></th></tr>` +
     work.map(a => { const s = a.summary; return `<tr class="ag ${workOpen === a.id ? 'on' : ''}" data-row="${a.id}">
       <td><b>${esc(a.name)}</b> <span class="muted code" style="letter-spacing:0">${esc(a.pc_number || '')}</span>${a.branchPCs?.length ? `<div class="muted" style="font-size:11px">+ ${a.branchPCs.length} PC(s) following it: ${a.branchPCs.join(', ')}</div>` : ''}${a.banned ? ' <span class="pill rejected">banned</span>' : ''}</td>
       <td><span class="dot ${a.pcOnline ? 'on' : ''}"></span>${a.pcOnline ? 'on' : `off ${a.pcSeen ? ago(a.pcSeen) : ''}`}</td>
@@ -204,6 +205,7 @@ function workTable() {
       <td class="${cls(s.runs.failed7d, 1, 5)}">${s.runs.failed7d}</td><td class="${cls(s.tasks.open, 5, 20)}">${s.tasks.open}</td>
       <td class="${cls(s.medicals.length, 1, 3)}">${s.medicals.length}</td><td>${a.phones}</td><td class="muted">${ago(s.at)}</td>`
       : `<td colspan="8" class="muted">No online copy yet (needs the newest Adal Keep and its chat signed in)</td>`}
+      <td class="${a.backup?.error ? 'num bad' : !a.backup?.at ? 'muted' : (Date.now() - new Date(a.backup.at)) > 3 * 864e5 ? 'num warn' : ''}">${a.backup?.at ? ago(a.backup.at) : 'none yet'}${a.backup?.error ? ' ⚠' : ''}</td>
       <td><button class="go" data-open="${a.id}">Open Adal Keep</button></td></tr>` }).join('') + '</table>'
   const a = work.find(x => x.id === workOpen)
   if (a?.summary) {
@@ -223,8 +225,55 @@ function workTable() {
         <h4 style="margin-top:14px">🧭 Where its profiles stand</h4><div class="stages">${Object.entries(s.stages || {}).sort((x, y) => y[1] - x[1]).map(([k, v]) => `<span>${esc(k.replace(/_/g, ' '))} · ${v}</span>`).join('')}</div></div>
     </div>`
   }
+  if (a) {
+    const b = a.backup || {}, dl = downloads[a.id]
+    html += `<div class="detail"><div class="box2"><h4>💾 Backup</h4>
+      <p>${b.at ? `Newest: <b>${new Date(b.at).toLocaleString()}</b> (${ago(b.at)}) · ${b.files_sent ?? '?'} of ${b.files_total ?? '?'} documents` : '<span class="muted">No backup yet — it runs by itself every day in the lunch break once the PC has the newest Adal Keep. Press "Back up now" to start one.</span>'}</p>
+      ${b.error ? `<p class="num bad" style="font-size:12px">Last try failed ${ago(b.error_at)}: ${esc(b.error)}</p>` : ''}
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">
+        <button class="go" data-bk="run">Back up now</button>
+        <button class="ghost" data-bk="status">How is it going?</button>
+        ${b.at ? `<button class="ghost" data-bk="restore">Restore on its PC</button>
+        <button class="ghost" data-bk="restoreTo">Restore onto another PC…</button>
+        <button class="ghost" data-bk="download">Download everything to this PC</button>` : ''}
+      </div>
+      ${dl ? `<p style="font-size:12px;margin-top:8px">${dl.error ? `<span class="num bad">Download failed: ${esc(dl.error)}</span>` : dl.done ? `✅ Saved ${dl.files} documents + the database in <span class="code" style="letter-spacing:0">${esc(dl.dir)}</span>` : `⏳ Downloading — ${esc(dl.step)} · ${dl.files} documents so far`}</p>` : ''}
+    </div></div>`
+  }
   $('#table').innerHTML = html
   const T = $('#table')
+  T.querySelectorAll('[data-bk]').forEach(btn => btn.onclick = async () => {
+    const k = btn.dataset.bk, ag = a
+    try {
+      if (k === 'run') { await api('/api/backup-run', { agency: ag.id }); tell('Backing up', 'It runs on their PC now; the newest time shows here when it is done.') }
+      else if (k === 'status') {
+        const r = await api('/api/backup-status', { agency: ag.id })
+        const p = r.progress || {}, j = r.job || {}
+        tell('Backup on their PC', p.running ? `Working: ${p.step || ''} ${p.files_todo ? `· ${p.files_done}/${p.files_todo} documents` : ''}`
+          : j.running ? `${j.kind} working…` : j.error ? `Last ${j.kind} failed: ${j.error}` : j.result ? `Last ${j.kind} done.` : `Idle · ${r.files_sent} of ${r.files_total} documents backed up.`)
+      }
+      else if (k === 'restore') {
+        if (!(await ask({ title: `Restore ${ag.name}?`, text: 'Their PC gets back every document from the newest backup and its database as it was then (the current one is kept as a copy). Adal Keep restarts on that PC.', ok: 'Restore', danger: true }))) return
+        await api('/api/backup-restore', { from: ag.id }); tell('Restoring', 'It runs on their PC now and restarts it when done.')
+      }
+      else if (k === 'restoreTo') {
+        const others = work.filter(x => x.id !== ag.id)
+        const pick = await ask({ title: `Put ${ag.name}'s backup on another PC`, text: 'For a new or replaced PC: install Adal Keep there first (it shows up here as an agency). Type its PC number:', ok: 'Restore there', danger: true, input: '' })
+        if (!pick) return
+        const to = others.find(x => String(x.pc_number) === String(pick).trim())
+        if (!to) return tell('Not found', `No agency PC with number ${pick}.`)
+        await api('/api/backup-restore', { from: ag.id, to: to.id }); tell('Restoring', `${ag.name}'s data goes onto PC ${to.pc_number} now; it restarts when done.`)
+      }
+      else if (k === 'download') {
+        downloads[ag.id] = await api('/api/backup-download', { agency: ag.id }); showTable()
+        const poll = setInterval(async () => {
+          downloads[ag.id] = await api(`/api/backup-download?agency=${ag.id}`, null, 'GET').catch(() => downloads[ag.id])
+          if (!downloads[ag.id]?.running) clearInterval(poll)
+          if (tab === 'work') showTable()
+        }, 2000)
+      }
+    } catch (err) { tell('Not done', err.message) }
+  })
   T.querySelectorAll('[data-row]').forEach(r => r.onclick = (e) => { if (e.target.closest('button')) return; workOpen = r.dataset.row; showTable(); renderList() })
   T.querySelectorAll('[data-open]').forEach(b => b.onclick = () => openAgency(b.dataset.open))
   T.querySelectorAll('[data-goto]').forEach(b => b.onclick = () => openAgency(workOpen, b.dataset.goto))

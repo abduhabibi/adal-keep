@@ -46,14 +46,21 @@ function writeState(s) {
   fs.writeFileSync(STATE, JSON.stringify(s, null, 1))
 }
 
+// Adal's own bot and storage channel (.env) serve every agency; an agency's
+// own bot / channel, when one was set before, still wins.
+const botToken = () => getSecret('telegram_bot_token') || process.env.TELEGRAM_BOT_TOKEN || ''
+const chatOf = (s) => s.chat_id || process.env.TELEGRAM_STORAGE_CHAT || ''
+
 export function getConfig() {
   const s = readState()
   return {
-    chat_id: s.chat_id || '',
+    chat_id: chatOf(s),
+    shared: !getSecret('telegram_bot_token') && !!process.env.TELEGRAM_BOT_TOKEN,
+    shared_ready: !!(process.env.TELEGRAM_BOT_TOKEN && (s.chat_id || process.env.TELEGRAM_STORAGE_CHAT)),
     window_start: s.window_start || '12:30',
     window_end: s.window_end || '13:30',
     enabled: s.enabled !== false,
-    has_token: !!getSecret('telegram_bot_token'),
+    has_token: !!botToken(),
     has_password: !!getSecret('backup_password'),
     last_run: s.last_run || null,
     last_ok: s.last_ok || null,
@@ -85,22 +92,27 @@ export function saveConfig({ bot_token, password, chat_id, window_start, window_
 
 // ── Telegram ─────────────────────────────────────────────────────────────────
 
-async function tg(token, method, body, timeoutMs = 60000) {
+async function tg(token, method, body, timeoutMs = 60000, tries = 0) {
   const r = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
     method: 'POST', body, signal: AbortSignal.timeout(timeoutMs),
     ...(body instanceof FormData ? {} : { headers: { 'content-type': 'application/json' } }),
   })
   const j = await r.json().catch(() => ({}))
+  // One channel serves many agencies: when Telegram says "too many", wait as it asks.
+  if (j.error_code === 429 && tries < 6) {
+    await new Promise(ok => setTimeout(ok, ((j.parameters?.retry_after || 5) + 1) * 1000))
+    return tg(token, method, body, timeoutMs, tries + 1)
+  }
   if (!j.ok) throw new Error(`Telegram: ${j.description || r.status}`)
   return j.result
 }
 
 /** Send a test message; returns the channel's title. */
 export async function testConnection() {
-  const token = getSecret('telegram_bot_token')
-  const { chat_id } = readState()
+  const token = botToken()
+  const chat_id = chatOf(readState())
   if (!token) throw new Error('Paste the bot token first.')
-  if (!chat_id) throw new Error('Press "Find my channel" first.')
+  if (!chat_id) throw new Error('The storage channel is not set yet — ask Adal.')
   const chat = await tg(token, 'getChat', JSON.stringify({ chat_id }))
   await tg(token, 'sendMessage', JSON.stringify({ chat_id, text: '✅ Adal Keep backup is connected. Locked backups will arrive here every day.' }))
   return { title: chat.title || chat.username || String(chat_id) }
@@ -108,7 +120,7 @@ export async function testConnection() {
 
 /** The channels/groups the bot has seen a post in (after it was made admin). */
 export async function findChats() {
-  const token = getSecret('telegram_bot_token')
+  const token = botToken()
   if (!token) throw new Error('Paste the bot token first.')
   const ups = await tg(token, 'getUpdates', JSON.stringify({ allowed_updates: ['channel_post', 'message', 'my_chat_member'] }))
   const seen = new Map()
@@ -226,16 +238,17 @@ async function sendSet(token, chat_id, password, buf, label) {
  */
 export async function runBackup(db, { force = false } = {}) {
   if (progress.running) return { busy: true }
-  const token = getSecret('telegram_bot_token'), password = getSecret('backup_password')
+  const token = botToken(), password = getSecret('backup_password')
   const s = readState()
-  if (!token || !password || !s.chat_id) throw new Error('Backup is not set up: bot token, channel and password are needed.')
+  const chat_id = chatOf(s)
+  if (!token || !password || !chat_id) throw new Error('Backup is not set up: the backup password is needed.')
   Object.assign(progress, { running: true, started_at: new Date().toISOString(), step: 'database', bytes_sent: 0, files_done: 0, files_todo: 0, error: null })
   s.last_run = new Date().toISOString(); writeState(s)
   const cfg = getConfig()
   try {
     s.sent ||= {}; s.sets ||= []
     // 1. The database, every run (the newest replaces the older ones in the index).
-    const dbIds = await sendSet(token, s.chat_id, password, await databaseSnapshot(db), `database-${today()}`)
+    const dbIds = await sendSet(token, chat_id, password, await databaseSnapshot(db), `database-${today()}`)
     s.sets = s.sets.filter(x => x.type !== 'db')
     s.sets.push({ type: 'db', date: new Date().toISOString(), parts: dbIds })
     writeState(s)
@@ -247,7 +260,7 @@ export async function runBackup(db, { force = false } = {}) {
     let group = [], size = 0
     const flush = async () => {
       if (!group.length) return
-      const ids = await sendSet(token, s.chat_id, password, pack(group), `documents-${today()}-${s.sets.length}`)
+      const ids = await sendSet(token, chat_id, password, pack(group), `documents-${today()}-${s.sets.length}`)
       s.sets.push({ type: 'files', date: new Date().toISOString(), parts: ids, files: group })
       for (const n of group) s.sent[n] = true
       progress.files_done += group.length
@@ -266,8 +279,10 @@ export async function runBackup(db, { force = false } = {}) {
     // 3. The index — what a restore needs to find every piece.
     progress.step = 'index'
     const index = Buffer.from(JSON.stringify({ adal_backup: 1, made: new Date().toISOString(), sets: s.sets }))
-    await sendPiece(token, s.chat_id, lock(zlib.gzipSync(index), password), 'adal-backup-index.enc',
-      `🗂 Adal Keep backup index · ${new Date().toLocaleString()} · keep the NEWEST one — it is what a restore needs`)
+    const indexId = await sendPiece(token, chat_id, lock(zlib.gzipSync(index), password), 'adal-backup-index.enc',
+      `🗂 Adal Keep backup index · ${(await db('companies').first().catch(() => null))?.name || 'agency'} · ${new Date().toLocaleString()} · keep the NEWEST one — it is what a restore needs`)
+    s.index_file_id = indexId
+    await rememberIndexOnline(db, indexId).catch(() => {})
 
     const left = listDocuments().filter(n => !s.sent[n]).length
     s.last_ok = new Date().toISOString(); s.last_day = today(); s.last_error = null
@@ -282,6 +297,35 @@ export async function runBackup(db, { force = false } = {}) {
     progress.finished_at = new Date().toISOString()
     fs.rmSync(TMP, { recursive: true, force: true })
   }
+}
+
+// The newest index's Telegram file id also waits in the agency's own
+// Supabase rows: a new PC of the agency restores without opening the channel.
+// (It is locked with the backup password; the id alone opens nothing.)
+const INDEX_KEY = '/_backup_index'
+async function rememberIndexOnline(db, fileId) {
+  const { cloudOn } = await import('./cloudSync.js')
+  if (!(await cloudOn(db))) return
+  const { cloudCall, cloudAgencyId } = await import('./chatCloud.js')
+  const agency = await cloudAgencyId(db)
+  await cloudCall(db, 'POST', '/rest/v1/keep_meta?on_conflict=agency_id,key',
+    [{ agency_id: agency, key: INDEX_KEY, data: { file_id: fileId, at: new Date().toISOString() }, updated_at: new Date().toISOString() }],
+    { headers: { Prefer: 'resolution=merge-duplicates,return=minimal' } })
+}
+/** The newest index, from this PC's notes or the agency's online rows. */
+export async function newestIndex(db) {
+  let id = readState().index_file_id
+  if (!id) {
+    const { cloudOn } = await import('./cloudSync.js')
+    if (await cloudOn(db)) {
+      const { cloudCall, cloudAgencyId } = await import('./chatCloud.js')
+      const agency = await cloudAgencyId(db)
+      const [row] = await cloudCall(db, 'GET', `/rest/v1/keep_meta?agency_id=eq.${agency}&key=eq.${encodeURIComponent(INDEX_KEY)}&select=data`).catch(() => [])
+      id = row?.data?.file_id
+    }
+  }
+  if (!id) throw new Error('No backup was found for this agency yet. Choose the "adal-backup-index.enc" file instead.')
+  return fetchPiece(botToken(), id)
 }
 
 let timer = null
@@ -311,7 +355,7 @@ export function startBackupSchedule(db) {
  * that already exist are left alone. The server must restart afterwards.
  */
 export async function restoreFrom(indexBuf, { bot_token, password }) {
-  const token = String(bot_token || getSecret('telegram_bot_token') || '').trim()
+  const token = String(bot_token || botToken() || '').trim()
   if (!token || !password) throw new Error('The bot token and the backup password are needed.')
   const index = JSON.parse(zlib.gunzipSync(unlock(indexBuf, password)).toString())
   if (!index.adal_backup) throw new Error('That is not an Adal Keep backup index.')

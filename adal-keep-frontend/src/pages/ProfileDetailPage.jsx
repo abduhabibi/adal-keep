@@ -169,8 +169,7 @@ export default function ProfileDetailPage() {
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* Left: client details */}
-        <section className="panel p-6 lg:col-span-1">
-          <h2 className="font-display text-lg font-bold text-slate-900 dark:text-white border-b border-slate-100 dark:border-slate-700/50 pb-3">Client details</h2>
+        <Fold id="details" title="Client details" className="panel p-4 sm:p-6 lg:col-span-1">
           <dl className="mt-4 grid grid-cols-1 gap-3">
             <Field label="Full name" value={profile.full_name} />
             <Field label="Order ID" value={profile.order_id} />
@@ -215,13 +214,12 @@ export default function ProfileDetailPage() {
             <Field label="Created" value={formatDate(profile.created_at)} />
             <Field label="Updated" value={formatDate(profile.updated_at)} />
           </dl>
-        </section>
+        </Fold>
 
         {/* Right: documents */}
-        <section className="panel p-6 lg:col-span-2 space-y-6">
-          <div>
-            <h2 className="font-display text-lg font-bold text-slate-900 dark:text-white mb-4 pb-3 border-b border-slate-100 dark:border-slate-700/50">Documents & Fields</h2>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <section className="panel p-4 sm:p-6 lg:col-span-2 space-y-6">
+          <Fold id="documents" title="Documents & Fields">
+            <div className="mt-4 grid grid-cols-2 gap-2 sm:gap-4 lg:grid-cols-3">
               {fields.map(field => (
                 <FieldCard
                   id={`field-${field.name.replace(/\s+/g, '-')}`}
@@ -233,7 +231,7 @@ export default function ProfileDetailPage() {
                 />
               ))}
             </div>
-          </div>
+          </Fold>
 
           {/* Generated CVs */}
           <div>
@@ -313,6 +311,23 @@ export default function ProfileDetailPage() {
         </Button>
       </section>
     </div>
+  )
+}
+
+/** A section that folds to its title; open or folded is remembered on this device. */
+function Fold({ id, title, className = '', children }) {
+  const key = `adal-fold-${id}`
+  const [open, setOpen] = useState(() => { try { return localStorage.getItem(key) !== '0' } catch { return true } })
+  const toggle = () => setOpen(o => { try { localStorage.setItem(key, o ? '0' : '1') } catch {} return !o })
+  return (
+    <section className={className}>
+      <button type="button" onClick={toggle} aria-expanded={open}
+        className="w-full flex items-center justify-between gap-2 text-left border-b border-slate-100 dark:border-slate-700/50 pb-3">
+        <h2 className="font-display text-lg font-bold text-slate-900 dark:text-white">{title}</h2>
+        <span className={`text-slate-400 text-sm transition-transform ${open ? '' : '-rotate-90'}`}>▼</span>
+      </button>
+      {open && children}
+    </section>
   )
 }
 

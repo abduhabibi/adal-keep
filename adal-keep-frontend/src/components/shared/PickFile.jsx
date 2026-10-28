@@ -1,4 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
+import { IN_PHONE_APP } from '../../lib/phoneApp'
+
+// The Camera · Gallery · Files choice is for phones; a PC opens its file window at once.
+export const ON_PHONE = IN_PHONE_APP || (typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches && window.innerWidth < 900)
 
 /**
  * Where a file comes from — the three choices everywhere a file is added:
@@ -44,7 +48,7 @@ export function usePickFile({ accept = 'image/*,application/pdf', multiple = fal
       {camera && <CameraShot guide={guide} onShot={(f) => { setCamera(false); take([f]) }} onClose={() => setCamera(false)} onFail={() => { setCamera(false); cameraRef.current?.click() }} />}
     </>
   )
-  return { open: () => setMenu(true), choose, element }
+  return { open: () => (ON_PHONE ? setMenu(true) : filesRef.current?.click()), choose, element }
 }
 
 /** The live camera (back camera on a phone, the webcam on a PC): take a picture. */

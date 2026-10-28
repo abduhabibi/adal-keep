@@ -1,3 +1,4 @@
+import './lib/phoneApp'
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'
@@ -43,6 +44,7 @@ async function phoneBoot() {
     await new Promise(() => {})       // the page is leaving
   }
   window.__ADAL_CLOUD = true
+  quietWhenHidden()
   const { startCloudDocuments, startLive } = await import('./cloud/adapter.js')
   startCloudDocuments()
   startLive().catch(() => {})
@@ -55,13 +57,35 @@ async function phoneBoot() {
   bar.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:9999;background:#0f766e;color:#fff;font:11px/1.2 system-ui,sans-serif;padding:4px 10px calc(4px + env(safe-area-inset-bottom));display:flex;gap:8px;align-items:center;justify-content:space-between'
   const btn = bar.querySelector('button')
   btn.style.cssText = 'background:transparent;color:#fff;border:0;font-size:16px;line-height:1;padding:0 4px'
-  btn.onclick = () => { if (confirm('Pair this phone with another agency (PC number + phone password)?')) { sessionStorage.removeItem('adal-cloud'); location.replace('/connect.html?pair=1') } }
+  btn.onclick = () => { if (confirm('Pair this phone with another agency (its PC number)?')) { sessionStorage.removeItem('adal-cloud'); location.replace('/connect.html?pair=1') } }
   window.addEventListener('adal-pc-online', (e) => {
     bar.querySelector('span').textContent = e.detail ? ON : OFF
     bar.style.background = e.detail ? '#4338ca' : '#0f766e'
   })
   document.body.appendChild(bar)
   document.body.style.paddingBottom = '26px'
+}
+
+// The phone does no work while the app is in the background: repeating
+// timers (lists, counts …) wait, and run once when it is opened again.
+// A timer marked fn.__always (the live link's heartbeat) keeps going.
+function quietWhenHidden() {
+  const real = window.setInterval.bind(window)
+  const missed = new Set(), runs = new Map()
+  window.setInterval = (fn, ms, ...args) => {
+    if (typeof fn !== 'function' || fn.__always || !(ms >= 1000)) return real(fn, ms, ...args)
+    const run = () => { if (document.hidden) missed.add(run); else fn(...args) }
+    const id = real(run, ms)
+    runs.set(id, run)
+    return id
+  }
+  const clear = window.clearInterval.bind(window)
+  window.clearInterval = (id) => { const r = runs.get(id); if (r) { missed.delete(r); runs.delete(id) } clear(id) }
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) return
+    const due = [...missed]; missed.clear()
+    due.forEach((f, i) => setTimeout(f, i * 30))   // spread out, not all at once
+  })
 }
 
 // Adal Keep Admin (vite --mode admin, served by adal-admin on :4101): one

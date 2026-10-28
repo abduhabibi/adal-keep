@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import api from '../services/api'
 import { useFileCapture } from '../context/FileCaptureContext'
-import { CameraShot } from './shared/PickFile'
+import { CameraShot, ON_PHONE } from './shared/PickFile'
 
 /**
  * Step 1 of a new profile: the passport. Drag it in (from the tray, the
@@ -128,7 +128,7 @@ export default function PassportFirst({ onRead, onSkip }) {
           onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; read(f) }} />
       </div>
 
-      {!busy && (
+      {!busy && ON_PHONE && (
         <div className="grid grid-cols-3 gap-2">
           {[['📷', 'Camera', openCamera], ['🖼️', 'Gallery', () => galleryRef.current?.click()], ['📁', 'Files', () => inputRef.current?.click()]].map(([icon, label, fn]) => (
             <button key={label} type="button" onClick={fn}

@@ -69,6 +69,8 @@ export default function ProfileAutomations({ profileId }) {
   const [workflows, setWorkflows] = useState([])
   const [queue, setQueue] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [aiOpen, setAiOpen] = useState(() => { try { return localStorage.getItem('adal-fold-ai') !== '0' } catch { return true } })
+  const foldAI = () => setAiOpen(o => { try { localStorage.setItem('adal-fold-ai', o ? '0' : '1') } catch {} return !o })
   const [open, setOpen] = useState(null)
   // The PC's tab, live (on the phone app it opens by itself).
   const [liveOpen, setLiveOpen] = useState(null)
@@ -325,11 +327,16 @@ export default function ProfileAutomations({ profileId }) {
   const max = queue?.max || 3
 
   return (
-    <section className="panel p-6">
-      <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-100 dark:border-slate-700/50">
+    <section className="panel p-4 sm:p-6">
+      <button type="button" onClick={foldAI} aria-expanded={aiOpen}
+        className={`w-full flex items-center justify-between gap-2 text-left pb-3 border-b border-slate-100 dark:border-slate-700/50 ${aiOpen ? 'mb-4' : ''}`}>
         <h2 className="font-display text-lg font-bold text-slate-900 dark:text-white">AI Actions</h2>
-        <span className="text-[10px] text-slate-400 uppercase tracking-wider">Browser automation</span>
-      </div>
+        <span className="flex items-center gap-2">
+          {running.length > 0 && <span className="text-[10px] font-semibold text-indigo-600">{running.length} working</span>}
+          <span className={`text-slate-400 text-sm transition-transform ${aiOpen ? '' : '-rotate-90'}`}>▼</span>
+        </span>
+      </button>
+      {aiOpen && <>
 
       {/* What is working right now, across all profiles */}
       <div className="mb-4 rounded-xl border border-slate-200 dark:border-slate-700 p-3">
@@ -461,7 +468,7 @@ export default function ProfileAutomations({ profileId }) {
           </div>
 
           {['running', 'paused'].includes(detail.status) && (
-            liveOpen === detail.id
+            (liveOpen === detail.id || IN_PHONE_APP || window.__ADAL_CLOUD)
               ? <LiveTab runId={detail.id} />
               : <button type="button" onClick={() => setLiveOpen(detail.id)}
                   className="w-full rounded-lg border-2 border-dashed border-indigo-300 dark:border-indigo-700 py-2 text-xs font-semibold text-indigo-700 dark:text-indigo-300">
@@ -483,6 +490,7 @@ export default function ProfileAutomations({ profileId }) {
           </div>
         </div>
       )}
+      </>}
     </section>
   )
 }

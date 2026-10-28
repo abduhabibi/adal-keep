@@ -491,8 +491,22 @@ export async function liveInput(page, b = {}) {
   } else if (b.kind === 'back') await page.goBack({ timeout: 20000 }).catch(() => {})
   else if (b.kind === 'forward') await page.goForward({ timeout: 20000 }).catch(() => {})
   else if (b.kind === 'reload') await page.reload({ waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {})
+  else if (['tap', 'tapAt', 'reveal', 'set', 'pick'].includes(b.kind)) await (await import('../services/pageMirror.js')).mirrorInput(page, b)
   else throw Object.assign(new Error('Unknown input'), { status: 400 })
 }
+
+// The tab as a light page for the phone (services/pageMirror.js).
+const mirrorShots = new Map()
+router.get('/automations/:id/mirror', async (req, res) => {
+  const page = await liveTab(req)
+  if (!page) return res.status(404).json({ error: 'This run has no open tab.' })
+  try {
+    const { mirrorOf } = await import('../services/pageMirror.js')
+    if (!mirrorShots.has(req.params.id)) mirrorShots.set(req.params.id, new Map())
+    if (mirrorShots.size > 20) mirrorShots.delete(mirrorShots.keys().next().value)
+    res.set('Cache-Control', 'no-store').json(await mirrorOf(page, mirrorShots.get(req.params.id)))
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
 
 router.post('/automations/:id/input', async (req, res) => {
   const page = await liveTab(req)

@@ -44,7 +44,7 @@ async function token() {
 
 export const getToken = () => token()
 
-async function gunzipJSON(b64) {
+export async function gunzipJSON(b64) {
   const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0))
   const text = await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).text()
   return JSON.parse(text)

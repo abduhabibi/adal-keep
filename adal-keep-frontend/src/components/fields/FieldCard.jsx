@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react'
-import { usePickFile } from '../shared/PickFile'
+import { usePickFile, ON_PHONE } from '../shared/PickFile'
 import { useNavigate } from 'react-router-dom'
 import { createPortal } from 'react-dom'
 import toast from 'react-hot-toast'
@@ -202,7 +202,7 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
   return (
     <div
       data-field-name={field.name}
-      className={`panel p-4 flex flex-col gap-3 relative bg-white dark:bg-slate-800 border rounded-xl shadow-sm transition-all duration-200 ${
+      className={`panel p-2.5 sm:p-4 flex flex-col gap-2 sm:gap-3 relative bg-white dark:bg-slate-800 border rounded-xl shadow-sm transition-all duration-200 ${
         isDragOver
           ? 'border-teal-500 ring-2 ring-teal-500/30 bg-teal-50/50 dark:bg-teal-900/10 scale-[1.02]'
           : 'border-slate-200 dark:border-slate-700'
@@ -213,15 +213,15 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
       onDrop={handleDrop}
     >
       {/* Header */}
-      <div className="flex items-start justify-between">
-        <h3 className="font-display text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-1">
+        <h3 className="font-display text-[13px] sm:text-sm font-bold leading-tight text-slate-800 dark:text-slate-100 flex items-center gap-2 min-w-0">
           {field.name}
           {(field.name === 'Self Video' || field.name === 'Photo') && (
             <span className="text-[10px] px-2 py-0.5 bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300 rounded-full font-medium">Multiple OK</span>
           )}
         </h3>
         
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1 sm:gap-2">
           {field.name === 'Appointment Slip' && field.files?.length > 0 && (
             <button
               type="button"
@@ -237,7 +237,7 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
             disabled={uploading}
             className="text-[10px] px-2 py-0.5 rounded-md bg-teal-50 text-teal-700 hover:bg-teal-100 dark:bg-teal-900/30 dark:text-teal-400 disabled:opacity-50"
             title="Add more files to this field"
-          >+ Add files</button>
+          >＋<span className="hidden sm:inline"> Add files</span></button>
           <input
             ref={multiInputRef}
             type="file"
@@ -249,7 +249,7 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
         </div>
 {field.files?.length > 0 && (
           <span className="chip bg-teal-50 dark:bg-teal-900/30 text-teal-700 dark:text-teal-400 ring-1 ring-teal-200 dark:ring-teal-800 text-[10px] px-2 py-0.5 rounded-full font-medium">
-            {field.files.length} file{field.files.length > 1 ? 's' : ''}
+            {field.files.length}<span className="hidden sm:inline"> file{field.files.length > 1 ? 's' : ''}</span>
           </span>
         )}
       </div>
@@ -362,7 +362,7 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
           <svg className={`h-8 w-8 transition-colors ${isDragOver ? 'text-teal-500' : 'text-slate-300 dark:text-slate-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
           <button type="button" onClick={pick.open} disabled={uploading}
             className="cursor-pointer text-xs font-semibold text-teal-700 dark:text-teal-400 hover:text-teal-800 dark:hover:text-teal-300 disabled:opacity-60">
-            {uploading ? 'Uploading...' : isDragOver ? 'Drop files here!' : '📷 Camera · 🖼️ Gallery · 📁 Files'}
+            {uploading ? 'Uploading...' : isDragOver ? 'Drop files here!' : ON_PHONE ? '📷 Camera · 🖼️ Gallery · 📁 Files' : 'Click to upload (or drop files here)'}
           </button>
           <input type="file" ref={fileInputRef} className="hidden" />
           <span className="text-[10px] text-slate-400 dark:text-slate-500">Max 10MB (Image or PDF)</span>

@@ -12,7 +12,10 @@
  *   PC → phone   { t: 'answer', id, code, type, head, data | bin | row }
  *   phone → PC   { t: 'watch', run }                         stream that run's tab (10 s, renewed)
  *   PC → phones  { t: 'frame', run, img, w, h, url, title }  the tab, when it changed
+ *   phone → PC   { t: 'watch', run, view: 'mirror' }          …or as a light page (pageMirror.js)
+ *   PC → phones  { t: 'mirror', run, gz }                    that page, gzipped JSON, when it changed
  *   phone → PC   { t: 'input', run, kind, … }                tap / type / key / scroll / nav / back …
+ *                                                            and on the light page: tap / tapAt / set / pick / reveal (id)
  * Big answers (over ~180 KB) go in a keep_calls row instead; the message names it.
  */
 import crypto from 'crypto'
@@ -96,14 +99,39 @@ async function frameOf(db, run) {
   return { img: shot.data, w: vw, h: vh, url: page.url(), title: await page.title().catch(() => '') }
 }
 
-function startStream(db, ch, run) {
+// The tab as a light page (services/pageMirror.js), sent when it changed.
+async function mirrorStep(db, ch, run, w) {
+  const { runTab } = await import('../routes/automations.js')
+  const page = await runTab(db, run)
+  if (!page) { ch.send({ t: 'mirror', run, gone: true }); return 2000 }
+  const { mirrorOf } = await import('./pageMirror.js')
+  const m = await mirrorOf(page, w.shots ||= new Map(), w.force)
+  const json = JSON.stringify(m)
+  const hash = crypto.createHash('sha1').update(json).digest('hex')
+  if (hash !== w.lastMirror || w.force || Date.now() - (w.mirrorAt || 0) > 5000) {
+    w.lastMirror = hash; w.mirrorAt = Date.now()
+    const gz = zlib.gzipSync(json, { level: 6 }).toString('base64')
+    if (gz.length < MAX_MSG) { ch.send({ t: 'mirror', run, gz }); liveStatus.frames++ }
+  }
+  w.force = false
+  return 350
+}
+
+function startStream(db, ch, run, view) {
   const w = watching.get(run) || {}
   w.until = Date.now() + 12000
+  if (view) w.view = view
   watching.set(run, w)
   if (w.loop) return
   w.loop = (async () => {
     let lastSent = 0
     while (Date.now() < w.until) {
+      if (w.view === 'mirror') {
+        let wait = 1000
+        try { wait = await mirrorStep(db, ch, run, w) } catch {}
+        for (let i = 0; i < wait / 50 && !w.force; i++) await sleep(50)
+        continue
+      }
       try {
         const f = await frameOf(db, run)
         if (f.gone) { ch.send({ t: 'frame', run, gone: true }); await sleep(2000); continue }
@@ -121,7 +149,7 @@ function startStream(db, ch, run) {
 
 // ------------------------------------------------------------ messages
 async function onMessage(db, agency, ch, m) {
-  if (m.t === 'pc' || m.t === 'answer' || m.t === 'frame') return
+  if (m.t === 'pc' || m.t === 'answer' || m.t === 'frame' || m.t === 'mirror' || m.t === 'inputError') return
   const phone = await phoneOf(db, agency, m.jwt)
   if (!phone) return
   relayStatus.lastCall = Date.now()   // a phone is busy: its uploads are filed at once
@@ -143,11 +171,13 @@ async function onMessage(db, agency, ch, m) {
     }, { headers: { Prefer: 'return=representation' } })
     ch.send({ t: 'answer', id: m.id, to: phone.user_id, row: row.id })
   } else if (m.t === 'watch') {
-    startStream(db, ch, Number(m.run))
+    startStream(db, ch, Number(m.run), m.view === 'mirror' ? 'mirror' : 'picture')
   } else if (m.t === 'input') {
     const { runTab, liveInput } = await import('../routes/automations.js')
     const page = await runTab(db, Number(m.run))
-    if (page) await liveInput(page, m).catch(() => {})
+    let error = null
+    if (page) await liveInput(page, m).catch((e) => { error = e.message })
+    if (error && m.ack) ch.send({ t: 'inputError', run: Number(m.run), to: phone.user_id, error })
     const w = watching.get(Number(m.run)); if (w) w.force = true
     startStream(db, ch, Number(m.run))
   }

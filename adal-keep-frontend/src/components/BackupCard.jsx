@@ -44,7 +44,13 @@ export default function BackupCard() {
         so a stolen or broken PC loses nothing. Telegram only sees pieces it cannot open.
       </p>
 
+      {c.shared && (
+        <p className="mb-4 rounded-lg bg-teal-50 dark:bg-teal-900/20 text-teal-800 dark:text-teal-300 px-3 py-2 text-sm" translate="no">
+          {c.shared_ready ? '✓' : '⏳'} Backups go to Adal's private storage channel — nothing to set up. They are locked with <b>your</b> backup password: nobody else, not even Adal, can open them.
+        </p>
+      )}
       <ol className="space-y-4 text-sm" translate="no">
+        {!c.shared && <>
         <li>
           <p className="font-semibold">1. Make a bot {c.has_token && <span className="text-teal-600">✓</span>}</p>
           <p className="text-slate-500 mb-1">In Telegram open <b>@BotFather</b> → send <code>/newbot</code> → give it a name → copy the token it gives you and paste it here.</p>
@@ -73,8 +79,9 @@ export default function BackupCard() {
             </div>
           )}
         </li>
+        </>}
         <li>
-          <p className="font-semibold">3. Choose the backup password {c.has_password && <span className="text-teal-600">✓</span>}</p>
+          <p className="font-semibold">{c.shared ? 1 : 3}. Choose the backup password {c.has_password && <span className="text-teal-600">✓</span>}</p>
           <p className="text-slate-500 mb-1">
             <b className="text-red-600">Write it on paper and keep it outside the office.</b> Without it nobody — not even Adal — can open the backup.
           </p>
@@ -86,7 +93,7 @@ export default function BackupCard() {
           {c.has_password && <p className="text-xs text-amber-700 mt-1">Changing it starts a fresh full backup (older pieces stay locked with the old password).</p>}
         </li>
         <li>
-          <p className="font-semibold">4. When</p>
+          <p className="font-semibold">{c.shared ? 2 : 4}. When</p>
           <div className="flex flex-wrap items-center gap-2">
             <span>Every day between</span>
             <input type="time" className={`${field} w-32`} defaultValue={c.window_start} onBlur={e => e.target.value !== c.window_start && save({ window_start: e.target.value })} />
@@ -120,13 +127,13 @@ export default function BackupCard() {
         <button type="button" onClick={() => setRestoreOpen(o => !o)} className="text-sm font-semibold text-teal-700 dark:text-teal-300 hover:underline">
           {restoreOpen ? '▾' : '▸'} Restore from the backup (new or repaired PC)
         </button>
-        {restoreOpen && <Restore />}
+        {restoreOpen && <Restore shared={c.shared} />}
       </div>
     </Card>
   )
 }
 
-function Restore() {
+function Restore({ shared }) {
   const [file, setFile] = useState(null)
   const [token, setToken] = useState('')
   const [pw, setPw] = useState('')
@@ -135,16 +142,22 @@ function Restore() {
   return (
     <div className="mt-3 space-y-2 text-sm">
       <p className="text-slate-500">
-        In the Telegram channel, download the <b>newest</b> “adal-backup-index.enc”. Choose it here with the bot token and the backup password.
-        The database on this PC is kept as a copy; documents already here are not touched. Adal Keep restarts at the end.
+        {shared
+          ? <>Type the backup password: the newest backup of this agency is found by itself.</>
+          : <>In the Telegram channel, download the <b>newest</b> “adal-backup-index.enc”. Choose it here with the bot token and the backup password.</>}
+        {' '}The database on this PC is kept as a copy; documents already here are not touched. Adal Keep restarts at the end.
       </p>
-      <input type="file" accept=".enc" onChange={e => setFile(e.target.files?.[0] || null)} />
-      <input className={field} type="password" value={token} onChange={e => setToken(e.target.value)} placeholder="Bot token (empty = the one saved on this PC)" autoComplete="off" />
+      {shared
+        ? <details className="text-xs text-slate-500"><summary className="cursor-pointer">An older backup file instead</summary><input type="file" accept=".enc" className="mt-1" onChange={e => setFile(e.target.files?.[0] || null)} /></details>
+        : <>
+            <input type="file" accept=".enc" onChange={e => setFile(e.target.files?.[0] || null)} />
+            <input className={field} type="password" value={token} onChange={e => setToken(e.target.value)} placeholder="Bot token (empty = the one saved on this PC)" autoComplete="off" />
+          </>}
       <input className={field} type="password" value={pw} onChange={e => setPw(e.target.value)} placeholder="Backup password" autoComplete="off" />
-      <Button size="sm" disabled={!file || !pw || busy} onClick={async () => {
+      <Button size="sm" disabled={(!file && !shared) || !pw || busy} onClick={async () => {
         setBusy(true)
         try {
-          const fd = new FormData(); fd.append('index', file); fd.append('bot_token', token); fd.append('password', pw)
+          const fd = new FormData(); if (file) fd.append('index', file); fd.append('bot_token', token); fd.append('password', pw)
           const r = (await api.post('/backup/restore', fd, { timeout: 0 })).data
           setDone(r)
         } catch (e) { toast.error(err(e), { duration: 9000 }) }

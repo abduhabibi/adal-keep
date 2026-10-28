@@ -4,7 +4,7 @@
  */
 import express from 'express'
 import multer from 'multer'
-import { getConfig, saveConfig, testConnection, findChats, runBackup, progress, restoreFrom } from '../services/telegramBackup.js'
+import { getConfig, saveConfig, testConnection, findChats, runBackup, progress, restoreFrom, newestIndex } from '../services/telegramBackup.js'
 import { onThisPC } from './trash.js'
 
 const router = express.Router()
@@ -23,8 +23,8 @@ router.post('/backup/run', here, (req, res) => {
 })
 router.post('/backup/restore', here, upload.single('index'), async (req, res) => {
   try {
-    if (!req.file) throw new Error('Choose the newest "adal-backup-index.enc" from the Telegram channel.')
-    const r = await restoreFrom(req.file.buffer, { bot_token: req.body.bot_token, password: req.body.password })
+    const indexBuf = req.file ? req.file.buffer : await newestIndex(req.app.locals.db)
+    const r = await restoreFrom(indexBuf, { bot_token: req.body.bot_token, password: req.body.password })
     res.json({ ...r, restart: true })
     if (r.database && process.platform === 'win32') setTimeout(() => process.exit(0), 1000) // the launcher starts it again
   } catch (e) { fail(res, e) }

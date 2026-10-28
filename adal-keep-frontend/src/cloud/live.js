@@ -22,7 +22,8 @@ export function connectLive({ url, anon, live, token }) {
     state.ws = ws
     ws.onopen = () => {
       push(topic, 'phx_join', { config: { broadcast: { self: false }, presence: { key: '' }, private: false }, access_token: anon })
-      state.beat = setInterval(() => push('phoenix', 'heartbeat', {}), 25000)
+      const beat = () => push('phoenix', 'heartbeat', {}); beat.__always = true
+      state.beat = setInterval(beat, 25000)
     }
     ws.onmessage = (e) => {
       let m; try { m = JSON.parse(e.data) } catch { return }

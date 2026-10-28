@@ -62,7 +62,13 @@ export default function ProfilesPage() {
   const selectedOnly = searchParams.get('chosen') === '1'
   const isChosen = (p) => !!p.chosen_at && !/CANCEL|REJECT/i.test(p.musaned_stage || '')
   const chosenCount = useMemo(() => profiles.filter(isChosen).length, [profiles])
-  const rows = selectedOnly ? allRows.filter(isChosen) : allRows
+  const filtered = selectedOnly ? allRows.filter(isChosen) : allRows
+  // 100 a page: quick to draw on any phone.
+  const PAGE = 100
+  const [page, setPage] = useState(1)
+  const pages = Math.max(1, Math.ceil(filtered.length / PAGE))
+  useEffect(() => { setPage(1) }, [filtered.length, step, selectedOnly])
+  const rows = filtered.slice((Math.min(page, pages) - 1) * PAGE, Math.min(page, pages) * PAGE)
 
   // 🔎 The whole Musaned Employment Requests list: who is newly chosen.
   const [scanning, setScanning] = useState(false)
@@ -198,7 +204,7 @@ export default function ProfilesPage() {
           ⚙ Filters{activeCount ? ` · ${activeCount}` : ''} {showFilters ? '▴' : '▾'}
         </button>
 
-        {showFilters && <div className="sm:col-span-4 border-t border-slate-100 dark:border-slate-700 pt-3">{filterBar}</div>}
+        {showFilters && <div className="col-span-2 sm:col-span-4 border-t border-slate-100 dark:border-slate-700 pt-3">{filterBar}</div>}
 
         <div className="sm:col-span-4 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
           <span>
@@ -230,7 +236,9 @@ export default function ProfilesPage() {
           }
         />
       ) : (
-        <div key={step || 'all'} className="grid grid-cols-1 gap-2 sm:gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <>
+        <Pager page={Math.min(page, pages)} pages={pages} total={filtered.length} per={PAGE} onPage={setPage} />
+        <div key={step || 'all'} className="grid grid-cols-2 gap-2 sm:gap-3 xl:grid-cols-3">
           {rows.map((p, i) => (
             <article
               key={p.id}
@@ -240,16 +248,17 @@ export default function ProfilesPage() {
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <h3 className="truncate font-display text-sm sm:text-lg font-bold text-slate-900">
-                    {p.full_name}
+                  <h3 className="truncate font-display text-sm sm:text-lg font-bold text-slate-900" title={p.full_name}>
+                    <span className="sm:hidden">{String(p.full_name || '').trim().split(/\s+/)[0]}</span>
+                    <span className="hidden sm:inline">{p.full_name}</span>
                   </h3>
-                  <p className="mt-0.5 truncate text-xs sm:text-sm text-slate-500">
-                    {p.phone_number || 'ስልክ የለም'}
-                    {/* Phones: the passport on the same line — the card stays one short row. */}
-                    <span className="sm:hidden">{p.passport_number ? ` · ${p.passport_number}` : ''}{p.broker_name ? ` · ${p.broker_name}` : ''}</span>
+                  <p className="mt-0.5 truncate text-[11px] sm:text-sm text-slate-500">
+                    <span className="hidden sm:inline">{p.phone_number || 'ስልክ የለም'}</span>
+                    {/* Phones: two short cards a row — first name and passport. */}
+                    <span className="sm:hidden">{p.passport_number || p.phone_number || '—'}</span>
                   </p>
                 </div>
-                <StatusBadge status={p.status} />
+                <span className="hidden sm:block"><StatusBadge status={p.status} /></span>
               </div>
 
               <dl className="hidden sm:block mt-4 space-y-1.5 text-sm text-slate-600">
@@ -296,6 +305,31 @@ export default function ProfilesPage() {
             </article>
           ))}
         </div>
+        <Pager page={Math.min(page, pages)} pages={pages} total={filtered.length} per={PAGE} onPage={(n) => { setPage(n); window.scrollTo({ top: 0, behavior: 'smooth' }) }} bottom />
+        </>
+      )}
+    </div>
+  )
+}
+/** Pages of 100: « 1 | 2 | … | n » — folds to "Page 2 of 5" with « when not needed. */
+function Pager({ page, pages, total, per, onPage, bottom = false }) {
+  const [open, setOpen] = useState(true)
+  if (pages <= 1) return null
+  const from = (page - 1) * per + 1, to = Math.min(total, page * per)
+  return (
+    <div className={`flex items-center gap-1.5 text-xs ${bottom ? 'mt-4 justify-center' : 'mb-3'} col-span-full`}>
+      <button type="button" onClick={() => setOpen(o => !o)} title={open ? 'Fold the pages' : 'Show the pages'}
+        className="shrink-0 rounded-md border border-slate-200 dark:border-slate-700 px-1.5 py-1 font-bold text-slate-500">{open ? '«' : '»'}</button>
+      {open ? (
+        <div className="flex flex-wrap items-center gap-1 min-w-0">
+          {Array.from({ length: pages }, (_, k) => k + 1).map(n => (
+            <button key={n} type="button" onClick={() => onPage(n)}
+              className={`min-w-[28px] rounded-md px-2 py-1 font-semibold ${n === page ? 'bg-teal-600 text-white' : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'}`}>{n}</button>
+          ))}
+          <span className="ml-1 text-slate-400">{from}–{to} of {total}</span>
+        </div>
+      ) : (
+        <span className="text-slate-500">Page {page} of {pages} · {from}–{to} of {total}</span>
       )}
     </div>
   )

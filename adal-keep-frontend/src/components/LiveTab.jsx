@@ -16,7 +16,7 @@ import { onBack, IN_PHONE_APP } from '../lib/phoneApp'
 const VIEW_KEY = 'adal-live-view'
 const PHONE = IN_PHONE_APP || (typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches)
 
-export default function LiveTab({ runId }) {
+export default function LiveTab({ runId, fill = false }) {
   const [view, setView] = useState(() => { try { return localStorage.getItem(VIEW_KEY) || (PHONE ? 'mirror' : 'picture') } catch { return 'picture' } })
   const [src, setSrc] = useState(null)
   const [page, setPage] = useState(null)        // the light page
@@ -170,7 +170,9 @@ export default function LiveTab({ runId }) {
       className={`flex-1 rounded-md py-1 text-xs font-semibold ${view === v ? 'bg-white dark:bg-slate-700 shadow text-indigo-700 dark:text-indigo-300' : 'text-slate-500'}`}>{label}</button>
   )
   return (
-    <div className={full
+    <div className={fill
+      ? 'h-full flex flex-col gap-1.5'
+      : full
       ? 'fixed inset-0 z-[90] bg-white dark:bg-slate-950 p-2 flex flex-col gap-2'
       : 'rounded-xl border-2 border-indigo-300 dark:border-indigo-700 bg-white dark:bg-slate-950 p-2 space-y-2'}>
       <div className="flex items-center gap-1.5">
@@ -182,7 +184,7 @@ export default function LiveTab({ runId }) {
             onChange={(e) => setAddress(e.target.value)} inputMode="url" autoCapitalize="off" autoCorrect="off" spellCheck={false}
             className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 px-2.5 py-1.5 text-xs font-mono truncate" />
         </form>
-        <button type="button" className={btn} onClick={() => setFull(f => !f)} title={full ? 'Smaller' : 'Full screen'}>{full ? '✕' : '⛶'}</button>
+        {!fill && <button type="button" className={btn} onClick={() => setFull(f => !f)} title={full ? 'Smaller' : 'Full screen'}>{full ? '✕' : '⛶'}</button>}
       </div>
       <div className="flex items-center gap-2">
         <div className="flex flex-1 rounded-lg bg-slate-100 dark:bg-slate-900 p-0.5">
@@ -191,20 +193,18 @@ export default function LiveTab({ runId }) {
         </div>
         <span className="shrink-0 text-[10px] text-slate-500">{busy ? '⏳' : mode === 'live' ? `⚡ ${fps}/s` : mode === 'pictures' ? '🔄' : '…'}</span>
       </div>
-      {meta.title && <p className="text-[10px] text-slate-500 truncate">{meta.title}</p>}
+      {meta.title && !fill && <p className="text-[10px] text-slate-500 truncate">{meta.title}</p>}
       {err && <p className="text-xs rounded-lg bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-300 px-2 py-1.5">{err}</p>}
 
       {view === 'mirror' && (
         page
-          ? <div className={full ? 'flex-1 min-h-0 overflow-y-auto' : 'max-h-[70vh] overflow-y-auto'}>
-              <Mirror page={page} send={send} />
-            </div>
+          ? <Mirror page={page} send={send} className={fill || full ? 'flex-1 min-h-0 overflow-y-auto overscroll-contain' : 'max-h-[70vh] overflow-y-auto'} />
           : !err && <div className="h-40 rounded-lg bg-slate-100 dark:bg-slate-900 animate-pulse" />
       )}
 
       {view === 'picture' && <>
         {src && (
-          <div className={`${full ? 'flex-1 min-h-0' : 'max-h-[70vh]'} overflow-auto rounded-lg border border-slate-200 dark:border-slate-800`}
+          <div className={`${full || fill ? 'flex-1 min-h-0' : 'max-h-[70vh]'} overflow-auto rounded-lg border border-slate-200 dark:border-slate-800`}
             style={{ touchAction: zoom > 1 ? 'pan-x pan-y' : 'none' }}>
             <img src={src} alt="The run's tab on the PC" draggable={false}
               onMouseDown={down} onMouseMove={(e) => e.buttons && move(e)} onMouseUp={up}
@@ -237,12 +237,58 @@ export default function LiveTab({ runId }) {
 }
 
 // ------------------------------------------------------------ the light page
-function Mirror({ page, send }) {
+function Mirror({ page, send, className }) {
   const blocks = page.blocks || []
+  const box = useRef(null)
+  const firstUrl = useRef(null)
+  // What the page needs from a person: its error words, captchas, required
+  // fields still empty, the field it is waiting in.
+  const needs = []
+  blocks.forEach((b, i) => {
+    if (b.k === 't' && b.err) needs.push([i, '⚠️ ' + b.text.slice(0, 60)])
+    else if (b.k === 'shot' && (b.frame || /captcha|robot|verif|code/i.test(b.label || ''))) needs.push([i, b.frame ? '🧩 ' + (b.label || 'Check box') : '🔤 ' + (b.label || 'Picture code')])
+    else if ((b.k === 'input' || b.k === 'textarea' || b.k === 'select') && b.req && !b.value && !b.dis) needs.push([i, '✏️ ' + (b.label || 'Empty field')])
+    else if (b.id && b.id === page.focus && b.k !== 'button' && b.k !== 'link') needs.push([i, '👉 ' + (b.label || 'Here')])
+  })
+  const jump = (i) => {
+    const el = box.current?.querySelector(`[data-i="${i}"]`)
+    el?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    el?.classList.add('ring-2', 'ring-amber-400'); setTimeout(() => el?.classList.remove('ring-2', 'ring-amber-400'), 1500)
+    const b = blocks[i]; if (b?.k === 'shot' && b.off) send({ kind: 'reveal', id: b.id })
+  }
+  // A new page: start at what it needs (or the top).
+  useEffect(() => {
+    if (firstUrl.current === page.url) return
+    firstUrl.current = page.url
+    if (needs.length) setTimeout(() => jump(needs[0][0]), 100)
+    else box.current?.scrollTo({ top: 0 })
+  }, [page.url])  // eslint-disable-line react-hooks/exhaustive-deps
+
   if (!blocks.length) return <p className="text-xs text-slate-500 p-4 text-center">The page is empty or still loading.</p>
+  // Buttons side by side wrap into one row, like the website's own bar.
+  const rows = []
+  blocks.forEach((b, i) => {
+    const small = (b.k === 'button' && !b.opt && b.text.length <= 24) || b.k === 'link' && b.text.length <= 24
+    const last = rows[rows.length - 1]
+    if (small && last?.row) last.items.push([b, i])
+    else rows.push(small ? { row: true, items: [[b, i]] } : { items: [[b, i]] })
+  })
   return (
-    <div className="space-y-1.5 text-sm px-0.5 pb-2">
-      {blocks.map((b, i) => <Block key={b.id ? `e${b.id}` : `t${i}`} b={b} send={send} focus={page.focus === b.id} />)}
+    <div ref={box} className={className}>
+      {needs.length > 0 && (
+        <div className="sticky top-0 z-10 -mx-0.5 mb-1.5 flex gap-1.5 overflow-x-auto bg-amber-50/95 dark:bg-amber-950/90 backdrop-blur px-1.5 py-1.5 rounded-lg">
+          <span className="shrink-0 self-center text-[10px] font-bold uppercase text-amber-800 dark:text-amber-300">Needs you</span>
+          {needs.slice(0, 12).map(([i, t]) => (
+            <button key={i} type="button" onClick={() => jump(i)}
+              className="shrink-0 max-w-[60vw] truncate rounded-full border border-amber-300 bg-white dark:bg-slate-900 px-2.5 py-1 text-[11px] font-semibold text-amber-900 dark:text-amber-200">{t}</button>
+          ))}
+        </div>
+      )}
+      <div className="space-y-1.5 text-sm px-0.5 pb-16">
+        {rows.map((r, n) => r.row
+          ? <div key={n} className="flex flex-wrap gap-1.5">{r.items.map(([b, i]) => <div key={b.id || i} data-i={i} className="rounded-lg"><Block b={b} send={send} focus={false} /></div>)}</div>
+          : r.items.map(([b, i]) => <div key={b.id ? `e${b.id}` : `t${i}`} data-i={i} className="rounded-lg"><Block b={b} send={send} focus={page.focus === b.id} /></div>))}
+      </div>
     </div>
   )
 }

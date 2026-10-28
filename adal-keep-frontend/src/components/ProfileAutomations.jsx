@@ -1,6 +1,8 @@
 import LiveTab from './LiveTab'
-import { IN_PHONE_APP } from '../lib/phoneApp'
+import { IN_PHONE_APP, onBack } from '../lib/phoneApp'
 import { useEffect, useState, useRef } from 'react'
+import { createPortal } from 'react-dom'
+import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import api from '../services/api'
 import LmisAccountPicker from './LmisAccountPicker'
@@ -42,6 +44,11 @@ const NO_CONTINUE = new Set(['awaiting-visa-save', 'awaiting-insurance-save'])
 
 const isRetry = (run) => run?.status === 'pending' && String(run.pause_reason || '').startsWith('Retry ')
 
+// On a phone a working task opens as its own screen: the website, fitted to
+// the phone, with what it waits for on top.
+const PHONE_VIEW = () => IN_PHONE_APP || !!window.__ADAL_CLOUD ||
+  (typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches && innerWidth < 900)
+
 function describeRun(run) {
   if (!run) return ''
   const n = `Run #${run.id}`
@@ -72,6 +79,10 @@ export default function ProfileAutomations({ profileId }) {
   const [aiOpen, setAiOpen] = useState(() => { try { return localStorage.getItem('adal-fold-ai') !== '0' } catch { return true } })
   const foldAI = () => setAiOpen(o => { try { localStorage.setItem('adal-fold-ai', o ? '0' : '1') } catch {} return !o })
   const [open, setOpen] = useState(null)
+  const [screen, setScreen] = useState(false)     // the phone's full-screen task view
+  const navigate = useNavigate()
+  const openRun = (id) => { setOpen(id); if (PHONE_VIEW()) setScreen(true) }
+  useEffect(() => screen ? onBack(() => setScreen(false)) : undefined, [screen])
   // The PC's tab, live (on the phone app it opens by itself).
   const [liveOpen, setLiveOpen] = useState(null)
   useEffect(() => { if (open && IN_PHONE_APP) setLiveOpen(open) }, [open])
@@ -112,7 +123,7 @@ export default function ProfileAutomations({ profileId }) {
     const waiting = workflows.map(w => w.latest).filter(Boolean)
       .find(r => r.status === 'paused') || workflows.map(w => w.latest).filter(Boolean).find(r => r.status === 'running')
     const pick = runId || (q.has('attention') ? waiting?.id : null)
-    if (pick) { attended.current = true; setOpen(pick) }
+    if (pick) { attended.current = true; openRun(pick) }
   }, [workflows])
 
   // The run's panel scrolls into view when it opens (on a phone it is far below the cards).
@@ -178,7 +189,7 @@ export default function ProfileAutomations({ profileId }) {
         `/profiles/${profileId}/automations/${workflowId}/start`,
         { account_id: accountFor(workflowId) }
       )
-      setOpen(r.data.runId)
+      openRun(r.data.runId)
       announce(r.data, `${name}: ${r.data.message || 'started'}`, t)
       load({ quiet: true })
     } catch (e) {
@@ -236,7 +247,8 @@ export default function ProfileAutomations({ profileId }) {
                 // its panel; a finished one too, with "Run again" (a second
                 // police/Musaned run should be deliberate). Anything else starts.
                 if (isActive) {
-                  setOpen(latest.id)
+                  openRun(latest.id)
+                  if (PHONE_VIEW()) return
                   return toast(describeRun(latest), { icon: isQueued ? '⏳' : 'ℹ️', duration: 5000 })
                 }
                 // Checking again is normal: a done check simply runs again.
@@ -354,9 +366,8 @@ export default function ProfileAutomations({ profileId }) {
                 <button
                   key={r.runId}
                   type="button"
-                  disabled={!mine}
-                  onClick={() => mine && setOpen(r.runId)}
-                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-semibold border-blue-300 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 ${mine ? 'hover:brightness-95 cursor-pointer' : 'cursor-default'}`}
+                  onClick={() => mine ? openRun(r.runId) : navigate(`/profiles/${r.profileId}?run=${r.runId}`)}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-semibold border-blue-300 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 hover:brightness-95 cursor-pointer"
                 >
                   <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
                   #{r.runId} · {wfName(r.workflowId)}
@@ -468,7 +479,10 @@ export default function ProfileAutomations({ profileId }) {
           </div>
 
           {['running', 'paused'].includes(detail.status) && (
-            (liveOpen === detail.id || IN_PHONE_APP || window.__ADAL_CLOUD)
+            PHONE_VIEW()
+              ? <button type="button" onClick={() => setScreen(true)}
+                  className="w-full rounded-xl bg-indigo-600 text-white py-3 text-sm font-semibold">🌐 Open the website of this task</button>
+              : liveOpen === detail.id
               ? <LiveTab runId={detail.id} />
               : <button type="button" onClick={() => setLiveOpen(detail.id)}
                   className="w-full rounded-lg border-2 border-dashed border-indigo-300 dark:border-indigo-700 py-2 text-xs font-semibold text-indigo-700 dark:text-indigo-300">
@@ -491,6 +505,42 @@ export default function ProfileAutomations({ profileId }) {
         </div>
       )}
       </>}
+      {screen && open && detail && detail.id === open && createPortal(
+        <div className="fixed inset-0 z-[95] flex flex-col bg-white dark:bg-slate-950" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
+          <div className="shrink-0 border-b border-slate-200 dark:border-slate-800 px-2 pt-2 pb-1.5 space-y-1.5">
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={() => setScreen(false)} className="shrink-0 rounded-lg px-2.5 py-1.5 text-base font-bold active:bg-slate-100 dark:active:bg-slate-800" aria-label="Back">‹</button>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-bold truncate">{wfName(detail.workflow_id)} <span className="font-normal text-slate-400">#{detail.id}</span></p>
+                <p className={`text-[11px] leading-tight ${detail.status === 'paused' ? 'text-amber-700 dark:text-amber-400 font-semibold' : 'text-slate-500'}`}>
+                  {detail.status === 'paused' ? '🖐 ' : detail.status === 'running' ? '⚙️ ' : ''}{describeRun(detail)}
+                </p>
+              </div>
+            </div>
+            {(detail.status === 'paused' || ['running', 'pending'].includes(detail.status)) && (
+              <div className="flex gap-1.5 overflow-x-auto">
+                {detail.status === 'paused' && !NO_CONTINUE.has(detail.pause_reason) && (
+                  <button onClick={resume} className="shrink-0 px-3 py-1.5 rounded-lg bg-teal-600 text-white text-xs font-semibold">{CONTINUE_LABEL[detail.pause_reason] || '▶ Continue'}</button>
+                )}
+                {detail.status === 'paused' && COMPLETE_LABEL[detail.pause_reason] && (
+                  <button onClick={() => { complete(); setScreen(false) }} className="shrink-0 px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-semibold">{COMPLETE_LABEL[detail.pause_reason]}</button>
+                )}
+                <button onClick={cancel} className="shrink-0 px-3 py-1.5 rounded-lg border border-red-300 text-red-600 text-xs font-semibold">{cancelArmed ? 'Tap again to cancel' : 'Cancel'}</button>
+              </div>
+            )}
+          </div>
+          <div className="flex-1 min-h-0 p-1.5">
+            {['running', 'paused'].includes(detail.status)
+              ? <LiveTab runId={detail.id} fill />
+              : <div className="h-full grid place-items-center text-center text-sm text-slate-500 p-6">
+                  <div className="space-y-3">
+                    <p>{detail.status === 'pending' ? '⏳ Waiting in line — it starts by itself, and its website shows here.' : detail.status === 'done' ? '✅ Done.' : describeRun(detail)}</p>
+                    <button onClick={() => setScreen(false)} className="px-4 py-2 rounded-lg border border-slate-300 text-sm">Close</button>
+                  </div>
+                </div>}
+          </div>
+        </div>,
+        document.body)}
     </section>
   )
 }

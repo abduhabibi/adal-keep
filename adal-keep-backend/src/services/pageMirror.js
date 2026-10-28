@@ -127,30 +127,48 @@ function readPage() {
   return { blocks, focus: focus || null, vw, vh, sx: scrollX, sy: scrollY, height: Math.round(document.documentElement.scrollHeight) }
 }
 
-/** The tab, read for the phone. Pictures within sight come as small JPEG cut-outs. */
+/**
+ * The tab, read for the phone. Pictures within sight come as small JPEG
+ * cut-outs of one picture of the screen (a run's tab works hidden, and only
+ * a whole-screen picture of a hidden tab is drawn reliably).
+ */
 export async function mirrorOf(page, cache = new Map(), force = false) {
   const m = await page.evaluate(readPage)
   m.blocks = m.blocks.slice(0, MAX_BLOCKS)
-  const cdp = page.__adalCdp ||= await page.target().createCDPSession()
+  const todo = []
   let shots = 0
   for (const b of m.blocks) {
     if (b.k !== 'shot') continue
     const { x, y, w, h, v } = b
-    delete b.x; delete b.y; delete b.v
+    delete b.x; delete b.y; delete b.v; delete b.w; delete b.h
     b.ar = +(w / h).toFixed(3)
     if (!v || shots >= 8) { b.off = true; continue }
-    const key = `${b.id}:${Math.round(x)}:${Math.round(y)}:${Math.round(w)}:${Math.round(h)}`
+    shots++
+    const key = `${Math.round(x)}:${Math.round(y)}:${Math.round(w)}:${Math.round(h)}:${page.url()}`
     const hit = cache.get(b.id)
-    if (hit && hit.key === key && !force && Date.now() - hit.at < (b.frame ? 2500 : 15000)) { b.img = hit.img; shots++; continue }
-    try {
-      const scale = Math.min(1, 480 / w, 360 / h) * 1.5
-      const shot = await cdp.send('Page.captureScreenshot', { format: 'jpeg', quality: 60, clip: { x: x + (m.sx || 0), y: y + (m.sy || 0), width: w, height: h, scale: Math.min(1.5, scale) }, captureBeyondViewport: false })
-      b.img = shot.data
-      cache.set(b.id, { key, img: b.img, at: Date.now() })
-      shots++
-    } catch { b.off = true }
+    if (hit && hit.key === key && !force && Date.now() - hit.at < (b.frame ? 2500 : 15000)) { b.img = hit.img; continue }
+    todo.push({ b, key, x, y, w, h })
   }
-  for (const b of m.blocks) if (b.k === 'shot') { delete b.w; delete b.h }
+  if (todo.length) {
+    try {
+      const sharp = (await import('sharp')).default
+      const shot = await Promise.race([
+        page.screenshot({ type: 'jpeg', quality: 85, captureBeyondViewport: false }),
+        new Promise((_, no) => setTimeout(() => no(new Error('slow')), 6000)),
+      ])
+      const meta = await sharp(shot).metadata()
+      const k = meta.width / m.vw                       // screen pixels per page pixel
+      for (const t of todo) {
+        const left = Math.max(0, Math.floor(t.x * k)), top = Math.max(0, Math.floor(t.y * k))
+        const width = Math.min(meta.width - left, Math.ceil(t.w * k)), height = Math.min(meta.height - top, Math.ceil(t.h * k))
+        if (width < 4 || height < 4) { t.b.off = true; continue }
+        const out = await sharp(shot).extract({ left, top, width, height })
+          .resize({ width: Math.min(width, 600), withoutEnlargement: true }).jpeg({ quality: 70 }).toBuffer()
+        t.b.img = out.toString('base64')
+        cache.set(t.b.id, { key: t.key, img: t.b.img, at: Date.now() })
+      }
+    } catch { for (const t of todo) t.b.off = true }
+  }
   m.url = page.url()
   m.title = await page.title().catch(() => '')
   return m

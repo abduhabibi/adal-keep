@@ -88,15 +88,16 @@ async function frameOf(db, run) {
   const { runTab } = await import('../routes/automations.js')
   const page = await runTab(db, run)
   if (!page) return { gone: true }
-  const cdp = page.__adalCdp ||= await page.target().createCDPSession()
-  const m = await cdp.send('Page.getLayoutMetrics')
-  const vw = m.cssLayoutViewport?.clientWidth || m.layoutViewport.clientWidth
-  const vh = m.cssLayoutViewport?.clientHeight || m.layoutViewport.clientHeight
-  const sx = m.cssVisualViewport?.pageX ?? m.visualViewport?.pageX ?? 0
-  const sy = m.cssVisualViewport?.pageY ?? m.visualViewport?.pageY ?? 0
-  const scale = Math.min(1, 1000 / vw)
-  const shot = await cdp.send('Page.captureScreenshot', { format: 'jpeg', quality: 55, clip: { x: sx, y: sy, width: vw, height: vh, scale }, captureBeyondViewport: false })
-  return { img: shot.data, w: vw, h: vh, url: page.url(), title: await page.title().catch(() => '') }
+  // A whole-screen picture (drawn reliably even while the run's tab works
+  // hidden), made smaller for the phone.
+  const raw = await Promise.race([
+    page.screenshot({ type: 'jpeg', quality: 70, captureBeyondViewport: false }),
+    new Promise((_, no) => setTimeout(() => no(new Error('slow')), 6000)),
+  ])
+  const [vw, vh] = await page.evaluate(() => [innerWidth, innerHeight])
+  const sharp = (await import('sharp')).default
+  const img = (await sharp(raw).resize({ width: Math.min(1000, vw), withoutEnlargement: true }).jpeg({ quality: 55 }).toBuffer()).toString('base64')
+  return { img, w: vw, h: vh, url: page.url(), title: await page.title().catch(() => '') }
 }
 
 // The tab as a light page (services/pageMirror.js), sent when it changed.

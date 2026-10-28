@@ -45,9 +45,10 @@ async function phoneBoot() {
   }
   window.__ADAL_CLOUD = true
   quietWhenHidden()
-  const { startCloudDocuments, startLive } = await import('./cloud/adapter.js')
+  const { startCloudDocuments, startLive, startMirror } = await import('./cloud/adapter.js')
   startCloudDocuments()
   startLive().catch(() => {})
+  startMirror()        // the agency's text on the phone itself: pages open at once
   // A slim line at the bottom: is the office PC on (live) or not (online copy)?
   const bar = document.createElement('div')
   bar.id = 'adal-cloud-bar'

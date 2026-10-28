@@ -137,16 +137,75 @@ async function summary(db) {
   }
 }
 
+// A change on this PC (anyone's: the PC, a phone, Admin): the answers it
+// touches go online within a second, and the phones are told which ones
+// changed (live link) — they keep their own copy of every answer.
+const soonKeys = new Set()
+const soonAt = new Map()   // key → when a change of it went online (the minute's copy must not undo it)
+let soonTimer = null
+export function pushSoon(db, apiPath) {
+  const p = String(apiPath || '').replace(/^\/api/, '').split('?')[0]
+  const id = p.match(/^\/profiles\/(\d+)/)?.[1] || p.match(/^\/cv\/profile-readiness\/(\d+)/)?.[1]
+  const keys = id ? [...PER_PROFILE(id), '/profiles', '/dashboard', '/automations/active', '/automations/stages', '/tasks', '/notifications', '/checklists']
+    : GLOBAL.filter(k => !['/setup/status', '/subscription/status', '/health', '/tutor/tour', '/cv/templates'].includes(k))
+  if (/^\/automations/.test(p)) for (const r of ['/profiles', '/automations/active', '/automations/stages']) keys.push(r)
+  keys.forEach(k => soonKeys.add(k))
+  clearTimeout(soonTimer)
+  soonTimer = setTimeout(() => pushKeys(db).catch(e => console.warn('[cloud] soon:', e.message)), 600)
+}
+async function pushKeys(db) {
+  if (!soonKeys.size || !(await cloudOn(db).catch(() => false))) return
+  const keys = [...soonKeys]; soonKeys.clear()
+  const agency = await cloudAgencyId(db)
+  if (!agency) return
+  const state = await stateOf(db)
+  const rows = [], hashes = []
+  for (const key of keys) {
+    let r
+    try { r = await local('GET', key) } catch { continue }
+    if (!r.ok) continue
+    let data
+    try { data = clean(key, await r.json()) } catch { continue }
+    const hash = sha(JSON.stringify(data))
+    if (state.get(key) === hash) continue
+    rows.push({ agency_id: agency, key, data, updated_at: new Date().toISOString() }); hashes.push(hash)
+  }
+  if (!rows.length) return
+  const now = Date.now()
+  rows.forEach(r => soonAt.set(r.key, now))
+  // Small answers first, and straight to the phones on the live link with
+  // their data (no download for them); then saved online, small before big.
+  const sized = rows.map((r, i) => ({ r, h: hashes[i], n: JSON.stringify(r.data).length })).sort((a, b) => a.n - b.n)
+  const { broadcast } = await import('./liveChannel.js')
+  const small = sized.filter(x => x.n < 60000)
+  for (let i = 0, part = [], size = 0; i <= small.length; i++) {
+    const x = small[i]
+    if (!x || size + x.n > 150000) { if (part.length) broadcast({ t: 'changed', rows: part }); part = []; size = 0 }
+    if (x) { part.push({ key: x.r.key, data: x.r.data, updated_at: x.r.updated_at }); size += x.n }
+  }
+  for (const group of [small, sized.filter(x => x.n >= 60000)]) {
+    if (!group.length) continue
+    await upsert(db, 'keep_meta', group.map(x => x.r), 'agency_id,key')
+    for (const x of group) await setState(db, x.r.key, x.h)
+    cloudStatus.pushed += group.length
+    const big = group.filter(x => x.n >= 60000).map(x => x.r.key)
+    if (big.length) broadcast({ t: 'changed', keys: big })
+  }
+}
+
 async function pushAnswers(db, agency, state) {
   const ids = (await db('profiles').select('id')).map(r => r.id)
   const keys = [...GLOBAL, ...ids.flatMap(PER_PROFILE)]
   const wanted = new Set(keys)
   let batch = []
   const flush = async () => {
+    batch = batch.filter(b => !(soonAt.get(b.row.key) > b.readAt))   // a newer change already went online
     if (!batch.length) return
     await upsert(db, 'keep_meta', batch.map(b => b.row), 'agency_id,key')
     for (const b of batch) await setState(db, b.row.key, b.hash)
     cloudStatus.pushed += batch.length
+    const sent = batch.map(b => b.row.key)
+    import('./liveChannel.js').then(L => L.broadcast({ t: 'changed', keys: sent })).catch(() => {})
     batch = []
   }
   for (const key of keys) {
@@ -159,7 +218,7 @@ async function pushAnswers(db, agency, state) {
     const body = JSON.stringify(data)
     const hash = sha(body)
     if (state.get(key) === hash) continue
-    batch.push({ row: { agency_id: agency, key, data, updated_at: new Date().toISOString() }, hash })
+    batch.push({ row: { agency_id: agency, key, data, updated_at: new Date().toISOString() }, hash, readAt: Date.now() })
     if (batch.length >= 20) await flush()
   }
   // The work summary (Adal Keep Admin).

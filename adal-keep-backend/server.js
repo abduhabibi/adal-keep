@@ -80,6 +80,16 @@ app.locals.db = db
 app.use(diagMiddleware)
 app.use(cors({ origin: true, credentials: true }))
 app.use(express.json())
+// Any change (from the PC, a phone or Admin): what it touches goes online in
+// about a second and the phones refresh their own copy (services/cloudSync.js).
+app.use('/api', (req, res, next) => {
+  if (req.method !== 'GET' && req.method !== 'HEAD' && !/^\/api\/(chat|mobile|tutor|system|updates|employees\/device)/.test(req.originalUrl)) {
+    res.on('finish', () => {
+      if (res.statusCode < 400) import('./src/services/cloudSync.js').then(c => c.pushSoon(req.app.locals.db, req.originalUrl)).catch(() => {})
+    })
+  }
+  next()
+})
 // Big answers (profile lists, journeys …) go gzipped: much faster over Wi-Fi and Tailscale.
 app.use((req, res, next) => {
   if (!/\bgzip\b/.test(req.headers['accept-encoding'] || '')) return next()

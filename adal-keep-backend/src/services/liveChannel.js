@@ -150,7 +150,7 @@ function startStream(db, ch, run, view) {
 
 // ------------------------------------------------------------ messages
 async function onMessage(db, agency, ch, m) {
-  if (m.t === 'pc' || m.t === 'answer' || m.t === 'frame' || m.t === 'mirror' || m.t === 'inputError') return
+  if (m.t === 'pc' || m.t === 'answer' || m.t === 'frame' || m.t === 'mirror' || m.t === 'inputError' || m.t === 'changed') return
   const phone = await phoneOf(db, agency, m.jwt)
   if (!phone) return
   relayStatus.lastCall = Date.now()   // a phone is busy: its uploads are filed at once
@@ -186,6 +186,8 @@ async function onMessage(db, agency, ch, m) {
 
 // ------------------------------------------------------------ start
 let ch = null
+/** A message to every phone of the agency (e.g. { t: 'changed', keys }). */
+export function broadcast(msg) { try { ch?.send(msg) } catch {} }
 export function startLiveChannel(db) {
   const tick = async () => {
     try {

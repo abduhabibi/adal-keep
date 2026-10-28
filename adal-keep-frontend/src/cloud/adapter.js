@@ -9,7 +9,8 @@
  *   uploads → the files go to online storage first, then a request
  * Documents open from online storage (/api/files/<id>/… links are rewritten).
  */
-import { connectLive, liveCall, liveReady, pcLive } from './live.js'
+import { connectLive, liveCall, liveReady, pcLive, onLive } from './live.js'
+import { mirrorReady, mirrorHas, mirrorGet, mirrorAt, mirrorAge, mirrorPut, mirrorSync, mirrorFetch, mirrorPrune, mirrorTake } from './mirror.js'
 
 const SAVED = 'adal-pc'
 // Adal Keep Admin opens one agency per window (window.__ADAL_CREDS): its own copies.
@@ -69,17 +70,11 @@ function httpError(status, message) {
 }
 
 // ---------------------------------------------------------------- answers
-let cache = {}
-try { cache = JSON.parse(localStorage.getItem(CACHE) || '{}') } catch {}
-function remember(key, data) {
-  cache[key] = data
-  try { localStorage.setItem(CACHE, JSON.stringify(cache)) } catch {
-    // Full: keep only the lists and this answer.
-    cache = Object.fromEntries(Object.entries(cache).filter(([k]) => !/^\/profiles\/\d+/.test(k)))
-    cache[key] = data
-    try { localStorage.setItem(CACHE, JSON.stringify(cache)) } catch {}
-  }
-}
+// Every answer comes from the phone's own copy (mirror.js); the old small
+// copy in localStorage is not used any more.
+try { localStorage.removeItem(CACHE) } catch {}
+const cache = new Proxy({}, { get: (_, k) => mirrorGet(k), has: (_, k) => mirrorHas(k) })
+const remember = (key, data) => mirrorPut(key, data)
 
 let pending = {}
 try { pending = JSON.parse(localStorage.getItem(PENDING) || '{}') } catch {}
@@ -99,24 +94,14 @@ function withPending(key, data, updatedAt) {
 }
 
 async function answer(key) {
-  // Fast: the copy on the phone at once; the newer one is fetched behind it.
-  if (key in cache && !answer.busy?.has(key)) {
-    (answer.busy ||= new Set()).add(key)
-    fresh(key).catch(() => {}).finally(() => answer.busy.delete(key))
-    return cache[key]
-  }
-  return fresh(key)
-}
-async function fresh(key) {
-  try {
-    const rows = await rest('GET', `/rest/v1/keep_meta?key=eq.${encodeURIComponent(key)}&select=data,updated_at`)
-    if (rows?.length) { const d = withPending(key, rows[0].data, rows[0].updated_at); remember(key, d); return d }
-    if (key in cache) return cache[key]
-    return undefined
-  } catch (e) {
-    if (key in cache) return cache[key]          // no internet: the last copy on the phone
-    throw e
-  }
+  const c = cloudCreds()
+  await mirrorReady(c.agency)
+  if (mirrorHas(key)) return withPending(key, mirrorGet(key), mirrorAt(key))
+  // Not on the phone yet (the first copy is still coming): just this one.
+  const rows = await rest('GET', `/rest/v1/keep_meta?key=eq.${encodeURIComponent(key)}&select=data,updated_at`)
+  if (!rows?.length) return undefined
+  remember(key, rows[0].data)
+  return withPending(key, rows[0].data, rows[0].updated_at)
 }
 
 const matchText = (p, q) => {
@@ -246,6 +231,57 @@ function relayed(a, config) {
   return { data, status: a.answer_code || 200, headers }
 }
 
+// ---------------------------------------------------------------- the copy
+// Asked from the PC every time while it is live (they change by the second).
+const LIVE_FIRST = /^\/(automations|chat|mobile|tasks\/calls|employees\/device|auth)\b/
+// The copy's key for a page's GET: the path (a field's files live in its fields).
+function baseKey(path, query) {
+  const files = path.match(/^\/profiles\/(\d+)\/fields\/(\d+)\/files$/)
+  if (files) return `/profiles/${files[1]}/fields`
+  if (path === '/profiles') return path
+  return Object.keys(query || {}).length ? null : path
+}
+// Right after a change, the touched answers come from the PC itself for a few
+// seconds (the copy catches up within ~2 s: the PC says what changed).
+const dirty = new Map()
+function markDirty(path) {
+  const id = path.match(/^\/profiles\/(\d+)/)?.[1]
+  const until = Date.now() + 10000
+  const keys = id ? [`/profiles/${id}`, `/profiles/${id}/fields`, `/profiles/${id}/automations`, `/profiles/${id}/journey`, `/cv/profile-readiness/${id}`, '/profiles']
+    : [path.split('?')[0], '/profiles', '/tasks', '/checklists', '/brokers', '/notifications']
+  keys.forEach(k => dirty.set(k, until))
+}
+const isDirty = (key) => (dirty.get(key) || 0) > Date.now()
+const revalidating = new Set()
+function revalidate(key) {
+  if (revalidating.has(key)) return
+  revalidating.add(key)
+  liveCall('get', key, undefined, 9000).then(async (m) => {
+    if (!m || m.code >= 300 || m.bin) return
+    const data = m.gz ? await gunzipJSON(m.gz) : m.data
+    if (data !== undefined && data !== null) remember(key, data)
+  }).catch(() => {}).finally(() => revalidating.delete(key))
+}
+
+/** Keep the phone's copy current: now, every 20 s while open, at once when the PC says what changed. */
+let mirrorOn = false
+export function startMirror() {
+  const c = cloudCreds()
+  if (!c || mirrorOn) return
+  mirrorOn = true
+  const sync = () => { if (!document.hidden) mirrorSync(rest, c.agency).catch(() => {}) }
+  sync()
+  setInterval(sync, 20000)
+  document.addEventListener('visibilitychange', sync)
+  onLive((m) => {
+    if (m.t !== 'changed') return
+    if (Array.isArray(m.rows)) mirrorTake(m.rows, c.agency)
+    if (Array.isArray(m.keys)) mirrorFetch(rest, c.agency, m.keys).catch(() => {})
+  })
+  const prune = () => mirrorPrune(rest, c.agency).catch(() => {})
+  setTimeout(prune, 60000); setInterval(prune, 15 * 60000)
+}
+
 // ---------------------------------------------------------------- adapter
 export async function cloudAdapter(config) {
   const method = (config.method || 'get').toLowerCase()
@@ -256,6 +292,20 @@ export async function cloudAdapter(config) {
   if (typeof body === 'string') { try { body = JSON.parse(body) } catch {} }
   const reply = (status, data, headers = {}) => ({ data, status, statusText: String(status), headers, config, request: {} })
   try {
+    // Fast: pages read the phone's own copy at once; with the PC live, an
+    // answer older than a minute is asked for behind it (the next look is newer).
+    if (method === 'get' && config.responseType !== 'blob' && !LIVE_FIRST.test(path)) {
+      const key = baseKey(path, query)
+      const c = cloudCreds()
+      if (key && !isDirty(key)) {
+        await mirrorReady(c.agency)
+        if (mirrorHas(key)) {
+          if (key === path && pcLive() && mirrorAge(key) > 60000) revalidate(key)
+          return reply(200, await get(path, query))
+        }
+      }
+    }
+    if (method !== 'get') markDirty(path)
     if (await pcOnline()) {
       const qs = u.search || (config.params ? '?' + new URLSearchParams(Object.entries(config.params).filter(([, v]) => v != null)).toString() : '')
       // Uploads: the files go online first; the PC files them at once.
@@ -278,7 +328,11 @@ export async function cloudAdapter(config) {
         try { a = await relay(method, path + qs, method === 'get' ? undefined : sendBody, method === 'get' ? 12000 : 25000) }
         catch (e) { if (method !== 'get') throw e }
       }
-      if (a) { const r = relayed(a, config); return reply(r.status, r.data, r.headers) }
+      if (a) {
+        const r = relayed(a, config)
+        if (method === 'get' && !qs && r.status < 300 && !(r.data instanceof Blob) && /json/.test(r.headers['content-type'] || '') && !LIVE_FIRST.test(path)) remember(path, r.data)
+        return reply(r.status, r.data, r.headers)
+      }
       if (method !== 'get') throw httpError(504, 'The PC did not answer in time — it may still do it. Look again in a moment.')
       // A GET with no answer: the online copy below.
     }
@@ -300,7 +354,7 @@ export async function cloudAdapter(config) {
 let secretsP = null
 export const cloudSecrets = () => (secretsP ||= rest('GET', '/rest/v1/keep_secrets?select=file_key,live,bot').then(r => r?.[0] || null).catch(() => { secretsP = null; return null }))
 
-/** A document kept in Telegram: download, decrypt here (AES-GCM), a local link. */
+/** A document kept in Telegram: download, decrypt here (AES-GCM) — the file itself. */
 async function telegramFile(object, mimetype) {
   const s = await cloudSecrets()
   if (!s?.bot) return null
@@ -315,20 +369,61 @@ async function telegramFile(object, mimetype) {
   const iv = buf.slice(3, 15), tag = buf.slice(15, 31), data = buf.slice(31)
   const joined = new Uint8Array(data.length + tag.length); joined.set(data); joined.set(tag, data.length)
   const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, joined)
-  return URL.createObjectURL(new Blob([plain], { type: mimetype || 'application/octet-stream' }))
+  return new Blob([plain], { type: mimetype || 'application/octet-stream' })
+}
+
+// Documents and pictures stay on the phone once opened (Cache Storage, up to
+// ~400 MB; the ones not opened for longest go first).
+const FILES = 'adal-files-v1', FILES_INDEX = 'adal-files-index', FILES_MAX = 400 * 1024 * 1024
+const fileReq = (id) => new Request(`https://files.adal.local/${cloudCreds()?.agency || ''}/${id}`)
+async function cachedFile(id) {
+  try {
+    const hit = await (await caches.open(FILES)).match(fileReq(id))
+    if (!hit) return null
+    const idx = JSON.parse(localStorage.getItem(FILES_INDEX) || '{}')
+    if (idx[id]) { idx[id][1] = Date.now(); localStorage.setItem(FILES_INDEX, JSON.stringify(idx)) }
+    return await hit.blob()
+  } catch { return null }
+}
+async function keepFile(id, blob) {
+  try {
+    const c = await caches.open(FILES)
+    await c.put(fileReq(id), new Response(blob, { headers: { 'Content-Type': blob.type || 'application/octet-stream' } }))
+    const idx = JSON.parse(localStorage.getItem(FILES_INDEX) || '{}')
+    idx[id] = [blob.size, Date.now()]
+    let total = Object.values(idx).reduce((n, [b]) => n + b, 0)
+    for (const [k] of Object.entries(idx).sort((a, b) => a[1][1] - b[1][1])) {
+      if (total <= FILES_MAX) break
+      total -= idx[k][0]; delete idx[k]; await c.delete(fileReq(k))
+    }
+    localStorage.setItem(FILES_INDEX, JSON.stringify(idx))
+  } catch {}
 }
 
 const signed = new Map()
 async function signedUrl(fileId) {
   if (signed.has(fileId)) return signed.get(fileId)
   const p = (async () => {
-    const rows = await rest('GET', `/rest/v1/keep_files?id=eq.${fileId}&select=object,mimetype`)
-    if (!rows?.[0]?.object) return null
-    if (rows[0].object.startsWith('tg:')) return telegramFile(rows[0].object, rows[0].mimetype)
-    const c = cloudCreds()
-    const s = await rest('POST', `/storage/v1/object/sign/keep/${rows[0].object}`, { expiresIn: 6 * 3600 })
-    return s?.signedURL ? `${c.url}/storage/v1${s.signedURL.startsWith('/') ? '' : '/'}${s.signedURL}` : null
-  })().catch(() => null)
+    // On the phone already: no download at all.
+    let blob = await cachedFile(fileId)
+    if (!blob) {
+      const rows = await rest('GET', `/rest/v1/keep_files?id=eq.${fileId}&select=object,mimetype`)
+      if (!rows?.[0]?.object) return null
+      if (rows[0].object.startsWith('tg:')) blob = await telegramFile(rows[0].object, rows[0].mimetype)
+      else {
+        const c = cloudCreds()
+        const s = await rest('POST', `/storage/v1/object/sign/keep/${rows[0].object}`, { expiresIn: 6 * 3600 })
+        if (!s?.signedURL) return null
+        const r = await fetch(`${c.url}/storage/v1${s.signedURL.startsWith('/') ? '' : '/'}${s.signedURL}`)
+        if (!r.ok) return null
+        blob = await r.blob()
+        if (rows[0].mimetype && !blob.type) blob = new Blob([blob], { type: rows[0].mimetype })
+      }
+      if (!blob) return null
+      keepFile(fileId, blob)
+    }
+    return URL.createObjectURL(blob)
+  })().catch(() => { signed.delete(fileId); return null })
   signed.set(fileId, p)
   return p
 }

@@ -24,18 +24,16 @@ export default function ProfileDetailPage() {
   useEffect(() => {
     let alive = true
     setLoading(true)
+    // The profile and its documents first (on a phone: from its own copy, at
+    // once); the CVs and the CV check fill in when they come.
     Promise.all([
       api.get(`/profiles/${id}`),
       api.get(`/profiles/${id}/fields`),
-      api.get(`/cv/generated`, { params: { profile_id: id } }).catch(() => ({ data: [] })),
-      api.get(`/cv/profile-readiness/${id}`).catch(() => ({ data: null })),
     ])
-      .then(([profileRes, fieldsRes, cvsRes, readinessRes]) => {
+      .then(([profileRes, fieldsRes]) => {
         if (alive) {
           setProfile(profileRes.data)
           setFields(fieldsRes.data)
-          setCvs(cvsRes.data || [])
-          setCvReadiness(readinessRes?.data || null)
         }
       })
       .catch(() => {
@@ -43,6 +41,8 @@ export default function ProfileDetailPage() {
         navigate('/profiles')
       })
       .finally(() => { if (alive) setLoading(false) })
+    api.get(`/cv/generated`, { params: { profile_id: id } }).then(r => { if (alive) setCvs(r.data || []) }).catch(() => {})
+    api.get(`/cv/profile-readiness/${id}`).then(r => { if (alive) setCvReadiness(r.data || null) }).catch(() => {})
     return () => { alive = false }
   }, [id, navigate])
 

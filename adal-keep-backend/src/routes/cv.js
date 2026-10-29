@@ -108,7 +108,8 @@ router.get('/generated', async (req, res) => {
       .select('generated_cvs.*', 'profiles.full_name as profile_name', 'profiles.passport_number', 'cv_templates.name as template_name', 'cv_templates.agency_name')
       .orderBy('generated_cvs.created_at', 'desc')
     if (req.query.profile_id) q = q.where('generated_cvs.profile_id', req.query.profile_id)
-    res.json(await q)
+    // The list leaves out each CV's full copy of the data (1–2 MB each; no page shows it).
+    res.json((await q).map(({ data_snapshot, ...c }) => c))
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 

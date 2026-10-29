@@ -16,6 +16,7 @@ import MainPCCard from '../components/MainPCCard'
 import WafidCard from '../components/WafidCard'
 import InsuranceCard from '../components/InsuranceCard'
 import BackupCard from '../components/BackupCard'
+import ErrorBoundary from '../components/shared/ErrorBoundary'
 
 export default function SettingsPage() {
   const { subscription, refresh } = useAuth()
@@ -242,10 +243,10 @@ export default function SettingsPage() {
       </Card>
 
 
-      {import.meta.env.VITE_DEMO !== '1' && <WafidCard />}
-      {import.meta.env.VITE_DEMO !== '1' && <InsuranceCard />}
-      {import.meta.env.VITE_DEMO !== '1' && <MainPCCard />}
-      {import.meta.env.VITE_DEMO !== '1' && <BackupCard />}
+      {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Wafid"><WafidCard /></ErrorBoundary>}
+      {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Insurance"><InsuranceCard /></ErrorBoundary>}
+      {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Main PC & phones"><MainPCCard /></ErrorBoundary>}
+      {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Backup"><BackupCard /></ErrorBoundary>}
 
       <Card>
         <h2 className="font-display text-lg font-bold mb-4 flex items-center gap-2">
@@ -451,7 +452,7 @@ export default function SettingsPage() {
       </Card>
 
       {/* The Adal tour — at the bottom of Settings */}
-      <TutorCard />
+      <ErrorBoundary small name="Tutor"><TutorCard /></ErrorBoundary>
     </div>
   )
 }

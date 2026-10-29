@@ -23,7 +23,7 @@ import zlib from 'zlib'
 import { cloudCall, cloudAgencyId, cloudConfig } from './chatCloud.js'
 import { cloudOn, agencySecrets, runCall, relayStatus } from './cloudSync.js'
 
-export const liveStatus = { connected: false, channel: null, calls: 0, frames: 0, error: null }
+export const liveStatus = { connected: false, channel: null, calls: 0, frames: 0, error: null, seen: 0, refused: 0, refusedWhy: null }
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 // Node 22+ has WebSocket built in; older Node uses the ws package (puppeteer's).
 const WS = globalThis.WebSocket || (await import('ws')).default
@@ -150,9 +150,10 @@ function startStream(db, ch, run, view) {
 
 // ------------------------------------------------------------ messages
 async function onMessage(db, agency, ch, m) {
-  if (m.t === 'pc' || m.t === 'answer' || m.t === 'frame' || m.t === 'mirror' || m.t === 'inputError' || m.t === 'changed' || m.t === 'call') return
+  if (m.t === 'pc' || m.t === 'answer' || m.t === 'frame' || m.t === 'mirror' || m.t === 'inputError' || m.t === 'changed' || m.t === 'ring') return
+  liveStatus.seen++
   const phone = await phoneOf(db, agency, m.jwt)
-  if (!phone) return
+  if (!phone) { liveStatus.refused++; liveStatus.refusedWhy = m.jwt ? 'not a phone of this agency (or its sign-in could not be checked)' : 'no sign-in on the message'; return }
   relayStatus.lastCall = Date.now()   // a phone is busy: its uploads are filed at once
   if (m.t === 'call') {
     liveStatus.calls++

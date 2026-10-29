@@ -58,7 +58,7 @@ export default function PhoneCalls() {
       ), { id: 'phone-call', duration: 10000 })
     }
     // At once from the PC (live link) …
-    if (window.__ADAL_CLOUD) import('../cloud/live.js').then(L => { if (alive) off = L.onLive(m => { if (m.t === 'call') show(m) }) })
+    if (window.__ADAL_CLOUD) import('../cloud/live.js').then(L => { if (alive) off = L.onLive(m => { if (m.t === 'ring') show(m) }) })
     // … and a look now and then, for calls the live link missed.
     const tick = async () => {
       try {

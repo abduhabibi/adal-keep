@@ -413,7 +413,7 @@ async function executeRun(db, page, job) {
       })
       console.log(`[notify] ${level.toUpperCase()} ${title}`)
       // The phones hear it at once (live link), not at their next look.
-      import('./liveChannel.js').then(L => L.broadcast({ t: 'call', id: Number(taskId?.id ?? taskId) || 0, title, description: String(body || '').slice(0, 300), profile_id: job.profile_id, run: runId, at: Date.now() })).catch(() => {})
+      import('./liveChannel.js').then(L => L.broadcast({ t: 'ring', id: Number(taskId?.id ?? taskId) || 0, title, description: String(body || '').slice(0, 300), profile_id: job.profile_id, run: runId, at: Date.now() })).catch(() => {})
       if (onLog) await onLog(level, `🔔 ${title}`)
       // A sign-in call rings the one watch alarm until a person touches that
       // page (or 1 minute); every other call rings its task's own sound.

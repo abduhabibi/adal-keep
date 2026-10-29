@@ -166,6 +166,14 @@ function optimistic(method, path, body) {
   return { ok: true, success: true, queued: true, message: 'Saved — the PC carries it out when it is on.' }
 }
 
+// Removed tasks leave the phone's copy at once (the PC confirms later).
+function dropTasks(method, path, body) {
+  const one = method === 'delete' && path.match(/^\/tasks\/(\d+)$/)?.[1]
+  const ids = one ? [Number(one)] : path === '/tasks/clear' ? (body?.ids || []).map(Number) : null
+  if (!ids || !Array.isArray(cache['/tasks'])) return
+  remember('/tasks', cache['/tasks'].filter(t => !ids.includes(Number(t.id))))
+}
+
 async function change(method, path, body) {
   if (NEEDS_PC.test(path)) throw httpError(503, 'This needs the PC (it is off or far away). It works again when the phone reaches the PC.')
   if (QUIET.test(path)) return { ok: true }
@@ -307,7 +315,7 @@ export async function cloudAdapter(config) {
         }
       }
     }
-    if (method !== 'get') markDirty(path)
+    if (method !== 'get') { markDirty(path); dropTasks(method, path, body) }
     if (await pcOnline()) {
       const qs = u.search || (config.params ? '?' + new URLSearchParams(Object.entries(config.params).filter(([, v]) => v != null)).toString() : '')
       // Uploads: the files go online first; the PC files them at once.

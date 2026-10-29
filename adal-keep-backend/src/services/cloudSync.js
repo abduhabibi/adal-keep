@@ -30,7 +30,7 @@ const MAX_FILE = 45 * 1024 * 1024
 // The answers the pages read: once for the agency, and per profile.
 const GLOBAL = ['/profiles', '/brokers', '/tasks', '/employees', '/settings', '/setup/status', '/subscription/status',
   '/automations/stages', '/automations/active', '/notifications', '/checklists', '/cv/templates', '/quick-links',
-  '/dashboard', '/tasks/documents', '/wafid/settings', '/health', '/tutor/tour', '/trash',
+  '/dashboard', '/tasks/documents', '/wafid/settings', '/health', '/tutor/tour', '/trash', '/cv/generated',
   '/lmis/accounts', '/musaned/accounts', '/tasheer/accounts', '/insurance/accounts', '/visa/accounts']
 const PER_PROFILE = (id) => [`/profiles/${id}`, `/profiles/${id}/fields`, `/profiles/${id}/automations`,
   `/profiles/${id}/journey`, `/cv/profile-readiness/${id}`, `/cv/generated?profile_id=${id}`]
@@ -47,10 +47,11 @@ const NOT_FROM_PHONES = /^\/(system|backup|branch|main-pc|mobile|subscription|se
 export const cloudStatus = { on: false, running: false, last: null, error: null, pushed: 0, files: 0, filesLeft: 0, applied: 0 }
 
 const sha = (s) => crypto.createHash('sha1').update(s).digest('hex')
+// (No body — undefined or null, e.g. a phone's DELETE — is sent as none: "null" is refused as JSON.)
 const local = (method, p, { body, headers = {} } = {}) => fetch(`http://127.0.0.1:${PORT()}/api${p}`, {
   method,
-  headers: { ...(body !== undefined && !(body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}), 'X-Adal-Cloud': '1', ...headers },
-  body: body === undefined ? undefined : body instanceof FormData ? body : JSON.stringify(body),
+  headers: { ...(body != null && !(body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}), 'X-Adal-Cloud': '1', ...headers },
+  body: body == null || method === 'GET' ? undefined : body instanceof FormData ? body : JSON.stringify(body),
 })
 const upsert = (db, table, rows, onConflict) => cloudCall(db, 'POST', `/rest/v1/${table}?on_conflict=${onConflict}`, rows,
   { headers: { Prefer: 'resolution=merge-duplicates,return=minimal' } })

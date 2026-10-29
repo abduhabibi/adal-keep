@@ -1,5 +1,6 @@
 import { useState, lazy, Suspense } from 'react'
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
+import ErrorBoundary from './components/shared/ErrorBoundary'
 import { Toaster } from 'react-hot-toast'
 import MainLayout from './components/layout/MainLayout'
 const DashboardPage = lazy(() => fresh(() => import('./pages/DashboardPage')))
@@ -36,7 +37,9 @@ function fresh(load) {
 }
 
 // Each page is loaded when it is first opened: a low-end PC starts faster.
-const page = (P) => <Suspense fallback={<div className="p-6 text-sm text-slate-400">…</div>}><P /></Suspense>
+// Every page in its own catcher: a fault shows a notice, never a blank screen.
+function Guarded({ children }) { const loc = useLocation(); return <ErrorBoundary resetKey={loc.pathname}>{children}</ErrorBoundary> }
+const page = (P) => <Guarded><Suspense fallback={<div className="p-6 text-sm text-slate-400">…</div>}><P /></Suspense></Guarded>
 
 const toaster = (
   <Toaster

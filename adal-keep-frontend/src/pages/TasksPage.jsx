@@ -84,12 +84,14 @@ export default function TasksPage() {
   const removeAllCompleted = async () => {
     const done = tasks.filter(x => normalizeStatus(x.status) === 'completed')
     if (!done.length) return
+    const ids = done.map(x => x.id)
+    setTasks(prev => prev.filter(t => !ids.includes(t.id)))   // gone at once
     try {
-      await Promise.all(done.map(x => api.delete(`/tasks/${x.id}`)))
+      await api.post('/tasks/clear', { ids })
       toast.success('Completed tasks cleared')
-      await load()
     } catch {
       toast.error('Clear failed')
+      await load()
     }
   }
 
@@ -97,21 +99,23 @@ export default function TasksPage() {
     const todo = tasks.filter(x => normalizeStatus(x.status) === 'pending')
     if (!todo.length) return
     if (!confirm('ሁሉንም ለመሰራት ተግባሮች ይሰረዙ?')) return
+    const ids = todo.map(x => x.id)
+    setTasks(prev => prev.filter(t => !ids.includes(t.id)))   // gone at once
     try {
-      await Promise.all(todo.map(x => api.delete(`/tasks/${x.id}`)))
+      await api.post('/tasks/clear', { ids })
       toast.success('ለመሰራት ተግባሮች ተሰርዘዋል')
-      await load()
     } catch {
       toast.error('Clear failed')
+      await load()
     }
   }
 
   const deleteTask = async (id) => {
     if (!confirm('ይህ ተግባር ይሰረዝ?')) return
+    setTasks(prev => prev.filter(t => t.id !== id))
     try {
       await api.delete(`/tasks/${id}`)
       toast.success('ተሰርዟል')
-      await load()
     } catch {
       toast.error('Delete failed')
     }

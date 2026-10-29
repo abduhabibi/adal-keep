@@ -121,7 +121,12 @@ export default function ChatPage() {
     } catch (e) { setStatus(s => (s?.configured ? s : { error: e.response?.data?.error || e.message })) }
   }, [])
   useEffect(() => {
-    api.get('/chat/status').then(r => setStatus(r.data)).catch(e => setStatus({ error: e.response?.data?.error || e.message }))
+    // Not reachable (on a phone: the office PC is off) — looked at again every 10 s.
+    let alive = true, timer = null
+    const look = () => api.get('/chat/status').then(r => { if (alive) setStatus(r.data); if (alive && !r.data?.configured) timer = setTimeout(look, 10000) })
+      .catch(e => { if (!alive) return; setStatus({ error: e.response?.data?.error || e.message, off: e.response?.status === 503 }); timer = setTimeout(look, 10000) })
+    look()
+    return () => { alive = false; clearTimeout(timer) }
   }, [])
   useEffect(() => {
     if (!status?.configured) return
@@ -326,8 +331,15 @@ export default function ChatPage() {
     return (
       <div className="m-6 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-8 text-center">
         <div className="text-4xl">💬</div>
-        <h2 className="mt-2 text-lg font-bold">The chat is not connected on this PC yet</h2>
-        <p className="mt-1 text-sm text-slate-500">{status.error || 'Adal adds the chat server to Adal Keep — then every agency appears here.'}</p>
+        {status.off && window.__ADAL_CLOUD
+          ? <>
+              <h2 className="mt-2 text-lg font-bold">The office PC is off</h2>
+              <p className="mt-1 text-sm text-slate-500">The chat goes through the office PC. It opens here by itself as soon as the PC is on.</p>
+            </>
+          : <>
+              <h2 className="mt-2 text-lg font-bold">The chat is not connected on this PC yet</h2>
+              <p className="mt-1 text-sm text-slate-500">{status.error || 'Adal adds the chat server to Adal Keep — then every agency appears here.'}</p>
+            </>}
       </div>
     )
   }

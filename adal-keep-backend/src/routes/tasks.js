@@ -81,6 +81,19 @@ router.patch('/:id', async (req, res) => {
   }
 })
 
+// Many at once ("Remove all", "Clear completed"): one call, done here one by one (to Trash).
+router.post('/clear', async (req, res) => {
+  try {
+    const ids = (Array.isArray(req.body?.ids) ? req.body.ids : []).map(Number).filter(Boolean).slice(0, 2000)
+    const { moveToTrash } = await import('../services/trash.js')
+    let removed = 0
+    for (const id of ids) { try { await moveToTrash(req.app.locals.db, 'task', id, req); removed++ } catch {} }
+    res.json({ success: true, removed })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
 router.delete('/:id', async (req, res) => {
   try {
     const { moveToTrash } = await import('../services/trash.js')

@@ -52,7 +52,7 @@ public class AdalBrowserActivity extends Activity {
     private boolean desktop = true;
     private String mobileUa;
     private String host = "", user = "", pass = "";
-    private String profileJson = "{}", fillJs = null;
+    private String profileJson = "{}", plansJson = "[]", fillJs = null;
     private SharedPreferences prefs;
     // Trackers and ads: not downloaded (faster on a slow line). Never the portal, never reCAPTCHA.
     private static final String[] BLOCK = { "google-analytics.com", "googletagmanager.com", "doubleclick.net", "googlesyndication.com",
@@ -74,6 +74,8 @@ public class AdalBrowserActivity extends Activity {
         desktop = prefs.getBoolean("desktop:" + host, o.optBoolean("desktop", false));
         JSONObject prof = o.optJSONObject("profile");
         if (prof != null) profileJson = prof.toString();
+        org.json.JSONArray plans = o.optJSONArray("plans");
+        if (plans != null) plansJson = plans.toString();
         try (InputStream in = getAssets().open("adal-fill.js")) { fillJs = new String(readAll(in), "UTF-8"); } catch (Exception e) { fillJs = null; }
 
         LinearLayout root = new LinearLayout(this);
@@ -261,9 +263,9 @@ public class AdalBrowserActivity extends Activity {
 
     /** Fill this page's forms with her details (only on the portal's own site); new steps fill as they appear. */
     private void fillForm(boolean byHand) {
-        if (fillJs == null || "{}".equals(profileJson)) return;
+        if (fillJs == null || ("{}".equals(profileJson) && "[]".equals(plansJson))) return;
         if (!onPortal()) { if (byHand) Toast.makeText(this, "This is not the portal's own page — nothing filled", Toast.LENGTH_SHORT).show(); return; }
-        web.evaluateJavascript(fillJs + ";window.__adalAuto=true;window.__adalFill(" + profileJson + ")", r -> {
+        web.evaluateJavascript(fillJs + ";window.__adalAuto=true;window.__adalFill(" + profileJson + "," + plansJson + ")", r -> {
             int n = 0; try { n = Integer.parseInt(r); } catch (Exception e) {}
             if (n > 0 || byHand) Toast.makeText(this, n > 0 ? "✨ Filled " + n + " box" + (n == 1 ? "" : "es") + " — check the green ones" : "Nothing on this page matches her details", Toast.LENGTH_SHORT).show();
         });

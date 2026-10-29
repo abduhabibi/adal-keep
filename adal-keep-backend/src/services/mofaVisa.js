@@ -65,7 +65,8 @@ const isoDate = (v) => {
   const s = String(v).trim()
   if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10)
   const d = new Date(s)
-  return isNaN(d) ? '' : d.toISOString().slice(0, 10)
+  // its own day, not the UTC one ("12 MAR 2023" was read as the 11th in Addis)
+  return isNaN(d) ? '' : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 const addDays = (n) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10)
 

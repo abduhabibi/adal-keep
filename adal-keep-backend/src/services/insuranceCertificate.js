@@ -45,7 +45,8 @@ const isoDate = (v) => {
   const s = String(v || '').trim()
   if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10)
   const d = new Date(s)
-  return s && !isNaN(d) ? d.toISOString().slice(0, 10) : ''
+  // its own day, not the UTC one ("4 May 1999" was read as the 3rd in Addis)
+  return s && !isNaN(d) ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` : ''
 }
 
 /** What the certificate form gets. Choices are regular expressions. */

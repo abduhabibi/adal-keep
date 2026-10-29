@@ -33,7 +33,7 @@ const GLOBAL = ['/profiles', '/brokers', '/tasks', '/employees', '/settings', '/
   '/dashboard', '/tasks/documents', '/wafid/settings', '/health', '/tutor/tour', '/trash', '/cv/generated',
   '/lmis/accounts', '/musaned/accounts', '/tasheer/accounts', '/insurance/accounts', '/visa/accounts']
 const PER_PROFILE = (id) => [`/profiles/${id}`, `/profiles/${id}/fields`, `/profiles/${id}/automations`,
-  `/profiles/${id}/journey`, `/cv/profile-readiness/${id}`, `/cv/generated?profile_id=${id}`]
+  `/profiles/${id}/journey`, `/profiles/${id}/fill-plan`, `/cv/profile-readiness/${id}`, `/cv/generated?profile_id=${id}`]
 const PER_BROKER = (id) => [`/brokers/${id}`]
 // The portals' sign-ins (LMIS, Musaned …): the lists go online without their
 // passwords; the passwords go in "/vault", locked with the agency's own key

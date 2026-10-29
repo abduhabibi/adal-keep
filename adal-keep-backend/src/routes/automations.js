@@ -391,6 +391,19 @@ export function journeyOf(p, runs = {}, hasCv = false) {
   }
 }
 
+// What the phone's browser fills on each portal (services/phoneFillPlan.js).
+router.get('/profiles/:profileId/fill-plan', async (req, res) => {
+  try {
+    const db = req.app.locals.db
+    const p = await db('profiles').where('id', Number(req.params.profileId)).first()
+    if (!p) return res.status(404).json({ error: 'Profile not found' })
+    const { fillPlans, fillSettings } = await import('../services/phoneFillPlan.js')
+    let employee = ''
+    try { employee = (await (await import('../services/activeEmployee.js')).getActiveEmployee(db))?.name || '' } catch {}
+    res.json({ plans: fillPlans(p, await fillSettings(db), employee) })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
 router.get('/profiles/:profileId/journey', async (req, res) => {
   try {
     const db = req.app.locals.db

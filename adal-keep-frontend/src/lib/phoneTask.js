@@ -46,7 +46,7 @@ export async function openOnPhone({ workflowId, profileId, accountId, title }) {
       if (a) { user = a.login_value || a.username || a.phone || ''; pass = a.password || '' }
     } catch {}
   }
-  let fields = [], profile = {}
+  let fields = [], profile = {}, plans = []
   if (profileId) {
     try {
       const p = (await api.get(`/profiles/${profileId}`)).data || {}
@@ -61,9 +61,11 @@ export async function openOnPhone({ workflowId, profileId, accountId, title }) {
         emergency_relationship: p.emergency_relationship,
       }).filter(([, v]) => v != null && String(v).trim() !== '').map(([k, v]) => [k, String(v).trim()]))
     } catch {}
+    // The PC robots' own steps for this portal (same boxes, same values).
+    try { plans = ((await api.get(`/profiles/${profileId}/fill-plan`)).data?.plans || []).filter(pl => pl.site === site) } catch {}
   }
   const plugin = window.Capacitor?.Plugins?.AdalDiscovery
   if (!plugin?.openBrowser) { window.open(url, '_blank', 'noopener'); return { opened: 'tab' } }
-  await plugin.openBrowser({ url, host: site, user, pass, fields, profile, title: title || '', desktop: false })
+  await plugin.openBrowser({ url, host: site, user, pass, fields, profile, plans, title: title || '', desktop: false })
   return { opened: 'phone', signIn: !!pass }
 }

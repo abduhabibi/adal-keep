@@ -18,8 +18,9 @@ router.get('/calls', async (req, res) => {
   try {
     const db = req.app.locals.db
     const after = Number(req.query.after) || 0
-    const q = db('tasks').where('type', 'automation').orderBy('id', 'desc').limit(20).select('id', 'title', 'description', 'profile_id', 'created_at')
-    res.json(after ? await q.where('id', '>', after) : await q.limit(1))
+    const q = db('tasks').where('type', 'automation').orderBy('id', 'desc').limit(20).select('id', 'title', 'description', 'profile_id', 'created_at', 'payload')
+    const rows = after ? await q.where('id', '>', after) : await q.limit(1)
+    res.json(rows.map(({ payload, ...r }) => { let run = null; try { run = JSON.parse(payload || '{}').run || null } catch {} return { ...r, run } }))
   } catch (err) {
     res.status(500).json({ error: 'Failed to load calls' })
   }

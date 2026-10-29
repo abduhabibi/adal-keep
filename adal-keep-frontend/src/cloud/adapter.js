@@ -124,6 +124,7 @@ async function get(path, query) {
     const fields = (await answer(`/profiles/${files[1]}/fields`)) || []
     return fields.find(f => String(f.id) === files[2])?.files || []
   }
+  if (path === '/cv/generated' && query.profile_id) return (await answer(`/cv/generated?profile_id=${query.profile_id}`)) || []
   const data = await answer(path)
   if (data === undefined) throw httpError(503, 'This needs the PC — it is not in the online copy.')
   return data
@@ -239,6 +240,7 @@ function baseKey(path, query) {
   const files = path.match(/^\/profiles\/(\d+)\/fields\/(\d+)\/files$/)
   if (files) return `/profiles/${files[1]}/fields`
   if (path === '/profiles') return path
+  if (path === '/cv/generated' && query?.profile_id) return `/cv/generated?profile_id=${query.profile_id}`
   return Object.keys(query || {}).length ? null : path
 }
 // Right after a change, the touched answers come from the PC itself for a few
@@ -309,23 +311,23 @@ export async function cloudAdapter(config) {
     if (await pcOnline()) {
       const qs = u.search || (config.params ? '?' + new URLSearchParams(Object.entries(config.params).filter(([, v]) => v != null)).toString() : '')
       // Uploads: the files go online first; the PC files them at once.
+      // A form: its text goes as it is; its files go online first and the PC
+      // files them at once and answers (a chat message shows straight away).
       let sendBody = body
       if (body instanceof FormData) {
-        const parts = await uploadParts(body)
-        const pid = Number(path.match(/^\/profiles\/(\d+)/)?.[1]) || null
-        await request('upload', { path, ...parts }, pid)
-        return reply(200, { ok: true, success: true, queued: true, files: [], message: 'Uploaded — the PC files it in a moment.' })
+        const hasFile = [...body.values()].some(v => v instanceof Blob)
+        sendBody = hasFile ? { __upload: { path, ...(await uploadParts(body)) } } : Object.fromEntries(body.entries())
       }
       let a = null
       // The live link first (a fraction of a second), else the slower way.
       if (liveReady()) {
-        const m = await liveCall(method, path + qs, method === 'get' ? undefined : sendBody, method === 'get' ? 9000 : 20000)
+        const m = await liveCall(method, path + qs, method === 'get' ? undefined : sendBody, method === 'get' ? 9000 : sendBody?.__upload ? 90000 : 20000)
         if (m?.row) a = (await rest('GET', `/rest/v1/keep_calls?id=eq.${m.row}&select=status,answer,answer_bin,answer_type,answer_head,answer_code`))?.[0] || null
         else if (m) a = { answer_code: m.code, answer_type: m.type, answer_head: m.head, answer: m.gz ? await gunzipJSON(m.gz) : m.data, answer_bin: m.bin }
         if (!m && method !== 'get') throw httpError(504, 'The PC did not answer in time — it may still do it. Look again in a moment.')
       }
       if (!a) {
-        try { a = await relay(method, path + qs, method === 'get' ? undefined : sendBody, method === 'get' ? 12000 : 25000) }
+        try { a = await relay(method, path + qs, method === 'get' ? undefined : sendBody, method === 'get' ? 12000 : sendBody?.__upload ? 90000 : 25000) }
         catch (e) { if (method !== 'get') throw e }
       }
       if (a) {
@@ -340,6 +342,8 @@ export async function cloudAdapter(config) {
     if (config.responseType === 'blob' && !(data instanceof Blob)) throw httpError(503, 'This needs the PC.')
     return reply(200, data)
   } catch (e) {
+    // The last calls that failed (for looking into problems: window.__adalErrors).
+    try { (window.__adalErrors ||= []).push({ at: new Date().toISOString(), method, path, error: e.message }); window.__adalErrors.splice(0, window.__adalErrors.length - 20) } catch {}
     const err = e.response ? e : httpError(503, e.message)
     err.config = config
     err.response = { ...err.response, config, headers: {}, statusText: String(err.response.status) }
@@ -353,6 +357,28 @@ export async function cloudAdapter(config) {
 // The agency's secrets: the documents' key and the Telegram bot that keeps them.
 let secretsP = null
 export const cloudSecrets = () => (secretsP ||= rest('GET', '/rest/v1/keep_secrets?select=file_key,live,bot').then(r => r?.[0] || null).catch(() => { secretsP = null; return null }))
+
+/** "AK1" + iv + tag + data (AES-256-GCM with the agency's key) → the bytes. */
+async function openAK1(buf, keyB64) {
+  if (buf[0] !== 65 || buf[1] !== 75 || buf[2] !== 49) throw new Error('not locked by Adal Keep')
+  const raw = Uint8Array.from(atob(keyB64), ch => ch.charCodeAt(0))
+  const key = await crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['decrypt'])
+  const iv = buf.slice(3, 15), tag = buf.slice(15, 31), data = buf.slice(31)
+  const joined = new Uint8Array(data.length + tag.length); joined.set(data); joined.set(tag, data.length)
+  return new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, joined))
+}
+
+/** The portals' sign-ins (LMIS, Musaned …) with their passwords — "/vault", opened here. */
+export async function openVault() {
+  const c = cloudCreds()
+  await mirrorReady(c.agency)
+  let v = mirrorGet('/vault')
+  if (!v) { const rows = await rest('GET', '/rest/v1/keep_meta?key=eq./vault&select=data'); v = rows?.[0]?.data; if (v) remember('/vault', v) }
+  const s = await cloudSecrets()
+  if (!v?.v || !s?.file_key) return {}
+  const plain = await openAK1(Uint8Array.from(atob(v.v), ch => ch.charCodeAt(0)), s.file_key)
+  return JSON.parse(new TextDecoder().decode(plain))
+}
 
 /** A document kept in Telegram: download, decrypt here (AES-GCM) — the file itself. */
 async function telegramFile(object, mimetype) {

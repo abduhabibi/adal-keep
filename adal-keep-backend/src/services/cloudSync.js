@@ -30,9 +30,15 @@ const MAX_FILE = 45 * 1024 * 1024
 // The answers the pages read: once for the agency, and per profile.
 const GLOBAL = ['/profiles', '/brokers', '/tasks', '/employees', '/settings', '/setup/status', '/subscription/status',
   '/automations/stages', '/automations/active', '/notifications', '/checklists', '/cv/templates', '/quick-links',
-  '/dashboard', '/tasks/documents', '/wafid/settings', '/health', '/tutor/tour']
+  '/dashboard', '/tasks/documents', '/wafid/settings', '/health', '/tutor/tour', '/trash',
+  '/lmis/accounts', '/musaned/accounts', '/tasheer/accounts', '/insurance/accounts', '/visa/accounts']
 const PER_PROFILE = (id) => [`/profiles/${id}`, `/profiles/${id}/fields`, `/profiles/${id}/automations`,
-  `/profiles/${id}/journey`, `/cv/profile-readiness/${id}`]
+  `/profiles/${id}/journey`, `/cv/profile-readiness/${id}`, `/cv/generated?profile_id=${id}`]
+const PER_BROKER = (id) => [`/brokers/${id}`]
+// The portals' sign-ins (LMIS, Musaned …): the lists go online without their
+// passwords; the passwords go in "/vault", locked with the agency's own key
+// (keep_secrets.file_key) — the agency's phones open it to sign in themselves.
+const ACCOUNT_LISTS = ['/lmis/accounts', '/musaned/accounts', '/tasheer/accounts', '/insurance/accounts', '/visa/accounts']
 const SECRET = /pass|token|secret|otp|api[_-]?key|license|cookie/i
 
 // Phone requests never replayed: they change the PC itself, not the agency's work.
@@ -60,11 +66,42 @@ async function setState(db, key, hash) {
 }
 
 function clean(key, data) {
-  if (key !== '/settings' || !data || typeof data !== 'object') return data
-  return Object.fromEntries(Object.entries(data).filter(([k]) => !SECRET.test(k)))
+  if (!data || typeof data !== 'object') return data
+  const strip = (o) => (o && typeof o === 'object' ? Object.fromEntries(Object.entries(o).filter(([k]) => !SECRET.test(k))) : o)
+  if (key === '/settings') return strip(data)
+  if (ACCOUNT_LISTS.includes(key) && Array.isArray(data)) return data.map(strip)
+  // A generated CV's list entry without its full copy of the data (1–2 MB each).
+  if (key.startsWith('/cv/generated') && Array.isArray(data)) return data.map(({ data_snapshot, ...c }) => c)
+  return data
+}
+
+/** "/vault": the portals' sign-ins with their passwords, locked with the agency's key. */
+async function pushVault(db, agency, state) {
+  const vault = {}
+  for (const key of ACCOUNT_LISTS) {
+    try { const r = await local('GET', key); if (r.ok) vault[key] = await r.json() } catch {}
+  }
+  const hash = sha(JSON.stringify(vault))
+  if (state.get('/vault') === hash) return
+  const { encrypt } = await import('./tgStore.js')
+  const { file_key } = await agencySecrets(db, agency)
+  await upsert(db, 'keep_meta', [{ agency_id: agency, key: '/vault', data: { v: encrypt(Buffer.from(JSON.stringify(vault)), file_key).toString('base64') }, updated_at: new Date().toISOString() }], 'agency_id,key')
+  await setState(db, '/vault', hash)
 }
 
 // ------------------------------------------------------------ 1. requests
+// A phone's form with files: the files wait in Supabase storage, the rest is text.
+async function formOf(db, p) {
+  const form = new FormData()
+  for (const [k, v] of Object.entries(p.form || {})) form.append(k, String(v))
+  for (const f of p.files || []) {
+    const res = await cloudCall(db, 'GET', `/storage/v1/object/keep/${f.object}`, undefined, { raw: true })
+    if (!res.ok) throw new Error(`file ${f.name} not found online`)
+    form.append(f.field || 'file', new Blob([Buffer.from(await res.arrayBuffer())], { type: f.mimetype || 'application/octet-stream' }), f.name || 'file')
+  }
+  return form
+}
+
 let applying = null
 const applyChanges = (db, agency) => (applying ||= applyChangesNow(db, agency).finally(() => { applying = null }))
 async function applyChangesNow(db, agency) {
@@ -76,17 +113,11 @@ async function applyChangesNow(db, agency) {
       names ||= new Map(((await cloudCall(db, 'GET', `/rest/v1/keep_devices?agency_id=eq.${agency}&select=user_id,name`)) || []).map(d => [d.user_id, d.name]))
       const who = { 'X-Adal-Who': encodeURIComponent(names.has(c.device_id) ? `${names.get(c.device_id)} (phone)` : 'Adal support') }
       const p = c.payload || {}
-      if (!String(p.path || '').startsWith('/') || NOT_FROM_PHONES.test(p.path)) throw new Error('not allowed from a phone')
+      // (Chat messages written while the PC was off are sent now.)
+      if (!String(p.path || '').startsWith('/') || (NOT_FROM_PHONES.test(p.path) && !/^\/chat\b/.test(p.path))) throw new Error('not allowed from a phone')
       let r
       if (c.kind === 'upload') {
-        const form = new FormData()
-        for (const [k, v] of Object.entries(p.form || {})) form.append(k, String(v))
-        for (const f of p.files || []) {
-          const res = await cloudCall(db, 'GET', `/storage/v1/object/keep/${f.object}`, undefined, { raw: true })
-          if (!res.ok) throw new Error(`file ${f.name} not found online`)
-          form.append(f.field || 'file', new Blob([Buffer.from(await res.arrayBuffer())], { type: f.mimetype || 'application/octet-stream' }), f.name || 'file')
-        }
-        r = await local('POST', p.path, { body: form, headers: who })
+        r = await local('POST', p.path, { body: await formOf(db, p), headers: who })
         // Filed on this PC: the phone's upload leaves Supabase storage.
         if (r.ok) for (const f of p.files || []) await cloudCall(db, 'DELETE', `/storage/v1/object/keep/${f.object}`).catch(() => {})
       } else {
@@ -141,6 +172,7 @@ async function summary(db) {
 // touches go online within a second, and the phones are told which ones
 // changed (live link) — they keep their own copy of every answer.
 const soonKeys = new Set()
+let vaultSoon = false
 const soonAt = new Map()   // key → when a change of it went online (the minute's copy must not undo it)
 let soonTimer = null
 export function pushSoon(db, apiPath) {
@@ -149,6 +181,9 @@ export function pushSoon(db, apiPath) {
   const keys = id ? [...PER_PROFILE(id), '/profiles', '/dashboard', '/automations/active', '/automations/stages', '/tasks', '/notifications', '/checklists']
     : GLOBAL.filter(k => !['/setup/status', '/subscription/status', '/health', '/tutor/tour', '/cv/templates'].includes(k))
   if (/^\/automations/.test(p)) for (const r of ['/profiles', '/automations/active', '/automations/stages']) keys.push(r)
+  const broker = p.match(/^\/brokers\/(\d+)/)?.[1]
+  if (broker) keys.push(`/brokers/${broker}`)
+  if (/accounts/.test(p)) { keys.push(...ACCOUNT_LISTS); vaultSoon = true }
   keys.forEach(k => soonKeys.add(k))
   clearTimeout(soonTimer)
   soonTimer = setTimeout(() => pushKeys(db).catch(e => console.warn('[cloud] soon:', e.message)), 600)
@@ -159,6 +194,7 @@ async function pushKeys(db) {
   const agency = await cloudAgencyId(db)
   if (!agency) return
   const state = await stateOf(db)
+  if (vaultSoon) { vaultSoon = false; await pushVault(db, agency, state).catch(() => {}) }
   const rows = [], hashes = []
   for (const key of keys) {
     let r
@@ -195,7 +231,9 @@ async function pushKeys(db) {
 
 async function pushAnswers(db, agency, state) {
   const ids = (await db('profiles').select('id')).map(r => r.id)
-  const keys = [...GLOBAL, ...ids.flatMap(PER_PROFILE)]
+  const brokers = (await db('brokers').select('id').catch(() => [])).map(r => r.id)
+  const keys = [...GLOBAL, ...ids.flatMap(PER_PROFILE), ...brokers.flatMap(PER_BROKER)]
+  await pushVault(db, agency, state).catch(e => console.warn('[cloud] vault:', e.message))
   const wanted = new Set(keys)
   let batch = []
   const flush = async () => {
@@ -233,7 +271,7 @@ async function pushAnswers(db, agency, state) {
   await flush()
   // Profiles that are gone: their answers go too.
   for (const key of state.keys()) {
-    if (!key.startsWith('/') || wanted.has(key) || key === '/_summary') continue
+    if (!key.startsWith('/') || wanted.has(key) || key === '/_summary' || key === '/vault') continue
     await cloudCall(db, 'DELETE', `/rest/v1/keep_meta?agency_id=eq.${agency}&key=eq.${encodeURIComponent(key)}`, undefined, { headers: { Prefer: 'return=minimal' } }).catch(() => {})
     await db('cloud_sync').where({ key }).del()
   }
@@ -492,7 +530,13 @@ export async function runCall(db, agency, c) {
       deviceNames = new Map(((await cloudCall(db, 'GET', `/rest/v1/keep_devices?agency_id=eq.${agency}&select=user_id,name`)) || []).map(d => [d.user_id, d.name]))
       namesAt = Date.now()
     }
-    const r = await local(method, p, { body: method === 'GET' ? undefined : (c.body ?? undefined), headers: { 'X-Adal-Who': encodeURIComponent(deviceNames.has(c.device_id) ? `${deviceNames.get(c.device_id)} (phone)` : 'Adal support') } })
+    const who = { 'X-Adal-Who': encodeURIComponent(deviceNames.has(c.device_id) ? `${deviceNames.get(c.device_id)} (phone)` : 'Adal support') }
+    // An upload from a phone while the PC is on: done now, with the PC's real answer.
+    const up = method === 'POST' && c.body?.__upload
+    const r = up
+      ? await local('POST', p, { body: await formOf(db, c.body.__upload), headers: who })
+      : await local(method, p, { body: method === 'GET' ? undefined : (c.body ?? undefined), headers: who })
+    if (up && r.ok) for (const f of c.body.__upload.files || []) cloudCall(db, 'DELETE', `/storage/v1/object/keep/${f.object}`).catch(() => {})
     patch.answer_code = r.status
     const type = r.headers.get('content-type') || ''
     patch.answer_type = type

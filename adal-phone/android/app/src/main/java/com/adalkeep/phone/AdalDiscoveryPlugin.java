@@ -102,6 +102,19 @@ public class AdalDiscoveryPlugin extends Plugin {
     }
 
     /** This app's own version: { versionCode, versionName }. */
+    /** A task done on the phone: the portal in Adal Keep's own browser (AdalBrowserActivity). */
+    @PluginMethod
+    public void openBrowser(PluginCall call) {
+        try {
+            Intent i = new Intent(getContext(), AdalBrowserActivity.class);
+            i.putExtra("options", call.getData().toString());
+            getActivity().startActivity(i);
+            call.resolve();
+        } catch (Exception e) {
+            call.reject(e.getMessage());
+        }
+    }
+
     @PluginMethod
     public void getVersion(PluginCall call) {
         try {

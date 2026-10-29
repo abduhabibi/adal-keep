@@ -115,8 +115,9 @@ function startPair(msg = '') {
 }
 
 ;(async () => {
-  await checkUpdate()
   const pc = saved()
-  if (pc?.cloud && !new URLSearchParams(location.search).has('pair')) open()
-  else startPair()
+  // Paired: straight in (the app looks for updates itself).
+  if (pc?.cloud && !new URLSearchParams(location.search).has('pair')) return open()
+  await checkUpdate()
+  startPair()
 })()

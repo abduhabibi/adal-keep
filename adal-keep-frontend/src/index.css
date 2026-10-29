@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Syne:wght@600;700;800&display=swap');
+/* Fonts come with the app (main.jsx): nothing waits for Google Fonts. */
 
 @tailwind base;
 
@@ -72,7 +72,7 @@ html, body, #root {
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "DM Sans", "Inter", system-ui, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "DM Sans Variable", "DM Sans", "Inter", system-ui, sans-serif;
   background: var(--bg);
   color: var(--text);
   line-height: 1.5;
@@ -83,7 +83,7 @@ body {
 }
 
 .font-display {
-  font-family: 'Syne', 'DM Sans', sans-serif;
+  font-family: 'Syne', 'DM Sans Variable', 'DM Sans', sans-serif;
 }
 
 /* ============================================

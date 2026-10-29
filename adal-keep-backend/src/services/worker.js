@@ -406,12 +406,14 @@ async function executeRun(db, page, job) {
 
   const notify = async (title, body, level = 'info', opts = {}) => {
     try {
-      await db('tasks').insert({
+      const [taskId] = await db('tasks').insert({
         type: 'automation', title, description: body || '',
         status: 'pending', profile_id: job.profile_id, assigned_to: 1,
-        is_ai_created: true, created_at: new Date().toISOString(),
+        is_ai_created: true, created_at: new Date().toISOString(), payload: JSON.stringify({ run: runId }),
       })
       console.log(`[notify] ${level.toUpperCase()} ${title}`)
+      // The phones hear it at once (live link), not at their next look.
+      import('./liveChannel.js').then(L => L.broadcast({ t: 'call', id: Number(taskId?.id ?? taskId) || 0, title, description: String(body || '').slice(0, 300), profile_id: job.profile_id, run: runId, at: Date.now() })).catch(() => {})
       if (onLog) await onLog(level, `🔔 ${title}`)
       // A sign-in call rings the one watch alarm until a person touches that
       // page (or 1 minute); every other call rings its task's own sound.

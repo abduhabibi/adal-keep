@@ -2,7 +2,8 @@ import LiveTab from './LiveTab'
 import { IN_PHONE_APP, onBack } from '../lib/phoneApp'
 import { useEffect, useState, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { useNavigate } from 'react-router-dom'
+import { openOnPhone, portalOf } from '../lib/phoneTask'
+import { useNavigate, useLocation } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import api from '../services/api'
 import LmisAccountPicker from './LmisAccountPicker'
@@ -80,8 +81,18 @@ export default function ProfileAutomations({ profileId }) {
   const foldAI = () => setAiOpen(o => { try { localStorage.setItem('adal-fold-ai', o ? '0' : '1') } catch {} return !o })
   const [open, setOpen] = useState(null)
   const [screen, setScreen] = useState(false)     // the phone's full-screen task view
+  const [choose, setChoose] = useState(null)      // phone: do this step here, or let the PC do it?
+  const [pcOn, setPcOn] = useState(false)
+  useEffect(() => {
+    if (!window.__ADAL_CLOUD) return
+    import('../cloud/live.js').then(L => setPcOn(L.pcLive())).catch(() => {})
+    const on = (e) => setPcOn(!!e.detail)
+    window.addEventListener('adal-pc-online', on)
+    return () => window.removeEventListener('adal-pc-online', on)
+  }, [])
+  useEffect(() => choose ? onBack(() => setChoose(null)) : undefined, [choose])
   const navigate = useNavigate()
-  const openRun = (id) => { setOpen(id); if (PHONE_VIEW()) setScreen(true) }
+  const openRun = (id) => { setOpen(id); setAiOpen(true); if (PHONE_VIEW()) setScreen(true) }
   useEffect(() => screen ? onBack(() => setScreen(false)) : undefined, [screen])
   // The PC's tab, live (on the phone app it opens by itself).
   const [liveOpen, setLiveOpen] = useState(null)
@@ -116,6 +127,8 @@ export default function ProfileAutomations({ profileId }) {
   // Opened from a call or a notification (?attention=1 or ?run=<id>): the run
   // that waits for a person opens by itself.
   const attended = useRef(false)
+  const location = useLocation()
+  useEffect(() => { attended.current = false }, [location.search, profileId])   // a new call: open again
   useEffect(() => {
     if (attended.current || !workflows.length) return
     const q = new URLSearchParams(window.location.search)
@@ -124,7 +137,7 @@ export default function ProfileAutomations({ profileId }) {
       .find(r => r.status === 'paused') || workflows.map(w => w.latest).filter(Boolean).find(r => r.status === 'running')
     const pick = runId || (q.has('attention') ? waiting?.id : null)
     if (pick) { attended.current = true; openRun(pick) }
-  }, [workflows])
+  }, [workflows, location.search])
 
   // The run's panel scrolls into view when it opens (on a phone it is far below the cards).
   useEffect(() => {
@@ -162,6 +175,16 @@ export default function ProfileAutomations({ profileId }) {
   }, [open])
 
   const wfName = (id) => workflows.find(w => w.id === id)?.name || id
+
+  // The step on this phone: its website opens here, the sign-in filled.
+  const doOnPhone = async (workflowId) => {
+    setChoose(null)
+    const t = toast.loading('Opening on this phone…')
+    try {
+      const r = await openOnPhone({ workflowId, profileId, accountId: accountFor(workflowId), title: wfName(workflowId) })
+      toast.success(r.signIn ? 'Sign-in filled — press the site\'s Sign in' : 'Opened on this phone', { id: t, duration: 4000 })
+    } catch (e) { toast.error(e.message, { id: t }) }
+  }
 
   // Musaned workflows use the Musaned account picker; everything else LMIS.
   const accountFor = (workflowId) =>
@@ -251,6 +274,8 @@ export default function ProfileAutomations({ profileId }) {
                   if (PHONE_VIEW()) return
                   return toast(describeRun(latest), { icon: isQueued ? '⏳' : 'ℹ️', duration: 5000 })
                 }
+                // On the phone: do it here (its website, signed in) or let the PC do it.
+                if (window.__ADAL_CLOUD && portalOf(w.id)) { import('../cloud/live.js').then(L => setPcOn(L.pcLive())).catch(() => {}); return setChoose(w.id) }
                 // Checking again is normal: a done check simply runs again.
                 if (isDone && REPEATABLE.has(w.id)) return start(w.id)
                 if (isDone) {
@@ -505,6 +530,27 @@ export default function ProfileAutomations({ profileId }) {
         </div>
       )}
       </>}
+      {choose && createPortal(
+        <div className="fixed inset-0 z-[96] bg-black/40 flex items-end" onClick={() => setChoose(null)}>
+          <div className="w-full rounded-t-2xl bg-white dark:bg-slate-900 p-4 space-y-2.5" style={{ paddingBottom: 'calc(16px + env(safe-area-inset-bottom))' }} onClick={e => e.stopPropagation()}>
+            <p className="font-bold">{wfName(choose)}</p>
+            <button onClick={() => doOnPhone(choose)} className="w-full rounded-xl bg-indigo-600 text-white py-3 text-sm font-semibold text-left px-4">
+              📱 Do it on this phone<span className="block text-[11px] font-normal opacity-90">Its website opens here, signed in for you — only phone and internet</span>
+            </button>
+            <button onClick={() => { const w = choose; setChoose(null); start(w) }} className="w-full rounded-xl border border-slate-300 dark:border-slate-600 py-3 text-sm font-semibold text-left px-4">
+              💻 The PC does it<span className="block text-[11px] font-normal text-slate-500">{pcOn ? 'It starts now on the office PC; you watch it here' : 'The office PC is off — it starts when the PC is on'}</span>
+            </button>
+            <button onClick={() => setChoose(null)} className="w-full py-2 text-sm text-slate-500">Cancel</button>
+          </div>
+        </div>,
+        document.body)}
+      {screen && open && !(detail && detail.id === open) && createPortal(
+        <div className="fixed inset-0 z-[95] flex flex-col items-center justify-center gap-3 bg-white dark:bg-slate-950 text-sm text-slate-500">
+          <div className="w-8 h-8 rounded-full border-4 border-indigo-200 border-t-indigo-600 animate-spin" />
+          <p>Opening task #{open}…</p>
+          <button onClick={() => setScreen(false)} className="px-4 py-2 rounded-lg border border-slate-300">Back</button>
+        </div>,
+        document.body)}
       {screen && open && detail && detail.id === open && createPortal(
         <div className="fixed inset-0 z-[95] flex flex-col bg-white dark:bg-slate-950" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
           <div className="shrink-0 border-b border-slate-200 dark:border-slate-800 px-2 pt-2 pb-1.5 space-y-1.5">
@@ -526,6 +572,7 @@ export default function ProfileAutomations({ profileId }) {
                   <button onClick={() => { complete(); setScreen(false) }} className="shrink-0 px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-semibold">{COMPLETE_LABEL[detail.pause_reason]}</button>
                 )}
                 <button onClick={cancel} className="shrink-0 px-3 py-1.5 rounded-lg border border-red-300 text-red-600 text-xs font-semibold">{cancelArmed ? 'Tap again to cancel' : 'Cancel'}</button>
+                {portalOf(detail.workflow_id) && <button onClick={() => doOnPhone(detail.workflow_id)} className="shrink-0 px-3 py-1.5 rounded-lg border border-indigo-300 text-indigo-700 text-xs font-semibold">📱 On this phone</button>}
               </div>
             )}
           </div>

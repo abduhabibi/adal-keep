@@ -87,12 +87,28 @@ export function mirrorSync(rest, agency) {
       if (!lastAt && !mem.has('/profiles')) {
         take(await rest('GET', `/rest/v1/keep_meta?key=in.(/profiles,/brokers,/settings,/dashboard)&${sel}`) || [], agency, false)
       }
-      for (let page = 0; page < 40; page++) {
-        const since = lastAt ? `&updated_at=gte.${encodeURIComponent(lastAt)}` : ''
-        const rows = await rest('GET', `/rest/v1/keep_meta?${sel}${since}&order=updated_at.asc&limit=150`) || []
-        take(rows, agency)
-        if (rows.length < 150) break
+      if (!lastAt) {
+        // The first time: everything, in pages.
+        for (let page = 0; page < 40; page++) {
+          const since = lastAt ? `&updated_at=gte.${encodeURIComponent(lastAt)}` : ''
+          const rows = await rest('GET', `/rest/v1/keep_meta?${sel}${since}&order=updated_at.asc&limit=150`) || []
+          take(rows, agency)
+          if (rows.length < 150) break
+        }
+        return
       }
+      // Then: the names and times of what changed lately (a big upload from a
+      // slow office line can land minutes after its time), and only those the
+      // phone does not have yet.
+      const back = new Date(new Date(lastAt).getTime() - 10 * 60000).toISOString()
+      const list = await rest('GET', `/rest/v1/keep_meta?select=key,updated_at&updated_at=gte.${encodeURIComponent(back)}&order=updated_at.asc&limit=2000`) || []
+      const need = list.filter(r => !String(r.key).startsWith('/_') && mem.get(r.key)?.at !== r.updated_at).map(r => r.key)
+      for (let i = 0; i < need.length; i += 40) {
+        const q = need.slice(i, i + 40).map(k => `"${String(k).replace(/"/g, '')}"`).join(',')
+        take(await rest('GET', `/rest/v1/keep_meta?key=in.(${encodeURIComponent(q)})&${sel}`) || [], agency, false)
+      }
+      const newest = list.reduce((m, r) => (r.updated_at > m ? r.updated_at : m), lastAt)
+      if (newest !== lastAt) { lastAt = newest; try { localStorage.setItem(LAST(agency), lastAt) } catch {} }
     } finally { syncing = null }
   })())
 }
@@ -111,11 +127,16 @@ export async function mirrorFetch(rest, agency, keys) {
   take(await rest('GET', `/rest/v1/keep_meta?key=in.(${encodeURIComponent(q)})&select=key,data,updated_at`) || [], agency)
 }
 
-/** Answers the PC no longer keeps (a deleted profile …) go here too. */
+/** Every 15 min: answers the PC no longer keeps go here too, and any the phone missed come. */
 export async function mirrorPrune(rest, agency) {
-  const rows = await rest('GET', '/rest/v1/keep_meta?select=key') || []
-  const there = new Set(rows.map(r => r.key))
+  const rows = await rest('GET', '/rest/v1/keep_meta?select=key,updated_at') || []
+  const there = new Map(rows.map(r => [r.key, r.updated_at]))
   const gone = [...mem.keys()].filter(k => !there.has(k))
   for (const k of gone) mem.delete(k)
   if (gone.length) store(gone.map(key => ({ key, del: true }))).catch(() => {})
+  const need = rows.filter(r => !String(r.key).startsWith('/_') && mem.get(r.key)?.at !== r.updated_at).map(r => r.key)
+  for (let i = 0; i < need.length; i += 40) {
+    const q = need.slice(i, i + 40).map(k => `"${String(k).replace(/"/g, '')}"`).join(',')
+    take(await rest('GET', `/rest/v1/keep_meta?key=in.(${encodeURIComponent(q)})&select=key,data,updated_at`) || [], agency, false)
+  }
 }

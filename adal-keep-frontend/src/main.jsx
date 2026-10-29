@@ -2,6 +2,11 @@ import './lib/phoneApp'
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'
+// The fonts are part of the app (no waiting for Google Fonts, works offline).
+import '@fontsource-variable/dm-sans/index.css'
+import '@fontsource/syne/600.css'
+import '@fontsource/syne/700.css'
+import '@fontsource/syne/800.css'
 import './index.css'
 
 // A page in a hidden tab does not need its every-few-seconds refreshes: they
@@ -39,6 +44,10 @@ async function boot() {
 async function phoneBoot() {
   const q = new URLSearchParams(location.search)
   if (q.has('cloud')) sessionStorage.setItem('adal-cloud', '1')
+  // Already paired: open at once (no detour through the pairing page).
+  if (sessionStorage.getItem('adal-cloud') !== '1' && !q.has('pair')) {
+    try { if (JSON.parse(localStorage.getItem('adal-pc') || 'null')?.cloud) sessionStorage.setItem('adal-cloud', '1') } catch {}
+  }
   if (sessionStorage.getItem('adal-cloud') !== '1') {
     location.replace('/connect.html' + location.search)
     await new Promise(() => {})       // the page is leaving

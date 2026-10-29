@@ -5,8 +5,8 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        sans: ['"DM Sans"', 'system-ui', 'sans-serif'],
-        display: ['Syne', '"DM Sans"', 'sans-serif'],
+        sans: ['"DM Sans Variable"', '"DM Sans"', 'system-ui', 'sans-serif'],
+        display: ['Syne', '"DM Sans Variable"', '"DM Sans"', 'sans-serif'],
       },
       colors: {
         ink: '#0f1c1a',

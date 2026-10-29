@@ -410,6 +410,13 @@ export async function runPipeline(filePath, db, analyzer, tag = '[pipeline]') {
   }
   await db('profiles').where('id', profileId).update(upd)
 
+  // Place of birth and issue date are not in the passport's machine lines: when
+  // the passport was settled from those alone, read them now (in the background).
+  if (isPassport && (!(upd.place_of_birth || current?.place_of_birth) || !(upd.passport_issue_date || current?.passport_issue_date))) {
+    const img = formats.find(f => /^image\//.test(f.mimetype || ''))?.path || stagedPath
+    import('./passportDetails.js').then(m => m.fillPassportDetails(db, profileId, img, log)).catch(e => log('passport details:', e.message))
+  }
+
   // A passport is checked against its MRZ right away, so the police-clearance
   // gate is already lit when the document arrives (no manual Re-check needed).
   if (result.doc_type === 'Passport') {

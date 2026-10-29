@@ -171,6 +171,18 @@ async function initSystem() {
       await db.migrate.latest()
       console.log('✅ Database migrations up to date')
       await ensureTenancySchema(db)
+      // Once, a minute after start: profiles whose passport left place of birth /
+      // issue date empty get them read from the passport picture.
+      setTimeout(async () => {
+        try {
+          const KEY = 'passport_details_backfill_v1'
+          if (await db('settings').where('key', KEY).first()) return
+          const { backfillPassportDetails } = await import('./src/services/passportDetails.js')
+          const n = await backfillPassportDetails(db)
+          await db('settings').insert({ key: KEY, value: new Date().toISOString() }).catch(() => {})
+          console.log(`[passport details] checked ${n} profile(s) missing place of birth / issue date`)
+        } catch (e) { console.warn('[passport details] backfill:', e.message) }
+      }, 60000)
     } catch (migErr) {
       console.warn('⚠️ Migration check skipped or non-critical issue:', migErr.message)
     }

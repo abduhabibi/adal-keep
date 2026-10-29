@@ -46,15 +46,24 @@ export async function openOnPhone({ workflowId, profileId, accountId, title }) {
       if (a) { user = a.login_value || a.username || a.phone || ''; pass = a.password || '' }
     } catch {}
   }
-  let fields = []
+  let fields = [], profile = {}
   if (profileId) {
     try {
       const p = (await api.get(`/profiles/${profileId}`)).data || {}
       fields = DETAILS.map(([label, k]) => ({ label, value: p[k] == null ? '' : String(p[k]).trim() })).filter(f => f.value)
+      // For the ✨ filler (adal-phone assets/adal-fill.js): her details by name,
+      // the name also as first / father's / grandfather's (Ethiopian names).
+      const words = String(p.full_name || '').trim().split(/\s+/).filter(Boolean)
+      profile = Object.fromEntries(Object.entries({
+        ...Object.fromEntries(DETAILS.map(([, k]) => [k, p[k]])),
+        first_name: words[0], father_name: words[1], grandfather_name: words.slice(2).join(' '),
+        gender: p.gender, nationality: p.nationality || 'Ethiopian', children_count: p.children_count, height: p.height, weight: p.weight,
+        emergency_relationship: p.emergency_relationship,
+      }).filter(([, v]) => v != null && String(v).trim() !== '').map(([k, v]) => [k, String(v).trim()]))
     } catch {}
   }
   const plugin = window.Capacitor?.Plugins?.AdalDiscovery
   if (!plugin?.openBrowser) { window.open(url, '_blank', 'noopener'); return { opened: 'tab' } }
-  await plugin.openBrowser({ url, host: site, user, pass, fields, title: title || '', desktop: true })
+  await plugin.openBrowser({ url, host: site, user, pass, fields, profile, title: title || '', desktop: false })
   return { opened: 'phone', signIn: !!pass }
 }

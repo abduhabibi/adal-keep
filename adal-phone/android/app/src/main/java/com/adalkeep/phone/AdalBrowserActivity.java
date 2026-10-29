@@ -11,7 +11,13 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
+import android.content.SharedPreferences;
 import android.webkit.CookieManager;
+import android.webkit.JavascriptInterface;
+import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
+import java.io.ByteArrayInputStream;
+import java.io.InputStream;
 import android.webkit.URLUtil;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
@@ -46,6 +52,12 @@ public class AdalBrowserActivity extends Activity {
     private boolean desktop = true;
     private String mobileUa;
     private String host = "", user = "", pass = "";
+    private String profileJson = "{}", fillJs = null;
+    private SharedPreferences prefs;
+    // Trackers and ads: not downloaded (faster on a slow line). Never the portal, never reCAPTCHA.
+    private static final String[] BLOCK = { "google-analytics.com", "googletagmanager.com", "doubleclick.net", "googlesyndication.com",
+        "facebook.net", "connect.facebook.com", "hotjar.com", "clarity.ms", "mixpanel.com", "segment.io", "segment.com", "newrelic.com",
+        "nr-data.net", "adservice.google.com", "scorecardresearch.com", "tiktok.com", "snap.licdn.com", "yandex.ru", "matomo", "fullstory.com" };
     private ValueCallback<Uri[]> fileCb;
 
     @Override
@@ -57,7 +69,12 @@ public class AdalBrowserActivity extends Activity {
         host = o.optString("host", "");
         user = o.optString("user", "");
         pass = o.optString("pass", "");
-        desktop = o.optBoolean("desktop", true);
+        // The phone layout unless the person chose desktop for this site before.
+        prefs = getSharedPreferences("adal-browser", MODE_PRIVATE);
+        desktop = prefs.getBoolean("desktop:" + host, o.optBoolean("desktop", false));
+        JSONObject prof = o.optJSONObject("profile");
+        if (prof != null) profileJson = prof.toString();
+        try (InputStream in = getAssets().open("adal-fill.js")) { fillJs = new String(readAll(in), "UTF-8"); } catch (Exception e) { fillJs = null; }
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -75,6 +92,7 @@ public class AdalBrowserActivity extends Activity {
         modeBtn = btn(desktop ? "📱" : "🖥", v -> setDesktop(!desktop));
         tools.addView(modeBtn);
         if (!pass.isEmpty()) tools.addView(btn("🔑", v -> fill(true)));
+        if (prof != null && prof.length() > 0) tools.addView(btn("✨", v -> fillForm(true)));
         JSONArray fields = o.optJSONArray("fields");
         if (fields != null && fields.length() > 0) tools.addView(btn("📋", v -> sheet.setVisibility(sheet.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE)));
         title = new TextView(this);
@@ -102,6 +120,15 @@ public class AdalBrowserActivity extends Activity {
         s.setLoadWithOverviewMode(true);
         s.setJavaScriptCanOpenWindowsAutomatically(true);
         s.setMediaPlaybackRequiresUserGesture(false);
+        s.setCacheMode(WebSettings.LOAD_DEFAULT);
+        s.setOffscreenPreRaster(true);              // smoother scrolling
+        web.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+        if (android.os.Build.VERSION.SDK_INT >= 26) web.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, true);
+        web.addJavascriptInterface(new Object() {
+            @JavascriptInterface public void filled(int n) {
+                runOnUiThread(() -> Toast.makeText(AdalBrowserActivity.this, "✨ Filled " + n + " box" + (n == 1 ? "" : "es") + " — check the green ones", Toast.LENGTH_SHORT).show());
+            }
+        }, "AdalApp");
         mobileUa = s.getUserAgentString();
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(web, true);   // reCAPTCHA
@@ -111,9 +138,15 @@ public class AdalBrowserActivity extends Activity {
                 title.setText(v.getTitle() != null && !v.getTitle().isEmpty() ? v.getTitle() : url);
                 layout();
                 fill(false);
+                fillForm(false);
                 // pages that draw their sign-in a moment later
                 v.postDelayed(() -> fill(false), 1500);
                 v.postDelayed(() -> fill(false), 4000);
+            }
+            @Override public WebResourceResponse shouldInterceptRequest(WebView v, WebResourceRequest req) {
+                String h = req.getUrl().getHost();
+                if (h != null) for (String b : BLOCK) if (h.contains(b)) return new WebResourceResponse("text/plain", "utf-8", new ByteArrayInputStream(new byte[0]));
+                return null;
             }
         });
         web.setWebChromeClient(new WebChromeClient() {
@@ -184,6 +217,7 @@ public class AdalBrowserActivity extends Activity {
 
     private void setDesktop(boolean d) {
         desktop = d;
+        prefs.edit().putBoolean("desktop:" + host, d).apply();
         modeBtn.setText(desktop ? "📱" : "🖥");
         applyMode();
         web.reload();
@@ -217,6 +251,29 @@ public class AdalBrowserActivity extends Activity {
             + "var us=null;all.forEach(function(i){if(i.compareDocumentPosition(pw)&4)us=i});"
             + "if(u)put(us,u);put(pw,p);pw.blur();return 'filled'})(" + JSONObject.quote(user) + "," + JSONObject.quote(pass) + "," + force + ")";
         web.evaluateJavascript(js, r -> { if (force) Toast.makeText(this, "\"filled\"".equals(r) ? "Sign-in filled — press the site's Sign in" : "No sign-in box on this page", Toast.LENGTH_SHORT).show(); });
+    }
+
+    private boolean onPortal() {
+        String url = web.getUrl();
+        String h = url == null ? "" : Uri.parse(url).getHost();
+        return h != null && !host.isEmpty() && (h.equals(host) || h.endsWith("." + host));
+    }
+
+    /** Fill this page's forms with her details (only on the portal's own site); new steps fill as they appear. */
+    private void fillForm(boolean byHand) {
+        if (fillJs == null || "{}".equals(profileJson)) return;
+        if (!onPortal()) { if (byHand) Toast.makeText(this, "This is not the portal's own page — nothing filled", Toast.LENGTH_SHORT).show(); return; }
+        web.evaluateJavascript(fillJs + ";window.__adalAuto=true;window.__adalFill(" + profileJson + ")", r -> {
+            int n = 0; try { n = Integer.parseInt(r); } catch (Exception e) {}
+            if (n > 0 || byHand) Toast.makeText(this, n > 0 ? "✨ Filled " + n + " box" + (n == 1 ? "" : "es") + " — check the green ones" : "Nothing on this page matches her details", Toast.LENGTH_SHORT).show();
+        });
+    }
+
+    private static byte[] readAll(InputStream in) throws java.io.IOException {
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        byte[] b = new byte[8192]; int n;
+        while ((n = in.read(b)) > 0) out.write(b, 0, n);
+        return out.toByteArray();
     }
 
     /** Type a value into the field the person is on. */

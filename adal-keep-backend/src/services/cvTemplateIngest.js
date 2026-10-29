@@ -17,6 +17,8 @@ Identity: {{PASSPORT_NO}} {{PLACE_OF_BIRTH}} {{RELIGION}} {{MARITAL_STATUS}} {{C
 Physical: {{WEIGHT}} {{HEIGHT}} {{COMPLEXION}} {{LIVING_TOWN}}
 Family: {{MOTHER_NAME}} {{FATHER_NAME}} {{SPOUSE_NAME}}
 Contact: {{PHONE}} {{EDUCATION}} {{ENGLISH}} {{ARABIC}}
+Languages (a Speak / Read / Write grid — one token per cell, value YES or NO): {{ENGLISH_SPEAK}} {{ENGLISH_READ}} {{ENGLISH_WRITE}} {{ARABIC_SPEAK}} {{ARABIC_READ}} {{ARABIC_WRITE}}
+  ({{ENGLISH}} / {{ARABIC}} alone is one cell, e.g. "SPEAK, READ" or "NO")
 Job: {{POST_APPLIED}} {{SALARY}} {{CURRENCY}} {{COUNTRY}} {{CONTRACT_YEARS}} {{REF_NO}} {{DATE_TODAY}}
 Skills: {{SKILL_CLEANING}} {{SKILL_IRONING}} {{SKILL_WASHING}} {{SKILL_BABY_SITTING}} {{SKILL_COOKING}}
 Previous: {{PREV_COUNTRY}} {{PREV_PERIOD}} {{PREV_POSITION}}

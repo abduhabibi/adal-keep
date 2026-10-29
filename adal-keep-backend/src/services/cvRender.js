@@ -238,8 +238,15 @@ export async function buildTemplateData(db, profile, template, overrides = {}) {
     SPOUSE_NAME:      merged.spouse_name || '',
     PHONE:            merged.phone_number || '',
     EDUCATION:        merged.education_level || 'New', /* EDUCATION_DEFAULT_PATCH */
-    ENGLISH:          merged.speaks_english ? 'YES' : 'NO',
-    ARABIC:           merged.speaks_arabic  ? 'YES' : 'NO',
+    // One cell per language: what she can do ("SPEAK", "SPEAK, READ, WRITE"), else NO.
+    ENGLISH:          languageText(merged, 'english'),
+    ARABIC:           languageText(merged, 'arabic'),
+    ENGLISH_SPEAK:    yes(merged.speaks_english),
+    ENGLISH_READ:     yes(merged.english_read),
+    ENGLISH_WRITE:    yes(merged.english_write),
+    ARABIC_SPEAK:     yes(merged.speaks_arabic),
+    ARABIC_READ:      yes(merged.arabic_read),
+    ARABIC_WRITE:     yes(merged.arabic_write),
     POST_APPLIED:     overrides.post_applied || 'HOUSE MAID',
     SALARY:           String(overrides.salary ?? template.salary ?? ''),
     CURRENCY:         overrides.currency || template.currency || 'SAR',
@@ -278,8 +285,60 @@ export async function buildTemplateData(db, profile, template, overrides = {}) {
   }
 }
 
+const on = (v) => v === true || v === 1 || v === '1' || v === 'true'
+const yes = (v) => (on(v) ? 'YES' : 'NO')
+function languageText(p, lang) {
+  const can = [on(lang === 'english' ? p.speaks_english : p.speaks_arabic) && 'SPEAK', on(p[`${lang}_read`]) && 'READ', on(p[`${lang}_write`]) && 'WRITE'].filter(Boolean)
+  return can.length ? can.join(', ') : 'NO'
+}
+
+/**
+ * Templates made before Speak / Read / Write were separate show {{ENGLISH}}
+ * and {{ARABIC}} in their language grids. Each cell gets its own:
+ *   - a row labelled Read / Write / Speak (قراءة / كتابة / محادثة): its
+ *     {{ENGLISH}} / {{ARABIC}} — or its fixed YES / NO cells, English first —
+ *     become that row's ENGLISH_READ … ARABIC_WRITE;
+ *   - a row with {{ENGLISH}} (or {{ARABIC}}) several times under a header
+ *     row SPEAK · READ · WRITE: each takes its column's.
+ * Other {{ENGLISH}} / {{ARABIC}} stay one cell ("SPEAK, READ").
+ */
+export function splitLanguageCells(html) {
+  const SKILL = { read: 'READ', write: 'WRITE', speak: 'SPEAK', 'قراءة': 'READ', 'كتابة': 'WRITE', 'محادثة': 'SPEAK' }
+  const text = (h) => h.replace(/<[^>]+>/g, ' ').replace(/&[a-z#0-9]+;/gi, ' ').replace(/\s+/g, ' ').trim()
+  let order = null
+  return String(html || '').replace(/<tr\b[^>]*>[\s\S]*?<\/tr>/gi, (row) => {
+    const cells = row.match(/<t[dh]\b[^>]*>[\s\S]*?<\/t[dh]>/gi) || []
+    const words = cells.map(c => text(c).toLowerCase())
+    // a header row: SPEAK READ WRITE in some order
+    const heads = words.map(w => (/^(speak|read|write)\b/.test(w) ? w.match(/^(speak|read|write)/)[1].toUpperCase() : null))
+    if (heads.filter(Boolean).length >= 2 && !/\{\{/.test(row)) { order = heads.filter(Boolean); return row }
+    // a row labelled with one skill
+    const first = (words[0] || '').split(' ')
+    const skill = SKILL[first[0]] || SKILL[first[first.length - 1]]
+    if (skill && cells.length >= 2) {
+      let langs = ['ENGLISH', 'ARABIC'], i = 0
+      return row.replace(/<t[dh]\b[^>]*>[\s\S]*?<\/t[dh]>/gi, (cell, off) => {
+        if (i++ === 0) return cell
+        if (/\{\{(ENGLISH|ARABIC)\}\}/.test(cell)) return cell.replace(/\{\{(ENGLISH|ARABIC)\}\}/g, (_, l) => { langs = langs.filter(x => x !== l); return `{{${l}_${skill}}}` })
+        if (/^(yes|no)$/i.test(text(cell)) && langs.length) { const l = langs.shift(); return cell.replace(/>(\s*)(yes|no)(\s*)</i, `>$1{{${l}_${skill}}}$3<`) }
+        return cell
+      })
+    }
+    // repeated cells under the header
+    if (order) {
+      let changed = row
+      for (const l of ['ENGLISH', 'ARABIC']) {
+        const re = new RegExp(`\\{\\{${l}\\}\\}`, 'g')
+        if ((row.match(re) || []).length === order.length) { let k = 0; changed = changed.replace(re, () => `{{${l}_${order[k++]}}}`) }
+      }
+      return changed
+    }
+    return row
+  })
+}
+
 export function mergeTemplate(html, css, data) {
-  let out = html || ''
+  let out = splitLanguageCells(html || '')
 
   // Base CSS — force A4 tall page
   const baseCss = `html,body{margin:0;padding:0;min-height:297mm;box-sizing:border-box;} @page{size:A4;margin:0;} body{display:flex;flex-direction:column;min-height:297mm;} .adal-page{flex:1;display:flex;flex-direction:column;} .adal-body{flex:1;}`

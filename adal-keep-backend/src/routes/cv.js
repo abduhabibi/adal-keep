@@ -210,6 +210,7 @@ router.post('/generate', async (req, res) => {
     if (overrides.children_count !== undefined) cvUpd.children_count = parseInt(overrides.children_count, 10) || 0
     if (overrides.speaks_english !== undefined) cvUpd.speaks_english = !!overrides.speaks_english
     if (overrides.speaks_arabic !== undefined) cvUpd.speaks_arabic = !!overrides.speaks_arabic
+    for (const k of ['english_read', 'english_write', 'arabic_read', 'arabic_write']) if (overrides[k] !== undefined) cvUpd[k] = !!overrides[k]
     if (overrides.skills !== undefined) cvUpd.skills = JSON.stringify(overrides.skills)
     if (overrides.previous_employment !== undefined) cvUpd.previous_employment = JSON.stringify(overrides.previous_employment)
     if (Object.keys(cvUpd).length) { cvUpd.updated_at = new Date().toISOString(); await db('profiles').where('id', profile.id).update(cvUpd) }

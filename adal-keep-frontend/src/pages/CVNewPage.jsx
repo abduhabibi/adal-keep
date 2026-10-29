@@ -16,6 +16,7 @@ const DEFAULT_FORM = {
   weight: 'Normal', height: 'Normal',
   mother_name: '', father_name: '',
   education_level: 'New', speaks_english: false, speaks_arabic: false,
+  english_read: false, english_write: false, arabic_read: false, arabic_write: false,
   skills: { ...DEFAULT_SKILLS }, previous_employment: [],
   cooking_skill: 'None', region: '', zone_subcity: '',
   labor_id: '', personal_number: '',
@@ -99,6 +100,8 @@ export default function CVNewPage() {
         phone_number: p.phone_number || brokerObj?.contact1 || '',
         speaks_english: !!p.speaks_english,
         speaks_arabic: !!p.speaks_arabic,
+        english_read: !!p.english_read, english_write: !!p.english_write,
+        arabic_read: !!p.arabic_read, arabic_write: !!p.arabic_write,
         skills, previous_employment: prev,
         cooking_skill: p.cooking_skill || 'None',
         region: p.region || '',
@@ -416,13 +419,30 @@ export default function CVNewPage() {
           </div>
         </div>
 
-        <div className="flex gap-4 pt-2">
-          <label className="inline-flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={form.speaks_english} onChange={e => upd('speaks_english', e.target.checked)} /> English
-          </label>
-          <label className="inline-flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={form.speaks_arabic} onChange={e => upd('speaks_arabic', e.target.checked)} /> Arabic
-          </label>
+        {/* Languages: a ticked language speaks it; read and write only when ticked. */}
+        <div className="pt-2">
+          <p className="text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">Languages</p>
+          <table className="text-sm">
+            <thead><tr className="text-xs text-slate-500"><th></th><th className="px-3 font-medium">Speak</th><th className="px-3 font-medium">Read</th><th className="px-3 font-medium">Write</th></tr></thead>
+            <tbody>
+              {[['english', 'English', 'speaks_english'], ['arabic', 'Arabic', 'speaks_arabic']].map(([k, label, speak]) => (
+                <tr key={k}>
+                  <td className="pr-3 py-1">
+                    <label className="inline-flex items-center gap-2">
+                      <input type="checkbox" checked={form[speak] || form[`${k}_read`] || form[`${k}_write`]}
+                        onChange={e => { const v = e.target.checked; upd(speak, v); if (!v) { upd(`${k}_read`, false); upd(`${k}_write`, false) } }} /> {label}
+                    </label>
+                  </td>
+                  {[speak, `${k}_read`, `${k}_write`].map(f => (
+                    <td key={f} className="px-3 text-center">
+                      <input type="checkbox" aria-label={`${label} ${f.includes('read') ? 'read' : f.includes('write') ? 'write' : 'speak'}`}
+                        checked={!!form[f]} onChange={e => upd(f, e.target.checked)} />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
 
         <div className="pt-3 border-t border-slate-100 dark:border-slate-700">

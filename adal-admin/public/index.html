@@ -197,7 +197,7 @@ function workTable() {
     ['Profiles', sum(s => s.profiles), ''], ['Chosen by employers', sum(s => Number(s.chosen)), ''],
   ]
   let html = `<div class="cards">${cards.map(([t, v, c]) => `<div class="card ${c}"><b>${v}</b><span>${t}</span></div>`).join('')}</div>
-    <table><tr><th>Agency</th><th>PC</th><th>Profiles</th><th>Chosen</th><th>Waiting</th><th>Failed 7 d</th><th>Tasks</th><th>Medical ≤ 14 d</th><th>Phones</th><th>Copied</th><th>Backup</th><th></th></tr>` +
+    <table><tr><th>Agency</th><th>PC</th><th>Profiles</th><th>Chosen</th><th>Waiting</th><th>Failed 7 d</th><th>Tasks</th><th>Medical ≤ 14 d</th><th>Phones</th><th>Copied</th><th>Backup</th><th>Version</th><th></th></tr>` +
     work.map(a => { const s = a.summary; return `<tr class="ag ${workOpen === a.id ? 'on' : ''}" data-row="${a.id}">
       <td><b>${esc(a.name)}</b> <span class="muted code" style="letter-spacing:0">${esc(a.pc_number || '')}</span>${a.branchPCs?.length ? `<div class="muted" style="font-size:11px">+ ${a.branchPCs.length} PC(s) following it: ${a.branchPCs.join(', ')}</div>` : ''}${a.banned ? ' <span class="pill rejected">banned</span>' : ''}</td>
       <td><span class="dot ${a.pcOnline ? 'on' : ''}"></span>${a.pcOnline ? 'on' : `off ${a.pcSeen ? ago(a.pcSeen) : ''}`}</td>
@@ -206,6 +206,7 @@ function workTable() {
       <td class="${cls(s.medicals.length, 1, 3)}">${s.medicals.length}</td><td>${a.phones}</td><td class="muted">${ago(s.at)}</td>`
       : `<td colspan="8" class="muted">No online copy yet (needs the newest Adal Keep and its chat signed in)</td>`}
       <td class="${a.backup?.error ? 'num bad' : !a.backup?.at ? 'muted' : (Date.now() - new Date(a.backup.at)) > 3 * 864e5 ? 'num warn' : ''}">${a.backup?.at ? ago(a.backup.at) : 'none yet'}${a.backup?.error ? ' ⚠' : ''}</td>
+      <td class="${!a.health?.version?.sha ? 'muted' : a.latest && a.health.version.sha !== a.latest ? 'num warn' : ''}" title="${a.latest ? `Published: ${a.latest}` : ''}">${a.health?.version?.sha ? esc(a.health.version.sha) + (a.latest && a.health.version.sha === a.latest ? ' ✓' : '') : a.health ? 'old' : '—'}</td>
       <td><button class="go" data-open="${a.id}">Open Adal Keep</button></td></tr>` }).join('') + '</table>'
   const a = work.find(x => x.id === workOpen)
   if (a?.summary) {
@@ -224,6 +225,18 @@ function workTable() {
         <span class="${m.days <= 3 ? 'num bad' : 'num warn'}">${m.days < 0 ? 'expired' : `${m.days} days`}</span><button class="ghost" data-goto="/profiles/${m.id}">Open</button></div>`).join('') || '<p class="muted">None within 14 days.</p>'}
         <h4 style="margin-top:14px">🧭 Where its profiles stand</h4><div class="stages">${Object.entries(s.stages || {}).sort((x, y) => y[1] - x[1]).map(([k, v]) => `<span>${esc(k.replace(/_/g, ' '))} · ${v}</span>`).join('')}</div></div>
     </div>`
+  }
+  if (a?.health) {
+    const h = a.health, lag = h.event_loop_lag_ms || {}
+    const ram = h.pc?.total_mb ? `${(h.pc.total_mb / 1024).toFixed(0)} GB RAM, ${(h.pc.free_mb / 1024).toFixed(1)} GB free` : ''
+    html += `<div class="detail"><div class="box2"><h4>🖥 Their PC <span class="muted" style="font-weight:400">${ago(h.at)}</span></h4>
+      <p>${esc(h.os || '')} · ${esc(h.pc?.cpu_model || '')} (${h.pc?.cpus || '?'} cores) · ${ram}</p>
+      <p>Browser: <b>${esc(h.browser || '?')}</b> · Adal Keep ${esc(h.version?.sha || 'version unknown')}${a.latest && h.version?.sha && h.version.sha !== a.latest ? ` <span class="num warn">(newest is ${esc(a.latest)})</span>` : ''} · running ${h.uptime_min ?? '?'} min</p>
+      <p>Server: <span class="${h.node_cpu_pct > 50 ? 'num bad' : h.node_cpu_pct > 20 ? 'num warn' : ''}">${h.node_cpu_pct ?? '?'}% CPU</span> · ${h.node_mem_mb ?? '?'} MB · delay <span class="${lag.p99 > 200 ? 'num bad' : lag.p99 > 50 ? 'num warn' : ''}">${lag.mean ?? '?'} ms (worst ${lag.max ?? '?'} ms)</span> · ${h.requests_5min ?? '?'} requests / 5 min</p>
+      ${h.slowest?.length ? `<p class="muted" style="font-size:12px">Slowest: ${h.slowest.map(esc).join(' · ')}</p>` : ''}
+      <h4 style="margin-top:10px">⚠ Last errors (${h.errors?.length || 0})</h4>
+      ${(h.errors || []).slice().reverse().map(e => `<div class="why" style="font-size:12px">${ago(e.at)}${e.times > 1 ? ` ×${e.times}` : ''} — ${esc(e.line)}</div>`).join('') || '<p class="muted">None.</p>'}
+    </div></div>`
   }
   if (a) {
     const b = a.backup || {}, dl = downloads[a.id]

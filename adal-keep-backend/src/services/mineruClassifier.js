@@ -460,6 +460,7 @@ export async function analyzeWithMineru(originalPath, { db = null } = {}) {
 }
 
 const GEMINI_QUICK_MODEL = process.env.GEMINI_QUICK_MODEL || 'gemini-3.5-flash-lite'
+const LOCAL_WAIT_MS = Number(process.env.LOCAL_OCR_WAIT_MS || 12000)
 
 /** The first promise that gives a truthy value (null when none does). */
 function firstTruthy(promises) {
@@ -487,7 +488,22 @@ async function analyzeUsual(originalPath, filename, gate = { open: Promise.resol
         .catch(e => { console.warn(`[classify] Gemini ${GEMINI_QUICK_MODEL} could not read the file:`, e.message); return null })]
     : null
   const gemEarly = gemCalls ? gemCalls[0] : null
-  const localP = analyzeLocally(originalPath).catch(() => null)
+  // This PC's own reading of a picture is heavy (~20 s of full CPU and ~400 MB
+  // on an i5, much more on a small office PC): it starts only when JEV and
+  // Gemini have not settled the file within LOCAL_WAIT_MS (no internet, no
+  // key, a slow line) or Gemini could not tell what it is. A PDF's text layer
+  // is cheap and is read at once.
+  const localP = (async () => {
+    if (gemEarly) {
+      const g = await Promise.race([
+        gemEarly.then(x => (x ? finishResult(x, '', 'gemini') : null)).catch(() => null),
+        new Promise(r => setTimeout(() => r('late'), LOCAL_WAIT_MS)),
+      ])
+      if (gate.cancelled) return null
+      if (g && g !== 'late' && g.doc_type && g.doc_type !== 'other') return null
+    }
+    return analyzeLocally(originalPath)
+  })().catch(() => null)
   if (gemCalls) {
     const verified = (g) => {
       if (!g) return null

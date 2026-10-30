@@ -84,7 +84,15 @@ export async function readMrzStrip(stripPath) {
   return texts
 }
 
-export async function extractPassport(imagePath, onProgress = () => {}) {
+// One reading at a time: each one takes a CPU core and ~400 MB for 20 s or more.
+let ocrChain = Promise.resolve()
+export function extractPassport(imagePath, onProgress = () => {}) {
+  const run = ocrChain.then(() => extractPassportNow(imagePath, onProgress))
+  ocrChain = run.catch(() => {})
+  return run
+}
+
+async function extractPassportNow(imagePath, onProgress = () => {}) {
   onProgress(0)
   const meta = await sharp(imagePath).metadata()
   const w = meta.width, h = meta.height

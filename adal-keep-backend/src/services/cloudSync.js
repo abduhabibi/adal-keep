@@ -230,8 +230,36 @@ async function pushKeys(db) {
   }
 }
 
+// Every answer of every profile is rebuilt only every FULL_MS (a safety net):
+// each minute, the agency's pages and only the profiles that changed lately.
+// (Changes made through the app go online at once anyway — pushSoon.) On a
+// small office PC the full sweep was ~1,300 requests a minute.
+const FULL_MS = 30 * 60 * 1000
+let lastFullAt = 0, lastSweepAt = 0, lastDiagAt = 0
+
+/** Profiles touched since `since` (runs, documents, CVs, tasks, the profile itself). */
+async function changedProfiles(db, since) {
+  // SQLite keeps both "2026-10-29 08:40:12" and ISO times: compare against the
+  // older-sorting space form, so nothing is missed (a few extra at most).
+  const at = since.toISOString().replace('T', ' ').slice(0, 19)
+  const ids = new Set()
+  const add = (rows) => rows.forEach(r => r.id != null && ids.add(Number(r.id)))
+  const q = (fn) => fn().catch(() => [])
+  add(await q(() => db('profiles').where('updated_at', '>=', at).select('id')))
+  for (const t of ['automation_queue', 'profile_automations', 'profile_fields', 'tasks', 'generated_cvs', 'document_verifications']) {
+    add(await q(() => db(t).where('updated_at', '>=', at).whereNotNull('profile_id').distinct('profile_id as id')))
+  }
+  add(await q(() => db('files').join('profile_fields', 'files.profile_field_id', 'profile_fields.id')
+    .where('files.created_at', '>=', at).distinct('profile_fields.profile_id as id')))
+  return [...ids]
+}
+
 async function pushAnswers(db, agency, state) {
-  const ids = (await db('profiles').select('id')).map(r => r.id)
+  const started = Date.now()
+  const full = !lastFullAt || started - lastFullAt >= FULL_MS
+  const ids = full
+    ? (await db('profiles').select('id')).map(r => r.id)
+    : await changedProfiles(db, new Date((lastSweepAt || started) - 3 * 60000))
   const brokers = (await db('brokers').select('id').catch(() => [])).map(r => r.id)
   const keys = [...GLOBAL, ...ids.flatMap(PER_PROFILE), ...brokers.flatMap(PER_BROKER)]
   await pushVault(db, agency, state).catch(e => console.warn('[cloud] vault:', e.message))
@@ -270,12 +298,32 @@ async function pushAnswers(db, agency, state) {
     }
   } catch (e) { console.warn('[cloud] summary:', e.message) }
   await flush()
+  lastSweepAt = started
+  if (!full) return
+  lastFullAt = started
   // Profiles that are gone: their answers go too.
   for (const key of state.keys()) {
     if (!key.startsWith('/') || wanted.has(key) || key === '/_summary' || key === '/vault') continue
     await cloudCall(db, 'DELETE', `/rest/v1/keep_meta?agency_id=eq.${agency}&key=eq.${encodeURIComponent(key)}`, undefined, { headers: { Prefer: 'return=minimal' } }).catch(() => {})
     await db('cloud_sync').where({ key }).del()
   }
+}
+
+/** The version this PC runs: the updater's mark (installed PCs) or git (a developer's copy). */
+function installedVersion() {
+  const back = path.join(path.dirname(fileURLToPath(import.meta.url)), '../..')
+  for (const root of [path.join(back, '..'), back]) {
+    try {
+      const m = JSON.parse(fs.readFileSync(path.join(root, '.adal-version.json'), 'utf8'))
+      if (m.sha) return { sha: String(m.sha).slice(0, 7), source: m.source || 'github', at: m.savedAt || null }
+    } catch {}
+    try {
+      let head = fs.readFileSync(path.join(root, '.git/HEAD'), 'utf8').trim()
+      if (head.startsWith('ref: ')) head = fs.readFileSync(path.join(root, '.git', head.slice(5)), 'utf8').trim()
+      if (/^[0-9a-f]{40}$/.test(head)) return { sha: head.slice(0, 7), source: 'git' }
+    } catch {}
+  }
+  return null
 }
 
 // ------------------------------------------------------------ secrets
@@ -385,6 +433,15 @@ async function syncOnce(db) {
     const state = await stateOf(db)
     await pushAnswers(db, agency, state)
     await pushFiles(db, agency, await stateOf(db))
+    // This PC's health and last errors, for Adal (every 5 minutes).
+    if (Date.now() - lastDiagAt >= 5 * 60000) {
+      lastDiagAt = Date.now()
+      try {
+        const { healthReport } = await import('./diag.js')
+        const data = await healthReport(db, installedVersion())
+        await upsert(db, 'keep_meta', [{ agency_id: agency, key: '/_diag', data, updated_at: data.at }], 'agency_id,key')
+      } catch (e) { console.warn('[cloud] health:', e.message) }
+    }
     cloudStatus.error = null
     cloudStatus.last = new Date().toISOString()
     if (applied) setTimeout(() => syncOnce(db).catch(() => {}), 3000)   // show the phone its own change soon
@@ -416,7 +473,7 @@ export function startCloudSync(db) {
   startRelay(db)
   watchStorageChat()
   setTimeout(() => setInterval(() => watchJoins(db), 4000), 15000)
-  console.log('☁️  Online copy for phones: synced every minute (when on)')
+  console.log('☁️  Online copy for phones: what changed every minute, everything every 30 minutes (when on)')
 }
 export const syncNow = (db) => syncOnce(db)
 

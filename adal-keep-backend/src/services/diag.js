@@ -55,3 +55,55 @@ export function diagReport(db) {
       .sort((a, b) => b.total_ms - a.total_ms).slice(0, 40),
   }
 }
+
+// ---------------------------------------------------------------------------
+// The PC's health for Adal (keep_meta "/_diag", sent by cloudSync every 5 min):
+// what PC it is, how busy, which browser, the version, and its last errors.
+// No personal data: error lines are cut short and passport numbers / phone
+// numbers are hidden.
+// ---------------------------------------------------------------------------
+const errors = []
+const hide = (t) => String(t).replace(/\b[A-Z]{1,2}\d{6,9}\b/g, '[passport]').replace(/\+?\d{9,13}/g, '[number]')
+export function noteError(where, message) {
+  const line = hide(`${where ? `${where}: ` : ''}${message instanceof Error ? message.message : message}`).replace(/\s+/g, ' ').slice(0, 400)
+  const last = errors[errors.length - 1]
+  if (last && last.line === line) { last.times++; last.at = new Date().toISOString(); return }
+  errors.push({ at: new Date().toISOString(), line, times: 1 })
+  if (errors.length > 40) errors.shift()
+}
+const origError = console.error.bind(console)
+console.error = (...a) => {
+  try { noteError('', a.map(x => (x instanceof Error ? x.message : typeof x === 'string' ? x : JSON.stringify(x))).join(' ')) } catch {}
+  origError(...a)
+}
+process.on('uncaughtException', (e) => noteError('crash', e))
+process.on('unhandledRejection', (e) => noteError('unhandled', e))
+
+async function browserInUse() {
+  try {
+    const r = await fetch('http://127.0.0.1:9222/json/version', { signal: AbortSignal.timeout(1500) })
+    const j = await r.json()
+    const ua = String(j['User-Agent'] || '')
+    return `${/Brave/i.test(ua) || /brave/i.test(j.Browser || '') ? 'Brave' : /Edg\//.test(ua) ? 'Edge' : 'Chrome'} ${String(j.Browser || '').split('/')[1] || ''}`.trim()
+  } catch { return 'not open' }
+}
+
+export async function healthReport(db, version = null) {
+  const d = diagReport(db)
+  const slowest = d.routes.filter(r => !/^GET \/api\/(profiles\/:id|cv|profiles\/:id\/\w+)$/.test(r.route)).slice(0, 6)
+    .map(r => `${r.route} ×${r.count} avg ${r.avg_ms} ms max ${r.max_ms} ms`)
+  return {
+    at: new Date().toISOString(),
+    version,
+    os: `${os.type()} ${os.release()} ${os.arch()}`,
+    pc: { ...d.pc, load: undefined },
+    node_mem_mb: d.node_mem_mb,
+    node_cpu_pct: d.node_cpu_pct,
+    event_loop_lag_ms: d.event_loop_lag_ms,
+    uptime_min: d.uptime_min,
+    requests_5min: d.requests_5min,
+    browser: await browserInUse(),
+    slowest,
+    errors: errors.slice(-25),
+  }
+}

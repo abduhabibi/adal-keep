@@ -191,9 +191,10 @@ const api = {
   // Agencies' work: how each agency's work stands (their PCs send a summary
   // with the online copy, adal-keep-backend services/cloudSync.js).
   'GET /api/work': async () => {
+    const latest = await sb('GET', '/storage/v1/object/adal-updates/release/latest.json').then(j => j?.manifest?.short || null).catch(() => null)
     const [agencies, meta, phones] = await Promise.all([
       rest('GET', 'agencies?is_admin=eq.false&select=id,name,pc_number,banned,last_seen&order=name.asc'),
-      rest('GET', 'keep_meta?key=in.(/_summary,/_pc,/_backup)&select=agency_id,key,data,updated_at').catch(() => []),
+      rest('GET', 'keep_meta?key=in.(/_summary,/_pc,/_backup,/_diag)&select=agency_id,key,data,updated_at').catch(() => []),
       rest('GET', 'keep_devices?select=agency_id,revoked').catch(() => []),
     ])
     const of = (id, key) => meta.find(m => m.agency_id === id && m.key === key)
@@ -207,8 +208,10 @@ const api = {
         pcOnline: !!pc && Date.now() - new Date(pc).getTime() < 60000,
         pcSeen: pc,
         summary: of(a.id, '/_summary')?.data || null,
+        health: of(a.id, '/_diag')?.data || null,
         backup: (({ key, ...b }) => ({ ...b, hasKey: !!key }))(of(a.id, '/_backup')?.data || {}),
         phones: phones.filter(d => d.agency_id === a.id && !d.revoked).length,
+        latest,
         branchPCs: branches.filter(b => b.name.replace(BRANCH, '') === a.name).map(b => b.name.match(BRANCH)[1]),
       }
     })

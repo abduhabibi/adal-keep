@@ -45,6 +45,14 @@ async function token() {
 
 export const getToken = () => token()
 
+/** A short-lived link to a file Adal published (adal-updates: the phone app). */
+export async function updateLink(file) {
+  const c = cloudCreds()
+  const r = await rest('POST', `/storage/v1/object/sign/adal-updates/${file}`, { expiresIn: 900 })
+  if (!r?.signedURL) throw new Error('no link')
+  return `${c.url}/storage/v1${r.signedURL}`
+}
+
 export async function gunzipJSON(b64) {
   const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0))
   const text = await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).text()

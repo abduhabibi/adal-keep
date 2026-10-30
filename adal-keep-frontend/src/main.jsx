@@ -77,11 +77,16 @@ async function phoneBoot() {
   phoneUpdates(bar)
 }
 
-// A newer phone app (published with Adal Keep on GitHub): looked for at the
+// A newer phone app (Adal publishes it in Supabase, adal-updates/phone; the
+// old GitHub address stays as a fallback): looked for at the
 // start, whenever the app is opened again (at most every 10 minutes) and every
 // 30 minutes. Android's "Update?" opens by itself once per new version; a red
 // button in the bottom bar stays until it is installed.
 const UPDATES = 'https://raw.githubusercontent.com/abduhabibi/adal-keep/release/adal-keep-backend/src/phone-app'
+// The published file's address: Supabase (signed in as this phone), else GitHub.
+async function updateUrl(file) {
+  try { const { updateLink } = await import('./cloud/adapter.js'); return await updateLink(`phone/${file}`) } catch { return `${UPDATES}/${file}` }
+}
 function phoneUpdates(bar) {
   const plugin = window.Capacitor?.Plugins?.AdalDiscovery
   if (!plugin?.getVersion) return
@@ -95,7 +100,7 @@ function phoneUpdates(bar) {
     busy = true
     btn.textContent = '⬇ Downloading…'
     try {
-      const r = await plugin.installUpdate({ url: `${UPDATES}/AdalKeep.apk?v=${v.versionCode}` })
+      const r = await plugin.installUpdate({ url: await updateUrl('AdalKeep.apk') })
       btn.textContent = r?.needsPermission ? '⬆ Allow, then tap here' : `⬆ Update to ${v.versionName}`
     } catch { btn.textContent = `⬆ Update to ${v.versionName}` }
     busy = false
@@ -105,7 +110,8 @@ function phoneUpdates(bar) {
     last = Date.now()
     try {
       const mine = await plugin.getVersion()
-      const v = await (await fetch(`${UPDATES}/version.json?t=${Date.now()}`, { cache: 'no-store' })).json()
+      let v
+      try { v = await (await fetch(await updateUrl('version.json'), { cache: 'no-store' })).json() } catch { v = await (await fetch(`${UPDATES}/version.json?t=${Date.now()}`, { cache: 'no-store' })).json() }
       if (!(v.versionCode > mine.versionCode)) { btn.style.display = 'none'; return }
       btn.style.display = ''
       btn.textContent = `⬆ Update to ${v.versionName}`

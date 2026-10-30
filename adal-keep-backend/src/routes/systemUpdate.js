@@ -6,6 +6,7 @@ import fs from 'fs'
 import os from 'os'
 import { Readable } from 'stream'
 import { fileURLToPath } from 'url'
+import { latestRelease, downloadRelease, setUpdateDb } from '../services/updateChannel.js'
 
 const execAsync = promisify(exec)
 const router = Router()
@@ -182,6 +183,36 @@ function describeCommit(commit) {
  * `changes` lists all of them (newest first) so the person sees what is new.
  */
 export async function checkForUpdate() {
+  const installedNow = await getInstalled()
+  // Installed PCs: Adal's signed release in Supabase (the GitHub repository
+  // may be private). GitHub stays as the fallback while PCs move over.
+  let supabaseError = null
+  if (!installedNow.isRepo) {
+    try { return await checkSupabase(installedNow) } catch (e) { supabaseError = e.message }
+  }
+  try {
+    const r = await checkGitHub()
+    if (supabaseError) r.note = [r.note, `Supabase updates: ${supabaseError}`].filter(Boolean).join(' · ')
+    return r
+  } catch (e) {
+    throw new Error(supabaseError ? `Supabase: ${supabaseError} · GitHub: ${e.message}` : e.message)
+  }
+}
+
+async function checkSupabase(installed) {
+  const m = await latestRelease('release')
+  const upToDate = !!installed.sha && installed.sha === m.sha
+  return {
+    hasUpdate: !upToDate, upToDate, installed,
+    latest: { sha: m.sha, short: m.short, message: m.message, date: m.date },
+    changes: upToDate ? [] : (m.changes || []).slice(0, 40),
+    count: upToDate ? 0 : (m.changes || []).length || 1,
+    source: 'supabase', manifest: m,
+    note: null,
+  }
+}
+
+async function checkGitHub() {
   const cfg = config()
   const commit = await github(`/commits/${encodeURIComponent(cfg.branch)}`)
   const latest = describeCommit(commit)
@@ -243,7 +274,7 @@ async function handleCheck(req, res) {
     res.json(result)
   } catch (err) {
     console.error('[system/update/check]', err.message)
-    res.status(502).json({ error: 'Could not reach GitHub for updates.', details: err.message })
+    res.status(502).json({ error: 'Could not reach the updates (Supabase or GitHub).', details: err.message })
   }
 }
 
@@ -310,6 +341,7 @@ async function autoUpdate(db, result) {
 
 /** Looks for a new version now and then, and installs it by itself (see autoUpdate). */
 export function startUpdateWatcher(db = null) {
+  setUpdateDb(db)
   if (watcher) return
   const every = Number(process.env.UPDATE_CHECK_MINUTES || 15) * 60 * 1000
   let lastCheck = 0
@@ -454,6 +486,56 @@ async function installFromTarball(cfg, logs, sha = '') {
   }
 }
 
+/**
+ * Adal's signed release from Supabase: the backend code and the frontend
+ * already built — no frontend build on the PC, and npm install only when the
+ * package list changed. Returns the marker to write.
+ */
+async function installFromRelease(cfg, logs, manifest) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'adal-update-'))
+  try {
+    const archive = path.join(tmp, 'release.tar.gz')
+    await downloadRelease(manifest, archive)
+    logs.push(`Downloaded ${(fs.statSync(archive).size / 1048576).toFixed(1)} MB from Supabase (signed by Adal, checked)`)
+    const extracted = path.join(tmp, 'src')
+    fs.mkdirSync(extracted, { recursive: true })
+    const tar = await run(`tar -xzf "${archive}" -C "${extracted}"`, tmp, 5 * 60 * 1000)
+    if (!tar.ok) throw new Error(`Extraction failed: ${tar.out.slice(-300)}`)
+    const keepData = (from) => (src) => {
+      const rel = path.relative(from, src)
+      return !rel || !rel.split(path.sep).some((part) => PROTECTED.has(part))
+    }
+    const backendDir = backendDirOf(cfg.projectRoot)
+    const from = path.join(extracted, 'adal-keep-backend')
+    if (!fs.existsSync(path.join(from, 'server.js'))) throw new Error('the release has no backend')
+    fs.cpSync(from, backendDir, { recursive: true, force: true, filter: keepData(from) })
+    logs.push(`Updated ${backendDir} (user data preserved)`)
+    // The built pages: a clean folder (old builds' files do not pile up).
+    const dist = path.join(cfg.projectRoot, 'adal-keep-frontend', 'dist')
+    const fresh = path.join(extracted, 'adal-keep-frontend', 'dist')
+    if (fs.existsSync(path.join(fresh, 'index.html'))) {
+      const old = `${dist}.old`
+      fs.rmSync(old, { recursive: true, force: true })
+      if (fs.existsSync(dist)) fs.renameSync(dist, old)
+      fs.mkdirSync(path.dirname(dist), { recursive: true })
+      fs.cpSync(fresh, dist, { recursive: true })
+      fs.rmSync(old, { recursive: true, force: true })
+      logs.push(`Updated ${dist}`)
+    }
+    // Packages: only when their list changed (or are missing).
+    const marker = readMarker(cfg.projectRoot) || {}
+    const hasModules = fs.existsSync(path.join(backendDir, 'node_modules'))
+    if (!hasModules || marker.lock_hash !== manifest.lock_hash) {
+      const toolchain = findToolchain(cfg.projectRoot)
+      const ni = await run(npmCmd(toolchain, 'install --omit=dev --no-audit --no-fund'), backendDir, 20 * 60 * 1000)
+      logs.push(`[backend] npm install → ${ni.ok ? 'ok' : 'failed'}\n${ni.out.slice(-400)}`)
+      if (!ni.ok && !hasModules) throw new Error('npm install failed')
+    } else logs.push('Packages unchanged — no npm install')
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true })
+  }
+}
+
 // ---------------------------------------------------------------------------
 // POST /api/system/update/apply — fetch + install the latest revision
 // ---------------------------------------------------------------------------
@@ -475,6 +557,25 @@ async function applyUpdate(req, res) {
   const logs = []
   try {
     const installed = await getInstalled()
+    setUpdateDb(req?.app?.locals?.db)
+
+    // --- Installed PC: Adal's signed release from Supabase -----------------
+    if (!installed.isRepo) {
+      let manifest = null
+      try { manifest = await latestRelease('release') } catch (e) { logs.push(`Supabase updates: ${e.message} — trying GitHub`) }
+      if (manifest) {
+        await installFromRelease(cfg, logs, manifest)
+        writeMarker(cfg.projectRoot, { sha: manifest.sha, branch: 'release', source: 'supabase', lock_hash: manifest.lock_hash, message: manifest.message })
+        const restarts = ['AdalKeep.exe', 'run-server.bat'].some(f => fs.existsSync(path.join(cfg.projectRoot, f)))
+        if (restarts) setTimeout(() => process.exit(0), 3000)
+        return res.json({
+          success: true, branch: 'release', source: 'supabase',
+          installed: { sha: manifest.sha, short: manifest.short },
+          message: restarts ? 'Update installed. The server restarts now — reload the page in about 20 seconds.' : 'Update installed. Please restart the app to apply changes.',
+          log: logs.join('\n').slice(-4000),
+        })
+      }
+    }
 
     // The revision GitHub currently publishes on the tracked branch — this is
     // what we record in the marker so the next "check" reports "up to date".

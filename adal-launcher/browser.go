@@ -103,9 +103,10 @@ func pickBrowser() string {
 		return b
 	}
 	if braveInstalling() {
-		logf("Brave is still installing — waiting for it")
-		notify("Adal Keep is finishing the Brave install.\r\n\r\nIt opens by itself in a moment — you can close this message.")
-		for end := time.Now().Add(4 * time.Minute); time.Now().Before(end); time.Sleep(2 * time.Second) {
+		// A short wait only: Brave's setup can take minutes on a slow line, and
+		// Adal Keep must open at once — in Chrome / Edge now, in Brave next time.
+		logf("Brave is still installing — waiting up to 20 s for it")
+		for end := time.Now().Add(20 * time.Second); time.Now().Before(end); time.Sleep(1 * time.Second) {
 			if b := braveExe(); b != "" {
 				time.Sleep(3 * time.Second) // let the installer finish its last files
 				return b

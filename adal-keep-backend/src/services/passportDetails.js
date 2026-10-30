@@ -3,8 +3,8 @@
  * place of birth and date of issue. A passport settled from those lines alone
  * (JEV, or this PC's own reading) left them empty; this reads them after the
  * passport is filed and fills only what the profile does not have yet:
- *   1. this PC's own reading of the printed text (free)
- *   2. Gemini's quick model, when a key is set
+ *   1. Gemini's quick model, when a key is set (light for the PC)
+ *   2. this PC's own reading of the printed text (heavy; only without Gemini)
  */
 import fs from 'fs'
 import path from 'path'
@@ -44,16 +44,8 @@ export async function fillPassportDetails(db, profileId, imagePath, log = consol
   }
   const done = () => (!need.place || got.place_of_birth) && (!need.issue || got.passport_issue_date)
 
-  // 1. This PC's own reading.
-  if (IMAGE.test(imagePath)) {
-    try {
-      const { extractPassport, extractVisualFields } = await import('./passportOcr.js')
-      const ocr = await extractPassport(imagePath)
-      take(extractVisualFields(ocr?.visualText || ''), 'this PC')
-    } catch {}
-  }
-  // 2. Gemini's quick model.
-  if (!done()) {
+  // 1. Gemini's quick model (a few seconds, almost no work for this PC).
+  {
     try {
       const { classifyWithGemini, isGeminiConfigured } = await import('./geminiClassifier.js')
       if (isGeminiConfigured()) {
@@ -61,6 +53,14 @@ export async function fillPassportDetails(db, profileId, imagePath, log = consol
         take(r?.fields || {}, 'Gemini')
       }
     } catch (e) { log(`[passport details] profile #${profileId}: Gemini did not answer (${e.message})`) }
+  }
+  // 2. This PC's own reading (heavy) — only when Gemini could not.
+  if (!done() && IMAGE.test(imagePath)) {
+    try {
+      const { extractPassport, extractVisualFields } = await import('./passportOcr.js')
+      const ocr = await extractPassport(imagePath)
+      take(extractVisualFields(ocr?.visualText || ''), 'this PC')
+    } catch {}
   }
   if (!Object.keys(got).length) return {}
   // Only what is still empty (a person may have typed it meanwhile).

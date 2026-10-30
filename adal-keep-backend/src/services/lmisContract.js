@@ -6,10 +6,11 @@
  *
  *   1. LMIS sign-in (the shared one — no new SMS code when LMIS is signed in
  *      in another tab)
- *   2. lmis.gov.et/organization/register/ (Contract)
- *   3. search her Labor ID
+ *   2. Contract / Report → Contract: lmis.gov.et/new-agency/contract-process/placed-labors
+ *      (LMIS's agency pages; the old organization/register page is not used)
+ *   3. search her Labor ID (EF…)
  *   4. Open her row (only the row with exactly that Labor ID)
- *   5. on her page (Labor ID checked again): Create Contract
+ *   5. on her page (Labor ID checked again): Create (Contract)
  *   6. the contract window: Experienced / Non Experienced (profile), the job
  *      order of her Musaned recruitment office (PRO), Beginning of Contract
  *      = today, Ending = 2 years later, and from her Musaned contract:
@@ -28,7 +29,7 @@
 import { log, settle, closePopups, stepLogin } from './lmisWorkflow.js'
 
 export const LMIS_CONTRACT = 'lmis_contract'
-const REGISTER_URL = 'https://lmis.gov.et/organization/register/'
+const CONTRACT_URL = 'https://lmis.gov.et/new-agency/contract-process/placed-labors'
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 const cancelled = (ctx) => typeof ctx.isCancelled === 'function' && ctx.isCancelled()
 
@@ -45,24 +46,38 @@ async function until(test, ms, ctx) {
 
 const text = (page) => page.evaluate(() => document.body?.innerText || '').catch(() => '')
 
+/** A visible text box to search in (the placed labors list has one). */
+const hasSearchBox = (page) => page.evaluate(() => [...document.querySelectorAll('input')]
+  .some(i => { const r = i.getBoundingClientRect(); return r.width > 40 && r.height > 10 && !i.disabled && /^(text|search|)$/i.test(i.type) })).catch(() => false)
+
 async function openContracts(page, ctx) {
-  log(ctx, 'opening LMIS → Contract (organization/register)')
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    await page.goto(REGISTER_URL, { waitUntil: 'domcontentloaded', timeout: 240000 })
+  log(ctx, 'opening LMIS → Contract / Report → Contract (placed labors)')
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    await page.goto(CONTRACT_URL, { waitUntil: 'domcontentloaded', timeout: 240000 })
       .catch(e => log(ctx, `navigation threw: ${e.message}`, 'warn'))
     const ok = await until(async () => {
       if (/\/(auth|login)/i.test(page.url())) return true
-      return /Labor ID/i.test(await text(page)) && !!(await page.$('input'))
+      return /contract-process/i.test(page.url()) && await hasSearchBox(page)
     }, 90000, ctx)
     if (/\/(auth|login)/i.test(page.url())) {
       log(ctx, 'LMIS asked to sign in again', 'warn')
       await stepLogin(page, ctx)
       continue
     }
-    if (ok) { await settle(page); await closePopups(page, ctx); log(ctx, '✓ Contract page open'); return }
-    log(ctx, 'the Contract page did not finish loading — loading it again', 'warn')
+    if (ok) { await settle(page); await closePopups(page, ctx); log(ctx, '✓ Contract (placed labors) page open'); return }
+    // Landed somewhere else (the agency dashboard): the menu, like a person.
+    log(ctx, `the Contract page did not show (at ${page.url()}) — using the menu`, 'warn')
+    await clickText(page, /^\s*Contract \/ Report\s*$/).catch(() => {})
+    await sleep(800)
+    await page.evaluate(() => {
+      const a = [...document.querySelectorAll('a')].find(x => /contract-process/.test(x.getAttribute('href') || '') && x.getBoundingClientRect().width > 0)
+      a?.click()
+    }).catch(() => {})
+    if (await until(async () => /contract-process/i.test(page.url()) && await hasSearchBox(page), 30000, ctx)) {
+      await settle(page); log(ctx, '✓ Contract (placed labors) page open (menu)'); return
+    }
   }
-  throw new Error('The LMIS Contract page did not open')
+  throw new Error(`The LMIS Contract page (placed labors) did not open — the tab shows ${page.url()}`)
 }
 
 /** Types the Labor ID in the page's search box. */
@@ -84,27 +99,42 @@ async function search(page, ctx, laborId) {
   log(ctx, `searching Labor ID ${laborId}`)
 }
 
-/** The table row with exactly this Labor ID: { found, count } */
+// Her row: the smallest box (table row or card) that shows exactly her Labor
+// ID and has an "Open" button.
+const ROW_FINDER = `(function (id) {
+  var want = id.toUpperCase()
+  var isOpen = function (b) { return /^\\s*open\\s*$/i.test(b.innerText || b.value || '') && b.getBoundingClientRect().width > 0 }
+  var boxes = []
+  var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
+  for (var n = walker.nextNode(); n; n = walker.nextNode()) {
+    if (n.textContent.toUpperCase().split(/[^A-Z0-9]+/).indexOf(want) < 0) continue
+    for (var el = n.parentElement, up = 0; el && up < 10; el = el.parentElement, up++) {
+      if (el.getBoundingClientRect().height <= 0) break
+      var btn = [].slice.call(el.querySelectorAll('a, button, [role="button"]')).filter(isOpen)
+      if (btn.length === 1) { boxes.push({ el: el, btn: btn[0] }); break }
+      if (btn.length > 1) break
+    }
+  }
+  return boxes
+})`
+
+/** Her row: { found, none } */
 function rowState(page, laborId) {
-  return page.evaluate((id) => {
-    const want = id.toUpperCase()
-    const rows = [...document.querySelectorAll('tr, [role="row"]')].filter(r => r.getBoundingClientRect().height > 0)
-    const mine = rows.filter(r => r.innerText.toUpperCase().split(/\s+/).includes(want))
-    return { found: mine.length, rows: rows.length, none: /no (record|data|result)/i.test(document.body.innerText || '') }
-  }, laborId).catch(() => ({ found: 0, rows: 0, none: false }))
+  return page.evaluate((finder, id) => {
+    const boxes = eval(finder)(id)
+    return { found: boxes.length, none: /no (record|data|result)|not found|empty/i.test(document.body.innerText || '') }
+  }, ROW_FINDER, laborId).catch(() => ({ found: 0, none: false }))
 }
 
 /** Presses Open in her row; the page opens in this same tab. */
 async function openRow(page, ctx, laborId) {
-  const target = await page.evaluate((id) => {
-    const want = id.toUpperCase()
-    const row = [...document.querySelectorAll('tr, [role="row"]')]
-      .find(r => r.getBoundingClientRect().height > 0 && r.innerText.toUpperCase().split(/\s+/).includes(want))
-    const btn = row && [...row.querySelectorAll('a, button, [role="button"]')].find(b => /^\s*open\s*$/i.test(b.innerText || ''))
+  const target = await page.evaluate((finder, id) => {
+    const btn = eval(finder)(id)[0]?.btn
     if (!btn) return null
     btn.setAttribute('data-adal-open', '1')
-    return { href: btn.tagName === 'A' ? btn.href : '' }
-  }, laborId)
+    btn.scrollIntoView({ block: 'center' })
+    return { href: btn.tagName === 'A' && btn.href && !/^javascript:|#$/.test(btn.href) ? btn.href : '' }
+  }, ROW_FINDER, laborId)
   if (!target) throw new Error(`No "Open" button in the row of ${laborId}`)
   if (target.href) { await page.goto(target.href, { waitUntil: 'domcontentloaded', timeout: 240000 }); return }
 
@@ -159,38 +189,51 @@ export async function runLmisContract(page, ctx) {
   }
   log(ctx, `✓ found ${laborId} — pressing Open`)
 
-  // 4. Her page.
+  // 4. Her page: her Labor ID on it, and no longer the list.
+  const listUrl = page.url()
   await openRow(page, ctx, laborId)
   const onHerPage = await until(async () => {
     const t = (await text(page)).toUpperCase()
-    return t.includes('PROCESS TIMELINE') && t.includes(laborId)
+    const moved = page.url() !== listUrl || /PROCESS TIMELINE/.test(t)
+    return moved && t.includes(laborId) && !(await rowState(page, laborId)).found
   }, 90000, ctx)
   if (!onHerPage) {
-    const t = await text(page)
-    const error = /PROCESS TIMELINE/i.test(t)
+    const t = (await text(page)).toUpperCase()
+    const error = page.url() !== listUrl && !t.includes(laborId)
       ? `The page that opened is not ${laborId} — stopped without creating anything`
-      : 'Her LMIS page did not open'
-    log(ctx, error, 'error')
+      : 'Her LMIS page did not open after Open'
+    log(ctx, `${error} (tab at ${page.url()})`, 'error')
+    await ctx.notify(`🖐 ${ctx.profileName}: LMIS contract — ${error}`, `In the LMIS tab: open ${laborId} from Contract → placed labors yourself, then press Create.`, 'error')
     return { ok: false, step: 'open', error, seconds: secs() }
   }
   await settle(page)
   await closePopups(page, ctx)
   log(ctx, `✓ ${ctx.profileName}'s LMIS page is open (${laborId})`)
 
-  // 5. Create Contract — only when she has none yet.
-  const hasButton = await until(async () => page.evaluate(() =>
-    [...document.querySelectorAll('button, a')].some(b => /create contract/i.test(b.innerText || '') && b.getBoundingClientRect().width > 0)
-  ), 20000, ctx)
+  // 5. Create (Contract) — only when she has none yet.
+  const CREATE = /^\s*(\+\s*)?create(\s+(new\s+)?contract)?\s*$/i
+  const findCreate = () => page.evaluate((src) => {
+    const re = new RegExp(src, 'i')
+    return [...document.querySelectorAll('button, a, [role="button"]')].some(b => re.test(b.innerText || '') && b.getBoundingClientRect().width > 0 && !b.disabled)
+  }, CREATE.source)
+  const hasButton = await until(findCreate, 25000, ctx)
   if (!hasButton) {
-    log(ctx, 'there is no "Create Contract" button — she already has an employment contract on LMIS; nothing was changed')
-    await ctx.notify(`ℹ️ ${ctx.profileName}: LMIS contract already started`, `Her LMIS page (${laborId}) shows no "Create Contract" button — the contract exists already.`)
-    return { ok: true, note: 'contract already exists', seconds: secs() }
+    const t = await text(page)
+    if (/contract (no|number|status|signed|created)|employment contract|payment/i.test(t) && !/no contract/i.test(t)) {
+      log(ctx, 'her page shows a contract already and no Create button — nothing was changed')
+      await ctx.notify(`ℹ️ ${ctx.profileName}: LMIS contract already started`, `Her LMIS page (${laborId}) already shows a contract and no "Create" button.`)
+      return { ok: true, note: 'contract already exists', seconds: secs() }
+    }
+    log(ctx, 'no "Create" button on her page — waiting for a person', 'warn')
+    await ctx.notify(`🖐 ${ctx.profileName}: LMIS contract — press Create`, `Her LMIS page (${laborId}) is open but Adal Keep did not find the Create button. Press it in the LMIS tab.`, 'error')
+    return { ok: true, pauseReason: 'awaiting-lmis-create', note: 'her page is open — Create not found', seconds: secs() }
   }
-  await page.evaluate(() => {
-    const b = [...document.querySelectorAll('button, a')].find(x => /create contract/i.test(x.innerText || '') && x.getBoundingClientRect().width > 0)
+  await page.evaluate((src) => {
+    const re = new RegExp(src, 'i')
+    const b = [...document.querySelectorAll('button, a, [role="button"]')].find(x => re.test(x.innerText || '') && x.getBoundingClientRect().width > 0 && !x.disabled)
     b?.scrollIntoView({ block: 'center' }); b?.click()
-  })
-  log(ctx, '✓ pressed Create Contract — the contract window opens')
+  }, CREATE.source)
+  log(ctx, '✓ pressed Create — the contract window opens')
 
   // 6. The contract window.
   const form = await until(async () => /Select A Job Order/i.test(await text(page)), 30000, ctx)

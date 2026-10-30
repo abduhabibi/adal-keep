@@ -62,7 +62,7 @@ for (const [name, text] of Object.entries(LINES)) {
   const mp3 = path.join(os.tmpdir(), `adal-voice-${name}.mp3`)
   fs.writeFileSync(mp3, Buffer.from(await r.arrayBuffer()))
   // A little silence first (players clip the start), loudness evened out.
-  execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-i', mp3, '-af', 'adelay=150,loudnorm=I=-14:TP=-1.5', '-ar', '44100', '-ac', '1', path.join(OUT, `${name}.wav`)])
+  execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-i', mp3, '-af', 'adelay=150,loudnorm=I=-14:TP=-1.5', '-ar', '24000', '-ac', '1', '-sample_fmt', 's16', path.join(OUT, `${name}.wav`)])
   fs.unlinkSync(mp3)
   console.log(`✓ ${name}: ${text}`)
 }

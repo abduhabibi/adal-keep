@@ -184,7 +184,7 @@ export function useProfileFilters(profiles) {
   )
 
   const filterBar = (
-    <div className="grid gap-3 grid-cols-2 sm:grid-cols-4 xl:grid-cols-9">
+    <div className="grid gap-3 grid-cols-2 sm:grid-cols-4 xl:grid-cols-8">
       <Select title="Date Range" value={f.range} onChange={set('range')} options={DATE_RANGES} />
       <Select title="Experience" value={f.experience} onChange={set('experience')} options={opts('Any', choices.experience)} />
       <Select title="Age" value={f.age} onChange={set('age')} options={AGES} />
@@ -193,10 +193,20 @@ export function useProfileFilters(profiles) {
       <Select title="Skill" value={f.skill} onChange={set('skill')} options={withNone('Any', choices.skill)} />
       <Select title="Religion" value={f.religion} onChange={set('religion')} options={withNone('Any', choices.religion)} />
       <Select title="Run" value={f.run} onChange={set('run')} options={RUNS} />
-      <Select title="Stage" value={f.stage} onChange={set('stage')} options={[['', 'Any stage'], ...stages.names.map(([k, t]) => {
-        const n = profiles.filter(p => (stages.of[p.id] || 'new') === k).length
-        return [k, `${t} (${n})`]
-      })]} />
+      {/* Stage: its own full row of chips (long names were cut off in a narrow box). */}
+      <div className="col-span-2 sm:col-span-4 xl:col-span-8">
+        <span className="block text-center text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5">Stage</span>
+        <div className="flex flex-wrap justify-center gap-1.5">
+          {[['', 'Any stage', profiles.length], ...stages.names.map(([k, t]) => [k, t, profiles.filter(p => (stages.of[p.id] || 'new') === k).length])].map(([k, t, n]) => (
+            <button key={k || 'any'} type="button" onClick={() => set('stage')(f.stage === k ? '' : k)}
+              className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${f.stage === k
+                ? 'border-teal-500 bg-teal-500 text-white'
+                : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-teal-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300'}`}>
+              {t} <span className={f.stage === k ? 'text-teal-100' : 'text-slate-400'}>{n}</span>
+            </button>
+          ))}
+        </div>
+      </div>
     </div>
   )
 

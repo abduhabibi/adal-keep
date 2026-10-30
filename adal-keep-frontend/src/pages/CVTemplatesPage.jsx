@@ -41,15 +41,16 @@ export default function CVTemplatesPage() {
         action={
           <div className="flex gap-2">
             <Button variant="secondary" onClick={() => navigate('/cvs')}>← CVs</Button>
-            <Button onClick={() => navigate('/cvs/templates/new')}>+ New Template</Button>
+            <Button variant="secondary" onClick={() => navigate('/cvs/templates/new')}>Write HTML…</Button>
+            <Button onClick={() => navigate('/cvs/templates/design')}>🎨 Create template</Button>
           </div>
         }
       />
 
       <div className="panel p-4 text-xs text-slate-500 leading-relaxed">
         Each template is a hand-authored HTML/CSS layout with <code className="bg-slate-100 dark:bg-slate-800 px-1 rounded">{'{{TOKENS}}'}</code> for the profile fields.
-        Click <b>New Template</b> to create one, or <b>Edit</b> on any card to modify.
-        Header and footer images are uploaded inside the editor.
+        Click <b>🎨 Create template</b>: upload the agency's header, pick two colours and one of the designs — the passport page is always included.
+        <b>Edit</b> on any card changes it; <b>Write HTML…</b> is for a hand-made layout.
       </div>
 
       {loading ? <Spinner /> : rows.length === 0 ? (

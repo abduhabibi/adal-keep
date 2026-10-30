@@ -24,6 +24,7 @@ const CVsPage = lazy(() => fresh(() => import('./pages/CVsPage')))
 const CVNewPage = lazy(() => fresh(() => import('./pages/CVNewPage')))
 const CVTemplatesPage = lazy(() => fresh(() => import('./pages/CVTemplatesPage')))
 const CVTemplateEditPage = lazy(() => fresh(() => import('./pages/CVTemplateEditPage')))
+const CVTemplateDesignPage = lazy(() => fresh(() => import('./pages/CVTemplateDesignPage')))
 
 // After an update the old page files are gone: a page that cannot load
 // reloads Adal Keep once (then the new files are used).
@@ -139,6 +140,7 @@ function Shell() {
             <Route path="cvs/new" element={page(CVNewPage)} />
             <Route path="cvs/templates" element={page(CVTemplatesPage)} />
             <Route path="cvs/templates/new" element={page(CVTemplateEditPage)} />
+            <Route path="cvs/templates/design" element={page(CVTemplateDesignPage)} />
             <Route path="cvs/templates/:id/edit" element={page(CVTemplateEditPage)} />
             <Route path="settings" element={page(SettingsPage)} />
             <Route path="*" element={<Navigate to="/" replace />} />

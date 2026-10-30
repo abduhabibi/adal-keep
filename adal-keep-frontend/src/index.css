@@ -317,11 +317,14 @@ body {
 }
 
 .animate-fade-in {
-  animation: fadeInUp 0.5s var(--ease-spring) forwards;
+  animation: fadeInUp 0.5s var(--ease-spring) backwards;
 }
 
+/* "backwards", not "forwards": once shown, no transform stays on the page —
+   a kept transform made every popup inside it (position: fixed) stick to the
+   page instead of the screen (Trash → Empty showed at the bottom of the list). */
 .animate-fade-up {
-  animation: fadeInUp 0.4s var(--ease-spring) forwards;
+  animation: fadeInUp 0.4s var(--ease-spring) backwards;
 }
 
 /* ============================================

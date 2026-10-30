@@ -3,7 +3,7 @@
 #  Unpacks the Windows dependencies that PREPARE put on the USB:
 #     deps\node-win-x64.zip     -> <install>\runtime
 #     deps\backend-modules.zip  -> <install>\backend\node_modules
-#     deps\brave\BraveSetup.exe -> installs Brave in the background when missing
+#     deps\brave\BraveSetup.exe -> installs Brave (waited for) when the installer has not
 #  and checks that the server's native modules load.
 #  Exit code 0 = ready. A log is kept in <install>\install.log.
 # =====================================================================
@@ -58,8 +58,8 @@ try {
     } finally { Pop-Location }
     Write-Host 'OK  native modules load'
 
-    # --- Brave (the automations drive it). Installs in the background:
-    #     it takes a few minutes and the install does not need to wait.
+    # --- Brave (the automations drive it). The installer installs it first;
+    #     this is the fallback, and it waits too.
     if (Get-Brave) {
         Write-Host 'OK  Brave already installed'
     } else {
@@ -68,8 +68,10 @@ try {
             # Copied off the USB first, so the USB can be removed meanwhile.
             $local = Join-Path $env:TEMP 'AdalKeep-BraveSetup.exe'
             Copy-Item $setup $local -Force
-            Start-Process -FilePath $local -ArgumentList '/silent', '/install' -WindowStyle Hidden
-            Write-Host 'OK  Brave is installing in the background'
+            # Waited for: Adal Keep must open in Brave from its first start.
+            Start-Process -FilePath $local -ArgumentList '/silent', '/install' -WindowStyle Hidden -Wait
+            for ($i = 0; $i -lt 180 -and -not (Get-Brave); $i++) { Start-Sleep -Seconds 2 }
+            if (Get-Brave) { Write-Host 'OK  Brave installed' } else { Write-Host 'WARN Brave did not install - Adal Keep uses Chrome or Edge' }
         } else {
             Write-Host 'WARN no Brave installer on the USB - install Brave by hand'
         }

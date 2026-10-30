@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import FileTray from '../FileTray'
 import { useLocation, useNavigate } from 'react-router-dom'
 import api from '../../services/api'
+import toast from 'react-hot-toast'
 
 export default function Navbar({ onMenuClick, capturedFiles, setCapturedFiles }) {
   const location = useLocation()
@@ -148,6 +149,7 @@ export default function Navbar({ onMenuClick, capturedFiles, setCapturedFiles })
             <button onClick={openAdd} className="p-1.5 rounded-lg text-slate-500 dark:text-slate-400 hover:text-teal-400 hover:bg-teal-500/10 transition-all duration-200" title="አዲስ ማገናኛ ጨምር">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
             </button>
+            <BackupButton />
           </div>
 
           <InboxButton />
@@ -200,6 +202,49 @@ export default function Navbar({ onMenuClick, capturedFiles, setCapturedFiles })
 }
 
 /** Red "Inbox" while chat messages wait unread (Adal, the other agencies, groups). */
+/** Backs up to Telegram now (the main PC), with its progress in one notice. */
+function BackupButton() {
+  const [busy, setBusy] = useState(false)
+  const watch = useRef(null)
+  useEffect(() => () => clearInterval(watch.current), [])
+  const follow = () => {
+    clearInterval(watch.current)
+    const id = 'backup-now'
+    watch.current = setInterval(async () => {
+      try {
+        const { data } = await api.get('/backup')
+        const p = data.progress || {}
+        if (p.running) {
+          const docs = p.files_todo ? ` · ${p.files_done || 0} of ${p.files_todo} new documents` : ''
+          toast.loading(`💾 Backing up — ${p.step === 'database' ? 'the database' : p.step === 'index' ? 'finishing' : 'documents'}${docs}`, { id })
+          return
+        }
+        clearInterval(watch.current); setBusy(false)
+        if (p.error) toast.error(`Backup stopped: ${p.error}`, { id, duration: 8000 })
+        else toast.success(`💾 Backed up · ${data.files_sent ?? '?'} of ${data.files_total ?? '?'} documents online`, { id, duration: 6000 })
+      } catch { clearInterval(watch.current); setBusy(false) }
+    }, 2000)
+  }
+  const run = async () => {
+    if (busy) return
+    setBusy(true)
+    try {
+      const { data } = await api.post('/backup/run')
+      toast.loading(data.busy ? '💾 A backup is already running…' : '💾 Backup started…', { id: 'backup-now' })
+      follow()
+    } catch (e) {
+      setBusy(false)
+      toast.error(e.response?.data?.error || 'The backup did not start', { id: 'backup-now', duration: 7000 })
+    }
+  }
+  return (
+    <button onClick={run} disabled={busy} title="Back up to Telegram now (whenever the robots are free it also runs by itself)"
+      className={`ml-1 flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 ${busy ? 'text-teal-500 bg-teal-500/10' : 'text-slate-500 dark:text-slate-400 hover:text-teal-400 hover:bg-teal-500/10'}`}>
+      <span className={busy ? 'animate-pulse' : ''}>💾</span> {busy ? 'Backing up…' : 'Backup'}
+    </button>
+  )
+}
+
 function InboxButton() {
   const navigate = useNavigate()
   const location = useLocation()

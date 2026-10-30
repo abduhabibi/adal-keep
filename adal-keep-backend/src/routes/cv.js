@@ -460,7 +460,14 @@ router.post('/templates/preview-html', async (req, res) => {
     }
     const dummyTemplate = t ? { ...t, salary: t.salary ?? 1000, currency: t.currency || 'SAR', country: t.country || 'SA', contract_years: t.contract_years || 2 }
                             : { salary: 1000, currency: 'SAR', country: 'SA', contract_years: 2 }
+    // A new design (Create template): its header, passport page and title colour before it is saved.
+    const b = req.body || {}
+    if (b.include_passport !== undefined) Object.assign(dummyTemplate, { include_passport: b.include_passport ? 1 : 0, passport_h1: b.passport_h1 ?? 'Passport', passport_h1_color: b.passport_h1_color || '#000000', passport_include_header: 1 })
     const data = await buildTemplateData(db, dummy, dummyTemplate, {})
+    if (typeof b.header_data_url === 'string' && /^data:image\//.test(b.header_data_url)) data.HEADER_IMAGE = b.header_data_url
+    if (data.PASSPORT_PAGE_INCLUDE && !data.PASSPORT_URL) {
+      data.PASSPORT_URL = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="700" height="480"><rect width="700" height="480" rx="18" fill="#e5e7eb"/><text x="350" y="250" font-family="Arial" font-size="30" fill="#9ca3af" text-anchor="middle">Her passport page</text></svg>')
+    }
     const merged = mergeTemplate(html, css || '', data)
     res.set('Content-Type', 'text/html; charset=utf-8').send(merged)
   } catch (e) {

@@ -79,7 +79,7 @@ app.locals.db = db
 
 app.use(diagMiddleware)
 app.use(cors({ origin: true, credentials: true }))
-app.use(express.json())
+app.use(express.json({ limit: '15mb' }))   // CV designs preview with their header image
 // Any change (from the PC, a phone or Admin): what it touches goes online in
 // about a second and the phones refresh their own copy (services/cloudSync.js).
 app.use('/api', (req, res, next) => {

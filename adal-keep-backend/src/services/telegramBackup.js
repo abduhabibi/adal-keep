@@ -276,13 +276,13 @@ export async function runBackup(db, { force = false } = {}) {
       group = []; size = 0
     }
     for (const name of todo) {
-      if (!force && !inWindow(cfg)) break // the lunch break is over: tomorrow
+      if (!force && runsWorking() > 0) break // a run needs the internet: the rest goes when it is free again
       let sz = 0
       try { sz = fs.statSync(path.join(SAFE, name)).size } catch { continue }
       group.push(name); size += sz
       if (size >= SET_TARGET) await flush()
     }
-    if (force || inWindow(cfg)) await flush()
+    if (force || runsWorking() === 0) await flush()
 
     // 3. The index — what a restore needs to find every piece.
     progress.step = 'index'
@@ -353,23 +353,36 @@ export function ensureBackupKey() {
 }
 
 let timer = null
-/** Every minute: in the window, once a day, run (and resume after a stop). */
+/**
+ * Whenever the robots are free (no run working or waiting), any time of day:
+ * new documents go online within minutes, the database every 2 hours (and
+ * once a day at least). A run that starts pauses the backup between sets; it
+ * carries on when the runs are free again.
+ */
+const DB_EVERY_MS = 2 * 3600 * 1000
+const QUIET_MS = 10 * 60 * 1000          // at most one run every 10 minutes
 export function startBackupSchedule(db) {
   if (timer) return
   if (botToken()) ensureBackupKey()
-  timer = setInterval(() => {
-    const cfg = getConfig()
-    if (!cfg.enabled || !cfg.has_token || !cfg.has_password || !cfg.chat_id || progress.running) return
-    if (!inWindow(cfg)) return
-    if (runsWorking() > 0) return // the runs get the internet; the backup waits
-    const s = readState()
-    const pending = cfg.files_sent < cfg.files_total
-    if (s.last_day === today() && !pending) return
-    // Failed today? try again at most every 15 minutes inside the window.
-    if (s.last_error && s.last_run && Date.now() - new Date(s.last_run).getTime() < 15 * 60 * 1000) return
-    runBackup(db).then(r => console.log('[backup] done', r)).catch(e => console.warn('[backup] failed:', e.message))
-  }, 60 * 1000)
-  console.log('💾 Telegram backup scheduled in the lunch break')
+  timer = setInterval(async () => {
+    try {
+      const cfg = getConfig()
+      if (!cfg.enabled || !cfg.has_token || !cfg.has_password || !cfg.chat_id || progress.running) return
+      if (runsWorking() > 0) return
+      const waiting = Number((await db('automation_queue').where('status', 'pending').count({ c: '*' }).first().catch(() => null))?.c || 0)
+      if (waiting > 0) return
+      const s = readState()
+      const since = s.last_run ? Date.now() - new Date(s.last_run).getTime() : Infinity
+      if (since < QUIET_MS) return
+      // Failed lately? again after 15 minutes.
+      if (s.last_error && since < 15 * 60 * 1000) return
+      const newDocs = listDocuments().some(n => !s.sent?.[n])
+      const lastDb = (s.sets || []).filter(x => x.type === 'db').map(x => new Date(x.date).getTime()).pop() || 0
+      if (!newDocs && Date.now() - lastDb < DB_EVERY_MS && s.last_day === today()) return
+      runBackup(db).then(r => console.log('[backup] done', r)).catch(e => console.warn('[backup] failed:', e.message))
+    } catch (e) { console.warn('[backup] schedule:', e.message) }
+  }, 2 * 60 * 1000)
+  console.log('💾 Telegram backup: whenever the robots are free (new documents within minutes, the database every 2 hours)')
 }
 
 // ── Restore ──────────────────────────────────────────────────────────────────

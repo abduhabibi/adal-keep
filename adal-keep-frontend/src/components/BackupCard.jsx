@@ -55,8 +55,8 @@ export default function BackupCard() {
     <Card>
       <h2 className="font-display text-lg font-bold mb-1 flex items-center gap-2" translate="no"><span>💾</span> Backup to Telegram</h2>
       <p className="text-sm text-slate-500 mb-4" translate="no">
-        A locked copy of the database and every document goes to your private Telegram channel every day in the lunch break,
-        so a stolen or broken PC loses nothing. Telegram only sees pieces it cannot open.
+        A locked copy of the database and every document goes to your private Telegram channel whenever the robots are free —
+        new documents within minutes, the database every 2 hours — so a stolen or broken PC loses nothing. Telegram only sees pieces it cannot open.
       </p>
 
       {c.shared && (
@@ -102,14 +102,8 @@ export default function BackupCard() {
         </li>
         <li>
           <p className="font-semibold">{c.shared ? 1 : 4}. When</p>
-          <div className="flex flex-wrap items-center gap-2">
-            <span>Every day between</span>
-            <input type="time" className={`${field} w-32`} defaultValue={c.window_start} onBlur={e => e.target.value !== c.window_start && save({ window_start: e.target.value })} />
-            <span>and</span>
-            <input type="time" className={`${field} w-32`} defaultValue={c.window_end} onBlur={e => e.target.value !== c.window_end && save({ window_end: e.target.value })} />
-            <span className="text-xs text-slate-500">(lunch break — it never slows the internet while people work; what is not sent goes the next day)</span>
-          </div>
-          <label className="mt-2 flex items-center gap-2"><input type="checkbox" checked={c.enabled} onChange={e => save({ enabled: e.target.checked }, e.target.checked ? 'Daily backup on' : 'Daily backup off')} /> Daily backup on</label>
+          <p className="text-slate-600 dark:text-slate-300">Any time no robot is working or waiting: a run that starts pauses the backup, and it carries on when the run is done. It never takes the internet from a run.</p>
+          <label className="mt-2 flex items-center gap-2"><input type="checkbox" checked={c.enabled} onChange={e => save({ enabled: e.target.checked }, e.target.checked ? 'Backup on' : 'Backup off')} /> Backup on</label>
         </li>
       </ol>
 

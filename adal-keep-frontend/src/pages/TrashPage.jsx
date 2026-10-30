@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
+import { createPortal } from 'react-dom'
 import api from '../services/api'
 import PageHeader from '../components/shared/PageHeader'
 
@@ -71,7 +72,9 @@ export default function TrashPage() {
             )}
         </div>
       )}
-      {ask && (
+      {/* On the screen itself (document.body), never inside the page: it shows in
+          the middle of the window however long the list is. */}
+      {ask && createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
           <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl dark:bg-slate-900">
             <p className="text-sm">{ask.text}</p>
@@ -81,7 +84,7 @@ export default function TrashPage() {
                 className="rounded-lg bg-red-600 px-4 py-1.5 text-sm font-semibold text-white">Delete for good</button>
             </div>
           </div>
-        </div>
+        </div>, document.body
       )}
     </div>
   )

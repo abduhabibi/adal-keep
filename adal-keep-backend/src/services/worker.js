@@ -132,6 +132,35 @@ function speak(text) {
   } catch { return false }
 }
 
+// The recorded lines (scripts/make-voice.mjs): which one a task plays.
+const VOICE_DIR = path.join(__dirname, '../voice')
+const CLIPS = [
+  [/^musaned_add/, 'musaned_add', 'musaned'], [/^musaned_check/, 'musaned_check', 'musaned'], [/^musaned/, 'done', 'musaned'],
+  [/^wafid_book/, 'wafid_book', 'wafid'], [/^wafid_check/, 'wafid_check', 'wafid'], [/^wafid_slip/, 'wafid_slip', 'wafid'], [/^wafid/, 'done', 'wafid'],
+  [/^police/, 'police', 'police'], [/^lmis_contract/, 'lmis_contract', 'lmis'], [/^(lmis|contract_import|delete_labour)/, 'done', 'lmis'],
+  [/^insurance/, 'insurance', 'insurance'], [/^tasheer/, 'tasheer', 'tasheer'], [/^(mofa|visa)/, 'visa', 'visa'],
+]
+function voiceClip(workflowId = '', level = 'info') {
+  const [, done, area] = CLIPS.find(([re]) => re.test(String(workflowId))) || [null, 'done', '']
+  const names = level === 'error' ? [`problem_${area}`, 'problem'] : [done, 'done']
+  return names.map(n => path.join(VOICE_DIR, `${n}.wav`)).find(f => fs.existsSync(f)) || null
+}
+function playVoice(file) {
+  if (!file) return false
+  try {
+    let cmd, args
+    if (process.platform === 'win32') {
+      cmd = 'powershell'
+      args = ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', `(New-Object Media.SoundPlayer '${file.replace(/'/g, "''")}').PlaySync()`]
+    } else if (process.platform === 'darwin') { cmd = 'afplay'; args = [file] }
+    else { cmd = 'sh'; args = ['-c', 'paplay "$0" 2>/dev/null || aplay -q "$0"', file] }
+    const child = spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: true })
+    child.on('error', () => {})
+    child.unref()
+    return true
+  } catch { return false }
+}
+
 const _lastSound = {}
 export function playNotificationSound(workflowId = '', { level = 'info', name = '' } = {}) {
   const kind = soundKind(workflowId)
@@ -139,7 +168,9 @@ export function playNotificationSound(workflowId = '', { level = 'info', name = 
   // Several notices of one kind at the same moment ring once.
   if (Date.now() - (_lastSound[kind] || 0) < 10000) return
   _lastSound[kind] = Date.now()
-  // Said out loud: "I have finished filling Musaned for Halima."
+  // Said out loud: the recorded voice (src/voice, ElevenLabs), else the
+  // computer's own voice ("I have finished filling Musaned for Halima").
+  if (playVoice(voiceClip(workflowId, level))) return
   if (speak(spokenLine(workflowId, { level, name }))) return
   try {
     const platform = process.platform

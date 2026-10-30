@@ -491,11 +491,11 @@ async function installFromTarball(cfg, logs, sha = '') {
  * already built — no frontend build on the PC, and npm install only when the
  * package list changed. Returns the marker to write.
  */
-async function installFromRelease(cfg, logs, manifest) {
+export async function installFromRelease(cfg, logs, manifest, localArchive = null) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'adal-update-'))
   try {
-    const archive = path.join(tmp, 'release.tar.gz')
-    await downloadRelease(manifest, archive)
+    const archive = localArchive || path.join(tmp, 'release.tar.gz')
+    if (!localArchive) await downloadRelease(manifest, archive)
     logs.push(`Downloaded ${(fs.statSync(archive).size / 1048576).toFixed(1)} MB from Supabase (signed by Adal, checked)`)
     const extracted = path.join(tmp, 'src')
     fs.mkdirSync(extracted, { recursive: true })

@@ -80,13 +80,67 @@ export function soundKind(workflowId = '') {
   return 'police'
 }
 
+// What Adal Keep says when a task calls (instead of a plain sound).
+const SAYS = [
+  [/^musaned_add/, 'filling Musaned'],
+  [/^musaned_check/, 'checking Musaned'],
+  [/^musaned/, 'Musaned'],
+  [/^wafid_book/, 'filling the Wafid medical booking'],
+  [/^wafid_check/, 'checking the medical result'],
+  [/^wafid_slip/, 'getting the medical appointment slip'],
+  [/^wafid/, 'the Wafid medical'],
+  [/^police/, 'filling the police certificate'],
+  [/^lmis_contract/, 'filling the LMIS contract'],
+  [/^(lmis|contract_import|delete_labour)/, 'LMIS'],
+  [/^insurance/, 'filling the insurance'],
+  [/^tasheer/, 'filling Tasheer'],
+  [/^(mofa|visa)/, 'filling the visa'],
+]
+export function spokenLine(workflowId = '', { level = 'info', name = '' } = {}) {
+  const what = (SAYS.find(([re]) => re.test(String(workflowId))) || [null, 'the task'])[1]
+  const who = String(name || '').trim().split(/\s+/)[0] || ''
+  const first = who ? who[0].toUpperCase() + who.slice(1).toLowerCase() : ''
+  const forWho = first ? ` for ${first}` : ''
+  if (level === 'error') return `${what.replace(/^(filling|checking|getting) /, '').replace(/^the /, 'The ').replace(/^./, c => c.toUpperCase())}${forWho} has a problem. Please have a look.`
+  return `I have finished ${what}${forWho}.`
+}
+
+/** Says a line with the computer's own voice; false when it cannot. */
+function speak(text) {
+  try {
+    const clean = String(text).replace(/["'`$\\]/g, '')
+    let cmd, args
+    if (process.platform === 'win32') {
+      const ps = `Add-Type -AssemblyName System.Speech; $s = New-Object System.Speech.Synthesis.SpeechSynthesizer; ` +
+        `try { $v = $s.GetInstalledVoices() | ForEach-Object { $_.VoiceInfo } | Where-Object { $_.Gender -eq 'Female' -and $_.Culture.Name -like 'en*' } | Select-Object -First 1; if ($v) { $s.SelectVoice($v.Name) } } catch {}; ` +
+        `$s.Rate = 0; $s.Volume = 100; $s.Speak('${clean}')`
+      cmd = 'powershell'
+      args = ['-NoProfile', '-WindowStyle', 'Hidden', '-EncodedCommand', Buffer.from(ps, 'utf16le').toString('base64')]
+    } else if (process.platform === 'darwin') {
+      cmd = 'say'; args = [clean]
+    } else {
+      const has = (b) => ['/usr/bin/', '/usr/local/bin/', '/bin/'].some(d => fs.existsSync(d + b))
+      if (has('spd-say')) { cmd = 'spd-say'; args = ['-w', '-t', 'female1', '-r', '-10', clean] }
+      else if (has('espeak-ng')) { cmd = 'espeak-ng'; args = ['-s', '150', clean] }
+      else if (has('espeak')) { cmd = 'espeak'; args = ['-s', '150', clean] }
+      else return false
+    }
+    const child = spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: true })
+    child.on('error', () => {})
+    child.unref()
+    return true
+  } catch { return false }
+}
+
 const _lastSound = {}
-export function playNotificationSound(workflowId = '') {
+export function playNotificationSound(workflowId = '', { level = 'info', name = '' } = {}) {
   const kind = soundKind(workflowId)
   const s = SOUNDS[kind]
   // Several notices of one kind at the same moment ring once.
   if (Date.now() - (_lastSound[kind] || 0) < 10000) return
   _lastSound[kind] = Date.now()
+  // Said out loud: "I have finished filling Musaned for Halima."
+  if (speak(spokenLine(workflowId, { level, name }))) return
   try {
     const platform = process.platform
     let cmd, args
@@ -418,7 +472,7 @@ async function executeRun(db, page, job) {
       // A sign-in call rings the one watch alarm until a person touches that
       // page (or 1 minute); every other call rings its task's own sound.
       if (opts.login) ringUntilTouched(opts.login, (m) => onLog?.('info', m))
-      else playNotificationSound(job.workflow_id)
+      else playNotificationSound(job.workflow_id, { level, name: profile?.full_name })
       showDesktopNotice(title, body)
     } catch (e) {
       console.error('[notify] failed:', e.message)

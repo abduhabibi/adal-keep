@@ -231,6 +231,9 @@ const EN = {
   'ፕሮፋይሎችን መጫን አልተቻለም': 'Could not load the profiles',
   'ፕሮፋይሎችን ወደ ክሊስቶች ይጎትቱ': 'Drag profiles onto checklists',
   'ፕሮፋይሎች': 'Profiles',
+  'ሕክምና': 'Medical',
+  'ብቁ': 'Fit',
+  'ተመዝግቧል': 'Applied',
   // a few phrases written with other spellings / forms on the pages
   'የተመደቡ ፕሮፋይሎች ': 'Assigned profiles ',
   'ፕሪሚየም CRM': 'Premium CRM',

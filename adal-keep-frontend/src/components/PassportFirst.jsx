@@ -25,6 +25,8 @@ export default function PassportFirst({ onRead, onSkip }) {
   const [camera, setCamera] = useState(false)
   // Camera: the live camera here when the browser allows it (phone app,
   // this PC's webcam), else the phone's own camera app.
+  // On a phone the camera opens by itself (Gallery / Files are on it).
+  useEffect(() => { if (ON_PHONE) { const t = setTimeout(() => openCamera(), 250); return () => clearTimeout(t) } }, [])
   const openCamera = () => {
     if (navigator.mediaDevices?.getUserMedia && window.isSecureContext) setCamera(true)
     else cameraRef.current?.click()
@@ -142,7 +144,9 @@ export default function PassportFirst({ onRead, onSkip }) {
             onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; read(f) }} />
         </div>
       )}
-      {camera && <CameraShot onShot={(f) => { setCamera(false); read(f) }} onClose={() => setCamera(false)} onFail={() => { setCamera(false); cameraRef.current?.click() }} />}
+      {camera && <CameraShot onShot={(f) => { setCamera(false); read(f) }} onClose={() => setCamera(false)}
+        onGallery={() => { setCamera(false); galleryRef.current?.click() }} onFiles={() => { setCamera(false); inputRef.current?.click() }}
+        onFail={() => { setCamera(false); cameraRef.current?.click() }} />}
 
       {!busy && trayPics.length > 0 && (
         <div>

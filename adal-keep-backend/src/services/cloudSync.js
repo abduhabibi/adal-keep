@@ -31,10 +31,12 @@ const MAX_FILE = 45 * 1024 * 1024
 const GLOBAL = ['/profiles', '/brokers', '/tasks', '/employees', '/settings', '/setup/status', '/subscription/status',
   '/automations/stages', '/automations/active', '/notifications', '/checklists', '/cv/templates', '/quick-links',
   '/dashboard', '/tasks/documents', '/wafid/settings', '/health', '/tutor/tour', '/trash', '/cv/generated',
-  '/lmis/accounts', '/musaned/accounts', '/tasheer/accounts', '/insurance/accounts', '/visa/accounts']
+  '/lmis/accounts', '/musaned/accounts', '/tasheer/accounts', '/insurance/accounts', '/visa/accounts',
+  '/automations/ready-for-submit', '/tutor/adoption', '/main-pc']
 const PER_PROFILE = (id) => [`/profiles/${id}`, `/profiles/${id}/fields`, `/profiles/${id}/automations`,
   `/profiles/${id}/journey`, `/profiles/${id}/fill-plan`, `/cv/profile-readiness/${id}`, `/cv/generated?profile_id=${id}`]
-const PER_BROKER = (id) => [`/brokers/${id}`]
+// A broker's page: the broker and the profiles it brought (text only).
+const PER_BROKER = (id) => [`/brokers/${id}`, `/profiles?broker_id=${id}`]
 // The portals' sign-ins (LMIS, Musaned …): the lists go online without their
 // passwords; the passwords go in "/vault", locked with the agency's own key
 // (keep_secrets.file_key) — the agency's phones open it to sign in themselves.
@@ -261,7 +263,8 @@ async function pushAnswers(db, agency, state) {
     ? (await db('profiles').select('id')).map(r => r.id)
     : await changedProfiles(db, new Date((lastSweepAt || started) - 3 * 60000))
   const brokers = (await db('brokers').select('id').catch(() => [])).map(r => r.id)
-  const keys = [...GLOBAL, ...ids.flatMap(PER_PROFILE), ...brokers.flatMap(PER_BROKER)]
+  const templates = (await db('cv_templates').select('id').catch(() => [])).map(r => `/cv/templates/${r.id}`)
+  const keys = [...GLOBAL, ...ids.flatMap(PER_PROFILE), ...brokers.flatMap(PER_BROKER), ...templates]
   await pushVault(db, agency, state).catch(e => console.warn('[cloud] vault:', e.message))
   const wanted = new Set(keys)
   let batch = []

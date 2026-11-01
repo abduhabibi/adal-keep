@@ -58,23 +58,11 @@ async function phoneBoot() {
   startCloudDocuments()
   startLive().catch(() => {})
   startMirror()        // the agency's text on the phone itself: pages open at once
-  // A slim line at the bottom: is the office PC on (live) or not (online copy)?
-  const bar = document.createElement('div')
-  bar.id = 'adal-cloud-bar'
-  const OFF = '☁️ PC off — online copy; changes are done when it is on'
-  const ON = '⚡ Live with the office PC'
-  bar.innerHTML = `<span>${OFF}</span> <button type="button" title="Pair with another agency">⋯</button>`
-  bar.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:9999;background:#0f766e;color:#fff;font:11px/1.2 system-ui,sans-serif;padding:4px 10px calc(4px + env(safe-area-inset-bottom));display:flex;gap:8px;align-items:center;justify-content:space-between'
-  const btn = bar.querySelector('button')
-  btn.style.cssText = 'background:transparent;color:#fff;border:0;font-size:16px;line-height:1;padding:0 4px'
-  btn.onclick = () => { if (confirm('Pair this phone with another agency (its PC number)?')) { sessionStorage.removeItem('adal-cloud'); location.replace('/connect.html?pair=1') } }
-  window.addEventListener('adal-pc-online', (e) => {
-    bar.querySelector('span').textContent = e.detail ? ON : OFF
-    bar.style.background = e.detail ? '#4338ca' : '#0f766e'
-  })
-  document.body.appendChild(bar)
-  document.body.style.paddingBottom = '26px'
-  phoneUpdates(bar)
+  // Whether the office PC is live, and pairing: in Settings → This phone (no bar on the pages).
+  window.__adalPcOnline = false
+  window.addEventListener('adal-pc-online', (e) => { window.__adalPcOnline = !!e.detail })
+  window.__adalPair = () => { sessionStorage.removeItem('adal-cloud'); location.replace('/connect.html?pair=1') }
+  phoneUpdates()
 }
 
 // A newer phone app (Adal publishes it in Supabase, adal-updates/phone; the
@@ -87,43 +75,49 @@ const UPDATES = 'https://raw.githubusercontent.com/abduhabibi/adal-keep/release/
 async function updateUrl(file) {
   try { const { updateLink } = await import('./cloud/adapter.js'); return await updateLink(`phone/${file}`) } catch { return `${UPDATES}/${file}` }
 }
-function phoneUpdates(bar) {
+function phoneUpdates() {
   const plugin = window.Capacitor?.Plugins?.AdalDiscovery
   if (!plugin?.getVersion) return
   let last = 0, busy = false
+  // Only when a new version exists: a small red button (bottom right); Settings → This phone shows it too.
   const btn = document.createElement('button')
   btn.type = 'button'
-  btn.style.cssText = 'display:none;background:#dc2626;color:#fff;border:0;border-radius:999px;font:bold 11px system-ui;padding:3px 10px'
-  bar.insertBefore(btn, bar.lastChild)
+  btn.style.cssText = 'display:none;position:fixed;right:12px;bottom:calc(12px + env(safe-area-inset-bottom));z-index:9999;background:#dc2626;color:#fff;border:0;border-radius:999px;font:bold 12px system-ui;padding:8px 14px;box-shadow:0 6px 18px rgba(220,38,38,.35)'
+  document.body.appendChild(btn)
+  const tell = (state) => { window.__adalUpdate = { ...(window.__adalUpdate || {}), ...state }; window.dispatchEvent(new CustomEvent('adal-update', { detail: window.__adalUpdate })) }
   const install = async (v) => {
     if (busy) return
     busy = true
-    btn.textContent = '⬇ Downloading…'
+    btn.textContent = '⬇ Downloading…'; tell({ busy: true })
     try {
       const r = await plugin.installUpdate({ url: await updateUrl('AdalKeep.apk') })
       btn.textContent = r?.needsPermission ? '⬆ Allow, then tap here' : `⬆ Update to ${v.versionName}`
     } catch { btn.textContent = `⬆ Update to ${v.versionName}` }
-    busy = false
+    busy = false; tell({ busy: false })
   }
-  const check = async () => {
-    if (document.hidden || Date.now() - last < 10 * 60000) return
+  const check = async (force) => {
+    if (!force && (document.hidden || Date.now() - last < 10 * 60000)) return
     last = Date.now()
     try {
       const mine = await plugin.getVersion()
       let v
       try { v = await (await fetch(await updateUrl('version.json'), { cache: 'no-store' })).json() } catch { v = await (await fetch(`${UPDATES}/version.json?t=${Date.now()}`, { cache: 'no-store' })).json() }
-      if (!(v.versionCode > mine.versionCode)) { btn.style.display = 'none'; return }
+      const newer = v.versionCode > mine.versionCode
+      tell({ mine: mine.versionName || mine.versionCode, latest: v.versionName, newer, checkedAt: Date.now() })
+      if (!newer) { btn.style.display = 'none'; return }
       btn.style.display = ''
       btn.textContent = `⬆ Update to ${v.versionName}`
       btn.onclick = () => install(v)
+      window.__adalInstallUpdate = () => install(v)
       const asked = `adal-update-${v.versionCode}`
       if (!sessionStorage.getItem(asked)) { sessionStorage.setItem(asked, '1'); install(v) }
     } catch {}
   }
+  window.__adalCheckUpdate = () => check(true)
   const tick = () => check(); tick.__always = true
   setTimeout(check, 3000)
   setInterval(tick, 30 * 60000)
-  document.addEventListener('visibilitychange', check)
+  document.addEventListener('visibilitychange', () => check())
 }
 
 // The phone does no work while the app is in the background: repeating

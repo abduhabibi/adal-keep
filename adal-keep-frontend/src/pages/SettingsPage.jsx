@@ -17,6 +17,7 @@ import WafidCard from '../components/WafidCard'
 import InsuranceCard from '../components/InsuranceCard'
 import BackupCard from '../components/BackupCard'
 import ErrorBoundary from '../components/shared/ErrorBoundary'
+import PhoneCard from '../components/PhoneCard'
 
 export default function SettingsPage() {
   const { subscription, refresh } = useAuth()
@@ -177,6 +178,7 @@ export default function SettingsPage() {
         title="የስርዓት ቅንብሮች"
         subtitle="መልክ፣ አውታረ መረብ፣ ምዝገባ እና ማሻሻያዎች"
       />
+      {window.__ADAL_CLOUD && <ErrorBoundary small name="This phone"><PhoneCard /></ErrorBoundary>}
 
       {/* NEW: Agency Settings Card */}
       <Card>
@@ -256,9 +258,11 @@ export default function SettingsPage() {
           {[['am', 'አማርኛ', 'Amharic'], ['en', 'English', 'እንግሊዝኛ']].map(([id, label, other]) => (
             <button key={id} type="button" onClick={async () => {
                 if (getLang() === id) return
-                // The tips panel follows the app's language.
-                await api.post('/tutor/lang', { who: whoAmI(), lang: id }).catch(() => {})
-                setLang(id)
+                // The tips panel follows the app's language — told in the
+                // background (on a phone the PC can be slow or off; the switch
+                // never waits for it).
+                Promise.race([api.post('/tutor/lang', { who: whoAmI(), lang: id }).catch(() => {}), new Promise(r => setTimeout(r, 800))])
+                  .finally(() => setLang(id))
               }}
               className={`rounded-xl border-2 p-4 text-left transition ${getLang() === id ? 'border-teal-500 bg-teal-50/60 dark:bg-teal-900/20' : 'border-slate-200 dark:border-slate-700 hover:border-teal-300'}`}>
               <span className="block font-semibold" translate="no">{label}</span>

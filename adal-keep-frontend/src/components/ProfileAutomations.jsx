@@ -522,7 +522,8 @@ export default function ProfileAutomations({ profileId }) {
                 </button>
           )}
 
-          <div className="max-h-72 overflow-y-auto rounded-lg bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 p-3 font-mono text-[11px] leading-relaxed">
+          {/* The run's log stays (Adal and the run use it) but is not shown: only the buttons. */}
+          <div hidden className="max-h-72 overflow-y-auto rounded-lg bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 p-3 font-mono text-[11px] leading-relaxed">
             {(detail.log || []).map((l, i) => (
               <div key={i} className={
                 l.level === 'error' ? 'text-red-600'

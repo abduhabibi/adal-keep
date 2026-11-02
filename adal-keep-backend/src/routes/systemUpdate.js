@@ -97,7 +97,8 @@ async function run(cmd, cwd, timeout = 5 * 60 * 1000) {
       shell: true,
       maxBuffer: 32 * 1024 * 1024,
       timeout,
-      env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: 'echo' },
+      // Packages never download their own browsers: the robots use the installed Brave.
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: 'echo', PUPPETEER_SKIP_DOWNLOAD: '1' },
     })
     return { ok: true, out: `${stdout || ''}${stderr || ''}`.trim() }
   } catch (err) {

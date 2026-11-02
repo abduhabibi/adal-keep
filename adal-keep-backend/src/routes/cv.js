@@ -188,6 +188,36 @@ router.get('/profile-readiness/:profileId', async (req, res) => {
   }
 })
 
+/**
+ * Her CV with one template, as a PDF saved in her CV field (and in
+ * generated_cvs). Also used by the WhatsApp sends.
+ */
+export async function generateCvFile(db, fresh, template, overrides = {}, createdBy = 'user') {
+  const data = await buildTemplateData(db, fresh, template, overrides)
+  const html = mergeTemplate(template.html_content, template.css_content, data)
+
+  const slug = (fresh.full_name || 'profile').replace(/[^A-Za-z0-9]+/g, '_').slice(0, 40)
+  const tslug = (template.name || 'template').replace(/[^A-Za-z0-9]+/g, '_').slice(0, 30)
+  const filename = 'AdalCV_' + fresh.id + '_' + slug + '_' + tslug + '_' + Date.now() + '.pdf'
+  const outPath = path.join(SAFE_STORAGE_DIR, filename)
+
+  try { await htmlToPdf(html, outPath) }
+  catch (e) { throw new Error('PDF render failed: ' + e.message) }
+
+  let cvField = await db('profile_fields').where('profile_id', fresh.id).andWhere('name', 'CV').first()
+  if (!cvField) {
+    const tpl = await db('field_templates').where('name', 'CV').first()
+    const [fid] = await db('profile_fields').insert({ profile_id: fresh.id, field_template_id: tpl ? tpl.id : null, name: 'CV', data_type: 'file', is_permanent: 1, created_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+    cvField = { id: fid }
+  }
+
+  const size = fs.statSync(outPath).size
+  const original_name = slug + '_' + tslug + '.pdf'
+  const [fileId] = await db('files').insert({ profile_field_id: cvField.id, original_name, path: filename, mimetype: 'application/pdf', size, created_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+  const [cvsId] = await db('generated_cvs').insert({ profile_id: fresh.id, template_id: template.id, filename, data_snapshot: JSON.stringify(data), pdf_path: filename, created_by: createdBy, created_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+  return { generated_cv_id: cvsId, file_id: fileId, filename, original_name, path: outPath }
+}
+
 router.post('/generate', async (req, res) => {
   const db = req.app.locals.db
   try {
@@ -215,31 +245,10 @@ router.post('/generate', async (req, res) => {
     if (overrides.previous_employment !== undefined) cvUpd.previous_employment = JSON.stringify(overrides.previous_employment)
     if (Object.keys(cvUpd).length) { cvUpd.updated_at = new Date().toISOString(); await db('profiles').where('id', profile.id).update(cvUpd) }
     const fresh = await db('profiles').where('id', profile.id).first()
-
-    const data = await buildTemplateData(db, fresh, template, overrides)
-    const html = mergeTemplate(template.html_content, template.css_content, data)
-
-    const slug = (fresh.full_name || 'profile').replace(/[^A-Za-z0-9]+/g, '_').slice(0, 40)
-    const tslug = (template.name || 'template').replace(/[^A-Za-z0-9]+/g, '_').slice(0, 30)
-    const filename = 'AdalCV_' + fresh.id + '_' + slug + '_' + tslug + '_' + Date.now() + '.pdf'
-    const outPath = path.join(SAFE_STORAGE_DIR, filename)
-
-    try { await htmlToPdf(html, outPath) }
-    catch (e) { return res.status(500).json({ error: 'PDF render failed: ' + e.message }) }
-
-    let cvField = await db('profile_fields').where('profile_id', fresh.id).andWhere('name', 'CV').first()
-    if (!cvField) {
-      const tpl = await db('field_templates').where('name', 'CV').first()
-      const [fid] = await db('profile_fields').insert({ profile_id: fresh.id, field_template_id: tpl ? tpl.id : null, name: 'CV', data_type: 'file', is_permanent: 1, created_at: new Date().toISOString(), updated_at: new Date().toISOString() })
-      cvField = { id: fid }
-    }
-
-    const size = fs.statSync(outPath).size
-    const [fileId] = await db('files').insert({ profile_field_id: cvField.id, original_name: slug + '_' + tslug + '.pdf', path: filename, mimetype: 'application/pdf', size, created_at: new Date().toISOString(), updated_at: new Date().toISOString() })
-
-    const [cvsId] = await db('generated_cvs').insert({ profile_id: fresh.id, template_id: template.id, filename, data_snapshot: JSON.stringify(data), pdf_path: filename, created_by: 'user', created_at: new Date().toISOString(), updated_at: new Date().toISOString() })
-
-    res.json({ ok: true, generated_cv_id: cvsId, file_id: fileId, filename, download_url: '/api/files/' + fileId + '/download' })
+    let made
+    try { made = await generateCvFile(db, fresh, template, overrides) }
+    catch (e) { return res.status(500).json({ error: e.message }) }
+    res.json({ ok: true, ...made, download_url: '/api/files/' + made.file_id + '/download' })
   } catch (e) {
     console.error('[CV] generate error: ' + e.message)
     res.status(500).json({ error: e.message })

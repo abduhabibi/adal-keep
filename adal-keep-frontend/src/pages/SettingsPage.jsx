@@ -18,6 +18,7 @@ import InsuranceCard from '../components/InsuranceCard'
 import BackupCard from '../components/BackupCard'
 import ErrorBoundary from '../components/shared/ErrorBoundary'
 import PhoneCard from '../components/PhoneCard'
+import WhatsAppCard from '../components/WhatsAppCard'
 
 export default function SettingsPage() {
   const { subscription, refresh } = useAuth()
@@ -248,6 +249,7 @@ export default function SettingsPage() {
       {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Wafid"><WafidCard /></ErrorBoundary>}
       {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Insurance"><InsuranceCard /></ErrorBoundary>}
       {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Main PC & phones"><MainPCCard /></ErrorBoundary>}
+      {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="WhatsApp"><WhatsAppCard /></ErrorBoundary>}
       {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Backup"><BackupCard /></ErrorBoundary>}
 
       <Card>

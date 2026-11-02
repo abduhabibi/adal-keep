@@ -31,7 +31,7 @@ const SAFE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..',
 const LIST_URL = 'https://tawtheeq.musaned.com.sa/employment-requests?sort=createdAt,DESC&page=0&size=10'
 // A request the employer made that waits for our (EPRO) approval.
 const PENDING_URL = 'https://tawtheeq.musaned.com.sa/employment-requests/pending'
-const EVERY_MS = Number(process.env.MUSANED_CHECK_HOURS || 4) * 3600 * 1000
+const EVERY_MS = Number(process.env.MUSANED_CHECK_HOURS || 3) * 3600 * 1000
 const BETWEEN_MS = 8000
 const FINAL = /ARRIVED|REJECTED|CANCELED|CANCELLED|OUTSIDE KSA/i
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
@@ -455,6 +455,7 @@ export async function applyTemplate(db, profileId, buf) {
   if (!now.visa_number && t.visaNumber) upd.visa_number = t.visaNumber
   if (!now.chosen_at) upd.chosen_at = new Date().toISOString() // a contract means an employer chose her
   await db('profiles').where('id', profileId).update(upd)
+  if (!now.chosen_at) import('./whatsapp.js').then(w => w.onChosen(db, profileId)).catch(e => console.warn('[contracts] whatsapp:', e.message))
   return t
 }
 
@@ -658,6 +659,7 @@ async function saveDetails(db, browser, page, p, card, cardText, d) {
   if (first) {
     await task(db, p.id, `Chosen on Musaned: ${p.full_name}`, `Contract ${update.contract_number || ''} · ${update.employer_name || ''} · ${update.musaned_stage || ''}. Wafid medical booking started.`)
     try { const { queueWafidBooking } = await import('./wafidStatus.js'); await queueWafidBooking(db, p.id, 'chosen') } catch (e) { console.warn('[contracts] wafid:', e.message) }
+    import('./whatsapp.js').then(w => w.onChosen(db, p.id)).catch(e => console.warn('[contracts] whatsapp:', e.message))
   } else if (dead && p.chosen_at && !/CANCEL|REJECT/i.test(p.musaned_stage || '')) {
     await task(db, p.id, `Musaned: ${p.full_name}'s contract was ${update.musaned_stage}`, `Contract ${update.contract_number || ''} · ${update.employer_name || ''}. She is free for another employer.`)
   } else if (p.musaned_stage && update.musaned_stage && p.musaned_stage !== update.musaned_stage) {

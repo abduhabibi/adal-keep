@@ -37,7 +37,7 @@ let _browser = null
  * Find a Chromium-based browser executable on this machine.
  * Returns the first one that exists, or null.
  */
-function findBrowserExecutable() {
+export function findBrowserExecutable() {
   const candidates = []
 
   if (process.platform === 'win32') {

@@ -52,6 +52,7 @@ import branchMergeRouter from './src/routes/branchMerge.js'
 import wafidRouter from './src/routes/wafid.js'
 import backupRouter from './src/routes/backup.js'
 import contractsRouter from './src/routes/contracts.js'
+import whatsappRouter from './src/routes/whatsapp.js'
 import { diagMiddleware, diagReport } from './src/services/diag.js'
 import { removeSecret } from './src/services/secretStore.js'
 import { startContractChecker } from './src/services/musanedContracts.js'
@@ -155,6 +156,7 @@ app.use('/api', branchMergeRouter)
 app.use('/api', wafidRouter)
 app.use('/api', backupRouter)
 app.use('/api', contractsRouter)
+app.use('/api', whatsappRouter)   // Settings → WhatsApp, CVs to agents
 watchPaid(db)
 
 // Utility function to safely check/add missing columns
@@ -183,6 +185,7 @@ async function initSystem() {
           console.log(`[passport details] checked ${n} profile(s) missing place of birth / issue date`)
         } catch (e) { console.warn('[passport details] backfill:', e.message) }
       }, 60000)
+      import('./src/services/whatsapp.js').then(w => w.startWhatsApp(db)).catch(e => console.warn('[whatsapp]', e.message))
     } catch (migErr) {
       console.warn('⚠️ Migration check skipped or non-critical issue:', migErr.message)
     }

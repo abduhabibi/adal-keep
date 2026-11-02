@@ -10,6 +10,7 @@ import { formatDate } from '../lib/utils'
 import FieldCard from '../components/fields/FieldCard'
 import ProfileAutomations from '../components/ProfileAutomations'
 import ProfileJourney from '../components/ProfileJourney'
+import WhatsAppSend from '../components/WhatsAppSend'
 import MedicalBattery from '../components/MedicalBattery'
 
 export default function ProfileDetailPage() {
@@ -164,6 +165,8 @@ export default function ProfileDetailPage() {
       )}
 
       <ProfileJourney profileId={id} />
+
+      {import.meta.env.VITE_DEMO !== '1' && <WhatsAppSend profile={profile} />}
 
       {(profile.chosen_at || profile.contract_number) && <ContractCard profile={profile} />}
 

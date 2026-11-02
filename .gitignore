@@ -105,3 +105,4 @@ adal-admin/admin.log
 # Android signing keys (kept in ~/.adal-keep)
 *.jks
 *.keystore
+adal-keep-backend/.wwebjs_cache/

@@ -140,9 +140,43 @@ export function JourneyFork({ states = {}, notes = {}, counts, selected, onSelec
   )
 }
 
-/** On a profile: her journey, refreshed every 15 s. */
+const STATE_WORD = { done: 'Done', active: 'Now', failed: 'Stopped', todo: 'Not yet', soon: 'Coming' }
+const STATE_CHIP = {
+  done: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300',
+  active: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300',
+  failed: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
+  todo: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300',
+  soon: 'bg-slate-50 text-slate-400 dark:bg-slate-900 dark:text-slate-500',
+}
+
+/** One step under the fork: its state, who it is with, its documents. */
+function StepCard({ s }) {
+  const missing = (s.docs || []).filter(d => !d.have).length
+  return (
+    <div className={`min-w-0 rounded-xl border p-2.5 text-xs ${s.state === 'active' ? 'border-amber-300 dark:border-amber-700' : 'border-slate-200 dark:border-slate-700'}`}>
+      <div className="flex items-center justify-between gap-1">
+        <span className="truncate font-bold text-slate-800 dark:text-slate-100">{s.title}</span>
+        <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${STATE_CHIP[s.state] || STATE_CHIP.todo}`}>{STATE_WORD[s.state] || s.state}</span>
+      </div>
+      {s.note && <p className="mt-0.5 truncate text-[11px] text-slate-500" title={s.note}>{s.note}</p>}
+      {s.who && <p className="mt-1 line-clamp-2 text-[11px] font-medium text-slate-700 dark:text-slate-200" title={s.who}>👤 {s.who}</p>}
+      {s.docs?.length > 0 && (
+        <div className="mt-1.5 flex flex-wrap gap-1" title={missing ? `${missing} document(s) missing` : 'All documents here'}>
+          {s.docs.map(d => (
+            <span key={d.name} className={`rounded px-1.5 py-0.5 text-[10px] ${d.have ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300' : 'bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-300'}`}>
+              {d.have ? '✓' : '✗'} {d.name}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** On a profile: her journey, refreshed every 15 s — the fork, then each step's who and documents. */
 export default function ProfileJourney({ profileId }) {
   const [j, setJ] = useState(null)
+  const [open, setOpen] = useState(() => { try { return localStorage.getItem('adal-journey-details') !== '0' } catch { return true } })
   useEffect(() => {
     let alive = true
     const load = () => api.get(`/profiles/${profileId}/journey`).then(r => alive && setJ(r.data)).catch(() => {})
@@ -151,12 +185,23 @@ export default function ProfileJourney({ profileId }) {
     return () => { alive = false; clearInterval(t) }
   }, [profileId])
   if (!j) return null
-  const all = [...j.lmis, ...j.embassy]
+  const all = [...j.lmis, ...j.embassy.slice(3)]
   const states = Object.fromEntries(all.map(s => [s.key, s.state]))
   const notes = Object.fromEntries(all.map(s => [s.key, s.note]))
+  const toggle = () => setOpen(o => { try { localStorage.setItem('adal-journey-details', o ? '0' : '1') } catch {} return !o })
   return (
-    <section data-tour="profile-journey" className="panel p-4" onClick={(e) => { if (e.target.closest('button')) document.getElementById('ai-actions')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }}>
-      <JourneyFork states={states} notes={notes} />
+    <section data-tour="profile-journey" className="panel p-4">
+      <div onClick={(e) => { if (e.target.closest('button')) document.getElementById('ai-actions')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }}>
+        <JourneyFork states={states} notes={notes} />
+      </div>
+      <button type="button" onClick={toggle} className="mt-2 text-xs font-semibold text-teal-700 hover:underline dark:text-teal-400">
+        {open ? '▾ Who and documents per step' : '▸ Who and documents per step'}
+      </button>
+      {open && (
+        <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-7">
+          {all.map(s => <StepCard key={s.key} s={s} />)}
+        </div>
+      )}
     </section>
   )
 }

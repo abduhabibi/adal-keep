@@ -8,7 +8,7 @@ import StatusBadge from '../components/shared/StatusBadge'
 import Button from '../components/shared/Button'
 import Input from '../components/shared/Input'
 import { useProfileFilters } from '../components/profileFilters'
-import { JourneyFork } from '../components/ProfileJourney'
+import { JourneyFork, SHARED, BRANCHES } from '../components/ProfileJourney'
 
 const STATUS_OPTIONS_AM = [
   { value: 'pending', label: 'በመጠባበቅ ላይ' },
@@ -57,7 +57,7 @@ export default function ProfilesPage() {
   }, [load])
 
   // Date range, experience, age, married, country, skill, religion + sort.
-  const { rows: allRows, filterBar, sortBar, active: filtering, clear, step, setStep, stepCounts, activeCount } = useProfileFilters(profiles)
+  const { rows: allRows, filterBar, sortBar, active: filtering, clear, step, setStep, stepCounts, activeCount, journey } = useProfileFilters(profiles)
   // 🤝 Selected: the girls an employer chose on Musaned.
   const selectedOnly = searchParams.get('chosen') === '1'
   const isChosen = (p) => !!p.chosen_at && !/CANCEL|REJECT/i.test(p.musaned_stage || '')
@@ -261,6 +261,8 @@ export default function ProfilesPage() {
                 <span className="hidden sm:block"><StatusBadge status={p.status} /></span>
               </div>
 
+              <MiniJourney steps={journey.steps[p.id]} who={journey.who[p.id]} missing={journey.missing[p.id]} picked={step} />
+
               <dl className="hidden sm:block mt-4 space-y-1.5 text-sm text-slate-600">
                 <div className="flex justify-between gap-2">
                   <dt className="text-slate-400">ደላላ</dt>
@@ -311,6 +313,34 @@ export default function ProfilesPage() {
     </div>
   )
 }
+// The seven steps in journey order, for the small dots on each card.
+const STEP_LIST = [...SHARED, ...BRANCHES.flatMap(b => b.steps)].map(([k, t]) => [k, t])
+const DOT = { done: 'bg-emerald-500', active: 'bg-amber-400 animate-pulse', failed: 'bg-red-500', todo: 'bg-slate-200 dark:bg-slate-700', soon: 'bg-slate-100 dark:bg-slate-800' }
+
+/**
+ * On each card: her journey as seven small dots (hover: the step and who it is
+ * with); with a step picked above the list, that step's who and missing documents.
+ */
+function MiniJourney({ steps = {}, who = {}, missing = {}, picked }) {
+  const n = Object.values(steps).filter(v => v === 'done').length
+  return (
+    <div className="mt-2">
+      <div className="flex items-center gap-1" title={`${n} of 7 steps done`}>
+        {STEP_LIST.map(([k, t], i) => (
+          <span key={k} title={`${t}${who[k] ? ` — ${who[k]}` : ''}${missing[k]?.length ? ` · missing: ${missing[k].join(', ')}` : ''}`}
+            className={`h-1.5 flex-1 rounded-full ${DOT[steps[k]] || DOT.todo} ${picked === k ? 'ring-2 ring-emerald-300' : ''} ${i === 3 ? 'ml-1' : ''}`} />
+        ))}
+      </div>
+      {picked && (who[picked] || missing[picked]?.length > 0) && (
+        <div className="mt-1.5 space-y-0.5 text-[11px] leading-tight">
+          {who[picked] && <p className="line-clamp-2 text-slate-600 dark:text-slate-300">👤 {who[picked]}</p>}
+          {missing[picked]?.length > 0 && <p className="truncate text-red-600 dark:text-red-400">✗ {missing[picked].join(', ')}</p>}
+        </div>
+      )}
+    </div>
+  )
+}
+
 /** Pages of 100: « 1 | 2 | … | n » — folds to "Page 2 of 5" with « when not needed. */
 function Pager({ page, pages, total, per, onPage, bottom = false }) {
   const [open, setOpen] = useState(true)

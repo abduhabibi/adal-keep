@@ -92,7 +92,7 @@ function useRunStates() {
  * visa), refreshed every 30 s. { names: [[key, label]…], of: {profileId: key} }
  */
 function useStages() {
-  const [st, setSt] = useState({ names: [], of: {}, steps: {} })
+  const [st, setSt] = useState({ names: [], of: {}, steps: {}, who: {}, missing: {} })
   useEffect(() => {
     let alive = true
     const load = () => api.get('/automations/stages')
@@ -103,6 +103,8 @@ function useStages() {
           names: r.data?.stages || [],
           of: Object.fromEntries(list.map(x => [x.profile_id, x.stage])),
           steps: Object.fromEntries(list.map(x => [x.profile_id, x.steps || {}])),
+          who: Object.fromEntries(list.map(x => [x.profile_id, x.who || {}])),
+          missing: Object.fromEntries(list.map(x => [x.profile_id, x.missing || {}])),
         })
       })
       .catch(() => {})
@@ -222,5 +224,6 @@ export function useProfileFilters(profiles) {
     // Filters set below the search line (the journey step is shown above the list).
     activeCount: Object.entries(f).filter(([k, v]) => v && k !== 'step').length,
     step: f.step, setStep: (k) => setF(prev => ({ ...prev, step: prev.step === k ? '' : k })), stepCounts,
+    journey: stages,
   }
 }

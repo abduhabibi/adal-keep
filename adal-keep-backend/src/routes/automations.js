@@ -356,6 +356,40 @@ export function stageOf(p, runs = {}) {
   return 'new'
 }
 
+// The documents each step needs (a field counts when it holds a file;
+// "Contract" is any of the contract fields).
+export const STEP_DOCS = {
+  cv: ['Passport', 'Photo', 'Full Body Photo', 'CV'],
+  musaned: ['Passport', 'Photo', 'CV'],
+  wafid: ['Passport', 'Photo', 'Appointment Slip', 'Medical Report'],
+  lmis: ['Contract', 'Slip', 'Medical Report', 'Labour ID'],
+  tasheer: ['Passport', 'Photo'],
+  insurance: ['Insurance'],
+  visa: ['Contract', 'Medical Report', 'Insurance', 'Visa'],
+}
+const hasDoc = (names, d) => d === 'Contract' ? [...names].some(n => /^Contract\b/i.test(n)) : names.has(d)
+
+/** Field names that hold a file, per profile: Map(id → Set). */
+export async function docsOf(db, ids) {
+  const rows = await db('profile_fields').join('files', 'files.profile_field_id', 'profile_fields.id')
+    .modify(q => { if (ids) q.whereIn('profile_fields.profile_id', ids) })
+    .distinct('profile_fields.profile_id', 'profile_fields.name').catch(() => [])
+  const m = new Map()
+  for (const r of rows) { if (!m.has(r.profile_id)) m.set(r.profile_id, new Set()); m.get(r.profile_id).add(r.name) }
+  return m
+}
+
+/** WhatsApp agents her CV is out at now (or the one that chose her): Map(id → [names]). */
+export async function agentsOut(db, ids) {
+  const rows = await db('whatsapp_sends').join('whatsapp_agents', 'whatsapp_agents.id', 'whatsapp_sends.agent_id')
+    .whereIn('whatsapp_sends.status', ['sent', 'chosen_here'])
+    .modify(q => { if (ids) q.whereIn('whatsapp_sends.profile_id', ids) })
+    .distinct('whatsapp_sends.profile_id', 'whatsapp_agents.name', 'whatsapp_sends.status').catch(() => [])
+  const m = new Map()
+  for (const r of rows) { if (!m.has(r.profile_id)) m.set(r.profile_id, []); m.get(r.profile_id).push(r.status === 'chosen_here' ? `${r.name} ✓` : r.name) }
+  return m
+}
+
 /**
  * One profile's journey, two tracks from the same start:
  *   LMIS:    CV → Musaned → Wafid → LMIS contract
@@ -364,7 +398,7 @@ export function stageOf(p, runs = {}) {
  * Each step: state 'done' | 'active' (working or waiting for a person) |
  * 'failed' | 'todo' | 'soon' (not built yet), and a short note.
  */
-export function journeyOf(p, runs = {}, hasCv = false) {
+export function journeyOf(p, runs = {}, hasCv = false, docs = null, agents = []) {
   const live = (r) => r && ['running', 'pending', 'paused'].includes(r.status)
   const step = (key, title, state, note = '', workflow = '') => ({ key, title, state, note, workflow })
   const fromRun = (r, doneNote = '') => r?.status === 'done' ? ['done', doneNote]
@@ -382,12 +416,30 @@ export function journeyOf(p, runs = {}, hasCv = false) {
   const lmis = step('lmis', 'LMIS contract', ...fromRun(runs.lmis_contract, 'created'), 'lmis_contract')
   const visa = /applied/i.test(p.visa_stage || '') ? ['done', p.visa_application_number ? `no. ${p.visa_application_number}` : 'applied']
     : fromRun(runs.mofa_visa)
+  const tasheer = step('tasheer', 'Tasheer', 'soon', 'coming')
+  const insurance = step('insurance', 'Insurance', ...fromRun(runs.insurance_certificate, 'certificate done'), 'insurance_certificate')
+  const visaStep = step('visa', 'Enjaz · Visa', visa[0], visa[1], 'mofa_visa')
+  // Who each step is with, and its documents (have / missing).
+  const employer = [p.employer_name, p.work_city].filter(Boolean).join(' · ')
+  const who = {
+    cv: agents.length ? `WhatsApp: ${agents.join(', ')}` : '',
+    musaned: [p.musaned_pro && `Office: ${p.musaned_pro}`, p.employer_name && `Employer: ${p.employer_name}`].filter(Boolean).join(' · '),
+    wafid: p.medical_valid_until ? `Medical valid until ${String(p.medical_valid_until).slice(0, 10)}` : '',
+    lmis: [employer && `Employer: ${employer}`, p.contract_number && `Contract ${p.contract_number}`, p.labor_id && `Labour ID ${p.labor_id}`].filter(Boolean).join(' · '),
+    insurance: '',
+    tasheer: '',
+    visa: [p.visa_number && `Visa ${p.visa_number}`, p.visa_application_number && `Application ${p.visa_application_number}`].filter(Boolean).join(' · '),
+  }
+  for (const st of [cv, musaned, wafid, lmis, tasheer, insurance, visaStep]) {
+    st.who = who[st.key] || ''
+    if (docs) {
+      const need = STEP_DOCS[st.key] || []
+      st.docs = need.map(d => ({ name: d, have: hasDoc(docs, d) }))
+    }
+  }
   return {
     lmis: [cv, musaned, wafid, lmis],
-    embassy: [cv, musaned, wafid,
-      step('tasheer', 'Tasheer', 'soon', 'coming'),
-      step('insurance', 'Insurance', ...fromRun(runs.insurance_certificate, 'certificate done'), 'insurance_certificate'),
-      step('visa', 'Enjaz · Visa', visa[0], visa[1], 'mofa_visa')],
+    embassy: [cv, musaned, wafid, tasheer, insurance, visaStep],
   }
 }
 
@@ -413,14 +465,16 @@ router.get('/profiles/:profileId/journey', async (req, res) => {
     const runs = {}
     for (const r of await db('automation_queue').where('profile_id', id).select('workflow_id', 'status').orderBy('id', 'asc')) runs[r.workflow_id] = r
     const cv = await db('generated_cvs').where('profile_id', id).first().catch(() => null)
-    res.json(journeyOf(p, runs, !!cv))
+    const docs = (await docsOf(db, [id])).get(id) || new Set()
+    res.json(journeyOf(p, runs, !!cv || docs.has('CV'), docs, (await agentsOut(db, [id])).get(id) || []))
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
 router.get('/automations/stages', async (req, res) => {
   try {
     const db = req.app.locals.db
-    const profiles = await db('profiles').select('id', 'status', 'musaned_stage', 'chosen_at', 'visa_stage', 'visa_application_number')
+    const profiles = await db('profiles').select('id', 'status', 'musaned_stage', 'chosen_at', 'visa_stage', 'visa_application_number',
+      'musaned_pro', 'employer_name', 'work_city', 'contract_number', 'labor_id', 'visa_number', 'medical_valid_until')
     const rows = await db('automation_queue').select('id', 'profile_id', 'workflow_id', 'status').orderBy('id', 'asc')
     const latest = new Map()
     for (const r of rows) {
@@ -428,12 +482,20 @@ router.get('/automations/stages', async (req, res) => {
       latest.get(r.profile_id)[r.workflow_id] = r
     }
     const withCv = new Set((await db('generated_cvs').distinct('profile_id').catch(() => [])).map(r => r.profile_id))
-    // Every journey step's state per profile: { cv: 'done', musaned: 'active', … }.
+    const docs = await docsOf(db)
+    const agents = await agentsOut(db)
+    // Every journey step per profile: its state { cv: 'done', … }, who it is
+    // with { musaned: 'Office: …' } and its missing documents { lmis: ['Slip'] }.
     const stepsOf = (p) => {
-      const j = journeyOf(p, latest.get(p.id) || {}, withCv.has(p.id))
-      return Object.fromEntries([...j.lmis, ...j.embassy].map(s => [s.key, s.state]))
+      const d = docs.get(p.id) || new Set()
+      const all = (() => { const j = journeyOf(p, latest.get(p.id) || {}, withCv.has(p.id) || d.has('CV'), d, agents.get(p.id) || []); return [...j.lmis, ...j.embassy.slice(3)] })()
+      return {
+        steps: Object.fromEntries(all.map(s => [s.key, s.state])),
+        who: Object.fromEntries(all.filter(s => s.who).map(s => [s.key, s.who])),
+        missing: Object.fromEntries(all.map(s => [s.key, (s.docs || []).filter(x => !x.have).map(x => x.name)]).filter(([, m]) => m.length)),
+      }
     }
-    res.json({ stages: STAGES, profiles: profiles.map(p => ({ profile_id: p.id, stage: stageOf(p, latest.get(p.id)), steps: stepsOf(p) })) })
+    res.json({ stages: STAGES, profiles: profiles.map(p => ({ profile_id: p.id, stage: stageOf(p, latest.get(p.id)), ...stepsOf(p) })) })
   } catch (e) {
     res.status(500).json({ error: e.message })
   }

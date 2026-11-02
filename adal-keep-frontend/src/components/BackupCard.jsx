@@ -56,7 +56,7 @@ export default function BackupCard() {
       <h2 className="font-display text-lg font-bold mb-1 flex items-center gap-2" translate="no"><span>💾</span> Backup to Telegram</h2>
       <p className="text-sm text-slate-500 mb-4" translate="no">
         A locked copy of the database and every document goes to your private Telegram channel whenever the robots are free —
-        new documents within minutes, the database every 2 hours — so a stolen or broken PC loses nothing. Telegram only sees pieces it cannot open.
+        new documents within seconds of arriving, the database every 2 hours — so a stolen or broken PC loses nothing. Telegram only sees pieces it cannot open.
       </p>
 
       {c.shared && (

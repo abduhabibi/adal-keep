@@ -244,22 +244,24 @@ async function sendSet(token, chat_id, password, buf, label) {
  * One backup run. `force` ignores the time window (the "Back up now" button);
  * otherwise it stops between sets when the window ends.
  */
-export async function runBackup(db, { force = false } = {}) {
+export async function runBackup(db, { force = false, docsOnly = false, light = false } = {}) {
   if (progress.running) return { busy: true }
   const token = botToken(), password = getSecret('backup_password')
   const s = readState()
   const chat_id = chatOf(s)
   if (!token || !password || !chat_id) throw new Error('Backup is not set up: the backup password is needed.')
-  Object.assign(progress, { running: true, started_at: new Date().toISOString(), step: 'database', bytes_sent: 0, files_done: 0, files_todo: 0, error: null })
-  s.last_run = new Date().toISOString(); writeState(s)
-  const cfg = getConfig()
+  Object.assign(progress, { running: true, started_at: new Date().toISOString(), step: docsOnly ? 'documents' : 'database', bytes_sent: 0, files_done: 0, files_todo: 0, error: null, docs_only: docsOnly })
+  s[docsOnly ? 'last_docs_run' : 'last_run'] = new Date().toISOString(); writeState(s)
   try {
     s.sent ||= {}; s.sets ||= []
-    // 1. The database, every run (the newest replaces the older ones in the index).
-    const dbIds = await sendSet(token, chat_id, password, await databaseSnapshot(db), `database-${today()}`)
-    s.sets = s.sets.filter(x => x.type !== 'db')
-    s.sets.push({ type: 'db', date: new Date().toISOString(), parts: dbIds })
-    writeState(s)
+    // 1. The database (the newest replaces the older ones in the index) —
+    //    not on the quick runs that only carry new documents.
+    if (!docsOnly) {
+      const dbIds = await sendSet(token, chat_id, password, await databaseSnapshot(db), `database-${today()}`)
+      s.sets = s.sets.filter(x => x.type !== 'db')
+      s.sets.push({ type: 'db', date: new Date().toISOString(), parts: dbIds })
+      writeState(s)
+    }
 
     // 2. Documents not sent yet, in sets of ~18 MB.
     progress.step = 'documents'
@@ -276,13 +278,13 @@ export async function runBackup(db, { force = false } = {}) {
       group = []; size = 0
     }
     for (const name of todo) {
-      if (!force && runsWorking() > 0) break // a run needs the internet: the rest goes when it is free again
+      if (!force && !light && runsWorking() > 0) break // a run needs the internet: the rest goes when it is free again
       let sz = 0
       try { sz = fs.statSync(path.join(SAFE, name)).size } catch { continue }
       group.push(name); size += sz
       if (size >= SET_TARGET) await flush()
     }
-    if (force || runsWorking() === 0) await flush()
+    if (force || light || runsWorking() === 0) await flush()
 
     // 3. The index — what a restore needs to find every piece.
     progress.step = 'index'
@@ -294,11 +296,12 @@ export async function runBackup(db, { force = false } = {}) {
     await publishBackup(db, { file_id: indexId, key: password, at: new Date().toISOString(), files_sent: Object.keys(s.sent).length, files_total: done.length, error: null }).catch(() => {})
 
     const left = listDocuments().filter(n => !s.sent[n]).length
-    s.last_ok = new Date().toISOString(); s.last_day = today(); s.last_error = null
+    s.last_ok = new Date().toISOString(); s.last_error = null
+    if (!docsOnly) s.last_day = today()
     writeState(s)
     return { ok: true, documents_left: left }
   } catch (e) {
-    const st = readState(); st.last_error = e.message; writeState(st)
+    const st = readState(); st.last_error = e.message; st.last_error_at = new Date().toISOString(); writeState(st)
     progress.error = e.message
     publishBackup(db, { error: e.message, error_at: new Date().toISOString() }).catch(() => {})
     throw e
@@ -354,35 +357,62 @@ export function ensureBackupKey() {
 
 let timer = null
 /**
- * Whenever the robots are free (no run working or waiting), any time of day:
- * new documents go online within minutes, the database every 2 hours (and
- * once a day at least). A run that starts pauses the backup between sets; it
- * carries on when the runs are free again.
+ * New documents go online within seconds of arriving: a quick run with only
+ * them (and the small index a restore reads). A few MB go even while a robot
+ * works — they hardly touch its internet; more wait until the robots are free.
+ * The whole database goes every 2 hours (once a day at least), when the robots
+ * are free (no run working or waiting). A run that starts pauses a big backup
+ * between sets; it carries on when the runs are free again.
  */
 const DB_EVERY_MS = 2 * 3600 * 1000
-const QUIET_MS = 10 * 60 * 1000          // at most one run every 10 minutes
+const QUIET_MS = 10 * 60 * 1000          // full runs: at most one every 10 minutes
+const DOCS_GAP_MS = 15 * 1000            // quick runs: at most one every 15 seconds
+const LIGHT_BYTES = 4 * 1024 * 1024      // new documents this small go even while a robot works
+const TICK_MS = 10 * 1000
+let kick = null
 export function startBackupSchedule(db) {
   if (timer) return
   if (botToken()) ensureBackupKey()
-  timer = setInterval(async () => {
+  const tick = async () => {
     try {
       const cfg = getConfig()
       if (!cfg.enabled || !cfg.has_token || !cfg.has_password || !cfg.chat_id || progress.running) return
-      if (runsWorking() > 0) return
+      const s = readState()
+      const ago = (t) => t ? Date.now() - new Date(t).getTime() : Infinity
+      const busy = runsWorking() > 0
+
+      // New documents: a quick run.
+      const fresh = listDocuments().filter(n => !s.sent?.[n])
+      if (fresh.length && ago(s.last_docs_run) >= DOCS_GAP_MS && !(s.last_error && ago(s.last_error_at) < 2 * 60 * 1000)) {
+        let bytes = 0
+        for (const n of fresh) { try { bytes += fs.statSync(path.join(SAFE, n)).size } catch {} }
+        const light = bytes <= LIGHT_BYTES
+        if (!busy || light) {
+          runBackup(db, { docsOnly: true, light })
+            .then(r => console.log(`[backup] ${fresh.length} new document(s) online`, r.documents_left ? `(${r.documents_left} still to go)` : ''))
+            .catch(e => console.warn('[backup] documents failed:', e.message))
+          return
+        }
+      }
+
+      // The database: every 2 hours (once a day at least), robots free.
+      if (busy) return
       const waiting = Number((await db('automation_queue').where('status', 'pending').count({ c: '*' }).first().catch(() => null))?.c || 0)
       if (waiting > 0) return
-      const s = readState()
-      const since = s.last_run ? Date.now() - new Date(s.last_run).getTime() : Infinity
-      if (since < QUIET_MS) return
-      // Failed lately? again after 15 minutes.
-      if (s.last_error && since < 15 * 60 * 1000) return
-      const newDocs = listDocuments().some(n => !s.sent?.[n])
+      if (ago(s.last_run) < QUIET_MS) return
+      if (s.last_error && ago(s.last_error_at || s.last_run) < 15 * 60 * 1000) return // failed lately: again after 15 minutes
       const lastDb = (s.sets || []).filter(x => x.type === 'db').map(x => new Date(x.date).getTime()).pop() || 0
-      if (!newDocs && Date.now() - lastDb < DB_EVERY_MS && s.last_day === today()) return
+      if (Date.now() - lastDb < DB_EVERY_MS && s.last_day === today()) return
       runBackup(db).then(r => console.log('[backup] done', r)).catch(e => console.warn('[backup] failed:', e.message))
     } catch (e) { console.warn('[backup] schedule:', e.message) }
-  }, 2 * 60 * 1000)
-  console.log('💾 Telegram backup: whenever the robots are free (new documents within minutes, the database every 2 hours)')
+  }
+  timer = setInterval(tick, TICK_MS)
+  // A new document: look in 3 s instead of waiting for the next tick.
+  try {
+    fs.mkdirSync(SAFE, { recursive: true })
+    fs.watch(SAFE, () => { clearTimeout(kick); kick = setTimeout(tick, 3000) }).on('error', () => {})
+  } catch {}
+  console.log('💾 Telegram backup: new documents within seconds, the database every 2 hours when the robots are free')
 }
 
 // ── Restore ──────────────────────────────────────────────────────────────────

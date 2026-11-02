@@ -6,6 +6,7 @@
 import { useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
 import api from '../services/api'
+import { wa } from '../lib/whatsapp'
 import Card from './shared/Card'
 import Button from './shared/Button'
 
@@ -23,8 +24,8 @@ function AgentForm({ initial, templates, chats, onDone, onCancel }) {
     setBusy(true)
     try {
       const body = { name: a.name, musaned_office: a.musaned_office, template_ids: a.template_ids, ...(a.chat_id ? { chat_id: a.chat_id } : { number: a.number }) }
-      if (initial?.id) await api.patch(`/whatsapp/agents/${initial.id}`, body)
-      else await api.post('/whatsapp/agents', body)
+      if (initial?.id) await wa.patch(`/whatsapp/agents/${initial.id}`, body)
+      else await wa.post('/whatsapp/agents', body)
       toast.success('Agent saved'); onDone()
     } catch (e) { toast.error(err(e)) }
     setBusy(false)
@@ -79,25 +80,27 @@ export default function WhatsAppCard() {
   const [templates, setTemplates] = useState([])
   const [chats, setChats] = useState(null)
   const [edit, setEdit] = useState(null) // {} new · agent
+  const [phone, setPhone] = useState('')
+  const [byPhone, setByPhone] = useState(false)
 
-  const load = () => api.get('/whatsapp').then(r => setS(r.data)).catch(() => setS(false))
-  const loadAgents = () => api.get('/whatsapp/agents').then(r => setAgents(r.data)).catch(() => {})
+  const load = () => wa.get('/whatsapp').then(r => setS(r.data)).catch(() => setS(false))
+  const loadAgents = () => wa.get('/whatsapp/agents').then(r => setAgents(r.data)).catch(() => {})
   useEffect(() => {
     load(); loadAgents()
     api.get('/cv/templates').then(r => setTemplates((r.data || []).filter(t => t.is_active !== 0))).catch(() => {})
   }, [])
   // While it starts / shows the QR, look every 2 s (the QR changes).
   useEffect(() => {
-    if (!s || !['starting', 'qr', 'signing-in'].includes(s.status)) return
+    if (!s || !['starting', 'qr', 'code', 'signing-in'].includes(s.status)) return
     const t = setInterval(load, 2000)
     return () => clearInterval(t)
   }, [s?.status])
-  useEffect(() => { if (s?.status === 'ready' && edit && !chats) api.get('/whatsapp/chats').then(r => setChats(r.data)).catch(() => setChats([])) }, [s?.status, edit])
+  useEffect(() => { if (s?.status === 'ready' && edit && !chats) wa.get('/whatsapp/chats').then(r => setChats(r.data)).catch(() => setChats([])) }, [s?.status, edit])
 
   if (s === false || s === null) return null
-  const connect = async () => { try { setS((await api.post('/whatsapp/connect')).data) } catch (e) { toast.error(err(e)) } }
-  const logout = async () => { if (!confirm('Sign this PC out of WhatsApp?')) return; try { setS((await api.post('/whatsapp/logout')).data) } catch (e) { toast.error(err(e)) } }
-  const remove = async (a) => { if (!confirm(`Remove ${a.name}?`)) return; await api.delete(`/whatsapp/agents/${a.id}`); loadAgents() }
+  const connect = async (withPhone) => { try { setS((await wa.post('/whatsapp/connect', withPhone ? { phone } : {})).data) } catch (e) { toast.error(err(e)) } }
+  const logout = async () => { if (!confirm('Sign your WhatsApp out of Adal Keep?')) return; try { setS((await wa.post('/whatsapp/logout')).data) } catch (e) { toast.error(err(e)) } }
+  const remove = async (a) => { if (!confirm(`Remove ${a.name}?`)) return; await wa.delete(`/whatsapp/agents/${a.id}`); loadAgents() }
   const tname = (id) => templates.find(t => t.id === id)?.name || `#${id}`
   const active = agents.filter(a => a.active)
 
@@ -105,35 +108,53 @@ export default function WhatsAppCard() {
     <Card>
       <h2 className="font-display text-lg font-bold mb-1 flex items-center gap-2" translate="no"><span>💬</span> WhatsApp</h2>
       <p className="text-sm text-slate-500 mb-4" translate="no">
-        Send CVs to your agents in Saudi Arabia from a profile. When Musaned shows who chose her, her CV is taken back from the other agents.
+        Everyone links their own WhatsApp here and sends CVs to their own agents in Saudi Arabia (a profile, or CVs → WhatsApp). When Musaned shows who chose her, her CV is taken back from the other agents.
       </p>
 
       {s.status === 'ready' ? (
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-teal-50 px-3 py-2 text-sm text-teal-800 dark:bg-teal-900/20 dark:text-teal-300">
-          <span>✓ Connected{s.me?.name ? ` as ${s.me.name}` : ''}{s.me?.number ? ` · +${s.me.number}` : ''}</span>
+          <span>✓ Your WhatsApp is connected{s.me?.name ? ` — ${s.me.name}` : ''}{s.me?.number ? ` · +${s.me.number}` : ''}</span>
           <button type="button" onClick={logout} className="text-xs underline">Sign out</button>
         </div>
-      ) : s.status === 'qr' ? (
-        <div className="mb-4 flex flex-col items-center gap-3 rounded-xl border border-slate-200 p-4 sm:flex-row dark:border-slate-700">
-          {s.qr ? <img src={s.qr} alt="WhatsApp QR code" className="h-56 w-56 rounded-lg bg-white p-2" /> : <div className="h-56 w-56 animate-pulse rounded-lg bg-slate-100" />}
-          <ol className="list-decimal space-y-1 pl-5 text-sm">
-            <li>Open WhatsApp on the agency's phone</li>
-            <li>Tap <b>⋮</b> (or Settings) → <b>Linked devices</b> → <b>Link a device</b></li>
-            <li>Point the phone at this code</li>
-          </ol>
+      ) : s.status === 'qr' || s.status === 'code' ? (
+        <div className="mb-4 flex flex-col items-center gap-4 rounded-xl border border-slate-200 p-4 sm:flex-row dark:border-slate-700">
+          {s.status === 'code'
+            ? <div className="rounded-xl bg-slate-900 px-6 py-5 font-mono text-3xl font-bold tracking-[0.2em] text-white" translate="no">{s.code}</div>
+            : s.qr ? <img src={s.qr} alt="WhatsApp QR code" className="h-56 w-56 rounded-lg bg-white p-2" /> : <div className="h-56 w-56 animate-pulse rounded-lg bg-slate-100" />}
+          <div className="space-y-2 text-sm">
+            <ol className="list-decimal space-y-1 pl-5">
+              <li>Open WhatsApp on your phone</li>
+              <li>Tap <b>⋮</b> (or Settings) → <b>Linked devices</b> → <b>Link a device</b></li>
+              {s.status === 'code'
+                ? <li>Tap <b>Link with phone number instead</b> and type this code</li>
+                : <li>Point the phone at this code</li>}
+            </ol>
+            {s.status === 'qr' && (
+              <button type="button" className="text-xs text-teal-700 underline dark:text-teal-400" onClick={() => setByPhone(true)}>On this phone? Link with your phone number instead</button>
+            )}
+            {s.status === 'qr' && byPhone && (
+              <div className="flex gap-2">
+                <input className={field} inputMode="tel" placeholder="Your WhatsApp number (251…)" value={phone} onChange={e => setPhone(e.target.value)} />
+                <Button size="sm" disabled={phone.replace(/\D/g, '').length < 9} onClick={() => connect(true)}>Get code</Button>
+              </div>
+            )}
+          </div>
         </div>
       ) : (
         <div className="mb-4 flex flex-wrap items-center gap-3">
-          <Button onClick={connect} disabled={s.status === 'starting' || s.status === 'signing-in'}>
-            {s.status === 'starting' ? 'Opening WhatsApp…' : s.status === 'signing-in' ? 'Signing in…' : '💬 Connect with WhatsApp'}
+          <Button onClick={() => connect(false)} disabled={s.status === 'starting' || s.status === 'signing-in'}>
+            {s.status === 'starting' ? 'Opening WhatsApp…' : s.status === 'signing-in' ? 'Signing in…' : '💬 Connect my WhatsApp'}
           </Button>
           {s.error && <span className="text-sm text-red-600">{s.error}</span>}
         </div>
       )}
+      {s.others?.length > 0 && (
+        <p className="-mt-2 mb-4 text-xs text-slate-500">Also connected on this agency: {s.others.map(o => o.me?.name || o.me?.number || o.key).join(' · ')}</p>
+      )}
 
       <div className="space-y-2">
         <div className="flex items-center justify-between">
-          <p className="text-sm font-semibold">Agents ({active.length})</p>
+          <p className="text-sm font-semibold">Your agents ({active.length})</p>
           {!edit && <Button size="sm" variant="secondary" onClick={() => setEdit({})} disabled={s.status !== 'ready'} title={s.status !== 'ready' ? 'Connect WhatsApp first' : ''}>＋ Add agent</Button>}
         </div>
         {edit && !edit.id && <AgentForm initial={null} templates={templates} chats={chats} onDone={() => { setEdit(null); loadAgents() }} onCancel={() => setEdit(null)} />}

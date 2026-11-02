@@ -6,6 +6,7 @@
 import { useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
 import api from '../services/api'
+import { wa } from '../lib/whatsapp'
 import Button from './shared/Button'
 
 const err = (e) => e?.response?.data?.error || e.message
@@ -18,26 +19,26 @@ const STATUS = {
 }
 
 export default function WhatsAppSend({ profile }) {
-  const [wa, setWa] = useState(null)
+  const [conn, setConn] = useState(null)
   const [agents, setAgents] = useState([])
   const [sends, setSends] = useState([])
   const [pick, setPick] = useState(null) // null closed · Set of agent ids
   const [busy, setBusy] = useState(false)
 
-  const loadSends = () => api.get(`/profiles/${profile.id}/whatsapp`).then(r => setSends(r.data)).catch(() => {})
+  const loadSends = () => wa.get(`/profiles/${profile.id}/whatsapp`).then(r => setSends(r.data)).catch(() => {})
   useEffect(() => {
-    api.get('/whatsapp').then(r => setWa(r.data)).catch(() => setWa(false))
-    api.get('/whatsapp/agents').then(r => setAgents(r.data.filter(a => a.active))).catch(() => {})
+    wa.get('/whatsapp').then(r => setConn(r.data)).catch(() => setConn(false))
+    wa.get('/whatsapp/agents').then(r => setAgents(r.data.filter(a => a.active))).catch(() => {})
     loadSends()
   }, [profile.id])
 
-  if (!wa || (!agents.length && !sends.length)) return null
-  const ready = wa.status === 'ready'
+  if (!conn || (!agents.length && !sends.length)) return null
+  const ready = conn.status === 'ready'
   const send = async (ids) => {
     setBusy(true)
     const t = toast.loading('Making the CVs and sending…')
     try {
-      const { data } = await api.post(`/profiles/${profile.id}/whatsapp/send`, { agent_ids: ids })
+      const { data } = await wa.post(`/profiles/${profile.id}/whatsapp/send`, { agent_ids: ids })
       const ok = data.results.filter(r => r.ok && !r.already).length
       const bad = data.results.filter(r => !r.ok)
       if (bad.length) toast.error(`${ok} sent · ${bad.length} not sent: ${bad[0].agent} — ${bad[0].error}`, { id: t, duration: 9000 })

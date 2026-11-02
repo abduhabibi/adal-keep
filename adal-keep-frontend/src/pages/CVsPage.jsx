@@ -6,11 +6,13 @@ import PageHeader from '../components/shared/PageHeader'
 import Button from '../components/shared/Button'
 import Spinner from '../components/shared/Spinner'
 import EmptyState from '../components/shared/EmptyState'
+import WhatsAppCVs from '../components/WhatsAppCVs'
 
 export default function CVsPage() {
   const navigate = useNavigate()
-  const [params] = useSearchParams()
+  const [params, setParams] = useSearchParams()
   const profileFilter = params.get('profile')
+  const tab = params.get('tab') === 'whatsapp' && !profileFilter ? 'whatsapp' : 'cvs'
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
 
@@ -23,7 +25,7 @@ export default function CVsPage() {
     finally { setLoading(false) }
   }
 
-  useEffect(() => { load() }, [profileFilter])
+  useEffect(() => { if (tab === 'cvs') load() }, [profileFilter, tab])
 
   const remove = async (id) => {
     if (!confirm('Delete this CV?')) return
@@ -48,7 +50,16 @@ export default function CVsPage() {
         }
       />
 
-      {loading ? <Spinner /> : rows.length === 0 ? (
+      {!profileFilter && import.meta.env.VITE_DEMO !== '1' && (
+        <div className="flex w-fit rounded-xl border border-slate-200 bg-white p-1 dark:border-slate-700 dark:bg-slate-800">
+          {[['cvs', '📄 Made CVs'], ['whatsapp', '💬 WhatsApp']].map(([id, label]) => (
+            <button key={id} type="button" onClick={() => setParams(id === 'whatsapp' ? { tab: 'whatsapp' } : {})}
+              className={`rounded-lg px-4 py-1.5 text-sm font-semibold ${tab === id ? 'bg-teal-600 text-white' : 'text-slate-600 dark:text-slate-300'}`}>{label}</button>
+          ))}
+        </div>
+      )}
+
+      {tab === 'whatsapp' ? <WhatsAppCVs /> : loading ? <Spinner /> : rows.length === 0 ? (
         <EmptyState
           title="No CVs yet"
           description="Click New CV to pick a candidate and generate a formatted CV for one of your agencies."

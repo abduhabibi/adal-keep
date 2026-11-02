@@ -71,7 +71,7 @@ router.post('/profiles/:profileId/automations/:workflowId/start', async (req, re
 
     // Preflight — depends on the workflow
     // Musaned workflows need no files
-    if (workflowId === 'musaned_check_chosen') {
+    if (workflowId === 'musaned_check_chosen' || workflowId === 'musaned_cv_import') {
       const prof = await db('profiles').where('id', profileId).first()
       if (!prof?.passport_number || !String(prof.passport_number).trim()) {
         return res.status(400).json({ error: 'Profile is missing the passport number', missing: ['Passport number'] })
@@ -270,6 +270,9 @@ router.post('/profiles/:profileId/automations/:workflowId/start', async (req, re
         }
       }
     }
+
+    // Add from Musaned: the CV template the person chose.
+    if (workflowId === 'musaned_cv_import' && req.body?.template_id) accountContext.cv_template_id = Number(req.body.template_id)
 
     const [runId] = await db('automation_queue').insert({
       profile_id: profileId,

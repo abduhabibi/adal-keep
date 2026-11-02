@@ -49,6 +49,8 @@ function resolveStoredPath(rawPath) {
   if (!rawPath) return null
   const cwd = process.cwd()
   const base = path.basename(rawPath)
+  // Files a run attaches (profileFiles.js) are stored with their full path.
+  if (path.isAbsolute(rawPath)) { try { if (fs.existsSync(rawPath)) return rawPath } catch {} }
   const candidates = [
     path.join(cwd, 'data/SafeStorage', rawPath),
     path.join(cwd, rawPath),

@@ -16,6 +16,8 @@ function resolveStoredPath(file) {
   const cwd = process.cwd()
   const raw = file.path || ''
   const base = path.basename(raw)
+  // Files attached by profileFiles.js are stored with their full path.
+  if (path.isAbsolute(raw)) { try { if (fs.existsSync(raw)) return raw } catch {} }
   const candidates = [
     path.join(cwd, 'data/SafeStorage', raw),   // AI files (basename) + data/SafeStorage/<subpath>
     path.join(cwd, raw),                        // uploads/... paths

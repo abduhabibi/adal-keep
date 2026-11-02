@@ -7,6 +7,7 @@ import Button from '../components/shared/Button'
 import Spinner from '../components/shared/Spinner'
 import EmptyState from '../components/shared/EmptyState'
 import WhatsAppCVs from '../components/WhatsAppCVs'
+import AddFromMusaned from '../components/AddFromMusaned'
 
 export default function CVsPage() {
   const navigate = useNavigate()
@@ -15,6 +16,7 @@ export default function CVsPage() {
   const tab = params.get('tab') === 'whatsapp' && !profileFilter ? 'whatsapp' : 'cvs'
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
+  const [fromMusaned, setFromMusaned] = useState(false)
 
   const load = async () => {
     setLoading(true)
@@ -45,6 +47,7 @@ export default function CVsPage() {
         action={
           <div className="flex gap-2">
             <Button variant="secondary" onClick={() => navigate('/cvs/templates')}>Templates</Button>
+            <Button variant="secondary" onClick={() => setFromMusaned(true)}>📥 Add from Musaned</Button>
             <Button data-tour="new-cv" onClick={openNew}>+ New CV</Button>
           </div>
         }
@@ -58,6 +61,8 @@ export default function CVsPage() {
           ))}
         </div>
       )}
+
+      {fromMusaned && <AddFromMusaned onClose={() => setFromMusaned(false)} />}
 
       {tab === 'whatsapp' ? <WhatsAppCVs /> : loading ? <Spinner /> : rows.length === 0 ? (
         <EmptyState

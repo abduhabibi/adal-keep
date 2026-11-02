@@ -37,6 +37,16 @@ export const WORKFLOWS = {
     stepCount: 3,
   },
 
+  musaned_cv_import: {
+    id: 'musaned_cv_import',
+    name: 'Add from Musaned',
+    description:
+      'Musaned sign-in (a person types the code) → HR Pool → search her passport → VIEW → her passport and photo copied to the profile, every empty field filled from the passport → her CV made',
+    target: 'https://tawtheeq.musaned.com.sa/hr-pool',
+    consts: {},
+    stepCount: 4,
+  },
+
   lmis_contract: {
     id: 'lmis_contract',
     name: 'Create LMIS contract',

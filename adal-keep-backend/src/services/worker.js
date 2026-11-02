@@ -526,6 +526,7 @@ async function executeRun(db, page, job) {
     musaned_username:  savedCtx.musaned_username || '',
     musaned_password:  savedCtx.musaned_password || '',
     musaned_name:      savedCtx.musaned_name || '',
+    cv_template_id:    savedCtx.cv_template_id || null,
     visa_username:     savedCtx.visa_username || '',
     visa_password:     savedCtx.visa_password || '',
     visa_name:         savedCtx.visa_name || '',

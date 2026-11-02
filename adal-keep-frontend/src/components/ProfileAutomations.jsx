@@ -265,7 +265,7 @@ export default function ProfileAutomations({ profileId }) {
             <button
               key={w.id}
               data-tour={`run-${w.id}`}
-              onClick={() => {
+              onClick={async () => {
                 // Every click says at once what is happening. A live run opens
                 // its panel; a finished one too, with "Run again" (a second
                 // police/Musaned run should be deliberate). Anything else starts.
@@ -274,8 +274,15 @@ export default function ProfileAutomations({ profileId }) {
                   if (PHONE_VIEW()) return
                   return toast(describeRun(latest), { icon: isQueued ? '⏳' : 'ℹ️', duration: 5000 })
                 }
-                // On the phone: do it here (its website, signed in) or let the PC do it.
-                if (window.__ADAL_CLOUD && portalOf(w.id)) { import('../cloud/live.js').then(L => setPcOn(L.pcLive())).catch(() => {}); return setChoose(w.id) }
+                // On the phone the PC does the work and the phone watches (the
+                // OTP / captcha page shows here at once). Only with the PC off:
+                // do it on this phone, or wait for the PC.
+                if (window.__ADAL_CLOUD && portalOf(w.id)) {
+                  const live = await import('../cloud/live.js').then(L => L.pcLive()).catch(() => false)
+                  setPcOn(live)
+                  if (live && !(isDone && !REPEATABLE.has(w.id))) return start(w.id)
+                  if (!live) return setChoose(w.id)
+                }
                 // Checking again is normal: a done check simply runs again.
                 if (isDone && REPEATABLE.has(w.id)) return start(w.id)
                 if (isDone) {
@@ -534,11 +541,11 @@ export default function ProfileAutomations({ profileId }) {
         <div className="fixed inset-0 z-[96] bg-black/40 flex items-end" onClick={() => setChoose(null)}>
           <div className="w-full rounded-t-2xl bg-white dark:bg-slate-900 p-4 space-y-2.5" style={{ paddingBottom: 'calc(16px + env(safe-area-inset-bottom))' }} onClick={e => e.stopPropagation()}>
             <p className="font-bold">{wfName(choose)}</p>
-            <button onClick={() => doOnPhone(choose)} className="w-full rounded-xl bg-indigo-600 text-white py-3 text-sm font-semibold text-left px-4">
-              📱 Do it on this phone<span className="block text-[11px] font-normal opacity-90">Its website opens here, signed in for you — only phone and internet</span>
-            </button>
             <button onClick={() => { const w = choose; setChoose(null); start(w) }} className="w-full rounded-xl border border-slate-300 dark:border-slate-600 py-3 text-sm font-semibold text-left px-4">
               💻 The PC does it<span className="block text-[11px] font-normal text-slate-500">{pcOn ? 'It starts now on the office PC; you watch it here' : 'The office PC is off — it starts when the PC is on'}</span>
+            </button>
+            <button onClick={() => doOnPhone(choose)} className="w-full rounded-xl bg-indigo-600 text-white py-3 text-sm font-semibold text-left px-4">
+              📱 Do it on this phone<span className="block text-[11px] font-normal opacity-90">Its website opens here, signed in for you — only phone and internet</span>
             </button>
             <button onClick={() => setChoose(null)} className="w-full py-2 text-sm text-slate-500">Cancel</button>
           </div>

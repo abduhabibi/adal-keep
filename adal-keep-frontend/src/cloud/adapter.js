@@ -396,14 +396,33 @@ export async function openVault() {
   return JSON.parse(new TextDecoder().decode(plain))
 }
 
+/**
+ * Bytes from an address. Telegram's file downloads do not allow pages to read
+ * them (no CORS); inside the phone app its own (native) HTTP has no such rule.
+ */
+async function fetchBytes(url) {
+  const H = window.Capacitor?.Plugins?.CapacitorHttp
+  if (H && window.Capacitor?.isNativePlatform?.()) {
+    const r = await H.request({ url, method: 'GET', responseType: 'arraybuffer' })
+    if (r.status >= 400) throw new Error(`HTTP ${r.status}`)
+    // Files come as base64; a JSON answer comes already read (an object).
+    if (typeof r.data === 'string') return Uint8Array.from(atob(r.data), ch => ch.charCodeAt(0))
+    if (r.data instanceof ArrayBuffer) return new Uint8Array(r.data)
+    return new TextEncoder().encode(JSON.stringify(r.data))
+  }
+  const r = await fetch(url)
+  if (!r.ok) throw new Error(`HTTP ${r.status}`)
+  return new Uint8Array(await r.arrayBuffer())
+}
+
 /** A document kept in Telegram: download, decrypt here (AES-GCM) — the file itself. */
 async function telegramFile(object, mimetype) {
   const s = await cloudSecrets()
   if (!s?.bot) return null
   const fileId = object.split(':')[1]
-  const f = await (await fetch(`https://api.telegram.org/bot${s.bot}/getFile?file_id=${encodeURIComponent(fileId)}`)).json()
+  const f = JSON.parse(new TextDecoder().decode(await fetchBytes(`https://api.telegram.org/bot${s.bot}/getFile?file_id=${encodeURIComponent(fileId)}`)))
   if (!f.ok) return null
-  const buf = new Uint8Array(await (await fetch(`https://api.telegram.org/file/bot${s.bot}/${f.result.file_path}`)).arrayBuffer())
+  const buf = await fetchBytes(`https://api.telegram.org/file/bot${s.bot}/${f.result.file_path}`)
   if (buf[0] !== 65 || buf[1] !== 75 || buf[2] !== 49) return null          // "AK1"
   const raw = Uint8Array.from(atob(s.file_key), ch => ch.charCodeAt(0))
   const key = await crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['decrypt'])

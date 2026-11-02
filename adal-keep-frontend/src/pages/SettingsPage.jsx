@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import api from '../services/api'
 import { useAuth } from '../context/AuthContext'
@@ -20,8 +21,21 @@ import ErrorBoundary from '../components/shared/ErrorBoundary'
 import PhoneCard from '../components/PhoneCard'
 import WhatsAppCard from '../components/WhatsAppCard'
 
+// The tabs of Settings: [id, icon, name].
+const SETTINGS_TABS = [
+  ['agency', '🏢', 'Agency'],
+  ['portals', '🤖', 'Portals'],
+  ['whatsapp', '💬', 'WhatsApp'],
+  ['backup', '💾', 'Backup & updates'],
+  ['look', '🎨', 'Look & language'],
+]
+
 export default function SettingsPage() {
   const { subscription, refresh } = useAuth()
+  // Which tab: ?tab=… (links like "Settings → WhatsApp" open it), else the agency.
+  const [params, setParams] = useSearchParams()
+  const tab = SETTINGS_TABS.some(([id]) => id === params.get('tab')) ? params.get('tab') : 'agency'
+  const setTab = (id) => { setParams(id === 'agency' ? {} : { tab: id }, { replace: true }); window.scrollTo({ top: 0 }) }
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   
@@ -179,8 +193,17 @@ export default function SettingsPage() {
         title="የስርዓት ቅንብሮች"
         subtitle="መልክ፣ አውታረ መረብ፣ ምዝገባ እና ማሻሻያዎች"
       />
+      {/* Settings in tabs — a short page instead of one long scroll. */}
+      <nav className="sticky top-0 z-20 -mx-1 flex gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-white/90 p-1 backdrop-blur dark:border-slate-700 dark:bg-slate-900/90" translate="no">
+        {SETTINGS_TABS.map(([id, icon, label]) => (
+          <button key={id} type="button" onClick={() => setTab(id)}
+            className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${tab === id ? 'bg-teal-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'}`}>
+            <span>{icon}</span>{label}
+          </button>
+        ))}
+      </nav>
+      {tab === 'agency' && <>
       {window.__ADAL_CLOUD && <ErrorBoundary small name="This phone"><PhoneCard /></ErrorBoundary>}
-
       {/* NEW: Agency Settings Card */}
       <Card>
         <h2 className="font-display text-lg font-bold mb-4 flex items-center gap-2">
@@ -208,7 +231,6 @@ export default function SettingsPage() {
           </div>
         </div>
       </Card>
-
       <Card>
         <h2 className="font-display text-lg font-bold mb-4 flex items-center gap-2">
           <span>🔑</span> ምዝገባ
@@ -244,87 +266,17 @@ export default function SettingsPage() {
           </form>
         </div>
       </Card>
-
-
+      {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Main PC & phones"><MainPCCard /></ErrorBoundary>}
+      </>}
+      {tab === 'portals' && <>
       {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Wafid"><WafidCard /></ErrorBoundary>}
       {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Insurance"><InsuranceCard /></ErrorBoundary>}
-      {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Main PC & phones"><MainPCCard /></ErrorBoundary>}
+      </>}
+      {tab === 'whatsapp' && <>
       {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="WhatsApp"><WhatsAppCard /></ErrorBoundary>}
+      </>}
+      {tab === 'backup' && <>
       {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Backup"><BackupCard /></ErrorBoundary>}
-
-      <Card>
-        <h2 className="font-display text-lg font-bold mb-4 flex items-center gap-2">
-          <span>🌐</span> Language · ቋንቋ
-        </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {[['am', 'አማርኛ', 'Amharic'], ['en', 'English', 'እንግሊዝኛ']].map(([id, label, other]) => (
-            <button key={id} type="button" onClick={async () => {
-                if (getLang() === id) return
-                // The tips panel follows the app's language — told in the
-                // background (on a phone the PC can be slow or off; the switch
-                // never waits for it).
-                Promise.race([api.post('/tutor/lang', { who: whoAmI(), lang: id }).catch(() => {}), new Promise(r => setTimeout(r, 800))])
-                  .finally(() => setLang(id))
-              }}
-              className={`rounded-xl border-2 p-4 text-left transition ${getLang() === id ? 'border-teal-500 bg-teal-50/60 dark:bg-teal-900/20' : 'border-slate-200 dark:border-slate-700 hover:border-teal-300'}`}>
-              <span className="block font-semibold" translate="no">{label}</span>
-              <span className="block text-xs text-slate-500 dark:text-slate-400" translate="no">{other}{getLang() === id ? ' · on' : ''}</span>
-            </button>
-          ))}
-        </div>
-        <p className="mt-2 text-xs text-slate-500" translate="no">Saved on this PC. Profile data and chat messages stay as they were written.</p>
-      </Card>
-
-      <Card>
-        <h2 className="font-display text-lg font-bold mb-4 flex items-center gap-2">
-          <span>🎨</span> መልክ
-        </h2>
-        <div data-tour="theme-picker" className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          {[
-            { id: 'light', label: 'Light', am: 'ብርሃን', swatch: 'bg-gradient-to-br from-white to-slate-200' },
-            { id: 'dark', label: 'Dark', am: 'ጨለማ', swatch: 'bg-gradient-to-br from-slate-800 to-black' },
-            { id: 'gradient', label: 'Gradient', am: 'ቀለማት', swatch: 'theme-swatch-gradient' },
-          ].map(t => (
-            <button
-              key={t.id}
-              type="button"
-              onClick={() => chooseTheme(t.id)}
-              className={`flex items-center gap-3 p-3 rounded-xl border-2 text-left transition-colors ${
-                theme === t.id ? 'border-teal-500 bg-teal-50/60 dark:bg-teal-900/20' : 'border-slate-200 dark:border-slate-700 hover:border-teal-300'
-              }`}
-            >
-              <span className={`h-10 w-10 shrink-0 rounded-lg border border-slate-300 dark:border-slate-600 ${t.swatch}`} />
-              <span>
-                <span className="block font-semibold text-slate-800 dark:text-slate-100">{t.label}</span>
-                <span className="block text-xs text-slate-500 dark:text-slate-400">{t.am}{theme === t.id ? ' · on' : ''}</span>
-              </span>
-            </button>
-          ))}
-        </div>
-      </Card>
-
-      <Card>
-        <h2 className="font-display text-lg font-bold mb-4 flex items-center gap-2">
-          <span>🖼️</span> የጀርባ ምስል
-        </h2>
-        <div className="grid gap-6 md:grid-cols-2">
-          <div className="aspect-video rounded-xl border-2 border-dashed flex items-center justify-center bg-slate-100 dark:bg-slate-900 overflow-hidden">
-            {currentWallpaper
-              ? <img src={currentWallpaper} alt="" className="w-full h-full object-cover" />
-              : <p className="text-sm text-slate-400">No wallpaper</p>}
-          </div>
-          <div className="flex flex-col justify-center gap-3">
-            <label className="flex flex-col items-center justify-center h-32 border-2 border-dashed rounded-xl cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800">
-              <span className="text-sm text-slate-500">{uploadingWallpaper ? 'Uploading…' : 'Upload wallpaper'}</span>
-              <input type="file" className="hidden" accept="image/jpeg,image/png" onChange={handleWallpaperUpload} />
-            </label>
-            {currentWallpaper && (
-              <button onClick={handleRemoveWallpaper} className="text-sm text-red-600">Remove</button>
-            )}
-          </div>
-        </div>
-      </Card>
-
       <Card>
         <h2 className="font-display text-lg font-bold mb-4 flex items-center gap-2">
           <span>🔄</span> ማሻሻያዎች
@@ -456,9 +408,81 @@ export default function SettingsPage() {
           )}
         </div>
       </Card>
-
+      </>}
+      {tab === 'look' && <>
+      <Card>
+        <h2 className="font-display text-lg font-bold mb-4 flex items-center gap-2">
+          <span>🌐</span> Language · ቋንቋ
+        </h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {[['am', 'አማርኛ', 'Amharic'], ['en', 'English', 'እንግሊዝኛ']].map(([id, label, other]) => (
+            <button key={id} type="button" onClick={async () => {
+                if (getLang() === id) return
+                // The tips panel follows the app's language — told in the
+                // background (on a phone the PC can be slow or off; the switch
+                // never waits for it).
+                Promise.race([api.post('/tutor/lang', { who: whoAmI(), lang: id }).catch(() => {}), new Promise(r => setTimeout(r, 800))])
+                  .finally(() => setLang(id))
+              }}
+              className={`rounded-xl border-2 p-4 text-left transition ${getLang() === id ? 'border-teal-500 bg-teal-50/60 dark:bg-teal-900/20' : 'border-slate-200 dark:border-slate-700 hover:border-teal-300'}`}>
+              <span className="block font-semibold" translate="no">{label}</span>
+              <span className="block text-xs text-slate-500 dark:text-slate-400" translate="no">{other}{getLang() === id ? ' · on' : ''}</span>
+            </button>
+          ))}
+        </div>
+        <p className="mt-2 text-xs text-slate-500" translate="no">Saved on this PC. Profile data and chat messages stay as they were written.</p>
+      </Card>
+      <Card>
+        <h2 className="font-display text-lg font-bold mb-4 flex items-center gap-2">
+          <span>🎨</span> መልክ
+        </h2>
+        <div data-tour="theme-picker" className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {[
+            { id: 'light', label: 'Light', am: 'ብርሃን', swatch: 'bg-gradient-to-br from-white to-slate-200' },
+            { id: 'dark', label: 'Dark', am: 'ጨለማ', swatch: 'bg-gradient-to-br from-slate-800 to-black' },
+            { id: 'gradient', label: 'Gradient', am: 'ቀለማት', swatch: 'theme-swatch-gradient' },
+          ].map(t => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => chooseTheme(t.id)}
+              className={`flex items-center gap-3 p-3 rounded-xl border-2 text-left transition-colors ${
+                theme === t.id ? 'border-teal-500 bg-teal-50/60 dark:bg-teal-900/20' : 'border-slate-200 dark:border-slate-700 hover:border-teal-300'
+              }`}
+            >
+              <span className={`h-10 w-10 shrink-0 rounded-lg border border-slate-300 dark:border-slate-600 ${t.swatch}`} />
+              <span>
+                <span className="block font-semibold text-slate-800 dark:text-slate-100">{t.label}</span>
+                <span className="block text-xs text-slate-500 dark:text-slate-400">{t.am}{theme === t.id ? ' · on' : ''}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      </Card>
+      <Card>
+        <h2 className="font-display text-lg font-bold mb-4 flex items-center gap-2">
+          <span>🖼️</span> የጀርባ ምስል
+        </h2>
+        <div className="grid gap-6 md:grid-cols-2">
+          <div className="aspect-video rounded-xl border-2 border-dashed flex items-center justify-center bg-slate-100 dark:bg-slate-900 overflow-hidden">
+            {currentWallpaper
+              ? <img src={currentWallpaper} alt="" className="w-full h-full object-cover" />
+              : <p className="text-sm text-slate-400">No wallpaper</p>}
+          </div>
+          <div className="flex flex-col justify-center gap-3">
+            <label className="flex flex-col items-center justify-center h-32 border-2 border-dashed rounded-xl cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800">
+              <span className="text-sm text-slate-500">{uploadingWallpaper ? 'Uploading…' : 'Upload wallpaper'}</span>
+              <input type="file" className="hidden" accept="image/jpeg,image/png" onChange={handleWallpaperUpload} />
+            </label>
+            {currentWallpaper && (
+              <button onClick={handleRemoveWallpaper} className="text-sm text-red-600">Remove</button>
+            )}
+          </div>
+        </div>
+      </Card>
       {/* The Adal tour — at the bottom of Settings */}
       <ErrorBoundary small name="Tutor"><TutorCard /></ErrorBoundary>
+      </>}
     </div>
   )
 }

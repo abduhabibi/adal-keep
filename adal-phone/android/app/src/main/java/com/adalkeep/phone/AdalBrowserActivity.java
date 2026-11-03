@@ -224,6 +224,17 @@ public class AdalBrowserActivity extends Activity {
         root.addView(sheet, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(230)));
 
         setContentView(root);
+        // White behind the status bar here: dark clock, wifi and battery.
+        androidx.core.view.WindowInsetsControllerCompat bars = androidx.core.view.WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
+        bars.setAppearanceLightStatusBars(true);
+        bars.setAppearanceLightNavigationBars(true);
+        // Android 15 draws every app under the status bar (clock, wifi, battery)
+        // and the gesture bar: keep the browser between them, and above the keyboard.
+        androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(root, (v, wi) -> {
+            androidx.core.graphics.Insets b = wi.getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars() | androidx.core.view.WindowInsetsCompat.Type.ime());
+            v.setPadding(b.left, b.top, b.right, b.bottom);
+            return androidx.core.view.WindowInsetsCompat.CONSUMED;
+        });
         web.loadUrl(o.optString("url", "about:blank"));
     }
 

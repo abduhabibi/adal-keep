@@ -1,6 +1,6 @@
 import LiveTab from './LiveTab'
 import { IN_PHONE_APP, onBack } from '../lib/phoneApp'
-import { useEffect, useState, useRef } from 'react'
+import { useCallback, useEffect, useState, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { openOnPhone, portalOf } from '../lib/phoneTask'
 import { useNavigate, useLocation } from 'react-router-dom'
@@ -15,6 +15,7 @@ const PAUSE_TEXT = {
   'awaiting-human-save':      'waiting for you to check the form and press SAVE',
   'awaiting-visa-save':       'waiting for you to type the captcha and press Save on the visa platform',
   'awaiting-insurance-save':  'waiting for you to finish the insurance certificate on FetaP',
+  'awaiting-visa-pay':        'waiting for you to pay the visa fees on the visa platform',
   'awaiting-wafid-robot':     'waiting for you to answer Wafid\'s "I am not a robot"',
   'awaiting-musaned-login':   'waiting for you to sign in to Musaned',
   'awaiting-musaned-captcha': 'waiting for you to solve the reCAPTCHA',
@@ -27,6 +28,7 @@ const CONTINUE_LABEL = {
   'awaiting-musaned-captcha': '✔ I solved the captcha — continue',
   'awaiting-musaned-otp':     '✔ I entered the OTP — continue',
   'awaiting-human-submit':    '↻ Retry uploads',
+  'awaiting-visa-pay':        '↻ Search again',
 }
 
 // The person finished the last step in the run's tab: mark the run done.
@@ -35,6 +37,7 @@ const COMPLETE_LABEL = {
   'awaiting-human-save':   '✔️ SAVE done',
   'awaiting-visa-save':    '✔️ Visa saved',
   'awaiting-insurance-save': '✔️ Insurance done',
+  'awaiting-visa-pay':       '✔️ Visa paid',
 }
 
 // Runs that are simply run again when clicked after they finished.
@@ -108,6 +111,15 @@ export default function ProfileAutomations({ profileId }) {
   const pollRef = useRef(null)
   const lastStatus = useRef(null)
   const panelRef = useRef(null)
+  // Is the run's own row (with its controls) on the screen? Then no bottom bar.
+  const [inlineSeen, setInlineSeen] = useState(false)
+  const io = useRef(null)
+  const inlineRef = useCallback((el) => {
+    io.current?.disconnect()
+    if (!el) { setInlineSeen(false); return }
+    io.current = new IntersectionObserver(([e]) => setInlineSeen(e.isIntersecting), { threshold: 0.6 })
+    io.current.observe(el)
+  }, [])
   const shownFor = useRef(null)
 
   const load = async ({ quiet = false } = {}) => {
@@ -291,7 +303,7 @@ export default function ProfileAutomations({ profileId }) {
                 }
                 start(w.id)
               }}
-              className={`text-left p-3 rounded-xl border transition-colors ${
+              className={`min-w-[15rem] sm:min-w-0 text-left p-3 rounded-xl border transition-colors ${
                 isDone
                   ? 'border-emerald-400 bg-emerald-50 dark:bg-emerald-900/20'
                   : isPaused
@@ -358,12 +370,56 @@ export default function ProfileAutomations({ profileId }) {
     { title: 'Wafid medical', ids: ['wafid_book', 'wafid_slip', 'wafid_check'], box: 'border-emerald-200 dark:border-emerald-800', head: 'text-emerald-700 dark:text-emerald-300' },
     { title: 'Tasheer', ids: [], empty: 'Coming soon — the Tasheer steps are added next.', box: 'border-amber-200 dark:border-amber-800 border-dashed', head: 'text-amber-700 dark:text-amber-300' },
     { title: 'Insurance', ids: ['insurance_certificate'], box: 'border-rose-200 dark:border-rose-800', head: 'text-rose-700 dark:text-rose-300' },
-    { title: 'Enjaz · Visa', ids: ['mofa_visa'], box: 'border-sky-200 dark:border-sky-800', head: 'text-sky-700 dark:text-sky-300' },
+    { title: 'Enjaz · Visa', ids: ['mofa_visa', 'mofa_pay'], box: 'border-sky-200 dark:border-sky-800', head: 'text-sky-700 dark:text-sky-300' },
     { title: 'LMIS · Contract', ids: ['lmis_contract'], box: 'border-teal-200 dark:border-teal-800', head: 'text-teal-700 dark:text-teal-300' },
     { title: 'LMIS · Police clearance', ids: ['police_certificate'], box: 'border-slate-200 dark:border-slate-700', head: 'text-slate-600 dark:text-slate-300' },
   ]
   const grouped = GROUPS.flatMap(g => g.ids)
   const otherFlows = workflows.filter(w => !grouped.includes(w.id))
+
+  // A run's controls: its name and state, its sign-in (small), Continue /
+  // done / Hold / Cancel / Run again / Close. Shown in its portal's row, beside
+  // its cards; when that row is off the screen, at the bottom of the screen.
+  const controls = () => detail && (<>
+          <button type="button" onClick={() => panelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })} className="shrink-0 text-left" title="Go to the run">
+            <span className="block max-w-[11rem] truncate text-xs font-bold">{wfName(detail.workflow_id)} <span className="font-normal text-slate-400">#{detail.id}</span></span>
+            <span className={`block text-[10px] ${detail.status === 'paused' ? 'font-semibold text-amber-600' : 'text-slate-500'}`}>{detail.status === 'paused' ? '🖐 needs you' : detail.status === 'running' ? '⚙️ working' : detail.status}</span>
+          </button>
+          <SignInChip runId={detail.id} />
+              {detail.status === 'paused' && !NO_CONTINUE.has(detail.pause_reason) && (
+                <button
+                  onClick={resume}
+                  className="shrink-0 px-3 py-1.5 rounded-lg bg-teal-600 text-white text-xs font-semibold hover:bg-teal-700"
+                >
+                  {CONTINUE_LABEL[detail.pause_reason] || '▶ Continue'}
+                </button>
+              )}
+              {detail.status === 'paused' && COMPLETE_LABEL[detail.pause_reason] && (
+                <button
+                  onClick={complete}
+                  className="shrink-0 px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700"
+                >
+                  {COMPLETE_LABEL[detail.pause_reason]}
+                </button>
+              )}
+              {detail.status === 'pending' && (
+                <button onClick={pause} className="shrink-0 px-3 py-1.5 rounded-lg bg-amber-500 text-white text-xs font-semibold hover:bg-amber-600">⏸ Hold</button>
+              )}
+              {['running', 'paused', 'pending'].includes(detail.status) && (
+                <button onClick={cancel} className="shrink-0 px-3 py-1.5 rounded-lg border border-red-300 text-red-600 text-xs font-semibold hover:bg-red-50">{cancelArmed ? 'Click again to cancel' : 'Cancel'}</button>
+              )}
+              {['done', 'failed', 'cancelled'].includes(detail.status) && (
+                <button
+                  onClick={() => start(detail.workflow_id)}
+                  disabled={!!sending[detail.workflow_id]}
+                  className="shrink-0 px-3 py-1.5 rounded-lg bg-teal-600 text-white text-xs font-semibold hover:bg-teal-700 disabled:opacity-60"
+                >
+                  ↻ Run again
+                </button>
+              )}
+              <button onClick={() => { setOpen(null); setDetail(null) }} className="shrink-0 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs">Close</button>
+  </>)
+  const inGroup = (g) => open && detail && g.ids.includes(detail.workflow_id)
 
   if (loading) return null
 
@@ -441,8 +497,15 @@ export default function ProfileAutomations({ profileId }) {
           <div key={g.title} className={`mb-3 rounded-xl border-2 p-3 ${g.box}`}>
             <p className={`text-[11px] font-semibold uppercase tracking-wide mb-2 ${g.head}`}>{g.title}</p>
             {flows.length ? (
-              <div className="grid gap-2 sm:grid-cols-2">
+              // One row: the portal's cards side by side, and the open run's controls beside them.
+              <div className="flex gap-2 overflow-x-auto pb-1 sm:grid sm:overflow-visible sm:pb-0"
+                style={{ gridTemplateColumns: `repeat(${flows.length + (inGroup(g) ? 1 : 0)}, minmax(0, 1fr))` }}>
                 {flows.map((w, i) => renderCard(w, flows.length > 1 ? i + 1 : 0))}
+                {inGroup(g) && (
+                  <div ref={inlineRef} className="run-actions flex min-w-[15rem] flex-wrap content-start items-center gap-1.5 rounded-xl border-2 border-dashed border-indigo-300 bg-indigo-50/40 p-2 animate-fade-up dark:border-indigo-700 dark:bg-indigo-900/10 sm:min-w-0">
+                    {controls()}
+                  </div>
+                )}
               </div>
             ) : (
               <p className="text-xs text-slate-400 py-3 text-center">{g.empty}</p>
@@ -506,45 +569,9 @@ export default function ProfileAutomations({ profileId }) {
       </>}
       {/* The run's buttons stay at the bottom of the screen (no scrolling down
           to them), with the account's sign-in in a small box beside them. */}
-      {open && detail && !screen && createPortal(
+      {open && detail && !screen && !inlineSeen && createPortal(
         <div className="run-actions solid-sheet fixed bottom-3 left-1/2 z-[70] flex max-w-[calc(100vw-1.5rem)] -translate-x-1/2 items-center gap-1.5 overflow-x-auto rounded-2xl border border-slate-200 bg-white/95 px-2.5 py-2 shadow-2xl backdrop-blur animate-fade-up dark:border-slate-700 dark:bg-slate-900/95 sm:gap-2" style={{ marginBottom: 'env(safe-area-inset-bottom)' }}>
-          <button type="button" onClick={() => panelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })} className="shrink-0 text-left" title="Go to the run">
-            <span className="block max-w-[11rem] truncate text-xs font-bold">{wfName(detail.workflow_id)} <span className="font-normal text-slate-400">#{detail.id}</span></span>
-            <span className={`block text-[10px] ${detail.status === 'paused' ? 'font-semibold text-amber-600' : 'text-slate-500'}`}>{detail.status === 'paused' ? '🖐 needs you' : detail.status === 'running' ? '⚙️ working' : detail.status}</span>
-          </button>
-          <SignInChip runId={detail.id} />
-              {detail.status === 'paused' && !NO_CONTINUE.has(detail.pause_reason) && (
-                <button
-                  onClick={resume}
-                  className="shrink-0 px-3 py-1.5 rounded-lg bg-teal-600 text-white text-xs font-semibold hover:bg-teal-700"
-                >
-                  {CONTINUE_LABEL[detail.pause_reason] || '▶ Continue'}
-                </button>
-              )}
-              {detail.status === 'paused' && COMPLETE_LABEL[detail.pause_reason] && (
-                <button
-                  onClick={complete}
-                  className="shrink-0 px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700"
-                >
-                  {COMPLETE_LABEL[detail.pause_reason]}
-                </button>
-              )}
-              {detail.status === 'pending' && (
-                <button onClick={pause} className="shrink-0 px-3 py-1.5 rounded-lg bg-amber-500 text-white text-xs font-semibold hover:bg-amber-600">⏸ Hold</button>
-              )}
-              {['running', 'paused', 'pending'].includes(detail.status) && (
-                <button onClick={cancel} className="shrink-0 px-3 py-1.5 rounded-lg border border-red-300 text-red-600 text-xs font-semibold hover:bg-red-50">{cancelArmed ? 'Click again to cancel' : 'Cancel'}</button>
-              )}
-              {['done', 'failed', 'cancelled'].includes(detail.status) && (
-                <button
-                  onClick={() => start(detail.workflow_id)}
-                  disabled={!!sending[detail.workflow_id]}
-                  className="shrink-0 px-3 py-1.5 rounded-lg bg-teal-600 text-white text-xs font-semibold hover:bg-teal-700 disabled:opacity-60"
-                >
-                  ↻ Run again
-                </button>
-              )}
-              <button onClick={() => { setOpen(null); setDetail(null) }} className="shrink-0 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs">Close</button>
+          {controls()}
         </div>,
         document.body)}
       {choose && createPortal(

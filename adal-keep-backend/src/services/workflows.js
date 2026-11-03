@@ -67,6 +67,16 @@ export const WORKFLOWS = {
     stepCount: 4,
   },
 
+  mofa_pay: {
+    id: 'mofa_pay',
+    name: 'Pay visa fees (Enjaz)',
+    description:
+      'Visa platform → a person types the sign-in captcha → Pay Visa Fees → her application number and passport number → Search → rings: a person checks and pays',
+    target: 'https://visa.mofa.gov.sa/Account/Login/enjazcompany',
+    consts: {},
+    stepCount: 3,
+  },
+
   wafid_check: {
     id: 'wafid_check',
     name: 'Check Wafid result',

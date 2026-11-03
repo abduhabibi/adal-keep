@@ -13,6 +13,13 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(AdalDiscoveryPlugin.class);
         super.onCreate(savedInstanceState);
+        // The page sits between the status bar and the gesture bar (Android 15);
+        // those two bands are dark, so the clock, wifi and battery show white on them.
+        getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0xFF111117));
+        getWindow().getDecorView().setBackgroundColor(0xFF111117);
+        androidx.core.view.WindowInsetsControllerCompat bars = androidx.core.view.WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
+        bars.setAppearanceLightStatusBars(false);
+        bars.setAppearanceLightNavigationBars(false);
 
         // Back: the page goes back (or its full-screen view closes);
         // at the first page, back twice within 2 seconds leaves the app.

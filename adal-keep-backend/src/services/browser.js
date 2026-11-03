@@ -84,6 +84,27 @@ export const PROFILE_DIR = process.env.ADAL_BROWSER_PROFILE ||
   path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'data', 'browser-profile')
 const DEBUG_PORT = 9222
 
+/**
+ * Start Brave fresh: one window, no tabs brought back from last time. Brave
+ * is usually stopped without closing (the PC shut down, Adal Keep restarted),
+ * so it thought it had crashed and reopened every old tab — slow (each old
+ * portal page loads again) and a second window. Its last session is let go
+ * (runs open their own tabs again anyway) and it starts on a new tab.
+ */
+function freshStart() {
+  try {
+    const prefs = path.join(PROFILE_DIR, 'Default', 'Preferences')
+    if (fs.existsSync(prefs)) {
+      const p = JSON.parse(fs.readFileSync(prefs, 'utf8'))
+      p.profile = { ...(p.profile || {}), exit_type: 'Normal', exited_cleanly: true }
+      p.session = { ...(p.session || {}), restore_on_startup: 5 }
+      fs.writeFileSync(prefs, JSON.stringify(p))
+    }
+    const sessions = path.join(PROFILE_DIR, 'Default', 'Sessions')
+    for (const f of fs.existsSync(sessions) ? fs.readdirSync(sessions) : []) fs.rmSync(path.join(sessions, f), { force: true })
+  } catch (e) { console.warn('[browser] fresh start:', e.message) }
+}
+
 const BROWSER_ARGS = [
   `--remote-debugging-port=${DEBUG_PORT}`,
   `--user-data-dir=${PROFILE_DIR}`,
@@ -150,6 +171,7 @@ export async function getBrowser() {
   }
 
   fs.mkdirSync(PROFILE_DIR, { recursive: true })
+  freshStart()
   // No page of its own: with Brave already open on this profile (without the
   // control port) a start only adds a tab to that window — it used to be an
   // Adal Keep tab every time a run or watcher looked for the browser.

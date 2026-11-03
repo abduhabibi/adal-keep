@@ -176,6 +176,11 @@ router.post('/profiles/:profileId/automations/:workflowId/start', async (req, re
       }
       const acct = await db('visa_accounts').first()
       if (!acct) return res.status(400).json({ error: 'No visa platform account yet — add one under "Visa platform login account"', missing: ['Visa platform account'] })
+    } else if (workflowId === 'mofa_pay') {
+      const prof = await db('profiles').where('id', profileId).first()
+      const missing = [!String(prof?.visa_application_number || '').trim() && 'Application number', !String(prof?.passport_number || '').trim() && 'Passport number'].filter(Boolean)
+      if (missing.length) return res.status(400).json({ error: 'Profile is missing for the visa payment: ' + missing.join(', ') + (missing.includes('Application number') ? ' (the visa application gives it — "Make visa" first)' : ''), missing })
+      if (!(await db('visa_accounts').first())) return res.status(400).json({ error: 'No visa platform account yet — add one under "Visa platform login account"', missing: ['Visa platform account'] })
     } else if (workflowId === 'lmis_contract') {
       const prof = await db('profiles').where('id', profileId).first()
       if (!prof?.labor_id || !String(prof.labor_id).trim()) {
@@ -342,6 +347,7 @@ router.get('/automations/active', async (req, res) => {
 // Where every profile stands in the whole journey (Musaned → employer →
 // Wafid → LMIS contract → visa). Used by the "Stage" filter on the lists.
 export const STAGES = [
+  ['visa_paid', 'Visa fees paid'],
   ['visa_applied', 'Visa applied'],
   ['visa', 'Visa — form filled, waiting for Save'],
   ['visa_ready', 'LMIS contract done — ready for visa'],
@@ -360,6 +366,7 @@ export const STAGES = [
 export function stageOf(p, runs = {}) {
   const live = (r) => r && ['running', 'pending', 'paused'].includes(r.status)
   const visa = String(p.visa_stage || '')
+  if (/paid/i.test(visa)) return 'visa_paid'
   if (/applied/i.test(visa)) return 'visa_applied'
   if (live(runs.mofa_visa) || /waiting|filled/i.test(visa)) return 'visa'
   if (runs.lmis_contract?.status === 'done') return 'visa_ready'
@@ -440,7 +447,7 @@ export function journeyOf(p, runs = {}, hasCv = false, docs = null, agents = [])
   const wakala = step('wakala', 'Paid wakala', /^paid$/i.test(pay) ? 'done' : chosen && /^unpaid$/i.test(pay) ? 'failed' : 'todo',
     /^paid$/i.test(pay) ? 'paid' : chosen && /^unpaid$/i.test(pay) ? 'unpaid' : '', 'musaned_check_chosen')
   const lmis = step('lmis', 'LMIS contract', ...fromRun(runs.lmis_contract, 'created'), 'lmis_contract')
-  const visa = /applied/i.test(p.visa_stage || '') ? ['done', p.visa_application_number ? `no. ${p.visa_application_number}` : 'applied']
+  const visa = /applied|paid/i.test(p.visa_stage || '') ? ['done', `${/paid/i.test(p.visa_stage) ? 'paid' : 'applied'}${p.visa_application_number ? ` · no. ${p.visa_application_number}` : ''}`]
     : fromRun(runs.mofa_visa)
   const tasheer = step('tasheer', 'Tasheer', 'soon', 'coming')
   const insurance = step('insurance', 'Insurance', ...fromRun(runs.insurance_certificate, 'certificate done'), 'insurance_certificate')
@@ -765,6 +772,10 @@ router.post('/automations/:id/complete', async (req, res) => {
         const { VISA_STAGES } = await import('../services/mofaVisa.js')
         await db('profiles').where('id', row.profile_id).update({ visa_stage: VISA_STAGES.applied, visa_applied_at: new Date().toISOString(), updated_at: new Date().toISOString() })
         next = ' Visa stage: Visa applied.'
+      } else if (row.workflow_id === 'mofa_pay') {
+        // The person paid the visa fees on the visa platform.
+        await db('profiles').where('id', row.profile_id).update({ visa_stage: 'Visa paid', updated_at: new Date().toISOString() })
+        next = ' Visa stage: Visa paid.'
       } else if (row.workflow_id === 'musaned_add_candidate') {
         // She is on Musaned now: the 4-hourly contract check watches for an employer.
         next = ' Adal Keep now checks every 4 hours whether a Saudi employer chooses her.'

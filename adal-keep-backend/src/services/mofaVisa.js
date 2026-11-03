@@ -621,7 +621,7 @@ async function fillForm(page, ctx, v) {
 async function readApplicationNumber(page) {
   return page.evaluate(() => {
     const t = document.body?.innerText || ''
-    const m = t.match(/application\s*(?:no\.?|number)\D{0,40}(\d{6,})/i) || t.match(/رقم الطلب\D{0,40}(\d{6,})/)
+    const m = t.match(/application\s*(?:no\.?|number)[^A-Z0-9]{0,40}([A-Z]?\d{6,})/i) || t.match(/رقم الطلب[^A-Z0-9]{0,40}([A-Z]?\d{6,})/i)
     return m ? m[1] : ''
   }).catch(() => '')
 }
@@ -706,4 +706,85 @@ export async function runMofaVisa(page, ctx) {
   })
   log(ctx, `✅ visa application saved${number ? ` — application number ${number}` : ''}`)
   return { ok: true, done: true, seconds: secs() }
+}
+
+
+// ---------------------------------------------------------------------------
+// Pay visa fees (workflow id: mofa_pay)
+// ---------------------------------------------------------------------------
+
+export const MOFA_PAY = 'mofa_pay'
+const PAY_URL = 'https://visa.mofa.gov.sa/Payment/GetApp'
+
+/** Types into the box under a label ("Application Number", "Passport Number"). */
+async function typeUnder(page, labelSrc, value) {
+  const kind = await markField(page, labelSrc, 'pay-' + labelSrc.replace(/\W/g, ''), 'input')
+  if (!kind) return false
+  const el = await page.$(`[data-adal-v="pay-${labelSrc.replace(/\W/g, '')}"]`)
+  if (!el) return false
+  await el.click({ clickCount: 3 }).catch(() => {})
+  await el.evaluate(e => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(e, ''); e.dispatchEvent(new Event('input', { bubbles: true })) })
+  await el.type(String(value), { delay: 30 })
+  await el.evaluate(e => e.dispatchEvent(new Event('change', { bubbles: true })))
+  return true
+}
+
+/** After Search: what the page says about her application (paid or not). */
+async function readPayResult(page) {
+  return page.evaluate(() => {
+    const t = (document.querySelector('main, #content, .container, body')?.innerText || '').replace(/\s+/g, ' ')
+    const paid = /already\s+paid|has\s+been\s+paid|payment\s+(?:is\s+)?(?:done|completed|successful)|تم\s+السداد|مدفوع/i.test(t) && !/not\s+paid|unpaid|غير\s+مدفوع/i.test(t)
+    const notFound = /no\s+(?:data|record|result)s?\s+found|not\s+found|لا\s+توجد/i.test(t)
+    const amount = (t.match(/(?:amount|total|fees?)\D{0,20}(\d[\d,.]*)\s*(?:SAR|ر\.?س|riyal)/i) || [])[1] || ''
+    return { paid, notFound, amount, text: t.slice(0, 400) }
+  }).catch(() => ({ paid: false, notFound: false, amount: '', text: '' }))
+}
+
+/**
+ * "Pay visa fees": the visa platform (sign-in: a person types the captcha) →
+ * Pay Visa Fees → her application number and passport number → Search →
+ * the tab comes to the front and rings: a person checks and pays. Already
+ * paid → her profile says so (visa_stage "Visa paid") and the run is done.
+ */
+export async function runMofaPay(page, ctx) {
+  const t0 = Date.now()
+  const secs = () => Math.round((Date.now() - t0) / 1000)
+  const p = ctx.profile || {}
+  const app = String(p.visa_application_number || '').trim()
+  const pp = String(p.passport_number || '').trim().toUpperCase()
+  const missing = [!app && 'Application number (from the visa application)', !pp && 'Passport number'].filter(Boolean)
+  if (missing.length) return { ok: false, step: 'preflight', error: `Profile is missing for the visa payment: ${missing.join(', ')}`, seconds: 0 }
+
+  log(ctx, `💳 Visa fees for ${ctx.profileName} — application ${app}`)
+  await signIn(page, ctx)
+  // Pay Visa Fees (the menu), else its page straight away.
+  if (!(await clickText(page, /^\s*Pay\s+Visa\s+Fees\s*$/))) await page.goto(PAY_URL, { waitUntil: 'domcontentloaded', timeout: 120000 }).catch(() => {})
+  if (!(await until(async () => !!(await markField(page, 'Application\\s*Number', 'pay-probe', 'input')), 30000, ctx))) {
+    if (onLogin(page)) { await signIn(page, ctx); await page.goto(PAY_URL, { waitUntil: 'domcontentloaded', timeout: 120000 }).catch(() => {}) }
+  }
+  await sleep(1000)
+  const a = await typeUnder(page, 'Application\\s*Number', app)
+  const b = await typeUnder(page, 'Passport\\s*Number', pp)
+  if (!a || !b) log(ctx, `could not find the ${!a ? 'Application Number' : 'Passport Number'} box — a person fills it`, 'warn')
+  else log(ctx, `typed application ${app} and passport ${pp}`)
+  if (a && b) {
+    await clickText(page, /^\s*Search\s*$/)
+    log(ctx, 'pressed Search')
+    await sleep(4000)
+  }
+  const r = await readPayResult(page)
+  if (r.paid) {
+    await ctx.noteProfile?.(`Visa: fees already paid (application ${app})`, { visa_stage: 'Visa paid' })
+    log(ctx, '✅ the visa fees are already paid')
+    return { ok: true, done: true, seconds: secs() }
+  }
+  if (r.notFound) log(ctx, `the platform found nothing for application ${app} / passport ${pp}`, 'warn')
+  await ctx.noteProfile?.(`Visa: fee page open — waiting for a person to pay (application ${app}${r.amount ? `, ${r.amount} SAR` : ''})`)
+  await page.bringToFront().catch(() => {})
+  await ctx.notify(
+    `💳 ${ctx.profileName}: pay the visa fees`,
+    `The visa platform's Pay Visa Fees page is in front with application ${app} and passport ${pp} searched${r.notFound ? ' — it found nothing; check the numbers' : ''}. Check it and pay, then press "✔️ Visa paid".`,
+    'warn'
+  )
+  return { ok: true, pauseReason: 'awaiting-visa-pay', seconds: secs() }
 }

@@ -1973,6 +1973,20 @@ export async function runFullWorkflow(page, ctx) {
     }
   }
 
+  // Visa fees on the visa platform: sign-in, Pay Visa Fees, search, a person pays.
+  if (workflowId === 'mofa_pay') {
+    try {
+      const { runMofaPay } = await import('./mofaVisa.js')
+      return await runMofaPay(page, ctx)
+    } catch (e) {
+      if (e?.cancelled) throw e
+      const secs = Math.round((Date.now() - t0) / 1000)
+      log(ctx, `visa payment failed after ${secs}s: ${e.message}`, 'error')
+      await dumpPageState(page, ctx, 'mofa-pay')
+      return { ok: false, step: 'mofa-pay', error: e.message, seconds: secs }
+    }
+  }
+
   // Visa on the Saudi visa platform: sign-in, the long form, a person saves.
   if (workflowId === 'mofa_visa') {
     try {

@@ -39,10 +39,63 @@ export function totp({ secret, digits = 6, period = 30, algorithm = 'SHA1' }, at
   return String(n % 10 ** digits).padStart(digits, '0')
 }
 
+const toBase32 = (buf) => {
+  let bits = 0, value = 0, out = ''
+  for (const b of buf) { value = (value << 8) | b; bits += 8; while (bits >= 5) { out += B32[(value >>> (bits - 5)) & 31]; bits -= 5 } }
+  if (bits > 0) out += B32[(value << (5 - bits)) & 31]
+  return out
+}
+
+/** A protobuf message's fields: [{ no, wire, value }] (varints as numbers, the rest as bytes). */
+function protoFields(buf) {
+  const out = []
+  let i = 0
+  const varint = () => { let r = 0, m = 1, b; do { b = buf[i++]; r += (b & 127) * m; m *= 128 } while (b & 128); return r }
+  while (i < buf.length) {
+    const key = varint(), no = Math.floor(key / 8), wire = key & 7
+    if (wire === 0) out.push({ no, wire, value: varint() })
+    else if (wire === 2) { const n = varint(); out.push({ no, wire, value: buf.subarray(i, i + n) }); i += n }
+    else if (wire === 5) { out.push({ no, wire, value: buf.subarray(i, i + 4) }); i += 4 }
+    else if (wire === 1) { out.push({ no, wire, value: buf.subarray(i, i + 8) }); i += 8 }
+    else throw new Error('The export QR could not be read')
+  }
+  return out
+}
+
+/**
+ * Google Authenticator's "Transfer codes → Export codes" QR:
+ * otpauth-migration://offline?data=<base64 MigrationPayload> — every account
+ * in the app (secret, name, issuer, algorithm, digits, TOTP/HOTP). The Musaned
+ * one is taken (by its name or issuer); with only one account, that one.
+ */
+function fromExport(text) {
+  const data = new URL(text).searchParams.get('data')
+  if (!data) throw new Error('The export QR has no accounts in it')
+  const accounts = protoFields(Buffer.from(data.replace(/ /g, '+'), 'base64')).filter(f => f.no === 1 && f.wire === 2).map(f => {
+    const a = { secret: '', name: '', issuer: '', algorithm: 'SHA1', digits: 6, totp: true }
+    for (const x of protoFields(f.value)) {
+      if (x.no === 1) a.secret = toBase32(x.value)
+      else if (x.no === 2) a.name = x.value.toString('utf8')
+      else if (x.no === 3) a.issuer = x.value.toString('utf8')
+      else if (x.no === 4) a.algorithm = ({ 2: 'SHA256', 3: 'SHA512' })[x.value] || 'SHA1'
+      else if (x.no === 5) a.digits = x.value === 2 ? 8 : 6
+      else if (x.no === 6) a.totp = x.value !== 1
+    }
+    return a
+  }).filter(a => a.secret && a.totp)
+  if (!accounts.length) throw new Error('The export QR has no time-based (TOTP) account in it')
+  const musaned = accounts.filter(a => /musaned|tawtheeq|مساند/i.test(`${a.issuer} ${a.name}`))
+  const pick = musaned.length === 1 ? musaned[0] : accounts.length === 1 ? accounts[0] : null
+  if (!pick) {
+    throw new Error(`This export holds ${accounts.length} accounts (${accounts.map(a => a.issuer ? `${a.issuer}: ${a.name}` : a.name).join(' · ')}) and Adal Keep cannot tell which is Musaned — export only the Musaned one (Transfer codes → Export codes → tick only Musaned)`)
+  }
+  return { secret: pick.secret, label: pick.issuer ? `${pick.issuer}:${pick.name}` : pick.name, issuer: pick.issuer, digits: pick.digits, period: 30, algorithm: pick.algorithm }
+}
+
 /** "otpauth://totp/Musaned:name?secret=…&digits=6" (or the bare key) → its parts. */
 export function parseKey(text) {
   const t = String(text || '').trim()
-  if (/^otpauth-migration:/i.test(t)) throw new Error('This is a Google Authenticator "export" QR — use the QR Musaned showed when the authenticator was set up (or the key written under it)')
+  if (/^otpauth-migration:/i.test(t)) return fromExport(t)
   if (/^otpauth:\/\//i.test(t)) {
     const u = new URL(t)
     const secret = u.searchParams.get('secret')
@@ -87,6 +140,13 @@ function keyOf(accountId) {
   try { return JSON.parse(getSecret(nameOf(accountId)) || 'null') } catch { return null }
 }
 export const hasAuthenticator = (accountId) => !!keyOf(accountId)
+/** What the account's authenticator is (shown in Settings): its name, and the code now. */
+export function authenticatorInfo(accountId) {
+  const k = keyOf(accountId)
+  if (!k) return null
+  const period = k.period || 30
+  return { label: k.label || k.issuer || '', code: totp(k), left: period - (Math.floor(Date.now() / 1000) % period), digits: k.digits || 6 }
+}
 
 /** The code for this account now — null when it has no authenticator. A code
  *  with under 5 s left waits for the next one (it would expire on the way). */

@@ -67,7 +67,7 @@ router.delete('/accounts/:id', async (req, res) => {
 
 /**
  * Musaned's authenticator per account (services/musanedTotp.js):
- *   GET    /musaned/authenticators              { accountId: true } — which have one
+ *   GET    /musaned/authenticators              { accountId: { label, code, left } | null }
  *   POST   /musaned/accounts/:id/authenticator  a QR picture (field "image") or { key }
  *   DELETE /musaned/accounts/:id/authenticator
  */
@@ -75,9 +75,9 @@ const musaned = accountsRouter('musaned_accounts', 'musaned_account')
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } })
 musaned.get('/authenticators', async (req, res) => {
   try {
-    const { hasAuthenticator } = await import('../services/musanedTotp.js')
+    const { authenticatorInfo } = await import('../services/musanedTotp.js')
     const rows = await req.app.locals.db('musaned_accounts').select('id')
-    res.json(Object.fromEntries(rows.map(r => [r.id, hasAuthenticator(r.id)])))
+    res.json(Object.fromEntries(rows.map(r => [r.id, authenticatorInfo(r.id)])))
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 musaned.post('/accounts/:id/authenticator', upload.single('image'), async (req, res) => {

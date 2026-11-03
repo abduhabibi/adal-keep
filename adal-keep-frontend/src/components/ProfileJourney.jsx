@@ -77,16 +77,20 @@ function Node({ k, title, n, state, note, count, selected, dim, onSelect, compac
   )
 }
 
-/** "Paid wakala": a small box on the curve (not a circle) — its count or state inside. */
+/** "Paid wakala": a small box on the curve, tilted along it, with only its
+ *  number (or state) inside — its name underneath, level like the others. */
 function BoxNode({ k, title, state, note, count, selected, dim, onSelect, compact, left, top, angle = 0 }) {
   const pick = !!onSelect
   const l = pick ? (selected ? LOOK.done : LOOK.todo) : (LOOK[state] || LOOK.todo)
   return (
     <button type="button" title={note ? `${title} — ${note}` : title} onClick={() => onSelect?.(k)}
-      className={`absolute z-10 flex items-center gap-1 rounded-md px-1.5 ${compact ? 'py-0.5 text-[9px]' : 'py-1 text-[10px]'} font-bold whitespace-nowrap shadow-sm transition-all duration-300 ${l.dot} ${dim ? 'opacity-40 hover:opacity-80' : ''} ${selected ? 'ring-4 ring-emerald-300/70 shadow-[0_0_16px_rgba(16,185,129,.8)]' : ''} ${pick || state ? 'cursor-pointer' : 'cursor-default'}`}
-      style={{ left, top, transform: `translate(-50%, -50%) rotate(${angle}deg)${selected ? ' scale(1.1)' : ''}` }}>
-      <span>💰</span><span>{title}</span>
-      {pick ? <span className="opacity-80">{count ?? 0}</span> : ICON[state] ? <span>{ICON[state]}</span> : null}
+      className={`absolute z-10 flex flex-col items-center transition-all duration-300 ${dim ? 'opacity-40 hover:opacity-80' : ''} ${pick || state ? 'cursor-pointer' : 'cursor-default'}`}
+      style={{ left, top, transform: 'translate(-50%, -11px)' }}>
+      <span className={`flex items-center justify-center rounded-[5px] font-bold shadow-sm transition-all duration-300 ${compact ? 'h-[18px] min-w-[30px] px-1 text-[10px]' : 'h-[22px] min-w-[36px] px-1.5 text-[11px]'} ${l.dot} ${selected ? 'ring-4 ring-emerald-300/70 shadow-[0_0_16px_rgba(16,185,129,.8)]' : ''}`}
+        style={{ transform: `rotate(${angle}deg)${selected ? ' scale(1.1)' : ''}` }}>
+        {pick ? (count ?? 0) : (ICON[state] || '💰')}
+      </span>
+      <span className={`${compact ? 'mt-1 text-[10px]' : 'mt-1.5 text-[11px]'} whitespace-nowrap font-semibold leading-tight ${l.text}`}>{title}</span>
     </button>
   )
 }

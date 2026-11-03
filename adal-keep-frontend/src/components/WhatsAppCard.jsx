@@ -99,7 +99,7 @@ export default function WhatsAppCard() {
 
   if (s === false || s === null) return null
   // WhatsApp's own page in Adal Keep's Brave: scan its QR there; Adal Keep connects when it shows the chats.
-  const openWeb = async () => { try { setS((await wa.post('/whatsapp/open-web')).data); toast.success('web.whatsapp.com is open in Adal Keep\'s Brave — scan its QR there', { duration: 7000 }) } catch (e) { toast.error(err(e)) } }
+  const openWeb = async () => { try { setS((await wa.post('/whatsapp/open-web')).data); toast.success('WhatsApp is open on the PC — scan its QR there', { duration: 7000 }) } catch (e) { toast.error(err(e)) } }
   const connect = async (withPhone) => { try { setS((await wa.post('/whatsapp/connect', withPhone ? { phone } : {})).data) } catch (e) { toast.error(err(e)) } }
   const logout = async () => { if (!confirm('Sign your WhatsApp out of Adal Keep?')) return; try { setS((await wa.post('/whatsapp/logout')).data) } catch (e) { toast.error(err(e)) } }
   const remove = async (a) => { if (!confirm(`Remove ${a.name}?`)) return; await wa.delete(`/whatsapp/agents/${a.id}`); loadAgents() }
@@ -147,8 +147,8 @@ export default function WhatsAppCard() {
         </div>
       ) : s.status === 'web' ? (
         <div className="mb-4 rounded-xl border border-teal-200 bg-teal-50/60 p-4 text-sm dark:border-teal-800 dark:bg-teal-900/10">
-          <p className="font-semibold">🌐 web.whatsapp.com is open in Adal Keep's Brave</p>
-          <p className="mt-1 text-slate-600 dark:text-slate-300">Scan the QR on that tab with your phone (Linked devices → Link a device). When your chats show, Adal Keep closes the tab and connects by itself.</p>
+          <p className="font-semibold">🌐 WhatsApp is open in {s.where || 'a window on this PC'}</p>
+          <p className="mt-1 text-slate-600 dark:text-slate-300">Scan the QR there with your phone (Linked devices → Link a device). When your chats show, Adal Keep closes the tab and connects by itself.</p>
           <p className="mt-2 flex items-center gap-2 text-xs text-slate-500"><span className="h-2 w-2 animate-ping rounded-full bg-teal-500" /> Waiting for you to sign in…</p>
         </div>
       ) : (

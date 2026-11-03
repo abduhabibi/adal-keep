@@ -1,3 +1,4 @@
+import { execFileSync } from 'child_process'
 /**
  * WhatsApp for every person of the agency (Settings → WhatsApp): each employee
  * links their own WhatsApp — a QR code, or a code for "Link with phone number"
@@ -45,7 +46,31 @@ const session = (key) => {
   if (!sessions.has(key)) sessions.set(key, { client: null, state: blank(), own: false })
   return sessions.get(key)
 }
-export const stateOf = (key) => session(key).state
+export const stateOf = (key) => {
+  const s = session(key)
+  // Its WhatsApp tab is gone (Brave closed or restarted): that QR is dead — say so.
+  if (['qr', 'starting', 'code'].includes(s.state.status) && s.client && (!s.client.pupPage || s.client.pupPage.isClosed?.())) {
+    if (s.client.pupPage) { s.client = null; setState(key, { status: 'off', qr: null, code: null, error: 'The WhatsApp tab was closed — press Connect again' }) }
+  }
+  return s.state
+}
+
+/**
+ * The browser WhatsApp is told it is: the real one (a current Brave/Chrome).
+ * whatsapp-web.js says "Chrome 101" by default, which WhatsApp now refuses to
+ * link (the QR shows, the phone says it could not link).
+ */
+let chromeMajor = null
+function realUserAgent(exe, fromBrowser = '') {
+  let ua = String(fromBrowser || '').replace('HeadlessChrome', 'Chrome')
+  if (/Chrome\/(\d+)/.test(ua) && Number(ua.match(/Chrome\/(\d+)/)[1]) >= 120) return ua
+  if (chromeMajor === null) {
+    chromeMajor = 142
+    try { const v = execFileSync(exe, ['--version'], { timeout: 5000 }).toString().match(/(\d{3})\.\d+/); if (v) chromeMajor = Number(v[1]) } catch {}
+  }
+  const osPart = process.platform === 'win32' ? 'Windows NT 10.0; Win64; x64' : process.platform === 'darwin' ? 'Macintosh; Intel Mac OS X 10_15_7' : 'X11; Linux x86_64'
+  return `Mozilla/5.0 (${osPart}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeMajor}.0.0.0 Safari/537.36`
+}
 const setState = (key, s) => Object.assign(session(key).state, s, { since: new Date().toISOString() })
 
 /** Adal Keep's Brave holds this account (the first one connected). */
@@ -77,6 +102,9 @@ export async function connect(db, key = 'owner', { phone = '' } = {}, tries = 2,
   if (db) dbRef = db
   const s = session(key)
   if (s.client && !['off', 'failed'].includes(s.state.status) && !phone) return s.state
+  // One start-up at a time: a second one would close the first one's WhatsApp tab.
+  if (s.startingAt && Date.now() - s.startingAt < 45000 && !phone) return s.state
+  s.startingAt = Date.now()
   if (s.client) { const old = s.client; s.client = null; await release(old, s.own) }
   setState(key, { status: 'starting', qr: null, code: null, error: null })
   const { default: wweb } = await import('whatsapp-web.js')
@@ -98,12 +126,16 @@ export async function connect(db, key = 'owner', { phone = '' } = {}, tries = 2,
     }
     await new Promise(r => setTimeout(r, 1500))
     opts.puppeteer = { browserWSEndpoint: browser.wsEndpoint(), defaultViewport: null }
+    opts.userAgent = realUserAgent(findBrowserExecutable(), await browser.userAgent().catch(() => ''))
   } else {
     const exe = findBrowserExecutable()
     if (!exe) { setState(key, { status: 'failed', error: 'Brave (or Chrome) is not installed on this PC' }); return s.state }
     opts.authStrategy = new wweb.LocalAuth({ clientId: key, dataPath: DIR })
+    opts.userAgent = realUserAgent(exe)
     opts.puppeteer = { executablePath: exe, headless: true, args: ['--no-first-run', '--no-default-browser-check', '--disable-gpu', '--disable-dev-shm-usage', '--mute-audio', '--disable-extensions'] }
   }
+  // Always today's WhatsApp Web (a saved old copy of its page cannot link new devices).
+  opts.webVersionCache = { type: 'none' }
   const digits = String(phone || '').replace(/\D/g, '')
   if (digits) opts.pairWithPhoneNumber = { phoneNumber: digits, showNotification: true }
   const c = s.client = new wweb.Client(opts)
@@ -119,8 +151,9 @@ export async function connect(db, key = 'owner', { phone = '' } = {}, tries = 2,
     const why = String(e?.message || e)
     if (tries > 1 && /Target closed|detached|Session closed/i.test(why)) {
       console.warn(`[whatsapp ${key}] tab closed while starting — trying again`)
-      setState(key, { status: 'off' }); return connect(db, key, { phone }, tries - 1)
+      setState(key, { status: 'off' }); s.startingAt = 0; return connect(db, key, { phone }, tries - 1)
     }
+    s.startingAt = 0
     console.warn(`[whatsapp ${key}] start-up failed:`, why)
     setState(key, { status: 'failed', error: `WhatsApp did not finish starting: ${why}` })
   }
@@ -140,19 +173,29 @@ export async function connect(db, key = 'owner', { phone = '' } = {}, tries = 2,
   }
   c.on('qr', async (qr) => {
     if (digits) return
-    try { const QR = (await import('qrcode')).default; setState(key, { status: 'qr', qr: await QR.toDataURL(qr, { margin: 1, width: 280 }) }) }
+    // WhatsApp's own QR now holds a link: https://wa.me/settings/linked_devices#<code>
+    // (a phone no longer takes the bare code) — show exactly what its page shows.
+    let text = qr
+    try {
+      const ref = await c.pupPage?.evaluate(() => document.querySelector('[data-ref]')?.getAttribute('data-ref'))
+      if (ref && ref.includes(qr.split(',')[0])) text = ref
+    } catch {}
+    if (!/^https?:/.test(text)) text = `https://wa.me/settings/linked_devices#${qr}`
+    try { const QR = (await import('qrcode')).default; setState(key, { status: 'qr', qr: await QR.toDataURL(text, { margin: 1, width: 300, errorCorrectionLevel: 'L' }) }) }
     catch (e) { setState(key, { status: 'qr', qr: null, error: e.message }) }
   })
   c.on('code', (code) => setState(key, { status: 'code', code: String(code).replace(/^(.{4})(.{4})$/, '$1-$2') }))
   c.on('authenticated', () => { if (s.state.status !== 'ready') setState(key, { status: 'signing-in', qr: null, code: null }) })
   c.on('ready', async () => {
+    s.startingAt = 0
     await shim(c)
     setState(key, { status: 'ready', qr: null, code: null, error: null, me: { name: c.info?.pushname || '', number: c.info?.wid?.user || '' } })
     noteOn(key, true)
     setTimeout(() => closeChosenSends().catch(() => {}), 10_000)
   })
-  c.on('auth_failure', (m) => setState(key, { status: 'failed', error: `Sign-in failed: ${m}` }))
+  c.on('auth_failure', (m) => { s.startingAt = 0; setState(key, { status: 'failed', error: `Sign-in failed: ${m}` }) })
   c.on('disconnected', (why) => {
+    s.startingAt = 0
     if (s.client === c) s.client = null
     setState(key, { status: 'off', me: null, error: why === 'LOGOUT' ? 'Signed out from the phone' : `Disconnected (${why})` })
     if (why === 'LOGOUT') noteOn(key, false)
@@ -172,32 +215,47 @@ export async function connect(db, key = 'owner', { phone = '' } = {}, tries = 2,
 const webWatch = new Map()
 export async function openWeb(db, key = 'owner') {
   if (db) dbRef = db
-  if (!inBrave(key)) throw new Error('Another person\'s WhatsApp uses Adal Keep\'s Brave — use the QR here instead')
   const s = session(key)
   if (s.client) { const old = s.client; s.client = null; await release(old, s.own) }
-  const browser = await getBrowser()
-  for (const pg of await browser.pages().catch(() => [])) {
-    if (/^https:\/\/web\.whatsapp\.com/.test(pg.url())) await pg.close().catch(() => {})
+  const brave = inBrave(key)
+  let page, own = null
+  if (brave) {
+    const browser = await getBrowser()
+    for (const pg of await browser.pages().catch(() => [])) {
+      if (/^https:\/\/web\.whatsapp\.com/.test(pg.url())) await pg.close().catch(() => {})
+    }
+    page = await browser.newPage()
+    await page.setUserAgent(realUserAgent(findBrowserExecutable(), await browser.userAgent().catch(() => ''))).catch(() => {})
+  } else {
+    // This person's own WhatsApp profile (the hidden window's), shown in a
+    // window of its own for the sign-in; hidden again afterwards.
+    const exe = findBrowserExecutable()
+    if (!exe) throw new Error('Brave (or Chrome) is not installed on this PC')
+    const { default: puppeteer } = await import('puppeteer-core').catch(() => import('puppeteer'))
+    own = await puppeteer.launch({ executablePath: exe, headless: false, defaultViewport: null,
+      userDataDir: path.join(DIR, `session-${key}`), args: ['--no-first-run', '--no-default-browser-check', '--window-size=1100,800'] })
+    page = (await own.pages())[0] || await own.newPage()
+    await page.setUserAgent(realUserAgent(exe)).catch(() => {})
   }
-  const page = await browser.newPage()
   await page.goto('https://web.whatsapp.com/', { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {})
   await page.bringToFront().catch(() => {})
-  setState(key, { status: 'web', qr: null, code: null, error: null, where: 'a web.whatsapp.com tab in Adal Keep\'s Brave' })
+  setState(key, { status: 'web', qr: null, code: null, error: null, where: brave ? 'a web.whatsapp.com tab in Adal Keep\'s Brave' : 'a WhatsApp window on this PC' })
   clearInterval(webWatch.get(key))
   const started = Date.now()
+  const closeIt = async () => { if (own) await own.close().catch(() => {}); else await page.close().catch(() => {}) }
   const t = setInterval(async () => {
     try {
       if (page.isClosed() || Date.now() - started > 10 * 60 * 1000) {
-        clearInterval(t); webWatch.delete(key)
-        if (session(key).state.status === 'web') setState(key, { status: 'off', error: page.isClosed() ? 'The WhatsApp tab was closed before signing in' : 'Not signed in within 10 minutes' })
+        clearInterval(t); webWatch.delete(key); await closeIt()
+        if (session(key).state.status === 'web') setState(key, { status: 'off', error: page.isClosed() ? 'The WhatsApp window was closed before signing in' : 'Not signed in within 10 minutes' })
         return
       }
-      // Signed in: the chat list shows (or WhatsApp keeps its "last-wid").
-      const on = await page.evaluate(() => !!document.querySelector('#pane-side, [data-testid="chat-list"]') || !!localStorage.getItem('last-wid-md')).catch(() => false)
+      // Signed in: the chat list shows.
+      const on = await page.evaluate(() => !!document.querySelector('#pane-side, [data-testid="chat-list"], [aria-label="Chat list"]')).catch(() => false)
       if (!on) return
       clearInterval(t); webWatch.delete(key)
-      await new Promise(r => setTimeout(r, 4000)) // let WhatsApp save its keys
-      await page.close().catch(() => {})
+      await new Promise(r => setTimeout(r, 5000)) // let WhatsApp save its keys
+      await closeIt()
       setState(key, { status: 'off' })
       await connect(dbRef, key)
     } catch {}

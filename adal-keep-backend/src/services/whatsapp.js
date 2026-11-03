@@ -162,6 +162,50 @@ export async function connect(db, key = 'owner', { phone = '' } = {}, tries = 2,
   return s.state
 }
 
+/**
+ * Sign in on WhatsApp's own page: a normal web.whatsapp.com tab opens in Adal
+ * Keep's Brave, in front; the person scans its QR there (WhatsApp's own QR,
+ * always fresh). When the tab shows the chats, Adal Keep closes it and
+ * connects — already signed in, no QR of its own. Brave account only (the
+ * other accounts run in a hidden window of their own).
+ */
+const webWatch = new Map()
+export async function openWeb(db, key = 'owner') {
+  if (db) dbRef = db
+  if (!inBrave(key)) throw new Error('Another person\'s WhatsApp uses Adal Keep\'s Brave — use the QR here instead')
+  const s = session(key)
+  if (s.client) { const old = s.client; s.client = null; await release(old, s.own) }
+  const browser = await getBrowser()
+  for (const pg of await browser.pages().catch(() => [])) {
+    if (/^https:\/\/web\.whatsapp\.com/.test(pg.url())) await pg.close().catch(() => {})
+  }
+  const page = await browser.newPage()
+  await page.goto('https://web.whatsapp.com/', { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {})
+  await page.bringToFront().catch(() => {})
+  setState(key, { status: 'web', qr: null, code: null, error: null, where: 'a web.whatsapp.com tab in Adal Keep\'s Brave' })
+  clearInterval(webWatch.get(key))
+  const started = Date.now()
+  const t = setInterval(async () => {
+    try {
+      if (page.isClosed() || Date.now() - started > 10 * 60 * 1000) {
+        clearInterval(t); webWatch.delete(key)
+        if (session(key).state.status === 'web') setState(key, { status: 'off', error: page.isClosed() ? 'The WhatsApp tab was closed before signing in' : 'Not signed in within 10 minutes' })
+        return
+      }
+      // Signed in: the chat list shows (or WhatsApp keeps its "last-wid").
+      const on = await page.evaluate(() => !!document.querySelector('#pane-side, [data-testid="chat-list"]') || !!localStorage.getItem('last-wid-md')).catch(() => false)
+      if (!on) return
+      clearInterval(t); webWatch.delete(key)
+      await new Promise(r => setTimeout(r, 4000)) // let WhatsApp save its keys
+      await page.close().catch(() => {})
+      setState(key, { status: 'off' })
+      await connect(dbRef, key)
+    } catch {}
+  }, 3000)
+  webWatch.set(key, t)
+  return s.state
+}
+
 /** Signs this person's WhatsApp out (their phone's "Linked devices" loses it). */
 export async function logout(key = 'owner') {
   const s = session(key)
@@ -237,7 +281,7 @@ export function msgIdOf(msg) {
 
 const ready = (key) => {
   const s = session(key)
-  if (!s.client || s.state.status !== 'ready') throw new Error('Your WhatsApp is not connected — Settings → WhatsApp')
+  if (!s.client || s.state.status !== 'ready') throw new Error('Your WhatsApp is not connected — Settings → Integrations → WhatsApp')
   return s.client
 }
 
@@ -301,7 +345,7 @@ export async function sendCV(db, key, profileId, agentIds, by = '') {
   let q = agentsOf(db, key).andWhere('active', 1)
   if (agentIds?.length) q = q.whereIn('id', agentIds)
   const agents = (await q).map(agentRow)
-  if (!agents.length) throw new Error('You have no WhatsApp agents yet — add them in Settings → WhatsApp')
+  if (!agents.length) throw new Error('You have no WhatsApp agents yet — add them in Settings → Integrations → WhatsApp')
   const made = new Map() // one PDF per template, shared by the agents that use it
   const out = []
   for (const a of agents) {

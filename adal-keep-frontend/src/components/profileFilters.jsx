@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import api from '../services/api'
+import { after } from './ProfileJourney'
 
 /**
  * Filters and sort for a list of profiles (Profiles page, broker page):
@@ -70,6 +71,12 @@ const EMPTY = { range: '', experience: '', age: '', married: '', country: '', sk
 const NONE = '__none__'
 const RUNS = [['', 'Any'], ['running', 'Running now'], ['waiting', 'Waiting for you'], ['idle', 'Not running']]
 const empty = (v) => !norm(v)
+/** In phase k: step k done and no step after it done (like CvPlus's tabs). */
+const LATER = {}
+export function inPhase(steps = {}, k) {
+  if (steps[k] !== 'done') return false
+  return !(LATER[k] ||= after(k)).some(x => steps[x] === 'done')
+}
 const match = (want, value) => (want === NONE ? empty(value) : same(value, want))
 
 /** Which profiles have a Musaned / police run working or waiting (refreshed every 10 s). */
@@ -151,8 +158,9 @@ export function useProfileFilters(profiles) {
       if (f.religion && !match(f.religion, p.religion)) return false
       if (f.run && (runStates[p.id] || 'idle') !== f.run) return false
       if (f.stage && (stages.of[p.id] || 'new') !== f.stage) return false
-      // Journey step picked above the list: only profiles that finished it.
-      if (f.step && stages.steps[p.id]?.[f.step] !== 'done') return false
+      // Journey step picked above the list: the profiles in that phase — that
+      // step finished, nothing after it yet (Selected = chosen, no Wafid yet).
+      if (f.step && !inPhase(stages.steps[p.id], f.step)) return false
       return true
     })
     const key = (p) => sort === 'age' ? (ageOf(p.date_of_birth) ?? -1)
@@ -212,10 +220,10 @@ export function useProfileFilters(profiles) {
     </div>
   )
 
-  // How many of these profiles finished each journey step.
+  // How many of these profiles are in each phase.
   const stepCounts = useMemo(() => {
     const c = {}
-    for (const p of profiles) for (const [k, v] of Object.entries(stages.steps[p.id] || {})) if (v === 'done') c[k] = (c[k] || 0) + 1
+    for (const p of profiles) for (const k of Object.keys(stages.steps[p.id] || {})) if (inPhase(stages.steps[p.id], k)) c[k] = (c[k] || 0) + 1
     return c
   }, [profiles, stages])
 

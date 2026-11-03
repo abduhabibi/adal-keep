@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import api from '../services/api'
 import { usePickFile } from './shared/PickFile'
+import { SHARED, BRANCHES } from './ProfileJourney'
 
 const ALL_FIELDS = [
   'Government ID', 'Passport', 'CV', 'Contract', 'Medical Report', 'Insurance', 'COC',
@@ -30,6 +31,11 @@ const INFO = {
   visa_stage: ['Visa', p => p.visa_stage],
 }
 
+// The paths (journey steps) as columns: each girl's state on that step.
+const PATHS = [...SHARED, ...BRANCHES.flatMap(b => b.steps)].map(([k, t]) => [k, t])
+const PATH_MARK = { done: '✓', active: '⏳', failed: '✗', todo: '', soon: '' }
+const PATH_LOOK = { done: 'text-emerald-600', active: 'text-amber-600', failed: 'text-red-600' }
+const pathCol = (k) => ({ key: k, kind: 'path', label: PATHS.find(([x]) => x === k)?.[1] || k })
 const docCol = (name) => ({ key: name, kind: 'doc', label: name })
 const infoCol = (k) => ({ key: k, kind: 'info', label: INFO[k][0] })
 
@@ -53,6 +59,11 @@ export default function ChecklistGridView({ checklist, onClose }) {
     return m
   })
   const [newCol, setNewCol] = useState({ label: '', type: 'tick' })
+  // Each girl's journey: { profileId: { steps: {cv:'done'…}, who: {…} } }.
+  const [paths, setPaths] = useState({})
+  useEffect(() => {
+    api.get('/automations/stages').then(r => setPaths(Object.fromEntries((r.data?.profiles || []).map(x => [x.profile_id, x])))).catch(() => {})
+  }, [checklist])
   const target = useRef(null)   // { profileId, fieldId } the next picked file goes to
   const pick = usePickFile({ onFiles: (files) => target.current && handleUpload(target.current.profileId, target.current.fieldId, files[0]) })
 
@@ -137,6 +148,7 @@ export default function ChecklistGridView({ checklist, onClose }) {
   // What a cell says, as text (CSV and print).
   const textOf = (profile, col) => {
     if (col.kind === 'info') return String(INFO[col.key]?.[1](profile) ?? '')
+    if (col.kind === 'path') return PATH_MARK[paths[profile.id]?.steps?.[col.key]] || ''
     if (col.kind === 'own') { const v = cells[`${profile.id}|${col.key}`] || ''; return col.type === 'tick' ? (v ? '✓' : '') : v }
     const f = profileData[profile.id]?.fields?.find(x => x.name === col.key)
     return f?.files?.length ? '✓' : ''
@@ -166,8 +178,8 @@ export default function ChecklistGridView({ checklist, onClose }) {
     const head = `<tr><th class="no">#</th><th class="name">Name</th>${columns.map(c => `<th>${esc(c.label)}</th>`).join('')}</tr>`
     const body = checklist.profiles.map((p, i) => `<tr><td class="no">${i + 1}</td><td class="name">${esc(p.full_name)}</td>${columns.map(c => {
       const t = textOf(p, c)
-      const mark = c.kind === 'doc' || c.type === 'tick'
-      return `<td class="${mark ? 'mark' : ''}">${mark ? (t ? '✓' : '<span class="box"></span>') : esc(t)}</td>`
+      const mark = c.kind === 'doc' || c.kind === 'path' || c.type === 'tick'
+      return `<td class="${mark ? 'mark' : ''}">${mark ? (t ? (c.kind === 'path' ? esc(t) : '✓') : '<span class="box"></span>') : esc(t)}</td>`
     }).join('')}</tr>`).join('')
     const html = `<!doctype html><html><head><meta charset="utf-8"><title>${esc(checklist.name)} — Checklist</title><style>
       @page { size: A4 ${landscape ? 'landscape' : 'portrait'}; margin: 7mm; }
@@ -248,6 +260,10 @@ export default function ChecklistGridView({ checklist, onClose }) {
                     const k = `${c.kind}:${c.key}`
                     const cell = 'border-b border-r border-slate-200 dark:border-slate-800 p-1 text-center align-middle'
                     if (c.kind === 'info') return <td key={k} className={`${cell} text-slate-600 dark:text-slate-300 px-2`}>{textOf(profile, c) || '—'}</td>
+                    if (c.kind === 'path') {
+                      const st = paths[profile.id]?.steps?.[c.key]
+                      return <td key={k} className={`${cell} text-base font-bold ${PATH_LOOK[st] || 'text-slate-300'}`} title={[st, paths[profile.id]?.who?.[c.key]].filter(Boolean).join(' — ')}>{PATH_MARK[st] || '—'}</td>
+                    }
                     if (c.kind === 'own') {
                       const v = cells[`${profile.id}|${c.key}`] || ''
                       return (
@@ -309,6 +325,17 @@ export default function ChecklistGridView({ checklist, onClose }) {
                   </form>
                 </section>
                 <section>
+                  <h4 className="text-xs font-bold uppercase text-slate-500 mb-2">🛤 Paths</h4>
+                  <div className="grid grid-cols-2 gap-1">
+                    {PATHS.map(([k, t]) => (
+                      <label key={k} className="flex items-center gap-2 p-1.5 rounded hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer text-sm">
+                        <input type="checkbox" checked={has('path', k)} onChange={() => toggle(pathCol(k))} className="w-4 h-4 accent-teal-600" />
+                        <span className="truncate">{t}</span>
+                      </label>
+                    ))}
+                  </div>
+                </section>
+                <section>
                   <h4 className="text-xs font-bold uppercase text-slate-500 mb-2">👤 Profile details</h4>
                   <div className="grid grid-cols-2 gap-1">
                     {Object.keys(INFO).map(k => (
@@ -336,7 +363,7 @@ export default function ChecklistGridView({ checklist, onClose }) {
                 <ol className="space-y-1">
                   {columns.map((c, i) => (
                     <li key={`${c.kind}:${c.key}`} className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 px-2 py-1.5 text-sm">
-                      <span className="text-xs">{c.kind === 'doc' ? '📄' : c.kind === 'info' ? '👤' : c.type === 'tick' ? '✓' : '✎'}</span>
+                      <span className="text-xs">{c.kind === 'doc' ? '📄' : c.kind === 'info' ? '👤' : c.kind === 'path' ? '🛤' : c.type === 'tick' ? '✓' : '✎'}</span>
                       <span className="flex-1 truncate">{c.label}</span>
                       <button type="button" onClick={() => move(i, -1)} disabled={i === 0} className="px-1.5 text-slate-500 disabled:opacity-30">↑</button>
                       <button type="button" onClick={() => move(i, 1)} disabled={i === columns.length - 1} className="px-1.5 text-slate-500 disabled:opacity-30">↓</button>

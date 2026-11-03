@@ -1,3 +1,4 @@
+import multer from 'multer'
 import express from 'express'
 
 /**
@@ -64,4 +65,31 @@ router.delete('/accounts/:id', async (req, res) => {
   return router
 }
 
-export default accountsRouter('musaned_accounts', 'musaned_account')
+/**
+ * Musaned's authenticator per account (services/musanedTotp.js):
+ *   GET    /musaned/authenticators              { accountId: true } — which have one
+ *   POST   /musaned/accounts/:id/authenticator  a QR picture (field "image") or { key }
+ *   DELETE /musaned/accounts/:id/authenticator
+ */
+const musaned = accountsRouter('musaned_accounts', 'musaned_account')
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } })
+musaned.get('/authenticators', async (req, res) => {
+  try {
+    const { hasAuthenticator } = await import('../services/musanedTotp.js')
+    const rows = await req.app.locals.db('musaned_accounts').select('id')
+    res.json(Object.fromEntries(rows.map(r => [r.id, hasAuthenticator(r.id)])))
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+musaned.post('/accounts/:id/authenticator', upload.single('image'), async (req, res) => {
+  try {
+    const { saveAuthenticator } = await import('../services/musanedTotp.js')
+    const acct = await req.app.locals.db('musaned_accounts').where('id', Number(req.params.id)).first('id')
+    if (!acct) return res.status(404).json({ error: 'No such Musaned account' })
+    res.json(await saveAuthenticator(acct.id, { image: req.file?.buffer || null, text: req.body?.key || '' }))
+  } catch (e) { res.status(400).json({ error: e.message }) }
+})
+musaned.delete('/accounts/:id/authenticator', async (req, res) => {
+  try { (await import('../services/musanedTotp.js')).removeAuthenticator(Number(req.params.id)); res.json({ ok: true }) }
+  catch (e) { res.status(500).json({ error: e.message }) }
+})
+export default musaned

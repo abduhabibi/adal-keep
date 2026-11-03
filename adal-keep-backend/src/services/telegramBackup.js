@@ -57,6 +57,8 @@ export function getConfig() {
     chat_id: chatOf(s),
     shared: !getSecret('telegram_bot_token') && !!process.env.TELEGRAM_BOT_TOKEN,
     shared_ready: !!(process.env.TELEGRAM_BOT_TOKEN && (s.chat_id || process.env.TELEGRAM_STORAGE_CHAT)),
+    // This agency's own channel (not the one Adal's storage shares between agencies).
+    own_channel: !!s.chat_id && s.chat_id !== (process.env.TELEGRAM_STORAGE_CHAT || ''),
     window_start: s.window_start || '12:30',
     window_end: s.window_end || '13:30',
     enabled: s.enabled !== false,
@@ -81,7 +83,13 @@ export function saveConfig({ bot_token, password, chat_id, window_start, window_
     setSecret('backup_password', String(password))
   }
   const s = readState()
-  if (chat_id !== undefined) s.chat_id = String(chat_id).trim()
+  if (chat_id !== undefined) {
+    const next = String(chat_id).trim()
+    // A new channel (this agency's own, instead of the shared one): everything
+    // is sent there again, so the channel alone holds a whole backup.
+    if (next !== chatOf(s)) { s.sent = {}; s.sets = []; s.moved_at = new Date().toISOString() }
+    s.chat_id = next
+  }
   const hhmm = /^([01]\d|2[0-3]):[0-5]\d$/
   if (window_start !== undefined) { if (!hhmm.test(window_start)) throw new Error('Start time like 12:30'); s.window_start = window_start }
   if (window_end !== undefined) { if (!hhmm.test(window_end)) throw new Error('End time like 13:30'); s.window_end = window_end }
@@ -124,6 +132,15 @@ export async function testConnection() {
   const chat = await tg(token, 'getChat', JSON.stringify({ chat_id }))
   await tg(token, 'sendMessage', JSON.stringify({ chat_id, text: '✅ Adal Keep backup is connected. Locked backups will arrive here every day.' }))
   return { title: chat.title || chat.username || String(chat_id) }
+}
+
+/** The bot's @name, to add as the admin of the agency's own channel. */
+let botName = null
+export async function botInfo() {
+  const token = botToken()
+  if (!token) return { username: null }
+  if (!botName) botName = (await tg(token, 'getMe', JSON.stringify({}))).username
+  return { username: botName }
 }
 
 /** The channels/groups the bot has seen a post in (after it was made admin). */

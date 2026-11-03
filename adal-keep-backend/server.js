@@ -52,6 +52,7 @@ import branchMergeRouter from './src/routes/branchMerge.js'
 import wafidRouter from './src/routes/wafid.js'
 import backupRouter from './src/routes/backup.js'
 import contractsRouter from './src/routes/contracts.js'
+import embassyRouter from './src/routes/embassy.js'
 import whatsappRouter from './src/routes/whatsapp.js'
 import { diagMiddleware, diagReport } from './src/services/diag.js'
 import { removeSecret } from './src/services/secretStore.js'
@@ -156,6 +157,7 @@ app.use('/api', branchMergeRouter)
 app.use('/api', wafidRouter)
 app.use('/api', backupRouter)
 app.use('/api', contractsRouter)
+app.use('/api', embassyRouter)   // the embassy print (3 pages a girl)
 app.use('/api', whatsappRouter)   // Settings → WhatsApp, CVs to agents
 watchPaid(db)
 

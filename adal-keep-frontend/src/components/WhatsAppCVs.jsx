@@ -68,7 +68,7 @@ export default function WhatsAppCVs() {
     return (
       <div className="panel p-6 text-center text-sm">
         <p className="mb-3 text-slate-600 dark:text-slate-300">{!ready ? 'Connect your WhatsApp first.' : 'Add your agents first.'}</p>
-        <Button onClick={() => navigate('/settings?tab=whatsapp')}>Settings → WhatsApp</Button>
+        <Button onClick={() => navigate('/settings?tab=integrations')}>Settings → Integrations</Button>
       </div>
     )
   }

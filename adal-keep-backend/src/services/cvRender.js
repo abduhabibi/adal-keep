@@ -45,7 +45,7 @@ function findBrowser() {
 }
 
 // Resolve a DB `path` to an absolute file — handles both upload roots.
-function resolveStoredPath(rawPath) {
+export function resolveStoredPath(rawPath) {
   if (!rawPath) return null
   const cwd = process.cwd()
   const base = path.basename(rawPath)

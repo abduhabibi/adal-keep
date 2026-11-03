@@ -54,7 +54,7 @@ export default function WhatsAppSend({ profile }) {
     <div className="panel p-4">
       <div className="flex flex-wrap items-center gap-2">
         <p className="font-display font-bold">💬 CV on WhatsApp</p>
-        {!ready && <span className="text-xs text-amber-700">WhatsApp is not connected (Settings → WhatsApp)</span>}
+        {!ready && <span className="text-xs text-amber-700">WhatsApp is not connected (Settings → Integrations)</span>}
         {!profile.chosen_at && agents.length > 0 && (
           <span className="ml-auto flex gap-2">
             <Button size="sm" variant="secondary" disabled={!ready || busy} onClick={() => setPick(pick ? null : new Set())}>Choose agents</Button>

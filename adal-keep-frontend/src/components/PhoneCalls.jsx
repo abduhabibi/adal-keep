@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import api from '../services/api'
-import { IN_PHONE_APP } from '../lib/phoneApp'
+import { IN_PHONE_APP, openOutside } from '../lib/phoneApp'
 
 /**
  * In the phone app: when a run calls for a person (captcha, code, Submit…),
@@ -46,7 +46,8 @@ export default function PhoneCalls() {
       ring(/captcha|code|robot|sign-in|sign in|reCAPTCHA/i.test(c.title))
       const open = () => {
         toast.dismiss('phone-call')
-        if (c.profile_id) navigate(`/profiles/${c.profile_id}?${c.run ? `run=${c.run}` : 'attention=1'}&t=${Date.now()}`)
+        if (c.link) openOutside(c.link)
+        else if (c.profile_id) navigate(`/profiles/${c.profile_id}?${c.run ? `run=${c.run}` : 'attention=1'}&t=${Date.now()}`)
         else navigate('/tasks')
       }
       toast((t) => (

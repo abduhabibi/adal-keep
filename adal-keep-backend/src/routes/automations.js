@@ -364,6 +364,7 @@ export function stageOf(p, runs = {}) {
 export const STEP_DOCS = {
   cv: ['Passport', 'Photo', 'Full Body Photo', 'CV'],
   musaned: ['Passport', 'Photo', 'CV'],
+  selected: ['Contract'],
   wafid: ['Passport', 'Photo', 'Appointment Slip', 'Medical Report'],
   lmis: ['Contract', 'Slip', 'Medical Report', 'Labour ID'],
   tasheer: ['Passport', 'Photo'],
@@ -416,6 +417,13 @@ export function journeyOf(p, runs = {}, hasCv = false, docs = null, agents = [])
   const w = p.status === 'medical_fit' ? ['done', 'FIT'] : p.status === 'medical_rejected' ? ['failed', 'UNFIT']
     : p.status === 'medical_applied' ? ['active', 'booked — waiting for the result'] : fromRun(runs.wafid_book)
   const wafid = step('wafid', 'Wafid', w[0], w[1], 'wafid_book')
+  // Chosen by an employer on Musaned (a cancelled or rejected request is not).
+  const chosen = !!p.chosen_at && !/CANCEL|REJECT/i.test(p.musaned_stage || '')
+  const selected = step('selected', 'Selected', chosen ? 'done' : 'todo', chosen ? String(p.chosen_at).slice(0, 10) : '', 'musaned_check_chosen')
+  // The wakala the office pays on Musaned (Employment Requests → Payment).
+  const pay = String(p.musaned_payment || '').trim()
+  const wakala = step('wakala', 'Paid wakala', /^paid$/i.test(pay) ? 'done' : chosen && /^unpaid$/i.test(pay) ? 'failed' : 'todo',
+    /^paid$/i.test(pay) ? 'paid' : chosen && /^unpaid$/i.test(pay) ? 'unpaid' : '', 'musaned_check_chosen')
   const lmis = step('lmis', 'LMIS contract', ...fromRun(runs.lmis_contract, 'created'), 'lmis_contract')
   const visa = /applied/i.test(p.visa_stage || '') ? ['done', p.visa_application_number ? `no. ${p.visa_application_number}` : 'applied']
     : fromRun(runs.mofa_visa)
@@ -427,13 +435,15 @@ export function journeyOf(p, runs = {}, hasCv = false, docs = null, agents = [])
   const who = {
     cv: agents.length ? `WhatsApp: ${agents.join(', ')}` : '',
     musaned: [p.musaned_pro && `Office: ${p.musaned_pro}`, p.employer_name && `Employer: ${p.employer_name}`].filter(Boolean).join(' · '),
+    selected: [p.musaned_pro && `Office: ${p.musaned_pro}`, p.contract_number && `Contract ${p.contract_number}`].filter(Boolean).join(' · '),
+    wakala: p.musaned_pro ? `Office: ${p.musaned_pro}` : '',
     wafid: p.medical_valid_until ? `Medical valid until ${String(p.medical_valid_until).slice(0, 10)}` : '',
     lmis: [employer && `Employer: ${employer}`, p.contract_number && `Contract ${p.contract_number}`, p.labor_id && `Labour ID ${p.labor_id}`].filter(Boolean).join(' · '),
     insurance: '',
     tasheer: '',
     visa: [p.visa_number && `Visa ${p.visa_number}`, p.visa_application_number && `Application ${p.visa_application_number}`].filter(Boolean).join(' · '),
   }
-  for (const st of [cv, musaned, wafid, lmis, tasheer, insurance, visaStep]) {
+  for (const st of [cv, musaned, selected, wafid, lmis, wakala, tasheer, insurance, visaStep]) {
     st.who = who[st.key] || ''
     if (docs) {
       const need = STEP_DOCS[st.key] || []
@@ -441,8 +451,8 @@ export function journeyOf(p, runs = {}, hasCv = false, docs = null, agents = [])
     }
   }
   return {
-    lmis: [cv, musaned, wafid, lmis],
-    embassy: [cv, musaned, wafid, tasheer, insurance, visaStep],
+    lmis: [cv, musaned, selected, wafid, lmis],
+    embassy: [cv, musaned, selected, wafid, wakala, tasheer, insurance, visaStep],
   }
 }
 
@@ -477,7 +487,7 @@ router.get('/automations/stages', async (req, res) => {
   try {
     const db = req.app.locals.db
     const profiles = await db('profiles').select('id', 'status', 'musaned_stage', 'chosen_at', 'visa_stage', 'visa_application_number',
-      'musaned_pro', 'employer_name', 'work_city', 'contract_number', 'labor_id', 'visa_number', 'medical_valid_until')
+      'musaned_pro', 'employer_name', 'work_city', 'contract_number', 'labor_id', 'visa_number', 'medical_valid_until', 'musaned_payment')
     const rows = await db('automation_queue').select('id', 'profile_id', 'workflow_id', 'status').orderBy('id', 'asc')
     const latest = new Map()
     for (const r of rows) {
@@ -491,7 +501,7 @@ router.get('/automations/stages', async (req, res) => {
     // with { musaned: 'Office: …' } and its missing documents { lmis: ['Slip'] }.
     const stepsOf = (p) => {
       const d = docs.get(p.id) || new Set()
-      const all = (() => { const j = journeyOf(p, latest.get(p.id) || {}, withCv.has(p.id) || d.has('CV'), d, agents.get(p.id) || []); return [...j.lmis, ...j.embassy.slice(3)] })()
+      const all = (() => { const j = journeyOf(p, latest.get(p.id) || {}, withCv.has(p.id) || d.has('CV'), d, agents.get(p.id) || []); return [...j.lmis, ...j.embassy.slice(4)] })()
       return {
         steps: Object.fromEntries(all.map(s => [s.key, s.state])),
         who: Object.fromEntries(all.filter(s => s.who).map(s => [s.key, s.who])),
@@ -513,6 +523,20 @@ router.get('/automations/:id', async (req, res) => {
     try { log = JSON.parse(row.log || '[]') } catch {}
     const queue = row.status === 'pending' ? await runStatus(db, row.id) : null
     res.json({ ...publicRun(row), log, queue })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+// The account this run signs in with — shown small by the run's buttons, so a
+// person who signs in by hand has it at hand. Asked for only when shown.
+router.get('/automations/:id/login', async (req, res) => {
+  try {
+    const row = await req.app.locals.db('automation_queue').where('id', req.params.id).first('context')
+    let c = {}
+    try { c = JSON.parse(row?.context || '{}') } catch {}
+    const pairs = [['musaned_username', 'musaned_password', 'musaned_name'], ['insurance_username', 'insurance_password', 'insurance_name'],
+      ['visa_username', 'visa_password', 'visa_name'], ['login_value', 'login_password', 'account_name']]
+    const k = pairs.find(([u, pw]) => c[u] || c[pw])
+    res.json(k ? { name: c[k[2]] || '', user: c[k[0]] || '', password: c[k[1]] || '' } : {})
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 

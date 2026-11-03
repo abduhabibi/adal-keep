@@ -3,6 +3,7 @@ import toast from 'react-hot-toast'
 import api from '../services/api'
 import PageHeader from '../components/shared/PageHeader'
 import Spinner from '../components/shared/Spinner'
+import { openOutside } from '../lib/phoneApp'
 
 export default function NotificationsPage() {
   const [notifications, setNotifications] = useState([])
@@ -54,13 +55,14 @@ export default function NotificationsPage() {
       case 'employee_created': return '👤'
       case 'captha_detected': return '🔒'
       case 'passport_unreadable': return '🛂'
+      case 'wakala': return '💰'
       default: return '📢'
     }
   }
 
   const getUrgency = (type) => {
     if (type === 'trial_expired' || type === 'captha_detected' || type === 'passport_unreadable') return 'high'
-    if (type === 'trial_warning') return 'medium'
+    if (type === 'trial_warning' || type === 'wakala') return 'medium'
     return 'low'
   }
 
@@ -107,7 +109,14 @@ export default function NotificationsPage() {
                       <div className="text-2xl">{getIcon(notif.type)}</div>
                       <div className="flex-1">
                         <h3 className="font-semibold text-slate-800 dark:text-white">{notif.title}</h3>
-                        <p className="text-sm text-slate-600 dark:text-slate-300 mt-1">{notif.body}</p>
+                        {(() => {
+                          // A link at the end of the body (a WhatsApp chat to open) becomes a button.
+                          const link = String(notif.body || '').match(/https:\/\/\S+$/)?.[0]
+                          return <>
+                            <p className="text-sm text-slate-600 dark:text-slate-300 mt-1">{link ? notif.body.slice(0, -link.length).trim() : notif.body}</p>
+                            {link && <button type="button" onClick={() => openOutside(link)} className="mt-2 rounded-lg bg-green-600 px-3 py-1 text-xs font-semibold text-white hover:bg-green-700">💬 Open WhatsApp</button>}
+                          </>
+                        })()}
                         <p className="text-xs text-slate-400 dark:text-slate-500 mt-2">
                           {new Date(notif.created_at).toLocaleString()}
                         </p>

@@ -474,40 +474,6 @@ export default function ProfileAutomations({ profileId }) {
                 <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-2">{detail.pause_reason}</p>
               )}
             </div>
-            <div className="run-actions flex flex-wrap gap-1.5 sm:justify-end sm:gap-2 sm:shrink-0">
-              {detail.status === 'paused' && !NO_CONTINUE.has(detail.pause_reason) && (
-                <button
-                  onClick={resume}
-                  className="px-3 py-1.5 rounded-lg bg-teal-600 text-white text-xs font-semibold hover:bg-teal-700"
-                >
-                  {CONTINUE_LABEL[detail.pause_reason] || '▶ Continue'}
-                </button>
-              )}
-              {detail.status === 'paused' && COMPLETE_LABEL[detail.pause_reason] && (
-                <button
-                  onClick={complete}
-                  className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700"
-                >
-                  {COMPLETE_LABEL[detail.pause_reason]}
-                </button>
-              )}
-              {detail.status === 'pending' && (
-                <button onClick={pause} className="px-3 py-1.5 rounded-lg bg-amber-500 text-white text-xs font-semibold hover:bg-amber-600">⏸ Hold</button>
-              )}
-              {['running', 'paused', 'pending'].includes(detail.status) && (
-                <button onClick={cancel} className="px-3 py-1.5 rounded-lg border border-red-300 text-red-600 text-xs font-semibold hover:bg-red-50">{cancelArmed ? 'Click again to cancel' : 'Cancel'}</button>
-              )}
-              {['done', 'failed', 'cancelled'].includes(detail.status) && (
-                <button
-                  onClick={() => start(detail.workflow_id)}
-                  disabled={!!sending[detail.workflow_id]}
-                  className="px-3 py-1.5 rounded-lg bg-teal-600 text-white text-xs font-semibold hover:bg-teal-700 disabled:opacity-60"
-                >
-                  ↻ Run again
-                </button>
-              )}
-              <button onClick={() => { setOpen(null); setDetail(null) }} className="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs">Close</button>
-            </div>
           </div>
 
           {['running', 'paused'].includes(detail.status) && (
@@ -538,6 +504,49 @@ export default function ProfileAutomations({ profileId }) {
         </div>
       )}
       </>}
+      {/* The run's buttons stay at the bottom of the screen (no scrolling down
+          to them), with the account's sign-in in a small box beside them. */}
+      {open && detail && !screen && createPortal(
+        <div className="run-actions fixed bottom-3 left-1/2 z-[70] flex max-w-[calc(100vw-1.5rem)] -translate-x-1/2 items-center gap-1.5 overflow-x-auto rounded-2xl border border-slate-200 bg-white/95 px-2.5 py-2 shadow-2xl backdrop-blur animate-fade-up dark:border-slate-700 dark:bg-slate-900/95 sm:gap-2" style={{ marginBottom: 'env(safe-area-inset-bottom)' }}>
+          <button type="button" onClick={() => panelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })} className="shrink-0 text-left" title="Go to the run">
+            <span className="block max-w-[11rem] truncate text-xs font-bold">{wfName(detail.workflow_id)} <span className="font-normal text-slate-400">#{detail.id}</span></span>
+            <span className={`block text-[10px] ${detail.status === 'paused' ? 'font-semibold text-amber-600' : 'text-slate-500'}`}>{detail.status === 'paused' ? '🖐 needs you' : detail.status === 'running' ? '⚙️ working' : detail.status}</span>
+          </button>
+          <SignInChip runId={detail.id} />
+              {detail.status === 'paused' && !NO_CONTINUE.has(detail.pause_reason) && (
+                <button
+                  onClick={resume}
+                  className="shrink-0 px-3 py-1.5 rounded-lg bg-teal-600 text-white text-xs font-semibold hover:bg-teal-700"
+                >
+                  {CONTINUE_LABEL[detail.pause_reason] || '▶ Continue'}
+                </button>
+              )}
+              {detail.status === 'paused' && COMPLETE_LABEL[detail.pause_reason] && (
+                <button
+                  onClick={complete}
+                  className="shrink-0 px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700"
+                >
+                  {COMPLETE_LABEL[detail.pause_reason]}
+                </button>
+              )}
+              {detail.status === 'pending' && (
+                <button onClick={pause} className="shrink-0 px-3 py-1.5 rounded-lg bg-amber-500 text-white text-xs font-semibold hover:bg-amber-600">⏸ Hold</button>
+              )}
+              {['running', 'paused', 'pending'].includes(detail.status) && (
+                <button onClick={cancel} className="shrink-0 px-3 py-1.5 rounded-lg border border-red-300 text-red-600 text-xs font-semibold hover:bg-red-50">{cancelArmed ? 'Click again to cancel' : 'Cancel'}</button>
+              )}
+              {['done', 'failed', 'cancelled'].includes(detail.status) && (
+                <button
+                  onClick={() => start(detail.workflow_id)}
+                  disabled={!!sending[detail.workflow_id]}
+                  className="shrink-0 px-3 py-1.5 rounded-lg bg-teal-600 text-white text-xs font-semibold hover:bg-teal-700 disabled:opacity-60"
+                >
+                  ↻ Run again
+                </button>
+              )}
+              <button onClick={() => { setOpen(null); setDetail(null) }} className="shrink-0 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs">Close</button>
+        </div>,
+        document.body)}
       {choose && createPortal(
         <div className="fixed inset-0 z-[96] bg-black/40 flex items-end" onClick={() => setChoose(null)}>
           <div className="w-full rounded-t-2xl bg-white dark:bg-slate-900 p-4 space-y-2.5" style={{ paddingBottom: 'calc(16px + env(safe-area-inset-bottom))' }} onClick={e => e.stopPropagation()}>
@@ -597,5 +606,25 @@ export default function ProfileAutomations({ profileId }) {
         </div>,
         document.body)}
     </section>
+  )
+}
+
+/** The run's sign-in (who and password), small: tap to copy, 👁 to see the password. */
+function SignInChip({ runId }) {
+  const [a, setA] = useState(null)
+  const [see, setSee] = useState(false)
+  useEffect(() => { let alive = true; api.get(`/automations/${runId}/login`).then(r => alive && setA(r.data)).catch(() => {}); return () => { alive = false } }, [runId])
+  if (!a?.user && !a?.password) return null
+  const copy = (v, what) => { navigator.clipboard?.writeText(v).then(() => toast.success(`${what} copied`, { duration: 1500 })).catch(() => {}) }
+  return (
+    <span className="flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-1.5 py-1 text-[10px] dark:border-slate-700 dark:bg-slate-800" title={a.name ? `Account: ${a.name}` : 'Sign-in'}>
+      🔑
+      {a.user && <button type="button" onClick={() => copy(a.user, 'Username')} className="max-w-[7rem] truncate font-mono hover:underline" title="Copy the username">{a.user}</button>}
+      {a.password && <>
+        <span className="text-slate-300">·</span>
+        <button type="button" onClick={() => copy(a.password, 'Password')} className="font-mono hover:underline" title="Copy the password">{see ? a.password : '••••••'}</button>
+        <button type="button" onClick={() => setSee(v => !v)} className="opacity-60 hover:opacity-100" title={see ? 'Hide' : 'Show'}>{see ? '🙈' : '👁'}</button>
+      </>}
+    </span>
   )
 }

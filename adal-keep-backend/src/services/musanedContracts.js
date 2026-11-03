@@ -665,6 +665,8 @@ async function saveDetails(db, browser, page, p, card, cardText, d) {
   } else if (p.musaned_stage && update.musaned_stage && p.musaned_stage !== update.musaned_stage) {
     await task(db, p.id, `Musaned: ${p.full_name} → ${update.musaned_stage}`, `Was ${p.musaned_stage}.`)
   }
+  // Wakala unpaid → the agent who chose her is asked (a call that opens their WhatsApp).
+  if (!dead && /^unpaid$/i.test(update.musaned_payment || '')) import('./wakala.js').then(w => w.askToPay(db, p.id)).catch(e => console.warn('[contracts] wakala:', e.message))
   return { state: 'chosen', stage: update.musaned_stage, contract: update.contract_number, pdfs: saved, first }
 }
 
@@ -733,7 +735,7 @@ async function musanedSignedInSomewhere(browser, log = () => {}) {
 async function signInForCheck(db, page) {
   const acct = await db('musaned_accounts').orderBy('is_default', 'desc').first().catch(() => null)
   const log = (msg) => console.log(`[contracts] ${msg}`)
-  const ctx = { musaned_username: acct?.username || '', musaned_password: acct?.password || '', onLog: (l, m) => log(m), profileName: 'Contract check' }
+  const ctx = { musaned_username: acct?.username || '', musaned_password: acct?.password || '', account_id: acct?.id || null, onLog: (l, m) => log(m), profileName: 'Contract check' }
   const { ringUntilTouched, stopLoginAlarm, showDesktopNotice } = await import('./worker.js')
   try {
     const { stepOpenMusaned, stepFillMusanedLogin } = await import('./musanedWorkflow.js')
@@ -750,8 +752,14 @@ async function signInForCheck(db, page) {
     showDesktopNotice(title, body)
     await task(db, null, title, body)
     const end = Date.now() + 30 * 60 * 1000
+    const { typeAuthenticatorCode, classifyScreen } = await import('./musanedWorkflow.js')
+    let codeAt = 0
     while (Date.now() < end) {
       await sleep(3000)
+      // The code box is up and the account's authenticator is in Adal Keep: type it (once per 30 s).
+      if (Date.now() - codeAt > 30000 && (await classifyScreen(page, ctx).catch(() => ({}))).screen === 'otp') {
+        if (await typeAuthenticatorCode(page, ctx).catch(() => false)) codeAt = Date.now()
+      }
       if (await musanedSignedInSomewhere(page.browser(), log)) {
         stopLoginAlarm()
         await doneSignInTasks(db)

@@ -5,7 +5,7 @@
  * copy, which passes no headers).
  */
 import express from 'express'
-import { keyOf, stateOf, allStates, connect, logout, listChats, chatForNumber, agentRow, agentsOf, sendCV, sendMany, bulk, sendsOf, onChosen, available } from '../services/whatsapp.js'
+import { keyOf, stateOf, allStates, connect, openWeb, logout, listChats, chatForNumber, agentRow, agentsOf, sendCV, sendMany, bulk, sendsOf, onChosen, available } from '../services/whatsapp.js'
 
 const router = express.Router()
 const fail = (res, e) => res.status(400).json({ error: e.message })
@@ -14,6 +14,7 @@ const who = (req) => keyOf(req.query.u ?? req.body?.u)
 const by = (req) => { try { return decodeURIComponent(req.get('x-adal-who') || '') } catch { return '' } }
 
 router.get('/whatsapp', (req, res) => res.json({ ...stateOf(who(req)), key: who(req), others: allStates().filter(s => s.key !== who(req) && s.status === 'ready') }))
+router.post('/whatsapp/open-web', async (req, res) => { try { res.json(await openWeb(req.app.locals.db, who(req))) } catch (e) { fail(res, e) } })
 router.post('/whatsapp/connect', async (req, res) => { try { res.json(await connect(req.app.locals.db, who(req), { phone: req.body?.phone })) } catch (e) { fail(res, e) } })
 router.post('/whatsapp/logout', async (req, res) => { try { await logout(who(req)); res.json(stateOf(who(req))) } catch (e) { fail(res, e) } })
 router.get('/whatsapp/chats', async (req, res) => { try { res.json(await listChats(who(req))) } catch (e) { fail(res, e) } })

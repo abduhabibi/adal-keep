@@ -1,8 +1,10 @@
 /**
  * The journey as one start that forks in two:
  *
- *   CV → Musaned → Wafid ─┬─ 🏛 LMIS     LMIS contract
- *                          └─ 🇸🇦 Embassy Tasheer → Insurance → Enjaz · Visa
+ *   CV → Musaned → Selected → Wafid ─┬─ 🏛 LMIS     LMIS contract
+ *                                     └─ [Paid wakala] ─ 🇸🇦 Tasheer → Insurance → Enjaz · Visa
+ *
+ * "Paid wakala" is a box on the curve down to the Embassy row.
  *
  * <JourneyFork> draws it. On a profile each step shows its state; on the
  * profile list each step shows how many profiles finished it, and a click
@@ -11,10 +13,10 @@
 import { useEffect, useRef, useState } from 'react'
 import api from '../services/api'
 
-export const SHARED = [['cv', 'CV'], ['musaned', 'Musaned'], ['wafid', 'Wafid']]
+export const SHARED = [['cv', 'CV'], ['musaned', 'Musaned'], ['selected', 'Selected'], ['wafid', 'Wafid']]
 export const BRANCHES = [
   { key: 'lmis-track', title: 'LMIS', icon: '🏛', steps: [['lmis', 'LMIS contract', 'Contract']] },
-  { key: 'embassy-track', title: 'Embassy', icon: '🇸🇦', steps: [['tasheer', 'Tasheer'], ['insurance', 'Insurance'], ['visa', 'Enjaz · Visa', 'Visa']] },
+  { key: 'embassy-track', title: 'Embassy', icon: '🇸🇦', steps: [['wakala', 'Paid wakala', 'Wakala'], ['tasheer', 'Tasheer'], ['insurance', 'Insurance'], ['visa', 'Enjaz · Visa', 'Visa']] },
 ]
 
 const LOOK = {
@@ -28,22 +30,32 @@ const ICON = { done: '✓', active: '•', failed: '!' }
 
 // Where each step sits: x as a share of the width, row 0 = LMIS (top),
 // 1 = the shared start (middle), 2 = Embassy (bottom).
+// "wakala" sits half-way down the curve from Wafid to Tasheer.
 const SPOT = {
-  cv: [0, 1], musaned: [0.17, 1], wafid: [0.34, 1],
-  lmis: [0.62, 0],
-  tasheer: [0.62, 2], insurance: [0.81, 2], visa: [1, 2],
+  cv: [0, 1], musaned: [0.12, 1], selected: [0.24, 1], wafid: [0.36, 1],
+  lmis: [0.66, 0],
+  wakala: [0.52, 1.5],
+  tasheer: [0.66, 2], insurance: [0.83, 2], visa: [1, 2],
 }
+const BOX = new Set(['wakala'])
 const EDGE = 30   // px kept at the left for the first step's name
 const LABELS = 78 // px kept at the right for the branches' names
 // Each step's step before it (the wires), and how each wire is drawn.
-const PARENT = { musaned: 'cv', wafid: 'musaned', lmis: 'wafid', tasheer: 'wafid', insurance: 'tasheer', visa: 'insurance' }
-const WIRES = Object.entries(PARENT).map(([to, from]) => ({ from, to, curve: from === 'wafid' }))
+export const PARENT = { musaned: 'cv', selected: 'musaned', wafid: 'selected', lmis: 'wafid', wakala: 'wafid', tasheer: 'wakala', insurance: 'tasheer', visa: 'insurance' }
+const WIRES = Object.entries(PARENT).map(([to, from]) => ({ from, to, curve: from === 'wafid' || from === 'wakala' }))
+/** Every step after k on her path (to tell her phase: the last step she finished). */
+export function after(k) {
+  const out = []
+  for (const [to, from] of Object.entries(PARENT)) if (from === k) out.push(to, ...after(to))
+  return out
+}
 const SIZE = {
   compact: { r: 11, rowGap: 26, block: 36 },
   full:    { r: 14, rowGap: 42, block: 60 },
 }
 
 function Node({ k, title, n, state, note, count, selected, dim, onSelect, compact, narrow, left, top }) {
+  if (BOX.has(k)) return <BoxNode {...{ k, title, state, note, count, selected, dim, onSelect, compact, left, top }} />
   const pick = !!onSelect
   const l = pick ? (selected ? LOOK.done : LOOK.todo) : (LOOK[state] || LOOK.todo)
   return (
@@ -56,6 +68,20 @@ function Node({ k, title, n, state, note, count, selected, dim, onSelect, compac
       </span>
       <span className={`${narrow ? 'mt-0.5 text-[9px] tracking-tight' : compact ? 'mt-0.5 text-[10px]' : 'mt-1 text-[11px]'} whitespace-nowrap font-semibold leading-tight ${l.text}`}>{title}</span>
       {note && <span className="text-[10px] text-slate-400 leading-tight whitespace-nowrap max-w-[96px] truncate">{note}</span>}
+    </button>
+  )
+}
+
+/** "Paid wakala": a small box on the curve (not a circle) — its count or state inside. */
+function BoxNode({ k, title, state, note, count, selected, dim, onSelect, compact, left, top }) {
+  const pick = !!onSelect
+  const l = pick ? (selected ? LOOK.done : LOOK.todo) : (LOOK[state] || LOOK.todo)
+  return (
+    <button type="button" title={note ? `${title} — ${note}` : title} onClick={() => onSelect?.(k)}
+      className={`absolute z-10 -translate-x-1/2 -translate-y-1/2 flex items-center gap-1 rounded-md px-1.5 ${compact ? 'py-0.5 text-[9px]' : 'py-1 text-[10px]'} font-bold whitespace-nowrap shadow-sm transition-all duration-300 ${l.dot} ${dim ? 'opacity-40 hover:opacity-80' : ''} ${selected ? 'ring-4 ring-emerald-300/70 shadow-[0_0_16px_rgba(16,185,129,.8)] scale-110' : ''} ${pick || state ? 'cursor-pointer' : 'cursor-default'}`}
+      style={{ left, top }}>
+      <span>💰</span><span>{title}</span>
+      {pick ? <span className="opacity-80">{count ?? 0}</span> : ICON[state] ? <span>{ICON[state]}</span> : null}
     </button>
   )
 }
@@ -95,7 +121,7 @@ export function JourneyFork({ states = {}, notes = {}, counts, selected, onSelec
   const pulse = (wire) => pick ? chain.has(wire.to) : states[wire.from] === 'done' && states[wire.to] === 'active'
 
   const path = ({ from, to, curve }) => {
-    const x1 = cx(from) + z.r + 1, y1 = cy(from), x2 = cx(to) - z.r - 1, y2 = cy(to)
+    const x1 = cx(from) + (BOX.has(from) ? 0 : z.r + 1), y1 = cy(from), x2 = cx(to) - (BOX.has(to) ? 0 : z.r + 1), y2 = cy(to)
     if (!curve) return `M${x1},${y1} L${x2},${y2}`
     const d = (x2 - x1) * 0.55
     return `M${x1},${y1} C${x1 + d},${y1} ${x2 - d},${y2} ${x2},${y2}`
@@ -126,7 +152,7 @@ export function JourneyFork({ states = {}, notes = {}, counts, selected, onSelec
         {w > 0 && steps.map(([k, title, short], i) => (
           <Node key={k} k={k} title={compact && short ? short : title} n={i + 1} state={states[k]} note={pick ? '' : notes[k]}
             count={counts?.[k]} selected={selected === k} dim={pick && selected && !chain.has(k)} onSelect={onSelect}
-            compact={compact} narrow={narrow} left={cx(k)} top={SPOT[k][1] * z.rowGap} />
+            compact={compact} narrow={narrow} left={cx(k)} top={BOX.has(k) ? cy(k) : SPOT[k][1] * z.rowGap} />
         ))}
         {/* the two branches' names, at the right end of their rows */}
         {BRANCHES.map((b, i) => (
@@ -185,7 +211,7 @@ export default function ProfileJourney({ profileId }) {
     return () => { alive = false; clearInterval(t) }
   }, [profileId])
   if (!j) return null
-  const all = [...j.lmis, ...j.embassy.slice(3)]
+  const all = [...j.lmis, ...j.embassy.slice(SHARED.length)]
   const states = Object.fromEntries(all.map(s => [s.key, s.state]))
   const notes = Object.fromEntries(all.map(s => [s.key, s.note]))
   const toggle = () => setOpen(o => { try { localStorage.setItem('adal-journey-details', o ? '0' : '1') } catch {} return !o })
@@ -198,7 +224,7 @@ export default function ProfileJourney({ profileId }) {
         {open ? '▾ Who and documents per step' : '▸ Who and documents per step'}
       </button>
       {open && (
-        <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-7">
+        <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-5">
           {all.map(s => <StepCard key={s.key} s={s} />)}
         </div>
       )}

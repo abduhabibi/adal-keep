@@ -89,15 +89,17 @@ export default function WhatsAppCard() {
     load(); loadAgents()
     api.get('/cv/templates').then(r => setTemplates((r.data || []).filter(t => t.is_active !== 0))).catch(() => {})
   }, [])
-  // While it starts / shows the QR, look every 2 s (the QR changes).
+  // While it starts / shows the QR, look every second (WhatsApp changes its QR every ~20 s).
   useEffect(() => {
-    if (!s || !['starting', 'qr', 'code', 'signing-in'].includes(s.status)) return
-    const t = setInterval(load, 2000)
+    if (!s || !['starting', 'qr', 'code', 'signing-in', 'web'].includes(s.status)) return
+    const t = setInterval(load, s.status === 'web' ? 3000 : 1000)
     return () => clearInterval(t)
   }, [s?.status])
   useEffect(() => { if (s?.status === 'ready' && edit && !chats) wa.get('/whatsapp/chats').then(r => setChats(r.data)).catch(() => setChats([])) }, [s?.status, edit])
 
   if (s === false || s === null) return null
+  // WhatsApp's own page in Adal Keep's Brave: scan its QR there; Adal Keep connects when it shows the chats.
+  const openWeb = async () => { try { setS((await wa.post('/whatsapp/open-web')).data); toast.success('web.whatsapp.com is open in Adal Keep\'s Brave — scan its QR there', { duration: 7000 }) } catch (e) { toast.error(err(e)) } }
   const connect = async (withPhone) => { try { setS((await wa.post('/whatsapp/connect', withPhone ? { phone } : {})).data) } catch (e) { toast.error(err(e)) } }
   const logout = async () => { if (!confirm('Sign your WhatsApp out of Adal Keep?')) return; try { setS((await wa.post('/whatsapp/logout')).data) } catch (e) { toast.error(err(e)) } }
   const remove = async (a) => { if (!confirm(`Remove ${a.name}?`)) return; await wa.delete(`/whatsapp/agents/${a.id}`); loadAgents() }
@@ -132,6 +134,9 @@ export default function WhatsAppCard() {
             {s.status === 'qr' && (
               <button type="button" className="text-xs text-teal-700 underline dark:text-teal-400" onClick={() => setByPhone(true)}>On this phone? Link with your phone number instead</button>
             )}
+            {s.status === 'qr' && (
+              <button type="button" className="block text-xs text-teal-700 underline dark:text-teal-400" onClick={openWeb}>QR not working? Sign in on web.whatsapp.com instead</button>
+            )}
             {s.status === 'qr' && byPhone && (
               <div className="flex gap-2">
                 <input className={field} inputMode="tel" placeholder="Your WhatsApp number (251…)" value={phone} onChange={e => setPhone(e.target.value)} />
@@ -140,10 +145,19 @@ export default function WhatsAppCard() {
             )}
           </div>
         </div>
+      ) : s.status === 'web' ? (
+        <div className="mb-4 rounded-xl border border-teal-200 bg-teal-50/60 p-4 text-sm dark:border-teal-800 dark:bg-teal-900/10">
+          <p className="font-semibold">🌐 web.whatsapp.com is open in Adal Keep's Brave</p>
+          <p className="mt-1 text-slate-600 dark:text-slate-300">Scan the QR on that tab with your phone (Linked devices → Link a device). When your chats show, Adal Keep closes the tab and connects by itself.</p>
+          <p className="mt-2 flex items-center gap-2 text-xs text-slate-500"><span className="h-2 w-2 animate-ping rounded-full bg-teal-500" /> Waiting for you to sign in…</p>
+        </div>
       ) : (
         <div className="mb-4 flex flex-wrap items-center gap-3">
           <Button onClick={() => connect(false)} disabled={s.status === 'starting' || s.status === 'signing-in'}>
             {s.status === 'starting' ? 'Opening WhatsApp…' : s.status === 'signing-in' ? 'Signing in…' : '💬 Connect my WhatsApp'}
+          </Button>
+          <Button variant="secondary" onClick={openWeb} disabled={s.status === 'starting' || s.status === 'signing-in'} title="Opens a normal web.whatsapp.com tab in Adal Keep's Brave: sign in there; Adal Keep connects when you are in">
+            🌐 Sign in on web.whatsapp.com
           </Button>
           {s.error && <span className="text-sm text-red-600">{s.error}</span>}
         </div>

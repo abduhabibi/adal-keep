@@ -9,6 +9,7 @@ import Button from '../components/shared/Button'
 import Input from '../components/shared/Input'
 import { useProfileFilters } from '../components/profileFilters'
 import { JourneyFork, SHARED, BRANCHES } from '../components/ProfileJourney'
+import SelectionBar from '../components/SelectionBar'
 
 const STATUS_OPTIONS_AM = [
   { value: 'pending', label: 'በመጠባበቅ ላይ' },
@@ -58,16 +59,14 @@ export default function ProfilesPage() {
 
   // Date range, experience, age, married, country, skill, religion + sort.
   const { rows: allRows, filterBar, sortBar, active: filtering, clear, step, setStep, stepCounts, activeCount, journey } = useProfileFilters(profiles)
-  // 🤝 Selected: the girls an employer chose on Musaned.
-  const selectedOnly = searchParams.get('chosen') === '1'
-  const isChosen = (p) => !!p.chosen_at && !/CANCEL|REJECT/i.test(p.musaned_stage || '')
-  const chosenCount = useMemo(() => profiles.filter(isChosen).length, [profiles])
-  const filtered = selectedOnly ? allRows.filter(isChosen) : allRows
+  // An old link ?chosen=1 (the 🤝 Selected button, now the journey's Selected phase).
+  useEffect(() => { if (searchParams.get('chosen') === '1') { setStep('selected'); const n = new URLSearchParams(searchParams); n.delete('chosen'); setSearchParams(n, { replace: true }) } }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  const filtered = allRows
   // 100 a page: quick to draw on any phone.
   const PAGE = 100
   const [page, setPage] = useState(1)
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE))
-  useEffect(() => { setPage(1) }, [filtered.length, step, selectedOnly])
+  useEffect(() => { setPage(1) }, [filtered.length, step])
   const rows = filtered.slice((Math.min(page, pages) - 1) * PAGE, Math.min(page, pages) * PAGE)
 
   // 🔎 The whole Musaned Employment Requests list: who is newly chosen.
@@ -96,6 +95,10 @@ export default function ProfilesPage() {
       toast.error(e.response?.data?.error || e.message, { id })
     } finally { setScanning(false) }
   }
+
+  // Ticked profiles (the box at the top centre of each card) → the side bar.
+  const [picked, setPicked] = useState(() => new Map())
+  const togglePick = (p) => setPicked(m => { const n = new Map(m); n.has(p.id) ? n.delete(p.id) : n.set(p.id, p); return n })
 
   // The nine filters fold away: the search line stays one line high.
   const [showFilters, setShowFilters] = useState(false)
@@ -146,11 +149,8 @@ export default function ProfilesPage() {
           <Button data-tour="new-profile" className="col-span-2 lg:col-span-1 w-full whitespace-nowrap" onClick={() => navigate('/profiles/new')}>
             + ፕሮፋይል አክል
           </Button>
-          <Button variant="secondary" className="w-full whitespace-nowrap !px-2 text-xs sm:text-sm" onClick={scanMusaned} disabled={scanning} title="Reads the Musaned Employment Requests list: anyone newly chosen gets her contract saved and a task; girls not in Adal Keep are added">
+          <Button variant="secondary" className="col-span-2 lg:col-span-1 w-full whitespace-nowrap !px-2 text-xs sm:text-sm" onClick={scanMusaned} disabled={scanning} title="Reads the Musaned Employment Requests list: anyone newly chosen gets her contract saved and a task; girls not in Adal Keep are added">
             {scanning ? '🔎 Checking…' : '🔎 Check for new selections'}
-          </Button>
-          <Button variant={selectedOnly ? 'primary' : 'secondary'} className="w-full whitespace-nowrap !px-2 text-xs sm:text-sm" onClick={() => updateFilter('chosen', selectedOnly ? '' : '1')} title="The girls an employer chose on Musaned">
-            🤝 Selected ({chosenCount})
           </Button>
         </div>
       </div>
@@ -238,14 +238,18 @@ export default function ProfilesPage() {
       ) : (
         <>
         <Pager page={Math.min(page, pages)} pages={pages} total={filtered.length} per={PAGE} onPage={setPage} />
-        <div key={step || 'all'} className="grid grid-cols-2 gap-2 sm:gap-3 xl:grid-cols-3">
+        <div key={step || 'all'} className={`grid grid-cols-2 gap-x-2 gap-y-4 pt-3 sm:gap-x-3 sm:gap-y-5 xl:grid-cols-3`}>
           {rows.map((p, i) => (
             <article
               key={p.id}
-              className="panel group cursor-pointer px-3 py-2.5 sm:p-4 transition hover:-translate-y-0.5 hover:shadow-soft animate-fade-up"
+              className={`panel group relative cursor-pointer px-3 py-2.5 sm:p-4 transition hover:-translate-y-0.5 hover:shadow-soft animate-fade-up ${picked.has(p.id) ? 'ring-2 ring-teal-500' : ''}`}
               style={{ animationDelay: `${Math.min(i, 8) * 40}ms` }}
               onClick={() => navigate(`/profiles/${p.id}`)}
             >
+              <label onClick={(e) => e.stopPropagation()} title="Select"
+                className="absolute left-1/2 -top-3 z-10 flex h-6 w-6 -translate-x-1/2 cursor-pointer items-center justify-center rounded-md bg-white/90 shadow-sm ring-1 ring-slate-200 dark:bg-slate-800 dark:ring-slate-600">
+                <input type="checkbox" className="h-4 w-4 cursor-pointer accent-teal-600" checked={picked.has(p.id)} onChange={() => togglePick(p)} />
+              </label>
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <h3 className="truncate font-display text-sm sm:text-lg font-bold text-slate-900" title={p.full_name}>
@@ -310,6 +314,10 @@ export default function ProfilesPage() {
         <Pager page={Math.min(page, pages)} pages={pages} total={filtered.length} per={PAGE} onPage={(n) => { setPage(n); window.scrollTo({ top: 0, behavior: 'smooth' }) }} bottom />
         </>
       )}
+      {picked.size > 0 && (
+        <SelectionBar picked={[...picked.values()]} onRemove={togglePick} onClear={() => setPicked(new Map())}
+          onAllShown={() => setPicked(m => { const n = new Map(m); rows.forEach(r => n.set(r.id, r)); return n })} />
+      )}
     </div>
   )
 }
@@ -325,10 +333,10 @@ function MiniJourney({ steps = {}, who = {}, missing = {}, picked }) {
   const n = Object.values(steps).filter(v => v === 'done').length
   return (
     <div className="mt-2">
-      <div className="flex items-center gap-1" title={`${n} of 7 steps done`}>
+      <div className="flex items-center gap-1" title={`${n} of ${STEP_LIST.length} steps done`}>
         {STEP_LIST.map(([k, t], i) => (
           <span key={k} title={`${t}${who[k] ? ` — ${who[k]}` : ''}${missing[k]?.length ? ` · missing: ${missing[k].join(', ')}` : ''}`}
-            className={`h-1.5 flex-1 rounded-full ${DOT[steps[k]] || DOT.todo} ${picked === k ? 'ring-2 ring-emerald-300' : ''} ${i === 3 ? 'ml-1' : ''}`} />
+            className={`h-1.5 flex-1 rounded-full ${DOT[steps[k]] || DOT.todo} ${picked === k ? 'ring-2 ring-emerald-300' : ''} ${i === SHARED.length ? 'ml-1' : ''}`} />
         ))}
       </div>
       {picked && (who[picked] || missing[picked]?.length > 0) && (

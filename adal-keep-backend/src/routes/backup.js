@@ -4,7 +4,7 @@
  */
 import express from 'express'
 import multer from 'multer'
-import { getConfig, saveConfig, testConnection, findChats, runBackup, progress, restoreFrom, newestBackup } from '../services/telegramBackup.js'
+import { getConfig, saveConfig, testConnection, findChats, botInfo, runBackup, progress, restoreFrom, newestBackup } from '../services/telegramBackup.js'
 import { onThisPC } from './trash.js'
 
 const router = express.Router()
@@ -14,6 +14,7 @@ const fail = (res, e) => res.status(400).json({ error: e.message })
 
 router.get('/backup', here, (req, res) => res.json({ ...getConfig(), progress }))
 router.post('/backup/settings', here, (req, res) => { try { res.json(saveConfig(req.body || {})) } catch (e) { fail(res, e) } })
+router.get('/backup/bot', here, async (req, res) => { try { res.json(await botInfo()) } catch (e) { fail(res, e) } })
 router.post('/backup/find-chats', here, async (req, res) => { try { res.json(await findChats()) } catch (e) { fail(res, e) } })
 router.post('/backup/test', here, async (req, res) => { try { res.json(await testConnection()) } catch (e) { fail(res, e) } })
 router.post('/backup/run', here, (req, res) => {

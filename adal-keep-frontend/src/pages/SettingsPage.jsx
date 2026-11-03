@@ -17,6 +17,8 @@ import MainPCCard from '../components/MainPCCard'
 import WafidCard from '../components/WafidCard'
 import InsuranceCard from '../components/InsuranceCard'
 import BackupCard from '../components/BackupCard'
+import TelegramChannelCard from '../components/TelegramChannelCard'
+import MusanedAuthenticatorCard from '../components/MusanedAuthenticatorCard'
 import ErrorBoundary from '../components/shared/ErrorBoundary'
 import PhoneCard from '../components/PhoneCard'
 import WhatsAppCard from '../components/WhatsAppCard'
@@ -25,7 +27,7 @@ import WhatsAppCard from '../components/WhatsAppCard'
 const SETTINGS_TABS = [
   ['agency', '🏢', 'Agency'],
   ['portals', '🤖', 'Portals'],
-  ['whatsapp', '💬', 'WhatsApp'],
+  ['integrations', '🔌', 'Integrations'],
   ['backup', '💾', 'Backup & updates'],
   ['look', '🎨', 'Look & language'],
 ]
@@ -34,7 +36,9 @@ export default function SettingsPage() {
   const { subscription, refresh } = useAuth()
   // Which tab: ?tab=… (links like "Settings → WhatsApp" open it), else the agency.
   const [params, setParams] = useSearchParams()
-  const tab = SETTINGS_TABS.some(([id]) => id === params.get('tab')) ? params.get('tab') : 'agency'
+  // ?tab=whatsapp (older links) opens Integrations, where WhatsApp now is.
+  const asked = params.get('tab') === 'whatsapp' ? 'integrations' : params.get('tab')
+  const tab = SETTINGS_TABS.some(([id]) => id === asked) ? asked : 'agency'
   const setTab = (id) => { setParams(id === 'agency' ? {} : { tab: id }, { replace: true }); window.scrollTo({ top: 0 }) }
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -269,11 +273,13 @@ export default function SettingsPage() {
       {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Main PC & phones"><MainPCCard /></ErrorBoundary>}
       </>}
       {tab === 'portals' && <>
+      {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Musaned authenticator"><MusanedAuthenticatorCard /></ErrorBoundary>}
       {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Wafid"><WafidCard /></ErrorBoundary>}
       {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Insurance"><InsuranceCard /></ErrorBoundary>}
       </>}
-      {tab === 'whatsapp' && <>
+      {tab === 'integrations' && <>
       {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="WhatsApp"><WhatsAppCard /></ErrorBoundary>}
+      {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Telegram"><TelegramChannelCard /></ErrorBoundary>}
       </>}
       {tab === 'backup' && <>
       {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Backup"><BackupCard /></ErrorBoundary>}

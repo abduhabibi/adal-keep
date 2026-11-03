@@ -20,3 +20,11 @@ if (typeof window !== 'undefined') window.__adalBack = () => {
   }
   return false
 }
+
+/** An outside link (a WhatsApp chat…): on a phone the WebView hands it to the app
+ *  that opens it (WhatsApp); on a PC a new tab. */
+export function openOutside(url) {
+  if (!url) return
+  if (IN_PHONE_APP || window.__ADAL_CLOUD) { window.location.href = url; return }
+  window.open(url, '_blank', 'noopener')
+}

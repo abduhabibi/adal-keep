@@ -2470,6 +2470,19 @@ async function waitForPersonCaptcha(page, ctx) {
  * after it ('dashboard' when signed in; 'otp' when nobody typed it).
  */
 async function passOtp(page, ctx) {
+  // The account's authenticator is in Adal Keep: type its code, no person needed.
+  if (await typeAuthenticatorCode(page, ctx)) {
+    let screen = 'otp'
+    const until = Date.now() + 20000
+    while (Date.now() < until && screen === 'otp') { await sleep(1500); screen = (await classifyScreen(page, ctx)).screen }
+    if (screen === 'agency-picker') { await stepClickAgencyCard(page, ctx); screen = await waitForDashboard(page, ctx, 30000) }
+    else if (screen === 'landing') { await stepClickGoToDashboard(page, ctx); screen = await waitForDashboard(page, ctx, 30000) }
+    if (screen !== 'otp') {
+      log(ctx, screen === 'dashboard' ? '✓ signed in with the authenticator code' : `after the code: ${screen}`, screen === 'dashboard' ? 'info' : 'warn')
+      return screen
+    }
+    log(ctx, 'the authenticator code was not taken — a person types it', 'warn')
+  }
   await page.bringToFront().catch(() => {})
   await ctx.notify(`🖐 ${ctx.profileName}: type the Musaned code`,
     'Type the code from the authenticator app in the Musaned tab and press Sign In. Adal Keep continues by itself.', 'info', { login: page })
@@ -2487,6 +2500,39 @@ async function passOtp(page, ctx) {
   return screen
 }
 
+/**
+ * Types the code of this run's Musaned account's authenticator (when one was
+ * given in Settings) into Musaned's code box(es) and presses Sign In / Verify.
+ * Returns false when the account has none or no code box was found.
+ */
+async function typeAuthenticatorCode(page, ctx) {
+  let code = null
+  try { code = await (await import('./musanedTotp.js')).codeFor(ctx.account_id) } catch (e) { log(ctx, `authenticator: ${e.message}`, 'warn') }
+  if (!code) return false
+  log(ctx, '🔑 typing the authenticator code (from Settings → Musaned)')
+  const typed = await page.evaluate((code) => {
+    const vis = (e) => e && e.offsetParent !== null && !e.disabled && !e.readOnly
+    const boxes = [...document.querySelectorAll('input')].filter(vis).filter(e => /otp|totp|code|one-time/i.test(`${e.name} ${e.id} ${e.autocomplete} ${e.placeholder} ${e.getAttribute('formcontrolname') || ''}`) || (e.maxLength === 1 && /text|tel|number/.test(e.type)))
+    const set = (el, v) => {
+      const proto = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')
+      el.focus(); proto.set.call(el, v)
+      el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true }))
+    }
+    const singles = boxes.filter(e => e.maxLength === 1)
+    if (singles.length >= code.length) { singles.slice(0, code.length).forEach((el, i) => set(el, code[i])); return 'boxes' }
+    if (boxes[0]) { set(boxes[0], code); return 'box' }
+    return ''
+  }, code).catch(() => '')
+  if (!typed) return false
+  await sleep(400)
+  await page.evaluate(() => {
+    const b = [...document.querySelectorAll('button, input[type="submit"]')].filter(e => e.offsetParent !== null && !e.disabled)
+      .find(e => /sign\s*in|verify|confirm|log\s*in|submit|تحقق|تسجيل|دخول|تأكيد/i.test(e.innerText || e.value || ''))
+    b?.click()
+  }).catch(() => {})
+  return true
+}
+
 async function waitForDashboard(page, ctx, timeoutMs) {
   const deadline = Date.now() + timeoutMs
   let last = 'unknown'
@@ -2499,4 +2545,4 @@ async function waitForDashboard(page, ctx, timeoutMs) {
   return last
 }
 // For tests (mock Musaned pages): the field fillers.
-export { typeAndCommitDropdown, fillDateByLabel, readFieldValues, chosenChips }
+export { typeAndCommitDropdown, fillDateByLabel, readFieldValues, chosenChips, typeAuthenticatorCode, classifyScreen }

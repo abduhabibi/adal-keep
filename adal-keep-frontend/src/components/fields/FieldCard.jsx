@@ -28,6 +28,27 @@ async function printFile(f) {
   }
 }
 
+/**
+ * Her passport from Musaned's HR Pool (the "Add from Musaned" run): needs her
+ * passport number to find her there — asked for when the profile has none.
+ */
+async function addFromMusaned(profileId, navigate) {
+  try {
+    const { data: p } = await api.get(`/profiles/${profileId}`)
+    let pp = String(p.passport_number || '').trim()
+    if (!pp) {
+      pp = String(prompt('Her passport number (to find her on Musaned):') || '').trim().toUpperCase()
+      if (!pp) return
+      await api.put(`/profiles/${profileId}`, { passport_number: pp })
+    }
+    let template_id = null
+    try { template_id = Number(localStorage.getItem('adal-musaned-cv-template')) || null } catch {}
+    const { data } = await api.post(`/profiles/${profileId}/automations/musaned_cv_import/start`, template_id ? { template_id } : {})
+    toast.success('Musaned opens — type the sign-in code when it asks', { duration: 6000 })
+    navigate(`/profiles/${profileId}?run=${data.runId}&t=${Date.now()}`)
+  } catch (e) { toast.error(e?.response?.data?.error || e.message, { duration: 8000 }) }
+}
+
 export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness = null }) {
   const navigate = useNavigate()
   const isCVField = field.name === 'CV'
@@ -360,10 +381,20 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
           isDragOver ? 'border-teal-500 bg-teal-50 dark:bg-teal-900/20' : 'border-slate-200 dark:border-slate-700 hover:border-teal-400 hover:bg-teal-50/50 dark:hover:bg-teal-900/10'
         }`}>
           <svg className={`h-8 w-8 transition-colors ${isDragOver ? 'text-teal-500' : 'text-slate-300 dark:text-slate-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
+          {field.name === 'Passport' && !uploading && !isDragOver ? (
+            // No passport yet: scan one from the files here, or copy hers from Musaned's HR Pool.
+            <div className="flex w-full flex-col gap-1.5 px-3">
+              <button type="button" onClick={pick.open}
+                className="rounded-lg bg-teal-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-teal-700">📁 Scan from my files</button>
+              <button type="button" onClick={() => addFromMusaned(profileId, navigate)}
+                className="rounded-lg border border-teal-300 px-3 py-1.5 text-xs font-semibold text-teal-700 hover:bg-teal-50 dark:border-teal-700 dark:text-teal-300 dark:hover:bg-teal-900/20">📥 Add from Musaned</button>
+            </div>
+          ) : (
           <button type="button" onClick={pick.open} disabled={uploading}
             className="cursor-pointer text-xs font-semibold text-teal-700 dark:text-teal-400 hover:text-teal-800 dark:hover:text-teal-300 disabled:opacity-60">
             {uploading ? 'Uploading...' : isDragOver ? 'Drop files here!' : ON_PHONE ? '📷 Camera · 🖼️ Gallery · 📁 Files' : 'Click to upload (or drop files here)'}
           </button>
+          )}
           <input type="file" ref={fileInputRef} className="hidden" />
           <span className="text-[10px] text-slate-400 dark:text-slate-500">Max 10MB (Image or PDF)</span>
         </div>

@@ -12,6 +12,7 @@ import ProfileAutomations from '../components/ProfileAutomations'
 import ProfileJourney from '../components/ProfileJourney'
 import WhatsAppSend from '../components/WhatsAppSend'
 import NotesTimeline from '../components/NotesTimeline'
+import VisaBarcodes from '../components/VisaBarcodes'
 import MedicalBattery from '../components/MedicalBattery'
 
 export default function ProfileDetailPage() {
@@ -129,17 +130,6 @@ export default function ProfileDetailPage() {
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <StatusBadge status={profile.status} />
-        {profile.broker_name && (
-          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-700 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-700">
-            Broker: {profile.broker_name}
-          </span>
-        )}
-        {profile.nationality && (
-          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-700 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-700">
-            {profile.nationality}
-          </span>
-        )}
         <span className="ml-auto"><MedicalBattery profile={profile} onSaved={(v) => setProfile(p => ({ ...p, ...v }))} /></span>
       </div>
 
@@ -170,6 +160,8 @@ export default function ProfileDetailPage() {
       {import.meta.env.VITE_DEMO !== '1' && <WhatsAppSend profile={profile} />}
 
       {(profile.chosen_at || profile.contract_number) && <ContractCard profile={profile} />}
+
+      <VisaBarcodes profile={profile} />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* Left: client details */}
@@ -311,6 +303,22 @@ export default function ProfileDetailPage() {
         >
           Update profile
         </Button>
+      </section>
+
+      {/* Status — the last thing on her profile. */}
+      <section className="panel flex flex-wrap items-center gap-2 p-4">
+        <span className="text-xs font-bold uppercase tracking-wide text-slate-400">Status</span>
+        <StatusBadge status={profile.status} />
+        {profile.broker_name && (
+          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-700 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-700">
+            Broker: {profile.broker_name}
+          </span>
+        )}
+        {profile.nationality && (
+          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-700 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-700">
+            {profile.nationality}
+          </span>
+        )}
       </section>
     </div>
   )

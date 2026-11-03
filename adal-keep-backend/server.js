@@ -1123,8 +1123,10 @@ initSystem().then(() => {
   })
 })
 
-// Auto-open Brave workspace
-const AUTO_START_BRAVE = process.env.AUTO_START_BRAVE !== 'false' && !isFollower()
+// The old Brave agent (its own Brave, its own profile, the same control port
+// 9222 as Adal Keep's Brave): only when asked for. It fought services/browser.js
+// for the port, so runs landed in a Brave that closed on every restart.
+const AUTO_START_BRAVE = process.env.AUTO_START_BRAVE === 'true' && !isFollower()
 if (AUTO_START_BRAVE) {
   setTimeout(async () => {
     try {

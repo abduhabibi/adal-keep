@@ -11,6 +11,7 @@ import FieldCard from '../components/fields/FieldCard'
 import ProfileAutomations from '../components/ProfileAutomations'
 import ProfileJourney from '../components/ProfileJourney'
 import WhatsAppSend from '../components/WhatsAppSend'
+import NotesTimeline from '../components/NotesTimeline'
 import MedicalBattery from '../components/MedicalBattery'
 
 export default function ProfileDetailPage() {
@@ -301,10 +302,8 @@ export default function ProfileDetailPage() {
       {/* Notes */}
       <section className="panel p-6">
         <h2 className="font-display text-lg font-bold text-slate-900 dark:text-white pb-3 border-b border-slate-100 dark:border-slate-700/50">Notes</h2>
-        <div className="mt-3 p-4 rounded-lg bg-slate-50 dark:bg-slate-900/50 border border-slate-200/80 dark:border-slate-700/60">
-          <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-700 dark:text-slate-300">
-            {profile.notes?.trim() || 'No notes yet.'}
-          </p>
+        <div className="mt-4">
+          <NotesTimeline notes={profile.notes} />
         </div>
         <Button
           className="mt-6 px-5 py-2.5 rounded-lg bg-teal-600 hover:bg-teal-700 text-white font-medium text-sm"

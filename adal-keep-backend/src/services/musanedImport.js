@@ -4,11 +4,15 @@
  * and the code). Then:
  *
  *   tawtheeq.musaned.com.sa/hr-pool → "Passport Number" filter → her passport
- *   → her row's VIEW / Details → her page: every picture and PDF Musaned loads
- *   there is caught → each one is read → the passport and the personal photo
- *   go onto her profile, every empty field is filled from the passport (and
- *   from Musaned's own page: religion, marital status …) → her CV is made with
- *   the template chosen when the run was started.
+ *   → her row's VIEW link (/hr-pool/candidates/<id>, opened in this tab; on the
+ *   page it opens a new tab) → her page asks Musaned for:
+ *     api/hrpool/<id>                 her details (birth date, religion …)
+ *     api/hrpool/<id>/photo/PASSPORT  her passport
+ *     api/hrpool/<id>/photo/PERSONAL  her personal photo
+ *   → the passport is read and must be hers → saved on her profile with the
+ *   photo (her face cut from the passport when Musaned's "personal photo" is
+ *   the passport again) → every empty field filled → her CV made with the
+ *   template chosen when the run was started.
  *
  * Nothing on Musaned is changed: it only searches, opens and reads.
  */
@@ -18,7 +22,8 @@ import path from 'path'
 import crypto from 'crypto'
 import { fileURLToPath } from 'url'
 
-const HR_POOL = 'https://tawtheeq.musaned.com.sa/hr-pool'
+const ORIGIN = 'https://tawtheeq.musaned.com.sa'
+const HR_POOL = `${ORIGIN}/hr-pool`
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 const TMP = path.join(os.tmpdir(), 'adal-musaned-import')
 const SAFE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'data', 'SafeStorage')
@@ -43,8 +48,8 @@ async function saveOnProfile(db, profileId, fieldName, file, original) {
   return true
 }
 
-/** HR Pool → Passport Number filter → her row. Returns false when she is not in the list. */
-async function openHerRow(page, passport, log) {
+/** HR Pool → Passport Number filter → her row's VIEW address, or null when she is not in the list. */
+async function findHerPage(page, passport, log) {
   await page.goto(HR_POOL, { waitUntil: 'networkidle2', timeout: 60000 }).catch(() => {})
   await page.waitForFunction(() => [...document.querySelectorAll('app-filter-search')].some(f => /Passport Number/i.test(f.textContent || '')), { timeout: 30000 })
   const filter = (await page.evaluateHandle(() => [...document.querySelectorAll('app-filter-search')].find(f => /Passport Number/i.test(f.textContent || '')))).asElement()
@@ -58,106 +63,44 @@ async function openHerRow(page, passport, log) {
   await page.waitForNetworkIdle({ idleTime: 800, timeout: 20000 }).catch(() => {})
   await sleep(1200)
   log(`🔎 HR Pool → passport ${passport}`)
-  // Her row: the smallest box with her passport and a VIEW / Details button.
-  return page.evaluate((pp) => {
-    const buttons = [...document.querySelectorAll('button, a')].filter(b => /^\s*(VIEW|DETAILS|View|Details|عرض|التفاصيل)\s*$/i.test(b.innerText || ''))
-    for (const b of buttons) {
+  // Her row: the smallest box with her passport and a VIEW link.
+  const href = await page.evaluate((pp) => {
+    const views = [...document.querySelectorAll('a, button')].filter(b => /^\s*(VIEW|DETAILS|عرض|التفاصيل)\s*$/i.test(b.innerText || ''))
+    for (const b of views) {
       let c = b
       for (let i = 0; i < 8 && c && !(c.innerText || '').toUpperCase().includes(pp); i++) c = c.parentElement
-      if (c && (c.innerText || '').toUpperCase().includes(pp)) { b.scrollIntoView({ block: 'center' }); b.click(); return true }
+      if (c && (c.innerText || '').toUpperCase().includes(pp)) return b.getAttribute('href') || b.closest('a')?.getAttribute('href') || ''
     }
-    return false
+    return null
   }, passport.toUpperCase())
+  if (href === null) return null
+  if (!href) throw new Error('Musaned: her VIEW has no address')
+  return new URL(href, ORIGIN).href
 }
 
-/** Label → value pairs on her page (Musaned shows "Label" above or beside its value). */
-function readPairs(page) {
-  return page.evaluate(() => {
-    const pairs = {}
-    const clean = (s) => String(s || '').replace(/\s+/g, ' ').trim()
-    for (const el of document.querySelectorAll('label, dt, th, .label, [class*="label"], [class*="title"], span, p, div')) {
-      if (el.children.length > 2) continue
-      const k = clean(el.innerText).replace(/[:：]$/, '')
-      if (!k || k.length > 40 || /\d{4}/.test(k)) continue
-      const next = el.nextElementSibling || el.parentElement?.nextElementSibling
-      const v = clean(next?.innerText)
-      if (v && v.length < 80 && v !== k && !pairs[k]) pairs[k] = v
-    }
-    return pairs
-  })
-}
-const pick = (pairs, ...labels) => {
-  for (const l of labels) {
-    const k = Object.keys(pairs).find(x => x.toLowerCase() === l.toLowerCase())
-    if (k && pairs[k] && pairs[k] !== '-') return pairs[k]
-  }
-  return ''
-}
-
-/**
- * Every picture / PDF Musaned sends while her page is open, plus the ones its
- * file viewer opens (a "Passport" / "Photo" link opens a viewer tab with the
- * file as a blob). Returns [{ buf, type }].
- */
-function catchFiles(page) {
-  const got = []
-  const seen = new Set()
-  const keep = (buf, type) => {
-    if (!buf || buf.length < 15000) return // icons, logos
-    const key = `${buf.length}:${buf.subarray(0, 64).toString('hex')}`
-    if (seen.has(key)) return
-    seen.add(key); got.push({ buf, type })
-  }
-  const onResponse = async (r) => {
-    const type = String(r.headers()['content-type'] || '')
-    if (!/^image\/(jpe?g|png|webp)|application\/pdf|application\/octet-stream/i.test(type)) return
-    if (/\/assets\/|logo|icon|sprite|avatar-placeholder/i.test(r.url())) return
-    try { keep(await r.buffer(), type) } catch {}
-  }
-  page.on('response', onResponse)
-  return { got, keep, stop: () => page.off('response', onResponse) }
-}
-
-/** Opens each file link on her page that looks like the passport or the photo, and keeps what its viewer shows. */
-async function openFileLinks(page, keep, log) {
-  const browser = page.browser()
-  const names = await page.evaluate(() => [...document.querySelectorAll('a, button, span')]
-    .map(x => (x.textContent || '').trim())
-    .filter(t => t && t.length < 80 && /passport|photo|picture|جواز|صورة|\.(jpe?g|png|pdf)$/i.test(t)))
-  for (const name of [...new Set(names)].slice(0, 6)) {
-    const viewer = new Promise(resolve => {
-      const on = (t) => { if (t.opener() === page.target() || /file-viewer|blob:/.test(t.url())) { browser.off('targetcreated', on); resolve(t) } }
-      browser.on('targetcreated', on)
-      setTimeout(() => { browser.off('targetcreated', on); resolve(null) }, 12000)
-    })
-    const clicked = await page.evaluate((name) => {
-      const a = [...document.querySelectorAll('a, button, span')].find(x => (x.textContent || '').trim() === name)
-      if (!a) return false
-      a.scrollIntoView({ block: 'center' }); a.click(); return true
-    }, name)
-    if (!clicked) continue
-    const t = await viewer
-    if (!t) { await sleep(1500); continue } // shown on the page itself: the response catcher has it
-    const v = await t.page().catch(() => null)
-    try {
-      if (!v) continue
-      await v.waitForFunction(() => /^blob:|^data:|^https?:/.test(document.querySelector('iframe, embed, img')?.src || ''), { timeout: 30000, polling: 300 }).catch(() => {})
-      const b64 = await v.evaluate(async () => {
-        const el = document.querySelector('iframe, embed, img')
-        if (!el?.src) return null
-        const r = await fetch(el.src)
-        const buf = new Uint8Array(await r.arrayBuffer())
-        let s = ''
-        for (let i = 0; i < buf.length; i += 0x8000) s += String.fromCharCode(...buf.subarray(i, i + 0x8000))
-        return [btoa(s), r.headers.get('content-type') || '']
-      }).catch(() => null)
-      if (b64) { keep(Buffer.from(b64[0], 'base64'), b64[1]); log(`📎 ${name}`) }
-    } finally { await v?.close().catch(() => {}) }
+/** Musaned's details → Adal Keep's fields (only clear values). */
+function fieldsFromMusaned(d = {}) {
+  const day = (v) => /^\d{4}-\d{2}-\d{2}/.test(String(v || '')) ? String(v).slice(0, 10) : ''
+  const religion = String(d.religion || '')
+  const marital = String(d.maritalStatus || '')
+  const kin = String(d.relativeContactKinship || '')
+  const edu = (d.qualifications || []).map(q => q?.nameEn || q?.value || q?.name || '').filter(Boolean)[0] || ''
+  return {
+    full_name: String(d.name || '').trim(),
+    date_of_birth: day(d.dateOfBirthGregorian),
+    gender: /^f/i.test(d.gender || '') ? 'F' : /^m/i.test(d.gender || '') ? 'M' : '',
+    marital_status: /single/i.test(marital) ? 'SINGLE' : /married/i.test(marital) ? 'MARRIED' : /divorc/i.test(marital) ? 'DIVORCED' : /widow/i.test(marital) ? 'WIDOWED' : '',
+    religion: /^non/i.test(religion) ? 'Non Muslim' : /muslim|islam/i.test(religion) ? 'Muslim' : /christ|orthodox/i.test(religion) ? 'Orthodox' : '',
+    phone_number: String(d.mobileNumber || '').trim(),
+    passport_issue_date: day(d.passportIssueDateGregorian),
+    passport_expiry_date: day(d.passportExpireDateGregorian),
+    children_count: Number.isFinite(Number(d.amountOfChildren)) ? String(Number(d.amountOfChildren)) : '',
+    education_level: String(edu).trim(),
+    emergency_name: String(d.relativeContactName || '').trim(),
+    emergency_phone: String(d.relativeContactPhone || '').trim(),
+    emergency_relationship: kin.trim(),
   }
 }
-
-const extOf = (buf, type) => buf.subarray(0, 4).toString() === '%PDF' ? '.pdf'
-  : buf[0] === 0x89 ? '.png' : /webp/.test(type) ? '.webp' : '.jpg'
 
 /** The run's work after the Musaned sign-in. Returns the worker's result. */
 export async function importFromHrPoolInRun(page, ctx) {
@@ -168,73 +111,117 @@ export async function importFromHrPoolInRun(page, ctx) {
   if (!passport) return { ok: false, error: 'Profile is missing the passport number' }
   page.__adalAllowImages = true // her pictures are what this run is for
 
-  const files = catchFiles(page)
-  let pairs = {}
+  const url = await findHerPage(page, passport, log)
+  if (!url) {
+    const msg = `Passport ${passport} is not in our Musaned HR Pool list`
+    log(msg, 'error')
+    await ctx.notify?.(`❌ ${ctx.profileName}: not found on Musaned`, msg)
+    return { ok: false, error: msg }
+  }
+
+  // Her page, in this tab: catch what it asks Musaned for.
+  const got = { passport: null, personal: null, details: null }
+  const id = url.split('/').pop()
+  const onResponse = async (r) => {
+    const u = r.url().replace(/[?#].*/, '')
+    if (!u.includes(`/hrpool/${id}`)) return
+    try {
+      if (/\/photo\/PASSPORT$/i.test(u)) got.passport = { buf: await r.buffer(), type: r.headers()['content-type'] || '' }
+      else if (/\/photo\/PERSONAL$/i.test(u)) got.personal = { buf: await r.buffer(), type: r.headers()['content-type'] || '' }
+      else if (u.endsWith(`/hrpool/${id}`)) got.details = await r.json()
+    } catch {}
+  }
+  page.on('response', onResponse)
   try {
-    if (!(await openHerRow(page, passport, log))) {
-      const msg = `Passport ${passport} is not in our Musaned HR Pool list`
-      log(msg, 'error')
-      await ctx.notify?.(`❌ ${ctx.profileName}: not found on Musaned`, msg)
-      return { ok: false, error: msg }
+    await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 }).catch(() => {})
+    for (let i = 0; i < 30 && !(got.details && got.passport && got.personal); i++) await sleep(500)
+    // Not caught (Musaned changed its addresses): the page's own pictures.
+    if (!got.passport && !got.personal) {
+      const blobs = await page.evaluate(async () => Promise.all([...document.querySelectorAll('img[src^="blob:"]')].map(async i => {
+        const buf = new Uint8Array(await (await fetch(i.src)).arrayBuffer()); let s = ''
+        for (let k = 0; k < buf.length; k += 0x8000) s += String.fromCharCode(...buf.subarray(k, k + 0x8000))
+        return btoa(s)
+      }))).catch(() => [])
+      const bufs = blobs.map(b => Buffer.from(b, 'base64'))
+      if (bufs[0]) got.personal = { buf: bufs[0], type: 'image/jpeg' }
+      if (bufs[1]) got.passport = { buf: bufs[1], type: 'image/jpeg' }
     }
-    log('📄 her page on Musaned')
-    await page.waitForNetworkIdle({ idleTime: 1200, timeout: 30000 }).catch(() => {})
-    await sleep(2500)
-    // Lazy pictures: scroll the page through once.
-    await page.evaluate(async () => { for (let y = 0; y < document.body.scrollHeight; y += 500) { window.scrollTo(0, y); await new Promise(r => setTimeout(r, 150)) } window.scrollTo(0, 0) }).catch(() => {})
-    await page.waitForNetworkIdle({ idleTime: 800, timeout: 15000 }).catch(() => {})
-    pairs = await readPairs(page).catch(() => ({}))
-    if (files.got.length < 2) await openFileLinks(page, files.keep, log).catch(e => log(`file links: ${e.message}`, 'warn'))
-  } finally { files.stop() }
-  log(`${files.got.length} file(s) from her Musaned page — reading them`)
-  if (!files.got.length) {
-    const msg = 'Her Musaned page showed no passport or photo to copy'
+  } finally { page.off('response', onResponse) }
+
+  const shown = got.details?.passportNumber || ''
+  if (shown && String(shown).toUpperCase() !== passport) {
+    const msg = `Musaned opened passport ${shown}, not ${passport} — nothing copied`
+    log(msg, 'error')
+    return { ok: false, error: msg }
+  }
+  log(`📄 her Musaned page: ${[got.details && 'details', got.passport && 'passport', got.personal && 'personal photo'].filter(Boolean).join(', ') || 'nothing'}`)
+  if (!got.passport && !got.personal && !got.details) {
+    const msg = 'Her Musaned page showed no passport, photo or details to copy'
     await ctx.notify?.(`⚠️ ${ctx.profileName}: nothing to copy`, msg)
     return { ok: false, error: msg }
   }
-  return applyMusanedFiles(ctx, files.got, pairs)
+  return applyMusanedFiles(ctx, got)
 }
 
+const extOf = (buf, type) => buf.subarray(0, 4).toString() === '%PDF' ? '.pdf'
+  : buf[0] === 0x89 ? '.png' : /webp/.test(type || '') ? '.webp' : '.jpg'
+
 /**
- * What was copied from her Musaned page → her profile: the passport and the
- * photo saved, every empty field filled, her CV made.
- * files: [{ buf, type }], pairs: { label: value } from her page.
+ * What came from her Musaned page → her profile.
+ * got: { passport: {buf,type}, personal: {buf,type}, details: {...} } (any may be missing).
  */
-export async function applyMusanedFiles(ctx, got, pairs = {}) {
+export async function applyMusanedFiles(ctx, got) {
   const db = ctx.db
   const log = (m, level = 'info') => ctx.onLog?.(level, m)
   const p = await db('profiles').where('id', ctx.profileId).first()
   const passport = String(p?.passport_number || '').trim().toUpperCase()
-  const files = { got }
-
-  // Which file is the passport, which the photo.
   fs.mkdirSync(TMP, { recursive: true })
+  const tmp = (name) => path.join(TMP, `${ctx.runId}-${name}`)
   const { analyzeWithMineru } = await import('./mineruClassifier.js')
-  let passportRead = null, passportFile = null, photoFile = null
-  for (const [i, f] of files.got.entries()) {
-    const file = path.join(TMP, `${ctx.runId}-${i}${extOf(f.buf, f.type)}`)
-    fs.writeFileSync(file, f.buf)
-    let r = null
-    try { r = await analyzeWithMineru(file, { db }) } catch (e) { log(`file ${i + 1} not read: ${e.message}`, 'warn') }
-    const pp = String(r?.fields?.passport_number || '').toUpperCase()
-    if (!passportFile && (r?.doc_type === 'Passport' || pp === passport)) {
-      if (pp && pp !== passport) { log(`file ${i + 1} is the passport of ${pp}, not hers — skipped`, 'warn'); continue }
-      passportFile = file; passportRead = r
-    } else if (!photoFile && (r?.doc_type === 'Photo' || !r)) photoFile = file
+
+  // 1. The passport: read, and it must be hers.
+  let passportFile = null, passportRead = null
+  if (got.passport?.buf?.length) {
+    passportFile = tmp(`passport${extOf(got.passport.buf, got.passport.type)}`)
+    fs.writeFileSync(passportFile, got.passport.buf)
+    try { passportRead = await analyzeWithMineru(passportFile, { db }) } catch (e) { log(`passport not read: ${e.message}`, 'warn') }
+    const pp = String(passportRead?.fields?.passport_number || '').toUpperCase()
+    if (pp && pp !== passport) {
+      log(`Musaned's passport picture is passport ${pp}, not ${passport} — not used`, 'error')
+      passportFile = null; passportRead = null
+    }
   }
-  // A face picture and no "Photo" answer: the smallest image that is not the passport.
-  if (!photoFile) {
-    const imgs = files.got.map((f, i) => ({ i, f })).filter(x => x.f.buf.subarray(0, 4).toString() !== '%PDF')
-      .map(x => path.join(TMP, `${ctx.runId}-${x.i}${extOf(x.f.buf, x.f.type)}`)).filter(f => f !== passportFile)
-    photoFile = imgs.sort((a, b) => fs.statSync(a).size - fs.statSync(b).size)[0] || null
+
+  // 2. The photo: Musaned's personal photo — unless it is the passport again
+  //    (or a passport at all); then her face cut from the passport.
+  let photoFile = null
+  if (got.personal?.buf?.length) {
+    const same = got.passport?.buf && Buffer.compare(got.personal.buf, got.passport.buf) === 0
+    if (!same) {
+      const f = tmp(`personal${extOf(got.personal.buf, got.personal.type)}`)
+      fs.writeFileSync(f, got.personal.buf)
+      let r = null
+      try { r = await analyzeWithMineru(f, { db }) } catch {}
+      if (r?.doc_type === 'Passport' || r?.fields?.passport_number) log('Musaned\'s "personal photo" is a passport — her face is cut from the passport instead', 'warn')
+      else photoFile = f
+    } else log('Musaned\'s "personal photo" is her passport again — her face is cut from the passport')
+  }
+  let faceCut = false
+  if (!photoFile && passportFile) {
+    try {
+      const { faceFromPassport } = await import('./passportFace.js')
+      photoFile = await faceFromPassport(passportFile, tmp('face_photo.jpg'))
+      faceCut = !!photoFile
+    } catch (e) { log(`face not cut: ${e.message}`, 'warn') }
   }
 
   const saved = []
   if (passportFile && await saveOnProfile(db, p.id, 'Passport', passportFile, `Passport_${passport}${path.extname(passportFile)}`)) saved.push('passport')
-  if (photoFile && await saveOnProfile(db, p.id, 'Photo', photoFile, `Photo_${passport}${path.extname(photoFile)}`)) saved.push('photo')
-  log(saved.length ? `✓ saved on her profile: ${saved.join(' and ')}` : 'no passport or photo recognised', saved.length ? 'info' : 'warn')
+  // "…_photo.jpg" = a face cut from the passport (Musaned's own run still asks for a real photo).
+  if (photoFile && await saveOnProfile(db, p.id, 'Photo', photoFile, faceCut ? `Passport_${passport}_photo.jpg` : `Photo_${passport}${path.extname(photoFile)}`)) saved.push(faceCut ? 'photo (face from the passport)' : 'photo')
+  if (saved.length) log(`✓ saved on her profile: ${saved.join(' and ')}`)
 
-  // Every empty field: from the passport, then from Musaned's own page.
+  // 3. Every empty field: Musaned's details first, then the passport's reading.
   const f = passportRead?.fields || {}
   const fromPassport = {
     full_name: f.full_name || [f.given_names, f.surname].filter(Boolean).join(' '),
@@ -242,18 +229,14 @@ export async function applyMusanedFiles(ctx, got, pairs = {}) {
     passport_issue_date: f.date_of_issue || f.passport_issue_date,
     passport_expiry_date: f.date_of_expiry || f.passport_expiry_date, nationality: f.nationality,
   }
-  // Musaned's words → Adal Keep's (only clear ones; anything else stays empty).
-  const religion = pick(pairs, 'Religion', 'الديانة')
-  const marital = pick(pairs, 'Marital Status', 'الحالة الاجتماعية')
-  const fromMusaned = {
-    religion: /islam|muslim|مسلم/i.test(religion) ? 'Muslim' : /christ|orthodox|مسيح/i.test(religion) ? 'Orthodox' : '',
-    marital_status: /single|أعزب|عزباء/i.test(marital) ? 'SINGLE' : /married|متزوج/i.test(marital) ? 'MARRIED'
-      : /divorc|مطلق/i.test(marital) ? 'DIVORCED' : /widow|أرمل/i.test(marital) ? 'WIDOWED' : '',
-  }
+  const fromMusaned = fieldsFromMusaned(got.details || {})
   const now = await db('profiles').where('id', p.id).first()
+  const cols = new Set(Object.keys(now))
   const upd = {}
-  for (const [k, v] of Object.entries({ ...fromMusaned, ...fromPassport })) {
-    if (v && !String(now[k] || '').trim()) upd[k] = String(v).trim()
+  for (const src of [fromMusaned, fromPassport]) {
+    for (const [k, v] of Object.entries(src)) {
+      if (cols.has(k) && v && !upd[k] && !String(now[k] ?? '').trim()) upd[k] = String(v).trim()
+    }
   }
   if (Object.keys(upd).length) {
     await db('profiles').where('id', p.id).update({ ...upd, updated_at: new Date().toISOString() })
@@ -261,15 +244,13 @@ export async function applyMusanedFiles(ctx, got, pairs = {}) {
   }
   if (saved.includes('passport')) {
     try { const { runPassportVerification } = await import('./verification.js'); await runPassportVerification(p.id, { handle: db }) } catch {}
-  }
-  if (passportFile) {
     try { const { fillPassportDetails } = await import('./passportDetails.js'); await fillPassportDetails(db, p.id, passportFile, (m) => log(m)) } catch {}
   }
 
-  // Her CV with the chosen template.
+  // 4. Her CV with the chosen template.
   let cvNote = ''
   const templateId = Number(ctx.cv_template_id) || (await db('cv_templates').where('is_active', 1).orderBy('id').first('id'))?.id
-  if (templateId && (passportFile || photoFile)) {
+  if (templateId) {
     try {
       const t = await db('cv_templates').where('id', templateId).first()
       const { generateCvFile } = await import('../routes/cv.js')
@@ -280,7 +261,7 @@ export async function applyMusanedFiles(ctx, got, pairs = {}) {
   }
   for (const n of fs.readdirSync(TMP)) if (n.startsWith(`${ctx.runId}-`)) fs.rmSync(path.join(TMP, n), { force: true })
 
-  const note = `From Musaned: ${saved.join(' + ') || 'nothing saved'}${Object.keys(upd).length ? ` · ${Object.keys(upd).length} field(s) filled` : ''}${cvNote}`
+  const note = `From Musaned: ${saved.join(' + ') || 'no new file'}${Object.keys(upd).length ? ` · ${Object.keys(upd).length} field(s) filled` : ''}${cvNote}`
   await ctx.notify?.(`📥 ${ctx.profileName}: added from Musaned`, note)
   return { ok: true, done: true, note }
 }

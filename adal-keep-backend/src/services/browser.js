@@ -150,8 +150,10 @@ export async function getBrowser() {
   }
 
   fs.mkdirSync(PROFILE_DIR, { recursive: true })
-  const ui = `http://localhost:${process.env.PORT || 4000}`
-  const child = spawn(exec, [...BROWSER_ARGS, ui], { detached: true, stdio: 'ignore', windowsHide: true })
+  // No page of its own: with Brave already open on this profile (without the
+  // control port) a start only adds a tab to that window — it used to be an
+  // Adal Keep tab every time a run or watcher looked for the browser.
+  const child = spawn(exec, BROWSER_ARGS, { detached: true, stdio: 'ignore', windowsHide: true })
   child.unref()
   console.log('[browser] started', exec, 'profile', PROFILE_DIR)
 
@@ -161,11 +163,13 @@ export async function getBrowser() {
     await new Promise(r => setTimeout(r, 500))
     try {
       _browser = await connectTo(puppeteer, cdpUrl)
+      // Just started: Brave restores its last tabs and replaces its first
+      // blank one — a run's tab opened in that moment is closed under it.
+      await new Promise(r => setTimeout(r, 3000))
       return _browser
     } catch (e) { lastErr = e }
   }
-  throw new Error(`The browser did not open its control port (${lastErr?.message || 'timeout'}). ` +
-    'If Brave was already open with the Adal Keep profile, close it and try again.')
+  throw new Error('Brave is open without Adal Keep\'s control (it was opened by hand). Close every Brave window, then press the button again — Adal Keep opens Brave itself.')
 }
 
 /**

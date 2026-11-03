@@ -73,7 +73,7 @@ async function release(c, own) {
  * a QR code, or (with `phone`) a code to type in WhatsApp → Linked devices →
  * Link with phone number instead. Safe to call again.
  */
-export async function connect(db, key = 'owner', { phone = '' } = {}, tries = 2) {
+export async function connect(db, key = 'owner', { phone = '' } = {}, tries = 2, { quiet = false } = {}) {
   if (db) dbRef = db
   const s = session(key)
   if (s.client && !['off', 'failed'].includes(s.state.status) && !phone) return s.state
@@ -84,7 +84,14 @@ export async function connect(db, key = 'owner', { phone = '' } = {}, tries = 2)
   const brave = inBrave(key)
   if (brave) {
     let browser
-    try { browser = await getBrowser() } catch (e) { setState(key, { status: 'failed', error: e.message }); return s.state }
+    // Reconnecting by itself never starts Brave: it waits until Brave is open.
+    if (quiet) {
+      const { openBrowserIfAny } = await import('./browser.js')
+      browser = await openBrowserIfAny()
+      if (!browser) { setState(key, { status: 'off', error: 'Waiting for Brave to be open' }); return s.state }
+    } else {
+      try { browser = await getBrowser() } catch (e) { setState(key, { status: 'failed', error: e.message }); return s.state }
+    }
     // One WhatsApp tab only: a second one makes WhatsApp ask "Use here?".
     for (const pg of await browser.pages().catch(() => [])) {
       if (/^https:\/\/web\.whatsapp\.com/.test(pg.url())) await pg.close().catch(() => {})
@@ -174,7 +181,13 @@ export function startWhatsApp(db) {
   const n = readNote()
   // Before accounts.json: the one account in Adal Keep's Brave.
   if (!n.on?.length && fs.existsSync(path.join(BACKEND, 'data', 'whatsapp-on'))) { n.brave ||= 'owner'; n.on = ['owner']; writeNote(n) }
-  ;(n.on || []).forEach((key, i) => setTimeout(() => connect(db, key).catch(e => console.warn('[whatsapp]', e.message)), 45_000 + i * 20_000))
+  // Again every 2 minutes while not connected (quietly: never opens Brave itself).
+  const again = () => (readNote().on || []).forEach((key, i) => setTimeout(() => {
+    const st = stateOf(key).status
+    if (st === 'off' || st === 'failed') connect(db, key, {}, 2, { quiet: true }).catch(e => console.warn('[whatsapp]', e.message))
+  }, i * 20_000))
+  setTimeout(again, 45_000)
+  setInterval(again, 2 * 60_000).unref?.()
   setInterval(() => closeChosenSends().catch(() => {}), 30 * 60_000).unref?.()
 }
 

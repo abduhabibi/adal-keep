@@ -305,7 +305,7 @@ export default function ProfileAutomations({ profileId }) {
                 }
                 start(w.id)
               }}
-              className={`min-w-[15rem] sm:min-w-0 text-left p-3 rounded-xl border transition-colors ${
+              className={`min-w-[15rem] sm:min-w-0 text-left px-3 py-2 rounded-xl border transition-colors ${
                 isDone
                   ? 'border-emerald-400 bg-emerald-50 dark:bg-emerald-900/20'
                   : isPaused
@@ -319,21 +319,21 @@ export default function ProfileAutomations({ profileId }) {
             >
               <div className="flex items-center gap-2">
                 {n ? <span className="w-5 h-5 shrink-0 rounded-full bg-indigo-600 text-white text-[11px] font-bold flex items-center justify-center">{n}</span> : null}
-                <span className="text-lg">{isDone ? '✔️' : '🤖'}</span>
-                <span className={`font-semibold text-sm leading-tight ${
+                <span className="text-base leading-none">{isDone ? '✔️' : '🤖'}</span>
+                <span title={w.name} className={`min-w-0 truncate font-semibold text-sm leading-tight ${
                   isDone ? 'text-emerald-800 dark:text-emerald-300' : 'text-slate-900 dark:text-white'
                 }`}>{w.name}</span>
               </div>
 
               {isDone ? (
-                <p className="text-[11px] text-emerald-700 dark:text-emerald-400 mt-1 font-medium">
+                <p className="text-[11px] text-emerald-700 dark:text-emerald-400 mt-0.5 font-medium">
                   ✓ {REPEATABLE.has(w.id) ? 'Checked' : 'Completed'} {latest.finished_at ? '· ' + new Date(latest.finished_at).toLocaleDateString() : ''}
                 </p>
               ) : (
-                <p className="text-[11px] text-slate-500 mt-1 line-clamp-2">{w.description}</p>
+                <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-1" title={w.description}>{w.description}</p>
               )}
 
-              <div className="flex items-center justify-between mt-2">
+              <div className="flex items-center justify-between mt-1">
                 <span className="text-[10px] text-slate-400">
                   {latest && isActive ? `Run #${latest.id}` : `${w.stepCount} steps`}
                 </span>
@@ -492,13 +492,13 @@ export default function ProfileAutomations({ profileId }) {
       {GROUPS.map(g => {
         const flows = g.ids.map(id => workflows.find(w => w.id === id)).filter(Boolean)
         return (
-          <div key={g.title} className={`mb-3 rounded-xl border-2 p-3 ${g.box}`}>
-            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <div key={g.title} className={`mb-2.5 rounded-xl border-2 px-3 py-2 ${g.box}`}>
+            <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
               <p className={`text-[11px] font-semibold uppercase tracking-wide ${g.head}`}>{g.title}</p>
               {g.title === 'Musaned' && <MusanedCode accountId={musanedAccountId} />}
             </div>
             {loginOf(g.title) && (
-              <div className="acct-compact mb-2 flex flex-wrap items-center gap-2 rounded-lg bg-white/60 px-2 py-1.5 dark:bg-slate-900/40">
+              <div className="acct-compact mb-1.5 flex flex-wrap items-center gap-2 rounded-lg bg-white/60 px-2 py-1 dark:bg-slate-900/40">
                 <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">🔑 Login</span>
                 <div className="min-w-0 flex-1">{loginOf(g.title)}</div>
                 <AccountPassword {...passOf(g.title)} />

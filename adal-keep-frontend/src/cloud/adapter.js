@@ -489,6 +489,13 @@ async function signedUrl(fileId) {
   return p
 }
 
+/** A document of Adal Keep as a Blob (from this phone's copy, else downloaded). */
+export async function fileBlob(fileId) {
+  const u = await signedUrl(String(fileId))
+  if (!u) return null
+  return (await fetch(u)).blob()
+}
+
 function fixNode(el) {
   for (const attr of ['src', 'href']) {
     const v = el.getAttribute?.(attr)

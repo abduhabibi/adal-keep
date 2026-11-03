@@ -107,7 +107,32 @@ public class AdalDiscoveryPlugin extends Plugin {
     public void openBrowser(PluginCall call) {
         try {
             Intent i = new Intent(getContext(), AdalBrowserActivity.class);
-            i.putExtra("options", call.getData().toString());
+            // Her documents (already downloaded from Adal Keep and opened on
+            // this phone) are written to the app's own folder: the portal's
+            // "choose a file" then offers them by name. Only their places go
+            // to the browser (the pictures themselves are too big for it).
+            JSObject data = call.getData();
+            org.json.JSONArray docs = data.optJSONArray("docs");
+            if (docs != null) {
+                File dir = new File(getContext().getCacheDir(), "adal-docs");
+                if (dir.exists()) { File[] old = dir.listFiles(); if (old != null) for (File f : old) f.delete(); }
+                dir.mkdirs();
+                org.json.JSONArray places = new org.json.JSONArray();
+                for (int k = 0; k < docs.length(); k++) {
+                    org.json.JSONObject d = docs.optJSONObject(k);
+                    if (d == null) continue;
+                    String name = d.optString("name", "file").replaceAll("[^\\w.\\-]+", "_");
+                    File f = new File(dir, k + "_" + name);
+                    try (FileOutputStream out = new FileOutputStream(f)) { out.write(android.util.Base64.decode(d.optString("data", ""), android.util.Base64.DEFAULT)); }
+                    org.json.JSONObject pl = new org.json.JSONObject();
+                    pl.put("label", d.optString("label", name));
+                    pl.put("path", f.getAbsolutePath());
+                    pl.put("mime", d.optString("mime", ""));
+                    places.put(pl);
+                }
+                data.put("docs", places);
+            }
+            i.putExtra("options", data.toString());
             getActivity().startActivity(i);
             call.resolve();
         } catch (Exception e) {

@@ -59,6 +59,8 @@ public class AdalBrowserActivity extends Activity {
         "facebook.net", "connect.facebook.com", "hotjar.com", "clarity.ms", "mixpanel.com", "segment.io", "segment.com", "newrelic.com",
         "nr-data.net", "adservice.google.com", "scorecardresearch.com", "tiktok.com", "snap.licdn.com", "yandex.ru", "matomo", "fullstory.com" };
     private ValueCallback<Uri[]> fileCb;
+    // Her documents from Adal Keep, offered when the page asks for a file: [label, path, mime].
+    private final java.util.List<String[]> docs = new java.util.ArrayList<>();
 
     @Override
     protected void onCreate(Bundle saved) {
@@ -66,6 +68,11 @@ public class AdalBrowserActivity extends Activity {
         getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
         JSONObject o;
         try { o = new JSONObject(getIntent().getStringExtra("options")); } catch (Exception e) { o = new JSONObject(); }
+        JSONArray dl = o.optJSONArray("docs");
+        if (dl != null) for (int k = 0; k < dl.length(); k++) {
+            JSONObject d = dl.optJSONObject(k);
+            if (d != null && new java.io.File(d.optString("path")).exists()) docs.add(new String[] { d.optString("label"), d.optString("path"), d.optString("mime") });
+        }
         host = o.optString("host", "");
         user = o.optString("user", "");
         pass = o.optString("pass", "");
@@ -156,7 +163,24 @@ public class AdalBrowserActivity extends Activity {
             @Override public boolean onShowFileChooser(WebView v, ValueCallback<Uri[]> cb, FileChooserParams params) {
                 if (fileCb != null) fileCb.onReceiveValue(null);
                 fileCb = cb;
-                try { startActivityForResult(params.createIntent(), 41); } catch (Exception e) { fileCb = null; return false; }
+                // Her documents first (the ones this page takes), then the phone's own files.
+                final java.util.List<String[]> fit = new java.util.ArrayList<>();
+                String[] accept = params.getAcceptTypes();
+                for (String[] d : docs) if (accepts(accept, d[2], d[1])) fit.add(d);
+                if (fit.isEmpty()) { openPhoneFiles(params); return true; }
+                String[] items = new String[fit.size() + 1];
+                for (int k = 0; k < fit.size(); k++) items[k] = "📄 " + fit.get(k)[0];
+                items[fit.size()] = "📁 From this phone…";
+                new android.app.AlertDialog.Builder(AdalBrowserActivity.this)
+                    .setTitle("Her documents (Adal Keep)")
+                    .setItems(items, (dlg, which) -> {
+                        if (which < fit.size()) {
+                            if (fileCb != null) fileCb.onReceiveValue(new Uri[] { Uri.fromFile(new java.io.File(fit.get(which)[1])) });
+                            fileCb = null;
+                        } else openPhoneFiles(params);
+                    })
+                    .setOnCancelListener(dlg -> { if (fileCb != null) fileCb.onReceiveValue(null); fileCb = null; })
+                    .show();
                 return true;
             }
         });
@@ -285,6 +309,26 @@ public class AdalBrowserActivity extends Activity {
             + "var d=Object.getOwnPropertyDescriptor(proto,'value');d.set.call(e,v);"
             + "e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new Event('change',{bubbles:true}));return 'ok'})(" + JSONObject.quote(value) + ")";
         web.evaluateJavascript(js, r -> { if (!"\"ok\"".equals(r)) Toast.makeText(this, "Tap a box on the page first", Toast.LENGTH_SHORT).show(); });
+    }
+
+    private void openPhoneFiles(WebChromeClient.FileChooserParams params) {
+        try { startActivityForResult(params.createIntent(), 41); }
+        catch (Exception e) { if (fileCb != null) fileCb.onReceiveValue(null); fileCb = null; }
+    }
+
+    /** Does the page's "accept" (image/*, .pdf, application/pdf …) take this document? */
+    private static boolean accepts(String[] accept, String mime, String path) {
+        if (accept == null || accept.length == 0) return true;
+        boolean any = false;
+        String ext = path.contains(".") ? path.substring(path.lastIndexOf('.')).toLowerCase() : "";
+        for (String a0 : accept) for (String a : a0.split(",")) {
+            a = a.trim().toLowerCase();
+            if (a.isEmpty()) continue;
+            any = true;
+            if (a.equals("*/*") || a.equals(mime) || a.equals(ext)) return true;
+            if (a.endsWith("/*") && mime != null && mime.startsWith(a.substring(0, a.length() - 1))) return true;
+        }
+        return !any;
     }
 
     @Override protected void onActivityResult(int req, int res, Intent data) {

@@ -32,6 +32,37 @@ const DETAILS = [
   ['Region', 'region'], ['Zone / Sub-city', 'zone_subcity'], ['Education', 'education_level'],
 ]
 
+/**
+ * Her documents for the portal's "choose a file" (Passport, Photo, Full Body
+ * Photo, CV, Contract, Medical Report …): the newest file of each, fetched from
+ * Adal Keep's online copy (Telegram) and handed to the phone's browser. The
+ * phone keeps them, so the next time is instant. At most ~25 MB in all.
+ */
+const DOC_ORDER = ['Passport', 'Photo', 'Full Body Photo', 'CV', 'Contract', 'Medical Report', 'Labour ID', 'Slip', 'Appointment Slip', 'Insurance', 'Police Clearance', 'COC', 'Visa']
+async function herDocuments(profileId) {
+  const out = []
+  try {
+    const fields = ((await api.get(`/profiles/${profileId}/fields`)).data || []).filter(f => f.files?.length)
+    fields.sort((a, b) => (DOC_ORDER.indexOf(a.name) + 1 || 99) - (DOC_ORDER.indexOf(b.name) + 1 || 99))
+    const { fileBlob } = await import('../cloud/adapter.js')
+    let total = 0
+    for (const f of fields) {
+      // Per field: the newest picture and the newest PDF (a portal may take only one kind).
+      const newest = [...f.files].sort((a, b) => b.id - a.id)
+      const pick = [newest.find(x => /^image\//.test(x.mimetype || '')), newest.find(x => /pdf/.test(x.mimetype || ''))].filter(Boolean)
+      for (const file of pick) {
+        const blob = await fileBlob(file.id).catch(() => null)
+        if (!blob || total + blob.size > 25 * 1024 * 1024) continue
+        total += blob.size
+        const data = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1] || ''); r.onerror = rej; r.readAsDataURL(blob) })
+        const ext = /pdf/.test(file.mimetype) ? 'pdf' : /png/.test(file.mimetype) ? 'png' : 'jpg'
+        out.push({ label: `${f.name} (${ext.toUpperCase()})`, name: `${f.name.replace(/\W+/g, '_')}.${ext}`, mime: file.mimetype || blob.type, data })
+      }
+    }
+  } catch {}
+  return out
+}
+
 /** Open a task's portal on this phone. accountId: the sign-in picked on the profile (else the default one). */
 export async function openOnPhone({ workflowId, profileId, accountId, title }) {
   const portal = portalOf(workflowId)
@@ -66,6 +97,7 @@ export async function openOnPhone({ workflowId, profileId, accountId, title }) {
   }
   const plugin = window.Capacitor?.Plugins?.AdalDiscovery
   if (!plugin?.openBrowser) { window.open(url, '_blank', 'noopener'); return { opened: 'tab' } }
-  await plugin.openBrowser({ url, host: site, user, pass, fields, profile, plans, title: title || '', desktop: false })
+  const docs = profileId ? await herDocuments(profileId) : []
+  await plugin.openBrowser({ url, host: site, user, pass, fields, profile, plans, docs, title: title || '', desktop: false })
   return { opened: 'phone', signIn: !!pass }
 }

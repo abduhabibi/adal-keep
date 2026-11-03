@@ -60,6 +60,25 @@ export function mainURL() {
 }
 export const isFollower = () => !!mainURL()
 
+/**
+ * This PC's key for the main PC (services/networkGate.js): asked for once,
+ * kept here; someone at the main PC says "Yes" to it. A new main PC → a new key.
+ */
+export async function mainKey() {
+  const f = readFile(), main = mainURL()
+  if (!main) return ''
+  if (f.pc_key && f.pc_key_for === main) return f.pc_key
+  const os = await import('os')
+  const r = await fetch(`${main}/api/pc-access/request`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name: `${os.hostname()} (Adal Keep on that PC)` }), signal: AbortSignal.timeout(8000),
+  })
+  const j = await r.json().catch(() => ({}))
+  if (!j.key) throw new Error(j.error || `The main PC did not answer (${r.status})`)
+  writeFile({ ...readFile(), pc_key: j.key, pc_key_for: main })
+  return j.key
+}
+
 /** Tidy what a person typed: "100.1.2.3" → "http://100.1.2.3:4000". */
 export function normalizeURL(input) {
   let u = String(input || '').trim().replace(/\/+$/, '')

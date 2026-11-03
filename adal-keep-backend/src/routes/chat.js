@@ -6,7 +6,7 @@ import express from 'express'
 import multer from 'multer'
 import * as chat from '../services/chatCloud.js'
 import { unlockApproved, statusPayload } from '../services/subscription.js'
-import { mainURL } from '../services/mainPC.js'
+import { mainURL, mainKey } from '../services/mainPC.js'
 
 const router = express.Router()
 
@@ -22,12 +22,15 @@ router.use('/chat', async (req, res, next) => {
   try {
     const headers = {}
     for (const h of ['content-type', 'x-adal-who', 'accept']) if (req.headers[h]) headers[h] = req.headers[h]
+    headers['x-adal-pc'] = await mainKey()   // the main PC lets in only computers it said "Yes" to
     let body
     if (!['GET', 'HEAD'].includes(req.method)) {
       if (/json/i.test(req.headers['content-type'] || '')) body = JSON.stringify(req.body ?? {})
       else { const c = []; for await (const x of req) c.push(x); body = Buffer.concat(c) }
     }
     const r = await fetch(`${main}/api${req.originalUrl.replace(/^\/api/, '')}`, { method: req.method, headers, body, signal: AbortSignal.timeout(60000) })
+    // Not approved yet: say so here (this PC's own page is not the one to ask).
+    if (r.status === 401) return res.status(503).json({ error: 'The main PC has not let this PC in yet — at the main PC, say "Yes" to this computer (it asks once).' })
     res.status(r.status)
     for (const h of ['content-type', 'content-disposition', 'cache-control']) { const v = r.headers.get(h); if (v) res.setHeader(h, v) }
     res.end(Buffer.from(await r.arrayBuffer()))

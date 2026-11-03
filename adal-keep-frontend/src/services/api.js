@@ -44,6 +44,10 @@ api.interceptors.response.use(
     if (error.response?.status === 402 && error.response?.data?.error === 'locked') {
       window.dispatchEvent(new Event('adal-locked'))
     }
+    // Another computer this PC has not said "Yes" to yet: ask first (PcAccessGate).
+    if (error.response?.status === 401 && error.response?.data?.pc_access) {
+      window.dispatchEvent(new Event('adal-pc-access'))
+    }
     if (error.response?.status === 503) {
       console.error('⚠️ Server is locked due to hardware mismatch.')
     } else if (error.code === 'ERR_NETWORK') {

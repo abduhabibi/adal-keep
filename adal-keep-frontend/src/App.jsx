@@ -1,4 +1,4 @@
-import { useState, lazy, Suspense } from 'react'
+import { useState, useEffect, lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import ErrorBoundary from './components/shared/ErrorBoundary'
 import { Toaster } from 'react-hot-toast'
@@ -19,6 +19,8 @@ import { FileCaptureProvider } from './context/FileCaptureContext'
 import { AuthProvider, useAuth } from './context/AuthContext'
 const TasksPage = lazy(() => fresh(() => import('./pages/TasksPage')))
 import LockScreen from './components/LockScreen'
+import PcAccessGate from './components/PcAccessGate'
+import api from './services/api'
 import IntroWizard from './pages/IntroWizard'
 const CVsPage = lazy(() => fresh(() => import('./pages/CVsPage')))
 const CVNewPage = lazy(() => fresh(() => import('./pages/CVNewPage')))
@@ -56,21 +58,34 @@ const toaster = (
   />
 )
 
-function TrialBanner({ days }) {
+function TrialBanner({ days, renew }) {
   const [open, setOpen] = useState(false)
   return (
     <>
       <button type="button" onClick={() => setOpen(true)}
         className="lock-button fixed top-0 left-0 right-0 z-[9999] !rounded-none !py-2 !text-sm">
-        Your free trial ends in {days} day{days === 1 ? '' : 's'} — unlock Adal Keep now →
+        {renew ? `Your 6 paid months end in ${days} day${days === 1 ? '' : 's'} — renew now →`
+          : `Your free trial ends in ${days} day${days === 1 ? '' : 's'} — unlock Adal Keep now →`}
       </button>
       {open && <LockScreen onClose={() => setOpen(false)} />}
     </>
   )
 }
 
+// Opened from another computer: the main PC must have said "Yes" to it.
+const GATED = !(import.meta.env.VITE_PHONE === '1' || import.meta.env.VITE_ADMIN === '1' || import.meta.env.VITE_DEMO === '1')
+
 function Shell() {
   const { state, subscription, refresh } = useAuth()
+  const [pcGate, setPcGate] = useState(false)
+  useEffect(() => {
+    if (!GATED) return
+    api.get('/pc-access/status').then(r => { if (r.data?.state && r.data.state !== 'approved') setPcGate(true) }).catch(() => {})
+    const on = () => setPcGate(true)
+    window.addEventListener('adal-pc-access', on)
+    return () => window.removeEventListener('adal-pc-access', on)
+  }, [])
+  if (pcGate) return <>{toaster}<PcAccessGate /></>
 
   if (state === 'loading') {
     return (
@@ -121,6 +136,7 @@ function Shell() {
       <BrowserRouter>
         {toaster}
         {subscription?.mode === 'trial' && subscription.daysLeft <= 3 && <TrialBanner days={subscription.daysLeft} />}
+        {subscription?.mode === 'active' && subscription.paidUntil && !subscription.forGood && subscription.paidDaysLeft <= 7 && <TrialBanner renew days={subscription.paidDaysLeft} />}
         <Routes>
           <Route path="/" element={<MainLayout />}>
             <Route index element={page(DashboardPage)} />

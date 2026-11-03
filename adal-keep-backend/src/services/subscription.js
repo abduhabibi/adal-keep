@@ -1,5 +1,5 @@
 /**
- * subscription.js — 14-day trial, then locked until the PC is unlocked.
+ * subscription.js — 3-week (21-day) trial, then locked until the PC is unlocked.
  *
  *   PC number   6 digits that belong to THIS server PC (from Windows'
  *               MachineGuid / Linux machine-id; the last digit is a check
@@ -8,7 +8,10 @@
  *               current 6-digit Google Authenticator code for that PC.
  *               Each PC has its own Authenticator entry (its secret is
  *               HMAC(ADAL_LICENSE_KEY, PC number)), so a code only opens
- *               the PC it was made for. Unlocked once = unlocked for good.
+ *               the PC it was made for. A code pays 6 months (30,000 ETB,
+ *               since 2026-11-03): the PC is open until then, and the next
+ *               code adds 6 more months. PCs unlocked "for good" before that
+ *               (50,000 ETB) stay open.
  *   Locked      every /api call and every stored document is refused, and
  *               the background work stops. Nothing is encrypted or deleted.
  *
@@ -37,7 +40,9 @@ const COPY_PATH = process.platform === 'win32'
   ? path.join(process.env.ProgramData || 'C:\\ProgramData', 'AdalKeep', 'sub.json')
   : path.join(os.homedir(), '.config', 'adal-keep', 'sub.json')
 
-export const TRIAL_DAYS = 14
+export const TRIAL_DAYS = 21   // 3 weeks
+export const PAID_DAYS = 182            // one code = 6 months
+export const PRICE_ETB = 30000          // for those 6 months
 export const SELLER_PHONE = process.env.ADAL_SELLER_PHONE || '0995668080'
 const DAY = 86400000
 const CLOCK_BACK_TOLERANCE = 6 * 3600000      // clock set back more than this → locked
@@ -108,7 +113,11 @@ export function codeMatches(pc, code, now = Date.now(), key = licenseKey()) {
   return [-2, -1, 0, 1].some(d => totp(secret, step + d) === code)
 }
 
+// Unlocked for good (sold before 2026-11-03).
 const proofFor = (pc) => crypto.createHmac('sha256', licenseKey() || 'no-key').update('adal-keep-unlocked:' + pc).digest('hex')
+// Paid until a date: the date is signed, so editing the file does not move it.
+const paidProof = (pc, until) => crypto.createHmac('sha256', licenseKey() || 'no-key').update(`adal-keep-paid:${pc}:${until}`).digest('hex')
+const paidOk = (x, pc) => !!(x?.paid_until && x?.paid_proof && x.paid_proof === paidProof(pc, x.paid_until))
 
 // ---------------------------------------------------------------------------
 // State
@@ -123,8 +132,13 @@ export function readSide() {
   const dates = [a?.installation_date, b?.installation_date].filter(Number.isFinite)
   if (dates.length) s.installation_date = Math.min(...dates)
   s.last_seen = Math.max(a?.last_seen || 0, b?.last_seen || 0) || null
-  s.paid_until = Math.max(a?.paid_until || 0, b?.paid_until || 0) || null
   const pc = pcNumber()
+  // A "paid until" from before the date was signed (the old codes): signed now, once.
+  for (const x of [a, b]) if (x?.paid_until && !x.paid_proof) x.paid_proof = paidProof(pc, x.paid_until)
+  // The latest signed "paid until" of the two copies.
+  const paid = [a, b].filter(x => paidOk(x, pc)).sort((x, y) => y.paid_until - x.paid_until)[0]
+  s.paid_until = paid?.paid_until || null
+  s.paid_proof = paid?.paid_proof || null
   if ([a, b].some(x => x?.unlocked_pc === pc && x?.unlock_proof === proofFor(pc))) {
     const src = [a, b].find(x => x?.unlocked_pc === pc && x?.unlock_proof === proofFor(pc))
     Object.assign(s, { unlocked_pc: pc, unlock_proof: src.unlock_proof, unlocked_at: src.unlocked_at })
@@ -133,6 +147,16 @@ export function readSide() {
 }
 
 export function writeSide(s) {
+  // Never lose a paid date that is on file (a write from an older read).
+  const pc = pcNumber()
+  for (const x of [readFile(SIDE_PATH), readFile(COPY_PATH)]) {
+    if (x?.paid_until && (!x.paid_proof || paidOk(x, pc)) && x.paid_until > (s.paid_until || 0)) {
+      s = { ...s, paid_until: x.paid_until, paid_proof: paidProof(pc, x.paid_until) }
+    }
+    if (x?.unlocked_pc === pc && x?.unlock_proof === proofFor(pc) && s.unlock_proof !== x.unlock_proof) {
+      s = { ...s, unlocked_pc: pc, unlock_proof: x.unlock_proof, unlocked_at: x.unlocked_at }
+    }
+  }
   for (const p of [SIDE_PATH, COPY_PATH]) {
     try { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, JSON.stringify(s, null, 2)) } catch {}
   }
@@ -164,7 +188,7 @@ export function computeMode(s) {
   const now = Date.now()
   const pc = pcNumber()
   if (s.unlocked_pc === pc && s.unlock_proof === proofFor(pc)) return 'active'
-  if (s.paid_until && s.paid_until > now) return 'active'   // paid with the old codes
+  if (paidOk(s, pc) && s.paid_until > now) return 'active'
   if (s.last_seen && now < s.last_seen - CLOCK_BACK_TOLERANCE) return 'locked'
   return now < s.installation_date + TRIAL_DAYS * DAY ? 'trial' : 'locked'
 }
@@ -182,6 +206,11 @@ export function statusPayload(s = state()) {
     sellerPhone: SELLER_PHONE,
     clockBack: !!(mode === 'locked' && s?.last_seen && now < s.last_seen - CLOCK_BACK_TOLERANCE),
     unlockedAt: s?.unlocked_at || null,
+    forGood: !!(s?.unlocked_pc === pcNumber() && s?.unlock_proof === proofFor(pcNumber())),
+    paidUntil: s && paidOk(s, pcNumber()) ? s.paid_until : null,
+    paidDaysLeft: s && paidOk(s, pcNumber()) ? Math.max(0, Math.ceil((s.paid_until - now) / DAY)) : 0,
+    priceEtb: PRICE_ETB,
+    paidMonths: 6,
     serverTime: now,
   }
 }
@@ -196,6 +225,13 @@ export function isAppLocked() {
 // ---------------------------------------------------------------------------
 // Unlock
 // ---------------------------------------------------------------------------
+/** 6 more months, from today or from the end of what is paid already. */
+function extend(s, pc, now, by) {
+  const from = paidOk(s, pc) && s.paid_until > now ? s.paid_until : now
+  const until = from + PAID_DAYS * DAY
+  return { ...s, paid_until: until, paid_proof: paidProof(pc, until), unlocked_at: now, unlocked_by: by, last_seen: now }
+}
+
 /** Returns { ok: true } or { ok: false, error }. */
 export function applyCode(code) {
   const s = state()
@@ -212,9 +248,14 @@ export function applyCode(code) {
     writeSide({ ...s, tries: [...tries, now] })
     return { ok: false, error: 'That code is not right for this PC. Check the PC\'s date and time, then ask for a new code.' }
   }
-  writeSide({ ...s, tries: [], unlocked_pc: pc, unlock_proof: proofFor(pc), unlocked_at: now, last_seen: now })
+  // A code counts once (it stays good for about 2 minutes: typed twice it would pay twice).
+  const used = (s.used_codes || []).filter(u => now - u.at < 10 * 60000)
+  if (used.some(u => u.code === crypto.createHash('sha256').update(pc + clean).digest('hex'))) {
+    return { ok: false, error: 'This code was used already. Ask Adal for a new code.' }
+  }
+  writeSide({ ...extend(s, pc, now, 'code'), tries: [], used_codes: [...used, { at: now, code: crypto.createHash('sha256').update(pc + clean).digest('hex') }] })
   _cache.at = 0
-  return { ok: true }
+  return { ok: true, paidUntil: readSide()?.paid_until || null }
 }
 
 /**
@@ -225,7 +266,7 @@ export function unlockApproved() {
   const s = state()
   const pc = pcNumber()
   if (computeMode(s) === 'active') return { ok: true }
-  writeSide({ ...s, tries: [], unlocked_pc: pc, unlock_proof: proofFor(pc), unlocked_at: Date.now(), last_seen: Date.now(), unlocked_by: 'approval' })
+  writeSide({ ...extend(s, pc, Date.now(), 'approval'), tries: [] })
   _cache.at = 0
   return { ok: true }
 }
@@ -255,8 +296,22 @@ export function subscriptionGuard(req, res, next) {
 }
 
 export async function maybeNotify(db, st) {
-  if (!db || st.mode !== 'trial' || st.daysLeft > 3) return
+  if (!db) return
   const today = new Date().toISOString().slice(0, 10)
+  // The 6 paid months end in 14 days or less: a reminder a day.
+  if (st.mode === 'active' && st.paidUntil && st.paidDaysLeft <= 14) {
+    try {
+      if (!(await db('notifications').where({ type: 'trial_warning', created_day: today }).first())) {
+        await db('notifications').insert({
+          type: 'trial_warning', title: 'Adal Keep: time to renew',
+          body: `The paid 6 months end in ${st.paidDaysLeft} day(s) (${new Date(st.paidUntil).toLocaleDateString('en-GB')}). Pay ${PRICE_ETB.toLocaleString('en')} ETB for 6 more months: call ${SELLER_PHONE} and tell them PC number ${st.pcNumber} for the code.`,
+          created_day: today, created_at: new Date().toISOString(),
+        })
+      }
+    } catch {}
+    return
+  }
+  if (st.mode !== 'trial' || st.daysLeft > 3) return
   try {
     if (!(await db('notifications').where({ type: 'trial_warning', created_day: today }).first())) {
       await db('notifications').insert({

@@ -3,7 +3,7 @@ import { useAuth } from '../context/AuthContext'
 import api from '../services/api'
 
 /**
- * The paywall. After the 14-day trial the server refuses everything until
+ * The paywall. After the 3-week trial the server refuses everything until
  * this PC is unlocked; this screen is all that shows. During the trial the
  * same screen opens from the banner (with a close button).
  *
@@ -206,14 +206,15 @@ export default function LockScreen({ onClose }) {
             {/* Pay */}
             <div className="flex flex-col items-center gap-3">
               <div className="lock-glow w-full max-w-sm rounded-3xl p-[3px]">
-                <img src="/adal-payment.webp" alt="Pay 50,000 ETB to Commercial Bank of Ethiopia account 1000709131323 — Adal Keep Subscription"
+                <img src="/adal-payment.webp" alt="Pay 30,000 ETB for 6 months to Commercial Bank of Ethiopia account 1000709131323 — Adal Keep Subscription"
                   className="block w-full rounded-[21px]" />
               </div>
+              <p className="text-center"><span className="text-2xl font-extrabold text-white">{(subscription?.priceEtb || 30000).toLocaleString()} ETB</span> <span className="text-sm text-slate-300">for {subscription?.paidMonths || 6} months</span></p>
               <p className="text-sm text-slate-400 text-center">Scan with your CBE app to pay</p>
               <p className="w-full max-w-sm rounded-2xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-3 text-center text-sm text-emerald-100">
                 <span aria-hidden="true">💚 </span>
                 <strong className="text-emerald-300">10% of your payment goes to charity</strong>
-                <span className="block text-xs text-emerald-200/80 mt-0.5">5,000 ETB of the 50,000 ETB</span>
+                <span className="block text-xs text-emerald-200/80 mt-0.5">{Math.round((subscription?.priceEtb || 30000) / 10).toLocaleString()} ETB of the {(subscription?.priceEtb || 30000).toLocaleString()} ETB</span>
               </p>
             </div>
 
@@ -222,8 +223,12 @@ export default function LockScreen({ onClose }) {
               <div>
                 <span className="lock-pill">
                   {locked
-                    ? (subscription?.clockBack ? 'This PC\'s clock was set back — Adal Keep is locked' : `Your ${subscription?.trialDays || 14}-day free trial has ended`)
-                    : `${subscription?.daysLeft ?? ''} day${subscription?.daysLeft === 1 ? '' : 's'} left in your free trial`}
+                    ? (subscription?.clockBack ? 'This PC\'s clock was set back — Adal Keep is locked'
+                      : subscription?.paidUntil ? `Your ${subscription?.paidMonths || 6} paid months ended on ${new Date(subscription.paidUntil).toLocaleDateString()} — renew to go on`
+                      : `Your ${subscription?.trialDays || 21}-day free trial has ended`)
+                    : subscription?.mode === 'active' && subscription?.paidUntil
+                      ? `Paid until ${new Date(subscription.paidUntil).toLocaleDateString()} · ${subscription.paidDaysLeft} day${subscription.paidDaysLeft === 1 ? '' : 's'} left — renew now and the 6 months are added on`
+                      : `${subscription?.daysLeft ?? ''} day${subscription?.daysLeft === 1 ? '' : 's'} left in your free trial`}
                 </span>
                 <h1 className="lock-grad-text lock-flow mt-4 text-4xl sm:text-5xl font-extrabold tracking-tight">Unlock Adal Keep</h1>
               </div>

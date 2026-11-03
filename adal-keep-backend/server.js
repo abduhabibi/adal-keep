@@ -2,7 +2,6 @@ import net from 'net'
 // Slow or busy office lines: give a connection 2.5 s to open (Node's 250 ms
 // default makes calls to Supabase / Telegram fail with ETIMEDOUT).
 net.setDefaultAutoSelectFamilyAttemptTimeout?.(2500)
-import paymentsRouter from './src/routes/payments.js'
 import zlib from 'zlib'
 import express from 'express'
 import musanedAccountsRouter, { accountsRouter } from './src/routes/musanedAccounts.js'
@@ -53,6 +52,8 @@ import wafidRouter from './src/routes/wafid.js'
 import backupRouter from './src/routes/backup.js'
 import contractsRouter from './src/routes/contracts.js'
 import embassyRouter from './src/routes/embassy.js'
+import pcAccessRouter from './src/routes/pcAccess.js'
+import { networkGate, originOk } from './src/services/networkGate.js'
 import whatsappRouter from './src/routes/whatsapp.js'
 import { diagMiddleware, diagReport } from './src/services/diag.js'
 import { removeSecret } from './src/services/secretStore.js'
@@ -80,7 +81,12 @@ const db = knex(knexConfig.development)
 app.locals.db = db
 
 app.use(diagMiddleware)
-app.use(cors({ origin: true, credentials: true }))
+// Security headers first, for every answer.
+app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false, crossOriginResourcePolicy: { policy: "cross-origin" }, frameguard: false }))
+// Only Adal Keep's own pages may call it from a browser (no other website).
+app.use(cors((req, cb) => cb(null, { origin: originOk(req) ? (req.headers.origin || false) : false, credentials: true })))
+// From another computer: only one this PC said "Yes" to (services/networkGate.js).
+app.use(networkGate)
 app.use(express.json({ limit: '15mb' }))   // CV designs preview with their header image
 // Any change (from the PC, a phone or Admin): what it touches goes online in
 // about a second and the phones refresh their own copy (services/cloudSync.js).
@@ -114,15 +120,13 @@ app.use(attachAuth)
 
 // Core Feature Routes
 app.use("/api", tenancyRouter)
-app.use('/api/payments', paymentsRouter)
+app.use('/api', pcAccessRouter)   // other computers ask to open Adal Keep; this PC answers
 app.use("/api/employees", employeesRouter)
 app.use("/api/employees", employeeRegisterRouter)
 app.use("/api/tasks", tasksRouter)
 app.use("/api/ai-tasks", aiTasksRouter)
 app.use("/api/branches", branchesRouter)
 
-// Security headers
-app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }))
 
 // NOTE: the frontend static files AND the SPA fallback are registered at the
 // BOTTOM of this file on purpose. Express matches routes in registration

@@ -185,12 +185,12 @@ function describeCommit(commit) {
  */
 export async function checkForUpdate() {
   const installedNow = await getInstalled()
-  // Installed PCs: Adal's signed release in Supabase (the GitHub repository
-  // may be private). GitHub stays as the fallback while PCs move over.
-  let supabaseError = null
+  // Installed PCs: only Adal's signed release in Supabase (the GitHub
+  // repository is private). GitHub is only for a developer's git checkout.
   if (!installedNow.isRepo) {
-    try { return await checkSupabase(installedNow) } catch (e) { supabaseError = e.message }
+    try { return await checkSupabase(installedNow) } catch (e) { throw new Error(`Supabase updates: ${e.message}`) }
   }
+  const supabaseError = null
   try {
     const r = await checkGitHub()
     if (supabaseError) r.note = [r.note, `Supabase updates: ${supabaseError}`].filter(Boolean).join(' · ')
@@ -563,8 +563,9 @@ async function applyUpdate(req, res) {
     // --- Installed PC: Adal's signed release from Supabase -----------------
     if (!installed.isRepo) {
       let manifest = null
-      try { manifest = await latestRelease('release') } catch (e) { logs.push(`Supabase updates: ${e.message} — trying GitHub`) }
-      if (manifest) {
+      try { manifest = await latestRelease('release') } catch (e) { throw new Error(`Supabase updates: ${e.message}`) }
+      if (!manifest) throw new Error('Supabase updates: no release published yet')
+      {
         await installFromRelease(cfg, logs, manifest)
         writeMarker(cfg.projectRoot, { sha: manifest.sha, branch: 'release', source: 'supabase', lock_hash: manifest.lock_hash, message: manifest.message })
         const restarts = ['AdalKeep.exe', 'run-server.bat'].some(f => fs.existsSync(path.join(cfg.projectRoot, f)))

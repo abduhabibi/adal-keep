@@ -65,15 +65,15 @@ async function phoneBoot() {
   phoneUpdates()
 }
 
-// A newer phone app (Adal publishes it in Supabase, adal-updates/phone; the
-// old GitHub address stays as a fallback): looked for at the
+// A newer phone app (Adal publishes it in Supabase, adal-updates/phone —
+// only there; the GitHub repository is private): looked for at the
 // start, whenever the app is opened again (at most every 10 minutes) and every
 // 30 minutes. Android's "Update?" opens by itself once per new version; a red
 // button in the bottom bar stays until it is installed.
-const UPDATES = 'https://raw.githubusercontent.com/abduhabibi/adal-keep/release/adal-keep-backend/src/phone-app'
-// The published file's address: Supabase (signed in as this phone), else GitHub.
+// The published file's address in Supabase (signed in as this phone).
 async function updateUrl(file) {
-  try { const { updateLink } = await import('./cloud/adapter.js'); return await updateLink(`phone/${file}`) } catch { return `${UPDATES}/${file}` }
+  const { updateLink } = await import('./cloud/adapter.js')
+  return await updateLink(`phone/${file}`)
 }
 function phoneUpdates() {
   const plugin = window.Capacitor?.Plugins?.AdalDiscovery
@@ -101,7 +101,7 @@ function phoneUpdates() {
     try {
       const mine = await plugin.getVersion()
       let v
-      try { v = await (await fetch(await updateUrl('version.json'), { cache: 'no-store' })).json() } catch { v = await (await fetch(`${UPDATES}/version.json?t=${Date.now()}`, { cache: 'no-store' })).json() }
+      v = await (await fetch(await updateUrl('version.json'), { cache: 'no-store' })).json()
       const newer = v.versionCode > mine.versionCode
       tell({ mine: mine.versionName || mine.versionCode, latest: v.versionName, newer, checkedAt: Date.now() })
       if (!newer) { btn.style.display = 'none'; return }

@@ -30,8 +30,7 @@ export default defineConfig(({ mode }) => ({
         // new apps are published — from the backend's .env, never committed.
         const env = Object.fromEntries((fs.existsSync('../adal-keep-backend/.env') ? fs.readFileSync('../adal-keep-backend/.env', 'utf8') : '')
           .split('\n').map(l => l.match(/^\s*([A-Z_]+)\s*=\s*(.*)\s*$/)).filter(Boolean).map(m => [m[1], m[2].replace(/^['"]|['"]$/g, '')]))
-        const cfg = { url: (env.SUPABASE_URL || '').replace(/\/+$/, ''), anon: env.SUPABASE_ANON_KEY || '',
-          updates: 'https://raw.githubusercontent.com/abduhabibi/adal-keep/release/adal-keep-backend/src/phone-app' }
+        const cfg = { url: (env.SUPABASE_URL || '').replace(/\/+$/, ''), anon: env.SUPABASE_ANON_KEY || '' }
         fs.writeFileSync(path.join(out, 'config.js'), `window.ADAL_CLOUD_CONFIG = ${JSON.stringify(cfg)}\n`)
       },
     },

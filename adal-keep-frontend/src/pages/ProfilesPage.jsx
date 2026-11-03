@@ -99,6 +99,10 @@ export default function ProfilesPage() {
   // Ticked profiles (the box at the top centre of each card) → the side bar.
   const [picked, setPicked] = useState(() => new Map())
   const togglePick = (p) => setPicked(m => { const n = new Map(m); n.has(p.id) ? n.delete(p.id) : n.set(p.id, p); return n })
+  // While some are ticked the bar takes the right side: the search pad steps aside.
+  useEffect(() => { document.body.dataset.picking = picked.size ? '1' : ''; return () => { document.body.dataset.picking = '' } }, [picked.size])
+  // What each ticked girl lacks for the last button pressed (shown on her card).
+  const [lacking, setLacking] = useState({})
 
   // The nine filters fold away: the search line stays one line high.
   const [showFilters, setShowFilters] = useState(false)
@@ -238,7 +242,7 @@ export default function ProfilesPage() {
       ) : (
         <>
         <Pager page={Math.min(page, pages)} pages={pages} total={filtered.length} per={PAGE} onPage={setPage} />
-        <div key={step || 'all'} className={`grid grid-cols-2 gap-x-2 gap-y-4 pt-3 sm:gap-x-3 sm:gap-y-5 xl:grid-cols-3`}>
+        <div key={step || 'all'} className={`grid grid-cols-2 gap-x-2 gap-y-4 pt-3 sm:gap-x-3 sm:gap-y-5 xl:grid-cols-3 ${picked.size ? 'lg:pr-[20rem]' : ''}`}>
           {rows.map((p, i) => (
             <article
               key={p.id}
@@ -266,6 +270,11 @@ export default function ProfilesPage() {
               </div>
 
               <MiniJourney steps={journey.steps[p.id]} who={journey.who[p.id]} missing={journey.missing[p.id]} picked={step} />
+              {lacking[p.id]?.length > 0 && (
+                <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-2 py-1.5 text-[11px] text-red-700 animate-slide-up dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
+                  <b>Missing:</b> {lacking[p.id].join(' · ')}
+                </div>
+              )}
 
               <dl className="hidden sm:block mt-4 space-y-1.5 text-sm text-slate-600">
                 <div className="flex justify-between gap-2">
@@ -315,7 +324,7 @@ export default function ProfilesPage() {
         </>
       )}
       {picked.size > 0 && (
-        <SelectionBar picked={[...picked.values()]} onRemove={togglePick} onClear={() => setPicked(new Map())}
+        <SelectionBar picked={[...picked.values()]} onRemove={togglePick} onClear={() => { setPicked(new Map()); setLacking({}) }} onLacking={setLacking}
           onAllShown={() => setPicked(m => { const n = new Map(m); rows.forEach(r => n.set(r.id, r)); return n })} />
       )}
     </div>

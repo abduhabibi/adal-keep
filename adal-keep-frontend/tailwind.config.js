@@ -23,10 +23,15 @@ export default {
           '0%': { opacity: '0' },
           '100%': { opacity: '1' },
         },
+        'slide-up': {
+          '0%': { opacity: '0', transform: 'translateY(100%)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
+        },
       },
       animation: {
         'fade-up': 'fade-up 0.35s ease-out backwards',
         'fade-in': 'fade-in 0.25s ease-out backwards',
+        'slide-up': 'slide-up 0.35s cubic-bezier(.2,.8,.2,1) backwards',
       },
     },
   },

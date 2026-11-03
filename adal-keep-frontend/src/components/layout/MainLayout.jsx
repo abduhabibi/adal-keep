@@ -75,7 +75,7 @@ export default function MainLayout() {
           </main>
 
           {padOpen && !inChat && (
-            <aside className="hidden md:flex w-72 shrink-0 flex-col p-3 pl-0 min-h-0">
+            <aside className="search-pad hidden md:flex w-72 shrink-0 flex-col p-3 pl-0 min-h-0">
               <ProfileSearchPad title="Profiles — search" autoFocusKey maxHeight="max-h-none" className="flex-1" />
             </aside>
           )}

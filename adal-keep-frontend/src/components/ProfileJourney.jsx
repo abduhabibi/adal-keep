@@ -42,7 +42,12 @@ const EDGE = 30   // px kept at the left for the first step's name
 const LABELS = 78 // px kept at the right for the branches' names
 // Each step's step before it (the wires), and how each wire is drawn.
 export const PARENT = { musaned: 'cv', selected: 'musaned', wafid: 'selected', lmis: 'wafid', wakala: 'wafid', tasheer: 'wakala', insurance: 'tasheer', visa: 'insurance' }
-const WIRES = Object.entries(PARENT).map(([to, from]) => ({ from, to, curve: from === 'wafid' || from === 'wakala' }))
+// Wafid → Tasheer is ONE smooth curve with the "Paid wakala" box sitting on it
+// (tilted along it); the box's own two wires are not drawn.
+const WIRES = [
+  ...Object.entries(PARENT).filter(([to, from]) => !BOX.has(to) && !BOX.has(from)).map(([to, from]) => ({ from, to, curve: from === 'wafid' })),
+  { from: 'wafid', to: 'tasheer', via: 'wakala', curve: true },
+]
 /** Every step after k on her path (to tell her phase: the last step she finished). */
 export function after(k) {
   const out = []
@@ -54,8 +59,8 @@ const SIZE = {
   full:    { r: 14, rowGap: 42, block: 60 },
 }
 
-function Node({ k, title, n, state, note, count, selected, dim, onSelect, compact, narrow, left, top }) {
-  if (BOX.has(k)) return <BoxNode {...{ k, title, state, note, count, selected, dim, onSelect, compact, left, top }} />
+function Node({ k, title, n, state, note, count, selected, dim, onSelect, compact, narrow, left, top, angle }) {
+  if (BOX.has(k)) return <BoxNode {...{ k, title, state, note, count, selected, dim, onSelect, compact, left, top, angle }} />
   const pick = !!onSelect
   const l = pick ? (selected ? LOOK.done : LOOK.todo) : (LOOK[state] || LOOK.todo)
   return (
@@ -73,13 +78,13 @@ function Node({ k, title, n, state, note, count, selected, dim, onSelect, compac
 }
 
 /** "Paid wakala": a small box on the curve (not a circle) — its count or state inside. */
-function BoxNode({ k, title, state, note, count, selected, dim, onSelect, compact, left, top }) {
+function BoxNode({ k, title, state, note, count, selected, dim, onSelect, compact, left, top, angle = 0 }) {
   const pick = !!onSelect
   const l = pick ? (selected ? LOOK.done : LOOK.todo) : (LOOK[state] || LOOK.todo)
   return (
     <button type="button" title={note ? `${title} — ${note}` : title} onClick={() => onSelect?.(k)}
-      className={`absolute z-10 -translate-x-1/2 -translate-y-1/2 flex items-center gap-1 rounded-md px-1.5 ${compact ? 'py-0.5 text-[9px]' : 'py-1 text-[10px]'} font-bold whitespace-nowrap shadow-sm transition-all duration-300 ${l.dot} ${dim ? 'opacity-40 hover:opacity-80' : ''} ${selected ? 'ring-4 ring-emerald-300/70 shadow-[0_0_16px_rgba(16,185,129,.8)] scale-110' : ''} ${pick || state ? 'cursor-pointer' : 'cursor-default'}`}
-      style={{ left, top }}>
+      className={`absolute z-10 flex items-center gap-1 rounded-md px-1.5 ${compact ? 'py-0.5 text-[9px]' : 'py-1 text-[10px]'} font-bold whitespace-nowrap shadow-sm transition-all duration-300 ${l.dot} ${dim ? 'opacity-40 hover:opacity-80' : ''} ${selected ? 'ring-4 ring-emerald-300/70 shadow-[0_0_16px_rgba(16,185,129,.8)]' : ''} ${pick || state ? 'cursor-pointer' : 'cursor-default'}`}
+      style={{ left, top, transform: `translate(-50%, -50%) rotate(${angle}deg)${selected ? ' scale(1.1)' : ''}` }}>
       <span>💰</span><span>{title}</span>
       {pick ? <span className="opacity-80">{count ?? 0}</span> : ICON[state] ? <span>{ICON[state]}</span> : null}
     </button>
@@ -117,8 +122,9 @@ export function JourneyFork({ states = {}, notes = {}, counts, selected, onSelec
   // is lit when both its ends are done, and pulses towards a step in progress.
   const chain = new Set()
   for (let k = selected; k; k = PARENT[k]) chain.add(k)
-  const lit = (wire) => pick ? chain.has(wire.to) : states[wire.from] === 'done' && ['done', 'active'].includes(states[wire.to])
-  const pulse = (wire) => pick ? chain.has(wire.to) : states[wire.from] === 'done' && states[wire.to] === 'active'
+  const end = (wire) => wire.via && !(pick ? chain.has(wire.to) : ['done', 'active'].includes(states[wire.to])) ? wire.via : wire.to
+  const lit = (wire) => pick ? chain.has(end(wire)) : states[wire.from] === 'done' && ['done', 'active'].includes(states[end(wire)])
+  const pulse = (wire) => pick ? chain.has(end(wire)) : states[wire.from] === 'done' && states[end(wire)] === 'active'
 
   const path = ({ from, to, curve }) => {
     const x1 = cx(from) + (BOX.has(from) ? 0 : z.r + 1), y1 = cy(from), x2 = cx(to) - (BOX.has(to) ? 0 : z.r + 1), y2 = cy(to)
@@ -127,6 +133,12 @@ export function JourneyFork({ states = {}, notes = {}, counts, selected, onSelec
     return `M${x1},${y1} C${x1 + d},${y1} ${x2 - d},${y2} ${x2},${y2}`
   }
   const steps = [...SHARED, ...BRANCHES.flatMap(b => b.steps)]
+  // The box: the middle of the Wafid → Tasheer curve, turned along it there
+  // (for this curve the slope at its middle is dy / (0.45·dx)).
+  const box = (() => {
+    const x1 = cx('wafid') + z.r + 1, y1 = cy('wafid'), x2 = cx('tasheer') - z.r - 1, y2 = cy('tasheer')
+    return { x: (x1 + x2) / 2, y: (y1 + y2) / 2, angle: Math.atan2(y2 - y1, 0.45 * (x2 - x1)) * 180 / Math.PI }
+  })()
 
   return (
     <div className={compact ? 'overflow-hidden' : 'overflow-x-auto overflow-y-hidden'}>
@@ -136,7 +148,7 @@ export function JourneyFork({ states = {}, notes = {}, counts, selected, onSelec
             {WIRES.map(wire => {
               const on = lit(wire)
               return (
-                <g key={wire.to}>
+                <g key={`${wire.from}-${wire.to}`}>
                   <path d={path(wire)} fill="none" strokeLinecap="round"
                     className={`transition-all duration-500 ${on ? 'stroke-emerald-500 journey-glow' : 'stroke-slate-300 dark:stroke-slate-600'}`}
                     strokeWidth={on ? 2.5 : 2} />
@@ -152,7 +164,7 @@ export function JourneyFork({ states = {}, notes = {}, counts, selected, onSelec
         {w > 0 && steps.map(([k, title, short], i) => (
           <Node key={k} k={k} title={compact && short ? short : title} n={i + 1} state={states[k]} note={pick ? '' : notes[k]}
             count={counts?.[k]} selected={selected === k} dim={pick && selected && !chain.has(k)} onSelect={onSelect}
-            compact={compact} narrow={narrow} left={cx(k)} top={BOX.has(k) ? cy(k) : SPOT[k][1] * z.rowGap} />
+            compact={compact} narrow={narrow} left={BOX.has(k) ? box.x : cx(k)} top={BOX.has(k) ? box.y : SPOT[k][1] * z.rowGap} angle={box.angle} />
         ))}
         {/* the two branches' names, at the right end of their rows */}
         {BRANCHES.map((b, i) => (

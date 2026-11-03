@@ -627,3 +627,10 @@ body {
   html { font-size: 14px; }
   .panel { border-radius: 14px; }
 }
+
+/* Floating sheets over the page (selected profiles, a run's buttons, the
+   "missing" list): never see-through, whatever the theme. */
+.solid-sheet { background-color: #ffffff !important; }
+:is(.dark, [data-theme="dark"], [data-theme="gradient"]) .solid-sheet { background-color: #111117 !important; }
+/* Profiles ticked (the selection bar is open on the right): the search pad steps aside. */
+body[data-picking="1"] .search-pad { display: none !important; }

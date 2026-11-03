@@ -80,14 +80,29 @@ td.l { color: #333; width: 15% } td.v { font-weight: bold; width: 18% } td.r { t
 .cert { margin-top: 10px } .sign { margin-top: 10px }
 `
 
-/** Print the embassy pages for these profile ids. */
-export async function printEmbassy(ids, agency = '') {
+/** What each girl's embassy pages need, and what she lacks: [{ g, missing: [...] }]. */
+export async function loadEmbassy(ids) {
   const { data } = await api.get('/embassy/print', { params: { ids: ids.join(',') } })
-  if (!data.girls?.length) throw new Error('Nothing to print')
-  const pages = data.girls.map(g =>
+  const girls = (data.girls || []).map(g => ({
+    g,
+    missing: [
+      !g.contract_page && 'Contract (PDF)',
+      !g.payment_page && 'Visa payment page',
+      !g.profile.visa_application_number && 'Application number',
+      !g.profile.visa_number && 'Visa number',
+      !g.photo && 'Photo',
+    ].filter(Boolean),
+  }))
+  return { email: data.agency_email, girls }
+}
+
+/** Print these girls' pages (3 each); a page not in Adal Keep prints as a marked gap. */
+export async function printEmbassy(loaded, girls, agency = '') {
+  if (!girls.length) throw new Error('Nothing to print')
+  const pages = girls.map(g =>
     picturePage(g.contract_page, 'Contract', g.profile.full_name) +
     picturePage(g.payment_page, 'Visa payment', g.profile.full_name) +
-    formPage(g, agency, data.agency_email)).join('')
+    formPage(g, agency, loaded.email)).join('')
   const frame = document.createElement('iframe')
   frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0'
   document.body.appendChild(frame)
@@ -100,5 +115,4 @@ export async function printEmbassy(ids, agency = '') {
   frame.contentWindow.focus()
   frame.contentWindow.print()
   setTimeout(() => frame.remove(), 60000)
-  return data.girls.map(g => ({ name: g.profile.full_name, contract: !!g.contract_page, payment: !!g.payment_page, application: !!g.profile.visa_application_number }))
 }

@@ -55,6 +55,21 @@ router.get('/profiles/:profileId/automations', async (req, res) => {
       .orderBy('id', 'desc')
     const latest = {}
     for (const r of runs) if (!latest[r.workflow_id]) latest[r.workflow_id] = publicRun(r)
+    // She has a contract: she is chosen on Musaned and her Musaned record is
+    // there — "Check if chosen" and "Add from Musaned" count as done (✓) unless
+    // a run of them is working now.
+    const p = await db('profiles').where('id', profileId).first('chosen_at', 'contract_number', 'musaned_stage')
+    const contract = (p?.contract_number && String(p.contract_number).trim()) ||
+      (p?.chosen_at && !/CANCEL|REJECT/i.test(p.musaned_stage || '')) ||
+      await db('profile_fields').join('files', 'files.profile_field_id', 'profile_fields.id')
+        .where('profile_fields.profile_id', profileId).where('profile_fields.name', 'like', 'Contract%').first('files.id')
+    if (contract) {
+      for (const id of ['musaned_check_chosen', 'musaned_cv_import']) {
+        const l = latest[id]
+        if (l && ['running', 'pending', 'paused', 'done'].includes(l.status)) continue
+        latest[id] = { id: l?.id || null, workflow_id: id, status: 'done', finished_at: p?.chosen_at || null, from_contract: true }
+      }
+    }
     res.json({
       workflows: workflows.map(w => ({ ...w, latest: latest[w.id] || null })),
       queue: queueSnapshot(),

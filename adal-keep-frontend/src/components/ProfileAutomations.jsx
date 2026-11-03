@@ -422,6 +422,20 @@ export default function ProfileAutomations({ profileId }) {
               <button onClick={() => { setOpen(null); setDetail(null) }} className="shrink-0 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs">Close</button>
   </>)
   const inGroup = (g) => open && detail && g.ids.includes(detail.workflow_id)
+  const passOf = (title) =>
+    /^LMIS/.test(title) ? { endpoint: '/lmis/accounts', id: accountId }
+    : title === 'Musaned' ? { endpoint: '/musaned/accounts', id: musanedAccountId }
+    : title === 'Tasheer' ? { endpoint: '/tasheer/accounts', id: tasheerAccountId }
+    : title === 'Insurance' ? { endpoint: '/insurance/accounts', id: insuranceAccountId }
+    : { endpoint: '/visa/accounts', id: visaAccountId }
+  // Each portal's sign-in account, in its own box.
+  const loginOf = (title) =>
+    /^LMIS/.test(title) ? <LmisAccountPicker value={accountId} onChange={setAccountId} />
+    : title === 'Musaned' ? <MusanedAccountPicker value={musanedAccountId} onChange={setMusanedAccountId} />
+    : title === 'Tasheer' ? <MusanedAccountPicker value={tasheerAccountId} onChange={setTasheerAccountId} endpoint="/tasheer/accounts" what="Tasheer" placeholder="Nuzla Tasheer" userLabel="Username" />
+    : title === 'Insurance' ? <MusanedAccountPicker value={insuranceAccountId} onChange={setInsuranceAccountId} endpoint="/insurance/accounts" what="insurance" placeholder="Nuzla FetaP" userLabel="Username / email" />
+    : /^Enjaz/.test(title) ? <MusanedAccountPicker value={visaAccountId} onChange={setVisaAccountId} endpoint="/visa/accounts" what="visa platform" placeholder="Nuzla visa" userLabel="Login Name" />
+    : null
 
   if (loading) return null
 
@@ -473,25 +487,7 @@ export default function ProfileAutomations({ profileId }) {
         </p>
       </div>
 
-      {/* Login accounts: one small slot per portal. */}
-      <div className="acct-compact mb-4 grid gap-2 grid-cols-1 sm:grid-cols-2 xl:grid-cols-5">
-        {[
-          ['LMIS', <LmisAccountPicker value={accountId} onChange={setAccountId} />],
-          ['Musaned', <MusanedAccountPicker value={musanedAccountId} onChange={setMusanedAccountId} />],
-          ['Tasheer', <MusanedAccountPicker value={tasheerAccountId} onChange={setTasheerAccountId}
-            endpoint="/tasheer/accounts" what="Tasheer" placeholder="Nuzla Tasheer" userLabel="Username" />],
-          ['Insurance (FetaP)', <MusanedAccountPicker value={insuranceAccountId} onChange={setInsuranceAccountId}
-            endpoint="/insurance/accounts" what="insurance" placeholder="Nuzla FetaP" userLabel="Username / email" />],
-          ['Enjaz · Visa', <MusanedAccountPicker value={visaAccountId} onChange={setVisaAccountId}
-            endpoint="/visa/accounts" what="visa platform" placeholder="Nuzla visa" userLabel="Login Name" />],
-        ].map(([title, picker]) => (
-          <div key={title} className="min-w-0">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 mb-1">{title} login</p>
-            {picker}
-          </div>
-        ))}
-      </div>
-
+      {/* Each portal's login sits in its own box below (with its cards). */}
       {/* The journey, in order: each portal's actions in one box. */}
       {GROUPS.map(g => {
         const flows = g.ids.map(id => workflows.find(w => w.id === id)).filter(Boolean)
@@ -501,6 +497,13 @@ export default function ProfileAutomations({ profileId }) {
               <p className={`text-[11px] font-semibold uppercase tracking-wide ${g.head}`}>{g.title}</p>
               {g.title === 'Musaned' && <MusanedCode accountId={musanedAccountId} />}
             </div>
+            {loginOf(g.title) && (
+              <div className="acct-compact mb-2 flex flex-wrap items-center gap-2 rounded-lg bg-white/60 px-2 py-1.5 dark:bg-slate-900/40">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">🔑 Login</span>
+                <div className="min-w-0 flex-1">{loginOf(g.title)}</div>
+                <AccountPassword {...passOf(g.title)} />
+              </div>
+            )}
             {flows.length ? (
               // One row: the portal's cards side by side, and the open run's controls beside them.
               <div className="flex gap-2 overflow-x-auto pb-1 sm:grid sm:overflow-visible sm:pb-0"
@@ -687,5 +690,28 @@ function MusanedCode({ accountId }) {
       <span className="font-mono text-sm font-bold tracking-[0.2em] text-slate-800 dark:text-slate-100">{code.slice(0, 3)} {code.slice(3)}</span>
       <span className="relative h-1 w-8 overflow-hidden rounded-full bg-indigo-100 dark:bg-indigo-900/40"><span className="absolute inset-y-0 left-0 bg-indigo-500 transition-all duration-1000" style={{ width: `${(left / 30) * 100}%` }} /></span>
     </button>
+  )
+}
+
+/** The chosen (else the default) account's sign-in, small: tap to copy, 👁 to see the password. */
+function AccountPassword({ endpoint, id }) {
+  const [list, setList] = useState(null)
+  const [see, setSee] = useState(false)
+  useEffect(() => { let alive = true; api.get(endpoint).then(r => alive && setList(r.data || [])).catch(() => {}); return () => { alive = false } }, [endpoint, id])
+  const a = (list || []).find(x => String(x.id) === String(id)) || (list || []).find(x => x.is_default) || (list || [])[0]
+  if (!a) return null
+  const user = a.login_value || a.username || a.phone || ''
+  const pass = a.password || ''
+  if (!user && !pass) return null
+  const copy = (v, what) => navigator.clipboard?.writeText(v).then(() => toast.success(`${what} copied`, { duration: 1500 })).catch(() => {})
+  return (
+    <span className="flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-white px-1.5 py-1 text-[11px] dark:border-slate-700 dark:bg-slate-800" title={a.name ? `Account: ${a.name}` : 'Sign-in'}>
+      {user && <button type="button" onClick={() => copy(user, 'Username')} className="max-w-[9rem] truncate font-mono hover:underline" title="Copy the username">{user}</button>}
+      {pass && <>
+        <span className="text-slate-300">·</span>
+        <button type="button" onClick={() => copy(pass, 'Password')} className="font-mono hover:underline" title="Copy the password">{see ? pass : '••••••'}</button>
+        <button type="button" onClick={() => setSee(v => !v)} className="opacity-60 hover:opacity-100" title={see ? 'Hide' : 'Show'}>{see ? '🙈' : '👁'}</button>
+      </>}
+    </span>
   )
 }

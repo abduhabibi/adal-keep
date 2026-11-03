@@ -1973,6 +1973,20 @@ export async function runFullWorkflow(page, ctx) {
     }
   }
 
+  // Her application on the visa platform's list (SmartForm): number and paid or not.
+  if (workflowId === 'mofa_find_app') {
+    try {
+      const { runMofaFindApp } = await import('./mofaVisa.js')
+      return await runMofaFindApp(page, ctx)
+    } catch (e) {
+      if (e?.cancelled) throw e
+      const secs = Math.round((Date.now() - t0) / 1000)
+      log(ctx, `finding the visa application failed after ${secs}s: ${e.message}`, 'error')
+      await dumpPageState(page, ctx, 'mofa-find')
+      return { ok: false, step: 'mofa-find', error: e.message, seconds: secs }
+    }
+  }
+
   // Visa fees on the visa platform: sign-in, Pay Visa Fees, search, a person pays.
   if (workflowId === 'mofa_pay') {
     try {

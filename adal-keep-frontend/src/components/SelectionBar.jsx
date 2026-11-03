@@ -1,7 +1,7 @@
 /**
  * The Profiles page's ticked girls, in a bar on the right (at the bottom on a
  * phone), with what can be done for all of them at once:
- *   🛂 Make Tasheer · 🛡️ Make insurance · 🖨️ Print embassy (3 pages a girl).
+ *   🛂 Make Tasheer · 🛡️ Make insurance · 🖨️ Print embassy (2 pages a girl).
  * Every button first checks each girl has what it needs: the ones who do go
  * ahead; the others slide up in a list with what they lack (also shown on
  * their cards), with a link to each one's profile.
@@ -88,7 +88,7 @@ export default function SelectionBar({ picked, onRemove, onClear, onAllShown, on
       const rows = loaded.girls.filter(x => x.missing.length).map(x => ({ p: x.g.profile, missing: x.missing }))
       if (ready.length) await printEmbassy(loaded, ready, company || '')
       showLacking(`Print embassy: ${rows.length} not printed — they lack something`,
-        ready.length ? `Printed for the ${ready.length} who have everything (${ready.length * 3} pages).` : 'Nobody had everything yet.',
+        ready.length ? `Printed for the ${ready.length} who have everything (${ready.length * 2} pages).` : 'Nobody had everything yet.',
         rows, {
           anywayLabel: `Print these ${rows.length} anyway (what is missing is left as a marked gap)`,
           anyway: () => printEmbassy(loaded, rows.map(r => loaded.girls.find(x => x.g.profile.id === r.p.id).g), company || '').catch(e => toast.error(err(e))),
@@ -97,10 +97,10 @@ export default function SelectionBar({ picked, onRemove, onClear, onAllShown, on
     setBusy('')
   }
 
-  const btn = 'flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition disabled:opacity-50'
+  const btn = 'flex w-full items-center gap-1 rounded-lg px-2 py-2 text-xs font-semibold leading-tight transition disabled:opacity-50 lg:gap-2 lg:px-3 lg:text-sm'
   return (
     <>
-    <aside className="solid-sheet fixed inset-x-2 bottom-2 z-[60] flex max-h-[60vh] flex-col rounded-2xl border border-slate-200 shadow-2xl dark:border-slate-700 lg:inset-x-auto lg:bottom-3 lg:right-3 lg:top-20 lg:max-h-none lg:w-[19rem]">
+    <aside className="solid-sheet fixed inset-x-2 bottom-2 z-[60] flex flex-col rounded-2xl border border-slate-200 shadow-2xl dark:border-slate-700 lg:inset-x-auto lg:bottom-3 lg:right-3 lg:top-20 lg:max-h-none lg:w-[19rem]">
       <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2 dark:border-slate-800">
         <button type="button" onClick={() => setOpen(o => !o)} className="text-sm font-bold">
           ✓ {picked.length} selected <span className="text-slate-400 lg:hidden">{open ? '▾' : '▴'}</span>
@@ -111,16 +111,18 @@ export default function SelectionBar({ picked, onRemove, onClear, onAllShown, on
         </span>
       </div>
       <div className={`${open ? '' : 'hidden lg:flex'} flex min-h-0 flex-1 flex-col`}>
-        <div className="space-y-1.5 border-b border-slate-100 p-3 dark:border-slate-800">
+        <div className="grid grid-cols-3 gap-1.5 border-b border-slate-100 p-2 dark:border-slate-800 lg:grid-cols-1 lg:p-3">
           <button type="button" className={`${btn} bg-slate-100 text-slate-400 dark:bg-slate-800`} disabled
-            title="The Tasheer run is not built yet — show Adal Keep the Tasheer site's steps and it will be">🛂 Make Tasheer <span className="ml-auto text-[10px] font-normal">coming</span></button>
+            title="The Tasheer run is not built yet — show Adal Keep the Tasheer site's steps and it will be">🛂 Make Tasheer <span className="ml-auto hidden text-[10px] font-normal lg:inline">coming</span></button>
           <button type="button" className={`${btn} bg-amber-50 text-amber-800 hover:bg-amber-100 dark:bg-amber-900/30 dark:text-amber-300`} disabled={!!busy}
             onClick={() => startAll('insurance_certificate', 'Insurance certificate')}>🛡️ {busy === 'insurance_certificate' ? 'Checking and starting…' : 'Make insurance'}</button>
           <button type="button" className={`${btn} bg-teal-600 text-white hover:bg-teal-700`} disabled={!!busy}
-            onClick={print} title="3 pages a girl: the contract's first page, the visa payment page, and the embassy form with the visa and application numbers as barcodes">
-            🖨️ {busy === 'print' ? 'Checking…' : 'Print embassy'} <span className="ml-auto text-[10px] font-normal opacity-80">{picked.length * 3} pages</span></button>
+            onClick={print} title="2 pages a girl: the contract's first page and the embassy form with the visa and application numbers as barcodes">
+            🖨️ {busy === 'print' ? 'Checking…' : 'Print embassy'} <span className="ml-auto hidden text-[10px] font-normal opacity-80 lg:inline">{picked.length * 2} pages</span></button>
         </div>
-        <ul className="min-h-0 flex-1 divide-y divide-slate-100 overflow-y-auto dark:divide-slate-800">
+        {/* On a phone the list stays about 3 names high and scrolls, so the
+            cards above stay free to tick more. */}
+        <ul className="max-h-[7.5rem] min-h-0 flex-1 divide-y divide-slate-100 overflow-y-auto overscroll-contain dark:divide-slate-800 lg:max-h-none">
           {picked.map(p => (
             <li key={p.id} className="flex items-center gap-2 px-3 py-1.5 text-xs">
               <span className="min-w-0 flex-1">

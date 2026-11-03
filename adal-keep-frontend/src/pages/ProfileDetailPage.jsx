@@ -49,6 +49,14 @@ export default function ProfileDetailPage() {
     return () => { alive = false }
   }, [id, navigate])
 
+  // A run changed state or a person pressed a run's button: her notes and
+  // fields are fresh again (the runs write into them).
+  useEffect(() => {
+    const again = () => api.get(`/profiles/${id}`).then(r => setProfile(r.data)).catch(() => {})
+    window.addEventListener('adal-profile-changed', again)
+    return () => window.removeEventListener('adal-profile-changed', again)
+  }, [id])
+
   const deleteProfile = async () => {
     if (!confirm('Delete this profile permanently?')) return
     try {

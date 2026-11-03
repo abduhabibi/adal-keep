@@ -14,16 +14,24 @@ const field = 'w-full rounded-lg border border-slate-300 dark:border-slate-600 b
 const err = (e) => e?.response?.data?.error || e.message
 const EMPTY = { name: '', chat_id: '', number: '', musaned_office: '', template_ids: [] }
 
+/**
+ * An agent in three taps: its CV template(s) → "Link with WhatsApp" (pick the
+ * chat) → its name (the chat's name, change it if you like) → Save. Its office
+ * on Musaned is the template's name (the templates are named after the Saudi
+ * offices), so the CVs it chose are taken back from the others by themselves.
+ */
 function AgentForm({ initial, templates, chats, onDone, onCancel }) {
   const [a, setA] = useState({ ...EMPTY, ...initial })
   const [q, setQ] = useState('')
+  const [picking, setPicking] = useState(false)
   const [busy, setBusy] = useState(false)
-  const shown = (chats || []).filter(c => !q || c.name.toLowerCase().includes(q.toLowerCase())).slice(0, 8)
+  const shown = (chats || []).filter(c => !q || c.name.toLowerCase().includes(q.toLowerCase())).slice(0, 40)
   const toggle = (id) => setA(x => ({ ...x, template_ids: x.template_ids.includes(id) ? x.template_ids.filter(t => t !== id) : [...x.template_ids, id] }))
+  const office = a.musaned_office || templates.find(t => t.id === a.template_ids[0])?.name || ''
   const save = async () => {
     setBusy(true)
     try {
-      const body = { name: a.name, musaned_office: a.musaned_office, template_ids: a.template_ids, ...(a.chat_id ? { chat_id: a.chat_id } : { number: a.number }) }
+      const body = { name: a.name.trim(), musaned_office: office, template_ids: a.template_ids, ...(a.chat_id ? { chat_id: a.chat_id } : { number: a.number }) }
       if (initial?.id) await wa.patch(`/whatsapp/agents/${initial.id}`, body)
       else await wa.post('/whatsapp/agents', body)
       toast.success('Agent saved'); onDone()
@@ -31,32 +39,16 @@ function AgentForm({ initial, templates, chats, onDone, onCancel }) {
     setBusy(false)
   }
   const chatName = (chats || []).find(c => c.id === a.chat_id)?.name
+  const linked = !!(a.chat_id || a.number.trim())
+  const step = (n, done, text) => (
+    <p className="mb-1.5 flex items-center gap-2 text-xs font-semibold text-slate-600 dark:text-slate-300">
+      <span className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold ${done ? 'bg-teal-600 text-white' : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-200'}`}>{done ? '✓' : n}</span>{text}
+    </p>
+  )
   return (
-    <div className="space-y-3 rounded-xl border border-teal-200 bg-teal-50/40 p-3 dark:border-teal-800 dark:bg-teal-900/10">
-      <div className="grid gap-2 sm:grid-cols-2">
-        <input className={field} placeholder="Agent's name (e.g. Al-Riyadh office)" value={a.name} onChange={e => setA({ ...a, name: e.target.value })} />
-        <input className={field} placeholder="Its office name on Musaned" value={a.musaned_office} onChange={e => setA({ ...a, musaned_office: e.target.value })} />
-      </div>
+    <div className="space-y-4 rounded-xl border border-teal-200 bg-teal-50/40 p-3 dark:border-teal-800 dark:bg-teal-900/10">
       <div>
-        <p className="mb-1 text-xs font-semibold text-slate-500">Chat {a.chat_id && <span className="text-teal-600">✓ {chatName || a.chat_id}</span>}</p>
-        <div className="grid gap-2 sm:grid-cols-2">
-          <input className={field} placeholder="Search your chats…" value={q} onChange={e => setQ(e.target.value)} />
-          <input className={field} placeholder="…or type the number (966…)" value={a.number} onChange={e => setA({ ...a, number: e.target.value, chat_id: '' })} />
-        </div>
-        {q && (
-          <div className="mt-1 flex flex-wrap gap-1">
-            {shown.map(c => (
-              <button key={c.id} type="button" onClick={() => { setA({ ...a, chat_id: c.id, number: '', name: a.name || c.name }); setQ('') }}
-                className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs hover:border-teal-500 dark:border-slate-700 dark:bg-slate-800">
-                {c.group ? '👥' : '👤'} {c.name}
-              </button>
-            ))}
-            {!shown.length && <span className="text-xs text-slate-500">No chat with that name</span>}
-          </div>
-        )}
-      </div>
-      <div>
-        <p className="mb-1 text-xs font-semibold text-slate-500">Its CV template(s)</p>
+        {step(1, a.template_ids.length > 0, 'Click its CV template')}
         <div className="flex flex-wrap gap-1.5">
           {templates.map(t => (
             <button key={t.id} type="button" onClick={() => toggle(t.id)}
@@ -66,9 +58,41 @@ function AgentForm({ initial, templates, chats, onDone, onCancel }) {
           ))}
         </div>
       </div>
+      <div>
+        {step(2, linked, 'Link it with WhatsApp')}
+        {linked && !picking ? (
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <span className="rounded-full bg-teal-100 px-2.5 py-1 text-xs font-semibold text-teal-800 dark:bg-teal-900/30 dark:text-teal-300">💬 {chatName || a.number || a.chat_id}</span>
+            <button type="button" onClick={() => setPicking(true)} className="text-xs text-teal-700 underline dark:text-teal-400">change</button>
+          </div>
+        ) : picking ? (
+          <div className="space-y-2 rounded-lg border border-slate-200 bg-white p-2 dark:border-slate-700 dark:bg-slate-900">
+            <input autoFocus className={field} placeholder="Search your WhatsApp chats…" value={q} onChange={e => setQ(e.target.value)} />
+            <div className="max-h-56 space-y-0.5 overflow-y-auto">
+              {chats === null && <p className="p-2 text-xs text-slate-400">Loading your chats…</p>}
+              {shown.map(c => (
+                <button key={c.id} type="button" onClick={() => { setA(x => ({ ...x, chat_id: c.id, number: '', name: x.name || c.name })); setPicking(false); setQ('') }}
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-teal-50 dark:hover:bg-teal-900/20">
+                  <span>{c.group ? '👥' : '👤'}</span><span className="truncate">{c.name}</span>
+                </button>
+              ))}
+              {chats && !shown.length && <p className="p-2 text-xs text-slate-500">No chat with that name</p>}
+            </div>
+            <input className={field} placeholder="…or type a number (966…)" value={a.number}
+              onChange={e => setA({ ...a, number: e.target.value, chat_id: '' })} onBlur={() => a.number.trim() && setPicking(false)} />
+          </div>
+        ) : (
+          <Button size="sm" variant="secondary" onClick={() => setPicking(true)}>💬 Link with WhatsApp</Button>
+        )}
+      </div>
+      <div>
+        {step(3, !!a.name.trim(), 'Name it')}
+        <input className={field} placeholder={chatName || 'e.g. Al-Riyadh office'} value={a.name} onChange={e => setA({ ...a, name: e.target.value })} />
+        {office && <p className="mt-1 text-[11px] text-slate-500">Musaned office: {office} (from the template)</p>}
+      </div>
       <div className="flex justify-end gap-2">
         <Button size="sm" variant="secondary" onClick={onCancel}>Cancel</Button>
-        <Button size="sm" disabled={busy || !a.name.trim() || (!a.chat_id && !a.number.trim())} onClick={save}>{busy ? 'Saving…' : 'Save agent'}</Button>
+        <Button size="sm" disabled={busy || !a.name.trim() || !linked || !a.template_ids.length} onClick={save}>{busy ? 'Saving…' : 'Save agent'}</Button>
       </div>
     </div>
   )

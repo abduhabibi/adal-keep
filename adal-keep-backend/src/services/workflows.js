@@ -67,6 +67,16 @@ export const WORKFLOWS = {
     stepCount: 4,
   },
 
+  mofa_find_app: {
+    id: 'mofa_find_app',
+    name: 'Find application number (Enjaz)',
+    description:
+      'Visa platform → a person types the sign-in captcha → the list of visa applications → her passport number → her Application Number, and whether the fees are paid (Print | Edit)',
+    target: 'https://visa.mofa.gov.sa/SmartForm',
+    consts: {},
+    stepCount: 3,
+  },
+
   mofa_pay: {
     id: 'mofa_pay',
     name: 'Pay visa fees (Enjaz)',

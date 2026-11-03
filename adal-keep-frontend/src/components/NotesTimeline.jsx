@@ -27,9 +27,11 @@ const STATUS = {
   fit: ['FIT', 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300'],
   done: ['Done', 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300'],
   info: ['Info', 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'],
+  cancel: ['Cancelled', 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'],
   past: ['Earlier', 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400'],
 }
-const statusOf = (t) => /\bUNFIT\b|failed|rejected|not found|error/i.test(t) ? 'bad'
+const statusOf = (t) => /cancelled/i.test(t) ? 'cancel'
+  : /\bUNFIT\b|failed|rejected|not found|no application found|NOT paid|error/i.test(t) ? 'bad'
   : /waiting for (a person|you)|a person (types|presses|adds)|needs? (you|a person)/i.test(t) ? 'need'
   : /\bFIT\b/.test(t) ? 'fit'
   : /already registered|not added again|nothing/i.test(t) ? 'info'

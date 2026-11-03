@@ -176,6 +176,10 @@ router.post('/profiles/:profileId/automations/:workflowId/start', async (req, re
       }
       const acct = await db('visa_accounts').first()
       if (!acct) return res.status(400).json({ error: 'No visa platform account yet — add one under "Visa platform login account"', missing: ['Visa platform account'] })
+    } else if (workflowId === 'mofa_find_app') {
+      const prof = await db('profiles').where('id', profileId).first()
+      if (!String(prof?.passport_number || '').trim()) return res.status(400).json({ error: 'Profile is missing the passport number', missing: ['Passport number'] })
+      if (!(await db('visa_accounts').first())) return res.status(400).json({ error: 'No visa platform account yet — add one under "Visa platform login account"', missing: ['Visa platform account'] })
     } else if (workflowId === 'mofa_pay') {
       const prof = await db('profiles').where('id', profileId).first()
       const missing = [!String(prof?.visa_application_number || '').trim() && 'Application number', !String(prof?.passport_number || '').trim() && 'Passport number'].filter(Boolean)
@@ -347,6 +351,7 @@ router.get('/automations/active', async (req, res) => {
 // Where every profile stands in the whole journey (Musaned → employer →
 // Wafid → LMIS contract → visa). Used by the "Stage" filter on the lists.
 export const STAGES = [
+  ['visa_printed', 'Visa printed'],
   ['visa_paid', 'Visa fees paid'],
   ['visa_applied', 'Visa applied'],
   ['visa', 'Visa — form filled, waiting for Save'],
@@ -366,6 +371,7 @@ export const STAGES = [
 export function stageOf(p, runs = {}) {
   const live = (r) => r && ['running', 'pending', 'paused'].includes(r.status)
   const visa = String(p.visa_stage || '')
+  if (/printed/i.test(visa)) return 'visa_printed'
   if (/paid/i.test(visa)) return 'visa_paid'
   if (/applied/i.test(visa)) return 'visa_applied'
   if (live(runs.mofa_visa) || /waiting|filled/i.test(visa)) return 'visa'
@@ -447,7 +453,7 @@ export function journeyOf(p, runs = {}, hasCv = false, docs = null, agents = [])
   const wakala = step('wakala', 'Paid wakala', /^paid$/i.test(pay) ? 'done' : chosen && /^unpaid$/i.test(pay) ? 'failed' : 'todo',
     /^paid$/i.test(pay) ? 'paid' : chosen && /^unpaid$/i.test(pay) ? 'unpaid' : '', 'musaned_check_chosen')
   const lmis = step('lmis', 'LMIS contract', ...fromRun(runs.lmis_contract, 'created'), 'lmis_contract')
-  const visa = /applied|paid/i.test(p.visa_stage || '') ? ['done', `${/paid/i.test(p.visa_stage) ? 'paid' : 'applied'}${p.visa_application_number ? ` · no. ${p.visa_application_number}` : ''}`]
+  const visa = /applied|paid|printed/i.test(p.visa_stage || '') ? ['done', `${/printed/i.test(p.visa_stage) ? 'printed' : /paid/i.test(p.visa_stage) ? 'paid' : 'applied'}${p.visa_application_number ? ` · no. ${p.visa_application_number}` : ''}`]
     : fromRun(runs.mofa_visa)
   const tasheer = step('tasheer', 'Tasheer', 'soon', 'coming')
   const insurance = step('insurance', 'Insurance', ...fromRun(runs.insurance_certificate, 'certificate done'), 'insurance_certificate')
@@ -639,6 +645,24 @@ router.post('/automations/:id/input', async (req, res) => {
   catch (e) { res.status(e.status || 500).json({ error: e.message }) }
 })
 
+
+/**
+ * A person's button on a run (Cancel, a "done" button, Continue) goes into her
+ * notes too, under the run's portal — so the notes never still say "waiting
+ * for a person" after the person answered.
+ */
+const PORTAL_OF = [[/^musaned/, 'Musaned'], [/^wafid/, 'Wafid medical'], [/^insurance/, 'Insurance'], [/^mofa/, 'Visa'], [/^police/, 'Police'], [/^(lmis|contract|delete)/, 'LMIS']]
+async function noteRun(db, row, what) {
+  try {
+    if (!row?.profile_id) return
+    const portal = (PORTAL_OF.find(([re]) => re.test(row.workflow_id)) || [null, 'Run'])[1]
+    const name = listWorkflows().find(w => w.id === row.workflow_id)?.name || row.workflow_id
+    const p = await db('profiles').where('id', row.profile_id).first('notes')
+    const line = `[${new Date().toISOString().slice(0, 10)}] ${portal}: ${name} (run #${row.id}) ${what}`
+    await db('profiles').where('id', row.profile_id).update({ notes: p?.notes ? `${p.notes}\n${line}` : line, updated_at: new Date().toISOString() })
+  } catch (e) { console.warn('[notes]', e.message) }
+}
+
 router.post('/automations/:id/resume', async (req, res) => {
   try {
     const db = req.app.locals.db
@@ -665,6 +689,7 @@ router.post('/automations/:id/resume', async (req, res) => {
       await db('automation_queue').where('id', runId).andWhere('status', 'paused')
         .update({ status: 'pending', updated_at: new Date().toISOString() })
     }
+    if (row.status === 'paused') await noteRun(db, row, 'continued by a person')
     const s = await dispatchRun(db, runId)
     res.json({ ok: true, ...s, message: runMessage(runId, s, row.status === 'paused' ? 'continued' : 'was already queued') })
   } catch (e) { res.status(500).json({ error: e.message }) }
@@ -721,6 +746,8 @@ router.post('/automations/:id/cancel', async (req, res) => {
       updated_at: new Date().toISOString(),
     })
 
+    await noteRun(db, row, 'cancelled by a person')
+
     // 3. The run lets go of its tab; the tab stays open for the person.
     const tabClosed = false
     try { forgetRunTab(runId) } catch {}
@@ -757,6 +784,8 @@ router.post('/automations/:id/complete', async (req, res) => {
       finished_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })
+
+    await noteRun(db, row, 'done — marked by a person')
 
     // What finishing this run starts next.
     let next = ''

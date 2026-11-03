@@ -1,8 +1,7 @@
 /**
- * Print for the embassy: 3 pages a girl —
+ * Print for the embassy: 2 pages a girl —
  *   1. her contract's first page (Musaned's contract PDF)
- *   2. the page that shows the visa is paid (from Enjaz; when it is kept)
- *   3. our page: the embassy application form with the visa number and the
+ *   2. our page: the embassy application form with the visa number and the
  *      application number as barcodes at the top.
  * Drawn in a hidden frame and sent to the printer.
  */
@@ -11,6 +10,8 @@ import { barcodeSvg } from './barcode'
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
 const day = (d) => { const m = String(d || '').match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? `${m[3]}-${m[2]}-${m[1]}` : esc(d) }
+// Enjaz prints the application number with an E in front (E823501586).
+export const appCode = (n) => { const t = String(n || '').trim(); return /^\d/.test(t) ? `E${t}` : t }
 const cap = (s) => String(s || '').toLowerCase().replace(/\b\w/g, c => c.toUpperCase())
 
 function picturePage(src, what, name) {
@@ -26,7 +27,7 @@ function formPage(g, agency, email) {
   return `<section class="page form">
   <div class="codes">
     <div>${barcodeSvg(p.visa_number, { width: 250, height: 46 })}<p><b>Visa Number:</b> ${esc(p.visa_number || '—')}</p><p><b>Sponsor Name:</b> ${esc(p.employer_name || '')}</p></div>
-    <div class="right">${barcodeSvg(p.visa_application_number, { width: 250, height: 46 })}<p><b>${esc(p.visa_application_number || 'No application number yet')}</b></p></div>
+    <div class="right">${barcodeSvg(appCode(p.visa_application_number), { width: 250, height: 46 })}<p><b>${esc(appCode(p.visa_application_number) || 'No application number yet')}</b></p></div>
   </div>
   <div class="head">
     <div class="photo">${g.photo ? `<img src="${g.photo}">` : ''}</div>
@@ -87,7 +88,6 @@ export async function loadEmbassy(ids) {
     g,
     missing: [
       !g.contract_page && 'Contract (PDF)',
-      !g.payment_page && 'Visa payment page',
       !g.profile.visa_application_number && 'Application number',
       !g.profile.visa_number && 'Visa number',
       !g.photo && 'Photo',
@@ -101,7 +101,6 @@ export async function printEmbassy(loaded, girls, agency = '') {
   if (!girls.length) throw new Error('Nothing to print')
   const pages = girls.map(g =>
     picturePage(g.contract_page, 'Contract', g.profile.full_name) +
-    picturePage(g.payment_page, 'Visa payment', g.profile.full_name) +
     formPage(g, agency, loaded.email)).join('')
   const frame = document.createElement('iframe')
   frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0'

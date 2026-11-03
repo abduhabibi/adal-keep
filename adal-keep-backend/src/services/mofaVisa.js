@@ -788,3 +788,60 @@ export async function runMofaPay(page, ctx) {
   )
   return { ok: true, pauseReason: 'awaiting-visa-pay', seconds: secs() }
 }
+
+// ---------------------------------------------------------------------------
+// Find her application (workflow id: mofa_find_app)
+// ---------------------------------------------------------------------------
+
+export const MOFA_FIND = 'mofa_find_app'
+
+/**
+ * SmartForm's list of visa applications, searched by her passport number:
+ * her row's Application Number (the first column) and what its Actions say —
+ * "Print | Edit" = the visa fees are paid, only "Edit" = not paid yet, and the
+ * status "Visa Printed" = the visa is issued.
+ */
+async function readAppRow(page, pp) {
+  return page.evaluate((pp) => {
+    const rows = [...document.querySelectorAll('tr')].filter(r => r.querySelectorAll('td').length >= 3)
+    const tr = rows.find(r => (r.innerText || '').toUpperCase().replace(/\s+/g, '').includes(pp))
+    if (!tr) return null
+    const cells = [...tr.querySelectorAll('td')].map(td => (td.innerText || '').trim())
+    const head = [...(tr.closest('table')?.querySelectorAll('th') || [])].map(th => (th.innerText || '').trim())
+    const at = (re) => { const i = head.findIndex(h => re.test(h)); return i >= 0 ? cells[i] || '' : '' }
+    const app = (at(/application\s*number/i) || cells[0] || '').match(/[A-Z]?\d{6,}/i)?.[0] || ''
+    const status = at(/status/i)
+    const actions = (at(/actions?/i) || cells[cells.length - 1] || '')
+    return { app, status, print: /print/i.test(actions), edit: /edit/i.test(actions), printed: /visa\s*printed/i.test(tr.innerText || '') }
+  }, pp).catch(() => null)
+}
+
+export async function runMofaFindApp(page, ctx) {
+  const t0 = Date.now()
+  const secs = () => Math.round((Date.now() - t0) / 1000)
+  const pp = String(ctx.profile?.passport_number || '').trim().toUpperCase()
+  if (!pp) return { ok: false, step: 'preflight', error: 'Profile is missing the passport number', seconds: 0 }
+  log(ctx, `🔎 Finding the visa application of ${ctx.profileName} (passport ${pp})`)
+  await signIn(page, ctx)
+  await page.goto(LIST_URL, { waitUntil: 'domcontentloaded', timeout: 120000 }).catch(() => {})
+  if (onLogin(page)) { await signIn(page, ctx); await page.goto(LIST_URL, { waitUntil: 'domcontentloaded', timeout: 120000 }).catch(() => {}) }
+  await until(async () => !!(await markField(page, 'Passport\\s*Number', 'find-probe', 'input')), 30000, ctx)
+  await sleep(800)
+  if (!(await typeUnder(page, 'Passport\\s*Number', pp))) throw new Error('The Passport Number box was not found on the list of visa applications')
+  await clickText(page, /^\s*Search\s*$/)
+  log(ctx, `searched passport ${pp}`)
+  let r = null
+  await until(async () => !!(r = await readAppRow(page, pp)), 20000, ctx)
+  if (!r || !r.app) {
+    await ctx.noteProfile?.(`Visa: no application found on the visa platform for passport ${pp}`)
+    return { ok: false, step: 'find', error: `No visa application found for passport ${pp}`, seconds: secs() }
+  }
+  const stage = r.printed ? 'Visa printed' : r.print ? 'Visa paid' : 'Visa applied'
+  const said = r.printed ? 'the visa is printed' : r.print ? 'the visa fees are paid' : 'the visa fees are NOT paid yet'
+  await ctx.noteProfile?.(`Visa: application number ${r.app} — ${said}`, { visa_application_number: r.app, visa_stage: stage })
+  log(ctx, `✅ application ${r.app} — ${said}`)
+  if (!r.print && !r.printed) {
+    await ctx.notify(`💳 ${ctx.profileName}: visa fees not paid`, `Application ${r.app} on the visa platform has no Print yet: the fees are not paid. "Pay visa fees" opens the payment.`, 'info')
+  }
+  return { ok: true, done: true, seconds: secs() }
+}

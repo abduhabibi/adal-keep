@@ -373,6 +373,18 @@ export function agentsOf(db, key) {
 }
 
 /** Her CV with this template: the newest one already made (file still there, made after her last change), else a new one. */
+/** Her newest self video on file (field "Self Video"), or null. */
+async function selfVideo(db, profileId) {
+  const f = await db('profile_fields').join('files', 'files.profile_field_id', 'profile_fields.id')
+    .where('profile_fields.profile_id', profileId).where('profile_fields.name', 'like', 'Self Video%')
+    .where('files.mimetype', 'like', 'video/%').orderBy('files.id', 'desc').first('files.path', 'files.original_name', 'files.size').catch(() => null)
+  if (!f) return null
+  const { resolveStoredPath } = await import('./cvRender.js')
+  const abs = resolveStoredPath(f.path)
+  if (!abs || !fs.existsSync(abs)) return null
+  return { path: abs, name: f.original_name || path.basename(abs), size: fs.statSync(abs).size }
+}
+
 async function cvFor(db, p, tid) {
   const old = await db('generated_cvs').where({ profile_id: p.id, template_id: tid }).orderBy('id', 'desc').first().catch(() => null)
   if (old?.pdf_path && new Date(old.created_at) >= new Date(p.updated_at || 0)) {
@@ -405,6 +417,7 @@ export async function sendCV(db, key, profileId, agentIds, by = '') {
   const agents = (await q).map(agentRow)
   if (!agents.length) throw new Error('You have no WhatsApp agents yet — add them in Settings → Integrations → WhatsApp')
   const made = new Map() // one PDF per template, shared by the agents that use it
+  const video = await selfVideo(db, p.id)
   const out = []
   for (const a of agents) {
     const tids = a.template_ids.length ? a.template_ids : [(await db('cv_templates').where('is_active', 1).orderBy('id').first('id'))?.id].filter(Boolean)
@@ -427,6 +440,21 @@ export async function sendCV(db, key, profileId, agentIds, by = '') {
       }
       await new Promise(r => setTimeout(r, 1500 + Math.random() * 1500)) // a person's pace
     }
+    // Her self video goes with her CV, once per agent (taken back with it when she is chosen).
+    if (video && out.some(o => o.agent === a.name && o.ok && !o.already)) {
+      const vrow = { profile_id: p.id, agent_id: a.id, template_id: null, chat_id: a.chat_id, user_key: key, sent_at: new Date().toISOString() }
+      try {
+        const media = wweb.MessageMedia.fromFilePath(video.path)
+        media.filename = video.name
+        // WhatsApp plays a video up to ~16 MB; a bigger one goes as a file.
+        const msg = await c.sendMessage(a.chat_id, media, { sendMediaAsDocument: video.size > 16 * 1024 * 1024, caption: `🎥 ${p.full_name}` })
+        await db('whatsapp_sends').insert({ ...vrow, message_id: msgIdOf(msg), status: 'sent' })
+        out.push({ agent: a.name, video: true, ok: true })
+      } catch (e) {
+        out.push({ agent: a.name, video: true, ok: false, error: `video: ${String(e?.message || e)}` })
+      }
+      await new Promise(r => setTimeout(r, 1500 + Math.random() * 1500))
+    }
   }
   if (by) console.log(`[whatsapp ${key}] ${p.full_name}: CV sent by ${by} to ${out.filter(o => o.ok && !o.already).length} chat(s)`)
   return out
@@ -445,7 +473,7 @@ export function sendMany(db, key, profileIds, agentIds, by = '') {
         name = (await db('profiles').where('id', id).first('full_name'))?.full_name || ''
         b.current = name
         const r = await sendCV(db, key, id, agentIds, by)
-        b.sent += r.filter(x => x.ok && !x.already).length
+        b.sent += r.filter(x => x.ok && !x.already && !x.video).length
         for (const x of r.filter(x => !x.ok)) { b.failed++; b.errors.push(`${name}: ${x.agent} — ${x.error}`) }
       } catch (e) { b.failed++; b.errors.push(`${name}: ${e.message}`) }
       b.done++

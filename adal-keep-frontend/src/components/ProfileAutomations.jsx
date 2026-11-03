@@ -41,7 +41,7 @@ const COMPLETE_LABEL = {
 }
 
 // Runs that are simply run again when clicked after they finished.
-const REPEATABLE = new Set(['musaned_check_chosen', 'musaned_cv_import', 'wafid_check', 'wafid_slip'])
+const REPEATABLE = new Set(['musaned_check_chosen', 'musaned_cv_import', 'wafid_check', 'wafid_slip', 'mofa_find_app'])
 
 // Waits that must not run again (a second run would make a second application).
 const NO_CONTINUE = new Set(['awaiting-visa-save', 'awaiting-insurance-save'])
@@ -176,6 +176,7 @@ export default function ProfileAutomations({ profileId }) {
         setDetail(r.data)
         // Refresh the cards whenever the run changes state (queued → working → paused …).
         if (r.data.status !== lastStatus.current) {
+          if (lastStatus.current) window.dispatchEvent(new Event('adal-profile-changed'))
           lastStatus.current = r.data.status
           load({ quiet: true })
         }
@@ -241,6 +242,7 @@ export default function ProfileAutomations({ profileId }) {
       announce(r.data, r.data.message || fallback)
       if (after) after()
       load({ quiet: true })
+      setTimeout(() => window.dispatchEvent(new Event('adal-profile-changed')), 300)
     } catch (e) {
       toast.error(e.response?.data?.error || `Could not ${action} run #${detail.id}`, { duration: 8000 })
     }
@@ -370,7 +372,7 @@ export default function ProfileAutomations({ profileId }) {
     { title: 'Wafid medical', ids: ['wafid_book', 'wafid_slip', 'wafid_check'], box: 'border-emerald-200 dark:border-emerald-800', head: 'text-emerald-700 dark:text-emerald-300' },
     { title: 'Tasheer', ids: [], empty: 'Coming soon — the Tasheer steps are added next.', box: 'border-amber-200 dark:border-amber-800 border-dashed', head: 'text-amber-700 dark:text-amber-300' },
     { title: 'Insurance', ids: ['insurance_certificate'], box: 'border-rose-200 dark:border-rose-800', head: 'text-rose-700 dark:text-rose-300' },
-    { title: 'Enjaz · Visa', ids: ['mofa_visa', 'mofa_pay'], box: 'border-sky-200 dark:border-sky-800', head: 'text-sky-700 dark:text-sky-300' },
+    { title: 'Enjaz · Visa', ids: ['mofa_visa', 'mofa_find_app', 'mofa_pay'], box: 'border-sky-200 dark:border-sky-800', head: 'text-sky-700 dark:text-sky-300' },
     { title: 'LMIS · Contract', ids: ['lmis_contract'], box: 'border-teal-200 dark:border-teal-800', head: 'text-teal-700 dark:text-teal-300' },
     { title: 'LMIS · Police clearance', ids: ['police_certificate'], box: 'border-slate-200 dark:border-slate-700', head: 'text-slate-600 dark:text-slate-300' },
   ]
@@ -495,7 +497,10 @@ export default function ProfileAutomations({ profileId }) {
         const flows = g.ids.map(id => workflows.find(w => w.id === id)).filter(Boolean)
         return (
           <div key={g.title} className={`mb-3 rounded-xl border-2 p-3 ${g.box}`}>
-            <p className={`text-[11px] font-semibold uppercase tracking-wide mb-2 ${g.head}`}>{g.title}</p>
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <p className={`text-[11px] font-semibold uppercase tracking-wide ${g.head}`}>{g.title}</p>
+              {g.title === 'Musaned' && <MusanedCode accountId={musanedAccountId} />}
+            </div>
             {flows.length ? (
               // One row: the portal's cards side by side, and the open run's controls beside them.
               <div className="flex gap-2 overflow-x-auto pb-1 sm:grid sm:overflow-visible sm:pb-0"
@@ -570,7 +575,7 @@ export default function ProfileAutomations({ profileId }) {
       {/* The run's buttons stay at the bottom of the screen (no scrolling down
           to them), with the account's sign-in in a small box beside them. */}
       {open && detail && !screen && !inlineSeen && createPortal(
-        <div className="run-actions solid-sheet fixed bottom-3 left-1/2 z-[70] flex max-w-[calc(100vw-1.5rem)] -translate-x-1/2 items-center gap-1.5 overflow-x-auto rounded-2xl border border-slate-200 bg-white/95 px-2.5 py-2 shadow-2xl backdrop-blur animate-fade-up dark:border-slate-700 dark:bg-slate-900/95 sm:gap-2" style={{ marginBottom: 'env(safe-area-inset-bottom)' }}>
+        <div className="run-actions solid-sheet fixed bottom-3 left-1/2 z-[70] flex w-max max-w-[calc(100vw-1.5rem)] -translate-x-1/2 flex-wrap items-center justify-center gap-1.5 rounded-2xl border border-slate-200 bg-white/95 px-2.5 py-2 shadow-2xl backdrop-blur animate-fade-up dark:border-slate-700 dark:bg-slate-900/95 sm:gap-2" style={{ marginBottom: 'env(safe-area-inset-bottom)' }}>
           {controls()}
         </div>,
         document.body)}
@@ -653,5 +658,34 @@ function SignInChip({ runId }) {
         <button type="button" onClick={() => setSee(v => !v)} className="opacity-60 hover:opacity-100" title={see ? 'Hide' : 'Show'}>{see ? '🙈' : '👁'}</button>
       </>}
     </span>
+  )
+}
+
+/**
+ * The Musaned code now (the account's authenticator kept in Adal Keep —
+ * Settings → Portals): in the Musaned box, tap to copy; it changes every 30 s.
+ */
+function MusanedCode({ accountId }) {
+  const [all, setAll] = useState(null)
+  const [left, setLeft] = useState(0)
+  useEffect(() => {
+    let alive = true
+    const load = () => api.get('/musaned/authenticators').then(r => { if (alive) { setAll(r.data || {}); const any = Object.values(r.data || {}).find(Boolean); setLeft(any?.left || 30) } }).catch(() => {})
+    load()
+    const t = setInterval(() => setLeft(l => { if (l <= 1) { load(); return 30 } return l - 1 }), 1000)
+    return () => { alive = false; clearInterval(t) }
+  }, [])
+  if (!all) return null
+  const info = (accountId && all[accountId]) || Object.values(all).find(Boolean)
+  if (!info) return <span className="text-[10px] text-slate-400" title="Settings → Portals → Musaned authenticator">🔑 No Musaned code in Adal Keep</span>
+  const code = String(info.code || '')
+  return (
+    <button type="button" onClick={() => navigator.clipboard?.writeText(code).then(() => toast.success('Musaned code copied', { duration: 1500 })).catch(() => {})}
+      title={`Musaned code (${info.label || 'authenticator'}) — tap to copy`}
+      className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-white px-2 py-1 dark:border-indigo-800 dark:bg-slate-900">
+      <span className="text-[10px] font-semibold text-indigo-700 dark:text-indigo-300">🔑 Musaned code</span>
+      <span className="font-mono text-sm font-bold tracking-[0.2em] text-slate-800 dark:text-slate-100">{code.slice(0, 3)} {code.slice(3)}</span>
+      <span className="relative h-1 w-8 overflow-hidden rounded-full bg-indigo-100 dark:bg-indigo-900/40"><span className="absolute inset-y-0 left-0 bg-indigo-500 transition-all duration-1000" style={{ width: `${(left / 30) * 100}%` }} /></span>
+    </button>
   )
 }

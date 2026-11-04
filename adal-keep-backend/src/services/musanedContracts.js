@@ -25,7 +25,7 @@ import path from 'path'
 import crypto from 'crypto'
 import { fileURLToPath } from 'url'
 import { getBrowser, openBrowserIfAny } from './browser.js'
-import { setupTab } from './tabManager.js'
+import { setupTab, borrowTab, doneWithTab, activeRunIds } from './tabManager.js'
 
 const SAFE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'data', 'SafeStorage')
 const LIST_URL = 'https://tawtheeq.musaned.com.sa/employment-requests?sort=createdAt,DESC&page=0&size=10'
@@ -159,7 +159,7 @@ export async function scanContracts(db, { auto = false } = {}) {
   try {
     const profiles = await db('profiles').select('*')
     const browser = await getBrowser()
-    page = await browser.newPage()
+    page = await borrowTab(browser, 'musaned_check_chosen', await activeRunIds(db))
     await setupTab(page, { runId: 'musaned-contracts' })
     page.__adalAllowImages = true
     const open = async (url) => {
@@ -236,7 +236,7 @@ export async function scanContracts(db, { auto = false } = {}) {
     const fresh = contractCheck.results.filter(r => r.first)
     return { checked: cards.length, newlyChosen: fresh.map(r => r.name), results: contractCheck.results, unknown: contractCheck.unknown }
   } finally {
-    try { await page?.close() } catch {}
+    await doneWithTab(page).catch(() => {})
     contractCheck.running = false
     contractCheck.last = new Date().toISOString()
   }
@@ -784,7 +784,7 @@ export async function checkContracts(db, { onlyId = null } = {}) {
     const list = await candidates(db, onlyId)
     if (!list.length) return { checked: 0 }
     const browser = await getBrowser()
-    page = await browser.newPage()
+    page = await borrowTab(browser, 'musaned_check_chosen', await activeRunIds(db))
     await setupTab(page, { runId: 'musaned-contracts' })
     page.__adalAllowImages = true
     for (const [i, p] of list.entries()) {
@@ -809,7 +809,7 @@ export async function checkContracts(db, { onlyId = null } = {}) {
     if (!contractCheck.signedOut && contractCheck.results.length) await doneSignInTasks(db)
     return { checked: contractCheck.results.length, results: contractCheck.results }
   } finally {
-    try { await page?.close() } catch {}
+    await doneWithTab(page).catch(() => {})
     contractCheck.running = false
     contractCheck.last = new Date().toISOString()
   }

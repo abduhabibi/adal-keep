@@ -116,7 +116,7 @@ export function codeMatches(pc, code, now = Date.now(), key = licenseKey()) {
 // Unlocked for good (sold before 2026-11-03).
 const proofFor = (pc) => crypto.createHmac('sha256', licenseKey() || 'no-key').update('adal-keep-unlocked:' + pc).digest('hex')
 // Paid until a date: the date is signed, so editing the file does not move it.
-const paidProof = (pc, until) => crypto.createHmac('sha256', licenseKey() || 'no-key').update(`adal-keep-paid:${pc}:${until}`).digest('hex')
+export const paidProof = (pc, until) => crypto.createHmac('sha256', licenseKey() || 'no-key').update(`adal-keep-paid:${pc}:${until}`).digest('hex')
 const paidOk = (x, pc) => !!(x?.paid_until && x?.paid_proof && x.paid_proof === paidProof(pc, x.paid_until))
 
 // ---------------------------------------------------------------------------

@@ -11,7 +11,7 @@
  */
 import { whenRunsIdle } from './busy.js'
 import { getBrowser, openBrowserIfAny } from './browser.js'
-import { setupTab } from './tabManager.js'
+import { setupTab, borrowTab, doneWithTab, activeRunIds } from './tabManager.js'
 import { checkMedicalStatus } from './wafidWorkflow.js'
 
 export const WAFID_BOOK = 'wafid_book'
@@ -101,7 +101,7 @@ export async function checkAll(db, { onlyId = null, auto = false } = {}) {
     if (!list.length) return { checked: 0, results: [] }
 
     const browser = await getBrowser()
-    page = await browser.newPage()
+    page = await borrowTab(browser, 'wafid_check', await activeRunIds(db))
     await setupTab(page, { runId: 'wafid-status' })
     page.__adalAllowImages = true // reCAPTCHA
 
@@ -125,7 +125,7 @@ export async function checkAll(db, { onlyId = null, auto = false } = {}) {
     }
     return { checked: checker.results.length, results: checker.results }
   } finally {
-    try { await page?.close() } catch {}
+    await doneWithTab(page).catch(() => {})
     checker.running = false
     checker.last = new Date().toISOString()
   }

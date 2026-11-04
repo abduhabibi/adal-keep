@@ -23,7 +23,7 @@ import { runFullWorkflow } from './lmisWorkflow.js'
 import { decideAgencyActions } from './jev/agencyManager.js'
 import { getActiveEmployee } from './activeEmployee.js'
 import { isAppLocked } from './subscription.js'
-import { openRunTab, forgetRunTab, tabOfRun, handTabToPerson, findRunTab } from './tabManager.js'
+import { openRunTab, forgetRunTab, tabOfRun, handTabToPerson, findRunTab, activeRunIds, hostOf } from './tabManager.js'
 import { registerTab, unregisterTab, noteLink } from './bandwidth.js'
 import { createRunQueue } from './runQueue.js'
 import { reportRuns } from './busy.js'
@@ -583,7 +583,10 @@ async function executeRun(db, page, job) {
       status: 'running',
       started_at: new Date().toISOString(),
     })
-    await onLog('info', `▶ Run #${runId} working in its own browser tab (no other run uses it)`)
+    await onLog('info', page.__adalReused
+      ? `▶ Run #${runId} took the free tab already open on ${hostOf(page.__adalReused)} (no other run uses it) and goes to its page`
+      : `▶ Run #${runId} working in its own browser tab (no other run uses it)`)
+    page.__adalReused = null
 
     const result = await runFullWorkflow(page, ctx)
 
@@ -657,9 +660,9 @@ async function runJob(db, job) {
     }
     const browser = await getBrowser()
     // After a server restart the run finds the tab it worked in again.
-    // (by its name only: a new run never takes over another tab on the same site)
     await findRunTab(browser, job.id, job.workflow_id, { bySite: false }).catch(() => null)
-    const page = await openRunTab(browser, job.id)
+    // Otherwise a free tab already on the site (signed in), else a new one.
+    const page = await openRunTab(browser, job.id, { workflowId: job.workflow_id, busyRuns: await activeRunIds(db) })
     await executeRun(db, page, job)
   } catch (e) {
     // Could not start at all: no browser, profile deleted, ...

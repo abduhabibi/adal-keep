@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { totp, luhnDigit, isPcNumber, pcNumber, codeMatches, pcSecret, computeMode, TRIAL_DAYS } from '../src/services/subscription.js'
+import { totp, luhnDigit, isPcNumber, pcNumber, codeMatches, pcSecret, computeMode, TRIAL_DAYS, paidProof } from '../src/services/subscription.js'
 
 const DAY = 86400000
 
@@ -40,6 +40,7 @@ test('trial → locked after the trial days; clock set back → locked', () => {
   assert.equal(computeMode({ installation_date: now - (TRIAL_DAYS - 1) * DAY, last_seen: now }), 'trial')
   assert.equal(computeMode({ installation_date: now - (TRIAL_DAYS + 1) * DAY, last_seen: now }), 'locked')
   assert.equal(computeMode({ installation_date: now - DAY, last_seen: now + 2 * DAY }), 'locked')
-  assert.equal(computeMode({ installation_date: now - 99 * DAY, paid_until: now + DAY }), 'active')
+  assert.equal(computeMode({ installation_date: now - 99 * DAY, paid_until: now + DAY, paid_proof: paidProof(pcNumber(), now + DAY) }), 'active')
+  assert.equal(computeMode({ installation_date: now - 99 * DAY, paid_until: now + DAY }), 'locked')   // a date without its proof
   assert.equal(computeMode({ installation_date: now - 99 * DAY, unlocked_pc: pcNumber(), unlock_proof: 'forged' }), 'locked')
 })

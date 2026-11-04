@@ -11,14 +11,16 @@
  *
  * WHAT THIS DOES
  * --------------
- *   openRunTab(browser, runId) → the run's own tab. A new run always gets a
- *                                new tab; a resumed run gets its tab back.
+ *   openRunTab(browser, runId) → the run's own tab. A resumed run gets its tab
+ *                                back; a new run takes a free tab already on
+ *                                its site (signed in, no page load from
+ *                                nothing) and goes to its page, else a new tab.
  *   tabOfRun(runId)            → that tab, or null.
  *   closeRunTab(runId)         → closes that tab and nothing else.
  *
- * This registry (runId → tab) is the only way a tab is ever found. A run
- * never touches a tab it does not own, and tabs the operator opened are
- * never adopted, navigated or closed.
+ * A tab is only ever taken when nobody needs it (findFreeTab): never one that
+ * a run owns, one waiting for a paused run, one a person is looking at, or a
+ * person's half-filled form.
  *
  * All tabs live in the browser's shared default context, so cookies are
  * shared: a new tab on a portal the browser is logged into stays logged in.
@@ -62,10 +64,15 @@ function isClosed(page) {
  */
 export async function setupTab(page, { runId, mute = true } = {}) {
   if (!page) return page
-  // The tab remembers its run in the page itself (window.name survives
-  // navigations), so after a server restart Adal Keep finds it again.
+  // The tab remembers its run in the page itself, so after a server restart
+  // Adal Keep finds it again. Going to another site wipes window.name: it is
+  // written again on every page load (the top page only, not its frames).
   if (runId !== undefined && runId !== null) {
-    try { page.evaluate?.((id) => { window.name = `adal-run-${id}` }, String(runId))?.catch?.(() => {}) } catch {}
+    const name = (id) => { if (window === window.top) window.name = `adal-run-${id}` }
+    try {
+      page.evaluate?.(name, String(runId))?.catch?.(() => {})
+      if (page.__adalNamed !== runId) { page.__adalNamed = runId; page.evaluateOnNewDocument?.(name, String(runId))?.catch?.(() => {}) }
+    } catch {}
   }
   if (page.__adalSetup) {
     if (runId !== undefined) page.__adalRunId = runId
@@ -98,6 +105,15 @@ export async function setupTab(page, { runId, mute = true } = {}) {
   } catch (e) {
     console.log('[tabManager] request interception attach failed:', e.message)
   }
+
+  // A person's clicks and keys in this tab (see isFree).
+  const watch = () => {
+    if (window.__adalWatch) return
+    window.__adalWatch = true
+    const mark = (e) => { if (e.isTrusted) try { sessionStorage.setItem('adal-touched', String(Date.now())) } catch {} }
+    for (const ev of ['pointerdown', 'keydown', 'wheel']) window.addEventListener(ev, mark, true)
+  }
+  try { page.evaluateOnNewDocument?.(watch)?.catch?.(() => {}); page.evaluate?.(watch)?.catch?.(() => {}) } catch {}
 
   if (runId !== undefined) page.__adalRunId = runId
   page.__adalSetup = true
@@ -185,8 +201,55 @@ export function tabOfRun(runId) {
 // Which site each kind of run works on (to find its tab when nothing else does).
 const RUN_HOSTS = [
   [/^musaned/, /musaned\.com\.sa|wahid\.sa/], [/^mofa|^visa/, /visa\.mofa\.gov\.sa/], [/^wafid/, /wafid\.com/],
-  [/^insurance/, /niscofetap\.com/], [/^(police|lmis)/, /lmis\.gov\.et/],
+  [/^insurance/, /niscofetap\.com/], [/^(police|lmis|contract_import|delete_labour)/, /lmis\.gov\.et/],
 ]
+const RUN_PEERS = [[/^musaned/, 'musaned'], [/^mofa|^visa/, 'mofa'], [/^insurance/, 'insurance'], [/^(police|lmis|contract_import|delete_labour)/, 'lmis']]
+
+/** The runs that still need their tabs (a paused one's tab waits for it). */
+export async function activeRunIds(db) {
+  const rows = await db('automation_queue').whereIn('status', ['pending', 'running', 'paused']).select('id').catch(() => [])
+  return new Set(rows.map(r => Number(r.id)))
+}
+
+const PERSON_MS = 60000
+const inTime = (p, ms = 3000) => Promise.race([p, new Promise(r => setTimeout(() => r(null), ms))])
+
+/** Is this tab free to take? (A frozen tab answers nothing: not free.) */
+async function isFree(p, busyRuns) {
+  if (p.__adalBorrowed || (p.__adalRunId !== undefined && !Number.isFinite(Number(p.__adalRunId)))) return false
+  const st = await inTime(p.evaluate(() => ({
+    name: window.name,
+    front: document.visibilityState === 'visible',
+    touched: Number(sessionStorage.getItem('adal-touched')) || 0,
+    typed: [...document.querySelectorAll('input, textarea')].some(e =>
+      !['hidden', 'password', 'checkbox', 'radio', 'file', 'submit', 'button'].includes(e.type) && e.value && e.value !== e.defaultValue),
+  })).catch(() => null))
+  if (!st) return false
+  // A tab a run drove always says "visible" (its focus is faked), so there a
+  // person shows by their clicks and keys since the run let go.
+  if (p.__adalCdp ? Date.now() - st.touched < PERSON_MS : st.front) return false
+  const run = /^adal-run-(\d+)$/.exec(st.name || '')?.[1]
+  if (run) return !busyRuns.has(Number(run))
+  return !!p.__adalCdp || !st.typed   // never a run's tab: what is typed there is a person's
+}
+
+/** A tab on this workflow's site nobody needs, signed in if there is one. */
+async function findFreeTab(browser, workflowId, busyRuns) {
+  const host = RUN_HOSTS.find(([w]) => w.test(String(workflowId)))?.[1]
+  if (!host || !browser?.pages) return null
+  const owned = new Set(_tabs.values())
+  const peer = RUN_PEERS.find(([w]) => w.test(String(workflowId)))?.[1]
+  const onSite = (await browser.pages().catch(() => [])).filter(p => !isClosed(p) && !owned.has(p) && host.test(p.url()))
+  const signedIn = (p) => { try { return !!signedInHere[peer]?.(p.url()) } catch { return false } }
+  for (const p of onSite.sort((a, b) => signedIn(b) - signedIn(a))) {
+    if (await isFree(p, busyRuns)) return p
+  }
+  return null
+}
+
+// One at a time: two runs starting together must not take the same tab.
+let _claims = Promise.resolve()
+const oneAtATime = (fn) => { const p = _claims.then(fn, fn); _claims = p.catch(() => {}); return p }
 
 /**
  * The run's tab even after a server restart (when the registry above is
@@ -223,10 +286,10 @@ export function runsWithTabs() {
 
 /**
  * The tab this run works in. A run that paused for a person (sign-in, OTP,
- * Submit) gets the same tab back when it resumes; otherwise a new tab.
- * Never a tab that belongs to another run or to the operator.
+ * Submit) gets the same tab back when it resumes; otherwise a free tab on its
+ * site, else a new tab. The run then goes to the page it needs by itself.
  */
-export async function openRunTab(browser, runId) {
+export async function openRunTab(browser, runId, { workflowId = '', busyRuns = new Set() } = {}) {
   const id = Number(runId)
   const own = tabOfRun(id)
   if (own) {
@@ -235,11 +298,51 @@ export async function openRunTab(browser, runId) {
     return own
   }
   if (!browser || typeof browser.newPage !== 'function') throw new Error('No browser to open a tab in')
+  const free = await oneAtATime(async () => {
+    const p = await findFreeTab(browser, workflowId, busyRuns)
+    if (p) _tabs.set(id, p)
+    return p
+  })
+  if (free) {
+    await letPageGo(free)
+    free.__adalReused = free.url()
+    await setupTab(free, { runId: id })
+    console.log(`[tabManager] run #${id} took the free tab on ${free.url().slice(0, 60)}`)
+    return free
+  }
   const page = await browser.newPage()
   _tabs.set(id, page)
   await setupTab(page, { runId: id })
   console.log(`[tabManager] run #${id} opened its own tab (${runsWithTabs().length} run tab(s) open)`)
   return page
+}
+
+/** "Leave site?" would stop the run's first page load in a tab that was in use. */
+async function letPageGo(page) {
+  if (page.__adalLeaves) return
+  page.__adalLeaves = true
+  page.on('dialog', d => { if (d.type() === 'beforeunload') d.accept().catch(() => {}) })
+}
+
+/**
+ * For a background check (not a run): a free tab on the site, or a new one.
+ * doneWithTab() afterwards closes only a tab the check opened itself.
+ */
+export async function borrowTab(browser, workflowId, busyRuns = new Set()) {
+  const free = await oneAtATime(async () => {
+    const p = await findFreeTab(browser, workflowId, busyRuns)
+    if (p) p.__adalBorrowed = true
+    return p
+  })
+  if (free) await letPageGo(free)
+  return free || browser.newPage()
+}
+export async function doneWithTab(page) {
+  if (!page) return
+  if (!page.__adalBorrowed) { await page.close().catch(() => {}); return }
+  page.__adalBorrowed = false
+  page.__adalRunId = undefined
+  handTabToPerson(page)
 }
 
 /**
@@ -256,6 +359,8 @@ export function forgetRunTab(runId) {
 export function handTabToPerson(page) {
   disarmFile(page)
   setFileDialogs(page, false).catch(() => {})
+  // The run's own clicks count as "trusted" too: only what comes after is a person's.
+  try { page.evaluate?.(() => { try { sessionStorage.removeItem('adal-touched') } catch {} })?.catch?.(() => {}) } catch {}
 }
 
 /** Close the tab this run owns. Returns true when a tab was closed. */
@@ -308,9 +413,9 @@ const signedInHere = {
 export async function borrowSignIn(page, peer) {
   const isIn = signedInHere[peer]
   if (!isIn || !page?.browser) return null
-  const self = page.target()
+  // This tab too: one taken from an earlier run is usually signed in itself.
   for (const t of page.browser().targets()) {
-    if (t === self || t.type() !== 'page') continue
+    if (t.type() !== 'page') continue
     let url = ''
     try { url = t.url() } catch { continue }
     if (!isIn(url)) continue

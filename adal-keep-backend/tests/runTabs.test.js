@@ -3,7 +3,8 @@
  *
  * Two runs at once used to end up in one tab: a run adopted any tab already
  * on its portal, even one another run was paused in, and the run id lived in
- * localStorage, which all tabs of a site share. These tests pin the new rule:
+ * localStorage, which all tabs of a site share. These tests pin the rule (with no
+ * workflow given, so no free tab is looked for):
  * a new run always gets a new tab, a resumed run gets its own tab back, and
  * closing one run's tab never touches another tab.
  */

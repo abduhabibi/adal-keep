@@ -4,6 +4,7 @@ import toast from 'react-hot-toast'
 import api from '../services/api'
 import { usePickFile } from './shared/PickFile'
 import { SHARED, BRANCHES } from './ProfileJourney'
+import { printOnPhone } from '../lib/phoneApp'
 
 const ALL_FIELDS = [
   'Government ID', 'Passport', 'CV', 'Contract', 'Medical Report', 'Insurance', 'COC',
@@ -171,7 +172,7 @@ export default function ChecklistGridView({ checklist, onClose }) {
    * Print: a clean page with only the table, filling the whole sheet —
    * landscape when there are many columns, the letters as big as fit.
    */
-  const handlePrint = () => {
+  const handlePrint = async () => {
     const n = columns.length
     const landscape = n > 7
     const font = Math.max(6.5, Math.min(12, (landscape ? 150 : 105) / (n + 3)))
@@ -203,6 +204,7 @@ export default function ChecklistGridView({ checklist, onClose }) {
       <table><thead>${head}</thead><tbody>${body}</tbody></table>
       <script>window.onload = () => setTimeout(() => window.print(), 300)</script>
     </body></html>`
+    if (await printOnPhone(html.replace(/<script>[\s\S]*?<\/script>/, ''))) return
     const w = window.open('', '_blank')
     if (w) { w.document.open(); w.document.write(html); w.document.close(); return }
     // Pop-ups blocked: print the same page from a hidden frame.

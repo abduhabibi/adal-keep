@@ -7,6 +7,7 @@
  */
 import api from '../services/api'
 import { barcodeSvg } from './barcode'
+import { printOnPhone } from './phoneApp'
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
 const day = (d) => { const m = String(d || '').match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? `${m[3]}-${m[2]}-${m[1]}` : esc(d) }
@@ -96,18 +97,20 @@ export async function loadEmbassy(ids) {
   return { email: data.agency_email, girls }
 }
 
-/** Print these girls' pages (3 each); a page not in Adal Keep prints as a marked gap. */
+/** Print these girls' pages (2 each); a page not in Adal Keep prints as a marked gap. */
 export async function printEmbassy(loaded, girls, agency = '') {
   if (!girls.length) throw new Error('Nothing to print')
   const pages = girls.map(g =>
     picturePage(g.contract_page, 'Contract', g.profile.full_name) +
     formPage(g, agency, loaded.email)).join('')
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Embassy</title><style>${CSS}</style></head><body>${pages}</body></html>`
+  if (await printOnPhone(html)) return
   const frame = document.createElement('iframe')
   frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0'
   document.body.appendChild(frame)
   const doc = frame.contentDocument
   doc.open()
-  doc.write(`<!doctype html><html><head><meta charset="utf-8"><title>Embassy</title><style>${CSS}</style></head><body>${pages}</body></html>`)
+  doc.write(html)
   doc.close()
   await new Promise(r => setTimeout(r, 400))
   await Promise.all([...doc.images].map(i => i.complete ? null : new Promise(r => { i.onload = i.onerror = r })))

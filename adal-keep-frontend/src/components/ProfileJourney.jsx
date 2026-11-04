@@ -27,6 +27,9 @@ const LOOK = {
   soon:   { dot: 'bg-white dark:bg-slate-900 border-2 border-dashed border-slate-300 dark:border-slate-600 text-slate-400', text: 'text-slate-400', line: 'bg-slate-200 dark:bg-slate-700' },
 }
 const ICON = { done: '✓', active: '•', failed: '!' }
+// "chosen 2026-11-02" → "chosen 2 Nov": the space under a step is narrow.
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const shortDate = (t) => String(t).replace(/\b\d{4}-(\d{2})-(\d{2})\b/g, (m, mo, d) => `${Number(d)} ${MONTHS[Number(mo) - 1] || mo}`)
 
 // Where each step sits: x as a share of the width, row 0 = LMIS (top),
 // 1 = the shared start (middle), 2 = Embassy (bottom).
@@ -37,6 +40,8 @@ const SPOT = {
   wakala: [0.52, 1.5],
   tasheer: [0.66, 2], insurance: [0.83, 2], visa: [1, 2],
 }
+// On a phone's filter the first row is given more of the width: its names touched.
+const NARROW_X = { musaned: 0.16, selected: 0.32, wafid: 0.48, lmis: 0.8, tasheer: 0.7, insurance: 0.85 }
 const BOX = new Set(['wakala'])
 const EDGE = 30   // px kept at the left for the first step's name
 const LABELS = 78 // px kept at the right for the branches' names
@@ -59,7 +64,7 @@ const SIZE = {
   full:    { r: 14, rowGap: 42, block: 60 },
 }
 
-function Node({ k, title, n, state, note, count, selected, dim, onSelect, compact, narrow, left, top, angle }) {
+function Node({ k, title, n, state, note, noteWidth, count, selected, dim, onSelect, compact, narrow, left, top, angle }) {
   if (BOX.has(k)) return <BoxNode {...{ k, title, state, note, count, selected, dim, onSelect, compact, left, top, angle }} />
   const pick = !!onSelect
   const l = pick ? (selected ? LOOK.done : LOOK.todo) : (LOOK[state] || LOOK.todo)
@@ -72,7 +77,8 @@ function Node({ k, title, n, state, note, count, selected, dim, onSelect, compac
         {pick ? (count ?? 0) : (ICON[state] || n)}
       </span>
       <span className={`${narrow ? 'mt-0.5 text-[9px] tracking-tight' : compact ? 'mt-0.5 text-[10px]' : 'mt-1 text-[11px]'} whitespace-nowrap font-semibold leading-tight ${l.text}`}>{title}</span>
-      {note && <span className="text-[10px] text-slate-400 leading-tight whitespace-nowrap max-w-[96px] truncate">{note}</span>}
+      {/* Never wider than the gap to the next step, or it runs into its neighbour's. */}
+      {note && <span className="text-[10px] text-slate-400 leading-tight line-clamp-2 break-words" style={{ width: noteWidth }}>{shortDate(note)}</span>}
     </button>
   )
 }
@@ -119,7 +125,7 @@ export function JourneyFork({ states = {}, notes = {}, counts, selected, onSelec
   // narrow screen the branches show only their icons.
   const narrow = compact && w > 0 && w < 520
   const edge = compact ? 22 : EDGE, labels = narrow ? 18 : LABELS
-  const cx = (k) => edge + SPOT[k][0] * Math.max(0, w - edge - labels - edge)
+  const cx = (k) => edge + (narrow ? NARROW_X[k] ?? SPOT[k][0] : SPOT[k][0]) * Math.max(0, w - edge - labels - edge)
   const cy = (k) => SPOT[k][1] * z.rowGap + z.r
 
   // The path to the picked step lights up (on the list); on a profile a wire
@@ -137,6 +143,7 @@ export function JourneyFork({ states = {}, notes = {}, counts, selected, onSelec
     return `M${x1},${y1} C${x1 + d},${y1} ${x2 - d},${y2} ${x2},${y2}`
   }
   const steps = [...SHARED, ...BRANCHES.flatMap(b => b.steps)]
+  const gap = cx('musaned') - cx('cv') - 4   // the first row's steps sit closest
   // The box: the middle of the Wafid → Tasheer curve, turned along it there
   // (for this curve the slope at its middle is dy / (0.45·dx)).
   const box = (() => {
@@ -146,7 +153,7 @@ export function JourneyFork({ states = {}, notes = {}, counts, selected, onSelec
 
   return (
     <div className={compact ? 'overflow-hidden' : 'overflow-x-auto overflow-y-hidden'}>
-      <div ref={ref} className="relative" style={{ height, minWidth: compact ? 0 : 460 }}>
+      <div ref={ref} className="relative" style={{ height, minWidth: compact ? 0 : 620 }}>
         {w > 0 && (
           <svg className="absolute inset-0 pointer-events-none" width={w} height={height} aria-hidden="true">
             {WIRES.map(wire => {
@@ -166,7 +173,7 @@ export function JourneyFork({ states = {}, notes = {}, counts, selected, onSelec
           </svg>
         )}
         {w > 0 && steps.map(([k, title, short], i) => (
-          <Node key={k} k={k} title={compact && short ? short : title} n={i + 1} state={states[k]} note={pick ? '' : notes[k]}
+          <Node key={k} k={k} title={compact && short ? short : title} n={i + 1} state={states[k]} note={pick ? '' : notes[k]} noteWidth={Math.min(96, SHARED.some(([s]) => s === k) ? gap : 96)}
             count={counts?.[k]} selected={selected === k} dim={pick && selected && !chain.has(k)} onSelect={onSelect}
             compact={compact} narrow={narrow} left={BOX.has(k) ? box.x : cx(k)} top={BOX.has(k) ? box.y : SPOT[k][1] * z.rowGap} angle={box.angle} />
         ))}
@@ -218,7 +225,8 @@ function StepCard({ s }) {
 /** On a profile: her journey, refreshed every 15 s — the fork, then each step's who and documents. */
 export default function ProfileJourney({ profileId }) {
   const [j, setJ] = useState(null)
-  const [open, setOpen] = useState(() => { try { return localStorage.getItem('adal-journey-details') !== '0' } catch { return true } })
+  // Closed until opened: the fork says enough at a glance.
+  const [open, setOpen] = useState(() => { try { return localStorage.getItem('adal-journey-details') === '1' } catch { return false } })
   useEffect(() => {
     let alive = true
     const load = () => api.get(`/profiles/${profileId}/journey`).then(r => alive && setJ(r.data)).catch(() => {})

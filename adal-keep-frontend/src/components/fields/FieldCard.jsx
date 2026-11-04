@@ -6,11 +6,20 @@ import toast from 'react-hot-toast'
 import api from '../../services/api'
 import { useFileCapture } from '../../context/FileCaptureContext'
 import FullBodyCropper from '../FullBodyCropper'
+import { printFileOnPhone } from '../../lib/phoneApp'
 
 /** Print a stored file (the slip's PDF) straight from the page. */
 async function printFile(f) {
   const url = `/api/files/${f.id}/download`
   try {
+    if (window.Capacitor?.Plugins?.AdalDiscovery?.printPdf) {
+      const { fileBlob } = await import('../../cloud/adapter.js')
+      const data = await fileBlob(f.id)
+      if (!data) throw new Error('This file is not in the online copy yet')
+      const typed = new Blob([data], { type: f.mimetype || data.type || 'application/pdf' })
+      await printFileOnPhone(typed, f.original_name || f.filename)
+      return
+    }
     const blob = await (await fetch(url)).blob()
     const src = URL.createObjectURL(new Blob([blob], { type: f.mimetype || blob.type || 'application/pdf' }))
     const frame = document.createElement('iframe')

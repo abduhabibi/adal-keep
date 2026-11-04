@@ -5,6 +5,17 @@ import android.content.Intent;
 import android.content.pm.PackageInfo;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Bundle;
+import android.os.CancellationSignal;
+import android.os.ParcelFileDescriptor;
+import android.print.PageRange;
+import android.print.PrintAttributes;
+import android.print.PrintDocumentAdapter;
+import android.print.PrintDocumentInfo;
+import android.print.PrintManager;
+import android.util.Base64;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
 import android.provider.Settings;
 import androidx.core.content.FileProvider;
 import java.io.File;
@@ -138,6 +149,54 @@ public class AdalDiscoveryPlugin extends Plugin {
         } catch (Exception e) {
             call.reject(e.getMessage());
         }
+    }
+
+    // Pages' window.print() does nothing inside an Android WebView: these open
+    // Android's own print screen (a printer, or Save as PDF).
+    private WebView printing; // kept: the page must live until Android has read it
+
+    /** printHtml({html}) → prints that page. */
+    @PluginMethod
+    public void printHtml(final PluginCall call) {
+        final String html = call.getString("html", "");
+        getActivity().runOnUiThread(() -> {
+            WebView w = new WebView(getContext());
+            w.setWebViewClient(new WebViewClient() {
+                private boolean sent = false;
+                @Override public void onPageFinished(WebView view, String url) {
+                    if (sent) return;
+                    sent = true;
+                    PrintManager pm = (PrintManager) getActivity().getSystemService(Context.PRINT_SERVICE);
+                    pm.print("Adal Keep", view.createPrintDocumentAdapter("Adal Keep"), new PrintAttributes.Builder().build());
+                    call.resolve();
+                }
+            });
+            printing = w;
+            w.loadDataWithBaseURL("https://localhost/", html, "text/html", "UTF-8", null);
+        });
+    }
+
+    /** printPdf({base64, name}) → prints that PDF as it is. */
+    @PluginMethod
+    public void printPdf(final PluginCall call) {
+        final byte[] pdf = Base64.decode(call.getString("base64", ""), Base64.DEFAULT);
+        final String name = call.getString("name", "Adal Keep.pdf");
+        getActivity().runOnUiThread(() -> {
+            PrintManager pm = (PrintManager) getActivity().getSystemService(Context.PRINT_SERVICE);
+            pm.print(name, new PrintDocumentAdapter() {
+                @Override public void onLayout(PrintAttributes o, PrintAttributes n, CancellationSignal c, LayoutResultCallback cb, Bundle b) {
+                    if (c.isCanceled()) { cb.onLayoutCancelled(); return; }
+                    cb.onLayoutFinished(new PrintDocumentInfo.Builder(name).setContentType(PrintDocumentInfo.CONTENT_TYPE_DOCUMENT).build(), true);
+                }
+                @Override public void onWrite(PageRange[] pages, ParcelFileDescriptor out, CancellationSignal c, WriteResultCallback cb) {
+                    try (FileOutputStream f = new FileOutputStream(out.getFileDescriptor())) {
+                        f.write(pdf);
+                        cb.onWriteFinished(new PageRange[] { PageRange.ALL_PAGES });
+                    } catch (Exception e) { cb.onWriteFailed(e.getMessage()); }
+                }
+            }, new PrintAttributes.Builder().build());
+            call.resolve();
+        });
     }
 
     @PluginMethod

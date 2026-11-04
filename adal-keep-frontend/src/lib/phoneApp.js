@@ -28,3 +28,20 @@ export function openOutside(url) {
   if (IN_PHONE_APP || window.__ADAL_CLOUD) { window.location.href = url; return }
   window.open(url, '_blank', 'noopener')
 }
+
+const printer = () => { const p = window.Capacitor?.Plugins?.AdalDiscovery; return p?.printHtml ? p : null }
+/** A page to print: window.print() does nothing in the phone app, so Android's
+ *  print screen opens instead. False when not in the app: print as usual. */
+export async function printOnPhone(html) {
+  if (!printer()) return false
+  await printer().printHtml({ html })
+  return true
+}
+/** A stored file to print, in the phone app: a PDF as it is, a picture on a page. */
+export async function printFileOnPhone(blob, name) {
+  if (!printer()) return false
+  const data = await new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = no; r.readAsDataURL(blob) })
+  if (/pdf/i.test(blob.type)) await printer().printPdf({ base64: String(data).split(',')[1], name: name || 'Adal Keep.pdf' })
+  else await printer().printHtml({ html: `<!doctype html><html><body style="margin:0"><img src="${data}" style="width:100%"></body></html>` })
+  return true
+}

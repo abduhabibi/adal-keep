@@ -76,7 +76,8 @@ function AgentForm({ initial, templates, chats, onDone, onCancel }) {
                   <span>{c.group ? '👥' : '👤'}</span><span className="truncate">{c.name}</span>
                 </button>
               ))}
-              {chats && !shown.length && <p className="p-2 text-xs text-slate-500">No chat with that name</p>}
+              {chats && !chats.length && <p className="p-2 text-xs text-slate-500">Your chats are still loading — they show here by themselves, or type the number below.</p>}
+              {chats?.length > 0 && !shown.length && <p className="p-2 text-xs text-slate-500">No chat with that name</p>}
             </div>
             <input className={field} placeholder="…or type a number (966…)" value={a.number}
               onChange={e => setA({ ...a, number: e.target.value, chat_id: '' })} onBlur={() => a.number.trim() && setPicking(false)} />
@@ -119,10 +120,17 @@ export default function WhatsAppCard() {
     const t = setInterval(load, s.status === 'web' ? 3000 : 1000)
     return () => clearInterval(t)
   }, [s?.status])
-  useEffect(() => { if (s?.status === 'ready' && edit && !chats) wa.get('/whatsapp/chats').then(r => setChats(r.data)).catch(() => setChats([])) }, [s?.status, edit])
+  // Right after connecting WhatsApp is still bringing its chats: keep asking until they are there.
+  useEffect(() => {
+    if (s?.status !== 'ready' || !edit || chats?.length) return
+    const load = () => wa.get('/whatsapp/chats').then(r => setChats(r.data)).catch(() => setChats(c => c || []))
+    load()
+    const t = setInterval(load, 4000)
+    return () => clearInterval(t)
+  }, [s?.status, edit, chats?.length])
 
   if (s === false || s === null) return null
-  // WhatsApp's own page in Adal Keep's Brave: scan its QR there; Adal Keep connects when it shows the chats.
+  // WhatsApp's own page in a window of its own: scan its QR there; Adal Keep connects when it shows the chats.
   const openWeb = async () => { try { setS((await wa.post('/whatsapp/open-web')).data); toast.success('WhatsApp is open on the PC — scan its QR there', { duration: 7000 }) } catch (e) { toast.error(err(e)) } }
   const connect = async (withPhone) => { try { setS((await wa.post('/whatsapp/connect', withPhone ? { phone } : {})).data) } catch (e) { toast.error(err(e)) } }
   const logout = async () => { if (!confirm('Sign your WhatsApp out of Adal Keep?')) return; try { setS((await wa.post('/whatsapp/logout')).data) } catch (e) { toast.error(err(e)) } }

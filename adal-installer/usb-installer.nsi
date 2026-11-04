@@ -101,6 +101,21 @@ Function FindBrave
   ${EndIf}
 FunctionEnd
 
+Function WaitForBrave   ; $R0 = how many 2-second looks
+  StrCpy $1 0
+  ${Do}
+    Call FindBrave
+    ${If} $BraveExe != ""
+      ${Break}
+    ${EndIf}
+    ${If} $1 >= $R0
+      ${Break}
+    ${EndIf}
+    Sleep 2000
+    IntOp $1 $1 + 1
+  ${Loop}
+FunctionEnd
+
 Function InstallBrave
   Call FindBrave
   ${If} $BraveExe != ""
@@ -113,26 +128,32 @@ Function InstallBrave
   ${EndIf}
   DetailPrint "Installing Brave from the USB (2-4 minutes, please wait)..."
   CopyFiles /SILENT "$EXEDIR\deps\brave\BraveSetup.exe" "$TEMP\AdalKeep-BraveSetup.exe"
-  ExecWait '"$TEMP\AdalKeep-BraveSetup.exe" /silent /install' $0
-  ; The setup can hand over to Brave's updater and return early: wait for brave.exe (up to 6 minutes).
-  StrCpy $1 0
-  ${Do}
-    Call FindBrave
-    ${If} $BraveExe != ""
-      ${Break}
-    ${EndIf}
-    ${If} $1 >= 180
-      ${Break}
-    ${EndIf}
-    Sleep 2000
-    IntOp $1 $1 + 1
-  ${Loop}
+  ; The standalone silent setup takes no switches ("/silent /install" belong to
+  ; Brave's small online installer and can make this one refuse).
+  ExecWait '"$TEMP\AdalKeep-BraveSetup.exe"' $0
+  ; It can hand over to Brave's updater and return early: wait for brave.exe (up to 6 minutes).
+  StrCpy $R0 180
+  Call WaitForBrave
+  ${If} $BraveExe == ""
+    DetailPrint "Brave: first try ended (code $0) - trying again..."
+    ExecWait '"$TEMP\AdalKeep-BraveSetup.exe" --system-level' $2
+    StrCpy $R0 90
+    Call WaitForBrave
+    StrCpy $0 "$0 / $2"
+  ${EndIf}
+  FileOpen $3 "$INSTDIR\brave-install.log" a
   ${If} $BraveExe != ""
     Sleep 3000   ; its last files
     DetailPrint "Brave is installed."
+    FileWrite $3 "Brave installed: $BraveExe$\r$\n"
   ${Else}
-    DetailPrint "Brave did not install (code $0) - Adal Keep will use Chrome or Edge."
+    ; Kept next to Adal Keep: AdalKeep.exe tries again at its next start
+    ; (for this Windows user, no admin needed) - Chrome or Edge until then.
+    CopyFiles /SILENT "$TEMP\AdalKeep-BraveSetup.exe" "$INSTDIR\BraveSetup.exe"
+    DetailPrint "Brave did not install (code $0) - Adal Keep tries again when it starts; Chrome or Edge until then."
+    FileWrite $3 "Brave did not install (codes $0)$\r$\n"
   ${EndIf}
+  FileClose $3
   Delete "$TEMP\AdalKeep-BraveSetup.exe"
 FunctionEnd
 

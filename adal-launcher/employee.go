@@ -7,7 +7,8 @@
 // the network, saving its address in companion.conf), then opens the main PC's
 // Adal Keep in an app-style Brave window with the Adal Keep logo on the taskbar.
 // Started at Windows login and from the Adal Keep icon. When the main PC
-// cannot be reached it says so, keeps trying, and opens the window once it answers.
+// cannot be reached it opens the online copy (online.go); on an install without
+// those pages it says so, keeps trying, and opens the window once it answers.
 package main
 
 import (
@@ -76,18 +77,29 @@ func runEmployee(root string) {
 		if u := waitForMainPC(root, 8*time.Second); u != "" {
 			openAppWindow(root, u)
 		} else {
-			// The first copy serves the "Looking for the main PC" page.
-			openAppWindow(root, connectURL)
+			// The first copy serves the online pages (or "Looking for the main PC").
+			openAppWindow(root, offlineURL(root))
 		}
 		return
 	}
 
 	logf("Adal Keep (employee PC) starting")
+	go repairBrave(root)
 	startHidden(filepath.Join(root, "adal-companion.exe"))
 	go brandWindows(root)
+	online := startOnlinePage(root)
 
 	// The Companion may still be searching the network: give it a moment.
-	u := waitForMainPC(root, 40*time.Second)
+	budget := 40 * time.Second
+	if online {
+		budget = 20 * time.Second // the online pages are ready: no long wait
+	}
+	u := waitForMainPC(root, budget)
+	if u == "" && online {
+		logf("main PC not reachable — opening the online copy")
+		openAppWindow(root, onlineURL)
+		select {}
+	}
 	if u == "" {
 		logf("main PC not reachable yet — showing the connect page, still trying")
 		if startConnectPage(root) {

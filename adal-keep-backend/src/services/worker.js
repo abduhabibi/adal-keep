@@ -18,7 +18,7 @@ import os from 'os'
 import path from 'path'
 import { spawn } from 'child_process'
 import { fileURLToPath } from 'url'
-import { getBrowser } from './browser.js'
+import { getBrowser, openBrowserIfAny } from './browser.js'
 import { runFullWorkflow } from './lmisWorkflow.js'
 import { decideAgencyActions } from './jev/agencyManager.js'
 import { getActiveEmployee } from './activeEmployee.js'
@@ -641,6 +641,20 @@ async function executeRun(db, page, job) {
  */
 async function runJob(db, job) {
   try {
+    // A retry, or a run the scanner queued (nobody pressed a button now):
+    // never opens Brave itself. While Brave is closed it waits, and it goes
+    // on once Brave is open again. Brave that a person closed (or quit Adal
+    // Keep) stays closed.
+    const nobodyAsked = /^Retry /.test(job.pause_reason || '') || /Auto-discovered by scanner/.test(String(job.log || ''))
+    if (nobodyAsked && !(await openBrowserIfAny())) {
+      const at = new Date(Date.now() + 2 * 60000).toISOString()
+      await db('automation_queue').where('id', job.id).update({
+        status: 'pending',
+        pause_reason: `Retry ${job.current_step || 0}/${MAX_ATTEMPTS} at ${at} — waiting for Brave to be open`,
+        updated_at: at,
+      })
+      return
+    }
     const browser = await getBrowser()
     // After a server restart the run finds the tab it worked in again.
     // (by its name only: a new run never takes over another tab on the same site)

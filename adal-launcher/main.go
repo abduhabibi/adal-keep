@@ -78,6 +78,7 @@ func main() {
 	}
 
 	logf("Adal Keep starting (background=%v)", background)
+	go repairBrave(root)
 	startHidden(filepath.Join(root, "adal-agent.exe"))
 	startHidden(filepath.Join(root, "adal-companion.exe"))
 	go keepServerRunning(root)

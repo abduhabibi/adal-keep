@@ -84,6 +84,9 @@ cp -f "$BASE/adal.ico" "$STAGE/main/adal.ico"
 cp -f "$STAGE/main/adal-companion.exe" "$STAGE/companion/adal-companion.exe"
 # Employee PCs open the main PC's Adal Keep through AdalKeep.exe (employee mode).
 cp -f "$STAGE/main/AdalKeep.exe" "$STAGE/main/adal.ico" "$STAGE/companion/"
+# The online copy's pages, for when the main PC is off (adal-launcher/online.go).
+( cd "$BASE/adal-keep-frontend" && npm run -s build:phone )
+rsync -a --delete "$BASE/adal-phone/www/" "$STAGE/companion/online/"
 rm -f "$STAGE/main/run-server.bat" "$STAGE/main/start-companion.bat" "$STAGE/companion/start-companion.bat"
 cp -f "$INST/files/finish-install.ps1" "$STAGE/main/"
 # The version this build is: Settings → "Check for updates" compares it with

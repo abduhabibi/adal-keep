@@ -3,7 +3,7 @@ import { listWorkflows } from '../services/workflows.js'
 import { dispatchRun, runStatus, queueSnapshot } from '../services/worker.js'
 import { markCancelled, isCancelled } from '../services/cancellation.js'
 import { forgetRunTab, findRunTab } from '../services/tabManager.js'
-import { getBrowser } from '../services/browser.js'
+import { openBrowserIfAny } from '../services/browser.js'
 import { assertPoliceReady, getProfileVerification, runPassportVerification } from '../services/verification.js'
 
 const router = express.Router()
@@ -581,7 +581,7 @@ router.get('/automations/:id/login', async (req, res) => {
 export async function runTab(db, runId) {
   const run = await db('automation_queue').where('id', runId).first('id', 'workflow_id').catch(() => null)
   if (!run) return null
-  return findRunTab(await getBrowser().catch(() => null), run.id, run.workflow_id)
+  return findRunTab(await openBrowserIfAny(), run.id, run.workflow_id)
 }
 const liveTab = (req) => runTab(req.app.locals.db, req.params.id)
 

@@ -10,7 +10,7 @@
  *                                     background tab of the agency's Brave
  */
 import { whenRunsIdle } from './busy.js'
-import { getBrowser } from './browser.js'
+import { getBrowser, openBrowserIfAny } from './browser.js'
 import { setupTab } from './tabManager.js'
 import { checkMedicalStatus } from './wafidWorkflow.js'
 
@@ -87,8 +87,10 @@ async function note(db, profileId, title, body) {
 }
 
 /** Look every applied profile up once. Returns what changed. */
-export async function checkAll(db, { onlyId = null } = {}) {
+export async function checkAll(db, { onlyId = null, auto = false } = {}) {
   if (checker.running) return { busy: true }
+  // The timed check never opens Brave itself: only when Brave is open.
+  if (auto && !(await openBrowserIfAny())) { console.log('[wafid] Brave is closed — checking when it is open'); return { skipped: true } }
   checker.running = true
   checker.results = []
   let page = null
@@ -132,7 +134,7 @@ export async function checkAll(db, { onlyId = null } = {}) {
 let timer = null
 export function startWafidChecker(db) {
   if (timer) return
-  const tick = () => whenRunsIdle(() => checkAll(db).catch(e => console.warn('[wafid] check failed:', e.message)), '[wafid]')
+  const tick = () => whenRunsIdle(() => checkAll(db, { auto: true }).catch(e => console.warn('[wafid] check failed:', e.message)), '[wafid]')
   setTimeout(tick, 3 * 60 * 1000) // a few minutes after start
   timer = setInterval(tick, EVERY_MS)
   console.log(`🩺 Wafid medical results checked every ${EVERY_MS / 3600000} h`)

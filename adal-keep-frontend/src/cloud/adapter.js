@@ -410,7 +410,9 @@ async function fetchBytes(url) {
     if (r.data instanceof ArrayBuffer) return new Uint8Array(r.data)
     return new TextEncoder().encode(JSON.stringify(r.data))
   }
-  const r = await fetch(url)
+  // An employee PC's Adal Keep (adal-launcher/online.go) fetches Telegram's files for the page.
+  const viaPC = location.port === '47801' && /^https:\/\/api\.telegram\.org\//.test(url)
+  const r = await fetch(viaPC ? `/tg?u=${encodeURIComponent(url)}` : url)
   if (!r.ok) throw new Error(`HTTP ${r.status}`)
   return new Uint8Array(await r.arrayBuffer())
 }

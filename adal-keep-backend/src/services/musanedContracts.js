@@ -24,7 +24,7 @@ import sharp from 'sharp'
 import path from 'path'
 import crypto from 'crypto'
 import { fileURLToPath } from 'url'
-import { getBrowser } from './browser.js'
+import { getBrowser, openBrowserIfAny } from './browser.js'
 import { setupTab } from './tabManager.js'
 
 const SAFE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'data', 'SafeStorage')
@@ -149,8 +149,11 @@ export function matchCard(card, profiles) {
 const cardIsNew = (p, c) => (!p.chosen_at && !/CANCEL|REJECT/i.test(c.stage || '')) ||
   (c.stage && (p.musaned_stage || '') !== c.stage) || (c.contract_number && p.contract_number !== c.contract_number)
 
-export async function scanContracts(db) {
+export async function scanContracts(db, { auto = false } = {}) {
   if (contractCheck.running) return { busy: true }
+  // The check every 4 hours never opens Brave itself: it waits until Brave is
+  // open (a person closed it, or quit Adal Keep — it must not come back).
+  if (auto && !(await openBrowserIfAny())) { console.log('[contracts] Brave is closed — checking when it is open'); return { skipped: true } }
   Object.assign(contractCheck, { running: true, results: [], signedOut: false, mode: 'list', unknown: [] })
   let page = null
   try {
@@ -816,7 +819,7 @@ let timer = null
 export function startContractChecker(db) {
   if (timer) return
   setTimeout(() => readSavedTemplates(db).catch(e => console.warn('[contracts] templates:', e.message)), 20000)
-  const tick = () => whenRunsIdle(() => scanContracts(db).catch(e => console.warn('[contracts] failed:', e.message)), '[contracts]')
+  const tick = () => whenRunsIdle(() => scanContracts(db, { auto: true }).catch(e => console.warn('[contracts] failed:', e.message)), '[contracts]')
   setTimeout(tick, 6 * 60 * 1000)
   timer = setInterval(tick, EVERY_MS)
   // Left signed out: as soon as Musaned is signed in anywhere in the Adal Keep
@@ -824,10 +827,11 @@ export function startContractChecker(db) {
   setInterval(async () => {
     if (!contractCheck.signedOut || contractCheck.running) return
     try {
-      if (!(await musanedSignedInSomewhere(await getBrowser(), (m) => console.log(`[contracts] ${m}`)))) return
+      const open = await openBrowserIfAny()   // never starts Brave: only looks at it when it is open
+      if (!open || !(await musanedSignedInSomewhere(open, (m) => console.log(`[contracts] ${m}`)))) return
       console.log('[contracts] ✓ Musaned is signed in again — checking now')
       await doneSignInTasks(db)
-      whenRunsIdle(() => scanContracts(db).catch(e => console.warn('[contracts] failed:', e.message)), '[contracts]')
+      whenRunsIdle(() => scanContracts(db, { auto: true }).catch(e => console.warn('[contracts] failed:', e.message)), '[contracts]')
     } catch {}
   }, 30000)
   console.log(`📄 Musaned contracts checked every ${EVERY_MS / 3600000} h`)

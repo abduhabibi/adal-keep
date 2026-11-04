@@ -12,6 +12,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -127,4 +128,38 @@ func pickBrowser() string {
 func fileExists(p string) bool {
 	st, err := os.Stat(p)
 	return err == nil && !st.IsDir()
+}
+
+// repairBrave: the installer could not install Brave (it left its setup next
+// to Adal Keep). Try again now, for this Windows user (no admin needed), in
+// the background. Chrome / Edge open Adal Keep until it is done; once Brave is
+// there the setup file goes.
+func repairBrave(root string) {
+	setup := filepath.Join(root, "BraveSetup.exe")
+	if !fileExists(setup) {
+		return
+	}
+	if braveExe() != "" {
+		os.Remove(setup)
+		return
+	}
+	if braveInstalling() {
+		return
+	}
+	logf("Brave is missing — installing it again from %s", setup)
+	cmd := hidden(exec.Command(setup))
+	if err := cmd.Start(); err != nil {
+		logf("Brave setup did not start: %v", err)
+		return
+	}
+	go cmd.Wait()
+	for end := time.Now().Add(10 * time.Minute); time.Now().Before(end); time.Sleep(5 * time.Second) {
+		if b := braveExe(); b != "" {
+			logf("Brave installed: %s", b)
+			time.Sleep(5 * time.Second)
+			os.Remove(setup)
+			return
+		}
+	}
+	logf("Brave did not install this time — trying again at the next start")
 }

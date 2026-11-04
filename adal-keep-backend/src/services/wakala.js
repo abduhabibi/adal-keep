@@ -62,7 +62,7 @@ export async function askToPay(db, profileId, { force = false } = {}) {
   // The bell (PC and phone): the link last, shown there as an "Open WhatsApp" button.
   await db('notifications').insert({ type: 'wakala', title, body: link ? `${description}\n${link}` : description, created_day: new Date().toISOString().slice(0, 10) }).catch(() => {})
   import('./liveChannel.js').then(L => L.broadcast({ t: 'ring', id: taskId, title, description, profile_id: p.id, link, at: Date.now() })).catch(() => {})
-  import('./worker.js').then(w => w.showDesktopNotice?.(title, description)).catch(() => {})
+  import('./worker.js').then(w => w.beep()).catch(() => {})
   return { asked: true, agent: agent?.name || null, link }
 }
 

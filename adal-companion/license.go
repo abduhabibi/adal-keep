@@ -2,16 +2,14 @@ package main
 
 // license.go — the Companion works only while the main Adal Keep PC is paid
 // for (or in its free trial). When the main PC is locked, the Companion stops
-// sending files and opens the Adal Keep page in the browser, which shows the
-// payment popup there too.
+// sending files and says so in its log. Nothing opens by itself: the payment
+// screen shows when Adal Keep is opened.
 
 import (
 	"encoding/json"
 	"io"
 	"log"
 	"net/http"
-	"os/exec"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -80,30 +78,15 @@ func watchLock() {
 	}()
 }
 
-// showPayPopup opens the Adal Keep page (it shows the payment popup while
-// locked), unless it was opened less than `gap` ago.
+// showPayPopup: a note in the log, at most every `gap`. No page is opened.
 func showPayPopup(gap time.Duration) {
 	lockMu.Lock()
+	defer lockMu.Unlock()
 	if gap > 0 && time.Since(lastPopup) < gap {
-		lockMu.Unlock()
 		return
 	}
 	lastPopup = time.Now()
-	lockMu.Unlock()
-
-	url := strings.TrimRight(hostServer, "/") + "/"
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "windows":
-		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
-	case "darwin":
-		cmd = exec.Command("open", url)
-	default:
-		cmd = exec.Command("xdg-open", url)
-	}
-	if err := cmd.Start(); err != nil {
-		log.Printf("⚠️ Could not open the payment page: %v", err)
-	}
+	log.Printf("🔒 %s needs paying: open Adal Keep to unlock it", serverDisplayName)
 }
 
 // lockedResponse tells whether an upload was refused because the main PC is locked.

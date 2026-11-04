@@ -1,7 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { visaNames, visaValues, missingForVisa } from '../src/services/mofaVisa.js'
-import { soundKind } from '../src/services/worker.js'
 
 test('visa names: first, father, family from the full name', () => {
   assert.deepEqual(visaNames({ full_name: 'Hiwot  Getachew Zenebe' }), { first: 'HIWOT', father: 'GETACHEW', grandfather: '', family: 'ZENEBE' })
@@ -33,7 +32,3 @@ test('a Settings choice names the option exactly', () => {
   assert.doesNotMatch('190', new RegExp(v.duration, 'i'))
 })
 
-test('each kind of run has its own sound', () => {
-  const kinds = ['police_certificate', 'musaned_add_candidate', 'lmis_contract', 'wafid_book', 'mofa_visa'].map(soundKind)
-  assert.equal(new Set(kinds).size, 5)
-})

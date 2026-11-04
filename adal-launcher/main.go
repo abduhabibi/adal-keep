@@ -3,7 +3,8 @@
 // AdalKeep.exe — starts Adal Keep with no command window anywhere.
 //
 //	AdalKeep.exe                   open Adal Keep (starts it first when needed)
-//	AdalKeep.exe --background      start it without opening a window (Windows login)
+//	AdalKeep.exe --background      start it without any window (Windows login);
+//	                               its window opens too only if allowed in Settings
 //	AdalKeep.exe --set-shortcut-ids <.lnk>...   installer: tag the shortcuts (see brand.go)
 //
 // On an employee PC (Companion install, no server) it opens the main PC's
@@ -12,7 +13,8 @@
 // One copy per signed-in user stays in the background: it keeps the server
 // running (and starts it again when it stops — after an update, for example),
 // starts the Companion and the agent hidden, and puts the Adal Keep logo on
-// the Adal Keep Brave window. Opening Adal Keep again only opens the page.
+// its window. Adal Keep's window opens only from its icon: closing it closes
+// it, and nothing here opens it again.
 package main
 
 import (
@@ -37,6 +39,7 @@ var logFile *os.File
 
 func main() {
 	root := exeDir()
+	installRoot = root
 	logDir := filepath.Join(root, "backend", "data")
 	if employeePC(root) {
 		logDir = root
@@ -59,7 +62,7 @@ func main() {
 	background := len(args) > 0 && args[0] == "--background"
 
 	if employeePC(root) {
-		runEmployee(root)
+		runEmployee(root, background)
 		return
 	}
 
@@ -78,13 +81,13 @@ func main() {
 	}
 
 	logf("Adal Keep starting (background=%v)", background)
-	go repairBrave(root)
+	go ensureBrowser(root)
 	startHidden(filepath.Join(root, "adal-agent.exe"))
 	startHidden(filepath.Join(root, "adal-companion.exe"))
 	go keepServerRunning(root)
 	go brandWindows(root)
 
-	if !background {
+	if !background || openAtStart(filepath.Join(root, "backend", "data")) {
 		serverReady(45 * time.Second)
 		openMainOrFollowed(root)
 	}
@@ -145,6 +148,7 @@ func keepServerRunning(root string) {
 		}
 		out, _ := os.OpenFile(filepath.Join(backend, "data", "server.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 		cmd := hidden(exec.Command(filepath.Join(root, "runtime", "node.exe"), "server.js"))
+		cmd.Env = append(os.Environ(), "ADAL_HIDDEN_AGENTS=1") // this launcher keeps Adal Keep's window apart
 		cmd.Dir = backend
 		cmd.Stdout, cmd.Stderr = out, out
 		logf("starting the server")
@@ -181,42 +185,25 @@ func serverReady(budget time.Duration) bool {
 	}
 }
 
+// profileDir: Adal Keep's own window. The agents' browser has a profile of its
+// own (backend\data\browser-profile), so closing this window touches nothing.
 func profileDir(root string) string {
 	if employeePC(root) {
 		return filepath.Join(root, "browser-profile")
 	}
-	return filepath.Join(root, "backend", "data", "browser-profile")
+	return filepath.Join(root, "backend", "data", "ui-profile")
 }
 
-// openUI opens the Adal Keep page in Brave with the Adal Keep browser
-// profile — the same profile and control port the server's automations use
-// (backend/src/services/browser.js). So the page and every automation run are
-// tabs of ONE window. When that Brave is already open, the page simply opens
-// as a new tab in it.
+// openAtStart: someone allowed Adal Keep's window to open when the PC starts.
+func openAtStart(dir string) bool {
+	b, err := os.ReadFile(filepath.Join(dir, "open-at-start.json"))
+	return err == nil && strings.Contains(strings.ReplaceAll(string(b), " ", ""), `"on":true`)
+}
+
+// openUI opens Adal Keep's window: an app window of Adal Browser (no address
+// bar, no tabs), apart from the agents' browser.
 func openUI(root string) {
-	if b := pickBrowser(); b != "" {
-		profile := profileDir(root)
-		os.MkdirAll(profile, 0o755)
-		args := []string{
-			"--user-data-dir=" + profile,
-			"--remote-debugging-port=9222",
-			"--no-first-run",
-			"--no-default-browser-check",
-			"--hide-crash-restore-bubble",
-			"--start-maximized",
-			"--disable-background-timer-throttling",
-			"--disable-renderer-backgrounding",
-			"--disable-backgrounding-occluded-windows",
-			uiURL,
-		}
-		if err := exec.Command(b, args...).Start(); err == nil {
-			logf("opened Adal Keep in %s", filepath.Base(b))
-			return
-		} else {
-			logf("could not start %s: %v", b, err)
-		}
-	}
-	exec.Command("rundll32", "url.dll,FileProtocolHandler", uiURL).Start()
+	openAppWindow(root, uiURL)
 }
 
 func showError(msg string) {

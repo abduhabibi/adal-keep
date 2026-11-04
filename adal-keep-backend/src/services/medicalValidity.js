@@ -96,7 +96,7 @@ export async function checkMedicalValidity(db) {
       ? `Her medical deadline is ${p.medical_valid_until}: ${left} day${left === 1 ? '' : 's'} left.`
       : `Her medical deadline was ${p.medical_valid_until}.`
     await db('tasks').insert({ type: 'automation', title, description: body, status: 'pending', profile_id: p.id, assigned_to: 1, is_ai_created: true, created_at: new Date().toISOString() }).catch(() => {})
-    try { const { showDesktopNotice } = await import('./worker.js'); showDesktopNotice(title, body) } catch {}
+    try { const { beep } = await import('./worker.js'); beep() } catch {}
     console.log(`[medical] ${title}`)
   }
 }

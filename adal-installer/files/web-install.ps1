@@ -1,8 +1,8 @@
 # Adal Keep - install over the internet, without the USB.
 # Fetched by:  irm '<link>' | iex   (the link comes from publish-install.mjs).
 # Downloads the installers, Node.js and the server packages ready-made for
-# Windows (nothing is built on this PC), Brave and Tailscale from their own
-# sites, runs the installer, then removes the downloaded files: the installers
+# Windows (nothing is built on this PC) and Tailscale, runs the installer (Adal
+# Browser fetches itself at Adal Keep's first start), then removes the downloaded files: the installers
 # hold the licence key, so they must not stay on the PC.
 function Install-AdalKeep {
     $ErrorActionPreference = 'Stop'
@@ -14,7 +14,6 @@ function Install-AdalKeep {
     $NodeSha = '__NODE_SHA__'
     $ModuleParts = @(__MODULE_URLS__)
     $ModulesSha = '__MODULES_SHA__'
-    $BraveUrl = 'https://github.com/brave/brave-browser/releases/latest/download/BraveBrowserStandaloneSilentSetup.exe'
     $TailscaleUrl = 'https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi'
     $Dir = Join-Path $env:LOCALAPPDATA 'AdalKeepSetup'
 
@@ -38,7 +37,7 @@ function Install-AdalKeep {
     try {
         if (Test-Path $Dir) { Remove-Item $Dir -Recurse -Force }
         $deps = Join-Path $Dir 'deps'
-        New-Item -ItemType Directory -Force -Path (Join-Path $deps 'brave'), (Join-Path $deps 'tailscale') | Out-Null
+        New-Item -ItemType Directory -Force -Path (Join-Path $deps 'tailscale') | Out-Null
 
         Write-Host '  [1/4] Adal Keep' -ForegroundColor Cyan
         $zip = Join-Path $Dir 'adal-keep.zip'
@@ -67,11 +66,7 @@ function Install-AdalKeep {
         } finally { $out.Close() }
         Test-Sha $modules $ModulesSha
 
-        Write-Host '  [4/4] Brave and Tailscale (the biggest download)' -ForegroundColor Cyan
-        if (-not (Get-File $BraveUrl (Join-Path $deps 'brave\BraveSetup.exe'))) {
-            Remove-Item (Join-Path $deps 'brave\BraveSetup.exe') -Force -ErrorAction SilentlyContinue
-            Write-Host '  Brave did not download: Chrome or Edge is used until it is installed.' -ForegroundColor Yellow
-        }
+        Write-Host '  [4/4] Tailscale' -ForegroundColor Cyan
         if (-not (Get-File $TailscaleUrl (Join-Path $deps 'tailscale\tailscale-setup.msi'))) {
             Remove-Item (Join-Path $deps 'tailscale\tailscale-setup.msi') -Force -ErrorAction SilentlyContinue
         }

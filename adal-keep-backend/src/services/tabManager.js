@@ -74,6 +74,8 @@ export async function setupTab(page, { runId, mute = true } = {}) {
       if (page.__adalNamed !== runId) { page.__adalNamed = runId; page.evaluateOnNewDocument?.(name, String(runId))?.catch?.(() => {}) }
     } catch {}
   }
+  // A run never brings itself forward: only a person's Open does (browser.showTab).
+  page.bringToFront = async () => {}
   if (page.__adalSetup) {
     if (runId !== undefined) page.__adalRunId = runId
     await setFileDialogs(page, true) // a resumed run takes the dialogs back

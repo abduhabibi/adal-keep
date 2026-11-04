@@ -4,9 +4,12 @@
  * Single persistent Chromium instance shared across all automation lanes.
  * Never spawns more than one browser process.
  *
- * Layout: ONE maximized browser window — the Adal Keep page and one tab
- * per run. All runs share the browser's default context (one sign-in for
- * LMIS / Musaned). No extra windows, no separate processes per run.
+ * Adal Browser (<install>\\browser\\AdalBrowser.exe) is Adal Keep's own Chromium:
+ * no Brave or Chrome is needed. The agents work in ONE window kept out of sight
+ * (off the screen): a run that needs nobody is never seen, and nothing ever
+ * pops up. A person brings a tab forward by pressing Open in the notification
+ * (showTab); the window goes back when the run goes on (tuckAway). All runs
+ * share one profile: one sign-in, and passwords saved in it stay.
  *
  * Cross-platform: Windows / macOS / Linux.
  *
@@ -38,7 +41,7 @@ let _browser = null
  * Returns the first one that exists, or null.
  */
 export function findBrowserExecutable() {
-  const candidates = []
+  const candidates = [OWN_BROWSER]
 
   if (process.platform === 'win32') {
     const pf   = process.env['ProgramFiles']      || 'C:\\Program Files'
@@ -80,9 +83,16 @@ export function findBrowserExecutable() {
 // One browser profile for Adal Keep, kept between restarts (LMIS and Musaned
 // stay signed in). The launcher opens the Adal Keep page with this same
 // profile, so the page and every run are tabs of ONE window.
+// Adal Browser has a profile of its own: Chromium refuses a profile a newer
+// browser wrote, and Brave's may be newer.
+const OWN_BROWSER = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'browser', 'AdalBrowser.exe')
 export const PROFILE_DIR = process.env.ADAL_BROWSER_PROFILE ||
-  path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'data', 'browser-profile')
+  path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'data', fs.existsSync(OWN_BROWSER) ? 'adal-browser' : 'browser-profile')
+// Out of sight needs today's AdalKeep.exe: an older one opens Adal Keep's page
+// inside this browser, and that page must stay on the screen.
+const HIDDEN = process.platform !== 'win32' || process.env.ADAL_HIDDEN_AGENTS === '1'
 const DEBUG_PORT = 9222
+const OFF = { left: -32000, top: -32000, width: 1366, height: 900 }
 
 /**
  * Start Brave fresh: one window, no tabs brought back from last time. Brave
@@ -111,7 +121,8 @@ const BROWSER_ARGS = [
   '--no-first-run',
   '--no-default-browser-check',
   '--hide-crash-restore-bubble',
-  '--start-maximized',
+  // Out of sight from its first moment.
+  ...(HIDDEN ? [`--window-position=${OFF.left},${OFF.top}`, `--window-size=${OFF.width},${OFF.height}`] : ['--start-maximized']),
   // Windows / Mac: drawing pages on the graphics chip leaves the processor
   // free (low-end PCs slowed down with everything drawn by the processor).
   ...(process.platform === 'linux' ? ['--disable-gpu'] : []),
@@ -121,7 +132,7 @@ const BROWSER_ARGS = [
   // browser-wide and blanks the Musaned reCAPTCHA images. Image policy is
   // per tab (`page.__adalAllowImages`, see tabManager.setupTab).
   '--disable-notifications',
-  '--disable-features=Translate,MediaRouter,OptimizationHints',
+  '--disable-features=Translate,MediaRouter,OptimizationHints,CalculateNativeWinOcclusion',
   '--disable-popup-blocking',
   '--noerrdialogs',
   '--disable-infobars',
@@ -188,6 +199,7 @@ export async function getBrowser() {
       // Just started: Brave restores its last tabs and replaces its first
       // blank one — a run's tab opened in that moment is closed under it.
       await new Promise(r => setTimeout(r, 3000))
+      await tuckAway({ force: true }).catch(() => {})
       return _browser
     } catch (e) { lastErr = e }
   }
@@ -205,6 +217,47 @@ export async function openBrowserIfAny() {
     _browser = await connectTo(puppeteer, process.env.BRAVE_CDP_URL || `http://localhost:${DEBUG_PORT}`)
     return _browser
   } catch { return null }
+}
+
+async function windowOf(page) {
+  const cdp = page.__adalCdp || await page.target().createCDPSession()
+  const { windowId } = await cdp.send('Browser.getWindowForTarget')
+  return { cdp, windowId }
+}
+const place = async ({ cdp, windowId }, bounds) => {
+  await cdp.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'normal' } })
+  await cdp.send('Browser.setWindowBounds', { windowId, bounds })
+}
+
+let _held = false   // a person opened the browser to use it: it stays until they close it
+
+/** The window comes forward on this tab: only ever because a person pressed Open. */
+export async function showTab(page, { hold = false } = {}) {
+  const w = await windowOf(page)
+  await place(w, { left: 60, top: 40, width: 1280, height: 800 })
+  await w.cdp.send('Browser.setWindowBounds', { windowId: w.windowId, bounds: { windowState: 'maximized' } }).catch(() => {})
+  await w.cdp.send('Page.bringToFront')
+  _shown = true
+  if (hold) _held = true
+}
+let _shown = false
+
+/** The window goes back out of sight (nothing happens while a person uses it). */
+export async function tuckAway({ force = false } = {}) {
+  if (!HIDDEN || _held || (!force && !_shown)) return
+  const browser = await openBrowserIfAny()
+  const page = (await browser?.pages().catch(() => []))?.[0]
+  if (!page) return
+  await place(await windowOf(page), OFF)
+  _shown = false
+}
+
+/** The browser for a person's own use: a new tab, in front, with its saved passwords. */
+export async function openForPerson() {
+  const browser = await getBrowser()
+  const page = await browser.newPage()
+  await showTab(page, { hold: true })
+  page.once('close', () => { _held = false })
 }
 
 /**

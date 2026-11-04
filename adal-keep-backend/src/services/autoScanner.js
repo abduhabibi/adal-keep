@@ -87,7 +87,6 @@ async function scanOnce(db) {
   if (isAppLocked()) return
   try {
     const ready = (await findReadyProfiles(db)).map(p => ({ ...p, wf: WORKFLOW_ID, why: 'Kuwait + labor_id + order_id + all 4 files present' }))
-    for (const p of await findContractReady(db)) ready.push({ ...p, wf: 'lmis_contract', why: 'chosen by an employer on Musaned + Wafid FIT + Labor ID' })
     if (ready.length === 0) return
 
     const account = await getDefaultAccount(db)

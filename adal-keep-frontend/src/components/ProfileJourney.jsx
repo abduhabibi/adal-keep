@@ -1,8 +1,7 @@
 /**
- * The journey as one start that forks in two:
+ * The journey:
  *
- *   CV → Musaned → Selected → Wafid ─┬─ 🏛 LMIS     LMIS contract
- *                                     └─ [Paid wakala] ─ 🇸🇦 Tasheer → Insurance → Enjaz · Visa
+ *   CV → Musaned → Selected → Wafid ─ [Paid wakala] ─ 🇸🇦 Tasheer → Insurance → Enjaz · Visa
  *
  * "Paid wakala" is a box on the curve down to the Embassy row.
  *
@@ -15,7 +14,6 @@ import api from '../services/api'
 
 export const SHARED = [['cv', 'CV'], ['musaned', 'Musaned'], ['selected', 'Selected'], ['wafid', 'Wafid']]
 export const BRANCHES = [
-  { key: 'lmis-track', title: 'LMIS', icon: '🏛', steps: [['lmis', 'LMIS contract', 'Contract']] },
   { key: 'embassy-track', title: 'Embassy', icon: '🇸🇦', steps: [['wakala', 'Paid wakala', 'Wakala'], ['tasheer', 'Tasheer'], ['insurance', 'Insurance'], ['visa', 'Enjaz · Visa', 'Visa']] },
 ]
 
@@ -31,22 +29,20 @@ const ICON = { done: '✓', active: '•', failed: '!' }
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const shortDate = (t) => String(t).replace(/\b\d{4}-(\d{2})-(\d{2})\b/g, (m, mo, d) => `${Number(d)} ${MONTHS[Number(mo) - 1] || mo}`)
 
-// Where each step sits: x as a share of the width, row 0 = LMIS (top),
-// 1 = the shared start (middle), 2 = Embassy (bottom).
+// Where each step sits: x as a share of the width, row 0 = the start, 1 = Embassy.
 // "wakala" sits half-way down the curve from Wafid to Tasheer.
 const SPOT = {
-  cv: [0, 1], musaned: [0.12, 1], selected: [0.24, 1], wafid: [0.36, 1],
-  lmis: [0.66, 0],
-  wakala: [0.52, 1.5],
-  tasheer: [0.66, 2], insurance: [0.83, 2], visa: [1, 2],
+  cv: [0, 0], musaned: [0.12, 0], selected: [0.24, 0], wafid: [0.36, 0],
+  wakala: [0.52, 0.5],
+  tasheer: [0.66, 1], insurance: [0.83, 1], visa: [1, 1],
 }
 // On a phone's filter the first row is given more of the width: its names touched.
-const NARROW_X = { musaned: 0.16, selected: 0.32, wafid: 0.48, lmis: 0.8, tasheer: 0.7, insurance: 0.85 }
+const NARROW_X = { musaned: 0.16, selected: 0.32, wafid: 0.48, tasheer: 0.7, insurance: 0.85 }
 const BOX = new Set(['wakala'])
 const EDGE = 30   // px kept at the left for the first step's name
 const LABELS = 78 // px kept at the right for the branches' names
 // Each step's step before it (the wires), and how each wire is drawn.
-export const PARENT = { musaned: 'cv', selected: 'musaned', wafid: 'selected', lmis: 'wafid', wakala: 'wafid', tasheer: 'wakala', insurance: 'tasheer', visa: 'insurance' }
+export const PARENT = { musaned: 'cv', selected: 'musaned', wafid: 'selected', wakala: 'wafid', tasheer: 'wakala', insurance: 'tasheer', visa: 'insurance' }
 // Wafid → Tasheer is ONE smooth curve with the "Paid wakala" box sitting on it
 // (tilted along it); the box's own two wires are not drawn.
 const WIRES = [
@@ -104,8 +100,8 @@ function BoxNode({ k, title, state, note, count, selected, dim, onSelect, compac
 /**
  * states: { stepKey: 'done' | 'active' | 'failed' | 'todo' | 'soon' }, notes: { stepKey: text }
  * — or, on the list — counts: { stepKey: n }, selected, onSelect(stepKey).
- * The steps are joined by wires; from Wafid two curved wires fork to LMIS
- * (up) and the Embassy (down). Lit wires glow green with a pulse running along.
+ * The steps are joined by wires; from Wafid a curved wire goes down to the
+ * Embassy row. Lit wires glow green with a pulse running along.
  */
 export function JourneyFork({ states = {}, notes = {}, counts, selected, onSelect, compact = false }) {
   const pick = !!onSelect
@@ -120,7 +116,7 @@ export function JourneyFork({ states = {}, notes = {}, counts, selected, onSelec
     setW(el.clientWidth)
     return () => ro.disconnect()
   }, [])
-  const height = z.rowGap * 2 + z.block
+  const height = z.rowGap + z.block
   // Compact (the list's filter) fits any width — no sideways scrolling: on a
   // narrow screen the branches show only their icons.
   const narrow = compact && w > 0 && w < 520
@@ -180,7 +176,7 @@ export function JourneyFork({ states = {}, notes = {}, counts, selected, onSelec
         {/* the two branches' names, at the right end of their rows */}
         {BRANCHES.map((b, i) => (
           <span key={b.key} className="absolute right-0 text-[10px] font-bold uppercase tracking-wide text-slate-400 whitespace-nowrap text-right"
-            style={{ top: (i === 0 ? 0 : 2) * z.rowGap + z.r - 7 }}>
+            style={{ top: z.rowGap + z.r - 7 }}>
             {b.icon}{!narrow && ` ${b.title}`}
           </span>
         ))}
@@ -235,7 +231,7 @@ export default function ProfileJourney({ profileId }) {
     return () => { alive = false; clearInterval(t) }
   }, [profileId])
   if (!j) return null
-  const all = [...j.lmis, ...j.embassy.slice(SHARED.length)]
+  const all = j.embassy
   const states = Object.fromEntries(all.map(s => [s.key, s.state]))
   const notes = Object.fromEntries(all.map(s => [s.key, s.note]))
   const toggle = () => setOpen(o => { try { localStorage.setItem('adal-journey-details', o ? '0' : '1') } catch {} return !o })

@@ -71,7 +71,7 @@ const unreachableMsg = "The main Adal Keep PC is not reachable.\n\n" +
 	"Make sure it is turned on and that this PC is on the same network (Wi-Fi / cable).\n\n" +
 	"Adal Keep keeps trying and opens by itself as soon as the main PC answers."
 
-func runEmployee(root string) {
+func runEmployee(root string, background bool) {
 	if !firstCopy() {
 		// Already running for this user: just open the window again.
 		if u := waitForMainPC(root, 8*time.Second); u != "" {
@@ -84,10 +84,14 @@ func runEmployee(root string) {
 	}
 
 	logf("Adal Keep (employee PC) starting")
-	go repairBrave(root)
+	go ensureBrowser(root)
 	startHidden(filepath.Join(root, "adal-companion.exe"))
 	go brandWindows(root)
 	online := startOnlinePage(root)
+	// At Windows login: the Companion works; the window opens from the icon.
+	if background && !openAtStart(root) {
+		select {}
+	}
 
 	// The Companion may still be searching the network: give it a moment.
 	budget := 40 * time.Second

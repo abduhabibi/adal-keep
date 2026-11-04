@@ -727,8 +727,7 @@ async function watchJoins(db) {
       announced.add(r.id)
       console.log(`[cloud] phone "${r.name}" asks to join`)
       try {
-        const { showDesktopNotice } = await import('./worker.js')
-        showDesktopNotice(`📱 ${r.name || 'A phone'} wants to join`, 'Open Adal Keep and press "Yes, it\'s me" — or No if you do not know this phone.')
+        ;(await import('./worker.js')).beep()
       } catch {}
     }
   } catch (e) { joinRequests.error = e.message }

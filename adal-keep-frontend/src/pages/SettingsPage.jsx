@@ -19,6 +19,7 @@ import InsuranceCard from '../components/InsuranceCard'
 import BackupCard from '../components/BackupCard'
 import TelegramChannelCard from '../components/TelegramChannelCard'
 import { PcAccessList } from '../components/PcAccessGate'
+import { StartupCard } from '../components/AttentionBar'
 import MusanedAuthenticatorCard from '../components/MusanedAuthenticatorCard'
 import ErrorBoundary from '../components/shared/ErrorBoundary'
 import PhoneCard from '../components/PhoneCard'
@@ -210,6 +211,7 @@ export default function SettingsPage() {
       {tab === 'agency' && <>
       {window.__ADAL_CLOUD && <ErrorBoundary small name="This phone"><PhoneCard /></ErrorBoundary>}
       {!window.__ADAL_CLOUD && import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Computers"><PcAccessList /></ErrorBoundary>}
+      {!window.__ADAL_CLOUD && import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Startup"><StartupCard /></ErrorBoundary>}
       {/* NEW: Agency Settings Card */}
       <Card>
         <h2 className="font-display text-lg font-bold mb-4 flex items-center gap-2">

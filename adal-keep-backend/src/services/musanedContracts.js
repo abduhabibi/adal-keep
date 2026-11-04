@@ -739,7 +739,7 @@ async function signInForCheck(db, page) {
   const acct = await db('musaned_accounts').orderBy('is_default', 'desc').first().catch(() => null)
   const log = (msg) => console.log(`[contracts] ${msg}`)
   const ctx = { musaned_username: acct?.username || '', musaned_password: acct?.password || '', account_id: acct?.id || null, onLog: (l, m) => log(m), profileName: 'Contract check' }
-  const { ringUntilTouched, stopLoginAlarm, showDesktopNotice } = await import('./worker.js')
+  const { beep } = await import('./worker.js')
   try {
     const { stepOpenMusaned, stepFillMusanedLogin } = await import('./musanedWorkflow.js')
     const open = await stepOpenMusaned(page, ctx)
@@ -748,11 +748,9 @@ async function signInForCheck(db, page) {
       log(`Musaned sign-in ${f.filled ? 'filled' : 'NOT filled (no Musaned account in AI Actions)'}`)
     }
     if (await musanedSignedInSomewhere(page.browser(), log)) { log('✓ Musaned was already signed in'); return true }
-    await page.bringToFront().catch(() => {})
-    ringUntilTouched(page, log)
+    beep()
     const title = SIGN_IN_TASKS[0]
-    const body = 'The Musaned tab is in front with the name and password filled. Type the captcha and the code — that is all: Adal Keep sees the sign-in by itself, picks the agency and goes on.'
-    showDesktopNotice(title, body)
+    const body = 'The name and password are filled: press Open on the notification. Type the captcha and the code — that is all: Adal Keep sees the sign-in by itself, picks the agency and goes on.'
     await task(db, null, title, body)
     const end = Date.now() + 30 * 60 * 1000
     const { typeAuthenticatorCode, classifyScreen } = await import('./musanedWorkflow.js')
@@ -764,7 +762,6 @@ async function signInForCheck(db, page) {
         if (await typeAuthenticatorCode(page, ctx).catch(() => false)) codeAt = Date.now()
       }
       if (await musanedSignedInSomewhere(page.browser(), log)) {
-        stopLoginAlarm()
         await doneSignInTasks(db)
         log('✓ Musaned signed in — checking goes on')
         await sleep(2000)
@@ -772,7 +769,6 @@ async function signInForCheck(db, page) {
       }
     }
   } catch (e) { console.warn('[contracts] sign-in:', e.message) }
-  stopLoginAlarm()
   return false
 }
 

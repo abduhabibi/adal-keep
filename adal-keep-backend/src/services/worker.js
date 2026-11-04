@@ -18,7 +18,8 @@ import os from 'os'
 import path from 'path'
 import { spawn } from 'child_process'
 import { fileURLToPath } from 'url'
-import { getBrowser, openBrowserIfAny } from './browser.js'
+import { getBrowser, openBrowserIfAny, tuckAway } from './browser.js'
+import { needPerson, askCaptcha, doneWith } from './attention.js'
 import { runFullWorkflow } from './lmisWorkflow.js'
 import { decideAgencyActions } from './jev/agencyManager.js'
 import { getActiveEmployee } from './activeEmployee.js'
@@ -53,262 +54,18 @@ let _agencyTimer   = null
 let _agencyRunning = false
 
 // --------------------------------------------------------------------------
-// Notifications
+// One small beep for every call, and nothing more: no voice, no alarm, no
+// window. What the call is about shows in the notification bar.
 // --------------------------------------------------------------------------
-// Each kind of run rings with its own sound, so a person hears which task
-// calls them without looking (Windows: C:\Windows\Media, then beeps).
-const SOUNDS = {
-  // linux: [file, times] — loud enough to hear across the room (short ones repeat).
-  police:  { win: 'chimes.wav',  beeps: [[880, 180], [660, 180]],                         linux: ['complete', 1],               mac: 'Glass' },
-  musaned: { win: 'notify.wav',  beeps: [[660, 150], [880, 150], [1100, 200]],           linux: ['message', 2],                mac: 'Ping' },
-  lmis:    { win: 'tada.wav',    beeps: [[523, 160], [523, 160], [784, 300]],            linux: ['bell', 3],                   mac: 'Hero' },
-  wafid:   { win: 'Ring02.wav',  beeps: [[1000, 120], [0, 80], [1000, 120]],             linux: ['phone-incoming-call', 1],    mac: 'Submarine' },
-  insurance: { win: 'Ring05.wav', beeps: [[440, 250], [554, 250], [659, 400]],          linux: ['suspend-error', 2],          mac: 'Blow' },
-  tasheer: { win: 'Ring06.wav',  beeps: [[1200, 90], [900, 90], [1200, 90], [900, 90]], linux: ['phone-outgoing-calling', 1], mac: 'Pop' },
-  visa:    { win: 'Alarm02.wav', beeps: [[784, 140], [988, 140], [1175, 140], [1568, 320]], linux: ['alarm-clock-elapsed', 1], mac: 'Funk' },
-}
-
-/** Which sound a workflow rings with. */
-export function soundKind(workflowId = '') {
-  const w = String(workflowId)
-  if (w.startsWith('mofa') || w.startsWith('visa')) return 'visa'
-  if (w.startsWith('insurance')) return 'insurance'
-  if (w.startsWith('tasheer')) return 'tasheer'
-  if (w.startsWith('wafid')) return 'wafid'
-  if (w.startsWith('musaned')) return 'musaned'
-  if (w === 'lmis_contract') return 'lmis'
-  return 'police'
-}
-
-// What Adal Keep says when a task calls (instead of a plain sound).
-const SAYS = [
-  [/^musaned_add/, 'filling Musaned'],
-  [/^musaned_check/, 'checking Musaned'],
-  [/^musaned/, 'Musaned'],
-  [/^wafid_book/, 'filling the Wafid medical booking'],
-  [/^wafid_check/, 'checking the medical result'],
-  [/^wafid_slip/, 'getting the medical appointment slip'],
-  [/^wafid/, 'the Wafid medical'],
-  [/^police/, 'filling the police certificate'],
-  [/^lmis_contract/, 'filling the LMIS contract'],
-  [/^(lmis|contract_import|delete_labour)/, 'LMIS'],
-  [/^insurance/, 'filling the insurance'],
-  [/^tasheer/, 'filling Tasheer'],
-  [/^(mofa|visa)/, 'filling the visa'],
-]
-export function spokenLine(workflowId = '', { level = 'info', name = '' } = {}) {
-  const what = (SAYS.find(([re]) => re.test(String(workflowId))) || [null, 'the task'])[1]
-  const who = String(name || '').trim().split(/\s+/)[0] || ''
-  const first = who ? who[0].toUpperCase() + who.slice(1).toLowerCase() : ''
-  const forWho = first ? ` for ${first}` : ''
-  if (level === 'error') return `${what.replace(/^(filling|checking|getting) /, '').replace(/^the /, 'The ').replace(/^./, c => c.toUpperCase())}${forWho} has a problem. Please have a look.`
-  return `I have finished ${what}${forWho}.`
-}
-
-/** Says a line with the computer's own voice; false when it cannot. */
-function speak(text) {
-  try {
-    const clean = String(text).replace(/["'`$\\]/g, '')
-    let cmd, args
-    if (process.platform === 'win32') {
-      const ps = `Add-Type -AssemblyName System.Speech; $s = New-Object System.Speech.Synthesis.SpeechSynthesizer; ` +
-        `try { $v = $s.GetInstalledVoices() | ForEach-Object { $_.VoiceInfo } | Where-Object { $_.Gender -eq 'Female' -and $_.Culture.Name -like 'en*' } | Select-Object -First 1; if ($v) { $s.SelectVoice($v.Name) } } catch {}; ` +
-        `$s.Rate = 0; $s.Volume = 100; $s.Speak('${clean}')`
-      cmd = 'powershell'
-      args = ['-NoProfile', '-WindowStyle', 'Hidden', '-EncodedCommand', Buffer.from(ps, 'utf16le').toString('base64')]
-    } else if (process.platform === 'darwin') {
-      cmd = 'say'; args = [clean]
-    } else {
-      const has = (b) => ['/usr/bin/', '/usr/local/bin/', '/bin/'].some(d => fs.existsSync(d + b))
-      if (has('spd-say')) { cmd = 'spd-say'; args = ['-w', '-t', 'female1', '-r', '-10', clean] }
-      else if (has('espeak-ng')) { cmd = 'espeak-ng'; args = ['-s', '150', clean] }
-      else if (has('espeak')) { cmd = 'espeak'; args = ['-s', '150', clean] }
-      else return false
-    }
-    const child = spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: true })
-    child.on('error', () => {})
-    child.unref()
-    return true
-  } catch { return false }
-}
-
-// The recorded lines (scripts/make-voice.mjs): which one a task plays.
-const VOICE_DIR = path.join(__dirname, '../voice')
-const CLIPS = [
-  [/^musaned_add/, 'musaned_add', 'musaned'], [/^musaned_check/, 'musaned_check', 'musaned'], [/^musaned/, 'done', 'musaned'],
-  [/^wafid_book/, 'wafid_book', 'wafid'], [/^wafid_check/, 'wafid_check', 'wafid'], [/^wafid_slip/, 'wafid_slip', 'wafid'], [/^wafid/, 'done', 'wafid'],
-  [/^police/, 'police', 'police'], [/^lmis_contract/, 'lmis_contract', 'lmis'], [/^(lmis|contract_import|delete_labour)/, 'done', 'lmis'],
-  [/^insurance/, 'insurance', 'insurance'], [/^tasheer/, 'tasheer', 'tasheer'], [/^(mofa|visa)/, 'visa', 'visa'],
-]
-function voiceClip(workflowId = '', level = 'info') {
-  const [, done, area] = CLIPS.find(([re]) => re.test(String(workflowId))) || [null, 'done', '']
-  const names = level === 'error' ? [`problem_${area}`, 'problem'] : [done, 'done']
-  return names.map(n => path.join(VOICE_DIR, `${n}.wav`)).find(f => fs.existsSync(f)) || null
-}
-function playVoice(file) {
-  if (!file) return false
+let _lastBeep = 0
+export function beep() {
+  if (Date.now() - _lastBeep < 3000) return     // several calls at once: one beep
+  _lastBeep = Date.now()
   try {
     let cmd, args
-    if (process.platform === 'win32') {
-      cmd = 'powershell'
-      args = ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', `(New-Object Media.SoundPlayer '${file.replace(/'/g, "''")}').PlaySync()`]
-    } else if (process.platform === 'darwin') { cmd = 'afplay'; args = [file] }
-    else { cmd = 'sh'; args = ['-c', 'paplay "$0" 2>/dev/null || aplay -q "$0"', file] }
-    const child = spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: true })
-    child.on('error', () => {})
-    child.unref()
-    return true
-  } catch { return false }
-}
-
-const _lastSound = {}
-export function playNotificationSound(workflowId = '', { level = 'info', name = '' } = {}) {
-  const kind = soundKind(workflowId)
-  const s = SOUNDS[kind]
-  // Several notices of one kind at the same moment ring once.
-  if (Date.now() - (_lastSound[kind] || 0) < 10000) return
-  _lastSound[kind] = Date.now()
-  // Said out loud: the recorded voice (src/voice, ElevenLabs), else the
-  // computer's own voice ("I have finished filling Musaned for Halima").
-  if (playVoice(voiceClip(workflowId, level))) return
-  if (speak(spokenLine(workflowId, { level, name }))) return
-  try {
-    const platform = process.platform
-    let cmd, args
-    if (platform === 'darwin') {
-      cmd = 'afplay'
-      args = [`/System/Library/Sounds/${s.mac}.aiff`]
-    } else if (platform === 'win32') {
-      const beeps = s.beeps.map(([f, ms]) => f ? `[console]::beep(${f},${ms})` : `Start-Sleep -Milliseconds ${ms}`).join('; ')
-      const wav = `$env:WINDIR\\Media\\${s.win}`
-      cmd = 'powershell'
-      args = ['-NoProfile', '-Command', `$f="${wav}"; if (Test-Path $f) { (New-Object Media.SoundPlayer $f).PlaySync() } else { ${beeps} }`]
-    } else {
-      const [file, times] = s.linux
-      const one = `paplay /usr/share/sounds/freedesktop/stereo/${file}.oga`
-      cmd = 'sh'
-      args = ['-c', Array(times).fill(one).join('; ')]
-    }
-    const child = spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: true })
-    child.on('error', () => {})
-    child.unref()
-  } catch {}
-}
-
-// --------------------------------------------------------------------------
-// The sign-in alarm: one sound for every "come and sign in" call (captcha,
-// code, robot tick), like a digital watch: beep-beep-beep-beep, again and
-// again, until a person clicks or types on that sign-in page, or 1 minute.
-// --------------------------------------------------------------------------
-let watchWav = null
-function watchAlarmFile() {
-  if (watchWav && fs.existsSync(watchWav)) return watchWav
-  const rate = 22050, len = rate                    // 1 second
-  const data = Buffer.alloc(len * 2)
-  for (let b = 0; b < 4; b++) {                     // 4 beeps of 70 ms, 60 ms apart
-    const from = Math.round(rate * b * 0.13), n = Math.round(rate * 0.07)
-    for (let i = 0; i < n; i++) {
-      const fade = Math.min(1, i / 60, (n - i) / 60)
-      const v = Math.sin(2 * Math.PI * 2800 * i / rate) * 0.7 * fade
-      data.writeInt16LE(Math.round(v * 32767), (from + i) * 2)
-    }
-  }
-  const head = Buffer.alloc(44)
-  head.write('RIFF', 0); head.writeUInt32LE(36 + data.length, 4); head.write('WAVE', 8)
-  head.write('fmt ', 12); head.writeUInt32LE(16, 16); head.writeUInt16LE(1, 20); head.writeUInt16LE(1, 22)
-  head.writeUInt32LE(rate, 24); head.writeUInt32LE(rate * 2, 28); head.writeUInt16LE(2, 32); head.writeUInt16LE(16, 34)
-  head.write('data', 36); head.writeUInt32LE(data.length, 40)
-  watchWav = path.join(os.tmpdir(), 'adal-keep-watch-alarm.wav')
-  fs.writeFileSync(watchWav, Buffer.concat([head, data]))
-  return watchWav
-}
-
-function playOnce(file) {
-  const cmd = process.platform === 'darwin' ? 'afplay' : 'paplay'
-  const child = spawn(cmd, [file], { stdio: 'ignore', windowsHide: true })
-  child.on('error', () => {})
-}
-
-let alarm = null
-export function stopLoginAlarm() {
-  const a = alarm
-  if (!a) return
-  alarm = null
-  clearInterval(a.timer)
-  if (a.child?.pid) {
-    if (process.platform === 'win32') spawn('taskkill', ['/PID', String(a.child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true }).on('error', () => {})
-    else try { a.child.kill() } catch {}
-  }
-}
-
-/** Ring the watch alarm until a person touches `page` (click, key, or a reCAPTCHA frame) or 1 minute. */
-export function ringUntilTouched(page, log) {
-  stopLoginAlarm()
-  try {
-    const file = watchAlarmFile()
-    const a = { started: Date.now() }
-    alarm = a
-    // Real clicks and keys only: Adal Keep fills sign-in forms without events.
-    const arm = () => page.evaluate(() => {
-      if (window.__adalTouched === undefined) {
-        window.__adalTouched = false
-        const on = (e) => { if (e.isTrusted) window.__adalTouched = true }
-        for (const ev of ['pointerdown', 'mousedown', 'keydown', 'touchstart']) document.addEventListener(ev, on, true)
-        // A click into the reCAPTCHA box lands in its own frame: the page only sees focus leave.
-        window.addEventListener('blur', () => setTimeout(() => { if (document.activeElement?.tagName === 'IFRAME') window.__adalTouched = true }, 0))
-      }
-      return window.__adalTouched
-    }).catch(() => null)
-    arm()
-    if (process.platform === 'win32') {
-      const f = file.replace(/'/g, "''")
-      a.child = spawn('powershell', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', `$p = New-Object Media.SoundPlayer '${f}'; $p.PlayLooping(); Start-Sleep -Seconds 61`], { stdio: 'ignore', windowsHide: true })
-      a.child.on('error', () => {})
-    } else {
-      playOnce(file)
-    }
-    a.timer = setInterval(async () => {
-      if (alarm !== a) return clearInterval(a.timer)
-      if (Date.now() - a.started > 60000) { log?.('⏰ nobody came for 1 minute — the sign-in alarm stopped'); return stopLoginAlarm() }
-      if (page.isClosed?.()) return stopLoginAlarm()
-      if (await arm() === true) { log?.('✓ a person is on the sign-in page — the alarm stopped'); return stopLoginAlarm() }
-      if (alarm === a && process.platform !== 'win32') playOnce(file)
-    }, 1100)
-  } catch {}
-}
-
-/**
- * A popup on the desktop next to the sound, so a call is seen even when the
- * speakers are low (Windows: a tray balloon; Linux: notify-send). Best effort.
- */
-export function showDesktopNotice(title, body = '') {
-  try {
-    const t = String(title || 'Adal Keep').slice(0, 63)
-    const b = String(body || title || '').slice(0, 250)
-    let cmd, args
-    if (process.platform === 'win32') {
-      const q = (x) => `'${x.replace(/'/g, "''")}'`
-      const ps = [
-        'Add-Type -AssemblyName System.Windows.Forms, System.Drawing',
-        '$n = New-Object System.Windows.Forms.NotifyIcon',
-        '$n.Icon = [System.Drawing.SystemIcons]::Information',
-        '$n.BalloonTipIcon = "Info"',
-        `$n.BalloonTipTitle = ${q(t)}`,
-        `$n.BalloonTipText = ${q(b)}`,
-        '$n.Visible = $true',
-        '$n.ShowBalloonTip(15000)',
-        'Start-Sleep -Seconds 16',
-        '$n.Dispose()',
-      ].join('; ')
-      cmd = 'powershell'
-      args = ['-NoProfile', '-WindowStyle', 'Hidden', '-EncodedCommand', Buffer.from(ps, 'utf16le').toString('base64')]
-    } else if (process.platform === 'darwin') {
-      cmd = 'osascript'
-      args = ['-e', `display notification ${JSON.stringify(b)} with title ${JSON.stringify(t)}`]
-    } else {
-      cmd = 'notify-send'
-      args = ['-a', 'Adal Keep', '-u', 'critical', t, b]
-    }
+    if (process.platform === 'win32') { cmd = 'powershell'; args = ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', '[console]::beep(1000,180)'] }
+    else if (process.platform === 'darwin') { cmd = 'afplay'; args = ['/System/Library/Sounds/Tink.aiff'] }
+    else { cmd = 'paplay'; args = ['/usr/share/sounds/freedesktop/stereo/message.oga'] }
     const child = spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: true })
     child.on('error', () => {})
     child.unref()
@@ -436,7 +193,7 @@ async function executeRun(db, page, job) {
   // One write at a time: steps log without waiting, and two read-modify-writes
   // at once used to drop lines.
   let logChain = Promise.resolve()
-  const onLog = (level, msg) => { const ts = Date.now(); return (logChain = logChain.then(() => writeLog(level, msg, ts)).catch(() => {})) }
+  const onLog = (level, msg) => { if (/^✓/.test(msg)) { doneWith(runId, { keepCaptcha: false }); tuckAway().catch(() => {}) } const ts = Date.now(); return (logChain = logChain.then(() => writeLog(level, msg, ts)).catch(() => {})) }
   const writeLog = async (level, msg, ts) => {
     const row = await db('automation_queue').where('id', runId).first()
     let log = []
@@ -500,11 +257,10 @@ async function executeRun(db, page, job) {
       // The phones hear it at once (live link), not at their next look.
       import('./liveChannel.js').then(L => L.broadcast({ t: 'ring', id: Number(taskId?.id ?? taskId) || 0, title, description: String(body || '').slice(0, 300), profile_id: job.profile_id, run: runId, at: Date.now() })).catch(() => {})
       if (onLog) await onLog(level, `🔔 ${title}`)
-      // A sign-in call rings the one watch alarm until a person touches that
-      // page (or 1 minute); every other call rings its task's own sound.
-      if (opts.login) ringUntilTouched(opts.login, (m) => onLog?.('info', m))
-      else playNotificationSound(job.workflow_id, { level, name: profile?.full_name })
-      showDesktopNotice(title, body)
+      // A sign-in, code or reCAPTCHA waits for a person: it stays in the bar
+      // until the run goes on (its next "✓"). Paused runs show from the queue.
+      if (opts.login) needPerson(runId, title, body)
+      beep()
     } catch (e) {
       console.error('[notify] failed:', e.message)
     }
@@ -564,6 +320,7 @@ async function executeRun(db, page, job) {
     } catch (e) { console.error('[worker] task failed:', e.message) }
   }
   ctx.isCancelled = () => isCancelled(runId)
+  ctx.askCaptcha = (image, answer) => { askCaptcha(runId, image, answer); beep() }
   // A run writes what it found into the profile's notes (dated), and may set
   // a few profile fields with it.
   ctx.noteProfile = async (text, fields = {}) => {
@@ -663,6 +420,7 @@ async function runJob(db, job) {
     await findRunTab(browser, job.id, job.workflow_id, { bySite: false }).catch(() => null)
     // Otherwise a free tab already on the site (signed in), else a new one.
     const page = await openRunTab(browser, job.id, { workflowId: job.workflow_id, busyRuns: await activeRunIds(db) })
+    await tuckAway().catch(() => {})   // a run goes on: its window goes back out of sight
     await executeRun(db, page, job)
   } catch (e) {
     // Could not start at all: no browser, profile deleted, ...
@@ -672,6 +430,7 @@ async function runJob(db, job) {
     const row = await db('automation_queue').where('id', job.id).first().catch(() => null)
     try {
       // Done, failed or cancelled: the tab stays open for the person.
+      doneWith(job.id, { keepCaptcha: row?.status === 'paused' })
       if (['cancelled', 'failed', 'done'].includes(row?.status)) forgetRunTab(job.id)
       // paused / pending (retry): the tab stays with the run; while a
       // person works in it, file dialogs open normally again.

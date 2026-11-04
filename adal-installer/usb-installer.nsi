@@ -87,76 +87,6 @@ Function .onInit
 FunctionEnd
 
 
-; Brave from the USB, installed now and waited for (2-4 minutes on a slow PC):
-; Adal Keep opens in Brave from its very first start, never in Chrome.
-Var BraveExe
-Function FindBrave
-  StrCpy $BraveExe ""
-  ${If} ${FileExists} "$PROGRAMFILES64\BraveSoftware\Brave-Browser\Application\brave.exe"
-    StrCpy $BraveExe "$PROGRAMFILES64\BraveSoftware\Brave-Browser\Application\brave.exe"
-  ${ElseIf} ${FileExists} "$PROGRAMFILES32\BraveSoftware\Brave-Browser\Application\brave.exe"
-    StrCpy $BraveExe "$PROGRAMFILES32\BraveSoftware\Brave-Browser\Application\brave.exe"
-  ${ElseIf} ${FileExists} "$LOCALAPPDATA\BraveSoftware\Brave-Browser\Application\brave.exe"
-    StrCpy $BraveExe "$LOCALAPPDATA\BraveSoftware\Brave-Browser\Application\brave.exe"
-  ${EndIf}
-FunctionEnd
-
-Function WaitForBrave   ; $R0 = how many 2-second looks
-  StrCpy $1 0
-  ${Do}
-    Call FindBrave
-    ${If} $BraveExe != ""
-      ${Break}
-    ${EndIf}
-    ${If} $1 >= $R0
-      ${Break}
-    ${EndIf}
-    Sleep 2000
-    IntOp $1 $1 + 1
-  ${Loop}
-FunctionEnd
-
-Function InstallBrave
-  Call FindBrave
-  ${If} $BraveExe != ""
-    DetailPrint "Brave is already installed."
-    Return
-  ${EndIf}
-  ${IfNot} ${FileExists} "$EXEDIR\deps\brave\BraveSetup.exe"
-    DetailPrint "No Brave installer on the USB (run PREPARE) - Adal Keep will use Chrome or Edge."
-    Return
-  ${EndIf}
-  DetailPrint "Installing Brave from the USB (2-4 minutes, please wait)..."
-  CopyFiles /SILENT "$EXEDIR\deps\brave\BraveSetup.exe" "$TEMP\AdalKeep-BraveSetup.exe"
-  ; The standalone silent setup takes no switches ("/silent /install" belong to
-  ; Brave's small online installer and can make this one refuse).
-  ExecWait '"$TEMP\AdalKeep-BraveSetup.exe"' $0
-  ; It can hand over to Brave's updater and return early: wait for brave.exe (up to 6 minutes).
-  StrCpy $R0 180
-  Call WaitForBrave
-  ${If} $BraveExe == ""
-    DetailPrint "Brave: first try ended (code $0) - trying again..."
-    ExecWait '"$TEMP\AdalKeep-BraveSetup.exe" --system-level' $2
-    StrCpy $R0 90
-    Call WaitForBrave
-    StrCpy $0 "$0 / $2"
-  ${EndIf}
-  FileOpen $3 "$INSTDIR\brave-install.log" a
-  ${If} $BraveExe != ""
-    Sleep 3000   ; its last files
-    DetailPrint "Brave is installed."
-    FileWrite $3 "Brave installed: $BraveExe$\r$\n"
-  ${Else}
-    ; Kept next to Adal Keep: AdalKeep.exe tries again at its next start
-    ; (for this Windows user, no admin needed) - Chrome or Edge until then.
-    CopyFiles /SILENT "$TEMP\AdalKeep-BraveSetup.exe" "$INSTDIR\BraveSetup.exe"
-    DetailPrint "Brave did not install (code $0) - Adal Keep tries again when it starts; Chrome or Edge until then."
-    FileWrite $3 "Brave did not install (codes $0)$\r$\n"
-  ${EndIf}
-  FileClose $3
-  Delete "$TEMP\AdalKeep-BraveSetup.exe"
-FunctionEnd
-
 Section "Install"
   SetShellVarContext all
 
@@ -202,8 +132,6 @@ Section "Install"
   ; Employees use Adal Keep through this PC: AdalKeep.exe opens the main PC's
   ; Adal Keep in an app-style Brave window with the Adal Keep logo, and runs the
   ; Companion (sends new scans) in the background. Opens at Windows login too.
-  ; Brave from the USB when it is missing (in the background, like the main PC).
-  Call InstallBrave
 
   CreateDirectory "$SMPROGRAMS\${APP_NAME}"
   Delete "$INSTDIR\start-companion.bat"
@@ -215,7 +143,7 @@ Section "Install"
   ; The taskbar shows the Adal Keep window as Adal Keep (its logo), not Brave.
   nsExec::Exec '"$INSTDIR\AdalKeep.exe" --set-shortcut-ids "$DESKTOP\${APP_NAME}.lnk" "$SMPROGRAMS\${APP_NAME}\${APP_NAME}.lnk"'
   Pop $0
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "${APP_KEY}" '"$INSTDIR\AdalKeep.exe"'
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "${APP_KEY}" '"$INSTDIR\AdalKeep.exe" --background'
 !else
   ; ============================= SERVER PC =============================
   DetailPrint "Copying Adal Keep..."
@@ -226,7 +154,6 @@ Section "Install"
   CreateDirectory "$INSTDIR\inbox"
 
   DetailPrint "Unpacking the server from the USB (about a minute)..."
-  Call InstallBrave
   nsExec::Exec '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\finish-install.ps1" -InstDir "$INSTDIR" -Deps "$EXEDIR\deps"'
   Pop $0
   ${If} $0 != 0
@@ -291,8 +218,8 @@ Section "Install"
   ; --- start it now (a silent IT install leaves that to the next login)
   IfSilent done
 !ifdef COMPANION
-  DetailPrint "Opening Adal Keep..."
-  Exec '"$INSTDIR\AdalKeep.exe"'
+  DetailPrint "Starting Adal Keep..."
+  Exec '"$INSTDIR\AdalKeep.exe" --background'
 !else
   DetailPrint "Starting Adal Keep..."
   Exec '"$INSTDIR\AdalKeep.exe" --background'

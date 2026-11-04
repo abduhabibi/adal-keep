@@ -3,7 +3,6 @@
 #  Unpacks the Windows dependencies that PREPARE put on the USB:
 #     deps\node-win-x64.zip     -> <install>\runtime
 #     deps\backend-modules.zip  -> <install>\backend\node_modules
-#     deps\brave\BraveSetup.exe -> installs Brave (waited for) when the installer has not
 #  and checks that the server's native modules load.
 #  Exit code 0 = ready. A log is kept in <install>\install.log.
 # =====================================================================
@@ -15,14 +14,6 @@ $ErrorActionPreference = 'Stop'
 $log = Join-Path $InstDir 'install.log'
 Start-Transcript -Path $log -Append | Out-Null
 
-function Get-Brave {
-    foreach ($p in @(
-        (Join-Path $env:ProgramFiles 'BraveSoftware\Brave-Browser\Application\brave.exe'),
-        (Join-Path ${env:ProgramFiles(x86)} 'BraveSoftware\Brave-Browser\Application\brave.exe'),
-        (Join-Path $env:LOCALAPPDATA 'BraveSoftware\Brave-Browser\Application\brave.exe')
-    )) { if ($p -and (Test-Path $p)) { return $p } }
-    return $null
-}
 
 $code = 0
 try {
@@ -58,24 +49,6 @@ try {
     } finally { Pop-Location }
     Write-Host 'OK  native modules load'
 
-    # --- Brave (the automations drive it). The installer installs it first;
-    #     this is the fallback, and it waits too.
-    if (Get-Brave) {
-        Write-Host 'OK  Brave already installed'
-    } else {
-        $setup = Join-Path $Deps 'brave\BraveSetup.exe'
-        if (Test-Path $setup) {
-            # Copied off the USB first, so the USB can be removed meanwhile.
-            $local = Join-Path $env:TEMP 'AdalKeep-BraveSetup.exe'
-            Copy-Item $setup $local -Force
-            # Waited for: Adal Keep must open in Brave from its first start.
-            Start-Process -FilePath $local -ArgumentList '/silent', '/install' -WindowStyle Hidden -Wait
-            for ($i = 0; $i -lt 180 -and -not (Get-Brave); $i++) { Start-Sleep -Seconds 2 }
-            if (Get-Brave) { Write-Host 'OK  Brave installed' } else { Write-Host 'WARN Brave did not install - Adal Keep uses Chrome or Edge' }
-        } else {
-            Write-Host 'WARN no Brave installer on the USB - install Brave by hand'
-        }
-    }
 } catch {
     Write-Host "FAILED: $($_.Exception.Message)"
     $code = 1

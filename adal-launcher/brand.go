@@ -1,11 +1,12 @@
 //go:build windows
 
-// brand.go — the Adal Keep Brave window shows the Adal Keep logo and name on
-// the taskbar, not Brave's.
+// brand.go — Adal Keep's window shows the Adal Keep logo and name on the
+// taskbar, and the agents' browser stays out of it.
 //
-// Only the windows of the Brave that runs the Adal Keep profile
-// (backend\data\browser-profile) are touched; a personal Brave keeps its own
-// look. Each such window gets:
+// The agents' window sits off the screen (backend/src/services/browser.js):
+// hideAgents takes it off the taskbar too, and gives it back when it comes on
+// the screen (a person pressed Open). Only Adal Keep's own profiles are touched.
+// Adal Keep's window gets:
 //   - the Adal Keep icon (WM_SETICON),
 //   - Adal Keep's own taskbar id (AppUserModelID), with the Adal Keep name,
 //     icon and AdalKeep.exe as what a pinned button starts.
@@ -36,6 +37,8 @@ var (
 	pLoadImage                   = user32.NewProc("LoadImageW")
 	pSendMessage                 = user32.NewProc("SendMessageW")
 	pGetWindow                   = user32.NewProc("GetWindow")
+	pGetWindowRect               = user32.NewProc("GetWindowRect")
+	pShowWindow                  = user32.NewProc("ShowWindow")
 	pGetSystemMetrics            = user32.NewProc("GetSystemMetrics")
 	pSHGetPropertyStoreForWindow = shell32.NewProc("SHGetPropertyStoreForWindow")
 	pCoCreateInstance            = ole32.NewProc("CoCreateInstance")
@@ -43,6 +46,8 @@ var (
 )
 
 const (
+	swHide         = 0
+	swShow         = 5
 	wmSetIcon      = 0x0080
 	wmGetIcon      = 0x007F
 	iconSmall      = 0
@@ -99,13 +104,47 @@ func brandWindows(root string) {
 		}
 		return 1
 	})
+	agentData := strings.ToLower(filepath.Join(root, "backend", "data"))
+	agents := map[uint32]bool{}
+	hidden := map[windows.HWND]bool{}
+	hideAgents := syscall.NewCallback(func(h windows.HWND, _ uintptr) uintptr {
+		if owner(h) != 0 || className(h) != "Chrome_WidgetWin_1" {
+			return 1
+		}
+		var pid uint32
+		windows.GetWindowThreadProcessId(h, &pid)
+		is, known := agents[pid]
+		if !known {
+			line := strings.ToLower(commandLine(pid))
+			is = strings.Contains(line, agentData) && strings.Contains(line, "--remote-debugging-port=9222")
+			agents[pid] = is
+		}
+		if !is {
+			return 1
+		}
+		var r windows.Rect
+		if ok, _, _ := pGetWindowRect.Call(uintptr(h), uintptr(unsafe.Pointer(&r))); ok == 0 {
+			return 1
+		}
+		off := r.Left < -10000
+		if off && windows.IsWindowVisible(h) {
+			pShowWindow.Call(uintptr(h), swHide)
+			hidden[h] = true
+		} else if !off && hidden[h] {
+			pShowWindow.Call(uintptr(h), swShow)
+			delete(hidden, h)
+		}
+		return 1
+	})
 	for {
 		windows.EnumWindows(cb, nil)
-		if len(ours) > 500 { // processes come and go
+		windows.EnumWindows(hideAgents, nil)
+		if len(ours) > 500 || len(agents) > 500 { // processes come and go
 			ours = map[uint32]bool{}
 			tagged = map[windows.HWND]bool{}
+			agents = map[uint32]bool{}
 		}
-		time.Sleep(1500 * time.Millisecond)
+		time.Sleep(700 * time.Millisecond)
 	}
 }
 

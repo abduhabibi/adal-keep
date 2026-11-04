@@ -3,7 +3,8 @@ import { listWorkflows } from '../services/workflows.js'
 import { dispatchRun, runStatus, queueSnapshot } from '../services/worker.js'
 import { markCancelled, isCancelled } from '../services/cancellation.js'
 import { forgetRunTab, findRunTab } from '../services/tabManager.js'
-import { openBrowserIfAny } from '../services/browser.js'
+import { openBrowserIfAny, showTab, openForPerson } from '../services/browser.js'
+import { waiting, answerCaptcha } from '../services/attention.js'
 import { assertPoliceReady, getProfileVerification, runPassportVerification } from '../services/verification.js'
 
 const router = express.Router()
@@ -333,6 +334,39 @@ router.get('/automations/ready-for-submit', async (req, res) => {
 // Get one run with its log (and, while it waits, where it stands in line)
 // Profiles with a run working now ('running') or waiting ('waiting': queued,
 // or paused for a person). Used by the "Run" filter on the profile lists.
+// The notification bar: what needs a person now.
+router.get('/automations/attention', async (req, res) => {
+  try {
+    const db = req.app.locals.db
+    const calls = waiting()
+    const paused = await db('automation_queue').where('status', 'paused').orderBy('id', 'desc').limit(30).select('id', 'pause_reason', 'updated_at')
+    for (const r of paused) if (!calls.some(c => c.run_id === r.id)) calls.push({ run_id: r.id, title: r.pause_reason || 'Waiting for you', body: '', at: new Date(r.updated_at).getTime(), image: null })
+    const runs = await db('automation_queue as q').leftJoin('profiles as p', 'p.id', 'q.profile_id')
+      .whereIn('q.id', calls.map(c => c.run_id)).select('q.id', 'q.profile_id', 'q.workflow_id', 'p.full_name')
+    const of = new Map(runs.map(r => [r.id, r]))
+    res.json(calls.filter(c => of.has(c.run_id)).map(c => ({ ...c, ...of.get(c.run_id), id: undefined })).sort((a, b) => b.at - a.at))
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+router.post('/automations/:id/captcha', async (req, res) => {
+  try {
+    const text = String(req.body?.text || '').trim()
+    if (!text) return res.status(400).json({ error: 'Type what the picture shows' })
+    await answerCaptcha(req.params.id, text)
+    res.json({ ok: true })
+  } catch (e) { res.status(400).json({ error: e.message }) }
+})
+router.post('/automations/:id/show', async (req, res) => {
+  try {
+    const page = await runTab(req.app.locals.db, Number(req.params.id))
+    if (!page) return res.status(404).json({ error: 'This run has no open tab.' })
+    await showTab(page)
+    res.json({ ok: true })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+router.post('/browser/open', async (req, res) => {
+  try { await openForPerson(); res.json({ ok: true }) } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
 router.get('/automations/active', async (req, res) => {
   try {
     const db = req.app.locals.db
@@ -452,7 +486,6 @@ export function journeyOf(p, runs = {}, hasCv = false, docs = null, agents = [])
   const pay = String(p.musaned_payment || '').trim()
   const wakala = step('wakala', 'Paid wakala', /^paid$/i.test(pay) ? 'done' : chosen && /^unpaid$/i.test(pay) ? 'failed' : 'todo',
     /^paid$/i.test(pay) ? 'paid' : chosen && /^unpaid$/i.test(pay) ? 'unpaid' : '', 'musaned_check_chosen')
-  const lmis = step('lmis', 'LMIS contract', ...fromRun(runs.lmis_contract, 'created'), 'lmis_contract')
   const visa = /applied|paid|printed/i.test(p.visa_stage || '') ? ['done', `${/printed/i.test(p.visa_stage) ? 'printed' : /paid/i.test(p.visa_stage) ? 'paid' : 'applied'}${p.visa_application_number ? ` · no. ${p.visa_application_number}` : ''}`]
     : fromRun(runs.mofa_visa)
   const tasheer = step('tasheer', 'Tasheer', 'soon', 'coming')
@@ -466,12 +499,11 @@ export function journeyOf(p, runs = {}, hasCv = false, docs = null, agents = [])
     selected: [p.musaned_pro && `Office: ${p.musaned_pro}`, p.contract_number && `Contract ${p.contract_number}`].filter(Boolean).join(' · '),
     wakala: p.musaned_pro ? `Office: ${p.musaned_pro}` : '',
     wafid: p.medical_valid_until ? `Medical valid until ${String(p.medical_valid_until).slice(0, 10)}` : '',
-    lmis: [employer && `Employer: ${employer}`, p.contract_number && `Contract ${p.contract_number}`, p.labor_id && `Labour ID ${p.labor_id}`].filter(Boolean).join(' · '),
     insurance: '',
     tasheer: '',
     visa: [p.visa_number && `Visa ${p.visa_number}`, p.visa_application_number && `Application ${p.visa_application_number}`].filter(Boolean).join(' · '),
   }
-  for (const st of [cv, musaned, selected, wafid, lmis, wakala, tasheer, insurance, visaStep]) {
+  for (const st of [cv, musaned, selected, wafid, wakala, tasheer, insurance, visaStep]) {
     st.who = who[st.key] || ''
     if (docs) {
       const need = STEP_DOCS[st.key] || []
@@ -479,7 +511,7 @@ export function journeyOf(p, runs = {}, hasCv = false, docs = null, agents = [])
     }
   }
   return {
-    lmis: [cv, musaned, selected, wafid, lmis],
+    lmis: [cv, musaned, selected, wafid],
     embassy: [cv, musaned, selected, wafid, wakala, tasheer, insurance, visaStep],
   }
 }

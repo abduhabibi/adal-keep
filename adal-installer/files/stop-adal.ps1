@@ -10,7 +10,7 @@ Get-CimInstance Win32_Process -Filter "Name = 'cmd.exe'" |
     Where-Object { $_.CommandLine -like "*$root*" -and ($_.CommandLine -like '*run-server.bat*' -or $_.CommandLine -like '*start-companion.bat*') } |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
 
-Get-Process node, AdalKeep, adal-companion, adal-agent |
+Get-Process node, AdalKeep, AdalBrowser, adal-companion, adal-agent |
     Where-Object { $_.Path -and $_.Path.StartsWith($root, [StringComparison]::OrdinalIgnoreCase) } |
     Stop-Process -Force
 

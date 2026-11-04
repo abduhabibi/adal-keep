@@ -358,6 +358,40 @@ async function fillLogin(page, ctx) {
 }
 
 /**
+ * The captcha picture, as a data: address for the notification (drawn from the
+ * page itself: no screenshot, so the tab stays out of sight).
+ */
+async function captchaPicture(page) {
+  return page.evaluate(() => {
+    const seen = [...document.querySelectorAll('img')].filter(i => i.offsetParent !== null && i.naturalWidth > 30)
+    const img = seen.find(i => /captcha/i.test(`${i.src} ${i.id} ${i.className} ${i.alt}`)) || null
+    if (!img) return null
+    const c = document.createElement('canvas')
+    c.width = img.naturalWidth; c.height = img.naturalHeight
+    c.getContext('2d').drawImage(img, 0, 0)
+    return c.toDataURL('image/png')
+  }).catch(() => null)
+}
+
+/** Type the captcha into its box (the text box under "Captcha", or after the password). */
+async function typeCaptcha(page, text) {
+  const ok = await page.evaluate((text) => {
+    const lab = [...document.querySelectorAll('label, span, div, td')].find(e => /^\s*\*?\s*captcha\s*\*?\s*$/i.test(e.innerText || ''))
+    let box = lab?.parentElement, input = null
+    for (let i = 0; i < 3 && box && !input; i++, box = box.parentElement) input = box.querySelector('input[type="text"], input:not([type])')
+    if (!input) {
+      const pw = document.querySelector('input[type="password"]')
+      input = pw && [...document.querySelectorAll('input[type="text"], input:not([type])')].find(i => pw.compareDocumentPosition(i) & Node.DOCUMENT_POSITION_FOLLOWING)
+    }
+    if (!input) return false
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, text)
+    for (const t of ['input', 'change']) input.dispatchEvent(new Event(t, { bubbles: true }))
+    return true
+  }, text)
+  if (!ok) throw new Error('The captcha box was not found')
+}
+
+/**
  * Signed in: the platform left the login page, or it greets the user
  * ("Welcome …") and shows no password box.
  */
@@ -387,19 +421,32 @@ async function signIn(page, ctx) {
     }
     await page.waitForSelector('input[type="password"]', { timeout: 60000 })
     await fillLogin(page, ctx)
-    log(ctx, `🔐 Login Name and Password filled (${ctx.visa_name || ctx.visa_username}) — a person types the captcha and presses Login`)
-    await page.bringToFront().catch(() => {})
+    log(ctx, `🔐 Login Name and Password filled (${ctx.visa_name || ctx.visa_username}) — waiting for the captcha`)
     await ctx.notify(
       `🛂 ${ctx.profileName}: visa platform — type the captcha`,
-      'The visa platform tab is in front with the Login Name and Password filled. Type the captcha picture\'s numbers and press Login; Adal Keep continues by itself.',
+      'Type the numbers in the picture here; Adal Keep signs in and continues by itself.',
       'warn', { login: page }
     )
+    // The picture goes to the notification; what is typed there signs in here.
+    let sentAt = 0
+    const ask = async () => {
+      const pic = await captchaPicture(page)
+      if (!pic) return
+      ctx.askCaptcha?.(pic, async (text) => {
+        await fillLogin(page, ctx).catch(() => {})
+        await typeCaptcha(page, text)
+        sentAt = Date.now()
+        await clickText(page, /^\s*(log ?in|sign ?in)\s*$/)
+      })
+    }
+    await ask()
     const t0 = Date.now()
     while (Date.now() - t0 < LOGIN_WAIT_MS) {
       if (cancelled(ctx)) { const e = new Error('Cancelled by user'); e.cancelled = true; throw e }
       if (await signedIn(page)) break
-      // A wrong captcha reloads the form empty: fill it again.
+      // A wrong captcha reloads the form empty: fill it again, and ask again.
       await fillLogin(page, ctx).catch(() => {})
+      if (sentAt && Date.now() - sentAt > 7000) { sentAt = 0; log(ctx, 'the captcha was not accepted — asking again', 'warn'); await ask() }
       await sleep(2000)
     }
     if (!(await signedIn(page))) throw new Error('Nobody signed in to the visa platform within 10 minutes')
@@ -684,13 +731,15 @@ export async function runMofaVisa(page, ctx) {
   }).catch(() => {})
 
   await ctx.noteProfile?.(`Visa: form filled — waiting for a person to type the captcha and press Save${left.length ? ` (also to fill: ${left.join('; ')})` : ''}`, { visa_stage: VISA_STAGES.waiting })
-  await page.bringToFront().catch(() => {})
   await ctx.notify(
-    `🛂 ${ctx.profileName}: visa form filled — type the captcha and press Save`,
+    `🛂 ${ctx.profileName}: visa form filled — type the captcha, then Open and press Save`,
     (left.length ? `Still to fill: ${left.join('; ')}. ` : 'Every field is filled. ') +
-    'Look the form over, type the captcha and press Save in the visa platform tab.',
-    'warn'
+    'Type the captcha here, then press Open, look the form over and press Save.',
+    'warn', { login: page }
   )
+  // Typed into the form only: Save stays a person's.
+  const pic = await captchaPicture(page)
+  if (pic) ctx.askCaptcha?.(pic, (text) => typeCaptcha(page, text))
   if (left.length) log(ctx, `left for a person: ${left.join('; ')}`, 'warn')
   log(ctx, '⏳ waiting for the person to press Save (up to 15 minutes)')
 
@@ -845,3 +894,4 @@ export async function runMofaFindApp(page, ctx) {
   }
   return { ok: true, done: true, seconds: secs() }
 }
+export { captchaPicture, typeCaptcha }   // tests

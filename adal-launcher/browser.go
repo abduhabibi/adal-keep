@@ -1,24 +1,25 @@
 //go:build windows
 
-// browser.go — which browser opens Adal Keep.
+// browser.go — Adal Browser, and which browser opens Adal Keep.
 //
-// Brave first: the automations drive it. Setup installs Brave in the
-// background, so right after an install it may still be on its way: then the
-// launcher waits for it (and says so) instead of opening another browser.
-// Without Brave, Chrome or Edge open Adal Keep the same way (same profile,
-// same control port), so the automations still work. The default browser is
-// the last resort.
+// Adal Browser is Adal Keep's own Chromium: <install>\browser\AdalBrowser.exe,
+// fetched once by ensureBrowser (ungoogled-chromium, pinned to one checked
+// file). Until it is there, or if it cannot be fetched, a browser already on
+// the PC is used the same way (Edge is on every Windows 10/11).
 package main
 
 import (
+	"archive/zip"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"io"
+	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
-	"unsafe"
 
-	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 )
 
@@ -70,96 +71,152 @@ func otherChromium() string {
 	)
 }
 
-// braveInstalling: Brave's setup (started by the Adal Keep installer) is running.
-func braveInstalling() bool {
-	snap, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
-	if err != nil {
-		return false
-	}
-	defer windows.CloseHandle(snap)
-	var e windows.ProcessEntry32
-	e.Size = uint32(unsafe.Sizeof(e))
-	for err = windows.Process32First(snap, &e); err == nil; err = windows.Process32Next(snap, &e) {
-		name := strings.ToLower(windows.UTF16ToString(e.ExeFile[:]))
-		if strings.Contains(name, "bravesetup") || strings.Contains(name, "brave_installer") ||
-			strings.Contains(name, "bravebrowser") || name == "braveupdate.exe" {
-			return true
-		}
-	}
-	return false
-}
-
-// notify shows a message without holding anything up.
-func notify(msg string) {
-	go func() {
-		title, _ := windows.UTF16PtrFromString("Adal Keep")
-		text, _ := windows.UTF16PtrFromString(msg)
-		windows.MessageBox(0, text, title, windows.MB_OK|windows.MB_ICONINFORMATION|windows.MB_SETFOREGROUND)
-	}()
-}
-
-// pickBrowser: Brave (waiting for it while it installs), else Chrome/Edge.
+// pickBrowser: Adal Browser, else one already on this PC.
 func pickBrowser() string {
+	if b := adalBrowser(installRoot); fileExists(b) {
+		return b
+	}
 	if b := braveExe(); b != "" {
 		return b
 	}
-	if braveInstalling() {
-		// A short wait only: Brave's setup can take minutes on a slow line, and
-		// Adal Keep must open at once — in Chrome / Edge now, in Brave next time.
-		logf("Brave is still installing — waiting up to 20 s for it")
-		for end := time.Now().Add(20 * time.Second); time.Now().Before(end); time.Sleep(1 * time.Second) {
-			if b := braveExe(); b != "" {
-				time.Sleep(3 * time.Second) // let the installer finish its last files
-				return b
-			}
-			if !braveInstalling() {
-				break
-			}
-		}
-	}
 	if b := otherChromium(); b != "" {
-		logf("Brave not found — using %s", b)
+		logf("Adal Browser not here yet — using %s", b)
 		return b
 	}
-	logf("no Brave, Chrome or Edge found — opening the default browser")
+	logf("no browser found — opening the default browser")
 	return ""
+}
+
+const (
+	browserVersion = "156.0.8078.79-1.1"
+	browserURL     = "https://github.com/ungoogled-software/ungoogled-chromium-windows/releases/download/" + browserVersion + "/ungoogled-chromium_" + browserVersion + "_windows_x64.zip"
+	browserSHA     = "a97c5378e16075967660f85cc34150444a9cfbc79733f048b9c6b42a851e4eb9"
+)
+
+var installRoot string
+
+func adalBrowser(root string) string { return filepath.Join(root, "browser", "AdalBrowser.exe") }
+
+// ensureBrowser fetches Adal Browser when it is missing, in the background,
+// trying again every minute until it is there.
+func ensureBrowser(root string) {
+	for !fileExists(adalBrowser(root)) {
+		logf("fetching Adal Browser %s", browserVersion)
+		if err := fetchBrowser(root); err != nil {
+			logf("Adal Browser: %v — trying again in a minute", err)
+			time.Sleep(time.Minute)
+			continue
+		}
+		logf("Adal Browser is ready")
+	}
+}
+
+func fetchBrowser(root string) error {
+	// Goes on where it stopped: a slow line drops long downloads.
+	part := filepath.Join(root, "browser.zip.part")
+	var have int64
+	if st, err := os.Stat(part); err == nil {
+		have = st.Size()
+	}
+	req, err := http.NewRequest(http.MethodGet, browserURL, nil)
+	if err != nil {
+		return err
+	}
+	if have > 0 {
+		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", have))
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	flags := os.O_CREATE | os.O_WRONLY
+	switch resp.StatusCode {
+	case http.StatusPartialContent:
+		flags |= os.O_APPEND
+	case http.StatusOK:
+		flags |= os.O_TRUNC
+	case http.StatusRequestedRangeNotSatisfiable: // already whole
+	default:
+		return fmt.Errorf("download: %s", resp.Status)
+	}
+	if resp.StatusCode != http.StatusRequestedRangeNotSatisfiable {
+		f, err := os.OpenFile(part, flags, 0o644)
+		if err != nil {
+			return err
+		}
+		_, err = io.Copy(f, resp.Body)
+		f.Close()
+		if err != nil {
+			return err // the next try goes on from here
+		}
+	}
+	f, err := os.Open(part)
+	if err != nil {
+		return err
+	}
+	sum := sha256.New()
+	_, err = io.Copy(sum, f)
+	f.Close()
+	if err != nil {
+		return err
+	}
+	if hex.EncodeToString(sum.Sum(nil)) != browserSHA {
+		os.Remove(part)
+		return fmt.Errorf("the download is damaged")
+	}
+	defer os.Remove(part)
+	tmp := filepath.Join(root, "browser.new")
+	os.RemoveAll(tmp)
+	defer os.RemoveAll(tmp)
+	z, err := zip.OpenReader(part)
+	if err != nil {
+		return err
+	}
+	defer z.Close()
+	// Everything sits in one folder inside the zip: the one holding chrome.exe.
+	prefix := ""
+	for _, e := range z.File {
+		if strings.EqualFold(filepath.Base(e.Name), "chrome.exe") {
+			prefix = strings.TrimSuffix(e.Name, filepath.Base(e.Name))
+			break
+		}
+	}
+	for _, e := range z.File {
+		name := strings.TrimPrefix(e.Name, prefix)
+		if name == "" || !strings.HasPrefix(e.Name, prefix) || strings.Contains(name, "..") {
+			continue
+		}
+		to := filepath.Join(tmp, filepath.FromSlash(name))
+		if e.FileInfo().IsDir() {
+			os.MkdirAll(to, 0o755)
+			continue
+		}
+		os.MkdirAll(filepath.Dir(to), 0o755)
+		in, err := e.Open()
+		if err != nil {
+			return err
+		}
+		out, err := os.Create(to)
+		if err != nil {
+			in.Close()
+			return err
+		}
+		_, err = io.Copy(out, in)
+		out.Close()
+		in.Close()
+		if err != nil {
+			return err
+		}
+	}
+	if err := os.Rename(filepath.Join(tmp, "chrome.exe"), filepath.Join(tmp, "AdalBrowser.exe")); err != nil {
+		return err
+	}
+	os.RemoveAll(filepath.Join(root, "browser"))
+	return os.Rename(tmp, filepath.Join(root, "browser"))
 }
 
 func fileExists(p string) bool {
 	st, err := os.Stat(p)
 	return err == nil && !st.IsDir()
-}
-
-// repairBrave: the installer could not install Brave (it left its setup next
-// to Adal Keep). Try again now, for this Windows user (no admin needed), in
-// the background. Chrome / Edge open Adal Keep until it is done; once Brave is
-// there the setup file goes.
-func repairBrave(root string) {
-	setup := filepath.Join(root, "BraveSetup.exe")
-	if !fileExists(setup) {
-		return
-	}
-	if braveExe() != "" {
-		os.Remove(setup)
-		return
-	}
-	if braveInstalling() {
-		return
-	}
-	logf("Brave is missing — installing it again from %s", setup)
-	cmd := hidden(exec.Command(setup))
-	if err := cmd.Start(); err != nil {
-		logf("Brave setup did not start: %v", err)
-		return
-	}
-	go cmd.Wait()
-	for end := time.Now().Add(10 * time.Minute); time.Now().Before(end); time.Sleep(5 * time.Second) {
-		if b := braveExe(); b != "" {
-			logf("Brave installed: %s", b)
-			time.Sleep(5 * time.Second)
-			os.Remove(setup)
-			return
-		}
-	}
-	logf("Brave did not install this time — trying again at the next start")
 }

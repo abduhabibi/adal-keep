@@ -124,11 +124,6 @@ func runEmployee(root string, background bool) {
 // openAppWindow: the main PC's Adal Keep as its own app-style window (no
 // address bar, no tabs), in this PC's Adal Keep browser profile.
 func openAppWindow(root, url string) {
-	b := pickBrowser()
-	if b == "" {
-		exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
-		return
-	}
 	profile := profileDir(root)
 	os.MkdirAll(profile, 0o755)
 	args := []string{
@@ -139,12 +134,28 @@ func openAppWindow(root, url string) {
 		"--hide-crash-restore-bubble",
 		"--start-maximized",
 	}
-	if err := exec.Command(b, args...).Start(); err != nil {
-		logf("could not start %s: %v", b, err)
-		exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
+	// One that cannot start must not leave the person with nothing: the next one opens.
+	for _, b := range browsers() {
+		cmd := exec.Command(b, args...)
+		if err := cmd.Start(); err != nil {
+			logf("could not start %s: %v", b, err)
+			continue
+		}
+		done := make(chan error, 1)
+		go func() { done <- cmd.Wait() }()
+		select {
+		case err := <-done:
+			if err != nil { // a clean end only means a window was already open
+				logf("%s stopped at once: %v", filepath.Base(b), err)
+				continue
+			}
+		case <-time.After(4 * time.Second):
+		}
+		logf("opened %s in %s (app window)", url, filepath.Base(b))
 		return
 	}
-	logf("opened %s in %s (app window)", url, filepath.Base(b))
+	logf("no browser could open — using the default one")
+	exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
 }
 
 // followedMainURL: on a full install, the main PC chosen in Settings → Main PC

@@ -4,8 +4,9 @@
 // taskbar, and the agents' browser stays out of it.
 //
 // The agents' window sits off the screen (backend/src/services/browser.js):
-// hideAgents takes it off the taskbar too, and gives it back when it comes on
-// the screen (a person pressed Open). Only Adal Keep's own profiles are touched.
+// hideAgents takes it off the taskbar too, as a tool window. It stays "shown"
+// for Windows: a hidden window stops drawing, and the card's live view needs it.
+// It gets its taskbar place back when it comes on the screen. Only Adal Keep's own profiles are touched.
 // Adal Keep's window gets:
 //   - the Adal Keep icon (WM_SETICON),
 //   - Adal Keep's own taskbar id (AppUserModelID), with the Adal Keep name,
@@ -39,6 +40,8 @@ var (
 	pGetWindow                   = user32.NewProc("GetWindow")
 	pGetWindowRect               = user32.NewProc("GetWindowRect")
 	pShowWindow                  = user32.NewProc("ShowWindow")
+	pGetWindowLong               = user32.NewProc("GetWindowLongPtrW")
+	pSetWindowLong               = user32.NewProc("SetWindowLongPtrW")
 	pGetSystemMetrics            = user32.NewProc("GetSystemMetrics")
 	pSHGetPropertyStoreForWindow = shell32.NewProc("SHGetPropertyStoreForWindow")
 	pCoCreateInstance            = ole32.NewProc("CoCreateInstance")
@@ -47,7 +50,10 @@ var (
 
 const (
 	swHide         = 0
-	swShow         = 5
+	swShowNA       = 8
+	gwlExStyle     = ^uintptr(19) // -20
+	wsExToolWindow = 0x00000080
+	wsExAppWindow  = 0x00040000
 	wmSetIcon      = 0x0080
 	wmGetIcon      = 0x007F
 	iconSmall      = 0
@@ -106,7 +112,7 @@ func brandWindows(root string) {
 	})
 	agentData := strings.ToLower(filepath.Join(root, "backend", "data"))
 	agents := map[uint32]bool{}
-	hidden := map[windows.HWND]bool{}
+	tool := map[windows.HWND]bool{}
 	hideAgents := syscall.NewCallback(func(h windows.HWND, _ uintptr) uintptr {
 		if owner(h) != 0 || className(h) != "Chrome_WidgetWin_1" {
 			return 1
@@ -127,12 +133,18 @@ func brandWindows(root string) {
 			return 1
 		}
 		off := r.Left < -10000
-		if off && windows.IsWindowVisible(h) {
+		if off != tool[h] && windows.IsWindowVisible(h) {
+			ex, _, _ := pGetWindowLong.Call(uintptr(h), gwlExStyle)
+			if off {
+				ex = ex&^wsExAppWindow | wsExToolWindow
+			} else {
+				ex = ex&^wsExToolWindow | wsExAppWindow
+			}
+			// The taskbar notices a new style when the window is shown again.
 			pShowWindow.Call(uintptr(h), swHide)
-			hidden[h] = true
-		} else if !off && hidden[h] {
-			pShowWindow.Call(uintptr(h), swShow)
-			delete(hidden, h)
+			pSetWindowLong.Call(uintptr(h), gwlExStyle, ex)
+			pShowWindow.Call(uintptr(h), swShowNA)
+			tool[h] = off
 		}
 		return 1
 	})

@@ -71,20 +71,15 @@ func otherChromium() string {
 	)
 }
 
-// pickBrowser: Adal Browser, else one already on this PC.
-func pickBrowser() string {
-	if b := adalBrowser(installRoot); fileExists(b) {
-		return b
+// browsers: Adal Browser, then what is already on this PC.
+func browsers() []string {
+	var list []string
+	for _, b := range []string{adalBrowser(installRoot), braveExe(), otherChromium()} {
+		if b != "" && fileExists(b) {
+			list = append(list, b)
+		}
 	}
-	if b := braveExe(); b != "" {
-		return b
-	}
-	if b := otherChromium(); b != "" {
-		logf("Adal Browser not here yet — using %s", b)
-		return b
-	}
-	logf("no browser found — opening the default browser")
-	return ""
+	return list
 }
 
 const (

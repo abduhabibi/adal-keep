@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import api from '../services/api'
+import LiveTab from './LiveTab'
 
 /**
  * The notification bell: a small button in the corner of Adal Keep while
@@ -9,8 +11,8 @@ import api from '../services/api'
  * opens by itself only for a captcha, the one call answered right here. A picture captcha shows here with an input: the typed
  * numbers go into the tab and the run finishes by itself, and the tab stays
  * signed in for the next runs. Anything else (a reCAPTCHA, a code, Save) has
- * Open, which brings that tab forward. The PC beeps by itself; another computer
- * beeps here.
+ * Open: that tab, live, over Adal Keep, driven from here. The PC beeps by
+ * itself; another computer beeps here.
  */
 const err = (e) => e?.response?.data?.error || e.message
 const here = () => ['localhost', '127.0.0.1'].includes(location.hostname)
@@ -40,10 +42,8 @@ function Call({ c, onDone }) {
     catch (er) { toast.error(err(er)) }
     setBusy(false)
   }
-  const open = async () => {
-    if (window.__ADAL_CLOUD) return navigate(`/profiles/${c.profile_id}?run=${c.run_id}&t=${Date.now()}`)
-    try { await api.post(`/automations/${c.run_id}/show`) } catch (er) { toast.error(err(er)) }
-  }
+  const [live, setLive] = useState(false)
+  const open = () => window.__ADAL_CLOUD ? navigate(`/profiles/${c.profile_id}?run=${c.run_id}&t=${Date.now()}`) : setLive(true)
   return (
     <li className="space-y-1.5 px-3 py-2.5">
       <p className="truncate text-xs font-bold">{c.full_name || `Run #${c.run_id}`}</p>
@@ -56,7 +56,11 @@ function Call({ c, onDone }) {
           <button disabled={busy || !text.trim()} className="rounded-lg bg-teal-600 px-2.5 text-xs font-bold text-white disabled:opacity-50">{busy ? '…' : 'Send'}</button>
         </form>
       )}
-      <button type="button" onClick={open} className="text-xs font-semibold text-teal-700 hover:underline dark:text-teal-400">Open →</button>
+      <span className="flex gap-3">
+        <button type="button" onClick={open} className="text-xs font-semibold text-teal-700 hover:underline dark:text-teal-400">Open →</button>
+        {c.profile_id && <button type="button" onClick={() => navigate(`/profiles/${c.profile_id}?run=${c.run_id}&t=${Date.now()}`)} className="text-xs text-slate-500 hover:underline">Her profile</button>}
+      </span>
+      {live && createPortal(<LiveTab runId={c.run_id} startFull onClose={() => setLive(false)} />, document.body)}
     </li>
   )
 }

@@ -95,6 +95,15 @@ export default function ProfileAutomations({ profileId }) {
   }, [])
   useEffect(() => choose ? onBack(() => setChoose(null)) : undefined, [choose])
   const navigate = useNavigate()
+  // Runs calling for a person now (a sign-in, a reCAPTCHA …): their tab shows by itself.
+  const [calling, setCalling] = useState(() => new Set())
+  useEffect(() => {
+    let alive = true
+    const look = () => api.get('/automations/attention').then(r => alive && setCalling(new Set((r.data || []).map(c => c.run_id)))).catch(() => {})
+    look()
+    const t = setInterval(look, 4000)
+    return () => { alive = false; clearInterval(t) }
+  }, [])
   const openRun = (id) => { setOpen(id); setAiOpen(true); if (PHONE_VIEW()) setScreen(true) }
   useEffect(() => screen ? onBack(() => setScreen(false)) : undefined, [screen])
   // The PC's tab, live (on the phone app it opens by itself).
@@ -550,11 +559,12 @@ export default function ProfileAutomations({ profileId }) {
             PHONE_VIEW()
               ? <button type="button" onClick={() => setScreen(true)}
                   className="w-full rounded-xl bg-indigo-600 text-white py-3 text-sm font-semibold">🌐 Open the website of this task</button>
-              : liveOpen === detail.id
+              // Waiting for a person: its tab shows right here, Expand to work in it.
+              : liveOpen === detail.id || detail.status === 'paused' || calling.has(detail.id)
               ? <LiveTab runId={detail.id} />
               : <button type="button" onClick={() => setLiveOpen(detail.id)}
                   className="w-full rounded-lg border-2 border-dashed border-indigo-300 dark:border-indigo-700 py-2 text-xs font-semibold text-indigo-700 dark:text-indigo-300">
-                  📱 Show the PC's tab here (answer a captcha or press Submit from this screen)
+                  👁 Show this run's tab here
                 </button>
           )}
 

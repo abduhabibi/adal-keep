@@ -14,9 +14,10 @@ import { onBack, IN_PHONE_APP } from '../lib/phoneApp'
  * elsewhere it is asked about once a second.
  */
 const VIEW_KEY = 'adal-live-view'
+const KEYS = ['Enter', 'Backspace', 'Tab', 'Escape', 'ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Delete', 'PageDown', 'PageUp', 'Home', 'End']
 const PHONE = IN_PHONE_APP || (typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches)
 
-export default function LiveTab({ runId, fill = false }) {
+export default function LiveTab({ runId, fill = false, startFull = false, onClose }) {
   const [view, setView] = useState(() => { try { return localStorage.getItem(VIEW_KEY) || (PHONE ? 'mirror' : 'picture') } catch { return 'picture' } })
   const [src, setSrc] = useState(null)
   const [page, setPage] = useState(null)        // the light page
@@ -25,7 +26,7 @@ export default function LiveTab({ runId, fill = false }) {
   const [editing, setEditing] = useState(false)
   const [err, setErr] = useState(null)
   const [text, setText] = useState('')
-  const [full, setFull] = useState(false)
+  const [full, setFull] = useState(startFull)
   const [mode, setMode] = useState('…')
   const [fps, setFps] = useState(0)
   const [zoom, setZoom] = useState(1)
@@ -50,8 +51,9 @@ export default function LiveTab({ runId, fill = false }) {
   }
   const GONE = 'This run\'s tab on the PC was closed. Press ▶ Continue — the run opens it again and it shows here.'
 
+  const shrink = () => { setFull(false); onClose?.() }
   // Back closes full screen first (phone app).
-  useEffect(() => full ? onBack(() => setFull(false)) : undefined, [full])
+  useEffect(() => full ? onBack(shrink) : undefined, [full])
 
   useEffect(() => {
     let alive = true, timer = null, off = null, renew = null
@@ -162,6 +164,13 @@ export default function LiveTab({ runId, fill = false }) {
     await send({ kind: 'key', key: 'Enter' })
     setText('')
   }
+  // Expanded on a PC it is a browser: click the page, then the keyboard works on it.
+  const keyboard = (e) => {
+    if (e.ctrlKey || e.metaKey || e.altKey) return
+    e.preventDefault()
+    if (e.key.length === 1) send({ kind: 'type', text: e.key })
+    else if (KEYS.includes(e.key)) send({ kind: 'key', key: e.key })
+  }
   const go = (e) => { e.preventDefault(); setEditing(false); if (address.trim()) send({ kind: 'nav', url: address.trim() }) }
 
   const btn = 'shrink-0 rounded-lg border border-slate-300 dark:border-slate-600 px-2 py-1.5 text-xs font-semibold active:bg-slate-100 dark:active:bg-slate-800'
@@ -184,7 +193,9 @@ export default function LiveTab({ runId, fill = false }) {
             onChange={(e) => setAddress(e.target.value)} inputMode="url" autoCapitalize="off" autoCorrect="off" spellCheck={false}
             className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 px-2.5 py-1.5 text-xs font-mono truncate" />
         </form>
-        {!fill && <button type="button" className={btn} onClick={() => setFull(f => !f)} title={full ? 'Smaller' : 'Full screen'}>{full ? '✕' : '⛶'}</button>}
+        {!fill && (full
+          ? <button type="button" className={btn} onClick={shrink} title="Smaller">✕</button>
+          : <button type="button" className={`${btn} border-indigo-400 text-indigo-700 dark:text-indigo-300`} onClick={() => setFull(true)}>⛶ Expand</button>)}
       </div>
       <div className="flex items-center gap-2">
         <div className="flex flex-1 rounded-lg bg-slate-100 dark:bg-slate-900 p-0.5">
@@ -204,7 +215,8 @@ export default function LiveTab({ runId, fill = false }) {
 
       {view === 'picture' && <>
         {src && (
-          <div className={`${full || fill ? 'flex-1 min-h-0' : 'max-h-[70vh]'} overflow-auto rounded-lg border border-slate-200 dark:border-slate-800`}
+          <div className={`${full || fill ? 'flex-1 min-h-0' : 'max-h-[50vh]'} overflow-auto rounded-lg border border-slate-200 outline-none focus:border-indigo-400 dark:border-slate-800`}
+            tabIndex={PHONE ? undefined : 0} onKeyDown={PHONE ? undefined : keyboard}
             style={{ touchAction: zoom > 1 ? 'pan-x pan-y' : 'none' }}>
             <img src={src} alt="The run's tab on the PC" draggable={false}
               onMouseDown={down} onMouseMove={(e) => e.buttons && move(e)} onMouseUp={up}
@@ -214,7 +226,7 @@ export default function LiveTab({ runId, fill = false }) {
           </div>
         )}
         {!src && !err && <div className="h-40 rounded-lg bg-slate-100 dark:bg-slate-900 animate-pulse" />}
-        <div className="flex items-center gap-1.5">
+        {PHONE && <><div className="flex items-center gap-1.5">
           <button type="button" className={btn} onClick={() => setZoom(z => Math.max(1, +(z - 0.5).toFixed(1)))}>－</button>
           <span className="text-[11px] w-10 text-center tabular-nums">{Math.round(zoom * 100)}%</span>
           <button type="button" className={btn} onClick={() => setZoom(z => Math.min(4, +(z + 0.5).toFixed(1)))}>＋</button>
@@ -230,7 +242,7 @@ export default function LiveTab({ runId, fill = false }) {
             ['▲', { kind: 'scroll', dy: -500 }], ['▼', { kind: 'scroll', dy: 500 }], ['⇞ Top', { kind: 'key', key: 'Home' }], ['⇟ End', { kind: 'key', key: 'End' }]].map(([l, b]) => (
             <button key={l} type="button" onClick={() => send(b)} className={btn}>{l}</button>
           ))}
-        </div>
+        </div></>}
       </>}
     </div>
   )

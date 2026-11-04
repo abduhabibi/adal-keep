@@ -74,7 +74,6 @@ func main() {
 	// Already running for this user: just open the page.
 	if !firstCopy() {
 		if !background {
-			serverReady(45 * time.Second)
 			openMainOrFollowed(root)
 		}
 		return
@@ -86,9 +85,9 @@ func main() {
 	startHidden(filepath.Join(root, "adal-companion.exe"))
 	go keepServerRunning(root)
 	go brandWindows(root)
+	startAppDoor(root)
 
 	if !background || openAtStart(filepath.Join(root, "backend", "data")) {
-		serverReady(45 * time.Second)
 		openMainOrFollowed(root)
 	}
 	select {} // stay in the background: server, Companion, logo
@@ -203,6 +202,11 @@ func openAtStart(dir string) bool {
 // openUI opens Adal Keep's window: an app window of Adal Browser (no address
 // bar, no tabs), apart from the agents' browser.
 func openUI(root string) {
+	if appDoorOpen() {
+		openAppWindow(root, appURL)
+		return
+	}
+	serverReady(45 * time.Second) // the copy that keeps the door is not there
 	openAppWindow(root, uiURL)
 }
 

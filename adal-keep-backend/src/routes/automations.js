@@ -3,7 +3,7 @@ import { listWorkflows } from '../services/workflows.js'
 import { dispatchRun, runStatus, queueSnapshot } from '../services/worker.js'
 import { markCancelled, isCancelled } from '../services/cancellation.js'
 import { forgetRunTab, findRunTab } from '../services/tabManager.js'
-import { openBrowserIfAny, showTab, openForPerson } from '../services/browser.js'
+import { openBrowserIfAny, openForPerson } from '../services/browser.js'
 import { waiting, answerCaptcha } from '../services/attention.js'
 import { assertPoliceReady, getProfileVerification, runPassportVerification } from '../services/verification.js'
 
@@ -368,14 +368,6 @@ router.post('/automations/:id/captcha', async (req, res) => {
     await answerCaptcha(req.params.id, text)
     res.json({ ok: true })
   } catch (e) { res.status(400).json({ error: e.message }) }
-})
-router.post('/automations/:id/show', async (req, res) => {
-  try {
-    const page = await runTab(req.app.locals.db, Number(req.params.id))
-    if (!page) return res.status(404).json({ error: 'This run has no open tab.' })
-    await showTab(page)
-    res.json({ ok: true })
-  } catch (e) { res.status(500).json({ error: e.message }) }
 })
 router.post('/browser/open', async (req, res) => {
   try { await openForPerson(); res.json({ ok: true }) } catch (e) { res.status(500).json({ error: e.message }) }

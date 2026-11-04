@@ -158,6 +158,34 @@ export async function connect(db, key = 'owner', { phone = '' } = {}, tries = 2)
       }
     }
   }
+  // WhatsApp's new /login page has no connection part (WAWebSocketModel), and
+  // the library stops there on "reading 'Socket'". So the sign-in is handled
+  // here: its QR shows in Adal Keep and "Stay logged in" stays ticked; after the
+  // scan WhatsApp loads its full app, and the library goes on from there.
+  const inject = c.inject.bind(c)
+  c.inject = async (...a) => {
+    let last = null
+    for (const end = Date.now() + 10 * 60_000; Date.now() < end;) {
+      const st = await c.pupPage?.evaluate(() => {
+        let up = false
+        try { up = !!window.require?.('WAWebSocketModel')?.Socket } catch {}
+        const stay = [...document.querySelectorAll('input[type="checkbox"]')].find(i => !i.checked)
+        stay?.click()
+        const canvas = document.querySelector('canvas')
+        return { up, ref: document.querySelector('[data-ref]')?.getAttribute('data-ref') || '', picture: canvas?.toDataURL() || '', login: location.pathname.startsWith('/login') }
+      }).catch(() => null)
+      if (st?.up) { if (last) setState(key, { status: 'signing-in', qr: null }); return inject(...a) }
+      const shown = st?.ref || st?.picture
+      if (st?.login && shown && shown !== last) {
+        last = shown
+        const { default: QR } = await import('qrcode')
+        const text = !st.ref || /^https?:/.test(st.ref) ? st.ref : `https://wa.me/settings/linked_devices#${st.ref}`
+        setState(key, { status: 'qr', qr: text ? await QR.toDataURL(text, { margin: 1, width: 300, errorCorrectionLevel: 'L' }) : st.picture, error: null })
+      }
+      await new Promise(r => setTimeout(r, 1000))
+    }
+    throw new Error('Nobody scanned the QR within 10 minutes')
+  }
   c.on('qr', async (qr) => {
     if (digits) return
     // WhatsApp's own QR now holds a link: https://wa.me/settings/linked_devices#<code>

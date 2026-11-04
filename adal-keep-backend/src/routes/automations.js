@@ -334,13 +334,27 @@ router.get('/automations/ready-for-submit', async (req, res) => {
 // Get one run with its log (and, while it waits, where it stands in line)
 // Profiles with a run working now ('running') or waiting ('waiting': queued,
 // or paused for a person). Used by the "Run" filter on the profile lists.
+const PLAIN_WAIT = {
+  'awaiting-insurance-save': 'Insurance: look it over and press Save',
+  'awaiting-visa-save': 'Visa: type the captcha and press Save',
+  'awaiting-visa-pay': 'Visa: pay the fees',
+  'awaiting-musaned-login': 'Musaned: sign in',
+  'awaiting-musaned-captcha': 'Musaned: tick the reCAPTCHA',
+  'awaiting-musaned-otp': 'Musaned: type the code',
+  'awaiting-human-save': 'Look it over and press Save',
+  'awaiting-human-submit': 'Look it over and press Submit',
+}
 // The notification bar: what needs a person now.
 router.get('/automations/attention', async (req, res) => {
   try {
     const db = req.app.locals.db
     const calls = waiting()
-    const paused = await db('automation_queue').where('status', 'paused').orderBy('id', 'desc').limit(30).select('id', 'pause_reason', 'updated_at')
-    for (const r of paused) if (!calls.some(c => c.run_id === r.id)) calls.push({ run_id: r.id, title: r.pause_reason || 'Waiting for you', body: '', at: new Date(r.updated_at).getTime(), image: null })
+    // Paused for a person today, in plain words. Older ones and runs a restart
+    // interrupted stay on their profiles: nobody is being called for them now.
+    const since = new Date(Date.now() - 12 * 3600000).toISOString()
+    const paused = await db('automation_queue').where('status', 'paused').where('updated_at', '>', since)
+      .where('pause_reason', 'not like', 'Interrupted%').orderBy('id', 'desc').limit(10).select('id', 'pause_reason', 'updated_at')
+    for (const r of paused) if (!calls.some(c => c.run_id === r.id)) calls.push({ run_id: r.id, title: PLAIN_WAIT[r.pause_reason] || 'Waiting for you', body: '', at: new Date(r.updated_at).getTime(), image: null })
     const runs = await db('automation_queue as q').leftJoin('profiles as p', 'p.id', 'q.profile_id')
       .whereIn('q.id', calls.map(c => c.run_id)).select('q.id', 'q.profile_id', 'q.workflow_id', 'p.full_name')
     const of = new Map(runs.map(r => [r.id, r]))

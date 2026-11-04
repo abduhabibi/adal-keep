@@ -4,8 +4,9 @@ import toast from 'react-hot-toast'
 import api from '../services/api'
 
 /**
- * The notification bar: what needs a person, in the corner of Adal Keep. No
- * window opens for it. A picture captcha shows here with an input: the typed
+ * The notification bell: a small button in the corner of Adal Keep while
+ * something needs a person, and nothing otherwise. No window opens for it. It
+ * opens by itself only for a captcha, the one call answered right here. A picture captcha shows here with an input: the typed
  * numbers go into the tab and the run finishes by itself, and the tab stays
  * signed in for the next runs. Anything else (a reCAPTCHA, a code, Save) has
  * Open, which brings that tab forward. The PC beeps by itself; another computer
@@ -62,7 +63,8 @@ function Call({ c, onDone }) {
 
 export default function AttentionBar() {
   const [calls, setCalls] = useState([])
-  const [open, setOpen] = useState(true)
+  const [open, setOpen] = useState(false)
+  const shut = useRef(false)   // closed by hand: stays closed
   const seen = useRef(null)
   const load = () => api.get('/automations/attention').then(r => {
     const list = r.data || []
@@ -70,6 +72,8 @@ export default function AttentionBar() {
     if (seen.current && !here() && keys.some(k => !seen.current.has(k))) beep()
     seen.current = new Set(keys)
     setCalls(list)
+    if (!list.length) shut.current = false
+    else if (list.some(c => c.image) && !shut.current) setOpen(true)
   }).catch(() => {})
   useEffect(() => {
     load()
@@ -77,15 +81,19 @@ export default function AttentionBar() {
     return () => clearInterval(t)
   }, [])
   if (!calls.length) return null
+  const toggle = () => setOpen(o => { shut.current = o; return !o })
   return (
-    <aside className="solid-sheet fixed bottom-3 left-3 z-[70] w-[19rem] max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-2xl border border-slate-200 shadow-2xl dark:border-slate-700">
-      <button type="button" onClick={() => setOpen(o => !o)} className="flex w-full items-center justify-between px-3 py-2 text-sm font-bold">
-        🔔 {calls.length} need{calls.length === 1 ? 's' : ''} you <span className="text-slate-400">{open ? '▾' : '▴'}</span>
+    <div className="fixed bottom-3 left-3 z-[70] flex max-w-[calc(100vw-1.5rem)] flex-col items-start gap-2">
+      {open && (
+        <ul className="max-h-[45vh] w-72 max-w-full divide-y divide-slate-100 overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-xl dark:divide-slate-800 dark:border-slate-700 dark:bg-slate-900">
+          {calls.map(c => <Call key={c.run_id} c={c} onDone={load} />)}
+        </ul>
+      )}
+      <button type="button" onClick={toggle} title={`${calls.length} need${calls.length === 1 ? 's' : ''} you`}
+        className="flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm font-bold shadow-lg dark:border-slate-700 dark:bg-slate-900">
+        🔔 <span className="rounded-full bg-red-500 px-1.5 text-xs text-white">{calls.length}</span>
       </button>
-      {open && <ul className="max-h-[50vh] divide-y divide-slate-100 overflow-y-auto border-t border-slate-100 dark:divide-slate-800 dark:border-slate-800">
-        {calls.map(c => <Call key={c.run_id} c={c} onDone={load} />)}
-      </ul>}
-    </aside>
+    </div>
   )
 }
 

@@ -27,7 +27,7 @@
  *
  * Cross-platform: pure Puppeteer/CDP — Windows / macOS / Linux identical.
  */
-import { newRunTab } from './browser.js'
+import { newRunTab, outOfSight } from './browser.js'
 
 export const PEERS = {
   musaned: { hosts: ['tawtheeq.musaned.com.sa', 'accounts.wahid.sa'], label: 'Musaned' },
@@ -225,6 +225,7 @@ const inTime = (p, ms = 3000) => Promise.race([p, new Promise(r => setTimeout(()
 /** Is this tab free to take? (A frozen tab answers nothing: not free.) */
 async function isFree(p, busyRuns) {
   if (p.__adalBorrowed || (p.__adalRunId !== undefined && !Number.isFinite(Number(p.__adalRunId)))) return false
+  if (!(await outOfSight(p))) return false   // a run is never seen working: only in the agents' window
   const st = await inTime(p.evaluate(() => ({
     name: window.name,
     front: document.visibilityState === 'visible',

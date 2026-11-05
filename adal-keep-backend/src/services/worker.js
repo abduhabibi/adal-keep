@@ -708,6 +708,28 @@ export async function runAgencyManager(db) {
   }
 }
 
+/** A person pressed Save in the live view and Musaned said SAVED: Musaned is done. */
+export async function closeSavedRuns(db) {
+  const rows = await db('automation_queue').where({ status: 'paused', workflow_id: 'musaned_add_candidate', pause_reason: 'awaiting-human-save' })
+    .where('updated_at', '>', new Date(Date.now() - 48 * 3600_000).toISOString()).select('id', 'profile_id', 'workflow_id', 'log')
+  if (!rows.length) return
+  const browser = await openBrowserIfAny()
+  if (!browser) return
+  const { savedOnPage } = await import('./musanedWorkflow.js')
+  for (const r of rows) {
+    const page = await findRunTab(browser, r.id, r.workflow_id)
+    if (!page || !(await savedOnPage(page))) continue
+    const now = new Date().toISOString()
+    let log = []
+    try { log = JSON.parse(r.log || '[]') } catch {}
+    log.push({ ts: Date.now(), level: 'info', msg: '✅ Musaned said SAVED — done' })
+    await db('automation_queue').where('id', r.id).where('status', 'paused').update({ status: 'done', pause_reason: null, finished_at: now, updated_at: now, log: JSON.stringify(log) })
+    doneWith(r.id, { force: true })
+    forgetRunTab(r.id)
+    console.log(`[worker] run #${r.id}: Musaned said SAVED — done`)
+  }
+}
+
 /** A run paused at Musaned's sign-in goes on by itself once its tab is signed in. */
 async function continueSignedIn(db) {
   const rows = await db('automation_queue').where('status', 'paused')
@@ -742,6 +764,7 @@ export function startWorker(db) {
     drainQueue(db).catch(e => console.error('[worker] poll error:', e))
   }, POLL_MS)
   setInterval(() => continueSignedIn(db).catch(e => console.warn('[worker] sign-in look:', e.message)), 15000).unref?.()
+  setInterval(() => closeSavedRuns(db).catch(e => console.warn('[worker] saved look:', e.message)), 3000).unref?.()
 
   console.log(`[worker] agency manager every ${AGENCY_INTERVAL_MS / 60000}min`)
   _agencyTimer = setInterval(() => {

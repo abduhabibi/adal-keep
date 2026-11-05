@@ -153,7 +153,23 @@ async function connectTo(puppeteer, url) {
     console.log('[browser] disconnected')
     if (_browser === b) _browser = null
   })
+  // A site's pop-up from a run's tab (a slip, a contract) goes out of sight too.
+  if (HIDDEN) b.on('targetcreated', async (t) => {
+    if (t.type() !== 'page' || !t.opener()) return
+    const from = await t.opener().page().catch(() => null)
+    const page = await t.page().catch(() => null)
+    if (from && page && await outOfSight(from)) await hide(page).catch(() => {})
+  })
   return b
+}
+
+/** Nobody can see this tab's window. */
+export async function outOfSight(page) {
+  if (!HIDDEN) return true
+  try {
+    const { bounds } = await (await windowOf(page)).cdp.send('Browser.getWindowForTarget')
+    return bounds.windowState === 'minimized' || bounds.left < -10000
+  } catch { return true }
 }
 
 function freeProfile() {
@@ -328,7 +344,22 @@ async function tabInAgentsWindow(browser) {
 
 /** With Adal Keep: the browser is up, out of sight, for the runs and the background checks. */
 export function startBrowserQuietly() {
-  if (HIDDEN) setTimeout(() => getBrowser().catch(e => console.warn('[browser] not started:', e.message)), 5000).unref?.()
+  if (HIDDEN) setTimeout(() => getBrowser().then(hideRunWindows).catch(e => console.warn('[browser] not started:', e.message)), 5000).unref?.()
+}
+
+/** Run tabs left in a window on the screen go out of sight, unless a person's Adal Keep is in it. */
+async function hideRunWindows(browser) {
+  const windows = new Map()
+  for (const page of await browser.pages()) {
+    const name = await page.evaluate(() => window.name).catch(() => '')
+    const { windowId } = await windowOf(page).catch(() => ({}))
+    if (!windowId) continue
+    const w = windows.get(windowId) || { page, run: false, person: false }
+    w.run ||= /^adal-run-/.test(name || '')
+    w.person ||= /^https?:\/\/(localhost|127\.0\.0\.1)/.test(page.url())
+    windows.set(windowId, w)
+  }
+  for (const w of windows.values()) if (w.run && !w.person && !(await outOfSight(w.page))) await hide(w.page).catch(() => {})
 }
 
 /** The browser for a person's own use: its own window, apart from the agents', with the saved passwords. */

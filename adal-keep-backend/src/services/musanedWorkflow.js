@@ -2274,6 +2274,25 @@ export async function stepFillCandidateDetails(page, ctx) {
 
 export async function stepSubmitCandidateForm(page, ctx) { return { ok: true } }
 
+/**
+ * After a person presses Save Musaned shows SAVED on the right for a moment,
+ * so the page keeps note of it. The worker asks (savedOnPage) and closes the run.
+ */
+export async function watchForSaved(page) {
+  await page.evaluate(() => {
+    if (window.__adalSavedWatch) return
+    window.__adalSavedWatch = true
+    const said = (t) => /\bsaved\b|saved successfully|added successfully|تم الحفظ/i.test(t || '')
+    const look = (n) => {
+      const e = n.nodeType === 1 ? n : n.parentElement
+      if (e && !e.closest('form') && !e.closest('button') && (e.textContent || '').length < 200 && said(e.textContent)) window.__adalSaved = true
+    }
+    new MutationObserver(ms => ms.forEach(m => { look(m.target); m.addedNodes.forEach(look) }))
+      .observe(document.body, { childList: true, subtree: true, characterData: true })
+  }).catch(() => {})
+}
+export const savedOnPage = (page) => page.evaluate(() => !!window.__adalSaved).catch(() => false)
+
 // ============================================================================
 // RUNNER
 // ============================================================================
@@ -2495,6 +2514,7 @@ async function musanedRun(page, ctx) {
 
     const secs = Math.round((Date.now() - t0) / 1000)
     // The form step already said "ready for SAVE" (and rang): no second notice.
+    await watchForSaved(page)
     return { ok: true, pauseReason: 'awaiting-human-save', seconds: secs }
   } catch (e) {
     const secs = Math.round((Date.now() - t0) / 1000)

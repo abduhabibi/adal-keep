@@ -20,6 +20,7 @@ import {
 } from './jev/musanedDecisions.js'
 import { pasteText, pasteAndCommit } from './domPaste.js'
 import { isPeerUrl, expectFile, disarmFile, signInTurn, borrowSignIn, toEnglish, typeCodeInto, pressCodeButton } from './tabManager.js'
+import { newRunTab } from './browser.js'
 import { musanedMissing, personalPhotoFile } from './musanedPreflight.js'
 
 const MUSANED_ROOT    = 'https://tawtheeq.musaned.com.sa/'
@@ -2314,14 +2315,89 @@ async function waitForOtherAccounts(ctx) {
   }
 }
 
-/** Who Musaned says is signed in: the name in its menu, '' when it cannot be read. */
-async function signedInUser(page) {
+// Runs in the page: the menu's Logout, when it shows. The innermost one: a link
+// inside a list item is what really signs out, the item around it does nothing.
+const logoutItem = () => [...document.querySelectorAll('a, button, li, .dropdown-item, [role="menuitem"]')]
+  .filter(e => e.offsetParent !== null).reverse().find(e => /^\s*(log\s*out|sign\s*out|تسجيل الخروج|خروج)\s*$/i.test(e.innerText || ''))
+
+// Runs in the page: the middle of the top-right menu's button, to press like a person.
+const menuButton = () => {
+  const kinds = '[data-bs-toggle], [data-toggle], .dropdown-toggle, button, a, img, svg'
+  // Never anything in the menu itself: its links are small and top-right too, and one is Logout.
+  const small = (e) => {
+    const b = e.getBoundingClientRect()
+    return b.width >= 12 && b.width <= 90 && b.height >= 12 && b.height <= 90 && b.top < 160 && b.left > innerWidth * 0.6 &&
+      !e.closest('.dropdown-item, .dropdown-menu') && !/log\s*out|خروج/i.test(e.innerText || '')
+  }
+  const named = document.querySelector('.dropdown-item.fw-bold')?.closest('.dropdown, .nav-item, li')
+  const el = [...(named?.querySelectorAll(kinds) || [])].find(small) || [...document.querySelectorAll(kinds)].filter(small)
+    .sort((x, y) => y.getBoundingClientRect().right - x.getBoundingClientRect().right)[0]
+  if (!el) return null
+  const b = el.getBoundingClientRect()
+  return { x: b.left + b.width / 2, y: b.top + b.height / 2 }
+}
+
+/** Opens Musaned's top-right menu: where its button was (true if it stood open), null when it does not open. */
+async function openUserMenu(page) {
   for (let i = 0; i < 16; i++) {
-    const who = await page.evaluate(() => document.querySelector('.dropdown-item.fw-bold')?.textContent?.trim() || '').catch(() => '')
-    if (who) return who.toLowerCase()
+    if (await page.evaluate(`!!(${logoutItem})()`).catch(() => false)) return true
+    const at = await page.evaluate(`(${menuButton})()`).catch(() => null)
+    if (at) {
+      await page.mouse.click(at.x, at.y).catch(() => {})
+      await sleep(400)
+      if (await page.evaluate(`!!(${logoutItem})()`).catch(() => false)) return at
+    }
     await sleep(500)
   }
-  return ''
+  return null
+}
+
+/** Who Musaned says is signed in: the name at the top of its menu, '' when it cannot be read. */
+async function signedInUser(page) {
+  const button = await openUserMenu(page)
+  if (!button) return ''
+  const who = await page.evaluate(`(() => {
+    const bold = document.querySelector('.dropdown-item.fw-bold')?.textContent?.trim()
+    if (bold) return bold
+    let box = (${logoutItem})()
+    while (box && (box.innerText || '').trim().split('\\n').filter(Boolean).length < 2) box = box.parentElement
+    return (box?.innerText || '').trim().split('\\n')[0].trim()
+  })()`).catch(() => '')
+  // Closed from the same spot it was opened from.
+  if (button.x) await page.mouse.click(button.x, button.y).catch(() => {})
+  return String(who || '').toLowerCase()
+}
+
+/** Presses Logout in the menu and waits for Musaned to let go. */
+async function pressLogout(page) {
+  if (!(await openUserMenu(page))) return false
+  await page.evaluate(`(${logoutItem})().click()`).catch(() => {})
+  for (let i = 0; i < 30; i++) {
+    await sleep(500)
+    await page.evaluate(() => [...document.querySelectorAll('button')].filter(b => b.offsetParent !== null)
+      .find(b => /^\s*(yes|ok|confirm|logout|نعم|موافق)\s*$/i.test(b.innerText || ''))?.click()).catch(() => {})
+    const out = await page.evaluate(() => !!document.querySelector('input[type="password"]')).catch(() => false)
+    if (out || !page.url().includes('tawtheeq.musaned.com.sa/dashboard') && !page.url().includes('tawtheeq.musaned.com.sa/hr-pool')) return true
+  }
+  return false
+}
+
+/**
+ * Signs out of the wrong account the way a person does: in a new tab, so no
+ * page of a run is touched, Musaned → top-right menu → Logout. Clearing its
+ * cookies is what is left when the menu does not do it.
+ */
+async function logOutInNewTab(page, ctx) {
+  let left = false
+  const tab = await newRunTab(page.browser())
+  try {
+    await tab.setViewport({ width: 1366, height: 900 }).catch(() => {})
+    await tab.goto(DASHBOARD_URL, { waitUntil: 'domcontentloaded', timeout: 45000 })
+    left = await pressLogout(tab)
+  } catch (e) { log(ctx, `the new tab could not log out: ${e.message}`, 'warn') }
+  finally { await tab.close().catch(() => {}) }
+  if (left) log(ctx, '✓ logged out of the other account')
+  else { log(ctx, 'Logout did not work: clearing the sign-in instead', 'warn'); await leaveMusaned(page) }
 }
 
 /** Leaves Musaned in the whole browser: cookies and page storage of the two sites. */
@@ -2352,8 +2428,8 @@ async function checkAccount(page, ctx) {
   if (want.includes(who)) { log(ctx, `✓ signed in as ${who}`); return true }
   if (ctx.accountSwitched) throw new Error(`Musaned stays signed in as ${who}, not ${want[0]}`)
   ctx.accountSwitched = true
-  log(ctx, `Musaned is signed in as ${who}: leaving, to sign in as ${want[0]}`, 'warn')
-  await leaveMusaned(page)
+  log(ctx, `Musaned is signed in as ${who}: logging out in a new tab, to sign in as ${want[0]}`, 'warn')
+  await logOutInNewTab(page, ctx)
   return false
 }
 
@@ -2651,4 +2727,4 @@ async function waitForDashboard(page, ctx, timeoutMs) {
   return last
 }
 // For tests (mock Musaned pages): the field fillers.
-export { leaveMusaned, checkAccount, typeAndCommitDropdown, fillDateByLabel, readFieldValues, chosenChips, typeAuthenticatorCode, classifyScreen }
+export { leaveMusaned, checkAccount, signedInUser, logOutInNewTab, typeAndCommitDropdown, fillDateByLabel, readFieldValues, chosenChips, typeAuthenticatorCode, classifyScreen }

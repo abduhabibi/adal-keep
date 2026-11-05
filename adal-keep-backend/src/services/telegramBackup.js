@@ -68,9 +68,14 @@ export function getConfig() {
     last_run: s.last_run || null,
     last_ok: s.last_ok || null,
     last_error: s.last_error || null,
-    files_sent: Object.keys(s.sent || {}).length,
-    files_total: listDocuments().length,
+    ...documentCounts(s),
   }
+}
+
+// Only documents still here count: a deleted one stays marked as sent.
+function documentCounts(s) {
+  const all = listDocuments()
+  return { files_sent: all.filter(n => s.sent?.[n]).length, files_total: all.length }
 }
 
 export function saveConfig({ bot_token, password, chat_id, window_start, window_end, enabled }) {
@@ -144,17 +149,32 @@ export async function botInfo() {
   return { username: botName }
 }
 
-/** The channels/groups the bot has seen a post in (after it was made admin). */
-export async function findChats() {
-  const token = botToken()
-  if (!token) throw new Error('Paste the bot token first.')
-  const ups = await tg(token, 'getUpdates', JSON.stringify({ allowed_updates: ['channel_post', 'message', 'my_chat_member'] }))
+const plainName = (t) => String(t || '').trim().replace(/\s+/g, ' ').toLowerCase()
+
+/** The channels where this agency's name was posted. Telegram's answer, read on its own. */
+export function chatsNamed(updates, agency) {
+  const want = plainName(agency)
   const seen = new Map()
-  for (const u of ups) {
-    const c = u.channel_post?.chat || u.message?.chat || u.my_chat_member?.chat
-    if (c && c.type !== 'private') seen.set(c.id, { id: c.id, title: c.title || c.username || String(c.id), type: c.type })
+  for (const u of updates) {
+    const post = u.channel_post || u.message
+    const c = post?.chat
+    if (want && c && c.type !== 'private' && plainName(post.text) === want) {
+      seen.set(c.id, { id: c.id, title: c.title || c.username || String(c.id), type: c.type })
+    }
   }
   return [...seen.values()]
+}
+
+/**
+ * The bot is shared, so it sees every agency's channels: only the one where this
+ * agency's own name was posted may be offered, or its backups could go to another's.
+ */
+export async function findChats(agency) {
+  const token = botToken()
+  if (!token) throw new Error('Paste the bot token first.')
+  if (!plainName(agency)) throw new Error('Write your agency name first.')
+  const ups = await tg(token, 'getUpdates', JSON.stringify({ allowed_updates: ['channel_post', 'message'] }))
+  return chatsNamed(ups, agency)
 }
 
 async function sendPiece(token, chat_id, buf, filename, caption) {

@@ -95,6 +95,12 @@ function freeProfile(key) {
   for (const f of ['SingletonLock', 'SingletonCookie', 'SingletonSocket', 'lockfile']) fs.rmSync(path.join(dir, f), { force: true })
 }
 
+// Passing states of a page that is still loading, not failures. "Already exists":
+// WhatsApp reloaded and the library's check looked before the browser had put its
+// functions back. "Timed out": the page was too busy to answer. Both pass by
+// themselves, and closing the browser would throw away what it has loaded so far.
+export const PASSING = /already exists|timed out/i
+
 /**
  * Starts this person's WhatsApp: signed in already → ready at once; otherwise
  * a QR code, or (with `phone`) a code to type in WhatsApp → Linked devices →
@@ -118,7 +124,8 @@ export async function connect(db, key = 'owner', { phone = '' } = {}, tries = 2)
   if (!exe) { setState(key, { status: 'failed', error: 'Adal Browser is not on this PC yet' }); return s.state }
   opts.authStrategy = new wweb.LocalAuth({ clientId: key, dataPath: DIR })
   opts.userAgent = realUserAgent(exe)
-  opts.puppeteer = { executablePath: exe, headless: true, args: ['--no-first-run', '--no-default-browser-check', '--disable-gpu', '--disable-dev-shm-usage', '--mute-audio', '--disable-extensions'] }
+  // A page busy loading the chats answers late: find out in 90s, not WhatsApp's 3 minutes.
+  opts.puppeteer = { executablePath: exe, headless: true, protocolTimeout: 90_000, args: ['--no-first-run', '--no-default-browser-check', '--disable-gpu', '--disable-dev-shm-usage', '--mute-audio', '--disable-extensions'] }
   // Always today's WhatsApp Web (a saved old copy of its page cannot link new devices).
   opts.webVersionCache = { type: 'none' }
   const digits = String(phone || '').replace(/\D/g, '')
@@ -138,7 +145,7 @@ export async function connect(db, key = 'owner', { phone = '' } = {}, tries = 2)
     if (s.client === c) s.client = null
     await release(c)
     const why = String(e?.message || e)
-    if (tries > 1 && /Target closed|detached|Session closed|Failed to launch/i.test(why)) {
+    if (tries > 1 && (/Target closed|detached|Session closed|Failed to launch/i.test(why) || PASSING.test(why))) {
       console.warn(`[whatsapp ${key}] tab closed while starting — trying again`)
       setState(key, { status: 'off' }); s.startingAt = 0
       await new Promise(r => setTimeout(r, 2000))
@@ -155,7 +162,7 @@ export async function connect(db, key = 'owner', { phone = '' } = {}, tries = 2)
   c.attachEventListeners = async (...a) => {
     for (let i = 1; ; i++) {
       try { return await attach(...a) } catch (e) {
-        if (i < 5 && c.pupPage && !c.pupPage.isClosed() && /Target closed|Session closed|detached/i.test(String(e?.message || e))) {
+        if (i < 5 && c.pupPage && !c.pupPage.isClosed() && (/Target closed|Session closed|detached/i.test(String(e?.message || e)) || PASSING.test(String(e?.message || e)))) {
           await new Promise(r => setTimeout(r, 700)); continue
         }
         await startFailed(e); throw e
@@ -178,7 +185,15 @@ export async function connect(db, key = 'owner', { phone = '' } = {}, tries = 2)
         const canvas = document.querySelector('canvas')
         return { up, ref: document.querySelector('[data-ref]')?.getAttribute('data-ref') || '', picture: canvas?.toDataURL() || '', login: location.pathname.startsWith('/login') }
       }).catch(() => null)
-      if (st?.up) { if (last) setState(key, { status: 'signing-in', qr: null }); return inject(...a) }
+      if (st?.up) {
+        if (last) setState(key, { status: 'signing-in', qr: null })
+        try { return await inject(...a) } catch (e) {
+          if (!PASSING.test(String(e?.message || e))) throw e
+          console.warn(`[whatsapp ${key}] page not ready yet, its browser stays open:`, String(e.message).slice(0, 90))
+          await new Promise(r => setTimeout(r, 2000))
+          continue
+        }
+      }
       const shown = st?.ref || st?.picture
       if (st?.login && shown && shown !== last) {
         last = shown

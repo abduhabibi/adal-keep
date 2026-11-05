@@ -2307,8 +2307,12 @@ async function signedInUser(page) {
 async function leaveMusaned(page) {
   const cdp = await page.target().createCDPSession()
   try {
+    const { cookies } = await cdp.send('Storage.getCookies')
+    for (const c of cookies.filter(c => /(^|\.)(musaned\.com\.sa|wahid\.sa)$/i.test(c.domain.replace(/^\./, '')))) {
+      await cdp.send('Network.deleteCookies', { name: c.name, domain: c.domain, path: c.path })
+    }
     for (const origin of ['https://tawtheeq.musaned.com.sa', 'https://accounts.wahid.sa']) {
-      await cdp.send('Storage.clearDataForOrigin', { origin, storageTypes: 'cookies,local_storage,indexeddb,service_workers,cache_storage' })
+      await cdp.send('Storage.clearDataForOrigin', { origin, storageTypes: 'local_storage,indexeddb,service_workers,cache_storage' })
     }
   } finally { cdp.detach().catch(() => {}) }
   await page.evaluate(() => { try { sessionStorage.clear() } catch {} }).catch(() => {})
@@ -2618,4 +2622,4 @@ async function waitForDashboard(page, ctx, timeoutMs) {
   return last
 }
 // For tests (mock Musaned pages): the field fillers.
-export { typeAndCommitDropdown, fillDateByLabel, readFieldValues, chosenChips, typeAuthenticatorCode, classifyScreen }
+export { leaveMusaned, checkAccount, typeAndCommitDropdown, fillDateByLabel, readFieldValues, chosenChips, typeAuthenticatorCode, classifyScreen }

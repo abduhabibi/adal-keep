@@ -256,8 +256,14 @@ const place = async ({ cdp, windowId }, bounds) => {
  */
 async function hide(page) {
   const w = await windowOf(page)
-  if (process.platform === 'linux') await w.cdp.send('Browser.setWindowBounds', { windowId: w.windowId, bounds: { windowState: 'minimized' } })
-  else await place(w, OFF)
+  if (process.platform !== 'linux') return place(w, OFF)
+  // A new window ignores this until the desktop has finished showing it.
+  for (let i = 0; i < 8; i++) {
+    await w.cdp.send('Browser.setWindowBounds', { windowId: w.windowId, bounds: { windowState: 'minimized' } })
+    await new Promise(r => setTimeout(r, 500))
+    const { bounds } = await w.cdp.send('Browser.getWindowBounds', { windowId: w.windowId })
+    if (bounds.windowState === 'minimized' && i >= 2) return
+  }
 }
 
 /** The first window of a browser just started, while it is still empty. */

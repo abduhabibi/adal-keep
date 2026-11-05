@@ -55,6 +55,7 @@ import embassyRouter from './src/routes/embassy.js'
 import pcAccessRouter from './src/routes/pcAccess.js'
 import { networkGate, originOk } from './src/services/networkGate.js'
 import whatsappRouter from './src/routes/whatsapp.js'
+import transitionsRouter from './src/routes/transitions.js'
 import { diagMiddleware, diagReport } from './src/services/diag.js'
 import { removeSecret } from './src/services/secretStore.js'
 import { startContractChecker } from './src/services/musanedContracts.js'
@@ -121,6 +122,7 @@ app.use(attachAuth)
 // Core Feature Routes
 app.use("/api", tenancyRouter)
 app.use('/api', pcAccessRouter)   // other computers ask to open Adal Keep; this PC answers
+app.use("/api", transitionsRouter)
 app.use("/api/employees", employeesRouter)
 app.use("/api/employees", employeeRegisterRouter)
 app.use("/api/tasks", tasksRouter)

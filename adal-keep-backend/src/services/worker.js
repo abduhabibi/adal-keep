@@ -321,7 +321,25 @@ async function executeRun(db, page, job) {
     } catch (e) { console.error('[worker] task failed:', e.message) }
   }
   ctx.isCancelled = () => isCancelled(runId)
-  ctx.askCaptcha = (image, answer, opts) => { askCaptcha(runId, image, answer, opts); beep() }
+  ctx.askCaptcha = (image, answer, opts) => {
+    askCaptcha(runId, image, answer, opts)
+    beep()
+    // The phones look now: the question is answered from there too.
+    import('./liveChannel.js').then(L => L.broadcast({ t: 'ring', id: Date.now(), title: opts?.title || 'Type the captcha', profile_id: job.profile_id, run: runId, at: Date.now() })).catch(() => {})
+  }
+  // A field the run cannot do without: asked in the notification, kept on the
+  // profile, and the run goes on. Null when nobody answers in 30 minutes.
+  ctx.askField = (column, title, choices) => new Promise((resolve) => {
+    const giveUp = setTimeout(() => { doneWith(runId); resolve(null) }, 30 * 60_000)
+    needPerson(runId, title)
+    ctx.askCaptcha(null, async (text) => {
+      clearTimeout(giveUp)
+      await db('profiles').where('id', job.profile_id).update({ [column]: text, updated_at: new Date().toISOString() })
+      ctx.profile = { ...ctx.profile, [column]: text }
+      doneWith(runId)
+      resolve(text)
+    }, { title, choices, label: 'Answer' })
+  })
   // A run writes what it found into the profile's notes (dated), and may set
   // a few profile fields with it.
   ctx.noteProfile = async (text, fields = {}) => {
@@ -525,12 +543,16 @@ export async function dispatchRun(db, runId) {
 }
 
 /**
- * A run that was working when the server stopped has no browser tab any more.
- * Park it as paused so running it again is a deliberate click: a restart
- * never re-opens a government form on its own.
+ * A run that was working when the server stopped goes on by itself, out of
+ * sight: nothing it does is final, since Save stays a person's. One from long
+ * ago is parked: nobody expects it now.
  */
 async function parkInterruptedRuns(db) {
   try {
+    const recent = new Date(Date.now() - 6 * 3600_000).toISOString()
+    const back = await db('automation_queue').where('status', 'running').where('updated_at', '>', recent)
+      .update({ status: 'pending', updated_at: new Date().toISOString() })
+    if (back) console.log(`[worker] ${back} run(s) interrupted by a restart — going on`)
     const n = await db('automation_queue').where('status', 'running').update({
       status: 'paused',
       pause_reason: 'Interrupted: the server restarted while this run was working. Press Continue to run it again.',
@@ -686,6 +708,23 @@ export async function runAgencyManager(db) {
   }
 }
 
+/** A run paused at Musaned's sign-in goes on by itself once its tab is signed in. */
+async function continueSignedIn(db) {
+  const rows = await db('automation_queue').where('status', 'paused')
+    .whereIn('pause_reason', ['awaiting-musaned-login', 'awaiting-musaned-otp', 'awaiting-musaned-captcha'])
+    .where('updated_at', '>', new Date(Date.now() - 12 * 3600_000).toISOString()).select('id', 'workflow_id')
+  if (!rows.length) return
+  const browser = await openBrowserIfAny()
+  if (!browser) return
+  for (const r of rows) {
+    const page = await findRunTab(browser, r.id, r.workflow_id)
+    if (!page || hostOf(page.url()) !== 'tawtheeq.musaned.com.sa') continue
+    await db('automation_queue').where('id', r.id).where('status', 'paused').update({ status: 'pending', updated_at: new Date().toISOString() })
+    console.log(`[worker] run #${r.id} is signed in — going on`)
+    drainQueue(db).catch(() => {})
+  }
+}
+
 // --------------------------------------------------------------------------
 // Lifecycle
 // --------------------------------------------------------------------------
@@ -702,6 +741,7 @@ export function startWorker(db) {
   _interval = setInterval(() => {
     drainQueue(db).catch(e => console.error('[worker] poll error:', e))
   }, POLL_MS)
+  setInterval(() => continueSignedIn(db).catch(e => console.warn('[worker] sign-in look:', e.message)), 15000).unref?.()
 
   console.log(`[worker] agency manager every ${AGENCY_INTERVAL_MS / 60000}min`)
   _agencyTimer = setInterval(() => {

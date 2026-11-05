@@ -96,7 +96,8 @@ router.post('/profiles/:profileId/automations/:workflowId/start', async (req, re
       // Musaned needs a personal photo, marital status, religion and a mobile number
       const prof = await db('profiles').where('id', profileId).first()
       const { musanedMissing, photoOnFile } = await import('../services/musanedPreflight.js')
-      const missing = musanedMissing(prof, await photoOnFile(db, profileId))
+      // Marital status and religion are asked in the notification during the run.
+      const missing = musanedMissing(prof, await photoOnFile(db, profileId)).filter(m => !/^(marital status|religion)$/.test(m))
       if (missing.length) {
         return res.status(400).json({
           error: 'Musaned not started. Profile is missing: ' + missing.join(', '),

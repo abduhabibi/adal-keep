@@ -31,7 +31,7 @@
 
 import fs from 'fs'
 import path from 'path'
-import { spawn } from 'child_process'
+import { spawn, execFileSync } from 'child_process'
 import { fileURLToPath } from 'url'
 
 let _browser = null
@@ -152,13 +152,23 @@ async function connectTo(puppeteer, url) {
   return b
 }
 
+function freeProfile() {
+  try {
+    if (process.platform === 'win32') {
+      const find = `Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and $_.CommandLine.Contains('${PROFILE_DIR.replace(/'/g, "''")}') } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`
+      execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', find], { timeout: 15000, windowsHide: true, stdio: 'ignore' })
+    } else execFileSync('pkill', ['-f', '--', `--user-data-dir=${PROFILE_DIR}`], { timeout: 5000, stdio: 'ignore' })
+  } catch {}   // nothing left behind: pkill says so with an error
+  for (const f of ['SingletonLock', 'SingletonCookie', 'SingletonSocket', 'lockfile']) fs.rmSync(path.join(PROFILE_DIR, f), { force: true })
+}
+
 /**
  * Get the shared browser. Connects to the Adal Keep browser when it is
  * already open (the launcher may have opened it); otherwise starts it, with
  * the Adal Keep page as its first tab. Runs then open tabs in that window —
  * never a new window. The browser is not closed when the server stops.
  */
-export async function getBrowser() {
+export async function getBrowser(fresh = false) {
   if (_browser && _browser.isConnected && _browser.isConnected()) {
     return _browser
   }
@@ -201,6 +211,13 @@ export async function getBrowser() {
       await tuckAway().catch(() => {})
       return _browser
     } catch (e) { lastErr = e }
+  }
+  // Left running on this profile without its control port: it answers nothing,
+  // so it is closed and started again instead of stopping every run.
+  if (!fresh) {
+    console.warn('[browser] open without its control port — starting it again')
+    freeProfile()
+    return getBrowser(true)
   }
   throw new Error('The browser is open without Adal Keep\'s control (it was opened by hand). Close every browser window, then press the button again — Adal Keep opens it itself.')
 }
@@ -268,6 +285,12 @@ export async function openForPerson() {
   const w = await windowOf(page)
   await w.cdp.send('Browser.setWindowBounds', { windowId: w.windowId, bounds: { windowState: 'maximized' } }).catch(() => {})
   await page.bringToFront()
+  return page
+}
+
+/** A window a person is done with goes off the screen; its tab keeps working. */
+export async function sendAway(page) {
+  if (HIDDEN) await place(await windowOf(page), OFF)
 }
 
 /**

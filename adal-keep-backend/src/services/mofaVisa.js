@@ -27,7 +27,7 @@ import { signInTurn, toEnglish } from './tabManager.js'
 export const MOFA_VISA = 'mofa_visa'
 const LOGIN_URL = 'https://visa.mofa.gov.sa/Account/Login/enjazcompany'
 const LIST_URL = 'https://visa.mofa.gov.sa/SmartForm'
-const LOGIN_WAIT_MS = 10 * 60 * 1000
+const LOGIN_WAIT_MS = 30 * 60 * 1000
 const SAVE_WAIT_MS = 15 * 60 * 1000
 
 export const VISA_STAGES = {
@@ -450,7 +450,7 @@ async function signIn(page, ctx) {
       if (sentAt && Date.now() - sentAt > 7000) { sentAt = 0; log(ctx, 'the captcha was not accepted — asking again', 'warn'); await ask('Not accepted: type the new numbers') }
       await sleep(2000)
     }
-    if (!(await signedIn(page))) throw new Error('Nobody signed in to the visa platform within 10 minutes')
+    if (!(await signedIn(page))) throw new Error('Nobody signed in to the visa platform within 30 minutes')
     log(ctx, '✓ signed in to the visa platform')
     await toEnglish(page, ctx)
   } finally { release() }

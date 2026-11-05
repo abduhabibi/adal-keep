@@ -24,12 +24,14 @@ import MusanedAuthenticatorCard from '../components/MusanedAuthenticatorCard'
 import ErrorBoundary from '../components/shared/ErrorBoundary'
 import PhoneCard from '../components/PhoneCard'
 import WhatsAppCard from '../components/WhatsAppCard'
+import TransitionsCard from '../components/TransitionsCard'
 
 // The tabs of Settings: [id, icon, name].
 const SETTINGS_TABS = [
   ['agency', '🏢', 'Agency'],
   ['portals', '🤖', 'Portals'],
   ['integrations', '🔌', 'Integrations'],
+  ['transitions', '🚚', 'Transitions'],
   ['backup', '💾', 'Backup & updates'],
   ['look', '🎨', 'Look & language'],
 ]
@@ -285,6 +287,7 @@ export default function SettingsPage() {
       {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="WhatsApp"><WhatsAppCard /></ErrorBoundary>}
       {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Telegram"><TelegramChannelCard /></ErrorBoundary>}
       </>}
+      {tab === 'transitions' && import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Transitions"><TransitionsCard /></ErrorBoundary>}
       {tab === 'backup' && <>
       {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Backup"><BackupCard /></ErrorBoundary>}
       <Card>

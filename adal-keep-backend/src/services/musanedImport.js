@@ -30,7 +30,7 @@ const SAFE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..',
 const MIME = { '.pdf': 'application/pdf', '.png': 'image/png', '.webp': 'image/webp', '.jpg': 'image/jpeg' }
 
 /** A copied file onto her profile field, kept like every upload (data/SafeStorage). False when she has it already. */
-async function saveOnProfile(db, profileId, fieldName, file, original) {
+export async function saveOnProfile(db, profileId, fieldName, file, original) {
   const buf = fs.readFileSync(file)
   const hash = crypto.createHash('sha256').update(buf).digest('hex')
   const now = new Date().toISOString()

@@ -199,6 +199,47 @@ public class AdalDiscoveryPlugin extends Plugin {
         });
     }
 
+    private static AdalDiscoveryPlugin live = null;
+
+    @Override
+    public void load() { live = this; }
+
+    /** False when the app is not running. */
+    static boolean reply(int run, String text) {
+        if (live == null) return false;
+        com.getcapacitor.JSObject o = new com.getcapacitor.JSObject();
+        o.put("run", run);
+        o.put("text", text);
+        live.notifyListeners("callReply", o, true);
+        return true;
+    }
+
+    /** Asks once for notifications, and keeps the app listening with the screen off. */
+    @PluginMethod
+    public void startListening(PluginCall call) {
+        Context c = getContext();
+        if (Build.VERSION.SDK_INT >= 33 && androidx.core.content.ContextCompat.checkSelfPermission(c, android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            androidx.core.app.ActivityCompat.requestPermissions(getActivity(), new String[] { android.Manifest.permission.POST_NOTIFICATIONS }, 7002);
+        }
+        androidx.core.content.ContextCompat.startForegroundService(c, new Intent(c, AdalWatchService.class));
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void notifyCall(PluginCall call) {
+        org.json.JSONArray choices = null;
+        try { choices = call.getArray("choices"); } catch (Exception e) { /* none */ }
+        AdalCalls.show(getContext(), call.getInt("run", 0), call.getString("title", "Adal Keep"), call.getString("body", ""),
+            call.getString("image"), Boolean.TRUE.equals(call.getBoolean("asks", false)), call.getString("label"), choices);
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void cancelCall(PluginCall call) {
+        AdalCalls.cancel(getContext(), call.getInt("run", 0));
+        call.resolve();
+    }
+
     @PluginMethod
     public void getVersion(PluginCall call) {
         try {

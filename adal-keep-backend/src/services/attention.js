@@ -16,9 +16,9 @@ export function needPerson(runId, title, body = '', { confirm = false } = {}) {
  * A question answered in the bar: the captcha picture (a data: address) or a
  * code with no picture, and what to do with the typed text.
  */
-export function askCaptcha(runId, image, answer, { title, label = 'Numbers' } = {}) {
+export function askCaptcha(runId, image, answer, { title, label = 'Numbers', choices = null } = {}) {
   const id = Number(runId)
-  const w = { title: 'Type the captcha', body: '', at: Date.now(), ...(waits.get(id) || {}), image, answer, label }
+  const w = { title: 'Type the captcha', body: '', at: Date.now(), ...(waits.get(id) || {}), image, answer, label, choices }
   waits.set(id, title ? { ...w, title, at: Date.now() } : w)
 }
 
@@ -33,13 +33,13 @@ export function doneWith(runId, { keepCaptcha = false, force = false } = {}) {
   if (!keepCaptcha || !w?.answer) waits.delete(id)
 }
 
-export const waiting = () => [...waits.entries()].map(([run_id, w]) => ({ run_id, title: w.title, body: w.body, at: w.at, asks: !!w.answer, label: w.label, confirm: !!w.confirm, image: w.image || null }))
+export const waiting = () => [...waits.entries()].map(([run_id, w]) => ({ run_id, title: w.title, body: w.body, at: w.at, asks: !!w.answer, label: w.label, choices: w.choices || null, confirm: !!w.confirm, image: w.image || null }))
 
 export async function answerCaptcha(runId, text) {
   const id = Number(runId)
   const w = waits.get(id)
   if (!w?.answer) throw new Error('This run is not waiting for a captcha any more')
   const answer = w.answer
-  waits.set(id, { ...w, image: null, answer: null, body: 'Sent — checking it…' })
+  waits.set(id, { ...w, image: null, answer: null, choices: null, body: 'Sent — checking it…' })
   await answer(String(text).trim())
 }

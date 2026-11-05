@@ -103,6 +103,16 @@ async function challengeShown(page) {
 export async function runWafidBooking(page, ctx) {
   const t0 = Date.now()
   const secs = () => Math.round((Date.now() - t0) / 1000)
+  // Asked in the notification instead of stopping. A Musaned contract or visa
+  // number means Saudi Arabia.
+  const p = ctx.profile || {}
+  if (!String(p.destination_country || '').trim()) {
+    if (p.contract_number || p.visa_number || p.tawassut_number) {
+      await ctx.db?.('profiles').where('id', ctx.profileId).update({ destination_country: 'Saudi Arabia' })
+      ctx.profile = { ...p, destination_country: 'Saudi Arabia' }
+    } else await ctx.askField?.('destination_country', `${ctx.profileName}: which country for Wafid?`, ['Saudi Arabia', 'Kuwait', 'Qatar', 'Oman', 'Bahrain', 'UAE'])
+  }
+  if (!String(ctx.profile?.marital_status || '').trim()) await ctx.askField?.('marital_status', `${ctx.profileName}: marital status?`, ['Single', 'Married', 'Divorced', 'Widowed'])
   const v = bookingValues(ctx.profile || {}, ctx.wafid || {})
   const missing = missingForBooking(v)
   if (missing.length) {

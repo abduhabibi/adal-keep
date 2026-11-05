@@ -6,13 +6,14 @@ import api from '../services/api'
 import LiveTab from './LiveTab'
 
 /**
- * The notification bell: a small button in the corner of Adal Keep while
- * something needs a person, and nothing otherwise. No window opens for it. It
- * opens by itself for a captcha or a code, the calls answered right here: the
- * typed numbers go into the tab, Enter sends them, and the run goes on by itself
- * (a wrong one asks again). Anything else (a reCAPTCHA, Save) opens that tab,
- * live, over Adal Keep, driven from here. The PC beeps by itself; another
- * computer beeps here.
+ * What needs a person, as normal notifications in the corner of Adal Keep, each
+ * with its X. No window opens for them. A captcha or a code is answered right
+ * in the notification (Enter sends it, a wrong one asks again), a question has
+ * its answers as buttons, and the run goes on by itself. A click opens that tab
+ * (a reCAPTCHA, Save), live, over Adal Keep. X only hides it here: the bell
+ * brings it back, and the run keeps waiting.
+ * In the phone app each call is also an Android notification, answered from
+ * there. With Adal Keep out of sight on a PC, a desktop one tells of it.
  */
 const err = (e) => e?.response?.data?.error || e.message
 const here = () => ['localhost', '127.0.0.1'].includes(location.hostname)
@@ -30,28 +31,37 @@ function beep() {
   } catch {}
 }
 
-function Call({ c, onDone }) {
+const phone = () => window.Capacitor?.Plugins?.AdalDiscovery
+const keyOf = (c) => `${c.run_id}:${c.at}`
+const send = (run, text) => api.post(`/automations/${run}/captcha`, { text })
+
+function Call({ c, onDone, onHide }) {
   const navigate = useNavigate()
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
-  const send = async (e) => {
-    e.preventDefault()
-    if (!text.trim()) return
+  const answer = async (value) => {
+    if (!String(value).trim()) return
     setBusy(true)
-    try { await api.post(`/automations/${c.run_id}/captcha`, { text }); setText(''); onDone() }
+    try { await send(c.run_id, value); setText(''); onDone() }
     catch (er) { toast.error(err(er)) }
     setBusy(false)
   }
   const [live, setLive] = useState(false)
   const open = () => window.__ADAL_CLOUD ? navigate(`/profiles/${c.profile_id}?run=${c.run_id}&t=${Date.now()}`) : setLive(true)
   return (
-    <li className="space-y-1.5 px-3 py-2.5">
+    <li className="relative space-y-2 rounded-2xl border border-slate-200 bg-white p-3 pr-8 shadow-xl dark:border-slate-700 dark:bg-slate-900">
+      <button type="button" aria-label="Hide" onClick={onHide} className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800">✕</button>
       <button type="button" onClick={open} className="block w-full text-left">
         <p className="truncate text-xs font-bold">{c.full_name || `Run #${c.run_id}`}</p>
         <p className="text-xs text-slate-600 dark:text-slate-300">{c.title}</p>
       </button>
-      {c.asks && (
-        <form onSubmit={send} className="flex items-stretch gap-1.5">
+      {c.asks && c.choices && (
+        <div className="flex flex-wrap gap-1.5">
+          {c.choices.map(v => <button key={v} type="button" disabled={busy} onClick={() => answer(v)} className="rounded-lg border border-teal-300 px-2 py-1 text-xs font-semibold text-teal-700 hover:bg-teal-50 disabled:opacity-50 dark:border-teal-700 dark:text-teal-300">{v}</button>)}
+        </div>
+      )}
+      {c.asks && !c.choices && (
+        <form onSubmit={(e) => { e.preventDefault(); answer(text) }} className="flex items-stretch gap-1.5">
           {c.image && <img src={c.image} alt="Captcha" className="h-10 rounded border border-slate-200 bg-white" />}
           <input autoFocus value={text} onChange={e => setText(e.target.value)} placeholder={c.label || 'Numbers'} inputMode="numeric" autoComplete="off"
             className="w-24 min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-2 text-sm dark:border-slate-600 dark:bg-slate-800" />
@@ -61,7 +71,6 @@ function Call({ c, onDone }) {
       <span className="flex gap-3">
         <button type="button" onClick={open} className="text-xs font-semibold text-teal-700 hover:underline dark:text-teal-400">Open →</button>
         {c.confirm && <button type="button" onClick={() => api.post(`/automations/${c.run_id}/attention/done`).then(onDone).catch(e => toast.error(err(e)))} className="text-xs font-semibold text-slate-500 hover:underline">Done ✓</button>}
-        {c.profile_id && <button type="button" onClick={() => navigate(`/profiles/${c.profile_id}?run=${c.run_id}&t=${Date.now()}`)} className="text-xs text-slate-500 hover:underline">Her profile</button>}
       </span>
       {live && createPortal(<LiveTab runId={c.run_id} startFull onClose={() => setLive(false)} />, document.body)}
     </li>
@@ -70,37 +79,60 @@ function Call({ c, onDone }) {
 
 export default function AttentionBar() {
   const [calls, setCalls] = useState([])
-  const [open, setOpen] = useState(false)
-  const shut = useRef(false)   // closed by hand: stays closed
+  const [hidden, setHidden] = useState(() => new Set())
   const seen = useRef(null)
   const load = () => api.get('/automations/attention').then(r => {
     const list = r.data || []
-    const keys = list.map(c => `${c.run_id}:${c.at}`)
-    if (seen.current && !here() && keys.some(k => !seen.current.has(k))) beep()
-    seen.current = new Set(keys)
+    const fresh = seen.current ? list.filter(c => !seen.current.has(keyOf(c))) : []
+    if (fresh.length && !here()) beep()
+    // Out of sight: the phone's or the PC's own notification.
+    for (const c of fresh) {
+      if (!document.hidden) continue
+      const title = c.full_name || 'Adal Keep'
+      if (phone()) phone().notifyCall?.({ run: c.run_id, title, body: c.title, image: c.image || undefined, asks: !!c.asks, label: c.label, choices: c.choices || undefined })
+      else if (window.Notification?.permission === 'granted') {
+        const n = new Notification(title, { body: c.title, tag: String(c.run_id), silent: true })
+        n.onclick = () => { window.focus(); n.close() }
+      }
+    }
+    if (seen.current) {
+      const now = new Set(list.map(c => c.run_id))
+      for (const k of seen.current) { const run = Number(k.split(':')[0]); if (!now.has(run)) phone()?.cancelCall?.({ run }) }
+    }
+    if (list.length && window.Notification?.permission === 'default' && !phone()) Notification.requestPermission().catch(() => {})
+    seen.current = new Set(list.map(keyOf))
     setCalls(list)
-    if (!list.length) shut.current = false
-    else if (list.some(c => c.asks) && !shut.current) setOpen(true)
   }).catch(() => {})
   useEffect(() => {
     load()
-    const t = setInterval(load, 3000)
-    return () => clearInterval(t)
+    const t = setInterval(load, window.__ADAL_CLOUD ? 6000 : 3000)
+    let off = null, alive = true, heard = null
+    // At once from the PC, not at the next look.
+    if (window.__ADAL_CLOUD) import('../cloud/live.js').then(L => { if (alive) off = L.onLive(m => { if (m.t === 'ring') load() }) })
+    const p = phone()
+    if (p) {
+      p.startListening?.().catch?.(() => {})
+      heard = p.addListener?.('callReply', ({ run, text }) => send(run, text).then(load).catch(e => toast.error(err(e))))
+    }
+    return () => { alive = false; clearInterval(t); off?.(); Promise.resolve(heard).then(h => h?.remove?.()) }
   }, [])
+  const shown = calls.filter(c => !hidden.has(keyOf(c)))
   if (!calls.length) return null
-  const toggle = () => setOpen(o => { shut.current = o; return !o })
+  const hide = (c) => { setHidden(h => new Set(h).add(keyOf(c))); phone()?.cancelCall?.({ run: c.run_id }) }
   return (
-    <div className="fixed bottom-3 left-3 z-[70] flex max-w-[calc(100vw-1.5rem)] flex-col items-start gap-2">
-      {open && (
-        <ul className="max-h-[45vh] w-72 max-w-full divide-y divide-slate-100 overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-xl dark:divide-slate-800 dark:border-slate-700 dark:bg-slate-900">
-          {calls.map(c => <Call key={c.run_id} c={c} onDone={load} />)}
+    <>
+      {shown.length > 0 && (
+        <ul className="fixed right-3 top-3 z-[70] max-h-[calc(100vh-1.5rem)] w-80 max-w-[calc(100vw-1.5rem)] space-y-2 overflow-y-auto">
+          {shown.map(c => <Call key={keyOf(c)} c={c} onDone={load} onHide={() => hide(c)} />)}
         </ul>
       )}
-      <button type="button" onClick={toggle} title={`${calls.length} need${calls.length === 1 ? 's' : ''} you`}
-        className="flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm font-bold shadow-lg dark:border-slate-700 dark:bg-slate-900">
-        🔔 <span className="rounded-full bg-red-500 px-1.5 text-xs text-white">{calls.length}</span>
-      </button>
-    </div>
+      {shown.length < calls.length && (
+        <button type="button" onClick={() => setHidden(new Set())} title="Show the hidden notifications"
+          className="fixed bottom-3 left-3 z-[70] flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm font-bold shadow-lg dark:border-slate-700 dark:bg-slate-900">
+          🔔 <span className="rounded-full bg-red-500 px-1.5 text-xs text-white">{calls.length - shown.length}</span>
+        </button>
+      )}
+    </>
   )
 }
 

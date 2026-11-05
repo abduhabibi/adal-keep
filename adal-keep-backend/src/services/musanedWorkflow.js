@@ -2297,6 +2297,10 @@ async function musanedRun(page, ctx) {
   const importCv = ctx.workflowId === 'musaned_cv_import'
   const checkOnly = ctx.workflowId === 'musaned_check_chosen' || importCv
   const photoResolved = checkOnly ? { path: true } : await resolvePersonalPhotoPath(ctx).catch(() => ({ path: null }))
+  if (!checkOnly) {
+    if (!String(ctx.profile?.marital_status || '').trim()) await ctx.askField?.('marital_status', `${ctx.profileName}: marital status?`, ['Single', 'Married', 'Divorced', 'Widowed'])
+    if (!String(ctx.profile?.religion || '').trim()) await ctx.askField?.('religion', `${ctx.profileName}: religion?`, ['Muslim', 'Christian'])
+  }
   const missing = checkOnly ? (ctx.profile?.passport_number ? [] : ['passport number']) : musanedMissing(ctx.profile || {}, photoResolved.path ? true : (photoResolved.passportCropOnly ? 'passport-crop' : false))
   if (missing.length) {
     const msg = 'Musaned not started. Profile is missing: ' + missing.join(', ')

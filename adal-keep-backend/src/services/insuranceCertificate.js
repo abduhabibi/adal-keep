@@ -20,7 +20,7 @@ import { visaNames, clickText } from './mofaVisa.js'
 export const INSURANCE_CERTIFICATE = 'insurance_certificate'
 const HOME = 'https://agency.niscofetap.com/'
 const DRAFT_URL = 'https://agency.niscofetap.com/certificate/draft'
-const LOGIN_WAIT_MS = 10 * 60 * 1000
+const LOGIN_WAIT_MS = 30 * 60 * 1000
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 const cancelled = (ctx) => typeof ctx?.isCancelled === 'function' && ctx.isCancelled()
@@ -135,7 +135,7 @@ async function signIn(page, ctx) {
         await ctx.notify(`🛡 ${ctx.profileName}: insurance sign-in needs you`, 'FetaP is still on its sign-in page. Finish the sign-in in that tab; Adal Keep continues by itself.', 'warn', { login: page })
       }
     }
-    if (await hasPassword(page)) throw new Error('Nobody signed in to FetaP within 10 minutes')
+    if (await hasPassword(page)) throw new Error('Nobody signed in to FetaP within 30 minutes')
     log(ctx, '✓ signed in to FetaP')
   } finally { release() }
 }

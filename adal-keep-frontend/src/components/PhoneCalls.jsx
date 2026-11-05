@@ -39,6 +39,7 @@ export default function PhoneCalls() {
       last.current = Math.max(last.current, c.id)
       const at = c.at || new Date(c.created_at).getTime()
       if (!(Date.now() - at < FRESH)) return
+      if (c.run) return // a run's call is a notification of its own (AttentionBar)
       ring()
       const open = () => {
         toast.dismiss('phone-call')

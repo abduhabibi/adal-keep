@@ -52,9 +52,11 @@ const now = Date.now()
 
 // The developer's side: the project with its history, and the signing keys.
 const projectTo = opt('--project') || path.join(os.homedir(), 'Documents', 'Adal_keep')
-if (fs.existsSync(path.join(projectTo, '.git'))) throw new Error(`${projectTo} already holds a project: choose another with --project`)
+// Run a second time: the project stays as it is, the agency's data below still goes in.
+const hadProject = fs.existsSync(path.join(projectTo, '.git'))
 fs.mkdirSync(path.dirname(projectTo), { recursive: true })
-copy(path.join(work, 'project'), projectTo)
+if (hadProject) console.log(`${projectTo} already holds the project: left as it is.`)
+else copy(path.join(work, 'project'), projectTo)
 const keysTo = opt('--keys') || path.join(os.homedir(), '.adal-keep')
 copy(path.join(work, 'keys'), keysTo)
 copy(path.join(work, 'notes'), path.join(projectTo, 'notes-from-old-pc'))

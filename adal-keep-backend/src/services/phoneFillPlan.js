@@ -162,7 +162,7 @@ export function fillPlans(profile, settings = {}, employeeName = '') {
       txt('Address', 'address', 'Kolfe Keraniyo'),
       txt('Relative name', 'relative name', employeeName),
       txt('Relative kinship', 'relative kinship', 'cousin'),
-      txt('Relative phone', 'relative phone', cleanPhone(p.emergency_phone || p.phone_number)),
+      txt('Relative phone', 'relative phone', `251${cleanPhone(p.emergency_phone || p.phone_number)}`),
       txt('Relative address', 'relative address', 'Addis Ababa'),
     ]),
   })

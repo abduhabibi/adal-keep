@@ -369,6 +369,11 @@ app.get('/api/profiles/:id', async (req, res) => {
   }
 })
 
+// Labor IDs are capitals, however they were typed.
+function capitalIds(data) {
+  for (const k of ['labor_id', 'emergency_labor_id']) if (typeof data[k] === 'string') data[k] = data[k].trim().toUpperCase()
+}
+
 app.post('/api/profiles', async (req, res) => {
   try {
     const data = pick(req.body, [
@@ -425,6 +430,7 @@ app.post('/api/profiles', async (req, res) => {
       'phone_number_2',
       'created_by',
     ])
+    capitalIds(data)
 
     if (!data.full_name?.trim() || !data.phone_number?.trim()) {
       return res.status(400).json({ error: 'Full name and phone are required' })
@@ -518,6 +524,7 @@ app.put('/api/profiles/:id', async (req, res) => {
       'employer_name', 'employer_id', 'employer_phone', 'employer_address', 'work_city', 'salary',
       'contract_date', 'issuing_authority', 'job_title',
     ])
+    capitalIds(data)
 
     if (data.full_name !== undefined && !String(data.full_name).trim()) {
       return res.status(400).json({ error: 'Full name is required' })

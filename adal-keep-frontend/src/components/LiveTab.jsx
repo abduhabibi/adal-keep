@@ -226,6 +226,13 @@ export default function LiveTab({ runId, fill = false, startFull = false, onClos
           </div>
         )}
         {!src && !err && <div className="h-40 rounded-lg bg-slate-100 dark:bg-slate-900 animate-pulse" />}
+        {!PHONE && (
+          <div className="flex flex-wrap gap-1.5">
+            {[['▲ Up', { kind: 'scroll', dy: -600 }], ['▼ Down', { kind: 'scroll', dy: 600 }], ['⇟ To the bottom', { kind: 'bottom' }]].map(([l, b]) => (
+              <button key={l} type="button" onClick={() => send(b)} className={btn}>{l}</button>
+            ))}
+          </div>
+        )}
         {PHONE && <><div className="flex items-center gap-1.5">
           <button type="button" className={btn} onClick={() => setZoom(z => Math.max(1, +(z - 0.5).toFixed(1)))}>－</button>
           <span className="text-[11px] w-10 text-center tabular-nums">{Math.round(zoom * 100)}%</span>
@@ -239,7 +246,7 @@ export default function LiveTab({ runId, fill = false, startFull = false, onClos
         </form>
         <div className="flex flex-wrap gap-1.5">
           {[['⌫', { kind: 'key', key: 'Backspace' }], ['Tab', { kind: 'key', key: 'Tab' }], ['Esc', { kind: 'key', key: 'Escape' }],
-            ['▲', { kind: 'scroll', dy: -500 }], ['▼', { kind: 'scroll', dy: 500 }], ['⇞ Top', { kind: 'key', key: 'Home' }], ['⇟ End', { kind: 'key', key: 'End' }]].map(([l, b]) => (
+            ['▲', { kind: 'scroll', dy: -500 }], ['▼', { kind: 'scroll', dy: 500 }], ['⇞ Top', { kind: 'key', key: 'Home' }], ['⇟ End', { kind: 'bottom' }]].map(([l, b]) => (
             <button key={l} type="button" onClick={() => send(b)} className={btn}>{l}</button>
           ))}
         </div></>}

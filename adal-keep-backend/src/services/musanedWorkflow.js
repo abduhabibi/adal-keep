@@ -48,6 +48,8 @@ function formatMusanedDate(dateStr) {
   return d.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
 }
 function cleanPhone(phone) { return phone ? String(phone).replace(/^(\+?251|0)/, '').replace(/\D/g, '') : '' }
+/** Relative phone on Musaned: with Ethiopia's 251 in front. */
+export const relativeNumber = (phone) => { const d = cleanPhone(phone); return d ? `251${d}` : '' }
 function log(ctx, msg, level = 'info') {
   // Cooperative cancellation — the cancel endpoint flips this run's flag, and
   // the next step log unwinds the workflow so the agent stops immediately.
@@ -2080,7 +2082,7 @@ export async function stepFillCandidateDetails(page, ctx) {
 
     const relativePhoneRaw = String(profile.emergency_phone || profile.phone_number || '').trim()
     const mobileNumber  = cleanPhone(mobileRaw)
-    const relativePhone = cleanPhone(relativePhoneRaw)
+    const relativePhone = relativeNumber(relativePhoneRaw)
     const maritalStatus = maritalStatusRaw
       ? (maritalStatusRaw.toUpperCase() === 'MARRIED' ? 'Married' : 'Single') : ''
     const religion = religionRaw

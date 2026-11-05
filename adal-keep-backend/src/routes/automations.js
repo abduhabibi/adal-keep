@@ -643,6 +643,16 @@ router.get('/automations/:id/screen', async (req, res) => {
 })
 
 export const LIVE_KEYS = ['Enter', 'Backspace', 'Tab', 'Escape', 'ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Delete', 'PageDown', 'PageUp', 'Home', 'End', 'Space']
+/** Scrolls the page, or the box inside it that scrolls (a long form often sits in one). */
+function scrollPage(dx, dy) {
+  const can = (e) => e.scrollHeight > e.clientHeight + 4 && /auto|scroll/.test(getComputedStyle(e).overflowY)
+  const boxes = [...document.querySelectorAll('*')].filter(can).sort((a, b) => b.clientHeight * b.clientWidth - a.clientHeight * a.clientWidth)
+  const page = document.scrollingElement || document.documentElement
+  const before = page.scrollTop
+  page.scrollBy({ left: dx, top: dy, behavior: 'instant' })
+  if (page.scrollTop === before && boxes[0]) boxes[0].scrollBy({ left: dx, top: dy, behavior: 'instant' })
+}
+
 /** One tap, key, scroll or move in a run's tab (the phone's / Admin's live view). */
 export async function liveInput(page, b = {}) {
   if (b.kind === 'click') {
@@ -656,7 +666,9 @@ export async function liveInput(page, b = {}) {
     if (!LIVE_KEYS.includes(key)) throw Object.assign(new Error('Unknown key'), { status: 400 })
     await page.keyboard.press(key === 'Space' ? ' ' : key)
   } else if (b.kind === 'scroll') {
-    await page.mouse.wheel({ deltaX: Math.max(-2000, Math.min(2000, Number(b.dx) || 0)), deltaY: Math.max(-3000, Math.min(3000, Number(b.dy) || 0)) })
+    await page.evaluate(scrollPage, Math.max(-2000, Math.min(2000, Number(b.dx) || 0)), Math.max(-3000, Math.min(3000, Number(b.dy) || 0)))
+  } else if (b.kind === 'bottom') {
+    await page.evaluate(scrollPage, 0, 1e7)
   } else if (b.kind === 'nav') {
     let u = String(b.url || '').trim()
     if (!/^https?:\/\//i.test(u)) u = /\s/.test(u) || !/\./.test(u) ? `https://www.google.com/search?q=${encodeURIComponent(u)}` : `https://${u}`

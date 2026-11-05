@@ -266,12 +266,31 @@ async function hide(page) {
   }
 }
 
-/** The first window of a browser just started, while it is still empty. */
+const ANCHOR = 'adal-agents-window'
+const named = (page) => page.url() === 'about:blank' && page.evaluate((n) => window.name === n, ANCHOR).catch(() => false)
+
+async function makeAnchor(page) {
+  await page.goto('about:blank').catch(() => {})
+  await page.evaluate((n) => { window.name = n }, ANCHOR)
+  await hide(page)
+  return page
+}
+
+/** The first window of a browser just started, while it is still empty: the agents' window. */
 async function tuckAway() {
   if (!HIDDEN) return
   const browser = await openBrowserIfAny()
   const page = (await browser?.pages().catch(() => []))?.[0]
-  if (page && /^(about:blank|chrome:\/\/newtab|brave:\/\/newtab)/.test(page.url())) await hide(page)
+  if (page && /^(about:blank|chrome:\/\/newtab|brave:\/\/newtab)/.test(page.url())) await makeAnchor(page)
+}
+
+/**
+ * The one window the agents work in: a blank tab out of sight that every run
+ * tab is opened from. It survives a server restart, and comes back if closed.
+ */
+async function agentsWindow(browser) {
+  for (const page of await browser.pages()) if (await named(page)) return page
+  return makeAnchor(await newWindow(browser, OFF, true))
 }
 
 async function newWindow(browser, bounds, background) {
@@ -284,15 +303,27 @@ async function newWindow(browser, bounds, background) {
 }
 
 /**
- * A run's new tab, in a window of its own off the screen. A plain new tab goes
- * to the last used window: a person's, or, when the agents' window was closed,
- * a new one the desktop puts on the screen.
+ * A run's new tab, in the agents' window: no new window ever shows. A plain new
+ * tab would go to the last used window, a person's.
  */
 export async function newRunTab(browser) {
   if (!HIDDEN || !browser.target) return browser.newPage()
-  const page = await newWindow(browser, OFF, true)
-  await hide(page).catch(e => console.warn('[browser] run window:', e.message))
-  return page
+  // One at a time: the new tab is told apart by being the only new one.
+  const made = _opening.then(() => tabInAgentsWindow(browser))
+  _opening = made.catch(() => {})
+  return made
+}
+let _opening = Promise.resolve()
+
+async function tabInAgentsWindow(browser) {
+  const anchor = await agentsWindow(browser)
+  const before = new Set(browser.targets())
+  const cdp = await anchor.target().createCDPSession()
+  try {
+    await cdp.send('Runtime.evaluate', { expression: "window.open('about:blank', '_blank', 'noopener'); 0", userGesture: true })
+    const target = await browser.waitForTarget(t => t.type() === 'page' && !before.has(t), { timeout: 10000 })
+    return await target.page()
+  } finally { cdp.detach().catch(() => {}) }
 }
 
 /** With Adal Keep: the browser is up, out of sight, for the runs and the background checks. */

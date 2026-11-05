@@ -31,3 +31,9 @@ test('template.pdf: employer, Saudi agency, our agency, contract', () => {
   assert.equal(t.ourAgency.name, 'SAMPLE FOREIGN EMPLOYMENT AGENCY')
   assert.equal(t.ourAgency.license, '999')
 })
+
+test('the relative phone goes to Musaned with 251 in front, however it was typed', async () => {
+  const { relativeNumber } = await import('../src/services/musanedWorkflow.js')
+  for (const v of ['0912345678', '912345678', '+251912345678', '251912345678']) assert.equal(relativeNumber(v), '251912345678')
+  assert.equal(relativeNumber(''), '')
+})

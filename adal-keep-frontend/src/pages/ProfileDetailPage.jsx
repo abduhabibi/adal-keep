@@ -468,7 +468,7 @@ function SaudiEmergency({ profile, onSaved }) {
       {editing ? (
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <input className="rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-1.5 text-sm w-48"
-            placeholder="EM13001783" value={value} onChange={e => setValue(e.target.value)} onKeyDown={e => e.key === 'Enter' && save()} />
+            placeholder="EM13001783" value={value} onChange={e => setValue(e.target.value.toUpperCase())} onKeyDown={e => e.key === 'Enter' && save()} />
           <Button size="sm" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</Button>
           <span className="text-xs text-slate-500">Their LMIS Labor ID (register the person on LMIS first). The contract run adds them on the Emergency Contact tab.</span>
         </div>

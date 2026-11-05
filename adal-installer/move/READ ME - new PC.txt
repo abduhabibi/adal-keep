@@ -1,0 +1,21 @@
+MOVE ADAL KEEP TO A NEW PC
+
+You need the passphrase. It is not on this USB.
+
+WINDOWS
+1. Run "2 - Install Adal Main.exe" from the "Adal Keep USB" folder.
+2. Run "Restore on Windows.bat" from this folder and type the passphrase.
+3. Open Adal Keep from the Desktop.
+
+LINUX
+1. Install Node.js (version 20 or newer).
+2. In this folder run:  node restore-adal.mjs
+3. In Documents/Adal_keep run:  npm install  in adal-keep-backend and adal-keep-frontend.
+4. Run:  bash adal-installer/linux/install-linux-app.sh
+
+AFTER EITHER ONE
+- Licence: the new PC has a new PC number and needs its own unlock code.
+- Phones: pair again with the new PC number.
+- WhatsApp: scan the QR again if it asks.
+- Musaned and the other sites: sign in once if they ask.
+- Keep only one main PC running for an agency: turn the old one off.

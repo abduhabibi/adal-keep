@@ -47,6 +47,16 @@ export const WORKFLOWS = {
     stepCount: 4,
   },
 
+  musaned_delete: {
+    id: 'musaned_delete',
+    name: 'Delete from Musaned',
+    description:
+      'Musaned sign-in → HR Pool → search her passport → Delete. Says so if she is not there. Her profile here stays.',
+    target: 'https://tawtheeq.musaned.com.sa/hr-pool',
+    consts: {},
+    stepCount: 3,
+  },
+
   mofa_visa: {
     id: 'mofa_visa',
     name: 'Make visa (Enjaz)',

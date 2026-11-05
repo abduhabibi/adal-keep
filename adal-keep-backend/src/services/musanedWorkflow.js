@@ -2295,7 +2295,8 @@ async function musanedRun(page, ctx) {
   // Preflight: Musaned is not opened for a profile missing these items.
   // (Checking whether she was chosen only needs her passport number.)
   const importCv = ctx.workflowId === 'musaned_cv_import'
-  const checkOnly = ctx.workflowId === 'musaned_check_chosen' || importCv
+  const deleting = ctx.workflowId === 'musaned_delete'
+  const checkOnly = ctx.workflowId === 'musaned_check_chosen' || importCv || deleting
   const photoResolved = checkOnly ? { path: true } : await resolvePersonalPhotoPath(ctx).catch(() => ({ path: null }))
   if (!checkOnly) {
     if (!String(ctx.profile?.marital_status || '').trim()) await ctx.askField?.('marital_status', `${ctx.profileName}: marital status?`, ['Single', 'Married', 'Divorced', 'Widowed'])
@@ -2373,6 +2374,10 @@ async function musanedRun(page, ctx) {
 
     ctx.releaseSignIn?.() // signed in: the next run may go
     await toEnglish(page, ctx)
+    if (deleting) {
+      const { deleteFromHrPoolInRun } = await import('./musanedImport.js')
+      return await deleteFromHrPoolInRun(page, ctx)
+    }
     if (importCv) {
       const { importFromHrPoolInRun } = await import('./musanedImport.js')
       return await importFromHrPoolInRun(page, ctx)

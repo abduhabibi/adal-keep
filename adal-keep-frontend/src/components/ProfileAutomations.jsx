@@ -41,7 +41,7 @@ const COMPLETE_LABEL = {
 }
 
 // Runs that are simply run again when clicked after they finished.
-const REPEATABLE = new Set(['musaned_check_chosen', 'musaned_cv_import', 'wafid_check', 'wafid_slip', 'mofa_find_app'])
+const REPEATABLE = new Set(['musaned_check_chosen', 'musaned_cv_import', 'musaned_delete', 'wafid_check', 'wafid_slip', 'mofa_find_app'])
 
 // Waits that must not run again (a second run would make a second application).
 const NO_CONTINUE = new Set(['awaiting-visa-save', 'awaiting-insurance-save'])
@@ -224,9 +224,17 @@ export default function ProfileAutomations({ profileId }) {
   }
 
   // One click = one run, started at once in its own tab, or put in line.
+  const armedDelete = useRef(0)
   const start = async (workflowId) => {
     if (sending[workflowId]) return
     const name = wfName(workflowId)
+    // Deleting cannot be undone: a second press within 6 seconds.
+    if (workflowId === 'musaned_delete' && Date.now() - armedDelete.current > 6000) {
+      armedDelete.current = Date.now()
+      toast('Press again to delete her from Musaned. This cannot be undone.', { icon: '⚠️', duration: 6000 })
+      return
+    }
+    armedDelete.current = 0
     const t = toast.loading(`${name}: checking the profile…`)
     setSending(s => ({ ...s, [workflowId]: true }))
     try {
@@ -377,7 +385,7 @@ export default function ProfileAutomations({ profileId }) {
   // CV (done on the profile) → Musaned → Wafid → Tasheer → Insurance → Enjaz · Visa,
   // then the LMIS steps, each on its own.
   const GROUPS = [
-    { title: 'Musaned', ids: ['musaned_add_candidate', 'musaned_check_chosen', 'musaned_cv_import'], box: 'border-indigo-200 dark:border-indigo-800', head: 'text-indigo-700 dark:text-indigo-300' },
+    { title: 'Musaned', ids: ['musaned_add_candidate', 'musaned_check_chosen', 'musaned_cv_import', 'musaned_delete'], box: 'border-indigo-200 dark:border-indigo-800', head: 'text-indigo-700 dark:text-indigo-300' },
     { title: 'Wafid medical', ids: ['wafid_book', 'wafid_slip', 'wafid_check'], box: 'border-emerald-200 dark:border-emerald-800', head: 'text-emerald-700 dark:text-emerald-300' },
     { title: 'Tasheer', ids: [], empty: 'Coming soon — the Tasheer steps are added next.', box: 'border-amber-200 dark:border-amber-800 border-dashed', head: 'text-amber-700 dark:text-amber-300' },
     { title: 'Insurance', ids: ['insurance_certificate'], box: 'border-rose-200 dark:border-rose-800', head: 'text-rose-700 dark:text-rose-300' },

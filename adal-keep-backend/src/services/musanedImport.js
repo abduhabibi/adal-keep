@@ -49,7 +49,7 @@ export async function saveOnProfile(db, profileId, fieldName, file, original) {
 }
 
 /** HR Pool → Passport Number filter → her row's VIEW address, or null when she is not in the list. */
-async function findHerPage(page, passport, log) {
+async function searchPassport(page, passport, log) {
   await page.goto(HR_POOL, { waitUntil: 'networkidle2', timeout: 60000 }).catch(() => {})
   await page.waitForFunction(() => [...document.querySelectorAll('app-filter-search')].some(f => /Passport Number/i.test(f.textContent || '')), { timeout: 30000 })
   const filter = (await page.evaluateHandle(() => [...document.querySelectorAll('app-filter-search')].find(f => /Passport Number/i.test(f.textContent || '')))).asElement()
@@ -63,6 +63,10 @@ async function findHerPage(page, passport, log) {
   await page.waitForNetworkIdle({ idleTime: 800, timeout: 20000 }).catch(() => {})
   await sleep(1200)
   log(`🔎 HR Pool → passport ${passport}`)
+}
+
+async function findHerPage(page, passport, log) {
+  await searchPassport(page, passport, log)
   // Her row: the smallest box with her passport and a VIEW link.
   const href = await page.evaluate((pp) => {
     const views = [...document.querySelectorAll('a, button')].filter(b => /^\s*(VIEW|DETAILS|عرض|التفاصيل)\s*$/i.test(b.innerText || ''))
@@ -76,6 +80,69 @@ async function findHerPage(page, passport, log) {
   if (href === null) return null
   if (!href) throw new Error('Musaned: her VIEW has no address')
   return new URL(href, ORIGIN).href
+}
+
+/** The rows showing exactly this passport number, and whether each has Delete. */
+const herRows = (page, passport) => page.evaluate((pp) => [...document.querySelectorAll('tr')]
+  .filter(r => [...r.querySelectorAll('.app-table-value, td')].some(c => (c.innerText || '').trim().toUpperCase() === pp))
+  .map(r => ({ canDelete: !!r.querySelector('button.candidate-delete:not([disabled])') })), passport)
+
+/**
+ * "Delete from Musaned" (run musaned_delete): signed in → HR Pool → her passport
+ * → Delete on her row, and Musaned's question answered. Only a row with exactly
+ * her number, and only when it is the one row; the search is run again after,
+ * so "deleted" is what Musaned shows. Her profile here stays.
+ */
+export async function deleteFromHrPoolInRun(page, ctx) {
+  const log = (m, level = 'info') => ctx.onLog?.(level, m)
+  const passport = String(ctx.profile?.passport_number || '').trim().toUpperCase()
+  if (!passport) return { ok: false, error: 'Profile is missing the passport number' }
+
+  await searchPassport(page, passport, log)
+  const rows = await herRows(page, passport)
+  if (!rows.length) {
+    log(`ℹ️ passport ${passport} is not in the HR Pool: nothing to delete`)
+    await ctx.notify?.(`ℹ️ ${ctx.profileName}: not available on Musaned`, `Passport ${passport} is not in the HR Pool. Nothing was deleted.`)
+    await ctx.noteProfile?.(`Musaned: passport ${passport} is not in the HR Pool (nothing deleted)`)
+    return { ok: true, done: true, note: 'not available' }
+  }
+  if (rows.length > 1) return { ok: false, error: `Musaned shows ${rows.length} rows for passport ${passport}: delete the right one by hand` }
+  if (!rows[0].canDelete) return { ok: false, error: 'Musaned has no Delete for her (she may have a contract or a request)' }
+
+  // Its question may be the browser's own or a box on the page.
+  const yes = (d) => d.accept().catch(() => {})
+  page.on('dialog', yes)
+  try {
+    await page.evaluate((pp) => {
+      const row = [...document.querySelectorAll('tr')].find(r => [...r.querySelectorAll('.app-table-value, td')].some(c => (c.innerText || '').trim().toUpperCase() === pp))
+      row.querySelector('button.candidate-delete').click()
+    }, passport)
+    log('🗑 pressed Delete')
+    let answered = false
+    for (let i = 0; i < 16 && !answered; i++) {
+      await sleep(500)
+      answered = await page.evaluate(() => {
+        const seen = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 }
+        const box = [...document.querySelectorAll('.modal.show, [role="dialog"], [role="alertdialog"], .swal2-popup, .p-dialog, .p-confirm-dialog, ngb-modal-window')].find(seen)
+        const b = box && [...box.querySelectorAll('button, a.btn')].filter(seen).find(e => /^\s*(yes|ok|confirm|delete|نعم|موافق|تأكيد|حذف)\s*$/i.test(e.innerText || ''))
+        b?.click()
+        return !!b
+      }).catch(() => false)
+    }
+    await page.waitForNetworkIdle({ idleTime: 800, timeout: 15000 }).catch(() => {})
+    await sleep(1000)
+  } finally { page.off('dialog', yes) }
+
+  await searchPassport(page, passport, log)
+  if ((await herRows(page, passport)).length) {
+    // Its question looked different, or it refused: a person sees why.
+    await ctx.notify?.(`🖐 ${ctx.profileName}: Musaned did not delete her`, 'Open the tab to see why, or press Delete there.', 'warn', { confirm: true })
+    return { ok: false, error: 'Musaned still shows her after Delete' }
+  }
+  log(`✓ passport ${passport} deleted from the HR Pool`)
+  await ctx.notify?.(`✅ ${ctx.profileName}: deleted from Musaned`, `Passport ${passport} is no longer in the HR Pool.`)
+  await ctx.noteProfile?.(`Musaned: deleted from the HR Pool (passport ${passport})`)
+  return { ok: true, done: true }
 }
 
 /** Musaned's details → Adal Keep's fields (only clear values). */

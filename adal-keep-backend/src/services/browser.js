@@ -128,6 +128,10 @@ const BROWSER_ARGS = [
   ...(process.platform === 'linux' ? ['--disable-gpu'] : []),
   '--disable-dev-shm-usage',
   '--disable-background-networking',
+  // A minimized run window keeps its full speed.
+  '--disable-backgrounding-occluded-windows',
+  '--disable-renderer-backgrounding',
+  '--disable-background-timer-throttling',
   // NOTE: do NOT add '--blink-settings=imagesEnabled=false': it is
   // browser-wide and blanks the Musaned reCAPTCHA images. Image policy is
   // per tab (`page.__adalAllowImages`, see tabManager.setupTab).
@@ -245,12 +249,23 @@ const place = async ({ cdp, windowId }, bounds) => {
   await cdp.send('Browser.setWindowBounds', { windowId, bounds })
 }
 
-/** Back out of sight: the first window a fresh browser shows. */
+/**
+ * A run's window out of sight. Linux desktops do not let a program place its
+ * windows (Wayland): there it is minimized, and it keeps working the same.
+ * Only ever a window of Adal Keep's own: moving a person's window resizes it.
+ */
+async function hide(page) {
+  const w = await windowOf(page)
+  if (process.platform === 'linux') await w.cdp.send('Browser.setWindowBounds', { windowId: w.windowId, bounds: { windowState: 'minimized' } })
+  else await place(w, OFF)
+}
+
+/** The first window of a browser just started, while it is still empty. */
 async function tuckAway() {
   if (!HIDDEN) return
   const browser = await openBrowserIfAny()
   const page = (await browser?.pages().catch(() => []))?.[0]
-  if (page) await place(await windowOf(page), OFF)
+  if (page && /^(about:blank|chrome:\/\/newtab|brave:\/\/newtab)/.test(page.url())) await hide(page)
 }
 
 async function newWindow(browser, bounds, background) {
@@ -269,7 +284,9 @@ async function newWindow(browser, bounds, background) {
  */
 export async function newRunTab(browser) {
   if (!HIDDEN || !browser.target) return browser.newPage()
-  return newWindow(browser, OFF, true)
+  const page = await newWindow(browser, OFF, true)
+  await hide(page).catch(e => console.warn('[browser] run window:', e.message))
+  return page
 }
 
 /** With Adal Keep: the browser is up, out of sight, for the runs and the background checks. */
@@ -281,16 +298,18 @@ export function startBrowserQuietly() {
 export async function openForPerson() {
   const browser = await getBrowser()
   if (!HIDDEN) return browser.newPage()
-  const page = await newWindow(browser, { left: 60, top: 40, width: 1280, height: 800 }, false)
-  const w = await windowOf(page)
-  await w.cdp.send('Browser.setWindowBounds', { windowId: w.windowId, bounds: { windowState: 'maximized' } }).catch(() => {})
+  const page = await newWindow(browser, {}, false)
+  if (process.platform !== 'linux') {
+    const w = await windowOf(page)
+    await w.cdp.send('Browser.setWindowBounds', { windowId: w.windowId, bounds: { windowState: 'maximized' } }).catch(() => {})
+  }
   await page.bringToFront()
   return page
 }
 
-/** A window a person is done with goes off the screen; its tab keeps working. */
+/** A window a person is done with goes out of sight; its tab keeps working. */
 export async function sendAway(page) {
-  if (HIDDEN) await place(await windowOf(page), OFF)
+  if (HIDDEN) await hide(page)
 }
 
 /**

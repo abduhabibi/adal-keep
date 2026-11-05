@@ -1,4 +1,5 @@
 import LiveTab from './LiveTab'
+import { Account } from './MusanedAuthenticatorCard'
 import { IN_PHONE_APP, onBack } from '../lib/phoneApp'
 import { useCallback, useEffect, useState, useRef } from 'react'
 import { createPortal } from 'react-dom'
@@ -686,6 +687,10 @@ function SignInChip({ runId }) {
  * Settings → Portals): in the Musaned box, tap to copy; it changes every 30 s.
  */
 function MusanedCode({ accountId }) {
+  const [adding, setAdding] = useState(false)
+  const [accounts, setAccounts] = useState([])
+  useEffect(() => { api.get('/musaned/accounts').then(r => setAccounts(r.data || [])).catch(() => {}) }, [])
+  const account = accounts.find(a => a.id === accountId) || accounts.find(a => a.is_default) || accounts[0]
   const [all, setAll] = useState(null)
   const [left, setLeft] = useState(0)
   useEffect(() => {
@@ -696,7 +701,14 @@ function MusanedCode({ accountId }) {
     return () => { alive = false; clearInterval(t) }
   }, [])
   if (!all) return null
-  const info = (accountId && all[accountId]) || Object.values(all).find(Boolean)
+  // Only this account's own: another account's code would not sign it in.
+  const info = account ? all[account.id] : null
+  if (!info && account) return (
+    <span className="block w-full">
+      <button type="button" onClick={() => setAdding(v => !v)} className="text-xs font-semibold text-indigo-700 hover:underline dark:text-indigo-300">🔑 Add {account.name}'s authenticator</button>
+      {adding && <ul className="mt-1"><Account a={account} has={null} onChange={() => { setAdding(false); api.get('/musaned/authenticators').then(r => setAll(r.data || {})).catch(() => {}) }} /></ul>}
+    </span>
+  )
   if (!info) return <span className="text-[10px] text-slate-400" title="Settings → Portals → Musaned authenticator">🔑 No Musaned code in Adal Keep</span>
   const code = String(info.code || '')
   return (

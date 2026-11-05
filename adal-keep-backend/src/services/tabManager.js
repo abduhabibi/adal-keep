@@ -77,7 +77,11 @@ export async function setupTab(page, { runId, mute = true } = {}) {
   }
   // A run never brings itself forward: only a person's Open does (LiveTab).
   page.bringToFront = async () => {}
+  // A desktop page whatever the window's size: in a narrow one the sites fold
+  // their menus away and the run cannot find them. It ends with the run.
+  const desktopPage = () => page.__adalCdp?.send('Emulation.setDeviceMetricsOverride', { width: 1366, height: 900, deviceScaleFactor: 1, mobile: false }).catch(() => {})
   if (page.__adalSetup) {
+    await desktopPage()
     if (runId !== undefined) page.__adalRunId = runId
     await setFileDialogs(page, true) // a resumed run takes the dialogs back
     return page
@@ -88,11 +92,9 @@ export async function setupTab(page, { runId, mute = true } = {}) {
     page.__adalCdp = cdp
     try { await cdp.send('Page.setAudioMuted', { muted: mute }) } catch {}
     try { await cdp.send('Emulation.setFocusEmulationEnabled', { enabled: true }) } catch {}
-    // A desktop page whatever the window's size: in a narrow one the sites fold
-    // their menus away and the run cannot find them.
-    try { await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1366, height: 900, deviceScaleFactor: 1, mobile: false }) } catch {}
     page.__adalFocused = true
     await catchFileDialogs(page, cdp)
+    await desktopPage()
   } catch (e) {
     console.log('[tabManager] cdp setup failed:', e.message)
   }
@@ -357,6 +359,7 @@ export async function doneWithTab(page) {
  */
 export function forgetRunTab(runId) {
   const page = tabOfRun(runId)
+  page?.__adalCdp?.send('Emulation.clearDeviceMetricsOverride').catch(() => {})
   if (page) handTabToPerson(page)
   return _tabs.delete(Number(runId))
 }

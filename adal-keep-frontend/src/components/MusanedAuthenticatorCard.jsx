@@ -36,7 +36,7 @@ function LiveCode({ info, onTick }) {
   )
 }
 
-function Account({ a, has, onChange }) {
+export function Account({ a, has, onChange }) {
   const [over, setOver] = useState(false)
   const [busy, setBusy] = useState(false)
   const [key, setKey] = useState('')

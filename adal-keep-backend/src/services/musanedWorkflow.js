@@ -400,7 +400,7 @@ export async function stepFillMusanedLogin(page, ctx) {
 }
 
 export async function stepClickAgencyCard(page, ctx) {
-  const agencyHint = String(ctx.profile?.agency_name || ctx.musaned_name || '').trim().toUpperCase()
+  const agencyHint = String(ctx.musaned_name || ctx.musaned_username || '').trim().toUpperCase()
   const deadline = Date.now() + 20000
   let clicked = false
   while (Date.now() < deadline && !clicked) {
@@ -414,6 +414,9 @@ export async function stepClickAgencyCard(page, ctx) {
       const txt = (el) => el.textContent || ''
       let candidates = all.filter(el => /FOREIGN\s+EMPLOYMENT\s+AGENCY/i.test(txt(el)) && /\bdetails\b/i.test(txt(el)))
       if (!candidates.length) candidates = all.filter(el => /FOREIGN\s+EMPLOYMENT\s+AGENCY/i.test(txt(el)))
+      // Several agencies under one sign-in: this account's own.
+      const own = hint ? candidates.filter(el => txt(el).toUpperCase().includes(hint)) : []
+      if (own.length) candidates = own
       if (!candidates.length && hint) candidates = all.filter(el => txt(el).toUpperCase().includes(hint))
       if (candidates.length) {
         candidates.sort((a, b) => {
@@ -2273,7 +2276,64 @@ export async function stepSubmitCandidateForm(page, ctx) { return { ok: true } }
 // RUNNER
 // ============================================================================
 
+/**
+ * One browser holds one Musaned sign-in. A run for another account waits for
+ * the earlier runs to finish (the earliest run goes first, so two never wait
+ * for each other), then signs in as its own account.
+ */
+async function waitForOtherAccounts(ctx) {
+  if (!ctx.db || !ctx.account_id) return
+  for (let told = false; ;) {
+    if (ctx.isCancelled?.()) { const e = new Error('Cancelled by user'); e.cancelled = true; throw e }
+    const other = await ctx.db('automation_queue').where('status', 'running').where('workflow_id', 'like', 'musaned%')
+      .where('id', '<', ctx.runId).whereNot('account_id', ctx.account_id).first('id').catch(() => null)
+    if (!other) return
+    if (!told) { told = true; log(ctx, `⏳ run #${other.id} is working on another Musaned account — waiting for it`) }
+    await sleep(3000)
+  }
+}
+
+/** Who Musaned says is signed in: the name in its menu, '' when it cannot be read. */
+async function signedInUser(page) {
+  for (let i = 0; i < 16; i++) {
+    const who = await page.evaluate(() => document.querySelector('.dropdown-item.fw-bold')?.textContent?.trim() || '').catch(() => '')
+    if (who) return who.toLowerCase()
+    await sleep(500)
+  }
+  return ''
+}
+
+/** Leaves Musaned in the whole browser: cookies and page storage of the two sites. */
+async function leaveMusaned(page) {
+  const cdp = await page.target().createCDPSession()
+  try {
+    for (const origin of ['https://tawtheeq.musaned.com.sa', 'https://accounts.wahid.sa']) {
+      await cdp.send('Storage.clearDataForOrigin', { origin, storageTypes: 'cookies,local_storage,indexeddb,service_workers,cache_storage' })
+    }
+  } finally { cdp.detach().catch(() => {}) }
+  await page.evaluate(() => { try { sessionStorage.clear() } catch {} }).catch(() => {})
+}
+
+/** Musaned is signed in as this run's account, or it signs in again as it. */
+async function checkAccount(page, ctx) {
+  const want = [ctx.musaned_username, ctx.musaned_name].map(v => String(v || '').trim().toLowerCase()).filter(Boolean)
+  if (!want.length) return true
+  const who = await signedInUser(page)
+  if (!who) {
+    if (ctx.workflowId === 'musaned_delete') throw new Error('Musaned does not show who is signed in: nothing was deleted')
+    log(ctx, 'Musaned does not show who is signed in', 'warn')
+    return true
+  }
+  if (want.includes(who)) { log(ctx, `✓ signed in as ${who}`); return true }
+  if (ctx.accountSwitched) throw new Error(`Musaned stays signed in as ${who}, not ${want[0]}`)
+  ctx.accountSwitched = true
+  log(ctx, `Musaned is signed in as ${who}: leaving, to sign in as ${want[0]}`, 'warn')
+  await leaveMusaned(page)
+  return false
+}
+
 export async function runMusanedWorkflow(page, ctx) {
+  await waitForOtherAccounts(ctx)
   // Musaned runs take turns signing in; a run uses a Musaned tab that is
   // already signed in (the person's or another run's) instead of signing in
   // again. The turn is let go as soon as this run is signed in.
@@ -2372,6 +2432,7 @@ async function musanedRun(page, ctx) {
       }
     }
 
+    if (!(await checkAccount(page, ctx))) return await musanedRun(page, { ...ctx, musanedStage: 'start' })
     ctx.releaseSignIn?.() // signed in: the next run may go
     await toEnglish(page, ctx)
     if (deleting) {

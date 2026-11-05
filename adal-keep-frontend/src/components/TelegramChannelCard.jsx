@@ -41,14 +41,10 @@ export default function TelegramChannelCard() {
     } catch (e) { toast.error(err(e)) }
   }
 
-  return (
-    <Card>
-      <h2 className="font-display text-lg font-bold mb-1 flex items-center gap-2" translate="no"><span>✈️</span> Telegram — this agency's backup channel</h2>
-      <p className="text-sm text-slate-500 mb-3" translate="no">
-        {c.own_channel
-          ? <>✓ Backups go to <b>this agency's own channel</b> (id {c.chat_id}){c.files_total ? ` — ${c.files_sent} of ${c.files_total} documents sent there so far` : ''}.</>
-          : <>Backups now go to Adal's <b>shared</b> storage channel. Give this agency a channel of its own, so one agency's backups never crowd out another's.</>}
-      </p>
+  // Backups reach a channel already: nothing to set up.
+  const connected = c.own_channel || !!(c.chat_id && c.last_ok)
+  const setup = (
+    <>
       <ol className="space-y-2 text-sm list-decimal pl-5" translate="no">
         <li>In Telegram: <b>New Channel → Private</b>, name it e.g. “{'<agency>'} Adal Backup”.</li>
         <li>Channel info → Administrators → <b>Add admin</b> → {bot ? <><code className="rounded bg-slate-100 px-1 dark:bg-slate-800">@{bot}</code> (Adal's backup bot)</> : 'your backup bot'}.</li>
@@ -63,6 +59,24 @@ export default function TelegramChannelCard() {
           </button>
         ))}
       </div>
+    </>
+  )
+
+  return (
+    <Card>
+      <h2 className="font-display text-lg font-bold mb-1 flex items-center gap-2" translate="no"><span>✈️</span> Telegram — this agency's backup channel</h2>
+      <p className="text-sm text-slate-500 mb-3" translate="no">
+        {connected
+          ? <>✓ Connected: backups go to <b>{c.own_channel ? "this agency's own channel" : 'the Telegram channel'}</b> (id {c.chat_id}){c.files_total ? ` — ${c.files_sent} of ${c.files_total} documents sent there so far` : ''}.</>
+          : <>Backups now go to Adal's <b>shared</b> storage channel. Give this agency a channel of its own, so one agency's backups never crowd out another's.</>}
+      </p>
+      {!connected && setup}
+      {connected && (
+        <details className="text-sm">
+          <summary className="cursor-pointer text-xs text-slate-500">Use another channel</summary>
+          <div className="mt-2">{setup}</div>
+        </details>
+      )}
     </Card>
   )
 }

@@ -89,6 +89,12 @@ export default function CVsPage() {
               <p className="text-[10px] text-slate-400">{new Date(r.created_at).toLocaleString()}</p>
               <div className="flex gap-2 border-t border-slate-100 dark:border-slate-700 pt-3">
                 <a
+                  href={`/api/cv/generated/${r.id}/view`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex-1 text-center py-2 text-xs font-medium rounded-lg bg-teal-600 text-white hover:bg-teal-700"
+                >Preview</a>
+                <a
                   href={`/api/cv/generated/${r.id}/download`}
                   target="_blank"
                   rel="noopener noreferrer"

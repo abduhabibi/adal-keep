@@ -4,7 +4,7 @@ import { dispatchRun, runStatus, queueSnapshot } from '../services/worker.js'
 import { markCancelled, isCancelled } from '../services/cancellation.js'
 import { forgetRunTab, findRunTab } from '../services/tabManager.js'
 import { openBrowserIfAny, openForPerson } from '../services/browser.js'
-import { waiting, answerCaptcha } from '../services/attention.js'
+import { waiting, answerCaptcha, doneWith } from '../services/attention.js'
 import { assertPoliceReady, getProfileVerification, runPassportVerification } from '../services/verification.js'
 
 const router = express.Router()
@@ -364,10 +364,14 @@ router.get('/automations/attention', async (req, res) => {
 router.post('/automations/:id/captcha', async (req, res) => {
   try {
     const text = String(req.body?.text || '').trim()
-    if (!text) return res.status(400).json({ error: 'Type what the picture shows' })
+    if (!text) return res.status(400).json({ error: 'Type it first' })
     await answerCaptcha(req.params.id, text)
     res.json({ ok: true })
   } catch (e) { res.status(400).json({ error: e.message }) }
+})
+router.post('/automations/:id/attention/done', (req, res) => {
+  doneWith(req.params.id, { force: true })
+  res.json({ ok: true })
 })
 router.post('/browser/open', async (req, res) => {
   try { await openForPerson(); res.json({ ok: true }) } catch (e) { res.status(500).json({ error: e.message }) }

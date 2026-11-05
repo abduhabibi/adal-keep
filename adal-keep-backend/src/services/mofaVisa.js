@@ -22,7 +22,7 @@
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { signInTurn } from './tabManager.js'
+import { signInTurn, toEnglish } from './tabManager.js'
 
 export const MOFA_VISA = 'mofa_visa'
 const LOGIN_URL = 'https://visa.mofa.gov.sa/Account/Login/enjazcompany'
@@ -412,6 +412,7 @@ async function signIn(page, ctx) {
     await page.goto(LOGIN_URL, { waitUntil: 'domcontentloaded', timeout: 120000 })
       .catch(e => log(ctx, `navigation threw: ${e.message}`, 'warn'))
     await sleep(2500)
+    await toEnglish(page, ctx)
     if (await signedIn(page)) {
       log(ctx, '✓ already signed in to the visa platform (shared sign-in)')
       return
@@ -429,7 +430,7 @@ async function signIn(page, ctx) {
     )
     // The picture goes to the notification; what is typed there signs in here.
     let sentAt = 0
-    const ask = async () => {
+    const ask = async (title) => {
       const pic = await captchaPicture(page)
       if (!pic) return
       ctx.askCaptcha?.(pic, async (text) => {
@@ -437,7 +438,7 @@ async function signIn(page, ctx) {
         await typeCaptcha(page, text)
         sentAt = Date.now()
         await clickText(page, /^\s*(log ?in|sign ?in)\s*$/)
-      })
+      }, { title })
     }
     await ask()
     const t0 = Date.now()
@@ -446,11 +447,12 @@ async function signIn(page, ctx) {
       if (await signedIn(page)) break
       // A wrong captcha reloads the form empty: fill it again, and ask again.
       await fillLogin(page, ctx).catch(() => {})
-      if (sentAt && Date.now() - sentAt > 7000) { sentAt = 0; log(ctx, 'the captcha was not accepted — asking again', 'warn'); await ask() }
+      if (sentAt && Date.now() - sentAt > 7000) { sentAt = 0; log(ctx, 'the captcha was not accepted — asking again', 'warn'); await ask('Not accepted: type the new numbers') }
       await sleep(2000)
     }
     if (!(await signedIn(page))) throw new Error('Nobody signed in to the visa platform within 10 minutes')
     log(ctx, '✓ signed in to the visa platform')
+    await toEnglish(page, ctx)
   } finally { release() }
 }
 

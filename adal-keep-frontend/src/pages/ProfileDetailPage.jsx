@@ -276,6 +276,14 @@ export default function ProfileDetailPage() {
                     </p>
                     <div className="flex gap-1.5 pt-2 border-t border-slate-200 dark:border-slate-700 mt-1">
                       <a
+                        href={`/api/cv/generated/${c.id}/view`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex-1 text-center text-[11px] py-1.5 rounded-md bg-teal-600 text-white hover:bg-teal-700"
+                      >
+                        Preview
+                      </a>
+                      <a
                         href={`/api/cv/generated/${c.id}/download`}
                         target="_blank"
                         rel="noopener noreferrer"
@@ -332,10 +340,10 @@ export default function ProfileDetailPage() {
   )
 }
 
-/** A section that folds to its title; open or folded is remembered on this device. */
+/** A section folded to its title until opened; opening it is remembered on this device. */
 function Fold({ id, title, className = '', children }) {
-  const key = `adal-fold-${id}`
-  const [open, setOpen] = useState(() => { try { return localStorage.getItem(key) !== '0' } catch { return true } })
+  const key = `adal-folded-${id}`
+  const [open, setOpen] = useState(() => { try { return localStorage.getItem(key) === '1' } catch { return false } })
   const toggle = () => setOpen(o => { try { localStorage.setItem(key, o ? '0' : '1') } catch {} return !o })
   return (
     <section className={className}>

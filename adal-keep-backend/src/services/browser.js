@@ -8,7 +8,7 @@
  * no Brave or Chrome is needed. The agents work in ONE window kept out of sight
  * (off the screen): a run that needs nobody is never seen, and nothing ever
  * pops up. A person brings a tab forward by pressing Open in the notification
- * (showTab); the window goes back when the run goes on (tuckAway). All runs
+ * (LiveTab). All runs
  * share one profile: one sign-in, and passwords saved in it stay.
  *
  * Cross-platform: Windows / macOS / Linux.
@@ -198,7 +198,7 @@ export async function getBrowser() {
       // Just started: Brave restores its last tabs and replaces its first
       // blank one — a run's tab opened in that moment is closed under it.
       await new Promise(r => setTimeout(r, 3000))
-      await tuckAway({ force: true }).catch(() => {})
+      await tuckAway().catch(() => {})
       return _browser
     } catch (e) { lastErr = e }
   }
@@ -228,35 +228,46 @@ const place = async ({ cdp, windowId }, bounds) => {
   await cdp.send('Browser.setWindowBounds', { windowId, bounds })
 }
 
-let _held = false   // a person opened the browser to use it: it stays until they close it
-
-/** The window comes forward on this tab: only ever because a person pressed Open. */
-export async function showTab(page, { hold = false } = {}) {
-  const w = await windowOf(page)
-  await place(w, { left: 60, top: 40, width: 1280, height: 800 })
-  await w.cdp.send('Browser.setWindowBounds', { windowId: w.windowId, bounds: { windowState: 'maximized' } }).catch(() => {})
-  await w.cdp.send('Page.bringToFront')
-  _shown = true
-  if (hold) _held = true
-}
-let _shown = false
-
-/** The window goes back out of sight (nothing happens while a person uses it). */
-export async function tuckAway({ force = false } = {}) {
-  if (!HIDDEN || _held || (!force && !_shown)) return
+/** Back out of sight: the first window a fresh browser shows. */
+async function tuckAway() {
+  if (!HIDDEN) return
   const browser = await openBrowserIfAny()
   const page = (await browser?.pages().catch(() => []))?.[0]
-  if (!page) return
-  await place(await windowOf(page), OFF)
-  _shown = false
+  if (page) await place(await windowOf(page), OFF)
 }
 
-/** The browser for a person's own use: a new tab, in front, with its saved passwords. */
+async function newWindow(browser, bounds, background) {
+  const cdp = await browser.target().createCDPSession()
+  try {
+    const { targetId } = await cdp.send('Target.createTarget', { url: 'about:blank', newWindow: true, background, ...bounds })
+    const target = await browser.waitForTarget(t => t._targetId === targetId, { timeout: 15000 })
+    return await target.page()
+  } finally { cdp.detach().catch(() => {}) }
+}
+
+/**
+ * A run's new tab, in a window of its own off the screen. A plain new tab goes
+ * to the last used window: a person's, or, when the agents' window was closed,
+ * a new one the desktop puts on the screen.
+ */
+export async function newRunTab(browser) {
+  if (!HIDDEN || !browser.target) return browser.newPage()
+  return newWindow(browser, OFF, true)
+}
+
+/** With Adal Keep: the browser is up, out of sight, for the runs and the background checks. */
+export function startBrowserQuietly() {
+  if (HIDDEN) setTimeout(() => getBrowser().catch(e => console.warn('[browser] not started:', e.message)), 5000).unref?.()
+}
+
+/** The browser for a person's own use: its own window, apart from the agents', with the saved passwords. */
 export async function openForPerson() {
   const browser = await getBrowser()
-  const page = await browser.newPage()
-  await showTab(page, { hold: true })
-  page.once('close', () => { _held = false })
+  if (!HIDDEN) return browser.newPage()
+  const page = await newWindow(browser, { left: 60, top: 40, width: 1280, height: 800 }, false)
+  const w = await windowOf(page)
+  await w.cdp.send('Browser.setWindowBounds', { windowId: w.windowId, bounds: { windowState: 'maximized' } }).catch(() => {})
+  await page.bringToFront()
 }
 
 /**

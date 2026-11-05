@@ -18,7 +18,7 @@ import os from 'os'
 import path from 'path'
 import { spawn } from 'child_process'
 import { fileURLToPath } from 'url'
-import { getBrowser, openBrowserIfAny, tuckAway } from './browser.js'
+import { getBrowser, openBrowserIfAny } from './browser.js'
 import { needPerson, askCaptcha, doneWith } from './attention.js'
 import { runFullWorkflow } from './lmisWorkflow.js'
 import { decideAgencyActions } from './jev/agencyManager.js'
@@ -193,7 +193,7 @@ async function executeRun(db, page, job) {
   // One write at a time: steps log without waiting, and two read-modify-writes
   // at once used to drop lines.
   let logChain = Promise.resolve()
-  const onLog = (level, msg) => { if (/^✓/.test(msg)) { doneWith(runId, { keepCaptcha: false }); tuckAway().catch(() => {}) } const ts = Date.now(); return (logChain = logChain.then(() => writeLog(level, msg, ts)).catch(() => {})) }
+  const onLog = (level, msg) => { if (/^✓/.test(msg)) doneWith(runId); const ts = Date.now(); return (logChain = logChain.then(() => writeLog(level, msg, ts)).catch(() => {})) }
   const writeLog = async (level, msg, ts) => {
     const row = await db('automation_queue').where('id', runId).first()
     let log = []
@@ -259,7 +259,7 @@ async function executeRun(db, page, job) {
       if (onLog) await onLog(level, `🔔 ${title}`)
       // A sign-in, code or reCAPTCHA waits for a person: it stays in the bar
       // until the run goes on (its next "✓"). Paused runs show from the queue.
-      if (opts.login) needPerson(runId, title, body)
+      if (opts.login || opts.confirm) needPerson(runId, title, body, { confirm: !!opts.confirm })
       beep()
     } catch (e) {
       console.error('[notify] failed:', e.message)
@@ -279,6 +279,7 @@ async function executeRun(db, page, job) {
     activeEmployee,
     login_value:       savedCtx.login_value || '',
     login_password:    savedCtx.login_password || '',
+    account_id:        savedCtx.account_id || job.account_id || null,
     musaned_username:  savedCtx.musaned_username || '',
     musaned_password:  savedCtx.musaned_password || '',
     musaned_name:      savedCtx.musaned_name || '',
@@ -320,7 +321,7 @@ async function executeRun(db, page, job) {
     } catch (e) { console.error('[worker] task failed:', e.message) }
   }
   ctx.isCancelled = () => isCancelled(runId)
-  ctx.askCaptcha = (image, answer) => { askCaptcha(runId, image, answer); beep() }
+  ctx.askCaptcha = (image, answer, opts) => { askCaptcha(runId, image, answer, opts); beep() }
   // A run writes what it found into the profile's notes (dated), and may set
   // a few profile fields with it.
   ctx.noteProfile = async (text, fields = {}) => {
@@ -420,7 +421,6 @@ async function runJob(db, job) {
     await findRunTab(browser, job.id, job.workflow_id, { bySite: false }).catch(() => null)
     // Otherwise a free tab already on the site (signed in), else a new one.
     const page = await openRunTab(browser, job.id, { workflowId: job.workflow_id, busyRuns: await activeRunIds(db) })
-    await tuckAway().catch(() => {})   // a run goes on: its window goes back out of sight
     await executeRun(db, page, job)
   } catch (e) {
     // Could not start at all: no browser, profile deleted, ...

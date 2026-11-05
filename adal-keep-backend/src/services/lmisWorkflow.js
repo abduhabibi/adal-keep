@@ -49,7 +49,7 @@ import fs from 'fs'
 import path from 'path'
 import os from 'os'
 import { runMusanedWorkflow } from './musanedWorkflow.js'
-import { expectFile, signInTurn, borrowSignIn } from './tabManager.js'
+import { expectFile, signInTurn, borrowSignIn, typeCodeInto, pressCodeButton } from './tabManager.js'
 import { lookAtPage, lookUnavailableReason } from './jevClassifier.js'
 
 
@@ -525,19 +525,31 @@ async function stepLoginNow(page, ctx) {
   let reclicks = 0
   let signedIn = false
   let codeSince = 0
+  let codeSent = 0
+  const askCode = (title) => ctx.askCaptcha?.(null, async (text) => {
+    if (!(await typeCodeInto(page, text))) throw new Error('The code box was not found: press Open')
+    codeSent = Date.now()
+    await sleep(400)
+    await pressCodeButton(page)
+  }, { title, label: 'Code' })
   while (Date.now() - t0 < LOGIN_WAIT_MS || (codeSince && Date.now() - codeSince < 10 * 60 * 1000)) {
     const url = page.url()
     if (!url.includes('/auth') && !url.includes('/login')) { signedIn = true; break }
-    // LMIS sent a code by SMS: a person types it (Adal Keep never handles
-    // codes). The tab comes to the front, it rings once, and the run waits up
-    // to 10 minutes. Sign In is never pressed again meanwhile.
+    // LMIS sent a code by SMS: a person types it in the notification (Adal Keep
+    // keeps no codes) and the run waits up to 10 minutes. Sign In is never
+    // pressed again meanwhile.
     if (await asksForCode(page)) {
       if (!codeSince) {
         codeSince = Date.now()
         log(ctx, '📱 LMIS asks for the SMS code — waiting for a person to type it (up to 10 min)')
-        await page.bringToFront().catch(() => {})
         await ctx.notify(`🖐 ${ctx.profileName}: type the LMIS SMS code`,
-          'LMIS sent a code by SMS. Type it in the LMIS tab; Adal Keep continues by itself.', 'info', { login: page }).catch(() => {})
+          'LMIS sent a code by SMS. Type it here; Adal Keep continues by itself.', 'info', { login: page }).catch(() => {})
+        askCode('Type the LMIS SMS code')
+      }
+      if (codeSent && Date.now() - codeSent > 8000) {
+        codeSent = 0
+        log(ctx, 'the code was not accepted — asking again', 'warn')
+        askCode('That code was not accepted: type it again')
       }
       if (Date.now() - codeSince > 10 * 60 * 1000) throw new Error('Nobody typed the LMIS SMS code within 10 minutes')
       lastClick = Date.now()

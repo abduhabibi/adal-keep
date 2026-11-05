@@ -19,7 +19,7 @@ import {
   reviewMusanedScreen, reviewStageComplete, reviewPreCheckReady,
 } from './jev/musanedDecisions.js'
 import { pasteText, pasteAndCommit } from './domPaste.js'
-import { isPeerUrl, expectFile, disarmFile, signInTurn, borrowSignIn } from './tabManager.js'
+import { isPeerUrl, expectFile, disarmFile, signInTurn, borrowSignIn, toEnglish, typeCodeInto, pressCodeButton } from './tabManager.js'
 import { musanedMissing, personalPhotoFile } from './musanedPreflight.js'
 
 const MUSANED_ROOT    = 'https://tawtheeq.musaned.com.sa/'
@@ -475,7 +475,11 @@ export async function stepClickHrPool(page, ctx) {
     })
     if (!clicked) await sleep(500)
   }
-  if (!clicked) throw new Error('HR Pool nav not found')
+  if (!clicked) {
+    // Its menu is folded away: the page itself still opens.
+    log(ctx, 'HR Pool is not on the screen — going to its page', 'warn')
+    await page.goto(new URL('/hr-pool', page.url()).href, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  }
   const navDeadline = Date.now() + 20000
   while (Date.now() < navDeadline) {
     const ok = await page.evaluate(() => {
@@ -2252,7 +2256,8 @@ export async function stepFillCandidateDetails(page, ctx) {
       `🔔 ${ctx.profileName}: Candidate form ready for manual SAVE`,
       stillEmpty.length
         ? `Please fill by hand before SAVE: ${stillEmpty.join(', ')}. Everything else is filled and acknowledged.`
-        : `All fields filled and checked, acknowledge ticked. Review and click SAVE.`
+        : `All fields filled and checked, acknowledge ticked. Review and click SAVE.`,
+      'info', { confirm: true }
     )
     log(ctx, '✅ done — WAITING for manual SAVE.')
     return { ok: true, note: 'awaiting manual SAVE' }
@@ -2328,6 +2333,7 @@ async function musanedRun(page, ctx) {
       } else if (review.screen === 'login-error') { await dumpPageState(page, ctx, 'login-rejected'); throw new Error('Musaned rejected the credentials') }
     } else {
       const open = await stepOpenMusaned(page, ctx)
+      await toEnglish(page, ctx)
       if (open.onKeycloak) {
         await sleep(1000)
         const fill = await stepFillMusanedLogin(page, ctx)
@@ -2362,6 +2368,7 @@ async function musanedRun(page, ctx) {
     }
 
     ctx.releaseSignIn?.() // signed in: the next run may go
+    await toEnglish(page, ctx)
     if (importCv) {
       const { importFromHrPoolInRun } = await import('./musanedImport.js')
       return await importFromHrPoolInRun(page, ctx)
@@ -2464,10 +2471,10 @@ async function waitForPersonCaptcha(page, ctx) {
 }
 
 /**
- * Musaned asks for the authenticator code: a person types it (Adal Keep keeps
- * no authenticator key). The tab comes to the front, it rings once, and the
- * run waits up to 10 minutes, then carries on by itself. Returns the screen
- * after it ('dashboard' when signed in; 'otp' when nobody typed it).
+ * Musaned asks for the authenticator code: Adal Keep types it when the account
+ * has its key. Otherwise the notification asks for it and the run waits up to
+ * 10 minutes, then carries on by itself. Returns the screen after it
+ * ('dashboard' when signed in; 'otp' when nobody typed it).
  */
 async function passOtp(page, ctx) {
   // The account's authenticator is in Adal Keep: type its code, no person needed.
@@ -2483,16 +2490,29 @@ async function passOtp(page, ctx) {
     }
     log(ctx, 'the authenticator code was not taken — a person types it', 'warn')
   }
-  await page.bringToFront().catch(() => {})
   await ctx.notify(`🖐 ${ctx.profileName}: type the Musaned code`,
-    'Type the code from the authenticator app in the Musaned tab and press Sign In. Adal Keep continues by itself.', 'info', { login: page })
-  log(ctx, '🖐 waiting for a person to type the Musaned authenticator code (up to 10 min)')
+    'Type the code from the authenticator app here. Adal Keep puts it in, signs in and continues by itself.', 'info', { login: page })
+  log(ctx, '🖐 waiting for the Musaned authenticator code (up to 10 min)')
+  // The code goes in from the notification; the tab is never needed.
+  let sentAt = 0
+  const ask = (title) => ctx.askCaptcha?.(null, async (text) => {
+    if (!(await typeCodeInto(page, text))) throw new Error('The code box was not found: press Open')
+    sentAt = Date.now()
+    await sleep(400)
+    await pressCodeButton(page)
+  }, { title, label: 'Code' })
+  ask('Type the Musaned code')
   const deadline = Date.now() + 10 * 60 * 1000
   let screen = 'otp'
   while (Date.now() < deadline && screen === 'otp') {
     if (typeof ctx.isCancelled === 'function' && ctx.isCancelled()) { const e = new Error('Cancelled by user'); e.cancelled = true; throw e }
     await sleep(1500)
     screen = (await classifyScreen(page, ctx)).screen
+    if (screen === 'otp' && sentAt && Date.now() - sentAt > 8000) {
+      sentAt = 0
+      log(ctx, 'the code was not accepted — asking again', 'warn')
+      ask('That code was not accepted: type the new one')
+    }
   }
   if (screen === 'agency-picker') { await stepClickAgencyCard(page, ctx); screen = await waitForDashboard(page, ctx, 30000) }
   else if (screen === 'landing') { await stepClickGoToDashboard(page, ctx); screen = await waitForDashboard(page, ctx, 30000) }
@@ -2510,26 +2530,9 @@ async function typeAuthenticatorCode(page, ctx) {
   try { code = await (await import('./musanedTotp.js')).codeFor(ctx.account_id) } catch (e) { log(ctx, `authenticator: ${e.message}`, 'warn') }
   if (!code) return false
   log(ctx, '🔑 typing the authenticator code (from Settings → Musaned)')
-  const typed = await page.evaluate((code) => {
-    const vis = (e) => e && e.offsetParent !== null && !e.disabled && !e.readOnly
-    const boxes = [...document.querySelectorAll('input')].filter(vis).filter(e => /otp|totp|code|one-time/i.test(`${e.name} ${e.id} ${e.autocomplete} ${e.placeholder} ${e.getAttribute('formcontrolname') || ''}`) || (e.maxLength === 1 && /text|tel|number/.test(e.type)))
-    const set = (el, v) => {
-      const proto = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')
-      el.focus(); proto.set.call(el, v)
-      el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true }))
-    }
-    const singles = boxes.filter(e => e.maxLength === 1)
-    if (singles.length >= code.length) { singles.slice(0, code.length).forEach((el, i) => set(el, code[i])); return 'boxes' }
-    if (boxes[0]) { set(boxes[0], code); return 'box' }
-    return ''
-  }, code).catch(() => '')
-  if (!typed) return false
+  if (!(await typeCodeInto(page, code))) return false
   await sleep(400)
-  await page.evaluate(() => {
-    const b = [...document.querySelectorAll('button, input[type="submit"]')].filter(e => e.offsetParent !== null && !e.disabled)
-      .find(e => /sign\s*in|verify|confirm|log\s*in|submit|تحقق|تسجيل|دخول|تأكيد/i.test(e.innerText || e.value || ''))
-    b?.click()
-  }).catch(() => {})
+  await pressCodeButton(page)
   return true
 }
 

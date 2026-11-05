@@ -192,6 +192,7 @@ async function initSystem() {
         } catch (e) { console.warn('[passport details] backfill:', e.message) }
       }, 60000)
       import('./src/services/whatsapp.js').then(w => w.startWhatsApp(db)).catch(e => console.warn('[whatsapp]', e.message))
+      import('./src/services/browser.js').then(b => b.startBrowserQuietly())
     } catch (migErr) {
       console.warn('⚠️ Migration check skipped or non-critical issue:', migErr.message)
     }

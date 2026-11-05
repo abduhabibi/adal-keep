@@ -27,6 +27,7 @@
  *
  * Cross-platform: pure Puppeteer/CDP — Windows / macOS / Linux identical.
  */
+import { newRunTab } from './browser.js'
 
 export const PEERS = {
   musaned: { hosts: ['tawtheeq.musaned.com.sa', 'accounts.wahid.sa'], label: 'Musaned' },
@@ -74,7 +75,7 @@ export async function setupTab(page, { runId, mute = true } = {}) {
       if (page.__adalNamed !== runId) { page.__adalNamed = runId; page.evaluateOnNewDocument?.(name, String(runId))?.catch?.(() => {}) }
     } catch {}
   }
-  // A run never brings itself forward: only a person's Open does (browser.showTab).
+  // A run never brings itself forward: only a person's Open does (LiveTab).
   page.bringToFront = async () => {}
   if (page.__adalSetup) {
     if (runId !== undefined) page.__adalRunId = runId
@@ -87,6 +88,9 @@ export async function setupTab(page, { runId, mute = true } = {}) {
     page.__adalCdp = cdp
     try { await cdp.send('Page.setAudioMuted', { muted: mute }) } catch {}
     try { await cdp.send('Emulation.setFocusEmulationEnabled', { enabled: true }) } catch {}
+    // A desktop page whatever the window's size: in a narrow one the sites fold
+    // their menus away and the run cannot find them.
+    try { await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1366, height: 900, deviceScaleFactor: 1, mobile: false }) } catch {}
     page.__adalFocused = true
     await catchFileDialogs(page, cdp)
   } catch (e) {
@@ -312,7 +316,7 @@ export async function openRunTab(browser, runId, { workflowId = '', busyRuns = n
     console.log(`[tabManager] run #${id} took the free tab on ${free.url().slice(0, 60)}`)
     return free
   }
-  const page = await browser.newPage()
+  const page = await newRunTab(browser)
   _tabs.set(id, page)
   await setupTab(page, { runId: id })
   console.log(`[tabManager] run #${id} opened its own tab (${runsWithTabs().length} run tab(s) open)`)
@@ -337,7 +341,7 @@ export async function borrowTab(browser, workflowId, busyRuns = new Set()) {
     return p
   })
   if (free) await letPageGo(free)
-  return free || browser.newPage()
+  return free || newRunTab(browser)
 }
 export async function doneWithTab(page) {
   if (!page) return
@@ -441,3 +445,52 @@ export async function borrowSignIn(page, peer) {
   return null
 }
 
+
+/**
+ * The sites in English before a run starts: the steps look for English words.
+ * Each site's switch shows only when it is in Arabic (Keycloak's sign-in page
+ * lists both languages, so its own language is asked there).
+ */
+export async function toEnglish(page, ctx) {
+  const how = await page.evaluate(() => {
+    const seen = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 }
+    const visa = [...document.querySelectorAll('a.language[id^="en"]')].find(seen)
+    if (visa) { visa.click(); return 'switch' }
+    const musaned = document.querySelector('a[applangswitcher]')
+    if (musaned && /^(en|english)$/i.test(musaned.textContent.trim())) { musaned.click(); return 'switch' }
+    const signIn = /^ar/i.test(document.documentElement.lang) && document.querySelector('a[href*="kc_locale=en"]')
+    if (signIn) { signIn.click(); return 'link' }
+    return ''
+  }).catch(() => '')
+  if (!how) return false
+  ctx?.onLog?.('info', '🌐 changing the site to English')
+  await new Promise(r => setTimeout(r, 3000)) // the page reloads in English
+  await page.waitForFunction(() => document.readyState === 'complete', { timeout: 20000 }).catch(() => {})
+  return true
+}
+
+/** Types a sign-in code into the page's code box(es). False when there is none. */
+export async function typeCodeInto(page, code) {
+  return !!(await page.evaluate((code) => {
+    const vis = (e) => e && e.offsetParent !== null && !e.disabled && !e.readOnly
+    const boxes = [...document.querySelectorAll('input')].filter(vis).filter(e => /otp|totp|code|one-time|verification/i.test(`${e.name} ${e.id} ${e.autocomplete} ${e.placeholder} ${e.getAttribute('formcontrolname') || ''}`) || (e.maxLength === 1 && /text|tel|number/.test(e.type)))
+    const set = (el, v) => {
+      const proto = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')
+      el.focus(); proto.set.call(el, v)
+      el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true }))
+    }
+    const singles = boxes.filter(e => e.maxLength === 1)
+    if (singles.length >= code.length) { singles.slice(0, code.length).forEach((el, i) => set(el, code[i])); return 'boxes' }
+    if (boxes[0]) { set(boxes[0], code); return 'box' }
+    return ''
+  }, code).catch(() => ''))
+}
+
+/** Presses the button that sends a typed code. */
+export async function pressCodeButton(page) {
+  await page.evaluate(() => {
+    const b = [...document.querySelectorAll('button, input[type="submit"]')].filter(e => e.offsetParent !== null && !e.disabled)
+      .find(e => /sign\s*in|verify|confirm|log\s*in|submit|continue|تحقق|تسجيل|دخول|تأكيد/i.test(e.innerText || e.value || ''))
+    b?.click()
+  }).catch(() => {})
+}

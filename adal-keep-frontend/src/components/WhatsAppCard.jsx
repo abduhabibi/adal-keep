@@ -108,7 +108,8 @@ export default function WhatsAppCard() {
   const [phone, setPhone] = useState('')
   const [byPhone, setByPhone] = useState(false)
 
-  const load = () => wa.get('/whatsapp').then(r => setS(r.data)).catch(() => setS(false))
+  // Not answering (the server restarting): the card stays and asks again.
+  const load = () => wa.get('/whatsapp').then(r => setS(r.data)).catch(e => e.response ? setS(false) : setTimeout(load, 3000))
   const loadAgents = () => wa.get('/whatsapp/agents').then(r => setAgents(r.data)).catch(() => {})
   useEffect(() => {
     load(); loadAgents()

@@ -104,6 +104,8 @@ export async function connect(db, key = 'owner', { phone = '' } = {}, tries = 2)
   if (db) dbRef = db
   const s = session(key)
   if (s.client && !['off', 'failed'].includes(s.state.status) && !phone) return s.state
+  // WhatsApp's own window is open on this profile: connecting would close it.
+  if (s.state.status === 'web') return s.state
   // One start-up at a time: a second one would close the first one's WhatsApp tab.
   if (s.startingAt && Date.now() - s.startingAt < 45000 && !phone) return s.state
   s.startingAt = Date.now()
@@ -136,13 +138,15 @@ export async function connect(db, key = 'owner', { phone = '' } = {}, tries = 2)
     if (s.client === c) s.client = null
     await release(c)
     const why = String(e?.message || e)
-    if (tries > 1 && /Target closed|detached|Session closed/i.test(why)) {
+    if (tries > 1 && /Target closed|detached|Session closed|Failed to launch/i.test(why)) {
       console.warn(`[whatsapp ${key}] tab closed while starting — trying again`)
-      setState(key, { status: 'off' }); s.startingAt = 0; return connect(db, key, { phone }, tries - 1)
+      setState(key, { status: 'off' }); s.startingAt = 0
+      await new Promise(r => setTimeout(r, 2000))
+      return connect(db, key, { phone }, tries - 1)
     }
     s.startingAt = 0
     console.warn(`[whatsapp ${key}] start-up failed:`, why)
-    setState(key, { status: 'failed', error: `WhatsApp did not finish starting: ${why}` })
+    setState(key, { status: 'failed', error: 'WhatsApp did not start: Adal Keep tries again by itself.' })
   }
   // WhatsApp opens and closes a hidden PDF-viewer frame while it starts; a
   // set-up call that touches every frame then fails although WhatsApp's own
@@ -238,6 +242,8 @@ const webWatch = new Map()
 export async function openWeb(db, key = 'owner') {
   if (db) dbRef = db
   const s = session(key)
+  // Said first: the 30-second check must not start its own WhatsApp on this profile.
+  setState(key, { status: 'web', qr: null, code: null, error: null, where: 'a WhatsApp window on this PC' })
   if (s.client) { const old = s.client; s.client = null; await release(old) }
   freeProfile(key)
   let page, own = null
@@ -245,13 +251,18 @@ export async function openWeb(db, key = 'owner') {
   const exe = findBrowserExecutable()
   if (!exe) throw new Error('Adal Browser is not on this PC yet')
   const { default: puppeteer } = await import('puppeteer-core').catch(() => import('puppeteer'))
-  own = await puppeteer.launch({ executablePath: exe, headless: false, defaultViewport: null,
-    userDataDir: path.join(DIR, `session-${key}`), args: ['--no-first-run', '--no-default-browser-check', '--window-size=1100,800'] })
-  page = (await own.pages())[0] || await own.newPage()
+  try {
+    own = await puppeteer.launch({ executablePath: exe, headless: false, defaultViewport: null,
+      userDataDir: path.join(DIR, `session-${key}`), args: ['--no-first-run', '--no-default-browser-check', '--window-size=1100,800'] })
+    page = (await own.pages())[0] || await own.newPage()
+  } catch (e) {
+    console.warn(`[whatsapp ${key}] its window did not open:`, e.message)
+    setState(key, { status: 'off', error: 'WhatsApp\'s window did not open. Press again.' })
+    return s.state
+  }
   await page.setUserAgent(realUserAgent(exe)).catch(() => {})
   await page.goto('https://web.whatsapp.com/', { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {})
   await page.bringToFront().catch(() => {})
-  setState(key, { status: 'web', qr: null, code: null, error: null, where: 'a WhatsApp window on this PC' })
   clearInterval(webWatch.get(key))
   const started = Date.now()
   const closeIt = () => own.close().catch(() => {})

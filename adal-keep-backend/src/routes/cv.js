@@ -122,6 +122,17 @@ router.get('/generated/:id/download', async (req, res) => {
   res.download(fullPath, path.basename(row.filename || row.pdf_path))
 })
 
+// Opens in the browser's PDF viewer instead of downloading.
+router.get('/generated/:id/view', async (req, res) => {
+  const db = req.app.locals.db
+  const row = await db('generated_cvs').where('id', req.params.id).first()
+  if (!row) return res.status(404).json({ error: 'Not found' })
+  const fullPath = path.join(SAFE_STORAGE_DIR, row.pdf_path)
+  if (!fs.existsSync(fullPath)) return res.status(404).json({ error: 'File missing on disk' })
+  res.set('Content-Disposition', 'inline')
+  res.type('application/pdf').sendFile(path.resolve(fullPath))
+})
+
 router.delete('/generated/:id', async (req, res) => {
   const db = req.app.locals.db
   const row = await db('generated_cvs').where('id', req.params.id).first()

@@ -174,7 +174,7 @@ export async function mirrorOf(page, cache = new Map(), force = false) {
   return m
 }
 
-const handleOf = async (page, id) => {
+export const handleOf = async (page, id) => {
   const h = await page.evaluateHandle((i) => window.__adalM?.els.get(Number(i)) || null, id)
   const el = h.asElement()
   if (!el) throw Object.assign(new Error('That part of the page is gone — it changed.'), { status: 409 })

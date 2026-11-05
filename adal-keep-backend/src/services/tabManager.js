@@ -473,11 +473,18 @@ export async function toEnglish(page, ctx) {
   return true
 }
 
+// Runs in the page: the visible boxes that take a sign-in code.
+const codeBoxes = () => {
+  const vis = (e) => e && e.offsetParent !== null && !e.disabled && !e.readOnly
+  return [...document.querySelectorAll('input')].filter(vis).filter(e => /otp|totp|code|one-time|verification/i.test(`${e.name} ${e.id} ${e.autocomplete} ${e.placeholder} ${e.getAttribute('formcontrolname') || ''}`) || (e.maxLength === 1 && /text|tel|number/.test(e.type)))
+}
+
+/** Is a code box on the page now? */
+export const codeBoxUp = (page) => page.evaluate(`(${codeBoxes})().length > 0`).catch(() => false)
+
 /** Types a sign-in code into the page's code box(es). False when there is none. */
 export async function typeCodeInto(page, code) {
-  return !!(await page.evaluate((code) => {
-    const vis = (e) => e && e.offsetParent !== null && !e.disabled && !e.readOnly
-    const boxes = [...document.querySelectorAll('input')].filter(vis).filter(e => /otp|totp|code|one-time|verification/i.test(`${e.name} ${e.id} ${e.autocomplete} ${e.placeholder} ${e.getAttribute('formcontrolname') || ''}`) || (e.maxLength === 1 && /text|tel|number/.test(e.type)))
+  const fill = (boxes, code) => {
     const set = (el, v) => {
       const proto = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')
       el.focus(); proto.set.call(el, v)
@@ -487,7 +494,8 @@ export async function typeCodeInto(page, code) {
     if (singles.length >= code.length) { singles.slice(0, code.length).forEach((el, i) => set(el, code[i])); return 'boxes' }
     if (boxes[0]) { set(boxes[0], code); return 'box' }
     return ''
-  }, code).catch(() => ''))
+  }
+  return !!(await page.evaluate(`(${fill})((${codeBoxes})(), ${JSON.stringify(String(code))})`).catch(() => ''))
 }
 
 /** Presses the button that sends a typed code. */

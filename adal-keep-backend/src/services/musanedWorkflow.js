@@ -2574,17 +2574,19 @@ async function waitForPersonCaptcha(page, ctx) {
  */
 async function passOtp(page, ctx) {
   // The account's authenticator is in Adal Keep: type its code, no person needed.
-  if (await typeAuthenticatorCode(page, ctx)) {
+  // Twice: a code typed as it changes is refused, and the second one is a new code.
+  for (let turn = 1; turn <= 2 && await typeAuthenticatorCode(page, ctx); turn++) {
     let screen = 'otp'
     const until = Date.now() + 20000
-    while (Date.now() < until && screen === 'otp') { await sleep(1500); screen = (await classifyScreen(page, ctx)).screen }
+    // "unknown" is Musaned's page between the code and the dashboard: still going.
+    while (Date.now() < until && ['otp', 'unknown'].includes(screen)) { await sleep(1500); screen = (await classifyScreen(page, ctx)).screen }
     if (screen === 'agency-picker') { await stepClickAgencyCard(page, ctx); screen = await waitForDashboard(page, ctx, 30000) }
     else if (screen === 'landing') { await stepClickGoToDashboard(page, ctx); screen = await waitForDashboard(page, ctx, 30000) }
     if (screen !== 'otp') {
       log(ctx, screen === 'dashboard' ? '✓ signed in with the authenticator code' : `after the code: ${screen}`, screen === 'dashboard' ? 'info' : 'warn')
       return screen
     }
-    log(ctx, 'the authenticator code was not taken — a person types it', 'warn')
+    log(ctx, turn === 1 ? 'the authenticator code was not taken — trying the next one' : 'the authenticator code was not taken — a person types it', 'warn')
   }
   await ctx.notify(`🖐 ${ctx.profileName}: type the Musaned code`,
     'Type the code from the authenticator app here. Adal Keep puts it in, signs in and continues by itself.', 'info', { login: page })
@@ -2626,7 +2628,12 @@ async function typeAuthenticatorCode(page, ctx) {
   try { code = await (await import('./musanedTotp.js')).codeFor(ctx.account_id) } catch (e) { log(ctx, `authenticator: ${e.message}`, 'warn') }
   if (!code) return false
   log(ctx, '🔑 typing the authenticator code (from Settings → Musaned)')
-  if (!(await typeCodeInto(page, code))) return false
+  // The screen can read as the code screen before its box is on the page.
+  const until = Date.now() + 15000
+  while (!(await typeCodeInto(page, code))) {
+    if (Date.now() > until) return false
+    await sleep(500)
+  }
   await sleep(400)
   await pressCodeButton(page)
   return true

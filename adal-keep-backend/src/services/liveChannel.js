@@ -175,10 +175,13 @@ async function onMessage(db, agency, ch, m) {
   } else if (m.t === 'watch') {
     startStream(db, ch, Number(m.run), m.view === 'mirror' ? 'mirror' : 'picture')
   } else if (m.t === 'input') {
-    const { runTab, liveInput } = await import('../routes/automations.js')
+    const { runTab, personInput } = await import('../routes/automations.js')
     const page = await runTab(db, Number(m.run))
     let error = null
-    if (page) await liveInput(page, m).catch((e) => { error = e.message })
+    if (page) {
+      const code = await personInput(db, Number(m.run), page, m).catch((e) => { error = e.message })
+      if (code) ch.send({ t: 'signInCode', run: Number(m.run), to: phone.user_id, code })
+    }
     if (error && m.ack) ch.send({ t: 'inputError', run: Number(m.run), to: phone.user_id, error })
     const w = watching.get(Number(m.run)); if (w) w.force = true
     startStream(db, ch, Number(m.run))

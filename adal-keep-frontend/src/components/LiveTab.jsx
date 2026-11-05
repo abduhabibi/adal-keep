@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import toast from 'react-hot-toast'
 import api from '../services/api'
 import { onBack, IN_PHONE_APP } from '../lib/phoneApp'
 
@@ -16,6 +17,21 @@ import { onBack, IN_PHONE_APP } from '../lib/phoneApp'
 const VIEW_KEY = 'adal-live-view'
 const KEYS = ['Enter', 'Backspace', 'Tab', 'Escape', 'ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Delete', 'PageDown', 'PageUp', 'Home', 'End']
 const PHONE = IN_PHONE_APP || (typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches)
+
+/** Sign in was pressed: the code is ready to paste; where nothing can copy, it shows. */
+async function copyCode(code) {
+  try { await navigator.clipboard.writeText(code) }
+  catch {
+    const box = document.createElement('textarea')
+    box.value = code
+    document.body.append(box)
+    box.select()
+    const done = document.execCommand('copy')
+    box.remove()
+    if (!done) return toast(`Musaned code: ${code}`, { id: 'sign-in-code', icon: '🔑', duration: 15000 })
+  }
+  toast.success('Musaned code copied', { id: 'sign-in-code', duration: 3000 })
+}
 
 export default function LiveTab({ runId, fill = false, startFull = false, onClose }) {
   const [view, setView] = useState(() => { try { return localStorage.getItem(VIEW_KEY) || (PHONE ? 'mirror' : 'picture') } catch { return 'picture' } })
@@ -67,6 +83,7 @@ export default function LiveTab({ runId, fill = false, startFull = false, onClos
           off = L.onLive(async (m) => {
             if (Number(m.run) !== Number(runId) || !alive) return
             if (m.t === 'inputError') { setErr(m.error); return }
+            if (m.t === 'signInCode') { copyCode(m.code); return }
             if (m.gone && (m.t === 'frame' || m.t === 'mirror')) { setErr(GONE); return }
             if (m.t === 'frame' && view === 'picture') {
               const bin = atob(m.img), bytes = new Uint8Array(bin.length)
@@ -121,7 +138,11 @@ export default function LiveTab({ runId, fill = false, startFull = false, onClos
   const send = async (body) => {
     if (live.current) return live.current.sendLive({ t: 'input', run: runId, ack: true, ...body })
     setBusy(true)
-    try { await api.post(`/automations/${runId}/input`, body); setErr(null) }
+    try {
+      const r = await api.post(`/automations/${runId}/input`, body)
+      if (r.data?.code) copyCode(r.data.code)
+      setErr(null)
+    }
     catch (e) { setErr(e.response?.data?.error || 'The PC did not do it.') }
     finally { setBusy(false); poke.current?.() }
   }

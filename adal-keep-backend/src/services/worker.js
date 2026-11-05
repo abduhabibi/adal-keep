@@ -24,7 +24,7 @@ import { runFullWorkflow } from './lmisWorkflow.js'
 import { decideAgencyActions } from './jev/agencyManager.js'
 import { getActiveEmployee } from './activeEmployee.js'
 import { isAppLocked } from './subscription.js'
-import { openRunTab, forgetRunTab, tabOfRun, handTabToPerson, findRunTab, activeRunIds, hostOf } from './tabManager.js'
+import { openRunTab, forgetRunTab, tabOfRun, handTabToPerson, findRunTab, activeRunIds, hostOf, codeBoxUp } from './tabManager.js'
 import { registerTab, unregisterTab, noteLink } from './bandwidth.js'
 import { createRunQueue } from './runQueue.js'
 import { reportRuns } from './busy.js'
@@ -731,16 +731,24 @@ export async function closeSavedRuns(db) {
 }
 
 /** A run paused at Musaned's sign-in goes on by itself once its tab is signed in. */
+async function hasAuthenticator(run) {
+  let saved = {}
+  try { saved = JSON.parse(run.context || '{}') } catch {}
+  return !!(await import('./musanedTotp.js')).authenticatorInfo(saved.account_id || run.account_id)
+}
+
 async function continueSignedIn(db) {
   const rows = await db('automation_queue').where('status', 'paused')
     .whereIn('pause_reason', ['awaiting-musaned-login', 'awaiting-musaned-otp', 'awaiting-musaned-captcha'])
-    .where('updated_at', '>', new Date(Date.now() - 12 * 3600_000).toISOString()).select('id', 'workflow_id')
+    .where('updated_at', '>', new Date(Date.now() - 12 * 3600_000).toISOString()).select('id', 'workflow_id', 'account_id', 'context')
   if (!rows.length) return
   const browser = await openBrowserIfAny()
   if (!browser) return
   for (const r of rows) {
     const page = await findRunTab(browser, r.id, r.workflow_id)
-    if (!page || hostOf(page.url()) !== 'tawtheeq.musaned.com.sa') continue
+    if (!page) continue
+    // A person pressed Sign in on a waiting run: its code box is up and Adal Keep has the code.
+    if (hostOf(page.url()) !== 'tawtheeq.musaned.com.sa' && !(await codeBoxUp(page) && await hasAuthenticator(r))) continue
     await db('automation_queue').where('id', r.id).where('status', 'paused').update({ status: 'pending', updated_at: new Date().toISOString() })
     console.log(`[worker] run #${r.id} is signed in — going on`)
     drainQueue(db).catch(() => {})

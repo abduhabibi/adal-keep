@@ -2,7 +2,7 @@ import express from 'express'
 import { listWorkflows } from '../services/workflows.js'
 import { dispatchRun, runStatus, queueSnapshot } from '../services/worker.js'
 import { markCancelled, isCancelled } from '../services/cancellation.js'
-import { forgetRunTab, findRunTab } from '../services/tabManager.js'
+import { forgetRunTab, findRunTab, hostOf } from '../services/tabManager.js'
 import { openBrowserIfAny, openForPerson } from '../services/browser.js'
 import { waiting, answerCaptcha, doneWith } from '../services/attention.js'
 import { seal } from '../services/accountVault.js'
@@ -681,6 +681,40 @@ export async function liveInput(page, b = {}) {
   else throw Object.assign(new Error('Unknown input'), { status: 400 })
 }
 
+// Runs in the page: is this the button that signs in?
+function isSignIn(el) {
+  const b = el?.closest?.('button, [role="button"], input[type="submit"], a')
+  return /^\s*(sign\s*in|log\s*in|login|تسجيل الدخول|دخول)\s*$/i.test(b?.innerText || b?.value || '')
+}
+
+/** A person's tap or Enter that signs in to Musaned, seen before it happens (the page goes after). */
+export async function pressesSignIn(page, b = {}) {
+  if (!/(^|\.)(wahid\.sa|musaned\.com\.sa)$/.test(hostOf(page.url()))) return false
+  if (b.kind === 'click') return page.evaluate(`(${isSignIn})(document.elementFromPoint(${Number(b.x)} * innerWidth, ${Number(b.y)} * innerHeight))`)
+  if (b.kind === 'key' && b.key === 'Enter') return page.evaluate(() => document.activeElement?.type === 'password')
+  if (b.kind === 'tap' || b.kind === 'tapAt') {
+    const el = await (await import('../services/pageMirror.js')).handleOf(page, b.id)
+    return el.evaluate(isSignIn)
+  }
+  return false
+}
+
+/** The code of the run's own Musaned account now: another account's would not sign it in. */
+async function codeOfRun(db, runId) {
+  const run = await db('automation_queue').where('id', runId).first('account_id', 'context', 'workflow_id')
+  if (!run?.workflow_id?.startsWith('musaned')) return null
+  let saved = {}
+  try { saved = JSON.parse(run.context || '{}') } catch {}
+  return (await import('../services/musanedTotp.js')).authenticatorInfo(saved.account_id || run.account_id)?.code || null
+}
+
+/** liveInput for a person: answers with the Musaned code when the tap was Sign in. */
+export async function personInput(db, runId, page, b) {
+  const signIn = await pressesSignIn(page, b).catch(() => false)
+  await liveInput(page, b)
+  return signIn ? codeOfRun(db, runId).catch(() => null) : null
+}
+
 // The tab as a light page for the phone (services/pageMirror.js).
 const mirrorShots = new Map()
 router.get('/automations/:id/mirror', async (req, res) => {
@@ -697,7 +731,7 @@ router.get('/automations/:id/mirror', async (req, res) => {
 router.post('/automations/:id/input', async (req, res) => {
   const page = await liveTab(req)
   if (!page) return res.status(404).json({ error: 'This run has no open tab.' })
-  try { await liveInput(page, req.body || {}); res.json({ ok: true }) }
+  try { res.json({ ok: true, code: await personInput(req.app.locals.db, req.params.id, page, req.body || {}) }) }
   catch (e) { res.status(e.status || 500).json({ error: e.message }) }
 })
 

@@ -1,6 +1,7 @@
 import dotenv from 'dotenv'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import { openRows } from './src/services/accountVault.js'
 dotenv.config()
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SQLITE_FILE = process.env.SQLITE_PATH
@@ -12,11 +13,13 @@ export default {
     client: 'sqlite3',
     connection,
     useNullAsDefault: true,
+    postProcessResponse: openRows,
     pool: {
       afterCreate(conn, done) {
         conn.run('PRAGMA journal_mode = WAL;')
         conn.run('PRAGMA busy_timeout = 8000;')
         conn.run('PRAGMA synchronous = NORMAL;')
+        conn.run('PRAGMA secure_delete = ON;')
         done(null, conn)
       }
     },
@@ -27,6 +30,7 @@ export default {
     client: 'sqlite3',
     connection,
     useNullAsDefault: true,
+    postProcessResponse: openRows,
     migrations: { directory: './src/migrations', tableName: 'knex_migrations' },
   },
 }

@@ -5,6 +5,7 @@ import { markCancelled, isCancelled } from '../services/cancellation.js'
 import { forgetRunTab, findRunTab } from '../services/tabManager.js'
 import { openBrowserIfAny, openForPerson } from '../services/browser.js'
 import { waiting, answerCaptcha, doneWith } from '../services/attention.js'
+import { seal } from '../services/accountVault.js'
 import { assertPoliceReady, getProfileVerification, runPassportVerification } from '../services/verification.js'
 
 const router = express.Router()
@@ -306,7 +307,7 @@ router.post('/profiles/:profileId/automations/:workflowId/start', async (req, re
       account_id: accountId || null,
       status: 'pending',
       current_step: 0,
-      context: JSON.stringify(accountContext),
+      context: seal(JSON.stringify(accountContext)),
       log: '[]',
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),

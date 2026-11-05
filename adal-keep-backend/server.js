@@ -195,6 +195,11 @@ async function initSystem() {
       }, 60000)
       import('./src/services/whatsapp.js').then(w => w.startWhatsApp(db)).catch(e => console.warn('[whatsapp]', e.message))
       import('./src/services/browser.js').then(b => b.startBrowserQuietly())
+      import('./src/services/accountVault.js').then(v => {
+        const lock = () => v.sealStored(db).catch(e => console.warn('[vault]', e.message))
+        lock()
+        setInterval(lock, 60_000).unref()
+      })
     } catch (migErr) {
       console.warn('⚠️ Migration check skipped or non-critical issue:', migErr.message)
     }
@@ -752,10 +757,12 @@ app.get('/api/profiles/:id/fields', async (req, res) => {
 
     const result = []
     for (const template of templates) {
-      let field = await database('profile_fields')
+      // A profile can hold the same field twice: its files count whichever copy they are in.
+      const copies = await database('profile_fields')
         .where('profile_id', id)
         .andWhere('name', template.name)
-        .first()
+        .orderBy('id')
+      let field = copies[0]
 
       if (!field) {
         const [newFieldId] = await database('profile_fields').insert({
@@ -769,7 +776,7 @@ app.get('/api/profiles/:id/fields', async (req, res) => {
       }
 
       const files = await database('files')
-        .where('profile_field_id', field.id)
+        .whereIn('profile_field_id', copies.length ? copies.map(c => c.id) : [field.id])
         .select('id', 'original_name', 'path', 'mimetype', 'size')
 
       result.push({ ...field, files })
@@ -821,6 +828,33 @@ app.get('/api/checklist', async (req, res) => {
     res.json(result)
   } catch (err) {
     console.error('Checklist error:', err)
+    res.status(500).json({ error: 'Failed to load checklist' })
+  }
+})
+
+// One status page's profiles and documents at once: the page asks every few seconds.
+app.get('/api/checklists/:id/live', async (req, res) => {
+  try {
+    const db = req.app.locals.db
+    const profiles = await db('checklist_profiles')
+      .join('profiles', 'checklist_profiles.profile_id', 'profiles.id')
+      .leftJoin('brokers', 'profiles.broker_id', 'brokers.id')
+      .where('checklist_id', req.params.id)
+      .select('profiles.*', 'brokers.name as broker_name')
+    const rows = await db('profile_fields').whereIn('profile_id', profiles.map(p => p.id)).orderBy('id').select('id', 'profile_id', 'name')
+    const files = await db('files').whereIn('profile_field_id', rows.map(r => r.id)).select('id', 'profile_field_id', 'original_name', 'mimetype')
+    const filesOf = new Map()
+    for (const f of files) filesOf.set(f.profile_field_id, [...(filesOf.get(f.profile_field_id) || []), f])
+    const fields = {}
+    for (const r of rows) {
+      const list = fields[r.profile_id] ||= []
+      let same = list.find(f => f.name === r.name)
+      if (!same) list.push(same = { id: r.id, name: r.name, files: [] })
+      same.files.push(...(filesOf.get(r.id) || []))
+    }
+    res.json({ profiles, fields })
+  } catch (err) {
+    console.error('Checklist live error:', err)
     res.status(500).json({ error: 'Failed to load checklist' })
   }
 })

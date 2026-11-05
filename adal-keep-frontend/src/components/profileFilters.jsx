@@ -116,8 +116,10 @@ function useStages() {
       })
       .catch(() => {})
     load()
-    const t = setInterval(load, 30000)
-    return () => { alive = false; clearInterval(t) }
+    const again = () => { if (!document.hidden) load() }
+    const t = setInterval(again, 8000)
+    window.addEventListener('focus', again)
+    return () => { alive = false; clearInterval(t); window.removeEventListener('focus', again) }
   }, [])
   return st
 }

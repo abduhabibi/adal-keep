@@ -18,6 +18,7 @@
  * Without the password nobody — not Telegram, not Adal — can read a backup.
  */
 import { runsWorking } from './busy.js'
+import { vaultKey, stageVaultKey, applyStagedVaultKey } from './accountVault.js'
 import fs from 'fs'
 import path from 'path'
 import zlib from 'zlib'
@@ -305,7 +306,7 @@ export async function runBackup(db, { force = false, docsOnly = false, light = f
 
     // 3. The index — what a restore needs to find every piece.
     progress.step = 'index'
-    const index = Buffer.from(JSON.stringify({ adal_backup: 1, made: new Date().toISOString(), sets: s.sets }))
+    const index = Buffer.from(JSON.stringify({ adal_backup: 1, made: new Date().toISOString(), sets: s.sets, vault_key: vaultKey() }))
     const indexId = await sendPiece(token, chat_id, lock(zlib.gzipSync(index), password), 'adal-backup-index.enc',
       `🗂 Adal Keep backup index · ${(await db('companies').first().catch(() => null))?.name || 'agency'} · ${new Date().toLocaleString()} · keep the NEWEST one — it is what a restore needs`)
     s.index_file_id = indexId
@@ -462,6 +463,7 @@ export async function restoreFrom(indexBuf, { bot_token, password }) {
       const raw = zlib.gunzipSync(await get(dbSet))
       if (fs.existsSync(DB_FILE)) fs.copyFileSync(DB_FILE, `${DB_FILE}.before-restore-${Date.now()}`)
       fs.writeFileSync(`${DB_FILE}.restored`, raw)
+      stageVaultKey(index.vault_key)   // the restored passwords open with it
     }
     // The database is swapped in on the next start (the open one cannot be replaced live).
     return { ok: true, files, database: !!dbSet, made: index.made }
@@ -476,6 +478,7 @@ export function applyRestoredDatabase() {
   if (!fs.existsSync(r)) return false
   for (const ext of ['-wal', '-shm']) fs.rmSync(DB_FILE + ext, { force: true })
   fs.renameSync(r, DB_FILE)
+  applyStagedVaultKey()
   console.log('💾 Restored database put in place')
   return true
 }

@@ -21,6 +21,9 @@ kill_port() {
   pkill -f "nodemon.*server" 2>/dev/null || true
 }
 
+# The installed app would come back on port 4000: this is for development only.
+systemctl --user stop adal-keep.service 2>/dev/null || true
+
 echo "→ Freeing ports 4000 and 3000..."
 kill_port 4000
 kill_port 3000

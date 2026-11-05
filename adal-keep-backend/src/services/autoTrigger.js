@@ -19,6 +19,7 @@
  */
 
 import path from 'path'
+import { seal } from './accountVault.js'
 import fs from 'fs'
 import { analyzeDocumentSmart } from './mineruAnalyzer.js'
 import { assertPoliceReady } from './verification.js'
@@ -200,7 +201,7 @@ export async function checkAutoTrigger(db, profileId, trigger = 'unknown') {
     account_id: account.id,
     status: 'pending',
     current_step: 0,
-    context: JSON.stringify(accountContext),
+    context: seal(JSON.stringify(accountContext)),
     log: JSON.stringify([{
       ts: Date.now(),
       level: 'info',

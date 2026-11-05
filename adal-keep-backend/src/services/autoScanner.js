@@ -19,6 +19,7 @@
  */
 
 import { isAppLocked } from './subscription.js'
+import { seal } from './accountVault.js'
 
 const SCAN_INTERVAL_MS = 2 * 60 * 1000        // 2 minutes
 const WORKFLOW_ID = 'police_certificate'
@@ -112,7 +113,7 @@ async function scanOnce(db) {
         account_id: account.id,
         status: 'pending',
         current_step: 0,
-        context: JSON.stringify(accountContext),
+        context: seal(JSON.stringify(accountContext)),
         log: JSON.stringify([{
           ts: Date.now(),
           level: 'info',

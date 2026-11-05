@@ -1,4 +1,5 @@
 import express from 'express'
+import { seal } from '../services/accountVault.js'
 const router = express.Router()
 
 router.get('/accounts', async (req, res) => {
@@ -22,7 +23,7 @@ router.post('/accounts', async (req, res) => {
       name: String(b.name).trim(),
       phone: String(b.phone).trim(),
       login_value: String(b.phone).trim(),      // phone is the login
-      password: String(b.password),
+      password: seal(String(b.password)),
       agency_name: b.agency_name || '',
       is_default: !!b.is_default,
       created_at: new Date().toISOString(),
@@ -39,6 +40,7 @@ router.patch('/accounts/:id', async (req, res) => {
     for (const k of ['name', 'phone', 'password', 'agency_name', 'is_default']) {
       if (req.body[k] !== undefined) upd[k] = req.body[k]
     }
+    if (upd.password) upd.password = seal(upd.password)
     // keep login_value in sync with phone
     if (upd.phone) upd.login_value = upd.phone
     if (upd.is_default) await db('lmis_accounts').update({ is_default: false })

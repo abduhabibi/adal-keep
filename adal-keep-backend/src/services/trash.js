@@ -8,6 +8,7 @@
  * as it was, or delete it for good.
  */
 import fs from 'fs'
+import { seal } from './accountVault.js'
 import path from 'path'
 import { fileURLToPath } from 'url'
 
@@ -127,6 +128,11 @@ export function whoFrom(req) {
  * Put an item in the trash and delete it. Returns the trash entry id, or
  * null when the item does not exist (nothing deleted).
  */
+/** A deleted account's password stays locked in the Trash. */
+function lockPasswords(tables) {
+  return JSON.parse(JSON.stringify(tables), (k, v) => (k === 'password' && typeof v === 'string' ? seal(v) : v))
+}
+
 export async function moveToTrash(db, kind, id, req = null) {
   const collect = KINDS[kind]
   if (!collect) throw new Error(`unknown trash kind ${kind}`)
@@ -136,7 +142,7 @@ export async function moveToTrash(db, kind, id, req = null) {
   const now = new Date().toISOString()
   const [trashId] = await db('trash').insert({
     kind, item_id: Number(id), title: String(item.title || kind).slice(0, 200),
-    payload: JSON.stringify({ tables: item.tables, extra: item.extra || null }), files: '[]',
+    payload: JSON.stringify({ tables: lockPasswords(item.tables), extra: item.extra || null }), files: '[]',
     ...(req ? whoFrom(req) : {}), deleted_at: now,
   })
 

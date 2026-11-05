@@ -62,28 +62,40 @@ export default function ChecklistGridView({ checklist, onClose }) {
   const [newCol, setNewCol] = useState({ label: '', type: 'tick' })
   // Each girl's journey: { profileId: { steps: {cv:'done'…}, who: {…} } }.
   const [paths, setPaths] = useState({})
-  useEffect(() => {
-    api.get('/automations/stages').then(r => setPaths(Object.fromEntries((r.data?.profiles || []).map(x => [x.profile_id, x])))).catch(() => {})
-  }, [checklist])
-  const target = useRef(null)   // { profileId, fieldId } the next picked file goes to
-  const pick = usePickFile({ onFiles: (files) => target.current && handleUpload(target.current.profileId, target.current.fieldId, files[0]) })
+  const target = useRef(null)   // { profileId, name } the next picked file goes to
+  const pick = usePickFile({ onFiles: (files) => target.current && handleUpload(target.current.profileId, target.current.name, files[0]) })
 
-  useEffect(() => { loadData() }, [checklist])
-
-  const loadData = async () => {
-    setLoading(true)
-    try {
-      const results = await Promise.all(checklist.profiles.map((p) =>
-        api.get(`/profiles/${p.id}/fields`).then((res) => ({ profile: p, fields: res.data }))))
-      const dataMap = {}
-      results.forEach(({ profile, fields }) => { dataMap[profile.id] = { profile, fields } })
-      setProfileData(dataMap)
-    } catch {
-      toast.error('Failed to load checklist data')
-    } finally {
-      setLoading(false)
-    }
+  // The page follows the system: documents and journey steps every few seconds,
+  // and at once when the person comes back to it.
+  const refresh = async () => {
+    const [live, stages] = await Promise.all([api.get(`/checklists/${checklist.id}/live`), api.get('/automations/stages')])
+    const dataMap = {}
+    for (const p of live.data.profiles) dataMap[p.id] = { profile: p, fields: live.data.fields[p.id] || [] }
+    setProfileData(dataMap)
+    setPaths(Object.fromEntries((stages.data?.profiles || []).map(x => [x.profile_id, x])))
   }
+  useEffect(() => {
+    let alive = true, busy = false
+    const load = async (first) => {
+      if (busy || (!first && document.hidden)) return
+      busy = true
+      try { await refresh() }
+      catch { if (first && alive) toast.error('Failed to load checklist data') }
+      finally { busy = false; if (first && alive) setLoading(false) }
+    }
+    setLoading(true)
+    load(true)
+    const again = () => load(false)
+    const t = setInterval(again, 5000)
+    window.addEventListener('focus', again)
+    document.addEventListener('visibilitychange', again)
+    return () => {
+      alive = false
+      clearInterval(t)
+      window.removeEventListener('focus', again)
+      document.removeEventListener('visibilitychange', again)
+    }
+  }, [checklist])
 
   // Every document field the profiles have (Appointment Slip, Medical Report …).
   const docNames = useMemo(() => {
@@ -120,15 +132,17 @@ export default function ChecklistGridView({ checklist, onClose }) {
     catch { toast.error('Not saved') }
   }
 
-  const handleUpload = async (profileId, fieldId, file) => {
-    if (!fieldId) return toast.error('This profile has no such document field')
+  const handleUpload = async (profileId, name, file) => {
     try {
+      // Opening the profile's fields makes the ones it does not have yet.
+      const fields = await api.get(`/profiles/${profileId}/fields`)
+      const fieldId = fields.data.find(f => f.name === name)?.id
+      if (!fieldId) return toast.error('This profile has no such document field')
       const formData = new FormData()
       formData.append('file', file)
       await api.post(`/profiles/${profileId}/fields/${fieldId}/upload`, formData, { headers: { 'Content-Type': 'multipart/form-data' } })
       toast.success('Uploaded successfully')
-      const res = await api.get(`/profiles/${profileId}/fields`)
-      setProfileData((prev) => ({ ...prev, [profileId]: { ...prev[profileId], fields: res.data } }))
+      await refresh()
     } catch {
       toast.error('Upload failed')
     }
@@ -146,18 +160,21 @@ export default function ChecklistGridView({ checklist, onClose }) {
     }
   }
 
+  // A CV made here counts even before its file reaches the CV field.
+  const hasCv = (profileId, name) => name === 'CV' && paths[profileId]?.steps?.cv === 'done'
+
   // What a cell says, as text (CSV and print).
   const textOf = (profile, col) => {
     if (col.kind === 'info') return String(INFO[col.key]?.[1](profile) ?? '')
     if (col.kind === 'path') return PATH_MARK[paths[profile.id]?.steps?.[col.key]] || ''
     if (col.kind === 'own') { const v = cells[`${profile.id}|${col.key}`] || ''; return col.type === 'tick' ? (v ? '✓' : '') : v }
     const f = profileData[profile.id]?.fields?.find(x => x.name === col.key)
-    return f?.files?.length ? '✓' : ''
+    return f?.files?.length || hasCv(profile.id, col.key) ? '✓' : ''
   }
 
   const handleDownloadCSV = () => {
     const q = (s) => `"${String(s ?? '').replace(/"/g, '""')}"`
-    const rows = checklist.profiles.map(p => [q(p.full_name), ...columns.map(c => q(c.kind === 'doc' || c.type === 'tick' ? (textOf(p, c) ? 'YES' : 'NO') : textOf(p, c)))].join(','))
+    const rows = Object.values(profileData).map(d => d.profile).map(p => [q(p.full_name), ...columns.map(c => q(c.kind === 'doc' || c.type === 'tick' ? (textOf(p, c) ? 'YES' : 'NO') : textOf(p, c)))].join(','))
     const csv = [['Full Name', ...columns.map(c => c.label)].map(q).join(','), ...rows].join('\n')
     const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' }))
     const link = document.createElement('a')
@@ -177,7 +194,7 @@ export default function ChecklistGridView({ checklist, onClose }) {
     const landscape = n > 7
     const font = Math.max(6.5, Math.min(12, (landscape ? 150 : 105) / (n + 3)))
     const head = `<tr><th class="no">#</th><th class="name">Name</th>${columns.map(c => `<th>${esc(c.label)}</th>`).join('')}</tr>`
-    const body = checklist.profiles.map((p, i) => `<tr><td class="no">${i + 1}</td><td class="name">${esc(p.full_name)}</td>${columns.map(c => {
+    const body = Object.values(profileData).map(d => d.profile).map((p, i) => `<tr><td class="no">${i + 1}</td><td class="name">${esc(p.full_name)}</td>${columns.map(c => {
       const t = textOf(p, c)
       const mark = c.kind === 'doc' || c.kind === 'path' || c.type === 'tick'
       return `<td class="${mark ? 'mark' : ''}">${mark ? (t ? (c.kind === 'path' ? esc(t) : '✓') : '<span class="box"></span>') : esc(t)}</td>`
@@ -200,7 +217,7 @@ export default function ChecklistGridView({ checklist, onClose }) {
       @media print { .tip { display: none; } }
     </style></head><body>
       <div class="tip">This is the clean page for printing. The print window opens by itself; close this tab when you are done.</div>
-      <div class="bar"><h1>${esc(checklist.name)}</h1><span class="meta">${checklist.profiles.length} profiles · ${new Date().toLocaleDateString()}</span></div>
+      <div class="bar"><h1>${esc(checklist.name)}</h1><span class="meta">${Object.keys(profileData).length || checklist.profiles.length} profiles · ${new Date().toLocaleDateString()}</span></div>
       <table><thead>${head}</thead><tbody>${body}</tbody></table>
       <script>window.onload = () => setTimeout(() => window.print(), 300)</script>
     </body></html>`
@@ -225,7 +242,7 @@ export default function ChecklistGridView({ checklist, onClose }) {
       <div className="border-b border-slate-200 dark:border-slate-800 flex flex-wrap gap-2 items-center justify-between px-4 sm:px-6 py-3 bg-slate-50 dark:bg-slate-900 shrink-0">
         <div className="min-w-0">
           <h2 className="font-display text-xl font-bold text-slate-900 dark:text-white truncate">{checklist.name}</h2>
-          <p className="text-xs text-slate-500">{checklist.profiles.length} profiles · {columns.length} columns</p>
+          <p className="text-xs text-slate-500">{Object.keys(profileData).length || checklist.profiles.length} profiles · {columns.length} columns</p>
         </div>
         <div className="flex gap-2 flex-wrap justify-end">
           <button type="button" onClick={() => setManage(true)} className={`${btn} text-white bg-teal-600 border-teal-600 hover:bg-teal-700`}>＋ Columns</button>
@@ -249,9 +266,8 @@ export default function ChecklistGridView({ checklist, onClose }) {
             </tr>
           </thead>
           <tbody>
-            {checklist.profiles.map((profile) => {
-              const data = profileData[profile.id]
-              if (!data) return null
+            {Object.values(profileData).map((data) => {
+              const profile = data.profile
               return (
                 <tr key={profile.id} className="hover:bg-slate-50 dark:hover:bg-slate-900">
                   <td className="sticky left-0 z-10 bg-white dark:bg-slate-950 border-b border-r border-slate-200 dark:border-slate-800 p-2 font-medium text-slate-900 dark:text-white">
@@ -281,17 +297,19 @@ export default function ChecklistGridView({ checklist, onClose }) {
                     const file = fieldObj?.files?.[0]
                     return (
                       <td key={k} className={cell} onDragOver={(e) => e.preventDefault()}
-                        onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) handleUpload(profile.id, fieldObj?.id, f) }}>
+                        onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) handleUpload(profile.id, c.key, f) }}>
                         {file ? (
                           file.mimetype?.startsWith('image/')
                             ? <img src={`/api/files/${file.id}/thumbnail`} className="w-12 h-12 object-cover rounded mx-auto border border-slate-200" alt="" />
                             : <div className="w-12 h-12 bg-slate-100 dark:bg-slate-800 rounded mx-auto flex items-center justify-center text-slate-400">📄</div>
-                        ) : fieldObj ? (
-                          <button type="button" onClick={() => { target.current = { profileId: profile.id, fieldId: fieldObj.id }; pick.open() }}
+                        ) : hasCv(profile.id, c.key) ? (
+                          <span className="text-base font-bold text-emerald-600" title="CV made in Adal Keep">✓</span>
+                        ) : (
+                          <button type="button" onClick={() => { target.current = { profileId: profile.id, name: c.key }; pick.open() }}
                             className="flex flex-col items-center justify-center w-12 h-12 mx-auto border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-lg cursor-pointer hover:border-teal-400 hover:bg-teal-50">
                             <span className="text-slate-300 text-lg">+</span>
                           </button>
-                        ) : <span className="text-slate-300">—</span>}
+                        )}
                       </td>
                     )
                   })}

@@ -1,5 +1,6 @@
 import multer from 'multer'
 import express from 'express'
+import { seal } from '../services/accountVault.js'
 
 /**
  * Login accounts of one portal (Musaned, the visa platform): list / add /
@@ -29,7 +30,7 @@ router.post('/accounts', async (req, res) => {
     const [id] = await db(table).insert({
       name: String(b.name).trim(),
       username: String(b.username).trim(),
-      password: String(b.password),
+      password: seal(String(b.password)),
       phone: b.phone || '',
       notes: b.notes || '',
       is_default: !!b.is_default,
@@ -47,6 +48,7 @@ router.patch('/accounts/:id', async (req, res) => {
     for (const k of ['name','username','password','phone','notes','is_default']) {
       if (req.body[k] !== undefined) upd[k] = req.body[k]
     }
+    if (upd.password) upd.password = seal(upd.password)
     if (upd.is_default) await db(table).update({ is_default: false })
     upd.updated_at = new Date().toISOString()
     await db(table).where('id', req.params.id).update(upd)

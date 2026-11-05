@@ -5,7 +5,7 @@
  * copy, which passes no headers).
  */
 import express from 'express'
-import { keyOf, stateOf, allStates, connect, openWeb, logout, listChats, chatForNumber, agentRow, agentsOf, sendCV, sendMany, bulk, sendsOf, onChosen, available } from '../services/whatsapp.js'
+import { keyOf, stateOf, allStates, connect, openWeb, logout, listChats, chatForNumber, agentRow, agentsOf, sendCV, sendMany, bulk, sendsOf, onChosen, available, agentLimit, roomForAgent } from '../services/whatsapp.js'
 
 const router = express.Router()
 const fail = (res, e) => res.status(400).json({ error: e.message })
@@ -13,7 +13,7 @@ const now = () => new Date().toISOString()
 const who = (req) => keyOf(req.query.u ?? req.body?.u)
 const by = (req) => { try { return decodeURIComponent(req.get('x-adal-who') || '') } catch { return '' } }
 
-router.get('/whatsapp', (req, res) => res.json({ ...stateOf(who(req)), key: who(req), others: allStates().filter(s => s.key !== who(req) && s.status === 'ready') }))
+router.get('/whatsapp', async (req, res) => res.json({ agent_limit: await agentLimit(req.app.locals.db), ...stateOf(who(req)), key: who(req), others: allStates().filter(s => s.key !== who(req) && s.status === 'ready') }))
 router.post('/whatsapp/open-web', async (req, res) => { try { res.json(await openWeb(req.app.locals.db, who(req))) } catch (e) { fail(res, e) } })
 router.post('/whatsapp/connect', async (req, res) => { try { res.json(await connect(req.app.locals.db, who(req), { phone: req.body?.phone })) } catch (e) { fail(res, e) } })
 router.post('/whatsapp/logout', async (req, res) => { try { await logout(who(req)); res.json(stateOf(who(req))) } catch (e) { fail(res, e) } })
@@ -46,6 +46,7 @@ router.post('/whatsapp/agents', async (req, res) => {
     const row = await agentBody(req)
     if (!row.name) throw new Error('Type the agent\'s name')
     if (!row.chat_id) throw new Error('Pick the agent\'s chat or type the number')
+    await roomForAgent(db)
     const [id] = await db('whatsapp_agents').insert({ template_ids: '[]', active: 1, ...row, user_key: who(req), created_at: now(), updated_at: now() })
     res.json(agentRow(await db('whatsapp_agents').where('id', id).first()))
   } catch (e) { fail(res, e) }

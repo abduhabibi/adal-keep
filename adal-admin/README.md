@@ -37,7 +37,7 @@ after that it asks for it (12 hours per sign-in). Forgot it? Delete the
 `ADMIN_PASSWORD_HASH=` line in `.env`, restart the panel and choose a new one.
 By hand: `node server.mjs` in this folder.
 
-- **Work** — every agency live: PC on/off, profiles, chosen, runs waiting for
+- **Work** — **Needs you** at the top lists what deserves a look first. Every agency live: PC on/off, profiles, chosen, runs waiting for
   a person, failures this week, open tasks, medicals running out, where the
   profiles stand. Pick an agency: **Continue** / **Cancel** its runs, mark its
   tasks done, give it a task (works while that agency's PC is on — the relay).
@@ -47,6 +47,11 @@ By hand: `node server.mjs` in this folder.
   online copy, and changes wait for the PC. Shown to the agency as "Adal support".
   (Needs `adal-keep-frontend` next to this folder: start-admin.sh rebuilds those
   pages with `npm run build:admin` when they changed.)
+- **Agents** — every foreign agent any agency works with, name and number, and
+  every CV template. Drag one onto an agency (or click it, then the agency): it
+  goes to that PC with its CV templates, without the header pictures. **Agents N of …**
+  is the agency's plan: type a bigger number when its offer grows; empty means any
+  number. Agents added by hand stay in `agents.json`. The agency's PC must be on.
 - **Inboxes** — every agency's chat with you; answer, send pictures.
 - **All chats** — the Everyone group and every private chat; delete messages.
 - **Payments** — receipts sent from the lock screen. **Approve** unlocks that PC

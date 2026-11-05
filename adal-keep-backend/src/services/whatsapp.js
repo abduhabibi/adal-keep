@@ -352,6 +352,78 @@ export function startWhatsApp(db) {
   setInterval(() => closeChosenSends().catch(() => {}), 30 * 60_000).unref?.()
 }
 
+// ---- Agents Adal gives an agency (Adal Keep Admin): how many, and which ----
+const LIMIT = 'whatsapp_agent_limit'
+const numberOf = (chatId) => String(chatId || '').replace(/@.*$/, '')
+const chatOf = (number) => `${String(number || '').replace(/\D/g, '')}@c.us`
+
+/** How many agents this agency's plan allows; null: as many as it wants. */
+export async function agentLimit(db) {
+  const row = await db('settings').where('key', LIMIT).first().catch(() => null)
+  return row?.value ? Number(row.value) : null
+}
+export async function setAgentLimit(db, limit) {
+  const value = Number(limit) > 0 ? String(Math.floor(Number(limit))) : ''
+  if (!(await db('settings').where('key', LIMIT).update({ value }))) await db('settings').insert({ key: LIMIT, value })
+  return agentLimit(db)
+}
+/** Throws when the plan has no room for one more. */
+export async function roomForAgent(db) {
+  const limit = await agentLimit(db)
+  if (limit === null) return
+  const [{ n }] = await db('whatsapp_agents').where('active', 1).count({ n: '*' })
+  if (Number(n) >= limit) throw new Error(`Your plan has ${limit} agent${limit === 1 ? '' : 's'}. Ask Adal for more.`)
+}
+
+/** Every active agent of this agency, for Adal: name, number, office and CV templates. */
+export async function agentList(db) {
+  const rows = await db('whatsapp_agents').where('active', 1).orderBy('name').catch(() => [])
+  const names = new Map((await db('cv_templates').select('id', 'name').catch(() => [])).map(t => [t.id, t.name]))
+  return rows.map(agentRow).map(a => ({
+    name: a.name, number: numberOf(a.chat_id), office: a.musaned_office || '', owner: a.user_key || '',
+    templates: a.template_ids.filter(id => names.has(id)).map(id => ({ id, name: names.get(id) })),
+  }))
+}
+
+/** A template from another agency: the one of that name here, or a new copy. */
+export async function giveTemplate(db, t) {
+  const name = String(t?.name || '').trim().toUpperCase()
+  if (!name || !t.html_content) throw new Error('That CV template has no content online yet.')
+  const had = await db('cv_templates').where('name', name).first('id')
+  if (had) return had.id
+  const at = new Date().toISOString()
+  const [id] = await db('cv_templates').insert({
+    name, agency_name: t.agency_name || '', agency_name_ar: t.agency_name_ar || '', salary: t.salary ?? null, currency: t.currency || 'SAR',
+    country: t.country || '', contract_years: t.contract_years ?? 2, html_content: t.html_content, css_content: t.css_content || '',
+    placeholders: t.placeholders || '[]', source_file: 'from Adal', is_active: true, created_at: at, updated_at: at,
+  })
+  return id
+}
+
+/** Adal gives this agency an agent, with its CV templates. */
+export async function giveAgent(db, { name, number, templates = [] }) {
+  const chat_id = chatOf(number)
+  if (!String(name || '').trim() || chat_id === '@c.us') throw new Error('The agent needs a name and a number')
+  const had = await db('whatsapp_agents').where('chat_id', chat_id).first()
+  const at = new Date().toISOString()
+  // The room first: a refused agent leaves no templates behind.
+  if (!had?.active) await roomForAgent(db)
+  const ids = []
+  for (const t of templates) ids.push(await giveTemplate(db, t))
+  if (had) {
+    await db('whatsapp_agents').where('id', had.id).update({ active: 1, template_ids: JSON.stringify([...new Set([...parseIds(had.template_ids), ...ids])]), updated_at: at })
+  } else {
+    await db('whatsapp_agents').insert({ name: String(name).trim().slice(0, 120), chat_id, template_ids: JSON.stringify(ids), active: 1, user_key: readNote().brave || 'owner', created_at: at, updated_at: at })
+  }
+  return agentList(db)
+}
+
+/** Adal takes an agent back: it stops being offered, its history stays. */
+export async function takeAgent(db, number) {
+  await db('whatsapp_agents').where('chat_id', chatOf(number)).update({ active: 0, updated_at: new Date().toISOString() })
+  return agentList(db)
+}
+
 /** Everyone's connection, for Settings (who is connected on this agency). */
 export const allStates = () => [...sessions.entries()].map(([key, s]) => ({ key, ...s.state, qr: undefined, code: undefined }))
 

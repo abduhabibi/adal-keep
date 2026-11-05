@@ -62,6 +62,15 @@
   .box2 h4 { margin:0 0 8px; } .row2 { display:flex; gap:8px; align-items:center; padding:6px 0; border-bottom:1px solid var(--line); font-size:13px; }
   .row2:last-child { border:0; } .row2 .grow { flex:1; min-width:0; } .row2 .why { color:var(--muted); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .stages { display:flex; flex-wrap:wrap; gap:6px; } .stages span { background:var(--teal-soft); color:var(--teal); border-radius:999px; padding:2px 9px; font-size:12px; font-weight:600; }
+  .needs { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:10px 14px; margin-bottom:14px; }
+  .needs h4 { margin:0 0 6px; } .needs div { padding:3px 0; font-size:13px; cursor:pointer; } .needs div:hover { color:var(--teal); }
+  .agwrap { display:grid; grid-template-columns:minmax(260px,330px) 1fr; gap:14px; align-items:start; } @media (max-width:900px) { .agwrap { grid-template-columns:1fr; } }
+  .aglist { display:grid; grid-template-columns:repeat(auto-fill,minmax(250px,1fr)); gap:12px; position:sticky; top:0; }
+  .drop { background:var(--panel); border:2px dashed var(--line); border-radius:12px; padding:10px; min-height:120px; } .drop.over { border-color:var(--teal); background:var(--teal-soft); }
+  .drop h4 { margin:0; display:flex; gap:6px; align-items:center; } .plan { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); margin:6px 0; }
+  .plan input { width:58px; } .chip { background:var(--bg,transparent); border:1px solid var(--line); border-radius:8px; padding:6px 8px; margin-top:6px; font-size:13px; }
+  .chip[draggable=true] { cursor:grab; } .chip b { display:block; } .chip small { color:var(--muted); display:block; overflow-wrap:anywhere; }
+  .chip .x { float:right; background:none; border:0; color:var(--muted); cursor:pointer; }
   #zoom { position:fixed; inset:0; background:#000c; display:none; align-items:center; justify-content:center; cursor:zoom-out; }
   #zoom img { max-width:92vw; max-height:92vh; }
 </style>
@@ -71,6 +80,7 @@
   <header>Adal Keep — Admin</header>
   <div class="tabs">
     <button data-tab="work" class="on">Work</button>
+    <button data-tab="agents">Agents</button>
     <button data-tab="inbox">Inboxes</button>
     <button data-tab="chats">All chats</button>
     <button data-tab="payments">Payments</button>
@@ -123,7 +133,7 @@ const img = (p) => `<img src="/api/image?path=${encodeURIComponent(p)}" onclick=
 
 document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
   tab = b.dataset.tab; document.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('on', x === b))
-  if (tab === 'payments' || tab === 'agencies' || tab === 'work') { open = null; showTable() } else renderList()
+  if (tab === 'payments' || tab === 'agencies' || tab === 'work' || tab === 'agents') { open = null; showTable() } else renderList()
   renderList()
 })
 
@@ -184,6 +194,103 @@ const wf = (w) => WF[w] || String(w || '').replace(/_/g, ' ')
 const ago = (t) => { if (!t) return '—'; const m = Math.round((Date.now() - new Date(t)) / 60000); return m < 1 ? 'now' : m < 60 ? `${m} min` : m < 1440 ? `${Math.round(m / 60)} h` : `${Math.round(m / 1440)} d` }
 const cls = (n, warn, bad) => n >= bad ? 'num bad' : n >= warn ? 'num warn' : 'num'
 
+// What deserves Adal's eye first, worked out from every agency's summary.
+function needsYou() {
+  const out = []
+  for (const a of work) {
+    const s = a.summary, hrs = a.pcSeen ? (Date.now() - new Date(a.pcSeen)) / 3600000 : null
+    const say = (rank, text) => out.push({ rank, id: a.id, text: `${a.name}: ${text}` })
+    if (a.banned) continue
+    if (!a.pcOnline && hrs !== null && hrs > 24) say(1, `PC off for ${hrs > 48 ? `${Math.round(hrs / 24)} days` : `${Math.round(hrs)} hours`}${s?.runs?.paused ? `, ${s.runs.paused} runs waiting` : ''}`)
+    if (!s) { say(3, 'has sent no summary yet'); continue }
+    for (const r of (s.reasons || []).filter(r => r.n >= 3)) say(2, `${r.n} runs failed this week: ${r.why}`)
+    if (s.runs?.paused >= 5) say(3, `${s.runs.paused} runs are waiting for a person`)
+    const soon = (s.medicals || []).filter(m => m.days <= 7).length
+    if (soon) say(2, `${soon} medical${soon > 1 ? 's' : ''} ending within 7 days`)
+    if (a.latest && a.health?.version?.sha && a.health.version.sha !== a.latest) say(4, `not on the newest version (${a.health.version.sha})`)
+    if (s.agent_limit && (s.agents || []).length >= s.agent_limit) say(4, `has used all ${s.agent_limit} agents of its plan: time for a bigger offer?`)
+  }
+  return out.sort((x, y) => x.rank - y.rank).slice(0, 8)
+}
+
+// Agents: every agency's foreign agents, and dragging one onto an agency gives it.
+let agentData = null, dragged = null, agentShown = '', agentDone = '', picked = null
+const agentLine = (g) => `<b>${esc(g.name)}</b><small>+${esc(g.number)}${g.templates?.length ? ` · ${esc([...new Set(g.templates.map(t => t.name))].join(', '))}` : ''}</small>`
+async function agentAct(path, body, done) {
+  try { await api(path, body); agentDone = done || ''; agentData = null; agentsView() }
+  catch (e) { await ask({ title: 'Not done', text: e.message }) }
+}
+async function agentsView() {
+  $('#title').textContent = picked ? `Now click the agency for ${(picked.agent || picked.template).name}` : agentDone || 'Agents — drag an agent or CV template onto an agency (or click it, then the agency)'
+  if (!agentData) agentData = await api('/api/agents').catch(e => ({ error: e.message }))
+  else {
+    // Redrawn only when something changed: a redraw would lose the scroll and any drag.
+    const next = await api('/api/agents').catch(() => agentData)
+    if (JSON.stringify(next) === agentShown && $('#agAdd')) return
+    agentData = next
+  }
+  if (tab !== 'agents') return
+  const D = agentData
+  agentShown = JSON.stringify(D)
+  if (D.error) { $('#table').innerHTML = `<p class="muted">${esc(D.error)}</p>`; return }
+  $('#table').innerHTML = `<div class="agwrap"><div class="box2">
+      <h4>All agents (${D.book.length})</h4>
+      <form id="agAdd" class="addform" style="display:block">
+        <input type="text" id="agName" placeholder="Name" autocomplete="off" style="width:100%;margin-bottom:6px">
+        <input type="text" id="agNum" placeholder="Number with country code" inputmode="tel" autocomplete="off" style="width:100%;margin-bottom:6px">
+        <select id="agTpl" style="width:100%;margin-bottom:6px"><option value="">No CV template</option>${D.templates.map((t, i) => `<option value="${i}">${esc(t.name)} — ${esc(t.agencyName)}</option>`).join('')}</select>
+        <button class="go">Add to the list</button>
+      </form>
+      ${D.book.map((g, i) => `<div class="chip" draggable="true" data-agent="${i}">${g.mine ? `<button class="x" data-forget="${esc(g.number)}" title="Take off your list">✕</button>` : ''}${agentLine(g)}<small>${g.with.length ? `with ${esc(g.with.join(', '))}` : 'with no agency yet'}</small></div>`).join('') || '<p class="muted">No agents yet.</p>'}
+      <h4 style="margin-top:14px">CV templates (${D.templates.length})</h4>
+      ${D.templates.map((t, i) => `<div class="chip" draggable="true" data-tpl="${i}"><b>${esc(t.name)}</b><small>${esc(t.agencyName)}</small></div>`).join('') || '<p class="muted">None online yet.</p>'}
+    </div>
+    <div class="aglist">${D.agencies.map((a, i) => `<div class="drop" data-agency="${i}">
+      <h4><span style="color:${a.pcOnline ? '#16a34a' : 'var(--red)'}" title="${a.pcOnline ? 'PC on' : 'PC off: it cannot take an agent now'}">●</span> ${esc(a.name)}</h4>
+      <div class="plan">Agents ${a.agents.length} of <input type="number" min="0" value="${a.limit ?? ''}" placeholder="any" data-limit="${i}" title="How many agents this agency's plan allows. Empty: any number."></div>
+      ${a.agents.map(g => `<div class="chip"><button class="x" data-take="${i}" data-num="${esc(g.number)}" title="Take this agent back">✕</button>${agentLine(g)}</div>`).join('') || `<p class="muted">${a.reports ? 'No agents yet.' : 'This PC has not reported its agents yet.'}</p>`}
+    </div>`).join('')}</div></div>`
+  const T = $('#table')
+  T.querySelectorAll('[draggable]').forEach(c => {
+    c.ondragstart = (e) => { dragged = c.dataset.agent !== undefined ? { agent: D.book[c.dataset.agent] } : { template: D.templates[c.dataset.tpl] }; e.dataTransfer.setData('text/plain', 'x'); e.dataTransfer.effectAllowed = 'copy' }
+    c.ondragend = () => { dragged = null }
+    // Click it, then the agency: for a trackpad or a phone, where dragging is awkward.
+    c.onclick = (e) => {
+      if (e.target.closest('button')) return
+      const it = c.dataset.agent !== undefined ? { agent: D.book[c.dataset.agent] } : { template: D.templates[c.dataset.tpl] }
+      const same = picked && (picked.agent?.number === it.agent?.number) && (picked.template?.name === it.template?.name)
+      picked = same ? null : it
+      T.querySelectorAll('[draggable]').forEach(x => { x.style.outline = '' })
+      if (picked) c.style.outline = '2px solid var(--teal)'
+      $('#title').textContent = picked ? `Now click the agency for ${(picked.agent || picked.template).name}` : 'Agents — drag an agent or CV template onto an agency (or click it, then the agency)'
+    }
+  })
+  const give = (a, it) => it?.agent ? agentAct('/api/agents/give', { agency: a.id, name: it.agent.name, number: it.agent.number, templates: it.agent.templates }, `${it.agent.name} now works with ${a.name}`)
+    : it?.template ? agentAct('/api/templates/give', { agency: a.id, template: it.template }, `${it.template.name} is now at ${a.name}`) : null
+  T.querySelectorAll('.drop').forEach(d => {
+    const a = D.agencies[d.dataset.agency]
+    d.ondragover = (e) => { e.preventDefault(); d.classList.add('over') }
+    d.ondragleave = () => d.classList.remove('over')
+    d.ondrop = async (e) => {
+      e.preventDefault(); d.classList.remove('over')
+      const it = dragged; dragged = null
+      await give(a, it)
+    }
+    d.onclick = (e) => {
+      if (!picked || e.target.closest('button, input')) return
+      const it = picked; picked = null
+      give(a, it)
+    }
+  })
+  T.querySelectorAll('[data-take]').forEach(b => b.onclick = async () => {
+    const a = D.agencies[b.dataset.take]
+    if (await ask({ title: `Take this agent back from ${a.name}?`, text: 'Its history there stays. CVs stop going to it.', ok: 'Take back', danger: true })) agentAct('/api/agents/take', { agency: a.id, number: b.dataset.num })
+  })
+  T.querySelectorAll('[data-forget]').forEach(b => b.onclick = (e) => { e.stopPropagation(); agentAct('/api/agents/forget', { number: b.dataset.forget }) })
+  T.querySelectorAll('[data-limit]').forEach(i => i.onchange = () => agentAct('/api/agents/limit', { agency: D.agencies[i.dataset.limit].id, limit: Number(i.value) || 0 }, `${D.agencies[i.dataset.limit].name}: plan saved`))
+  $('#agAdd').onsubmit = (e) => { e.preventDefault(); agentAct('/api/agents/add', { name: $('#agName').value, number: $('#agNum').value, template: D.templates[$('#agTpl').value] || null }) }
+}
+
 function workTable() {
   $('#title').textContent = "Agencies' work — every agency, live"
   const S = work.map(a => a.summary).filter(Boolean)
@@ -196,7 +303,8 @@ function workTable() {
     ['Medicals ending ≤ 7 days', sum(s => s.medicals.filter(m => m.days <= 7).length), sum(s => s.medicals.filter(m => m.days <= 7).length) ? 'bad' : ''],
     ['Profiles', sum(s => s.profiles), ''], ['Chosen by employers', sum(s => Number(s.chosen)), ''],
   ]
-  let html = `<div class="cards">${cards.map(([t, v, c]) => `<div class="card ${c}"><b>${v}</b><span>${t}</span></div>`).join('')}</div>
+  const needs = needsYou()
+  let html = `${needs.length ? `<div class="needs"><h4>Needs you</h4>${needs.map(n => `<div data-need="${n.id}">${esc(n.text)}</div>`).join('')}</div>` : ''}<div class="cards">${cards.map(([t, v, c]) => `<div class="card ${c}"><b>${v}</b><span>${t}</span></div>`).join('')}</div>
     <table><tr><th>Agency</th><th>PC</th><th>Profiles</th><th>Chosen</th><th>Waiting</th><th>Failed 7 d</th><th>Tasks</th><th>Medical ≤ 14 d</th><th>Phones</th><th>Copied</th><th>Backup</th><th>Version</th><th></th></tr>` +
     work.map(a => { const s = a.summary; return `<tr class="ag ${workOpen === a.id ? 'on' : ''}" data-row="${a.id}">
       <td><b>${esc(a.name)}</b> <span class="muted code" style="letter-spacing:0">${esc(a.pc_number || '')}</span>${a.branchPCs?.length ? `<div class="muted" style="font-size:11px">+ ${a.branchPCs.length} PC(s) following it: ${a.branchPCs.join(', ')}</div>` : ''}${a.banned ? ' <span class="pill rejected">banned</span>' : ''}</td>
@@ -287,6 +395,7 @@ function workTable() {
       }
     } catch (err) { tell('Not done', err.message) }
   })
+  T.querySelectorAll('[data-need]').forEach(d => d.onclick = () => { workOpen = d.dataset.need; showTable(); renderList() })
   T.querySelectorAll('[data-row]').forEach(r => r.onclick = (e) => { if (e.target.closest('button')) return; workOpen = r.dataset.row; showTable(); renderList() })
   T.querySelectorAll('[data-open]').forEach(b => b.onclick = () => openAgency(b.dataset.open))
   T.querySelectorAll('[data-goto]').forEach(b => b.onclick = () => openAgency(workOpen, b.dataset.goto))
@@ -305,6 +414,7 @@ function workTable() {
 function showTable() {
   $('#thread').style.display = 'none'; $('#compose').style.display = 'none'; $('#table').style.display = 'block'
   if (tab === 'work') return workTable()
+  if (tab === 'agents') return agentsView()
   if (tab === 'payments') {
     $('#title').textContent = 'Payment receipts'
     $('#table').innerHTML = `<table><tr><th>Receipt</th><th>Agency</th><th>PC number</th><th>Sent</th><th>Status</th><th></th></tr>` +
@@ -391,6 +501,7 @@ async function refresh() {
     if (open) open = data.conversations.find(c => c.id === open.id) || open
     renderList()
     if (tab === 'work') { if (!document.querySelector('#table input:focus')) showTable() }
+    else if (tab === 'agents') { if (!dragged && !document.querySelector('#table input:focus, #table select:focus')) agentsView() }
     else if (tab === 'payments' || tab === 'agencies') showTable()
     else await loadMessages()
     const waiting = data.requests.filter(r => r.status === 'pending').length

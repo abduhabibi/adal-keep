@@ -402,7 +402,32 @@ export async function stepFillMusanedLogin(page, ctx) {
   return { filled: true, via: submitted }
 }
 
+/**
+ * Musaned's "Welcome back … select the establishment" page says who is signed in
+ * before anything is pressed. Only a card naming another saved account counts as
+ * wrong: an account's name here need not be spelled as on Musaned ("Zad").
+ */
+export async function wrongAgencyCard(page, ctx) {
+  if (!ctx.db) return ''
+  const text = String(await page.evaluate(() => document.body.innerText).catch(() => '')).toLowerCase()
+  const words = (a) => [a.name, a.username].map(v => String(v || '').trim().toLowerCase()).filter(v => v.length >= 3)
+  if ([ctx.musaned_name, ctx.musaned_username].flatMap(v => words({ name: v })).some(w => text.includes(w))) return ''
+  const others = await ctx.db('musaned_accounts').select('id', 'name', 'username').catch(() => [])
+  return others.find(a => a.id !== ctx.account_id && words(a).some(w => text.includes(w)))?.name || ''
+}
+
 export async function stepClickAgencyCard(page, ctx) {
+  const other = await wrongAgencyCard(page, ctx)
+  if (other) {
+    if (ctx.accountSwitched) throw new Error(`Musaned stays signed in as ${other}`)
+    ctx.accountSwitched = true
+    log(ctx, `Musaned offers ${other}'s agency: logging out, to sign in as this run's account`, 'warn')
+    // "Not you? Log Out" is on this page.
+    const pressed = await page.evaluate(`(() => { const b = (${logoutItem})(); b?.click(); return !!b })()`).catch(() => false)
+    if (pressed) await page.waitForFunction(() => !!document.querySelector('input[type="password"]'), { timeout: 15000 }).catch(() => {})
+    else await logOutInNewTab(page, ctx)
+    throw Object.assign(new Error('signing in again as this run\'s account'), { signInAgain: true })
+  }
   const agencyHint = String(ctx.musaned_name || ctx.musaned_username || '').trim().toUpperCase()
   const deadline = Date.now() + 20000
   let clicked = false
@@ -2444,7 +2469,10 @@ export async function runMusanedWorkflow(page, ctx) {
   waiting = false; clearTimeout(note)
   try {
     if (await borrowSignIn(page, 'musaned')) log(ctx, '🔗 Musaned is already signed in in another tab — using that sign-in')
-    return await musanedRun(page, ctx)
+    try { return await musanedRun(page, ctx) } catch (e) {
+      if (!e?.signInAgain) throw e
+      return await musanedRun(page, { ...ctx, musanedStage: 'start' })
+    }
   } finally { ctx.releaseSignIn() }
 }
 
@@ -2594,7 +2622,7 @@ async function musanedRun(page, ctx) {
     return { ok: true, pauseReason: 'awaiting-human-save', seconds: secs }
   } catch (e) {
     const secs = Math.round((Date.now() - t0) / 1000)
-    if (e?.cancelled) throw e
+    if (e?.cancelled || e?.signInAgain) throw e
     // A step failed because Musaned said she is registered already.
     const already = await readAlreadyRegistered(page, 500)
     if (already) return await stopAlreadyRegistered(page, ctx, already, secs)

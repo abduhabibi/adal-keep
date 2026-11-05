@@ -15,6 +15,7 @@
  * src/cloud/adapter.js). Secrets (passwords, tokens) never leave the PC.
  */
 import crypto from 'crypto'
+import { plainReason } from './runOutcome.js'
 import { me as joinAgency, chatConfigured, cloudCall, cloudAuth, cloudAgencyId, cloudConfig } from './chatCloud.js'
 import { isFollower } from './mainPC.js'
 import { tgReady, tgPut, tgDelete, TG_MAX_DOWNLOAD, findStorageChat } from './tgStore.js'
@@ -159,7 +160,13 @@ async function summary(db) {
     const r = await local('GET', '/automations/stages')
     if (r.ok) for (const p of (await r.json()).profiles || []) stages[p.stage] = (stages[p.stage] || 0) + 1
   } catch {}
+  const { agentList, agentLimit } = await import('./whatsapp.js')
+  const reasons = {}
+  for (const r of failed) { const why = plainReason(r.pause_reason); reasons[why] = (reasons[why] || 0) + 1 }
   return {
+    agents: await agentList(db),
+    agent_limit: await agentLimit(db),
+    reasons: Object.entries(reasons).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([why, n]) => ({ why, n })),
     profiles: names.size,
     chosen: (await db('profiles').whereNotNull('chosen_at').count({ n: '*' }))[0].n,
     stages,
@@ -547,6 +554,14 @@ async function fromAdal(db, id) {
 // newest backup here (its own, or another agency PC's — a replaced PC).
 export const adalJob = { kind: null, running: false, result: null, error: null, at: null }
 async function adalCommand(db, method, p, body) {
+  // Before the backup's "busy": giving an agent does not wait for a backup.
+  if (p.startsWith('/_adal/agents/')) {
+    const W = await import('./whatsapp.js')
+    if (p === '/_adal/agents/give') return { agents: await W.giveAgent(db, body), limit: await W.agentLimit(db) }
+    if (p === '/_adal/agents/take') return { agents: await W.takeAgent(db, body.number), limit: await W.agentLimit(db) }
+    if (p === '/_adal/agents/limit') return { agents: await W.agentList(db), limit: await W.setAgentLimit(db, body.limit) }
+    if (p === '/_adal/agents/template') return { id: await W.giveTemplate(db, body.template) }
+  }
   const B = await import('./telegramBackup.js')
   if (p === '/_adal/backup' && method === 'GET') return { ...B.getConfig(), progress: B.progress, job: adalJob }
   if (adalJob.running || B.progress.running) return { busy: true, job: adalJob, progress: B.progress }

@@ -99,8 +99,71 @@ async function ensureAdmin() {
   }
 }
 
+// ---------------------------------------------------------------- agents --
+// Adal's own book of foreign agents, beside what each agency's PC reports.
+const BOOK = path.join(HERE, 'agents.json')
+const readBook = () => { try { return JSON.parse(fs.readFileSync(BOOK, 'utf8')) } catch { return [] } }
+const writeBook = (list) => fs.writeFileSync(BOOK, JSON.stringify(list, null, 2))
+const digits = (n) => String(n || '').replace(/\D/g, '')
+// A PC's summary comes within a minute or so: what it just answered counts until then.
+const justNow = new Map()
+const remember = (agency, a) => { justNow.set(agency, { agents: a.agents, limit: a.limit, at: Date.now() }); return a }
+async function templateOf({ agency, id }) {
+  const [row] = await rest('GET', `keep_meta?agency_id=eq.${encodeURIComponent(agency)}&key=eq.${encodeURIComponent(`/cv/templates/${Number(id)}`)}&select=data`)
+  if (!row?.data) throw new Error('That CV template is not online yet: its agency PC must be on for a minute.')
+  return row.data
+}
+
 // ------------------------------------------------------------------- api --
 const api = {
+  // Every agency's foreign agents and CV templates, and Adal's book.
+  'GET /api/agents': async () => {
+    const [agencies, meta, tpls] = await Promise.all([
+      rest('GET', 'agencies?is_admin=eq.false&select=id,name,banned&order=name.asc'),
+      rest('GET', 'keep_meta?key=in.(/_summary,/_pc)&select=agency_id,key,data').catch(() => []),
+      rest('GET', 'keep_meta?key=like./cv/templates/*&select=agency_id,key,name:data->>name').catch(() => []),
+    ])
+    const of = (id, key) => meta.find(m => m.agency_id === id && m.key === key)?.data
+    const list = agencies.filter(a => !/\s·\s*branch PC \d{6}$/.test(a.name || '')).map(a => {
+      const s = of(a.id, '/_summary') || {}
+      const fresh = justNow.get(a.id)
+      const now = fresh && Date.now() - fresh.at < 120000 ? fresh : { agents: s.agents || [], limit: s.agent_limit ?? null }
+      const pc = of(a.id, '/_pc')?.at
+      return { id: a.id, name: a.name, pcOnline: !!pc && Date.now() - new Date(pc).getTime() < 60000, reports: !!s.agents, agents: now.agents, limit: now.limit }
+    })
+    const names = Object.fromEntries(list.map(a => [a.id, a.name]))
+    const templates = tpls.filter(t => /^\/cv\/templates\/\d+$/.test(t.key) && names[t.agency_id] && t.name)
+      .map(t => ({ agency: t.agency_id, agencyName: names[t.agency_id], id: Number(t.key.split('/').pop()), name: t.name }))
+    const book = new Map()
+    const entry = (name, number) => { if (!book.has(number)) book.set(number, { name, number, with: [], templates: [], mine: false }); return book.get(number) }
+    for (const b of readBook()) { const e = entry(b.name, b.number); e.mine = true; if (b.template) e.templates.push(b.template) }
+    for (const a of list) for (const g of a.agents) {
+      const e = entry(g.name, g.number)
+      e.with.push(a.name)
+      for (const t of g.templates || []) e.templates.push({ agency: a.id, id: t.id, name: t.name })
+    }
+    return { agencies: list, templates, book: [...book.values()].sort((x, y) => x.name.localeCompare(y.name)) }
+  },
+  'POST /api/agents/add': async (q, b) => {
+    const name = String(b.name || '').trim(), number = digits(b.number)
+    if (!name) throw new Error('Type the agent\'s name.')
+    if (number.length < 7) throw new Error('Type the agent\'s number with its country code.')
+    writeBook([...readBook().filter(x => x.number !== number), { name, number, template: b.template || null }])
+    return { ok: true }
+  },
+  'POST /api/agents/forget': async (q, b) => { writeBook(readBook().filter(x => x.number !== digits(b.number))); return { ok: true } },
+  // Dropped on an agency: the agent and its CV templates go to that agency's PC.
+  'POST /api/agents/give': async (q, b) => {
+    const seen = new Set(), templates = []
+    for (const t of b.templates || []) {
+      const data = await templateOf(t)
+      if (!seen.has(data.name)) { seen.add(data.name); templates.push(data) }
+    }
+    return remember(b.agency, await agencyCall(String(b.agency), 'POST', '/_adal/agents/give', { name: b.name, number: b.number, templates }))
+  },
+  'POST /api/agents/take': async (q, b) => remember(b.agency, await agencyCall(String(b.agency), 'POST', '/_adal/agents/take', { number: b.number })),
+  'POST /api/agents/limit': async (q, b) => remember(b.agency, await agencyCall(String(b.agency), 'POST', '/_adal/agents/limit', { limit: b.limit })),
+  'POST /api/templates/give': async (q, b) => agencyCall(String(b.agency), 'POST', '/_adal/agents/template', { template: await templateOf(b.template) }),
   'GET /api/overview': async () => {
     const [agencies, convs, requests] = await Promise.all([
       rest('GET', 'agencies?select=id,name,pc_number,banned,is_admin,created_at,last_seen&order=last_seen.desc'),

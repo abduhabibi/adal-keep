@@ -201,8 +201,8 @@ export default function WhatsAppCard() {
 
       <div className="space-y-2">
         <div className="flex items-center justify-between">
-          <p className="text-sm font-semibold">Your agents ({active.length})</p>
-          {!edit && <Button size="sm" variant="secondary" onClick={() => setEdit({})} disabled={s.status !== 'ready'} title={s.status !== 'ready' ? 'Connect WhatsApp first' : ''}>＋ Add agent</Button>}
+          <p className="text-sm font-semibold">Your agents ({active.length}{s.agent_limit ? ` of ${s.agent_limit}` : ''})</p>
+          {!edit && <Button size="sm" variant="secondary" onClick={() => setEdit({})} disabled={s.status !== 'ready' || (s.agent_limit && active.length >= s.agent_limit)} title={s.status !== 'ready' ? 'Connect WhatsApp first' : s.agent_limit && active.length >= s.agent_limit ? 'Your plan is full: ask Adal for more agents' : ''}>＋ Add agent</Button>}
         </div>
         {edit && !edit.id && <AgentForm initial={null} templates={templates} chats={chats} onDone={() => { setEdit(null); loadAgents() }} onCancel={() => setEdit(null)} />}
         {active.map(a => edit?.id === a.id

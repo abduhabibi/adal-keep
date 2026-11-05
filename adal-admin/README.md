@@ -52,6 +52,8 @@ By hand: `node server.mjs` in this folder.
   goes to that PC with its CV templates, without the header pictures. **Agents N of …**
   is the agency's plan: type a bigger number when its offer grows; empty means any
   number. Agents added by hand stay in `agents.json`. The agency's PC must be on.
+- **CEOs** — agency, CEO and number, from each agency's setup. Type a missing
+  one there: it stays in `ceos.json` and goes to the agency's PC when it is on.
 - **Inboxes** — every agency's chat with you; answer, send pictures.
 - **All chats** — the Everyone group and every private chat; delete messages.
 - **Payments** — receipts sent from the lock screen. **Approve** unlocks that PC

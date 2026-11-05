@@ -114,8 +114,35 @@ async function templateOf({ agency, id }) {
   return row.data
 }
 
+// What Adal typed in the CEOs list: it counts over what the PC reports, also while that PC is off.
+const CEOS = path.join(HERE, 'ceos.json')
+const readCeos = () => { try { return JSON.parse(fs.readFileSync(CEOS, 'utf8')) } catch { return {} } }
+
 // ------------------------------------------------------------------- api --
 const api = {
+  // Every agency's CEO: agency, name and number.
+  'GET /api/ceos': async () => {
+    const [agencies, meta] = await Promise.all([
+      rest('GET', 'agencies?is_admin=eq.false&select=id,name,pc_number&order=name.asc'),
+      rest('GET', 'keep_meta?key=in.(/_summary,/_pc)&select=agency_id,key,data').catch(() => []),
+    ])
+    const of = (id, key) => meta.find(m => m.agency_id === id && m.key === key)?.data
+    const typed = readCeos()
+    return agencies.filter(a => !/\s·\s*branch PC \d{6}$/.test(a.name || '')).map(a => {
+      const c = of(a.id, '/_summary')?.ceo || {}, t = typed[a.id] || {}
+      const pc = of(a.id, '/_pc')?.at
+      return { id: a.id, agency: c.agency || a.name, pc: a.pc_number, name: t.name ?? c.name ?? '', phone: t.phone ?? c.phone ?? '', pcOnline: !!pc && Date.now() - new Date(pc).getTime() < 60000 }
+    })
+  },
+  'POST /api/ceos/save': async (q, b) => {
+    const id = String(b.agency || '')
+    if (!isAgency(id)) throw new Error('bad agency')
+    const name = String(b.name || '').trim().slice(0, 120), phone = String(b.phone || '').trim().slice(0, 40)
+    fs.writeFileSync(CEOS, JSON.stringify({ ...readCeos(), [id]: { name, phone } }, null, 2))
+    // Its own PC learns it too when it is on; the list here is right either way.
+    const onPc = await agencyCall(id, 'POST', '/_adal/company', { name, phone }, 8000).then(() => true).catch(() => false)
+    return { ok: true, onPc }
+  },
   // Every agency's foreign agents and CV templates, and Adal's book.
   'GET /api/agents': async () => {
     const [agencies, meta, tpls] = await Promise.all([

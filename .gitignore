@@ -99,6 +99,7 @@ adal-keep-backend/.adal_sub.json
 adal-keep-backend/.adal_chat.json
 adal-admin/.env
 adal-admin/agents.json
+adal-admin/ceos.json
 
 # admin panel log
 adal-admin/admin.log

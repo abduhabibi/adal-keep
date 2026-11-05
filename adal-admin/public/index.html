@@ -62,6 +62,7 @@
   .box2 h4 { margin:0 0 8px; } .row2 { display:flex; gap:8px; align-items:center; padding:6px 0; border-bottom:1px solid var(--line); font-size:13px; }
   .row2:last-child { border:0; } .row2 .grow { flex:1; min-width:0; } .row2 .why { color:var(--muted); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .stages { display:flex; flex-wrap:wrap; gap:6px; } .stages span { background:var(--teal-soft); color:var(--teal); border-radius:999px; padding:2px 9px; font-size:12px; font-weight:600; }
+  #ceoT input { width:100%; min-width:130px; padding:6px 8px; border-radius:8px; border:1px solid var(--line); background:var(--bg); color:var(--text); }
   .needs { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:10px 14px; margin-bottom:14px; }
   .needs h4 { margin:0 0 6px; } .needs div { padding:3px 0; font-size:13px; cursor:pointer; } .needs div:hover { color:var(--teal); }
   .agwrap { display:grid; grid-template-columns:minmax(260px,330px) 1fr; gap:14px; align-items:start; } @media (max-width:900px) { .agwrap { grid-template-columns:1fr; } }
@@ -81,6 +82,7 @@
   <div class="tabs">
     <button data-tab="work" class="on">Work</button>
     <button data-tab="agents">Agents</button>
+    <button data-tab="ceos">CEOs</button>
     <button data-tab="inbox">Inboxes</button>
     <button data-tab="chats">All chats</button>
     <button data-tab="payments">Payments</button>
@@ -133,7 +135,7 @@ const img = (p) => `<img src="/api/image?path=${encodeURIComponent(p)}" onclick=
 
 document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
   tab = b.dataset.tab; document.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('on', x === b))
-  if (tab === 'payments' || tab === 'agencies' || tab === 'work' || tab === 'agents') { open = null; showTable() } else renderList()
+  if (tab === 'payments' || tab === 'agencies' || tab === 'work' || tab === 'agents' || tab === 'ceos') { open = null; showTable() } else renderList()
   renderList()
 })
 
@@ -291,6 +293,32 @@ async function agentsView() {
   $('#agAdd').onsubmit = (e) => { e.preventDefault(); agentAct('/api/agents/add', { name: $('#agName').value, number: $('#agNum').value, template: D.templates[$('#agTpl').value] || null }) }
 }
 
+// CEOs: who to call at each agency. Typed here when the agency's setup left it empty.
+let ceoShown = ''
+async function ceosView() {
+  const rows = await api('/api/ceos').catch(e => ({ error: e.message }))
+  if (tab !== 'ceos') return
+  $('#title').textContent = rows.error ? rows.error : `CEOs — ${rows.filter(r => r.name).length} of ${rows.length} agencies have a name`
+  if (rows.error) return
+  const now = JSON.stringify(rows)
+  if (now === ceoShown && $('#ceoT')) return
+  ceoShown = now
+  $('#table').innerHTML = `<table id="ceoT"><tr><th>Agency</th><th>CEO</th><th>Number</th><th>PC</th></tr>${rows.map((r, i) => `<tr>
+    <td>${esc(r.agency)}</td>
+    <td><input type="text" data-i="${i}" data-f="name" value="${esc(r.name)}" placeholder="Type the name" aria-label="CEO of ${esc(r.agency)}"></td>
+    <td><input type="text" data-i="${i}" data-f="phone" value="${esc(r.phone)}" placeholder="Type the number" inputmode="tel" aria-label="Number of ${esc(r.agency)}"></td>
+    <td class="code">${esc(r.pc || '')}</td></tr>`).join('')}</table>`
+  $('#table').querySelectorAll('input').forEach(el => el.onchange = async () => {
+    const r = rows[el.dataset.i]
+    r[el.dataset.f] = el.value
+    $('#title').textContent = `Saving ${r.agency}…`
+    try {
+      const a = await api('/api/ceos/save', { agency: r.id, name: r.name, phone: r.phone })
+      $('#title').textContent = a.onPc ? `${r.agency}: saved, and on its PC` : `${r.agency}: saved here; its PC is off`
+    } catch (e) { await ask({ title: 'Not saved', text: e.message }) }
+  })
+}
+
 function workTable() {
   $('#title').textContent = "Agencies' work — every agency, live"
   const S = work.map(a => a.summary).filter(Boolean)
@@ -415,6 +443,7 @@ function showTable() {
   $('#thread').style.display = 'none'; $('#compose').style.display = 'none'; $('#table').style.display = 'block'
   if (tab === 'work') return workTable()
   if (tab === 'agents') return agentsView()
+  if (tab === 'ceos') return ceosView()
   if (tab === 'payments') {
     $('#title').textContent = 'Payment receipts'
     $('#table').innerHTML = `<table><tr><th>Receipt</th><th>Agency</th><th>PC number</th><th>Sent</th><th>Status</th><th></th></tr>` +
@@ -501,6 +530,7 @@ async function refresh() {
     if (open) open = data.conversations.find(c => c.id === open.id) || open
     renderList()
     if (tab === 'work') { if (!document.querySelector('#table input:focus')) showTable() }
+    else if (tab === 'ceos') { if (!document.querySelector('#table input:focus')) ceosView() }
     else if (tab === 'agents') { if (!dragged && !document.querySelector('#table input:focus, #table select:focus')) agentsView() }
     else if (tab === 'payments' || tab === 'agencies') showTable()
     else await loadMessages()

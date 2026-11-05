@@ -161,9 +161,11 @@ async function summary(db) {
     if (r.ok) for (const p of (await r.json()).profiles || []) stages[p.stage] = (stages[p.stage] || 0) + 1
   } catch {}
   const { agentList, agentLimit } = await import('./whatsapp.js')
+  const company = await db('companies').first('name', 'owner_name', 'phone1', 'phone2').catch(() => null)
   const reasons = {}
   for (const r of failed) { const why = plainReason(r.pause_reason); reasons[why] = (reasons[why] || 0) + 1 }
   return {
+    ceo: { agency: company?.name || '', name: company?.owner_name || '', phone: company?.phone2 || company?.phone1 || '' },
     agents: await agentList(db),
     agent_limit: await agentLimit(db),
     reasons: Object.entries(reasons).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([why, n]) => ({ why, n })),
@@ -554,7 +556,11 @@ async function fromAdal(db, id) {
 // newest backup here (its own, or another agency PC's — a replaced PC).
 export const adalJob = { kind: null, running: false, result: null, error: null, at: null }
 async function adalCommand(db, method, p, body) {
-  // Before the backup's "busy": giving an agent does not wait for a backup.
+  // Before the backup's "busy": neither of these waits for a backup.
+  if (p === '/_adal/company') {
+    await db('companies').update({ owner_name: String(body.name || '').trim() || null, phone2: String(body.phone || '').trim() || null })
+    return { ok: true }
+  }
   if (p.startsWith('/_adal/agents/')) {
     const W = await import('./whatsapp.js')
     if (p === '/_adal/agents/give') return { agents: await W.giveAgent(db, body), limit: await W.agentLimit(db) }

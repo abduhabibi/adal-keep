@@ -14,8 +14,9 @@ package main
 import (
 	"bufio"
 	"encoding/json"
-	"os"
 	"net/http"
+	neturl "net/url"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -133,6 +134,11 @@ func openAppWindow(root, url string) {
 		"--no-default-browser-check",
 		"--hide-crash-restore-bubble",
 		"--start-maximized",
+	}
+	// The main PC is reached over plain http: without this, every CV saved from it
+	// is held back with a "may be dangerous" warning. Only this one address.
+	if u, err := neturl.Parse(url); err == nil && u.Scheme == "http" && u.Hostname() != "localhost" && u.Hostname() != "127.0.0.1" {
+		args = append(args, "--unsafely-treat-insecure-origin-as-secure="+u.Scheme+"://"+u.Host)
 	}
 	// One that cannot start must not leave the person with nothing: the next one opens.
 	for _, b := range browsers() {

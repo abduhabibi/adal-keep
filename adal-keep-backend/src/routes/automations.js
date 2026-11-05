@@ -6,6 +6,7 @@ import { forgetRunTab, findRunTab, hostOf } from '../services/tabManager.js'
 import { openBrowserIfAny, openForPerson } from '../services/browser.js'
 import { waiting, answerCaptcha, doneWith } from '../services/attention.js'
 import { seal } from '../services/accountVault.js'
+import { plainReason, problemOf, goneFromMusaned } from '../services/runOutcome.js'
 import { assertPoliceReady, getProfileVerification, runPassportVerification } from '../services/verification.js'
 
 const router = express.Router()
@@ -429,7 +430,7 @@ export function stageOf(p, runs = {}) {
   if (p.status === 'medical_applied' || live(runs.wafid_book) || runs.wafid_book?.status === 'done') return 'wafid'
   if (p.chosen_at) return 'chosen'
   if (/another agency/i.test(p.musaned_stage || '')) return 'other_agency'
-  if (p.musaned_stage || runs.musaned_add_candidate?.status === 'done') return 'musaned'
+  if (!goneFromMusaned(runs) && (p.musaned_stage || runs.musaned_add_candidate?.status === 'done')) return 'musaned'
   return 'new'
 }
 
@@ -480,13 +481,16 @@ export function journeyOf(p, runs = {}, hasCv = false, docs = null, agents = [])
   const live = (r) => r && ['running', 'pending', 'paused'].includes(r.status)
   const step = (key, title, state, note = '', workflow = '') => ({ key, title, state, note, workflow })
   const fromRun = (r, doneNote = '') => r?.status === 'done' ? ['done', doneNote]
-    : live(r) ? ['active', r.status === 'paused' ? 'waiting for you' : r.status === 'running' ? 'working now' : 'in line']
-    : r?.status === 'failed' ? ['failed', 'last run failed'] : ['todo', '']
+    : live(r) ? ['active', r.status === 'paused' ? 'waiting for you' : r.status === 'running' ? 'working now' : /^Retry/.test(r.pause_reason || '') ? `trying again — ${plainReason(r.pause_reason)}` : 'in line']
+    : r?.status === 'failed' ? ['failed', plainReason(r.pause_reason)] : ['todo', '']
   const cv = step('cv', 'CV', hasCv ? 'done' : 'todo', hasCv ? 'made' : '')
-  const added = runs.musaned_add_candidate?.status === 'done' || !!p.musaned_stage
+  const gone = goneFromMusaned(runs)
+  const added = !gone && (runs.musaned_add_candidate?.status === 'done' || !!p.musaned_stage)
   const m = live(runs.musaned_add_candidate) ? fromRun(runs.musaned_add_candidate)
     : /another agency/i.test(p.musaned_stage || '') ? ['failed', 'registered by another agency']
-    : added ? ['done', p.chosen_at ? `chosen ${String(p.chosen_at).slice(0, 10)}` : 'not chosen yet'] : ['todo', '']
+    : added ? ['done', p.chosen_at ? `chosen ${String(p.chosen_at).slice(0, 10)}` : 'not chosen yet']
+    : gone ? ['todo', 'not on Musaned']
+    : runs.musaned_add_candidate?.status === 'failed' ? fromRun(runs.musaned_add_candidate) : ['todo', '']
   const musaned = step('musaned', 'Musaned', m[0], m[1], 'musaned_add_candidate')
   const w = p.status === 'medical_fit' ? ['done', 'FIT'] : p.status === 'medical_rejected' ? ['failed', 'UNFIT']
     : p.status === 'medical_applied' ? ['active', 'booked — waiting for the result'] : fromRun(runs.wafid_book)
@@ -560,7 +564,7 @@ router.get('/automations/stages', async (req, res) => {
     const db = req.app.locals.db
     const profiles = await db('profiles').select('id', 'status', 'musaned_stage', 'chosen_at', 'visa_stage', 'visa_application_number',
       'musaned_pro', 'employer_name', 'work_city', 'contract_number', 'labor_id', 'visa_number', 'medical_valid_until', 'musaned_payment')
-    const rows = await db('automation_queue').select('id', 'profile_id', 'workflow_id', 'status').orderBy('id', 'asc')
+    const rows = await db('automation_queue').select('id', 'profile_id', 'workflow_id', 'status', 'pause_reason', 'finished_at').orderBy('id', 'asc')
     const latest = new Map()
     for (const r of rows) {
       if (!latest.has(r.profile_id)) latest.set(r.profile_id, {})
@@ -576,6 +580,8 @@ router.get('/automations/stages', async (req, res) => {
       const all = (() => { const j = journeyOf(p, latest.get(p.id) || {}, withCv.has(p.id) || d.has('CV'), d, agents.get(p.id) || []); return [...j.lmis, ...j.embassy.slice(4)] })()
       return {
         steps: Object.fromEntries(all.map(s => [s.key, s.state])),
+        notes: Object.fromEntries(all.filter(s => s.state === 'failed' && s.note).map(s => [s.key, s.note])),
+        problem: problemOf(latest.get(p.id), new Set(all.filter(s => s.state === 'done').map(s => s.workflow))),
         who: Object.fromEntries(all.filter(s => s.who).map(s => [s.key, s.who])),
         missing: Object.fromEntries(all.map(s => [s.key, (s.docs || []).filter(x => !x.have).map(x => x.name)]).filter(([, m]) => m.length)),
       }

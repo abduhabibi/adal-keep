@@ -24,6 +24,7 @@ import { runFullWorkflow } from './lmisWorkflow.js'
 import { decideAgencyActions } from './jev/agencyManager.js'
 import { getActiveEmployee } from './activeEmployee.js'
 import { isAppLocked } from './subscription.js'
+import { plainReason, workflowName } from './runOutcome.js'
 import { openRunTab, forgetRunTab, tabOfRun, handTabToPerson, findRunTab, activeRunIds, hostOf, codeBoxUp } from './tabManager.js'
 import { registerTab, unregisterTab, noteLink } from './bandwidth.js'
 import { createRunQueue } from './runQueue.js'
@@ -180,7 +181,17 @@ async function recordFailure(db, job, errText, retryable) {
       updated_at: new Date().toISOString(),
     })
     console.log(`[worker] run #${job.id} FAILED permanently`)
+    await noteFailure(db, job, errText).catch(e => console.warn('[worker] note failed:', e.message))
   }
+}
+
+/** Her profile says what went wrong, once (the same failure again adds nothing). */
+async function noteFailure(db, job, errText) {
+  const line = `${workflowName(job.workflow_id)}: ${plainReason(errText)}`
+  const row = await db('profiles').where('id', job.profile_id).first('notes')
+  if (String(row?.notes || '').split('\n').pop().endsWith(line)) return
+  const dated = `[${new Date().toISOString().slice(0, 10)}] ${line}`
+  await db('profiles').where('id', job.profile_id).update({ notes: row?.notes ? `${row.notes}\n${dated}` : dated, updated_at: new Date().toISOString() })
 }
 
 /**

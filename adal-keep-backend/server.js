@@ -195,6 +195,7 @@ async function initSystem() {
       }, 60000)
       import('./src/services/whatsapp.js').then(w => w.startWhatsApp(db)).catch(e => console.warn('[whatsapp]', e.message))
       import('./src/services/browser.js').then(b => b.startBrowserQuietly())
+      import('./src/services/secretStore.js').then(s => s.moveSecretsToVault())
       import('./src/services/accountVault.js').then(v => {
         const lock = () => v.sealStored(db).catch(e => console.warn('[vault]', e.message))
         lock()

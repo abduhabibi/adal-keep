@@ -273,6 +273,7 @@ export default function ChecklistGridView({ checklist, onClose }) {
                   <td className="sticky left-0 z-10 bg-white dark:bg-slate-950 border-b border-r border-slate-200 dark:border-slate-800 p-2 font-medium text-slate-900 dark:text-white">
                     {profile.full_name}
                     {profile.broker_name && <div className="text-[10px] text-slate-400 font-normal">{profile.broker_name}</div>}
+                    {paths[profile.id]?.problem && <div className="text-[10px] text-red-600 font-normal max-w-[220px] whitespace-normal">⚠ {paths[profile.id].problem}</div>}
                   </td>
                   {columns.map((c) => {
                     const k = `${c.kind}:${c.key}`
@@ -280,7 +281,7 @@ export default function ChecklistGridView({ checklist, onClose }) {
                     if (c.kind === 'info') return <td key={k} className={`${cell} text-slate-600 dark:text-slate-300 px-2`}>{textOf(profile, c) || '—'}</td>
                     if (c.kind === 'path') {
                       const st = paths[profile.id]?.steps?.[c.key]
-                      return <td key={k} className={`${cell} text-base font-bold ${PATH_LOOK[st] || 'text-slate-300'}`} title={[st, paths[profile.id]?.who?.[c.key]].filter(Boolean).join(' — ')}>{PATH_MARK[st] || '—'}</td>
+                      return <td key={k} className={`${cell} text-base font-bold ${PATH_LOOK[st] || 'text-slate-300'}`} title={[st, paths[profile.id]?.notes?.[c.key], paths[profile.id]?.who?.[c.key]].filter(Boolean).join(' — ')}>{PATH_MARK[st] || '—'}</td>
                     }
                     if (c.kind === 'own') {
                       const v = cells[`${profile.id}|${c.key}`] || ''

@@ -103,7 +103,7 @@ export async function deleteFromHrPoolInRun(page, ctx) {
   if (!rows.length) {
     log(`ℹ️ passport ${passport} is not in the HR Pool: nothing to delete`)
     await ctx.notify?.(`ℹ️ ${ctx.profileName}: not available on Musaned`, `Passport ${passport} is not in the HR Pool. Nothing was deleted.`)
-    await ctx.noteProfile?.(`Musaned: passport ${passport} is not in the HR Pool (nothing deleted)`)
+    await ctx.noteProfile?.(`Musaned: passport ${passport} is not in the HR Pool (nothing deleted)`, { musaned_stage: null })
     return { ok: true, done: true, note: 'not available' }
   }
   if (rows.length > 1) return { ok: false, error: `Musaned shows ${rows.length} rows for passport ${passport}: delete the right one by hand` }
@@ -141,7 +141,7 @@ export async function deleteFromHrPoolInRun(page, ctx) {
   }
   log(`✓ passport ${passport} deleted from the HR Pool`)
   await ctx.notify?.(`✅ ${ctx.profileName}: deleted from Musaned`, `Passport ${passport} is no longer in the HR Pool.`)
-  await ctx.noteProfile?.(`Musaned: deleted from the HR Pool (passport ${passport})`)
+  await ctx.noteProfile?.(`Musaned: deleted from the HR Pool (passport ${passport})`, { musaned_stage: null })
   return { ok: true, done: true }
 }
 

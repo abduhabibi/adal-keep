@@ -458,7 +458,7 @@ export function startWatcher(watchDir, db, processorFn, tag = '[pipeline]') {
   }
   console.log(`${tag} watching ${watchDir}`)
   const timers = new Map()
-  fs.watch(watchDir, (evt, fname) => {
+  const watcher = fs.watch(watchDir, (evt, fname) => {
     if (!fname || fname.startsWith('.')) return
     const fp = path.join(watchDir, fname)
     clearTimeout(timers.get(fname))
@@ -466,5 +466,11 @@ export function startWatcher(watchDir, db, processorFn, tag = '[pipeline]') {
       timers.delete(fname)
       try { const s = await fs.promises.stat(fp); if (s.isFile()) await enqueueFile(db, fp) } catch {}
     }, 2000)) // 2 s without a change: the download or copy has finished
+  })
+  // The folder went away (a USB, a moved Downloads): wait for it, do not crash.
+  watcher.on('error', (e) => {
+    console.warn(`${tag} lost ${watchDir}: ${e.message}`)
+    watcher.close()
+    setTimeout(() => startWatcher(watchDir, db, processorFn, tag), 5000).unref?.()
   })
 }

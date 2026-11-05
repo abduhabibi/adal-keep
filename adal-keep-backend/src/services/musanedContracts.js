@@ -14,7 +14,7 @@
  * The first time a contract is found the profile counts as chosen and the
  * Wafid medical booking starts by itself.
  *
- * Musaned needs a signed-in Musaned in the Adal Keep Brave (captcha + OTP are
+ * Musaned needs a signed-in Musaned in Adal Browser (captcha + OTP are
  * always a person's). Signed out → one reminder task, and the check waits.
  * Nothing on Musaned is ever changed: it only searches, reads and downloads.
  */
@@ -170,7 +170,7 @@ export async function scanContracts(db, { auto = false } = {}) {
     if (!ok && await signInForCheck(db, page)) ok = await open(LIST_URL.replace('size=10', 'size=50'))
     if (!ok) {
       contractCheck.signedOut = true
-      await task(db, null, SIGN_IN_TASKS[1], 'Adal Keep looks at the Musaned list for newly chosen girls, but Musaned is signed out. Sign in to Musaned in the Adal Keep Brave whenever you can (captcha + code) — Adal Keep notices it by itself and checks again.')
+      await task(db, null, SIGN_IN_TASKS[1], 'Adal Keep looks at the Musaned list for newly chosen girls, but Musaned is signed out. Sign in to Musaned in Adal Browser whenever you can (captcha + code) — Adal Keep notices it by itself and checks again.')
       return { signedOut: true }
     }
     const cards = []
@@ -798,7 +798,7 @@ export async function checkContracts(db, { onlyId = null } = {}) {
       if (r.state === 'signed-out') {
         contractCheck.signedOut = true
         await task(db, null, SIGN_IN_TASKS[1],
-          'Adal Keep looks every 4 hours whether a Saudi employer chose a girl, but Musaned is signed out. Sign in to Musaned in the Adal Keep Brave whenever you can (captcha + code) — Adal Keep notices it by itself and checks again.')
+          'Adal Keep looks every 4 hours whether a Saudi employer chose a girl, but Musaned is signed out. Sign in to Musaned in Adal Browser whenever you can (captcha + code) — Adal Keep notices it by itself and checks again.')
         break
       }
     }

@@ -4,8 +4,8 @@
  *   bash adal-installer/build-installer.sh      (first: the newest installers)
  *   node adal-keep-backend/scripts/publish-install.mjs [days]   (default 3)
  *
- * Puts the two installers, Node.js and the Windows server packages (in parts:
- * a stored file is at most 50 MB) in a private Supabase bucket and prints one
+ * Puts the two installers, Node.js, the Windows server packages and Adal
+ * Browser (in parts: a stored file is at most 50 MB) in a private Supabase bucket and prints one
  * line to paste into PowerShell on the new PC. Nothing is built on that PC.
  *
  * The installers hold ADAL_LICENSE_KEY and the Supabase and AI keys, so they
@@ -39,6 +39,7 @@ const shaOf = (b) => crypto.createHash('sha256').update(b).digest('hex').toUpper
 const sha = shaOf(bundle)
 const node = fs.readFileSync(path.join(USB, 'deps/node-win-x64.zip'))
 const modules = fs.readFileSync(path.join(USB, 'deps/backend-modules.zip'))
+const browser = fs.readFileSync(path.join(USB, 'deps/adal-browser.zip'))
 const PART = 45 * 1024 * 1024
 console.log(`bundle: ${(bundle.length / 1048576).toFixed(1)} MB`)
 
@@ -57,15 +58,21 @@ const link = async (name) => {
 
 await put('adal-keep.zip', bundle, 'application/zip')
 await put('node-win-x64.zip', node, 'application/zip')
-const parts = []
-for (let i = 0, at = 0; at < modules.length; i++, at += PART) {
-  await put(`modules-${i}.bin`, modules.subarray(at, at + PART), 'application/octet-stream')
-  parts.push(await link(`modules-${i}.bin`))
+const inParts = async (name, data) => {
+  const parts = []
+  for (let i = 0, at = 0; at < data.length; i++, at += PART) {
+    await put(`${name}-${i}.bin`, data.subarray(at, at + PART), 'application/octet-stream')
+    parts.push(await link(`${name}-${i}.bin`))
+  }
+  return parts.map(u => `'${u}'`).join(', ')
 }
+const moduleUrls = await inParts('modules', modules)
+const browserUrls = await inParts('browser', browser)
 const script = fs.readFileSync(path.join(ROOT, 'adal-installer/files/web-install.ps1'), 'utf8')
   .replace('__BUNDLE_URL__', await link('adal-keep.zip')).replace('__BUNDLE_SHA__', sha)
   .replace('__NODE_URL__', await link('node-win-x64.zip')).replace('__NODE_SHA__', shaOf(node))
-  .replace('__MODULE_URLS__', parts.map(u => `'${u}'`).join(', ')).replace('__MODULES_SHA__', shaOf(modules))
+  .replace('__MODULE_URLS__', moduleUrls).replace('__MODULES_SHA__', shaOf(modules))
+  .replace('__BROWSER_URLS__', browserUrls).replace('__BROWSER_SHA__', shaOf(browser))
 await put('install.ps1', script, 'text/plain')
 // Written backwards: a long secret-looking link gets hidden or cut when copied
 // from a chat, and then the PC gets a broken link.

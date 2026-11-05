@@ -53,7 +53,7 @@ router.post('/:id/approve', async (req, res) => {
         await db('tasks').where({ id: task.id }).update(taskUpdate)
 
         const msg = isApproval 
-          ? `Pextran automation approved for ${existing.full_name}. Opening Brave...`
+          ? `Pextran automation approved for ${existing.full_name}. Opening Adal Browser...`
           : `ካለ ፕሮፋይል ጋር ተገናኝቷል፡ ${existing.full_name} (#${existing.id})`
 
         // Trigger Pextran flow (pennywise - reuse existing agent)

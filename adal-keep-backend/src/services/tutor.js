@@ -97,12 +97,9 @@ export const LESSONS = [
   { id: 'visa_run', route: '/profiles/:p', target: 'run-mofa_visa',
     am: ['ቪዛ (እንጃዝ)', 'visa.mofa.gov.sa ውስጥ ይገባል (ካፕቻውን እርስዎ)፣ New Application ይከፍታል፣ ፎቶን ጨምሮ ሙሉ ፎርሙን ይሞላል፣ ካፕቻ እና Save እንዲያደርጉ ይጠራዎታል።'],
     en: ['The visa (Enjaz)', 'It signs in to visa.mofa.gov.sa (you type the captcha), opens a New Application, fills the whole form with her photo and calls you for the captcha and Save.'] },
-  { id: 'lmis_contract', route: '/profiles/:p', target: 'run-lmis_contract',
-    am: ['የLMIS ውል', 'LMIS ውስጥ ውሉን ይሞላል፣ ሰነዶቹን ይጭናል፤ Submit የሚጫኑት እርስዎ ነዎት።'],
-    en: ['The LMIS contract', 'It fills the contract in LMIS and uploads the documents; you are the one who presses Submit.'] },
   { id: 'sounds', route: '', target: null,   // any page: no need to move
-    am: ['ድምፁን ይለዩ', 'ለመግባት (ካፕቻ፣ ኮድ) ሲጠራ እንደ ሰዓት ማንቂያ ይጮኻል፤ በገጹ ላይ ሲጫኑ ወይም 1 ደቂቃ ሲያልፍ ይቆማል። Submit ወይም Save ሲጠራ እያንዳንዱ ስራ የራሱ ድምፅ አለው። በዴስክቶፑ ላይም መልእክት ይወጣል።'],
-    en: ['Know the sounds', 'A sign-in call (captcha, code) beeps like a watch alarm until you click on that page, or 1 minute. A call to Submit or Save rings with the task\'s own sound. Both pop up on the desktop.'] },
+    am: ['ድምፁን ይለዩ', 'ሰው ሲያስፈልግ (ካፕቻ፣ ኮድ፣ Submit ወይም Save) አንድ ትንሽ ድምፅ ይሰማል፤ ከታች በግራ ያለው ደወል ምን እንደሚያስፈልግ ያሳያል።'],
+    en: ['Know the sound', 'When a person is needed (captcha, code, Submit or Save) you hear one small beep, and the bell at the bottom left says what is needed.'] },
 ]
 const LESSON_IDS = new Set(LESSONS.map(l => l.id))
 

@@ -176,8 +176,7 @@ export async function getBrowser() {
   const exec = findBrowserExecutable()
   if (!exec) {
     throw new Error(
-      'No Chromium-based browser found. Install Brave, Chrome, or Edge, ' +
-      'or set BRAVE_CDP_URL to an already-running instance with --remote-debugging-port=9222'
+      'Adal Browser is not on this PC yet: it is getting ready, try again in a minute.'
     )
   }
 
@@ -203,7 +202,7 @@ export async function getBrowser() {
       return _browser
     } catch (e) { lastErr = e }
   }
-  throw new Error('Brave is open without Adal Keep\'s control (it was opened by hand). Close every Brave window, then press the button again — Adal Keep opens Brave itself.')
+  throw new Error('The browser is open without Adal Keep\'s control (it was opened by hand). Close every browser window, then press the button again — Adal Keep opens it itself.')
 }
 
 /**

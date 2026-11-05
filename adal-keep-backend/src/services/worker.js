@@ -410,7 +410,7 @@ async function runJob(db, job) {
       const at = new Date(Date.now() + 2 * 60000).toISOString()
       await db('automation_queue').where('id', job.id).update({
         status: 'pending',
-        pause_reason: `Retry ${job.current_step || 0}/${MAX_ATTEMPTS} at ${at} — waiting for Brave to be open`,
+        pause_reason: `Retry ${job.current_step || 0}/${MAX_ATTEMPTS} at ${at} — waiting for Adal Browser to be open`,
         updated_at: at,
       })
       return

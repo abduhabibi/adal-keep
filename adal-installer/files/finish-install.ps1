@@ -3,6 +3,7 @@
 #  Unpacks the Windows dependencies that PREPARE put on the USB:
 #     deps\node-win-x64.zip     -> <install>\runtime
 #     deps\backend-modules.zip  -> <install>\backend\node_modules
+#     deps\adal-browser.zip     -> <install>\browser
 #  and checks that the server's native modules load.
 #  Exit code 0 = ready. A log is kept in <install>\install.log.
 # =====================================================================
@@ -40,6 +41,14 @@ try {
     tar.exe -xf (Join-Path $Deps 'backend-modules.zip') -C $backend
     if ($LASTEXITCODE -ne 0) { throw 'could not unpack backend-modules.zip' }
     Write-Host 'OK  server packages'
+
+    # --- Adal Browser: ready at the first start, nothing to download. If it is
+    # missing or locked the launcher fetches it, so this never stops the install.
+    $browserZip = Join-Path $Deps 'adal-browser.zip'
+    if (Test-Path $browserZip) {
+        tar.exe -xf $browserZip -C $InstDir
+        if ($LASTEXITCODE -eq 0) { Write-Host 'OK  Adal Browser' } else { Write-Host 'WARN Adal Browser not unpacked: it is fetched at the first start' }
+    }
 
     # --- the server cannot start without these, so check now, not at first use
     Push-Location $backend

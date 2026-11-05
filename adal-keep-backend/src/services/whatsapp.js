@@ -113,7 +113,7 @@ export async function connect(db, key = 'owner', { phone = '' } = {}, tries = 2)
   const { default: wweb } = await import('whatsapp-web.js')
   const opts = {}
   const exe = findBrowserExecutable()
-  if (!exe) { setState(key, { status: 'failed', error: 'Brave (or Chrome) is not installed on this PC' }); return s.state }
+  if (!exe) { setState(key, { status: 'failed', error: 'Adal Browser is not on this PC yet' }); return s.state }
   opts.authStrategy = new wweb.LocalAuth({ clientId: key, dataPath: DIR })
   opts.userAgent = realUserAgent(exe)
   opts.puppeteer = { executablePath: exe, headless: true, args: ['--no-first-run', '--no-default-browser-check', '--disable-gpu', '--disable-dev-shm-usage', '--mute-audio', '--disable-extensions'] }
@@ -243,7 +243,7 @@ export async function openWeb(db, key = 'owner') {
   let page, own = null
   // Shown in a window of its own for the sign-in; hidden again afterwards.
   const exe = findBrowserExecutable()
-  if (!exe) throw new Error('Brave (or Chrome) is not installed on this PC')
+  if (!exe) throw new Error('Adal Browser is not on this PC yet')
   const { default: puppeteer } = await import('puppeteer-core').catch(() => import('puppeteer'))
   own = await puppeteer.launch({ executablePath: exe, headless: false, defaultViewport: null,
     userDataDir: path.join(DIR, `session-${key}`), args: ['--no-first-run', '--no-default-browser-check', '--window-size=1100,800'] })

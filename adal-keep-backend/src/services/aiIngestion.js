@@ -1,14 +1,27 @@
 import os from 'os'
 import path from 'path'
+import { execFileSync } from 'child_process'
 import { startWatcher } from './docPipeline.js'
 import { startQueueWorker } from './ingestQueue.js'
 import { analyzeWithMineru } from './mineruClassifier.js'
 import { isAppLocked } from './subscription.js'
 
+// Where Windows really keeps Downloads: it is often moved to D:\ or OneDrive.
+export function windowsDownloads(run = readDownloadsKey, env = process.env) {
+  if (process.platform !== 'win32' && run === readDownloadsKey) return null
+  try {
+    const m = run().match(/REG_(?:EXPAND_)?SZ\s+(.+?)\s*$/m)
+    return m ? m[1].replace(/%([^%]+)%/g, (all, k) => env[k] ?? all) : null
+  } catch { return null }
+}
+function readDownloadsKey() {
+  return execFileSync('reg', ['query', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\User Shell Folders', '/v', '{374DE290-123F-4565-9164-39C4925E467B}'], { encoding: 'utf8', windowsHide: true })
+}
+
 // Folders watched for new documents. WATCH_DIR may list several, separated
 // by ";". Default: the user's Downloads folder (browser and Telegram saves),
 // plus Telegram Desktop's own folder and the inbox on Windows.
-const DOWNLOADS = path.join(os.homedir(), 'Downloads')
+const DOWNLOADS = windowsDownloads() || path.join(os.homedir(), 'Downloads')
 const WATCH_DIRS = (process.env.WATCH_DIR
   ? process.env.WATCH_DIR.split(';')
   : process.platform === 'win32'

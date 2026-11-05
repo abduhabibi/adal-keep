@@ -87,7 +87,7 @@ export default function ProfilesPage() {
       const moved = (s.results || []).filter(x => !x.first && x.state === 'chosen' && !x.unchanged).length
       const added = s.added || []
       if (added.length) toast.success(`Added to Adal Keep from Musaned: ${added.map(a => a.name).join(', ')}`, { duration: 10000 })
-      if (s.signedOut) toast.error('Musaned is signed out — sign in in the Adal Keep Brave; the check goes on by itself.', { id, duration: 8000 })
+      if (s.signedOut) toast.error('Musaned is signed out — sign in in Adal Browser; the check goes on by itself.', { id, duration: 8000 })
       else if (fresh.length) toast.success(`Newly chosen: ${fresh.join(', ')} — contracts saved.`, { id, duration: 10000 })
       else toast.success(`No one new.${moved ? ` ${moved} moved to a new stage.` : ''}${s.unknown?.length ? ` ${s.unknown.length} on Musaned are not in Adal Keep.` : ''}`, { id, duration: 6000 })
       load()

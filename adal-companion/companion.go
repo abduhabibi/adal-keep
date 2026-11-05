@@ -54,37 +54,37 @@ func main() {
 	// Files that could not be sent before wait in the outbox until delivered.
 	watchOutbox()
 
-	home, _ := os.UserHomeDir()
-	candidates := []string{
-		filepath.Join(home, "Downloads"),
-		filepath.Join(home, "Desktop"),
-		filepath.Join(home, "OneDrive", "Desktop"), // Desktop kept in OneDrive
-	}
-	for _, d := range candidates {
-		if info, err := os.Stat(d); err == nil && info.IsDir() {
-			watchDirs = append(watchDirs, d)
-			log.Printf("   📁 Watching: %s", d)
-		}
-	}
-
-	announce(serverReachable(), serverDisplayName+" ("+hostServer+")", watchDirs)
-
-	if len(watchDirs) == 0 {
-		log.Fatal("❌ No directories to watch")
-	}
-
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		log.Fatalf("❌ Watcher error: %v", err)
 	}
 	defer watcher.Close()
 
-	for _, d := range watchDirs {
-		watcher.Add(d)
+	started := time.Now()
+	watchFolders(watcher)
+	announce(serverReachable(), serverDisplayName+" ("+hostServer+")", watchDirs)
+	if len(watchDirs) == 0 {
+		log.Printf("⚠️ No folder to watch yet: looking again every %s", sweepEvery)
 	}
+
+	// Sending happens apart from watching: a slow upload must not leave change
+	// notices waiting, Windows drops them when too many pile up.
+	found := make(chan string, 256)
+	go func() {
+		for p := range found {
+			// A scanner writes a file in bursts; never upload it half-way.
+			if !waitForStableFile(p, 20*time.Second) {
+				log.Printf("⚠️ Still changing after 20s — uploading anyway: %s", filepath.Base(p))
+			}
+			log.Printf("📄 Detected: %s", filepath.Base(p))
+			processAndUpload(p)
+		}
+	}()
 
 	log.Println("✅ Companion running. Monitoring files...")
 	processed := make(map[string]time.Time)
+	sweep := time.NewTicker(sweepEvery)
+	defer sweep.Stop()
 
 	for {
 		select {
@@ -92,15 +92,7 @@ func main() {
 			if !ok {
 				return
 			}
-			if event.Op&(fsnotify.Create|fsnotify.Write) == 0 {
-				continue
-			}
-			ext := strings.ToLower(filepath.Ext(event.Name))
-			relevant := map[string]bool{
-				".jpg": true, ".jpeg": true, ".png": true, ".bmp": true,
-				".pdf": true, ".docx": true, ".xlsx": true,
-			}
-			if !relevant[ext] {
+			if event.Op&(fsnotify.Create|fsnotify.Write) == 0 || !isRelevant(event.Name) {
 				continue
 			}
 			if last, exists := processed[event.Name]; exists && time.Since(last) < 5*time.Second {
@@ -112,18 +104,21 @@ func main() {
 				continue
 			}
 			processed[event.Name] = time.Now()
-			// A scanner writes a file in bursts; never upload it half-way.
-			if !waitForStableFile(event.Name, 20*time.Second) {
-				log.Printf("⚠️ Still changing after 20s — uploading anyway: %s", filepath.Base(event.Name))
+			found <- event.Name
+
+		case <-sweep.C:
+			watchFolders(watcher)
+			for _, p := range missedFiles(watchDirs, started, processed) {
+				log.Printf("🔎 Found in the folder sweep: %s", filepath.Base(p))
+				processed[p] = time.Now()
+				found <- p
 			}
-			log.Printf("📄 Detected: %s", filepath.Base(event.Name))
-			processAndUpload(event.Name)
 
 		case err, ok := <-watcher.Errors:
 			if !ok {
 				return
 			}
-			log.Printf("⚠️ Error: %v", err)
+			log.Printf("⚠️ Error: %v", err) // the next sweep finds what was lost
 		}
 	}
 }

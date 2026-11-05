@@ -73,15 +73,19 @@ function fileToDataUri(absPath, mime) {
 // Phone photos are 3-12 MB; a CV prints them a few centimetres wide. Shrink
 // once (cached by path + modified time) so preview and PDF are light and fast.
 const _shrunk = new Map()
-async function imageDataUri(absPath, mime, maxPx) {
+async function imageDataUri(absPath, mime, maxPx, { trim = false } = {}) {
   if (!absPath || !fs.existsSync(absPath)) return ''
   if (mime && !mime.startsWith('image/')) return fileToDataUri(absPath, mime)
-  const key = absPath + ':' + fs.statSync(absPath).mtimeMs + ':' + maxPx
+  const key = absPath + ':' + fs.statSync(absPath).mtimeMs + ':' + maxPx + ':' + trim
   if (_shrunk.has(key)) return _shrunk.get(key)
   let uri
   try {
     const sharp = (await import('sharp')).default
-    const img = sharp(absPath).rotate().resize({ width: maxPx, height: maxPx, fit: 'inside', withoutEnlargement: true })
+    // Trimmed on its own first: sharp cannot trim and resize in one go, and a
+    // blank picture has nothing to trim.
+    let source = absPath
+    if (trim) source = await sharp(absPath).rotate().trim({ background: '#ffffff', threshold: 25 }).toBuffer().catch(() => absPath)
+    const img = (source === absPath ? sharp(absPath).rotate() : sharp(source)).resize({ width: maxPx, height: maxPx, fit: 'inside', withoutEnlargement: true })
     const { hasAlpha } = await sharp(absPath).metadata()
     uri = hasAlpha   // transparent banners stay PNG
       ? 'data:image/png;base64,' + (await img.png({ compressionLevel: 9 }).toBuffer()).toString('base64')
@@ -152,7 +156,7 @@ export async function buildTemplateData(db, profile, template, overrides = {}) {
   const fullBodyAbs = fullBodyFile ? resolveStoredPath(fullBodyFile.path) : null
   const passportAbs = passportFile ? resolveStoredPath(passportFile.path) : null
   const photoUrl    = photoAbs    ? await imageDataUri(photoAbs, photoFile.mimetype, 800)       : PHOTO_PH
-  const fullBodyUrl = fullBodyAbs ? await imageDataUri(fullBodyAbs, fullBodyFile.mimetype, 1400) : BODY_PH
+  const fullBodyUrl = fullBodyAbs ? await imageDataUri(fullBodyAbs, fullBodyFile.mimetype, 1400, { trim: true }) : BODY_PH
   let passportUrl = ''
   if (passportAbs) {
     if ((passportFile.mimetype || '').startsWith('image/')) {
@@ -339,12 +343,51 @@ export function splitLanguageCells(html) {
   })
 }
 
+// The CV page is one A4 in the preview and in the PDF alike. The full-body
+// photo fills its box without pushing the page taller (it takes the room left
+// beside the table, whole: a photo often holds the face as well).
+const PAGE_CSS = `
+body{background:#fff!important;}
+.cv-page{width:210mm!important;min-height:297mm!important;margin:0 auto!important;box-shadow:none!important;flex:none;}
+.main-grid{align-items:stretch;}
+.right-col{display:flex;flex-direction:column;}
+.body-photo{position:relative;flex:1 1 auto;min-height:50mm;padding:0!important;overflow:hidden;background:#fff;}
+.body-photo img{position:absolute;left:0;top:0;width:100%!important;height:100%!important;max-width:none!important;max-height:none!important;object-fit:contain!important;}
+`
+// Templates whose photos were capped small (Al-Shahd and those made like it).
+const WIDE_PHOTOS_CSS = `
+.cv-body{display:flex;flex-direction:column;}
+.main-grid{flex:1 1 auto;}
+.left-col{flex:1 1 0;min-width:0;display:flex;}
+.left-col .details{height:100%;}
+.right-col{flex:0 0 62mm;}
+.name-panel .inner{height:36mm;}
+.headshot-cell{width:34mm;padding:0!important;}
+.headshot-cell img{display:block;width:100%;max-width:none;height:40mm;object-fit:cover;object-position:center top;border:0;}
+`
+// Runs in the preview and before the PDF, so both show the same page. A CV too
+// tall for A4 first loses cell padding, then shrinks its body; one that fits is
+// left alone.
+const FIT_SCRIPT = `<script>(function(){
+function fit(){
+  var p=document.querySelector('.cv-page');if(!p||p.dataset.fitted)return;p.dataset.fitted='1';
+  var limit=Math.floor(297*96/25.4)+1,tall=function(){return p.scrollHeight>limit};
+  var st=document.createElement('style');document.head.appendChild(st);
+  for(var n=6;n>=2&&tall();n--)st.textContent='.cv-page td{padding-top:'+n+'px!important;padding-bottom:'+n+'px!important}';
+  var b=p.querySelector('.cv-body')||p;
+  for(var z=98;z>=60&&tall();z-=2)b.style.zoom=z/100;
+  p.style.height='297mm';p.style.overflow='hidden';
+}
+window.adalFit=fit;
+if(document.readyState==='complete')fit();else addEventListener('load',fit);
+})()</script>`
+
 export function mergeTemplate(html, css, data) {
   let out = splitLanguageCells(html || '')
 
   // Base CSS — force A4 tall page
   const baseCss = `html,body{margin:0;padding:0;min-height:297mm;box-sizing:border-box;} @page{size:A4;margin:0;} body{display:flex;flex-direction:column;min-height:297mm;} .adal-page{flex:1;display:flex;flex-direction:column;} .adal-body{flex:1;}`
-  const combinedCss = baseCss + '\n' + (css || '')
+  const combinedCss = baseCss + '\n' + (css || '') + PAGE_CSS + (/max-height:\s*220px/.test(css || '') ? WIDE_PHOTOS_CSS : '')
 
   if (/<\/head>/i.test(out)) out = out.replace(/<\/head>/i, `<style>${combinedCss}</style></head>`)
   else out = `<style>${combinedCss}</style>` + out
@@ -398,7 +441,7 @@ export function mergeTemplate(html, css, data) {
       : ''
 
     const passportPage =
-      '<div style="page-break-before:always;width:210mm;height:297mm;padding:8px 16px;box-sizing:border-box;display:flex;flex-direction:column;background:#fff;">' +
+      '<div style="page-break-before:always;flex:none;margin:0 auto;width:210mm;height:297mm;padding:8px 16px;box-sizing:border-box;display:flex;flex-direction:column;background:#fff;">' +
         headerHtml + h1Html +
         '<div style="flex:1;display:flex;align-items:center;justify-content:center;padding:2mm 0;min-height:0;"><img src="' + data.PASSPORT_URL + '" style="max-width:100%;max-height:100%;object-fit:contain;" /></div>' +
         footerHtml +
@@ -415,7 +458,7 @@ export function mergeTemplate(html, css, data) {
     }
   }
 
-  return out
+  return /<\/body>/i.test(out) ? out.replace(/<\/body>/i, FIT_SCRIPT + '</body>') : out + FIT_SCRIPT
 }
 
 // One headless browser kept warm for PDFs: starting a browser per CV cost
@@ -438,6 +481,7 @@ export async function htmlToPdf(html, outPath) {
   try {
     // Everything is inline (data: images), so "load" is enough.
     await page.setContent(html, { waitUntil: 'load', timeout: 60000 })
+    await page.evaluate(() => window.adalFit?.())
     await page.pdf({
       path: outPath,
       format: 'A4',

@@ -1,9 +1,9 @@
 # Adal Keep - install over the internet, without the USB.
 # Fetched by:  irm '<link>' | iex   (the link comes from publish-install.mjs).
 # Downloads the installers, Node.js and the server packages ready-made for
-# Windows (nothing is built on this PC) and Tailscale, runs the installer (Adal
-# Browser fetches itself at Adal Keep's first start), then removes the downloaded files: the installers
-# hold the licence key, so they must not stay on the PC.
+# Windows (nothing is built on this PC), Adal Browser and Tailscale, runs the
+# installer, then removes the downloaded files: the installers hold the licence
+# key, so they must not stay on the PC.
 function Install-AdalKeep {
     $ErrorActionPreference = 'Stop'
     $ProgressPreference = 'SilentlyContinue'
@@ -14,6 +14,8 @@ function Install-AdalKeep {
     $NodeSha = '__NODE_SHA__'
     $ModuleParts = @(__MODULE_URLS__)
     $ModulesSha = '__MODULES_SHA__'
+    $BrowserParts = @(__BROWSER_URLS__)
+    $BrowserSha = '__BROWSER_SHA__'
     $TailscaleUrl = 'https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi'
     $Dir = Join-Path $env:LOCALAPPDATA 'AdalKeepSetup'
 
@@ -34,39 +36,49 @@ function Install-AdalKeep {
         if ((Get-FileHash $file -Algorithm SHA256).Hash -ne $want) { throw "$(Split-Path $file -Leaf) is damaged. Run the line again." }
     }
 
+    function Get-Parts($urls, $to) {
+        $out = [IO.File]::Create($to)
+        try {
+            foreach ($u in $urls) {
+                $part = Join-Path $Dir 'part.bin'
+                Remove-Item $part -Force -ErrorAction SilentlyContinue
+                if (-not (Get-File $u $part)) { return $false }
+                $in = [IO.File]::OpenRead($part)
+                try { $in.CopyTo($out) } finally { $in.Close() }
+                Remove-Item $part -Force
+            }
+        } finally { $out.Close() }
+        return $true
+    }
+
     try {
         if (Test-Path $Dir) { Remove-Item $Dir -Recurse -Force }
         $deps = Join-Path $Dir 'deps'
         New-Item -ItemType Directory -Force -Path (Join-Path $deps 'tailscale') | Out-Null
 
-        Write-Host '  [1/4] Adal Keep' -ForegroundColor Cyan
+        Write-Host '  [1/5] Adal Keep' -ForegroundColor Cyan
         $zip = Join-Path $Dir 'adal-keep.zip'
         if (-not (Get-File $Url $zip)) { throw 'The download failed. The link may have expired: ask for a new one.' }
         Test-Sha $zip $Sha
         Expand-Archive -Path $zip -DestinationPath $Dir -Force
         Remove-Item $zip -Force
 
-        Write-Host '  [2/4] Node.js' -ForegroundColor Cyan
+        Write-Host '  [2/5] Node.js' -ForegroundColor Cyan
         $node = Join-Path $deps 'node-win-x64.zip'
         if (-not (Get-File $NodeUrl $node)) { throw 'Node.js did not download. Run the line again.' }
         Test-Sha $node $NodeSha
 
-        Write-Host '  [3/4] Server packages' -ForegroundColor Cyan
+        Write-Host '  [3/5] Server packages' -ForegroundColor Cyan
         $modules = Join-Path $deps 'backend-modules.zip'
-        $out = [IO.File]::Create($modules)
-        try {
-            foreach ($u in $ModuleParts) {
-                $part = Join-Path $Dir 'part.bin'
-                Remove-Item $part -Force -ErrorAction SilentlyContinue
-                if (-not (Get-File $u $part)) { throw 'The server packages did not download. Run the line again.' }
-                $in = [IO.File]::OpenRead($part)
-                try { $in.CopyTo($out) } finally { $in.Close() }
-                Remove-Item $part -Force
-            }
-        } finally { $out.Close() }
+        if (-not (Get-Parts $ModuleParts $modules)) { throw 'The server packages did not download. Run the line again.' }
         Test-Sha $modules $ModulesSha
 
-        Write-Host '  [4/4] Tailscale' -ForegroundColor Cyan
+        Write-Host '  [4/5] Adal Browser' -ForegroundColor Cyan
+        $browser = Join-Path $deps 'adal-browser.zip'
+        if (-not (Get-Parts $BrowserParts $browser)) { throw 'Adal Browser did not download. Run the line again.' }
+        Test-Sha $browser $BrowserSha
+
+        Write-Host '  [5/5] Tailscale' -ForegroundColor Cyan
         if (-not (Get-File $TailscaleUrl (Join-Path $deps 'tailscale\tailscale-setup.msi'))) {
             Remove-Item (Join-Path $deps 'tailscale\tailscale-setup.msi') -Force -ErrorAction SilentlyContinue
         }

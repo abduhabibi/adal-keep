@@ -11,14 +11,14 @@ The files are numbered in the order you use them.
 
 1. PREPARE  (once per USB, on any Windows PC with internet)
    Double-click it and wait for DONE in green (about 5 minutes).
-   It downloads Node.js, the server packages, the Brave browser and
-   Tailscale into deps\. Running it again later is quick: what is already on
+   It downloads Node.js, the server packages and Tailscale into deps\.
+   A USB made by the build already has all of this, Adal Browser too. Running it again later is quick: what is already on
    the USB is kept.
 
 2. MAIN PC
    Double-click, click YES on the admin prompt. Nothing to answer.
-   Installs to C:\AdalKeep, starts with Windows, opens on
-   http://localhost:4000 . Brave installs by itself in the background.
+   Installs to C:\AdalKeep, starts with Windows, and opens as an
+   app from its icon. Adal Browser comes with it, nothing to download.
 
 3. EMPLOYEE PCs
    Double-click, click YES. An "Adal Keep" icon appears on the

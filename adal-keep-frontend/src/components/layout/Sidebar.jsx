@@ -1,5 +1,7 @@
 import { NavLink } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
+import toast from 'react-hot-toast'
+import api from '../../services/api'
 
 const links = [
   {
@@ -213,6 +215,14 @@ export default function Sidebar({ isOpen, onToggle, collapsed, onToggleCollapse 
                 {!collapsed && <span className="truncate">{link.label}</span>}
               </NavLink>
             ))}
+            {onMainPC() && !window.__ADAL_CLOUD && import.meta.env.VITE_DEMO !== '1' && (
+              <button type="button" title="Open Adal Browser"
+                onClick={() => api.post('/browser/open').catch(e => toast.error(e.response?.data?.error || e.message))}
+                className={`${getLinkClass({ isActive: false })} w-full ${collapsed ? 'justify-center px-0' : ''}`}>
+                <span className="shrink-0">🌐</span>
+                {!collapsed && <span className="truncate">Adal Browser</span>}
+              </button>
+            )}
             <NavLink
               to={settingsLink.to}
               onClick={() => { if (window.innerWidth < 768) onToggle() }}

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { buildTemplateData } from '../src/services/cvRender.js'
+import { buildTemplateData, mergeTemplate } from '../src/services/cvRender.js'
 
 // A knex stand-in: every query finds nothing (no files, no broker).
 function emptyDb() {
@@ -38,4 +38,12 @@ test('"Have experience" on the profile fills the experience rows', async () => {
 test('living town falls back to the region', async () => {
   const d = await buildTemplateData(emptyDb(), { id: 1, region: 'Oromia', place_of_birth: 'HALABA' }, tpl, {})
   assert.equal(d.LIVING_TOWN, 'Oromia')
+})
+
+test('a CV carries its one-page fit, so preview and PDF are the same page', () => {
+  const html = mergeTemplate('<div class="cv-page"><div class="cv-body">x</div></div>', '.a{}', {})
+  assert.match(html, /window\.adalFit=fit/)
+  assert.match(html, /\.body-photo img\{position:absolute/)
+  assert.doesNotMatch(html, /\.headshot-cell img\{display:block;width:100%/) // only for capped templates
+  assert.match(mergeTemplate('<div class="cv-page"></div>', '.x{max-height: 220px}', {}), /\.headshot-cell img\{display:block;width:100%/)
 })

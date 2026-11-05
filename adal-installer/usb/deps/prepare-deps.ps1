@@ -8,21 +8,18 @@
 #  Produces (in deps\):
 #     node-win-x64.zip        Node.js runtime for Windows
 #     backend-modules.zip     the server's node_modules, built FOR WINDOWS
-#     brave\BraveSetup.exe    Brave browser installer (used by the automations)
 #     tailscale\tailscale-setup.msi  the private link (other branch, home, phones)
 #     prepare.log             full output, for when something fails
 #     READY.txt               written last - the installer checks for it
 #
 #  Fast: downloads with curl.exe into the PC's temp folder (not straight onto
-#  the USB), Brave downloads in the background while the packages build, and
-#  Node / Brave already on the USB from an earlier run are kept.
+#  the USB), and Node already on the USB from an earlier run is kept.
 # =====================================================================
 $ErrorActionPreference = 'Stop'
 $ProgressPreference    = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 $NodeVersion = '24.14.1'          # keep in step with the Node used for development
-$BraveUrl    = 'https://github.com/brave/brave-browser/releases/latest/download/BraveBrowserStandaloneSilentSetup.exe'
 $TailscaleUrl = 'https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi'
 $Deps   = $PSScriptRoot
 $Work   = Join-Path $env:TEMP ('adal-deps-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
@@ -31,7 +28,7 @@ $Log    = Join-Path $Deps 'prepare.log'
 $Curl   = (Get-Command curl.exe -ErrorAction SilentlyContinue).Source
 $Start  = Get-Date
 
-function Step($n, $msg) { Write-Host ''; Write-Host " [$n/5] $msg" -ForegroundColor Cyan }
+function Step($n, $msg) { Write-Host ''; Write-Host " [$n/4] $msg" -ForegroundColor Cyan }
 function Ok($msg)       { Write-Host "       OK  $msg" -ForegroundColor Green }
 function Note($msg)     { Write-Host "       $msg" -ForegroundColor DarkGray }
 function Fail($msg) {
@@ -92,21 +89,7 @@ if (Test-Path $Ready) { Remove-Item $Ready -Force }
 Set-Content -Path $Log -Value "Adal Keep PREPARE $(Get-Date -Format 'yyyy-MM-dd HH:mm') on $env:COMPUTERNAME" -Encoding ASCII
 New-Item -ItemType Directory -Force -Path $Work | Out-Null
 
-$braveDir = Join-Path $Deps 'brave'
-$braveExe = Join-Path $braveDir 'BraveSetup.exe'
-$braveTmp = Join-Path $Work 'BraveSetup.exe'
-$braveJob = $null
-
 try {
-    # Brave (167 MB) downloads in the background while the packages build.
-    # Already on the USB from an earlier PREPARE: kept.
-    $haveBrave = (Test-Path $braveExe) -and ((Get-Item $braveExe).Length -gt 100MB)
-    if (-not $haveBrave -and $Curl) {
-        $braveJob = Start-Process -FilePath $Curl -ArgumentList @('-L', '--fail', '-s', '-S', '--retry', '3', '-o', "`"$braveTmp`"", $BraveUrl) `
-            -WindowStyle Hidden -PassThru
-        $null = $braveJob.Handle
-    }
-
     # ------------------------------------------------------------------
     Step 1 "Node.js $NodeVersion"
     $nodeZip  = Join-Path $Deps 'node-win-x64.zip'
@@ -138,7 +121,7 @@ try {
     Copy-Item (Join-Path $Deps 'source\package.json') $build
     if (Test-Path (Join-Path $Deps 'source\package-lock.json')) { Copy-Item (Join-Path $Deps 'source\package-lock.json') $build }
     $env:Path = "$nodeDir;$env:Path"
-    $env:PUPPETEER_SKIP_DOWNLOAD = '1'      # the automations use the installed Brave
+    $env:PUPPETEER_SKIP_DOWNLOAD = '1'      # the automations use Adal Browser
     $code = RunQuiet $node @("`"$npmCli`"", 'ci', '--omit=dev', '--no-audit', '--no-fund') $build
     if ($code -ne 0) {
         Note 'npm ci failed - trying npm install'
@@ -158,32 +141,8 @@ try {
     Ok ("server packages  ($(MB $modTmp) MB)")
 
     # ------------------------------------------------------------------
-    Step 3 'Brave browser (offline installer)'
-    New-Item -ItemType Directory -Force -Path $braveDir | Out-Null
-    $gotBrave = $haveBrave
-    if ($haveBrave) {
-        Note 'already on the USB - kept'
-    } else {
-        if ($braveJob) {
-            while (-not $braveJob.HasExited) {
-                $sz = if (Test-Path $braveTmp) { [math]::Round((Get-Item $braveTmp).Length / 1MB) } else { 0 }
-                Write-Host "`r       downloading... $sz of ~160 MB   " -NoNewline
-                Start-Sleep -Seconds 1
-            }
-            Write-Host "`r                                          `r" -NoNewline
-            $gotBrave = ($braveJob.ExitCode -eq 0) -and (Test-Path $braveTmp)
-        }
-        if (-not $gotBrave) { $gotBrave = Download $BraveUrl $braveTmp }
-        if ($gotBrave) {
-            Note 'copying to the USB...'
-            Copy-Item $braveTmp $braveExe -Force
-        }
-    }
-    if ($gotBrave) { Ok ("BraveSetup.exe  ($(MB $braveExe) MB)") }
-    else { Write-Host '       WARN  Brave could not be downloaded. Installs still work; install Brave by hand.' -ForegroundColor Yellow }
-
     # ------------------------------------------------------------------
-    Step 4 'Tailscale (the private link between branches, home and phones)'
+    Step 3 'Tailscale (the private link between branches, home and phones)'
     $tsDir = Join-Path $Deps 'tailscale'
     $tsMsi = Join-Path $tsDir 'tailscale-setup.msi'
     New-Item -ItemType Directory -Force -Path $tsDir | Out-Null
@@ -198,12 +157,11 @@ try {
     else { Write-Host '       WARN  Tailscale could not be downloaded. Install it from tailscale.com by hand.' -ForegroundColor Yellow }
 
     # ------------------------------------------------------------------
-    Step 5 'Marking the USB ready'
+    Step 4 'Marking the USB ready'
     Set-Content -Path $Ready -Encoding ASCII -Value @(
         'Adal Keep USB dependencies - ready',
         "prepared:  $(Get-Date -Format 'yyyy-MM-dd HH:mm') on $env:COMPUTERNAME",
         "node:      $NodeVersion",
-        "brave:     $(if ($gotBrave) { 'included' } else { 'missing' })",
         "tailscale: $(if ($gotTs) { 'included' } else { 'missing' })"
     )
     Ok 'ready'
@@ -213,7 +171,6 @@ catch {
     Fail "$($_.Exception.Message) (at line $($_.InvocationInfo.ScriptLineNumber))"
 }
 finally {
-    if ($braveJob -and -not $braveJob.HasExited) { try { $braveJob.Kill() } catch {} }
     Remove-Item $Work -Recurse -Force -ErrorAction SilentlyContinue
 }
 

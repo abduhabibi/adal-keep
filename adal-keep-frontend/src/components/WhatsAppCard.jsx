@@ -188,7 +188,7 @@ export default function WhatsAppCard() {
           <Button onClick={() => connect(false)} disabled={s.status === 'starting' || s.status === 'signing-in'}>
             {s.status === 'starting' ? 'Opening WhatsApp…' : s.status === 'signing-in' ? 'Signing in…' : '💬 Connect my WhatsApp'}
           </Button>
-          <Button variant="secondary" onClick={openWeb} disabled={s.status === 'starting' || s.status === 'signing-in'} title="Opens a normal web.whatsapp.com tab in Adal Keep's Brave: sign in there; Adal Keep connects when you are in">
+          <Button variant="secondary" onClick={openWeb} disabled={s.status === 'starting' || s.status === 'signing-in'} title="Opens a normal web.whatsapp.com tab in Adal Browser: sign in there; Adal Keep connects when you are in">
             🌐 Sign in on web.whatsapp.com
           </Button>
           {s.error && <span className="text-sm text-red-600">{s.error}</span>}

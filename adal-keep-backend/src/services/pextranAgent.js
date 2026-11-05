@@ -73,7 +73,7 @@ export async function startNewRecruit(profileName) {
   }
 
   const browser = await ensureBrowser()
-  if (!browser) return { ok: false, error: 'Brave አልተከፈተም' }
+  if (!browser) return { ok: false, error: 'Adal Browser አልተከፈተም' }
 
   // Go to main Pextran page first, then click "Recruits" in left sidebar as requested
   let page = await getOrOpenTab(
@@ -134,7 +134,7 @@ export async function approvePextranNext(task) {
 
   const { ensureBrowser, getOrOpenTab } = api()
   const browser = await ensureBrowser()
-  if (!browser) throw new Error('Brave አልተከፈተም')
+  if (!browser) throw new Error('Adal Browser አልተከፈተም')
 
   const page = await getOrOpenTab(browser, ['pextran.com'], null)
   if (!page) throw new Error('No Pextran tab')

@@ -152,6 +152,9 @@ if [ -s "$APK" ]; then
 else
   echo "   WARN no phone app yet (adal-phone not built)"
 fi
+# Adal Browser travels with the install: nothing to fetch on the new PC.
+bash "$INST/pack-browser.sh" "$USB/deps"
+rm -rf "$USB/deps/brave"   # no longer installed
 cp -f "$BACK/package.json" "$BACK/package-lock.json" "$USB/deps/source/"
 cp -f "$INST/README-USB.txt" "$USB/README-USB.txt"
 # A previous PREPARE built node_modules for an older package.json: say so.

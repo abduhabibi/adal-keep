@@ -5,7 +5,7 @@
 ;    makensis -DCOMPANION usb-installer.nsi   -> "3 - Install Adal Companion.exe"
 ;
 ;  Main (server PC): app files are inside the .exe; the Windows Node runtime,
-;  the server packages and Brave come from the USB's deps\ folder, which
+;  the server packages and Adal Browser come from the USB's deps\ folder, which
 ;  "1 - PREPARE (once, needs internet).bat" fills once.
 ;  Companion (employee PC): fully self-contained, needs nothing else.
 ;
@@ -119,6 +119,9 @@ Section "Install"
   ; ============================ EMPLOYEE PC ============================
   DetailPrint "Copying the Companion..."
   File /r "stage\companion\*"
+  ; Adal Browser ready at the first start; missing here, it is fetched then
+  nsExec::Exec 'tar.exe -xf "$EXEDIR\deps\adal-browser.zip" -C "$INSTDIR"'
+  Pop $0
   ; the Companion saves the discovered server into companion.conf here
   nsExec::Exec 'icacls "$INSTDIR" /grant *S-1-5-32-545:(OI)(CI)M /C /Q'
   Pop $0
@@ -130,7 +133,7 @@ Section "Install"
   Pop $0
 
   ; Employees use Adal Keep through this PC: AdalKeep.exe opens the main PC's
-  ; Adal Keep in an app-style Brave window with the Adal Keep logo, and runs the
+  ; Adal Keep in an app-style window with the Adal Keep logo, and runs the
   ; Companion (sends new scans) in the background. Opens at Windows login too.
 
   CreateDirectory "$SMPROGRAMS\${APP_NAME}"
@@ -140,7 +143,7 @@ Section "Install"
   CreateShortcut "$DESKTOP\${APP_NAME}.lnk" "$INSTDIR\AdalKeep.exe" "" "$INSTDIR\AdalKeep.exe" 0
   CreateShortcut "$SMPROGRAMS\${APP_NAME}\${APP_NAME}.lnk" "$INSTDIR\AdalKeep.exe" "" "$INSTDIR\AdalKeep.exe" 0
   CreateShortcut "$SMPROGRAMS\${APP_NAME}\Uninstall ${PRODUCT}.lnk" "$INSTDIR\uninstall.exe"
-  ; The taskbar shows the Adal Keep window as Adal Keep (its logo), not Brave.
+  ; The taskbar shows the Adal Keep window as Adal Keep (its logo).
   nsExec::Exec '"$INSTDIR\AdalKeep.exe" --set-shortcut-ids "$DESKTOP\${APP_NAME}.lnk" "$SMPROGRAMS\${APP_NAME}\${APP_NAME}.lnk"'
   Pop $0
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "${APP_KEY}" '"$INSTDIR\AdalKeep.exe" --background'
@@ -194,7 +197,7 @@ Section "Install"
   Delete "$INSTDIR\Open Adal Keep.url"
   Delete "$SMPROGRAMS\${APP_NAME}\Open ${APP_NAME} in the browser.lnk"
   CreateShortcut "$SMPROGRAMS\${APP_NAME}\Uninstall ${APP_NAME}.lnk" "$INSTDIR\uninstall.exe"
-  ; The taskbar shows the Adal Keep window as Adal Keep (its logo), not Brave.
+  ; The taskbar shows the Adal Keep window as Adal Keep (its logo).
   nsExec::Exec '"$INSTDIR\AdalKeep.exe" --set-shortcut-ids "$DESKTOP\${APP_NAME}.lnk" "$SMPROGRAMS\${APP_NAME}\${APP_NAME}.lnk"'
   Pop $0
   ; start the server with Windows: no window, it restarts itself if it stops

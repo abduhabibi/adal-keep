@@ -119,7 +119,7 @@ export async function checkAll(db, { onlyId = null, auto = false } = {}) {
           `wafid.com shows ${r.text} for passport ${p.passport_number}. Status set to Medical · ${r.state === 'fit' ? 'Fit' : 'Rejected'}.`)
       }
       if (r.state === 'challenge') {
-        await note(db, p.id, 'Wafid asks "I am not a robot"', 'The medical check stopped. Open wafid.com/en/medical-status-search once in the Adal Keep Brave, answer it, then press "Check medical results now".')
+        await note(db, p.id, 'Wafid asks "I am not a robot"', 'The medical check stopped. Open wafid.com/en/medical-status-search once in Adal Browser, answer it, then press "Check medical results now".')
         break
       }
     }

@@ -47,6 +47,9 @@ export default function LiveTab({ runId, fill = false, startFull = false, onClos
   const [fps, setFps] = useState(0)
   const [zoom, setZoom] = useState(1)
   const [busy, setBusy] = useState(false)
+  const [codeBox, setCodeBox] = useState(false)
+  const [typeCode, setTypeCode] = useState(false)   // the browser would not read the clipboard: paste by hand
+  const streamFailed = useRef(false)
   const last = useRef(null)
   const live = useRef(null)          // the live link (cloud/live.js) when it is up
   const frames = useRef([])
@@ -84,6 +87,7 @@ export default function LiveTab({ runId, fill = false, startFull = false, onClos
             if (Number(m.run) !== Number(runId) || !alive) return
             if (m.t === 'inputError') { setErr(m.error); return }
             if (m.t === 'signInCode') { copyCode(m.code); return }
+            if (m.codeBox !== undefined) setCodeBox(!!m.codeBox)
             if (m.gone && (m.t === 'frame' || m.t === 'mirror')) { setErr(GONE); return }
             if (m.t === 'frame' && view === 'picture') {
               const bin = atob(m.img), bytes = new Uint8Array(bin.length)
@@ -93,6 +97,7 @@ export default function LiveTab({ runId, fill = false, startFull = false, onClos
             } else if (m.t === 'mirror' && view === 'mirror' && m.gz) {
               const p = await gunzipJSON(m.gz)
               if (!alive) return
+              setCodeBox(!!p.codeBox)
               setPage(p); setErr(null); tick(); setMeta({ url: p.url || '', title: p.title || '' })
             }
           })
@@ -112,7 +117,16 @@ export default function LiveTab({ runId, fill = false, startFull = false, onClos
           if (view === 'mirror') {
             const r = await api.get(`/automations/${runId}/mirror`)
             if (!alive) return
+            setCodeBox(!!r.data.codeBox)
             setPage(r.data); setErr(null); tick(); setMeta({ url: r.data.url || '', title: r.data.title || '' })
+          } else if (!PHONE && !streamFailed.current) {
+            // The PC sends the picture as it changes; only the address is asked for.
+            const r = await api.get(`/automations/${runId}/tab`)
+            if (!alive) return
+            setCodeBox(!!r.data.codeBox); setMeta({ url: r.data.url || '', title: r.data.title || '' }); setErr(null)
+            const url = document.hidden ? null : `${api.defaults.baseURL}/automations/${runId}/stream`
+            setSrc(s => s === url ? s : url)
+            setMode('live')
           } else {
             const r = await api.get(`/automations/${runId}/screen`, { responseType: 'blob' })
             if (!alive) return
@@ -123,7 +137,7 @@ export default function LiveTab({ runId, fill = false, startFull = false, onClos
         } catch (e) {
           if (alive) setErr(e.response?.status === 404 ? GONE : 'The PC tab did not answer.')
         }
-        if (alive) timer = setTimeout(step, document.hidden ? 5000 : 900)
+        if (alive) timer = setTimeout(step, document.hidden ? 5000 : !PHONE && view === 'picture' && !streamFailed.current ? 1500 : 900)
       }
       poke.current = () => { clearTimeout(timer); timer = setTimeout(step, 250) }
       step()
@@ -145,6 +159,19 @@ export default function LiveTab({ runId, fill = false, startFull = false, onClos
     }
     catch (e) { setErr(e.response?.data?.error || 'The PC did not do it.') }
     finally { setBusy(false); poke.current?.() }
+  }
+
+  // The page asks for a code: what the person copied from the authenticator goes in.
+  const giveCode = (raw) => {
+    const code = String(raw || '').replace(/\s/g, '').match(/\d{4,8}/)?.[0]
+    if (!code) return toast.error('No code found: copy it from your authenticator first.', { id: 'paste-code' })
+    setTypeCode(false)
+    send({ kind: 'code', code })
+    toast.success('Code sent', { id: 'paste-code', duration: 2000 })
+  }
+  const pasteCode = async () => {
+    try { giveCode(await navigator.clipboard.readText()) }
+    catch { setTypeCode(true) }
   }
 
   // Picture: tap = click there; drag = scroll the page (or the picture when magnified); two fingers = magnify.
@@ -228,6 +255,17 @@ export default function LiveTab({ runId, fill = false, startFull = false, onClos
       {meta.title && !fill && <p className="text-[10px] text-slate-500 truncate">{meta.title}</p>}
       {err && <p className="text-xs rounded-lg bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-300 px-2 py-1.5">{err}</p>}
 
+      {codeBox && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 px-2 py-1.5">
+          <button type="button" onClick={pasteCode} className={`${btn} border-indigo-500 bg-indigo-600 text-white`}>📋 Paste my code</button>
+          {typeCode
+            ? <input autoFocus inputMode="numeric" aria-label="Paste your code here" placeholder="Paste your code here" onPaste={(e) => { e.preventDefault(); giveCode(e.clipboardData.getData('text')) }}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); giveCode(e.currentTarget.value) } }}
+                className="w-40 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-2 py-1.5 text-sm" />
+            : <span className="text-xs text-indigo-800 dark:text-indigo-200">Copy the code from your authenticator, then press this.</span>}
+        </div>
+      )}
+
       {view === 'mirror' && (
         page
           ? <Mirror page={page} send={send} className={fill || full ? 'flex-1 min-h-0 overflow-y-auto overscroll-contain' : 'max-h-[70vh] overflow-y-auto'} />
@@ -240,6 +278,7 @@ export default function LiveTab({ runId, fill = false, startFull = false, onClos
             tabIndex={PHONE ? undefined : 0} onKeyDown={PHONE ? undefined : keyboard}
             style={{ touchAction: zoom > 1 ? 'pan-x pan-y' : 'none' }}>
             <img src={src} alt="The run's tab on the PC" draggable={false}
+              onError={() => { if (!String(src).startsWith('blob:')) { streamFailed.current = true; setSrc(null); poke.current?.() } }}
               onMouseDown={down} onMouseMove={(e) => e.buttons && move(e)} onMouseUp={up}
               onTouchStart={down} onTouchMove={move} onTouchEnd={up} onWheel={wheel}
               style={{ width: `${zoom * 100}%`, maxWidth: 'none' }}

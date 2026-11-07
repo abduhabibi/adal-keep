@@ -2,7 +2,7 @@ import express from 'express'
 import { listWorkflows } from '../services/workflows.js'
 import { dispatchRun, runStatus, queueSnapshot } from '../services/worker.js'
 import { markCancelled, isCancelled } from '../services/cancellation.js'
-import { forgetRunTab, findRunTab, hostOf } from '../services/tabManager.js'
+import { forgetRunTab, findRunTab, hostOf, codeBoxUp, typeCodeInto, pressCodeButton } from '../services/tabManager.js'
 import { openBrowserIfAny, openForPerson } from '../services/browser.js'
 import { waiting, answerCaptcha, doneWith } from '../services/attention.js'
 import { seal } from '../services/accountVault.js'
@@ -649,6 +649,29 @@ router.get('/automations/:id/screen', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
+// The tab as it changes, for an <img>: the newest picture only, so a slow connection
+// skips frames instead of falling behind.
+router.get('/automations/:id/stream', async (req, res) => {
+  const page = await liveTab(req)
+  if (!page) return res.status(404).json({ error: 'This run has no open tab.' })
+  const { watchFrames } = await import('../services/liveFrames.js')
+  res.writeHead(200, { 'Content-Type': 'multipart/x-mixed-replace; boundary=adalframe', 'Cache-Control': 'no-store', Connection: 'close' })
+  const stop = await watchFrames(page, (img) => {
+    if (res.writableNeedDrain) return
+    res.write(`--adalframe\r\nContent-Type: image/jpeg\r\nContent-Length: ${img.length}\r\n\r\n`)
+    res.write(img)
+    res.write('\r\n')
+  })
+  req.on('close', stop)
+})
+
+// What goes with the pictures: the address, and whether the page asks for a code.
+router.get('/automations/:id/tab', async (req, res) => {
+  const page = await liveTab(req)
+  if (!page) return res.status(404).json({ error: 'This run has no open tab.' })
+  res.set('Cache-Control', 'no-store').json({ url: page.url(), title: await page.title().catch(() => ''), codeBox: await codeBoxUp(page) })
+})
+
 export const LIVE_KEYS = ['Enter', 'Backspace', 'Tab', 'Escape', 'ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Delete', 'PageDown', 'PageUp', 'Home', 'End', 'Space']
 /** Scrolls the page, or the box inside it that scrolls (a long form often sits in one). */
 function scrollPage(dx, dy) {
@@ -672,6 +695,12 @@ export async function liveInput(page, b = {}) {
     const key = String(b.key || '')
     if (!LIVE_KEYS.includes(key)) throw Object.assign(new Error('Unknown key'), { status: 400 })
     await page.keyboard.press(key === 'Space' ? ' ' : key)
+  } else if (b.kind === 'code') {
+    const code = String(b.code || '').replace(/\D/g, '')
+    if (code.length < 4 || code.length > 8) throw Object.assign(new Error('That is not a code: copy it from the authenticator first.'), { status: 400 })
+    if (!(await typeCodeInto(page, code))) throw Object.assign(new Error('The code box is not on the page.'), { status: 409 })
+    await new Promise(r => setTimeout(r, 300))
+    await pressCodeButton(page)
   } else if (b.kind === 'scroll') {
     await page.evaluate(scrollPage, Math.max(-2000, Math.min(2000, Number(b.dx) || 0)), Math.max(-3000, Math.min(3000, Number(b.dy) || 0)))
   } else if (b.kind === 'bottom') {

@@ -64,7 +64,7 @@ export default function WafidCard() {
             {check?.running ? `Checking… ${check.results?.length || 0} done` : 'Check medical results now'}
           </Button>
           <span className="text-xs text-slate-500">
-            Every “Medical · Applied” profile is looked up on wafid.com every 4 hours by itself.{check?.last ? ` Last: ${new Date(check.last).toLocaleString()}` : ''}
+            Press the button to look up every “Medical · Applied” profile on wafid.com.{check?.last ? ` Last: ${new Date(check.last).toLocaleString()}` : ''}
           </span>
         </div>
         {check?.results?.length > 0 && (

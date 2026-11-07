@@ -18,7 +18,6 @@
  * always a person's). Signed out → one reminder task, and the check waits.
  * Nothing on Musaned is ever changed: it only searches, reads and downloads.
  */
-import { whenRunsIdle } from './busy.js'
 import fs from 'fs'
 import sharp from 'sharp'
 import path from 'path'
@@ -31,7 +30,6 @@ const SAFE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..',
 const LIST_URL = 'https://tawtheeq.musaned.com.sa/employment-requests?sort=createdAt,DESC&page=0&size=10'
 // A request the employer made that waits for our (EPRO) approval.
 const PENDING_URL = 'https://tawtheeq.musaned.com.sa/employment-requests/pending'
-const EVERY_MS = Number(process.env.MUSANED_CHECK_HOURS || 3) * 3600 * 1000
 const BETWEEN_MS = 8000
 const FINAL = /ARRIVED|REJECTED|CANCELED|CANCELLED|OUTSIDE KSA/i
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
@@ -811,24 +809,10 @@ export async function checkContracts(db, { onlyId = null } = {}) {
   }
 }
 
+// No check runs by itself: it opened tabs in people's way. A person presses the button.
 let timer = null
 export function startContractChecker(db) {
   if (timer) return
+  timer = true
   setTimeout(() => readSavedTemplates(db).catch(e => console.warn('[contracts] templates:', e.message)), 20000)
-  const tick = () => whenRunsIdle(() => scanContracts(db, { auto: true }).catch(e => console.warn('[contracts] failed:', e.message)), '[contracts]')
-  setTimeout(tick, 6 * 60 * 1000)
-  timer = setInterval(tick, EVERY_MS)
-  // Left signed out: as soon as Musaned is signed in anywhere in the Adal Keep
-  // Brave (by a person or a run), the check goes on by itself.
-  setInterval(async () => {
-    if (!contractCheck.signedOut || contractCheck.running) return
-    try {
-      const open = await openBrowserIfAny()   // never starts Brave: only looks at it when it is open
-      if (!open || !(await musanedSignedInSomewhere(open, (m) => console.log(`[contracts] ${m}`)))) return
-      console.log('[contracts] ✓ Musaned is signed in again — checking now')
-      await doneSignInTasks(db)
-      whenRunsIdle(() => scanContracts(db, { auto: true }).catch(e => console.warn('[contracts] failed:', e.message)), '[contracts]')
-    } catch {}
-  }, 30000)
-  console.log(`📄 Musaned contracts checked every ${EVERY_MS / 3600000} h`)
 }

@@ -6,16 +6,14 @@
  *   checkAll(db)                      every "Medical · Applied" profile is
  *                                     looked up on wafid.com: FIT → Medical ·
  *                                     Fit, UNFIT → Medical · Rejected
- *   startWafidChecker(db)             checkAll every few hours, in a
+ *   startWafidChecker()               nothing runs by itself now; a person presses Check, in a
  *                                     background tab of the agency's Brave
  */
-import { whenRunsIdle } from './busy.js'
 import { getBrowser, openBrowserIfAny } from './browser.js'
 import { setupTab, borrowTab, doneWithTab, activeRunIds } from './tabManager.js'
 import { checkMedicalStatus } from './wafidWorkflow.js'
 
 export const WAFID_BOOK = 'wafid_book'
-const EVERY_MS = Number(process.env.WAFID_CHECK_HOURS || 4) * 3600 * 1000
 const BETWEEN_MS = 20000 // one look-up every 20 s: gentle on wafid.com
 
 /** Queue a booking run unless one is waiting, running or done already. */
@@ -131,11 +129,5 @@ export async function checkAll(db, { onlyId = null, auto = false } = {}) {
   }
 }
 
-let timer = null
-export function startWafidChecker(db) {
-  if (timer) return
-  const tick = () => whenRunsIdle(() => checkAll(db, { auto: true }).catch(e => console.warn('[wafid] check failed:', e.message)), '[wafid]')
-  setTimeout(tick, 3 * 60 * 1000) // a few minutes after start
-  timer = setInterval(tick, EVERY_MS)
-  console.log(`🩺 Wafid medical results checked every ${EVERY_MS / 3600000} h`)
-}
+// No check runs by itself: it opened tabs in people's way. A person presses the button.
+export function startWafidChecker() {}

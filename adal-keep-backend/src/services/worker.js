@@ -3,7 +3,7 @@
  *
  * v10 — no agent pool. Every run gets its own tab (tabManager.openRunTab) and
  *       only ever touches that tab, so two runs at once never share a tab or
- *       steer each other's. Up to AUTOMATION_MAX_RUNS (default 3) work at the
+ *       steer each other's. One run works at the
  *       same time; the rest wait in line and start by themselves, oldest
  *       first, when a slot frees (runQueue.js).
  *
@@ -24,7 +24,7 @@ import { runFullWorkflow } from './lmisWorkflow.js'
 import { decideAgencyActions } from './jev/agencyManager.js'
 import { getActiveEmployee } from './activeEmployee.js'
 import { isAppLocked } from './subscription.js'
-import { plainReason, workflowName } from './runOutcome.js'
+import { plainReason, workflowName, withInternetCheck } from './runOutcome.js'
 import { openRunTab, forgetRunTab, tabOfRun, handTabToPerson, findRunTab, activeRunIds, hostOf, codeBoxUp } from './tabManager.js'
 import { registerTab, unregisterTab, noteLink } from './bandwidth.js'
 import { createRunQueue } from './runQueue.js'
@@ -36,19 +36,15 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SAFE_STORAGE_DIR = path.join(__dirname, '../../data/SafeStorage')
 
 // How many runs may work at the same time, each in its own tab.
-const MAX_RUNS           = Math.max(1, Number(process.env.AUTOMATION_MAX_RUNS || 4))
+// One agent at a time: it gets the whole internet, and nothing else competes with it.
+const MAX_RUNS           = 1
 const POLL_MS            = 5000
-const MAX_ATTEMPTS       = 3
 // Retry backoff: attempt 1 waits this long, attempt 2 waits 4× this.
-// Minimum 2 minutes per the operator's request; override with RETRY_BACKOFF_MS.
-const BACKOFF_BASE_MS    = Number(process.env.RETRY_BACKOFF_MS || 120000)
 const AGENCY_INTERVAL_MS = 30 * 60 * 1000   // 30 min
 const AGENCY_PROFILE_LIMIT = Number(process.env.AGENCY_PROFILE_LIMIT || 200)
 
 // Errors retrying can never fix. Add LMIS/companion-specific permanent
 // reasons here so they don't burn attempts on a 2-minute loop.
-const PERMANENT_ERROR =
-  /refused the login|not found|Not Found|not in the|placed pool|different labor|could not be verified|already_in_other_agency|already attached|already exists|Profile is missing|LMIS portal error|LMIS blocks|Musaned not started|No visa platform account|No insurance account|Nobody signed in|showed no appointment slip/i
 
 let _interval      = null
 let _agencyTimer   = null
@@ -158,31 +154,17 @@ async function visaSettings(db) {
 // --------------------------------------------------------------------------
 // Run execution — one run, one tab
 // --------------------------------------------------------------------------
-/** Put a failed attempt back in line after a backoff, or fail it for good. */
-async function recordFailure(db, job, errText, retryable) {
-  const attempt = (job.current_step || 0) + 1
-  if (retryable && attempt < MAX_ATTEMPTS) {
-    const delayMs = BACKOFF_BASE_MS * Math.pow(4, attempt - 1)
-    const retryAt = new Date(Date.now() + delayMs).toISOString()
-    // NOTE: `updated_at` is deliberately set to a FUTURE timestamp. This is
-    // what readyJobsQuery reads to know the backoff window hasn't elapsed.
-    await db('automation_queue').where('id', job.id).update({
-      status: 'pending',
-      current_step: attempt,
-      pause_reason: `Retry ${attempt}/${MAX_ATTEMPTS} at ${retryAt} — ${errText}`,
-      updated_at: retryAt,
-    })
-    console.log(`[worker] run #${job.id} retry ${attempt}/${MAX_ATTEMPTS} in ${Math.round(delayMs / 60000)}min`)
-  } else {
-    await db('automation_queue').where('id', job.id).update({
-      status: 'failed',
-      pause_reason: `${errText} (after ${attempt} attempts)`,
-      finished_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
-    console.log(`[worker] run #${job.id} FAILED permanently`)
-    await noteFailure(db, job, errText).catch(e => console.warn('[worker] note failed:', e.message))
-  }
+/** A run gets one try: it fails here and says why. A person presses it again. */
+async function recordFailure(db, job, errText) {
+  const why = await withInternetCheck(errText)
+  await db('automation_queue').where('id', job.id).update({
+    status: 'failed',
+    pause_reason: why,
+    finished_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  })
+  console.log(`[worker] run #${job.id} failed: ${why}`)
+  await noteFailure(db, job, why).catch(e => console.warn('[worker] note failed:', e.message))
 }
 
 /** Her profile says what went wrong, once (the same failure again adds nothing). */
@@ -407,14 +389,14 @@ async function executeRun(db, page, job) {
 
     // ---- Failure: retry vs permanent ----
     const errText = result.error || result.reason || ''
-    await recordFailure(db, job, errText, !PERMANENT_ERROR.test(errText))
+    await recordFailure(db, job, errText)
     return false
   } catch (e) {
     if (e?.cancelled || isCancelled(runId)) {
       await handleCancelled()
       return false
     }
-    await recordFailure(db, job, e.message, true)
+    await recordFailure(db, job, e.message)
     return false
   }
 }
@@ -431,16 +413,16 @@ async function executeRun(db, page, job) {
  */
 async function runJob(db, job) {
   try {
-    // A retry, or a run the scanner queued (nobody pressed a button now):
+    // A run the scanner queued (nobody pressed a button now):
     // never opens Brave itself. While Brave is closed it waits, and it goes
     // on once Brave is open again. Brave that a person closed (or quit Adal
     // Keep) stays closed.
-    const nobodyAsked = /^Retry /.test(job.pause_reason || '') || /Auto-discovered by scanner/.test(String(job.log || ''))
+    const nobodyAsked = /^(Retry |Waiting for Adal Browser)/.test(job.pause_reason || '') || /Auto-discovered by scanner/.test(String(job.log || ''))
     if (nobodyAsked && !(await openBrowserIfAny())) {
       const at = new Date(Date.now() + 2 * 60000).toISOString()
       await db('automation_queue').where('id', job.id).update({
         status: 'pending',
-        pause_reason: `Retry ${job.current_step || 0}/${MAX_ATTEMPTS} at ${at} — waiting for Adal Browser to be open`,
+        pause_reason: 'Waiting for Adal Browser to be open',
         updated_at: at,
       })
       return
@@ -454,7 +436,7 @@ async function runJob(db, job) {
   } catch (e) {
     // Could not start at all: no browser, profile deleted, ...
     console.error(`[worker] run #${job.id} could not start: ${e.message}`)
-    try { await recordFailure(db, job, e.message, !PERMANENT_ERROR.test(e.message)) } catch {}
+    try { await recordFailure(db, job, e.message) } catch {}
   } finally {
     const row = await db('automation_queue').where('id', job.id).first().catch(() => null)
     try {
@@ -773,8 +755,7 @@ export function startWorker(db) {
   if (_interval) return
 
   console.log(
-    `[worker] polling every ${POLL_MS}ms — up to ${MAX_RUNS} runs at once, each in its own tab — ` +
-    `backoff base ${BACKOFF_BASE_MS / 1000}s`
+    `[worker] polling every ${POLL_MS}ms — one run at a time, in its own tab`
   )
   parkInterruptedRuns(db).finally(() => drainQueue(db))
   // The poll only matters for retries whose backoff has run out and for runs

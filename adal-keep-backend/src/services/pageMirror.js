@@ -134,6 +134,7 @@ function readPage() {
  */
 export async function mirrorOf(page, cache = new Map(), force = false) {
   const m = await page.evaluate(readPage)
+  m.codeBox = await (await import('./tabManager.js')).codeBoxUp(page)
   m.blocks = m.blocks.slice(0, MAX_BLOCKS)
   const todo = []
   let shots = 0

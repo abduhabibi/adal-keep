@@ -1,17 +1,25 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { plainReason, problemOf, goneFromMusaned } from '../src/services/runOutcome.js'
+import { plainReason, problemOf, goneFromMusaned, withInternetCheck } from '../src/services/runOutcome.js'
 
 test('real stored failures read as something to act on', () => {
   assert.equal(plainReason('Profile is missing for Wafid: destination country (after 1 attempts)'), 'missing on the profile: destination country')
-  assert.equal(plainReason('Could not reach tawtheeq.musaned.com.sa (after 3 attempts)'), 'the site was not available: try again')
+  assert.equal(plainReason('Could not reach tawtheeq.musaned.com.sa (after 3 attempts)'), 'the site was not available')
   assert.equal(plainReason('Worker card not found (after 2 attempts)'), 'she was not found on the site')
-  assert.equal(plainReason("Attempted to use detached Frame 'C19A'. (after 3 attempts)"), 'the page changed while working: try again')
-  assert.equal(plainReason("Cannot read properties of null (reading 'width') (after 3 attempts)"), 'the page changed while working: try again')
+  assert.equal(plainReason("Attempted to use detached Frame 'C19A'. (after 3 attempts)"), 'the page changed while it was working')
+  assert.equal(plainReason("Cannot read properties of null (reading 'width') (after 3 attempts)"), 'the page changed while it was working')
   assert.equal(plainReason('Submit button not found (after 1 attempts)'), 'the site changed: Submit button was not there')
-  assert.equal(plainReason('Retry 1/3 at 2026-11-05T10:00:00.000Z — Could not reach x'), 'the site was not available: try again')
+  assert.equal(plainReason('Retry 1/3 at 2026-11-05T10:00:00.000Z — Could not reach x'), 'the site was not available')
   assert.match(plainReason('LMIS blocks this agency: "No Bank Account Found". The agency must'), /bank account/)
   assert.equal(plainReason(''), 'last run failed')
+})
+
+test('a network failure says whose it was, others stay as they are', async () => {
+  const up = await withInternetCheck('Could not reach x', async () => {})
+  assert.equal(plainReason(up), "the site did not answer, and this PC's internet was working")
+  const down = await withInternetCheck('net::ERR_TIMED_OUT', async () => { throw new Error('no') })
+  assert.equal(plainReason(down), "this PC's internet was down")
+  assert.equal(await withInternetCheck('Submit button not found', async () => { throw new Error('never asked') }), 'Submit button not found')
 })
 
 test('the newest standing failure is the one shown, a later success clears it', () => {

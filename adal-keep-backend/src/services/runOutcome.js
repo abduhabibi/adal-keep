@@ -10,14 +10,25 @@ const REASONS = [
   [/no Delete for her/i, () => 'Musaned has no Delete for her: she may have a contract or a request'],
   [/still shows her after Delete/i, () => 'Musaned still shows her after Delete'],
   [/shows \d+ rows for passport/i, () => 'Musaned shows more than one row for her passport'],
-  [/Could not reach|net::ERR|ERR_[A-Z_]+|Navigation timeout|timed? ?out|Could not determine login state/i, () => 'the site was not available: try again'],
+  [/this PC's internet was working/i, () => "the site did not answer, and this PC's internet was working"],
+  [/this PC's internet was down/i, () => "this PC's internet was down"],
+  [/Could not reach|net::ERR|ERR_[A-Z_]+|Navigation timeout|timed? ?out|Could not determine login state/i, () => 'the site was not available'],
   [/Worker card not found/i, () => 'she was not found on the site'],
   [/(\S.*) not found/i, (m) => `the site changed: ${m[1]} was not there`],
-  [/detached|Target closed|Session closed|context was destroyed|Protocol error|Cannot read properties/i, () => 'the page changed while working: try again'],
+  [/detached|Target closed|Session closed|context was destroyed|Protocol error|Cannot read properties/i, () => 'the page changed while it was working'],
 ]
 
 /** The stored reason without the worker's "Retry 1/3 at …" and "(after 3 attempts)". */
 const bare = (text) => String(text || '').replace(/^Retry \d+\/\d+ at \S+ — /, '').replace(/ \(after \d+ attempts?\)$/, '').trim()
+
+const NETWORK = /Could not reach|net::ERR|ERR_[A-Z_]+|Navigation timeout|timed? ?out/i
+
+/** A network failure says whose it was: this PC's internet or the site's. */
+export async function withInternetCheck(text, probe = () => fetch('https://www.google.com/generate_204', { signal: AbortSignal.timeout(6000) })) {
+  if (!NETWORK.test(text)) return text
+  const up = await probe().then(() => true).catch(() => false)
+  return `${text} — ${up ? "this PC's internet was working" : "this PC's internet was down"}`
+}
 
 export function plainReason(text) {
   const raw = bare(text)

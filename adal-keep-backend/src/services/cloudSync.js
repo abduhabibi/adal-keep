@@ -16,6 +16,7 @@
  */
 import crypto from 'crypto'
 import { plainReason } from './runOutcome.js'
+import { runsWorking } from './busy.js'
 import { me as joinAgency, chatConfigured, cloudCall, cloudAuth, cloudAgencyId, cloudConfig } from './chatCloud.js'
 import { isFollower } from './mainPC.js'
 import { tgReady, tgPut, tgDelete, TG_MAX_DOWNLOAD, findStorageChat } from './tgStore.js'
@@ -478,7 +479,8 @@ export function startCloudSync(db) {
   if (timer) return
   const tick = async () => {
     cloudStatus.on = await cloudOn(db).catch(() => false)
-    if (cloudStatus.on) await syncOnce(db)
+    // An agent is working: it has the internet. The copy catches up when it is done.
+    if (cloudStatus.on && !runsWorking()) await syncOnce(db)
   }
   setTimeout(tick, 45000)
   timer = setInterval(tick, EVERY_MS)

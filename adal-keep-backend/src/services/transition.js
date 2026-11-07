@@ -25,9 +25,11 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import { getBrowser, openForPerson, sendAway } from './browser.js'
 import { saveOnProfile } from './musanedImport.js'
+import { copyEasyEnjaz } from './easyEnjazCopy.js'
 
 export const SOURCES = {
-  easyenjaz: { name: 'EasyEnjaz', url: 'https://easyenjaz.com/' },
+  // Its API is known, so it is asked directly: see easyEnjazCopy.js.
+  easyenjaz: { name: 'EasyEnjaz', url: 'https://easyenjaz.com/', deep: copyEasyEnjaz },
   enjazplus: { name: 'EnjazPlus', url: 'https://v2.enjazplus.com/' },
   musaned: {
     name: 'Musaned', url: 'https://tawtheeq.musaned.com.sa/', start: ['/hr-pool'],
@@ -46,7 +48,7 @@ const SIGN_IN_WAIT = 15 * 60_000
 const MAX_PAGES = 40, MAX_REQUESTS = 3000, MAX_TEMPLATES = 5
 
 const states = new Map()
-const blank = () => ({ status: 'idle', step: '', people: 0, created: 0, updated: 0, files: 0, templates: 0, skipped: 0, error: null, folder: null })
+const blank = () => ({ status: 'idle', step: '', people: 0, created: 0, updated: 0, files: 0, templates: 0, skipped: 0, failed: 0, error: null, folder: null })
 const stateOf = (id) => states.get(id) || blank()
 const set = (id, patch) => { states.set(id, { ...stateOf(id), ...patch }); return states.get(id) }
 
@@ -306,6 +308,16 @@ async function run(db, id, source, url, deps) {
     }
     await (deps.sendAway || sendAway)(page).catch(() => {})
     set(id, { status: 'copying', step: 'Reading the lists' })
+
+    if (source.deep) {
+      page.off('response', onResponse)
+      await source.deep({
+        db, page, folder, check, readPerson, limit: deps.limit, download: deps.download,
+        set: (patch) => set(id, patch), state: () => stateOf(id), save: (person) => saveProfile(db, id, source, person),
+      })
+      set(id, { status: 'done', step: '' })
+      return
+    }
 
     // Every list page, those with people first.
     const queue = (source.start || []).map(p => new URL(p, origin).href)

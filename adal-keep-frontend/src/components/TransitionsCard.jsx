@@ -31,6 +31,7 @@ function Result({ s }) {
         <p className="text-slate-500">
           {s.people} found · {s.created} new profiles · {s.updated} filled in · {s.files} files · {s.templates} CV templates
           {s.skipped > 0 && ` · ${s.skipped} templates could not be made`}
+          {s.failed > 0 && ` · ${s.failed} files could not be read: press the button again to try them`}
         </p>
       )}
       {s.status === 'done' && !s.people && <p className="text-amber-700 dark:text-amber-400">Nobody with a passport number was found on this site. Everything it showed is kept in {s.folder}.</p>}

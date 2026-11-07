@@ -82,6 +82,34 @@ export function Account({ a, has, onChange }) {
   )
 }
 
+/** Settings → Integrations: each Musaned account's code right now, to read and type. */
+export function MusanedCodesCard() {
+  const [accounts, setAccounts] = useState(null)
+  const [has, setHas] = useState({})
+  const load = () => {
+    api.get('/musaned/accounts').then(r => setAccounts(r.data || [])).catch(() => setAccounts([]))
+    api.get('/musaned/authenticators').then(r => setHas(r.data || {})).catch(() => {})
+  }
+  useEffect(() => { load() }, [])
+  if (!accounts) return null
+  return (
+    <Card>
+      <h2 className="font-display text-lg font-bold mb-1 flex items-center gap-2" translate="no"><span>🔑</span> Musaned code</h2>
+      <p className="text-sm text-slate-500 mb-3" translate="no">The code for each Musaned account right now. It changes every 30 seconds.</p>
+      {accounts.length
+        ? <ul className="space-y-2">{accounts.map(a => (
+            <li key={a.id} className="rounded-xl border border-slate-200 p-3 dark:border-slate-700">
+              <span className="text-sm font-semibold">{a.name} <span className="font-normal text-slate-400">{a.username}</span></span>
+              {has[a.id]
+                ? <LiveCode info={has[a.id]} onTick={load} />
+                : <p className="mt-1 text-xs text-slate-500">No authenticator yet: add it in Settings → Portals.</p>}
+            </li>
+          ))}</ul>
+        : <p className="text-sm text-slate-400">No Musaned account yet.</p>}
+    </Card>
+  )
+}
+
 export default function MusanedAuthenticatorCard() {
   const [accounts, setAccounts] = useState(null)
   const [has, setHas] = useState({})

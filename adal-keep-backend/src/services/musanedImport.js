@@ -27,7 +27,7 @@ const HR_POOL = `${ORIGIN}/hr-pool`
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 const TMP = path.join(os.tmpdir(), 'adal-musaned-import')
 const SAFE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'data', 'SafeStorage')
-const MIME = { '.pdf': 'application/pdf', '.png': 'image/png', '.webp': 'image/webp', '.jpg': 'image/jpeg' }
+const MIME = { '.pdf': 'application/pdf', '.png': 'image/png', '.webp': 'image/webp', '.jpg': 'image/jpeg', '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime' }
 
 /** A copied file onto her profile field, kept like every upload (data/SafeStorage). False when she has it already. */
 export async function saveOnProfile(db, profileId, fieldName, file, original) {

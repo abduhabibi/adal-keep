@@ -38,3 +38,18 @@ test('only a Pextran address is taken', () => {
   assert.throws(() => checkLink('https://pextran.com.evil.test/'))
   assert.throws(() => checkLink(''))
 })
+
+test('EasyEnjaz: every file key is found, secrets are dropped, its own names are read', async () => {
+  const { fileKeysOf, withoutSecrets, personOf } = await import('../src/services/easyEnjazCopy.js')
+  const keys = fileKeysOf({ photoKey: 'a/p.jpg', passportKey: 'https://b2.test/a/pass.jpg', doc2Key: 'a/m.pdf', interviewKey: '', photo: null, somethingKey: 'a/x.pdf' })
+  assert.deepEqual(keys, [{ field: 'Photo', key: 'a/p.jpg' }, { field: 'Passport', key: 'a/pass.jpg' }, { field: 'Medical Report', key: 'a/m.pdf' }, { field: 'Document', key: 'a/x.pdf' }])
+  assert.deepEqual(withoutSecrets([{ name: 'A', passwordHash: 'x', token: 'y', inner: { password: 'z', ok: 1 } }]), [{ name: 'A', inner: { ok: 1 } }])
+  const p = personOf({ fullName: 'A B', passportNo: 'EP1234567', applicationNo: 'E123', visaNo: '190', sponsorID: '10', sponsorPhone: '05', pasportExpiryDate: '2030-01-02T00:00:00', phoneNo: '09', contactPerson: 'C' }, readPerson)
+  assert.equal(p.visa_application_number, 'E123')
+  assert.equal(p.visa_number, '190')
+  assert.equal(p.employer_id, '10')
+  assert.equal(p.passport_expiry_date, '2030-01-02')
+  assert.equal(p.phone_number, '09')
+  assert.equal(p.emergency_name, 'C')
+  assert.equal(personOf({ fullName: 'No passport' }, readPerson), null)
+})

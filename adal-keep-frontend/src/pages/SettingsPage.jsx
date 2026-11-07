@@ -20,7 +20,7 @@ import BackupCard from '../components/BackupCard'
 import TelegramChannelCard from '../components/TelegramChannelCard'
 import { PcAccessList } from '../components/PcAccessGate'
 import { StartupCard } from '../components/AttentionBar'
-import MusanedAuthenticatorCard from '../components/MusanedAuthenticatorCard'
+import MusanedAuthenticatorCard, { MusanedCodesCard } from '../components/MusanedAuthenticatorCard'
 import ErrorBoundary from '../components/shared/ErrorBoundary'
 import PhoneCard from '../components/PhoneCard'
 import WhatsAppCard from '../components/WhatsAppCard'
@@ -284,6 +284,7 @@ export default function SettingsPage() {
       {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Insurance"><InsuranceCard /></ErrorBoundary>}
       </>}
       {tab === 'integrations' && <>
+      {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Musaned code"><MusanedCodesCard /></ErrorBoundary>}
       {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="WhatsApp"><WhatsAppCard /></ErrorBoundary>}
       {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Telegram"><TelegramChannelCard /></ErrorBoundary>}
       </>}

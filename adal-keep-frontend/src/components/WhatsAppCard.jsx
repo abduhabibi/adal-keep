@@ -167,8 +167,8 @@ export default function WhatsAppCard() {
             {s.status === 'qr' && (
               <button type="button" className="text-xs text-teal-700 underline dark:text-teal-400" onClick={() => setByPhone(true)}>On this phone? Link with your phone number instead</button>
             )}
-            {s.status === 'qr' && (
-              <button type="button" className="block text-xs text-teal-700 underline dark:text-teal-400" onClick={openWeb}>QR not working? Sign in on web.whatsapp.com instead</button>
+            {s.status === 'qr' && !window.__ADAL_CLOUD && (
+              <Button size="sm" variant="secondary" onClick={openWeb}>🌐 Sign in through web.whatsapp.com instead</Button>
             )}
             {s.status === 'qr' && byPhone && (
               <div className="flex gap-2">
@@ -185,14 +185,25 @@ export default function WhatsAppCard() {
           <p className="mt-2 flex items-center gap-2 text-xs text-slate-500"><span className="h-2 w-2 animate-ping rounded-full bg-teal-500" /> Waiting for you to sign in…</p>
         </div>
       ) : (
-        <div className="mb-4 flex flex-wrap items-center gap-3">
-          <Button onClick={() => connect(false)} disabled={s.status === 'starting' || s.status === 'signing-in'}>
-            {s.status === 'starting' ? 'Opening WhatsApp…' : s.status === 'signing-in' ? 'Signing in…' : '💬 Connect my WhatsApp'}
-          </Button>
-          <Button variant="secondary" onClick={openWeb} disabled={s.status === 'starting' || s.status === 'signing-in'} title="Opens a normal web.whatsapp.com tab in Adal Browser: sign in there; Adal Keep connects when you are in">
-            🌐 Sign in on web.whatsapp.com
-          </Button>
-          {s.error && <span className="text-sm text-red-600">{s.error}</span>}
+        // On the PC: WhatsApp's own web.whatsapp.com window first (scan its QR there).
+        // On a phone that window would open on the PC, so its QR shows here instead.
+        <div className="mb-4 space-y-2">
+          <div className="flex flex-wrap items-center gap-3">
+            {window.__ADAL_CLOUD ? (
+              <Button onClick={() => connect(false)} disabled={s.status === 'starting' || s.status === 'signing-in'}>
+                {s.status === 'starting' ? 'Opening WhatsApp…' : s.status === 'signing-in' ? 'Signing in…' : '💬 Connect my WhatsApp'}
+              </Button>
+            ) : (<>
+              <Button onClick={openWeb} disabled={s.status === 'starting' || s.status === 'signing-in'} title="Opens web.whatsapp.com in a window on this PC: scan its QR with your phone; Adal Keep takes over when your chats show">
+                {s.status === 'starting' ? 'Opening WhatsApp…' : s.status === 'signing-in' ? 'Signing in…' : '🌐 Sign in through web.whatsapp.com'}
+              </Button>
+              <button type="button" onClick={() => connect(false)} disabled={s.status === 'starting' || s.status === 'signing-in'} className="text-xs text-teal-700 underline disabled:opacity-50 dark:text-teal-400">
+                or show the QR here
+              </button>
+            </>)}
+          </div>
+          <p className="text-xs text-slate-500">Scan once: it stays signed in, signs in afresh by itself every morning, and comes back after a restart. Only if the phone itself unlinks it is a new scan needed — you get a notification then.</p>
+          {s.error && <p className="text-sm text-red-600">{s.error}</p>}
         </div>
       )}
       {s.others?.length > 0 && (

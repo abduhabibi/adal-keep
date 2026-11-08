@@ -239,7 +239,7 @@ export async function connect(db, key = 'owner', { phone = '' } = {}, tries = 2)
     s.startingAt = 0
     if (s.client === c) s.client = null
     setState(key, { status: 'off', me: null, error: why === 'LOGOUT' ? 'Signed out from the phone' : `Disconnected (${why})` })
-    if (why === 'LOGOUT') noteOn(key, false)
+    if (why === 'LOGOUT') { noteOn(key, false); signedOutNotice(key) }
     release(c)
   })
   c.initialize().catch(startFailed)
@@ -304,6 +304,17 @@ export async function openWeb(db, key = 'owner') {
   return s.state
 }
 
+/** Signed out from the phone: the only case that needs a new scan — say so where people look. */
+async function signedOutNotice(key) {
+  if (!dbRef) return
+  const who = key === 'owner' ? '' : await dbRef('users').where('id', Number(key.slice(1))).first('name').then(u => u?.name ? ` (${u.name})` : '').catch(() => '')
+  await dbRef('notifications').insert({
+    type: 'whatsapp', title: `💬 WhatsApp${who} was signed out from the phone`,
+    body: 'Sign in again: Settings → Integrations → WhatsApp → Sign in through web.whatsapp.com, and scan the QR with the phone.',
+    created_day: new Date().toISOString().slice(0, 10),
+  }).catch(() => {})
+}
+
 /** Signs this person's WhatsApp out (their phone's "Linked devices" loses it). */
 export async function logout(key = 'owner') {
   const s = session(key)
@@ -322,9 +333,22 @@ export async function logout(key = 'owner') {
  * connects again (no QR: it is still signed in); one stuck starting, or that
  * stopped answering while it says ready, starts again.
  */
+// Every morning (from 6:00) each account signs in afresh: its hidden window
+// starts again with the saved sign-in (no QR), so WhatsApp never goes stale.
+const DAILY_FROM = 6
 function keepConnected() {
   ;(readNote().on || []).forEach((key, i) => setTimeout(async () => {
     const s = session(key), st = stateOf(key).status
+    const today = new Date().toLocaleDateString('en-CA')
+    const n = readNote()
+    if (st === 'ready' && s.client && new Date().getHours() >= DAILY_FROM && (n.daily || {})[key] !== today && !Object.values(bulk).some(b => b?.running)) {
+      writeNote({ ...n, daily: { ...(n.daily || {}), [key]: today } })
+      console.log(`[whatsapp ${key}] the daily fresh sign-in`)
+      const old = s.client; s.client = null; s.startingAt = 0; s.bad = 0
+      setState(key, { status: 'off' })
+      await release(old)
+      return connect(dbRef, key).catch(e => console.warn('[whatsapp]', e.message))
+    }
     const restart = async (why) => {
       console.warn(`[whatsapp ${key}] ${why} — starting it again`)
       const old = s.client; s.client = null; s.startingAt = 0; s.bad = 0

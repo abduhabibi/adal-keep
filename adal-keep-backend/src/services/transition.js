@@ -26,13 +26,15 @@ import { fileURLToPath } from 'url'
 import { getBrowser, openForPerson, sendAway } from './browser.js'
 import { saveOnProfile } from './musanedImport.js'
 import { copyEasyEnjaz, signedInToken } from './easyEnjazCopy.js'
+import { copyEnjazPlus, signedInEnjazPlus } from './enjazPlusCopy.js'
 import { keepAwake } from './awake.js'
 import { collectBrokers, saveBrokers } from './siteBrokers.js'
 
 export const SOURCES = {
   // Its API is known, so it is asked directly: see easyEnjazCopy.js.
   easyenjaz: { name: 'EasyEnjaz', url: 'https://easyenjaz.com/login', deep: copyEasyEnjaz, token: signedInToken },
-  enjazplus: { name: 'EnjazPlus', url: 'https://v2.enjazplus.com/' },
+  // Its data through its own GraphQL, with the window's sign-in: every employee of every tab, with her files.
+  enjazplus: { name: 'EnjazPlus', url: 'https://v2.enjazplus.com/app/employees', deep: copyEnjazPlus, token: signedInEnjazPlus },
   musaned: {
     name: 'Musaned', url: 'https://tawtheeq.musaned.com.sa/', start: ['/hr-pool'],
     // Her pictures are not in her record: Musaned serves them by her id.
@@ -255,6 +257,40 @@ const pressNext = (page) => page.evaluate(() => {
   return true
 }).catch(() => false)
 
+/**
+ * Musaned with a saved account: the same steps the robots use — Login, its
+ * username and password (as saved in Portals), the agency's own card, the
+ * dashboard. A picture code, if Musaned shows one, is typed by the person in
+ * the window; the copy waits for the sign-in as always and then goes on.
+ */
+async function musanedSignIn(db, page, accountId, say, check) {
+  const acct = await db('musaned_accounts').where('id', Number(accountId)).first().catch(() => null)
+  if (!acct?.username || !acct?.password) return
+  const w = await import('./musanedWorkflow.js')
+  const ctx = { db, account_id: acct.id, musaned_username: acct.username, musaned_password: acct.password, musaned_name: acct.name, runId: 'move', profileId: '-' }
+  try {
+    say(`Signing in to Musaned as ${acct.name}…`)
+    const opened = await w.stepOpenMusaned(page, ctx)
+    if (opened.onKeycloak) {
+      const f = await w.stepFillMusanedLogin(page, ctx)
+      if (f.captcha) say(`${acct.name} is filled in: type the picture's letters in the Musaned window and press Log in`)
+    }
+    // Signed in: Musaned shows its agencies — this account's own card, then the dashboard.
+    for (const end = Date.now() + 5 * 60_000; Date.now() < end;) {
+      check()
+      const s = await w.snapshotState(page).catch(() => null)
+      if (s?.hasDashboardNav) return
+      if (s?.hasAgencyPicker) { await w.stepClickAgencyCard(page, ctx).catch(() => {}); await w.stepClickGoToDashboard(page, ctx).catch(() => {}); return }
+      if (s?.hasGoToDashboard) { await w.stepClickGoToDashboard(page, ctx).catch(() => {}); return }
+      await sleep(1500)
+    }
+  } catch (e) {
+    if (e.stopped) throw e
+    console.warn('[transition musaned] sign-in with the saved account:', e.message)
+    say('Sign in to Musaned in the window that opened')
+  }
+}
+
 // ── The copy ────────────────────────────────────────────────────────────────
 export function startTransition(db, id, link, deps = {}) {
   const source = deps.source || SOURCES[id]
@@ -319,6 +355,7 @@ async function run(db, id, source, url, deps) {
     windows.set(id, page)
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 120000 }).catch(() => {})
     await page.bringToFront().catch(() => {})
+    if (id === 'musaned' && deps.accountId) await (deps.musanedSignIn || musanedSignIn)(db, page, deps.accountId, (step) => set(id, { step }), check)
     // Signed in: the site says so, or else off the sign-in page and staying off it.
     const waitSignIn = async (tab) => {
       for (let t0 = Date.now(), calm = 0; ;) {

@@ -160,3 +160,40 @@ test('Pextran brokers: found in any answer, made once, filled, and given to thei
   assert.equal(again.created, 0)                                    // never twice
   await db.destroy()
 })
+
+test('EnjazPlus: every employee of every page, her files, a sign-out midway, and going on later', async () => {
+  const fs = await import('fs'), os = await import('os'), path = await import('path')
+  const { default: knex } = await import('knex')
+  const { copyEnjazPlus, personOf } = await import('../src/services/enjazPlusCopy.js')
+  const db = knex({ client: 'sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true, pool: { min: 1, max: 1 } })
+  await db.schema.createTable('profile_fields', t => { t.increments('id'); t.integer('profile_id'); t.integer('field_template_id'); t.string('name'); t.string('data_type'); t.integer('is_permanent'); t.string('created_at'); t.string('updated_at') })
+  await db.schema.createTable('field_templates', t => { t.increments('id'); t.string('name') })
+  await db.schema.createTable('files', t => { t.increments('id'); t.integer('profile_field_id'); t.string('original_name'); t.string('path'); t.string('mimetype'); t.integer('size'); t.string('content_hash'); t.string('created_at'); t.string('updated_at') })
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ep-'))
+  const folder = path.join(dir, 'run'); fs.mkdirSync(folder)
+  const people = Array.from({ length: 120 }, (_, i) => ({ _id: `e${i}`, givenName: `Given${i}`, surName: 'Sur', passportNumber: `ep90000${String(i).padStart(2, '0')}`, facePhoto: `https://cdn.test/f${i}.jpg`, additionalData: { labourId: `ef${i}`, appliedCountry: 'SAUDI_ARABIA' }, address: { telephone: '0911' } }))
+  let calls = 0, cookie = 'a=1'
+  const ask = async (url, opts) => {
+    const { variables } = JSON.parse(opts.body)
+    if (opts.headers.Cookie !== cookie) return { status: 401, json: async () => ({ errors: [{ message: 'Not authorized' }] }) }
+    if (++calls === 2) { cookie = 'a=2'; return { status: 401, json: async () => ({ errors: [{ message: 'Not authorized' }] }) } } // signed out here
+    return { status: 200, ok: true, json: async () => ({ data: { employees: { totalCount: people.length, employees: people.slice(variables.skip, variables.skip + variables.take) } } }) }
+  }
+  const download = async () => ({ ok: true, headers: new Map([['content-type', 'image/jpeg']]), arrayBuffer: async () => Buffer.from('jpg' + Math.random()) })
+  let st = {}, n = 0, signIns = 0
+  const saved = []
+  const base = { db, folder, readPerson, ask, download, wait: async () => {}, set: p => { st = { ...st, ...p } }, state: () => st,
+    save: async (p) => { saved.push(p); return ++n }, signIn: async () => { signIns++; return { cookie } }, check() {} }
+  await copyEnjazPlus({ ...base, token: { cookie: 'a=1' }, limit: 70 })    // a first visit stops after 70
+  assert.equal(st.people, 120)
+  assert.equal(signIns, 1)
+  await copyEnjazPlus({ ...base, token: { cookie } })                       // the next goes on
+  assert.equal(saved.length, 120)
+  assert.equal(fs.readdirSync(path.join(folder, 'records')).length, 120)
+  assert.equal(st.files, 120)
+  assert.equal(fs.existsSync(path.join(dir, 'enjazplus-progress.json')), false)
+  const p = personOf(people[3], readPerson)
+  assert.equal(p.full_name, 'Given3 Sur'); assert.equal(p.passport_number, 'EP9000003'); assert.equal(p.labor_id, 'EF3'); assert.equal(p.destination_country, 'Saudi Arabia')
+  await db.destroy()
+  fs.rmSync(dir, { recursive: true, force: true })
+})

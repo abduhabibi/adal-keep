@@ -9,7 +9,8 @@ router.get('/transitions', (req, res) => res.json(transitionStates()))
 router.post('/transitions/:source/start', async (req, res) => {
   try {
     const link = req.params.source === 'pextran' ? checkLink(req.body?.link) : null
-    res.json(startTransition(req.app.locals.db, req.params.source, link))
+    const accountId = Number(req.body?.account_id) || null
+    res.json(startTransition(req.app.locals.db, req.params.source, link, accountId ? { accountId } : {}))
   } catch (e) { res.status(400).json({ error: e.message }) }
 })
 

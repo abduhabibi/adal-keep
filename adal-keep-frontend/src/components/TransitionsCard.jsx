@@ -52,9 +52,17 @@ export default function TransitionsCard() {
     return () => clearInterval(t)
   }, [running])
 
-  const start = async (id) => {
+  const [choose, setChoose] = useState(null) // the Musaned accounts to pick from
+  const start = async (id, accountId) => {
+    // Musaned: signed in with a saved account — asked which when there are two or more.
+    if (id === 'musaned' && accountId === undefined) {
+      const accounts = await api.get('/musaned/accounts').then(r => r.data || []).catch(() => [])
+      if (accounts.length > 1) { setChoose(accounts); return }
+      accountId = accounts[0]?.id ?? null
+    }
+    setChoose(null)
     setStarting(id)
-    try { await api.post(`/transitions/${id}/start`, id === 'pextran' ? { link } : {}); await load() }
+    try { await api.post(`/transitions/${id}/start`, id === 'pextran' ? { link } : accountId ? { account_id: accountId } : {}); await load() }
     catch (e) { toast.error(err(e)) }
     setStarting(null)
   }
@@ -99,6 +107,24 @@ export default function TransitionsCard() {
           )
         })}
       </div>
+      {choose && (
+        <div className="fixed inset-0 z-[90] flex items-end justify-center bg-black/40 p-3 sm:items-center" onClick={() => setChoose(null)}>
+          <div className="w-full max-w-sm rounded-2xl bg-white p-4 shadow-2xl dark:bg-slate-900" onClick={e => e.stopPropagation()}>
+            <p className="font-bold">Move from which Musaned account?</p>
+            <p className="mb-3 text-xs text-slate-500">Adal Keep signs in with it (its saved password) and copies that account's people.</p>
+            <div className="space-y-2">
+              {choose.map(a => (
+                <button key={a.id} type="button" onClick={() => start('musaned', a.id)}
+                  className="flex w-full items-center justify-between rounded-xl border border-slate-200 px-3 py-2.5 text-left hover:border-teal-400 hover:bg-teal-50 dark:border-slate-700 dark:hover:bg-teal-900/20">
+                  <span><span className="block font-semibold">{a.name}</span><span className="text-xs text-slate-500">{a.username}</span></span>
+                  {a.is_default ? <span className="text-[10px] font-semibold text-teal-600">default</span> : null}
+                </button>
+              ))}
+            </div>
+            <button type="button" onClick={() => setChoose(null)} className="mt-3 w-full text-sm text-slate-500 underline">Cancel</button>
+          </div>
+        </div>
+      )}
     </Card>
   )
 }

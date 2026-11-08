@@ -57,7 +57,7 @@ try {
 if (previous?.sha === sha) { console.log(`Already published: ${sha.slice(0, 7)}`); process.exit(0) }
 
 // 1. Frontend.
-if (!args.has('--skip-frontend')) { console.log('== building the frontend'); execFileSync('npm', ['run', '-s', 'build'], { cwd: FRONT, stdio: 'inherit' }) }
+if (!args.has('--skip-frontend')) { console.log('== building the frontend'); execFileSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['run', '-s', 'build'], { cwd: FRONT, stdio: 'inherit', shell: process.platform === 'win32' }) }
 
 // 2. The bundle: committed backend files (never .env, data, uploads) + dist.
 const stage = fs.mkdtempSync(path.join(os.tmpdir(), 'adal-release-'))
@@ -71,7 +71,8 @@ try {
   }
   fs.cpSync(path.join(FRONT, 'dist'), path.join(stage, 'adal-keep-frontend/dist'), { recursive: true })
   const archive = path.join(os.tmpdir(), `adal-keep-${sha.slice(0, 7)}.tar.gz`)
-  execFileSync('tar', ['-czf', archive, '-C', stage, 'adal-keep-backend', 'adal-keep-frontend'])
+  // Windows: its own tar (Git's tar reads C: as a remote host).
+  execFileSync(process.platform === 'win32' ? path.join(process.env.SystemRoot || 'C:/Windows', 'System32', 'tar.exe') : 'tar', ['-czf', archive, '-C', stage, 'adal-keep-backend', 'adal-keep-frontend'])
   const buf = fs.readFileSync(archive)
   fs.unlinkSync(archive)
 

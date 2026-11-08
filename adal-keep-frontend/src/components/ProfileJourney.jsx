@@ -37,7 +37,10 @@ const SPOT = {
   tasheer: [0.66, 1], insurance: [0.83, 1], visa: [1, 1],
 }
 // On a phone's filter the first row is given more of the width: its names touched.
-const NARROW_X = { musaned: 0.155, selected: 0.34, wafid: 0.5, tasheer: 0.655, insurance: 0.83 }
+// On a phone the wakala is a step of its own at the start of the Embassy row (no room for a box on the curve).
+const NARROW_X = { musaned: 0.155, selected: 0.34, wafid: 0.5, wakala: 0.56, tasheer: 0.705, insurance: 0.855 }
+const NARROW_WIRES = Object.entries(PARENT_OF()).map(([to, from]) => ({ from, to, curve: from === 'wafid' }))
+function PARENT_OF() { return { musaned: 'cv', selected: 'musaned', wafid: 'selected', wakala: 'wafid', tasheer: 'wakala', insurance: 'tasheer', visa: 'insurance' } }
 const BOX = new Set(['wakala'])
 const EDGE = 30   // px kept at the left for the first step's name
 const LABELS = 78 // px kept at the right for the branches' names
@@ -59,6 +62,7 @@ export function after(k) {
 export const WAFID_RESULTS = [['wafid:fit', 'Fit'], ['wafid:pending', 'Pending'], ['wafid:unfit', 'Unfit']]
 // Where each result sits left of Wafid, in steps of a gap wide enough for its name.
 const RESULT_DX = { 'wafid:fit': -2.25, 'wafid:pending': -1.2, 'wafid:unfit': -0.15 }
+const RESULT_DX_NARROW = { 'wafid:fit': -2.5, 'wafid:pending': -1.45, 'wafid:unfit': -0.45 }
 const RESULT_LOOK = {
   'wafid:fit': { dot: 'bg-emerald-500 text-white', text: 'text-emerald-600 dark:text-emerald-300' },
   'wafid:pending': { dot: 'bg-amber-400 text-white', text: 'text-amber-600 dark:text-amber-300' },
@@ -70,8 +74,8 @@ const SIZE = {
   full:    { r: 14, rowGap: 42, block: 60 },
 }
 
-function Node({ k, title, n, state, note, noteWidth, count, selected, dim, onSelect, compact, narrow, left, top, angle, look }) {
-  if (BOX.has(k)) return <BoxNode {...{ k, title, state, note, count, selected, dim, onSelect, compact, left, top, angle }} />
+function Node({ k, title, n, state, note, noteWidth, count, selected, dim, onSelect, compact, narrow, left, top, angle, look, round = false }) {
+  if (BOX.has(k) && !round) return <BoxNode {...{ k, title, state, note, count, selected, dim, onSelect, compact, left, top, angle }} />
   const pick = !!onSelect
   const l = look ? (selected ? look : { ...LOOK.todo, text: look.text }) : pick ? (selected ? LOOK.done : LOOK.todo) : (LOOK[state] || LOOK.todo)
   return (
@@ -128,14 +132,19 @@ export function JourneyFork({ states = {}, notes = {}, counts, selected, onSelec
   }, [])
   const results = pick && (selected === 'wafid' || RESULT_DX[selected] != null)
   // The results hang below the first row's names: the bar grows to hold them.
+  const narrow = compact && w > 0 && w < 520
+  // On a phone the Embassy row sits lower, clear of the first row's names.
+  const rowGap = narrow ? z.rowGap + 14 : z.rowGap
   const drop = results ? (compact ? 20 : 26) : 0
-  const height = z.rowGap + z.block + drop
+  const height = rowGap + z.block + drop
   // Compact (the list's filter) fits any width — no sideways scrolling: on a
   // narrow screen the branches show only their icons.
-  const narrow = compact && w > 0 && w < 520
-  const edge = compact ? 22 : EDGE, labels = narrow ? 18 : LABELS
+  const edge = compact ? 22 : EDGE, labels = narrow ? 4 : LABELS
   const cx = (k) => edge + (narrow ? NARROW_X[k] ?? SPOT[k][0] : SPOT[k][0]) * Math.max(0, w - edge - labels - edge)
-  const cy = (k) => SPOT[k][1] * z.rowGap + z.r
+  const row = (k) => (narrow && BOX.has(k) ? 1 : SPOT[k][1])
+  const cy = (k) => row(k) * rowGap + z.r
+  const isBox = (k) => BOX.has(k) && !narrow
+  const wires = narrow ? NARROW_WIRES : WIRES
 
   // The path to the picked step lights up (on the list); on a profile a wire
   // is lit when both its ends are done, and pulses towards a step in progress.
@@ -149,16 +158,16 @@ export function JourneyFork({ states = {}, notes = {}, counts, selected, onSelec
   const pulse = (wire) => pick ? chain.has(end(wire)) : states[wire.from] === 'done' && states[end(wire)] === 'active'
 
   const path = ({ from, to, curve }) => {
-    const x1 = cx(from) + (BOX.has(from) ? 0 : z.r + 1), y1 = cy(from), x2 = cx(to) - (BOX.has(to) ? 0 : z.r + 1), y2 = cy(to)
+    const x1 = cx(from) + (isBox(from) ? 0 : z.r + 1), y1 = cy(from), x2 = cx(to) - (isBox(to) ? 0 : z.r + 1), y2 = cy(to)
     if (!curve) return `M${x1},${y1} L${x2},${y2}`
     const d = (x2 - x1) * 0.55
     return `M${x1},${y1} C${x1 + d},${y1} ${x2 - d},${y2} ${x2},${y2}`
   }
   const steps = [...SHARED, ...BRANCHES.flatMap(b => b.steps)]
   const step = Math.max(36, Math.min(80, (cx('wafid') - edge) / 2.5))
-  const rx = (k) => Math.max(edge, cx('wafid') + RESULT_DX[k] * step)
+  const rx = (k) => Math.max(edge, cx('wafid') + (narrow ? RESULT_DX_NARROW : RESULT_DX)[k] * step)
   const resultWire = (k) => {
-    const x1 = cx('wafid'), y1 = cy('wafid') + z.r + 1, x2 = rx(k), y2 = z.rowGap + drop + 1, d = (y2 - y1) * 0.6
+    const x1 = cx('wafid'), y1 = cy('wafid') + z.r + 1, x2 = rx(k), y2 = rowGap + drop + 1, d = (y2 - y1) * 0.6
     return `M${x1},${y1} C${x1},${y1 + d} ${x2},${y2 - d} ${x2},${y2}`
   }
   const gap = cx('musaned') - cx('cv') - 4   // the first row's steps sit closest
@@ -174,7 +183,7 @@ export function JourneyFork({ states = {}, notes = {}, counts, selected, onSelec
       <div ref={ref} className="relative" style={{ height, minWidth: compact ? 0 : 620 }}>
         {w > 0 && (
           <svg className="absolute inset-0 pointer-events-none" width={w} height={height} aria-hidden="true">
-            {WIRES.map(wire => {
+            {wires.map(wire => {
               const on = lit(wire)
               return (
                 <g key={`${wire.from}-${wire.to}`}>
@@ -196,16 +205,16 @@ export function JourneyFork({ states = {}, notes = {}, counts, selected, onSelec
         {w > 0 && steps.map(([k, title, short], i) => (
           <Node key={k} k={k} title={compact && short ? short : title} n={i + 1} state={states[k]} note={pick ? '' : notes[k]} noteWidth={Math.min(96, SHARED.some(([s]) => s === k) ? gap : 96)}
             count={counts?.[k]} selected={selected === k} dim={pick && selected && !chain.has(k)} onSelect={onSelect}
-            compact={compact} narrow={narrow} left={BOX.has(k) ? box.x : cx(k)} top={BOX.has(k) ? box.y : SPOT[k][1] * z.rowGap} angle={box.angle} />
+            compact={compact} narrow={narrow} round={!isBox(k)} left={isBox(k) ? box.x : cx(k)} top={isBox(k) ? box.y : row(k) * rowGap} angle={box.angle} />
         ))}
         {w > 0 && results && WAFID_RESULTS.map(([k, title]) => (
           <Node key={k} k={k} title={title} count={counts?.[k]} selected={selected === k} dim={!!result && selected !== k} onSelect={onSelect}
-            compact={compact} narrow={narrow} left={rx(k)} top={z.rowGap + drop} look={RESULT_LOOK[k]} />
+            compact={compact} narrow={narrow} left={rx(k)} top={rowGap + drop} look={RESULT_LOOK[k]} />
         ))}
         {/* the two branches' names, at the right end of their rows */}
-        {BRANCHES.map((b, i) => (
+        {!narrow && BRANCHES.map((b, i) => (
           <span key={b.key} className="absolute right-0 text-[10px] font-bold uppercase tracking-wide text-slate-400 whitespace-nowrap text-right"
-            style={{ top: z.rowGap + z.r - 7 }}>
+            style={{ top: rowGap + z.r - 7 }}>
             {b.icon}{!narrow && ` ${b.title}`}
           </span>
         ))}

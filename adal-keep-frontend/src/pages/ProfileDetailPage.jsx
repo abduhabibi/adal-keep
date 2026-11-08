@@ -110,8 +110,8 @@ export default function ProfileDetailPage() {
         title={amharicName || profile.full_name}
         subtitle={amharicName ? profile.full_name : (profile.phone_number || 'No phone on file')}
         action={
-          <div className="flex flex-wrap items-center gap-2.5">
-            <Button variant="secondary" onClick={() => navigate('/profiles')}>← Back</Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="secondary" onClick={() => navigate('/profiles')} title="Back" aria-label="Back"><span aria-hidden="true">←</span><span className="hidden sm:inline"> Back</span></Button>
             <Button
               className="bg-purple-600 hover:bg-purple-700 text-white"
               data-tour="cv-create"
@@ -128,8 +128,9 @@ export default function ProfileDetailPage() {
             <Button
               className="bg-red-600 hover:bg-red-700 text-white"
               onClick={deleteProfile}
+              title="Delete" aria-label="Delete"
             >
-              🗑️ Delete
+              🗑️<span className="hidden sm:inline"> Delete</span>
             </Button>
           </div>
         }

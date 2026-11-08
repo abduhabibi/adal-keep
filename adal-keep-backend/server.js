@@ -59,6 +59,7 @@ import transitionsRouter from './src/routes/transitions.js'
 import appRouter from './src/routes/app.js'
 import notesRouter from './src/routes/notes.js'
 import { watchChanges } from './src/services/changes.js'
+import { answerCache } from './src/services/answerCache.js'
 import { diagMiddleware, diagReport } from './src/services/diag.js'
 import { removeSecret } from './src/services/secretStore.js'
 import { startContractChecker } from './src/services/musanedContracts.js'
@@ -122,6 +123,8 @@ app.use(subscriptionGuard)
 app.use('/uploads', express.static(path.join(process.cwd(), 'data/SafeStorage')))
 
 app.use(attachAuth)
+// The big lists every page asks for: made once, kept until their tables change.
+app.use(answerCache())
 
 // Core Feature Routes
 app.use("/api", tenancyRouter)

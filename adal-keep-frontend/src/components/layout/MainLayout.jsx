@@ -35,6 +35,15 @@ export default function MainLayout() {
   useEffect(() => { if (inChat) setSidebarCollapsed(true) }, [inChat])
   // The profiles search pad is on every page (docked right); it can be folded away.
   const [padOpen, setPadOpen] = useState(readPad)
+  // The pad loads every profile: on a phone (where it is not shown) it is not made at all.
+  const [wide, setWide] = useState(() => window.matchMedia?.('(min-width: 768px)').matches ?? true)
+  useEffect(() => {
+    const m = window.matchMedia?.('(min-width: 768px)')
+    if (!m) return
+    const on = () => setWide(m.matches)
+    m.addEventListener?.('change', on)
+    return () => m.removeEventListener?.('change', on)
+  }, [])
   const togglePad = () => setPadOpen(o => {
     try { localStorage.setItem(PAD_KEY, o ? 'closed' : 'open') } catch {}
     return !o
@@ -73,12 +82,12 @@ export default function MainLayout() {
         <Navbar onMenuClick={() => setSidebarOpen(!sidebarOpen)} />
         <div className="flex flex-1 min-h-0">
           <main className="flex-1 min-w-0 overflow-y-auto transition-colors duration-500 custom-scrollbar">
-            <div className={inChat ? 'h-full' : 'p-6'}>
+            <div className={inChat ? 'h-full' : 'px-3 py-4 sm:p-6'}>
               <Outlet />
             </div>
           </main>
 
-          {padOpen && !inChat && (
+          {padOpen && !inChat && wide && (
             <aside className="search-pad hidden md:flex w-72 shrink-0 flex-col p-3 pl-0 min-h-0">
               <ProfileSearchPad title="Profiles — search" autoFocusKey maxHeight="max-h-none" className="flex-1" />
             </aside>

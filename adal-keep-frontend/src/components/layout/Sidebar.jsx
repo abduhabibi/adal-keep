@@ -126,7 +126,8 @@ const settingsLink = {
   ),
 }
 
-export default function Sidebar({ isOpen, onToggle, collapsed, onToggleCollapse }) {
+export default function Sidebar({ isOpen, onToggle, collapsed: narrowWanted, onToggleCollapse }) {
+  const collapsed = narrowWanted && (window.matchMedia?.('(min-width: 768px)').matches ?? true)
   const { company } = useAuth()
   // Before setup completes we show "Adal Keep"; afterwards "Adal <Company name>".
   const brand = company ? `Adal ${company}` : 'Adal Keep'

@@ -162,7 +162,7 @@ export default function ProfilesPage() {
         </div>
       </div>
 
-      <div className="panel mb-4 sm:mb-5 grid grid-cols-[1fr_auto] gap-2 p-2 sm:p-3 sm:grid-cols-[1fr_auto_auto_auto] items-center animate-fade-up">
+      <div className="panel mb-4 sm:mb-5 grid grid-cols-[minmax(0,1fr)_auto] gap-2 p-2 sm:p-3 sm:grid-cols-[minmax(0,1fr)_auto_auto_auto] items-center animate-fade-up">
         <Input
           placeholder="በስም፣ በስልክ ወይም በመታወቂያ ይፈልጉ..."
           value={query}
@@ -207,7 +207,7 @@ export default function ProfilesPage() {
         </select>
 
         <button type="button" onClick={() => setShowFilters(v => !v)}
-          className={`field whitespace-nowrap text-sm font-semibold ${activeCount ? 'border-teal-400 text-teal-700 dark:text-teal-300' : ''}`}>
+          className={`field !w-auto whitespace-nowrap !px-3 text-sm font-semibold ${activeCount ? 'border-teal-400 text-teal-700 dark:text-teal-300' : ''}`}>
           ⚙ Filters{activeCount ? ` · ${activeCount}` : ''} {showFilters ? '▴' : '▾'}
         </button>
 
@@ -254,7 +254,7 @@ export default function ProfilesPage() {
               onClick={() => navigate(`/profiles/${p.id}`)}
             >
               <label onClick={(e) => e.stopPropagation()} title="Select"
-                className="absolute left-1/2 -top-3 z-10 flex h-6 w-6 -translate-x-1/2 cursor-pointer items-center justify-center rounded-md bg-white/90 shadow-sm ring-1 ring-slate-200 dark:bg-slate-800 dark:ring-slate-600">
+                className="absolute right-1.5 top-1.5 z-10 flex h-7 w-7 cursor-pointer items-center justify-center rounded-md">
                 <input type="checkbox" className="h-4 w-4 cursor-pointer accent-teal-600" checked={picked.has(p.id)} onChange={() => togglePick(p)} />
               </label>
               <div className="flex items-start justify-between gap-3">
@@ -362,25 +362,23 @@ function MiniJourney({ steps = {}, who = {}, missing = {}, picked }) {
 }
 
 /** Pages of 100: « 1 | 2 | … | n » — folds to "Page 2 of 5" with « when not needed. */
+/** ‹ 1 … 4 5 6 … 21 › — one short line on any screen. */
 function Pager({ page, pages, total, per, onPage, bottom = false }) {
-  const [open, setOpen] = useState(true)
   if (pages <= 1) return null
   const from = (page - 1) * per + 1, to = Math.min(total, page * per)
+  const near = [...new Set([1, page - 1, page, page + 1, pages])].filter(n => n >= 1 && n <= pages).sort((a, b) => a - b)
+  const list = []
+  near.forEach((n, i) => { if (i && n - near[i - 1] > 1) list.push('…' + n); list.push(n) })
+  const btn = 'h-8 min-w-[32px] rounded-lg px-2 font-semibold'
+  const plain = `${btn} bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 disabled:opacity-40`
   return (
-    <div className={`flex items-center gap-1.5 text-xs ${bottom ? 'mt-4 justify-center' : 'mb-3'} col-span-full`}>
-      <button type="button" onClick={() => setOpen(o => !o)} title={open ? 'Fold the pages' : 'Show the pages'}
-        className="shrink-0 rounded-md border border-slate-200 dark:border-slate-700 px-1.5 py-1 font-bold text-slate-500">{open ? '«' : '»'}</button>
-      {open ? (
-        <div className="flex flex-wrap items-center gap-1 min-w-0">
-          {Array.from({ length: pages }, (_, k) => k + 1).map(n => (
-            <button key={n} type="button" onClick={() => onPage(n)}
-              className={`min-w-[28px] rounded-md px-2 py-1 font-semibold ${n === page ? 'bg-teal-600 text-white' : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'}`}>{n}</button>
-          ))}
-          <span className="ml-1 text-slate-400">{from}–{to} of {total}</span>
-        </div>
-      ) : (
-        <span className="text-slate-500">Page {page} of {pages} · {from}–{to} of {total}</span>
-      )}
+    <div className={`flex flex-wrap items-center gap-1 text-xs ${bottom ? 'mt-4 justify-center' : 'mb-3'} col-span-full`}>
+      <button type="button" className={plain} disabled={page <= 1} onClick={() => onPage(page - 1)} aria-label="Previous page">‹</button>
+      {list.map(n => typeof n === 'string'
+        ? <span key={n} className="px-0.5 text-slate-400">…</span>
+        : <button key={n} type="button" onClick={() => onPage(n)} className={n === page ? `${btn} bg-teal-600 text-white` : plain}>{n}</button>)}
+      <button type="button" className={plain} disabled={page >= pages} onClick={() => onPage(page + 1)} aria-label="Next page">›</button>
+      <span className="ml-1 text-slate-400 whitespace-nowrap">{from}–{to} of {total}</span>
     </div>
   )
 }

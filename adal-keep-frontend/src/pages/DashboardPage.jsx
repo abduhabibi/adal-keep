@@ -65,7 +65,7 @@ export default function DashboardPage() {
             to={card.link}
             className="glass-panel p-5 hover:scale-[1.02] transition-all duration-300 group"
           >
-            <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${card.color} flex items-center justify-center text-white font-bold text-lg mb-3 group-hover:shadow-lg transition-shadow`}>
+            <div className={`h-10 min-w-10 w-fit px-2.5 rounded-xl bg-gradient-to-br ${card.color} flex items-center justify-center text-white font-bold text-lg tabular-nums mb-3 group-hover:shadow-lg transition-shadow`}>
               {card.value}
             </div>
             <p className="text-sm font-medium">{card.label}</p>

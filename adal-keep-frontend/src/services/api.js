@@ -8,6 +8,21 @@ const api = axios.create({
   withCredentials: true, // Required for cookies/sessions
 })
 
+// The same GET asked again while the first is on its way shares its answer:
+// pages and side panels that load the same list at once cost one request.
+{
+  const get = api.get.bind(api)
+  const inflight = new Map()
+  api.get = (url, config = {}) => {
+    if (config.responseType && config.responseType !== 'json') return get(url, config)
+    const key = url + '?' + JSON.stringify(config.params || {})
+    if (inflight.has(key)) return inflight.get(key)
+    const p = get(url, config).finally(() => inflight.delete(key))
+    inflight.set(key, p)
+    return p
+  }
+}
+
 // Who is working (the employee chosen on this PC): the Trash shows who deleted what.
 api.interceptors.request.use((config) => {
   try {

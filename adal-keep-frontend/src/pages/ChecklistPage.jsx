@@ -181,8 +181,23 @@ export default function ChecklistPage() {
                 onDragEnd={handleDragEnd}
                 className="p-3 bg-white/70 dark:bg-slate-800/70 border border-slate-200/60 dark:border-slate-700/60 rounded-xl shadow-sm cursor-grab active:cursor-grabbing hover:border-teal-400/50 dark:hover:border-teal-400/30 hover:shadow-md transition-all group"
               >
-                <div className="font-semibold text-slate-800 dark:text-white text-sm">{profile.full_name}</div>
-                <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">{profile.phone_number || 'ስልክ የለም'}</div>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="font-semibold text-slate-800 dark:text-white text-sm truncate">{profile.full_name}</div>
+                    <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">{profile.phone_number || 'ስልክ የለም'}</div>
+                  </div>
+                  {checklists.length > 0 && (
+                    <select aria-label="Put in a checklist" value="" title="Put in a checklist"
+                      onChange={async (e) => {
+                        const id = Number(e.target.value); if (!id) return
+                        try { await api.post(`/checklists/${id}/profiles`, { profile_ids: [profile.id] }); toast.success(`Added to “${checklists.find(c => c.id === id)?.name}”`); loadData(true) } catch { toast.error('ፕሮፋይሉን ማከል አልተቻለም') }
+                      }}
+                      className="h-8 w-9 shrink-0 cursor-pointer appearance-none rounded-lg border border-teal-300 bg-teal-50 text-center text-base font-bold text-teal-700 dark:border-teal-700 dark:bg-teal-900/30 dark:text-teal-300">
+                      <option value="">＋</option>
+                      {checklists.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                  )}
+                </div>
               </div>
             ))}
             {filteredProfiles.length === 0 && (
@@ -207,7 +222,7 @@ export default function ChecklistPage() {
                 value={newChecklistName}
                 onChange={(e) => setNewChecklistName(e.target.value)}
               />
-              <Button type="button" data-tour="new-checklist" onClick={() => setNaming(naming == null ? newChecklistName.trim() : null)}>＋ Add</Button>
+              <Button type="button" data-tour="new-checklist" className="shrink-0 whitespace-nowrap" onClick={() => setNaming(naming == null ? newChecklistName.trim() : null)}>＋ Add</Button>
             </div>
             {naming != null && (
               <form onSubmit={handleCreateChecklist} className="mt-2 flex gap-2">

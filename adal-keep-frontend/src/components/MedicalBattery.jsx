@@ -55,10 +55,10 @@ export default function MedicalBattery({ profile, onSaved }) {
 
   return (
     <button type="button" onClick={() => setEditing(true)} title={`${from ? `Medical examination ${nice(from)} · ` : ''}deadline ${nice(until)} · click to change`}
-      className={`inline-flex items-center gap-2 text-xs font-semibold ${left <= 7 ? 'text-red-600 dark:text-red-400' : left <= 14 ? 'text-amber-700 dark:text-amber-300' : 'text-slate-600 dark:text-slate-300'}`}>
+      className={`inline-flex flex-wrap items-center gap-x-2 gap-y-0.5 text-left text-xs font-semibold ${left <= 7 ? 'text-red-600 dark:text-red-400' : left <= 14 ? 'text-amber-700 dark:text-amber-300' : 'text-slate-600 dark:text-slate-300'}`}>
       <BatteryShape pct={pct} color={color} blink={left <= 3} />
-      <span>{text}</span>
-      <span className="font-normal text-slate-400">· deadline {nice(until)}{from ? ` · exam ${nice(from)}` : ''}</span>
+      <span className="whitespace-nowrap">{text}</span>
+      <span className="basis-full font-normal text-slate-400 sm:basis-auto">· deadline {nice(until)}{from ? ` · exam ${nice(from)}` : ''}</span>
     </button>
   )
 }

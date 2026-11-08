@@ -25,6 +25,19 @@ const when = (t) => {
   return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
 }
 
+/** A long note: its newest 3 lines, all of it on a tap. */
+function LongNote({ text }) {
+  const [all, setAll] = useState(false)
+  const lines = String(text || '').split('\n').filter(Boolean)
+  const shown = all || lines.length <= 3 ? lines : lines.slice(-3)
+  return (
+    <div className="text-sm text-slate-800 dark:text-slate-100">
+      {shown.map((l, i) => <p key={i} className="break-words">{l}</p>)}
+      {lines.length > 3 && <button type="button" onClick={() => setAll(a => !a)} className="mt-0.5 text-xs font-semibold text-teal-600 dark:text-teal-400">{all ? 'Less' : `All ${lines.length} lines`}</button>}
+    </div>
+  )
+}
+
 export default function NotesPage() {
   const navigate = useNavigate()
   const [data, setData] = useState(null)
@@ -125,7 +138,7 @@ export default function NotesPage() {
         <div className="flex gap-2">
           <textarea ref={box} rows={1} value={text} onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !people.length) add(e) }}
-            placeholder="Write a note, then Enter…   (@name: about a person)"
+            placeholder="Write a note… (@name for a person)"
             className="min-h-[42px] flex-1 resize-y rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-900" />
           <button type="submit" disabled={!text.trim()} className="shrink-0 rounded-xl bg-teal-600 px-4 text-sm font-semibold text-white disabled:opacity-40">Add</button>
         </div>
@@ -201,7 +214,7 @@ export default function NotesPage() {
             {fromProfiles.map(p => (
               <li key={p.profile_id} className="panel px-3 py-2">
                 <button type="button" onClick={() => navigate(`/profiles/${p.profile_id}`)} className="text-xs font-semibold text-teal-600 hover:underline dark:text-teal-400">👤 {p.full_name}</button>
-                <p className="whitespace-pre-wrap break-words text-sm text-slate-800 dark:text-slate-100">{p.notes}</p>
+                <LongNote text={p.notes} />
               </li>
             ))}
           </ul>

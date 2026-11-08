@@ -248,6 +248,8 @@ function StepCard({ s }) {
 }
 
 /** On a profile: her journey, refreshed every 15 s — the fork, then each step's who and documents. */
+const narrowScreen = () => !(window.matchMedia?.('(min-width: 640px)').matches ?? true)
+
 export default function ProfileJourney({ profileId }) {
   const [j, setJ] = useState(null)
   // Closed until opened: the fork says enough at a glance.
@@ -267,7 +269,7 @@ export default function ProfileJourney({ profileId }) {
   return (
     <section data-tour="profile-journey" className="panel p-4">
       <div onClick={(e) => { if (e.target.closest('button')) document.getElementById('ai-actions')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }}>
-        <JourneyFork states={states} notes={notes} />
+        <JourneyFork states={states} notes={notes} compact={narrowScreen()} />
       </div>
       <button type="button" onClick={toggle} className="mt-2 text-xs font-semibold text-teal-700 hover:underline dark:text-teal-400">
         {open ? '▾ Who and documents per step' : '▸ Who and documents per step'}

@@ -31,7 +31,7 @@ const MAX_FILE = 45 * 1024 * 1024
 
 // The answers the pages read: once for the agency, and per profile.
 const GLOBAL = ['/profiles', '/brokers', '/tasks', '/employees', '/settings', '/setup/status', '/subscription/status',
-  '/automations/stages', '/automations/active', '/notifications', '/checklists', '/notes', '/cv/templates', '/quick-links',
+  '/automations/stages', '/automations/active', '/notifications', '/checklists', '/cv/templates', '/quick-links',
   '/dashboard', '/tasks/documents', '/wafid/settings', '/health', '/tutor/tour', '/trash', '/cv/generated',
   '/lmis/accounts', '/musaned/accounts', '/tasheer/accounts', '/insurance/accounts', '/visa/accounts',
   '/automations/ready-for-submit', '/tutor/adoption', '/main-pc']

@@ -5,7 +5,7 @@ import api from '../services/api'
 import { usePickFile } from './shared/PickFile'
 import { SHARED, BRANCHES } from './ProfileJourney'
 import { printOnPhone } from '../lib/phoneApp'
-import LangToggle from './LangToggle'
+import { AmharicKeys, typeAmharic, useAmharicTyping } from '../lib/amharicInput'
 import { onDataChange } from '../lib/changes'
 
 const ALL_FIELDS = [
@@ -62,6 +62,7 @@ export default function ChecklistGridView({ checklist, onClose }) {
     return m
   })
   const [newCol, setNewCol] = useState({ label: '', type: 'tick' })
+  const [amharic, setAmharic] = useAmharicTyping() // the notes are typed in Amharic (አ) or English (A)
   const [adding, setAdding] = useState(null) // a new note column's name, while it is typed
   // Each girl's journey: { profileId: { steps: {cv:'done'…}, who: {…} } }.
   const [paths, setPaths] = useState({})
@@ -281,7 +282,7 @@ export default function ChecklistGridView({ checklist, onClose }) {
           <button type="button" onClick={handleDownloadCSV} className={`${btn} text-emerald-700 bg-emerald-50 border-emerald-200 hover:bg-emerald-100`}>CSV</button>
           <button type="button" onClick={handleDeleteChecklist} className={`${btn} text-red-700 bg-red-50 border-red-200 hover:bg-red-100`}>Delete</button>
           <button type="button" onClick={onClose} className={`${btn} text-slate-700 bg-white border-slate-300 hover:bg-slate-50`}>Close</button>
-          <LangToggle />
+          <AmharicKeys on={amharic} onChange={setAmharic} />
         </div>
       </div>
 
@@ -330,7 +331,7 @@ export default function ChecklistGridView({ checklist, onClose }) {
                         <td key={k} className={cell}>
                           {c.type === 'tick'
                             ? <input type="checkbox" checked={!!v} onChange={(e) => setCell(profile.id, c.key, e.target.checked ? '1' : '')} className="w-5 h-5 accent-teal-600 cursor-pointer" />
-                            : <input key={v} defaultValue={v} onBlur={(e) => { if (e.target.value !== v) setCell(profile.id, c.key, e.target.value) }}
+                            : <input key={v} defaultValue={v} lang={amharic ? 'am' : 'en'} onInput={(e) => { if (amharic) typeAmharic(e); else e.target.dataset.was = e.target.value }} onFocus={(e) => { e.target.dataset.was = e.target.value }} onBlur={(e) => { if (e.target.value !== v) setCell(profile.id, c.key, e.target.value) }}
                                 placeholder="…" className="w-36 rounded border border-slate-200 dark:border-slate-700 bg-transparent px-1.5 py-1 text-xs" />}
                         </td>
                       )

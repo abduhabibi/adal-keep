@@ -53,7 +53,7 @@ export default function BrokersPage() {
         title="ደላሎች"
         subtitle="ሁሉም ደላሎች · ለዝርዝር ጠቅ ያድርጉ"
         action={
-          <div className="w-64">
+          <div className="w-full sm:w-64">
             <Input
               placeholder="ደላላ ይፈልጉ..."
               value={search}
@@ -64,7 +64,8 @@ export default function BrokersPage() {
       />
 
       {/* Outside a broker: search every profile */}
-      <ProfileSearchPad title="All profiles — search" profiles={profiles} maxHeight="max-h-72" />
+      {/* (on a phone the brokers come first; this search is on bigger screens) */}
+      <div className="hidden sm:block"><ProfileSearchPad title="All profiles — search" profiles={profiles} maxHeight="max-h-72" /></div>
 
       {filtered.length === 0 ? (
         <div className="text-center py-20 text-slate-400">

@@ -1,7 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import toast from 'react-hot-toast'
 import api from '../services/api'
-import LangToggle from '../components/LangToggle'
 import Spinner from '../components/shared/Spinner'
 import Input from '../components/shared/Input'
 import Button from '../components/shared/Button'
@@ -213,7 +212,6 @@ export default function ChecklistPage() {
               <h2 className="font-display font-bold text-slate-800 dark:text-white flex items-center gap-2">
                 <span className="text-lg">📋</span> የኔ ቼክስቶች
               </h2>
-              <LangToggle />
             </div>
             <div className="flex gap-2">
               <Input

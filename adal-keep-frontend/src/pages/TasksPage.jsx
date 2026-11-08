@@ -7,7 +7,6 @@ import PageHeader from '../components/shared/PageHeader'
 import Button from '../components/shared/Button'
 import Spinner from '../components/shared/Spinner'
 import DocumentActivity from '../components/DocumentActivity'
-import { isPhoneApp } from '../lib/phoneMode'
 
 const COLUMNS = [
   { key: 'pending', label: 'ለመሰራት', color: 'amber' },
@@ -171,7 +170,7 @@ export default function TasksPage() {
         action={<Button onClick={load} variant="secondary">ዳግም ጫን</Button>}
       />
 
-      {!isPhoneApp() && <DocumentActivity />}
+      <DocumentActivity />
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {COLUMNS.map(col => {

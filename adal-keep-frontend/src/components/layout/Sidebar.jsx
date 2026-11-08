@@ -2,7 +2,6 @@ import { NavLink } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import toast from 'react-hot-toast'
 import api from '../../services/api'
-import { isPhoneApp, PHONE_PAGES } from '../../lib/phoneMode'
 
 const links = [
   {
@@ -106,17 +105,6 @@ const trashLink = {
   ),
 }
 
-// The phone app adds people with its camera: a menu item of its own.
-const newProfileLink = {
-  to: '/profiles/new',
-  label: '＋ New profile',
-  icon: (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  ),
-}
-
 const settingsLink = {
   to: '/settings',
   label: 'ማስተካከያዎች',
@@ -201,7 +189,7 @@ export default function Sidebar({ isOpen, onToggle, collapsed: narrowWanted, onT
 
         {/* Navigation */}
         <nav className="flex-1 space-y-1 px-3 py-4 overflow-y-auto custom-scrollbar">
-          {(isPhoneApp() ? [...links.filter(l => PHONE_PAGES.includes(l.to)).slice(0, 1), newProfileLink, ...links.filter(l => PHONE_PAGES.includes(l.to)).slice(1)] : links).map((link) => (
+          {links.map((link) => (
             <NavLink
               key={link.to}
               to={link.to}

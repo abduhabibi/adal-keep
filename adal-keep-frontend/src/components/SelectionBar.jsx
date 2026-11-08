@@ -15,7 +15,6 @@ import api from '../services/api'
 import { useAuth } from '../context/AuthContext'
 import { loadEmbassy, printEmbassy } from '../lib/embassyPrint'
 import { dragProfiles } from '../lib/profileDrag'
-import { isPhoneApp } from '../lib/phoneMode'
 
 const err = (e) => e?.response?.data?.error || e.message
 
@@ -135,10 +134,10 @@ export default function SelectionBar({ picked, onRemove, onClear, onAllShown, on
       </div>
       <div className={`${open ? '' : 'hidden lg:flex'} flex min-h-0 flex-1 flex-col`}>
         <div className="grid grid-cols-2 gap-1.5 border-b border-slate-100 p-2 dark:border-slate-800 lg:grid-cols-1 lg:p-3">
-          {!isPhoneApp() && <><button type="button" className={`${btn} bg-slate-100 text-slate-400 dark:bg-slate-800`} disabled
+          <button type="button" className={`${btn} bg-slate-100 text-slate-400 dark:bg-slate-800`} disabled
             title="The Tasheer run is not built yet — show Adal Keep the Tasheer site's steps and it will be">🛂 Make Tasheer <span className="ml-auto hidden text-[10px] font-normal lg:inline">coming</span></button>
           <button type="button" className={`${btn} bg-amber-50 text-amber-800 hover:bg-amber-100 dark:bg-amber-900/30 dark:text-amber-300`} disabled={!!busy}
-            onClick={() => startAll('insurance_certificate', 'Insurance certificate')}>🛡️ {busy === 'insurance_certificate' ? 'Checking and starting…' : 'Make insurance'}</button></>}
+            onClick={() => startAll('insurance_certificate', 'Insurance certificate')}>🛡️ {busy === 'insurance_certificate' ? 'Checking and starting…' : 'Make insurance'}</button>
           <button type="button" className={`${btn} bg-teal-600 text-white hover:bg-teal-700`} disabled={!!busy}
             onClick={print} title="2 pages a girl: the contract's first page and the embassy form with the visa and application numbers as barcodes">
             🖨️ {busy === 'print' ? 'Checking…' : 'Print embassy'} <span className="ml-auto hidden text-[10px] font-normal opacity-80 lg:inline">{picked.length * 2} pages</span></button>

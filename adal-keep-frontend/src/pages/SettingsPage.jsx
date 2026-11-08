@@ -25,7 +25,6 @@ import ErrorBoundary from '../components/shared/ErrorBoundary'
 import PhoneCard from '../components/PhoneCard'
 import WhatsAppCard from '../components/WhatsAppCard'
 import TransitionsCard from '../components/TransitionsCard'
-import { isPhoneApp } from '../lib/phoneMode'
 
 // The tabs of Settings: [id, icon, name].
 const SETTINGS_TABS = [
@@ -204,7 +203,7 @@ export default function SettingsPage() {
       />
       {/* Settings in tabs — a short page instead of one long scroll. */}
       <nav className="sticky top-0 z-20 -mx-1 flex gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-white/90 p-1 backdrop-blur dark:border-slate-700 dark:bg-slate-900/90" translate="no">
-        {SETTINGS_TABS.filter(([id]) => !isPhoneApp() || ['agency', 'look'].includes(id)).map(([id, icon, label]) => (
+        {SETTINGS_TABS.map(([id, icon, label]) => (
           <button key={id} type="button" onClick={() => setTab(id)}
             className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${tab === id ? 'bg-teal-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'}`}>
             <span>{icon}</span>{label}

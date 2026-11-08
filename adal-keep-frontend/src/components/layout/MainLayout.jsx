@@ -12,7 +12,6 @@ import useReadyChime from '../../hooks/useReadyChime'
 import useNewVersion from '../../hooks/useNewVersion'
 import api from '../../services/api'
 import UpdateBanner from '../UpdateBanner'
-import { isPhoneApp } from '../../lib/phoneMode'
 
 const PAD_KEY = 'adal-search-pad'
 
@@ -67,7 +66,7 @@ export default function MainLayout() {
       {!DEMO && <TutorTracker />}
       {!DEMO && <JoinRequests />}
       {!DEMO && <PcAccessRequests />}
-      {!DEMO && !isPhoneApp() && <AttentionBar />}
+      {!DEMO && <AttentionBar />}
       {!DEMO && <PhoneCalls />}
       <Sidebar
         isOpen={sidebarOpen}

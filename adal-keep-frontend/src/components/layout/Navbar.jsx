@@ -3,7 +3,6 @@ import FileTray from '../FileTray'
 import { useLocation, useNavigate } from 'react-router-dom'
 import api from '../../services/api'
 import toast from 'react-hot-toast'
-import { isPhoneApp } from '../../lib/phoneMode'
 
 export default function Navbar({ onMenuClick, capturedFiles, setCapturedFiles }) {
   const location = useLocation()
@@ -170,7 +169,7 @@ export default function Navbar({ onMenuClick, capturedFiles, setCapturedFiles })
           {/* User Avatar */}
           <button onClick={() => navigate('/settings')} className="w-8 h-8 rounded-full overflow-hidden shadow ring-1 ring-black/10 dark:ring-white/20 transition-transform duration-200 hover:scale-105" title="ማስተካከያዎች"><img src="/adal-logo.png" alt="Adal" className="h-full w-full object-cover" draggable={false} /></button>
 
-          {!isPhoneApp() && <FileTray capturedFiles={capturedFiles} setCapturedFiles={setCapturedFiles} />}
+          <FileTray capturedFiles={capturedFiles} setCapturedFiles={setCapturedFiles} />
         </div>
       </nav>
 

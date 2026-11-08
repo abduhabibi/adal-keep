@@ -243,8 +243,12 @@ export default function ProfileAutomations({ profileId }) {
         `/profiles/${profileId}/automations/${workflowId}/start`,
         { account_id: accountFor(workflowId) }
       )
-      openRun(r.data.runId)
-      announce(r.data, `${name}: ${r.data.message || 'started'}`, t)
+      if (/^mofa/.test(workflowId)) {
+        toast.success(`${name}: started — it works quietly; its captcha comes as a notification`, { id: t, duration: 5000 })
+      } else {
+        openRun(r.data.runId)
+        announce(r.data, `${name}: ${r.data.message || 'started'}`, t)
+      }
       load({ quiet: true })
     } catch (e) {
       toast.error(`${name}: ${e.response?.data?.error || 'could not start'}`, { id: t, duration: 8000 })

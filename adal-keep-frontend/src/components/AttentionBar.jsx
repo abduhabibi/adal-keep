@@ -82,13 +82,21 @@ export default function AttentionBar() {
   const [hidden, setHidden] = useState(() => new Set())
   const seen = useRef(null)
   const load = () => api.get('/automations/attention').then(r => {
-    const list = r.data || []
+    // A phone does not get what goes to the PC first (an Enjaz captcha: 30 s) until then.
+    const onPhone = !!phone() || !!window.__ADAL_CLOUD
+    const list = (r.data || []).filter(c => !onPhone || !(c.phone_wait_ms > 0))
     const fresh = seen.current ? list.filter(c => !seen.current.has(keyOf(c))) : []
     if (fresh.length && !here()) beep()
-    // Out of sight: the phone's or the PC's own notification.
     for (const c of fresh) {
-      if (!document.hidden) continue
       const title = c.full_name || 'Adal Keep'
+      // On the PC a captcha picture is always a Windows notification (even with Adal Keep in front).
+      if (!onPhone && c.asks && c.image && window.Notification?.permission === 'granted') {
+        const n = new Notification(`${title}: ${c.title}`, { body: 'Type these numbers in Adal Keep (the bar at the top).', image: c.image, icon: c.image, tag: `captcha-${c.run_id}`, requireInteraction: true })
+        n.onclick = () => { window.focus(); n.close() }
+        continue
+      }
+      // Out of sight: the phone's or the PC's own notification.
+      if (!document.hidden) continue
       if (phone()) phone().notifyCall?.({ run: c.run_id, title, body: c.title, image: c.image || undefined, asks: !!c.asks, label: c.label, choices: c.choices || undefined })
       else if (window.Notification?.permission === 'granted') {
         const n = new Notification(title, { body: c.title, tag: String(c.run_id), silent: true })

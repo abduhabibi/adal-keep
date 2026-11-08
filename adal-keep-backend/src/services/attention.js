@@ -16,9 +16,10 @@ export function needPerson(runId, title, body = '', { confirm = false } = {}) {
  * A question answered in the bar: the captcha picture (a data: address) or a
  * code with no picture, and what to do with the typed text.
  */
-export function askCaptcha(runId, image, answer, { title, label = 'Numbers', choices = null } = {}) {
+export function askCaptcha(runId, image, answer, { title, label = 'Numbers', choices = null, phoneAfterMs = 0 } = {}) {
   const id = Number(runId)
-  const w = { title: 'Type the captcha', body: '', at: Date.now(), ...(waits.get(id) || {}), image, answer, label, choices }
+  // phoneAfterMs: the phones are not shown it before then (it goes to this PC first).
+  const w = { title: 'Type the captcha', body: '', at: Date.now(), ...(waits.get(id) || {}), image, answer, label, choices, phoneFrom: phoneAfterMs ? Date.now() + phoneAfterMs : 0 }
   waits.set(id, title ? { ...w, title, at: Date.now() } : w)
 }
 
@@ -33,7 +34,7 @@ export function doneWith(runId, { keepCaptcha = false, force = false } = {}) {
   if (!keepCaptcha || !w?.answer) waits.delete(id)
 }
 
-export const waiting = () => [...waits.entries()].map(([run_id, w]) => ({ run_id, title: w.title, body: w.body, at: w.at, asks: !!w.answer, label: w.label, choices: w.choices || null, confirm: !!w.confirm, image: w.image || null }))
+export const waiting = () => [...waits.entries()].map(([run_id, w]) => ({ run_id, title: w.title, body: w.body, at: w.at, asks: !!w.answer, label: w.label, choices: w.choices || null, confirm: !!w.confirm, image: w.image || null, phone_wait_ms: w.answer && w.phoneFrom ? Math.max(0, w.phoneFrom - Date.now()) : 0 }))
 
 export async function answerCaptcha(runId, text) {
   const id = Number(runId)

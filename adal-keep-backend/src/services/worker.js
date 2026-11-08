@@ -19,7 +19,7 @@ import path from 'path'
 import { spawn } from 'child_process'
 import { fileURLToPath } from 'url'
 import { getBrowser, openBrowserIfAny } from './browser.js'
-import { needPerson, askCaptcha, doneWith } from './attention.js'
+import { needPerson, askCaptcha, doneWith, waiting } from './attention.js'
 import { runFullWorkflow } from './lmisWorkflow.js'
 import { decideAgencyActions } from './jev/agencyManager.js'
 import { getActiveEmployee } from './activeEmployee.js'
@@ -29,7 +29,7 @@ import { openRunTab, forgetRunTab, tabOfRun, handTabToPerson, findRunTab, active
 import { registerTab, unregisterTab, noteLink } from './bandwidth.js'
 import { createRunQueue } from './runQueue.js'
 import { reportRuns } from './busy.js'
-import { isCancelled, clearCancelled } from './cancellation.js'
+import { isCancelled, clearCancelled, markCancelled } from './cancellation.js'
 import { assertPoliceReady } from './verification.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -247,8 +247,9 @@ async function executeRun(db, page, job) {
         is_ai_created: true, created_at: new Date().toISOString(), payload: JSON.stringify({ run: runId }),
       })
       console.log(`[notify] ${level.toUpperCase()} ${title}`)
-      // The phones hear it at once (live link), not at their next look.
-      import('./liveChannel.js').then(L => L.broadcast({ t: 'ring', id: Number(taskId?.id ?? taskId) || 0, title, description: String(body || '').slice(0, 300), profile_id: job.profile_id, run: runId, at: Date.now() })).catch(() => {})
+      // The phones hear it at once (live link), not at their next look —
+      // except an Enjaz captcha: that goes to the phones only after 30 s on the PC (askCaptcha).
+      if (!(opts.login && /^mofa/.test(String(job.workflow_id || '')))) import('./liveChannel.js').then(L => L.broadcast({ t: 'ring', id: Number(taskId?.id ?? taskId) || 0, title, description: String(body || '').slice(0, 300), profile_id: job.profile_id, run: runId, at: Date.now() })).catch(() => {})
       if (onLog) await onLog(level, `🔔 ${title}`)
       // A sign-in, code or reCAPTCHA waits for a person: it stays in the bar
       // until the run goes on (its next "✓"). Paused runs show from the queue.
@@ -314,11 +315,32 @@ async function executeRun(db, page, job) {
     } catch (e) { console.error('[worker] task failed:', e.message) }
   }
   ctx.isCancelled = () => isCancelled(runId)
+  // Enjaz (the visa platform): the captcha goes to this PC first (a Windows
+  // notification with its picture); nobody in 30 s → to the phones; nobody in
+  // 2 minutes → the run is cancelled (forgotten), not left waiting.
+  const enjaz = /^mofa/.test(String(job.workflow_id || ''))
+  const ringPhones = (opts) => import('./liveChannel.js').then(L => L.broadcast({ t: 'ring', id: Date.now(), title: opts?.title || 'Type the captcha', profile_id: job.profile_id, run: runId, at: Date.now() })).catch(() => {})
+  const stillAsked = () => waiting().some(w => w.run_id === Number(runId) && w.asks)
   ctx.askCaptcha = (image, answer, opts) => {
-    askCaptcha(runId, image, answer, opts)
+    askCaptcha(runId, image, answer, enjaz ? { ...opts, phoneAfterMs: 30_000 } : opts)
     beep()
-    // The phones look now: the question is answered from there too.
-    import('./liveChannel.js').then(L => L.broadcast({ t: 'ring', id: Date.now(), title: opts?.title || 'Type the captcha', profile_id: job.profile_id, run: runId, at: Date.now() })).catch(() => {})
+    if (!enjaz) { ringPhones(opts); return }
+    clearTimeout(ctx._toPhones); clearTimeout(ctx._forgotten)
+    ctx._toPhones = setTimeout(() => {
+      if (!stillAsked()) return
+      console.log(`[worker] run #${runId}: the captcha was not typed on the PC in 30 s — to the phones`)
+      ringPhones(opts)
+    }, 30_000)
+    ctx._forgotten = setTimeout(async () => {
+      if (!stillAsked()) return
+      console.log(`[worker] run #${runId}: nobody typed the captcha in 2 minutes — cancelled`)
+      markCancelled(runId)
+      doneWith(runId, { force: true })
+      const now = new Date().toISOString()
+      await db('automation_queue').where('id', runId).whereNotIn('status', ['done', 'failed', 'cancelled'])
+        .update({ status: 'cancelled', pause_reason: 'Nobody typed the captcha within 2 minutes', finished_at: now, updated_at: now }).catch(() => {})
+      onLog?.('warn', 'Nobody typed the captcha within 2 minutes — the run is cancelled. Start it again when someone is there.')?.catch?.(() => {})
+    }, 120_000)
   }
   // A field the run cannot do without: asked in the notification, kept on the
   // profile, and the run goes on. Null when nobody answers in 30 minutes.

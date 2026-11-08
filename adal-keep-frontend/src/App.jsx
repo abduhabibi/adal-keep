@@ -22,6 +22,7 @@ import LockScreen from './components/LockScreen'
 import PcAccessGate from './components/PcAccessGate'
 import api from './services/api'
 import IntroWizard from './pages/IntroWizard'
+import { isPhoneApp } from './lib/phoneMode'
 const CVsPage = lazy(() => fresh(() => import('./pages/CVsPage')))
 const CVNewPage = lazy(() => fresh(() => import('./pages/CVNewPage')))
 const CVTemplatesPage = lazy(() => fresh(() => import('./pages/CVTemplatesPage')))
@@ -139,7 +140,7 @@ function Shell() {
         {subscription?.mode === 'active' && subscription.paidUntil && !subscription.forGood && subscription.paidDaysLeft <= 7 && <TrialBanner renew days={subscription.paidDaysLeft} />}
         <Routes>
           <Route path="/" element={<MainLayout />}>
-            <Route index element={page(DashboardPage)} />
+            <Route index element={isPhoneApp() ? <Navigate to="/profiles" replace /> : page(DashboardPage)} />
             <Route path="profiles" element={page(ProfilesPage)} />
             <Route path="chat" element={page(ChatPage)} />
             <Route path="trash" element={page(TrashPage)} />

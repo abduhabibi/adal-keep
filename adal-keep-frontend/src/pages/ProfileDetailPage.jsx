@@ -15,6 +15,7 @@ import NotesTimeline from '../components/NotesTimeline'
 import VisaBarcodes from '../components/VisaBarcodes'
 import MedicalBattery from '../components/MedicalBattery'
 import { onDataChange } from '../lib/changes'
+import { isPhoneApp } from '../lib/phoneMode'
 
 export default function ProfileDetailPage() {
   const { id } = useParams()
@@ -307,7 +308,7 @@ export default function ProfileDetailPage() {
           </div>
         </section>
       </div>
-      <div id="ai-actions" className="scroll-mt-24"><ProfileAutomations profileId={id} /></div>
+      {!isPhoneApp() && <div id="ai-actions" className="scroll-mt-24"><ProfileAutomations profileId={id} /></div>}
 
       {/* Notes */}
       <section className="panel p-6">

@@ -106,7 +106,8 @@ export default function WhatsAppCard() {
   const [chats, setChats] = useState(null)
   const [edit, setEdit] = useState(null) // {} new · agent
   const [phone, setPhone] = useState('')
-  const [byPhone, setByPhone] = useState(false)
+  const [ask, setAsk] = useState(false)        // the number box is open
+  const [copied, setCopied] = useState('')
 
   // Not answering (the server restarting): the card stays and asks again.
   const load = () => wa.get('/whatsapp').then(r => setS(r.data)).catch(e => e.response ? setS(false) : setTimeout(load, 3000))
@@ -121,6 +122,9 @@ export default function WhatsAppCard() {
     const t = setInterval(load, s.status === 'web' ? 3000 : 1000)
     return () => clearInterval(t)
   }, [s?.status])
+  useEffect(() => {
+    if (s?.status === 'code' && s.code && copied !== s.code) { try { navigator.clipboard?.writeText(String(s.code).replace(/-/g, '')).then(() => setCopied(s.code)).catch(() => {}) } catch {} }
+  }, [s?.status, s?.code])
   // Right after connecting WhatsApp is still bringing its chats: keep asking until they are there.
   useEffect(() => {
     if (s?.status !== 'ready' || !edit || chats?.length) return
@@ -133,7 +137,19 @@ export default function WhatsAppCard() {
   if (s === false || s === null) return null
   // WhatsApp's own page in a window of its own: scan its QR there; Adal Keep connects when it shows the chats.
   const openWeb = async () => { try { setS((await wa.post('/whatsapp/open-web')).data); toast.success('WhatsApp is open on the PC — scan its QR there', { duration: 7000 }) } catch (e) { toast.error(err(e)) } }
-  const connect = async (withPhone) => { try { setS((await wa.post('/whatsapp/connect', withPhone ? { phone } : {})).data) } catch (e) { toast.error(err(e)) } }
+  const connect = async (withPhone, number = phone) => { try { setS((await wa.post('/whatsapp/connect', withPhone ? { phone: number } : {})).data) } catch (e) { toast.error(err(e)) } }
+  // "Integrate with WhatsApp": the number linked before (or the one just typed) gets WhatsApp's notification.
+  const remembered = () => { try { return localStorage.getItem('adal-wa-number') || '' } catch { return '' } }
+  const number = String(s.last_number || remembered() || '').replace(/\D/g, '')
+  const busyNow = s.status === 'starting' || s.status === 'signing-in'
+  const start = async (typed) => {
+    const n = (typed ? phone : number).replace(/\D/g, '')
+    if (n.length < 9) { setAsk(true); return }
+    try { localStorage.setItem('adal-wa-number', n) } catch {}
+    setAsk(false)
+    await connect(true, n)
+  }
+  const copy = (code) => { try { navigator.clipboard?.writeText(String(code).replace(/-/g, '')); setCopied(code) } catch {} }
   const logout = async () => { if (!confirm('Sign your WhatsApp out of Adal Keep?')) return; try { setS((await wa.post('/whatsapp/logout')).data) } catch (e) { toast.error(err(e)) } }
   const remove = async (a) => { if (!confirm(`Remove ${a.name}?`)) return; await wa.delete(`/whatsapp/agents/${a.id}`); loadAgents() }
   const tname = (id) => templates.find(t => t.id === id)?.name || `#${id}`
@@ -148,34 +164,33 @@ export default function WhatsAppCard() {
 
       {s.status === 'ready' ? (
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-teal-50 px-3 py-2 text-sm text-teal-800 dark:bg-teal-900/20 dark:text-teal-300">
-          <span>✓ Your WhatsApp is connected{s.me?.name ? ` — ${s.me.name}` : ''}{s.me?.number ? ` · +${s.me.number}` : ''}</span>
+          <span>✓ WhatsApp is integrated{s.me?.name ? ` — ${s.me.name}` : ''}{s.me?.number ? ` · +${s.me.number}` : ''}</span>
           <button type="button" onClick={logout} className="text-xs underline">Sign out</button>
         </div>
-      ) : s.status === 'qr' || s.status === 'code' ? (
+      ) : s.status === 'code' ? (
+        // The code WhatsApp asks for: already copied — tap WhatsApp's notification on the phone and paste.
+        <div className="mb-4 rounded-xl border border-teal-200 bg-teal-50/50 p-4 dark:border-teal-800 dark:bg-teal-900/10">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="rounded-xl bg-slate-900 px-5 py-3 font-mono text-3xl font-bold tracking-[0.2em] text-white" translate="no">{s.code}</div>
+            <Button size="sm" variant="secondary" onClick={() => copy(s.code)}>{copied === s.code ? '✓ Copied' : 'Copy'}</Button>
+            {window.__ADAL_CLOUD && <a href="whatsapp://" className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white">Open WhatsApp</a>}
+          </div>
+          <ol className="mt-3 list-decimal space-y-1 pl-5 text-sm">
+            <li>WhatsApp on your phone shows <b>“Enter code to link new device”</b> — tap it and tap <b>Allow</b> / <b>Confirm</b></li>
+            <li>Paste (or type) this code. That's all — Adal Keep finishes by itself.</li>
+          </ol>
+          <p className="mt-2 text-xs text-slate-500">No notification? WhatsApp → ⋮ → Linked devices → Link a device → <b>Link with phone number instead</b>. <button type="button" className="underline" onClick={() => start(true)}>New code</button> · <button type="button" className="underline" onClick={() => setAsk(true)}>Another number</button></p>
+        </div>
+      ) : s.status === 'qr' ? (
         <div className="mb-4 flex flex-col items-center gap-4 rounded-xl border border-slate-200 p-4 sm:flex-row dark:border-slate-700">
-          {s.status === 'code'
-            ? <div className="rounded-xl bg-slate-900 px-6 py-5 font-mono text-3xl font-bold tracking-[0.2em] text-white" translate="no">{s.code}</div>
-            : s.qr ? <img src={s.qr} alt="WhatsApp QR code" className="h-56 w-56 rounded-lg bg-white p-2" /> : <div className="h-56 w-56 animate-pulse rounded-lg bg-slate-100" />}
+          {s.qr ? <img src={s.qr} alt="WhatsApp QR code" className="h-56 w-56 rounded-lg bg-white p-2" /> : <div className="h-56 w-56 animate-pulse rounded-lg bg-slate-100" />}
           <div className="space-y-2 text-sm">
             <ol className="list-decimal space-y-1 pl-5">
               <li>Open WhatsApp on your phone</li>
               <li>Tap <b>⋮</b> (or Settings) → <b>Linked devices</b> → <b>Link a device</b></li>
-              {s.status === 'code'
-                ? <li>Tap <b>Link with phone number instead</b> and type this code</li>
-                : <li>Point the phone at this code</li>}
+              <li>Point the phone at this code</li>
             </ol>
-            {s.status === 'qr' && (
-              <button type="button" className="text-xs text-teal-700 underline dark:text-teal-400" onClick={() => setByPhone(true)}>On this phone? Link with your phone number instead</button>
-            )}
-            {s.status === 'qr' && !window.__ADAL_CLOUD && (
-              <Button size="sm" variant="secondary" onClick={openWeb}>🌐 Sign in through web.whatsapp.com instead</Button>
-            )}
-            {s.status === 'qr' && byPhone && (
-              <div className="flex gap-2">
-                <input className={field} inputMode="tel" placeholder="Your WhatsApp number (251…)" value={phone} onChange={e => setPhone(e.target.value)} />
-                <Button size="sm" disabled={phone.replace(/\D/g, '').length < 9} onClick={() => connect(true)}>Get code</Button>
-              </div>
-            )}
+            <Button size="sm" onClick={() => setAsk(true)}>📱 Use my phone number instead</Button>
           </div>
         </div>
       ) : s.status === 'web' ? (
@@ -185,26 +200,25 @@ export default function WhatsAppCard() {
           <p className="mt-2 flex items-center gap-2 text-xs text-slate-500"><span className="h-2 w-2 animate-ping rounded-full bg-teal-500" /> Waiting for you to sign in…</p>
         </div>
       ) : (
-        // On the PC: WhatsApp's own web.whatsapp.com window first (scan its QR there).
-        // On a phone that window would open on the PC, so its QR shows here instead.
+        // One button. The number linked before is used again (one click);
+        // the first time it is asked once.
         <div className="mb-4 space-y-2">
-          <div className="flex flex-wrap items-center gap-3">
-            {window.__ADAL_CLOUD ? (
-              <Button onClick={() => connect(false)} disabled={s.status === 'starting' || s.status === 'signing-in'}>
-                {s.status === 'starting' ? 'Opening WhatsApp…' : s.status === 'signing-in' ? 'Signing in…' : '💬 Connect my WhatsApp'}
-              </Button>
-            ) : (<>
-              <Button onClick={openWeb} disabled={s.status === 'starting' || s.status === 'signing-in'} title="Opens web.whatsapp.com in a window on this PC: scan its QR with your phone; Adal Keep takes over when your chats show">
-                {s.status === 'starting' ? 'Opening WhatsApp…' : s.status === 'signing-in' ? 'Signing in…' : '🌐 Sign in through web.whatsapp.com'}
-              </Button>
-              <button type="button" onClick={() => connect(false)} disabled={s.status === 'starting' || s.status === 'signing-in'} className="text-xs text-teal-700 underline disabled:opacity-50 dark:text-teal-400">
-                or show the QR here
-              </button>
-            </>)}
-          </div>
-          <p className="text-xs text-slate-500">Scan once: it stays signed in, signs in afresh by itself every morning, and comes back after a restart. Only if the phone itself unlinks it is a new scan needed — you get a notification then.</p>
+          <Button onClick={() => start(false)} disabled={busyNow}>
+            {s.status === 'starting' ? 'Asking WhatsApp…' : s.status === 'signing-in' ? 'Signing in…' : '💬 Integrate with WhatsApp'}
+          </Button>
+          {number && !ask && <p className="text-xs text-slate-500">With +{number} · <button type="button" className="underline" onClick={() => setAsk(true)}>another number</button></p>}
+          <p className="text-xs text-slate-500">
+            Your phone gets a WhatsApp notification: tap it, allow, paste the code. It then stays integrated — it signs in afresh by itself every morning and after a restart.
+            {' '}Rather scan a QR? <button type="button" className="underline" onClick={() => connect(false)}>show it here</button>{!window.__ADAL_CLOUD && <> or <button type="button" className="underline" onClick={openWeb}>sign in on web.whatsapp.com</button></>}.
+          </p>
           {s.error && <p className="text-sm text-red-600">{s.error}</p>}
         </div>
+      )}
+      {ask && !['ready', 'web'].includes(s.status) && (
+        <form className="-mt-2 mb-4 flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); start(true) }}>
+          <input autoFocus className={field + ' max-w-xs'} inputMode="tel" placeholder="Your WhatsApp number, e.g. 2519…" value={phone} onChange={e => setPhone(e.target.value)} />
+          <Button size="sm" type="submit" disabled={phone.replace(/\D/g, '').length < 9}>Send me the code</Button>
+        </form>
       )}
       {s.others?.length > 0 && (
         <p className="-mt-2 mb-4 text-xs text-slate-500">Also connected on this agency: {s.others.map(o => o.me?.name || o.me?.number || o.key).join(' · ')}</p>

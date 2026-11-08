@@ -42,6 +42,15 @@ const noteOn = (key, on) => {
   writeNote(n)
 }
 
+/** The number each person last linked: "Integrate with WhatsApp" asks for it only once. */
+export const lastNumber = (key) => readNote().numbers?.[key] || ''
+const rememberNumber = (key, number) => {
+  const d = String(number || '').replace(/\D/g, '')
+  if (!d) return
+  const n = readNote()
+  writeNote({ ...n, numbers: { ...(n.numbers || {}), [key]: d } })
+}
+
 const blank = () => ({ status: 'off', qr: null, code: null, me: null, error: null, since: null, where: null })
 const session = (key) => {
   if (!sessions.has(key)) sessions.set(key, { client: null, state: blank(), own: false })
@@ -225,6 +234,7 @@ export async function connect(db, key = 'owner', { phone = '' } = {}, tries = 2)
     await shim(c)
     setState(key, { status: 'ready', qr: null, code: null, error: null, me: { name: c.info?.pushname || '', number: c.info?.wid?.user || '' } })
     noteOn(key, true)
+    rememberNumber(key, c.info?.wid?.user)
     // Its browser died (closed, crashed): connect again now, not at the next look.
     c.pupBrowser?.once('disconnected', () => {
       if (s.client !== c) return

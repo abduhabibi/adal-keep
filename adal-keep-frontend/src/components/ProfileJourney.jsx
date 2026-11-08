@@ -14,7 +14,7 @@ import api from '../services/api'
 
 export const SHARED = [['cv', 'CV'], ['musaned', 'Musaned'], ['selected', 'Selected'], ['wafid', 'Wafid']]
 export const BRANCHES = [
-  { key: 'embassy-track', title: 'Embassy', icon: '🇸🇦', steps: [['wakala', 'Paid wakala', 'Wakala'], ['tasheer', 'Tasheer'], ['insurance', 'Insurance', 'Insur.'], ['visa', 'Enjaz · Visa', 'Visa']] },
+  { key: 'embassy-track', title: 'Embassy', icon: '🇸🇦', steps: [['wakala', 'Paid wakala', 'Wakala'], ['tasheer', 'Tasheer'], ['insurance', 'Insurance'], ['visa', 'Enjaz · Visa', 'Visa']] },
 ]
 
 const LOOK = {
@@ -38,7 +38,9 @@ const SPOT = {
 }
 // On a phone's filter the first row is given more of the width: its names touched.
 // On a phone the wakala is a step of its own at the start of the Embassy row (no room for a box on the curve).
-const NARROW_X = { musaned: 0.155, selected: 0.34, wafid: 0.5, wakala: 0.56, tasheer: 0.705, insurance: 0.855 }
+// A U on a phone: CV → Wafid along the top, a turn down at the right, Wakala → Visa back along the bottom.
+const NARROW_X = { cv: 0, musaned: 1 / 3, selected: 2 / 3, wafid: 1, wakala: 1, tasheer: 2 / 3, insurance: 1 / 3, visa: 0 }
+const NARROW_RESULTS = { 'wafid:fit': 0.2, 'wafid:pending': 0.45, 'wafid:unfit': 0.7 }
 const NARROW_WIRES = Object.entries(PARENT_OF()).map(([to, from]) => ({ from, to, curve: from === 'wafid' }))
 function PARENT_OF() { return { musaned: 'cv', selected: 'musaned', wafid: 'selected', wakala: 'wafid', tasheer: 'wakala', insurance: 'tasheer', visa: 'insurance' } }
 const BOX = new Set(['wakala'])
@@ -135,13 +137,14 @@ export function JourneyFork({ states = {}, notes = {}, counts, selected, onSelec
   const narrow = compact && w > 0 && w < 520
   // On a phone the Embassy row sits lower, clear of the first row's names.
   const rowGap = narrow ? z.rowGap + 14 : z.rowGap
-  const drop = results ? (compact ? 20 : 26) : 0
-  const height = rowGap + z.block + drop
+  const drop = results && !narrow ? (compact ? 20 : 26) : 0
+  const height = (narrow && results ? 2 * rowGap : rowGap) + z.block + drop
   // Compact (the list's filter) fits any width — no sideways scrolling: on a
   // narrow screen the branches show only their icons.
-  const edge = compact ? 22 : EDGE, labels = narrow ? 4 : LABELS
+  const edge = compact ? 26 : EDGE, labels = narrow ? 0 : LABELS
   const cx = (k) => edge + (narrow ? NARROW_X[k] ?? SPOT[k][0] : SPOT[k][0]) * Math.max(0, w - edge - labels - edge)
-  const row = (k) => (narrow && BOX.has(k) ? 1 : SPOT[k][1])
+  // On a phone with Fit / Pending / Unfit open, they take the middle and the bottom row moves down.
+  const row = (k) => { const r = narrow && BOX.has(k) ? 1 : SPOT[k][1]; return narrow && results && r === 1 ? 2 : r }
   const cy = (k) => row(k) * rowGap + z.r
   const isBox = (k) => BOX.has(k) && !narrow
   const wires = narrow ? NARROW_WIRES : WIRES
@@ -158,14 +161,20 @@ export function JourneyFork({ states = {}, notes = {}, counts, selected, onSelec
   const pulse = (wire) => pick ? chain.has(end(wire)) : states[wire.from] === 'done' && states[end(wire)] === 'active'
 
   const path = ({ from, to, curve }) => {
-    const x1 = cx(from) + (isBox(from) ? 0 : z.r + 1), y1 = cy(from), x2 = cx(to) - (isBox(to) ? 0 : z.r + 1), y2 = cy(to)
-    if (!curve) return `M${x1},${y1} L${x2},${y2}`
+    if (narrow && Math.abs(cx(from) - cx(to)) < 2) {
+      // The U-turn: out of the step's right side, round, into the next one's right side.
+      const x = cx(from) + z.r, y1 = cy(from), y2 = cy(to), b = Math.min(18, edge - 4)
+      return `M${x},${y1} C${x + b},${y1} ${x + b},${y2} ${x},${y2}`
+    }
+    const dir = cx(to) >= cx(from) ? 1 : -1
+    const x1 = cx(from) + (isBox(from) ? 0 : dir * (z.r + 1)), y1 = cy(from), x2 = cx(to) - (isBox(to) ? 0 : dir * (z.r + 1)), y2 = cy(to)
+    if (!curve || narrow) return `M${x1},${y1} L${x2},${y2}`
     const d = (x2 - x1) * 0.55
     return `M${x1},${y1} C${x1 + d},${y1} ${x2 - d},${y2} ${x2},${y2}`
   }
   const steps = [...SHARED, ...BRANCHES.flatMap(b => b.steps)]
   const step = Math.max(36, Math.min(80, (cx('wafid') - edge) / 2.5))
-  const rx = (k) => Math.max(edge, cx('wafid') + (narrow ? RESULT_DX_NARROW : RESULT_DX)[k] * step)
+  const rx = (k) => narrow ? edge + NARROW_RESULTS[k] * Math.max(0, w - 2 * edge) : Math.max(edge, cx('wafid') + RESULT_DX[k] * step)
   const resultWire = (k) => {
     const x1 = cx('wafid'), y1 = cy('wafid') + z.r + 1, x2 = rx(k), y2 = rowGap + drop + 1, d = (y2 - y1) * 0.6
     return `M${x1},${y1} C${x1},${y1 + d} ${x2},${y2 - d} ${x2},${y2}`

@@ -13,6 +13,7 @@ const EmployeesPage = lazy(() => fresh(() => import('./pages/EmployeesPage')))
 const BrokersPage = lazy(() => fresh(() => import('./pages/BrokersPage')))
 const BrokerDetailPage = lazy(() => fresh(() => import('./pages/BrokerDetailPage')))
 const ChecklistPage = lazy(() => fresh(() => import('./pages/ChecklistPage')))
+const NotesPage = lazy(() => fresh(() => import('./pages/NotesPage')))
 const SettingsPage = lazy(() => fresh(() => import('./pages/SettingsPage')))
 const NotificationsPage = lazy(() => fresh(() => import('./pages/NotificationsPage')))
 import { FileCaptureProvider } from './context/FileCaptureContext'
@@ -150,6 +151,7 @@ function Shell() {
             <Route path="brokers" element={page(BrokersPage)} />
             <Route path="brokers/:id" element={page(BrokerDetailPage)} />
             <Route path="checklist" element={page(ChecklistPage)} />
+            <Route path="notes" element={page(NotesPage)} />
             <Route path="notifications" element={page(NotificationsPage)} />
             <Route path="tasks" element={page(TasksPage)} />
             <Route path="cvs" element={page(CVsPage)} />

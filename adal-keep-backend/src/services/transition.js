@@ -25,11 +25,13 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import { getBrowser, openForPerson, sendAway } from './browser.js'
 import { saveOnProfile } from './musanedImport.js'
-import { copyEasyEnjaz } from './easyEnjazCopy.js'
+import { copyEasyEnjaz, signedInToken } from './easyEnjazCopy.js'
+import { keepAwake } from './awake.js'
+import { collectBrokers, saveBrokers } from './siteBrokers.js'
 
 export const SOURCES = {
   // Its API is known, so it is asked directly: see easyEnjazCopy.js.
-  easyenjaz: { name: 'EasyEnjaz', url: 'https://easyenjaz.com/', deep: copyEasyEnjaz },
+  easyenjaz: { name: 'EasyEnjaz', url: 'https://easyenjaz.com/login', deep: copyEasyEnjaz, token: signedInToken },
   enjazplus: { name: 'EnjazPlus', url: 'https://v2.enjazplus.com/' },
   musaned: {
     name: 'Musaned', url: 'https://tawtheeq.musaned.com.sa/', start: ['/hr-pool'],
@@ -48,7 +50,8 @@ const SIGN_IN_WAIT = 15 * 60_000
 const MAX_PAGES = 40, MAX_REQUESTS = 3000, MAX_TEMPLATES = 5
 
 const states = new Map()
-const blank = () => ({ status: 'idle', step: '', people: 0, created: 0, updated: 0, files: 0, templates: 0, skipped: 0, failed: 0, error: null, folder: null })
+const windows = new Map()     // a system → the window a person signs in to
+const blank = () => ({ status: 'idle', step: '', people: 0, created: 0, updated: 0, files: 0, templates: 0, brokers: 0, skipped: 0, failed: 0, error: null, folder: null })
 const stateOf = (id) => states.get(id) || blank()
 const set = (id, patch) => { states.set(id, { ...stateOf(id), ...patch }); return states.get(id) }
 
@@ -56,6 +59,14 @@ export const transitionStates = () => Object.fromEntries(Object.entries(SOURCES)
   const { stop, ...st } = stateOf(id)
   return [id, { ...st, name: s.name }]
 }))
+
+/** The sign-in window, when it went behind another. */
+export async function showTransition(id) {
+  await windows.get(id)?.bringToFront()
+}
+
+/** A copy is using the line: the online copy waits, as it does for a run. */
+export const transitionRunning = () => [...states.values()].some(s => ['signing-in', 'copying'].includes(s.status))
 
 export function stopTransition(id) {
   if (['signing-in', 'copying'].includes(stateOf(id).status)) set(id, { stop: true, step: 'Stopping…' })
@@ -232,7 +243,7 @@ const readTables = (page) => page.evaluate(() => [...document.querySelectorAll('
 
 const links = (page) => page.evaluate(() => [...new Set([...document.querySelectorAll('a[href]')].map(a => a.href))]).catch(() => [])
 const AVOID = /log.?out|sign.?out|delete|remove|destroy|edit|create|\/new|\/add|settings|billing|payment/i
-const PEOPLE = /candidat|worker|cv|employee|applicant|maid|hr-pool|recruit|labou?r|people|profile|template/i
+const PEOPLE = /broker|candidat|worker|cv|employee|applicant|maid|hr-pool|recruit|labou?r|people|profile|template/i
 const hasId = (p) => /\/(\d+|[0-9a-f]{16,}|[0-9a-f-]{32,})(\/|$)/i.test(p)
 
 const pressNext = (page) => page.evaluate(() => {
@@ -252,7 +263,12 @@ export function startTransition(db, id, link, deps = {}) {
   const url = link || source.url
   if (!url) throw new Error('Paste the address first')
   set(id, { ...blank(), status: 'signing-in', step: `Sign in to ${source.name} in the window that opened` })
-  run(db, id, source, url, deps).catch(e => {
+  // A move takes hours on a slow line: the PC must not sleep in the middle.
+  const letSleep = (deps.keepAwake || keepAwake)(`moving from ${source.name}`)
+  run(db, id, source, url, deps).finally(letSleep).then(async () => {
+    // Done: what came in is backed up as soon as no agent is working.
+    try { (await import('./telegramBackup.js')).backupSoon() } catch {}
+  }).catch(e => {
     console.error(`[transition ${id}]`, e)
     set(id, { status: e.stopped ? 'stopped' : 'failed', step: '', error: e.stopped ? null : e.message })
   })
@@ -272,6 +288,7 @@ async function run(db, id, source, url, deps) {
   const people = new Map()      // passport → { person, raw }
   const lists = new Map()       // address → how to read it again
   const htmlTemplates = []
+  const brokersFound = new Map() // the site's brokers, by its own id
   const add = (found) => {
     for (const f of found) {
       const had = people.get(f.person.passport_number)
@@ -284,6 +301,7 @@ async function run(db, id, source, url, deps) {
       const req = r.request()
       if (!/json/i.test(r.headers()['content-type'] || '') || !['xhr', 'fetch'].includes(req.resourceType())) return
       const json = await r.json()
+      collectBrokers(json, r.url(), brokersFound)
       const found = findPeople(json)
       if (/template/i.test(r.url())) htmlTemplates.push(...templatesIn(json))
       if (!found.length) return
@@ -295,25 +313,50 @@ async function run(db, id, source, url, deps) {
       if (!lists.has(r.url())) lists.set(r.url(), { headers, json, count: found.length, method: req.method(), body: req.postData() })
     } catch {}
   }
-  page.on('response', onResponse)
+  if (!source.deep) page.on('response', onResponse)
 
   try {
+    windows.set(id, page)
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 120000 }).catch(() => {})
-    // Signed in: off the sign-in page and staying off it.
-    for (let t0 = Date.now(), calm = 0; calm < 2;) {
-      check()
-      if (Date.now() - t0 > SIGN_IN_WAIT) throw new Error('Nobody signed in within 15 minutes')
-      await sleep(1500)
-      calm = (await onSignIn(page)) ? 0 : calm + 1
+    await page.bringToFront().catch(() => {})
+    // Signed in: the site says so, or else off the sign-in page and staying off it.
+    const waitSignIn = async (tab) => {
+      for (let t0 = Date.now(), calm = 0; ;) {
+        check()
+        if (tab.isClosed?.()) throw new Error('The sign-in window was closed before signing in. Press the button again.')
+        if (Date.now() - t0 > SIGN_IN_WAIT) throw new Error('Nobody signed in within 15 minutes. Press the button again: it goes on from where it stopped.')
+        await sleep(1500)
+        if (source.token) { const t = await source.token(tab); if (t) return t; continue }
+        calm = (await onSignIn(tab)) ? 0 : calm + 1
+        if (calm >= 2) return true
+      }
     }
-    await (deps.sendAway || sendAway)(page).catch(() => {})
+    const signedIn = await waitSignIn(page)
+    windows.delete(id)
+    if (!source.deep) await (deps.sendAway || sendAway)(page).catch(() => {})
     set(id, { status: 'copying', step: 'Reading the lists' })
 
     if (source.deep) {
-      page.off('response', onResponse)
+      // The window has done its work: from here on the browser is not needed.
+      if (!deps.page) await page.close().catch(() => {})
       await source.deep({
-        db, page, folder, check, readPerson, limit: deps.limit, download: deps.download,
+        db, token: signedIn, folder, check, readPerson, limit: deps.limit, download: deps.download,
         set: (patch) => set(id, patch), state: () => stateOf(id), save: (person) => saveProfile(db, id, source, person),
+        // The sign-in ran out: a window for a person, then back out of sight.
+        signIn: async () => {
+          set(id, { status: 'signing-in', step: `${source.name} signed out. Sign in again in the window that opened: the copy goes on by itself` })
+          const again = await (deps.openForPerson || openForPerson)()
+          windows.set(id, again)
+          try {
+            await again.goto(url, { waitUntil: 'domcontentloaded', timeout: 120000 }).catch(() => {})
+            const token = await waitSignIn(again)
+            set(id, { status: 'copying', step: 'Going on with the copy' })
+            return token
+          } finally {
+            windows.delete(id)
+            await again.close().catch(() => {})
+          }
+        },
       })
       set(id, { status: 'done', step: '' })
       return
@@ -401,10 +444,12 @@ async function run(db, id, source, url, deps) {
     const cvFiles = []
     try {
       let n = 0
+      const saved = []
       for (const { person, raw } of people.values()) {
         check()
         set(id, { step: `Saving ${++n} of ${people.size}: ${person.full_name}` })
         const profileId = await saveProfile(db, id, source, person)
+        saved.push({ person, raw, profileId })
         const wanted = [...filesOf(raw, origin), ...(source.files?.(raw, origin) || [])]
         for (const f of wanted) {
           const headers = firstList?.headers || {}
@@ -421,21 +466,41 @@ async function run(db, id, source, url, deps) {
           }
         }
       }
+      if (brokersFound.size) {
+        set(id, { step: 'Making the brokers' })
+        const b = await saveBrokers(db, saved, brokersFound, source.name)
+        set(id, { brokers: b.created + b.filled })
+        console.log(`[transition ${id}] brokers: ${b.created} new, ${b.filled} filled, ${b.assigned} people given theirs`)
+      }
       set(id, { step: 'Making the CV templates' })
       await copyTemplates(db, id, source, page, { htmlTemplates, cvPages, cvFiles, tmp, passports: [...people.keys()], check })
     } finally { fs.rmSync(tmp, { recursive: true, force: true }) }
     set(id, { status: 'done', step: '' })
   } finally {
     page.off('response', onResponse)
+    windows.delete(id)
     if (!deps.page) await page.close().catch(() => {})
   }
 }
 
-async function saveProfile(db, id, source, person) {
+// One person is saved at a time, so two copies of the same passport (EasyEnjaz
+// lists some people as active and inactive) never make two profiles.
+let saving = Promise.resolve()
+function saveProfile(db, id, source, person) {
+  const next = saving.then(() => saveOne(db, id, source, person))
+  saving = next.catch(() => {})
+  return next
+}
+
+/** The same passport however it was typed: no spaces, dashes or dots. */
+const SAME_PASSPORT = "UPPER(REPLACE(REPLACE(REPLACE(passport_number, ' ', ''), '-', ''), '.', '')) = ?"
+export const passportKey = (p) => String(p || '').toUpperCase().replace(/[s.-]/g, '')
+
+async function saveOne(db, id, source, person) {
   const now = new Date().toISOString()
   const cols = await db('profiles').columnInfo()
   const row = Object.fromEntries(Object.entries(person).filter(([k, v]) => cols[k] && v !== ''))
-  const had = await db('profiles').whereRaw('UPPER(passport_number) = ?', [person.passport_number]).first()
+  const had = await db('profiles').whereRaw(SAME_PASSPORT, [passportKey(person.passport_number)]).orderBy('id').first()
   if (!had) {
     const [newId] = await db('profiles').insert({ ...row, created_by: `Transition: ${source.name}`, created_at: now, updated_at: now })
     set(id, { created: stateOf(id).created + 1 })

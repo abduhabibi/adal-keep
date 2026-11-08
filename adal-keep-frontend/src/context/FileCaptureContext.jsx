@@ -1,9 +1,24 @@
-import { createContext, useContext, useState, useCallback } from 'react'
+import { createContext, useContext, useState, useCallback, useEffect } from 'react'
+
+// Profiles kept in the tray (only ids and names, on this computer): they stay
+// until dragged onto a checklist or taken out.
+const PROFILES_KEY = 'adal-tray-profiles'
+const readTray = () => { try { return JSON.parse(localStorage.getItem(PROFILES_KEY) || '[]') } catch { return [] } }
 
 const FileCaptureContext = createContext()
 
 export function FileCaptureProvider({ children }) {
   const [capturedFiles, setCapturedFiles] = useState([])
+  const [trayProfiles, setTrayProfiles] = useState(readTray)
+  useEffect(() => { try { localStorage.setItem(PROFILES_KEY, JSON.stringify(trayProfiles)) } catch {} }, [trayProfiles])
+  const addProfiles = useCallback((list) => {
+    const have = new Set(trayProfiles.map(p => p.id))
+    const fresh = list.filter(p => p?.id && !have.has(p.id))
+    if (fresh.length) setTrayProfiles(prev => [...prev, ...fresh.filter(p => !prev.some(x => x.id === p.id)).map(p => ({ id: p.id, full_name: p.full_name || '', phone_number: p.phone_number || '' }))])
+    return fresh.length
+  }, [trayProfiles])
+  const removeProfile = useCallback((id) => setTrayProfiles(prev => prev.filter(p => p.id !== id)), [])
+  const clearProfiles = useCallback(() => setTrayProfiles([]), [])
 
   const addFiles = useCallback((fileList) => {
     const filesArray = Array.from(fileList).filter(f => f instanceof File)
@@ -41,7 +56,7 @@ export function FileCaptureProvider({ children }) {
   }, [])
 
   return (
-    <FileCaptureContext.Provider value={{ capturedFiles, setCapturedFiles, addFiles, removeFile, clearAll }}>
+    <FileCaptureContext.Provider value={{ capturedFiles, setCapturedFiles, addFiles, removeFile, clearAll, trayProfiles, addProfiles, removeProfile, clearProfiles }}>
       {children}
     </FileCaptureContext.Provider>
   )

@@ -19,6 +19,7 @@ export function setLang(lang) {
 }
 
 const EN = {
+  'ማስታወሻዎች': 'Notes',
   'ሁሉም ማሳወቂያዎች ተጽድተዋል': 'All notifications cleared',
   'ሁሉም ማሳወቂያዎች ይሰረዙ?': 'Delete all notifications?',
   'ሁሉም ተመድበዋል': 'All assigned',

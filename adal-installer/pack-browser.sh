@@ -22,7 +22,10 @@ echo "$SHA  $ZIP" | sha256sum -c --quiet
 unzip -q "$ZIP" -d "$WORK/x"
 mv "$(dirname "$(find "$WORK/x" -name chrome.exe | head -1)")" "$WORK/browser"
 mv "$WORK/browser/chrome.exe" "$WORK/browser/AdalBrowser.exe"
-WINEDEBUG=-all wine "$BASE/adal-installer/tools/seticon.exe" "$WORK/browser/AdalBrowser.exe" "$BASE/adal.ico" | tr -d '\r'
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) "$BASE/adal-installer/tools/seticon.exe" "$WORK/browser/AdalBrowser.exe" "$BASE/adal.ico" | tr -d '\r' ;;
+  *) WINEDEBUG=-all wine "$BASE/adal-installer/tools/seticon.exe" "$WORK/browser/AdalBrowser.exe" "$BASE/adal.ico" | tr -d '\r' ;;
+esac
 rm -f "$OUT"
 ( cd "$WORK" && zip -q -r -9 "$OUT.tmp.zip" browser ) && mv "$OUT.tmp.zip" "$OUT"
 echo "$VERSION" > "$DEPS/adal-browser.version"

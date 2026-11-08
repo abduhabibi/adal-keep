@@ -6,8 +6,7 @@
  *   - every applicant, active and inactive, and each one's full record;
  *   - every file her record has a key for (photo, full body, passport, interview
  *     video, COC, medical, ID card, relative's ID, insurance, registration form);
- *   - her visa report, when she has a visa, her CV, and the site's own printed
- *     passport page ("Print Selected Documents" → View Passport), all as PDF;
+ *   - her visa report, when she has a visa, and her CV, both as PDF;
  *   - the agency's own lists (agents, companies, templates, flights, complaints…).
  *
  * Only reads: the one POST is the site's "print CV", which makes a PDF. Every
@@ -15,16 +14,25 @@
  * here is not lost. A visit cut short goes on from where it stopped: whoever is
  * finished is noted in easyenjaz-progress.json until a whole copy has ended.
  *
+ * The browser is only for signing in. The sign-in is then held here and the API
+ * is asked directly, so closing that window, or Chrome, changes nothing. It lasts
+ * a few hours: when it runs out the copy waits, a sign-in window comes back, and
+ * it goes on. Its home page has no password box, so being signed in is asked of
+ * the API. A list read only in part is never taken for the whole list.
+ *
  * Checked against the real site on 2026-11-07 (list, record, a photo, visa, CV).
- * The printed passport page is read from the site's code, not yet seen working.
+ * A passport scan exists only under passportKey. "Print Selected Documents → View
+ * Passport" is no way round that: it prints her CV form, so it is not used.
  */
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { saveOnProfile } from './musanedImport.js'
 
+const SITE = 'https://easyenjaz.com'
 const WORKERS = 3
-const PAGE = 300
+const PAGE = 100           // small enough to arrive whole on a slow line
+const GIVE_UP_AFTER = 10   // people in a row with nothing from the site
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 
 const FIELD_OF_KEY = {
@@ -79,27 +87,42 @@ export function personOf(rec, readPerson) {
   return p
 }
 
-/** One read in the site's tab, signed in as its own pages are. */
-const inPage = (page, url, opts) => page.evaluate(async (url, { method, body, binary }) => {
+/** The tab's sign-in, when the site still takes it; else null. It stays out of every log and file. */
+export const signedInToken = (page) => page.evaluate(async () => {
   const token = localStorage.getItem('token')
-  if (!token) return { status: 401 }
-  const r = await fetch(url, { method: method || 'GET', headers: { Authorization: `Bearer ${token}`, ...(body ? { 'Content-Type': 'application/json' } : {}) }, body })
-  const type = r.headers.get('content-type') || ''
-  if (!r.ok) return { status: r.status, type }
-  if (!binary) return { status: r.status, type, text: await r.text() }
-  const buf = new Uint8Array(await r.arrayBuffer())
-  let s = ''
-  for (let i = 0; i < buf.length; i += 0x8000) s += String.fromCharCode(...buf.subarray(i, i + 0x8000))
-  return { status: r.status, type, base64: btoa(s) }
-}, url, opts).catch(e => ({ status: 0, error: e.message }))
+  if (!token) return null
+  const r = await fetch('/api/Applicants/paged?skip=0&take=1&sortField=SNo&sortOrder=desc', { headers: { Authorization: `Bearer ${token}` } })
+  return r.ok ? token : null
+}).catch(() => null)
 
-export async function copyEasyEnjaz({ db, page, folder, set, state, check, readPerson, save, download = fetch, limit = Infinity }) {
-  const signedOut = (done, all) => new Error(`EasyEnjaz signed out after ${done} of ${all}. Press the button again: it goes on from there.`)
+/** One read from the API. Its status 0 means no answer at all. */
+async function request(token, url, { method, body, binary }) {
+  try {
+    const r = await fetch(SITE + url, {
+      method: method || 'GET', body, signal: AbortSignal.timeout(binary ? 300_000 : 180_000),
+      headers: { Authorization: `Bearer ${token}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+    })
+    const type = r.headers.get('content-type') || ''
+    if (!r.ok) return { status: r.status, type }
+    return binary ? { status: r.status, type, buffer: Buffer.from(await r.arrayBuffer()) } : { status: r.status, type, text: await r.text() }
+  } catch (e) { return { status: 0, error: e.message } }
+}
+
+export async function copyEasyEnjaz({ db, token, folder, set, state, check, readPerson, save, signIn, ask = request, download = fetch, limit = Infinity, wait = sleep }) {
+  // All the workers wait for one sign-in.
+  let renewing = null
+  const renew = (old) => {
+    if (token !== old) return token
+    renewing ||= signIn().then(t => { token = t; return t }).finally(() => { renewing = null })
+    return renewing
+  }
   const call = async (url, opts = {}) => {
-    for (let i = 0; ; i++) {
-      const r = await inPage(page, url, opts)
-      if (r.status === 401) { const e = new Error('signed out'); e.signedOut = true; throw e }
-      if (i < 2 && (r.status === 0 || r.status === 429 || r.status >= 500)) { await sleep(3000 * (i + 1)); continue }
+    for (let tries = 0, signIns = 0; ;) {
+      check()
+      const used = token
+      const r = await ask(used, url, opts)
+      if (r.status === 401 && signIns++ < 2) { await renew(used); continue }
+      if (tries++ < 4 && (r.status === 0 || r.status === 429 || r.status >= 500)) { await wait(4000 * tries); continue }
       return r
     }
   }
@@ -115,12 +138,13 @@ export async function copyEasyEnjaz({ db, page, folder, set, state, check, readP
   for (const list of ['/api/Applicants/paged', '/api/Applicants/inactive_paged']) {
     for (let skip = 0; ;) {
       check()
-      const j = await json(`${list}?skip=${skip}&take=${PAGE}&sortField=SNo&sortOrder=desc`).catch(e => { if (e.signedOut) throw signedOut(0, 0); throw e })
-      const got = j?.data || []
+      const j = await json(`${list}?skip=${skip}&take=${PAGE}&sortField=SNo&sortOrder=desc`)
+      if (!j) throw new Error('EasyEnjaz did not give the whole list: check the internet and press the button again. It goes on from where it stopped.')
+      const got = j.data || []
       rows.push(...got)
       skip += PAGE
       set({ step: `Reading the list of applicants: ${rows.length}` })
-      if (!got.length || skip >= Number(j?.totalCount || 0)) break
+      if (!got.length || skip >= Number(j.totalCount || 0)) break
     }
   }
   if (!rows.length) throw new Error('EasyEnjaz gave no applicants. Are you signed in with an agency account?')
@@ -131,7 +155,7 @@ export async function copyEasyEnjaz({ db, page, folder, set, state, check, readP
   for (const [name, url] of Object.entries(LISTS)) {
     check()
     set({ step: `Reading the agency's ${name.replace(/-/g, ' ')}` })
-    const j = await json(url).catch(e => { if (e.signedOut) throw signedOut(0, rows.length); return null })
+    const j = await json(url)
     if (j != null) fs.writeFileSync(path.join(agencyDir, `${name}.json`), JSON.stringify(withoutSecrets(j), null, 1))
   }
 
@@ -172,27 +196,26 @@ export async function copyEasyEnjaz({ db, page, folder, set, state, check, readP
   const hasFile = (profileId, name) => db('files').join('profile_fields', 'files.profile_field_id', 'profile_fields.id')
     .where({ 'profile_fields.profile_id': profileId, 'files.original_name': name }).first()
 
-  // optional: the site may simply have no such page for her, which is no failure.
   const report = async (profileId, passport, field, label, url, opts = {}) => {
     if (await hasFile(profileId, `${passport}-${label}.pdf`)) return true
-    const { optional, ...ask } = opts
-    const r = await call(url, { ...ask, binary: true })
-    if (r.status !== 200 || !/pdf/i.test(r.type || '') || !r.base64) {
-      if (opts.optional) return true
+    const r = await call(url, { ...opts, binary: true })
+    if (r.status !== 200 || !/pdf/i.test(r.type || '') || !r.buffer?.length) {
       failed()
       return false
     }
-    await keep(profileId, passport, field, label, Buffer.from(r.base64, 'base64'), '.pdf')
+    await keep(profileId, passport, field, label, r.buffer, '.pdf')
     return true
   }
 
   const copyOne = async (row) => {
     const id = String(row.id)
     const rec = { ...row }
-    for (const [k, v] of Object.entries((await json(`/api/applicants/${id}`)) || {})) if (v != null && v !== '') rec[k] = v
+    const full = await json(`/api/applicants/${id}`)
+    if (!full) { failed(); return 'none' } // Nothing is taken from a half answer: she stays for the next try.
+    for (const [k, v] of Object.entries(full)) if (v != null && v !== '') rec[k] = v
     fs.writeFileSync(path.join(records, `${id}.json`), JSON.stringify(withoutSecrets(rec), null, 1))
     const person = personOf(rec, readPerson)
-    if (!person) return true // No passport number: her record is kept in the folder.
+    if (!person) return 'whole' // No passport number: her record is kept in the folder.
     const profileId = await save(person)
     let whole = true
     for (const { field, key } of fileKeysOf(rec)) {
@@ -203,26 +226,36 @@ export async function copyEasyEnjaz({ db, page, folder, set, state, check, readP
     }
     if (rec.visaNo) whole = (await report(profileId, person.passport_number, 'Visa', 'EasyEnjaz-Visa', `/api/Reports/applicant_visa/${id}`)) && whole
     whole = (await report(profileId, person.passport_number, 'CV', 'EasyEnjaz-CV', '/api/Reports/print_cv/CVReport.repx', { method: 'POST', body: JSON.stringify([row.id]) })) && whole
-    if (!rec.passportKey) await report(profileId, person.passport_number, 'Passport', 'EasyEnjaz-Passport', `/api/Reports/print_documents?docTypes=${encodeURIComponent('View Passport')}`, { method: 'POST', body: JSON.stringify([row.id]), optional: true })
-    return whole
+    return whole ? 'whole' : 'part'
   }
 
-  let at = 0, finished = rows.length - todo.length, stopped = null
+  // A file EasyEnjaz itself no longer has is not a lost line: after two visits
+  // that person counts as done, so a copy never stops on the same people again.
+  const triesFile = path.join(path.dirname(folder), 'easyenjaz-tries.json')
+  let tries = {}
+  try { tries = JSON.parse(fs.readFileSync(triesFile, 'utf8')) } catch {}
+  const siteAnswers = async () => !!(await json(`/api/Applicants/paged?skip=0&take=1&sortField=SNo&sortOrder=desc`))
+  let at = 0, finished = rows.length - todo.length, stopped = null, silent = 0
   const worker = async () => {
     while (!stopped) {
       const row = todo[at++]
       if (!row) return
       try {
         check()
-        const whole = await copyOne(row)
+        const got = await copyOne(row)
         finished++
-        if (whole) {
-          done.add(String(row.id))
+        const id = String(row.id)
+        if (got !== 'none') silent = 0
+        if (got === 'part') { tries[id] = (tries[id] || 0) + 1; fs.writeFileSync(triesFile, JSON.stringify(tries)) }
+        if (got === 'whole' || (got === 'part' && tries[id] >= 2)) {
+          done.add(id)
           fs.writeFileSync(progressFile, JSON.stringify([...done]))
+        } else if (got === 'none' && ++silent >= GIVE_UP_AFTER && !(await siteAnswers().then(ok => { if (ok) silent = 0; return ok }))) {
+          throw new Error(`EasyEnjaz stopped answering after ${finished} of ${total}: check the internet and press the button again. It goes on from where it stopped.`)
         }
         set({ step: `Copying everyone: ${finished} of ${total}` })
       } catch (e) {
-        stopped ||= e.signedOut ? signedOut(finished, total) : e
+        stopped ||= e
       }
     }
   }
@@ -232,5 +265,5 @@ export async function copyEasyEnjaz({ db, page, folder, set, state, check, readP
   if (stopped) throw stopped
 
   // A whole copy is over: the next one looks at everyone again.
-  if (done.size >= rows.length) fs.rmSync(progressFile, { force: true })
+  if (done.size >= rows.length) { fs.rmSync(progressFile, { force: true }); fs.rmSync(triesFile, { force: true }) }
 }

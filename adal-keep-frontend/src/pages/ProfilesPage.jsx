@@ -10,6 +10,7 @@ import Input from '../components/shared/Input'
 import { useProfileFilters } from '../components/profileFilters'
 import { JourneyFork, SHARED, BRANCHES } from '../components/ProfileJourney'
 import SelectionBar from '../components/SelectionBar'
+import { onDataChange } from '../lib/changes'
 
 const STATUS_OPTIONS_AM = [
   { value: 'pending', label: 'በመጠባበቅ ላይ' },
@@ -31,8 +32,8 @@ export default function ProfilesPage() {
   const status = searchParams.get('status') || 'all'
   const brokerId = searchParams.get('broker_id') || ''
 
-  const load = useCallback(async () => {
-    setLoading(true)
+  const load = useCallback(async (quiet) => {
+    if (quiet !== true) setLoading(true)
     try {
       const params = {}
       if (query.trim()) params.q = query.trim()
@@ -46,11 +47,13 @@ export default function ProfilesPage() {
       setProfiles(profilesRes.data)
       setBrokers(brokersRes.data)
     } catch {
-      toast.error('ፕሮፋይሎችን መጫን አልተቻለም')
+      if (quiet !== true) toast.error('ፕሮፋይሎችን መጫን አልተቻለም')
     } finally {
       setLoading(false)
     }
   }, [query, status, brokerId])
+  // A profile changed anywhere (a person, a robot, a phone): the list follows at once.
+  useEffect(() => onDataChange(['profiles', 'brokers'], () => load(true), 3000), [load])
 
   useEffect(() => {
     const t = setTimeout(load, 200)
@@ -269,7 +272,7 @@ export default function ProfilesPage() {
                 <span className="hidden sm:block"><StatusBadge status={p.status} /></span>
               </div>
 
-              <MiniJourney steps={journey.steps[p.id]} who={journey.who[p.id]} missing={journey.missing[p.id]} picked={step} />
+              <MiniJourney steps={journey.steps[p.id]} who={journey.who[p.id]} missing={journey.missing[p.id]} picked={step?.split(':')[0]} />
               {lacking[p.id]?.length > 0 && (
                 <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-2 py-1.5 text-[11px] text-red-700 animate-slide-up dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
                   <b>Missing:</b> {lacking[p.id].join(' · ')}

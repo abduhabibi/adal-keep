@@ -1,10 +1,15 @@
 import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import toast from 'react-hot-toast'
+import { useNavigate } from 'react-router-dom'
 import { useFileCapture } from '../context/FileCaptureContext'
+import { dragProfiles, isProfileDrag, profileCardsDropped } from '../lib/profileDrag'
+import api from '../services/api'
 
 export default function FileTray() {
-  const { capturedFiles, addFiles, removeFile, clearAll } = useFileCapture()
+  const { capturedFiles, addFiles, removeFile, clearAll, trayProfiles, addProfiles, removeProfile, clearProfiles } = useFileCapture()
+  const navigate = useNavigate()
+  const [hot, setHot] = useState(false) // a profile is dragged over the tray
   const [isOpen, setIsOpen] = useState(false)
   const [showGlobalOverlay, setShowGlobalOverlay] = useState(false)
   const buttonRef = useRef(null)
@@ -117,10 +122,23 @@ export default function FileTray() {
     e.preventDefault()
     e.stopPropagation()
     e.dataTransfer.dropEffect = 'copy'
+    if (isProfileDrag(e)) setHot(true)
   }
-  const handleTrayDrop = (e) => {
+  const handleTrayDrop = async (e) => {
     e.preventDefault()
     e.stopPropagation()
+    setHot(false)
+    if (e.dataTransfer?.getData('application/x-adal-from-tray')) return
+    if (isProfileDrag(e)) {
+      let cards = profileCardsDropped(e)
+      // A drag that carried only ids: their names are looked up once.
+      if (cards.some(c => !c.full_name)) {
+        cards = await Promise.all(cards.map(c => c.full_name ? c : api.get(`/profiles/${c.id}`).then(r => ({ id: c.id, full_name: r.data?.full_name || '', phone_number: r.data?.phone_number || '' })).catch(() => c)))
+      }
+      const n = addProfiles(cards)
+      toast.success(n ? `${cards.length === 1 ? cards[0].full_name || 'Profile' : cards.length + ' profiles'} kept in the tray` : 'Already in the tray')
+      return
+    }
     if (e.dataTransfer?.getData('application/x-tray-file-id')) return
     const files = extractFiles(e)
     if (files.length > 0) {
@@ -192,17 +210,18 @@ export default function FileTray() {
         ref={buttonRef}
         onClick={toggleDropdown}
         onDragOver={handleTrayDragOver}
+        onDragLeave={() => setHot(false)}
         onDrop={handleTrayDrop}
-        className="relative p-2.5 rounded-full transition-all duration-200 group hover:bg-slate-100/60 dark:hover:bg-white/5"
-        aria-label="File Tray"
-        title="Captured Files (Drag files anywhere or press Ctrl+V)"
+        className={`relative p-2.5 rounded-full transition-all duration-200 group hover:bg-slate-100/60 dark:hover:bg-white/5 ${hot ? 'ring-2 ring-teal-500 bg-teal-50 dark:bg-teal-900/30 scale-110' : ''}`}
+        aria-label="Tray"
+        title="Tray: files (drag them anywhere or Ctrl+V) and profiles (drag them here)"
       >
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="text-slate-600 dark:text-slate-400 group-hover:text-slate-900 dark:group-hover:text-white transition-colors">
           <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" /><polyline points="13 2 13 9 20 9" />
         </svg>
-        {capturedFiles.length > 0 && (
-          <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-teal-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center ring-2 ring-white dark:ring-slate-900 animate-pulse">
-            {capturedFiles.length}
+        {capturedFiles.length + trayProfiles.length > 0 && (
+          <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-teal-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center ring-2 ring-white dark:ring-slate-900">
+            {capturedFiles.length + trayProfiles.length}
           </span>
         )}
       </button>
@@ -218,15 +237,39 @@ export default function FileTray() {
         >
           <div className="p-4 border-b border-slate-200/60 dark:border-slate-800/60 flex justify-between items-center">
             <div>
-              <h3 className="font-semibold text-sm text-slate-800 dark:text-white">Quick Upload Tray</h3>
-              <p className="text-[10px] text-slate-400 dark:text-slate-500">Drag files anywhere or press Ctrl+V</p>
+              <h3 className="font-semibold text-sm text-slate-800 dark:text-white">Tray</h3>
+              <p className="text-[10px] text-slate-400 dark:text-slate-500">Files: drag anywhere or Ctrl+V · Profiles: drag here</p>
             </div>
             {capturedFiles.length > 0 && (
               <button onClick={() => { clearAll(); toast.success('Tray cleared') }} className="text-xs text-red-500 hover:text-red-600 dark:text-red-400 dark:hover:text-red-300 transition-colors font-medium">Clear all</button>
             )}
           </div>
+          {trayProfiles.length > 0 && (
+            <div className="border-b border-slate-200/60 dark:border-slate-800/60 p-2">
+              <div className="flex items-center justify-between px-1 pb-1">
+                <span className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Profiles · {trayProfiles.length}</span>
+                <span className="flex gap-3 text-xs">
+                  <button type="button" draggable onDragStart={(e) => { dragProfiles(e, trayProfiles); e.dataTransfer.setData('application/x-adal-from-tray', '1') }}
+                    className="cursor-grab font-medium text-teal-600 dark:text-teal-400" title="Drag all onto a checklist">⠿ Drag all</button>
+                  <button type="button" onClick={() => { clearProfiles(); toast.success('Profiles taken out of the tray') }} className="font-medium text-red-500">Clear</button>
+                </span>
+              </div>
+              <div className="max-h-48 overflow-y-auto custom-scrollbar">
+                {trayProfiles.map(p => (
+                  <div key={p.id} draggable onDragStart={(e) => { dragProfiles(e, p); e.dataTransfer.setData('application/x-adal-from-tray', '1') }}
+                    className="group flex items-center gap-2 rounded-lg px-2 py-1.5 cursor-grab hover:bg-slate-100/80 dark:hover:bg-white/10">
+                    <button type="button" onClick={() => { setIsOpen(false); navigate(`/profiles/${p.id}`) }} className="min-w-0 flex-1 text-left">
+                      <span className="block truncate text-sm font-medium text-slate-700 dark:text-slate-200">{p.full_name || `Profile #${p.id}`}</span>
+                      <span className="block text-[11px] text-slate-400">{p.phone_number || 'Drag onto a checklist'}</span>
+                    </button>
+                    <button type="button" onClick={() => removeProfile(p.id)} className="rounded-md p-1 text-slate-400 opacity-0 group-hover:opacity-100 hover:text-red-500" aria-label="Take out">✕</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="max-h-72 overflow-y-auto custom-scrollbar p-2">
-            {capturedFiles.length === 0 ? (
+            {capturedFiles.length === 0 && trayProfiles.length ? null : capturedFiles.length === 0 ? (
               <div className="p-8 text-center">
                 <p className="text-sm text-slate-500 dark:text-slate-400 mb-1 font-medium">Tray is empty</p>
                 <p className="text-xs text-slate-400 dark:text-slate-500">Drop files anywhere or copy + Ctrl+V</p>

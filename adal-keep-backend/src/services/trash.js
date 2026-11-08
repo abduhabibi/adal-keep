@@ -60,6 +60,10 @@ const KINDS = {
     const linked = await db('profiles').where('broker_id', id).select('id')
     return { title: b.name, tables: { brokers: [b] }, paths: [], extra: { profiles: linked.map(r => r.id) } }
   },
+  async note(db, id) {
+    const n = await db('notes').where('id', id).first()
+    return n && { title: `Note: ${String(n.text).slice(0, 80)}`, tables: { notes: [n] }, paths: [] }
+  },
   async employee(db, id) {
     const u = await db('users').where('id', id).first()
     return u && { title: u.name || u.username, tables: { users: [u] }, paths: [] }
@@ -111,7 +115,7 @@ const KINDS = {
 
 // Restore parents before children; delete children before parents.
 const ORDER = ['brokers', 'users', 'cv_templates', 'checklists', 'profiles', 'profile_fields', 'files', 'generated_cvs',
-  'document_verifications', 'checklist_profiles', 'tasks', 'quick_links', 'lmis_accounts', 'musaned_accounts', 'visa_accounts', 'tasheer_accounts', 'insurance_accounts']
+  'document_verifications', 'checklist_profiles', 'tasks', 'quick_links', 'lmis_accounts', 'musaned_accounts', 'visa_accounts', 'tasheer_accounts', 'insurance_accounts', 'notes']
 
 /** Who deleted it: the employee name the page sends, and from which PC. */
 export function whoFrom(req) {

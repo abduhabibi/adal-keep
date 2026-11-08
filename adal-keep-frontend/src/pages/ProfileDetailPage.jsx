@@ -14,6 +14,7 @@ import WhatsAppSend from '../components/WhatsAppSend'
 import NotesTimeline from '../components/NotesTimeline'
 import VisaBarcodes from '../components/VisaBarcodes'
 import MedicalBattery from '../components/MedicalBattery'
+import { onDataChange } from '../lib/changes'
 
 export default function ProfileDetailPage() {
   const { id } = useParams()
@@ -54,7 +55,12 @@ export default function ProfileDetailPage() {
   useEffect(() => {
     const again = () => api.get(`/profiles/${id}`).then(r => setProfile(r.data)).catch(() => {})
     window.addEventListener('adal-profile-changed', again)
-    return () => window.removeEventListener('adal-profile-changed', again)
+    // Changed anywhere else too: her details, notes, documents and status follow at once.
+    const off = onDataChange(['profiles', 'profile_fields', 'files', 'automation_queue', 'profile_automations', 'notes'], (t) => {
+      again()
+      if (t.some(x => x === 'profile_fields' || x === 'files' || x === '*')) api.get(`/profiles/${id}/fields`).then(r => setFields(r.data)).catch(() => {})
+    })
+    return () => { window.removeEventListener('adal-profile-changed', again); off() }
   }, [id])
 
   const deleteProfile = async () => {
@@ -159,10 +165,6 @@ export default function ProfileDetailPage() {
         </div>
       )}
 
-      {profile.destination_country === 'Saudi Arabia' && (
-        <SaudiEmergency profile={profile} onSaved={(v) => setProfile(p => ({ ...p, emergency_labor_id: v }))} />
-      )}
-
       <ProfileJourney profileId={id} />
 
       {import.meta.env.VITE_DEMO !== '1' && <WhatsAppSend profile={profile} />}
@@ -212,7 +214,6 @@ export default function ProfileDetailPage() {
             <Field label="Emergency name" value={profile.emergency_name} />
             <Field label="Emergency phone" value={profile.emergency_phone} />
             <Field label="Emergency relationship" value={profile.emergency_relationship} />
-            {profile.destination_country === 'Saudi Arabia' && <Field label="Emergency Labor ID (LMIS)" value={profile.emergency_labor_id} />}
             <Field label="Destination Country" value={profile.destination_country} />
             <Field label="Broker" value={profile.broker_name || 'Unassigned'} />
             <Field label="Created" value={formatDate(profile.created_at)} />
@@ -448,33 +449,3 @@ function LaborIdEdit({ profile, onSaved }) {
   )
 }
 
-/** Saudi Arabia: the LMIS contract needs the emergency contact person's Labor ID. */
-function SaudiEmergency({ profile, onSaved }) {
-  const [value, setValue] = useState(profile.emergency_labor_id || '')
-  const [editing, setEditing] = useState(!profile.emergency_labor_id)
-  const [saving, setSaving] = useState(false)
-  const save = async () => {
-    const v = value.toUpperCase().trim()
-    if (!v) return toast.error('Type the Labor ID of the emergency contact person')
-    setSaving(true)
-    try {
-      await api.put(`/profiles/${profile.id}`, { emergency_labor_id: v })
-      onSaved(v); setEditing(false); toast.success('Emergency contact saved')
-    } catch (e) { toast.error(e?.response?.data?.error || 'Could not save') } finally { setSaving(false) }
-  }
-  return (
-    <div className={`panel p-4 border-l-4 ${profile.emergency_labor_id && !editing ? 'border-l-emerald-500' : 'border-l-amber-400 bg-amber-50/30 dark:bg-amber-900/10'}`}>
-      <p className="text-sm font-semibold">🇸🇦 Saudi Arabia — emergency contact person for the LMIS contract</p>
-      {editing ? (
-        <div className="mt-2 flex flex-wrap items-center gap-2">
-          <input className="rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-1.5 text-sm w-48"
-            placeholder="EM13001783" value={value} onChange={e => setValue(e.target.value.toUpperCase())} onKeyDown={e => e.key === 'Enter' && save()} />
-          <Button size="sm" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</Button>
-          <span className="text-xs text-slate-500">Their LMIS Labor ID (register the person on LMIS first). The contract run adds them on the Emergency Contact tab.</span>
-        </div>
-      ) : (
-        <p className="text-xs text-slate-500 mt-1">Labor ID <b>{profile.emergency_labor_id}</b> — added on the LMIS contract's Emergency Contact tab. <button type="button" className="underline" onClick={() => setEditing(true)}>Change</button></p>
-      )}
-    </div>
-  )
-}

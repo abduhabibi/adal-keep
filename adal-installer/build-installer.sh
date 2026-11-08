@@ -21,11 +21,22 @@ set -euo pipefail
 BASE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 INST="$BASE/adal-installer"
 STAGE="$INST/stage"
-USB="$BASE/Adal Keep USB"
+# USB_DIR: build straight onto the flash drive (e.g. "/d/Adal Keep USB").
+USB="${USB_DIR:-$BASE/Adal Keep USB}"
 BACK="$BASE/adal-keep-backend"
 
+# On Windows (Git Bash): the build tools in C:\AdalTools, rsync done by a small
+# Node script, and the icon tool run directly (no Wine).
+WINDOWS=0
+case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) WINDOWS=1 ;; esac
+if [ "$WINDOWS" = 1 ]; then
+  export PATH="/c/AdalTools/go/bin:/c/AdalTools/nsis:/c/AdalKeep/runtime:$PATH"
+  command -v rsync >/dev/null 2>&1 || rsync() { node "$INST/tools/rsync-lite.cjs" "$@"; }
+fi
+seticon() { if [ "$WINDOWS" = 1 ]; then "$INST/tools/seticon.exe" "$@"; else WINEDEBUG=-all wine "$INST/tools/seticon.exe" "$@"; fi; }
 need() { command -v "$1" >/dev/null 2>&1 || { echo "ERROR: '$1' is not installed"; exit 1; }; }
-need makensis; need go; need rsync; need node
+need makensis; need go; need node
+[ "$WINDOWS" = 1 ] || need rsync
 
 rm -rf "$STAGE"
 mkdir -p "$STAGE/main/backend" "$STAGE/main/frontend" "$STAGE/companion"
@@ -75,8 +86,8 @@ echo "== [3/6] Windows programs (Go, windows/amd64) =="
 # The Adal Keep logo inside both programs (taskbar, shortcuts, Explorer).
 ( cd "$INST/tools/seticon" && GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o "$INST/tools/seticon.exe" . )
 for exe in AdalKeep.exe adal-companion.exe; do
-  out=$(WINEDEBUG=-all wine "$INST/tools/seticon.exe" "$STAGE/main/$exe" "$BASE/adal.ico" 2>/dev/null) \
-    || { echo "STOP: could not put the logo into $exe (is Wine installed?)"; exit 1; }
+  out=$(seticon "$STAGE/main/$exe" "$BASE/adal.ico" 2>/dev/null) \
+    || { echo "STOP: could not put the logo into $exe"; exit 1; }
   echo "   $out" | tr -d '\r'
 done
 cp -f "$BASE/adal.ico" "$STAGE/main/adal.ico"
@@ -85,7 +96,7 @@ cp -f "$STAGE/main/adal-companion.exe" "$STAGE/companion/adal-companion.exe"
 # Employee PCs open the main PC's Adal Keep through AdalKeep.exe (employee mode).
 cp -f "$STAGE/main/AdalKeep.exe" "$STAGE/main/adal.ico" "$STAGE/companion/"
 # The online copy's pages, for when the main PC is off (adal-launcher/online.go).
-( cd "$BASE/adal-keep-frontend" && npm run -s build:phone )
+( cd "$BASE/adal-keep-frontend" && VITE_PHONE=1 node node_modules/vite/bin/vite.js build --mode phone --logLevel warn )
 rsync -a --delete "$BASE/adal-phone/www/" "$STAGE/companion/online/"
 rm -f "$STAGE/main/run-server.bat" "$STAGE/main/start-companion.bat" "$STAGE/companion/start-companion.bat"
 cp -f "$INST/files/finish-install.ps1" "$STAGE/main/"
@@ -110,11 +121,9 @@ echo "== [4/6] Installers =="
 
 echo "== [5/6] USB folder =="
 # Keep deps\ a previous PREPARE already filled (it is the slow part).
-if [ -d "$USB/deps" ]; then mv "$USB/deps" "$INST/.deps-keep"; fi
-rm -rf "$USB"
-mkdir -p "$USB"
-if [ -d "$INST/.deps-keep" ]; then mv "$INST/.deps-keep" "$USB/deps"; fi
+# It stays where it is; only the files this build makes are replaced.
 mkdir -p "$USB/deps/source"
+rm -f "$USB/2 - Install Adal Main.exe" "$USB/3 - Install Adal Companion.exe" "$USB/"*.bat
 mv -f "$INST/2 - Install Adal Main.exe" "$INST/3 - Install Adal Companion.exe" "$USB/"
 cp -f "$INST/usb/1 - PREPARE (once, needs internet).bat" "$USB/"
 cp -f "$INST/usb/4 - Copy logs to this USB.bat" "$USB/"

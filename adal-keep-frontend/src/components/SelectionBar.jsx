@@ -1,7 +1,8 @@
 /**
  * The Profiles page's ticked girls, in a bar on the right (at the bottom on a
  * phone), with what can be done for all of them at once:
- *   🛂 Make Tasheer · 🛡️ Make insurance · 🖨️ Print embassy (2 pages a girl).
+ *   🛂 Make Tasheer · 🛡️ Make insurance · 🖨️ Print embassy (2 pages a girl) ·
+ *   📋 Make a checklist of them (found later on the Checklists page).
  * Every button first checks each girl has what it needs: the ones who do go
  * ahead; the others slide up in a list with what they lack (also shown on
  * their cards), with a link to each one's profile.
@@ -13,6 +14,7 @@ import toast from 'react-hot-toast'
 import api from '../services/api'
 import { useAuth } from '../context/AuthContext'
 import { loadEmbassy, printEmbassy } from '../lib/embassyPrint'
+import { dragProfiles } from '../lib/profileDrag'
 
 const err = (e) => e?.response?.data?.error || e.message
 
@@ -59,6 +61,25 @@ export default function SelectionBar({ picked, onRemove, onClear, onAllShown, on
   const [busy, setBusy] = useState('')
   const [open, setOpen] = useState(true)
   const [sheet, setSheet] = useState(null)
+  const [naming, setNaming] = useState(null) // the new checklist's name, while typed
+  const navigate = useNavigate()
+
+  const makeChecklist = async (e) => {
+    e.preventDefault()
+    const name = (naming || '').trim()
+    if (!name) return
+    setBusy('checklist')
+    try {
+      await api.post('/checklists', { name, profile_ids: picked.map(p => p.id) })
+      setNaming(null)
+      toast.success((t) => (
+        <span className="flex items-center gap-3">Checklist “{name}” made with {picked.length}
+          <button type="button" className="font-semibold text-teal-600" onClick={() => { toast.dismiss(t.id); navigate('/checklist') }}>Open</button>
+        </span>
+      ), { duration: 6000 })
+    } catch (e2) { toast.error(err(e2)) }
+    setBusy('')
+  }
 
   const showLacking = (title, done, rows, extra = {}) => {
     onLacking?.(Object.fromEntries(rows.map(r => [r.p.id, r.missing])))
@@ -102,7 +123,8 @@ export default function SelectionBar({ picked, onRemove, onClear, onAllShown, on
     <>
     <aside className="solid-sheet fixed inset-x-2 bottom-2 z-[60] flex flex-col rounded-2xl border border-slate-200 shadow-2xl dark:border-slate-700 lg:inset-x-auto lg:bottom-3 lg:right-3 lg:top-20 lg:max-h-none lg:w-[19rem]">
       <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2 dark:border-slate-800">
-        <button type="button" onClick={() => setOpen(o => !o)} className="text-sm font-bold">
+        <button type="button" onClick={() => setOpen(o => !o)} className="text-sm font-bold cursor-grab" draggable
+          onDragStart={(e) => dragProfiles(e, picked)} title="Drag all of them onto a checklist or the tray">
           ✓ {picked.length} selected <span className="text-slate-400 lg:hidden">{open ? '▾' : '▴'}</span>
         </button>
         <span className="flex gap-2 text-xs">
@@ -111,7 +133,7 @@ export default function SelectionBar({ picked, onRemove, onClear, onAllShown, on
         </span>
       </div>
       <div className={`${open ? '' : 'hidden lg:flex'} flex min-h-0 flex-1 flex-col`}>
-        <div className="grid grid-cols-3 gap-1.5 border-b border-slate-100 p-2 dark:border-slate-800 lg:grid-cols-1 lg:p-3">
+        <div className="grid grid-cols-2 gap-1.5 border-b border-slate-100 p-2 dark:border-slate-800 lg:grid-cols-1 lg:p-3">
           <button type="button" className={`${btn} bg-slate-100 text-slate-400 dark:bg-slate-800`} disabled
             title="The Tasheer run is not built yet — show Adal Keep the Tasheer site's steps and it will be">🛂 Make Tasheer <span className="ml-auto hidden text-[10px] font-normal lg:inline">coming</span></button>
           <button type="button" className={`${btn} bg-amber-50 text-amber-800 hover:bg-amber-100 dark:bg-amber-900/30 dark:text-amber-300`} disabled={!!busy}
@@ -119,12 +141,22 @@ export default function SelectionBar({ picked, onRemove, onClear, onAllShown, on
           <button type="button" className={`${btn} bg-teal-600 text-white hover:bg-teal-700`} disabled={!!busy}
             onClick={print} title="2 pages a girl: the contract's first page and the embassy form with the visa and application numbers as barcodes">
             🖨️ {busy === 'print' ? 'Checking…' : 'Print embassy'} <span className="ml-auto hidden text-[10px] font-normal opacity-80 lg:inline">{picked.length * 2} pages</span></button>
+          <button type="button" className={`${btn} bg-indigo-50 text-indigo-800 hover:bg-indigo-100 dark:bg-indigo-900/30 dark:text-indigo-300`} disabled={!!busy}
+            onClick={() => setNaming(naming == null ? '' : null)}>📋 {busy === 'checklist' ? 'Making…' : 'Make checklist'}</button>
+          {naming != null && (
+            <form onSubmit={makeChecklist} className="col-span-2 flex gap-1.5 lg:col-span-1">
+              <input autoFocus value={naming} onChange={(e) => setNaming(e.target.value)} placeholder="Checklist name"
+                onKeyDown={(e) => { if (e.key === 'Escape') setNaming(null) }}
+                className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-900" />
+              <button type="submit" disabled={!naming.trim() || !!busy} className="rounded-lg bg-indigo-600 px-3 text-sm font-semibold text-white disabled:opacity-50">Save</button>
+            </form>
+          )}
         </div>
         {/* On a phone the list stays about 3 names high and scrolls, so the
             cards above stay free to tick more. */}
         <ul className="max-h-[7.5rem] min-h-0 flex-1 divide-y divide-slate-100 overflow-y-auto overscroll-contain dark:divide-slate-800 lg:max-h-none">
           {picked.map(p => (
-            <li key={p.id} className="flex items-center gap-2 px-3 py-1.5 text-xs">
+            <li key={p.id} className="flex items-center gap-2 px-3 py-1.5 text-xs cursor-grab" draggable onDragStart={(e) => dragProfiles(e, p)}>
               <span className="min-w-0 flex-1">
                 <span className="block truncate font-semibold">{p.full_name}</span>
                 <span className="text-slate-500">{p.passport_number || '—'}</span>

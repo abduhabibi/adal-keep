@@ -7,8 +7,8 @@ android {
         applicationId "com.adalkeep.phone"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 52
-        versionName "1.51"
+        versionCode 53
+        versionName "1.52"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -24,7 +24,10 @@ android {
     signingConfigs {
         release {
             if (keyProps['storeFile']) {
-                storeFile file(keyProps['storeFile'])
+                // Written on another PC (another path): the key beside the properties file.
+                def store = file(keyProps['storeFile'])
+                if (!store.exists()) store = new File(keyFile.parentFile, 'phone-release.jks')
+                storeFile store
                 storePassword keyProps['storePassword']
                 keyAlias keyProps['keyAlias']
                 keyPassword keyProps['keyPassword']

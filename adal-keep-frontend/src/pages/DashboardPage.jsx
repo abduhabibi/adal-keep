@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import api from '../services/api'
+import { onDataChange } from '../lib/changes'
 
 export default function DashboardPage() {
   const [stats, setStats] = useState(null)
@@ -25,6 +26,7 @@ export default function DashboardPage() {
       finally { setLoading(false) }
     }
     load()
+    return onDataChange(['profiles', 'tasks', 'automation_queue', 'profile_automations'], load)
   }, [])
 
   if (loading) {

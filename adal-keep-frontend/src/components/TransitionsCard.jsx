@@ -42,6 +42,7 @@ function Result({ s }) {
 export default function TransitionsCard() {
   const [all, setAll] = useState({})
   const [link, setLink] = useState('')
+  const [starting, setStarting] = useState(null)
   const load = () => api.get('/transitions').then(r => setAll(r.data)).catch(() => {})
   useEffect(() => { load() }, [])
   const running = Object.values(all).some(busy)
@@ -52,16 +53,23 @@ export default function TransitionsCard() {
   }, [running])
 
   const start = async (id) => {
-    try { await api.post(`/transitions/${id}/start`, id === 'pextran' ? { link } : {}); load() }
+    setStarting(id)
+    try { await api.post(`/transitions/${id}/start`, id === 'pextran' ? { link } : {}); await load() }
     catch (e) { toast.error(err(e)) }
+    setStarting(null)
   }
-  const stop = (id) => api.post(`/transitions/${id}/stop`).then(load).catch(e => toast.error(err(e)))
+  // Never where the Move button is, and it asks: a second click on Move must not end the copy.
+  const stop = (id, name) => {
+    if (!confirm(`Stop copying from ${name}? What is saved stays, and pressing Move again goes on from there.`)) return
+    api.post(`/transitions/${id}/stop`).then(load).catch(e => toast.error(err(e)))
+  }
+  const show = (id) => api.post(`/transitions/${id}/show`).catch(e => toast.error(err(e)))
 
   return (
     <Card>
       <h2 className="font-display text-lg font-bold mb-1 flex items-center gap-2" translate="no"><span>🚚</span> Move here from another system</h2>
       <p className="text-sm text-slate-500 mb-4" translate="no">
-        Press a system, sign in in the window that opens, and Adal Keep copies your people, their files and CV templates. Profiles already here keep what you typed and only get their empty fields filled. Nothing on the other system is changed.
+        Press a system once, sign in in the window that opens, and Adal Keep copies your people, their files and CV templates by itself. Profiles already here keep what you typed and only get their empty fields filled. Nothing on the other system is changed.
       </p>
       <div className="space-y-3" translate="no">
         {SYSTEMS.map(([id, name, where]) => {
@@ -73,14 +81,20 @@ export default function TransitionsCard() {
                   <p className="font-semibold">{name}</p>
                   <p className="text-xs text-slate-500">{where}</p>
                 </div>
-                {busy(s)
-                  ? <Button size="sm" variant="secondary" onClick={() => stop(id)}>Stop</Button>
-                  : <Button size="sm" disabled={running || (id === 'pextran' && !link.trim())} onClick={() => start(id)}>Move from {name}</Button>}
+                <Button size="sm" disabled={!!starting || running || (id === 'pextran' && !link.trim())} onClick={() => start(id)}>
+                  {busy(s) || starting === id ? 'Working…' : `Move from ${name}`}
+                </Button>
               </div>
               {id === 'pextran' && !busy(s) && (
                 <Input value={link} onChange={e => setLink(e.target.value)} placeholder="https://zadulmead.agency.pextran.com/" inputMode="url" autoComplete="off" />
               )}
               {s && <Result s={s} />}
+              {busy(s) && (
+                <div className="flex flex-wrap items-center gap-3 text-xs">
+                  {s.status === 'signing-in' && <button type="button" onClick={() => show(id)} className="font-semibold text-teal-700 hover:underline dark:text-teal-400">Show the sign-in window</button>}
+                  <button type="button" onClick={() => stop(id, name)} className="text-slate-400 hover:text-red-600 hover:underline">Stop the copy</button>
+                </div>
+              )}
             </div>
           )
         })}

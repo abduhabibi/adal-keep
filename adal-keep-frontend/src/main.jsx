@@ -12,14 +12,26 @@ import './index.css'
 // A page in a hidden tab does not need its every-few-seconds refreshes: they
 // are skipped until the page is seen again (and done at once then). This keeps
 // low-end PCs and the main PC quiet.
+// Each page refresh of 2 s – 1 min is also kept in a list: when the PC says
+// something changed, they all run at once (lib/changes.js) — so every list,
+// count and status on screen follows the change without waiting.
+const liveRefreshes = new Map()
 if (typeof document !== 'undefined') {
   const every = window.setInterval.bind(window)
+  const stop = window.clearInterval.bind(window)
   const later = new Set()
   window.setInterval = (fn, ms, ...args) => {
     if (typeof fn !== 'function' || !(ms < 60000)) return every(fn, ms, ...args)
     const run = () => fn(...args)
-    return every(() => { if (document.hidden) later.add(run); else run() }, ms)
+    const id = every(() => { if (document.hidden) later.add(run); else run() }, ms)
+    if (ms >= 2000) liveRefreshes.set(id, run)
+    return id
   }
+  window.clearInterval = (id) => { liveRefreshes.delete(id); stop(id) }
+  import('./lib/changes.js').then(c => c.setRefreshAll(() => {
+    let i = 0
+    for (const run of liveRefreshes.values()) setTimeout(() => { try { run() } catch {} }, (i++) * 25) // spread out
+  }))
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) return
     const due = [...later]; later.clear()
@@ -169,7 +181,9 @@ async function adminBoot() {
   if (q.get('to')) history.replaceState(null, '', q.get('to'))
 }
 
-boot().finally(() => ReactDOM.createRoot(document.getElementById('root')).render(
+boot().finally(() => {
+  if (import.meta.env.VITE_DEMO !== '1' && import.meta.env.VITE_ADMIN !== '1') import('./lib/changes.js').then(c => c.startChanges()).catch(() => {})
+}).finally(() => ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <App />
   </React.StrictMode>
@@ -178,6 +192,21 @@ boot().finally(() => ReactDOM.createRoot(document.getElementById('root')).render
 // Installable app (Install Adal Keep in the browser menu). Not in the demo build.
 if ('serviceWorker' in navigator && import.meta.env.PROD && import.meta.env.VITE_DEMO !== '1' && import.meta.env.VITE_PHONE !== '1' && import.meta.env.VITE_ADMIN !== '1') {
   window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}))
+}
+
+// On the main PC itself, this window keeps Adal Keep alive: when the last one
+// is closed everything ends (backend services/appLife.js). Closing while a run or
+// a move is working asks first.
+if (import.meta.env.VITE_DEMO !== '1' && import.meta.env.VITE_PHONE !== '1' && import.meta.env.VITE_ADMIN !== '1'
+  && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && 'EventSource' in window) {
+  let busy = false
+  const alive = new EventSource('/api/app/alive')
+  alive.onmessage = (e) => { try { busy = !!JSON.parse(e.data).busy } catch {} }
+  window.addEventListener('beforeunload', (e) => {
+    if (!busy) return
+    e.preventDefault()
+    e.returnValue = 'Adal Keep is still working. Closing it stops everything; it goes on when you open it again.'
+  })
 }
 
 // English (Settings → Language): shows the Amharic pages in English.

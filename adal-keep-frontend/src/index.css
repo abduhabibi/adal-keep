@@ -599,6 +599,9 @@ body {
 .journey-pulse { stroke-dasharray: 10 90; animation: journey-run 1.6s linear infinite; filter: drop-shadow(0 0 4px rgba(167, 243, 208, .95)); }
 @keyframes journey-run { from { stroke-dashoffset: 100; } to { stroke-dashoffset: 0; } }
 @media (prefers-reduced-motion: reduce) { .journey-pulse { animation: none; stroke-dasharray: none; opacity: .5; } }
+.journey-grow { stroke-dasharray: 100; stroke-dashoffset: 100; animation: journey-draw .45s ease-out forwards; }
+@keyframes journey-draw { to { stroke-dashoffset: 0; } }
+@media (prefers-reduced-motion: reduce) { .journey-grow { animation: none; stroke-dashoffset: 0; } }
 
 /* Chat, like Telegram: a soft patterned wall behind the bubbles, and bubble tails. */
 .tg-wall {

@@ -515,10 +515,11 @@ export default function ProfileAutomations({ profileId }) {
               {g.title === 'Musaned' && <MusanedCode accountId={musanedAccountId} />}
             </div>
             {loginOf(g.title) && (
-              <div className="acct-compact mb-1.5 flex flex-wrap items-center gap-2 rounded-lg bg-white/60 px-2 py-1 dark:bg-slate-900/40">
-                <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">🔑 Login</span>
-                <div className="min-w-0 flex-1">{loginOf(g.title)}</div>
-                <AccountPassword {...passOf(g.title)} />
+              // On a phone: "Login" and the account on one line, the picker and its buttons the full width under it.
+              <div className="acct-compact mb-1.5 flex flex-wrap items-center gap-x-2 gap-y-1.5 rounded-lg bg-white/60 px-2 py-1.5 dark:bg-slate-900/40">
+                <span className="order-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">🔑 Login</span>
+                <div className="order-3 min-w-0 basis-full sm:order-2 sm:basis-0 sm:flex-1">{loginOf(g.title)}</div>
+                <div className="order-2 ml-auto min-w-0 sm:order-3 sm:ml-0"><AccountPassword {...passOf(g.title)} /></div>
               </div>
             )}
             {flows.length ? (

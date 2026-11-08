@@ -1,6 +1,6 @@
 /** Settings → Transitions: bring an agency's data over from the system it used before. */
 import express from 'express'
-import { transitionStates, startTransition, stopTransition, checkLink } from '../services/transition.js'
+import { transitionStates, startTransition, stopTransition, showTransition, checkLink } from '../services/transition.js'
 
 const router = express.Router()
 
@@ -16,6 +16,11 @@ router.post('/transitions/:source/start', async (req, res) => {
 router.post('/transitions/:source/stop', (req, res) => {
   stopTransition(req.params.source)
   res.json(transitionStates())
+})
+
+router.post('/transitions/:source/show', async (req, res) => {
+  await showTransition(req.params.source).catch(() => {})
+  res.json({ ok: true })
 })
 
 export default router

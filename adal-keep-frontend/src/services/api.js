@@ -38,7 +38,14 @@ if (import.meta.env.VITE_PHONE === '1' || import.meta.env.VITE_ADMIN === '1') {
 
 // Global error handler (optional but helpful for debugging)
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    // A change made here: this page and its neighbours reload at once.
+    const m = String(response.config?.method || 'get').toLowerCase()
+    if (m !== 'get' && m !== 'head') {
+      import('../lib/changes.js').then(c => { const t = c.tablesOfRequest(response.config?.url); if (t) c.tellChanged(t) }).catch(() => {})
+    }
+    return response
+  },
   (error) => {
     // Trial over and not unlocked: the app swaps itself for the lock screen.
     if (error.response?.status === 402 && error.response?.data?.error === 'locked') {

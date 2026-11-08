@@ -394,6 +394,13 @@ export function ensureBackupKey() {
 }
 
 let timer = null
+// A move from another system just ended: everything it brought goes up as soon
+// as no agent is working (not two hours later).
+let wanted = false
+export function backupSoon() { wanted = true }
+async function moving() {
+  try { return (await import('./transition.js')).transitionRunning() } catch { return false }
+}
 /**
  * New documents go online within seconds of arriving: a quick run with only
  * them (and the small index a restore reads). A few MB go even while a robot
@@ -417,6 +424,8 @@ export function startBackupSchedule(db) {
       if (!cfg.enabled || !cfg.has_token || !cfg.has_password || !cfg.chat_id || progress.running) return
       const s = readState()
       const ago = (t) => t ? Date.now() - new Date(t).getTime() : Infinity
+      // A move from another system needs the whole (slow) line: nothing goes up meanwhile.
+      if (await moving()) return
       const busy = runsWorking() > 0
 
       // New documents: a quick run.
@@ -437,10 +446,11 @@ export function startBackupSchedule(db) {
       if (busy) return
       const waiting = Number((await db('automation_queue').where('status', 'pending').count({ c: '*' }).first().catch(() => null))?.c || 0)
       if (waiting > 0) return
-      if (ago(s.last_run) < QUIET_MS) return
+      if (ago(s.last_run) < QUIET_MS && !wanted) return
       if (s.last_error && ago(s.last_error_at || s.last_run) < 15 * 60 * 1000) return // failed lately: again after 15 minutes
       const lastDb = (s.sets || []).filter(x => x.type === 'db').map(x => new Date(x.date).getTime()).pop() || 0
-      if (Date.now() - lastDb < DB_EVERY_MS && s.last_day === today()) return
+      if (Date.now() - lastDb < DB_EVERY_MS && s.last_day === today() && !wanted) return
+      wanted = false
       runBackup(db).then(r => console.log('[backup] done', r)).catch(e => console.warn('[backup] failed:', e.message))
     } catch (e) { console.warn('[backup] schedule:', e.message) }
   }

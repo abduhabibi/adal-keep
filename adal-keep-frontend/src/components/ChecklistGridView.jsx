@@ -5,6 +5,8 @@ import api from '../services/api'
 import { usePickFile } from './shared/PickFile'
 import { SHARED, BRANCHES } from './ProfileJourney'
 import { printOnPhone } from '../lib/phoneApp'
+import LangToggle from './LangToggle'
+import { onDataChange } from '../lib/changes'
 
 const ALL_FIELDS = [
   'Government ID', 'Passport', 'CV', 'Contract', 'Medical Report', 'Insurance', 'COC',
@@ -60,6 +62,7 @@ export default function ChecklistGridView({ checklist, onClose }) {
     return m
   })
   const [newCol, setNewCol] = useState({ label: '', type: 'tick' })
+  const [adding, setAdding] = useState(null) // a new note column's name, while it is typed
   // Each girl's journey: { profileId: { steps: {cv:'done'…}, who: {…} } }.
   const [paths, setPaths] = useState({})
   const target = useRef(null)   // { profileId, name } the next picked file goes to
@@ -87,11 +90,18 @@ export default function ChecklistGridView({ checklist, onClose }) {
     load(true)
     const again = () => load(false)
     const t = setInterval(again, 5000)
+    const off = onDataChange(['checklist_cells', 'checklists'], () => api.get('/checklists').then(r => {
+      const me = (r.data || []).find(c => c.id === checklist.id)
+      if (!me) return
+      setCells(Object.fromEntries((me.cells || []).map(c => [`${c.profile_id}|${c.column}`, c.value])))
+      if (me.columns?.length) setColumns(me.columns)
+    }).catch(() => {}))
     window.addEventListener('focus', again)
     document.addEventListener('visibilitychange', again)
     return () => {
       alive = false
       clearInterval(t)
+      off()
       window.removeEventListener('focus', again)
       document.removeEventListener('visibilitychange', again)
     }
@@ -124,6 +134,27 @@ export default function ChecklistGridView({ checklist, onClose }) {
     if (columns.some(c => c.kind === 'own' && c.key.toLowerCase() === label.toLowerCase())) return toast.error('There is a column with that name')
     saveColumns([...columns, { key: label, kind: 'own', label, type: newCol.type }])
     setNewCol({ label: '', type: newCol.type })
+  }
+
+  // Notes: a column of their own, added and removed right on the table.
+  const addNote = (e) => {
+    e?.preventDefault()
+    const own = columns.filter(c => c.kind === 'own').map(c => c.key.toLowerCase())
+    let label = (adding || '').trim()
+    if (!label) for (let i = 1; !label || own.includes(label.toLowerCase()); i++) label = `Note ${i}`
+    if (own.includes(label.toLowerCase())) return toast.error('There is a column with that name')
+    saveColumns([...columns, { key: label, kind: 'own', label, type: 'text' }])
+    setAdding(null)
+  }
+  const dropColumn = (col) => {
+    const before = columns
+    saveColumns(columns.filter(c => c !== col))
+    // What was written stays saved: Undo brings the column back with it.
+    toast((t) => (
+      <span className="flex items-center gap-3 text-sm">Removed “{col.label}”
+        <button type="button" className="font-semibold text-teal-600" onClick={() => { saveColumns(before); toast.dismiss(t.id) }}>Undo</button>
+      </span>
+    ), { duration: 6000 })
   }
 
   const setCell = async (profileId, column, value) => {
@@ -250,6 +281,7 @@ export default function ChecklistGridView({ checklist, onClose }) {
           <button type="button" onClick={handleDownloadCSV} className={`${btn} text-emerald-700 bg-emerald-50 border-emerald-200 hover:bg-emerald-100`}>CSV</button>
           <button type="button" onClick={handleDeleteChecklist} className={`${btn} text-red-700 bg-red-50 border-red-200 hover:bg-red-100`}>Delete</button>
           <button type="button" onClick={onClose} className={`${btn} text-slate-700 bg-white border-slate-300 hover:bg-slate-50`}>Close</button>
+          <LangToggle />
         </div>
       </div>
 
@@ -260,9 +292,18 @@ export default function ChecklistGridView({ checklist, onClose }) {
               <th className="sticky left-0 z-20 bg-slate-100 dark:bg-slate-800 border-b border-r border-slate-300 dark:border-slate-700 p-3 text-left min-w-[150px]">Profile</th>
               {columns.map((c) => (
                 <th key={`${c.kind}:${c.key}`} className={`border-b border-r border-slate-300 dark:border-slate-700 p-1.5 text-center font-semibold ${c.kind === 'own' ? 'text-teal-700 dark:text-teal-300' : 'text-slate-600 dark:text-slate-300'}`}>
-                  {c.label}
+                  <span className="inline-flex items-center gap-1">{c.label}
+                    {c.kind === 'own' && <button type="button" title={`Remove “${c.label}”`} onClick={() => dropColumn(c)} className="rounded px-1 text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10">✕</button>}
+                  </span>
                 </th>
               ))}
+              <th className="border-b border-slate-300 dark:border-slate-700 p-1.5 min-w-[150px] text-left">
+                {adding == null
+                  ? <button type="button" onClick={() => setAdding('')} className="rounded-lg border border-dashed border-teal-400 px-3 py-1.5 text-xs font-semibold text-teal-700 hover:bg-teal-50 dark:text-teal-300 dark:hover:bg-teal-900/30">＋ Note</button>
+                  : <form onSubmit={addNote}><input autoFocus value={adding} onChange={(e) => setAdding(e.target.value)} placeholder="Note name, then Enter"
+                      onKeyDown={(e) => { if (e.key === 'Escape') setAdding(null) }} onBlur={() => { if (!adding.trim()) setAdding(null) }}
+                      className="w-36 rounded border border-teal-400 bg-white px-2 py-1 text-xs font-normal dark:bg-slate-900" /></form>}
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -289,8 +330,8 @@ export default function ChecklistGridView({ checklist, onClose }) {
                         <td key={k} className={cell}>
                           {c.type === 'tick'
                             ? <input type="checkbox" checked={!!v} onChange={(e) => setCell(profile.id, c.key, e.target.checked ? '1' : '')} className="w-5 h-5 accent-teal-600 cursor-pointer" />
-                            : <input defaultValue={v} onBlur={(e) => { if (e.target.value !== v) setCell(profile.id, c.key, e.target.value) }}
-                                className="w-28 rounded border border-slate-200 dark:border-slate-700 bg-transparent px-1.5 py-1 text-xs" />}
+                            : <input key={v} defaultValue={v} onBlur={(e) => { if (e.target.value !== v) setCell(profile.id, c.key, e.target.value) }}
+                                placeholder="…" className="w-36 rounded border border-slate-200 dark:border-slate-700 bg-transparent px-1.5 py-1 text-xs" />}
                         </td>
                       )
                     }
@@ -314,6 +355,7 @@ export default function ChecklistGridView({ checklist, onClose }) {
                       </td>
                     )
                   })}
+                  <td className="border-b border-slate-200 dark:border-slate-800" />
                 </tr>
               )
             })}

@@ -1,18 +1,22 @@
 import { useEffect, useState, useRef } from 'react'
 import toast from 'react-hot-toast'
 import api from '../services/api'
-import PageHeader from '../components/shared/PageHeader'
+import LangToggle from '../components/LangToggle'
 import Spinner from '../components/shared/Spinner'
 import Input from '../components/shared/Input'
 import Button from '../components/shared/Button'
 import ChecklistGridView from '../components/ChecklistGridView'
+import { profilesDropped } from '../lib/profileDrag'
+import { onDataChange } from '../lib/changes'
 
 export default function ChecklistPage() {
   const [allProfiles, setAllProfiles] = useState([])
   const [checklists, setChecklists] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
-  const [newChecklistName, setNewChecklistName] = useState('')
+  const [newChecklistName, setNewChecklistName] = useState('') // the search over the checklists
+  const [naming, setNaming] = useState(null)                    // a new checklist's name, while typed
+  const [kept, setKept] = useState(() => { try { return JSON.parse(localStorage.getItem('adal-checklists-kept') || '{}') } catch { return {} } })
   const [viewChecklist, setViewChecklist] = useState(null)
   
   // Drag state for visual feedback
@@ -21,10 +25,11 @@ export default function ChecklistPage() {
 
   useEffect(() => {
     loadData()
+    return onDataChange(['checklists', 'checklist_profiles', 'checklist_cells', 'profiles'], () => loadData(true))
   }, [])
 
-  const loadData = async () => {
-    setLoading(true)
+  const loadData = async (quiet) => {
+    if (quiet !== true) setLoading(true)
     try {
       const [profilesRes, checklistsRes] = await Promise.all([
         api.get('/profiles'),
@@ -41,6 +46,7 @@ export default function ChecklistPage() {
 
   const handleDragStart = (e, profileId) => {
     e.dataTransfer.setData('profileId', String(profileId))
+    e.dataTransfer.setData('application/x-adal-profiles', JSON.stringify([profileId]))
     e.dataTransfer.effectAllowed = 'move'
     // Visual feedback for the item being dragged
     if (e.target) e.target.style.opacity = '0.5'
@@ -82,11 +88,11 @@ export default function ChecklistPage() {
     dragCounters.current[checklistId] = 0
     setDragOverChecklistId(null)
 
-    const profileId = e.dataTransfer.getData('profileId')
-    if (!profileId) return
+    const ids = profilesDropped(e)
+    if (!ids.length) return
 
     try {
-      await api.post(`/checklists/${checklistId}/profiles`, { profile_id: profileId })
+      await api.post(`/checklists/${checklistId}/profiles`, { profile_ids: ids })
       toast.success('ፕሮፋይሉ ወደ ቼክስቱ ተጨምሯል')
       loadData()
     } catch {
@@ -96,10 +102,12 @@ export default function ChecklistPage() {
 
   const handleCreateChecklist = async (e) => {
     e.preventDefault()
-    if (!newChecklistName.trim()) return
+    const name = (naming || '').trim()
+    if (!name) return
     try {
-      await api.post('/checklists', { name: newChecklistName })
+      await api.post('/checklists', { name })
       toast.success('ቼክስት ተጥል')
+      setNaming(null)
       setNewChecklistName('')
       loadData()
     } catch {
@@ -133,16 +141,24 @@ export default function ChecklistPage() {
     p.phone_number?.includes(search)
   )
 
+  // Over two months old: asked about, never deleted by itself. "Keep" asks again two months later.
+  const TWO_MONTHS = 61 * 864e5
+  const old = (c) => Date.now() - new Date(String(c.created_at || '').replace(' ', 'T') + (/Z|[+-]dd:?dd$/.test(c.created_at || '') ? '' : 'Z')).getTime() > TWO_MONTHS
+    && !(kept[c.id] && Date.now() - kept[c.id] < TWO_MONTHS)
+  const keep = (id) => {
+    const next = { ...kept, [id]: Date.now() }
+    setKept(next)
+    try { localStorage.setItem('adal-checklists-kept', JSON.stringify(next)) } catch {}
+  }
+  const oldOnes = checklists.filter(old)
+  const q = newChecklistName.trim().toLowerCase()
+  const shown = !q ? checklists : checklists.filter(c => c.name.toLowerCase().includes(q) || c.profiles.some(p => p.full_name?.toLowerCase().includes(q) || p.phone_number?.includes(q)))
+
   if (loading) return <div className="flex h-64 items-center justify-center"><Spinner /></div>
 
   return (
-    <div className="animate-fade-up h-[calc(100vh-8rem)] flex flex-col">
-      <PageHeader 
-        title="የቼክሊስት አቀናባሪ" 
-        subtitle="ፕሮፋይሎችን ወደ ክሊስቶች ይጎትቱ"
-      />
-
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-6 overflow-hidden">
+    <div className="animate-fade-up h-[calc(100dvh-5.5rem)] flex flex-col">
+      <div className="flex-1 min-h-0 grid grid-cols-1 grid-rows-[minmax(0,2fr)_minmax(0,3fr)] lg:grid-rows-1 lg:grid-cols-3 gap-3 lg:gap-4 overflow-hidden">
         
         {/* LEFT PANE: All Profiles */}
         <div className="panel flex flex-col overflow-hidden lg:col-span-1">
@@ -178,22 +194,36 @@ export default function ChecklistPage() {
         {/* RIGHT PANE: Checklists */}
         <div className="panel flex flex-col overflow-hidden lg:col-span-2">
           <div className="p-4 border-b border-slate-200/60 dark:border-slate-800/60">
-            <h2 className="font-display font-bold text-slate-800 dark:text-white mb-3 flex items-center gap-2">
-              <span className="text-lg">📋</span> የኔ ቼክስቶች
-            </h2>
-            <form data-tour="new-checklist" onSubmit={handleCreateChecklist} className="flex gap-2">
-              <Input 
-                placeholder="አዲስ የቼክሊስት ስም..." 
-                value={newChecklistName} 
-                onChange={(e) => setNewChecklistName(e.target.value)} 
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <h2 className="font-display font-bold text-slate-800 dark:text-white flex items-center gap-2">
+                <span className="text-lg">📋</span> የኔ ቼክስቶች
+              </h2>
+              <LangToggle />
+            </div>
+            <div className="flex gap-2">
+              <Input
+                type="search"
+                placeholder="🔍 Search checklists or a name in them…"
+                value={newChecklistName}
+                onChange={(e) => setNewChecklistName(e.target.value)}
               />
-              <Button type="submit" disabled={!newChecklistName.trim()}>
-                ፍጠር
-              </Button>
-            </form>
+              <Button type="button" data-tour="new-checklist" onClick={() => setNaming(naming == null ? newChecklistName.trim() : null)}>＋ Add</Button>
+            </div>
+            {naming != null && (
+              <form onSubmit={handleCreateChecklist} className="mt-2 flex gap-2">
+                <Input autoFocus placeholder="New checklist name…" value={naming} onChange={(e) => setNaming(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Escape') setNaming(null) }} />
+                <Button type="submit" disabled={!naming.trim()}>Save</Button>
+              </form>
+            )}
+            {oldOnes.length > 0 && (
+              <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
+                ⏳ {oldOnes.length === 1 ? '1 checklist is' : `${oldOnes.length} checklists are`} over 2 months old. Delete {oldOnes.length === 1 ? 'it' : 'them'} if no longer needed — nothing is deleted by itself.
+              </div>
+            )}
           </div>
           <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
-            {checklists.map(checklist => {
+            {shown.map(checklist => {
               const isOver = dragOverChecklistId === checklist.id
               return (
                 <div
@@ -208,6 +238,13 @@ export default function ChecklistPage() {
                       : 'border-transparent hover:border-slate-200 dark:hover:border-slate-700'
                   }`}
                 >
+                  {old(checklist) && (
+                    <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-500/10 dark:text-amber-200">
+                      <span className="flex-1">⏳ Made over 2 months ago. Delete it?</span>
+                      <button type="button" onClick={() => handleDeleteChecklist(checklist.id, checklist.name)} className="rounded-md bg-red-600 px-2.5 py-1 font-semibold text-white hover:bg-red-700">Delete</button>
+                      <button type="button" onClick={() => keep(checklist.id)} className="rounded-md border border-amber-400 px-2.5 py-1 font-semibold hover:bg-amber-100 dark:hover:bg-amber-500/20">Keep</button>
+                    </div>
+                  )}
                   <div className="flex justify-between items-start mb-3">
                     <h3 className="font-bold text-slate-800 dark:text-white text-lg">
                       {checklist.name}
@@ -271,6 +308,9 @@ export default function ChecklistPage() {
                 </div>
               )
             })}
+            {checklists.length > 0 && shown.length === 0 && (
+              <div className="text-center py-12 text-slate-400 dark:text-slate-500 text-sm">No checklist matches “{newChecklistName}”.</div>
+            )}
             {checklists.length === 0 && (
               <div className="text-center py-12 text-slate-400 dark:text-slate-500 text-sm">
                 እስካሁን ምንም ቼክሊስት የለም።

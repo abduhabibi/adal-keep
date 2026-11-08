@@ -73,8 +73,15 @@ const RUNS = [['', 'Any'], ['running', 'Running now'], ['waiting', 'Waiting for 
 const empty = (v) => !norm(v)
 /** In phase k: step k done and no step after it done (like CvPlus's tabs). */
 const LATER = {}
+// At Wafid: booked, fit or unfit, and nothing after it done yet.
+const WAFID = { 'wafid:fit': ['done'], 'wafid:pending': ['active'], 'wafid:unfit': ['failed'] }
 export function inPhase(steps = {}, k) {
+  if (WAFID[k]) return WAFID[k].includes(steps.wafid) && inLater(steps, 'wafid')
+  if (k === 'wafid') return ['done', 'active', 'failed'].includes(steps.wafid) && inLater(steps, 'wafid')
   if (steps[k] !== 'done') return false
+  return inLater(steps, k)
+}
+function inLater(steps, k) {
   return !(LATER[k] ||= after(k)).some(x => steps[x] === 'done')
 }
 const match = (want, value) => (want === NONE ? empty(value) : same(value, want))
@@ -225,7 +232,7 @@ export function useProfileFilters(profiles) {
   // How many of these profiles are in each phase.
   const stepCounts = useMemo(() => {
     const c = {}
-    for (const p of profiles) for (const k of Object.keys(stages.steps[p.id] || {})) if (inPhase(stages.steps[p.id], k)) c[k] = (c[k] || 0) + 1
+    for (const p of profiles) for (const k of [...Object.keys(stages.steps[p.id] || {}), ...Object.keys(WAFID)]) if (inPhase(stages.steps[p.id], k)) c[k] = (c[k] || 0) + 1
     return c
   }, [profiles, stages])
 

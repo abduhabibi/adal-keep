@@ -56,6 +56,9 @@ import pcAccessRouter from './src/routes/pcAccess.js'
 import { networkGate, originOk } from './src/services/networkGate.js'
 import whatsappRouter from './src/routes/whatsapp.js'
 import transitionsRouter from './src/routes/transitions.js'
+import appRouter from './src/routes/app.js'
+import notesRouter from './src/routes/notes.js'
+import { watchChanges } from './src/services/changes.js'
 import { diagMiddleware, diagReport } from './src/services/diag.js'
 import { removeSecret } from './src/services/secretStore.js'
 import { startContractChecker } from './src/services/musanedContracts.js'
@@ -80,6 +83,7 @@ const db = knex(knexConfig.development)
 
 // Store db in app.locals for routes to access
 app.locals.db = db
+watchChanges(db)   // every window is told at once when something changes
 
 app.use(diagMiddleware)
 // Security headers first, for every answer.
@@ -123,6 +127,8 @@ app.use(attachAuth)
 app.use("/api", tenancyRouter)
 app.use('/api', pcAccessRouter)   // other computers ask to open Adal Keep; this PC answers
 app.use("/api", transitionsRouter)
+app.use('/api', notesRouter)         // the Notes page
+app.use('/api', appRouter)          // its window on this PC: closing the last one ends Adal Keep
 app.use("/api/employees", employeesRouter)
 app.use("/api/employees", employeeRegisterRouter)
 app.use("/api/tasks", tasksRouter)
@@ -865,20 +871,21 @@ app.get('/api/checklists', async (req, res) => {
   try {
     const db = req.app.locals.db
     const checklists = await db('checklists').orderBy('created_at', 'desc')
-    const result = []
-    
-    for (const c of checklists) {
-      const profiles = await db('checklist_profiles')
-        .join('profiles', 'checklist_profiles.profile_id', 'profiles.id')
-        .leftJoin('brokers', 'profiles.broker_id', 'brokers.id')
-        .where('checklist_id', c.id)
-        .select('profiles.*', 'brokers.name as broker_name')
+    // Three reads for all of them (not three per checklist): the page opens at once.
+    const members = await db('checklist_profiles')
+      .join('profiles', 'checklist_profiles.profile_id', 'profiles.id')
+      .leftJoin('brokers', 'profiles.broker_id', 'brokers.id')
+      .select('checklist_profiles.checklist_id as __checklist', 'profiles.*', 'brokers.name as broker_name')
+    const cellRows = await db('checklist_cells').select('checklist_id', 'profile_id', 'column', 'value').catch(() => [])
+    const by = (rows, key) => rows.reduce((m, r) => { (m[r[key]] ||= []).push(r); return m }, {})
+    const profilesOf = by(members, '__checklist'), cellsOf = by(cellRows, 'checklist_id')
+    res.json(checklists.map(c => {
       let columns = null
       try { columns = c.columns ? JSON.parse(c.columns) : null } catch {}
-      const cells = await db('checklist_cells').where('checklist_id', c.id).select('profile_id', 'column', 'value').catch(() => [])
-      result.push({ ...c, columns, cells, profiles })
-    }
-    res.json(result)
+      const profiles = (profilesOf[c.id] || []).map(({ __checklist, ...p }) => p)
+      const cells = (cellsOf[c.id] || []).map(({ checklist_id, ...x }) => x)
+      return { ...c, columns, cells, profiles }
+    }))
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Failed to load checklists' })
@@ -887,10 +894,17 @@ app.get('/api/checklists', async (req, res) => {
 
 app.post('/api/checklists', async (req, res) => {
   try {
-    const { name } = req.body
-    if (!name?.trim()) return res.status(400).json({ error: 'Name is required' })
-    const [id] = await req.app.locals.db('checklists').insert({ name })
-    res.status(201).json({ id, name, profiles: [] })
+    const db = req.app.locals.db
+    const name = String(req.body?.name || '').trim().slice(0, 120)
+    if (!name) return res.status(400).json({ error: 'Name is required' })
+    // Made from profiles picked on the list: they go in at once.
+    const ids = [...new Set((req.body?.profile_ids || []).map(Number).filter(Boolean))].slice(0, 2000)
+    const id = await db.transaction(async (t) => {
+      const [newId] = await t('checklists').insert({ name })
+      for (let i = 0; i < ids.length; i += 200) await t('checklist_profiles').insert(ids.slice(i, i + 200).map(profile_id => ({ checklist_id: newId, profile_id })))
+      return newId
+    })
+    res.status(201).json({ id, name, added: ids.length, profiles: [] })
   } catch (err) {
     res.status(500).json({ error: 'Failed to create checklist' })
   }
@@ -937,15 +951,13 @@ app.put('/api/checklists/:id/cells', async (req, res) => {
 
 app.post('/api/checklists/:id/profiles', async (req, res) => {
   try {
-    const { profile_id } = req.body
-    const exists = await req.app.locals.db('checklist_profiles')
-      .where({ checklist_id: req.params.id, profile_id })
-      .first()
-    
-    if (!exists) {
-      await req.app.locals.db('checklist_profiles').insert({ checklist_id: req.params.id, profile_id })
-    }
-    res.json({ success: true })
+    const db = req.app.locals.db
+    const ids = [...new Set([...(req.body?.profile_ids || []), req.body?.profile_id].map(Number).filter(Boolean))].slice(0, 2000)
+    const checklist_id = Number(req.params.id)
+    const had = new Set((await db('checklist_profiles').where({ checklist_id }).whereIn('profile_id', ids).pluck('profile_id')).map(Number))
+    const fresh = ids.filter(i => !had.has(i))
+    for (let i = 0; i < fresh.length; i += 200) await db('checklist_profiles').insert(fresh.slice(i, i + 200).map(profile_id => ({ checklist_id, profile_id })))
+    res.json({ success: true, added: fresh.length })
   } catch (err) {
     res.status(500).json({ error: 'Failed to add profile' })
   }

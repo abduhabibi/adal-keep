@@ -55,15 +55,25 @@ export function after(k) {
   for (const [to, from] of Object.entries(PARENT)) if (from === k) out.push(to, ...after(to))
   return out
 }
+// On the list: a click on Wafid opens three curved wires down to its results.
+export const WAFID_RESULTS = [['wafid:fit', 'Fit'], ['wafid:pending', 'Pending'], ['wafid:unfit', 'Unfit']]
+// Where each result sits left of Wafid, in steps of a gap wide enough for its name.
+const RESULT_DX = { 'wafid:fit': -2.25, 'wafid:pending': -1.2, 'wafid:unfit': -0.15 }
+const RESULT_LOOK = {
+  'wafid:fit': { dot: 'bg-emerald-500 text-white', text: 'text-emerald-600 dark:text-emerald-300' },
+  'wafid:pending': { dot: 'bg-amber-400 text-white', text: 'text-amber-600 dark:text-amber-300' },
+  'wafid:unfit': { dot: 'bg-red-500 text-white', text: 'text-red-600 dark:text-red-400' },
+}
+const RESULT_RING = { 'wafid:fit': 'stroke-emerald-500', 'wafid:pending': 'stroke-amber-400', 'wafid:unfit': 'stroke-red-500' }
 const SIZE = {
   compact: { r: 11, rowGap: 26, block: 36 },
   full:    { r: 14, rowGap: 42, block: 60 },
 }
 
-function Node({ k, title, n, state, note, noteWidth, count, selected, dim, onSelect, compact, narrow, left, top, angle }) {
+function Node({ k, title, n, state, note, noteWidth, count, selected, dim, onSelect, compact, narrow, left, top, angle, look }) {
   if (BOX.has(k)) return <BoxNode {...{ k, title, state, note, count, selected, dim, onSelect, compact, left, top, angle }} />
   const pick = !!onSelect
-  const l = pick ? (selected ? LOOK.done : LOOK.todo) : (LOOK[state] || LOOK.todo)
+  const l = look ? (selected ? look : { ...LOOK.todo, text: look.text }) : pick ? (selected ? LOOK.done : LOOK.todo) : (LOOK[state] || LOOK.todo)
   return (
     <button type="button" title={note || title}
       onClick={() => onSelect?.(k)}
@@ -116,7 +126,10 @@ export function JourneyFork({ states = {}, notes = {}, counts, selected, onSelec
     setW(el.clientWidth)
     return () => ro.disconnect()
   }, [])
-  const height = z.rowGap + z.block
+  const results = pick && (selected === 'wafid' || RESULT_DX[selected] != null)
+  // The results hang below the first row's names: the bar grows to hold them.
+  const drop = results ? (compact ? 20 : 26) : 0
+  const height = z.rowGap + z.block + drop
   // Compact (the list's filter) fits any width — no sideways scrolling: on a
   // narrow screen the branches show only their icons.
   const narrow = compact && w > 0 && w < 520
@@ -127,7 +140,10 @@ export function JourneyFork({ states = {}, notes = {}, counts, selected, onSelec
   // The path to the picked step lights up (on the list); on a profile a wire
   // is lit when both its ends are done, and pulses towards a step in progress.
   const chain = new Set()
-  for (let k = selected; k; k = PARENT[k]) chain.add(k)
+  const result = RESULT_DX[selected] != null ? selected : null
+  if (result) chain.add(result)
+  for (let k = result ? 'wafid' : selected; k; k = PARENT[k]) chain.add(k)
+
   const end = (wire) => wire.via && !(pick ? chain.has(wire.to) : ['done', 'active'].includes(states[wire.to])) ? wire.via : wire.to
   const lit = (wire) => pick ? chain.has(end(wire)) : states[wire.from] === 'done' && ['done', 'active'].includes(states[end(wire)])
   const pulse = (wire) => pick ? chain.has(end(wire)) : states[wire.from] === 'done' && states[end(wire)] === 'active'
@@ -139,6 +155,12 @@ export function JourneyFork({ states = {}, notes = {}, counts, selected, onSelec
     return `M${x1},${y1} C${x1 + d},${y1} ${x2 - d},${y2} ${x2},${y2}`
   }
   const steps = [...SHARED, ...BRANCHES.flatMap(b => b.steps)]
+  const step = Math.max(36, Math.min(80, (cx('wafid') - edge) / 2.5))
+  const rx = (k) => Math.max(edge, cx('wafid') + RESULT_DX[k] * step)
+  const resultWire = (k) => {
+    const x1 = cx('wafid'), y1 = cy('wafid') + z.r + 1, x2 = rx(k), y2 = z.rowGap + drop + 1, d = (y2 - y1) * 0.6
+    return `M${x1},${y1} C${x1},${y1 + d} ${x2},${y2 - d} ${x2},${y2}`
+  }
   const gap = cx('musaned') - cx('cv') - 4   // the first row's steps sit closest
   // The box: the middle of the Wafid → Tasheer curve, turned along it there
   // (for this curve the slope at its middle is dy / (0.45·dx)).
@@ -166,12 +188,19 @@ export function JourneyFork({ states = {}, notes = {}, counts, selected, onSelec
                 </g>
               )
             })}
+            {results && WAFID_RESULTS.map(([k]) => (
+              <path key={k} d={resultWire(k)} pathLength="100" fill="none" strokeLinecap="round" className={`journey-grow transition-all duration-500 ${RESULT_RING[k]} ${selected === k ? 'journey-glow' : 'opacity-60'}`} strokeWidth={selected === k ? 2.5 : 2} />
+            ))}
           </svg>
         )}
         {w > 0 && steps.map(([k, title, short], i) => (
           <Node key={k} k={k} title={compact && short ? short : title} n={i + 1} state={states[k]} note={pick ? '' : notes[k]} noteWidth={Math.min(96, SHARED.some(([s]) => s === k) ? gap : 96)}
             count={counts?.[k]} selected={selected === k} dim={pick && selected && !chain.has(k)} onSelect={onSelect}
             compact={compact} narrow={narrow} left={BOX.has(k) ? box.x : cx(k)} top={BOX.has(k) ? box.y : SPOT[k][1] * z.rowGap} angle={box.angle} />
+        ))}
+        {w > 0 && results && WAFID_RESULTS.map(([k, title]) => (
+          <Node key={k} k={k} title={title} count={counts?.[k]} selected={selected === k} dim={!!result && selected !== k} onSelect={onSelect}
+            compact={compact} narrow={narrow} left={rx(k)} top={z.rowGap + drop} look={RESULT_LOOK[k]} />
         ))}
         {/* the two branches' names, at the right end of their rows */}
         {BRANCHES.map((b, i) => (

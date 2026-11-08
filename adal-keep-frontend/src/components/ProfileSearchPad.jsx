@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../services/api'
+import { dragProfiles } from '../lib/profileDrag'
 
 /**
  * Search pad: a searchable list of profiles. Type a name, passport number,
@@ -111,8 +112,11 @@ export default function ProfileSearchPad({
           <li key={p.id}>
             <button
               type="button"
+              draggable
+              onDragStart={(e) => dragProfiles(e, p)}
+              title="Open — or drag onto a checklist or the tray"
               onClick={() => navigate(`/profiles/${p.id}`)}
-              className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-teal-50 dark:hover:bg-teal-900/30 transition-colors"
+              className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-teal-50 dark:hover:bg-teal-900/30 transition-colors cursor-grab active:cursor-grabbing"
             >
               <span className="flex items-center gap-1.5 text-sm font-medium text-slate-800 dark:text-slate-100">
                 {runs[p.id] && <span title={runs[p.id] === 'running' ? 'Run working now' : 'Run waiting'} className={`flex-none w-2 h-2 rounded-full ${runs[p.id] === 'running' ? 'bg-blue-500 animate-pulse' : 'bg-amber-500'}`} />}

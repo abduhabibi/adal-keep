@@ -55,7 +55,7 @@ export default function MusanedAccountPicker({ value, onChange, endpoint = '/mus
     <div className="space-y-2">
       <div className="flex items-center gap-2">
         <select
-          className="field flex-1"
+          className="field min-w-0 flex-1"
           value={value || ''}
           onChange={e => onChange(e.target.value ? Number(e.target.value) : null)}
         >
@@ -73,7 +73,7 @@ export default function MusanedAccountPicker({ value, onChange, endpoint = '/mus
           <button
             type="button"
             onClick={() => remove(selected.id)}
-            className="px-2 py-1.5 rounded-lg border border-red-300 text-red-600 text-xs font-semibold hover:bg-red-50 dark:hover:bg-red-900/20"
+            className="shrink-0 px-2 py-1.5 rounded-lg border border-red-300 text-red-600 text-xs font-semibold hover:bg-red-50 dark:hover:bg-red-900/20"
             title="Delete selected account"
           >
             🗑
@@ -83,7 +83,7 @@ export default function MusanedAccountPicker({ value, onChange, endpoint = '/mus
         <button
           type="button"
           onClick={() => setShowAdd(true)}
-          className="px-3 py-1.5 rounded-lg bg-teal-600 text-white text-xs font-semibold hover:bg-teal-700"
+          className="shrink-0 whitespace-nowrap px-3 py-1.5 rounded-lg bg-teal-600 text-white text-xs font-semibold hover:bg-teal-700"
         >
           + Add
         </button>

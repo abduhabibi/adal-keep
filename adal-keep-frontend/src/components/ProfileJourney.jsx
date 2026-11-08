@@ -14,7 +14,7 @@ import api from '../services/api'
 
 export const SHARED = [['cv', 'CV'], ['musaned', 'Musaned'], ['selected', 'Selected'], ['wafid', 'Wafid']]
 export const BRANCHES = [
-  { key: 'embassy-track', title: 'Embassy', icon: '🇸🇦', steps: [['wakala', 'Paid wakala', 'Wakala'], ['tasheer', 'Tasheer'], ['insurance', 'Insurance'], ['visa', 'Enjaz · Visa', 'Visa']] },
+  { key: 'embassy-track', title: 'Embassy', icon: '🇸🇦', steps: [['wakala', 'Paid wakala', 'Wakala'], ['tasheer', 'Tasheer'], ['insurance', 'Insurance', 'Insur.'], ['visa', 'Enjaz · Visa', 'Visa']] },
 ]
 
 const LOOK = {
@@ -37,7 +37,7 @@ const SPOT = {
   tasheer: [0.66, 1], insurance: [0.83, 1], visa: [1, 1],
 }
 // On a phone's filter the first row is given more of the width: its names touched.
-const NARROW_X = { musaned: 0.16, selected: 0.32, wafid: 0.48, tasheer: 0.7, insurance: 0.85 }
+const NARROW_X = { musaned: 0.155, selected: 0.34, wafid: 0.5, tasheer: 0.655, insurance: 0.83 }
 const BOX = new Set(['wakala'])
 const EDGE = 30   // px kept at the left for the first step's name
 const LABELS = 78 // px kept at the right for the branches' names
@@ -84,7 +84,7 @@ function Node({ k, title, n, state, note, noteWidth, count, selected, dim, onSel
       </span>
       <span className={`${narrow ? 'mt-0.5 text-[9px] tracking-tight' : compact ? 'mt-0.5 text-[10px]' : 'mt-1 text-[11px]'} whitespace-nowrap font-semibold leading-tight ${l.text}`}>{title}</span>
       {/* Never wider than the gap to the next step, or it runs into its neighbour's. */}
-      {note && <span className="text-[10px] text-slate-400 leading-tight line-clamp-2 break-words" style={{ width: noteWidth }}>{shortDate(note)}</span>}
+      {note && !compact && <span className="text-[10px] text-slate-400 leading-tight line-clamp-2 break-words" style={{ width: noteWidth }}>{shortDate(note)}</span>}
     </button>
   )
 }

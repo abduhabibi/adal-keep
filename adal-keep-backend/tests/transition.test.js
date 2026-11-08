@@ -197,3 +197,44 @@ test('EnjazPlus: every employee of every page, her files, a sign-out midway, and
   await db.destroy()
   fs.rmSync(dir, { recursive: true, force: true })
 })
+
+test('Musaned: the whole HR pool page by page, each one\'s details and photos, a token that runs out, and going on later', async () => {
+  const fs = await import('fs'), os = await import('os'), path = await import('path')
+  const { default: knex } = await import('knex')
+  const { copyMusaned } = await import('../src/services/musanedCopy.js')
+  const db = knex({ client: 'sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true, pool: { min: 1, max: 1 } })
+  await db.schema.createTable('profile_fields', t => { t.increments('id'); t.integer('profile_id'); t.integer('field_template_id'); t.string('name'); t.string('data_type'); t.integer('is_permanent'); t.string('created_at'); t.string('updated_at') })
+  await db.schema.createTable('field_templates', t => { t.increments('id'); t.string('name') })
+  await db.schema.createTable('files', t => { t.increments('id'); t.integer('profile_field_id'); t.string('original_name'); t.string('path'); t.string('mimetype'); t.integer('size'); t.string('content_hash'); t.string('created_at'); t.string('updated_at') })
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mu-'))
+  const folder = path.join(dir, 'run'); fs.mkdirSync(folder)
+  const pool = Array.from({ length: 230 }, (_, i) => ({ id: 1000 + i, name: `Person ${i}` }))
+  let auth = 'Bearer one', calls = 0
+  const ask = async (url, opts) => {
+    if (opts.headers.Authorization !== auth) return { ok: false, status: 401 }
+    if (++calls === 5) { auth = 'Bearer two'; return { ok: false, status: 401 } }            // the token ran out here
+    const u = new URL(url)
+    if (u.pathname === '/api/search/hrpool') {
+      const p = Number(u.searchParams.get('page')), s = Number(u.searchParams.get('size'))
+      return { ok: true, status: 200, json: async () => ({ content: pool.slice(p * s, p * s + s), totalElements: pool.length }) }
+    }
+    const m = u.pathname.match(/^\/api\/hrpool\/(\d+)(\/photo\/(\w+))?$/)
+    if (m && !m[2]) return { ok: true, status: 200, json: async () => ({ name: `Person ${m[1]}`, passportNumber: `ep${m[1]}`, religion: 'MUSLIM', dateOfBirthGregorian: '1999-01-02' }) }
+    if (m) return { ok: true, status: 200, headers: new Map([['content-type', 'image/jpeg']]), arrayBuffer: async () => Buffer.from(m[3] + m[1]) }
+    return { ok: false, status: 404 }
+  }
+  let st = {}, n = 0, signIns = 0
+  const saved = []
+  const base = { db, folder, readPerson, ask, wait: async () => {}, set: p => { st = { ...st, ...p } }, state: () => st,
+    save: async (p) => { saved.push(p); return ++n }, signIn: async () => { signIns++; return { auth } }, check() {} }
+  await copyMusaned({ ...base, token: { auth: 'Bearer one' }, limit: 100 })
+  assert.equal(st.people, 230)
+  assert.equal(signIns, 1)
+  await copyMusaned({ ...base, token: { auth } })
+  assert.equal(saved.length, 230)
+  assert.equal(st.files, 460)                                   // passport and photo each
+  assert.equal(saved[0].passport_number, 'EP1000'); assert.equal(saved[0].religion, 'Muslim'); assert.equal(saved[0].date_of_birth, '1999-01-02')
+  assert.equal(fs.existsSync(path.join(dir, 'musaned-progress.json')), false)
+  await db.destroy()
+  fs.rmSync(dir, { recursive: true, force: true })
+})

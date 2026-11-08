@@ -27,6 +27,7 @@ import { getBrowser, openForPerson, sendAway } from './browser.js'
 import { saveOnProfile } from './musanedImport.js'
 import { copyEasyEnjaz, signedInToken } from './easyEnjazCopy.js'
 import { copyEnjazPlus, signedInEnjazPlus } from './enjazPlusCopy.js'
+import { copyMusaned, signedInMusaned } from './musanedCopy.js'
 import { keepAwake } from './awake.js'
 import { collectBrokers, saveBrokers } from './siteBrokers.js'
 
@@ -37,6 +38,8 @@ export const SOURCES = {
   enjazplus: { name: 'EnjazPlus', url: 'https://v2.enjazplus.com/app/employees', deep: copyEnjazPlus, token: signedInEnjazPlus },
   musaned: {
     name: 'Musaned', url: 'https://tawtheeq.musaned.com.sa/', start: ['/hr-pool'],
+    // Everyone in the HR pool through Musaned's own list; its window stays open (its token is kept fresh there).
+    deep: copyMusaned, token: signedInMusaned, keepTab: true,
     // Her pictures are not in her record: Musaned serves them by her id.
     files: (r, origin) => r.id ? [
       { field: 'Passport', url: `${origin}/api/hrpool/${r.id}/photo/PASSPORT` },
@@ -270,7 +273,11 @@ async function musanedSignIn(db, page, accountId, say, check) {
   const ctx = { db, account_id: acct.id, musaned_username: acct.username, musaned_password: acct.password, musaned_name: acct.name, runId: 'move', profileId: '-' }
   try {
     say(`Signing in to Musaned as ${acct.name}…`)
-    const opened = await w.stepOpenMusaned(page, ctx)
+    // Musaned moves to its sign-in page while it is looked at ("detached frame"): look again.
+    let opened = null
+    for (let i = 0; i < 3 && !opened; i++) {
+      opened = await w.stepOpenMusaned(page, ctx).catch(async (e) => { if (!/detached|Execution context/i.test(e.message) || i === 2) throw e; await sleep(2000); return null })
+    }
     if (opened.onKeycloak) {
       const f = await w.stepFillMusanedLogin(page, ctx)
       if (f.captcha) say(`${acct.name} is filled in: type the picture's letters in the Musaned window and press Log in`)
@@ -375,8 +382,9 @@ async function run(db, id, source, url, deps) {
 
     if (source.deep) {
       // The window has done its work: from here on the browser is not needed.
-      if (!deps.page) await page.close().catch(() => {})
+      if (!deps.page && !source.keepTab) await page.close().catch(() => {})
       await source.deep({
+        progressName: `${id}-progress${deps.accountId ? '-' + deps.accountId : ''}.json`,
         db, token: signedIn, folder, check, readPerson, limit: deps.limit, download: deps.download,
         set: (patch) => set(id, patch), state: () => stateOf(id), save: (person) => saveProfile(db, id, source, person),
         // The sign-in ran out: a window for a person, then back out of sight.

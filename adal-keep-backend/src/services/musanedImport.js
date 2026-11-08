@@ -146,7 +146,7 @@ export async function deleteFromHrPoolInRun(page, ctx) {
 }
 
 /** Musaned's details → Adal Keep's fields (only clear values). */
-function fieldsFromMusaned(d = {}) {
+export function fieldsFromMusaned(d = {}) {
   const day = (v) => /^\d{4}-\d{2}-\d{2}/.test(String(v || '')) ? String(v).slice(0, 10) : ''
   const religion = String(d.religion || '')
   const marital = String(d.maritalStatus || '')

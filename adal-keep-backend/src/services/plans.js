@@ -112,7 +112,7 @@ export async function refreshLicense() {
   try {
     const c = await import('./chatCloud.js')
     if (!c.chatConfigured()) return license()
-    const res = await c.cloudCall(dbRef, 'GET', `/storage/v1/object/authenticated/${BUCKET}/licenses/${pc}.json`, undefined, { raw: true, headers: { 'Cache-Control': 'no-cache' } })
+    const res = await c.cloudCall(dbRef, 'GET', `/storage/v1/object/authenticated/${BUCKET}/licenses/${pc}.json?t=${Date.now()}`, undefined, { raw: true, headers: { 'Cache-Control': 'no-cache' } })
     if (res.status === 404 || res.status === 400) return license()
     if (!res.ok) return license()
     const file = await res.json()

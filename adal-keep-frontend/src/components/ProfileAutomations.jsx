@@ -517,7 +517,8 @@ export default function ProfileAutomations({ profileId }) {
       {/* Each portal's login sits in its own box below (with its cards). */}
       {/* The journey, in order: each portal's actions in one box. */}
       {GROUPS.filter(g => !g.hidden).map(g => {
-        const flows = g.ids.map(id => workflows.find(w => w.id === id)).filter(Boolean)
+        // Robots outside the plan are left out (the backend refuses them too).
+        const flows = g.ids.filter(id => !lockedFor(plan, id)).map(id => workflows.find(w => w.id === id)).filter(Boolean)
         // Outside this agency's plan: the robots are not offered — "I want it" asks Adal Keep.
         const locked = g.ids.map(id => lockedFor(plan, id)).find(Boolean)
         if (locked && g.ids.every(id => lockedFor(plan, id))) return (

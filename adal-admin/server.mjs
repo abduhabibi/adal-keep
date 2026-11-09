@@ -128,7 +128,7 @@ const SIGNING = path.join(os.homedir(), '.adal-keep', 'update-signing.pem')
 const DAY_MS = 86400000
 async function licenseOf(pc) {
   try {
-    const file = await sb('GET', `/storage/v1/object/adal-updates/licenses/${pc}.json`)
+    const file = await sb('GET', `/storage/v1/object/adal-updates/licenses/${pc}.json?t=${Date.now()}`)
     return plans.verifyLicense(file, pc)
   } catch { return null }
 }

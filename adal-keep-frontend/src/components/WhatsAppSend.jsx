@@ -8,6 +8,7 @@ import toast from 'react-hot-toast'
 import api from '../services/api'
 import { wa } from '../lib/whatsapp'
 import Button from './shared/Button'
+import { usePlan } from '../lib/plan'
 
 const err = (e) => e?.response?.data?.error || e.message
 const STATUS = {
@@ -24,6 +25,7 @@ export default function WhatsAppSend({ profile }) {
   const [sends, setSends] = useState([])
   const [pick, setPick] = useState(null) // null closed · Set of agent ids
   const [busy, setBusy] = useState(false)
+  const plan = usePlan()
   // Only between a complete CV and her being selected: before, there is no CV
   // to send; after, it is gone for good.
   const [due, setDue] = useState(false)
@@ -39,6 +41,8 @@ export default function WhatsAppSend({ profile }) {
     }).catch(() => setDue(false))
   }, [profile.id, profile.chosen_at])
 
+  // WhatsApp outside this agency's plan: not offered here (Settings → Plan says so).
+  if (plan?.features?.find(f => f.key === 'whatsapp')?.state === 'off') return null
   if (!due || profile.chosen_at || !conn || (!agents.length && !sends.length)) return null
   const ready = conn.status === 'ready'
   const send = async (ids) => {

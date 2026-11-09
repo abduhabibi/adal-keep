@@ -118,8 +118,89 @@ async function templateOf({ agency, id }) {
 const CEOS = path.join(HERE, 'ceos.json')
 const readCeos = () => { try { return JSON.parse(fs.readFileSync(CEOS, 'utf8')) } catch { return {} } }
 
+// ----------------------------------------------------------------- plans --
+// Each agency's licence (adal-keep-backend/src/services/plans.js): its plan,
+// paid / trial dates and features, signed with Adal's update key so only this
+// panel can make one; the agency's PC reads it within 30 minutes.
+const plans = await import('../adal-keep-backend/src/services/plans.js')
+const { signManifest } = await import('../adal-keep-backend/src/services/updateChannel.js')
+const SIGNING = path.join(os.homedir(), '.adal-keep', 'update-signing.pem')
+const DAY_MS = 86400000
+async function licenseOf(pc) {
+  try {
+    const file = await sb('GET', `/storage/v1/object/adal-updates/licenses/${pc}.json`)
+    return plans.verifyLicense(file, pc)
+  } catch { return null }
+}
+async function saveLicense(pc, l) {
+  if (!fs.existsSync(SIGNING)) throw new Error('The signing key (~/.adal-keep/update-signing.pem) is not on this PC: licences can only be made on Adal\'s PC.')
+  const license = plans.signedPart({ ...l, pc, at: new Date().toISOString() })
+  const signature = signManifest(license, fs.readFileSync(SIGNING, 'utf8'))
+  await sb('POST', `/storage/v1/object/adal-updates/licenses/${pc}.json`, Buffer.from(JSON.stringify({ license, signature })), { 'Content-Type': 'application/json', 'x-upsert': 'true', 'Cache-Control': 'no-cache' })
+  return license
+}
+const inboxOf = async (agencyId) => (await rest('GET', `conversations?kind=eq.admin&key=eq.admin:${agencyId}&select=id`))?.[0]?.id || null
+async function tell(agencyId, body) {
+  const conv = await inboxOf(agencyId)
+  if (conv) await rest('POST', 'messages', { conversation_id: conv, sender_id: ADMIN_ID, body }, { Prefer: 'return=minimal' }).catch(() => {})
+}
+
 // ------------------------------------------------------------------- api --
 const api = {
+  // Plans: every agency's licence, the features, and what agencies asked for.
+  'GET /api/plans': async () => {
+    const agencies = (await rest('GET', 'agencies?is_admin=eq.false&select=id,name,pc_number,banned,last_seen&order=name.asc'))
+      .filter(a => /^\d{6}$/.test(a.pc_number || '') && !/\s·\s*branch PC \d{6}$/.test(a.name || ''))
+    const lic = await Promise.all(agencies.map(a => licenseOf(a.pc_number)))
+    const asks = await rest('GET', `messages?body=like.*We want:*&sender_id=neq.${ADMIN_ID}&select=id,conversation_id,sender_id,body,created_at&order=id.desc&limit=200`).catch(() => [])
+    const name = Object.fromEntries(agencies.map(a => [a.id, a.name]))
+    return {
+      plans: plans.PLANS, features: plans.FEATURES,
+      agencies: agencies.map((a, i) => ({ ...a, license: lic[i], states: Object.fromEntries(plans.FEATURES.map(f => [f.key, plans.featureState(f.key, lic[i] || { plan: 'premium' })])) })),
+      asks: (asks || []).map(m => ({ ...m, agency: name[m.sender_id] || '?', feature: (String(m.body).match(/\[([a-z_]+)\]/) || [])[1] || null })),
+    }
+  },
+  // One agency's licence: its plan, days added to what it paid / to its trial, features on / off / offered.
+  'POST /api/plans/save': async (q, b) => {
+    const pc = String(b.pc || '')
+    if (!/^\d{6}$/.test(pc)) throw new Error('bad PC number')
+    const had = (await licenseOf(pc)) || {}
+    const now = Date.now()
+    const l = { ...had }
+    if (b.plan) { if (!plans.PLANS.some(p => p.key === b.plan)) throw new Error('unknown plan'); l.plan = b.plan }
+    if (Number(b.add_paid_days)) l.paid_until = Math.max(Number(had.paid_until) || 0, now) + Number(b.add_paid_days) * DAY_MS
+    if (b.paid_until === null) l.paid_until = null
+    if (Number(b.add_trial_days)) l.trial_until = Math.max(Number(had.trial_until) || 0, now) + Number(b.add_trial_days) * DAY_MS
+    if (b.features && typeof b.features === 'object') {
+      l.features = { ...(had.features || {}) }
+      for (const [k, v] of Object.entries(b.features)) { if (v === 'plan') delete l.features[k]; else if (['on', 'off'].includes(v)) l.features[k] = v }
+    }
+    if (b.offer) l.offers = [...(had.offers || []).filter(o => o.feature !== b.offer), { id: `${b.offer}-${now}`, feature: b.offer, at: new Date(now).toISOString() }]
+    if (b.unoffer) l.offers = (had.offers || []).filter(o => o.feature !== b.unoffer)
+    if (b.note !== undefined) l.note = String(b.note || '').slice(0, 300)
+    // Turned on: the offer is done.
+    if (l.features) l.offers = (l.offers || []).filter(o => l.features[o.feature] !== 'on')
+    const saved = await saveLicense(pc, l)
+    if (b.agency && b.tell) await tell(b.agency, String(b.tell))
+    return { ok: true, license: saved }
+  },
+  // A feature offered to every agency (or those chosen): each is told in its inbox and can answer "I want it".
+  'POST /api/plans/offer': async (q, b) => {
+    const f = plans.FEATURES.find(x => x.key === b.feature)
+    if (!f) throw new Error('unknown feature')
+    const agencies = (await rest('GET', 'agencies?is_admin=eq.false&banned=eq.false&select=id,name,pc_number'))
+      .filter(a => /^\d{6}$/.test(a.pc_number || '') && (!b.ids?.length || b.ids.includes(a.id)))
+    let offered = 0
+    for (const a of agencies) {
+      const had = (await licenseOf(a.pc_number)) || { plan: 'premium' }
+      if (plans.featureState(f.key, had) === 'on') continue
+      const now = Date.now()
+      await saveLicense(a.pc_number, { ...had, offers: [...(had.offers || []).filter(o => o.feature !== f.key), { id: `${f.key}-${now}`, feature: f.key, at: new Date(now).toISOString() }] })
+      await tell(a.id, `🆕 New in Adal Keep: ${f.title} — ${f.about}. Want it? Open Settings → Plan and press "I want it".`)
+      offered++
+    }
+    return { ok: true, offered }
+  },
   // Every agency's CEO: agency, name and number.
   'GET /api/ceos': async () => {
     const [agencies, meta] = await Promise.all([

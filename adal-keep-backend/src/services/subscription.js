@@ -30,6 +30,11 @@ import { execSync } from 'child_process'
 import { fileURLToPath } from 'url'
 import dotenv from 'dotenv'
 import { generateFingerprint } from './fingerprints.js'
+import { licenseNow } from './plans.js'
+
+// Adal's signed licence (plans.js): paid until / a longer trial, given in the admin panel.
+const licPaid = () => Number(licenseNow()?.paid_until) || 0
+const trialEnd = (s) => Math.max((s?.installation_date || Date.now()) + TRIAL_DAYS * DAY, Number(licenseNow()?.trial_until) || 0)
 
 dotenv.config()
 
@@ -189,26 +194,27 @@ export function computeMode(s) {
   const pc = pcNumber()
   if (s.unlocked_pc === pc && s.unlock_proof === proofFor(pc)) return 'active'
   if (paidOk(s, pc) && s.paid_until > now) return 'active'
+  if (licPaid() > now) return 'active'
   if (s.last_seen && now < s.last_seen - CLOCK_BACK_TOLERANCE) return 'locked'
-  return now < s.installation_date + TRIAL_DAYS * DAY ? 'trial' : 'locked'
+  return now < trialEnd(s) ? 'trial' : 'locked'
 }
 
 export function statusPayload(s = state()) {
   const mode = computeMode(s)
   const now = Date.now()
-  const trialEnd = s ? s.installation_date + TRIAL_DAYS * DAY : null
+  const trialEndsAt = s ? trialEnd(s) : null
   return {
     mode,
-    daysLeft: mode === 'trial' && trialEnd ? Math.max(0, Math.ceil((trialEnd - now) / DAY)) : 0,
+    daysLeft: mode === 'trial' && trialEndsAt ? Math.max(0, Math.ceil((trialEndsAt - now) / DAY)) : 0,
     trialDays: TRIAL_DAYS,
-    trialEndsAt: trialEnd,
+    trialEndsAt,
     pcNumber: pcNumber(),
     sellerPhone: SELLER_PHONE,
     clockBack: !!(mode === 'locked' && s?.last_seen && now < s.last_seen - CLOCK_BACK_TOLERANCE),
     unlockedAt: s?.unlocked_at || null,
     forGood: !!(s?.unlocked_pc === pcNumber() && s?.unlock_proof === proofFor(pcNumber())),
-    paidUntil: s && paidOk(s, pcNumber()) ? s.paid_until : null,
-    paidDaysLeft: s && paidOk(s, pcNumber()) ? Math.max(0, Math.ceil((s.paid_until - now) / DAY)) : 0,
+    paidUntil: Math.max(s && paidOk(s, pcNumber()) ? s.paid_until : 0, licPaid()) || null,
+    paidDaysLeft: Math.max(0, Math.ceil((Math.max(s && paidOk(s, pcNumber()) ? s.paid_until : 0, licPaid()) - now) / DAY)),
     priceEtb: PRICE_ETB,
     paidMonths: 6,
     serverTime: now,

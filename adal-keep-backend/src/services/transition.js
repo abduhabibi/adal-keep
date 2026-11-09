@@ -551,6 +551,7 @@ async function takeCvHeader(db, id, source) {
       .orderBy('files.id', 'desc').limit(8).select('files.path')
     const { SAFE_STORAGE_DIR } = await import('./docPipeline.js')
     const files = rows.map(r => path.join(SAFE_STORAGE_DIR, path.basename(r.path)))
+    if (!(await import('./plans.js')).hasFeature('cv_header')) return
     const got = await (await import('./cvHeader.js')).harvestHeaders(db, files, source.name, SAFE_STORAGE_DIR)
     if (got) { set(id, { templates: (stateOf(id).templates || 0) + 1 }); console.log(`[transition ${id}] CV header kept (#${got})`) }
   } catch (e) { console.warn(`[transition ${id}] CV header:`, e.message) }

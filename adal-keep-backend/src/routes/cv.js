@@ -380,11 +380,12 @@ router.get('/headers/:id/image', async (req, res) => {
 router.post('/headers/from-cvs', tplUpload.array('files', 8), async (req, res) => {
   const files = (req.files || []).map(f => f.path)
   try {
+    ;(await import('../services/plans.js')).needFeature('cv_header')
     const { harvestHeaders } = await import('../services/cvHeader.js')
     const id = await harvestHeaders(req.app.locals.db, files, String(req.body?.name || '').trim() || 'CV', SAFE_STORAGE_DIR)
     if (!id) return res.status(400).json({ error: 'No header shared by these CVs was found — give two or more CVs of the same agency (pictures).' })
     res.json({ ok: true, id })
-  } catch (e) { res.status(500).json({ error: e.message }) }
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }) }
   finally { for (const f of files) fs.promises.unlink(f).catch(() => {}) }
 })
 router.delete('/headers/:id', async (req, res) => {

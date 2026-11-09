@@ -9,6 +9,7 @@ import toast from 'react-hot-toast'
 import api from '../services/api'
 import LmisAccountPicker from './LmisAccountPicker'
 import MusanedAccountPicker from './MusanedAccountPicker'
+import { usePlan, lockedFor, planName, wantFeature } from '../lib/plan'
 
 // What a paused run is waiting for, in words.
 const PAUSE_TEXT = {
@@ -81,6 +82,7 @@ function aheadText(n) {
 }
 
 export default function ProfileAutomations({ profileId }) {
+  const plan = usePlan()
   const [workflows, setWorkflows] = useState([])
   const [queue, setQueue] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -516,6 +518,16 @@ export default function ProfileAutomations({ profileId }) {
       {/* The journey, in order: each portal's actions in one box. */}
       {GROUPS.filter(g => !g.hidden).map(g => {
         const flows = g.ids.map(id => workflows.find(w => w.id === id)).filter(Boolean)
+        // Outside this agency's plan: the robots are not offered — "I want it" asks Adal Keep.
+        const locked = g.ids.map(id => lockedFor(plan, id)).find(Boolean)
+        if (locked && g.ids.every(id => lockedFor(plan, id))) return (
+          <div key={g.title} className={`mb-2.5 flex flex-wrap items-center gap-2 rounded-xl border-2 border-dashed px-3 py-2 opacity-80 ${g.box}`}>
+            <p className={`text-[11px] font-semibold uppercase tracking-wide ${g.head}`}>🔒 {g.title}</p>
+            <span className="min-w-0 flex-1 text-xs text-slate-500">In the {planName(plan, locked.plan)} plan</span>
+            <button type="button" onClick={() => wantFeature(locked.key).then(() => toast.success(`Adal Keep was told you want ${locked.title}`)).catch(e => toast.error(e?.response?.data?.error || e.message))}
+              className="rounded-lg bg-white px-2.5 py-1 text-xs font-semibold text-teal-700 ring-1 ring-teal-300 hover:bg-teal-50 dark:bg-slate-900 dark:text-teal-300">I want it</button>
+          </div>
+        )
         return (
           <div key={g.title} className={`mb-2.5 rounded-xl border-2 px-3 py-2 ${g.box}`}>
             <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">

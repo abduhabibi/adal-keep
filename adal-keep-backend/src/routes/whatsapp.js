@@ -8,6 +8,12 @@ import express from 'express'
 import { lastNumber, keyOf, stateOf, allStates, connect, openWeb, logout, listChats, chatForNumber, agentRow, agentsOf, sendCV, sendMany, bulk, notifyMany, notices, sendsOf, onChosen, available, agentLimit, roomForAgent } from '../services/whatsapp.js'
 
 const router = express.Router()
+// WhatsApp is in the Standard plan (plans.js): connecting and sending need it; looking does not.
+router.use(async (req, res, next) => {
+  if (req.method !== 'POST' || !/^\/(whatsapp\/(connect|open-web|bulk|notify)|profiles\/\d+\/whatsapp\/send)/.test(req.path)) return next()
+  const { requireFeature } = await import('../services/plans.js')
+  requireFeature('whatsapp')(req, res, next)
+})
 const fail = (res, e) => res.status(400).json({ error: e.message })
 const now = () => new Date().toISOString()
 const who = (req) => keyOf(req.query.u ?? req.body?.u)

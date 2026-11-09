@@ -52,6 +52,35 @@ router.post('/setup/company', async (req, res) => {
 
 router.get('/subscription/status', (req, res) => res.json(statusPayload()))
 
+// The agency's plan and features (services/plans.js), from Adal's signed licence.
+router.get('/plan', async (req, res) => {
+  const p = await import('../services/plans.js')
+  await p.license()
+  res.json(p.planPayload())
+})
+router.post('/plan/refresh', async (req, res) => {
+  const p = await import('../services/plans.js')
+  await p.refreshLicense()
+  res.json({ ...p.planPayload(), subscription: statusPayload() })
+})
+// "I want it": a feature Adal offered (or one outside the plan) — said to Adal in the chat.
+router.post('/plan/want', async (req, res) => {
+  try {
+    const p = await import('../services/plans.js')
+    const f = p.featureOf(String(req.body?.feature || ''))
+    const offer = (p.licenseNow()?.offers || []).find(o => o.feature === req.body?.feature || o.id === req.body?.offer)
+    if (!f && !offer) return res.status(400).json({ error: 'Unknown feature' })
+    const c = await import('../services/chatCloud.js')
+    if (!c.chatConfigured()) return res.status(503).json({ error: 'The chat is not set up on this PC: call Adal Keep.' })
+    const db = req.app.locals.db
+    const inbox = ((await c.conversations(db)) || []).find(x => x.kind === 'admin')
+    if (!inbox) return res.status(503).json({ error: 'Your inbox with Adal Keep is not there yet: open the chat once.' })
+    const title = f?.title || offer?.title || req.body.feature
+    await c.send(db, inbox.id, `🧩 We want: ${title} [${f?.key || offer?.feature}]`)
+    res.json({ ok: true })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
 router.post('/subscription/unlock', async (req, res) => {
   const r = applyCode(req.body?.code)
   if (!r.ok) return res.status(400).json({ error: r.error })

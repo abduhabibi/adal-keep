@@ -77,7 +77,7 @@ router.get('/profiles/:profileId/automations', async (req, res) => {
       workflows: workflows.map(w => ({ ...w, latest: latest[w.id] || null })),
       queue: queueSnapshot(),
     })
-  } catch (e) { res.status(500).json({ error: e.message }) }
+  } catch (e) { res.status(e.status || 500).json({ error: e.message, ...(e.feature ? { feature: e.feature, plan: e.plan } : {}) }) }
 })
 
 // Enqueue a workflow
@@ -86,6 +86,10 @@ router.post('/profiles/:profileId/automations/:workflowId/start', async (req, re
     const db = req.app.locals.db
     const profileId = Number(req.params.profileId)
     const workflowId = req.params.workflowId
+
+    // The agency's plan (plans.js): a robot outside it does not start.
+    const inPlan = featureForWorkflow(workflowId)
+    if (inPlan) needFeature(inPlan.key)
 
     // Preflight — depends on the workflow
     // Musaned workflows need no files
@@ -349,7 +353,7 @@ router.post('/profiles/:profileId/automations/:workflowId/start', async (req, re
     // itself. Either way the answer says which, before the browser does anything.
     const s = await dispatchRun(db, runId)
     res.json({ ok: true, runId, resumed: false, ...s, members: 1 + group.length, skipped, message: runMessage(runId, s, s.state === 'running' ? 'started' : 'queued') + (group.length ? ` One certificate for ${1 + group.length}.` : '') })
-  } catch (e) { res.status(500).json({ error: e.message }) }
+  } catch (e) { res.status(e.status || 500).json({ error: e.message, ...(e.feature ? { feature: e.feature, plan: e.plan } : {}) }) }
 })
 
 // Police certificate runs that are ready for the person's Submit: the page
@@ -362,7 +366,7 @@ router.get('/automations/ready-for-submit', async (req, res) => {
       .select('id', 'profile_id', 'updated_at')
       .orderBy('id', 'desc').limit(50)
     res.json(rows)
-  } catch (e) { res.status(500).json({ error: e.message }) }
+  } catch (e) { res.status(e.status || 500).json({ error: e.message, ...(e.feature ? { feature: e.feature, plan: e.plan } : {}) }) }
 })
 
 // Get one run with its log (and, while it waits, where it stands in line)
@@ -393,7 +397,7 @@ router.get('/automations/attention', async (req, res) => {
       .whereIn('q.id', calls.map(c => c.run_id)).select('q.id', 'q.profile_id', 'q.workflow_id', 'p.full_name')
     const of = new Map(runs.map(r => [r.id, r]))
     res.json(calls.filter(c => of.has(c.run_id)).map(c => ({ ...c, ...of.get(c.run_id), id: undefined })).sort((a, b) => b.at - a.at))
-  } catch (e) { res.status(500).json({ error: e.message }) }
+  } catch (e) { res.status(e.status || 500).json({ error: e.message, ...(e.feature ? { feature: e.feature, plan: e.plan } : {}) }) }
 })
 router.post('/automations/:id/captcha', async (req, res) => {
   try {
@@ -408,7 +412,7 @@ router.post('/automations/:id/attention/done', (req, res) => {
   res.json({ ok: true })
 })
 router.post('/browser/open', async (req, res) => {
-  try { await openForPerson(); res.json({ ok: true }) } catch (e) { res.status(500).json({ error: e.message }) }
+  try { await openForPerson(); res.json({ ok: true }) } catch (e) { res.status(e.status || 500).json({ error: e.message, ...(e.feature ? { feature: e.feature, plan: e.plan } : {}) }) }
 })
 
 router.get('/automations/active', async (req, res) => {
@@ -455,6 +459,7 @@ export const STAGES = [
 
 // Musaned's own contract stages, in order (its tabs).
 import { MUSANED_ORDER, musanedStep } from '../services/musanedStages.js'
+import { featureForWorkflow, needFeature } from '../services/plans.js'
 export { MUSANED_ORDER, musanedStep }
 
 export function stageOf(p, runs = {}) {
@@ -604,7 +609,7 @@ router.get('/profiles/:profileId/fill-plan', async (req, res) => {
     let employee = ''
     try { employee = (await (await import('../services/activeEmployee.js')).getActiveEmployee(db))?.name || '' } catch {}
     res.json({ plans: fillPlans(p, await fillSettings(db), employee) })
-  } catch (e) { res.status(500).json({ error: e.message }) }
+  } catch (e) { res.status(e.status || 500).json({ error: e.message, ...(e.feature ? { feature: e.feature, plan: e.plan } : {}) }) }
 })
 
 router.get('/profiles/:profileId/journey', async (req, res) => {
@@ -618,7 +623,7 @@ router.get('/profiles/:profileId/journey', async (req, res) => {
     const cv = await db('generated_cvs').where('profile_id', id).first().catch(() => null)
     const docs = (await docsOf(db, [id])).get(id) || new Set()
     res.json({ ...journeyOf(p, runs, !!cv || docs.has('CV'), docs, (await agentsOut(db, [id])).get(id) || []), cv_missing: cvMissing(p, docs, !!cv || docs.has('CV')) })
-  } catch (e) { res.status(500).json({ error: e.message }) }
+  } catch (e) { res.status(e.status || 500).json({ error: e.message, ...(e.feature ? { feature: e.feature, plan: e.plan } : {}) }) }
 })
 
 /** What her CV still lacks before it can go to agents ([] = complete): a CV made, or all a CV shows. */
@@ -675,7 +680,7 @@ router.get('/automations/:id', async (req, res) => {
     try { log = JSON.parse(row.log || '[]') } catch {}
     const queue = row.status === 'pending' ? await runStatus(db, row.id) : null
     res.json({ ...publicRun(row), log, queue })
-  } catch (e) { res.status(500).json({ error: e.message }) }
+  } catch (e) { res.status(e.status || 500).json({ error: e.message, ...(e.feature ? { feature: e.feature, plan: e.plan } : {}) }) }
 })
 
 // The account this run signs in with — shown small by the run's buttons, so a
@@ -689,7 +694,7 @@ router.get('/automations/:id/login', async (req, res) => {
       ['visa_username', 'visa_password', 'visa_name'], ['login_value', 'login_password', 'account_name']]
     const k = pairs.find(([u, pw]) => c[u] || c[pw])
     res.json(k ? { name: c[k[2]] || '', user: c[k[0]] || '', password: c[k[1]] || '' } : {})
-  } catch (e) { res.status(500).json({ error: e.message }) }
+  } catch (e) { res.status(e.status || 500).json({ error: e.message, ...(e.feature ? { feature: e.feature, plan: e.plan } : {}) }) }
 })
 
 // Continue a paused run (after the person signed in, entered the OTP, ...)
@@ -720,7 +725,7 @@ router.get('/automations/:id/screen', async (req, res) => {
     const size = await page.evaluate(() => [window.innerWidth, window.innerHeight]).catch(() => [0, 0])
     res.set({ 'Content-Type': 'image/jpeg', 'Cache-Control': 'no-store', 'X-Tab-Size': size.join('x'), 'X-Tab-Url': encodeURI(page.url()).slice(0, 300), 'Access-Control-Expose-Headers': 'X-Tab-Size, X-Tab-Url' })
     res.end(shot)
-  } catch (e) { res.status(500).json({ error: e.message }) }
+  } catch (e) { res.status(e.status || 500).json({ error: e.message, ...(e.feature ? { feature: e.feature, plan: e.plan } : {}) }) }
 })
 
 // The tab as it changes, for an <img>: the newest picture only, so a slow connection
@@ -834,7 +839,7 @@ router.get('/automations/:id/mirror', async (req, res) => {
     if (!mirrorShots.has(req.params.id)) mirrorShots.set(req.params.id, new Map())
     if (mirrorShots.size > 20) mirrorShots.delete(mirrorShots.keys().next().value)
     res.set('Cache-Control', 'no-store').json(await mirrorOf(page, mirrorShots.get(req.params.id)))
-  } catch (e) { res.status(500).json({ error: e.message }) }
+  } catch (e) { res.status(e.status || 500).json({ error: e.message, ...(e.feature ? { feature: e.feature, plan: e.plan } : {}) }) }
 })
 
 router.post('/automations/:id/input', async (req, res) => {
@@ -894,7 +899,7 @@ router.post('/automations/:id/resume', async (req, res) => {
     if (row.status === 'paused') await noteRun(db, row, 'continued by a person')
     const s = await dispatchRun(db, runId)
     res.json({ ok: true, ...s, message: runMessage(runId, s, row.status === 'paused' ? 'continued' : 'was already queued') })
-  } catch (e) { res.status(500).json({ error: e.message }) }
+  } catch (e) { res.status(e.status || 500).json({ error: e.message, ...(e.feature ? { feature: e.feature, plan: e.plan } : {}) }) }
 })
 
 // Pause = take a waiting run out of the line. A run that is working cannot be
@@ -921,7 +926,7 @@ router.post('/automations/:id/pause', async (req, res) => {
     })
     if (!n) return res.status(409).json({ error: `Run #${runId} started working a moment ago — use Cancel to stop it.` })
     res.json({ ok: true, message: `Run #${runId} paused — taken out of the line. Press Continue to queue it again.` })
-  } catch (e) { res.status(500).json({ error: e.message }) }
+  } catch (e) { res.status(e.status || 500).json({ error: e.message, ...(e.feature ? { feature: e.feature, plan: e.plan } : {}) }) }
 })
 
 // Cancel a run — stop it and close the one tab it owns. Other runs' tabs and
@@ -961,7 +966,7 @@ router.post('/automations/:id/cancel', async (req, res) => {
       ? `Run #${runId} cancelled — taken out of the line. ${otherRunsText(others)}`
       : `Run #${runId} cancelled${tabClosed ? ' and its tab closed' : ''}. ${otherRunsText(others)}`
     res.json({ ok: true, tabClosed, message })
-  } catch (e) { res.status(500).json({ error: e.message }) }
+  } catch (e) { res.status(e.status || 500).json({ error: e.message, ...(e.feature ? { feature: e.feature, plan: e.plan } : {}) }) }
 })
 
 // Mark a paused run as fully complete (the person pressed Submit / SAVE in its

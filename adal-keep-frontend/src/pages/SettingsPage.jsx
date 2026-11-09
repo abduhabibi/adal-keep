@@ -25,10 +25,12 @@ import ErrorBoundary from '../components/shared/ErrorBoundary'
 import PhoneCard from '../components/PhoneCard'
 import WhatsAppCard from '../components/WhatsAppCard'
 import TransitionsCard from '../components/TransitionsCard'
+import PlanCard from '../components/PlanCard'
 
 // The tabs of Settings: [id, icon, name].
 const SETTINGS_TABS = [
   ['agency', '🏢', 'Agency'],
+  ['plan', '⭐', 'Plan'],
   ['portals', '🤖', 'Portals'],
   ['integrations', '🔌', 'Integrations'],
   ['transitions', '🚚', 'Transitions'],
@@ -278,6 +280,7 @@ export default function SettingsPage() {
       </Card>
       {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Main PC & phones"><MainPCCard /></ErrorBoundary>}
       </>}
+      {tab === 'plan' && import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Plan"><PlanCard /></ErrorBoundary>}
       {tab === 'portals' && <>
       {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Musaned authenticator"><MusanedAuthenticatorCard /></ErrorBoundary>}
       {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Wafid"><WafidCard /></ErrorBoundary>}

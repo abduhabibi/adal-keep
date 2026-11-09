@@ -87,6 +87,7 @@
     <button data-tab="chats">All chats</button>
     <button data-tab="payments">Payments</button>
     <button data-tab="agencies">Agencies</button>
+    <button data-tab="plans">Plans</button>
   </div>
   <div class="list" id="list"></div>
 </nav>
@@ -135,7 +136,7 @@ const img = (p) => `<img src="/api/image?path=${encodeURIComponent(p)}" onclick=
 
 document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
   tab = b.dataset.tab; document.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('on', x === b))
-  if (tab === 'payments' || tab === 'agencies' || tab === 'work' || tab === 'agents' || tab === 'ceos') { open = null; showTable() } else renderList()
+  if (tab === 'payments' || tab === 'agencies' || tab === 'work' || tab === 'agents' || tab === 'ceos' || tab === 'plans') { open = null; showTable() } else renderList()
   renderList()
 })
 
@@ -295,6 +296,68 @@ async function agentsView() {
 
 // CEOs: who to call at each agency. Typed here when the agency's setup left it empty.
 let ceoShown = ''
+// Plans: each agency's plan, paid days, trial days and features — Adal's signed licence (plans.js).
+async function plansView() {
+  $('#title').textContent = 'Plans — loading…'
+  const d = await api('/api/plans').catch(e => ({ error: e.message }))
+  if (tab !== 'plans') return
+  if (d.error) { $('#title').textContent = d.error; $('#table').innerHTML = ''; return }
+  const day = (t) => t ? new Date(t).toISOString().slice(0, 10) : '—'
+  const left = (t) => t ? Math.ceil((t - Date.now()) / 86400000) : null
+  const STATE = { on: ['✓', '#047857', '#d1fae5'], off: ['✕', '#991b1b', '#fee2e2'], offered: ['?', '#92400e', '#fef3c7'] }
+  $('#title').textContent = `Plans — ${d.agencies.length} agencies`
+  $('#table').innerHTML = `
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">${d.plans.map(p => `<div style="flex:1;min-width:180px;border:1px solid #e2e8f0;border-radius:12px;padding:10px">
+      <b>${esc(p.name)}</b> · ${p.price.toLocaleString()} ETB / 6 months<br>
+      <small>${d.features.filter(f => ({ basic: 1, standard: 2, premium: 3 })[f.plan] <= p.rank).map(f => esc(f.title)).join(' · ') || 'The office work'}${p.extras ? ' · ' + p.extras.map(esc).join(' · ') : ''}</small></div>`).join('')}</div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px;padding:10px;border-radius:12px;background:#f8fafc">
+      <b>Offer a feature to every agency without it:</b>
+      <select id="offerF">${d.features.map(f => `<option value="${f.key}">${esc(f.title)}</option>`).join('')}</select>
+      <button id="offerAll">Offer — they are told in their inbox</button></div>
+    ${d.asks.length ? `<div style="margin-bottom:14px"><b>They asked for</b><ul style="margin:6px 0 0 18px">${d.asks.slice(0, 12).map(a => `<li>${esc(a.agency)}: ${esc(String(a.body).replace(/^🧩\s*/, ''))} <small>${day(new Date(a.created_at).getTime())}</small></li>`).join('')}</ul></div>` : ''}
+    <table><tr><th>Agency</th><th>Plan</th><th>Paid until</th><th>Trial until</th><th>Features (click: plan → on → off)</th><th>Note</th></tr>${d.agencies.map((a, i) => {
+      const l = a.license || {}
+      const pl = left(l.paid_until), tl = left(l.trial_until)
+      return `<tr data-i="${i}">
+        <td><b>${esc(a.name)}</b><br><small class="code">${esc(a.pc_number)}</small>${a.banned ? ' <small style="color:#b91c1c">banned</small>' : ''}</td>
+        <td><select data-act="plan">${d.plans.map(p => `<option value="${p.key}" ${(l.plan || 'premium') === p.key ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select>${a.license ? '' : '<br><small>not set: trial = Premium</small>'}</td>
+        <td>${day(l.paid_until)}${pl != null ? ` <small>(${pl} d)</small>` : ''}<br>
+          <button data-act="paid" data-days="30">+30 d</button> <button data-act="paid" data-days="182">+6 mo</button> <button data-act="paid" data-days="ask">+…</button></td>
+        <td>${day(l.trial_until)}${tl != null ? ` <small>(${tl} d)</small>` : ''}<br>
+          <button data-act="trial" data-days="7">+7 d</button> <button data-act="trial" data-days="14">+14 d</button> <button data-act="trial" data-days="ask">+…</button></td>
+        <td>${d.features.map(f => { const st = a.states[f.key]; const own = l.features?.[f.key]; const [ic, fg, bg] = STATE[st]
+          return `<button data-act="feat" data-f="${f.key}" title="${esc(f.about)} — ${own ? 'set by you' : 'from the plan'}" style="margin:2px;border-radius:999px;padding:2px 8px;border:1px solid ${fg};color:${fg};background:${bg};${own ? 'font-weight:700' : ''}">${ic} ${esc(f.title)}</button>` }).join('')}</td>
+        <td><input type="text" data-act="note" value="${esc(l.note || '')}" placeholder="Shown to the agency"></td></tr>` }).join('')}</table>
+    <p><small>Saved changes reach the agency's PC within 30 minutes (or at once when it presses Refresh in Settings → Plan). Bold = set for that agency alone.</small></p>`
+  const save = async (a, body, said) => {
+    $('#title').textContent = `Saving ${a.name}…`
+    try { await api('/api/plans/save', { pc: a.pc_number, agency: a.id, ...body }); $('#title').textContent = `${a.name}: ${said}`; plansView() }
+    catch (e) { await ask({ title: 'Not saved', text: e.message }); plansView() }
+  }
+  $('#offerAll').onclick = async () => {
+    const key = $('#offerF').value, f = d.features.find(x => x.key === key)
+    if (!(await ask({ title: 'Offer ' + f.title + '?', text: 'Every agency that does not have it gets a message in its inbox and can answer "I want it". It is turned on only when you turn it on.', ok: 'Offer' }))) return
+    try { const r = await api('/api/plans/offer', { feature: key }); await tell('Offered', `${f.title}: offered to ${r.offered} agencies.`); plansView() } catch (e) { await ask({ title: 'Not offered', text: e.message }) }
+  }
+  $('#table').querySelectorAll('tr[data-i]').forEach(tr => {
+    const a = d.agencies[tr.dataset.i], l = a.license || {}
+    tr.querySelector('[data-act=plan]').onchange = (e) => save(a, { plan: e.target.value, tell: `Your Adal Keep plan is now ${d.plans.find(p => p.key === e.target.value).name}.` }, 'plan saved')
+    tr.querySelectorAll('[data-act=paid],[data-act=trial]').forEach(b => b.onclick = async () => {
+      let days = b.dataset.days
+      if (days === 'ask') { days = await ask({ title: (b.dataset.act === 'paid' ? 'Paid' : 'Trial') + ' days to add', text: a.name, input: '30' }); if (!days) return }
+      days = Number(days); if (!days) return
+      save(a, b.dataset.act === 'paid' ? { add_paid_days: days, tell: `Adal Keep: ${days} days added to your subscription. Thank you!` } : { add_trial_days: days, tell: `Adal Keep: your free trial has ${days} more days.` }, `${days} days added`)
+    })
+    tr.querySelectorAll('[data-act=feat]').forEach(b => b.onclick = () => {
+      const k = b.dataset.f, own = l.features?.[k]
+      const next = own === undefined ? 'on' : own === 'on' ? 'off' : 'plan'
+      const f = d.features.find(x => x.key === k)
+      save(a, { features: { [k]: next }, ...(next === 'on' ? { tell: `Adal Keep: ${f.title} is on for you now.` } : {}) }, `${f.title}: ${next === 'plan' ? 'as the plan says' : next}`)
+    })
+    tr.querySelector('[data-act=note]').onchange = (e) => save(a, { note: e.target.value }, 'note saved')
+  })
+}
+
 async function ceosView() {
   const rows = await api('/api/ceos').catch(e => ({ error: e.message }))
   if (tab !== 'ceos') return
@@ -444,6 +507,7 @@ function showTable() {
   if (tab === 'work') return workTable()
   if (tab === 'agents') return agentsView()
   if (tab === 'ceos') return ceosView()
+  if (tab === 'plans') return plansView()
   if (tab === 'payments') {
     $('#title').textContent = 'Payment receipts'
     $('#table').innerHTML = `<table><tr><th>Receipt</th><th>Agency</th><th>PC number</th><th>Sent</th><th>Status</th><th></th></tr>` +

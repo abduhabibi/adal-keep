@@ -12,6 +12,7 @@ import useReadyChime from '../../hooks/useReadyChime'
 import useNewVersion from '../../hooks/useNewVersion'
 import api from '../../services/api'
 import UpdateBanner from '../UpdateBanner'
+import { swipeBack } from '../../lib/phoneApp'
 
 const PAD_KEY = 'adal-search-pad'
 
@@ -44,6 +45,43 @@ export default function MainLayout() {
     m.addEventListener?.('change', on)
     return () => m.removeEventListener?.('change', on)
   }, [])
+  // An open chat fills the phone (no top bar), as in Telegram.
+  const [bare, setBare] = useState(false)
+  useEffect(() => {
+    const on = (e) => setBare(!!e.detail)
+    window.addEventListener('adal-fullscreen', on)
+    return () => window.removeEventListener('adal-fullscreen', on)
+  }, [])
+  // A swipe from left to right (a phone): back — out of the open chat or
+  // profile; with nothing to go back from, the sidebar. Right to left closes it.
+  useEffect(() => {
+    if (wide) return
+    let start = null
+    const down = (e) => {
+      const t = e.touches?.[0]
+      if (!t || e.touches.length > 1) { start = null; return }
+      // Not from something that moves sideways itself (a slider, a list scrolling sideways, the mic).
+      for (let el = e.target; el && el !== document.body; el = el.parentElement) {
+        if (el.dataset?.noSwipe !== undefined || el.tagName === 'INPUT' && el.type === 'range') { start = null; return }
+        if (el.scrollWidth > el.clientWidth + 4 && /(auto|scroll)/.test(getComputedStyle(el).overflowX) && el.scrollLeft > 0) { start = null; return }
+      }
+      start = { x: t.clientX, y: t.clientY, at: Date.now() }
+    }
+    const up = (e) => {
+      const s = start; start = null
+      const t = e.changedTouches?.[0]
+      if (!s || !t || Date.now() - s.at > 700) return
+      const dx = t.clientX - s.x, dy = t.clientY - s.y
+      if (Math.abs(dx) < 70 || Math.abs(dy) > Math.abs(dx) * 0.6) return
+      if (dx > 0) {
+        if (sidebarOpen) return
+        if (!swipeBack()) setSidebarOpen(true)
+      } else if (sidebarOpen) setSidebarOpen(false)
+    }
+    window.addEventListener('touchstart', down, { passive: true })
+    window.addEventListener('touchend', up, { passive: true })
+    return () => { window.removeEventListener('touchstart', down); window.removeEventListener('touchend', up) }
+  }, [wide, sidebarOpen])
   const togglePad = () => setPadOpen(o => {
     try { localStorage.setItem(PAD_KEY, o ? 'closed' : 'open') } catch {}
     return !o
@@ -79,7 +117,7 @@ export default function MainLayout() {
         {DEMO && <Suspense fallback={null}><DemoBanner /></Suspense>}
         {!DEMO && <FollowerBanner />}
         {!DEMO && <UpdateBanner />}
-        <Navbar onMenuClick={() => setSidebarOpen(!sidebarOpen)} />
+        {!(bare && !wide) && <Navbar onMenuClick={() => setSidebarOpen(!sidebarOpen)} />}
         <div className="flex flex-1 min-h-0">
           <main className="flex-1 min-w-0 overflow-y-auto transition-colors duration-500 custom-scrollbar">
             <div className={inChat ? 'h-full' : 'px-3 py-4 sm:p-6'}>

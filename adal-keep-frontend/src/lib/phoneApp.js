@@ -21,6 +21,24 @@ if (typeof window !== 'undefined') window.__adalBack = () => {
   return false
 }
 
+/**
+ * A swipe from left to right: back — the newest open view closes (an open
+ * chat, a selection…), else the page goes back. False when there is nothing
+ * to go back from: the swipe then opens the sidebar.
+ */
+export function swipeBack() {
+  if (backStack.length) { try { backStack[backStack.length - 1]() } catch {} return true }
+  // Back only out of a page inside a page (a profile, a broker, an edit): from a
+  // menu page (Profiles, Brokers, Chat…) the swipe opens the sidebar.
+  const parts = location.pathname.split('/').filter(Boolean)
+  if (parts.length < 2) return false
+  if ((history.state?.idx || 0) > 0) { history.back(); return true }
+  const up = '/' + parts.slice(0, -1).join('/')
+  history.replaceState({ ...(history.state || {}), idx: 0 }, '', up)
+  window.dispatchEvent(new PopStateEvent('popstate', { state: history.state }))
+  return true
+}
+
 /** An outside link (a WhatsApp chat…): on a phone the WebView hands it to the app
  *  that opens it (WhatsApp); on a PC a new tab. */
 export function openOutside(url) {

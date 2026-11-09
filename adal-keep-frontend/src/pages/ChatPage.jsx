@@ -2,6 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 import api from '../services/api'
 import { cachedGet } from '../lib/deviceCache'
+import { onBack } from '../lib/phoneApp'
+import VoiceNote from '../components/VoiceNote'
+
+// A finger (a phone) rather than a mouse: a long press selects, as in Telegram.
+const touchScreen = () => window.matchMedia?.('(pointer: coarse)').matches
 
 /**
  * Chat between every agency that runs Adal Keep — works like Telegram:
@@ -109,6 +114,10 @@ export default function ChatPage() {
   const [replyTo, setReplyTo] = useState(null)     // message
   const [editing, setEditing] = useState(null)     // message
   const [menu, setMenu] = useState(null)           // { m, x, y }
+  const [picked, setPicked] = useState([])         // messages selected (a long press), as in Telegram
+  const [attachOpen, setAttachOpen] = useState(false)
+  const galleryRef = useRef(null), cameraRef = useRef(null)
+  const press = useRef(null)
   const [forwarding, setForwarding] = useState(null)
   const [info, setInfo] = useState(false)          // group info panel
   const [newGroup, setNewGroup] = useState(false)
@@ -213,6 +222,41 @@ export default function ChatPage() {
   // --- derived --------------------------------------------------------
   const convOf = (id) => convs.find(c => c.id === id)
   const current = open ? (convOf(open.id) || open) : null
+  const shown = useMemo(() => msgs.filter(m => !m.deleted_at), [msgs])
+  // The open chat fills the phone; back (or a swipe) closes it.
+  useEffect(() => {
+    if (!open?.id) return
+    window.dispatchEvent(new CustomEvent('adal-fullscreen', { detail: true }))
+    const off = onBack(() => setOpen(null))
+    return () => { off(); setPicked([]); window.dispatchEvent(new CustomEvent('adal-fullscreen', { detail: false })) }
+  }, [open?.id])
+  useEffect(() => { if (!picked.length) return; return onBack(() => setPicked([])) }, [picked.length > 0]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (!attachOpen) return; return onBack(() => setAttachOpen(false)) }, [attachOpen])
+  const togglePick = (m) => setPicked(cur => cur.some(x => x.id === m.id) ? cur.filter(x => x.id !== m.id) : [...cur, m])
+  const pressStart = (m, e) => {
+    if (!touchScreen()) return
+    const t = e.touches?.[0]
+    press.current = { x: t?.clientX, y: t?.clientY, timer: setTimeout(() => { press.current = null; navigator.vibrate?.(15); togglePick(m) }, 420) }
+  }
+  const pressMove = (e) => {
+    const p = press.current, t = e.touches?.[0]
+    if (p && t && (Math.abs(t.clientX - p.x) > 10 || Math.abs(t.clientY - p.y) > 10)) { clearTimeout(p.timer); press.current = null }
+  }
+  const pressEnd = () => { if (press.current) { clearTimeout(press.current.timer); press.current = null } }
+  const deletePicked = async () => {
+    const mine = picked.filter(m => m.sender_id === me?.id)
+    if (!mine.length) return
+    if (!(await askYes(mine.length === 1 ? 'Delete this message for everyone?' : 'Delete these ' + mine.length + ' messages for everyone?'))) return
+    for (const m of mine) {
+      try { await api.post('/chat/messages/' + m.id + '/delete'); setMsgs(cur => cur.filter(x => x.id !== m.id)) } catch (e) { toast.error(e.response?.data?.error || 'Not deleted') }
+    }
+    setPicked([])
+  }
+  const copyPicked = async () => {
+    const text = [...picked].sort((a, b) => a.id - b.id).map(m => m.body).filter(Boolean).join('\n\n')
+    try { await navigator.clipboard.writeText(text); toast.success(picked.length === 1 ? 'Copied' : picked.length + ' messages copied') } catch { toast.error('Could not copy') }
+    setPicked([])
+  }
   const isEveryone = !!current && (current.is_everyone ?? (current.kind === 'group' && current.title === 'Everyone' && !current.my_role))
   const isGroup = current?.kind === 'group' && !isEveryone
   // is_everyone comes with the new schema; before that, Everyone is the group with no role.
@@ -301,6 +345,7 @@ export default function ChatPage() {
   const recRef = useRef(null)
   const hold = useRef(null)      // { x0, t0, up } while the finger is on the mic
   const [slide, setSlide] = useState(0)
+  const [lift, setLift] = useState(0)
   const startVoice = async () => {
     if (!navigator.mediaDevices?.getUserMedia) { toast.error('Voice messages need the microphone (on this PC, or over the secure link).'); return false }
     try {
@@ -322,18 +367,27 @@ export default function ChatPage() {
     if (rec) return
     e.preventDefault()
     try { e.currentTarget.setPointerCapture(e.pointerId) } catch {}
-    hold.current = { x0: e.clientX, t0: Date.now(), up: false, cancelled: false }
+    hold.current = { x0: e.clientX, y0: e.clientY, t0: Date.now(), up: false, cancelled: false }
     setSlide(0)
     const ok = await startVoice()
     const h = hold.current
     if (!ok || !h) { hold.current = null; return }
     if (h.cancelled) { hold.current = null; stopVoice(false) }
+    else if (h.lockOnStart) { hold.current = null; const r = recRef.current; if (r) { r.locked = true; setRec({ ...r }) } }
     else if (h.up) { hold.current = null; finishHold(h) }
   }
   const micMove = (e) => {
     const h = hold.current
     if (!h || h.up) return
-    const dx = Math.min(0, e.clientX - h.x0)
+    const dx = Math.min(0, e.clientX - h.x0), dy = Math.min(0, e.clientY - h.y0)
+    // Up: locked — it records on with the finger off (a bin to cancel, the arrow to send).
+    if (dy < -70 && dy < dx) {
+      const r = recRef.current
+      if (r) { r.locked = true; setRec({ ...r }); hold.current = null; setSlide(0); setLift(0); navigator.vibrate?.(20) }
+      else h.lockOnStart = true
+      return
+    }
+    setLift(dy)
     setSlide(dx)
     if (dx < -110) { h.cancelled = true; h.up = true; setSlide(0); if (recRef.current) { hold.current = null; stopVoice(false); navigator.vibrate?.(20) } }
   }
@@ -345,7 +399,7 @@ export default function ChatPage() {
   const micUp = () => {
     const h = hold.current
     if (!h || h.up) return
-    h.up = true; setSlide(0)
+    h.up = true; setSlide(0); setLift(0)
     if (recRef.current) { hold.current = null; finishHold(h) }
   }
   // The recording's time, by the half second.
@@ -478,6 +532,18 @@ export default function ChatPage() {
           </div>
         ) : (
           <>
+            {picked.length > 0 ? (
+            <header className="flex items-center gap-1 border-b border-slate-200 bg-white px-2 py-2 dark:border-black/40 dark:bg-[#17212b] md:px-5">
+              <button type="button" onClick={() => setPicked([])} title="Cancel" className="flex h-10 w-10 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/10 text-xl">✕</button>
+              <span className="flex-1 pl-1 text-lg font-bold">{picked.length}</span>
+              {picked.length === 1 && <button type="button" title="Reply" onClick={() => { const m = picked[0]; setPicked([]); act('reply', m) }} className="flex h-10 w-10 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/10 text-xl">↩</button>}
+              {picked.some(m => m.body) && <button type="button" title="Copy" onClick={copyPicked} className="flex h-10 w-10 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/10">
+                <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.9" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" /></svg></button>}
+              {picked.length === 1 && <button type="button" title="Forward" onClick={() => { const m = picked[0]; setPicked([]); setForwarding(m) }} className="flex h-10 w-10 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/10 text-xl">↪</button>}
+              {picked.every(m => m.sender_id === me?.id) && <button type="button" title="Delete" onClick={deletePicked} className="flex h-10 w-10 items-center justify-center rounded-full text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20">
+                <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-12M9 7V4h6v3" /></svg></button>}
+            </header>
+            ) : (
             <header className="flex items-center gap-3 border-b border-slate-200 bg-white px-3 py-2 dark:border-black/40 dark:bg-[#17212b] md:px-5">
               <button type="button" onClick={() => setOpen(null)} title="Back to the chats"
                 className="md:hidden -ml-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-2xl text-slate-500 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/10">←</button>
@@ -490,6 +556,7 @@ export default function ChatPage() {
               </button>
               {isGroup && <button type="button" onClick={() => setInfo(v => !v)} className="rounded-lg px-2 py-1 text-xs text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800">Group info</button>}
             </header>
+            )}
 
             {pinned && (
               <div className="flex items-center gap-2 border-b border-slate-200 bg-teal-50/60 px-5 py-1.5 text-xs dark:border-slate-700 dark:bg-teal-900/20">
@@ -502,21 +569,25 @@ export default function ChatPage() {
 
             <div className="flex min-h-0 flex-1">
               <div ref={threadRef} className="tg-wall flex-1 overflow-y-auto px-2 py-3 sm:px-6">
-                {msgs.length === 0 && <p className="mx-auto mt-10 w-fit rounded-2xl bg-black/25 px-4 py-2 text-center text-sm text-white">No messages yet — say hello.</p>}
-                {msgs.map((m, i) => {
+                {shown.length === 0 && <p className="mx-auto mt-10 w-fit rounded-2xl bg-black/25 px-4 py-2 text-center text-sm text-white">No messages yet — say hello.</p>}
+                {shown.map((m, i) => {
                   const mine = m.sender_id === me?.id
-                  const prev = msgs[i - 1]
+                  const prev = shown[i - 1]
+                  const isPicked = picked.some(x => x.id === m.id)
                   const newDay = !prev || !sameDay(prev.created_at, m.created_at)
                   const showName = current.kind !== 'direct' && !mine && (newDay || prev?.sender_id !== m.sender_id)
                   const quoted = m.reply_to ? byId[m.reply_to] : null
                   return (
                     <div key={m.id}>
                       {newDay && <div className="sticky top-1 z-[1] my-3 text-center"><span className="rounded-full bg-black/25 px-3 py-1 text-xs font-medium text-white dark:bg-black/40">{dayLabel(m.created_at)}</span></div>}
-                      <div className={`mb-1 flex ${mine ? 'justify-end' : 'justify-start'}`}>
+                      <div className={`-mx-2 mb-1 flex px-2 sm:-mx-6 sm:px-6 ${mine ? 'justify-end' : 'justify-start'} ${isPicked ? 'bg-sky-500/20' : ''}`}
+                        onClick={() => picked.length && togglePick(m)}>
                         <div id={`msg-${m.id}`}
-                          onContextMenu={e => { e.preventDefault(); if (!m.deleted_at) setMenu({ m, x: e.clientX, y: e.clientY }) }}
+                          onTouchStart={e => pressStart(m, e)} onTouchMove={pressMove} onTouchEnd={pressEnd} onTouchCancel={pressEnd}
+                          onContextMenu={e => { e.preventDefault(); if (touchScreen()) return; if (!m.deleted_at) setMenu({ m, x: e.clientX, y: e.clientY }) }}
                           onDoubleClick={() => !m.deleted_at && act('reply', m)}
-                          className={`tg-bubble group relative max-w-[85%] sm:max-w-[65%] rounded-2xl px-2.5 pb-1 pt-1.5 shadow-sm transition ${mine ? 'tg-out rounded-br-[4px] bg-[#effdde] dark:bg-[#2b5278]' : 'tg-in rounded-bl-[4px] bg-white dark:bg-[#182533]'}`}>
+                          style={picked.length ? { pointerEvents: 'none' } : undefined}
+                          className={`tg-bubble group relative max-w-[85%] sm:max-w-[65%] select-none sm:select-text rounded-2xl px-2.5 pb-1 pt-1.5 shadow-sm transition ${mine ? 'tg-out rounded-br-[4px] bg-[#effdde] dark:bg-[#2b5278]' : 'tg-in rounded-bl-[4px] bg-white dark:bg-[#182533]'}`}>
                           {showName && <p className="text-[13px] font-semibold text-sky-600 dark:text-sky-400">{names[m.sender_id] || 'Agency'}</p>}
                           {m.forwarded_from && !m.deleted_at && <p className="text-[11px] italic text-sky-700 dark:text-sky-300">Forwarded from {m.forwarded_from}</p>}
                           {quoted && !m.deleted_at && (
@@ -534,7 +605,7 @@ export default function ChatPage() {
                                   <img src={fileUrl(m.image_path)} alt="" className="my-1 max-h-72 rounded-lg" />
                                 </a>
                               )}
-                              {m.kind === 'voice' && m.file_path && <audio controls preload="none" src={fileUrl(m.file_path)} className="my-1 h-10 w-64 max-w-full" />}
+                              {m.kind === 'voice' && m.file_path && <VoiceNote src={fileUrl(m.file_path)} mine={mine} />}
                               {m.kind === 'file' && m.file_path && (
                                 <a href={fileUrl(m.file_path, m.file_name)} target="_blank" rel="noreferrer"
                                   className="my-1 flex items-center gap-3 rounded-lg bg-black/5 px-3 py-2 hover:bg-black/10 dark:bg-white/10">
@@ -611,11 +682,13 @@ export default function ChatPage() {
                     </div>
                   ) : (<>
                     {/* One paperclip: a photo (gallery or camera), a video or a document. */}
-                    <button type="button" title="Attach a photo or file" onClick={() => fileRef.current?.click()}
+                    <button type="button" title="Attach a photo or file" onClick={() => setAttachOpen(true)}
                       className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-[#3390ec] dark:text-slate-500 dark:hover:bg-white/10">
                       <svg viewBox="0 0 24 24" className="h-6 w-6 -rotate-45" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" aria-hidden="true"><path d="M21 12.5 12.6 20.9a5.5 5.5 0 0 1-7.8-7.8l8.5-8.5a3.7 3.7 0 0 1 5.2 5.2l-8.5 8.5a1.8 1.8 0 0 1-2.6-2.6l7.8-7.8" /></svg>
                     </button>
                     <input ref={fileRef} type="file" className="hidden" onChange={e => { takeFile(e.target.files?.[0]); e.target.value = '' }} />
+                    <input ref={galleryRef} type="file" accept="image/*,video/*" className="hidden" onChange={e => { takeFile(e.target.files?.[0]); e.target.value = '' }} />
+                    <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={e => { takeFile(e.target.files?.[0]); e.target.value = '' }} />
                     <textarea ref={inputRef} rows={1} value={text}
                       onChange={e => onType(e.target.value)}
                       onKeyDown={e => {
@@ -635,7 +708,7 @@ export default function ChatPage() {
                     </button>
                   ) : (rec || (!text.trim() && !attach && !editing)) ? (
                     <button type="button" title="Hold to record a voice message, tap to record hands-free"
-                      onPointerDown={micDown} onPointerMove={micMove} onPointerUp={micUp} onPointerCancel={micUp} onContextMenu={e => e.preventDefault()}
+                      data-no-swipe onPointerDown={micDown} onPointerMove={micMove} onPointerUp={micUp} onPointerCancel={micUp} onContextMenu={e => e.preventDefault()}
                       style={{ touchAction: 'none' }}
                       className={`relative flex shrink-0 select-none items-center justify-center rounded-full bg-gradient-to-br from-[#4fa9f5] to-[#2b7fdc] text-white shadow-lg shadow-sky-500/30 transition-all duration-150 ${rec ? 'h-14 w-14 -my-1.5' : 'h-11 w-11 active:scale-95'}`}>
                       {rec && <span className="absolute inset-0 -z-10 animate-ping rounded-full bg-sky-400/40" />}
@@ -655,6 +728,32 @@ export default function ChatPage() {
               </div>
             )}
           </>
+        )}
+        {attachOpen && (
+          <div className="absolute inset-0 z-40 flex items-end bg-black/40" onClick={() => setAttachOpen(false)}>
+            <div className="w-full rounded-t-3xl bg-white px-6 pb-6 pt-3 shadow-2xl dark:bg-[#17212b]" onClick={e => e.stopPropagation()}>
+              <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-slate-300 dark:bg-slate-600" />
+              <div className="grid grid-cols-3 gap-4">
+                {[['Gallery', 'from-[#4fa9f5] to-[#2b7fdc]', galleryRef, 'M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6Zm3 11 3.5-4.5 2.5 3 3.5-4.5L20 17H7Zm2-8.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z'],
+                  ['Camera', 'from-[#f56b6b] to-[#e0405a]', cameraRef, 'M9 4 7.5 6H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-2.5L15 4H9Zm3 13a4.5 4.5 0 1 1 0-9 4.5 4.5 0 0 1 0 9Zm0-2a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z'],
+                  ['File', 'from-[#5ed3a1] to-[#25a76e]', fileRef, 'M6 2h8l6 6v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Zm7 1.5V9h5.5L13 3.5Z']].map(([label, colour, ref, d]) => (
+                  <button key={label} type="button" onClick={() => { setAttachOpen(false); ref.current?.click() }} className="flex flex-col items-center gap-2">
+                    <span className={`flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br ${colour} text-white shadow-lg`}>
+                      <svg viewBox="0 0 24 24" className="h-7 w-7" fill="currentColor" aria-hidden="true"><path d={d} /></svg>
+                    </span>
+                    <span className="text-sm text-slate-600 dark:text-slate-300">{label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+        {rec && !rec.locked && (
+          <div className="pointer-events-none absolute bottom-20 right-3 z-30 flex flex-col items-center gap-1 rounded-full bg-white px-2.5 py-3 text-slate-500 shadow-lg transition-transform dark:bg-[#242f3d] dark:text-slate-300"
+            style={{ transform: `translateY(${Math.max(-50, lift)}px)` }}>
+            <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /></svg>
+            <span className="text-xs">▲</span>
+          </div>
         )}
         {dragging && (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center border-4 border-dashed border-teal-500 bg-teal-500/10 text-lg font-bold text-teal-700">

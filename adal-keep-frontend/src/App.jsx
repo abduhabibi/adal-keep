@@ -28,6 +28,14 @@ const CVTemplatesPage = lazy(() => fresh(() => import('./pages/CVTemplatesPage')
 const CVTemplateEditPage = lazy(() => fresh(() => import('./pages/CVTemplateEditPage')))
 const CVTemplateDesignPage = lazy(() => fresh(() => import('./pages/CVTemplateDesignPage')))
 
+// Every page's code, fetched once while nothing else is happening: opening a
+// tab never waits for its code (the browser keeps those files for good).
+if (typeof window !== 'undefined' && import.meta.env.VITE_DEMO !== '1') {
+  const warm = () => [() => import('./pages/DashboardPage'), () => import('./pages/ProfilesPage'), () => import('./pages/ProfileDetailPage'), () => import('./pages/ProfileFormPage'), () => import('./pages/ChatPage'), () => import('./pages/TrashPage'), () => import('./pages/EmployeesPage'), () => import('./pages/BrokersPage'), () => import('./pages/BrokerDetailPage'), () => import('./pages/ChecklistPage'), () => import('./pages/SettingsPage'), () => import('./pages/NotificationsPage'), () => import('./pages/TasksPage'), () => import('./pages/CVsPage'), () => import('./pages/CVNewPage'), () => import('./pages/CVTemplatesPage'), () => import('./pages/CVTemplateEditPage'), () => import('./pages/CVTemplateDesignPage')]
+    .reduce((p, load) => p.then(() => new Promise(r => (window.requestIdleCallback || setTimeout)(() => load().catch(() => {}).finally(r)))), Promise.resolve())
+  window.addEventListener('load', () => setTimeout(warm, 2500), { once: true })
+}
+
 // After an update the old page files are gone: a page that cannot load
 // reloads Adal Keep once (then the new files are used).
 function fresh(load) {

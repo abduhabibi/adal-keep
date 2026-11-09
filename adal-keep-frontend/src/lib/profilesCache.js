@@ -18,7 +18,11 @@ api.interceptors.response.use((r) => {
 })
 
 export function profilesList({ fresh = false, onSaved } = {}) {
-  if (!fresh && hit && Date.now() - hit.at < KEEP_MS) return hit.promise
+  if (!fresh && hit && Date.now() - hit.at < KEEP_MS) {
+    // Still on its way (a slow line): the copy kept on this device shows meanwhile.
+    if (onSaved) import('./deviceCache').then(d => d.saved('/profiles')).then(old => { if (old !== undefined) onSaved(old) }).catch(() => {})
+    return hit.promise
+  }
   const promise = cachedGet('/profiles', { onSaved }).then(d => d || [])
   hit = { at: Date.now(), promise }
   promise.catch(() => { if (hit?.promise === promise) hit = null })

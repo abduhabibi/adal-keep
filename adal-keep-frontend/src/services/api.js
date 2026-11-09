@@ -23,6 +23,40 @@ const api = axios.create({
   }
 }
 
+// Every page's data kept on this device (asked for on 2026-11-09): the first
+// time a page asks for something on a visit, what was saved last time answers
+// at once and the PC's fresh answer is saved behind it (a different one
+// raises "adal-data-fresh": the layout shows the page again with it). Asked
+// again on the same visit (a page checking every few seconds), or right after
+// a change was sent, the PC answers. Live things always come from the PC.
+const LIVE = /^\/?(automations\/(active|\d+)|transitions|chat\/(messages|typing|unlock|file|image|search)|subscription|setup|auth|plan\/|whatsapp\/(notify|bulk)|system|updates|health|app\/|captcha|pc-access|mobile|tutor)/
+if (import.meta.env.VITE_DEMO !== '1') {
+  const get = api.get
+  const asked = new Set()
+  let dirtyUntil = 0
+  api.adalVisit = () => asked.clear()
+  api.adalDirty = () => { dirtyUntil = Date.now() + 8000 }
+  const keep = (key, r) => { import('../lib/idbStore').then(s => s.idbPut(key, r.data)).catch(() => {}); return r }
+  api.get = (url, config = {}) => {
+    const plain = !config.adalNoCache && (!config.responseType || config.responseType === 'json') && !LIVE.test(String(url))
+    if (!plain) return get(url, config)
+    return import('../lib/idbStore').then(async ({ idbGet, answerKey }) => {
+      const key = answerKey(api.defaults.baseURL, url, config.params)
+      if (asked.has(key) || Date.now() < dirtyUntil) { asked.add(key); return get(url, config).then(r => keep(key, r)) }
+      asked.add(key)
+      const net = get(url, config).then(r => keep(key, r))
+      const old = await idbGet(key)
+      if (old === undefined) return net
+      net.then(r => { if (JSON.stringify(r.data) !== JSON.stringify(old)) window.dispatchEvent(new CustomEvent('adal-data-fresh', { detail: { url } })) }).catch(() => {})
+      return { data: old, status: 200, statusText: 'OK (kept on this device)', headers: {}, config, fromDevice: true }
+    })
+  }
+  // A change sent to the PC: what is asked next comes from the PC.
+  // (Not the messages that change nothing: "still here", typing, opened, a check.)
+  const QUIET = /(ping|typing|device-resume|opened|plan\/refresh|alive|heartbeat|seen|read)\b/
+  api.interceptors.request.use((c) => { if (c.method && c.method.toLowerCase() !== 'get' && !QUIET.test(String(c.url))) dirtyUntil = Date.now() + 8000; return c })
+}
+
 // Who is working (the employee chosen on this PC): the Trash shows who deleted what.
 api.interceptors.request.use((config) => {
   try {

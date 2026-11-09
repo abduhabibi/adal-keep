@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
 import Navbar from './Navbar'
 import Sidebar from './Sidebar'
@@ -32,6 +32,30 @@ export default function MainLayout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   // The chat needs the room: the sidebar folds the moment it opens.
   const { pathname } = useLocation()
+  // Pages open from what this device kept (services/api.js); the PC's fresh
+  // answer, when it differs and comes within a few seconds, shows the page
+  // again with it — once per visit, never while something is being typed.
+  const [pageKey, setPageKey] = useState(0)
+  const visit = useRef({ path: '', at: 0, redone: false })
+  useEffect(() => { api.adalVisit?.(); visit.current = { path: pathname, at: Date.now(), redone: false } }, [pathname])
+  useEffect(() => {
+    let timer = null
+    const on = () => {
+      const v = visit.current
+      if (v.redone || Date.now() - v.at > 6000) return
+      clearTimeout(timer)
+      timer = setTimeout(() => {
+        const el = document.activeElement
+        if (el && (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.isContentEditable)) return
+        if (visit.current !== v || v.redone) return
+        v.redone = true
+        api.adalVisit?.()
+        setPageKey(k => k + 1)
+      }, 350)
+    }
+    window.addEventListener('adal-data-fresh', on)
+    return () => { window.removeEventListener('adal-data-fresh', on); clearTimeout(timer) }
+  }, [])
   const inChat = pathname.startsWith('/chat')
   useEffect(() => { if (inChat) setSidebarCollapsed(true) }, [inChat])
   // The profiles search pad is on every page (docked right); it can be folded away.
@@ -121,7 +145,7 @@ export default function MainLayout() {
         <div className="flex flex-1 min-h-0">
           <main className="flex-1 min-w-0 overflow-y-auto transition-colors duration-500 custom-scrollbar">
             <div className={inChat ? 'h-full' : 'px-3 py-4 sm:p-6'}>
-              <Outlet />
+              <Outlet key={pageKey} />
             </div>
           </main>
 

@@ -214,14 +214,18 @@ public class AdalDiscoveryPlugin extends Plugin {
         return true;
     }
 
-    /** Asks once for notifications, and keeps the app listening with the screen off. */
+    /**
+     * Asks once for notifications. The phone does not listen in the background
+     * any more (asked on 2026-11-09): no "listening" service, no lasting
+     * notification — and one left running from an older version is stopped.
+     */
     @PluginMethod
     public void startListening(PluginCall call) {
         Context c = getContext();
         if (Build.VERSION.SDK_INT >= 33 && androidx.core.content.ContextCompat.checkSelfPermission(c, android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
             androidx.core.app.ActivityCompat.requestPermissions(getActivity(), new String[] { android.Manifest.permission.POST_NOTIFICATIONS }, 7002);
         }
-        androidx.core.content.ContextCompat.startForegroundService(c, new Intent(c, AdalWatchService.class));
+        c.stopService(new Intent(c, AdalWatchService.class));
         call.resolve();
     }
 

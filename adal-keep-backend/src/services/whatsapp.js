@@ -29,9 +29,15 @@ let dbRef = null
 const sessions = new Map() // key → { client, state, own }
 
 /** Who is asking: the employee chosen on that PC or phone (?u=…), else the agency's owner. */
-export const keyOf = (u) => {
-  const k = String(u ?? '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40)
-  return k && k !== 'undefined' && k !== 'null' ? `u${k}` : 'owner'
+/**
+ * One WhatsApp for the whole agency (asked on 2026-11-09): connected once —
+ * from the phone or a PC — it is the same on this PC, every PC and every
+ * phone. Whoever asks gets the one already connected (else the one being set up).
+ */
+export const keyOf = () => {
+  const n = readNote()
+  const all = [...new Set([n.brave, ...(n.on || [])].filter(Boolean))]
+  return all.find(k => sessions.get(k)?.state?.status === 'ready') || n.brave || all[0] || 'owner'
 }
 
 const readNote = () => { try { return JSON.parse(fs.readFileSync(NOTE, 'utf8')) } catch { return { brave: null, on: [] } } }
@@ -531,10 +537,9 @@ export async function chatForNumber(key, number) {
 
 const parseIds = (v) => { try { return (JSON.parse(v || '[]') || []).map(Number).filter(Boolean) } catch { return [] } }
 export const agentRow = (a) => a && ({ ...a, template_ids: parseIds(a.template_ids), active: !!a.active })
-/** This person's agents (agents from before accounts belong to the first account). */
-export function agentsOf(db, key) {
-  const brave = readNote().brave
-  return db('whatsapp_agents').where(q => { q.where('user_key', key); if (key === brave || !brave) q.orWhereNull('user_key') })
+/** The agency's agents: one WhatsApp for everybody, so every agent (whoever added it). */
+export function agentsOf(db) {
+  return db('whatsapp_agents')
 }
 
 /** Her CV with this template: the newest one already made (file still there, made after her last change), else a new one. */

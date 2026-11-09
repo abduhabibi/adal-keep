@@ -7,6 +7,7 @@ import Button from '../components/shared/Button'
 import ChecklistGridView from '../components/ChecklistGridView'
 import { profilesDropped } from '../lib/profileDrag'
 import { onDataChange } from '../lib/changes'
+import { profilesList } from '../lib/profilesCache'
 
 export default function ChecklistPage() {
   const [allProfiles, setAllProfiles] = useState([])
@@ -31,10 +32,10 @@ export default function ChecklistPage() {
     if (quiet !== true) setLoading(true)
     try {
       const [profilesRes, checklistsRes] = await Promise.all([
-        api.get('/profiles'),
+        profilesList({ fresh: quiet === true }),
         api.get('/checklists')
       ])
-      setAllProfiles(profilesRes.data)
+      setAllProfiles(profilesRes)
       setChecklists(checklistsRes.data)
     } catch {
       toast.error('መረጃችን መጫን አልተቻለም')

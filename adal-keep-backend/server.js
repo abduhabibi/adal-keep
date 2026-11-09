@@ -23,6 +23,7 @@ import updatesRouter from './src/routes/updates.js'
 import tutorRouter from './src/routes/tutor.js'
 import systemUpdateRouter, { startUpdateWatcher } from './src/routes/systemUpdate.js'
 import { startMedicalWatcher } from './src/services/medicalValidity.js'
+import { startAppointmentWatcher } from './src/services/appointmentReminders.js'
 import { startCloudSync } from './src/services/cloudSync.js'
 import { startLiveChannel } from './src/services/liveChannel.js'
 import quickLinksRouter from "./src/routes/quickLinks.js"
@@ -93,6 +94,27 @@ app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false,
 app.use(cors((req, cb) => cb(null, { origin: originOk(req) ? (req.headers.origin || false) : false, credentials: true })))
 // From another computer: only one this PC said "Yes" to (services/networkGate.js).
 app.use(networkGate)
+// Big answers go packed (gzip) — the profiles list is megabytes, and a phone
+// reads it over its own connection: packed it is about a tenth.
+app.use((req, res, next) => {
+  if (!/gzip/.test(req.headers['accept-encoding'] || '')) return next()
+  const json = res.json.bind(res)
+  res.json = (body) => {
+    let text
+    try { text = JSON.stringify(body) } catch { return json(body) }
+    if (text === undefined || text.length < 8192 || res.headersSent) return json(body)
+    zlib.gzip(text, { level: 5 }, (e, buf) => {
+      if (res.headersSent) return
+      res.type('application/json')
+      if (e) return res.send(text)
+      res.set('Content-Encoding', 'gzip')
+      res.append('Vary', 'Accept-Encoding')
+      res.send(buf)
+    })
+    return res
+  }
+  next()
+})
 app.use(express.json({ limit: '15mb' }))   // CV designs preview with their header image
 // Any change (from the PC, a phone or Admin): what it touches goes online in
 // about a second and the phones refresh their own copy (services/cloudSync.js).
@@ -443,6 +465,7 @@ app.post('/api/profiles', async (req, res) => {
       'emergency_relationship',
       'emergency_labor_id',
       'visa_stage', 'visa_application_number', 'medical_valid_from', 'medical_valid_until',
+      'tasheer_date', 'tasheer_time', 'tasheer_center', 'tasheer_ref', 'wafid_appt_date', 'wafid_appt_time', 'wafid_center', 'wafid_slip_number',
       'cooking_skill',
       'destination_country',
       'date_of_birth',
@@ -534,6 +557,7 @@ app.put('/api/profiles/:id', async (req, res) => {
       'emergency_relationship',
       'emergency_labor_id',
       'visa_stage', 'visa_application_number', 'medical_valid_from', 'medical_valid_until',
+      'tasheer_date', 'tasheer_time', 'tasheer_center', 'tasheer_ref', 'wafid_appt_date', 'wafid_appt_time', 'wafid_center', 'wafid_slip_number',
       'cooking_skill',
       'destination_country',
       'date_of_birth',
@@ -753,6 +777,9 @@ app.delete('/api/brokers/:id', async (req, res) => {
   }
 })
 
+// The document fields not used for now: kept (with any file in them), not offered.
+const HIDDEN_FIELDS = new Set(['COC', 'Saudi-letter', 'Musaned', 'Broker ID', 'Ticket-ongoing', 'Ticket-deported', 'Police Clearance', 'Labour ID', 'Slip', 'Experience Form', 'Employee ID', 'Client ID'])
+
 // Fetch & auto-create permanent profile fields
 app.get('/api/profiles/:id/fields', async (req, res) => {
   try {
@@ -778,6 +805,8 @@ app.get('/api/profiles/:id/fields', async (req, res) => {
 
     const result = []
     for (const template of templates) {
+      // Not used now (asked on 2026-11-09): shown only when she already has a file in it.
+      const hidden = HIDDEN_FIELDS.has(template.name)
       // A profile can hold the same field twice: its files count whichever copy they are in.
       const copies = await database('profile_fields')
         .where('profile_id', id)
@@ -785,6 +814,7 @@ app.get('/api/profiles/:id/fields', async (req, res) => {
         .orderBy('id')
       let field = copies[0]
 
+      if (!field && hidden) continue
       if (!field) {
         const [newFieldId] = await database('profile_fields').insert({
           profile_id: id,
@@ -800,6 +830,7 @@ app.get('/api/profiles/:id/fields', async (req, res) => {
         .whereIn('profile_field_id', copies.length ? copies.map(c => c.id) : [field.id])
         .select('id', 'original_name', 'path', 'mimetype', 'size')
 
+      if (hidden && !files.length) continue
       result.push({ ...field, files })
     }
 
@@ -1175,6 +1206,7 @@ initSystem().then(() => {
     console.log(`🚀 Backend running on http://localhost:${PORT}`)
     startUpdateWatcher(app.locals.db) // a new version installs by itself when no run is working
     startMedicalWatcher(app.locals.db) // the medical's battery: warnings as it runs out
+    startAppointmentWatcher(app.locals.db) // Tasheer / Wafid appointments: a reminder the day before
     startCloudSync(app.locals.db)      // the online copy phones use when this PC is off
     startLiveChannel(app.locals.db)    // phones ↔ this PC, instant (Supabase Realtime)
     if (isFollower()) {

@@ -55,3 +55,12 @@ test('a CV is complete when made, or when all it shows is there', async () => {
   assert.deepEqual(cvMissing({ full_name: 'A B', passport_number: 'EP1234567', date_of_birth: '2000-01-01' }, new Set(['Photo', 'Passport'])), [])
   assert.deepEqual(cvMissing({ full_name: 'A B', passport_number: 'EP1234567' }, new Set(['Photo'])), ['date of birth', 'passport scan'])
 })
+
+test('an appointment is reminded of the day before, once', async () => {
+  const { dueReminders } = await import('../src/services/appointmentReminders.js')
+  const now = new Date(2026, 10, 9, 10)
+  const p = { tasheer_date: '2026-11-10', tasheer_time: '09:30', tasheer_center: 'Addis Ababa', wafid_appt_date: '2026-11-20' }
+  const due = dueReminders(p, now)
+  assert.equal(due.length, 1); assert.equal(due[0].when, 'tomorrow'); assert.equal(due[0].kind.key, 'tasheer')
+  assert.equal(dueReminders({ ...p, appointment_alerts_sent: JSON.stringify([due[0].id]) }, now).length, 0)
+})

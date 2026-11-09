@@ -67,6 +67,14 @@ const emptyForm = {
   experience_years: '',
   personal_number: '',
   emergency_name: '',
+  tasheer_date: '',
+  tasheer_time: '',
+  tasheer_center: '',
+  tasheer_ref: '',
+  wafid_appt_date: '',
+  wafid_appt_time: '',
+  wafid_center: '',
+  wafid_slip_number: '',
   emergency_phone: '',
   emergency_gender: 'Male',
   emergency_relationship: 'Father',
@@ -173,7 +181,15 @@ export default function ProfileFormPage() {
             experience_country: p.experience_country || '',
             experience_years: p.experience_years ?? '',
             personal_number: p.personal_number || '',
-            emergency_name: p.emergency_name || '',
+            emergency_name: p.emergency_name || p.father_name || '',
+            tasheer_date: p.tasheer_date || '',
+            tasheer_time: p.tasheer_time || '',
+            tasheer_center: p.tasheer_center || '',
+            tasheer_ref: p.tasheer_ref || '',
+            wafid_appt_date: p.wafid_appt_date || '',
+            wafid_appt_time: p.wafid_appt_time || '',
+            wafid_center: p.wafid_center || '',
+            wafid_slip_number: p.wafid_slip_number || '',
             emergency_phone: p.emergency_phone || '',
             emergency_gender: p.emergency_gender || 'Male',
             emergency_relationship: p.emergency_relationship || 'Father',
@@ -417,10 +433,6 @@ export default function ProfileFormPage() {
             <input id="full_name" required className={inputClass} value={form.full_name} onChange={setField('full_name')} />
           </div>
           <div>
-            <label className={labelClass} htmlFor="order_id">Order ID</label>
-            <input id="order_id" className={inputClass} value={form.order_id} onChange={setField('order_id')} />
-          </div>
-          <div>
             <label className={labelClass} htmlFor="phone_number">ስልክ ቁጥር *</label>
             <input id="phone_number" required type="tel" className={inputClass} placeholder="251 9XX XXX XXX" value={form.phone_number} onChange={setField('phone_number')} />
           </div>
@@ -459,9 +471,6 @@ export default function ProfileFormPage() {
           <div className="sm:col-span-2">
             <label className={labelClass} htmlFor="destination_country">
               Destination Country *
-              <span className="ml-2 text-[10px] text-teal-600 font-semibold">
-                (Kuwait auto-starts Police Clearance)
-              </span>
             </label>
             <select
               id="destination_country"
@@ -564,7 +573,7 @@ export default function ProfileFormPage() {
             </select>
           </div>
           <div>
-            <label className={labelClass} htmlFor="emergency_name">Guardian / Emergency name (auto from middle)</label>
+            <label className={labelClass} htmlFor="emergency_name">Emergency name (her father — from the middle name)</label>
             <input id="emergency_name" className={inputClass} value={form.emergency_name} onChange={setField('emergency_name')} />
           </div>
           <div>
@@ -591,9 +600,26 @@ export default function ProfileFormPage() {
           </div>
         </div>
 
+        {/* ---- Appointment slips: Tasheer (visa biometrics) and the Wafid medical — a reminder the day before ---- */}
+        <div className="rounded-xl border border-slate-200 p-4 dark:border-slate-700">
+          <p className="mb-3 text-sm font-semibold text-slate-700 dark:text-slate-200">📅 Appointments <span className="font-normal text-xs text-slate-500">— a reminder comes the day before; the slips go in Documents (Tasheer Slip; the Wafid one in Appointment Slip)</span></p>
+          {[['tasheer', 'Tasheer (visa biometrics)', ['tasheer_date', 'tasheer_time', 'tasheer_center', 'tasheer_ref'], 'Reference number'],
+            ['wafid', 'Wafid medical', ['wafid_appt_date', 'wafid_appt_time', 'wafid_center', 'wafid_slip_number'], 'Slip number']].map(([k, title, [d, t, c, r], refLabel]) => (
+            <div key={k} className="mb-3 last:mb-0">
+              <p className="mb-1 text-xs font-bold uppercase tracking-wide text-teal-700 dark:text-teal-300">{title}</p>
+              <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
+                <div><label className={smallLabel} htmlFor={d}>Date</label><input id={d} type="date" className={smallInput} value={form[d]} onChange={setField(d)} /></div>
+                <div><label className={smallLabel} htmlFor={t}>Time</label><input id={t} type="time" className={smallInput} value={form[t]} onChange={setField(t)} /></div>
+                <div><label className={smallLabel} htmlFor={c}>{k === 'tasheer' ? 'Centre' : 'Medical centre'}</label><input id={c} className={smallInput} value={form[c]} onChange={setField(c)} placeholder={k === 'tasheer' ? 'Addis Ababa' : ''} /></div>
+                <div><label className={smallLabel} htmlFor={r}>{refLabel}</label><input id={r} className={smallInput} value={form[r]} onChange={setField(r)} /></div>
+              </div>
+            </div>
+          ))}
+        </div>
+
         {/* ---- Rarely used: kept, editable, folded away ---- */}
         <details className="rounded-xl border border-slate-200 dark:border-slate-700 p-4 group">
-          <summary className="cursor-pointer text-sm font-semibold text-slate-600 dark:text-slate-300 select-none">More details (optional) — second phone, height, weight, parents, region, education …</summary>
+          <summary className="cursor-pointer text-sm font-semibold text-slate-600 dark:text-slate-300 select-none">More details (optional) — second phone, height, weight, region, education …</summary>
           <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <div>
               <label className={smallLabel} htmlFor="phone_number_2">Second phone</label>
@@ -610,14 +636,6 @@ export default function ProfileFormPage() {
           <div>
             <label className={smallLabel} htmlFor="education_level">Education</label>
             <input id="education_level" className={smallInput} value={form.education_level} onChange={setField('education_level')} />
-          </div>
-          <div>
-            <label className={smallLabel} htmlFor="mother_name">Mother's name</label>
-            <input id="mother_name" className={smallInput} value={form.mother_name} onChange={setField('mother_name')} />
-          </div>
-          <div>
-            <label className={smallLabel} htmlFor="father_name">Father's name</label>
-            <input id="father_name" className={smallInput} value={form.father_name} onChange={setField('father_name')} />
           </div>
           <div>
             <label className={smallLabel} htmlFor="region">Region</label>

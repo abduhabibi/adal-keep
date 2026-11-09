@@ -8,10 +8,11 @@ import { printOnPhone } from '../lib/phoneApp'
 import { AmharicKeys, typeAmharic, useAmharicTyping } from '../lib/amharicInput'
 import { onDataChange } from '../lib/changes'
 
+// COC, Saudi letter, Musaned, Broker ID, the tickets, Police Clearance, Labour ID,
+// Slip, Experience Form, Employee ID and Client ID are not used for now (2026-11-09).
 const ALL_FIELDS = [
-  'Government ID', 'Passport', 'CV', 'Contract', 'Medical Report', 'Insurance', 'COC',
-  'Police Clearance', 'Visa', 'Saudi-letter', 'Musaned', 'Broker ID', 'Ticket-ongoing',
-  'Ticket-deported', 'Labour ID', 'Slip', 'Experience Form', 'Employee ID', 'Client ID'
+  'Government ID', 'Passport', 'CV', 'Contract', 'Medical Report', 'Insurance', 'Visa',
+  'Tasheer Slip', 'Appointment Slip',
 ]
 
 // Profile details that can be columns too.

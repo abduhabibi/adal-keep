@@ -11,6 +11,7 @@ import { useProfileFilters } from '../components/profileFilters'
 import { JourneyFork, SHARED, BRANCHES } from '../components/ProfileJourney'
 import SelectionBar from '../components/SelectionBar'
 import { onDataChange } from '../lib/changes'
+import { profilesList } from '../lib/profilesCache'
 
 const STATUS_OPTIONS_AM = [
   { value: 'pending', label: 'በመጠባበቅ ላይ' },
@@ -41,10 +42,10 @@ export default function ProfilesPage() {
       if (brokerId) params.broker_id = brokerId
 
       const [profilesRes, brokersRes] = await Promise.all([
-        api.get('/profiles', { params }),
+        Object.keys(params).length ? api.get('/profiles', { params }).then(r => r.data) : profilesList({ fresh: quiet === true }),
         api.get('/brokers'),
       ])
-      setProfiles(profilesRes.data)
+      setProfiles(profilesRes)
       setBrokers(brokersRes.data)
     } catch {
       if (quiet !== true) toast.error('ፕሮፋይሎችን መጫን አልተቻለም')

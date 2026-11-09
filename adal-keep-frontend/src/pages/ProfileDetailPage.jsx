@@ -151,7 +151,8 @@ export default function ProfileDetailPage() {
       </div>
 
       {/* Auto-trigger status */}
-      {profile.destination_country?.toLowerCase() === 'kuwait' && (
+      {/* Police clearance: not used for now (its code stays for later). */}
+      {false && profile.destination_country?.toLowerCase() === 'kuwait' && (
         <div className={`panel p-4 border-l-4 ${
           cvReadiness?.can_generate ? 'border-l-emerald-500 bg-emerald-50/30 dark:bg-emerald-900/10'
                                     : 'border-l-amber-400 bg-amber-50/30 dark:bg-amber-900/10'
@@ -181,7 +182,6 @@ export default function ProfileDetailPage() {
         <Fold id="details" title="Client details" className="panel p-4 sm:p-6 lg:col-span-1">
           <dl className="mt-4 grid grid-cols-1 gap-3">
             <Field label="Full name" value={profile.full_name} />
-            <Field label="Order ID" value={profile.order_id} />
             {amharicName && <Field label="Full name (AM)" value={amharicName} />}
             <Field label="Phone" value={profile.phone_number} />
             <Field label="National ID" value={profile.national_id} />
@@ -199,8 +199,6 @@ export default function ProfileDetailPage() {
             <Field label="Children" value={profile.children_count != null && String(profile.children_count).trim() !== '' ? String(Number(profile.children_count) || 0) : '0'} />
             <Field label="Weight" value={profile.weight} />
             <Field label="Height" value={profile.height} />
-            <Field label="Mother's name" value={profile.mother_name} />
-            <Field label="Father's name" value={profile.father_name} />
             <Field label="Education" value={profile.education_level} />
             <Field
               label="Work experience"
@@ -214,10 +212,12 @@ export default function ProfileDetailPage() {
             <Field label="Zone / Sub-city" value={profile.zone_subcity} />
             <Field label="Personal number" value={profile.personal_number} />
             <Field label="Cooking skill" value={profile.cooking_skill} />
-            <Field label="Emergency name" value={profile.emergency_name} />
+            <Field label="Emergency name (father)" value={profile.emergency_name || profile.father_name} />
             <Field label="Emergency phone" value={profile.emergency_phone} />
             <Field label="Emergency relationship" value={profile.emergency_relationship} />
             <Field label="Destination Country" value={profile.destination_country} />
+            {profile.tasheer_date && <Field label="📅 Tasheer (visa biometrics)" value={[profile.tasheer_date, profile.tasheer_time, profile.tasheer_center, profile.tasheer_ref && `ref ${profile.tasheer_ref}`].filter(Boolean).join(' · ')} />}
+            {profile.wafid_appt_date && <Field label="📅 Wafid medical" value={[profile.wafid_appt_date, profile.wafid_appt_time, profile.wafid_center, profile.wafid_slip_number && `slip ${profile.wafid_slip_number}`].filter(Boolean).join(' · ')} />}
             <Field label="Broker" value={profile.broker_name || 'Unassigned'} />
             <Field label="Created" value={formatDate(profile.created_at)} />
             <Field label="Updated" value={formatDate(profile.updated_at)} />

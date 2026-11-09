@@ -80,6 +80,21 @@ function AskHost() {
   )
 }
 
+/**
+ * Asks again only once the last answer is in (never a pile of requests on a
+ * slow phone line), and seldom while the app is out of sight.
+ */
+function every(fn, ms) {
+  let on = true, timer = null
+  const go = async () => {
+    if (!on) return
+    try { await fn() } catch {}
+    if (on) timer = setTimeout(go, document.hidden ? Math.max(ms, 15000) : ms)
+  }
+  go()
+  return () => { on = false; clearTimeout(timer) }
+}
+
 export default function ChatPage() {
   const [status, setStatus] = useState(null)
   const [agencies, setAgencies] = useState([])
@@ -130,12 +145,11 @@ export default function ChatPage() {
   }, [])
   useEffect(() => {
     if (!status?.configured) return
-    loadSide()
     api.post('/chat/ping').catch(() => {})
-    const t1 = setInterval(loadSide, 4000)
+    const stop1 = every(loadSide, 4000)
     const t2 = setInterval(() => api.post('/chat/ping').catch(() => {}), 30000)
     const t3 = setInterval(() => setNow(Date.now()), 15000)
-    return () => { clearInterval(t1); clearInterval(t2); clearInterval(t3) }
+    return () => { stop1(); clearInterval(t2); clearInterval(t3) }
   }, [status?.configured, loadSide])
 
   // the open chat: messages (new + edited/deleted), typing, members
@@ -159,15 +173,14 @@ export default function ChatPage() {
         }
       } catch {}
     }
-    const side = async () => {
-      try {
-        const [t, mem] = await Promise.all([api.get('/chat/typing', { params: { conversation: open.id } }), api.get(`/chat/groups/${open.id}/members`)])
-        if (alive) { setTyping(Array.isArray(t.data) ? t.data : []); setMembers(Array.isArray(mem.data) ? mem.data : []) }
-      } catch {}
+    const typingNow = async () => {
+      try { const t = await api.get('/chat/typing', { params: { conversation: open.id } }); if (alive) setTyping(Array.isArray(t.data) ? t.data : []) } catch {}
     }
-    pull(); side()
-    const a = setInterval(pull, 2000), b = setInterval(side, 3000)
-    return () => { alive = false; clearInterval(a); clearInterval(b) }
+    const membersNow = async () => {
+      try { const mem = await api.get(`/chat/groups/${open.id}/members`); if (alive) setMembers(Array.isArray(mem.data) ? mem.data : []) } catch {}
+    }
+    const stops = [every(pull, 2000), every(typingNow, 3000), every(membersNow, 15000)]
+    return () => { alive = false; stops.forEach(f => f()) }
   }, [open?.id])
 
   useEffect(() => {

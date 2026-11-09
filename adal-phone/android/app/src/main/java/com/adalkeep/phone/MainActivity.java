@@ -55,25 +55,12 @@ public class MainActivity extends BridgeActivity {
         });
     }
 
-    // Out of sight the page keeps running (AdalWatchService keeps the app alive):
-    // it is what hears the PC's calls and shows them as notifications.
-    private void keepPageRunning() {
-        WebView web = getBridge() != null ? getBridge().getWebView() : null;
-        if (web == null) return;
-        web.onResume();
-        web.resumeTimers();
-    }
-
+    // Out of sight the app rests (it does not listen in the background); a
+    // "listening" service left from an older version is stopped.
     @Override
-    public void onPause() {
-        super.onPause();
-        keepPageRunning();
-    }
-
-    @Override
-    public void onStop() {
-        super.onStop();
-        keepPageRunning();
+    public void onResume() {
+        super.onResume();
+        try { stopService(new android.content.Intent(this, AdalWatchService.class)); } catch (Exception e) { /* none running */ }
     }
 
     private void exitOrWarn() {

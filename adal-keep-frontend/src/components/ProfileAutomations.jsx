@@ -398,7 +398,8 @@ export default function ProfileAutomations({ profileId }) {
     { title: 'Tasheer', ids: [], empty: 'Coming soon — the Tasheer steps are added next.', box: 'border-amber-200 dark:border-amber-800 border-dashed', head: 'text-amber-700 dark:text-amber-300' },
     { title: 'Insurance', ids: ['insurance_certificate'], box: 'border-rose-200 dark:border-rose-800', head: 'text-rose-700 dark:text-rose-300' },
     { title: 'Enjaz · Visa', ids: ['mofa_visa', 'mofa_find_app', 'mofa_pay'], box: 'border-sky-200 dark:border-sky-800', head: 'text-sky-700 dark:text-sky-300' },
-    { title: 'LMIS · Police clearance', ids: ['police_certificate'], box: 'border-slate-200 dark:border-slate-700', head: 'text-slate-600 dark:text-slate-300' },
+    // Not used for now (its code stays for later): not shown.
+    { title: 'LMIS · Police clearance', hidden: true, ids: ['police_certificate'], box: 'border-slate-200 dark:border-slate-700', head: 'text-slate-600 dark:text-slate-300' },
   ]
   const grouped = GROUPS.flatMap(g => g.ids)
   const otherFlows = workflows.filter(w => !grouped.includes(w.id))
@@ -513,7 +514,7 @@ export default function ProfileAutomations({ profileId }) {
 
       {/* Each portal's login sits in its own box below (with its cards). */}
       {/* The journey, in order: each portal's actions in one box. */}
-      {GROUPS.map(g => {
+      {GROUPS.filter(g => !g.hidden).map(g => {
         const flows = g.ids.map(id => workflows.find(w => w.id === id)).filter(Boolean)
         return (
           <div key={g.title} className={`mb-2.5 rounded-xl border-2 px-3 py-2 ${g.box}`}>

@@ -6,6 +6,7 @@ import api from '../services/api'
 import PageHeader from '../components/shared/PageHeader'
 import Spinner from '../components/shared/Spinner'
 import Input from '../components/shared/Input'
+import { profilesList } from '../lib/profilesCache'
 
 export default function BrokersPage() {
   const navigate = useNavigate()
@@ -23,10 +24,10 @@ export default function BrokersPage() {
     try {
       const [brokersRes, profilesRes] = await Promise.all([
         api.get('/brokers'),
-        api.get('/profiles')
+        profilesList()
       ])
       setBrokers(brokersRes.data || [])
-      setProfiles(profilesRes.data || [])
+      setProfiles(profilesRes || [])
     } catch (err) {
       toast.error('ደላሎችን መጫን አልተቻለም')
     } finally {

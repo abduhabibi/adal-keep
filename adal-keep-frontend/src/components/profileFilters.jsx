@@ -74,10 +74,12 @@ const empty = (v) => !norm(v)
 /** In phase k: step k done and no step after it done (like CvPlus's tabs). */
 const LATER = {}
 // At Wafid: booked, fit or unfit, and nothing after it done yet.
-const WAFID = { 'wafid:fit': ['done'], 'wafid:pending': ['active'], 'wafid:unfit': ['failed'] }
+const WAFID = { 'wafid:fit': ['done'], 'wafid:pending': ['active'], 'wafid:unfit': ['failed'], 'wakala:paid': ['done'], 'wakala:unpaid': ['failed'] }
 export function inPhase(steps = {}, k) {
-  if (WAFID[k]) return WAFID[k].includes(steps.wafid) && inLater(steps, 'wafid')
+  if (WAFID[k]) { const s = k.split(':')[0]; return WAFID[k].includes(steps[s]) && inLater(steps, s) }
   if (k === 'wafid') return ['done', 'active', 'failed'].includes(steps.wafid) && inLater(steps, 'wafid')
+  // At the wakala: paid, or chosen with it unpaid — nothing after it done yet.
+  if (k === 'wakala') return ['done', 'failed'].includes(steps.wakala) && inLater(steps, 'wakala')
   if (steps[k] !== 'done') return false
   return inLater(steps, k)
 }

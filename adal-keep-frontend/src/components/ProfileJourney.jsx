@@ -40,7 +40,7 @@ const SPOT = {
 // On a phone the wakala is a step of its own at the start of the Embassy row (no room for a box on the curve).
 // A U on a phone: CV → Wafid along the top, a turn down at the right, Wakala → Visa back along the bottom.
 const NARROW_X = { cv: 0, musaned: 1 / 3, selected: 2 / 3, wafid: 1, wakala: 1, tasheer: 2 / 3, insurance: 1 / 3, visa: 0 }
-const NARROW_RESULTS = { 'wafid:fit': 0.2, 'wafid:pending': 0.45, 'wafid:unfit': 0.7 }
+const NARROW_RESULTS = { 'wafid:fit': 0.2, 'wafid:pending': 0.45, 'wafid:unfit': 0.7, 'wakala:paid': 0.55, 'wakala:unpaid': 0.85 }
 const NARROW_WIRES = Object.entries(PARENT_OF()).map(([to, from]) => ({ from, to, curve: from === 'wafid' }))
 function PARENT_OF() { return { musaned: 'cv', selected: 'musaned', wafid: 'selected', wakala: 'wafid', tasheer: 'wakala', insurance: 'tasheer', visa: 'insurance' } }
 const BOX = new Set(['wakala'])
@@ -62,15 +62,19 @@ export function after(k) {
 }
 // On the list: a click on Wafid opens three curved wires down to its results.
 export const WAFID_RESULTS = [['wafid:fit', 'Fit'], ['wafid:pending', 'Pending'], ['wafid:unfit', 'Unfit']]
+// A click on Wakala: Paid (on Musaned) and Unpaid (chosen, the wakala not paid yet).
+export const STEP_RESULTS = { wafid: WAFID_RESULTS, wakala: [['wakala:paid', 'Paid'], ['wakala:unpaid', 'Unpaid']] }
 // Where each result sits left of Wafid, in steps of a gap wide enough for its name.
-const RESULT_DX = { 'wafid:fit': -2.25, 'wafid:pending': -1.2, 'wafid:unfit': -0.15 }
+const RESULT_DX = { 'wafid:fit': -2.25, 'wafid:pending': -1.2, 'wafid:unfit': -0.15, 'wakala:paid': -1.2, 'wakala:unpaid': -0.15 }
 const RESULT_DX_NARROW = { 'wafid:fit': -2.5, 'wafid:pending': -1.45, 'wafid:unfit': -0.45 }
 const RESULT_LOOK = {
+  'wakala:paid': { dot: 'bg-emerald-500 text-white', text: 'text-emerald-600 dark:text-emerald-300' },
+  'wakala:unpaid': { dot: 'bg-red-500 text-white', text: 'text-red-600 dark:text-red-400' },
   'wafid:fit': { dot: 'bg-emerald-500 text-white', text: 'text-emerald-600 dark:text-emerald-300' },
   'wafid:pending': { dot: 'bg-amber-400 text-white', text: 'text-amber-600 dark:text-amber-300' },
   'wafid:unfit': { dot: 'bg-red-500 text-white', text: 'text-red-600 dark:text-red-400' },
 }
-const RESULT_RING = { 'wafid:fit': 'stroke-emerald-500', 'wafid:pending': 'stroke-amber-400', 'wafid:unfit': 'stroke-red-500' }
+const RESULT_RING = { 'wafid:fit': 'stroke-emerald-500', 'wafid:pending': 'stroke-amber-400', 'wafid:unfit': 'stroke-red-500', 'wakala:paid': 'stroke-emerald-500', 'wakala:unpaid': 'stroke-red-500' }
 const SIZE = {
   compact: { r: 11, rowGap: 26, block: 36 },
   full:    { r: 14, rowGap: 42, block: 60 },
@@ -132,7 +136,11 @@ export function JourneyFork({ states = {}, notes = {}, counts, selected, onSelec
     setW(el.clientWidth)
     return () => ro.disconnect()
   }, [])
-  const results = pick && (selected === 'wafid' || RESULT_DX[selected] != null)
+  // A step with branches picked (Wafid, Wakala), or one of its branches.
+  const result = RESULT_DX[selected] != null ? selected : null
+  const branchOf = result ? result.split(':')[0] : STEP_RESULTS[selected] ? selected : null
+  const results = pick && !!branchOf
+  const resultList = results ? STEP_RESULTS[branchOf] : []
   // The results hang below the first row's names: the bar grows to hold them.
   const narrow = compact && w > 0 && w < 520
   // On a phone the Embassy row sits lower, clear of the first row's names.
@@ -144,7 +152,9 @@ export function JourneyFork({ states = {}, notes = {}, counts, selected, onSelec
   const edge = compact ? 26 : EDGE, labels = narrow ? 0 : LABELS
   const cx = (k) => edge + (narrow ? NARROW_X[k] ?? SPOT[k][0] : SPOT[k][0]) * Math.max(0, w - edge - labels - edge)
   // On a phone with Fit / Pending / Unfit open, they take the middle and the bottom row moves down.
-  const row = (k) => { const r = narrow && BOX.has(k) ? 1 : SPOT[k][1]; return narrow && results && r === 1 ? 2 : r }
+  // On a phone: Wafid's branches take the middle row (the bottom row moves down); Wakala's hang under it.
+  const row = (k) => { const r = narrow && BOX.has(k) ? 1 : SPOT[k][1]; return narrow && results && branchOf === 'wafid' && r === 1 ? 2 : r }
+  const resultsTop = narrow && branchOf === 'wakala' ? 2 * rowGap : rowGap + drop
   const cy = (k) => row(k) * rowGap + z.r
   const isBox = (k) => BOX.has(k) && !narrow
   const wires = narrow ? NARROW_WIRES : WIRES
@@ -152,9 +162,8 @@ export function JourneyFork({ states = {}, notes = {}, counts, selected, onSelec
   // The path to the picked step lights up (on the list); on a profile a wire
   // is lit when both its ends are done, and pulses towards a step in progress.
   const chain = new Set()
-  const result = RESULT_DX[selected] != null ? selected : null
   if (result) chain.add(result)
-  for (let k = result ? 'wafid' : selected; k; k = PARENT[k]) chain.add(k)
+  for (let k = result ? branchOf : selected; k; k = PARENT[k]) chain.add(k)
 
   const end = (wire) => wire.via && !(pick ? chain.has(wire.to) : ['done', 'active'].includes(states[wire.to])) ? wire.via : wire.to
   const lit = (wire) => pick ? chain.has(end(wire)) : states[wire.from] === 'done' && ['done', 'active'].includes(states[end(wire)])
@@ -174,9 +183,11 @@ export function JourneyFork({ states = {}, notes = {}, counts, selected, onSelec
   }
   const steps = [...SHARED, ...BRANCHES.flatMap(b => b.steps)]
   const step = Math.max(36, Math.min(80, (cx('wafid') - edge) / 2.5))
-  const rx = (k) => narrow ? edge + NARROW_RESULTS[k] * Math.max(0, w - 2 * edge) : Math.max(edge, cx('wafid') + RESULT_DX[k] * step)
+  // Where a branch hangs from: the step's dot (Wakala on a wide screen: its box on the curve).
+  const from = () => branchOf === 'wakala' && isBox('wakala') ? { x: box.x, y: box.y + 12 } : { x: cx(branchOf), y: cy(branchOf) + z.r + 1 }
+  const rx = (k) => narrow ? edge + NARROW_RESULTS[k] * Math.max(0, w - 2 * edge) : Math.max(edge, from().x + RESULT_DX[k] * step)
   const resultWire = (k) => {
-    const x1 = cx('wafid'), y1 = cy('wafid') + z.r + 1, x2 = rx(k), y2 = rowGap + drop + 1, d = (y2 - y1) * 0.6
+    const { x: x1, y: y1 } = from(), x2 = rx(k), y2 = resultsTop + 1, d = (y2 - y1) * 0.6
     return `M${x1},${y1} C${x1},${y1 + d} ${x2},${y2 - d} ${x2},${y2}`
   }
   const gap = cx('musaned') - cx('cv') - 4   // the first row's steps sit closest
@@ -206,7 +217,7 @@ export function JourneyFork({ states = {}, notes = {}, counts, selected, onSelec
                 </g>
               )
             })}
-            {results && WAFID_RESULTS.map(([k]) => (
+            {resultList.map(([k]) => (
               <path key={k} d={resultWire(k)} pathLength="100" fill="none" strokeLinecap="round" className={`journey-grow transition-all duration-500 ${RESULT_RING[k]} ${selected === k ? 'journey-glow' : 'opacity-60'}`} strokeWidth={selected === k ? 2.5 : 2} />
             ))}
           </svg>
@@ -216,9 +227,9 @@ export function JourneyFork({ states = {}, notes = {}, counts, selected, onSelec
             count={counts?.[k]} selected={selected === k} dim={pick && selected && !chain.has(k)} onSelect={onSelect}
             compact={compact} narrow={narrow} round={!isBox(k)} left={isBox(k) ? box.x : cx(k)} top={isBox(k) ? box.y : row(k) * rowGap} angle={box.angle} />
         ))}
-        {w > 0 && results && WAFID_RESULTS.map(([k, title]) => (
+        {w > 0 && resultList.map(([k, title]) => (
           <Node key={k} k={k} title={title} count={counts?.[k]} selected={selected === k} dim={!!result && selected !== k} onSelect={onSelect}
-            compact={compact} narrow={narrow} left={rx(k)} top={rowGap + drop} look={RESULT_LOOK[k]} />
+            compact={compact} narrow={narrow} left={rx(k)} top={resultsTop} look={RESULT_LOOK[k]} />
         ))}
         {/* the two branches' names, at the right end of their rows */}
         {!narrow && BRANCHES.map((b, i) => (

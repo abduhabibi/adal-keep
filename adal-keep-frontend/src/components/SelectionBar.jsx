@@ -15,6 +15,7 @@ import api from '../services/api'
 import { useAuth } from '../context/AuthContext'
 import { loadEmbassy, printEmbassy } from '../lib/embassyPrint'
 import { dragProfiles } from '../lib/profileDrag'
+import WhatsAppNotice from './WhatsAppNotice'
 
 const err = (e) => e?.response?.data?.error || e.message
 
@@ -62,6 +63,7 @@ export default function SelectionBar({ picked, onRemove, onClear, onAllShown, on
   const [open, setOpen] = useState(true)
   const [sheet, setSheet] = useState(null)
   const [naming, setNaming] = useState(null) // the checklist panel is open: the new one's name, while typed
+  const [messaging, setMessaging] = useState(false) // the WhatsApp message panel is open
   const [lists, setLists] = useState(null)     // the checklists already made (to add the selected to)
   const navigate = useNavigate()
   const openLists = () => {
@@ -106,6 +108,7 @@ export default function SelectionBar({ picked, onRemove, onClear, onAllShown, on
   // One run per girl. The server checks each one before it starts (the same
   // check as on her profile): those that lack something are listed, not started.
   const startAll = async (workflowId, name) => {
+    if (workflowId === 'insurance_certificate' && picked.length > 1) return insureTogether(name)
     setBusy(workflowId)
     let ok = 0
     const rows = []
@@ -116,6 +119,26 @@ export default function SelectionBar({ picked, onRemove, onClear, onAllShown, on
     setBusy('')
     if (ok) toast.success(`${name}: started for ${ok} girl${ok === 1 ? '' : 's'}`)
     showLacking(`${name}: ${rows.length} not started — they lack something`, ok ? `Started for the ${ok} who have everything.` : 'Nobody had everything yet.', rows)
+  }
+
+  // Make insurance for several: ONE FetaP certificate with all of them as
+  // members (Number Of Insured = how many). The first who has everything leads.
+  const insureTogether = async (name) => {
+    setBusy('insurance_certificate')
+    const rows = []
+    let started = null
+    for (const p of picked) {
+      try {
+        const r = await api.post(`/profiles/${p.id}/automations/insurance_certificate/start`, { group_ids: picked.map(x => x.id) })
+        started = r.data
+        for (const s of r.data?.skipped || []) { const q = picked.find(x => x.id === s.id); if (q) rows.push({ p: q, missing: s.missing }) }
+        break
+      } catch (e) { rows.push({ p, missing: e?.response?.data?.missing?.length ? e.response.data.missing : [err(e)] }) }
+    }
+    setBusy('')
+    if (started) toast.success(`${name}: one certificate for ${started.members || 1} — Adal Keep fills each and presses Add Member, then tells you.`, { duration: 8000 })
+    const once = [...new Map(rows.map(r => [r.p.id, r])).values()]
+    showLacking(`${name}: ${once.length} not on the certificate — they lack something`, started ? `On the certificate: ${started.members || 1}.` : 'Nobody had everything yet.', once)
   }
 
   const print = async () => {
@@ -160,6 +183,9 @@ export default function SelectionBar({ picked, onRemove, onClear, onAllShown, on
             🖨️ {busy === 'print' ? 'Checking…' : 'Print embassy'} <span className="ml-auto hidden text-[10px] font-normal opacity-80 lg:inline">{picked.length * 2} pages</span></button>
           <button type="button" className={`${btn} bg-indigo-50 text-indigo-800 hover:bg-indigo-100 dark:bg-indigo-900/30 dark:text-indigo-300`} disabled={!!busy}
             onClick={openLists}>📋 {busy === 'checklist' ? 'Saving…' : 'Checklist'} <span className="ml-auto hidden text-[10px] font-normal opacity-80 lg:inline">new or add</span></button>
+          <button type="button" className={`${btn} bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:bg-emerald-900/30 dark:text-emerald-300`} disabled={!!busy}
+            onClick={() => setMessaging(m => !m)}>💬 WhatsApp <span className="ml-auto hidden text-[10px] font-normal opacity-80 lg:inline">text or voice</span></button>
+          {messaging && <WhatsAppNotice picked={picked} onClose={() => setMessaging(false)} />}
           {naming != null && (
             <div className="col-span-2 space-y-2 rounded-xl border border-indigo-200 bg-indigo-50/50 p-2 dark:border-indigo-800 dark:bg-indigo-900/20 lg:col-span-1">
               <form onSubmit={makeChecklist} className="flex gap-1.5">

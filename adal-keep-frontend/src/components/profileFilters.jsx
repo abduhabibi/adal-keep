@@ -78,8 +78,7 @@ const WAFID = { 'wafid:fit': ['done'], 'wafid:pending': ['active'], 'wafid:unfit
 export function inPhase(steps = {}, k) {
   if (WAFID[k]) { const s = k.split(':')[0]; return WAFID[k].includes(steps[s]) && inLater(steps, s) }
   if (k === 'wafid') return ['done', 'active', 'failed'].includes(steps.wafid) && inLater(steps, 'wafid')
-  // At the wakala: paid, or chosen with it unpaid — nothing after it done yet.
-  if (k === 'wakala') return ['done', 'failed'].includes(steps.wakala) && inLater(steps, 'wakala')
+  if (k === 'musaned') return ['done', 'waiting'].includes(steps.musaned) && inLater(steps, 'musaned')
   if (steps[k] !== 'done') return false
   return inLater(steps, k)
 }

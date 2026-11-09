@@ -482,11 +482,28 @@ export async function htmlToPdf(html, outPath) {
     // Everything is inline (data: images), so "load" is enough.
     await page.setContent(html, { waitUntil: 'load', timeout: 60000 })
     await page.evaluate(() => window.adalFit?.())
+    // Every CV fits its page, whatever the template: the CV page shrinks until
+    // it is no taller than A4 and is cut to A4 exactly — so nothing spills
+    // over into an (almost) blank page.
+    const pages = await page.evaluate(() => {
+      const A4 = Math.floor(297 * 96 / 25.4)
+      for (const el of [document.documentElement, document.body]) { el.style.minHeight = '0'; el.style.height = 'auto' }
+      const first = document.querySelector('.cv-page') || document.querySelector('.adal-page')
+      if (first) {
+        const body = first.querySelector('.cv-body, .adal-body') || first
+        if (!first.dataset.fitted) for (let z = 100; z >= 55 && first.scrollHeight > A4 + 1; z -= 3) body.style.zoom = z / 100
+        Object.assign(first.style, { height: '297mm', maxHeight: '297mm', overflow: 'hidden', boxSizing: 'border-box', breakAfter: 'auto', pageBreakAfter: 'auto' })
+      }
+      // The pages it is meant to have: the CV, and each page that starts a new one (the passport).
+      const breaks = [...document.querySelectorAll('body *')].filter(e => /always|page/.test(getComputedStyle(e).breakBefore) || getComputedStyle(e).pageBreakBefore === 'always').length
+      return first ? 1 + breaks : 0
+    }).catch(() => 0)
     await page.pdf({
       path: outPath,
       format: 'A4',
       printBackground: true,
       margin: { top: '0', right: '0', bottom: '0', left: '0' },
+      ...(pages > 0 ? { pageRanges: `1-${pages}` } : {}),
     })
   } finally {
     await page.close().catch(() => {})

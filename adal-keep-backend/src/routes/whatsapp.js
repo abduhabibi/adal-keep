@@ -5,7 +5,7 @@
  * copy, which passes no headers).
  */
 import express from 'express'
-import { lastNumber, keyOf, stateOf, allStates, connect, openWeb, logout, listChats, chatForNumber, agentRow, agentsOf, sendCV, sendMany, bulk, sendsOf, onChosen, available, agentLimit, roomForAgent } from '../services/whatsapp.js'
+import { lastNumber, keyOf, stateOf, allStates, connect, openWeb, logout, listChats, chatForNumber, agentRow, agentsOf, sendCV, sendMany, bulk, notifyMany, notices, sendsOf, onChosen, available, agentLimit, roomForAgent } from '../services/whatsapp.js'
 
 const router = express.Router()
 const fail = (res, e) => res.status(400).json({ error: e.message })
@@ -79,6 +79,17 @@ router.post('/whatsapp/bulk', (req, res) => {
     const ids = (req.body?.profile_ids || []).map(Number).filter(Boolean)
     if (!ids.length) throw new Error('Choose the profiles to send')
     res.json(sendMany(req.app.locals.db, who(req), ids, req.body?.agent_ids || [], by(req)))
+  } catch (e) { fail(res, e) }
+})
+
+// A message (text and/or a voice note) to each picked profile — her phone or her broker's.
+router.get('/whatsapp/notify', (req, res) => res.json(notices[who(req)] || { running: false }))
+router.post('/whatsapp/notify', (req, res) => {
+  try {
+    const ids = (req.body?.profile_ids || []).map(Number).filter(Boolean)
+    if (!ids.length) throw new Error('Choose the profiles to message')
+    const audio = req.body?.audio?.data ? { data: String(req.body.audio.data), mime: String(req.body.audio.mime || '') } : null
+    res.json(notifyMany(req.app.locals.db, who(req), { profileIds: ids, to: req.body?.to === 'broker' ? 'broker' : 'her', text: String(req.body?.text || ''), audio }, by(req)))
   } catch (e) { fail(res, e) }
 })
 

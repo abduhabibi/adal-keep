@@ -16,6 +16,7 @@ const PAUSE_TEXT = {
   'awaiting-human-save':      'waiting for you to check the form and press SAVE',
   'awaiting-visa-save':       'waiting for you to type the captcha and press Save on the visa platform',
   'awaiting-insurance-save':  'waiting for you to finish the insurance certificate on FetaP',
+  'with-run':  'on a shared insurance certificate — it finishes with that run',
   'awaiting-visa-pay':        'waiting for you to pay the visa fees on the visa platform',
   'awaiting-wafid-robot':     'waiting for you to answer Wafid\'s "I am not a robot"',
   'awaiting-musaned-login':   'waiting for you to sign in to Musaned',
@@ -45,7 +46,9 @@ const COMPLETE_LABEL = {
 const REPEATABLE = new Set(['musaned_check_chosen', 'musaned_cv_import', 'musaned_delete', 'wafid_check', 'wafid_slip', 'mofa_find_app'])
 
 // Waits that must not run again (a second run would make a second application).
-const NO_CONTINUE = new Set(['awaiting-visa-save', 'awaiting-insurance-save'])
+const NO_CONTINUE = new Set(['awaiting-visa-save', 'awaiting-insurance-save', 'with-run'])
+// "with-run-812" (on run #812's certificate) reads as "with-run".
+const reasonKey = (r) => /^with-run-/.test(r || '') ? 'with-run' : r
 
 const isRetry = (run) => run?.status === 'pending' && String(run.pause_reason || '').startsWith('Retry ')
 
@@ -62,8 +65,8 @@ function describeRun(run) {
     case 'pending': return isRetry(run)
       ? `${n} is waiting to retry after a failed attempt.`
       : `${n} is waiting in line and starts by itself when a slot frees.`
-    case 'paused': return PAUSE_TEXT[run.pause_reason]
-      ? `${n} is ${PAUSE_TEXT[run.pause_reason]}.`
+    case 'paused': return PAUSE_TEXT[reasonKey(run.pause_reason)]
+      ? `${n} is ${PAUSE_TEXT[reasonKey(run.pause_reason)]}.`
       : `${n} is paused: ${run.pause_reason || 'no reason given'}`
     case 'done': return `${n} is complete.`
     case 'cancelled': return `${n} was cancelled.`
@@ -409,7 +412,7 @@ export default function ProfileAutomations({ profileId }) {
             <span className={`block text-[10px] ${detail.status === 'paused' ? 'font-semibold text-amber-600' : 'text-slate-500'}`}>{detail.status === 'paused' ? '🖐 needs you' : detail.status === 'running' ? '⚙️ working' : detail.status}</span>
           </button>
           <SignInChip runId={detail.id} />
-              {detail.status === 'paused' && !NO_CONTINUE.has(detail.pause_reason) && (
+              {detail.status === 'paused' && !NO_CONTINUE.has(reasonKey(detail.pause_reason)) && (
                 <button
                   onClick={resume}
                   className="shrink-0 px-3 py-1.5 rounded-lg bg-teal-600 text-white text-xs font-semibold hover:bg-teal-700"
@@ -640,7 +643,7 @@ export default function ProfileAutomations({ profileId }) {
             </div>
             {(detail.status === 'paused' || ['running', 'pending'].includes(detail.status)) && (
               <div className="flex gap-1.5 overflow-x-auto">
-                {detail.status === 'paused' && !NO_CONTINUE.has(detail.pause_reason) && (
+                {detail.status === 'paused' && !NO_CONTINUE.has(reasonKey(detail.pause_reason)) && (
                   <button onClick={resume} className="shrink-0 px-3 py-1.5 rounded-lg bg-teal-600 text-white text-xs font-semibold">{CONTINUE_LABEL[detail.pause_reason] || '▶ Continue'}</button>
                 )}
                 {detail.status === 'paused' && COMPLETE_LABEL[detail.pause_reason] && (

@@ -403,6 +403,8 @@ async function run(db, id, source, url, deps) {
           }
         },
       })
+      set(id, { step: 'Cutting out the CV header' })
+      await takeCvHeader(db, id, source)
       set(id, { status: 'done', step: '' })
       return
     }
@@ -517,8 +519,9 @@ async function run(db, id, source, url, deps) {
         set(id, { brokers: b.created + b.filled })
         console.log(`[transition ${id}] brokers: ${b.created} new, ${b.filled} filled, ${b.assigned} people given theirs`)
       }
-      set(id, { step: 'Making the CV templates' })
-      await copyTemplates(db, id, source, page, { htmlTemplates, cvPages, cvFiles, tmp, passports: [...people.keys()], check })
+      // The agency's CV header (not its template): cut out and kept for "Add CV template".
+      set(id, { step: 'Cutting out the CV header' })
+      await takeCvHeader(db, id, source)
     } finally { fs.rmSync(tmp, { recursive: true, force: true }) }
     set(id, { status: 'done', step: '' })
   } finally {
@@ -526,6 +529,24 @@ async function run(db, id, source, url, deps) {
     windows.delete(id)
     if (!deps.page) await page.close().catch(() => {})
   }
+}
+
+/**
+ * The CVs this system's people came with: the header they all share is cut
+ * out and kept (Add CV template offers it). A person then picks the colours.
+ */
+async function takeCvHeader(db, id, source) {
+  try {
+    const rows = await db('files').join('profile_fields', 'files.profile_field_id', 'profile_fields.id')
+      .join('profiles', 'profiles.id', 'profile_fields.profile_id')
+      .where('profile_fields.name', 'CV').where('profiles.created_by', `Transition: ${source.name}`)
+      .where(q => q.where('files.mimetype', 'like', 'image/%').orWhere('files.path', 'like', '%.jpg').orWhere('files.path', 'like', '%.png'))
+      .orderBy('files.id', 'desc').limit(8).select('files.path')
+    const { SAFE_STORAGE_DIR } = await import('./docPipeline.js')
+    const files = rows.map(r => path.join(SAFE_STORAGE_DIR, path.basename(r.path)))
+    const got = await (await import('./cvHeader.js')).harvestHeaders(db, files, source.name, SAFE_STORAGE_DIR)
+    if (got) { set(id, { templates: (stateOf(id).templates || 0) + 1 }); console.log(`[transition ${id}] CV header kept (#${got})`) }
+  } catch (e) { console.warn(`[transition ${id}] CV header:`, e.message) }
 }
 
 // One person is saved at a time, so two copies of the same passport (EasyEnjaz
@@ -539,7 +560,7 @@ function saveProfile(db, id, source, person) {
 
 /** The same passport however it was typed: no spaces, dashes or dots. */
 const SAME_PASSPORT = "UPPER(REPLACE(REPLACE(REPLACE(passport_number, ' ', ''), '-', ''), '.', '')) = ?"
-export const passportKey = (p) => String(p || '').toUpperCase().replace(/[s.-]/g, '')
+export const passportKey = (p) => String(p || '').toUpperCase().replace(/[\s.-]/g, '')
 
 async function saveOne(db, id, source, person) {
   const now = new Date().toISOString()

@@ -323,13 +323,25 @@ async function newWindow(browser, bounds, background) {
  * tab would go to the last used window, a person's.
  */
 export async function newRunTab(browser) {
-  if (!HIDDEN || !browser.target) return browser.newPage()
+  if (!browser.target) return browser.newPage()
+  // On the person's screen: the run's tab opens behind, the person stays on the tab they are on.
+  if (!HIDDEN) return backgroundTab(browser).catch(() => browser.newPage())
   // One at a time: the new tab is told apart by being the only new one.
   const made = _opening.then(() => tabInAgentsWindow(browser))
   _opening = made.catch(() => {})
   return made
 }
 let _opening = Promise.resolve()
+
+/** A new tab that opens behind the one the person is on (it is not brought forward). */
+async function backgroundTab(browser) {
+  const cdp = await browser.target().createCDPSession()
+  try {
+    const { targetId } = await cdp.send('Target.createTarget', { url: 'about:blank', background: true })
+    const target = await browser.waitForTarget(t => t._targetId === targetId, { timeout: 15000 })
+    return await target.page()
+  } finally { cdp.detach().catch(() => {}) }
+}
 
 async function tabInAgentsWindow(browser) {
   const anchor = await agentsWindow(browser)

@@ -23,7 +23,10 @@ function LiveCode({ info, onTick }) {
     const t = setInterval(() => setLeft(l => { if (l <= 1) { setTimeout(() => tick.current(), 600); return 30 } return l - 1 }), 1000)
     return () => clearInterval(t)
   }, [])
-  const code = String(info.code || '')
+  const code = String(info.code || ''), next = String(info.next || '')
+  // A code works once on Musaned: the one Adal Keep just typed is spent, and
+  // one about to change may expire while it is typed — then the next one is the one to type.
+  const useNext = info.used || left <= 6
   return (
     <div className="mt-2 flex flex-wrap items-center gap-3 rounded-lg bg-emerald-50/60 px-3 py-2 dark:bg-emerald-900/10">
       <span className="text-xs text-slate-600 dark:text-slate-300">Authenticator: <b>{info.label || 'Musaned'}</b></span>
@@ -32,6 +35,12 @@ function LiveCode({ info, onTick }) {
         <span className="absolute inset-y-0 left-0 bg-emerald-500 transition-all duration-1000" style={{ width: `${(left / 30) * 100}%` }} />
       </span>
       <span className="text-[11px] text-slate-500">{left}s · should match the code in your phone's app</span>
+      {useNext && next && (
+        <span className="basis-full text-[11px] font-semibold text-amber-700 dark:text-amber-300">
+          {info.used ? 'Adal Keep just signed in with this code — Musaned takes a code only once. ' : 'It changes in a moment. '}
+          Type the next one: <span className="font-mono text-sm tracking-[0.2em]">{next.slice(0, 3)} {next.slice(3)}</span> (good in {left}s)
+        </span>
+      )}
     </div>
   )
 }

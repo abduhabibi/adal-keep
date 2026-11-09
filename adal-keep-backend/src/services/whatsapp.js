@@ -763,3 +763,57 @@ export async function available(db, key) {
     }
   })
 }
+
+/**
+ * A message to many (the profiles picked on the list), each from this
+ * person's WhatsApp: to her own phone or to her broker's. The text can say
+ * who she is and who selected her: {name}, {selected_by} (the office that
+ * chose her on Musaned, or the employer), {passport}. A voice note goes too
+ * when one was recorded. In the background; `notices[key]` tells how far.
+ */
+export const notices = {}
+export const ethiopianNumber = (v) => {
+  const d = String(v || '').replace(/\D/g, '')
+  if (/^2519\d{8}$|^2517\d{8}$/.test(d)) return d
+  if (/^0[97]\d{8}$/.test(d)) return `251${d.slice(1)}`
+  if (/^[97]\d{8}$/.test(d)) return `251${d}`
+  return d.length >= 11 ? d : ''
+}
+export const fillNotice = (text, p, broker = null) => String(text || '')
+  .replace(/\{name\}/gi, p.full_name || '')
+  .replace(/\{selected_by\}/gi, p.musaned_pro || p.employer_name || '—')
+  .replace(/\{passport\}/gi, p.passport_number || '')
+  .replace(/\{broker\}/gi, broker?.name || '')
+export function notifyMany(db, key, { profileIds = [], to = 'her', text = '', audio = null } = {}, by = '') {
+  if (notices[key]?.running) throw new Error('Still sending the last message — wait until it finishes')
+  const c = ready(key)
+  if (!String(text).trim() && !audio?.data) throw new Error('Write the message or record a voice note')
+  const n = notices[key] = { running: true, total: profileIds.length, done: 0, sent: 0, failed: 0, current: '', errors: [] }
+  ;(async () => {
+    const { default: wweb } = await import('whatsapp-web.js')
+    const voice = audio?.data ? new wweb.MessageMedia(audio.mime || 'audio/ogg; codecs=opus', String(audio.data).replace(/^data:[^,]+,/, ''), 'voice.ogg') : null
+    const asVoice = !!voice && /ogg/i.test(audio.mime || '')
+    for (const id of profileIds) {
+      let name = ''
+      try {
+        const p = await db('profiles').where('id', id).first()
+        if (!p) throw new Error('profile not found')
+        name = n.current = p.full_name || `#${id}`
+        const broker = p.broker_id ? await db('brokers').where('id', p.broker_id).first().catch(() => null) : null
+        const number = ethiopianNumber(to === 'broker' ? (broker?.contact1 || broker?.contact2) : p.phone_number)
+        if (!number) throw new Error(to === 'broker' ? 'her broker has no phone number' : 'no phone number')
+        const chat = await c.getNumberId(number)
+        if (!chat) throw new Error('that number is not on WhatsApp')
+        const words = fillNotice(text, p, broker).trim()
+        if (words) await c.sendMessage(chat._serialized, words)
+        if (voice) await c.sendMessage(chat._serialized, voice, asVoice ? { sendAudioAsVoice: true } : { sendMediaAsDocument: false })
+        n.sent++
+      } catch (e) { n.failed++; n.errors.push(`${name || '#' + id}: ${String(e?.message || e)}`) }
+      n.done++
+      await new Promise(r => setTimeout(r, 1500 + Math.random() * 1500)) // a person's pace
+    }
+    n.running = false; n.current = ''; n.finished_at = new Date().toISOString()
+    if (by) console.log(`[whatsapp ${key}] message to ${n.sent} of ${n.total} by ${by}`)
+  })().catch(e => { n.running = false; n.errors.push(String(e?.message || e)) })
+  return n
+}

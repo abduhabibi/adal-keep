@@ -363,6 +363,56 @@ router.get('/templates/:id/header-image', async (req, res) => {
   res.sendFile(fp)
 })
 
+// CV headers cut from the CVs a move brought in: "Add CV template" offers them.
+router.get('/headers', async (req, res) => {
+  try {
+    const rows = await req.app.locals.db('cv_headers').orderBy('id', 'desc').catch(() => [])
+    res.json(rows.filter(r => fs.existsSync(path.join(SAFE_STORAGE_DIR, path.basename(r.path || '')))).map(r => ({ id: r.id, name: r.name, source: r.source, width: r.width, height: r.height, created_at: r.created_at })))
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+router.get('/headers/:id/image', async (req, res) => {
+  const r = await req.app.locals.db('cv_headers').where('id', Number(req.params.id)).first().catch(() => null)
+  const fp = r && path.join(SAFE_STORAGE_DIR, path.basename(r.path || ''))
+  if (!fp || !fs.existsSync(fp)) return res.status(404).end()
+  res.sendFile(fp)
+})
+// Cut the header out of CV pictures the person gives (two or more CVs of the same agency).
+router.post('/headers/from-cvs', tplUpload.array('files', 8), async (req, res) => {
+  const files = (req.files || []).map(f => f.path)
+  try {
+    const { harvestHeaders } = await import('../services/cvHeader.js')
+    const id = await harvestHeaders(req.app.locals.db, files, String(req.body?.name || '').trim() || 'CV', SAFE_STORAGE_DIR)
+    if (!id) return res.status(400).json({ error: 'No header shared by these CVs was found — give two or more CVs of the same agency (pictures).' })
+    res.json({ ok: true, id })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+  finally { for (const f of files) fs.promises.unlink(f).catch(() => {}) }
+})
+router.delete('/headers/:id', async (req, res) => {
+  try {
+    const db = req.app.locals.db
+    const r = await db('cv_headers').where('id', Number(req.params.id)).first()
+    if (!r) return res.status(404).json({ error: 'Not found' })
+    await db('cv_headers').where('id', r.id).del()
+    const used = await db('cv_templates').where('header_path', r.path).first()
+    if (!used) fs.promises.unlink(path.join(SAFE_STORAGE_DIR, path.basename(r.path))).catch(() => {})
+    res.json({ ok: true })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+// A template takes one of those headers (its own copy of the picture).
+router.post('/templates/:id/header-from/:headerId', async (req, res) => {
+  try {
+    const db = req.app.locals.db
+    const tpl = await db('cv_templates').where('id', req.params.id).first()
+    const h = await db('cv_headers').where('id', Number(req.params.headerId)).first()
+    if (!tpl || !h) return res.status(404).json({ error: 'Not found' })
+    const name = `${Date.now()}_${uuid()}.png`
+    fs.copyFileSync(path.join(SAFE_STORAGE_DIR, path.basename(h.path)), path.join(SAFE_STORAGE_DIR, name))
+    await db('cv_templates').where('id', tpl.id).update({ header_path: name, updated_at: new Date().toISOString() })
+    await dropImage(db, tpl.header_path)
+    res.json({ ok: true, header_path: name })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
 router.get('/templates/:id/footer-image', async (req, res) => {
   const db = req.app.locals.db
   const tpl = await db('cv_templates').where('id', req.params.id).first()

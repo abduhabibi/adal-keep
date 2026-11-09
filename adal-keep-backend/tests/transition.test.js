@@ -198,42 +198,44 @@ test('EnjazPlus: every employee of every page, her files, a sign-out midway, and
   fs.rmSync(dir, { recursive: true, force: true })
 })
 
-test('Musaned: the whole HR pool page by page, each one\'s details and photos, a token that runs out, and going on later', async () => {
+test('Musaned: the HR pool page by page as the page shows it (10 a page), statuses updated, details and photos for the new, going on later', async () => {
   const fs = await import('fs'), os = await import('os'), path = await import('path')
   const { default: knex } = await import('knex')
-  const { copyMusaned } = await import('../src/services/musanedCopy.js')
+  const { copyMusaned, statusOf } = await import('../src/services/musanedCopy.js')
   const db = knex({ client: 'sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true, pool: { min: 1, max: 1 } })
+  await db.schema.createTable('profiles', t => { t.increments('id'); t.string('full_name'); t.string('passport_number'); t.string('musaned_stage'); t.string('updated_at') })
   await db.schema.createTable('profile_fields', t => { t.increments('id'); t.integer('profile_id'); t.integer('field_template_id'); t.string('name'); t.string('data_type'); t.integer('is_permanent'); t.string('created_at'); t.string('updated_at') })
   await db.schema.createTable('field_templates', t => { t.increments('id'); t.string('name') })
   await db.schema.createTable('files', t => { t.increments('id'); t.integer('profile_field_id'); t.string('original_name'); t.string('path'); t.string('mimetype'); t.integer('size'); t.string('content_hash'); t.string('created_at'); t.string('updated_at') })
+  // Two already here: one gets a newer contract stage, one keeps hers (a plain status never overwrites it).
+  await db('profiles').insert([{ full_name: 'Had 0', passport_number: 'EP1000', musaned_stage: 'EPRO APPROVAL' }, { full_name: 'Had 1', passport_number: 'EP1001', musaned_stage: 'FMOL APPROVAL' }])
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mu-'))
   const folder = path.join(dir, 'run'); fs.mkdirSync(folder)
-  const pool = Array.from({ length: 230 }, (_, i) => ({ id: 1000 + i, name: `Person ${i}` }))
-  let auth = 'Bearer one', calls = 0
-  const ask = async (url, opts) => {
-    if (opts.headers.Authorization !== auth) return { ok: false, status: 401 }
-    if (++calls === 5) { auth = 'Bearer two'; return { ok: false, status: 401 } }            // the token ran out here
-    const u = new URL(url)
-    if (u.pathname === '/api/search/hrpool') {
-      const p = Number(u.searchParams.get('page')), s = Number(u.searchParams.get('size'))
-      return { ok: true, status: 200, json: async () => ({ content: pool.slice(p * s, p * s + s), totalElements: pool.length }) }
-    }
+  const people = Array.from({ length: 23 }, (_, i) => ({ id: 1000 + i, name: `Person ${i}`, passportNumber: `ep${1000 + i}`, status: i === 0 ? 'FMOL APPROVED' : i === 1 ? 'AVAILABLE' : 'AVAILABLE' }))
+  let asked = []
+  const pool = () => (async function* () { for (let p = 0; p * 10 < people.length; p++) yield { content: people.slice(p * 10, p * 10 + 10), totalElements: people.length, page: p + 1, pages: 3, total: people.length } })()
+  const ask = async (url) => {
+    const u = new URL(url); asked.push(u.pathname)
+    if (/\/api\/search\//.test(u.pathname)) throw new Error('the list is never asked for apart from the page')
     const m = u.pathname.match(/^\/api\/hrpool\/(\d+)(\/photo\/(\w+))?$/)
-    if (m && !m[2]) return { ok: true, status: 200, json: async () => ({ name: `Person ${m[1]}`, passportNumber: `ep${m[1]}`, religion: 'MUSLIM', dateOfBirthGregorian: '1999-01-02' }) }
+    if (m && !m[2]) return { ok: true, status: 200, json: async () => ({ name: `Person ${m[1]}`, religion: 'MUSLIM', dateOfBirthGregorian: '1999-01-02' }) }
     if (m) return { ok: true, status: 200, headers: new Map([['content-type', 'image/jpeg']]), arrayBuffer: async () => Buffer.from(m[3] + m[1]) }
     return { ok: false, status: 404 }
   }
-  let st = {}, n = 0, signIns = 0
+  let st = {}
   const saved = []
-  const base = { db, folder, readPerson, ask, wait: async () => {}, set: p => { st = { ...st, ...p } }, state: () => st,
-    save: async (p) => { saved.push(p); return ++n }, signIn: async () => { signIns++; return { auth } }, check() {} }
-  await copyMusaned({ ...base, token: { auth: 'Bearer one' }, limit: 100 })
-  assert.equal(st.people, 230)
-  assert.equal(signIns, 1)
-  await copyMusaned({ ...base, token: { auth } })
-  assert.equal(saved.length, 230)
-  assert.equal(st.files, 460)                                   // passport and photo each
-  assert.equal(saved[0].passport_number, 'EP1000'); assert.equal(saved[0].religion, 'Muslim'); assert.equal(saved[0].date_of_birth, '1999-01-02')
+  const base = { db, folder, readPerson, ask, pool, wait: async () => {}, set: p => { st = { ...st, ...p } }, state: () => st,
+    save: async (p) => { saved.push(p); const had = await db('profiles').where('passport_number', p.passport_number).first(); if (had) return had.id; const [id] = await db('profiles').insert({ full_name: p.full_name, passport_number: p.passport_number, musaned_stage: p.musaned_stage }); return id }, check() {} }
+  await copyMusaned({ ...base, token: { auth: 'Bearer one' }, limit: 10 })
+  await copyMusaned({ ...base, token: { auth: 'Bearer one' } })
+  assert.equal(st.people, 23)
+  assert.equal((await db('profiles').where('passport_number', 'EP1000').first()).musaned_stage, 'FMOL APPROVED')
+  assert.equal((await db('profiles').where('passport_number', 'EP1001').first()).musaned_stage, 'FMOL APPROVAL')
+  assert.equal(await db('profiles').count('* as n').then(r => r[0].n), 23)
+  assert.equal(st.files, 42)                                      // passport and photo for the 21 new ones
+  assert.equal(asked.filter(p => /^\/api\/hrpool\/\d+$/.test(p)).length, 21)   // details only for the new
+  assert.equal(saved.find(p => p.passport_number === 'EP1002').religion, 'Muslim')
+  assert.equal(statusOf({ status: { nameEn: 'Visa Issued' } }), 'Visa Issued')
   assert.equal(fs.existsSync(path.join(dir, 'musaned-progress.json')), false)
   await db.destroy()
   fs.rmSync(dir, { recursive: true, force: true })

@@ -164,6 +164,7 @@ async function recordFailure(db, job, errText) {
     updated_at: new Date().toISOString(),
   })
   console.log(`[worker] run #${job.id} failed: ${why}`)
+  if (job.workflow_id === 'insurance_certificate') await import('./insuranceCertificate.js').then(m => m.settleMembers(db, job.id, 'failed', `the shared certificate (run #${job.id}) failed`)).catch(() => {})
   await noteFailure(db, job, why).catch(e => console.warn('[worker] note failed:', e.message))
 }
 
@@ -301,6 +302,10 @@ async function executeRun(db, page, job) {
     wafid: isWafid ? await wafidSettings(db) : null,
     visa: isVisa ? await visaSettings(db) : null,
     insurance: isInsurance ? await visaSettings(db) : null,
+    // Make insurance for several: everyone on one certificate (this profile first).
+    group: isInsurance && Array.isArray(savedCtx.group_ids) && savedCtx.group_ids.length > 1
+      ? (await db('profiles').whereIn('id', savedCtx.group_ids)).sort((a, b) => savedCtx.group_ids.indexOf(a.id) - savedCtx.group_ids.indexOf(b.id))
+      : null,
   }
 
   ctx.page = page

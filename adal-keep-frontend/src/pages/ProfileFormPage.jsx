@@ -121,7 +121,7 @@ export default function ProfileFormPage() {
       const r = await api.post('/contracts/check', { profile_id: Number(id) })
       const one = r.data?.results?.[0]
       if (r.data?.busy) toast('The contract check is already running — try again in a minute.', { icon: '⏳' })
-      else if (one?.state === 'signed-out') toast.error('Musaned is signed out: sign in in Adal Browser, then press again.', { duration: 8000 })
+      else if (one?.state === 'signed-out') toast.error('Musaned is signed out: sign in to Musaned, then press again.', { duration: 8000 })
       else if (one?.state === 'not-chosen') toast('Nobody has chosen her on Musaned yet.', { icon: 'ℹ️' })
       else if (one?.state === 'error') toast.error(`Musaned: ${one.error}`, { duration: 8000 })
       else if (one?.state === 'chosen') {

@@ -429,13 +429,22 @@ async function signIn(page, ctx) {
       'warn', { login: page }
     )
     // The picture goes to the notification; what is typed there signs in here.
-    let sentAt = 0
+    // Only the LOGIN page's captcha is ever sent — never a picture of a page after it.
+    let sentAt = 0, lastPic = null
+    const onLoginForm = async () => onLogin(page) && !(await signedIn(page)) &&
+      await page.evaluate(() => [...document.querySelectorAll('input[type="password"]')].some(i => i.offsetParent !== null)).catch(() => false)
     const ask = async (title) => {
+      if (!(await onLoginForm())) return
       const pic = await captchaPicture(page)
-      if (!pic) return
+      if (!pic || pic === lastPic) return
+      lastPic = pic
       ctx.askCaptcha?.(pic, async (text) => {
+        // The answer goes into the very form its picture came from.
+        if (!(await onLoginForm())) { log(ctx, 'the answer came after the sign-in page had gone — not typed', 'warn'); return }
         await fillLogin(page, ctx).catch(() => {})
         await typeCaptcha(page, text)
+        const typed = await page.evaluate((t) => [...document.querySelectorAll('input')].some(i => i.value === t), text).catch(() => false)
+        log(ctx, typed ? `captcha typed (${text.length} characters) — pressing Login` : 'the captcha did not stay in its box', typed ? 'info' : 'warn')
         sentAt = Date.now()
         await clickText(page, /^\s*(log ?in|sign ?in)\s*$/)
       }, { title })
@@ -445,9 +454,13 @@ async function signIn(page, ctx) {
     while (Date.now() - t0 < LOGIN_WAIT_MS) {
       if (cancelled(ctx)) { const e = new Error('Cancelled by user'); e.cancelled = true; throw e }
       if (await signedIn(page)) break
-      // A wrong captcha reloads the form empty: fill it again, and ask again.
+      // A wrong captcha reloads the form empty: fill it again, and ask again —
+      // once the page is back on the login form with a NEW picture.
       await fillLogin(page, ctx).catch(() => {})
-      if (sentAt && Date.now() - sentAt > 7000) { sentAt = 0; log(ctx, 'the captcha was not accepted — asking again', 'warn'); await ask('Not accepted: type the new numbers') }
+      if (sentAt && Date.now() - sentAt > 12000 && await onLoginForm()) {
+        const pic = await captchaPicture(page)
+        if (pic && pic !== lastPic) { sentAt = 0; log(ctx, 'the captcha was not accepted — asking again', 'warn'); await ask('Not accepted: type the new numbers') }
+      }
       await sleep(2000)
     }
     if (!(await signedIn(page))) throw new Error('Nobody signed in to the visa platform within 30 minutes')
@@ -740,8 +753,8 @@ export async function runMofaVisa(page, ctx) {
     'warn', { login: page }
   )
   // Typed into the form only: Save stays a person's.
-  const pic = await captchaPicture(page)
-  if (pic) ctx.askCaptcha?.(pic, (text) => typeCaptcha(page, text))
+  // The form's own captcha (after the sign-in) is NOT sent out: the person
+  // types it on the form when they look it over and press Save.
   if (left.length) log(ctx, `left for a person: ${left.join('; ')}`, 'warn')
   log(ctx, '⏳ waiting for the person to press Save (up to 15 minutes)')
 

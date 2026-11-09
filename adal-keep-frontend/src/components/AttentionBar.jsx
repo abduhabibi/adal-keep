@@ -10,8 +10,8 @@ import LiveTab from './LiveTab'
  * with its X. No window opens for them. A captcha or a code is answered right
  * in the notification (Enter sends it, a wrong one asks again), a question has
  * its answers as buttons, and the run goes on by itself. A click opens that tab
- * (a reCAPTCHA, Save), live, over Adal Keep. X only hides it here: the bell
- * brings it back, and the run keeps waiting.
+ * (a reCAPTCHA, Save), live, over Adal Keep. X removes it (it does not come
+ * back in the 🔔); the run itself keeps waiting on its profile.
  * In the phone app each call is also an Android notification, answered from
  * there. With Adal Keep out of sight on a PC, a desktop one tells of it.
  */
@@ -79,7 +79,9 @@ function Call({ c, onDone, onHide }) {
 
 export default function AttentionBar() {
   const [calls, setCalls] = useState([])
-  const [hidden, setHidden] = useState(() => new Set())
+  // Removed with X: kept on this PC so they do not come back.
+  const [hidden, setHidden] = useState(() => { try { return new Set(JSON.parse(localStorage.getItem('adal-calls-removed') || '[]')) } catch { return new Set() } })
+  useEffect(() => { try { localStorage.setItem('adal-calls-removed', JSON.stringify([...hidden].slice(-300))) } catch {} }, [hidden])
   const seen = useRef(null)
   const load = () => api.get('/automations/attention').then(r => {
     // A phone does not get what goes to the PC first (an Enjaz captcha: 30 s) until then.
@@ -125,7 +127,7 @@ export default function AttentionBar() {
     return () => { alive = false; clearInterval(t); off?.(); Promise.resolve(heard).then(h => h?.remove?.()) }
   }, [])
   const shown = calls.filter(c => !hidden.has(keyOf(c)))
-  if (!calls.length) return null
+  if (!shown.length) return null
   const hide = (c) => { setHidden(h => new Set(h).add(keyOf(c))); phone()?.cancelCall?.({ run: c.run_id }) }
   return (
     <>
@@ -133,12 +135,6 @@ export default function AttentionBar() {
         <ul className="fixed right-3 top-3 z-[70] max-h-[calc(100vh-1.5rem)] w-80 max-w-[calc(100vw-1.5rem)] space-y-2 overflow-y-auto">
           {shown.map(c => <Call key={keyOf(c)} c={c} onDone={load} onHide={() => hide(c)} />)}
         </ul>
-      )}
-      {shown.length < calls.length && (
-        <button type="button" onClick={() => setHidden(new Set())} title="Show the hidden notifications"
-          className="fixed bottom-3 left-3 z-[70] flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm font-bold shadow-lg dark:border-slate-700 dark:bg-slate-900">
-          🔔 <span className="rounded-full bg-red-500 px-1.5 text-xs text-white">{calls.length - shown.length}</span>
-        </button>
       )}
     </>
   )
@@ -157,8 +153,6 @@ export function StartupCard() {
         <input type="checkbox" checked={on} onChange={e => set(e.target.checked)} /> Open Adal Keep when this PC starts
       </label>
       <p className="text-xs text-slate-500">Off: the agents and WhatsApp still work in the background, and the window opens only from its icon.</p>
-      <button type="button" className="rounded-lg border border-teal-300 px-3 py-1.5 text-sm font-semibold text-teal-700 hover:bg-teal-50 dark:border-teal-700 dark:text-teal-300 dark:hover:bg-teal-900/20"
-        onClick={() => api.post('/browser/open').catch(e => toast.error(err(e)))}>🌐 Open Adal Browser</button>
     </section>
   )
 }

@@ -145,19 +145,20 @@ async function signIn(page, ctx) {
  * placeholder, every list by its first option ("Title", "Gender", "Region"…),
  * the two date boxes are, in order, Date Of Birth and Effective Date.
  */
-function fillBox(page, placeholder, value) {
-  return page.evaluate((ph, v) => {
+function fillBox(page, placeholder, value, force = false) {
+  return page.evaluate((ph, v, force) => {
     const root = document.querySelector('.modal-parent') || document
     const el = [...root.querySelectorAll('input, textarea')].find(i => (i.placeholder || '').trim().toLowerCase() === ph.toLowerCase() && i.offsetParent !== null)
     if (!el) return 'missing'
-    if (el.value) return 'kept'
+    if (el.value === v) return 'ok'
+    if (el.value && !force) return 'kept'
     const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
     el.focus()
     Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, v)
     for (const t of ['input', 'change']) el.dispatchEvent(new Event(t, { bubbles: true }))
     el.blur()
     return el.value === v ? 'ok' : 'failed'
-  }, placeholder, value)
+  }, placeholder, value, force)
 }
 
 function chooseIn(page, firstOption, src) {
@@ -257,6 +258,7 @@ export async function runInsuranceCertificate(page, ctx) {
   const v = insuranceValues(ctx.profile, ctx.insurance || {})
   const missing = missingForInsurance(v)
   if (missing.length) return { ok: false, step: 'preflight', error: `Profile is missing for the insurance: ${missing.join(', ')}`, seconds: 0 }
+  if (ctx.group?.length > 1) return runGroupCertificate(page, ctx, t0)
 
   log(ctx, `🛡 Insurance certificate for ${ctx.profileName}`)
   await signIn(page, ctx)
@@ -278,5 +280,137 @@ export async function runInsuranceCertificate(page, ctx) {
     'warn'
   )
   if (left.length) log(ctx, `left for a person: ${left.join('; ')}`, 'warn')
+  return { ok: true, pauseReason: 'awaiting-insurance-save', seconds: secs() }
+}
+
+/**
+ * The others on a shared certificate (runs paused "with-run-<id>") end the way
+ * the run that made it ends: done with it, cancelled or failed with it.
+ */
+export async function settleMembers(db, runId, status, why = null) {
+  const now = new Date().toISOString()
+  return db('automation_queue').where({ status: 'paused', pause_reason: `with-run-${Number(runId)}` })
+    .update({ status, pause_reason: status === 'done' ? null : why || `with run #${runId}: ${status}`, finished_at: now, updated_at: now })
+    .catch(() => 0)
+}
+
+/** The certificate's own boxes (once): branch, and how many are insured. */
+async function fillHeader(page, ctx, v) {
+  const left = []
+  if (v.branch) {
+    const r = await chooseIn(page, 'Insurance Branch', v.branch)
+    if (r.state === 'ok') { log(ctx, `✓ Insurance Branch: ${r.text}`); await sleep(400) } else left.push('Insurance Branch')
+  } else left.push('Insurance Branch (choose it in Settings → Insurance)')
+  const n = await fillBox(page, 'Number Of Insured', v.insured, true)
+  if (n === 'ok') log(ctx, `✓ Number Of Insured: ${v.insured}`); else left.push('Number Of Insured')
+  return left
+}
+
+/** One member's boxes (Add Insured). force: what the last member left in a box is written over. */
+async function fillMember(page, ctx, v, force) {
+  const left = []
+  const select = async (first, src, name = first) => {
+    if (!src) return left.push(name)
+    const r = await chooseIn(page, first, src)
+    if (r.state === 'ok') { log(ctx, `✓ ${name}: ${r.text}`); await sleep(300) }
+    else left.push(`${name}${r.options?.length ? ` (choices: ${r.options.join(', ')})` : ''}`)
+  }
+  const text = async (placeholder, value, name = placeholder) => {
+    if (!value) { if (force) await fillBox(page, placeholder, '', true).catch(() => {}); return left.push(name) }
+    const r = await fillBox(page, placeholder, value, force)
+    if (r === 'ok') log(ctx, `✓ ${name}`)
+    else if (r === 'kept') log(ctx, `${name} already filled — kept`)
+    else left.push(name)
+  }
+  await select('Title', v.title)
+  await text('First Name', v.first)
+  await text('Father Name', v.father)
+  await text('Grand Father Name', v.grandfather)
+  await select('Gender', v.gender)
+  const dob = await setDateNth(page, 0, v.dob)
+  if (dob) log(ctx, '✓ Date Of Birth'); else left.push('Date Of Birth')
+  await text('Passport Number', v.passport)
+  await text('Labor ID', v.labor_id)
+  await text('Phone', v.phone)
+  await text('Email', v.email)
+  await text('Woreda', v.woreda)
+  await text('Sub city', v.sub_city, 'Sub City')
+  await select('Region', v.region)
+  await select('Country Of Destination', v.destination)
+  return left
+}
+
+/** "Added Members (n)" under the form; -1 when it is not shown. */
+const addedCount = (page) => page.evaluate(() => {
+  const m = (document.body?.innerText || '').match(/Added\s+Members\s*\((\d+)\)/i)
+  return m ? Number(m[1]) : -1
+}).catch(() => -1)
+
+/** Add Member, and wait until the list under the form has one more. */
+async function addMember(page, ctx, before) {
+  if (!(await clickText(page, /^\s*add member\s*$/))) throw new Error('FetaP shows no "Add Member" button')
+  if (await until(async () => (await addedCount(page)) > Math.max(0, before), 15000, ctx)) return true
+  // The site said why (a box it wants): tell it.
+  const why = await page.evaluate(() => [...document.querySelectorAll('.text-red-500, .error, .invalid-feedback, [role="alert"], .toast, .Vue-Toastification__toast')]
+    .map(e => (e.innerText || '').trim()).filter(Boolean).slice(0, 3).join('; ')).catch(() => '')
+  throw new Error(`Add Member was not taken${why ? ` — FetaP says: ${why}` : ''}`)
+}
+
+/**
+ * Make insurance for several: one certificate. Number Of Insured = how many;
+ * for each: fill her, Add Member (she goes into the list under the form), the
+ * next … When all are in, one notification: a person adds the beneficiary,
+ * looks it over and presses Request Certificate.
+ */
+async function runGroupCertificate(page, ctx, t0) {
+  const secs = () => Math.round((Date.now() - t0) / 1000)
+  const people = ctx.group
+  const all = people.map(p => ({ p, v: insuranceValues(p, ctx.insurance || {}) }))
+  for (const x of all) x.v.insured = String(people.length)
+  log(ctx, `🛡 One insurance certificate for ${people.length}`)
+  await signIn(page, ctx)
+  if (!/\/certificate\/draft/i.test(page.url())) await page.goto(DRAFT_URL, { waitUntil: 'domcontentloaded', timeout: 120000 }).catch(() => {})
+  if (!(await until(async () => /new certificate/i.test(await page.evaluate(() => document.body?.innerText || '')), 60000, ctx))) {
+    throw new Error('The Draft Certificates page did not show "New Certificate"')
+  }
+  await openNewCertificate(page, ctx)
+  await sleep(800)
+  const left = await fillHeader(page, ctx, all[0].v)
+  const added = [], notAdded = []
+  for (let i = 0; i < all.length; i++) {
+    const { p, v } = all[i]
+    log(ctx, `✍️ ${i + 1} of ${all.length}: ${p.full_name}`)
+    const miss = await fillMember(page, ctx, v, i > 0)
+    // Without these FetaP will not take her: she is left for a person.
+    const must = miss.filter(m => /First Name|Father Name|Gender|Date Of Birth|Passport/i.test(m))
+    if (must.length) { notAdded.push(`${p.full_name} (${must.join(', ')})`); continue }
+    try {
+      await addMember(page, ctx, await addedCount(page))
+      added.push(p.id)
+      log(ctx, `✓ Add Member — ${p.full_name} (${added.length} in the list)`)
+      if (miss.length) left.push(`${p.full_name}: ${miss.join(', ')}`)
+      await sleep(700)
+    } catch (e) {
+      log(ctx, `${p.full_name}: ${e.message}`, 'warn')
+      notAdded.push(`${p.full_name} (${e.message})`)
+    }
+  }
+  // Number Of Insured: how many really went in.
+  if (added.length && added.length !== people.length) await fillBox(page, 'Number Of Insured', String(added.length), true).catch(() => {})
+  const summary = `${added.length} of ${people.length} added as members${notAdded.length ? `; not added: ${notAdded.join('; ')}` : ''}`
+  if (ctx.db) {
+    const day = new Date().toISOString().slice(0, 10)
+    for (const p of people) {
+      const line = `[${day}] Insurance: on one FetaP certificate with ${people.length - 1} other(s) — ${added.includes(p.id) ? 'added as a member' : 'NOT added: add her by hand'}`
+      const row = await ctx.db('profiles').where('id', p.id).first('notes').catch(() => null)
+      await ctx.db('profiles').where('id', p.id).update({ notes: [row?.notes, line].filter(Boolean).join('\n'), updated_at: new Date().toISOString() }).catch(() => {})
+    }
+  }
+  await ctx.notify(
+    `🛡 Insurance: ${added.length} of ${people.length} on one certificate`,
+    `${summary}. ${left.length ? `Still to fill: ${left.join('; ')}. ` : ''}In the FetaP tab: add the beneficiary, look it over and press Request Certificate. Then press "✔️ Insurance done" on the run.`,
+    'warn'
+  )
+  log(ctx, `✅ ${summary}`)
   return { ok: true, pauseReason: 'awaiting-insurance-save', seconds: secs() }
 }

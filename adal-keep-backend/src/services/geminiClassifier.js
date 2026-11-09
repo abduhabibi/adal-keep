@@ -95,7 +95,9 @@ Classification guide:
 - Labour ID / Employee ID / Client ID: the matching ID card.
 - Slip: bank or payment receipt (Order ID, Debit/Credit Account, SWIFT, CBE, Birr, transfer receipt).
 - Experience Form: employment experience letter. Insurance: insurance policy.
-- CV: curriculum vitae / resume. Contract: employment contract (employer name, employee name).
+- CV: curriculum vitae / resume, also another agency's "APPLICATION FOR EMPLOYMENT" page (a photo of the girl with tables:
+  complete name, passport details, languages …). For such a CV fill full_name, passport_number, date_of_issue, place_of_birth
+  and date_of_birth from what it prints. Contract: employment contract (employer name, employee name).
 - Photo: a personal photograph of a person with no printed document text.
 - other: none of the above, or unreadable.
 

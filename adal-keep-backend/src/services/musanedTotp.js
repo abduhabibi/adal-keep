@@ -141,11 +141,20 @@ function keyOf(accountId) {
 }
 export const hasAuthenticator = (accountId) => !!keyOf(accountId)
 /** What the account's authenticator is (shown in Settings): its name, and the code now. */
+// Musaned takes each code once: the one Adal Keep typed is spent (a person
+// typing it again is told it is invalid) — the page shows the next one then.
+const spent = new Map() // account → the 30-s step whose code Adal Keep typed
+const stepOf = (k, at = Date.now()) => Math.floor(at / 1000 / (k.period || 30))
 export function authenticatorInfo(accountId) {
   const k = keyOf(accountId)
   if (!k) return null
   const period = k.period || 30
-  return { label: k.label || k.issuer || '', code: totp(k), left: period - (Math.floor(Date.now() / 1000) % period), digits: k.digits || 6 }
+  const now = Date.now()
+  return {
+    label: k.label || k.issuer || '', code: totp(k, now), left: period - (Math.floor(now / 1000) % period), digits: k.digits || 6,
+    next: totp(k, now + period * 1000),
+    used: spent.get(Number(accountId)) === stepOf(k, now),
+  }
 }
 
 /** The code for this account now — null when it has no authenticator. A code
@@ -155,5 +164,6 @@ export async function codeFor(accountId) {
   if (!k) return null
   const left = k.period - (Math.floor(Date.now() / 1000) % k.period)
   if (left < 5) await new Promise(r => setTimeout(r, left * 1000 + 300))
+  spent.set(Number(accountId), stepOf(k))
   return totp(k)
 }

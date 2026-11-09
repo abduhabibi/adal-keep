@@ -291,6 +291,12 @@ export async function runPipeline(filePath, db, analyzer, tag = '[pipeline]') {
                    sanitizeName(`${ex.given_names || ''} ${ex.surname || ''}`)
   // Only a passport (its MRZ verified — checked above) names or creates a profile.
   const isPassport = result.doc_type === 'Passport'
+  // Another agency's CV ("APPLICATION FOR EMPLOYMENT") is how most girls'
+  // passport details arrive: with its passport number and name it makes her
+  // profile too (kept as her CV; her passport is still asked for).
+  const passportNo = String(ex.passport_number || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
+  if (passportNo) ex.passport_number = passportNo
+  const cvWithPassport = result.doc_type === 'CV' && /^[A-Z]{1,2}d{6,8}$/.test(passportNo) && fullName.split(' ').length >= 2
   log(`name in the document: "${fullName}" (doc=${result.doc_type}, conf=${result.confidence})`)
 
   if (!db) return { ok: false, reason: 'no_db' }
@@ -312,7 +318,7 @@ export async function runPipeline(filePath, db, analyzer, tag = '[pipeline]') {
     }
   } else {
     profile = await findProfile(ex, [fullName, nameFromFilename(filename)], db)
-    if (!profile && isPassport) { profile = await createProfile(ex, fullName, db); if (profile) profile.created = true }
+    if (!profile && (isPassport || cvWithPassport)) { profile = await createProfile(ex, fullName, db); if (profile) profile.created = true }
   }
   if (!profile) {
     if (isPassport) {

@@ -299,6 +299,26 @@ router.post('/profiles/:profileId/automations/:workflowId/start', async (req, re
       }
     }
 
+    // Make insurance for several at once: ONE certificate, every one of them a
+    // member (the run fills her, Add Member, the next …). The others get a run
+    // that waits on this one and finishes with it.
+    let group = [], skipped = []
+    if (workflowId === 'insurance_certificate' && Array.isArray(req.body?.group_ids) && req.body.group_ids.length > 1) {
+      const { insuranceValues, missingForInsurance } = await import('../services/insuranceCertificate.js')
+      const ids = [...new Set(req.body.group_ids.map(Number).filter(n => n && n !== profileId))]
+      const rows = await db('profiles').whereIn('id', ids)
+      const busy = new Set((await db('automation_queue').whereIn('profile_id', ids).where('workflow_id', workflowId)
+        .whereIn('status', ['running', 'paused', 'pending']).select('profile_id')).map(r => r.profile_id))
+      for (const id of ids) {
+        const p = rows.find(r => r.id === id)
+        const missing = p ? missingForInsurance(insuranceValues(p)) : ['profile not found']
+        if (busy.has(id)) skipped.push({ id, missing: ['an insurance run is already open for her'] })
+        else if (missing.length) skipped.push({ id, missing })
+        else group.push(id)
+      }
+      if (group.length) accountContext.group_ids = [profileId, ...group]
+    }
+
     // Add from Musaned: the CV template the person chose.
     if (workflowId === 'musaned_cv_import' && req.body?.template_id) accountContext.cv_template_id = Number(req.body.template_id)
 
@@ -314,10 +334,21 @@ router.post('/profiles/:profileId/automations/:workflowId/start', async (req, re
       updated_at: new Date().toISOString(),
     })
 
+    // The others on the same certificate: a run each, waiting on this one.
+    const mainId = Number(runId?.id ?? runId)
+    for (const id of group) {
+      await db('automation_queue').insert({
+        profile_id: id, workflow_id: workflowId, account_id: accountId || null,
+        status: 'paused', pause_reason: `with-run-${mainId}`, current_step: 0,
+        context: seal(JSON.stringify({ with_run: mainId })), log: '[]',
+        created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+      })
+    }
+
     // Start it now if a slot is free; otherwise it waits in line and starts by
     // itself. Either way the answer says which, before the browser does anything.
     const s = await dispatchRun(db, runId)
-    res.json({ ok: true, runId, resumed: false, ...s, message: runMessage(runId, s, s.state === 'running' ? 'started' : 'queued') })
+    res.json({ ok: true, runId, resumed: false, ...s, members: 1 + group.length, skipped, message: runMessage(runId, s, s.state === 'running' ? 'started' : 'queued') + (group.length ? ` One certificate for ${1 + group.length}.` : '') })
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
@@ -356,7 +387,7 @@ router.get('/automations/attention', async (req, res) => {
     // interrupted stay on their profiles: nobody is being called for them now.
     const since = new Date(Date.now() - 12 * 3600000).toISOString()
     const paused = await db('automation_queue').where('status', 'paused').where('updated_at', '>', since)
-      .where('pause_reason', 'not like', 'Interrupted%').orderBy('id', 'desc').limit(10).select('id', 'pause_reason', 'updated_at')
+      .where('pause_reason', 'not like', 'Interrupted%').where('pause_reason', 'not like', 'with-run-%').orderBy('id', 'desc').limit(10).select('id', 'pause_reason', 'updated_at')
     for (const r of paused) if (!calls.some(c => c.run_id === r.id)) calls.push({ run_id: r.id, title: PLAIN_WAIT[r.pause_reason] || 'Waiting for you', body: '', at: new Date(r.updated_at).getTime(), image: null })
     const runs = await db('automation_queue as q').leftJoin('profiles as p', 'p.id', 'q.profile_id')
       .whereIn('q.id', calls.map(c => c.run_id)).select('q.id', 'q.profile_id', 'q.workflow_id', 'p.full_name')
@@ -398,6 +429,13 @@ router.get('/automations/active', async (req, res) => {
 // Where every profile stands in the whole journey (Musaned → employer →
 // Wafid → LMIS contract → visa). Used by the "Stage" filter on the lists.
 export const STAGES = [
+  ['arrived', 'Arrived KSA'],
+  ['visa_issued', 'Visa issued'],
+  ['embassy', 'Sent to the Saudi Embassy'],
+  ['fmol_approved', 'FMOL approved'],
+  ['fmol', 'Waiting for FMOL approval'],
+  ['epro_approved', 'EPRO approved'],
+  ['epro', 'Waiting for our (EPRO) approval'],
   ['visa_printed', 'Visa printed'],
   ['visa_paid', 'Visa fees paid'],
   ['visa_applied', 'Visa applied'],
@@ -415,8 +453,14 @@ export const STAGES = [
   ['new', 'Not on Musaned yet'],
 ]
 
+// Musaned's own contract stages, in order (its tabs).
+import { MUSANED_ORDER, musanedStep } from '../services/musanedStages.js'
+export { MUSANED_ORDER, musanedStep }
+
 export function stageOf(p, runs = {}) {
   const live = (r) => r && ['running', 'pending', 'paused'].includes(r.status)
+  const at = musanedStep(p.musaned_stage)
+  if (at >= 4) return MUSANED_ORDER[at][1]
   const visa = String(p.visa_stage || '')
   if (/printed/i.test(visa)) return 'visa_printed'
   if (/paid/i.test(visa)) return 'visa_paid'
@@ -426,6 +470,7 @@ export function stageOf(p, runs = {}) {
   if (live(runs.lmis_contract)) return 'lmis_contract'
   if (runs.insurance_certificate?.status === 'done') return 'insured'
   if (live(runs.insurance_certificate)) return 'insurance'
+  if (at >= 0) return MUSANED_ORDER[at][1]
   if (p.status === 'medical_fit') return p.chosen_at ? 'contract_ready' : 'medical_fit'
   if (p.status === 'medical_applied' || live(runs.wafid_book) || runs.wafid_book?.status === 'done') return 'wafid'
   if (p.chosen_at) return 'chosen'
@@ -441,10 +486,11 @@ export const STEP_DOCS = {
   musaned: ['Passport', 'Photo', 'CV'],
   selected: ['Contract'],
   wafid: ['Passport', 'Photo', 'Appointment Slip', 'Medical Report'],
-  lmis: ['Contract', 'Slip', 'Medical Report', 'Labour ID'],
-  tasheer: ['Passport', 'Photo'],
+  epro: ['Contract'],
   insurance: ['Insurance'],
-  visa: ['Contract', 'Medical Report', 'Insurance', 'Visa'],
+  fmol: ['Contract', 'Slip', 'Medical Report', 'Labour ID'],
+  embassy: ['Passport', 'Photo', 'Contract', 'Medical Report', 'Insurance'],
+  visa: ['Visa'],
 }
 const hasDoc = (names, d) => d === 'Contract' ? [...names].some(n => /^Contract\b/i.test(n)) : names.has(d)
 
@@ -486,9 +532,10 @@ export function journeyOf(p, runs = {}, hasCv = false, docs = null, agents = [])
   const cv = step('cv', 'CV', hasCv ? 'done' : 'todo', hasCv ? 'made' : '')
   const gone = goneFromMusaned(runs)
   const added = !gone && (runs.musaned_add_candidate?.status === 'done' || !!p.musaned_stage)
+  // On Musaned and nobody chose her yet: 'waiting' (its own colour), not done.
   const m = live(runs.musaned_add_candidate) ? fromRun(runs.musaned_add_candidate)
     : /another agency/i.test(p.musaned_stage || '') ? ['failed', 'registered by another agency']
-    : added ? ['done', p.chosen_at ? `chosen ${String(p.chosen_at).slice(0, 10)}` : 'not chosen yet']
+    : added ? (p.chosen_at ? ['done', `chosen ${String(p.chosen_at).slice(0, 10)}`] : ['waiting', 'not chosen yet'])
     : gone ? ['todo', 'not on Musaned']
     : runs.musaned_add_candidate?.status === 'failed' ? fromRun(runs.musaned_add_candidate) : ['todo', '']
   const musaned = step('musaned', 'Musaned', m[0], m[1], 'musaned_add_candidate')
@@ -496,7 +543,8 @@ export function journeyOf(p, runs = {}, hasCv = false, docs = null, agents = [])
     : p.status === 'medical_applied' ? ['active', 'booked — waiting for the result'] : fromRun(runs.wafid_book)
   const wafid = step('wafid', 'Wafid', w[0], w[1], 'wafid_book')
   // Chosen by an employer on Musaned (a cancelled or rejected request is not).
-  const chosen = !!p.chosen_at && !/CANCEL|REJECT/i.test(p.musaned_stage || '')
+  const at = musanedStep(p.musaned_stage)
+  const chosen = (!!p.chosen_at || at >= 0) && !/CANCEL|REJECT/i.test(p.musaned_stage || '')
   const selected = step('selected', 'Selected', chosen ? 'done' : 'todo', chosen ? String(p.chosen_at).slice(0, 10) : '', 'musaned_check_chosen')
   // The wakala the office pays on Musaned (Employment Requests → Payment).
   const pay = String(p.musaned_payment || '').trim()
@@ -504,9 +552,19 @@ export function journeyOf(p, runs = {}, hasCv = false, docs = null, agents = [])
     /^paid$/i.test(pay) ? 'paid' : chosen && /^unpaid$/i.test(pay) ? 'unpaid' : '', 'musaned_check_chosen')
   const visa = /applied|paid|printed/i.test(p.visa_stage || '') ? ['done', `${/printed/i.test(p.visa_stage) ? 'printed' : /paid/i.test(p.visa_stage) ? 'paid' : 'applied'}${p.visa_application_number ? ` · no. ${p.visa_application_number}` : ''}`]
     : fromRun(runs.mofa_visa)
-  const tasheer = step('tasheer', 'Tasheer', 'soon', 'coming')
-  const insurance = step('insurance', 'Insurance', ...fromRun(runs.insurance_certificate, 'certificate done'), 'insurance_certificate')
-  const visaStep = step('visa', 'Enjaz · Visa', visa[0], visa[1], 'mofa_visa')
+  // Musaned's tabs: EPRO approval → EPRO approved → FMOL approval → FMOL approved → Sent to the Saudi Embassy → Visa issued → Arrived KSA.
+  const past = (i) => at >= i
+  const epro = step('epro', 'EPRO', past(1) ? 'done' : at === 0 ? 'active' : 'todo', past(1) ? 'approved' : at === 0 ? 'waiting for our approval' : '', 'musaned_check_chosen')
+  const ins = fromRun(runs.insurance_certificate, 'certificate done')
+  const insurance = step('insurance', 'Insurance', ins[0] === 'todo' && past(3) ? 'done' : ins[0], ins[0] === 'todo' && past(3) ? '' : ins[1], 'insurance_certificate')
+  const lmisRun = fromRun(runs.lmis_contract, 'contract done')
+  const fmol = step('fmol', 'FMOL', past(3) || lmisRun[0] === 'done' ? 'done' : at === 2 ? 'active' : lmisRun[0],
+    past(3) ? 'approved' : lmisRun[0] === 'done' ? lmisRun[1] : at === 2 ? 'waiting for FMOL approval' : lmisRun[1], 'lmis_contract')
+  const embassy = step('embassy', 'Embassy', past(4) || visa[0] === 'done' ? 'done' : visa[0],
+    past(4) ? 'sent to the Saudi Embassy' : visa[1], 'mofa_visa')
+  const visaStep = step('visa', 'Visa issued', past(5) || /printed/i.test(p.visa_stage || '') ? 'done' : at === 4 ? 'active' : 'todo',
+    past(5) ? (p.visa_number ? `visa ${p.visa_number}` : 'issued') : /printed/i.test(p.visa_stage || '') ? 'printed' : at === 4 ? 'at the embassy' : '')
+  const arrived = step('arrived', 'Arrived KSA', past(6) ? 'done' : 'todo', past(6) ? 'arrived' : '')
   // Who each step is with, and its documents (have / missing).
   const employer = [p.employer_name, p.work_city].filter(Boolean).join(' · ')
   const who = {
@@ -516,10 +574,12 @@ export function journeyOf(p, runs = {}, hasCv = false, docs = null, agents = [])
     wakala: p.musaned_pro ? `Office: ${p.musaned_pro}` : '',
     wafid: p.medical_valid_until ? `Medical valid until ${String(p.medical_valid_until).slice(0, 10)}` : '',
     insurance: '',
-    tasheer: '',
+    epro: p.musaned_pro ? `Office: ${p.musaned_pro}` : '',
+    fmol: p.labor_id ? `Labour ID ${p.labor_id}` : '',
+    embassy: p.visa_application_number ? `Application ${p.visa_application_number}` : '',
     visa: [p.visa_number && `Visa ${p.visa_number}`, p.visa_application_number && `Application ${p.visa_application_number}`].filter(Boolean).join(' · '),
   }
-  for (const st of [cv, musaned, selected, wafid, wakala, tasheer, insurance, visaStep]) {
+  for (const st of [cv, musaned, selected, wafid, wakala, epro, insurance, fmol, embassy, visaStep, arrived]) {
     st.who = who[st.key] || ''
     if (docs) {
       const need = STEP_DOCS[st.key] || []
@@ -528,7 +588,9 @@ export function journeyOf(p, runs = {}, hasCv = false, docs = null, agents = [])
   }
   return {
     lmis: [cv, musaned, selected, wafid],
-    embassy: [cv, musaned, selected, wafid, wakala, tasheer, insurance, visaStep],
+    embassy: [cv, musaned, selected, wafid, epro, insurance, fmol, embassy, visaStep, arrived],
+    // The wakala is not a step on the line: the list's Paid / Unpaid buttons.
+    extra: [wakala],
   }
 }
 
@@ -577,7 +639,7 @@ router.get('/automations/stages', async (req, res) => {
     // with { musaned: 'Office: …' } and its missing documents { lmis: ['Slip'] }.
     const stepsOf = (p) => {
       const d = docs.get(p.id) || new Set()
-      const all = (() => { const j = journeyOf(p, latest.get(p.id) || {}, withCv.has(p.id) || d.has('CV'), d, agents.get(p.id) || []); return [...j.lmis, ...j.embassy.slice(4)] })()
+      const all = (() => { const j = journeyOf(p, latest.get(p.id) || {}, withCv.has(p.id) || d.has('CV'), d, agents.get(p.id) || []); return [...j.embassy, ...j.extra] })()
       return {
         steps: Object.fromEntries(all.map(s => [s.key, s.state])),
         notes: Object.fromEntries(all.filter(s => s.state === 'failed' && s.note).map(s => [s.key, s.note])),
@@ -803,6 +865,9 @@ router.post('/automations/:id/resume', async (req, res) => {
     if (row.status !== 'paused' && row.status !== 'pending') {
       return res.status(409).json({ error: `Run #${runId} is ${row.status} — nothing to continue. Start it again from its card.` })
     }
+    if (/^with-run-/.test(row.pause_reason || '')) {
+      return res.status(409).json({ error: `She is on the certificate of run #${row.pause_reason.slice(9)} — it finishes with that run.` })
+    }
     // Running the visa form again would make a second application.
     if (row.pause_reason === 'awaiting-insurance-save') {
       return res.status(409).json({ error: `Run #${runId} filled the certificate form already. Finish it in its tab, then "✔️ Insurance done" — or Cancel it to start over.` })
@@ -872,6 +937,7 @@ router.post('/automations/:id/cancel', async (req, res) => {
     })
 
     await noteRun(db, row, 'cancelled by a person')
+    if (row.workflow_id === 'insurance_certificate') await (await import('../services/insuranceCertificate.js')).settleMembers(db, runId, 'cancelled', `cancelled with run #${runId}`)
 
     // 3. The run lets go of its tab; the tab stays open for the person.
     const tabClosed = false
@@ -911,6 +977,7 @@ router.post('/automations/:id/complete', async (req, res) => {
     })
 
     await noteRun(db, row, 'done — marked by a person')
+    if (row.workflow_id === 'insurance_certificate') await (await import('../services/insuranceCertificate.js')).settleMembers(db, runId, 'done')
 
     // What finishing this run starts next.
     let next = ''

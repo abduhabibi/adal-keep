@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import api from '../services/api'
@@ -90,7 +90,7 @@ export default function ProfilesPage() {
       const moved = (s.results || []).filter(x => !x.first && x.state === 'chosen' && !x.unchanged).length
       const added = s.added || []
       if (added.length) toast.success(`Added to Adal Keep from Musaned: ${added.map(a => a.name).join(', ')}`, { duration: 10000 })
-      if (s.signedOut) toast.error('Musaned is signed out — sign in in Adal Browser; the check goes on by itself.', { id, duration: 8000 })
+      if (s.signedOut) toast.error('Musaned is signed out — sign in to Musaned in the window that opens; the check goes on by itself.', { id, duration: 8000 })
       else if (fresh.length) toast.success(`Newly chosen: ${fresh.join(', ')} — contracts saved.`, { id, duration: 10000 })
       else toast.success(`No one new.${moved ? ` ${moved} moved to a new stage.` : ''}${s.unknown?.length ? ` ${s.unknown.length} on Musaned are not in Adal Keep.` : ''}`, { id, duration: 6000 })
       load()
@@ -129,25 +129,22 @@ export default function ProfilesPage() {
     }
   }
 
-  const filterLabel = useMemo(() => {
-    const parts = []
-    if (status !== 'all') parts.push(STATUS_OPTIONS_AM.find((s) => s.value === status)?.label || status)
-    if (brokerId) {
-      const b = brokers.find((x) => String(x.id) === String(brokerId))
-      if (b) parts.push(b.name)
-    }
-    if (query.trim()) parts.push(`“${query.trim()}”`)
-    return parts.length ? parts.join(' · ') : 'ሁሉንም ደንበኞች'
-  }, [status, brokerId, query, brokers])
 
   return (
     <div>
       {/* Title · the journey (fills the space between) · the buttons — one
           line on wide screens; stacked on narrow ones, the journey scrolling sideways. */}
       <div className="mb-5 flex flex-col lg:flex-row lg:items-center gap-3 lg:gap-4">
-        <div className="shrink-0">
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">ፕሮፋይሎች</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{filterLabel}</p>
+        {/* The wakala (paid on Musaned or not): two buttons — the page's name is already in the header. */}
+        <div className="shrink-0 grid grid-cols-2 lg:grid-cols-1 gap-2 lg:w-36">
+          {[['wakala:paid', '💰 Wakala paid', 'border-emerald-300 text-emerald-700 dark:text-emerald-300', 'bg-emerald-600 text-white border-emerald-600'],
+            ['wakala:unpaid', '⏳ Wakala unpaid', 'border-red-300 text-red-700 dark:text-red-300', 'bg-red-600 text-white border-red-600']].map(([k, t, look, on]) => (
+            <button key={k} type="button" onClick={() => setStep(k)} title={k === 'wakala:paid' ? 'Chosen, the wakala paid on Musaned' : 'Chosen by an employer, the wakala not paid yet'}
+              className={`flex items-center justify-between gap-2 rounded-xl border px-3 py-2 text-xs font-bold transition ${step === k ? on + ' shadow-[0_0_14px_rgba(16,185,129,.5)]' : 'bg-white/60 dark:bg-slate-900/60 ' + look}`}>
+              <span className="whitespace-nowrap">{t}</span>
+              <span className={`rounded-full px-1.5 text-[11px] ${step === k ? 'bg-white/25' : 'bg-slate-100 dark:bg-slate-800'}`}>{stepCounts['wakala:' + k.split(':')[1]] || 0}</span>
+            </button>
+          ))}
         </div>
         <div className="panel min-w-0 flex-1 px-2 py-2" data-tour="journey-filter">
           <JourneyFork compact counts={stepCounts} selected={step} onSelect={setStep} />
@@ -220,6 +217,12 @@ export default function ProfilesPage() {
               <button type="button" className="ml-3 text-teal-700 dark:text-teal-300 hover:underline" onClick={clear}>
                 Clear filters
               </button>
+            )}
+            {/* Any filter on (a step, a search, a status…): tick every profile it found, on every page. */}
+            {(filtering || step || query.trim() || status !== 'all' || brokerId) && filtered.length > 0 && (
+              filtered.every(p => picked.has(p.id))
+                ? <button type="button" className="ml-3 font-semibold text-slate-500 hover:underline" onClick={() => { setPicked(new Map()); setLacking({}) }}>☐ Untick all</button>
+                : <button type="button" className="ml-3 rounded-md bg-teal-600 px-2 py-0.5 font-semibold text-white hover:bg-teal-700" onClick={() => setPicked(m => { const n = new Map(m); filtered.forEach(p => n.set(p.id, p)); return n })}>☑ Select all {filtered.length}</button>
             )}
           </span>
           {sortBar}
@@ -335,7 +338,7 @@ export default function ProfilesPage() {
 }
 // The seven steps in journey order, for the small dots on each card.
 const STEP_LIST = [...SHARED, ...BRANCHES.flatMap(b => b.steps)].map(([k, t]) => [k, t])
-const DOT = { done: 'bg-emerald-500', active: 'bg-amber-400 animate-pulse', failed: 'bg-red-500', todo: 'bg-slate-200 dark:bg-slate-700', soon: 'bg-slate-100 dark:bg-slate-800' }
+const DOT = { waiting: 'bg-sky-400', done: 'bg-emerald-500', active: 'bg-amber-400 animate-pulse', failed: 'bg-red-500', todo: 'bg-slate-200 dark:bg-slate-700', soon: 'bg-slate-100 dark:bg-slate-800' }
 
 /**
  * On each card: her journey as seven small dots (hover: the step and who it is

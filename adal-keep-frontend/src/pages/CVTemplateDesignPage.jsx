@@ -48,6 +48,36 @@ export default function CVTemplateDesignPage() {
   const [design, setDesign] = useState('classic')
   const [headerFile, setHeaderFile] = useState(null)
   const [header, setHeader] = useState('')
+  // Headers cut from the CVs a move brought in (or from CVs given here): one is picked instead of uploading.
+  const [headers, setHeaders] = useState([])
+  const [headerId, setHeaderId] = useState(null)
+  const [cutting, setCutting] = useState(false)
+  const cvsRef = useRef(null)
+  const loadHeaders = () => api.get('/cv/headers').then(r => setHeaders(r.data || [])).catch(() => {})
+  useEffect(() => { loadHeaders() }, [])
+  const pickSaved = async (h) => {
+    try {
+      const blob = (await api.get(`/cv/headers/${h.id}/image`, { responseType: 'blob' })).data
+      const r = new FileReader()
+      r.onload = () => { setHeader(String(r.result)); setHeaderId(h.id); setHeaderFile(null) }
+      r.readAsDataURL(blob)
+    } catch { toast.error('That header could not be opened') }
+  }
+  const cutFromCvs = async (list) => {
+    const files = [...(list || [])].filter(f => f.type.startsWith('image/'))
+    if (files.length < 2) return toast.error('Choose two or more CV pictures of the same agency')
+    setCutting(true)
+    const fd = new FormData()
+    files.slice(0, 8).forEach(f => fd.append('files', f))
+    if (name.trim()) fd.append('name', name.trim())
+    try {
+      const { data } = await api.post('/cv/headers/from-cvs', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+      toast.success('Header cut out of the CVs')
+      await loadHeaders()
+      await pickSaved({ id: data.id })
+    } catch (e) { toast.error(e.response?.data?.error || 'No header found') }
+    setCutting(false)
+  }
   const [passportTitle, setPassportTitle] = useState('Passport')
   const [passportColor, setPassportColor] = useState(readPassportColor)
   const [saving, setSaving] = useState(false)
@@ -61,6 +91,7 @@ export default function CVTemplateDesignPage() {
     if (!f) return
     if (!f.type.startsWith('image/')) return toast.error('The header must be a picture (PNG or JPG)')
     setHeaderFile(f)
+    setHeaderId(null)
     const r = new FileReader()
     r.onload = () => setHeader(String(r.result))
     r.readAsDataURL(f)
@@ -68,15 +99,18 @@ export default function CVTemplateDesignPage() {
 
   const save = async () => {
     if (!name.trim()) return toast.error('Type the agency (template) name')
-    if (!headerFile) return toast.error('Upload the agency header picture')
+    if (!headerFile && !headerId) return toast.error('Upload the agency header picture, or pick one cut from your CVs')
     setSaving(true)
     const t = toast.loading('Saving the template…')
     try {
       const { html: html_content, css: css_content } = designHtml(design, primary, secondary)
       const { data } = await api.post('/cv/templates', { name: name.trim(), agency_name: name.trim(), agency_name_ar: nameAr.trim(), html_content, css_content })
-      const fd = new FormData()
-      fd.append('header', headerFile)
-      await api.post(`/cv/templates/${data.id}/header`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+      if (headerId) await api.post(`/cv/templates/${data.id}/header-from/${headerId}`)
+      else {
+        const fd = new FormData()
+        fd.append('header', headerFile)
+        await api.post(`/cv/templates/${data.id}/header`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+      }
       await api.patch(`/cv/templates/${data.id}`, { include_passport: 1, passport_h1: passportTitle, passport_h1_color: passportColor, passport_include_header: 1 })
       toast.success('Template saved — it is ready for CVs', { id: t })
       navigate('/cvs/templates')
@@ -104,6 +138,26 @@ export default function CVTemplateDesignPage() {
               className="flex min-h-[64px] w-full items-center justify-center rounded-lg border-2 border-dashed border-slate-300 p-2 text-sm text-slate-500 hover:border-teal-500 dark:border-slate-600">
               {header ? <img src={header} alt="header" className="max-h-20 max-w-full object-contain" /> : '⬆ Upload the header picture'}
             </button>
+            {/* Or a header cut from the agency's CVs. */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-semibold text-slate-500">or pick a header cut from CVs</span>
+                <input ref={cvsRef} type="file" accept="image/*" multiple className="hidden" onChange={e => { cutFromCvs(e.target.files); e.target.value = '' }} />
+                <button type="button" disabled={cutting} onClick={() => cvsRef.current?.click()} className="text-xs font-semibold text-teal-700 hover:underline disabled:opacity-50 dark:text-teal-400">
+                  {cutting ? 'Cutting…' : '✂ Cut from CVs'}
+                </button>
+              </div>
+              {headers.length > 0 ? (
+                <div className="grid max-h-48 gap-1.5 overflow-y-auto">
+                  {headers.map(h => (
+                    <button key={h.id} type="button" onClick={() => pickSaved(h)} title={h.name}
+                      className={`rounded-lg border bg-white p-1 ${headerId === h.id ? 'border-teal-500 ring-2 ring-teal-300' : 'border-slate-200 hover:border-teal-400 dark:border-slate-700'}`}>
+                      <img src={`/api/cv/headers/${h.id}/image`} alt={h.name} className="mx-auto max-h-12 max-w-full object-contain" loading="lazy" />
+                    </button>
+                  ))}
+                </div>
+              ) : <p className="text-[11px] text-slate-400">None yet — a move from another system cuts its CV header out by itself, or press ✂ and give two or more CVs of the same agency.</p>}
+            </div>
           </div>
 
           <div className="panel space-y-3 p-4">

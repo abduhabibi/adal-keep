@@ -50,7 +50,7 @@ export default function MainLayout() {
   })
 
   return (
-    <div className="app-shell flex h-screen overflow-hidden bg-slate-50 dark:bg-slate-900">
+    <div className="app-shell flex h-[var(--app-h,100vh)] overflow-hidden bg-slate-50 dark:bg-slate-900">
       {newVersion && (
         <button type="button" onClick={() => window.location.reload()}
           className="fixed bottom-4 left-1/2 z-[9990] -translate-x-1/2 rounded-full bg-teal-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg hover:bg-teal-700">
@@ -75,7 +75,7 @@ export default function MainLayout() {
         onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
       />
 
-      <div className="flex flex-col flex-1 min-w-0 h-screen overflow-hidden relative">
+      <div className="flex flex-col flex-1 min-w-0 h-[var(--app-h,100vh)] overflow-hidden relative">
         {DEMO && <Suspense fallback={null}><DemoBanner /></Suspense>}
         {!DEMO && <FollowerBanner />}
         {!DEMO && <UpdateBanner />}

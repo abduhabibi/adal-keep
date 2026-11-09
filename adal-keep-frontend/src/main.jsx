@@ -211,3 +211,18 @@ if (import.meta.env.VITE_DEMO !== '1' && import.meta.env.VITE_PHONE !== '1' && i
 
 // English (Settings → Language): shows the Amharic pages in English.
 import('./lib/i18n.js').then(m => m.startLanguage())
+
+// The app is as tall as what can be seen: when a phone's keyboard opens, the
+// page gets shorter (Android does not do it by itself here), so a box being
+// typed in — the chat's message box — stays just above the keyboard.
+;(() => {
+  const vv = window.visualViewport
+  if (!vv) return
+  const fit = () => {
+    document.documentElement.style.setProperty('--app-h', `${Math.round(vv.height)}px`)
+    if (window.scrollY) window.scrollTo(0, 0)
+    window.dispatchEvent(new Event('adal-viewport'))
+  }
+  vv.addEventListener('resize', fit)
+  fit()
+})()

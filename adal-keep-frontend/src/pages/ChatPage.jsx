@@ -104,6 +104,7 @@ export default function ChatPage() {
   const [dragging, setDragging] = useState(false)
   const threadRef = useRef(null)
   const fileRef = useRef(null)
+  const photoRef = useRef(null)
   const inputRef = useRef(null)
   const lastId = useRef(0)
   const since = useRef(null)
@@ -175,6 +176,12 @@ export default function ChatPage() {
     if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 200) el.scrollTop = el.scrollHeight
   }, [msgs.length])
   useEffect(() => { const el = threadRef.current; if (el) el.scrollTop = el.scrollHeight }, [open?.id])
+  // The keyboard opened (the page got shorter): the last messages stay in sight.
+  useEffect(() => {
+    const keep = () => { const el = threadRef.current; if (el) el.scrollTop = el.scrollHeight }
+    window.addEventListener('adal-viewport', keep)
+    return () => window.removeEventListener('adal-viewport', keep)
+  }, [])
 
   // message search
   useEffect(() => {
@@ -260,6 +267,9 @@ export default function ChatPage() {
     }
   }
 
+  // The chosen photo, shown small above the box before it is sent.
+  const attachUrl = useMemo(() => attach && /^image\//.test(attach.type) ? URL.createObjectURL(attach) : null, [attach])
+  useEffect(() => () => { if (attachUrl) URL.revokeObjectURL(attachUrl) }, [attachUrl])
   const takeFile = (f) => {
     if (!f) return
     if (f.size > 20 * 1024 * 1024) return toast.error('Files up to 20 MB.')
@@ -513,7 +523,9 @@ export default function ChatPage() {
                 )}
                 {attach && (
                   <div className="mb-2 flex items-center gap-3 rounded-lg bg-slate-100 p-2 text-sm dark:bg-slate-800">
-                    <span className="text-xl">{/^image\//.test(attach.type) ? '📷' : '📄'}</span>
+                    {attachUrl
+                      ? <img src={attachUrl} alt="" className="h-16 w-16 shrink-0 rounded-lg object-cover" />
+                      : <span className="text-xl">📄</span>}
                     <span className="min-w-0 flex-1 truncate">{attach.name} <span className="text-xs text-slate-500">· {sizeOf(attach.size)}</span></span>
                     <button type="button" className="text-red-600 hover:underline" onClick={() => setAttach(null)}>remove</button>
                   </div>
@@ -531,6 +543,10 @@ export default function ChatPage() {
                     <button type="button" title="Send a picture or document" onClick={() => fileRef.current?.click()}
                       className="h-11 w-11 shrink-0 rounded-full text-xl text-slate-400 hover:bg-slate-100 hover:text-sky-500 dark:hover:bg-white/10">📎</button>
                     <input ref={fileRef} type="file" className="hidden" onChange={e => { takeFile(e.target.files?.[0]); e.target.value = '' }} />
+                    {/* A photo, like Telegram: the gallery or the camera. */}
+                    <button type="button" title="Send a photo" onClick={() => photoRef.current?.click()}
+                      className="h-11 w-11 shrink-0 rounded-full text-xl text-slate-400 hover:bg-slate-100 hover:text-sky-500 dark:hover:bg-white/10">🖼️</button>
+                    <input ref={photoRef} type="file" accept="image/*" className="hidden" onChange={e => { takeFile(e.target.files?.[0]); e.target.value = '' }} />
                     <textarea ref={inputRef} rows={1} value={text}
                       onChange={e => onType(e.target.value)}
                       onKeyDown={e => {

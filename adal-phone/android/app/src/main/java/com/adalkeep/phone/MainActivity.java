@@ -21,6 +21,25 @@ public class MainActivity extends BridgeActivity {
         bars.setAppearanceLightStatusBars(false);
         bars.setAppearanceLightNavigationBars(false);
 
+        // The keyboard: the page ends at its top edge (Android 15 lays the
+        // keyboard over the page otherwise), so a box being typed in — the
+        // chat's message box — stays in sight just above it.
+        WebView page = getBridge() != null ? getBridge().getWebView() : null;
+        if (page != null) {
+            androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(page, (v, insets) -> {
+                androidx.core.graphics.Insets sys = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars());
+                androidx.core.graphics.Insets ime = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.ime());
+                android.view.ViewGroup.MarginLayoutParams m = (android.view.ViewGroup.MarginLayoutParams) v.getLayoutParams();
+                m.leftMargin = sys.left;
+                m.rightMargin = sys.right;
+                m.topMargin = sys.top;
+                m.bottomMargin = Math.max(sys.bottom, ime.bottom);
+                v.setLayoutParams(m);
+                return androidx.core.view.WindowInsetsCompat.CONSUMED;
+            });
+            androidx.core.view.ViewCompat.requestApplyInsets(page);
+        }
+
         // Back: the page goes back (or its full-screen view closes);
         // at the first page, back twice within 2 seconds leaves the app.
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {

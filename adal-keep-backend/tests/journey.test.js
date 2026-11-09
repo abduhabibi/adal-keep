@@ -48,3 +48,10 @@ test('the header CVs share is cut out of them (the name under it differs)', asyn
   assert.ok(got.height >= 85 && got.height <= 130, `header height ${got.height}`)
   fs.rmSync(dir, { recursive: true, force: true })
 })
+
+test('a CV is complete when made, or when all it shows is there', async () => {
+  const { cvMissing } = await import('../src/routes/automations.js')
+  assert.deepEqual(cvMissing({}, new Set(), true), [])
+  assert.deepEqual(cvMissing({ full_name: 'A B', passport_number: 'EP1234567', date_of_birth: '2000-01-01' }, new Set(['Photo', 'Passport'])), [])
+  assert.deepEqual(cvMissing({ full_name: 'A B', passport_number: 'EP1234567' }, new Set(['Photo'])), ['date of birth', 'passport scan'])
+})

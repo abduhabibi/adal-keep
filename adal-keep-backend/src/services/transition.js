@@ -271,6 +271,7 @@ async function musanedSignIn(db, page, accountId, say, check) {
   if (!acct?.username || !acct?.password) return
   const w = await import('./musanedWorkflow.js')
   const ctx = { db, account_id: acct.id, musaned_username: acct.username, musaned_password: acct.password, musaned_name: acct.name, runId: 'move', profileId: '-' }
+  page.__adalMusanedCtx = ctx // the HR pool is reached through this agency's own card
   try {
     say(`Signing in to Musaned as ${acct.name}…`)
     // Musaned moves to its sign-in page while it is looked at ("detached frame"): look again.
@@ -286,9 +287,10 @@ async function musanedSignIn(db, page, accountId, say, check) {
     for (const end = Date.now() + 5 * 60_000; Date.now() < end;) {
       check()
       const s = await w.snapshotState(page).catch(() => null)
-      if (s?.hasDashboardNav) return
+      // The agency's card first: "Organizations" is on that page too, and the HR pool opened before it is "Access Denied".
       if (s?.hasAgencyPicker) { await w.stepClickAgencyCard(page, ctx).catch(() => {}); await w.stepClickGoToDashboard(page, ctx).catch(() => {}); return }
-      if (s?.hasGoToDashboard) { await w.stepClickGoToDashboard(page, ctx).catch(() => {}); return }
+      if (s?.hasGoToDashboard && !s?.hasDashboardNav) { await w.stepClickGoToDashboard(page, ctx).catch(() => {}); return }
+      if (s?.hasDashboardNav) return
       await sleep(1500)
     }
   } catch (e) {

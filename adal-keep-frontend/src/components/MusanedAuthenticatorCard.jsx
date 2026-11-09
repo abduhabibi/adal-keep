@@ -13,35 +13,38 @@ import Button from './shared/Button'
 
 const err = (e) => e?.response?.data?.error || e.message
 
-/** How it is set up: the authenticator's name and its code now — the same as on the phone. */
-function LiveCode({ info, onTick }) {
-  const [left, setLeft] = useState(info.left)
-  useEffect(() => { setLeft(info.left) }, [info])
-  const tick = useRef(onTick)
-  tick.current = onTick
+/**
+ * Every account's Musaned code, asked of this PC every 2 s — the very code the
+ * profile page shows and Adal Keep types (a page left open never shows a stale one).
+ */
+export function useMusanedCodes() {
+  const [all, setAll] = useState(null)
+  const load = useRef(null)
   useEffect(() => {
-    const t = setInterval(() => setLeft(l => { if (l <= 1) { setTimeout(() => tick.current(), 600); return 30 } return l - 1 }), 1000)
-    return () => clearInterval(t)
+    let alive = true
+    load.current = () => api.get('/musaned/authenticators').then(r => { if (alive) setAll(r.data || {}) }).catch(() => {})
+    load.current()
+    const t = setInterval(() => load.current(), 2000)
+    return () => { alive = false; clearInterval(t) }
   }, [])
-  const code = String(info.code || ''), next = String(info.next || '')
-  // A code works once on Musaned: the one Adal Keep just typed is spent, and
-  // one about to change may expire while it is typed — then the next one is the one to type.
-  const useNext = info.used || left <= 6
+  return [all, () => load.current?.()]
+}
+
+const copyCode = (code) => navigator.clipboard?.writeText(code).then(() => toast.success(`Musaned code ${code} copied`, { duration: 1500 })).catch(() => toast.error('Could not copy'))
+
+/** The account's code now: click to copy. The same as on the profile page. */
+function LiveCode({ info }) {
+  const code = String(info.code || ''), left = info.left || 30
   return (
-    <div className="mt-2 flex flex-wrap items-center gap-3 rounded-lg bg-emerald-50/60 px-3 py-2 dark:bg-emerald-900/10">
+    <button type="button" onClick={() => copyCode(code)} title="Click to copy"
+      className="mt-2 flex w-full flex-wrap items-center gap-3 rounded-lg bg-emerald-50/60 px-3 py-2 text-left hover:bg-emerald-100/70 dark:bg-emerald-900/10 dark:hover:bg-emerald-900/30">
       <span className="text-xs text-slate-600 dark:text-slate-300">Authenticator: <b>{info.label || 'Musaned'}</b></span>
       <span className="font-mono text-xl font-bold tracking-[0.25em] text-emerald-700 dark:text-emerald-300">{code.slice(0, 3)} {code.slice(3)}</span>
       <span className="relative h-1.5 w-16 overflow-hidden rounded-full bg-emerald-100 dark:bg-emerald-900/40">
         <span className="absolute inset-y-0 left-0 bg-emerald-500 transition-all duration-1000" style={{ width: `${(left / 30) * 100}%` }} />
       </span>
-      <span className="text-[11px] text-slate-500">{left}s · should match the code in your phone's app</span>
-      {useNext && next && (
-        <span className="basis-full text-[11px] font-semibold text-amber-700 dark:text-amber-300">
-          {info.used ? 'Adal Keep just signed in with this code — Musaned takes a code only once. ' : 'It changes in a moment. '}
-          Type the next one: <span className="font-mono text-sm tracking-[0.2em]">{next.slice(0, 3)} {next.slice(3)}</span> (good in {left}s)
-        </span>
-      )}
-    </div>
+      <span className="text-[11px] text-slate-500">{left}s · 📋 click to copy</span>
+    </button>
   )
 }
 
@@ -73,7 +76,7 @@ export function Account({ a, has, onChange }) {
           ? <span className="flex shrink-0 items-center gap-2 text-xs"><span className="rounded-full bg-emerald-100 px-2 py-0.5 font-semibold text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300">🔑 Code typed by Adal Keep</span><button type="button" onClick={remove} className="text-red-600 hover:underline">Remove</button></span>
           : <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500 dark:bg-slate-800">A person types the code</span>}
       </div>
-      {has && <LiveCode info={has} onTick={onChange} />}
+      {has && <LiveCode info={has} />}
       <div
         onDragOver={(e) => { e.preventDefault(); setOver(true) }} onDragLeave={() => setOver(false)}
         onDrop={(e) => { e.preventDefault(); setOver(false); const f = e.dataTransfer.files?.[0]; if (f) send(f) }}
@@ -94,10 +97,11 @@ export function Account({ a, has, onChange }) {
 /** Settings → Integrations: each Musaned account's code right now, to read and type. */
 export function MusanedCodesCard() {
   const [accounts, setAccounts] = useState(null)
-  const [has, setHas] = useState({})
+  const [codes, reload] = useMusanedCodes()
+  const has = codes || {}
   const load = () => {
     api.get('/musaned/accounts').then(r => setAccounts(r.data || [])).catch(() => setAccounts([]))
-    api.get('/musaned/authenticators').then(r => setHas(r.data || {})).catch(() => {})
+    reload()
   }
   useEffect(() => { load() }, [])
   if (!accounts) return null
@@ -110,7 +114,7 @@ export function MusanedCodesCard() {
             <li key={a.id} className="rounded-xl border border-slate-200 p-3 dark:border-slate-700">
               <span className="text-sm font-semibold">{a.name} <span className="font-normal text-slate-400">{a.username}</span></span>
               {has[a.id]
-                ? <LiveCode info={has[a.id]} onTick={load} />
+                ? <LiveCode info={has[a.id]} />
                 : <p className="mt-1 text-xs text-slate-500">No authenticator yet: add it in Settings → Portals.</p>}
             </li>
           ))}</ul>
@@ -121,10 +125,11 @@ export function MusanedCodesCard() {
 
 export default function MusanedAuthenticatorCard() {
   const [accounts, setAccounts] = useState(null)
-  const [has, setHas] = useState({})
+  const [codes, reload] = useMusanedCodes()
+  const has = codes || {}
   const load = () => {
     api.get('/musaned/accounts').then(r => setAccounts(r.data || [])).catch(() => setAccounts([]))
-    api.get('/musaned/authenticators').then(r => setHas(r.data || {})).catch(() => {})
+    reload()
   }
   useEffect(() => { load() }, [])
   if (!accounts) return null

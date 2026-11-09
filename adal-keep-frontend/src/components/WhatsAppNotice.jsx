@@ -8,12 +8,12 @@ import toast from 'react-hot-toast'
 import { wa } from '../lib/whatsapp'
 
 const err = (e) => e?.response?.data?.error || e.message
-const DEFAULT = 'Hello {name}, you have been selected by {selected_by}. Please come to the office.'
+const DEFAULT = { agent: 'About the worker you selected:', her: 'Hello {name}, you have been selected by {selected_by}. Please come to the office.', broker: 'Hello, {name} has been selected by {selected_by}.' }
 const voiceType = () => ['audio/ogg;codecs=opus', 'audio/webm;codecs=opus', 'audio/webm'].find(t => window.MediaRecorder?.isTypeSupported?.(t)) || ''
 
 export default function WhatsAppNotice({ picked, onClose }) {
-  const [to, setTo] = useState('her')
-  const [text, setText] = useState(DEFAULT)
+  const [to, setTo] = useState('agent')
+  const [text, setText] = useState(DEFAULT.agent)
   const [rec, setRec] = useState(null)        // the recorder while recording
   const [voice, setVoice] = useState(null)    // { url, data, mime, secs }
   const [job, setJob] = useState(null)
@@ -62,7 +62,7 @@ export default function WhatsAppNotice({ picked, onClose }) {
     } catch (e) { toast.error(err(e)) }
   }
 
-  const example = picked[0] ? text.replace(/\{name\}/gi, picked[0].full_name || '').replace(/\{selected_by\}/gi, picked[0].musaned_pro || picked[0].employer_name || '—').replace(/\{passport\}/gi, picked[0].passport_number || '') : ''
+  const example = picked[0] ? (to === 'agent' ? `${text}  👤 ${picked[0].full_name || ''}  🛂 ${picked[0].passport_number || ''}` : text).replace(/\{name\}/gi, picked[0].full_name || '').replace(/\{selected_by\}/gi, picked[0].musaned_pro || picked[0].employer_name || '—').replace(/\{passport\}/gi, picked[0].passport_number || '') : ''
 
   return (
     <div className="col-span-2 space-y-2 rounded-xl border border-emerald-200 bg-emerald-50/50 p-2 dark:border-emerald-800 dark:bg-emerald-900/20 lg:col-span-1">
@@ -70,13 +70,14 @@ export default function WhatsAppNotice({ picked, onClose }) {
         <span className="text-xs font-bold text-emerald-800 dark:text-emerald-300">💬 WhatsApp to {picked.length}</span>
         <button type="button" onClick={onClose} className="rounded px-1.5 text-slate-400 hover:text-slate-600">✕</button>
       </div>
-      <div className="grid grid-cols-2 gap-1 rounded-lg bg-white p-0.5 text-xs font-semibold dark:bg-slate-900">
-        {[['her', 'Her phone'], ['broker', 'Her broker']].map(([k, t]) => (
-          <button key={k} type="button" onClick={() => setTo(k)} className={`rounded-md py-1 ${to === k ? 'bg-emerald-600 text-white' : 'text-slate-500'}`}>{t}</button>
+      <div className="grid grid-cols-3 gap-1 rounded-lg bg-white p-0.5 text-xs font-semibold dark:bg-slate-900">
+        {[['agent', 'Who chose her'], ['her', 'Her phone'], ['broker', 'Her broker']].map(([k, t]) => (
+          <button key={k} type="button" onClick={() => { setTo(k); if (Object.values(DEFAULT).includes(text)) setText(DEFAULT[k]) }} className={`rounded-md py-1 ${to === k ? 'bg-emerald-600 text-white' : 'text-slate-500'}`}>{t}</button>
         ))}
       </div>
       <textarea value={text} onChange={e => setText(e.target.value)} rows={3}
         className="w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-900" />
+      {to === 'agent' && <p className="text-[10px] leading-tight text-emerald-800 dark:text-emerald-300">Sent in the chat of the agent she was chosen from, under her CV there — her name and passport go under the message.</p>}
       <p className="text-[10px] leading-tight text-slate-500">{'{name}'} · {'{selected_by}'} (who selected her) · {'{passport}'}{example && <><br />e.g. “{example.slice(0, 120)}”</>}</p>
       <div className="flex items-center gap-1.5">
         <button type="button" onClick={record}

@@ -73,6 +73,36 @@ async function openPool(page) {
   await page.goto(`${ORIGIN}/hr-pool`, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {})
 }
 
+/** Musaned's own "Access Denied" page (/403): the HR pool was opened before the agency was picked. */
+export const onDenied = (page) => page.evaluate(() => /^\/403\b/.test(location.pathname) || /^\s*access denied\s*$/im.test(document.body?.innerText || '')).catch(() => false)
+
+/**
+ * Back from Access Denied the way a person goes: Musaned's start page, the
+ * agency's own card, Go to Dashboard — then the HR pool from its menu.
+ */
+async function backFromDenied(page) {
+  page.__adalDenied = (page.__adalDenied || 0) + 1
+  if (page.__adalDenied > 3) throw new Error('Musaned keeps showing "Access Denied" for the HR pool. Sign in with the agency\'s own Musaned account (its HR pool), then press the button again: it goes on from where it stopped.')
+  page.__adalToPool = false
+  await page.goto(`${ORIGIN}/`, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {})
+  await sleep(2500)
+}
+
+/** On the way to the HR pool: the agency picked (its card, Go to Dashboard) before anything else. */
+async function toDashboard(page) {
+  const w = await import('./musanedWorkflow.js')
+  const s = await w.snapshotState(page).catch(() => null)
+  if (!s) return false
+  const ctx = page.__adalMusanedCtx || null
+  if (s.hasAgencyPicker) {
+    // The person picks it when there is no saved account to tell which.
+    if (ctx) { await w.stepClickAgencyCard(page, ctx).catch(() => {}); await w.stepClickGoToDashboard(page, ctx).catch(() => {}) }
+    return false
+  }
+  if (s.hasGoToDashboard && !s.hasDashboardNav) { await w.stepClickGoToDashboard(page, ctx || {}).catch(() => {}); return false }
+  return !!s.hasDashboardNav
+}
+
 /**
  * Signed in, once the window's HR pool page has had its list from Musaned:
  * { auth, cookie, page } — else null (still signing in). From the dashboard it
@@ -83,10 +113,13 @@ export async function signedInMusaned(page) {
   const url = page.url()
   if (!url.startsWith(ORIGIN)) return null
   if (seen.pool && seen.auth) return credOf(page)
+  if (await onDenied(page)) { await backFromDenied(page); return null }
   const onPool = POOL_PATH.test(new URL(url).pathname)
-  if (!onPool && !page.__adalToPool) {
-    const dash = !!(await import('./musanedWorkflow.js').then(w => w.snapshotState(page)).catch(() => null))?.hasDashboardNav
-    if (dash) { page.__adalToPool = true; await openPool(page) }
+  if (!onPool && !page.__adalToPool && await toDashboard(page)) { page.__adalToPool = true; await openPool(page) }
+  // On the HR pool with no list for a while (opened too early): again by the menu.
+  if (page.__adalToPool && !seen.pool) {
+    page.__adalPoolWait = (page.__adalPoolWait || 0) + 1
+    if (page.__adalPoolWait > 20) { page.__adalPoolWait = 0; page.__adalToPool = false }
   }
   return null
 }
@@ -124,11 +157,16 @@ export async function* poolByPages(page, { check = () => {}, wait = sleep, say =
     }
     return null
   }
-  // Its first page, fresh.
+  // Its first page, fresh — the list the window already has, else the menu once more.
   let t = Date.now()
-  if (POOL_PATH.test(new URL(page.url()).pathname)) await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {})
-  else await openPool(page)
-  let list = await next(t, 45000)
+  let list = seen.lists.length && !(Number(seen.lists[0].json?.number) > 0) ? seen.lists.shift().json : null
+  seen.lists = []
+  if (!list) {
+    if (await onDenied(page)) { await backFromDenied(page); await toDashboard(page); await sleep(2000) }
+    await openPool(page)
+    list = await next(t, 45000)
+  }
+  if (!list && await onDenied(page)) throw new Error('Musaned showed "Access Denied" for the HR pool. Press the button again: it goes on from where it stopped.')
   if (!list) throw new Error('The Musaned HR pool did not show its list. Press the button again: it goes on from where it stopped.')
   const size = Math.max(1, Number(list.size) || list.content.length || 10)
   const total = Number(list.totalElements ?? list.content.length)

@@ -136,15 +136,18 @@ export default function ProfilesPage() {
           line on wide screens; stacked on narrow ones, the journey scrolling sideways. */}
       <div className="mb-5 flex flex-col lg:flex-row lg:items-center gap-3 lg:gap-4">
         {/* The wakala (paid on Musaned or not): two buttons — the page's name is already in the header. */}
-        <div className="shrink-0 grid grid-cols-2 lg:grid-cols-1 gap-2 lg:w-36">
-          {[['wakala:paid', '💰 Wakala paid', 'border-emerald-300 text-emerald-700 dark:text-emerald-300', 'bg-emerald-600 text-white border-emerald-600'],
-            ['wakala:unpaid', '⏳ Wakala unpaid', 'border-red-300 text-red-700 dark:text-red-300', 'bg-red-600 text-white border-red-600']].map(([k, t, look, on]) => (
-            <button key={k} type="button" onClick={() => setStep(k)} title={k === 'wakala:paid' ? 'Chosen, the wakala paid on Musaned' : 'Chosen by an employer, the wakala not paid yet'}
-              className={`flex items-center justify-between gap-2 rounded-xl border px-3 py-2 text-xs font-bold transition ${step === k ? on + ' shadow-[0_0_14px_rgba(16,185,129,.5)]' : 'bg-white/60 dark:bg-slate-900/60 ' + look}`}>
-              <span className="whitespace-nowrap">{t}</span>
-              <span className={`rounded-full px-1.5 text-[11px] ${step === k ? 'bg-white/25' : 'bg-slate-100 dark:bg-slate-800'}`}>{stepCounts['wakala:' + k.split(':')[1]] || 0}</span>
-            </button>
-          ))}
+        <div className="shrink-0 lg:w-40">
+          <div className="mb-1 px-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">Wakala</div>
+          <div className="grid grid-cols-2 lg:grid-cols-1 gap-1.5">
+            {[['wakala:paid', '✓ Paid', 'border-emerald-300 text-emerald-700 dark:border-emerald-700 dark:text-emerald-300', 'bg-emerald-600 text-white border-emerald-600'],
+              ['wakala:unpaid', '⏳ Unpaid', 'border-red-300 text-red-700 dark:border-red-800 dark:text-red-300', 'bg-red-600 text-white border-red-600']].map(([k, t, look, on]) => (
+              <button key={k} type="button" onClick={() => setStep(k)} title={k === 'wakala:paid' ? 'Chosen, the wakala paid on Musaned' : 'Chosen by an employer, the wakala not paid yet'}
+                className={`flex min-w-0 items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-xs font-bold transition ${step === k ? on + ' shadow-md' : 'bg-white/60 dark:bg-slate-900/60 ' + look}`}>
+                <span className="truncate">{t}</span>
+                <span className={`shrink-0 rounded-full px-1.5 text-[11px] ${step === k ? 'bg-white/25' : 'bg-slate-100 dark:bg-slate-800'}`}>{stepCounts[k] || 0}</span>
+              </button>
+            ))}
+          </div>
         </div>
         <div className="panel min-w-0 flex-1 px-2 py-2" data-tour="journey-filter">
           <JourneyFork compact counts={stepCounts} selected={step} onSelect={setStep} />

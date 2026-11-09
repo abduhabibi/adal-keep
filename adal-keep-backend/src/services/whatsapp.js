@@ -784,7 +784,26 @@ export const fillNotice = (text, p, broker = null) => String(text || '')
   .replace(/\{selected_by\}/gi, p.musaned_pro || p.employer_name || '—')
   .replace(/\{passport\}/gi, p.passport_number || '')
   .replace(/\{broker\}/gi, broker?.name || '')
-export function notifyMany(db, key, { profileIds = [], to = 'her', text = '', audio = null } = {}, by = '') {
+/**
+ * The agent she was chosen from: the WhatsApp agent whose CV of her was
+ * chosen (else the one whose Musaned office chose her) — its chat, and her
+ * CV message there to answer under.
+ */
+export async function chosenAgentOf(db, p) {
+  const s = await db('whatsapp_sends').where({ profile_id: p.id, status: 'chosen_here' }).orderBy('id', 'desc').first().catch(() => null)
+  if (s) {
+    const a = await db('whatsapp_agents').where('id', s.agent_id).first().catch(() => null)
+    return { chat: s.chat_id || a?.chat_id, name: a?.name || '', quote: s.message_id || null }
+  }
+  if (!p.musaned_pro) return null
+  const a = (await db('whatsapp_agents')).find(x => officeMatches(x.musaned_office, p.musaned_pro))
+  if (!a) return null
+  const sent = await db('whatsapp_sends').where({ profile_id: p.id, agent_id: a.id }).whereNotNull('message_id').orderBy('id', 'desc').first().catch(() => null)
+  return { chat: a.chat_id, name: a.name, quote: sent?.message_id || null }
+}
+const herLines = (p) => [p.full_name && `👤 ${p.full_name}`, p.passport_number && `🛂 ${p.passport_number}`].filter(Boolean).join('\n')
+
+export function notifyMany(db, key, { profileIds = [], to = 'agent', text = '', audio = null } = {}, by = '') {
   if (notices[key]?.running) throw new Error('Still sending the last message — wait until it finishes')
   const c = ready(key)
   if (!String(text).trim() && !audio?.data) throw new Error('Write the message or record a voice note')
@@ -800,6 +819,19 @@ export function notifyMany(db, key, { profileIds = [], to = 'her', text = '', au
         if (!p) throw new Error('profile not found')
         name = n.current = p.full_name || `#${id}`
         const broker = p.broker_id ? await db('brokers').where('id', p.broker_id).first().catch(() => null) : null
+        if (to === 'agent') {
+          // Into the chat of the agent who chose her, under her CV there; her name and passport under the message.
+          const ag = await chosenAgentOf(db, p)
+          if (!ag?.chat) throw new Error(p.musaned_pro ? `no WhatsApp agent for ${p.musaned_pro} (Settings → WhatsApp → its Musaned office)` : 'not chosen through a WhatsApp agent yet')
+          const words = [fillNotice(text, p, broker).trim(), herLines(p)].filter(Boolean).join('\n\n')
+          const opts = ag.quote ? { quotedMessageId: ag.quote } : {}
+          try { await c.sendMessage(ag.chat, words, opts) } catch (e) { if (!ag.quote) throw e; await c.sendMessage(ag.chat, words) }
+          if (voice) await c.sendMessage(ag.chat, voice, asVoice ? { sendAudioAsVoice: true } : { sendMediaAsDocument: false })
+          n.sent++
+          n.done++
+          await new Promise(r => setTimeout(r, 1500 + Math.random() * 1500))
+          continue
+        }
         const number = ethiopianNumber(to === 'broker' ? (broker?.contact1 || broker?.contact2) : p.phone_number)
         if (!number) throw new Error(to === 'broker' ? 'her broker has no phone number' : 'no phone number')
         const chat = await c.getNumberId(number)

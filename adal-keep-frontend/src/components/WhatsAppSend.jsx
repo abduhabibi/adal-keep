@@ -24,15 +24,22 @@ export default function WhatsAppSend({ profile }) {
   const [sends, setSends] = useState([])
   const [pick, setPick] = useState(null) // null closed · Set of agent ids
   const [busy, setBusy] = useState(false)
+  // Only between a complete CV and her being selected: before, there is no CV
+  // to send; after, it is gone for good.
+  const [due, setDue] = useState(false)
 
   const loadSends = () => wa.get(`/profiles/${profile.id}/whatsapp`).then(r => setSends(r.data)).catch(() => {})
   useEffect(() => {
     wa.get('/whatsapp').then(r => setConn(r.data)).catch(() => setConn(false))
     wa.get('/whatsapp/agents').then(r => setAgents(r.data.filter(a => a.active))).catch(() => {})
     loadSends()
-  }, [profile.id])
+    api.get(`/profiles/${profile.id}/journey`).then(({ data }) => {
+      const st = (k) => (data?.embassy || []).find(x => x.key === k)?.state
+      setDue(Array.isArray(data?.cv_missing) && !data.cv_missing.length && st('selected') !== 'done')
+    }).catch(() => setDue(false))
+  }, [profile.id, profile.chosen_at])
 
-  if (!conn || (!agents.length && !sends.length)) return null
+  if (!due || profile.chosen_at || !conn || (!agents.length && !sends.length)) return null
   const ready = conn.status === 'ready'
   const send = async (ids) => {
     setBusy(true)

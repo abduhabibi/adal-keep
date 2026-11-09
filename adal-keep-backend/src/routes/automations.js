@@ -617,9 +617,21 @@ router.get('/profiles/:profileId/journey', async (req, res) => {
     for (const r of await db('automation_queue').where('profile_id', id).select('workflow_id', 'status').orderBy('id', 'asc')) runs[r.workflow_id] = r
     const cv = await db('generated_cvs').where('profile_id', id).first().catch(() => null)
     const docs = (await docsOf(db, [id])).get(id) || new Set()
-    res.json(journeyOf(p, runs, !!cv || docs.has('CV'), docs, (await agentsOut(db, [id])).get(id) || []))
+    res.json({ ...journeyOf(p, runs, !!cv || docs.has('CV'), docs, (await agentsOut(db, [id])).get(id) || []), cv_missing: cvMissing(p, docs, !!cv || docs.has('CV')) })
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
+
+/** What her CV still lacks before it can go to agents ([] = complete): a CV made, or all a CV shows. */
+export function cvMissing(p, docs = new Set(), hasCv = false) {
+  if (hasCv) return []
+  return [
+    !String(p.full_name || '').trim() && 'name',
+    !String(p.passport_number || '').trim() && 'passport number',
+    !p.date_of_birth && 'date of birth',
+    !docs.has('Photo') && 'photo',
+    !docs.has('Passport') && 'passport scan',
+  ].filter(Boolean)
+}
 
 router.get('/automations/stages', async (req, res) => {
   try {

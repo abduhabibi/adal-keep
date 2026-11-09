@@ -89,7 +89,7 @@ router.post('/whatsapp/notify', (req, res) => {
     const ids = (req.body?.profile_ids || []).map(Number).filter(Boolean)
     if (!ids.length) throw new Error('Choose the profiles to message')
     const audio = req.body?.audio?.data ? { data: String(req.body.audio.data), mime: String(req.body.audio.mime || '') } : null
-    res.json(notifyMany(req.app.locals.db, who(req), { profileIds: ids, to: req.body?.to === 'broker' ? 'broker' : 'her', text: String(req.body?.text || ''), audio }, by(req)))
+    res.json(notifyMany(req.app.locals.db, who(req), { profileIds: ids, to: ['broker', 'her'].includes(req.body?.to) ? req.body.to : 'agent', text: String(req.body?.text || ''), audio }, by(req)))
   } catch (e) { fail(res, e) }
 })
 

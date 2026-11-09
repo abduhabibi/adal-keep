@@ -1,5 +1,5 @@
 import LiveTab from './LiveTab'
-import { Account } from './MusanedAuthenticatorCard'
+import { Account, useMusanedCodes } from './MusanedAuthenticatorCard'
 import { IN_PHONE_APP, onBack } from '../lib/phoneApp'
 import { useCallback, useEffect, useState, useRef } from 'react'
 import { createPortal } from 'react-dom'
@@ -699,26 +699,18 @@ function MusanedCode({ accountId }) {
   const [accounts, setAccounts] = useState([])
   useEffect(() => { api.get('/musaned/accounts').then(r => setAccounts(r.data || [])).catch(() => {}) }, [])
   const account = accounts.find(a => a.id === accountId) || accounts.find(a => a.is_default) || accounts[0]
-  const [all, setAll] = useState(null)
-  const [left, setLeft] = useState(0)
-  useEffect(() => {
-    let alive = true
-    const load = () => api.get('/musaned/authenticators').then(r => { if (alive) { setAll(r.data || {}); const any = Object.values(r.data || {}).find(Boolean); setLeft(any?.left || 30) } }).catch(() => {})
-    load()
-    const t = setInterval(() => setLeft(l => { if (l <= 1) { load(); return 30 } return l - 1 }), 1000)
-    return () => { alive = false; clearInterval(t) }
-  }, [])
+  const [all, reload] = useMusanedCodes()
   if (!all) return null
   // Only this account's own: another account's code would not sign it in.
   const info = account ? all[account.id] : null
   if (!info && account) return (
     <span className="block w-full">
       <button type="button" onClick={() => setAdding(v => !v)} className="text-xs font-semibold text-indigo-700 hover:underline dark:text-indigo-300">🔑 Add {account.name}'s authenticator</button>
-      {adding && <ul className="mt-1"><Account a={account} has={null} onChange={() => { setAdding(false); api.get('/musaned/authenticators').then(r => setAll(r.data || {})).catch(() => {}) }} /></ul>}
+      {adding && <ul className="mt-1"><Account a={account} has={null} onChange={() => { setAdding(false); reload() }} /></ul>}
     </span>
   )
   if (!info) return <span className="text-[10px] text-slate-400" title="Settings → Portals → Musaned authenticator">🔑 No Musaned code in Adal Keep</span>
-  const code = String(info.code || '')
+  const code = String(info.code || ''), left = info.left || 30
   return (
     <button type="button" onClick={() => navigator.clipboard?.writeText(code).then(() => toast.success('Musaned code copied', { duration: 1500 })).catch(() => {})}
       title={`Musaned code (${info.label || 'authenticator'}) — tap to copy`}

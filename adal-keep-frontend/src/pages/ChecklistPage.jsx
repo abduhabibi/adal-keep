@@ -8,6 +8,7 @@ import ChecklistGridView from '../components/ChecklistGridView'
 import { profilesDropped } from '../lib/profileDrag'
 import { onDataChange } from '../lib/changes'
 import { profilesList } from '../lib/profilesCache'
+import { cachedGet } from '../lib/deviceCache'
 
 export default function ChecklistPage() {
   const [allProfiles, setAllProfiles] = useState([])
@@ -31,12 +32,13 @@ export default function ChecklistPage() {
   const loadData = async (quiet) => {
     if (quiet !== true) setLoading(true)
     try {
+      // What was kept on this device shows at once; the fresh lists replace it.
       const [profilesRes, checklistsRes] = await Promise.all([
-        profilesList({ fresh: quiet === true }),
-        api.get('/checklists')
+        profilesList({ fresh: quiet === true, onSaved: quiet === true ? undefined : (d) => setAllProfiles(d || []) }),
+        cachedGet('/checklists', { onSaved: quiet === true ? undefined : (d) => { setChecklists(d || []); setLoading(false) } })
       ])
       setAllProfiles(profilesRes)
-      setChecklists(checklistsRes.data)
+      setChecklists(checklistsRes)
     } catch {
       toast.error('መረጃችን መጫን አልተቻለም')
     } finally {

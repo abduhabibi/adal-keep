@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import api from '../services/api'
 import { after } from './ProfileJourney'
+import { cachedGet } from '../lib/deviceCache'
 
 /**
  * Filters and sort for a list of profiles (Profiles page, broker page):
@@ -110,7 +111,21 @@ function useStages() {
   const [st, setSt] = useState({ names: [], of: {}, steps: {}, who: {}, missing: {} })
   useEffect(() => {
     let alive = true
-    const load = () => api.get('/automations/stages')
+    // The saved counts at once (deviceCache), the fresh ones behind them.
+    const show = (data) => {
+      if (!alive) return
+      const list = data?.profiles || []
+      setSt({
+        names: data?.stages || [],
+        of: Object.fromEntries(list.map(x => [x.profile_id, x.stage])),
+        steps: Object.fromEntries(list.map(x => [x.profile_id, x.steps || {}])),
+        who: Object.fromEntries(list.map(x => [x.profile_id, x.who || {}])),
+        missing: Object.fromEntries(list.map(x => [x.profile_id, x.missing || {}])),
+      })
+    }
+    let first = true
+    const load = () => cachedGet('/automations/stages', { onSaved: first ? show : undefined })
+      .then(data => { first = false; return { data } })
       .then(r => {
         if (!alive) return
         const list = r.data?.profiles || []

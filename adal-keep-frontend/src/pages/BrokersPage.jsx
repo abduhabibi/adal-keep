@@ -7,6 +7,7 @@ import PageHeader from '../components/shared/PageHeader'
 import Spinner from '../components/shared/Spinner'
 import Input from '../components/shared/Input'
 import { profilesList } from '../lib/profilesCache'
+import { cachedGet } from '../lib/deviceCache'
 
 export default function BrokersPage() {
   const navigate = useNavigate()
@@ -22,11 +23,12 @@ export default function BrokersPage() {
   const loadData = async () => {
     setLoading(true)
     try {
+      // What was kept on this device shows at once; the fresh lists replace it.
       const [brokersRes, profilesRes] = await Promise.all([
-        api.get('/brokers'),
-        profilesList()
+        cachedGet('/brokers', { onSaved: (d) => { setBrokers(d || []); setLoading(false) } }),
+        profilesList({ onSaved: (d) => setProfiles(d || []) })
       ])
-      setBrokers(brokersRes.data || [])
+      setBrokers(brokersRes || [])
       setProfiles(profilesRes || [])
     } catch (err) {
       toast.error('ደላሎችን መጫን አልተቻለም')

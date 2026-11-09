@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 import api from '../services/api'
+import { cachedGet } from '../lib/deviceCache'
 
 /**
  * Chat between every agency that runs Adal Keep — works like Telegram:
@@ -129,10 +130,17 @@ export default function ChatPage() {
   const seenOf = useMemo(() => Object.fromEntries(agencies.map(a => [a.id, a.last_seen])), [agencies])
 
   // --- loading --------------------------------------------------------
+  // The chats and agencies kept on this device show at once (the first time); the fresh ones replace them.
+  const sideShown = useRef(false)
   const loadSide = useCallback(async () => {
     try {
-      const [c, a] = await Promise.all([api.get('/chat/conversations'), api.get('/chat/agencies')])
-      setConvs(Array.isArray(c.data) ? c.data : []); setAgencies(Array.isArray(a.data) ? a.data : [])
+      const first = !sideShown.current
+      sideShown.current = true
+      const [c, a] = await Promise.all([
+        cachedGet('/chat/conversations', { onSaved: first ? (d) => setConvs(Array.isArray(d) ? d : []) : undefined }),
+        cachedGet('/chat/agencies', { onSaved: first ? (d) => setAgencies(Array.isArray(d) ? d : []) : undefined }),
+      ])
+      setConvs(Array.isArray(c) ? c : []); setAgencies(Array.isArray(a) ? a : [])
     } catch (e) { setStatus(s => (s?.configured ? s : { error: e.response?.data?.error || e.message })) }
   }, [])
   useEffect(() => {

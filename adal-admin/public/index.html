@@ -113,7 +113,11 @@ const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<':
 const when = (t) => new Date(t).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })
 const api = async (p, body) => {
   const r = await fetch(p, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {})
-  const j = await r.json(); if (!r.ok) throw new Error(j.error || r.status); return j
+  // Signed out (12 hours passed, or the panel was set up again): back to the password.
+  if (r.status === 401) { location.reload(); return new Promise(() => {}) }
+  const text = await r.text()
+  let j = {}; try { j = text ? JSON.parse(text) : {} } catch { throw new Error(`The panel answered ${r.status} without data`) }
+  if (!r.ok) throw new Error(j.error || r.status); return j
 }
 // The panel's own questions: the browser's confirm() can be switched off
 // ("Don't allow localhost:4100 to ask again") and then silently says No.

@@ -573,7 +573,12 @@ async function image(res, p) {
 const ENV_FILE = path.join(HERE, '.env')
 const hashOf = (pw, salt) => crypto.scryptSync(pw, salt, 32).toString('hex')
 let passHash = process.env.ADMIN_PASSWORD_HASH || ''   // "salt:hash"
-const sessions = new Map()                             // token → expires
+// Sign-ins outlive a restart of the panel: kept in .sessions.json (only a
+// hash of each cookie, never the cookie itself), 12 hours each.
+const SESS_FILE = path.join(HERE, '.sessions.json')
+const tokenHash = (t) => crypto.createHash('sha256').update(t).digest('hex')
+const sessions = new Map((() => { try { return Object.entries(JSON.parse(fs.readFileSync(SESS_FILE, 'utf8'))).filter(([, exp]) => exp > Date.now()) } catch { return [] } })())
+const keepSessions = () => { try { fs.writeFileSync(SESS_FILE, JSON.stringify(Object.fromEntries([...sessions].filter(([, exp]) => exp > Date.now())))) } catch {} }
 
 function setPassword(pw) {
   const salt = crypto.randomBytes(16).toString('hex')
@@ -589,11 +594,12 @@ function passwordRight(pw) {
 }
 function signedIn(req) {
   const t = String(req.headers.cookie || '').match(/adal_admin=([a-f0-9]{64})/)?.[1]
-  return !!t && (sessions.get(t) || 0) > Date.now()
+  return !!t && (sessions.get(tokenHash(t)) || 0) > Date.now()
 }
 function startSession(res) {
   const t = crypto.randomBytes(32).toString('hex')
-  sessions.set(t, Date.now() + 12 * 3600 * 1000)
+  sessions.set(tokenHash(t), Date.now() + 12 * 3600 * 1000)
+  keepSessions()
   res.setHeader('Set-Cookie', `adal_admin=${t}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200`)
 }
 async function formBody(req) {
@@ -640,6 +646,8 @@ http.createServer(async (req, res) => {
       res.writeHead(303, { Location: '/' }).end(); return
     }
     if (u.pathname === '/logout') {
+      const t = String(req.headers.cookie || '').match(/adal_admin=([a-f0-9]{64})/)?.[1]
+      if (t) { sessions.delete(tokenHash(t)); keepSessions() }
       res.writeHead(303, { 'Set-Cookie': 'adal_admin=; Path=/; Max-Age=0', Location: '/' }).end(); return
     }
     if (!signedIn(req)) {

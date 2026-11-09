@@ -25,7 +25,7 @@ const TYPES = [[/pdf/i, '.pdf'], [/png/i, '.png'], [/webp/i, '.webp'], [/jpe?g/i
 const isPoolList = (u) => /\/api\/search\/hrpool(\?|$)/.test(u)
 
 /** Listens to the window's own calls to Musaned: the token they carry, and the HR pool lists it gets. */
-function listen(page) {
+export function listen(page) {
   if (page.__adalMusaned) return page.__adalMusaned
   const seen = page.__adalMusaned = { auth: null, at: 0, lists: [], pool: false }
   page.on('request', (r) => {
@@ -116,8 +116,12 @@ export async function signedInMusaned(page) {
   if (await onDenied(page)) { await backFromDenied(page); return null }
   const onPool = POOL_PATH.test(new URL(url).pathname)
   if (!onPool && !page.__adalToPool && await toDashboard(page)) { page.__adalToPool = true; await openPool(page) }
-  // On the HR pool with no list for a while (opened too early): again by the menu.
-  if (page.__adalToPool && !seen.pool) {
+  // On the HR pool, its list not seen (it came before Adal Keep was listening,
+  // or the page was opened too early): the page shown again, as a person presses F5.
+  if (onPool && !seen.pool) {
+    page.__adalPoolWait = (page.__adalPoolWait || 0) + 1
+    if (page.__adalPoolWait === 2 || page.__adalPoolWait % 20 === 0) await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {})
+  } else if (page.__adalToPool && !seen.pool) {
     page.__adalPoolWait = (page.__adalPoolWait || 0) + 1
     if (page.__adalPoolWait > 20) { page.__adalPoolWait = 0; page.__adalToPool = false }
   }

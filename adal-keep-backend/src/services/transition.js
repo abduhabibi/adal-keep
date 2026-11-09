@@ -27,7 +27,7 @@ import { getBrowser, openForPerson, sendAway } from './browser.js'
 import { saveOnProfile } from './musanedImport.js'
 import { copyEasyEnjaz, signedInToken } from './easyEnjazCopy.js'
 import { copyEnjazPlus, signedInEnjazPlus } from './enjazPlusCopy.js'
-import { copyMusaned, signedInMusaned } from './musanedCopy.js'
+import { copyMusaned, signedInMusaned, listen as listenMusaned } from './musanedCopy.js'
 import { keepAwake } from './awake.js'
 import { collectBrokers, saveBrokers } from './siteBrokers.js'
 
@@ -286,6 +286,9 @@ async function musanedSignIn(db, page, accountId, say, check) {
     // Signed in: Musaned shows its agencies — this account's own card, then the dashboard.
     for (const end = Date.now() + 5 * 60_000; Date.now() < end;) {
       check()
+      // Signed in already (by the person, or Musaned in Arabic): a Musaned page that is not the sign-in.
+      const at = (() => { try { return new URL(page.url()) } catch { return null } })()
+      if (at && at.host === 'tawtheeq.musaned.com.sa' && /^\/(hr-pool|employment-requests|dashboard|candidates|contracts|organizations)/.test(at.pathname)) return
       const s = await w.snapshotState(page).catch(() => null)
       // The agency's card first: "Organizations" is on that page too, and the HR pool opened before it is "Access Denied".
       if (s?.hasAgencyPicker) { await w.stepClickAgencyCard(page, ctx).catch(() => {}); await w.stepClickGoToDashboard(page, ctx).catch(() => {}); return }
@@ -362,6 +365,8 @@ async function run(db, id, source, url, deps) {
 
   try {
     windows.set(id, page)
+    // Musaned: its window's own calls heard from the start (the HR pool's list comes as the page opens).
+    if (id === 'musaned') listenMusaned(page)
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 120000 }).catch(() => {})
     await page.bringToFront().catch(() => {})
     if (id === 'musaned' && deps.accountId) await (deps.musanedSignIn || musanedSignIn)(db, page, deps.accountId, (step) => set(id, { step }), check)

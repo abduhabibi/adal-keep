@@ -104,7 +104,6 @@ export default function ChatPage() {
   const [dragging, setDragging] = useState(false)
   const threadRef = useRef(null)
   const fileRef = useRef(null)
-  const photoRef = useRef(null)
   const inputRef = useRef(null)
   const lastId = useRef(0)
   const since = useRef(null)
@@ -276,20 +275,63 @@ export default function ChatPage() {
     setAttach(f); inputRef.current?.focus()
   }
 
-  // voice notes (needs the microphone; works on this PC and over https)
+  // Voice messages, as in Telegram: hold the mic to record and let go to send;
+  // slide left to cancel; a quick tap records hands-free (a bin and a send button).
+  const recRef = useRef(null)
+  const hold = useRef(null)      // { x0, t0, up } while the finger is on the mic
+  const [slide, setSlide] = useState(0)
   const startVoice = async () => {
-    if (!navigator.mediaDevices?.getUserMedia) return toast.error('Voice messages need the microphone (on this PC, or over the secure link).')
+    if (!navigator.mediaDevices?.getUserMedia) { toast.error('Voice messages need the microphone (on this PC, or over the secure link).'); return false }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       const recorder = new MediaRecorder(stream)
       const chunks = []
       recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data)
       recorder.start()
-      setRec({ recorder, chunks, stream, t0: Date.now() })
-    } catch { toast.error('The microphone is not available.') }
+      const r = { recorder, chunks, stream, t0: Date.now(), locked: false }
+      recRef.current = r; setRec(r)
+      navigator.vibrate?.(30)
+      return true
+    } catch (e) {
+      toast.error(/denied|allowed|permission/i.test(e?.message || e?.name || '') ? 'Allow Adal Keep to use the microphone (in the phone\'s settings → Apps → Adal Keep → Permissions).' : 'The microphone is not available.')
+      return false
+    }
   }
+  const micDown = async (e) => {
+    if (rec) return
+    e.preventDefault()
+    try { e.currentTarget.setPointerCapture(e.pointerId) } catch {}
+    hold.current = { x0: e.clientX, t0: Date.now(), up: false, cancelled: false }
+    setSlide(0)
+    const ok = await startVoice()
+    const h = hold.current
+    if (!ok || !h) { hold.current = null; return }
+    if (h.cancelled) { hold.current = null; stopVoice(false) }
+    else if (h.up) { hold.current = null; finishHold(h) }
+  }
+  const micMove = (e) => {
+    const h = hold.current
+    if (!h || h.up) return
+    const dx = Math.min(0, e.clientX - h.x0)
+    setSlide(dx)
+    if (dx < -110) { h.cancelled = true; h.up = true; setSlide(0); if (recRef.current) { hold.current = null; stopVoice(false); navigator.vibrate?.(20) } }
+  }
+  const finishHold = (h) => {
+    // A short tap: recording goes on hands-free. Held: sent on letting go.
+    if (Date.now() - h.t0 < 350) { const r = recRef.current; if (r) { r.locked = true; setRec({ ...r }) } }
+    else stopVoice(true)
+  }
+  const micUp = () => {
+    const h = hold.current
+    if (!h || h.up) return
+    h.up = true; setSlide(0)
+    if (recRef.current) { hold.current = null; finishHold(h) }
+  }
+  // The recording's time, by the half second.
+  useEffect(() => { if (!rec) return; const t = setInterval(() => setNow(Date.now()), 500); return () => clearInterval(t) }, [!!rec]) // eslint-disable-line react-hooks/exhaustive-deps
+  const clock = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` }
   const stopVoice = async (sendIt) => {
-    const r = rec; setRec(null)
+    const r = recRef.current; recRef.current = null; setRec(null)
     if (!r) return
     await new Promise(res => { r.recorder.onstop = res; r.recorder.stop() })
     r.stream.getTracks().forEach(t => t.stop())
@@ -531,22 +573,28 @@ export default function ChatPage() {
                   </div>
                 )}
                 {hasLink && <p className="mb-1 text-xs text-red-600">Links are not allowed in the chat — remove the link to send.</p>}
-                {rec ? (
-                  <div className="flex items-center gap-3">
-                    <span className="h-3 w-3 animate-pulse rounded-full bg-red-500" />
-                    <span className="flex-1 text-sm text-slate-600 dark:text-slate-300">Recording… {Math.round((now - rec.t0) / 1000)}s</span>
-                    <button type="button" onClick={() => stopVoice(false)} className="text-sm text-slate-500 hover:underline">Cancel</button>
-                    <button type="button" onClick={() => stopVoice(true)} className="h-10 rounded-full bg-teal-600 px-5 text-sm font-semibold text-white hover:bg-teal-700">Send voice</button>
-                  </div>
-                ) : (
-                  <div className="flex items-end gap-2">
-                    <button type="button" title="Send a picture or document" onClick={() => fileRef.current?.click()}
-                      className="h-11 w-11 shrink-0 rounded-full text-xl text-slate-400 hover:bg-slate-100 hover:text-sky-500 dark:hover:bg-white/10">📎</button>
+                <div className="flex items-end gap-1.5">
+                  {rec ? (
+                    // Recording, as Telegram shows it: the time, "slide to cancel" (or, tapped, a bin to cancel).
+                    <div className="flex h-11 min-w-0 flex-1 items-center gap-3 px-2">
+                      {rec.locked
+                        ? <button type="button" title="Cancel" onClick={() => stopVoice(false)} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-red-500 dark:hover:bg-white/10">
+                            <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-12M9 7V4h6v3" /></svg>
+                          </button>
+                        : null}
+                      <span className="h-2.5 w-2.5 shrink-0 animate-pulse rounded-full bg-red-500" />
+                      <span className="shrink-0 font-mono text-[15px] tabular-nums text-slate-700 dark:text-slate-200">{clock(now - rec.t0)}</span>
+                      {!rec.locked && (
+                        <span className="min-w-0 flex-1 truncate text-center text-sm text-slate-400 transition-transform" style={{ transform: `translateX(${Math.max(-60, slide)}px)` }}>‹ Slide to cancel</span>
+                      )}
+                    </div>
+                  ) : (<>
+                    {/* One paperclip: a photo (gallery or camera), a video or a document. */}
+                    <button type="button" title="Attach a photo or file" onClick={() => fileRef.current?.click()}
+                      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-[#3390ec] dark:text-slate-500 dark:hover:bg-white/10">
+                      <svg viewBox="0 0 24 24" className="h-6 w-6 -rotate-45" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" aria-hidden="true"><path d="M21 12.5 12.6 20.9a5.5 5.5 0 0 1-7.8-7.8l8.5-8.5a3.7 3.7 0 0 1 5.2 5.2l-8.5 8.5a1.8 1.8 0 0 1-2.6-2.6l7.8-7.8" /></svg>
+                    </button>
                     <input ref={fileRef} type="file" className="hidden" onChange={e => { takeFile(e.target.files?.[0]); e.target.value = '' }} />
-                    {/* A photo, like Telegram: the gallery or the camera. */}
-                    <button type="button" title="Send a photo" onClick={() => photoRef.current?.click()}
-                      className="h-11 w-11 shrink-0 rounded-full text-xl text-slate-400 hover:bg-slate-100 hover:text-sky-500 dark:hover:bg-white/10">🖼️</button>
-                    <input ref={photoRef} type="file" accept="image/*" className="hidden" onChange={e => { takeFile(e.target.files?.[0]); e.target.value = '' }} />
                     <textarea ref={inputRef} rows={1} value={text}
                       onChange={e => onType(e.target.value)}
                       onKeyDown={e => {
@@ -557,19 +605,32 @@ export default function ChatPage() {
                       onPaste={e => { const f = e.clipboardData?.files?.[0]; if (f) { e.preventDefault(); e.stopPropagation(); takeFile(f) } }}
                       placeholder={editing ? 'Edit the message…' : 'Write a message…'}
                       className="max-h-40 min-h-[44px] flex-1 resize-none rounded-3xl border-0 bg-slate-100 px-4 py-3 text-[15px] focus:outline-none dark:bg-[#242f3d]" />
-                    {!text.trim() && !attach && !editing ? (
-                      <button type="button" title="Record a voice message" onClick={startVoice}
-                        className="h-11 w-11 shrink-0 rounded-full bg-sky-500 text-lg text-white shadow hover:bg-sky-600">🎤</button>
-                    ) : (
-                      <button type="button" onClick={send} disabled={sending || hasLink} title={editing ? 'Save' : 'Send'}
-                        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-sky-500 text-white shadow hover:bg-sky-600 disabled:opacity-40">
-                        {sending ? '…' : editing ? '✓' : (
-                          <svg viewBox="0 0 24 24" className="h-5 w-5 translate-x-[1px]" fill="currentColor" aria-hidden="true"><path d="M3.4 20.4 20.85 12.9a1 1 0 0 0 0-1.8L3.4 3.6a.99.99 0 0 0-1.38 1.17L4.3 11 13 12l-8.7 1-2.28 6.23a.99.99 0 0 0 1.38 1.17Z" /></svg>
-                        )}
-                      </button>
-                    )}
-                  </div>
-                )}
+                  </>)}
+                  {/* The round button: a mic (hold to record, let go to send, slide left to cancel; a tap records hands-free) — a send arrow once there is something to send. */}
+                  {rec?.locked ? (
+                    <button type="button" title="Send the voice message" onClick={() => stopVoice(true)}
+                      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#4fa9f5] to-[#2b7fdc] text-white shadow-lg shadow-sky-500/30 active:scale-95">
+                      <svg viewBox="0 0 24 24" className="h-5 w-5 translate-x-[1px]" fill="currentColor" aria-hidden="true"><path d="M3.4 20.4 20.85 12.9a1 1 0 0 0 0-1.8L3.4 3.6a.99.99 0 0 0-1.38 1.17L4.3 11 13 12l-8.7 1-2.28 6.23a.99.99 0 0 0 1.38 1.17Z" /></svg>
+                    </button>
+                  ) : (rec || (!text.trim() && !attach && !editing)) ? (
+                    <button type="button" title="Hold to record a voice message, tap to record hands-free"
+                      onPointerDown={micDown} onPointerMove={micMove} onPointerUp={micUp} onPointerCancel={micUp} onContextMenu={e => e.preventDefault()}
+                      style={{ touchAction: 'none' }}
+                      className={`relative flex shrink-0 select-none items-center justify-center rounded-full bg-gradient-to-br from-[#4fa9f5] to-[#2b7fdc] text-white shadow-lg shadow-sky-500/30 transition-all duration-150 ${rec ? 'h-14 w-14 -my-1.5' : 'h-11 w-11 active:scale-95'}`}>
+                      {rec && <span className="absolute inset-0 -z-10 animate-ping rounded-full bg-sky-400/40" />}
+                      <svg viewBox="0 0 24 24" className={rec ? 'h-7 w-7' : 'h-6 w-6'} fill="currentColor" aria-hidden="true"><path d="M12 15a3.5 3.5 0 0 0 3.5-3.5v-6a3.5 3.5 0 0 0-7 0v6A3.5 3.5 0 0 0 12 15Z" /><path d="M18.5 11.5a.9.9 0 0 0-1.8 0 4.7 4.7 0 0 1-9.4 0 .9.9 0 0 0-1.8 0 6.5 6.5 0 0 0 5.6 6.4V20H8.6a.9.9 0 0 0 0 1.8h6.8a.9.9 0 0 0 0-1.8h-2.5v-2.1a6.5 6.5 0 0 0 5.6-6.4Z" /></svg>
+                    </button>
+                  ) : (
+                    <button type="button" onClick={send} disabled={sending || hasLink} title={editing ? 'Save' : 'Send'}
+                      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#4fa9f5] to-[#2b7fdc] text-white shadow-lg shadow-sky-500/30 active:scale-95 disabled:opacity-40">
+                      {sending ? '…' : editing ? (
+                        <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5" /></svg>
+                      ) : (
+                        <svg viewBox="0 0 24 24" className="h-5 w-5 translate-x-[1px]" fill="currentColor" aria-hidden="true"><path d="M3.4 20.4 20.85 12.9a1 1 0 0 0 0-1.8L3.4 3.6a.99.99 0 0 0-1.38 1.17L4.3 11 13 12l-8.7 1-2.28 6.23a.99.99 0 0 0 1.38 1.17Z" /></svg>
+                      )}
+                    </button>
+                  )}
+                </div>
               </div>
             )}
           </>

@@ -15,7 +15,7 @@ const DATE_RANGES = [
   ['182', 'Last 6 months'], ['365', 'Last year'],
 ]
 const AGES = [['', 'Any age'], ['18-24', '18 – 24'], ['25-29', '25 – 29'], ['30-34', '30 – 34'], ['35-39', '35 – 39'], ['40-200', '40 and over']]
-const SORTS = [['updated_at', 'Last Updated'], ['created_at', 'Date Added'], ['full_name', 'Name'], ['age', 'Age']]
+const SORTS = [['updated_at', 'Recent (opened or updated)'], ['created_at', 'Date Added'], ['full_name', 'Name'], ['age', 'Age']]
 
 export function ageOf(dob) {
   const d = new Date(dob)
@@ -174,6 +174,7 @@ export function useProfileFilters(profiles) {
     })
     const key = (p) => sort === 'age' ? (ageOf(p.date_of_birth) ?? -1)
       : sort === 'full_name' ? norm(p.full_name).toLowerCase()
+      : sort === 'updated_at' ? Math.max(new Date(p.updated_at || 0).getTime() || 0, new Date(p.last_opened_at || 0).getTime() || 0)
       : new Date(p[sort] || 0).getTime()
     out.sort((a, b) => {
       const x = key(a), y = key(b)

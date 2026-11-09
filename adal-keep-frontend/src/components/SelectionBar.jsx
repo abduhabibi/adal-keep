@@ -61,8 +61,29 @@ export default function SelectionBar({ picked, onRemove, onClear, onAllShown, on
   const [busy, setBusy] = useState('')
   const [open, setOpen] = useState(true)
   const [sheet, setSheet] = useState(null)
-  const [naming, setNaming] = useState(null) // the new checklist's name, while typed
+  const [naming, setNaming] = useState(null) // the checklist panel is open: the new one's name, while typed
+  const [lists, setLists] = useState(null)     // the checklists already made (to add the selected to)
   const navigate = useNavigate()
+  const openLists = () => {
+    if (naming != null) { setNaming(null); return }
+    setNaming('')
+    api.get('/checklists').then(r => setLists((r.data || []).map(c => ({ id: c.id, name: c.name, count: c.profiles?.length || 0, has: new Set((c.profiles || []).map(p => p.id)) })))).catch(() => setLists([]))
+  }
+  const opened = (t, text) => toast.success((x) => (
+    <span className="flex items-center gap-3">{text}
+      <button type="button" className="font-semibold text-teal-600" onClick={() => { toast.dismiss(x.id); navigate('/checklist') }}>Open</button>
+    </span>
+  ), { id: t, duration: 6000 })
+  const addTo = async (c) => {
+    setBusy('checklist')
+    try {
+      const r = await api.post(`/checklists/${c.id}/profiles`, { profile_ids: picked.map(p => p.id) })
+      const n = r.data?.added ?? picked.length
+      setNaming(null)
+      opened(undefined, n ? `${n} added to “${c.name}”` : `They are all in “${c.name}” already`)
+    } catch (e2) { toast.error(err(e2)) }
+    setBusy('')
+  }
 
   const makeChecklist = async (e) => {
     e.preventDefault()
@@ -72,11 +93,7 @@ export default function SelectionBar({ picked, onRemove, onClear, onAllShown, on
     try {
       await api.post('/checklists', { name, profile_ids: picked.map(p => p.id) })
       setNaming(null)
-      toast.success((t) => (
-        <span className="flex items-center gap-3">Checklist “{name}” made with {picked.length}
-          <button type="button" className="font-semibold text-teal-600" onClick={() => { toast.dismiss(t.id); navigate('/checklist') }}>Open</button>
-        </span>
-      ), { duration: 6000 })
+      opened(undefined, `Checklist “${name}” made with ${picked.length}`)
     } catch (e2) { toast.error(err(e2)) }
     setBusy('')
   }
@@ -142,14 +159,33 @@ export default function SelectionBar({ picked, onRemove, onClear, onAllShown, on
             onClick={print} title="2 pages a girl: the contract's first page and the embassy form with the visa and application numbers as barcodes">
             🖨️ {busy === 'print' ? 'Checking…' : 'Print embassy'} <span className="ml-auto hidden text-[10px] font-normal opacity-80 lg:inline">{picked.length * 2} pages</span></button>
           <button type="button" className={`${btn} bg-indigo-50 text-indigo-800 hover:bg-indigo-100 dark:bg-indigo-900/30 dark:text-indigo-300`} disabled={!!busy}
-            onClick={() => setNaming(naming == null ? '' : null)}>📋 {busy === 'checklist' ? 'Making…' : 'Make checklist'}</button>
+            onClick={openLists}>📋 {busy === 'checklist' ? 'Saving…' : 'Checklist'} <span className="ml-auto hidden text-[10px] font-normal opacity-80 lg:inline">new or add</span></button>
           {naming != null && (
-            <form onSubmit={makeChecklist} className="col-span-2 flex gap-1.5 lg:col-span-1">
-              <input autoFocus value={naming} onChange={(e) => setNaming(e.target.value)} placeholder="Checklist name"
-                onKeyDown={(e) => { if (e.key === 'Escape') setNaming(null) }}
-                className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-900" />
-              <button type="submit" disabled={!naming.trim() || !!busy} className="rounded-lg bg-indigo-600 px-3 text-sm font-semibold text-white disabled:opacity-50">Save</button>
-            </form>
+            <div className="col-span-2 space-y-2 rounded-xl border border-indigo-200 bg-indigo-50/50 p-2 dark:border-indigo-800 dark:bg-indigo-900/20 lg:col-span-1">
+              <form onSubmit={makeChecklist} className="flex gap-1.5">
+                <input autoFocus value={naming} onChange={(e) => setNaming(e.target.value)} placeholder="New checklist name"
+                  onKeyDown={(e) => { if (e.key === 'Escape') setNaming(null) }}
+                  className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-900" />
+                <button type="submit" disabled={!naming.trim() || !!busy} className="shrink-0 rounded-lg bg-indigo-600 px-3 text-sm font-semibold text-white disabled:opacity-50">Make</button>
+              </form>
+              {lists === null ? <p className="text-xs text-slate-400">Loading the checklists…</p> : lists.length > 0 && (
+                <div>
+                  <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">or add them to</p>
+                  <div className="max-h-40 space-y-1 overflow-y-auto">
+                    {lists.map(c => {
+                      const already = picked.every(p => c.has.has(p.id))
+                      return (
+                        <button key={c.id} type="button" disabled={!!busy || already} onClick={() => addTo(c)}
+                          className="flex w-full items-center justify-between gap-2 rounded-lg bg-white px-2.5 py-1.5 text-left text-sm hover:bg-indigo-100 disabled:opacity-50 dark:bg-slate-900 dark:hover:bg-indigo-900/40">
+                          <span className="min-w-0 truncate font-medium">{c.name}</span>
+                          <span className="shrink-0 text-[11px] text-slate-400">{already ? 'all in it' : `${c.count} in it · ＋`}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
           )}
         </div>
         {/* On a phone the list stays about 3 names high and scrolls, so the

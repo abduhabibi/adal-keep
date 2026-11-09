@@ -46,6 +46,7 @@ export default function ProfileDetailPage() {
         navigate('/profiles')
       })
       .finally(() => { if (alive) setLoading(false) })
+    api.post(`/profiles/${id}/opened`).catch(() => {})   // the most recent on the list now
     api.get(`/cv/generated`, { params: { profile_id: id } }).then(r => { if (alive) setCvs(r.data || []) }).catch(() => {})
     api.get(`/cv/profile-readiness/${id}`).then(r => { if (alive) setCvReadiness(r.data || null) }).catch(() => {})
     return () => { alive = false }

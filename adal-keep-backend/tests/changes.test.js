@@ -22,3 +22,22 @@ test('every write is noticed once, by table; bookkeeping is not', async () => {
   off()
   await db.destroy()
 })
+
+test('opening a profile is not told to everyone (only its last_opened_at changes)', async () => {
+  const { default: knex } = await import('knex')
+  const { watchChanges, onChanged } = await import('../src/services/changes.js')
+  const db = knex({ client: 'sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true })
+  await db.schema.createTable('profiles', t => { t.increments('id'); t.string('notes'); t.string('last_opened_at') })
+  await db('profiles').insert({ notes: 'a' })
+  watchChanges(db)
+  const heard = []
+  const off = onChanged(c => heard.push(c.tables))
+  await new Promise(r => setTimeout(r, 900)); heard.length = 0
+  await db('profiles').where('id', 1).update({ last_opened_at: new Date().toISOString() })
+  await new Promise(r => setTimeout(r, 900))
+  assert.deepEqual(heard, [])
+  await db('profiles').where('id', 1).update({ notes: 'b' })
+  await new Promise(r => setTimeout(r, 900))
+  assert.deepEqual(heard, [['profiles']])
+  off(); await db.destroy()
+})

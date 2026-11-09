@@ -39,6 +39,7 @@ export function tellChanged(tables) {
 
 // Which tables a write through the API touches (for the page's own changes).
 const BY_PATH = [
+  [/^\/?profiles\/\d+\/opened/, null],   // opening a profile is not a change
   [/^\/?checklists/, ['checklists', 'checklist_profiles', 'checklist_cells']],
   [/^\/?notes/, ['notes', 'profiles']],
   [/^\/?profiles\/\d+\/(fields|files)|^\/?files/, ['profile_fields', 'files']],

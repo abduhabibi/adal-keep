@@ -59,7 +59,7 @@ import transitionsRouter from './src/routes/transitions.js'
 import appRouter from './src/routes/app.js'
 import notesRouter from './src/routes/notes.js'
 import { watchChanges } from './src/services/changes.js'
-import { answerCache } from './src/services/answerCache.js'
+import { answerCache, forget as forgetAnswer } from './src/services/answerCache.js'
 import { diagMiddleware, diagReport } from './src/services/diag.js'
 import { removeSecret } from './src/services/secretStore.js'
 import { startContractChecker } from './src/services/musanedContracts.js'
@@ -97,7 +97,7 @@ app.use(express.json({ limit: '15mb' }))   // CV designs preview with their head
 // Any change (from the PC, a phone or Admin): what it touches goes online in
 // about a second and the phones refresh their own copy (services/cloudSync.js).
 app.use('/api', (req, res, next) => {
-  if (req.method !== 'GET' && req.method !== 'HEAD' && !/^\/api\/(chat|mobile|tutor|system|updates|employees\/device)/.test(req.originalUrl)) {
+  if (req.method !== 'GET' && req.method !== 'HEAD' && !/^\/api\/(chat|mobile|tutor|system|updates|employees\/device)/.test(req.originalUrl) && !/^\/api\/profiles\/\d+\/opened/.test(req.originalUrl)) {
     res.on('finish', () => {
       if (res.statusCode < 400) import('./src/services/cloudSync.js').then(c => c.pushSoon(req.app.locals.db, req.originalUrl)).catch(() => {})
     })
@@ -365,6 +365,17 @@ app.get('/api/profiles', async (req, res) => {
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Failed to load profiles' })
+  }
+})
+
+// A profile was opened: it becomes the most recent one on the list.
+app.post('/api/profiles/:id/opened', async (req, res) => {
+  try {
+    await db('profiles').where('id', Number(req.params.id)).update({ last_opened_at: new Date().toISOString() })
+    forgetAnswer('/api/profiles')
+    res.json({ ok: true })
+  } catch (err) {
+    res.status(500).json({ error: 'Could not note it' })
   }
 })
 

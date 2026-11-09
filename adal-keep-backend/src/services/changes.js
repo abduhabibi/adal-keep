@@ -42,7 +42,8 @@ function flush() {
 export function watchChanges(db) {
   db.on('query-response', (_r, q) => {
     const m = WRITE.exec(q?.sql || '')
-    if (m) changed(m[1])
+    // A profile being opened is not a change anyone else needs to reload for.
+    if (m && !(m[1] === 'profiles' && /^\s*update\b[^]*\bset\s+[`"]?last_opened_at[`"]?\s*=\s*\?\s+where/i.test(q.sql))) changed(m[1])
   })
 }
 

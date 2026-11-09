@@ -22,6 +22,9 @@ onChanged(({ tables }) => {
   for (const [p, from] of Object.entries(KEPT)) if (tables.includes('*') || from.some(t => tables.includes(t))) cache.delete(p)
 })
 
+/** Made again on the next ask (a change only this PC's lists need, e.g. a profile opened). */
+export function forget(p) { cache.delete(p) }
+
 export function answerCache() {
   return (req, res, next) => {
     if (req.method !== 'GET') return next()

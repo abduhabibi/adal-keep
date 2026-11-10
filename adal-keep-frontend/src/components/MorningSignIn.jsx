@@ -15,7 +15,10 @@ export default function MorningSignIn() {
   useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t) }, [])
   if (!sites?.length) return null
   const open = async (s) => {
-    try { await api.post(`/sessions/${s.key}/open`); toast.success(`Sign in to ${s.name} in the window that opened — it then stays signed in all day`, { duration: 7000 }) } catch (e) { toast.error(err(e)) }
+    try {
+      const { data } = await api.post(`/sessions/${s.key}/open`)
+      toast.success(data?.auto ? `Adal Keep fills in ${s.name} by itself (account + code) — if it shows a picture code, type it in the window and press Log in` : `Sign in to ${s.name} in the window that opened — it then stays signed in all day`, { duration: 7000 })
+    } catch (e) { toast.error(err(e)) }
     setTimeout(load, 8000)
   }
   const inCount = sites.filter(s => s.signedIn).length

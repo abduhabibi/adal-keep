@@ -266,7 +266,7 @@ const pressNext = (page) => page.evaluate(() => {
  * dashboard. A picture code, if Musaned shows one, is typed by the person in
  * the window; the copy waits for the sign-in as always and then goes on.
  */
-async function musanedSignIn(db, page, accountId, say, check) {
+export async function musanedSignIn(db, page, accountId, say, check) {
   const acct = await db('musaned_accounts').where('id', Number(accountId)).first().catch(() => null)
   if (!acct?.username || !acct?.password) return
   const w = await import('./musanedWorkflow.js')

@@ -48,7 +48,12 @@ export async function keepAlive() {
       const site = siteOf(p.url())
       if (!site) continue
       seen[site.key].tabs++
-      const inNow = signedInAt(site, p.url())
+      // Musaned's front page looks the same signed in or not: its own menu says so.
+      let inNow = signedInAt(site, p.url())
+      if (inNow && site.key === 'musaned') {
+        const st = await Promise.race([import('./musanedWorkflow.js').then(w => w.snapshotState(p)).catch(() => null), new Promise(r => setTimeout(() => r(null), 8000))])
+        inNow = !!(st && (st.hasDashboardNav || st.hasHrPoolPage) && !st.hasPassword)
+      }
       if (inNow) seen[site.key].signedIn = true
       // Never a tab a robot is working in, nor one a person is typing in.
       if (!inNow || p.__adalBorrowed || running.has(Number(p.__adalRunId))) continue
@@ -94,11 +99,28 @@ export async function sessionsNow() {
 }
 
 /** A window on that site, to sign in (its tab is then kept signed in all day). */
-export async function openSite(key) {
+export async function openSite(key, database = null) {
+  if (database) db = database
   const site = SITES.find(s => s.key === key)
   if (!site) throw new Error('Unknown site')
   const page = await openForPerson()
   await page.goto(site.start, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {})
   await page.bringToFront().catch(() => {})
+  // Musaned: Adal Keep signs in by itself (the saved account and its authenticator code), then the tab goes out of sight.
+  if (key === 'musaned' && db) {
+    const acct = await db('musaned_accounts').orderBy('is_default', 'desc').orderBy('id').first('id').catch(() => null)
+    if (acct) {
+      const { musanedSignIn } = await import('./transition.js')
+      musanedSignIn(db, page, acct.id, (step) => console.log('[sessions] Musaned:', step), () => {})
+        .then(async () => {
+          // Out of sight only once it is really signed in (a picture code is a person's to type).
+          const st = await import('./musanedWorkflow.js').then(w => w.snapshotState(page)).catch(() => null)
+          if (st?.hasDashboardNav || st?.hasHrPoolPage) { const { sendAway } = await import('./browser.js'); await sendAway(page).catch(() => {}) }
+          keepAlive().catch(() => {})
+        })
+        .catch(e => console.warn('[sessions] Musaned sign-in:', e.message))
+      return { ok: true, auto: true }
+    }
+  }
   return { ok: true }
 }

@@ -416,7 +416,7 @@ router.get('/sessions', async (req, res) => {
   try { res.json(await (await import('../services/sessionKeeper.js')).sessionsNow()) } catch (e) { res.status(500).json({ error: e.message }) }
 })
 router.post('/sessions/:key/open', async (req, res) => {
-  try { res.json(await (await import('../services/sessionKeeper.js')).openSite(req.params.key)) } catch (e) { res.status(400).json({ error: e.message }) }
+  try { res.json(await (await import('../services/sessionKeeper.js')).openSite(req.params.key, req.app.locals.db)) } catch (e) { res.status(400).json({ error: e.message }) }
 })
 
 router.post('/browser/open', async (req, res) => {

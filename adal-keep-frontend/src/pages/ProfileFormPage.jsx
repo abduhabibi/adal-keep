@@ -452,6 +452,10 @@ export default function ProfileFormPage() {
             <input id="full_name" required className={inputClass} value={form.full_name} onChange={setField('full_name')} />
           </div>
           <div>
+            <label className={labelClass} htmlFor="order_id">Order ID</label>
+            <input id="order_id" className={inputClass} value={form.order_id} onChange={setField('order_id')} />
+          </div>
+          <div>
             <label className={labelClass} htmlFor="phone_number">ስልክ ቁጥር *</label>
             <input id="phone_number" required type="tel" className={inputClass} placeholder="251 9XX XXX XXX" value={form.phone_number} onChange={setField('phone_number')} />
           </div>
@@ -490,6 +494,9 @@ export default function ProfileFormPage() {
           <div className="sm:col-span-2">
             <label className={labelClass} htmlFor="destination_country">
               Destination Country *
+              <span className="ml-2 text-[10px] text-teal-600 font-semibold">
+                (Kuwait auto-starts Police Clearance)
+              </span>
             </label>
             <select
               id="destination_country"

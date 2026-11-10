@@ -778,7 +778,7 @@ app.delete('/api/brokers/:id', async (req, res) => {
 })
 
 // The document fields not used for now: kept (with any file in them), not offered.
-const HIDDEN_FIELDS = new Set(['COC', 'Saudi-letter', 'Musaned', 'Broker ID', 'Ticket-ongoing', 'Ticket-deported', 'Police Clearance', 'Labour ID', 'Slip', 'Experience Form', 'Employee ID', 'Client ID'])
+const HIDDEN_FIELDS = new Set(['COC', 'Saudi-letter', 'Musaned', 'Broker ID', 'Ticket-ongoing', 'Ticket-deported', 'Experience Form', 'Employee ID', 'Client ID'])
 
 // Fetch & auto-create permanent profile fields
 app.get('/api/profiles/:id/fields', async (req, res) => {
@@ -1206,6 +1206,7 @@ initSystem().then(() => {
     console.log(`🚀 Backend running on http://localhost:${PORT}`)
     startUpdateWatcher(app.locals.db) // a new version installs by itself when no run is working
     startMedicalWatcher(app.locals.db) // the medical's battery: warnings as it runs out
+    import('./src/services/sessionKeeper.js').then(k => k.startSessionKeeper(app.locals.db)).catch(e => console.warn('[sessions]', e.message)) // signed in once, kept all day
     import('./src/services/plans.js').then(p => p.startLicenseWatch(app.locals.db)).catch(e => console.warn('[plans]', e.message)) // Adal's signed licence: plan, dates, features
     startAppointmentWatcher(app.locals.db) // Tasheer / Wafid appointments: a reminder the day before
     startCloudSync(app.locals.db)      // the online copy phones use when this PC is off

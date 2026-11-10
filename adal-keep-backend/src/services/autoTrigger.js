@@ -116,9 +116,8 @@ async function extractOrderIdFromSlip(db, profileId, filePaths) {
 // The main check. Returns { ready, triggered, reason, runId? }.
 // Idempotent — safe to call 100 times per minute.
 // ============================================================================
-// Police clearance is not used for now (asked on 2026-11-09): nothing starts it
-// by itself. Its code stays — POLICE_ON=1 brings it back.
-const POLICE_ON = process.env.POLICE_ON === '1'
+// Police clearance is on again (asked on 2026-11-10); POLICE_ON=0 turns it off.
+const POLICE_ON = process.env.POLICE_ON !== '0'
 
 export async function checkAutoTrigger(db, profileId, trigger = 'unknown') {
   if (!POLICE_ON) return { triggered: false, reason: 'police clearance is off for now' }

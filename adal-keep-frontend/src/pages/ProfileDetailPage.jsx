@@ -152,8 +152,7 @@ export default function ProfileDetailPage() {
       </div>
 
       {/* Auto-trigger status */}
-      {/* Police clearance: not used for now (its code stays for later). */}
-      {false && profile.destination_country?.toLowerCase() === 'kuwait' && (
+      {profile.destination_country?.toLowerCase() === 'kuwait' && (
         <div className={`panel p-4 border-l-4 ${
           cvReadiness?.can_generate ? 'border-l-emerald-500 bg-emerald-50/30 dark:bg-emerald-900/10'
                                     : 'border-l-amber-400 bg-amber-50/30 dark:bg-amber-900/10'
@@ -185,6 +184,7 @@ export default function ProfileDetailPage() {
         <Fold id="details" title="Client details" className="panel p-4 sm:p-6 lg:col-span-1">
           <dl className="mt-4 grid grid-cols-1 gap-3">
             <Field label="Full name" value={profile.full_name} />
+            <Field label="Order ID" value={profile.order_id} />
             {amharicName && <Field label="Full name (AM)" value={amharicName} />}
             <Field label="Phone" value={profile.phone_number} />
             <Field label="National ID" value={profile.national_id} />

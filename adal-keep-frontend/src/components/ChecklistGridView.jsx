@@ -12,7 +12,7 @@ import { onDataChange } from '../lib/changes'
 // Slip, Experience Form, Employee ID and Client ID are not used for now (2026-11-09).
 const ALL_FIELDS = [
   'Government ID', 'Passport', 'CV', 'Contract', 'Medical Report', 'Insurance', 'Visa',
-  'Tasheer Slip', 'Appointment Slip',
+  'Tasheer Slip', 'Appointment Slip', 'Police Clearance', 'Labour ID', 'Slip',
 ]
 
 // Profile details that can be columns too.

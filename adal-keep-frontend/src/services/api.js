@@ -29,7 +29,7 @@ const api = axios.create({
 // raises "adal-data-fresh": the layout shows the page again with it). Asked
 // again on the same visit (a page checking every few seconds), or right after
 // a change was sent, the PC answers. Live things always come from the PC.
-const LIVE = /^\/?(automations\/(active|\d+)|transitions|chat\/(messages|typing|unlock|file|image|search)|subscription|setup|auth|plan\/|whatsapp\/(notify|bulk)|system|updates|health|app\/|captcha|pc-access|mobile|tutor)/
+const LIVE = /^\/?(automations\/(active|\d+)|transitions|chat\/(messages|typing|unlock|file|image|search)|subscription|setup|auth|plan\/|whatsapp\/(notify|bulk)|system|updates|health|app\/|captcha|pc-access|mobile|tutor|sessions)/
 if (import.meta.env.VITE_DEMO !== '1') {
   const get = api.get
   const asked = new Set()

@@ -252,6 +252,47 @@ export async function setSelect(page, key, src, ctx) {
   }, key, src)
 }
 
+/**
+ * A list that stays empty until something is typed (a searchable dropdown,
+ * Select2 / Chosen): open it, type the word, choose the match. { ok, text } or
+ * { ok: false, why } (what kind of box it was, for the log).
+ */
+export async function typeInSelect(page, key, word, src) {
+  const box = await page.evaluate((key) => {
+    const el = document.querySelector(`[data-adal-v="${key}"]`)
+    if (!el) return null
+    const near = el.nextElementSibling
+    const s2 = near && /select2|chosen/i.test(near.className) ? near : el.parentElement?.querySelector('.select2-container, .select2, .chosen-container')
+    if (!s2) return { kind: `${el.tagName.toLowerCase()}#${el.id || el.name || '?'}${el.disabled ? ' (disabled)' : ''}` }
+    s2.setAttribute('data-adal-s2', key)
+    return { kind: 'select2' }
+  }, key)
+  if (!box) return { ok: false, why: 'not found' }
+  if (box.kind !== 'select2') return { ok: false, why: box.kind }
+  await page.click(`[data-adal-s2="${key}"] .select2-selection, [data-adal-s2="${key}"] .chosen-single, [data-adal-s2="${key}"]`).catch(() => {})
+  await sleep(500)
+  const search = await page.$('.select2-container--open .select2-search__field, .select2-drop-active input, .chosen-with-drop input')
+  if (search) await search.type(word, { delay: 60 })
+  const re = new RegExp(src, 'i')
+  for (let i = 0; i < 20; i++) {
+    await sleep(500)
+    const hit = await page.evaluateHandle((src) => {
+      const re = new RegExp(src, 'i')
+      return [...document.querySelectorAll('.select2-results__option, .select2-result-label, .chosen-results li')].find(o => re.test(o.textContent.trim())) || null
+    }, src)
+    const el = hit.asElement?.()
+    if (el) {
+      const text = (await el.evaluate(e => e.textContent.trim())) || word
+      await el.click().catch(() => el.evaluate(e => e.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))))
+      await sleep(400)
+      const ok = await page.evaluate((key, src) => { const s = document.querySelector(`[data-adal-v="${key}"]`); const o = s?.options?.[s.selectedIndex]; return !!o && new RegExp(src, 'i').test(o.text) }, key, src).catch(() => false)
+      return { ok: ok || re.test(text), text }
+    }
+  }
+  await page.keyboard.press('Escape').catch(() => {})
+  return { ok: false, why: 'select2: no match for ' + word }
+}
+
 /** Sets a date box: the page's own date picker when it has one, else dd/mm/yyyy. */
 function setDate(page, key, iso) {
   return page.evaluate((key, iso) => {
@@ -561,10 +602,16 @@ async function documentAndOccupation(page, ctx, v, left) {
 /** Fills the long form. Returns what is still for a person to fill. */
 async function fillForm(page, ctx, v) {
   const left = []
-  const select = async (label, key, src, name = label) => {
+  const select = async (label, key, src, name = label, typeWord = '') => {
     const kind = await markField(page, label, key, 'select')
     if (!kind) return
-    const r = await setSelect(page, key, src, ctx)
+    let r = await setSelect(page, key, src, ctx)
+    // An empty list: one that fills as you type (Issuing Country) — type her country.
+    if (!r.ok && !r.options?.length && typeWord) {
+      const t = await typeInSelect(page, key, typeWord, src)
+      if (t.ok) r = t
+      else log(ctx, `${name}: the list stayed empty (${t.why})`, 'warn')
+    }
     if (r.ok) { log(ctx, `✓ ${name}: ${r.text}`); await sleep(700) }
     else left.push(`${name}${r.options?.length ? ` (choices: ${r.options.slice(0, 6).join(', ')})` : ''}`)
   }
@@ -632,7 +679,7 @@ async function fillForm(page, ctx, v) {
   log(ctx, '✍️ Passport')
   await text('passport (?:no\\.?|number)', 'pnum', v.passport, 'Passport Number')
   await select('passport type', 'ptype', v.passport_type, 'Passport Type')
-  await select('issuing country', 'pcountry', v.issuing_country, 'Issuing Country')
+  await select('issuing country', 'pcountry', 'ethiopia|إثيوبيا|اثيوبيا|أثيوبيا', 'Issuing Country', 'Ethiopia')
   await date('date of issue', 'pissue', v.issue_date, 'Date of Issue')
   await date('date of expiry', 'pexpiry', v.expiry_date, 'Date of Expiry')
   await text('place of birth', 'pob', v.birth_place, 'Place of Birth')

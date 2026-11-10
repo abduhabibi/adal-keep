@@ -411,6 +411,14 @@ router.post('/automations/:id/attention/done', (req, res) => {
   doneWith(req.params.id, { force: true })
   res.json({ ok: true })
 })
+// Morning sign-in (services/sessionKeeper.js): each site signed in or not; a window to sign in.
+router.get('/sessions', async (req, res) => {
+  try { res.json(await (await import('../services/sessionKeeper.js')).sessionsNow()) } catch (e) { res.status(500).json({ error: e.message }) }
+})
+router.post('/sessions/:key/open', async (req, res) => {
+  try { res.json(await (await import('../services/sessionKeeper.js')).openSite(req.params.key)) } catch (e) { res.status(400).json({ error: e.message }) }
+})
+
 router.post('/browser/open', async (req, res) => {
   try { await openForPerson(); res.json({ ok: true }) } catch (e) { res.status(e.status || 500).json({ error: e.message, ...(e.feature ? { feature: e.feature, plan: e.plan } : {}) }) }
 })

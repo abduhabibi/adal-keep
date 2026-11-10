@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import api from '../services/api'
 import { onDataChange } from '../lib/changes'
+import MorningSignIn from '../components/MorningSignIn'
+import { isPhoneApp } from '../lib/phoneMode'
 
 export default function DashboardPage() {
   const [stats, setStats] = useState(null)
@@ -54,6 +56,8 @@ export default function DashboardPage() {
         <h1 className="text-2xl font-bold font-display">ዳሽቦርድ</h1>
         <p className="text-muted text-sm mt-1">የስርዓት አጠቃላይ እይታ</p>
       </div>
+
+      {!isPhoneApp() && <MorningSignIn />}
 
       {/* Quick Links */}
 

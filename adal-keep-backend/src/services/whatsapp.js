@@ -437,7 +437,7 @@ export async function giveTemplate(db, t) {
     header_path = `cv-header-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`
     fs.writeFileSync(path.join(SAFE_STORAGE_DIR, header_path), Buffer.from(t.header.data, 'base64'))
   }
-  const had = await db('cv_templates').where('name', name).first('id', 'header_path')
+  const had = await db('cv_templates').where('name', name).first()
   if (had) {
     if (header_path && !had.header_path) await db('cv_templates').where('id', had.id).update({ header_path, updated_at: new Date().toISOString() })
     else if (header_path) { const { SAFE_STORAGE_DIR } = await import('./docPipeline.js'); fs.rmSync(path.join(SAFE_STORAGE_DIR, header_path), { force: true }) }

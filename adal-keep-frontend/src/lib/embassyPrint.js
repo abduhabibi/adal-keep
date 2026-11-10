@@ -1,13 +1,14 @@
 /**
- * Print for the embassy: 2 pages a girl —
- *   1. her contract's first page (Musaned's contract PDF)
- *   2. our page: the embassy application form with the visa number and the
- *      application number as barcodes at the top.
+ * Print for the embassy: one page a girl — the embassy application form with
+ * the visa number and the application number as barcodes at the top, and the
+ * embassy's "For official use only" box as its footer. (No contract page, no
+ * mother's name: asked on 2026-11-10.)
  * Drawn in a hidden frame and sent to the printer.
  */
 import api from '../services/api'
 import { barcodeSvg } from './barcode'
 import { printOnPhone } from './phoneApp'
+import { EMBASSY_FOOTER } from './embassyFooter'
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
 const day = (d) => { const m = String(d || '').match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? `${m[3]}-${m[2]}-${m[1]}` : esc(d) }
@@ -36,7 +37,6 @@ function formPage(g, agency, email) {
   </div>
   <table>
     ${row('Full Name:', p.full_name, 'الاسم الكامل')}
-    ${row("Mother's Name:", p.mother_name, 'اسم الأم')}
     ${row('Date of Birth:', day(p.date_of_birth), 'تاريخ الولادة', 'Place of Birth:', p.place_of_birth, 'مكان الولادة')}
     ${row('Previous Nationality:', cap(p.nationality || 'Ethiopia'), 'الجنسية السابقة', 'Present Nationality:', cap(p.nationality || 'Ethiopia'), 'الجنسية الحالية')}
     ${row('Sex:', /^m/i.test(p.gender || '') ? 'Male' : 'Female', 'الجنس', 'Marital Status:', String(p.marital_status || '').toLowerCase(), 'الحالة الاجتماعية')}
@@ -57,6 +57,7 @@ function formPage(g, agency, email) {
   </table>
   <p class="cert">The undersigned hereby certify that all the information I have provided are correct. I will abide by the laws of the Kingdom during the period of my resident in it.</p>
   <p class="sign"><b>Date:</b> ${today} &nbsp; &nbsp; <b>Signature</b> ____________ &nbsp; &nbsp; <b>Name:</b> ${esc(p.full_name)}</p>
+  <img class="foot" src="${EMBASSY_FOOTER}" alt="">
 </section>`
 }
 
@@ -80,6 +81,7 @@ td.l { color: #333; width: 15% } td.v { font-weight: bold; width: 18% } td.r { t
 .chip { display: inline-block; border: 1px solid #ccc; border-radius: 4px; padding: 0 5px; margin-right: 3px; font-weight: normal }
 .chip.on { background: #eee; font-weight: bold }
 .cert { margin-top: 10px } .sign { margin-top: 10px }
+.form { display: flex; flex-direction: column } .foot { margin-top: auto; width: 100%; display: block }
 `
 
 /** What each girl's embassy pages need, and what she lacks: [{ g, missing: [...] }]. */
@@ -88,7 +90,6 @@ export async function loadEmbassy(ids) {
   const girls = (data.girls || []).map(g => ({
     g,
     missing: [
-      !g.contract_page && 'Contract (PDF)',
       !g.profile.visa_application_number && 'Application number',
       !g.profile.visa_number && 'Visa number',
       !g.photo && 'Photo',
@@ -97,12 +98,10 @@ export async function loadEmbassy(ids) {
   return { email: data.agency_email, girls }
 }
 
-/** Print these girls' pages (2 each); a page not in Adal Keep prints as a marked gap. */
+/** Print these girls' pages (one each). */
 export async function printEmbassy(loaded, girls, agency = '') {
   if (!girls.length) throw new Error('Nothing to print')
-  const pages = girls.map(g =>
-    picturePage(g.contract_page, 'Contract', g.profile.full_name) +
-    formPage(g, agency, loaded.email)).join('')
+  const pages = girls.map(g => formPage(g, agency, loaded.email)).join('')
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>Embassy</title><style>${CSS}</style></head><body>${pages}</body></html>`
   if (await printOnPhone(html)) return
   const frame = document.createElement('iframe')

@@ -11,6 +11,7 @@ import FieldCard from '../components/fields/FieldCard'
 import ProfileAutomations from '../components/ProfileAutomations'
 import ProfileJourney from '../components/ProfileJourney'
 import WhatsAppSend from '../components/WhatsAppSend'
+import EmbassyPrintButton from '../components/EmbassyPrintButton'
 import NotesTimeline from '../components/NotesTimeline'
 import VisaBarcodes from '../components/VisaBarcodes'
 import MedicalBattery from '../components/MedicalBattery'
@@ -174,6 +175,8 @@ export default function ProfileDetailPage() {
       {import.meta.env.VITE_DEMO !== '1' && <WhatsAppSend profile={profile} />}
 
       {(profile.chosen_at || profile.contract_number) && <ContractCard profile={profile} />}
+
+      <div className="flex flex-wrap items-center gap-2"><EmbassyPrintButton profile={profile} /></div>
 
       <VisaBarcodes profile={profile} />
 

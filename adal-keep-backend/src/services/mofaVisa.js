@@ -126,19 +126,19 @@ export function visaValues(profile, files = {}, settings = {}) {
     first: n.first, father: n.father, grandfather: n.grandfather, family: n.family,
     previous_nationality: 'no',
     passport: String(p.passport_number || c['Passport Number'] || '').trim().toUpperCase().replace(/\s+/g, ''),
-    passport_type: pick('visa_passport_type', 'normal|ordinary|regular|عادي'),
+    passport_type: 'normal|ordinary|regular|عادي',                // always Normal
     issuing_country: 'ethiopia',
     issue_date: isoDate(p.passport_issue_date || c['Passport Issue Date']),
     expiry_date: isoDate(p.passport_expiry_date || c['Passport Expiry Date']),
     birth_place: String(p.place_of_birth || c['Passport Issue Place'] || '').trim().toUpperCase(),
     dob: isoDate(p.date_of_birth || c['Date of Birth']),
-    id_number: String(p.national_id || '').trim(),
+    id_number: '0',                                                 // always 0
     religion: !rel ? '' : /muslim|islam/.test(rel) && !/non/.test(rel) ? 'muslim|islam|مسلم' : 'christ|مسيح',
     marital: !m ? '' : m.startsWith('MARRIED') ? '^\\s*married|متزوج' : m.startsWith('DIVORC') ? 'divorc|مطلق' : m.startsWith('WIDOW') ? 'widow|أرمل|ارمل' : 'single|أعزب|عزباء',
     gender: g.startsWith('F') ? 'female|أنثى|انثى' : g.startsWith('M') ? '^\\s*male|ذكر' : '',
     occupation: pick('visa_occupation', 'house ?work|house ?maid|domestic|housekeeper|عاملة منزلية|خادمة'),
     qualification: settings.visa_qualification || String(p.education_level || c['Education level'] || '').trim() || 'None',
-    degree_source: settings.visa_degree_source || 'Ethiopia',
+    degree_source: '0',                                             // always 0
     ksa_address: address,
     email: settings.agency_email || String(c['E-Mail'] || '').trim(),
     sponsor_name: String(p.employer_name || '').trim(),
@@ -147,7 +147,7 @@ export function visaValues(profile, files = {}, settings = {}) {
     sponsor_phone: String(p.employer_phone || c['Mobile Number'] || '').replace(/\D/g, ''),
     visa_number: String(p.visa_number || c['Visa Number'] || c['Candidate · Visa Number'] || '').trim(),
     transport: pick('visa_transport', 'air|جو'),
-    port: settings.visa_port ? pick('visa_port') : portFor(city),
+    port: '',                                                       // Port of Entry: left empty
     city,
     entry_date: addDays(Number(settings.visa_entry_days) || 30),
     purpose: settings.visa_purpose || 'Work',
@@ -162,7 +162,7 @@ export function missingForVisa(v) {
   const need = {
     first: 'name', family: 'surname', passport: 'passport number', issue_date: 'passport issue date',
     expiry_date: 'passport expiry date', dob: 'date of birth', gender: 'gender', sponsor_name: 'employer name (Musaned contract)',
-    sponsor_id: 'employer ID (Musaned contract)', photoPath: 'Photo file',
+    sponsor_id: 'employer ID (Musaned contract)', photoPath: 'Photo file', religion: 'religion',
   }
   return Object.entries(need).filter(([k]) => !v[k]).map(([, label]) => label)
 }
@@ -533,6 +533,15 @@ async function documentAndOccupation(page, ctx, v, left) {
       log(ctx, `✓ DocumentNumber: ${doc} (her visa number)`)
     }
   }
+  // Classify Occupations: always "Building and housekeeping" (then the visa's own occupations).
+  const pickClass = async () => {
+    const cls = await page.$$eval('#ddlClassifyOccupations option', os => (os.find(o => /building and house ?keep/i.test(o.text)) || os.find(o => /house ?keep|domestic/i.test(o.text)) || {}).value || '').catch(() => '')
+    if (!cls) return false
+    await page.evaluate((val) => { const s = document.getElementById('ddlClassifyOccupations'); if (window.jQuery) window.jQuery(s).val(val).trigger('change'); else { s.value = val; s.dispatchEvent(new Event('change', { bubbles: true })) } }, cls)
+    log(ctx, '✓ Classify Occupations: Building and housekeeping')
+    return true
+  }
+  if (await page.$('#ddlClassifyOccupations')) await pickClass()
   // The visa's own occupations come back after a moment.
   for (let i = 0; i < 24 && !(await options()).length; i++) await sleep(500)
   let got = await choose()
@@ -628,7 +637,7 @@ async function fillForm(page, ctx, v) {
   await date('date of expiry', 'pexpiry', v.expiry_date, 'Date of Expiry')
   await text('place of birth', 'pob', v.birth_place, 'Place of Birth')
   await date('date of birth', 'dob', v.dob, 'Date of Birth')
-  if (v.id_number) await text('id number', 'idnum', v.id_number, 'ID Number')
+  await text('id number', 'idnum', v.id_number, 'ID Number')
 
   await select('religion', 'religion', v.religion, 'Religion')
   await select('marital status', 'marital', v.marital, 'Marital Status')
@@ -648,7 +657,7 @@ async function fillForm(page, ctx, v) {
   await text('sponsor address', 'saddr', v.sponsor_address, 'Sponsor Address')
   await text('phone (?:no\\.?|number)', 'sphone', v.sponsor_phone, 'Phone Number')
   await select('transport mode', 'transport', v.transport, 'Transport Mode')
-  await select('port of entry', 'port', v.port, `Port of Entry${v.city ? ` (works in ${v.city})` : ''}`)
+  // Port of Entry: left empty on purpose (asked on 2026-11-10).
   await date('expected entry date to ksa', 'entry', v.entry_date, 'Expected Entry Date To KSA')
   await text('purpose', 'purpose', v.purpose, 'Purpose')
 

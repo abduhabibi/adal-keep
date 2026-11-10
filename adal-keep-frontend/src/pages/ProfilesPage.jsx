@@ -66,7 +66,7 @@ export default function ProfilesPage() {
   // Date range, experience, age, married, country, skill, religion + sort.
   const { rows: allRows, filterBar, sortBar, active: filtering, clear, step, setStep, stepCounts, activeCount, journey } = useProfileFilters(profiles)
   // An old link ?chosen=1 (the 🤝 Selected button, now the journey's Selected phase).
-  useEffect(() => { if (searchParams.get('chosen') === '1') { setStep('selected'); const n = new URLSearchParams(searchParams); n.delete('chosen'); setSearchParams(n, { replace: true }) } }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (searchParams.get('chosen') === '1') { setStep('selected'); const n = new URLSearchParams(searchParams); n.delete('chosen'); setSearchParams(n, { replace: true }) } }, [searchParams.get('chosen')]) // eslint-disable-line react-hooks/exhaustive-deps
   const filtered = allRows
   // 100 a page: quick to draw on any phone.
   const PAGE = 100

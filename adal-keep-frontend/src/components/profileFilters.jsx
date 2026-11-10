@@ -168,7 +168,7 @@ export function useProfileFilters(profiles) {
     const now = Date.now()
     const out = profiles.filter(p => {
       if (f.range) {
-        const t = new Date(p.updated_at || p.created_at).getTime()
+        const t = new Date(p.created_at || p.updated_at).getTime()
         if (!(t >= now - Number(f.range) * DAY)) return false
       }
       if (f.experience && !same(p.work_experience, f.experience)) return false
@@ -180,7 +180,10 @@ export function useProfileFilters(profiles) {
       if (f.married && !match(f.married, p.marital_status)) return false
       if (f.country && !match(f.country, p.destination_country)) return false
       if (f.skill && (f.skill === NONE ? skillsOf(p.skills).length > 0 : !skillsOf(p.skills).some(s => same(s, f.skill)))) return false
-      if (f.religion && !match(f.religion, p.religion)) return false
+      if (f.religion) {
+        const muslim = /^\s*(muslim|islam|moslem|ሙስሊም|እስልምና|مسلم)/i.test(p.religion || '')
+        if (f.religion === 'muslim' ? !muslim : (muslim || empty(p.religion))) return false
+      }
       if (f.run && (runStates[p.id] || 'idle') !== f.run) return false
       if (f.stage && (stages.of[p.id] || 'new') !== f.stage) return false
       // Journey step picked above the list: the profiles in that phase — that
@@ -227,22 +230,8 @@ export function useProfileFilters(profiles) {
       <Select title="Married" value={f.married} onChange={set('married')} options={withNone('Any', choices.married)} />
       <Select title="Country" value={f.country} onChange={set('country')} options={withNone('Any', choices.country)} />
       <Select title="Skill" value={f.skill} onChange={set('skill')} options={withNone('Any', choices.skill)} />
-      <Select title="Religion" value={f.religion} onChange={set('religion')} options={withNone('Any', choices.religion)} />
+      <Select title="Religion" value={f.religion} onChange={set('religion')} options={[['', 'Any'], ['muslim', 'Muslim'], ['non_muslim', 'Non-Muslim']]} />
       <Select title="Run" value={f.run} onChange={set('run')} options={RUNS} />
-      {/* Stage: its own full row of chips (long names were cut off in a narrow box). */}
-      <div className="col-span-2 sm:col-span-4 xl:col-span-8">
-        <span className="block text-center text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5">Stage</span>
-        <div className="flex flex-wrap justify-center gap-1.5">
-          {[['', 'Any stage', profiles.length], ...stages.names.map(([k, t]) => [k, t, profiles.filter(p => (stages.of[p.id] || 'new') === k).length])].map(([k, t, n]) => (
-            <button key={k || 'any'} type="button" onClick={() => set('stage')(f.stage === k ? '' : k)}
-              className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${f.stage === k
-                ? 'border-teal-500 bg-teal-500 text-white'
-                : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-teal-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300'}`}>
-              {t} <span className={f.stage === k ? 'text-teal-100' : 'text-slate-400'}>{n}</span>
-            </button>
-          ))}
-        </div>
-      </div>
     </div>
   )
 

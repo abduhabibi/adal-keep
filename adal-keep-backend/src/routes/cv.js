@@ -204,6 +204,8 @@ router.get('/profile-readiness/:profileId', async (req, res) => {
  * generated_cvs). Also used by the WhatsApp sends.
  */
 export async function generateCvFile(db, fresh, template, overrides = {}, createdBy = 'user') {
+  // Religion is a must on every CV (asked on 2026-11-10).
+  if (!String(fresh?.religion || '').trim()) throw Object.assign(new Error(`Religion is missing for ${fresh?.full_name || 'her'}: fill it in on the profile, then make the CV.`), { status: 400 })
   const data = await buildTemplateData(db, fresh, template, overrides)
   const html = mergeTemplate(template.html_content, template.css_content, data)
 
@@ -258,7 +260,7 @@ router.post('/generate', async (req, res) => {
     const fresh = await db('profiles').where('id', profile.id).first()
     let made
     try { made = await generateCvFile(db, fresh, template, overrides) }
-    catch (e) { return res.status(500).json({ error: e.message }) }
+    catch (e) { return res.status(e.status || 500).json({ error: e.message }) }
     res.json({ ok: true, ...made, download_url: '/api/files/' + made.file_id + '/download' })
   } catch (e) {
     console.error('[CV] generate error: ' + e.message)

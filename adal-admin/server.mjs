@@ -107,7 +107,7 @@ const writeBook = (list) => fs.writeFileSync(BOOK, JSON.stringify(list, null, 2)
 const digits = (n) => String(n || '').replace(/\D/g, '')
 // A PC's summary comes within a minute or so: what it just answered counts until then.
 const justNow = new Map()
-const remember = (agency, a) => { justNow.set(agency, { agents: a.agents, limit: a.limit, at: Date.now() }); return a }
+const remember = (agency, a) => { if (a && !a.queued) justNow.set(agency, { agents: a.agents, limit: a.limit, at: Date.now() }); return a }
 async function templateOf({ agency, id }) {
   const [row] = await rest('GET', `keep_meta?agency_id=eq.${encodeURIComponent(agency)}&key=eq.${encodeURIComponent(`/cv/templates/${Number(id)}`)}&select=data`)
   if (!row?.data) throw new Error('That CV template is not online yet: its agency PC must be on for a minute.')
@@ -117,6 +117,31 @@ async function templateOf({ agency, id }) {
 // What Adal typed in the CEOs list: it counts over what the PC reports, also while that PC is off.
 const CEOS = path.join(HERE, 'ceos.json')
 const readCeos = () => { try { return JSON.parse(fs.readFileSync(CEOS, 'utf8')) } catch { return {} } }
+
+// --------------------------------------------------------------- agencies --
+// One agency per PC: each install of Adal Keep made its own chat account, so
+// a PC can have several — the newest (last seen) is the agency; the others
+// are its old accounts (banned / deleted together with it). Branch and
+// companion PCs ("· branch PC 123456") belong to their main PC: not listed.
+const BRANCH_RE = /\s·\s*branch PC \d{6}$/
+async function mainAgencies() {
+  const rows = await rest('GET', 'agencies?is_admin=eq.false&select=id,name,pc_number,banned,created_at,last_seen&order=last_seen.desc.nullslast')
+  const by = new Map()
+  for (const a of rows) {
+    if (BRANCH_RE.test(a.name || '')) continue
+    const k = /^\d{6}$/.test(a.pc_number || '') ? a.pc_number : a.id
+    const g = by.get(k)
+    if (!g) by.set(k, { ...a, ids: [a.id], first_seen: a.created_at })
+    else { g.ids.push(a.id); if (a.created_at < g.first_seen) g.first_seen = a.created_at; g.banned = g.banned || a.banned }
+  }
+  return [...by.values()].sort((x, y) => String(x.name).localeCompare(String(y.name)))
+}
+const branchesOf = (rows, main) => rows.filter(a => BRANCH_RE.test(a.name || '') && a.name.startsWith(`${main.name} ·`))
+const pcSeenAt = async (ids) => {
+  const meta = await rest('GET', `keep_meta?key=eq./_pc&agency_id=in.(${ids.join(',')})&select=agency_id,data`).catch(() => [])
+  return meta.map(m => m.data?.at).filter(Boolean).sort().pop() || null
+}
+const onlineAt = (at) => !!at && Date.now() - new Date(at).getTime() < 60000
 
 // ----------------------------------------------------------- CV templates --
 // Adal's own collection of every agency's CV templates (cv-templates.json and
@@ -231,11 +256,59 @@ async function tell(agencyId, body) {
 
 // ------------------------------------------------------------------- api --
 const api = {
+  // One agency's page: everything it has, what waits for its PC, its chat and receipts.
+  'GET /api/agency': async (q) => {
+    const all = await mainAgencies()
+    const a = all.find(x => x.pc_number === q.pc || x.id === q.id)
+    if (!a) throw new Error('No such agency')
+    const ids = a.ids.join(',')
+    // Commands left on an old account of this PC (it never reads them again): moved to the one it uses.
+    if (a.ids.length > 1) await rest('PATCH', `keep_calls?agency_id=in.(${a.ids.slice(1).join(',')})&device_id=eq.${ADMIN_ID}&status=eq.new`, { agency_id: a.id }, { Prefer: 'return=minimal' }).catch(() => {})
+    const [meta, waiting, receipts, inbox, phones] = await Promise.all([
+      rest('GET', `keep_meta?agency_id=eq.${a.id}&key=in.(/_summary,/_pc,/_backup,/_diag)&select=key,data,updated_at`).catch(() => []),
+      rest('GET', `keep_calls?agency_id=in.(${ids})&device_id=eq.${ADMIN_ID}&status=eq.new&select=id,method,path,created_at&order=id.asc`).catch(() => []),
+      rest('GET', `unlock_requests?agency_id=in.(${ids})&select=id,status,note,created_at,image_path&order=id.desc&limit=10`).catch(() => []),
+      rest('GET', `conversations?kind=eq.admin&key=in.(${a.ids.map(i => `"admin:${i}"`).join(',')})&select=id,key,last_message_at&order=last_message_at.desc.nullslast`).catch(() => []),
+      rest('GET', `keep_devices?agency_id=eq.${a.id}&select=name,revoked,created_at`).catch(() => []),
+    ])
+    const of = (k) => meta.find(m => m.key === k)?.data || null
+    const pcAt = of('/_pc')?.at || null
+    const lic = a.pc_number ? await licenseOf(a.pc_number) : null
+    const WHAT = { '/_adal/agents/give': 'Give an agent', '/_adal/agents/take': 'Take an agent back', '/_adal/agents/limit': 'Agents allowed', '/_adal/agents/template': 'Give a CV template', '/_adal/company': 'CEO details', '/_adal/backup/run': 'Back up now', '/_adal/backup/restore': 'Restore a backup' }
+    return {
+      ...a, pcOnline: onlineAt(pcAt), pcSeen: pcAt, code: codeFor(a.pc_number),
+      summary: of('/_summary'), backup: of('/_backup'), license: lic,
+      plan: lic?.plan || 'premium',
+      waiting: waiting.map(w => ({ ...w, what: WHAT[w.path] || `${w.method} ${w.path}` })),
+      receipts, inbox: inbox[0]?.id || null,
+      phones: phones.filter(p => !p.revoked).map(p => ({ name: p.name, since: p.created_at })),
+      accounts: a.ids.length,
+    }
+  },
+  // A command still waiting for its PC: not sent after all.
+  'POST /api/waiting/cancel': async (q, b) => {
+    await rest('DELETE', `keep_calls?id=eq.${Number(b.id)}&device_id=eq.${ADMIN_ID}&status=eq.new`)
+    return { ok: true }
+  },
+  // Ban / delete a PC: every account it ever had.
+  'POST /api/ban-pc': async (q, b) => {
+    const a = (await mainAgencies()).find(x => x.pc_number === b.pc || x.id === b.id)
+    if (!a) throw new Error('No such agency')
+    await rest('PATCH', `agencies?id=in.(${a.ids.join(',')})`, { banned: !!b.banned }, { Prefer: 'return=minimal' })
+    return { ok: true }
+  },
+  'POST /api/delete-pc': async (q, b) => {
+    const a = (await mainAgencies()).find(x => x.pc_number === b.pc || x.id === b.id)
+    if (!a) throw new Error('No such agency')
+    for (const id of a.ids) await api['POST /api/delete-agency'](q, { id })
+    return { ok: true, accounts: a.ids.length }
+  },
+
   // CV templates: the collection, every agency with the templates it has, what waits for its PC.
   'GET /api/cvt': async () => {
     const c = await collectCvt()
     const [agencies, rows, meta] = await Promise.all([
-      rest('GET', 'agencies?is_admin=eq.false&select=id,name,banned&order=name.asc'),
+      mainAgencies(),
       rest('GET', 'keep_meta?key=like./cv/templates/*&select=agency_id,key,name:data->>name').catch(() => []),
       rest('GET', 'keep_meta?key=eq./_pc&select=agency_id,key,data').catch(() => []),
     ])
@@ -278,7 +351,7 @@ const api = {
 
   // Plans: every agency's licence, the features, and what agencies asked for.
   'GET /api/plans': async () => {
-    const agencies = (await rest('GET', 'agencies?is_admin=eq.false&select=id,name,pc_number,banned,last_seen&order=name.asc'))
+    const agencies = (await mainAgencies())
       .filter(a => /^\d{6}$/.test(a.pc_number || '') && !/\s·\s*branch PC \d{6}$/.test(a.name || ''))
     const lic = await Promise.all(agencies.map(a => licenseOf(a.pc_number)))
     const asks = await rest('GET', `messages?body=like.*We want:*&sender_id=neq.${ADMIN_ID}&select=id,conversation_id,sender_id,body,created_at&order=id.desc&limit=200`).catch(() => [])
@@ -317,7 +390,7 @@ const api = {
   'POST /api/plans/offer': async (q, b) => {
     const f = plans.FEATURES.find(x => x.key === b.feature)
     if (!f) throw new Error('unknown feature')
-    const agencies = (await rest('GET', 'agencies?is_admin=eq.false&banned=eq.false&select=id,name,pc_number'))
+    const agencies = (await mainAgencies()).filter(a => !a.banned)
       .filter(a => /^\d{6}$/.test(a.pc_number || '') && (!b.ids?.length || b.ids.includes(a.id)))
     let offered = 0
     for (const a of agencies) {
@@ -333,7 +406,7 @@ const api = {
   // Every agency's CEO: agency, name and number.
   'GET /api/ceos': async () => {
     const [agencies, meta] = await Promise.all([
-      rest('GET', 'agencies?is_admin=eq.false&select=id,name,pc_number&order=name.asc'),
+      mainAgencies(),
       rest('GET', 'keep_meta?key=in.(/_summary,/_pc)&select=agency_id,key,data').catch(() => []),
     ])
     const of = (id, key) => meta.find(m => m.agency_id === id && m.key === key)?.data
@@ -356,7 +429,7 @@ const api = {
   // Every agency's foreign agents and CV templates, and Adal's book.
   'GET /api/agents': async () => {
     const [agencies, meta, tpls] = await Promise.all([
-      rest('GET', 'agencies?is_admin=eq.false&select=id,name,banned&order=name.asc'),
+      mainAgencies(),
       rest('GET', 'keep_meta?key=in.(/_summary,/_pc)&select=agency_id,key,data').catch(() => []),
       rest('GET', 'keep_meta?key=like./cv/templates/*&select=agency_id,key,name:data->>name').catch(() => []),
     ])
@@ -421,9 +494,12 @@ const api = {
     const title = (c) => c.kind === 'group' ? 'Everyone'
       : c.kind === 'admin' ? name[c.key.slice(6)] || 'agency'
       : members.filter(m => m.conversation_id === c.id).map(m => name[m.agency_id]).join(' ↔ ')
+    const mains = await mainAgencies()
+    const mainOf = new Map(mains.flatMap(m => m.ids.map(id => [id, m])))
     return {
       adminId: ADMIN_ID,
-      agencies: agencies.map(a => ({ ...a, code: a.is_admin ? null : codeFor(a.pc_number) })),
+      agencies: agencies.map(a => ({ ...a, code: a.is_admin ? null : codeFor(a.pc_number), main: mainOf.get(a.id)?.id === a.id, of: mainOf.get(a.id)?.id || null })),
+      mains: mains.map(m => ({ ...m, code: codeFor(m.pc_number) })),
       conversations: convs.map(c => ({ ...c, title: title(c), last: latest[c.id] || null, unread: unread[c.id] || (c.kind === 'admin' && lastRead[c.id] === undefined ? 0 : 0) })),
       requests: requests.map(r => ({ ...r, agency: name[r.agency_id] || '?', code: codeFor(r.pc_number) })),
       // null = the agency_invites table is not in Supabase yet (run schema.sql again)
@@ -492,16 +568,17 @@ const api = {
   // with the online copy, adal-keep-backend services/cloudSync.js).
   'GET /api/work': async () => {
     const latest = await sb('GET', '/storage/v1/object/adal-updates/release/latest.json').then(j => j?.manifest?.short || null).catch(() => null)
-    const [agencies, meta, phones] = await Promise.all([
-      rest('GET', 'agencies?is_admin=eq.false&select=id,name,pc_number,banned,last_seen&order=name.asc'),
+    const [agencies, meta, phones, allRows] = await Promise.all([
+      mainAgencies(),
       rest('GET', 'keep_meta?key=in.(/_summary,/_pc,/_backup,/_diag)&select=agency_id,key,data,updated_at').catch(() => []),
       rest('GET', 'keep_devices?select=agency_id,revoked').catch(() => []),
+      rest('GET', 'agencies?is_admin=eq.false&select=id,name').catch(() => []),
     ])
     const of = (id, key) => meta.find(m => m.agency_id === id && m.key === key)
     // PCs that follow a main PC ("<agency> · branch PC 123456") belong to that agency.
     const BRANCH = /\s·\s*branch PC (\d{6})$/
-    const branches = agencies.filter(a => BRANCH.test(a.name || ''))
-    return agencies.filter(a => !BRANCH.test(a.name || '')).map(a => {
+    const branches = allRows.filter(a => BRANCH.test(a.name || ''))
+    return agencies.map(a => {
       const pc = of(a.id, '/_pc')?.data?.at || null
       return {
         ...a,
@@ -511,7 +588,8 @@ const api = {
         health: of(a.id, '/_diag')?.data || null,
         backup: (({ key, ...b }) => ({ ...b, hasKey: !!key }))(of(a.id, '/_backup')?.data || {}),
         phones: phones.filter(d => d.agency_id === a.id && !d.revoked).length,
-        latest,
+        latest, code: codeFor(a.pc_number),
+        waiting: 0,
         branchPCs: branches.filter(b => b.name.replace(BRANCH, '') === a.name).map(b => b.name.match(BRANCH)[1]),
       }
     })
@@ -547,6 +625,10 @@ const api = {
 const isAgency = (id) => /^[0-9a-f-]{36}$/i.test(id || '') && id !== ADMIN_ID
 async function agencyCall(agency, method, p, body, ms = 25000) {
   if (!isAgency(agency) || !p.startsWith('/')) throw new Error('bad call')
+  if (method.toUpperCase() !== 'GET' && !onlineAt(await pcSeenAt([agency]))) {
+    await rest('POST', 'keep_calls', { agency_id: agency, device_id: ADMIN_ID, method: method.toUpperCase(), path: p, body }, { Prefer: 'return=minimal' })
+    return { queued: true, message: "Its PC is off: this waits online and is done as soon as the PC is on." }
+  }
   const [row] = await rest('POST', 'keep_calls?select=id', { agency_id: agency, device_id: ADMIN_ID, method: method.toUpperCase(), path: p, body }, { Prefer: 'return=representation' })
   for (const end = Date.now() + ms; Date.now() < end;) {
     await new Promise(r => setTimeout(r, 500))

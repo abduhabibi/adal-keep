@@ -5,95 +5,136 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Adal Keep Admin</title>
 <style>
-  :root { --bg:#f4f6f8; --panel:#fff; --line:#e3e8ee; --text:#14212b; --muted:#64748b; --teal:#0f766e; --teal-soft:#e6f4f2; --red:#dc2626; --amber:#b45309; --mine:#d9f2ee; }
-  @media (prefers-color-scheme: dark) { :root { --bg:#0d1419; --panel:#141e25; --line:#24323c; --text:#e5edf2; --muted:#8aa0ae; --teal-soft:#123532; --mine:#163d39; } }
-  * { box-sizing: border-box; }
-  body { margin:0; font:14px/1.45 system-ui, sans-serif; background:var(--bg); color:var(--text); height:100vh; display:flex; }
-  nav { width:300px; background:var(--panel); border-right:1px solid var(--line); display:flex; flex-direction:column; min-height:0; }
-  nav header { padding:16px; font-weight:700; font-size:16px; border-bottom:1px solid var(--line); }
-  .tabs { display:flex; flex-wrap:wrap; gap:4px; padding:8px; border-bottom:1px solid var(--line); }
-  .tabs button { flex:1; border:0; background:transparent; color:var(--muted); padding:7px 6px; border-radius:8px; cursor:pointer; font-weight:600; font-size:12px; }
-  .tabs button.on { background:var(--teal-soft); color:var(--teal); }
+  :root { --bg:#f3f5f9; --panel:#fff; --panel2:#f8fafc; --line:#e5e9f0; --text:#0f1c2a; --muted:#64748b; --teal:#0d9488; --teal-d:#0f766e; --teal-soft:#e6f6f4; --red:#dc2626; --amber:#b45309; --mine:#d9f2ee; --green:#16a34a; --shadow:0 1px 2px #0f172a0d, 0 4px 14px #0f172a0a; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#0b1117; --panel:#121b23; --panel2:#0f171e; --line:#223039; --text:#e6eef3; --muted:#8ea3b0; --teal-soft:#10322f; --mine:#143a36; --shadow:none; } }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.45 "Segoe UI", system-ui, sans-serif; background:var(--bg); color:var(--text); height:100vh; display:flex; overflow:hidden; }
+  /* The menu */
+  #menu { width:220px; flex-shrink:0; background:var(--panel); border-right:1px solid var(--line); display:flex; flex-direction:column; }
+  #menu .brand { padding:18px 18px 14px; font-weight:800; font-size:16px; display:flex; gap:10px; align-items:center; }
+  #menu .brand i { font-style:normal; width:32px; height:32px; border-radius:10px; background:linear-gradient(135deg,#14b8a6,#0f766e); color:#fff; display:grid; place-items:center; font-size:16px; }
+  .tabs { display:flex; flex-direction:column; gap:2px; padding:6px 10px; }
+  .tabs button { display:flex; gap:10px; align-items:center; border:0; background:transparent; color:var(--muted); padding:9px 12px; border-radius:10px; cursor:pointer; font:600 13.5px "Segoe UI", system-ui, sans-serif; text-align:left; }
+  .tabs button span.ic { width:20px; text-align:center; font-size:15px; }
+  .tabs button:hover { background:var(--panel2); color:var(--text); }
+  .tabs button.on { background:var(--teal-soft); color:var(--teal-d); }
+  @media (prefers-color-scheme: dark) { .tabs button.on { color:#5eead4; } }
+  .tabs button .count { margin-left:auto; background:var(--red); color:#fff; border-radius:999px; font-size:11px; padding:0 7px; }
+  #menu .foot { margin-top:auto; padding:12px 18px; font-size:11.5px; color:var(--muted); border-top:1px solid var(--line); }
+  #menu .foot a { color:var(--muted); }
+  /* The list beside the chats */
+  nav#side { width:300px; flex-shrink:0; background:var(--panel); border-right:1px solid var(--line); display:none; flex-direction:column; min-height:0; }
+  body.chats nav#side { display:flex; }
+  nav#side header { padding:16px; font-weight:700; border-bottom:1px solid var(--line); }
   .list { overflow-y:auto; flex:1; }
-  .item { padding:10px 14px; border-bottom:1px solid var(--line); cursor:pointer; display:flex; gap:8px; align-items:center; }
+  .item { padding:11px 14px; border-bottom:1px solid var(--line); cursor:pointer; display:flex; gap:8px; align-items:center; }
   .item:hover, .item.on { background:var(--teal-soft); }
   .item .t { font-weight:600; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .item .s { color:var(--muted); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .badge { background:var(--teal); color:#fff; border-radius:999px; font-size:11px; padding:1px 7px; font-weight:700; }
   main { flex:1; display:flex; flex-direction:column; min-width:0; }
-  main > header { padding:14px 18px; background:var(--panel); border-bottom:1px solid var(--line); font-weight:700; }
-  #thread { flex:1; overflow-y:auto; padding:16px 18px; display:flex; flex-direction:column; gap:6px; }
-  .msg { max-width:70%; background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:7px 10px; align-self:flex-start; }
+  main > header { padding:16px 24px; background:var(--panel); border-bottom:1px solid var(--line); font-weight:700; font-size:15px; display:flex; gap:12px; align-items:center; min-height:58px; }
+  main > header #title { flex:1; min-width:0; }
+  #search { width:240px; padding:8px 12px; border-radius:10px; border:1px solid var(--line); background:var(--panel2); color:var(--text); font:13px "Segoe UI", system-ui, sans-serif; }
+  #sync { font-size:11.5px; color:var(--muted); font-weight:500; white-space:nowrap; }
+  #sync.off { color:var(--red); }
+  #thread { flex:1; overflow-y:auto; padding:18px 24px; display:flex; flex-direction:column; gap:6px; }
+  .msg { max-width:70%; background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:8px 11px; align-self:flex-start; box-shadow:var(--shadow); }
   .msg.mine { align-self:flex-end; background:var(--mine); }
   .msg .who { font-size:11px; font-weight:700; color:var(--teal); }
   .msg .time { font-size:10px; color:var(--muted); text-align:right; }
   .msg img { max-width:260px; max-height:260px; border-radius:8px; display:block; margin-top:4px; cursor:zoom-in; }
   .msg .del { font-size:10px; color:var(--red); cursor:pointer; margin-left:8px; }
-  form#compose { display:flex; gap:8px; padding:12px 18px; background:var(--panel); border-top:1px solid var(--line); }
-  form#compose input[type=text] { flex:1; padding:10px 12px; border-radius:10px; border:1px solid var(--line); background:var(--bg); color:var(--text); }
+  form#compose { display:flex; gap:8px; padding:12px 24px; background:var(--panel); border-top:1px solid var(--line); }
+  form#compose input[type=text] { flex:1; padding:11px 14px; border-radius:12px; border:1px solid var(--line); background:var(--panel2); color:var(--text); }
+  button { font-family:inherit; }
   button.go { background:var(--teal); color:#fff; border:0; border-radius:10px; padding:9px 16px; font-weight:600; cursor:pointer; }
-  button.ghost { background:transparent; border:1px solid var(--line); color:var(--text); border-radius:8px; padding:5px 10px; cursor:pointer; }
-  button.danger { background:var(--red); color:#fff; border:0; border-radius:8px; padding:5px 10px; cursor:pointer; }
-  table { width:100%; border-collapse:collapse; background:var(--panel); }
-  th, td { text-align:left; padding:9px 12px; border-bottom:1px solid var(--line); vertical-align:middle; }
-  th { font-size:11px; text-transform:uppercase; color:var(--muted); }
-  .wrap { padding:16px 18px; overflow:auto; flex:1; }
-  .code { font-family:ui-monospace, monospace; font-weight:700; letter-spacing:.15em; }
-  .pill { font-size:11px; font-weight:700; padding:2px 8px; border-radius:999px; }
+  button.go:hover { background:var(--teal-d); }
+  button.ghost { background:var(--panel); border:1px solid var(--line); color:var(--text); border-radius:10px; padding:7px 12px; cursor:pointer; font-weight:600; }
+  button.ghost:hover { border-color:var(--teal); color:var(--teal); }
+  button.danger { background:var(--red); color:#fff; border:0; border-radius:10px; padding:7px 12px; cursor:pointer; font-weight:600; }
+  table { width:100%; border-collapse:collapse; background:var(--panel); border-radius:14px; overflow:hidden; box-shadow:var(--shadow); }
+  th, td { text-align:left; padding:10px 12px; border-bottom:1px solid var(--line); vertical-align:middle; }
+  th { font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); background:var(--panel2); }
+  .wrap { padding:20px 24px; overflow:auto; flex:1; }
+  .code { font-family:ui-monospace, Consolas, monospace; font-weight:700; letter-spacing:.12em; }
+  .pill { font-size:11px; font-weight:700; padding:2px 9px; border-radius:999px; display:inline-block; }
   .pending { background:#fef3c7; color:var(--amber); } .approved { background:#d1fae5; color:#047857; } .rejected { background:#fee2e2; color:var(--red); }
   .muted { color:var(--muted); }
   #dlg { position:fixed; inset:0; background:#0009; display:none; align-items:center; justify-content:center; z-index:50; }
-  #dlg .box { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:20px; width:min(420px,92vw); }
-  #dlg h3 { margin:0 0 6px; } #dlg p { margin:0 0 12px; color:var(--muted); }
-  #dlg input { width:100%; padding:9px 10px; border-radius:8px; border:1px solid var(--line); background:var(--bg); color:var(--text); margin-bottom:12px; }
+  #dlg .box { background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:22px; width:min(440px,92vw); box-shadow:0 20px 60px #0004; }
+  #dlg h3 { margin:0 0 6px; } #dlg p { margin:0 0 14px; color:var(--muted); }
+  #dlg input { width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--line); background:var(--panel2); color:var(--text); margin-bottom:12px; }
   #dlg .row { display:flex; gap:8px; justify-content:flex-end; }
-  .addform { display:grid; grid-template-columns:140px 1fr auto auto; gap:8px; align-items:center; background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:12px; margin-bottom:16px; }
-  .addform input[type=text] { padding:9px 10px; border-radius:8px; border:1px solid var(--line); background:var(--bg); color:var(--text); }
-  h4 { margin:18px 0 8px; }
-  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin-bottom:16px; }
-  .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:12px; }
-  .card b { font-size:24px; display:block; } .card span { color:var(--muted); font-size:12px; }
+  .addform { display:grid; grid-template-columns:140px 1fr auto auto; gap:8px; align-items:center; background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:12px; margin-bottom:16px; box-shadow:var(--shadow); }
+  .addform input[type=text] { padding:9px 10px; border-radius:10px; border:1px solid var(--line); background:var(--panel2); color:var(--text); }
+  h4 { margin:20px 0 10px; font-size:14px; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin-bottom:18px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:14px; box-shadow:var(--shadow); }
+  .card b { font-size:26px; display:block; letter-spacing:-.02em; } .card span { color:var(--muted); font-size:12px; }
   .card.warn b { color:var(--amber); } .card.bad b { color:var(--red); }
   tr.ag { cursor:pointer; } tr.ag:hover, tr.ag.on { background:var(--teal-soft); }
-  .dot { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:6px; background:#94a3b8; } .dot.on { background:#16a34a; }
+  .dot { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:6px; background:#94a3b8; } .dot.on { background:var(--green); box-shadow:0 0 0 3px #16a34a26; }
   .num.warn { color:var(--amber); font-weight:700; } .num.bad { color:var(--red); font-weight:700; }
-  .detail { display:grid; grid-template-columns:repeat(auto-fit,minmax(340px,1fr)); gap:12px; margin-top:14px; }
-  .box2 { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:12px; min-width:0; }
-  .box2 h4 { margin:0 0 8px; } .row2 { display:flex; gap:8px; align-items:center; padding:6px 0; border-bottom:1px solid var(--line); font-size:13px; }
+  .detail { display:grid; grid-template-columns:repeat(auto-fit,minmax(340px,1fr)); gap:14px; margin-top:14px; }
+  .box2 { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:14px; min-width:0; box-shadow:var(--shadow); }
+  .box2 h4 { margin:0 0 10px; } .row2 { display:flex; gap:8px; align-items:center; padding:7px 0; border-bottom:1px solid var(--line); font-size:13px; }
   .row2:last-child { border:0; } .row2 .grow { flex:1; min-width:0; } .row2 .why { color:var(--muted); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .stages { display:flex; flex-wrap:wrap; gap:6px; } .stages span { background:var(--teal-soft); color:var(--teal); border-radius:999px; padding:2px 9px; font-size:12px; font-weight:600; }
-  #ceoT input { width:100%; min-width:130px; padding:6px 8px; border-radius:8px; border:1px solid var(--line); background:var(--bg); color:var(--text); }
-  .needs { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:10px 14px; margin-bottom:14px; }
+  .stages { display:flex; flex-wrap:wrap; gap:6px; } .stages span { background:var(--teal-soft); color:var(--teal-d); border-radius:999px; padding:2px 10px; font-size:12px; font-weight:600; }
+  #ceoT input { width:100%; min-width:130px; padding:7px 9px; border-radius:10px; border:1px solid var(--line); background:var(--panel2); color:var(--text); }
+  .needs { background:var(--panel); border:1px solid var(--line); border-left:4px solid var(--amber); border-radius:14px; padding:12px 16px; margin-bottom:16px; box-shadow:var(--shadow); }
   .needs h4 { margin:0 0 6px; } .needs div { padding:3px 0; font-size:13px; cursor:pointer; } .needs div:hover { color:var(--teal); }
-  .agwrap { display:grid; grid-template-columns:minmax(260px,330px) 1fr; gap:14px; align-items:start; } @media (max-width:900px) { .agwrap { grid-template-columns:1fr; } }
+  .agwrap { display:grid; grid-template-columns:minmax(260px,330px) 1fr; gap:16px; align-items:start; } @media (max-width:900px) { .agwrap { grid-template-columns:1fr; } }
   .aglist { display:grid; grid-template-columns:repeat(auto-fill,minmax(250px,1fr)); gap:12px; position:sticky; top:0; }
-  .drop { background:var(--panel); border:2px dashed var(--line); border-radius:12px; padding:10px; min-height:120px; } .drop.over { border-color:var(--teal); background:var(--teal-soft); }
+  .drop { background:var(--panel); border:2px dashed var(--line); border-radius:14px; padding:12px; min-height:120px; } .drop.over { border-color:var(--teal); background:var(--teal-soft); }
   .drop h4 { margin:0; display:flex; gap:6px; align-items:center; } .plan { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); margin:6px 0; }
-  .plan input { width:58px; } .chip { background:var(--bg,transparent); border:1px solid var(--line); border-radius:8px; padding:6px 8px; margin-top:6px; font-size:13px; }
-  .chip[draggable=true] { cursor:grab; } .chip b { display:block; } .chip small { color:var(--muted); display:block; overflow-wrap:anywhere; }
+  .plan input { width:58px; } .chip { background:var(--panel2); border:1px solid var(--line); border-radius:10px; padding:7px 9px; margin-top:6px; font-size:13px; }
+  .chip[draggable=true] { cursor:grab; } .chip[draggable=true]:hover { border-color:var(--teal); } .chip b { display:block; } .chip small { color:var(--muted); display:block; overflow-wrap:anywhere; }
   .chip .x { float:right; background:none; border:0; color:var(--muted); cursor:pointer; }
-  #zoom { position:fixed; inset:0; background:#000c; display:none; align-items:center; justify-content:center; cursor:zoom-out; }
+  #zoom { position:fixed; inset:0; background:#000c; display:none; align-items:center; justify-content:center; cursor:zoom-out; z-index:60; }
   #zoom img { max-width:92vw; max-height:92vh; }
+  /* Agencies: one card per PC */
+  .agrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(290px,1fr)); gap:14px; }
+  .acard { background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:16px; cursor:pointer; box-shadow:var(--shadow); transition:border-color .15s, transform .15s; }
+  .acard:hover { border-color:var(--teal); transform:translateY(-1px); }
+  .acard .top { display:flex; gap:10px; align-items:center; }
+  .acard .av { width:40px; height:40px; border-radius:12px; display:grid; place-items:center; font-weight:800; color:#fff; background:linear-gradient(135deg,#14b8a6,#0e7490); flex-shrink:0; }
+  .acard .nm { font-weight:700; font-size:15px; } .acard .sub { font-size:12px; color:var(--muted); }
+  .acard .nums { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin-top:12px; }
+  .acard .nums div { background:var(--panel2); border-radius:10px; padding:8px; text-align:center; } .acard .nums b { display:block; font-size:17px; } .acard .nums span { font-size:11px; color:var(--muted); }
+  .plantag { margin-left:auto; font-size:11px; font-weight:700; padding:2px 9px; border-radius:999px; background:var(--teal-soft); color:var(--teal-d); text-transform:uppercase; letter-spacing:.04em; }
+  .plantag.basic { background:#e0e7ff; color:#3730a3; } .plantag.standard { background:#dbeafe; color:#1d4ed8; } .plantag.premium { background:#fef3c7; color:#92400e; }
+  .apage .head { display:flex; gap:14px; align-items:center; flex-wrap:wrap; margin-bottom:16px; }
+  .apage .head .av { width:56px; height:56px; border-radius:16px; font-size:22px; }
+  .apage .acts { display:flex; gap:8px; flex-wrap:wrap; margin-left:auto; }
+  .kv { display:grid; grid-template-columns:auto 1fr; gap:6px 14px; font-size:13px; } .kv span { color:var(--muted); }
+  .tags { display:flex; flex-wrap:wrap; gap:6px; } .tags span { background:var(--panel2); border:1px solid var(--line); border-radius:999px; padding:3px 10px; font-size:12px; }
+  .wait { border-left:3px solid var(--amber); }
+  #toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:#0f172a; color:#fff; padding:10px 18px; border-radius:12px; font-size:13px; box-shadow:0 10px 30px #0005; display:none; z-index:70; max-width:80vw; }
 </style>
 </head>
 <body>
-<nav>
-  <header>Adal Keep — Admin</header>
+<aside id="menu">
+  <div class="brand"><i>A</i> Adal Keep Admin</div>
   <div class="tabs">
-    <button data-tab="work" class="on">Work</button>
-    <button data-tab="agents">Agents</button>
-    <button data-tab="cvt">CV templates</button>
-    <button data-tab="ceos">CEOs</button>
-    <button data-tab="inbox">Inboxes</button>
-    <button data-tab="chats">All chats</button>
-    <button data-tab="payments">Payments</button>
-    <button data-tab="agencies">Agencies</button>
-    <button data-tab="plans">Plans</button>
+    <button data-tab="work" class="on"><span class="ic">🏠</span>Home</button>
+    <button data-tab="agencies"><span class="ic">🏢</span>Agencies</button>
+    <button data-tab="inbox"><span class="ic">💬</span>Inbox</button>
+    <button data-tab="payments"><span class="ic">💳</span>Payments</button>
+    <button data-tab="plans"><span class="ic">⭐</span>Plans</button>
+    <button data-tab="cvt"><span class="ic">📄</span>CV templates</button>
+    <button data-tab="agents"><span class="ic">🤝</span>Agents</button>
+    <button data-tab="ceos"><span class="ic">👤</span>CEOs</button>
+    <button data-tab="chats"><span class="ic">🗨️</span>All chats</button>
   </div>
+  <div class="foot">Only on this PC · <a href="/logout">Sign out</a></div>
+</aside>
+<nav id="side">
+  <header id="sideT">Inbox</header>
   <div class="list" id="list"></div>
 </nav>
 <main>
-  <header id="title">Choose a chat</header>
+  <header><span id="title">Home</span><input id="search" type="search" placeholder="Find an agency…" autocomplete="off"><span id="sync">…</span></header>
   <div id="thread"></div>
   <div class="wrap" id="table" style="display:none"></div>
   <form id="compose" style="display:none">
@@ -105,6 +146,7 @@
 </main>
 <div id="zoom" onclick="this.style.display='none'"><img alt=""></div>
 <div id="dlg"><div class="box"><h3 id="dlgT"></h3><p id="dlgP"></p><input id="dlgI" type="text" style="display:none"><div class="row"><button class="ghost" id="dlgNo">Cancel</button><button class="go" id="dlgOk">OK</button></div></div></div>
+<div id="toast"></div>
 <script>
 let data = { agencies: [], conversations: [], requests: [] }
 let tab = 'work', open = null, lastId = 0, work = [], workOpen = null
@@ -118,7 +160,9 @@ const api = async (p, body) => {
   if (r.status === 401) { location.reload(); return new Promise(() => {}) }
   const text = await r.text()
   let j = {}; try { j = text ? JSON.parse(text) : {} } catch { throw new Error(`The panel answered ${r.status} without data`) }
-  if (!r.ok) throw new Error(j.error || r.status); return j
+  if (!r.ok) throw new Error(j.error || r.status)
+  if (j && j.queued) toast(j.message || 'Its PC is off: it waits online and is done when the PC is on.')
+  return j
 }
 // The panel's own questions: the browser's confirm() can be switched off
 // ("Don't allow localhost:4100 to ask again") and then silently says No.
@@ -140,7 +184,11 @@ const name = (id) => data.agencies.find(a => a.id === id)?.name || 'agency'
 const img = (p) => `<img src="/api/image?path=${encodeURIComponent(p)}" onclick="event.stopPropagation(); zoom.querySelector('img').src=this.src; zoom.style.display='flex'">`
 
 document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
+  if (tab === b.dataset.tab && tab === 'agencies') pageOf = null
   tab = b.dataset.tab; document.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('on', x === b))
+  document.body.classList.toggle('chats', tab === 'inbox' || tab === 'chats')
+  $('#sideT').textContent = tab === 'inbox' ? 'Inbox — your chat with each agency' : 'All chats'
+  if (tab !== 'inbox' && tab !== 'chats') { $('#thread').style.display = 'none'; $('#compose').style.display = 'none' }
   if (tab === 'payments' || tab === 'agencies' || tab === 'work' || tab === 'agents' || tab === 'ceos' || tab === 'plans' || tab === 'cvt') { open = null; showTable() } else renderList()
   renderList()
 })
@@ -148,7 +196,8 @@ document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
 function renderList() {
   const L = $('#list')
   if (tab === 'inbox' || tab === 'chats') {
-    const convs = data.conversations.filter(c => tab === 'inbox' ? c.kind === 'admin' : c.kind !== 'admin')
+    const mainIds = new Set((data.mains || []).map(m => m.id))
+    const convs = data.conversations.filter(c => tab === 'inbox' ? c.kind === 'admin' && (!data.mains || mainIds.has(c.key.slice(6)) || c.unread) : c.kind !== 'admin')
     L.innerHTML = convs.map(c => `<div class="item ${open?.id === c.id ? 'on' : ''}" data-id="${c.id}">
       <div style="min-width:0;flex:1"><div class="t">${esc(c.title)}</div>
       <div class="s">${c.last ? esc(c.last.body || '📷 picture') : '<span class="muted">no messages yet</span>'}</div></div>
@@ -574,6 +623,137 @@ function workTable() {
   const f = $('#addTask'); if (f) f.onsubmit = (e) => { e.preventDefault(); const t = $('#taskT').value.trim(); if (t) call('POST', '/tasks', { title: t, description: 'From Adal support', type: 'manual', priority: 'high' }, 'The task is on their Tasks page.') }
 }
 
+// ------------------------------------------------------------ the panel --
+// What was seen last time shows at once (kept on this PC), then the fresh copy.
+const KEEP = (k, v) => { try { localStorage.setItem('adm:' + k, JSON.stringify(v)) } catch {} }
+const KEPT = (k) => { try { return JSON.parse(localStorage.getItem('adm:' + k) || 'null') } catch { return null } }
+let toastT = null
+function toast(t) { const el = $('#toast'); el.textContent = t; el.style.display = 'block'; clearTimeout(toastT); toastT = setTimeout(() => { el.style.display = 'none' }, 5000) }
+const initials = (n) => String(n || '?').split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase()
+const mains = () => (data.mains || []).filter(a => !query || `${a.name} ${a.pc_number}`.toLowerCase().includes(query))
+const workOf = (a) => work.find(w => w.id === a.id || (w.pc_number && w.pc_number === a.pc_number)) || {}
+let query = '', pageOf = null, pageData = null, agShownHtml = ''
+
+// Agencies: one card per PC — what each has, at a glance.
+function agenciesView() {
+  if (pageOf) return agencyPage(pageOf)
+  const list = mains()
+  $('#title').textContent = `Agencies — ${list.length}`
+  const inv = data.invites
+  const html = `<div class="agrid">${list.map(a => {
+    const w = workOf(a), s = w.summary
+    return `<div class="acard" data-pc="${esc(a.pc_number || a.id)}">
+      <div class="top"><div class="av">${esc(initials(a.name))}</div>
+        <div style="min-width:0"><div class="nm">${esc(a.name)}</div>
+        <div class="sub"><span class="dot ${w.pcOnline ? 'on' : ''}"></span>${w.pcOnline ? 'PC on' : `PC off${w.pcSeen ? ' · ' + ago(w.pcSeen) : ''}`} · <span class="code" style="letter-spacing:.05em">${esc(a.pc_number || '')}</span></div></div>
+        <span class="plantag ${esc(s?.plan || '')}">${esc(s?.plan || '—')}</span></div>
+      <div class="nums"><div><b>${s ? s.profiles : '—'}</b><span>profiles</span></div><div><b>${s ? s.chosen : '—'}</b><span>chosen</span></div><div><b class="${s ? cls(s.runs.paused + s.runs.pending, 5, 15) : ''}">${s ? s.runs.paused + s.runs.pending : '—'}</b><span>waiting</span></div></div>
+      ${a.banned ? '<div style="margin-top:10px"><span class="pill rejected">banned</span></div>' : ''}
+    </div>` }).join('') || '<p class="muted">No agency yet.</p>'}</div>
+    <h4>Add an agency by its PC number</h4>
+    <form class="addform" id="addf">
+      <input type="text" id="addPc" placeholder="PC number" inputmode="numeric" maxlength="7" autocomplete="off">
+      <input type="text" id="addName" placeholder="Agency name" autocomplete="off">
+      <label class="muted"><input type="checkbox" id="addPaid"> paid (unlocks)</label>
+      <button class="go">Add agency</button>
+    </form>
+    ${inv && inv.length ? `<table><tr><th>PC number</th><th>Name</th><th>Status</th><th>Paid</th><th>Unlock code now</th><th></th></tr>` +
+      inv.map(i => `<tr><td class="code">${esc(i.pc_number)}</td><td><b>${esc(i.name)}</b></td>
+        <td>${i.joined ? '<span class="pill approved">installed</span>' : '<span class="pill pending">not installed yet</span>'}</td>
+        <td><label><input type="checkbox" data-paid="${i.pc_number}" ${i.paid ? 'checked' : ''}> ${i.paid ? 'paid — unlocked' : 'not paid'}</label></td>
+        <td class="code">${i.code || '—'}</td><td><button class="ghost" data-uninvite="${i.pc_number}">Remove</button></td></tr>`).join('') + '</table>' : ''}`
+  // Redrawn only when something changed: a click is never lost under a redraw.
+  if (html === agShownHtml && $('#table .agrid')) return
+  agShownHtml = html
+  $('#table').innerHTML = html
+  $('#table').querySelectorAll('.acard').forEach(c => c.onclick = () => { pageOf = c.dataset.pc; pageData = KEPT('agency:' + pageOf); agencyPage(pageOf) })
+  $('#addf').onsubmit = async (e) => {
+    e.preventDefault()
+    try { await api('/api/invite', { pc: $('#addPc').value, name: $('#addName').value, paid: $('#addPaid').checked }); refresh() } catch (err) { tell('Not added', err.message) }
+  }
+  $('#table').querySelectorAll('[data-paid]').forEach(c => c.onchange = async () => {
+    if (c.checked && !(await ask({ title: 'Mark as paid?', text: `PC ${c.dataset.paid} unlocks for good the next time it is online.`, ok: 'Mark paid' }))) { c.checked = false; return }
+    await api('/api/invite-paid', { pc: c.dataset.paid, paid: c.checked }); refresh()
+  })
+  $('#table').querySelectorAll('[data-uninvite]').forEach(b => b.onclick = async () => {
+    if (await ask({ title: 'Remove from your list?', text: `PC ${b.dataset.uninvite}. An installed agency stays installed.`, ok: 'Remove', danger: true })) { await api('/api/invite-delete', { pc: b.dataset.uninvite }); refresh() }
+  })
+}
+
+// One agency: everything it has, everything to do with it.
+async function agencyPage(pc, fresh = true) {
+  const paint = (A) => {
+    if (tab !== 'agencies' || pageOf !== pc || !A) return
+    const s = A.summary, h = s?.has || {}
+    $('#title').innerHTML = `<button class="ghost" id="back" style="margin-right:10px">← Agencies</button>${esc(A.name)}`
+    $('#back').onclick = () => { pageOf = null; agenciesView() }
+    const line = (k, v) => `<span>${k}</span><b>${v ?? '—'}</b>`
+    $('#table').innerHTML = `<div class="apage">
+      <div class="head"><div class="acard" style="padding:0;border:0;box-shadow:none;cursor:default;background:none"><div class="av">${esc(initials(A.name))}</div></div>
+        <div><div style="font-size:20px;font-weight:800">${esc(A.name)}</div>
+          <div class="muted"><span class="dot ${A.pcOnline ? 'on' : ''}"></span>${A.pcOnline ? 'PC on now' : `PC off${A.pcSeen ? ' — last on ' + ago(A.pcSeen) + ' ago' : ''}`} · PC <span class="code">${esc(A.pc_number || '—')}</span> · unlock code <span class="code">${esc(A.code || '—')}</span></div></div>
+        <div class="acts">
+          <button class="go" id="aOpen">Open Adal Keep</button>
+          ${A.inbox ? '<button class="ghost" id="aChat">💬 Message</button>' : ''}
+          <button class="ghost" id="aPlan">⭐ Plan & days</button>
+          <button class="ghost" id="aBackup">💾 Back up now</button>
+          ${A.banned ? '<button class="ghost" id="aUnban">Unban</button>' : '<button class="danger" id="aBan">Ban</button>'}
+          <button class="ghost" id="aDel" style="color:var(--red)">Delete</button>
+        </div></div>
+      ${A.waiting.length ? `<div class="box2 wait" style="margin-bottom:14px"><h4>⏳ Waiting for its PC (${A.waiting.length})</h4>${A.waiting.map(w => `<div class="row2"><span class="grow">${esc(w.what)}</span><span class="muted">${ago(w.created_at)} ago</span><button class="ghost" data-cancel="${w.id}">Don't send</button></div>`).join('')}<p class="muted" style="margin:6px 0 0">Done by itself the moment its PC is on.</p></div>` : ''}
+      <div class="cards">
+        <div class="card"><b>${s ? s.profiles : '—'}</b><span>profiles</span></div>
+        <div class="card"><b>${s ? s.chosen : '—'}</b><span>chosen by employers</span></div>
+        <div class="card ${s && s.runs.paused + s.runs.pending > 10 ? 'warn' : ''}"><b>${s ? s.runs.paused + s.runs.pending : '—'}</b><span>robot runs waiting</span></div>
+        <div class="card ${s?.runs.failed7d ? 'bad' : ''}"><b>${s ? s.runs.failed7d : '—'}</b><span>failed this week</span></div>
+        <div class="card"><b>${s ? s.tasks.open : '—'}</b><span>open tasks</span></div>
+        <div class="card ${(s?.medicals || []).some(m => m.days <= 7) ? 'bad' : ''}"><b>${s ? s.medicals.length : '—'}</b><span>medicals ending ≤ 14 d</span></div>
+      </div>
+      <div class="detail">
+        <div class="box2"><h4>What it has</h4><div class="kv">
+          ${line('Plan', esc((A.plan || '—').replace(/^./, c => c.toUpperCase())))}
+          ${line('Paid until', A.license?.paid_until ? new Date(A.license.paid_until).toLocaleDateString() : 'not set')}
+          ${line('Trial until', A.license?.trial_until ? new Date(A.license.trial_until).toLocaleDateString() : 'the first 21 days')}
+          ${line('Employees', h.employees)}${line('Brokers', h.brokers)}${line('Checklists', h.checklists)}
+          ${line('Phones', A.phones.length)}${line('WhatsApp agents', s ? `${(s.agents || []).length}${s.agent_limit ? ' of ' + s.agent_limit : ''}` : null)}
+          ${line('Version', esc(s?.version || '—'))}${line('Backup', A.backup?.at ? ago(A.backup.at) + ' ago' : 'none yet')}
+          ${line('CEO', esc([s?.ceo?.name, s?.ceo?.phone].filter(Boolean).join(' · ') || '—'))}
+          ${line('Accounts on this PC', A.accounts > 1 ? `${A.accounts} (reinstalled ${A.accounts - 1}×)` : 1)}
+          ${line('Copied online', s?.at ? ago(s.at) + ' ago' : 'not yet')}
+        </div></div>
+        <div class="box2"><h4>CV templates (${(h.cv_templates || []).length})</h4><div class="tags">${(h.cv_templates || []).map(n => `<span>${esc(n)}</span>`).join('') || '<span class="muted" style="border:0">none</span>'}</div>
+          <h4 style="margin-top:14px">WhatsApp agents</h4><div class="tags">${(s?.agents || []).map(g => `<span>${esc(g.name)}</span>`).join('') || '<span class="muted" style="border:0">none</span>'}</div>
+          <h4 style="margin-top:14px">Where the profiles stand</h4><div class="stages">${Object.entries(s?.stages || {}).map(([k, v]) => `<span>${esc(k)} · ${v}</span>`).join('') || '<span class="muted">—</span>'}</div></div>
+        <div class="box2"><h4>Waiting for a person (${(s?.waiting || []).length})</h4>${(s?.waiting || []).slice(0, 12).map(r => `<div class="row2"><span class="grow"><b>${esc(r.name || '#' + r.profile_id)}</b> · ${esc(wf(r.workflow))}<div class="why">${esc(r.reason || '')}</div></span><span class="muted">${ago(r.at)}</span></div>`).join('') || '<p class="muted">Nothing waiting.</p>'}</div>
+        <div class="box2"><h4>Failed this week (${(s?.failed || []).length})</h4>${(s?.failed || []).slice(0, 12).map(r => `<div class="row2"><span class="grow"><b>${esc(r.name || '#' + r.profile_id)}</b> · ${esc(wf(r.workflow))}<div class="why">${esc(r.reason || '')}</div></span><span class="muted">${ago(r.at)}</span></div>`).join('') || '<p class="muted">No failures.</p>'}</div>
+        <div class="box2"><h4>Medicals ending soon</h4>${(s?.medicals || []).slice(0, 12).map(m => `<div class="row2"><span class="grow">${esc(m.name)}</span><span class="${m.days <= 7 ? 'num bad' : 'num warn'}">${m.days} d</span></div>`).join('') || '<p class="muted">None within 14 days.</p>'}</div>
+        <div class="box2"><h4>Receipts</h4>${A.receipts.map(r => `<div class="row2"><span class="grow">${when(r.created_at)}</span><span class="pill ${r.status}">${r.status}</span></div>`).join('') || '<p class="muted">No receipts yet.</p>'}
+          <h4 style="margin-top:14px">Phones</h4>${A.phones.map(p => `<div class="row2"><span class="grow">${esc(p.name || 'Phone')}</span><span class="muted">since ${new Date(p.since).toLocaleDateString()}</span></div>`).join('') || '<p class="muted">No phone paired.</p>'}</div>
+      </div></div>`
+    $('#aOpen').onclick = () => openAgency(A.id)
+    if ($('#aChat')) $('#aChat').onclick = () => { const c = data.conversations.find(x => x.id === A.inbox); if (c) { switchTab('inbox'); openConv(c) } }
+    $('#aPlan').onclick = () => { switchTab('plans') }
+    $('#aBackup').onclick = async () => { try { const r = await api('/api/backup-run', { agency: A.id }); if (!r.queued) toast(`${A.name}: backing up now`) } catch (e) { tell('Not done', e.message) } }
+    if ($('#aBan')) $('#aBan').onclick = async () => { if (await ask({ title: `Ban ${A.name}?`, text: 'It can no longer write in Everyone or private chats (it can still write to you).', ok: 'Ban', danger: true })) { await api('/api/ban-pc', { pc: A.pc_number, id: A.id, banned: true }); agencyPage(pc) } }
+    if ($('#aUnban')) $('#aUnban').onclick = async () => { await api('/api/ban-pc', { pc: A.pc_number, id: A.id, banned: false }); agencyPage(pc) }
+    $('#aDel').onclick = async () => {
+      if (!(await ask({ title: `Delete ${A.name}?`, text: `Its account${A.accounts > 1 ? 's (all ' + A.accounts + ')' : ''}, chats, receipts and pictures are removed for good. If that PC opens the chat again it comes back as a new agency.`, ok: 'Delete', danger: true }))) return
+      try { await api('/api/delete-pc', { pc: A.pc_number, id: A.id }); pageOf = null; refresh(); agenciesView() } catch (e) { tell('Not deleted', e.message) }
+    }
+    $('#table').querySelectorAll('[data-cancel]').forEach(b => b.onclick = async () => { await api('/api/waiting/cancel', { id: b.dataset.cancel }); agencyPage(pc) })
+  }
+  if (pageData && pageOf === pc) paint(pageData)
+  else $('#table').innerHTML = '<p class="muted">Loading…</p>'
+  if (!fresh) return
+  try {
+    const A = await api('/api/agency?' + (/^\d{6}$/.test(pc) ? 'pc=' : 'id=') + encodeURIComponent(pc))
+    KEEP('agency:' + pc, A)
+    if (JSON.stringify(A) !== JSON.stringify(pageData)) { pageData = A; paint(A) }
+  } catch (e) { if (!pageData) $('#table').innerHTML = `<p class="muted">${esc(e.message)}</p>` }
+}
+
+function switchTab(t) { const b = document.querySelector(`.tabs button[data-tab="${t}"]`); if (b) b.click() }
+
 function showTable() {
   $('#thread').style.display = 'none'; $('#compose').style.display = 'none'; $('#table').style.display = 'block'
   if (tab === 'work') return workTable()
@@ -598,6 +778,8 @@ function showTable() {
       if (note === null) return
       await api('/api/decide', { id: b.dataset.no, approve: false, note }); refresh()
     })
+  } else if (tab === 'agencies') {
+    return agenciesView()
   } else {
     $('#title').textContent = 'Agencies'
     const inv = data.invites
@@ -660,24 +842,32 @@ $('#pic').onchange = () => {
   $('#pic').value = ''
 }
 
+let synced = 0
 async function refresh() {
   try {
-    data = await api('/api/overview')
-    work = await api('/api/work').catch(() => work)
+    data = await api('/api/overview'); KEEP('overview', data)
+    work = await api('/api/work').catch(() => work); KEEP('work', work)
+    synced = Date.now(); $('#sync').className = ''; $('#sync').textContent = '● synced'
     if (open) open = data.conversations.find(c => c.id === open.id) || open
     renderList()
     if (tab === 'work') { if (!document.querySelector('#table input:focus')) showTable() }
     else if (tab === 'cvt') { if (!cvtDragged) cvtView() }
     else if (tab === 'ceos') { if (!document.querySelector('#table input:focus')) ceosView() }
     else if (tab === 'agents') { if (!dragged && !document.querySelector('#table input:focus, #table select:focus')) agentsView() }
-    else if (tab === 'payments' || tab === 'agencies') showTable()
+    else if (tab === 'agencies') { if (!document.querySelector('#table input:focus')) { if (pageOf) agencyPage(pageOf); else agenciesView() } }
+    else if (tab === 'payments') showTable()
     else await loadMessages()
     const waiting = data.requests.filter(r => r.status === 'pending').length
     document.title = (waiting ? `(${waiting}) ` : '') + 'Adal Keep Admin'
-    document.querySelector('[data-tab=payments]').textContent = waiting ? `Payments (${waiting})` : 'Payments'
-  } catch (e) { $('#title').textContent = 'Cannot reach Supabase: ' + e.message }
+    document.querySelector('[data-tab=payments]').innerHTML = `<span class="ic">💳</span>Payments${waiting ? `<span class="count">${waiting}</span>` : ''}`
+    const unread = data.conversations.filter(c => c.kind === 'admin').reduce((n, c) => n + (c.unread || 0), 0)
+    document.querySelector('[data-tab=inbox]').innerHTML = `<span class="ic">💬</span>Inbox${unread ? `<span class="count">${unread}</span>` : ''}`
+  } catch (e) { $('#sync').className = 'off'; $('#sync').textContent = synced ? `● offline — last synced ${ago(synced)} ago` : '● cannot reach Supabase: ' + e.message }
 }
-showTable(); refresh(); setInterval(refresh, 5000)
+// Open at once with what was seen last time; the fresh copy follows.
+data = KEPT('overview') || data; work = KEPT('work') || work
+$('#search').oninput = (e) => { query = e.target.value.trim().toLowerCase(); pageOf = null; if (tab !== 'agencies') switchTab('agencies'); else agenciesView() }
+showTable(); renderList(); refresh(); setInterval(refresh, 5000)
 </script>
 </body>
 </html>

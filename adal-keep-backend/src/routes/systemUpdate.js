@@ -136,7 +136,7 @@ function writeMarker(root, data) {
 }
 
 /** Detect the currently installed revision (git first, then marker file). */
-async function getInstalled() {
+export async function getInstalled() {
   const { projectRoot } = config()
   const isRepo = fs.existsSync(path.join(projectRoot, '.git'))
   if (isRepo) {

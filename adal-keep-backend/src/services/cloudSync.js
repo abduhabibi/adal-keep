@@ -178,6 +178,14 @@ async function summary(db) {
     failed: failed.sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at))).slice(0, 25).map(run),
     tasks: { open: tasks.length, latest: tasks.slice(0, 15) },
     medicals: meds.slice(0, 25),
+    has: {
+      employees: Number((await db('users').count({ n: '*' }).catch(() => [{ n: 0 }]))[0].n) || 0,
+      brokers: Number((await db('brokers').count({ n: '*' }).catch(() => [{ n: 0 }]))[0].n) || 0,
+      cv_templates: (await db('cv_templates').select('name').catch(() => [])).map(t => t.name),
+      checklists: Number((await db('checklists').count({ n: '*' }).catch(() => [{ n: 0 }]))[0].n) || 0,
+    },
+    version: await (async () => { try { return (await (await import('../routes/systemUpdate.js')).getInstalled()).short || null } catch { return null } })(),
+    plan: await (async () => { try { return (await import('./plans.js')).planOf() } catch { return null } })(),
   }
 }
 
@@ -535,7 +543,10 @@ let relayTimer = null, lastBeat = 0, lastClean = 0, deviceNames = new Map(), nam
 async function answerCall(db, agency, c) {
   let patch = { status: 'done', answered_at: new Date().toISOString() }
   try {
-    if (Date.now() - new Date(c.created_at).getTime() > RELAY_LATE_MS) { patch.status = 'late'; return }
+    // A phone's call is late after 30 s (it gave up waiting). Adal's commands
+    // wait online until this PC is on (up to 30 days), then run.
+    const age = Date.now() - new Date(c.created_at).getTime()
+    if (age > RELAY_LATE_MS && !(age < 30 * 86400000 && await fromAdal(db, c.device_id))) { patch.status = 'late'; return }
     patch = { ...patch, ...(await runCall(db, agency, c)) }
   } finally {
     await cloudCall(db, 'PATCH', `/rest/v1/keep_calls?id=eq.${c.id}`, patch, { headers: { Prefer: 'return=minimal' } }).catch(() => {})
@@ -548,12 +559,11 @@ async function answerCall(db, agency, c) {
 // their own id (keep_calls RLS), so a call carrying this id is Adal's.
 let adalId = null
 async function fromAdal(db, id) {
-  if (!id) return false
   if (!adalId) {
     const { agencies } = await import('./chatCloud.js')
     adalId = ((await agencies(db).catch(() => [])) || []).find(a => a.is_admin)?.id || null
   }
-  return !!adalId && id === adalId
+  return !!id && !!adalId && id === adalId
 }
 // What Adal can do on an agency's PC, from Admin: back up now, restore the
 // newest backup here (its own, or another agency PC's — a replaced PC).
@@ -664,7 +674,10 @@ async function relayOnce(db) {
   if (Date.now() - lastClean > 5 * 60000) {
     lastClean = Date.now()
     const old = new Date(Date.now() - 10 * 60000).toISOString()
-    await cloudCall(db, 'DELETE', `/rest/v1/keep_calls?agency_id=eq.${agency}&created_at=lt.${old}`, undefined, { headers: { Prefer: 'return=minimal' } }).catch(() => {})
+    // Not Adal's commands still waiting to run.
+    await fromAdal(db, null).catch(() => {})
+    const keepAdal = adalId ? `&or=(status.neq.new,device_id.neq.${adalId})` : ''
+    await cloudCall(db, 'DELETE', `/rest/v1/keep_calls?agency_id=eq.${agency}&created_at=lt.${old}${keepAdal}`, undefined, { headers: { Prefer: 'return=minimal' } }).catch(() => {})
   }
 }
 

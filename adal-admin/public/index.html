@@ -82,6 +82,7 @@
   <div class="tabs">
     <button data-tab="work" class="on">Work</button>
     <button data-tab="agents">Agents</button>
+    <button data-tab="cvt">CV templates</button>
     <button data-tab="ceos">CEOs</button>
     <button data-tab="inbox">Inboxes</button>
     <button data-tab="chats">All chats</button>
@@ -140,7 +141,7 @@ const img = (p) => `<img src="/api/image?path=${encodeURIComponent(p)}" onclick=
 
 document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
   tab = b.dataset.tab; document.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('on', x === b))
-  if (tab === 'payments' || tab === 'agencies' || tab === 'work' || tab === 'agents' || tab === 'ceos' || tab === 'plans') { open = null; showTable() } else renderList()
+  if (tab === 'payments' || tab === 'agencies' || tab === 'work' || tab === 'agents' || tab === 'ceos' || tab === 'plans' || tab === 'cvt') { open = null; showTable() } else renderList()
   renderList()
 })
 
@@ -300,6 +301,73 @@ async function agentsView() {
 
 // CEOs: who to call at each agency. Typed here when the agency's setup left it empty.
 let ceoShown = ''
+// CV templates: Adal's collection (every agency's templates, with their headers) — drag one onto an agency.
+let cvtData = null, cvtShown = '', cvtPicked = null, cvtDragged = null, cvtSaid = ''
+async function cvtView() {
+  const next = await api('/api/cvt').catch(e => ({ error: e.message }))
+  if (tab !== 'cvt') return
+  if (next.error) { $('#title').textContent = next.error; return }
+  const now = JSON.stringify(next)
+  if (now === cvtShown && $('#cvtWrap')) return
+  cvtData = next; cvtShown = now
+  const D = cvtData
+  $('#title').textContent = cvtPicked ? `Now click the agency for ${cvtPicked.name}` : cvtSaid || `CV templates — ${D.items.length} in your collection. Drag one onto an agency (or click it, then the agency).`
+  $('#table').innerHTML = `<div class="agwrap" id="cvtWrap"><div class="box2">
+      <h4>Your collection (${D.items.length})</h4>
+      <p class="muted" style="margin:0 0 8px">Every agency's CV templates come here by themselves (their header picture once that agency's PC is on). Yours to give to anyone.</p>
+      ${D.items.map((t, i) => `<div class="chip" draggable="true" data-i="${i}" title="From ${esc(t.fromName)}">
+        <button class="x" data-forget="${i}" title="Take out of your collection">✕</button>
+        ${t.header ? `<img src="/api/cvt/header?key=${encodeURIComponent(t.key)}" alt="" style="display:block;width:100%;max-height:46px;object-fit:cover;border-radius:6px;margin-bottom:4px">` : ''}
+        <b>${esc(t.name)}</b><small>from ${esc(t.fromName)}${t.headerLater ? ' · header when its PC is on' : t.header ? '' : ' · no header'}</small></div>`).join('') || '<p class="muted">No CV templates online yet: they come once an agency PC is on.</p>'}
+    </div>
+    <div class="aglist">${D.agencies.map((a, i) => `<div class="drop" data-a="${i}">
+      <h4><span style="color:${a.pcOnline ? '#16a34a' : 'var(--red)'}" title="${a.pcOnline ? 'PC on' : 'PC off: a template waits until it is on'}">●</span> ${esc(a.name)}</h4>
+      ${a.has.map(n => `<div class="chip"><b>${esc(n)}</b></div>`).join('') || '<p class="muted">No CV templates yet.</p>'}
+      ${a.waiting.map(n => `<div class="chip" style="opacity:.7;border-style:dashed"><button class="x" data-unwait="${i}" data-name="${esc(n)}" title="Do not send it">✕</button><b>${esc(n)}</b><small>waiting for its PC</small></div>`).join('')}
+    </div>`).join('')}</div></div>`
+  const T = $('#table')
+  const say = (t) => { cvtSaid = t; $('#title').textContent = t }
+  const give = async (a, t) => {
+    if (!t) return
+    if (a.has.includes(t.name)) { say(`${a.name} already has ${t.name}`); return }
+    say(`Giving ${t.name} to ${a.name}…`)
+    try {
+      const r = await api('/api/cvt/give', { key: t.key, agency: a.id })
+      say(r.waiting ? `${t.name} goes to ${a.name} as soon as its PC is on` : `${t.name} is now at ${a.name}`)
+    } catch (e) { await ask({ title: 'Not given', text: e.message }); say('') }
+    cvtShown = ''; cvtView()
+  }
+  T.querySelectorAll('[draggable][data-i]').forEach(c => {
+    const t = D.items[c.dataset.i]
+    c.ondragstart = (e) => { cvtDragged = t; e.dataTransfer.setData('text/plain', t.name); e.dataTransfer.effectAllowed = 'copy' }
+    c.ondragend = () => { cvtDragged = null }
+    c.onclick = (e) => {
+      if (e.target.closest('button')) return
+      cvtPicked = cvtPicked?.key === t.key ? null : t
+      T.querySelectorAll('[draggable]').forEach(x => { x.style.outline = '' })
+      if (cvtPicked) c.style.outline = '2px solid var(--teal)'
+      $('#title').textContent = cvtPicked ? `Now click the agency for ${t.name}` : 'CV templates'
+    }
+  })
+  T.querySelectorAll('.drop[data-a]').forEach(d => {
+    const a = D.agencies[d.dataset.a]
+    d.ondragover = (e) => { e.preventDefault(); d.classList.add('over') }
+    d.ondragleave = () => d.classList.remove('over')
+    d.ondrop = (e) => { e.preventDefault(); d.classList.remove('over'); const t = cvtDragged; cvtDragged = null; give(a, t) }
+    d.onclick = (e) => { if (!cvtPicked || e.target.closest('button')) return; const t = cvtPicked; cvtPicked = null; give(a, t) }
+  })
+  T.querySelectorAll('[data-forget]').forEach(b => b.onclick = async (e) => {
+    e.stopPropagation()
+    const t = D.items[b.dataset.forget]
+    if (!(await ask({ title: `Take ${t.name} out of your collection?`, text: 'Agencies that have it keep it. It comes back if its agency still has it online.', ok: 'Take out', danger: true }))) return
+    await api('/api/cvt/forget', { key: t.key }); cvtShown = ''; cvtView()
+  })
+  T.querySelectorAll('[data-unwait]').forEach(b => b.onclick = async (e) => {
+    e.stopPropagation()
+    await api('/api/cvt/unwait', { agency: D.agencies[b.dataset.unwait].id, name: b.dataset.name }); cvtShown = ''; cvtView()
+  })
+}
+
 // Plans: each agency's plan, paid days, trial days and features — Adal's signed licence (plans.js).
 async function plansView() {
   $('#title').textContent = 'Plans — loading…'
@@ -512,6 +580,7 @@ function showTable() {
   if (tab === 'agents') return agentsView()
   if (tab === 'ceos') return ceosView()
   if (tab === 'plans') return plansView()
+  if (tab === 'cvt') return cvtView()
   if (tab === 'payments') {
     $('#title').textContent = 'Payment receipts'
     $('#table').innerHTML = `<table><tr><th>Receipt</th><th>Agency</th><th>PC number</th><th>Sent</th><th>Status</th><th></th></tr>` +
@@ -598,6 +667,7 @@ async function refresh() {
     if (open) open = data.conversations.find(c => c.id === open.id) || open
     renderList()
     if (tab === 'work') { if (!document.querySelector('#table input:focus')) showTable() }
+    else if (tab === 'cvt') { if (!cvtDragged) cvtView() }
     else if (tab === 'ceos') { if (!document.querySelector('#table input:focus')) ceosView() }
     else if (tab === 'agents') { if (!dragged && !document.querySelector('#table input:focus, #table select:focus')) agentsView() }
     else if (tab === 'payments' || tab === 'agencies') showTable()

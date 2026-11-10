@@ -104,6 +104,9 @@ adal-admin/ceos.json
 # admin panel log
 adal-admin/admin.log
 adal-admin/.sessions.json
+adal-admin/launcher.log
+adal-admin/cv-templates.json
+adal-admin/cv-collection/
 
 # Android signing keys (kept in ~/.adal-keep)
 *.jks

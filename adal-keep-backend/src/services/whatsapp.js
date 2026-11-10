@@ -429,10 +429,23 @@ export async function agentList(db) {
 export async function giveTemplate(db, t) {
   const name = String(t?.name || '').trim().toUpperCase()
   if (!name || !t.html_content) throw new Error('That CV template has no content online yet.')
-  const had = await db('cv_templates').where('name', name).first('id')
-  if (had) return had.id
+  // Its header picture (from Adal's collection): saved here like any CV header.
+  let header_path = null
+  if (t.header?.data) {
+    const { SAFE_STORAGE_DIR } = await import('./docPipeline.js')
+    const ext = /^(png|jpe?g|webp)$/i.test(t.header.ext || '') ? t.header.ext.toLowerCase() : 'png'
+    header_path = `cv-header-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`
+    fs.writeFileSync(path.join(SAFE_STORAGE_DIR, header_path), Buffer.from(t.header.data, 'base64'))
+  }
+  const had = await db('cv_templates').where('name', name).first('id', 'header_path')
+  if (had) {
+    if (header_path && !had.header_path) await db('cv_templates').where('id', had.id).update({ header_path, updated_at: new Date().toISOString() })
+    else if (header_path) { const { SAFE_STORAGE_DIR } = await import('./docPipeline.js'); fs.rmSync(path.join(SAFE_STORAGE_DIR, header_path), { force: true }) }
+    return had.id
+  }
   const at = new Date().toISOString()
   const [id] = await db('cv_templates').insert({
+    ...(header_path ? { header_path } : {}),
     name, agency_name: t.agency_name || '', agency_name_ar: t.agency_name_ar || '', salary: t.salary ?? null, currency: t.currency || 'SAR',
     country: t.country || '', contract_years: t.contract_years ?? 2, html_content: t.html_content, css_content: t.css_content || '',
     placeholders: t.placeholders || '[]', source_file: 'from Adal', is_active: true, created_at: at, updated_at: at,

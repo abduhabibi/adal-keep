@@ -118,6 +118,90 @@ async function templateOf({ agency, id }) {
 const CEOS = path.join(HERE, 'ceos.json')
 const readCeos = () => { try { return JSON.parse(fs.readFileSync(CEOS, 'utf8')) } catch { return {} } }
 
+// ----------------------------------------------------------- CV templates --
+// Adal's own collection of every agency's CV templates (cv-templates.json and
+// their header pictures in cv-collection/): taken from each agency's online
+// copy, the header from its PC while it is on. A template dragged onto an
+// agency goes to its PC now, or as soon as that PC is on (kept in "waiting").
+const CVT_FILE = path.join(HERE, 'cv-templates.json')
+const CVT_DIR = path.join(HERE, 'cv-collection')
+const readCvt = () => { try { return JSON.parse(fs.readFileSync(CVT_FILE, 'utf8')) } catch { return { items: [], waiting: [] } } }
+const writeCvt = (c) => fs.writeFileSync(CVT_FILE, JSON.stringify(c))
+const pcOnlineOf = (meta, id) => { const at = meta.find(m => m.agency_id === id && m.key === '/_pc')?.data?.at; return !!at && Date.now() - new Date(at).getTime() < 60000 }
+// A picture from an agency's PC (its answer comes back as base64).
+async function agencyFile(agency, p, ms = 25000) {
+  const [row] = await rest('POST', 'keep_calls?select=id', { agency_id: agency, device_id: ADMIN_ID, method: 'GET', path: p, body: null }, { Prefer: 'return=representation' })
+  for (const end = Date.now() + ms; Date.now() < end;) {
+    await new Promise(r => setTimeout(r, 500))
+    const [a] = await rest('GET', `keep_calls?id=eq.${row.id}&select=status,answer_code,answer_type,answer_bin`)
+    if (a?.status === 'done') return a.answer_code === 200 && a.answer_bin ? { type: a.answer_type || 'image/png', buf: Buffer.from(a.answer_bin, 'base64') } : null
+    if (a?.status === 'late') break
+  }
+  return null
+}
+const extOf = (type) => (/jpe?g/.test(type) ? 'jpg' : /webp/.test(type) ? 'webp' : 'png')
+let cvtBusy = false
+/** New and changed templates from every agency's online copy; headers fetched from PCs that are on. */
+async function collectCvt() {
+  if (cvtBusy) return fixLater(readCvt())
+  cvtBusy = true
+  try {
+    const c = fixLater(readCvt())
+    c.waiting ||= []
+    const [agencies, rows, meta] = await Promise.all([
+      rest('GET', 'agencies?is_admin=eq.false&select=id,name'),
+      rest('GET', 'keep_meta?key=like./cv/templates/*&select=agency_id,key,data,updated_at').catch(() => []),
+      rest('GET', 'keep_meta?key=eq./_pc&select=agency_id,key,data').catch(() => []),
+    ])
+    const names = Object.fromEntries(agencies.map(a => [a.id, a.name]))
+    for (const row of rows) {
+      if (!/^\/cv\/templates\/\d+$/.test(row.key) || !row.data?.html_content || !names[row.agency_id]) continue
+      const key = `${row.agency_id}:${row.key.split('/').pop()}`
+      const had = c.items.find(i => i.key === key)
+      if (had && had.updated === row.updated_at) continue
+      const { id, created_at, ...template } = row.data
+      const item = had || { key, added: new Date().toISOString() }
+      Object.assign(item, { name: String(template.name || 'CV').toUpperCase(), from: row.agency_id, fromName: names[row.agency_id], template, updated: row.updated_at })
+      if (!template.header_path) item.header = null
+      else if (!(had?.header && had.headerOf === template.header_path)) item.header = undefined   // to fetch from its PC
+      if (!had) c.items.push(item)
+    }
+    fs.mkdirSync(CVT_DIR, { recursive: true })
+    for (const item of c.items.filter(i => i.header === undefined && pcOnlineOf(meta, i.from))) {
+      const pic = await agencyFile(item.from, `/cv/templates/${item.key.split(':')[1]}/header-image`).catch(() => null)
+      if (!pic) continue
+      const file = `${item.key.replace(/[^\w-]/g, '_')}.${extOf(pic.type)}`
+      fs.writeFileSync(path.join(CVT_DIR, file), pic.buf)
+      item.header = file
+      item.headerOf = item.template.header_path
+    }
+    // JSON drops "undefined": a header still to fetch is kept as "later".
+    for (const item of c.items) if (item.header === undefined) item.header = 'later'
+    writeCvt(c)
+    for (const item of c.items) if (item.header === 'later') item.header = undefined
+    return c
+  } finally { cvtBusy = false }
+}
+const fixLater = (c) => { for (const i of c.items) if (i.header === 'later') i.header = undefined; return c }
+/** A template from the collection to an agency's PC (with its header picture). */
+async function giveCvt(item, agency) {
+  const header = item.header ? { data: fs.readFileSync(path.join(CVT_DIR, path.basename(item.header))).toString('base64'), ext: path.extname(item.header).slice(1) } : null
+  return agencyCall(agency, 'POST', '/_adal/agents/template', { template: { ...item.template, name: item.name, header } }, 40000)
+}
+// Waiting deliveries go once the agency's PC is on.
+setInterval(async () => {
+  const c = fixLater(readCvt())
+  if (!c.waiting?.length || !ADMIN_ID) return
+  const meta = await rest('GET', 'keep_meta?key=eq./_pc&select=agency_id,key,data').catch(() => [])
+  let changed = false
+  for (const w of [...c.waiting]) {
+    if (!pcOnlineOf(meta, w.agency)) continue
+    const item = c.items.find(i => i.key === w.key)
+    try { if (item) await giveCvt(item, w.agency); c.waiting = c.waiting.filter(x => x !== w); changed = true } catch {}
+  }
+  if (changed) writeCvt(c)
+}, 60000).unref?.()
+
 // ----------------------------------------------------------------- plans --
 // Each agency's licence (adal-keep-backend/src/services/plans.js): its plan,
 // paid / trial dates and features, signed with Adal's update key so only this
@@ -147,6 +231,51 @@ async function tell(agencyId, body) {
 
 // ------------------------------------------------------------------- api --
 const api = {
+  // CV templates: the collection, every agency with the templates it has, what waits for its PC.
+  'GET /api/cvt': async () => {
+    const c = await collectCvt()
+    const [agencies, rows, meta] = await Promise.all([
+      rest('GET', 'agencies?is_admin=eq.false&select=id,name,banned&order=name.asc'),
+      rest('GET', 'keep_meta?key=like./cv/templates/*&select=agency_id,key,name:data->>name').catch(() => []),
+      rest('GET', 'keep_meta?key=eq./_pc&select=agency_id,key,data').catch(() => []),
+    ])
+    return {
+      items: c.items.map(i => ({ key: i.key, name: i.name, fromName: i.fromName, header: !!i.header, headerLater: i.header === undefined, added: i.added })).sort((a, b) => a.name.localeCompare(b.name)),
+      agencies: agencies.filter(a => !/\s·\s*branch PC \d{6}$/.test(a.name || '')).map(a => ({
+        id: a.id, name: a.name, pcOnline: pcOnlineOf(meta, a.id),
+        has: [...new Set(rows.filter(r => r.agency_id === a.id && r.name).map(r => String(r.name).toUpperCase()))].sort(),
+        waiting: (c.waiting || []).filter(w => w.agency === a.id).map(w => c.items.find(i => i.key === w.key)?.name).filter(Boolean),
+      })),
+    }
+  },
+  'POST /api/cvt/give': async (q, b) => {
+    const c = fixLater(readCvt())
+    c.waiting ||= []
+    const item = c.items.find(i => i.key === b.key)
+    if (!item) throw new Error('That template is not in your collection.')
+    const meta = await rest('GET', 'keep_meta?key=eq./_pc&select=agency_id,key,data').catch(() => [])
+    if (!pcOnlineOf(meta, b.agency)) {
+      c.waiting = [...c.waiting.filter(w => !(w.key === b.key && w.agency === b.agency)), { key: b.key, agency: b.agency, at: new Date().toISOString() }]
+      writeCvt(c)
+      return { ok: true, waiting: true }
+    }
+    await giveCvt(item, b.agency)
+    return { ok: true }
+  },
+  'POST /api/cvt/unwait': async (q, b) => {
+    const c = fixLater(readCvt())
+    c.waiting = (c.waiting || []).filter(w => !(w.agency === b.agency && c.items.find(i => i.key === w.key)?.name === b.name))
+    writeCvt(c); return { ok: true }
+  },
+  'POST /api/cvt/forget': async (q, b) => {
+    const c = fixLater(readCvt())
+    const it = c.items.find(i => i.key === b.key)
+    c.items = c.items.filter(i => i.key !== b.key)
+    c.waiting = (c.waiting || []).filter(w => w.key !== b.key)
+    if (it?.header) fs.rmSync(path.join(CVT_DIR, path.basename(it.header)), { force: true })
+    writeCvt(c); return { ok: true }
+  },
+
   // Plans: every agency's licence, the features, and what agencies asked for.
   'GET /api/plans': async () => {
     const agencies = (await rest('GET', 'agencies?is_admin=eq.false&select=id,name,pc_number,banned,last_seen&order=name.asc'))
@@ -660,6 +789,14 @@ http.createServer(async (req, res) => {
       return
     }
     if (u.pathname === '/api/image') return await image(res, u.searchParams.get('path'))
+    // A header picture from the CV template collection.
+    if (u.pathname === '/api/cvt/header') {
+      const item = readCvt().items.find(i => i.key === u.searchParams.get('key'))
+      const file = item?.header && item.header !== 'later' ? path.join(CVT_DIR, path.basename(item.header)) : null
+      if (!file || !fs.existsSync(file)) { res.writeHead(404).end(); return }
+      res.writeHead(200, { 'Content-Type': /\.jpg$/.test(file) ? 'image/jpeg' : /\.webp$/.test(file) ? 'image/webp' : 'image/png', 'Cache-Control': 'private, max-age=3600' })
+      res.end(fs.readFileSync(file)); return
+    }
     const fn = api[`${req.method} ${u.pathname}`]
     if (!fn) { res.writeHead(404).end(); return }
     let body = {}

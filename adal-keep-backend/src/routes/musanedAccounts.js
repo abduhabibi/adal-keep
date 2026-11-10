@@ -94,4 +94,14 @@ musaned.delete('/accounts/:id/authenticator', async (req, res) => {
   try { (await import('../services/musanedTotp.js')).removeAuthenticator(Number(req.params.id)); res.json({ ok: true }) }
   catch (e) { res.status(500).json({ error: e.message }) }
 })
+
+// The agency's signed contract for EPRO approve (Settings → Integrations → EPRO signature).
+musaned.get('/epro-signature', async (req, res) => res.json((await import('../services/eproSignature.js')).eproSignature()))
+musaned.post('/epro-signature', upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Choose the signed contract (PDF, PNG or JPG)' })
+    res.json((await import('../services/eproSignature.js')).saveEproSignature(req.file.buffer, req.file.originalname))
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }) }
+})
+musaned.delete('/epro-signature', async (req, res) => { (await import('../services/eproSignature.js')).removeEproSignature(); res.json({ ok: true }) })
 export default musaned

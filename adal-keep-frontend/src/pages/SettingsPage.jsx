@@ -26,6 +26,7 @@ import PhoneCard from '../components/PhoneCard'
 import WhatsAppCard from '../components/WhatsAppCard'
 import TransitionsCard from '../components/TransitionsCard'
 import PlanCard from '../components/PlanCard'
+import EproSignatureCard from '../components/EproSignatureCard'
 
 // The tabs of Settings: [id, icon, name].
 const SETTINGS_TABS = [
@@ -288,6 +289,7 @@ export default function SettingsPage() {
       </>}
       {tab === 'integrations' && <>
       {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Musaned code"><MusanedCodesCard /></ErrorBoundary>}
+      {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="EPRO signature"><EproSignatureCard /></ErrorBoundary>}
       {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="WhatsApp"><WhatsAppCard /></ErrorBoundary>}
       {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Telegram"><TelegramChannelCard /></ErrorBoundary>}
       </>}

@@ -61,7 +61,7 @@ router.get('/profiles/:profileId/automations', async (req, res) => {
     // She has a contract: she is chosen on Musaned and her Musaned record is
     // there — "Check if chosen" and "Add from Musaned" count as done (✓) unless
     // a run of them is working now.
-    const p = await db('profiles').where('id', profileId).first('chosen_at', 'contract_number', 'musaned_stage')
+    const p = await db('profiles').where('id', profileId).first('chosen_at', 'contract_number', 'musaned_stage', 'status')
     const contract = (p?.contract_number && String(p.contract_number).trim()) ||
       (p?.chosen_at && !/CANCEL|REJECT/i.test(p.musaned_stage || '')) ||
       await db('profile_fields').join('files', 'files.profile_field_id', 'profile_fields.id')
@@ -74,7 +74,8 @@ router.get('/profiles/:profileId/automations', async (req, res) => {
       }
     }
     res.json({
-      workflows: workflows.map(w => ({ ...w, latest: latest[w.id] || null })),
+      // EPRO approve: only once her Wafid medical is FIT.
+      workflows: workflows.filter(w => w.id !== 'musaned_epro_approve' || p?.status === 'medical_fit' || latest[w.id]).map(w => ({ ...w, latest: latest[w.id] || null })),
       queue: queueSnapshot(),
     })
   } catch (e) { res.status(e.status || 500).json({ error: e.message, ...(e.feature ? { feature: e.feature, plan: e.plan } : {}) }) }
@@ -93,7 +94,13 @@ router.post('/profiles/:profileId/automations/:workflowId/start', async (req, re
 
     // Preflight — depends on the workflow
     // Musaned workflows need no files
-    if (['musaned_check_chosen', 'musaned_cv_import', 'musaned_delete'].includes(workflowId)) {
+    if (workflowId === 'musaned_epro_approve') {
+      const prof = await db('profiles').where('id', profileId).first()
+      if (prof?.status !== 'medical_fit') return res.status(400).json({ error: 'EPRO approve comes after the Wafid medical is FIT.' })
+      const { eproSignature } = await import('../services/eproSignature.js')
+      if (!eproSignature()) return res.status(400).json({ error: 'Upload the signed contract once in Settings → Integrations → EPRO signature first.' })
+    }
+    if (['musaned_check_chosen', 'musaned_cv_import', 'musaned_delete', 'musaned_epro_approve'].includes(workflowId)) {
       const prof = await db('profiles').where('id', profileId).first()
       if (!prof?.passport_number || !String(prof.passport_number).trim()) {
         return res.status(400).json({ error: 'Profile is missing the passport number', missing: ['Passport number'] })

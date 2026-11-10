@@ -694,6 +694,53 @@ export async function checkChosenInRun(page, ctx) {
   return { ok: true, done: true, note: msg }
 }
 
+/**
+ * EPRO approve (after Wafid FIT): Employment Requests (or Pending) → her
+ * passport → DETAILS → APPROVE → the agency's signed contract in Contract
+ * Upload. SAVE is never pressed — a person looks it over, ticks the pledge and
+ * saves; Adal Keep rings for it (with its sound).
+ */
+export async function eproApproveInRun(page, ctx) {
+  const db = ctx.db
+  const p = await db('profiles').where('id', ctx.profileId).first()
+  if (!p?.passport_number) return { ok: false, error: 'Profile is missing the passport number' }
+  const { eproSignature } = await import('./eproSignature.js')
+  const sig = eproSignature()
+  if (!sig) return { ok: false, error: 'No signed contract yet: upload it once in Settings → Integrations → EPRO signature' }
+  const passport = String(p.passport_number).trim().toUpperCase()
+  page.__adalAllowImages = true
+  ctx.onLog?.('info', `🔎 Employment Requests → passport ${passport}`)
+  let s = await search(page, passport)
+  if (s.signedOut) return { ok: false, error: 'Musaned signed out' }
+  if (!s.cards?.length) {
+    const sp = await search(page, passport, PENDING_URL).catch(() => ({ cards: [] }))
+    if (sp.cards?.length) s = sp
+  }
+  if (!s.cards?.length) return { ok: false, error: 'No employment request with her passport on Musaned (nobody chose her yet?)' }
+  ctx.onLog?.('info', '✓ her request found — DETAILS')
+  await openDetails(page)
+  // APPROVE (on the contract page, next to REJECT).
+  const approve = await page.evaluateHandle(() => [...document.querySelectorAll('button, a')].find(b => /^\s*(✓\s*)?APPROVE\s*$/i.test((b.innerText || '').trim()) && b.offsetParent !== null) || null)
+  if (!approve.asElement?.()) {
+    const stage = await page.evaluate(() => (document.body.innerText.match(/(EPRO APPROVAL|EPRO APPROVED|FMOL APPROVAL|FMOL APPROVED|SENT TO SAUDI EMBASSY)/i) || [])[1] || '')
+    return { ok: false, error: `There is no APPROVE button on her contract${stage ? ` (it is at ${stage})` : ''}: approved already?` }
+  }
+  await approve.asElement().click()
+  ctx.onLog?.('info', '✓ APPROVE pressed — Contract Upload')
+  await page.waitForFunction(() => /Contract Upload/i.test(document.body.innerText || '') && !!document.querySelector('input[type=file]'), { timeout: 20000 }).catch(() => {})
+  const input = await page.$('input[type=file]')
+  if (!input) return { ok: false, error: 'The Contract Upload box did not open after APPROVE' }
+  await input.uploadFile(sig.path)
+  await page.evaluate(() => { const i = document.querySelector('input[type=file]'); i?.dispatchEvent(new Event('change', { bubbles: true })) }).catch(() => {})
+  await sleep(2500)
+  const shown = await page.evaluate((name) => (document.body.innerText || '').includes(name), sig.name).catch(() => false)
+  ctx.onLog?.(shown ? 'info' : 'warn', shown ? `✓ signed contract uploaded (${sig.name}) — SAVE left for a person` : 'the signed contract was given to the upload box; check it shows before saving')
+  await ctx.noteProfile?.(`EPRO: approved and the signed contract uploaded — waiting for a person to press SAVE on Musaned`).catch?.(() => {})
+  await ctx.notify?.(`✍️ ${ctx.profileName}: EPRO — look it over and press SAVE`,
+    'Musaned: APPROVE pressed and the signed contract uploaded in Contract Upload. Tick the pledge, look it over and press SAVE (Adal Keep never presses it).', 'warn', { login: page })
+  return { ok: true, pauseReason: 'awaiting-epro-save' }
+}
+
 /** Check every profile (or one). */
 /**
  * The check found Musaned signed out: open its sign-in in this tab, fill the

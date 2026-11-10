@@ -3,11 +3,15 @@ import FileTray from '../FileTray'
 import { useLocation, useNavigate } from 'react-router-dom'
 import api from '../../services/api'
 import toast from 'react-hot-toast'
+import { beep } from '../AttentionBar'
 
 export default function Navbar({ onMenuClick, capturedFiles, setCapturedFiles }) {
   const location = useLocation()
   const navigate = useNavigate()
   const [undoneTaskCount, setUndoneTaskCount] = useState(0)
+  // A new notification (a task) rings, like the calls above the page.
+  const lastCount = useRef(null)
+  useEffect(() => { if (lastCount.current !== null && undoneTaskCount > lastCount.current) beep(); lastCount.current = undoneTaskCount }, [undoneTaskCount])
   const [quickLinks, setQuickLinks] = useState([])
   const [showAddModal, setShowAddModal] = useState(false)
   const [editingLink, setEditingLink] = useState(null)

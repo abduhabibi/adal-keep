@@ -41,6 +41,7 @@ export async function answerCaptcha(runId, text) {
   const w = waits.get(id)
   if (!w?.answer) throw new Error('This run is not waiting for a captcha any more')
   const answer = w.answer
-  waits.set(id, { ...w, image: null, answer: null, choices: null, body: 'Sent — checking it…' })
+  // Sent: the notice goes (a code that is not accepted comes back as a new one).
+  waits.delete(id)
   await answer(String(text).trim())
 }

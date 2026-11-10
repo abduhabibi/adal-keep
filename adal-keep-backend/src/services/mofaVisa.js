@@ -414,21 +414,28 @@ async function captchaPicture(page) {
   }).catch(() => null)
 }
 
-/** Type the captcha into its box (the text box under "Captcha", or after the password). */
+/**
+ * Type the captcha into its box: a text box AFTER the password and after the
+ * word "Captcha" — never the Login Name box (it comes before the password; a
+ * wide search used to land there). Enjaz's captcha is digits: only digits go in.
+ */
 async function typeCaptcha(page, text) {
+  const digits = String(text || '').replace(/[^0-9٠-٩]/g, '').replace(/[٠-٩]/g, d => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
+  if (!digits) throw new Error('The captcha is numbers only')
   const ok = await page.evaluate((text) => {
-    const lab = [...document.querySelectorAll('label, span, div, td')].find(e => /^\s*\*?\s*captcha\s*\*?\s*$/i.test(e.innerText || ''))
-    let box = lab?.parentElement, input = null
-    for (let i = 0; i < 3 && box && !input; i++, box = box.parentElement) input = box.querySelector('input[type="text"], input:not([type])')
-    if (!input) {
-      const pw = document.querySelector('input[type="password"]')
-      input = pw && [...document.querySelectorAll('input[type="text"], input:not([type])')].find(i => pw.compareDocumentPosition(i) & Node.DOCUMENT_POSITION_FOLLOWING)
-    }
-    if (!input) return false
+    const seen = (e) => e && e.offsetParent !== null
+    const pw = [...document.querySelectorAll('input[type="password"]')].find(seen)
+    const after = (x, y) => !!(x && y && (x.compareDocumentPosition(y) & Node.DOCUMENT_POSITION_FOLLOWING))
+    const texts = [...document.querySelectorAll('input[type="text"], input[type="tel"], input[type="number"], input:not([type])')].filter(seen)
+    const lab = [...document.querySelectorAll('label, span, div, td, th, p')].filter(seen).find(e => /^\s*\*?\s*(captcha|رمز التحقق|الرمز)\s*\*?\s*:?\s*$/i.test(e.innerText || ''))
+    // After the password, and after the "Captcha" label when there is one; the nearest such box.
+    const input = texts.find(i => (!pw || after(pw, i)) && (!lab || after(lab, i)))
+      || texts.find(i => /captcha/i.test(`${i.id} ${i.name} ${i.placeholder}`))
+    if (!input || (pw && !after(pw, input))) return false
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, text)
     for (const t of ['input', 'change']) input.dispatchEvent(new Event(t, { bubbles: true }))
     return true
-  }, text)
+  }, digits)
   if (!ok) throw new Error('The captcha box was not found')
 }
 

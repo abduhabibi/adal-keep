@@ -13,7 +13,7 @@ test('an Enjaz captcha goes to the PC first: the phones are told to wait, then i
   assert.equal(w.phone_wait_ms, 0)                     // now the phones too
   await answerCaptcha(901, ' 4821 ')
   assert.equal(typed, '4821')
-  assert.equal(waiting().find(x => x.run_id === 901).asks, false)
+  assert.equal(waiting().find(x => x.run_id === 901), undefined)   // answered: the notice is gone
   askCaptcha(902, null, async () => {}, {})             // other robots: everyone at once
   assert.equal(waiting().find(x => x.run_id === 902).phone_wait_ms, 0)
 })

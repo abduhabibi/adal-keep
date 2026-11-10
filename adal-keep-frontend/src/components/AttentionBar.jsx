@@ -18,7 +18,7 @@ import LiveTab from './LiveTab'
 const err = (e) => e?.response?.data?.error || e.message
 const here = () => ['localhost', '127.0.0.1'].includes(location.hostname)
 
-function beep() {
+export function beep() {
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)()
     const o = ctx.createOscillator(), g = ctx.createGain()
@@ -63,7 +63,7 @@ function Call({ c, onDone, onHide }) {
       {c.asks && !c.choices && (
         <form onSubmit={(e) => { e.preventDefault(); answer(text) }} className="flex items-stretch gap-1.5">
           {c.image && <img src={c.image} alt="Captcha" className="h-10 rounded border border-slate-200 bg-white" />}
-          <input autoFocus value={text} onChange={e => setText(e.target.value)} placeholder={c.label || 'Numbers'} inputMode="numeric" autoComplete="off"
+          <input autoFocus value={text} onChange={e => setText(/number|code|captcha|^$/i.test(c.label || "") ? e.target.value.replace(/[^0-9]/g, "") : e.target.value)} placeholder={c.label || 'Numbers'} inputMode="numeric" autoComplete="off"
             className="w-24 min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-2 text-sm dark:border-slate-600 dark:bg-slate-800" />
           <button disabled={busy || !text.trim()} className="rounded-lg bg-teal-600 px-2.5 text-xs font-bold text-white disabled:opacity-50">{busy ? '…' : 'Send'}</button>
         </form>
@@ -88,7 +88,8 @@ export default function AttentionBar() {
     const onPhone = !!phone() || !!window.__ADAL_CLOUD
     const list = (r.data || []).filter(c => !onPhone || !(c.phone_wait_ms > 0))
     const fresh = seen.current ? list.filter(c => !seen.current.has(keyOf(c))) : []
-    if (fresh.length && !here()) beep()
+    // Every new notification rings (asked on 2026-11-10), on this PC too.
+    if (fresh.length) beep()
     for (const c of fresh) {
       const title = c.full_name || 'Adal Keep'
       // On the PC a captcha picture is always a Windows notification (even with Adal Keep in front).

@@ -17,6 +17,7 @@ const PAUSE_TEXT = {
   'awaiting-human-save':      'waiting for you to check the form and press SAVE',
   'awaiting-visa-save':       'waiting for you to type the captcha and press Save on the visa platform',
   'awaiting-insurance-save':  'waiting for you to finish the insurance certificate on FetaP',
+  'awaiting-epro-save':       'waiting for you to tick the pledge and press SAVE on Musaned (Contract Upload)',
   'with-run':  'on a shared insurance certificate — it finishes with that run',
   'awaiting-visa-pay':        'waiting for you to pay the visa fees on the visa platform',
   'awaiting-wafid-robot':     'waiting for you to answer Wafid\'s "I am not a robot"',
@@ -40,6 +41,7 @@ const COMPLETE_LABEL = {
   'awaiting-human-save':   '✔️ SAVE done',
   'awaiting-visa-save':    '✔️ Visa saved',
   'awaiting-insurance-save': '✔️ Insurance done',
+  'awaiting-epro-save':      '✔️ EPRO saved',
   'awaiting-visa-pay':       '✔️ Visa paid',
 }
 
@@ -47,7 +49,7 @@ const COMPLETE_LABEL = {
 const REPEATABLE = new Set(['musaned_check_chosen', 'musaned_cv_import', 'musaned_delete', 'wafid_check', 'wafid_slip', 'mofa_find_app'])
 
 // Waits that must not run again (a second run would make a second application).
-const NO_CONTINUE = new Set(['awaiting-visa-save', 'awaiting-insurance-save', 'with-run'])
+const NO_CONTINUE = new Set(['awaiting-visa-save', 'awaiting-insurance-save', 'awaiting-epro-save', 'with-run'])
 // "with-run-812" (on run #812's certificate) reads as "with-run".
 const reasonKey = (r) => /^with-run-/.test(r || '') ? 'with-run' : r
 
@@ -376,6 +378,7 @@ export default function ProfileAutomations({ profileId }) {
                       : latest.pause_reason === 'awaiting-human-save' ? '⏳ Awaiting your SAVE'
                       : latest.pause_reason === 'awaiting-visa-save' ? '⏳ Awaiting your visa Save'
                       : latest.pause_reason === 'awaiting-insurance-save' ? '⏳ Awaiting you on FetaP'
+                      : latest.pause_reason === 'awaiting-epro-save' ? '⏳ Awaiting your SAVE on Musaned'
                       : '● Paused'}
                   </span>
                 )}
@@ -395,7 +398,7 @@ export default function ProfileAutomations({ profileId }) {
   // CV (done on the profile) → Musaned → Wafid → Tasheer → Insurance → Enjaz · Visa,
   // then the LMIS steps, each on its own.
   const GROUPS = [
-    { title: 'Musaned', ids: ['musaned_add_candidate', 'musaned_check_chosen', 'musaned_cv_import', 'musaned_delete'], box: 'border-indigo-200 dark:border-indigo-800', head: 'text-indigo-700 dark:text-indigo-300' },
+    { title: 'Musaned', ids: ['musaned_add_candidate', 'musaned_check_chosen', 'musaned_cv_import', 'musaned_delete', 'musaned_epro_approve'], box: 'border-indigo-200 dark:border-indigo-800', head: 'text-indigo-700 dark:text-indigo-300' },
     { title: 'Wafid medical', ids: ['wafid_book', 'wafid_slip', 'wafid_check'], box: 'border-emerald-200 dark:border-emerald-800', head: 'text-emerald-700 dark:text-emerald-300' },
     { title: 'Tasheer', ids: [], empty: 'Coming soon — the Tasheer steps are added next.', box: 'border-amber-200 dark:border-amber-800 border-dashed', head: 'text-amber-700 dark:text-amber-300' },
     { title: 'Insurance', ids: ['insurance_certificate'], box: 'border-rose-200 dark:border-rose-800', head: 'text-rose-700 dark:text-rose-300' },

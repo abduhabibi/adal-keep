@@ -32,7 +32,7 @@ const RANK = Object.fromEntries(PLANS.map(p => [p.key, p.rank]))
  * `workflows`: the robots it covers. Anything not listed here is in every plan.
  */
 export const FEATURES = [
-  { key: 'musaned_robots', title: 'Musaned robots', plan: 'standard', about: 'Add a candidate, import her CV, delete, contracts, the HR pool move', workflows: ['musaned_add_candidate', 'musaned_cv_import', 'musaned_delete'] },
+  { key: 'musaned_robots', title: 'Musaned robots', plan: 'standard', about: 'Add a candidate, import her CV, delete, contracts, the HR pool move', workflows: ['musaned_add_candidate', 'musaned_cv_import', 'musaned_delete', 'musaned_epro_approve'] },
   { key: 'wafid', title: 'Wafid medical robots', plan: 'standard', about: 'Book the medical, print the slip, check the result', workflows: ['wafid_book', 'wafid_slip', 'wafid_check'] },
   { key: 'whatsapp', title: 'WhatsApp', plan: 'standard', about: 'CVs to agents, a message to all the selected', workflows: [] },
   { key: 'moves', title: 'Moves from other systems', plan: 'standard', about: 'Copy everything from EasyEnjaz, EnjazPlus or Musaned', workflows: [] },

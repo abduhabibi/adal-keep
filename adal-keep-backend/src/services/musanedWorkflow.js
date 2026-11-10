@@ -2485,7 +2485,8 @@ async function musanedRun(page, ctx) {
   // (Checking whether she was chosen only needs her passport number.)
   const importCv = ctx.workflowId === 'musaned_cv_import'
   const deleting = ctx.workflowId === 'musaned_delete'
-  const checkOnly = ctx.workflowId === 'musaned_check_chosen' || importCv || deleting
+  const epro = ctx.workflowId === 'musaned_epro_approve'
+  const checkOnly = ctx.workflowId === 'musaned_check_chosen' || importCv || deleting || epro
   const photoResolved = checkOnly ? { path: true } : await resolvePersonalPhotoPath(ctx).catch(() => ({ path: null }))
   if (!checkOnly) {
     if (!String(ctx.profile?.marital_status || '').trim()) await ctx.askField?.('marital_status', `${ctx.profileName}: marital status?`, ['Single', 'Married', 'Divorced', 'Widowed'])
@@ -2571,6 +2572,10 @@ async function musanedRun(page, ctx) {
     if (importCv) {
       const { importFromHrPoolInRun } = await import('./musanedImport.js')
       return await importFromHrPoolInRun(page, ctx)
+    }
+    if (epro) {
+      const { eproApproveInRun } = await import('./musanedContracts.js')
+      return await eproApproveInRun(page, ctx)
     }
     if (checkOnly) {
       const { checkChosenInRun } = await import('./musanedContracts.js')

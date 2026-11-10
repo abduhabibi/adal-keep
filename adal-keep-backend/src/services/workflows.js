@@ -37,6 +37,16 @@ export const WORKFLOWS = {
     stepCount: 3,
   },
 
+  musaned_epro_approve: {
+    id: 'musaned_epro_approve',
+    name: 'EPRO approve',
+    description:
+      'After Wafid FIT: Musaned → Employment Requests → her passport → DETAILS → APPROVE → the agency\'s signed contract (Settings → Integrations) uploaded in Contract Upload. SAVE is never pressed: a person looks it over and saves.',
+    target: 'https://tawtheeq.musaned.com.sa/employment-requests',
+    consts: {},
+    stepCount: 4,
+  },
+
   musaned_cv_import: {
     id: 'musaned_cv_import',
     name: 'Add from Musaned',

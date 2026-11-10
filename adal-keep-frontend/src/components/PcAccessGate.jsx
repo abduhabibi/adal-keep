@@ -12,6 +12,8 @@ export default function PcAccessGate() {
   const [name, setName] = useState(() => { try { return localStorage.getItem('adal_pc_name') || '' } catch { return '' } })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [acct, setAcct] = useState({ username: '', password: '' })
+  const [way, setWay] = useState('account') // the main PC's account (in at once) · or ask for a Yes
 
   const check = () => api.get('/pc-access/status').then(r => {
     setState(r.data.state)
@@ -35,12 +37,39 @@ export default function PcAccessGate() {
     setBusy(false)
   }
 
+  // Signed in with the main PC's own account: in at once.
+  const signIn = async (e) => {
+    e.preventDefault()
+    setBusy(true); setError('')
+    try {
+      try { localStorage.setItem('adal_pc_name', name) } catch {}
+      await api.post('/pc-access/signin', { ...acct, name: name.trim() || 'A computer' })
+      location.reload()
+    } catch (er) { setError(er.response?.data?.error || er.message); setBusy(false) }
+  }
   const asking = state === 'none' || state === 'denied' || state === 'removed'
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900 p-4">
       <div className="w-full max-w-md rounded-2xl bg-white dark:bg-slate-800 p-6 shadow-xl text-center space-y-4 animate-fade-up">
         <div className="text-5xl">{state === 'waiting' ? '⏳' : '🔐'}</div>
-        {asking ? (
+        {asking && way === 'account' ? (
+          <form onSubmit={signIn} className="space-y-3">
+            <h1 className="text-xl font-bold text-slate-900 dark:text-white">Sign in to the main PC</h1>
+            <p className="text-sm text-slate-500 dark:text-slate-400">The same username and password as on the main PC: this computer opens all its data at once.</p>
+            <input value={acct.username} onChange={e => setAcct(a => ({ ...a, username: e.target.value }))} autoFocus required autoComplete="username"
+              placeholder="Username (or phone)" className="w-full rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2.5 text-sm" />
+            <input value={acct.password} onChange={e => setAcct(a => ({ ...a, password: e.target.value }))} type="password" required autoComplete="current-password"
+              placeholder="Password" className="w-full rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2.5 text-sm" />
+            <input value={name} onChange={e => setName(e.target.value)} maxLength={60}
+              placeholder="This computer's name (optional) — e.g. Branch 2 reception"
+              className="w-full rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2.5 text-sm" />
+            {error && <p className="text-sm text-red-600">{error}</p>}
+            <button disabled={busy || !acct.username || !acct.password} className="w-full rounded-xl bg-teal-600 hover:bg-teal-700 py-3 font-bold text-white disabled:opacity-50">
+              {busy ? 'Signing in…' : 'Sign in'}
+            </button>
+            <button type="button" onClick={() => { setWay('ask'); setError('') }} className="text-xs text-slate-500 hover:underline">No account? Ask the main PC instead</button>
+          </form>
+        ) : asking ? (
           <form onSubmit={ask} className="space-y-3">
             <h1 className="text-xl font-bold text-slate-900 dark:text-white">Ask the main PC to let this computer in</h1>
             <p className="text-sm text-slate-500 dark:text-slate-400">
@@ -55,6 +84,7 @@ export default function PcAccessGate() {
             <button disabled={busy || !name.trim()} className="w-full rounded-xl bg-teal-600 hover:bg-teal-700 py-3 font-bold text-white disabled:opacity-50">
               {busy ? 'Asking…' : 'Ask the main PC'}
             </button>
+            <button type="button" onClick={() => { setWay('account'); setError('') }} className="text-xs text-slate-500 hover:underline">Sign in with the main PC's account instead</button>
           </form>
         ) : (
           <>

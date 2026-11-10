@@ -103,6 +103,7 @@ export default function MainPCCard() {
   const [info, setInfo] = useState(null)
   const [mode, setMode] = useState('main')
   const [mainUrl, setMainUrl] = useState('')
+  const [acct, setAcct] = useState({ username: '', password: '' }) // the main PC's own account: in at once
   const [busy, setBusy] = useState('')
   const [msg, setMsg] = useState(null) // { ok, text }
   const [source, setSource] = useState('')
@@ -129,9 +130,10 @@ export default function MainPCCard() {
   const save = async () => {
     setBusy('save'); setMsg(null)
     try {
-      await api.post('/main-pc', { main_url: mode === 'follow' ? mainUrl : '' })
+      const r = await api.post('/main-pc', { main_url: mode === 'follow' ? mainUrl : '', ...(mode === 'follow' && acct.username && acct.password ? acct : {}) })
+      setAcct({ username: '', password: '' })
       setMsg({ ok: true, text: mode === 'follow'
-        ? 'Saved. Adal Keep restarts now; from the next start this PC opens the main PC.'
+        ? (r.data?.signed_in ? 'Signed in to the main PC: this PC opens all its data. Adal Keep restarts now.' : 'Saved. Adal Keep restarts now; from the next start this PC opens the main PC.')
         : 'Saved. This PC is the main PC again. Adal Keep restarts now.' })
       setTimeout(load, 4000)
     } catch (e) { setMsg({ ok: false, text: err(e) }) }
@@ -217,11 +219,18 @@ export default function MainPCCard() {
               </button>
             ))}
           </div>
-          {mode === 'follow' && (
+          {mode === 'follow' && (<>
             <input value={mainUrl} onChange={e => setMainUrl(e.target.value)} placeholder="Main PC address, e.g. 100.101.102.103 or http://nuzla-main:4000"
               className="mt-3 w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm font-mono" />
-          )}
-          {((mode === 'main') === follower || (mode === 'follow' && mainUrl.replace(/\/+$/, '') !== info.main_url)) && (
+            <p className="mt-3 text-xs text-slate-500">Sign in with the main PC's account (the same username and password as there): this PC opens all its data at once — nobody at the main PC has to say Yes.</p>
+            <div className="mt-1.5 grid gap-2 sm:grid-cols-2">
+              <input value={acct.username} onChange={e => setAcct(a => ({ ...a, username: e.target.value }))} placeholder="Username (or phone)" autoComplete="username"
+                className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm" />
+              <input value={acct.password} onChange={e => setAcct(a => ({ ...a, password: e.target.value }))} type="password" placeholder="Password" autoComplete="current-password"
+                className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm" />
+            </div>
+          </>)}
+          {((mode === 'main') === follower || (mode === 'follow' && (mainUrl.replace(/\/+$/, '') !== info.main_url || (acct.username && acct.password)))) && (
             <div className="mt-3"><Button onClick={save} disabled={busy === 'save' || (mode === 'follow' && !mainUrl.trim())}>
               {busy === 'save' ? 'Checking that PC…' : 'Save'}
             </Button></div>

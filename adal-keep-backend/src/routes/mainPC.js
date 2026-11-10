@@ -9,7 +9,7 @@ import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import express from 'express'
-import { describe, checkMainPC, setMainURL, turnOnHttps } from '../services/mainPC.js'
+import { describe, checkMainPC, setMainURL, turnOnHttps, mainKey } from '../services/mainPC.js'
 import { onThisPC } from './trash.js'
 
 const router = express.Router()
@@ -37,8 +37,14 @@ router.post('/main-pc/open-at-start', thisPCOnly, (req, res) => {
 router.post('/main-pc', thisPCOnly, async (req, res) => {
   try {
     const url = req.body?.main_url ? await checkMainPC(req.body.main_url) : ''
-    setMainURL(url)
-    res.json({ ok: true, restart: true, ...(await describe()) })
+    // Signed in with the main PC's account: let in there at once (no "Yes" needed). Checked first.
+    const { username, password } = req.body || {}
+    if (url && username && password) {
+      const had = (await describe()).main_url || ''
+      setMainURL(url)
+      try { await mainKey({ username, password }) } catch (e) { setMainURL(had); return res.status(400).json({ error: e.message }) }
+    } else setMainURL(url)
+    res.json({ ok: true, restart: true, signed_in: !!(url && username && password), ...(await describe()) })
     // Restart so automations, the inbox watcher and network discovery follow
     // the new choice. The launcher (AdalKeep.exe) starts the server again.
     if (process.platform === 'win32') setTimeout(() => process.exit(0), 800)

@@ -68,6 +68,7 @@ const OPEN = [
   ['POST', /^\/api\/companion\/ingest$/],
   ['POST', /^\/api\/messaging\/ai\/event$/],
   ['POST', /^\/api\/pc-access\/request$/],
+  ['POST', /^\/api\/pc-access\/signin$/],
   ['GET', /^\/api\/pc-access\/status$/],
 ]
 
@@ -111,6 +112,19 @@ export function requestAccess(req, name) {
   const id = crypto.randomBytes(6).toString('hex')
   s.pending = s.pending.filter(x => Date.now() - x.at < 24 * 3600000).slice(-20)
   s.pending.push({ id, key: hash(key), name: String(name || 'A computer').slice(0, 60), ip: ipOf(req), agent: String(req.headers['user-agent'] || '').slice(0, 120), at: Date.now() })
+  write(s)
+  return { id, key }
+}
+
+/**
+ * Signed in with an account of this PC (the owner's or an employee's, the same
+ * username and password): let in at once — nobody here has to say Yes.
+ */
+export function admitSignedIn(req, name, user) {
+  const s = read()
+  const key = crypto.randomBytes(32).toString('base64url')
+  const id = crypto.randomBytes(6).toString('hex')
+  s.pcs.push({ id, key: hash(key), name: String(name || 'A computer').slice(0, 60), ip: ipOf(req), agent: String(req.headers['user-agent'] || '').slice(0, 120), approved_at: Date.now(), last_seen: Date.now(), by_account: String(user || '').slice(0, 60) })
   write(s)
   return { id, key }
 }

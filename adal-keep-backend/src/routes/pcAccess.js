@@ -9,7 +9,8 @@
  *   DELETE /pc-access/:id           (this PC only) take one off the list
  */
 import express from 'express'
-import { isLocal, requestAccess, statusOf, pending, answer, list, remove, setKeyCookie } from '../services/networkGate.js'
+import bcrypt from 'bcryptjs'
+import { isLocal, requestAccess, admitSignedIn, statusOf, pending, answer, list, remove, setKeyCookie } from '../services/networkGate.js'
 
 const router = express.Router()
 const asks = new Map() // ip → times: at most 5 asks in 10 minutes
@@ -24,6 +25,29 @@ router.post('/pc-access/request', (req, res) => {
   const r = requestAccess(req, req.body?.name)
   setKeyCookie(res, r.key)
   res.json({ ok: true, id: r.id, key: r.key })
+})
+// The same account as this PC (owner or employee): in at once, no "Yes" needed.
+// At most 5 tries in 10 minutes per address (no guessing passwords).
+const tries = new Map()
+router.post('/pc-access/signin', async (req, res) => {
+  const ip = String(req.socket?.remoteAddress || '')
+  const now = Date.now()
+  const recent = (tries.get(ip) || []).filter(t => now - t < 10 * 60000)
+  if (recent.length >= 5) return res.status(429).json({ error: 'Too many tries — wait 10 minutes' })
+  const username = String(req.body?.username || '').trim(), password = String(req.body?.password || '')
+  if (!username || !password) return res.status(400).json({ error: 'Type the username and password of this Adal Keep' })
+  try {
+    const db = req.app.locals.db
+    const user = await db('users').where('username', username).orWhere('phone_work', username).first()
+    if (!user?.password || !(await bcrypt.compare(password, user.password))) {
+      tries.set(ip, [...recent, now])
+      return res.status(401).json({ error: 'That username or password is not right for the main PC' })
+    }
+    const r = admitSignedIn(req, req.body?.name, user.username)
+    setKeyCookie(res, r.key)
+    console.log(`[pc-access] ${String(req.body?.name || 'A computer').slice(0, 60)} came in with ${user.username}'s account`)
+    res.json({ ok: true, id: r.id, key: r.key })
+  } catch (e) { res.status(500).json({ error: e.message }) }
 })
 router.get('/pc-access/status', (req, res) => res.json(isLocal(req) ? { state: 'approved', here: true } : statusOf(req)))
 router.get('/pc-access/pending', here, (req, res) => res.json(pending()))

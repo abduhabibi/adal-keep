@@ -112,6 +112,14 @@ export default function ProfileFormPage() {
   const { activeEmployee, user } = useAuth()
   const [form, setForm] = useState(emptyForm)
   const [brokers, setBrokers] = useState([])
+  // Who created it (a new profile): the employees to pick from, the signed-in one first.
+  const [staff, setStaff] = useState([])
+  const [createdBy, setCreatedBy] = useState('')
+  useEffect(() => {
+    if (isEdit) return
+    api.get('/employees').then(r => setStaff(Array.isArray(r.data) ? r.data : [])).catch(() => {})
+    setCreatedBy(prev => prev || activeEmployee?.name || '')
+  }, [isEdit])
   const [loading, setLoading] = useState(isEdit)
   const [saving, setSaving] = useState(false)
   const [hydrated, setHydrated] = useState(false)
@@ -291,9 +299,9 @@ export default function ProfileFormPage() {
       }
       // Tag the creator so this profile shows under the right employee
       if (!isEdit) {
-        const me = activeEmployee || user || {}
-        const createdByName = String(me.name || me.full_name || me.username || '').trim()
-        payload.created_by = createdByName || 'System'
+        // Who made it: asked on the form (the signed-in employee to start with).
+        if (!createdBy.trim()) { toast.error('Who created this profile? Pick the employee.'); setSaving(false); return }
+        payload.created_by = createdBy.trim()
       }
       if (isEdit) {
         await api.put(`/profiles/${id}`, payload)
@@ -422,6 +430,17 @@ export default function ProfileFormPage() {
                 More details (experience, guardian, languages…) ▸
               </button>
             </div>
+          </div>
+        )}
+
+        {!isEdit && (
+          <div className="rounded-xl border-2 border-teal-200 bg-teal-50/50 p-3 dark:border-teal-800 dark:bg-teal-900/10">
+            <label className={labelClass} htmlFor="created_by">Who created this profile? *</label>
+            <select id="created_by" required className={inputClass} value={createdBy} onChange={e => setCreatedBy(e.target.value)}>
+              <option value="">— Pick the employee —</option>
+              {staff.map(s => <option key={s.id} value={s.name}>{s.name}{s.role === 'admin' ? ' ★' : ''}</option>)}
+              {createdBy && !staff.some(s => s.name === createdBy) && <option value={createdBy}>{createdBy}</option>}
+            </select>
           </div>
         )}
 

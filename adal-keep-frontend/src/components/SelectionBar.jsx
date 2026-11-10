@@ -15,7 +15,7 @@ import api from '../services/api'
 import { useAuth } from '../context/AuthContext'
 import { loadEmbassy, printEmbassy } from '../lib/embassyPrint'
 import { dragProfiles } from '../lib/profileDrag'
-import WhatsAppNotice from './WhatsAppNotice'
+import WhatsAppSendPicked from './WhatsAppSendPicked'
 
 const err = (e) => e?.response?.data?.error || e.message
 
@@ -184,8 +184,8 @@ export default function SelectionBar({ picked, onRemove, onClear, onAllShown, on
           <button type="button" className={`${btn} bg-indigo-50 text-indigo-800 hover:bg-indigo-100 dark:bg-indigo-900/30 dark:text-indigo-300`} disabled={!!busy}
             onClick={openLists}>📋 {busy === 'checklist' ? 'Saving…' : 'Checklist'} <span className="ml-auto hidden text-[10px] font-normal opacity-80 lg:inline">new or add</span></button>
           <button type="button" className={`${btn} bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:bg-emerald-900/30 dark:text-emerald-300`} disabled={!!busy}
-            onClick={() => setMessaging(m => !m)}>💬 WhatsApp <span className="ml-auto hidden text-[10px] font-normal opacity-80 lg:inline">text or voice</span></button>
-          {messaging && <WhatsAppNotice picked={picked} onClose={() => setMessaging(false)} />}
+            onClick={() => setMessaging(m => !m)}>💬 WhatsApp <span className="ml-auto hidden text-[10px] font-normal opacity-80 lg:inline">send CVs</span></button>
+          {messaging && <WhatsAppSendPicked picked={picked} onClose={() => setMessaging(false)} />}
           {naming != null && (
             <div className="col-span-2 space-y-2 rounded-xl border border-indigo-200 bg-indigo-50/50 p-2 dark:border-indigo-800 dark:bg-indigo-900/20 lg:col-span-1">
               <form onSubmit={makeChecklist} className="flex gap-1.5">

@@ -11,7 +11,6 @@ import Button from './shared/Button'
 import Input from './shared/Input'
 
 const SYSTEMS = [
-  ['easyenjaz', 'EasyEnjaz', 'easyenjaz.com'],
   ['enjazplus', 'EnjazPlus', 'v2.enjazplus.com'],
   ['musaned', 'Musaned', 'tawtheeq.musaned.com.sa'],
   ['pextran', 'Pextran', 'your agency\'s own address'],

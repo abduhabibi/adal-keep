@@ -8,6 +8,12 @@ import express from 'express'
 import { lastNumber, keyOf, stateOf, allStates, connect, openWeb, logout, listChats, chatForNumber, agentRow, agentsOf, sendCV, sendMany, bulk, notifyMany, notices, sendsOf, onChosen, available, agentLimit, roomForAgent } from '../services/whatsapp.js'
 
 const router = express.Router()
+// Sending CVs on WhatsApp: only the admin employee (signed in as the admin).
+router.use((req, res, next) => {
+  if (req.method !== 'POST' || !/^\/(whatsapp\/bulk|profiles\/\d+\/whatsapp\/send)$/.test(req.path)) return next()
+  if (req.auth?.role === 'admin') return next()
+  res.status(403).json({ error: 'Only the admin employee sends CVs on WhatsApp: sign in as the admin (Employees).', admin_only: true })
+})
 // WhatsApp is in the Standard plan (plans.js): connecting and sending need it; looking does not.
 router.use(async (req, res, next) => {
   if (req.method !== 'POST' || !/^\/(whatsapp\/(connect|open-web|bulk|notify)|profiles\/\d+\/whatsapp\/send)/.test(req.path)) return next()

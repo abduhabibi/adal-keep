@@ -33,7 +33,7 @@ import { collectBrokers, saveBrokers } from './siteBrokers.js'
 
 export const SOURCES = {
   // Its API is known, so it is asked directly: see easyEnjazCopy.js.
-  easyenjaz: { name: 'EasyEnjaz', url: 'https://easyenjaz.com/login', deep: copyEasyEnjaz, token: signedInToken },
+  // EasyEnjaz: no longer offered (2026-11-10); its code stays in easyEnjazCopy.js.
   // Its data through its own GraphQL, with the window's sign-in: every employee of every tab, with her files.
   enjazplus: { name: 'EnjazPlus', url: 'https://v2.enjazplus.com/app/employees', deep: copyEnjazPlus, token: signedInEnjazPlus },
   musaned: {

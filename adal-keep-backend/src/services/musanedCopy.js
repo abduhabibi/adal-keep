@@ -150,7 +150,7 @@ async function clickPage(page, n) {
  * The HR pool, page after page, as the page itself shows it: yields each list
  * Musaned gave the page ({ content, totalElements, size }).
  */
-export async function* poolByPages(page, { check = () => {}, wait = sleep, say = () => {} } = {}) {
+export async function* poolByPages(page, { check = () => {}, wait = sleep, say = () => {}, newest = 100 } = {}) {
   const seen = listen(page)
   const next = async (after, ms) => {
     for (const end = Date.now() + ms; Date.now() < end;) {
@@ -161,35 +161,74 @@ export async function* poolByPages(page, { check = () => {}, wait = sleep, say =
     }
     return null
   }
-  // Its first page, fresh — the list the window already has, else the menu once more.
+  // Its first page — the list the window already has, else the HR pool again
+  // (Access Denied: back to the agency's dashboard first), a few times.
   let t = Date.now()
   let list = seen.lists.length && !(Number(seen.lists[0].json?.number) > 0) ? seen.lists.shift().json : null
   seen.lists = []
-  if (!list) {
-    if (await onDenied(page)) { await backFromDenied(page); await toDashboard(page); await sleep(2000) }
-    await openPool(page)
-    list = await next(t, 45000)
+  for (let tries = 0; !list && tries < 3; tries++) {
+    check()
+    if (await onDenied(page)) { await backFromDenied(page).catch(() => {}); await toDashboard(page).catch(() => {}); await sleep(2000) }
+    t = Date.now()
+    if (tries) await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {})
+    else await openPool(page)
+    list = await next(t, 30000)
   }
-  if (!list && await onDenied(page)) throw new Error('Musaned showed "Access Denied" for the HR pool. Press the button again: it goes on from where it stopped.')
-  if (!list) throw new Error('The Musaned HR pool did not show its list. Press the button again: it goes on from where it stopped.')
+  if (!list) throw new Error(await onDenied(page)
+    ? 'Musaned showed "Access Denied" for the HR pool: sign in with the agency\'s own Musaned account, then press the button again.'
+    : 'The Musaned HR pool did not show its list (is Musaned slow right now?). Press the button again.')
   const size = Math.max(1, Number(list.size) || list.content.length || 10)
   const total = Number(list.totalElements ?? list.content.length)
   const pages = Math.max(1, Math.ceil(total / size))
-  for (let n = 1; ; n++) {
-    yield { ...list, page: n, pages, total }
-    if (n >= pages || !list.content.length) return
-    // A person's pace between pages.
-    await wait(900 + Math.floor(Math.random() * 900))
-    say(`HR pool page ${n + 1} of ${pages}`)
-    let got = null
-    for (let tries = 0; tries < 3 && !got; tries++) {
+  const want = Math.min(pages, Math.max(1, Math.ceil(newest / size)))
+  // A page the paginator goes to: its list, or null (tried 3 times).
+  const goTo = async (n) => {
+    for (let tries = 0; tries < 3; tries++) {
+      check()
+      await wait(900 + Math.floor(Math.random() * 900))   // a person's pace
       t = Date.now()
-      if (!(await clickPage(page, n + 1))) { await wait(2000); continue }
-      got = await next(t, 30000)
+      if (!(await clickPage(page, n))) { await wait(2000); continue }
+      const got = await next(t, 30000)
+      if (got) return got
     }
-    if (!got) throw new Error(`The Musaned HR pool did not go to page ${n + 1}. Press the button again: it goes on from where it stopped.`)
+    return null
+  }
+  // Which end is the newest: the dates on its rows (page 1 against the last page).
+  let order = Array.from({ length: want }, (_, i) => i + 1)
+  if (pages > want && newestOf(list) !== null) {
+    say('Finding the newest girls')
+    const last = await goTo(pages)
+    if (last && newestOf(last) !== null && newestOf(last) > newestOf(list)) {
+      order = Array.from({ length: want }, (_, i) => pages - i)    // the newest are at the end
+      list = last
+    } else if (last) {
+      const first = await goTo(1)                                 // back to page 1
+      if (first) list = first
+    }
+  }
+  for (let i = 0; i < order.length; i++) {
+    yield { ...list, page: order[i], pages, total, step: i + 1, steps: order.length }
+    if (i + 1 >= order.length || !list.content.length) return
+    say(`HR pool page ${order[i + 1]} (${i + 2} of ${order.length})`)
+    const got = await goTo(order[i + 1])
+    // A page that does not answer: what was copied stays; the move ends calmly.
+    if (!got) { yield { content: [], stopped: `Musaned did not show page ${order[i + 1]}: the girls before it are copied. Press the button again for the rest.` }; return }
     list = got
   }
+}
+
+// The newest date on a list's rows (registered / created / added), or null when its rows carry none.
+const DATE_KEYS = /creat|regist|added|insert|submit/i
+function newestOf(list) {
+  let best = null
+  for (const r of list?.content || []) {
+    for (const [k, v] of Object.entries(r || {})) {
+      if (!DATE_KEYS.test(k) || typeof v !== 'string') continue
+      const t = Date.parse(v)
+      if (!Number.isNaN(t) && (best === null || t > best)) best = t
+    }
+  }
+  return best
 }
 
 const idOf = (row) => row?.id ?? row?.candidateId ?? row?.hrPoolId ?? null
@@ -204,11 +243,20 @@ export function statusOf(r = {}) {
   return ''
 }
 
-export async function copyMusaned({ db, token, folder, set, state, check, readPerson, save, ask = fetch, wait = sleep, limit = Infinity, progressName = 'musaned-progress.json', pool }) {
+// An HR-pool status that only means "in the pool" (not chosen by an employer): no contract to fetch.
+const POOL_ONLY = /^(available|in our list|new|ready|active|pending|under review|draft|in review|approved)$/i
+
+/**
+ * The newest `newest` girls of the HR pool (100): each one's every detail, her
+ * photo and passport (when her profile has none), her status; and for those an
+ * employer chose, the contract PDFs from Employment Requests (the same robot as
+ * "Check if chosen"), each into its own Contract document.
+ */
+export async function copyMusaned({ db, token, folder, set, state, check, readPerson, save, ask = fetch, wait = sleep, limit = Infinity, newest = 100, progressName = 'musaned-progress.json', pool, contracts }) {
   const cred = token
   const fresh = async () => cred?.page ? { ...(await credOf(cred.page)), auth: listen(cred.page).auth || cred.auth } : cred
-  // Her details and pictures: once, slowly. Musaned refusing them is not a
-  // reason to reload or sign in again — she is kept from her row.
+  // Her details and pictures, slowly. Musaned refusing them is not a reason
+  // to reload or sign in again — she is kept from her row.
   let refused = 0
   const get = async (url, opts = {}) => {
     if (refused >= 5) return null
@@ -222,65 +270,84 @@ export async function copyMusaned({ db, token, folder, set, state, check, readPe
       return null
     }
   }
+  const hasFile = async (profileId, field) => !!(await db('profile_fields').join('files', 'files.profile_field_id', 'profile_fields.id')
+    .where({ 'profile_fields.profile_id': profileId, 'profile_fields.name': field }).first('files.id').catch(() => null))
 
   const records = path.join(folder, 'records')
   fs.mkdirSync(records, { recursive: true })
   const progressFile = path.join(path.dirname(folder), progressName)
-  let done = new Set()
-  try { done = new Set(JSON.parse(fs.readFileSync(progressFile, 'utf8'))) } catch {}
+  fs.rmSync(progressFile, { force: true })   // the newest 100 are looked at again each time
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'adal-musaned-'))
-  const pages = pool ? pool() : poolByPages(cred.page, { check, wait, say: (step) => set({ step }) })
-  let seenRows = 0, total = 0, copied = 0, statuses = 0
+  const pages = pool ? pool() : poolByPages(cred.page, { check, wait, newest, say: (step) => set({ step }) })
+  let seenRows = 0, total = 0, copied = 0, statuses = 0, stopped = ''
+  const chosen = []   // profile ids to fetch the contract of
   set({ status: 'copying', step: 'Opening the HR pool' })
   try {
     for await (const list of pages) {
       check()
+      if (list.stopped) { stopped = list.stopped; break }
       total = list.total ?? list.totalElements ?? total
-      set({ people: total, step: `HR pool page ${list.page || '?'} of ${list.pages || '?'} — ${seenRows} of ${total} looked at` })
+      set({ people: Math.min(newest, total || newest), step: `HR pool page ${list.page || '?'}${list.steps ? ` (${list.step} of ${list.steps})` : ''} — ${seenRows} of ${Math.min(newest, total || newest)} copied` })
       for (const row of list.content || []) {
         check()
+        if (seenRows >= newest || copied >= limit) break
         seenRows++
         const id = idOf(row)
         if (id == null) continue
         const key = String(id)
         let passport = passportOf(row, readPerson)
-        const had = passport ? await db('profiles').whereRaw("UPPER(REPLACE(REPLACE(REPLACE(passport_number, ' ', ''), '-', ''), '.', '')) = ?", [passport.replace(/[.-]/g, '')]).first('id', 'musaned_stage').catch(() => null) : null
-        // Her status, as Musaned's list shows it now.
         const stage = statusOf(row)
-        if (had) {
-          const to = newerStage(had.musaned_stage, stage)
-          if (to) { await db('profiles').where('id', had.id).update({ musaned_stage: to, updated_at: new Date().toISOString() }).catch(() => {}); statuses++; set({ updated: (state().updated || 0) + 1 }) }
-          if (done.has(key)) continue
-        }
-        if (done.has(key) || copied >= limit) continue
-        // Not here yet (or never copied): her details and pictures.
-        const details = had ? {} : (await get(`/api/hrpool/${key}`))?.json || {}
+        // Every detail of hers (filling only what her profile does not have yet).
+        const details = (await get(`/api/hrpool/${key}`))?.json || {}
         const rec = { ...row, ...details }
         fs.writeFileSync(path.join(records, `${key}.json`), JSON.stringify(rec, null, 1))
         const fromMusaned = Object.fromEntries(Object.entries(fieldsFromMusaned(rec)).filter(([, v]) => v))
         passport ||= passportOf(rec, readPerson)
         const name = fromMusaned.full_name || readPerson(rec)?.full_name || ''
-        if (passport && name) {
-          const profileId = await save({ ...(readPerson(rec) || {}), ...fromMusaned, full_name: name, passport_number: passport, ...(stage && !had ? { musaned_stage: stage.toUpperCase() } : {}) })
-          if (!had) for (const [kind, field] of [['PASSPORT', 'Passport'], ['PERSONAL', 'Photo']]) {
-            check()
-            const f = await get(`/api/hrpool/${key}/photo/${kind}`, { binary: true })
-            if (!f?.buf?.length) continue
-            const ext = TYPES.find(([re]) => re.test(f.type))?.[1] || '.jpg'
-            const fname = `${passport}-Musaned-${field}${ext}`
-            const file = path.join(tmp, `${Date.now()}-${fname}`)
-            fs.writeFileSync(file, f.buf)
-            try { if (await saveOnProfile(db, profileId, field, file, fname)) set({ files: (state().files || 0) + 1 }) }
-            finally { fs.rmSync(file, { force: true }) }
-          }
-          copied++
-          if (!had) await wait(700)
+        if (!passport || !name) continue
+        const had = await db('profiles').whereRaw("UPPER(REPLACE(REPLACE(REPLACE(passport_number, ' ', ''), '-', ''), '.', '')) = ?", [passport.replace(/[.-]/g, '')]).first('id', 'musaned_stage').catch(() => null)
+        const profileId = await save({ ...(readPerson(rec) || {}), ...fromMusaned, full_name: name, passport_number: passport, ...(stage && !had ? { musaned_stage: stage.toUpperCase() } : {}) })
+        if (had) {
+          const to = newerStage(had.musaned_stage, stage)
+          if (to) { await db('profiles').where('id', had.id).update({ musaned_stage: to, updated_at: new Date().toISOString() }).catch(() => {}); statuses++ }
         }
-        done.add(key)
-        fs.writeFileSync(progressFile, JSON.stringify([...done]))
+        // Her photo and passport, each where it belongs (only when her profile has none).
+        for (const [kind, field] of [['PASSPORT', 'Passport'], ['PERSONAL', 'Photo']]) {
+          check()
+          if (await hasFile(profileId, field)) continue
+          const f = await get(`/api/hrpool/${key}/photo/${kind}`, { binary: true })
+          if (!f?.buf?.length) continue
+          const ext = TYPES.find(([re]) => re.test(f.type))?.[1] || '.jpg'
+          const fname = `${passport}-Musaned-${field}${ext}`
+          const file = path.join(tmp, `${Date.now()}-${fname}`)
+          fs.writeFileSync(file, f.buf)
+          try { if (await saveOnProfile(db, profileId, field, file, fname)) set({ files: (state().files || 0) + 1 }) }
+          finally { fs.rmSync(file, { force: true }) }
+        }
+        // Chosen by an employer: her contract comes after the list.
+        if (stage && !POOL_ONLY.test(stage) && !(await hasFile(profileId, 'Contract'))) chosen.push(profileId)
+        copied++
+        await wait(700)
       }
+      if (seenRows >= newest || copied >= limit) break
     }
   } finally { fs.rmSync(tmp, { recursive: true, force: true }) }
-  set({ step: `HR pool: ${seenRows} looked at, ${statuses} status(es) updated${refused >= 5 ? ' — Musaned did not give the details of some: they were kept from the list' : ''}` })
-  if (total && seenRows >= total) fs.rmSync(progressFile, { force: true })
+
+  // The contracts of the chosen ones (Employment Requests → her passport → DETAILS → the PDFs).
+  let withContract = 0
+  if (chosen.length) {
+    const fetchOne = contracts || (async (profileId) => {
+      const { checkContracts, contractCheck } = await import('./musanedContracts.js')
+      for (let i = 0; i < 60 && contractCheck.running; i++) await wait(5000)   // the 4-hourly check finishing first
+      await checkContracts(db, { onlyId: profileId })
+      return contractCheck.results.find(r => r.id === profileId)
+    })
+    for (const [i, profileId] of chosen.entries()) {
+      check()
+      set({ step: `Contracts: ${i + 1} of ${chosen.length}` })
+      try { const r = await fetchOne(profileId); if (r?.state === 'chosen' || (await hasFile(profileId, 'Contract'))) withContract++ } catch {}
+    }
+  }
+  set({ step: [`Newest ${seenRows} of the HR pool copied`, statuses && `${statuses} status(es) updated`, chosen.length && `${withContract} of ${chosen.length} contract(s) saved`,
+    refused >= 5 && 'Musaned did not give the details of some: they were kept from the list', stopped].filter(Boolean).join(' · ') })
 }

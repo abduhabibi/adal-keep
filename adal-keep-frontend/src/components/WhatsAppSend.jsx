@@ -9,6 +9,7 @@ import api from '../services/api'
 import { wa } from '../lib/whatsapp'
 import Button from './shared/Button'
 import { usePlan } from '../lib/plan'
+import { useAuth } from '../context/AuthContext'
 
 const err = (e) => e?.response?.data?.error || e.message
 const STATUS = {
@@ -26,6 +27,7 @@ export default function WhatsAppSend({ profile }) {
   const [pick, setPick] = useState(null) // null closed · Set of agent ids
   const [busy, setBusy] = useState(false)
   const plan = usePlan()
+  const { activeEmployee } = useAuth()
   // Only between a complete CV and her being selected: before, there is no CV
   // to send; after, it is gone for good.
   const [due, setDue] = useState(false)
@@ -43,6 +45,8 @@ export default function WhatsAppSend({ profile }) {
 
   // WhatsApp outside this agency's plan: not offered here (Settings → Plan says so).
   if (plan?.features?.find(f => f.key === 'whatsapp')?.state === 'off') return null
+  // Only the admin employee sends CVs on WhatsApp.
+  if (activeEmployee?.role !== 'admin') return null
   if (!due || profile.chosen_at || !conn || (!agents.length && !sends.length)) return null
   const ready = conn.status === 'ready'
   const send = async (ids) => {

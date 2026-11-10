@@ -224,7 +224,8 @@ test('Musaned: the HR pool page by page as the page shows it (10 a page), status
   }
   let st = {}
   const saved = []
-  const base = { db, folder, readPerson, ask, pool, wait: async () => {}, set: p => { st = { ...st, ...p } }, state: () => st,
+  const contractsAsked = []
+  const base = { db, folder, readPerson, ask, pool, wait: async () => {}, contracts: async (id) => { contractsAsked.push(id); return { state: 'chosen' } }, set: p => { st = { ...st, ...p } }, state: () => st,
     save: async (p) => { saved.push(p); const had = await db('profiles').where('passport_number', p.passport_number).first(); if (had) return had.id; const [id] = await db('profiles').insert({ full_name: p.full_name, passport_number: p.passport_number, musaned_stage: p.musaned_stage }); return id }, check() {} }
   await copyMusaned({ ...base, token: { auth: 'Bearer one' }, limit: 10 })
   await copyMusaned({ ...base, token: { auth: 'Bearer one' } })
@@ -232,8 +233,9 @@ test('Musaned: the HR pool page by page as the page shows it (10 a page), status
   assert.equal((await db('profiles').where('passport_number', 'EP1000').first()).musaned_stage, 'FMOL APPROVED')
   assert.equal((await db('profiles').where('passport_number', 'EP1001').first()).musaned_stage, 'FMOL APPROVAL')
   assert.equal(await db('profiles').count('* as n').then(r => r[0].n), 23)
-  assert.equal(st.files, 42)                                      // passport and photo for the 21 new ones
-  assert.equal(asked.filter(p => /^\/api\/hrpool\/\d+$/.test(p)).length, 21)   // details only for the new
+  assert.equal(st.files, 46)                                      // passport and photo for all 23 (none had any)
+  assert.equal(asked.filter(p => /^\/api\/hrpool\/\d+$/.test(p)).length, 33)   // every detail of each of the newest: 10, then all 23
+  assert.equal(contractsAsked.length, 2)                          // the chosen one (FMOL APPROVED), on each of the two runs
   assert.equal(saved.find(p => p.passport_number === 'EP1002').religion, 'Muslim')
   assert.equal(statusOf({ status: { nameEn: 'Visa Issued' } }), 'Visa Issued')
   assert.equal(fs.existsSync(path.join(dir, 'musaned-progress.json')), false)

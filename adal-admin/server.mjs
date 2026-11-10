@@ -867,7 +867,7 @@ http.createServer(async (req, res) => {
     }
 
     if (u.pathname === '/' || u.pathname === '/index.html') {
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(fs.readFileSync(path.join(HERE, 'public', 'index.html')))
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }).end(fs.readFileSync(path.join(HERE, 'public', 'index.html')))
       return
     }
     if (u.pathname === '/api/image') return await image(res, u.searchParams.get('path'))

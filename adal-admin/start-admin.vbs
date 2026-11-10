@@ -34,8 +34,6 @@ Else
   End If
   Note "starting the panel"
   sh.Run "cmd /c ""C:\AdalKeep\runtime\node.exe"" server.mjs >> admin.log 2>&1", 0, False
-  ' A small note while it starts (closes by itself).
-  If Not onlyServer Then sh.Run "mshta ""javascript:document.title='Adal Keep Admin';document.write('<body style=\'font:16px Segoe UI;padding:24px;background:#0f172a;color:#e2e8f0\'>Starting Adal Keep Admin…</body>');resizeTo(360,140);setTimeout(function(){close()},9000)""", 1, False
   ok = False
   For i = 1 To 60
     WScript.Sleep 500

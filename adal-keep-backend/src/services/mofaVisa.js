@@ -432,11 +432,47 @@ async function typeCaptcha(page, text) {
     const input = texts.find(i => (!pw || after(pw, i)) && (!lab || after(lab, i)))
       || texts.find(i => /captcha/i.test(`${i.id} ${i.name} ${i.placeholder}`))
     if (!input || (pw && !after(pw, input))) return false
-    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, text)
-    for (const t of ['input', 'change']) input.dispatchEvent(new Event(t, { bubbles: true }))
+    document.querySelectorAll('[data-adal-captcha]').forEach(e => e.removeAttribute('data-adal-captcha'))
+    input.setAttribute('data-adal-captcha', '1')
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, '')
     return true
   }, digits)
   if (!ok) throw new Error('The captcha box was not found')
+  // Typed key by key, like a person: the page's own checks see the numbers.
+  const box = await page.$('[data-adal-captcha]')
+  await box.focus()
+  await box.type(digits, { delay: 40 })
+  await page.evaluate(() => {
+    const i = document.querySelector('[data-adal-captcha]')
+    for (const t of ['input', 'change', 'keyup']) i?.dispatchEvent(new Event(t, { bubbles: true }))
+  }).catch(() => {})
+}
+
+/**
+ * Press the sign-in form's own Login button (the one in the same form as the
+ * password, never a "Login" link elsewhere on the page); Enter in the captcha
+ * box when there is no such button.
+ */
+async function pressLogin(page) {
+  const h = await page.evaluateHandle(() => {
+    const seen = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(e).visibility !== 'hidden' }
+    const pw = [...document.querySelectorAll('input[type="password"]')].find(seen)
+    if (!pw) return null
+    const scope = pw.form || document
+    const all = [...scope.querySelectorAll('button, input[type="submit"], input[type="button"], a, [role="button"]')].filter(seen)
+    const after = all.filter(e => pw.compareDocumentPosition(e) & Node.DOCUMENT_POSITION_FOLLOWING)
+    const word = (e) => /^\s*(log ?in|sign ?in|دخول|تسجيل الدخول)\s*$/i.test((e.innerText || e.value || '').trim())
+    return after.find(word) || all.find(word) || after.find(e => e.type === 'submit') || null
+  })
+  const el = h.asElement()
+  if (el) {
+    await el.evaluate(e => e.scrollIntoView({ block: 'center' })).catch(() => {})
+    await el.click().catch(async () => { await el.evaluate(e => e.click()) })
+    return true
+  }
+  const box = await page.$('[data-adal-captcha]')
+  if (box) { await box.press('Enter').catch(() => {}); return true }
+  return false
 }
 
 /**
@@ -494,7 +530,14 @@ async function signIn(page, ctx) {
         const typed = await page.evaluate((t) => [...document.querySelectorAll('input')].some(i => i.value === t), text).catch(() => false)
         log(ctx, typed ? `captcha typed (${text.length} characters) — pressing Login` : 'the captcha did not stay in its box', typed ? 'info' : 'warn')
         sentAt = Date.now()
-        await clickText(page, /^\s*(log ?in|sign ?in)\s*$/)
+        if (!(await pressLogin(page))) log(ctx, 'the Login button was not found — press Login', 'warn')
+        // Still on the same form a few seconds later: Enter in the captcha box.
+        await sleep(5000)
+        const digits = String(text).replace(/[^0-9]/g, '')
+        if (await onLoginForm() && await page.evaluate((t) => document.querySelector('[data-adal-captcha]')?.value === t, digits).catch(() => false)) {
+          log(ctx, 'Login did not go — pressing Enter in the captcha box', 'warn')
+          await page.$('[data-adal-captcha]').then(b => b?.press('Enter')).catch(() => {})
+        }
       }, { title })
     }
     await ask()
@@ -972,4 +1015,4 @@ export async function runMofaFindApp(page, ctx) {
   }
   return { ok: true, done: true, seconds: secs() }
 }
-export { captchaPicture, typeCaptcha }   // tests
+export { captchaPicture, typeCaptcha, pressLogin }   // tests

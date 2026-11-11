@@ -205,8 +205,8 @@ async function signIn(page, ctx) {
 }
 
 /** A <select> named by the text just before it ("VISA Type", "VSC Center", "Number of Applicants"). */
-function chooseBy(page, labelSrc, optionSrc) {
-  return page.evaluate((labelSrc, optionSrc) => {
+function chooseBy(page, id, labelSrc, optionSrc) {
+  return page.evaluate((id, labelSrc, optionSrc) => {
     const lab = new RegExp(labelSrc, 'i'), want = new RegExp(optionSrc, 'i')
     const textBefore = (el) => {
       const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
@@ -214,12 +214,14 @@ function chooseBy(page, labelSrc, optionSrc) {
       while ((n = w.nextNode())) {
         if (el.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_FOLLOWING) break
         if (n.parentElement?.closest('select, option, script, style')) continue
+        if (n.parentElement && n.parentElement.offsetParent === null && getComputedStyle(n.parentElement).position !== 'fixed') continue   // hidden (the "*" of a field)
         const t = n.textContent.trim()
         if (t) last = t
       }
       return last
     }
-    const sel = [...document.querySelectorAll('select')].find(s => s.offsetParent !== null && lab.test(textBefore(s)))
+    // Tasheer's own boxes by their id; else by the words before them.
+    const sel = document.getElementById(id) || [...document.querySelectorAll('select')].find(s => s.offsetParent !== null && lab.test(textBefore(s)))
     if (!sel) return { state: 'missing' }
     const opts = [...sel.options]
     const o = opts.find(o => want.test(o.text.trim()))
@@ -229,7 +231,7 @@ function chooseBy(page, labelSrc, optionSrc) {
       for (const t of ['input', 'change']) sel.dispatchEvent(new Event(t, { bubbles: true }))
     }
     return { state: 'ok', text: o.text.trim(), max: Math.max(0, ...opts.map(o => Number(o.text.trim()) || 0)) }
-  }, labelSrc, optionSrc)
+  }, id, labelSrc, optionSrc)
 }
 
 const bodyText = (page) => page.evaluate(() => document.body?.innerText || '').catch(() => '')
@@ -270,10 +272,10 @@ export async function runTasheer(page, ctx) {
 
   // VISA Type → VSC Center → Number of Applicants (each may reload the next list).
   const left = []
-  const pick = async (label, src, name) => {
+  const pick = async (id, label, src, name) => {
     let r
-    for (let i = 0; i < 10; i++) {
-      r = await chooseBy(page, label, src)
+    for (let i = 0; i < 20; i++) {          // the next list loads after the one before is chosen
+      r = await chooseBy(page, id, label, src)
       if (r.state === 'ok') break
       await sleep(1000)
     }
@@ -281,9 +283,9 @@ export async function runTasheer(page, ctx) {
     else left.push(`${name}${r.options?.length ? ` (choices: ${r.options.join(', ')})` : ''}`)
     return r
   }
-  await pick('^\\s*visa\\s*type\\s*\\*?\\s*:?\\s*$', '^\\s*work\\s*$', 'VISA Type')
-  await pick('^\\s*vsc\\s*cent(er|re)\\s*\\*?\\s*:?\\s*$', 'addis', 'VSC Center')
-  const r = await pick('^\\s*number\\s*of\\s*applicants\\s*\\*?\\s*:?\\s*$', `^\\s*${people.length}\\s*$`, 'Number of Applicants')
+  await pick('group_scheduling_visatype', '^\\s*visa\\s*type\\s*\\*?\\s*:?\\s*$', '^\\s*work\\s*$', 'VISA Type')
+  await pick('group_scheduling_vscId', '^\\s*vsc\\s*cent(er|re)\\s*\\*?\\s*:?\\s*$', 'addis', 'VSC Center')
+  const r = await pick('scheduling_numberOfApplicants', '^\\s*number\\s*of\\s*applicants\\s*\\*?\\s*:?\\s*$', `^\\s*${people.length}\\s*$`, 'Number of Applicants')
   if (r.state === 'no-match' && r.max && r.max < people.length) left.push(`Tasheer takes at most ${r.max} applicants at once — ${people.length} were selected`)
 
   await ctx.noteProfile?.('Tasheer: group scheduling filled — waiting for a person to choose the day and time and press Submit').catch?.(() => {})

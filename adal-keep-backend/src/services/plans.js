@@ -37,6 +37,7 @@ export const FEATURES = [
   { key: 'whatsapp', title: 'WhatsApp', plan: 'standard', about: 'CVs to agents, a message to all the selected', workflows: [] },
   { key: 'moves', title: 'Moves from other systems', plan: 'standard', about: 'Copy everything from EasyEnjaz, EnjazPlus or Musaned', workflows: [] },
   { key: 'enjaz_visa', title: 'Enjaz visa robot', plan: 'premium', about: 'The visa application and its payment on Enjaz', workflows: ['mofa_visa', 'mofa_find_app', 'mofa_pay'] },
+  { key: 'tasheer', title: 'Tasheer robot', plan: 'premium', about: 'Group appointments: the form, then the Excel uploaded by itself', workflows: ['tasheer_schedule'] },
   { key: 'insurance', title: 'Insurance robot', plan: 'premium', about: 'One certificate for many, filled and added by itself', workflows: ['insurance_certificate'] },
   // Reading passports and CVs (AI) is in every plan: every profile is made from it.
   { key: 'cv_header', title: 'CV headers cut by themselves', plan: 'premium', about: 'The agency header cut out of CVs (moves, "Cut from CVs") for its CV templates', workflows: [] },

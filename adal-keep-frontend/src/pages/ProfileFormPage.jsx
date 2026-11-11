@@ -438,7 +438,7 @@ export default function ProfileFormPage() {
             <label className={labelClass} htmlFor="created_by">Who created this profile? *</label>
             <select id="created_by" required className={inputClass} value={createdBy} onChange={e => setCreatedBy(e.target.value)}>
               <option value="">— Pick the employee —</option>
-              {staff.map(s => <option key={s.id} value={s.name}>{s.name}{s.role === 'admin' ? ' ★' : ''}</option>)}
+              {staff.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
               {createdBy && !staff.some(s => s.name === createdBy) && <option value={createdBy}>{createdBy}</option>}
             </select>
           </div>

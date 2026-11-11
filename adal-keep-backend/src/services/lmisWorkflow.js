@@ -2027,6 +2027,20 @@ export async function runFullWorkflow(page, ctx) {
     }
   }
 
+  // Tasheer group appointment (agents.tasheer.com).
+  if (workflowId === 'tasheer_schedule') {
+    try {
+      const { runTasheer } = await import('./tasheer.js')
+      return await runTasheer(page, ctx)
+    } catch (e) {
+      if (e?.cancelled) throw e
+      const secs = Math.round((Date.now() - t0) / 1000)
+      log(ctx, `Tasheer failed after ${secs}s: ${e.message}`, 'error')
+      await dumpPageState(page, ctx, 'tasheer')
+      return { ok: false, step: 'tasheer', error: e.message, seconds: secs }
+    }
+  }
+
   // Insurance certificate on FetaP (agency.niscofetap.com).
   if (workflowId === 'insurance_certificate') {
     try {

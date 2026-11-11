@@ -115,6 +115,15 @@ export const WORKFLOWS = {
     stepCount: 2,
   },
 
+  tasheer_schedule: {
+    id: 'tasheer_schedule',
+    name: 'Tasheer appointment',
+    description: 'Tasheer (agents.tasheer.com) sign-in filled → GROUP SCHEDULING → Work, Addis Ababa, how many → a person picks the day and time and Submits → the Excel uploaded, consent ticked → a person presses Save',
+    target: 'https://agents.tasheer.com/AgentTasheer/auth/cnav',
+    consts: {},
+    stepCount: 4,
+  },
+
   insurance_certificate: {
     id: 'insurance_certificate',
     name: 'Insurance certificate',

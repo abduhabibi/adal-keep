@@ -45,8 +45,6 @@ export default function WhatsAppSend({ profile }) {
 
   // WhatsApp outside this agency's plan: not offered here (Settings → Plan says so).
   if (plan?.features?.find(f => f.key === 'whatsapp')?.state === 'off') return null
-  // Only the admin employee sends CVs on WhatsApp.
-  if (activeEmployee?.role !== 'admin') return null
   if (!due || profile.chosen_at || !conn || (!agents.length && !sends.length)) return null
   const ready = conn.status === 'ready'
   const send = async (ids) => {

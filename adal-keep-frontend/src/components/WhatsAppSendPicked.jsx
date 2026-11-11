@@ -1,7 +1,7 @@
 /**
  * The selected profiles' CVs to agents on WhatsApp: only the agents on the
- * WhatsApp that is connected now are listed, with "Select all". Only the admin
- * employee sends CVs (the PC refuses anyone else).
+ * WhatsApp that is connected now are listed, with "Select all". Anyone
+ * may send them.
  */
 import { useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
@@ -35,7 +35,6 @@ export default function WhatsAppSendPicked({ picked, onClose }) {
   }, [job?.running])
 
   const ready = conn?.status === 'ready'
-  const admin = activeEmployee?.role === 'admin'
   const all = agents?.length > 0 && to.size === agents.length
   const flip = (id) => setTo(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
   const send = async () => {
@@ -50,9 +49,7 @@ export default function WhatsAppSendPicked({ picked, onClose }) {
         <span className="text-xs font-bold text-emerald-800 dark:text-emerald-300">💬 {picked.length} CV{picked.length === 1 ? '' : 's'} to agents on WhatsApp</span>
         <button type="button" onClick={onClose} className="rounded px-1.5 text-slate-400 hover:text-slate-600">✕</button>
       </div>
-      {!admin ? (
-        <p className="text-xs text-amber-800 dark:text-amber-300">Only the admin employee sends CVs on WhatsApp: sign in as the admin (Employees).</p>
-      ) : conn === null || agents === null ? (
+      {conn === null || agents === null ? (
         <p className="text-xs text-slate-500">Looking at the WhatsApp…</p>
       ) : !ready ? (
         <p className="text-xs text-slate-600 dark:text-slate-300">WhatsApp is not connected now: connect it in Settings → Integrations → WhatsApp.</p>

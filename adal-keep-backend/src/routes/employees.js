@@ -94,12 +94,6 @@ router.post('/device-login', async (req, res) => {
     }
     const user = await db('users').where({ id: employeeId }).first()
     if (!user) return res.status(404).json({ error: 'ሰራተኛ አልተገኘም' })
-    // An admin employee: the password, every time (it is never remembered).
-    if (user.role === 'admin') {
-      const pw = String(req.body.password || '')
-      if (!pw) return res.status(401).json({ error: 'This is an admin account: type its password', needs_password: true })
-      if (!user.password || !(await bcrypt.compare(pw, user.password))) return res.status(401).json({ error: 'That password is not right', needs_password: true })
-    }
 
     const other = await db('users')
       .where({ device_serial: deviceSerial })
@@ -209,34 +203,6 @@ router.put('/:id', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: 'ማዘመን አልተቻለም' })
   }
-})
-
-/**
- * Admin employees: the only ones who send CVs on WhatsApp and make other
- * admins. The first one is made by the agency's owner (nobody signed in as an
- * employee on the main PC); after that only an admin makes an admin.
- *   POST /employees/:id/admin { on: true, password }   make admin (with its password)
- *   POST /employees/:id/admin { on: false }            back to an employee
- */
-router.post('/:id/admin', async (req, res) => {
-  try {
-    const db = req.app.locals.db
-    const admins = await db('users').where({ role: 'admin' }).select('id')
-    const me = req.auth?.role
-    const allowed = me === 'admin' || (me !== 'employee' && !admins.length)
-    if (!allowed) return res.status(403).json({ error: admins.length ? 'Only an admin can make or remove admins: sign in as the admin first.' : 'The owner makes the first admin: sign out of the employee first.' })
-    const user = await db('users').where({ id: req.params.id }).first()
-    if (!user) return res.status(404).json({ error: 'ሰራተኛ አልተገኘም' })
-    if (req.body?.on) {
-      const pw = String(req.body.password || '')
-      if (pw.length < 6) return res.status(400).json({ error: 'An admin password needs at least 6 characters' })
-      await db('users').where({ id: user.id }).update({ role: 'admin', password: await bcrypt.hash(pw, 10), updated_at: new Date().toISOString() })
-    } else {
-      if (admins.length === 1 && admins[0].id === user.id) return res.status(400).json({ error: 'This is the only admin: make another admin first.' })
-      await db('users').where({ id: user.id }).update({ role: 'employee', updated_at: new Date().toISOString() })
-    }
-    res.json({ ok: true })
-  } catch (err) { res.status(500).json({ error: err.message }) }
 })
 
 router.delete('/:id', async (req, res) => {

@@ -164,7 +164,7 @@ async function recordFailure(db, job, errText) {
     updated_at: new Date().toISOString(),
   })
   console.log(`[worker] run #${job.id} failed: ${why}`)
-  if (job.workflow_id === 'insurance_certificate') await import('./insuranceCertificate.js').then(m => m.settleMembers(db, job.id, 'failed', `the shared certificate (run #${job.id}) failed`)).catch(() => {})
+  if (['insurance_certificate', 'tasheer_schedule'].includes(job.workflow_id)) await import('./insuranceCertificate.js').then(m => m.settleMembers(db, job.id, 'failed', `the shared certificate (run #${job.id}) failed`)).catch(() => {})
   await noteFailure(db, job, why).catch(e => console.warn('[worker] note failed:', e.message))
 }
 
@@ -231,8 +231,9 @@ async function executeRun(db, page, job) {
   const isWafid = job.workflow_id.startsWith('wafid')
   const isVisa = job.workflow_id.startsWith('mofa')
   const isInsurance = job.workflow_id.startsWith('insurance')
+  const isTasheer = job.workflow_id.startsWith('tasheer')
   // The visa platform's sign-in captcha is a picture a person reads.
-  page.__adalAllowImages = isMusaned || isWafid || isVisa || isInsurance
+  page.__adalAllowImages = isMusaned || isWafid || isVisa || isInsurance || isTasheer
   console.log(
     `[worker] run #${runId} image policy: ` +
     (isMusaned || isWafid || isVisa || isInsurance
@@ -285,6 +286,10 @@ async function executeRun(db, page, job) {
     insurance_username: savedCtx.insurance_username || '',
     insurance_password: savedCtx.insurance_password || '',
     insurance_name:    savedCtx.insurance_name || '',
+    tasheer_username:  savedCtx.tasheer_username || '',
+    tasheer_password:  savedCtx.tasheer_password || '',
+    tasheer_name:      savedCtx.tasheer_name || '',
+    tasheer: isTasheer ? await import('./tasheer.js').then(m => m.tasheerSettings(db)) : null,
     musanedStage,
     labor_id:          profile.labor_id || '',
     destination_country: profile.destination_country || '',
@@ -303,7 +308,7 @@ async function executeRun(db, page, job) {
     visa: isVisa ? await visaSettings(db) : null,
     insurance: isInsurance ? await visaSettings(db) : null,
     // Make insurance for several: everyone on one certificate (this profile first).
-    group: isInsurance && Array.isArray(savedCtx.group_ids) && savedCtx.group_ids.length > 1
+    group: (isInsurance || isTasheer) && Array.isArray(savedCtx.group_ids) && savedCtx.group_ids.length > 1
       ? (await db('profiles').whereIn('id', savedCtx.group_ids)).sort((a, b) => savedCtx.group_ids.indexOf(a.id) - savedCtx.group_ids.indexOf(b.id))
       : null,
   }

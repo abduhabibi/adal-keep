@@ -154,18 +154,11 @@ export default function EmployeesPage() {
 
   /** One click — bind this PC, no password */
   const openGate = async (emp) => {
-    // An admin: its password, every time (never remembered).
-    let password
-    if (emp.role === 'admin') {
-      password = window.prompt(`${emp.name} is an admin: type the password`)
-      if (!password) return
-    }
     setGateLoading(true)
     try {
       const res = await api.post('/employees/device-login', {
         employeeId: emp.id,
         deviceSerial: getDeviceSerial(),
-        ...(password ? { password } : {}),
       })
       const u = { ...emp, ...(res.data?.user || {}) }
       setCurrentUser(u)
@@ -204,22 +197,6 @@ export default function EmployeesPage() {
     setMyProfiles([])
   }
 
-  // Admin employees: the only ones who send CVs on WhatsApp and make other admins.
-  const hasAdmin = employees.some(e => e.role === 'admin')
-  const canMakeAdmin = activeEmployee?.role === 'admin' || (!activeEmployee && !hasAdmin)
-  const setAdmin = async (emp, on) => {
-    let password
-    if (on) {
-      password = window.prompt(`Make ${emp.name} an admin.\nChoose the admin password (at least 6 characters). It is asked at every sign-in:`)
-      if (!password) return
-      if (window.prompt('Type the same password again:') !== password) return toast.error('The two passwords are not the same')
-    } else if (!window.confirm(`${emp.name} goes back to an employee (no CVs on WhatsApp)?`)) return
-    try {
-      await api.post(`/employees/${emp.id}/admin`, { on, ...(password ? { password } : {}) })
-      toast.success(on ? `${emp.name} is an admin now` : `${emp.name} is an employee now`)
-      loadEmployees()
-    } catch (err) { toast.error(err.response?.data?.error || err.message) }
-  }
 
   const openCreateEmp = () => {
     setEditingEmp(null)
@@ -562,7 +539,7 @@ export default function EmployeesPage() {
                 <h3 className="font-bold text-lg text-slate-800 dark:text-white group-hover:text-teal-600 transition-colors">
                   {emp.name}
                 </h3>
-                <p className="text-sm text-slate-500 mt-0.5">@{emp.username}{emp.role === 'admin' && <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">★ Admin</span>}</p>
+                <p className="text-sm text-slate-500 mt-0.5">@{emp.username}</p>
                 <div className="mt-3 text-sm text-slate-600 dark:text-slate-300">
                   📞 {emp.phone_work || '—'}
                 </div>
@@ -571,10 +548,6 @@ export default function EmployeesPage() {
                 </div>
               </div>
               <div className="absolute top-3 right-3 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                {canMakeAdmin && (
-                  <button type="button" onClick={(e) => { e.stopPropagation(); setAdmin(emp, emp.role !== 'admin') }}
-                    className="p-1.5 rounded-lg text-slate-400 hover:text-amber-600 hover:bg-amber-50" title={emp.role === 'admin' ? 'Back to an employee' : 'Make admin'}>★</button>
-                )}
                 <button
                   type="button"
                   onClick={(e) => {

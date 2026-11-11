@@ -1,7 +1,7 @@
 /**
  * The Profiles page's ticked girls, in a bar on the right (at the bottom on a
  * phone), with what can be done for all of them at once:
- *   🛂 Make Tasheer · 🛡️ Make insurance · 🖨️ Print embassy (2 pages a girl) ·
+ *   🛂 Make Tasheer (one group appointment) · 📥 Excel download (name, labour ID, passport; other formats under it) · 🛡️ Make insurance · 🖨️ Print embassy (2 pages a girl) ·
  *   📋 Make a checklist of them (found later on the Checklists page).
  * Every button first checks each girl has what it needs: the ones who do go
  * ahead; the others slide up in a list with what they lack (also shown on
@@ -16,6 +16,7 @@ import { useAuth } from '../context/AuthContext'
 import { loadEmbassy, printEmbassy } from '../lib/embassyPrint'
 import { dragProfiles } from '../lib/profileDrag'
 import WhatsAppSendPicked from './WhatsAppSendPicked'
+import { FORMATS, downloadTable } from '../lib/tableExport'
 
 const err = (e) => e?.response?.data?.error || e.message
 
@@ -64,6 +65,7 @@ export default function SelectionBar({ picked, onRemove, onClear, onAllShown, on
   const [sheet, setSheet] = useState(null)
   const [naming, setNaming] = useState(null) // the checklist panel is open: the new one's name, while typed
   const [messaging, setMessaging] = useState(false) // the WhatsApp message panel is open
+  const [exporting, setExporting] = useState(false) // the download formats are shown
   const [lists, setLists] = useState(null)     // the checklists already made (to add the selected to)
   const navigate = useNavigate()
   const openLists = () => {
@@ -108,7 +110,7 @@ export default function SelectionBar({ picked, onRemove, onClear, onAllShown, on
   // One run per girl. The server checks each one before it starts (the same
   // check as on her profile): those that lack something are listed, not started.
   const startAll = async (workflowId, name) => {
-    if (workflowId === 'insurance_certificate' && picked.length > 1) return insureTogether(name)
+    if (['insurance_certificate', 'tasheer_schedule'].includes(workflowId) && picked.length > 1) return insureTogether(name, workflowId)
     setBusy(workflowId)
     let ok = 0
     const rows = []
@@ -123,22 +125,23 @@ export default function SelectionBar({ picked, onRemove, onClear, onAllShown, on
 
   // Make insurance for several: ONE FetaP certificate with all of them as
   // members (Number Of Insured = how many). The first who has everything leads.
-  const insureTogether = async (name) => {
-    setBusy('insurance_certificate')
+  const insureTogether = async (name, workflowId = 'insurance_certificate') => {
+    const tasheer = workflowId === 'tasheer_schedule'
+    setBusy(workflowId)
     const rows = []
     let started = null
     for (const p of picked) {
       try {
-        const r = await api.post(`/profiles/${p.id}/automations/insurance_certificate/start`, { group_ids: picked.map(x => x.id) })
+        const r = await api.post(`/profiles/${p.id}/automations/${workflowId}/start`, { group_ids: picked.map(x => x.id) })
         started = r.data
         for (const s of r.data?.skipped || []) { const q = picked.find(x => x.id === s.id); if (q) rows.push({ p: q, missing: s.missing }) }
         break
       } catch (e) { rows.push({ p, missing: e?.response?.data?.missing?.length ? e.response.data.missing : [err(e)] }) }
     }
     setBusy('')
-    if (started) toast.success(`${name}: one certificate for ${started.members || 1} — Adal Keep fills each and presses Add Member, then tells you.`, { duration: 8000 })
+    if (started) toast.success(tasheer ? `${name}: one group appointment for ${started.members || 1} — sign in when it rings, then pick the day and time.` : `${name}: one certificate for ${started.members || 1} — Adal Keep fills each and presses Add Member, then tells you.`, { duration: 8000 })
     const once = [...new Map(rows.map(r => [r.p.id, r])).values()]
-    showLacking(`${name}: ${once.length} not on the certificate — they lack something`, started ? `On the certificate: ${started.members || 1}.` : 'Nobody had everything yet.', once)
+    showLacking(`${name}: ${once.length} not ${tasheer ? 'in the appointment' : 'on the certificate'} — they lack something`, started ? `${tasheer ? 'In the appointment' : 'On the certificate'}: ${started.members || 1}.` : 'Nobody had everything yet.', once)
   }
 
   const print = async () => {
@@ -158,6 +161,18 @@ export default function SelectionBar({ picked, onRemove, onClear, onAllShown, on
     setBusy('')
   }
 
+  const download = async (format) => {
+    try {
+      const day = new Date().toISOString().slice(0, 10)
+      await downloadTable(format, {
+        title: `Selected (${picked.length}) — ${day}`,
+        head: ['Name', 'Labour ID', 'Passport'],
+        rows: picked.map(p => [p.full_name || '', p.labor_id || '', p.passport_number || '']),
+        name: `Selected_${picked.length}_${day}`,
+      })
+    } catch (e) { toast.error(err(e)) }
+  }
+
   const btn = 'flex w-full items-center gap-1 rounded-lg px-2 py-2 text-xs font-semibold leading-tight transition disabled:opacity-50 lg:gap-2 lg:px-3 lg:text-sm'
   return (
     <>
@@ -174,8 +189,8 @@ export default function SelectionBar({ picked, onRemove, onClear, onAllShown, on
       </div>
       <div className={`${open ? '' : 'hidden lg:flex'} flex min-h-0 flex-1 flex-col`}>
         <div className="grid grid-cols-2 gap-1.5 border-b border-slate-100 p-2 dark:border-slate-800 lg:grid-cols-1 lg:p-3">
-          <button type="button" className={`${btn} bg-slate-100 text-slate-400 dark:bg-slate-800`} disabled
-            title="The Tasheer run is not built yet — show Adal Keep the Tasheer site's steps and it will be">🛂 Make Tasheer <span className="ml-auto hidden text-[10px] font-normal lg:inline">coming</span></button>
+          <button type="button" className={`${btn} bg-sky-50 text-sky-800 hover:bg-sky-100 dark:bg-sky-900/30 dark:text-sky-300`} disabled={!!busy}
+            onClick={() => startAll('tasheer_schedule', 'Tasheer')} title="One group appointment on Tasheer for all of them (only those whose visa is made)">🛂 {busy === 'tasheer_schedule' ? 'Checking and starting…' : 'Make Tasheer'} <span className="ml-auto hidden text-[10px] font-normal opacity-80 lg:inline">group</span></button>
           <button type="button" className={`${btn} bg-amber-50 text-amber-800 hover:bg-amber-100 dark:bg-amber-900/30 dark:text-amber-300`} disabled={!!busy}
             onClick={() => startAll('insurance_certificate', 'Insurance certificate')}>🛡️ {busy === 'insurance_certificate' ? 'Checking and starting…' : 'Make insurance'}</button>
           <button type="button" className={`${btn} bg-teal-600 text-white hover:bg-teal-700`} disabled={!!busy}
@@ -186,6 +201,19 @@ export default function SelectionBar({ picked, onRemove, onClear, onAllShown, on
           <button type="button" className={`${btn} bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:bg-emerald-900/30 dark:text-emerald-300`} disabled={!!busy}
             onClick={() => setMessaging(m => !m)}>💬 WhatsApp <span className="ml-auto hidden text-[10px] font-normal opacity-80 lg:inline">send CVs</span></button>
           {messaging && <WhatsAppSendPicked picked={picked} onClose={() => setMessaging(false)} />}
+          <button type="button" className={`${btn} bg-lime-50 text-lime-800 hover:bg-lime-100 dark:bg-lime-900/30 dark:text-lime-300`}
+            onClick={() => { setExporting(true); download('xlsx') }} title="Name · Labour ID · Passport of the selected">📥 Excel download <span className="ml-auto hidden text-[10px] font-normal opacity-80 lg:inline">name · labour ID · passport</span></button>
+          <div className="col-span-2 lg:col-span-1">
+            <button type="button" onClick={() => setExporting(x => !x)} className="px-1 text-[11px] text-slate-500 hover:underline">{exporting ? '▾' : '▸'} Other formats</button>
+            {exporting && (
+              <div className="mt-1 flex flex-wrap gap-1">
+                {FORMATS.map(fm => (
+                  <button key={fm} type="button" onClick={() => download(fm)}
+                    className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold uppercase text-slate-700 hover:border-lime-400 hover:bg-lime-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">{fm}</button>
+                ))}
+              </div>
+            )}
+          </div>
           {naming != null && (
             <div className="col-span-2 space-y-2 rounded-xl border border-indigo-200 bg-indigo-50/50 p-2 dark:border-indigo-800 dark:bg-indigo-900/20 lg:col-span-1">
               <form onSubmit={makeChecklist} className="flex gap-1.5">

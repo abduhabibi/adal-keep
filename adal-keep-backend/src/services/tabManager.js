@@ -34,6 +34,7 @@ export const PEERS = {
   lmis:    { hosts: ['lmis.gov.et'],                                  label: 'LMIS' },
   mofa:    { hosts: ['visa.mofa.gov.sa'],                             label: 'Visa platform' },
   insurance: { hosts: ['agency.niscofetap.com'],                        label: 'Insurance (FetaP)' },
+  tasheer: { hosts: ['agents.tasheer.com'],                             label: 'Tasheer' },
 }
 
 export function hostOf(url) {
@@ -209,9 +210,9 @@ export function tabOfRun(runId) {
 // Which site each kind of run works on (to find its tab when nothing else does).
 const RUN_HOSTS = [
   [/^musaned/, /musaned\.com\.sa|wahid\.sa/], [/^mofa|^visa/, /visa\.mofa\.gov\.sa/], [/^wafid/, /wafid\.com/],
-  [/^insurance/, /niscofetap\.com/], [/^(police|lmis|contract_import|delete_labour)/, /lmis\.gov\.et/],
+  [/^insurance/, /niscofetap\.com/], [/^tasheer/, /tasheer\.com/], [/^(police|lmis|contract_import|delete_labour)/, /lmis\.gov\.et/],
 ]
-const RUN_PEERS = [[/^musaned/, 'musaned'], [/^mofa|^visa/, 'mofa'], [/^insurance/, 'insurance'], [/^(police|lmis|contract_import|delete_labour)/, 'lmis']]
+const RUN_PEERS = [[/^musaned/, 'musaned'], [/^mofa|^visa/, 'mofa'], [/^insurance/, 'insurance'], [/^tasheer/, 'tasheer'], [/^(police|lmis|contract_import|delete_labour)/, 'lmis']]
 
 /** The runs that still need their tabs (a paused one's tab waits for it). */
 export async function activeRunIds(db) {
@@ -412,6 +413,7 @@ const signedInHere = {
   musaned: (url) => hostOf(url) === 'tawtheeq.musaned.com.sa',
   insurance: (url) => isPeerUrl(url, 'insurance') && !/(login|sign-?in|auth)/i.test(new URL(url).pathname),
   mofa: (url) => isPeerUrl(url, 'mofa') && !/\/account\/login/i.test(new URL(url).pathname),
+  tasheer: (url) => isPeerUrl(url, 'tasheer') && /\/auth\//i.test(new URL(url).pathname),
 }
 
 /**

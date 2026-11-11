@@ -173,6 +173,12 @@ router.post('/profiles/:profileId/automations/:workflowId/start', async (req, re
       if (!prof?.passport_number || !String(prof.passport_number).trim()) {
         return res.status(400).json({ error: 'Profile is missing the passport number', missing: ['Passport number'] })
       }
+    } else if (workflowId === 'tasheer_schedule') {
+      const prof = await db('profiles').where('id', profileId).first()
+      const T = await import('../services/tasheer.js')
+      const missing = T.missingForTasheer(prof || {}, await T.tasheerSettings(db))
+      if (missing.length) return res.status(400).json({ error: 'Profile is missing for Tasheer: ' + missing.join(', '), missing })
+      if (!(await db('tasheer_accounts').first())) return res.status(400).json({ error: 'No Tasheer account yet — add one under AI Actions → Tasheer → Login', missing: ['Tasheer account'] })
     } else if (workflowId === 'insurance_certificate') {
       const prof = await db('profiles').where('id', profileId).first()
       const { insuranceValues, missingForInsurance } = await import('../services/insuranceCertificate.js')
@@ -279,6 +285,16 @@ router.post('/profiles/:profileId/automations/:workflowId/start', async (req, re
         accountContext.account_id = acct.id
         await db('insurance_accounts').where('id', acct.id).update({ last_used_at: new Date().toISOString() })
       }
+    } else if (workflowId.startsWith('tasheer')) {
+      let acct = accountId ? await db('tasheer_accounts').where('id', accountId).first() : null
+      if (!acct) acct = await db('tasheer_accounts').orderBy('is_default', 'desc').first()
+      if (acct) {
+        accountContext.tasheer_username = acct.username
+        accountContext.tasheer_password = acct.password
+        accountContext.tasheer_name = acct.name
+        accountContext.account_id = acct.id
+        await db('tasheer_accounts').where('id', acct.id).update({ last_used_at: new Date().toISOString() }).catch(() => {})
+      }
     } else if (workflowId.startsWith('mofa')) {
       // One visa platform account for every visa run.
       let acct = accountId ? await db('visa_accounts').where('id', accountId).first() : null
@@ -314,16 +330,19 @@ router.post('/profiles/:profileId/automations/:workflowId/start', async (req, re
     // member (the run fills her, Add Member, the next …). The others get a run
     // that waits on this one and finishes with it.
     let group = [], skipped = []
-    if (workflowId === 'insurance_certificate' && Array.isArray(req.body?.group_ids) && req.body.group_ids.length > 1) {
-      const { insuranceValues, missingForInsurance } = await import('../services/insuranceCertificate.js')
+    if (['insurance_certificate', 'tasheer_schedule'].includes(workflowId) && Array.isArray(req.body?.group_ids) && req.body.group_ids.length > 1) {
+      const { insuranceValues, missingForInsurance: forInsurance } = await import('../services/insuranceCertificate.js')
+      const T = workflowId === 'tasheer_schedule' ? await import('../services/tasheer.js') : null
+      const ts = T ? await T.tasheerSettings(db) : null
+      const missingForInsurance = T ? (p) => T.missingForTasheer(p, ts) : (v) => forInsurance(v)
       const ids = [...new Set(req.body.group_ids.map(Number).filter(n => n && n !== profileId))]
       const rows = await db('profiles').whereIn('id', ids)
       const busy = new Set((await db('automation_queue').whereIn('profile_id', ids).where('workflow_id', workflowId)
         .whereIn('status', ['running', 'paused', 'pending']).select('profile_id')).map(r => r.profile_id))
       for (const id of ids) {
         const p = rows.find(r => r.id === id)
-        const missing = p ? missingForInsurance(insuranceValues(p)) : ['profile not found']
-        if (busy.has(id)) skipped.push({ id, missing: ['an insurance run is already open for her'] })
+        const missing = p ? missingForInsurance(T ? p : insuranceValues(p)) : ['profile not found']
+        if (busy.has(id)) skipped.push({ id, missing: [`a${T ? ' Tasheer' : 'n insurance'} run is already open for her`] })
         else if (missing.length) skipped.push({ id, missing })
         else group.push(id)
       }
@@ -359,7 +378,7 @@ router.post('/profiles/:profileId/automations/:workflowId/start', async (req, re
     // Start it now if a slot is free; otherwise it waits in line and starts by
     // itself. Either way the answer says which, before the browser does anything.
     const s = await dispatchRun(db, runId)
-    res.json({ ok: true, runId, resumed: false, ...s, members: 1 + group.length, skipped, message: runMessage(runId, s, s.state === 'running' ? 'started' : 'queued') + (group.length ? ` One certificate for ${1 + group.length}.` : '') })
+    res.json({ ok: true, runId, resumed: false, ...s, members: 1 + group.length, skipped, message: runMessage(runId, s, s.state === 'running' ? 'started' : 'queued') + (group.length ? (workflowId === 'tasheer_schedule' ? ` One Tasheer group appointment for ${1 + group.length}.` : ` One certificate for ${1 + group.length}.`) : '') })
   } catch (e) { res.status(e.status || 500).json({ error: e.message, ...(e.feature ? { feature: e.feature, plan: e.plan } : {}) }) }
 })
 
@@ -381,6 +400,7 @@ router.get('/automations/ready-for-submit', async (req, res) => {
 // or paused for a person). Used by the "Run" filter on the profile lists.
 const PLAIN_WAIT = {
   'awaiting-insurance-save': 'Insurance: look it over and press Save',
+  'awaiting-tasheer-save': 'Tasheer: look it over and press Save',
   'awaiting-visa-save': 'Visa: type the captcha and press Save',
   'awaiting-visa-pay': 'Visa: pay the fees',
   'awaiting-musaned-login': 'Musaned: sign in',
@@ -870,7 +890,7 @@ router.post('/automations/:id/input', async (req, res) => {
  * notes too, under the run's portal — so the notes never still say "waiting
  * for a person" after the person answered.
  */
-const PORTAL_OF = [[/^musaned/, 'Musaned'], [/^wafid/, 'Wafid medical'], [/^insurance/, 'Insurance'], [/^mofa/, 'Visa'], [/^police/, 'Police'], [/^(lmis|contract|delete)/, 'LMIS']]
+const PORTAL_OF = [[/^musaned/, 'Musaned'], [/^wafid/, 'Wafid medical'], [/^insurance/, 'Insurance'], [/^tasheer/, 'Tasheer'], [/^mofa/, 'Visa'], [/^police/, 'Police'], [/^(lmis|contract|delete)/, 'LMIS']]
 async function noteRun(db, row, what) {
   try {
     if (!row?.profile_id) return
@@ -901,6 +921,9 @@ router.post('/automations/:id/resume', async (req, res) => {
       return res.status(409).json({ error: `She is on the certificate of run #${row.pause_reason.slice(9)} — it finishes with that run.` })
     }
     // Running the visa form again would make a second application.
+    if (row.pause_reason === 'awaiting-tasheer-save') {
+      return res.status(409).json({ error: `Run #${runId} uploaded the Excel on Tasheer already. Press Save in its tab, then "✔️ Tasheer saved" — or Cancel it to start over.` })
+    }
     if (row.pause_reason === 'awaiting-insurance-save') {
       return res.status(409).json({ error: `Run #${runId} filled the certificate form already. Finish it in its tab, then "✔️ Insurance done" — or Cancel it to start over.` })
     }
@@ -1009,11 +1032,26 @@ router.post('/automations/:id/complete', async (req, res) => {
     })
 
     await noteRun(db, row, 'done — marked by a person')
-    if (row.workflow_id === 'insurance_certificate') await (await import('../services/insuranceCertificate.js')).settleMembers(db, runId, 'done')
+    if (['insurance_certificate', 'tasheer_schedule'].includes(row.workflow_id)) await (await import('../services/insuranceCertificate.js')).settleMembers(db, runId, 'done')
 
     // What finishing this run starts next.
-    let next = ''
-    try {
+    const next = await whatDoneStarts(db, row)
+
+
+    res.json({
+      ok: true,
+      tabClosed,
+      message: `Run #${runId} marked complete${tabClosed ? ' — its tab was closed' : ''}.${next}`,
+    })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+/** What a run being done (by the robot and a person, or ticked by hand) starts next. */
+async function whatDoneStarts(db, row) {
+  let next = ''
+  try {
       if (row.workflow_id === 'wafid_book') {
         // Booked and paid on Wafid: the result checker now watches it.
         await db('profiles').where('id', row.profile_id).update({ status: 'medical_applied', updated_at: new Date().toISOString() })
@@ -1033,16 +1071,46 @@ router.post('/automations/:id/complete', async (req, res) => {
         // She is on Musaned now: the 4-hourly contract check watches for an employer.
         next = ' Adal Keep now checks every 4 hours whether a Saudi employer chooses her.'
       }
-    } catch (e) { console.warn('[complete] next step:', e.message) }
+  } catch (e) { console.warn('[complete] next step:', e.message) }
+  return next
+}
 
-    res.json({
-      ok: true,
-      tabClosed,
-      message: `Run #${runId} marked complete${tabClosed ? ' — its tab was closed' : ''}.${next}`,
-    })
-  } catch (e) {
-    res.status(500).json({ error: e.message })
-  }
+/**
+ * A step done by hand (the checkbox on its card): the step counts as done —
+ * its open run (waiting, held) ends done, or a done entry is written — and
+ * what it starts next is started, as if the robot had done it.
+ * { done: false } takes back a tick made by hand.
+ */
+router.post('/profiles/:id/automations/:workflowId/mark-done', async (req, res) => {
+  try {
+    const db = req.app.locals.db
+    const profileId = Number(req.params.id)
+    const { workflowId } = req.params
+    const now = new Date().toISOString()
+    if (req.body?.done === false) {
+      const last = await db('automation_queue').where({ profile_id: profileId, workflow_id: workflowId, status: 'done', pause_reason: 'Done by hand' }).orderBy('id', 'desc').first()
+      if (!last) return res.status(409).json({ error: 'Only a step ticked by hand can be unticked' })
+      await db('automation_queue').where('id', last.id).update({ status: 'cancelled', pause_reason: 'Tick taken back', updated_at: now })
+      return res.json({ ok: true, message: 'Not done any more' })
+    }
+    const open = await db('automation_queue').where({ profile_id: profileId, workflow_id: workflowId }).whereIn('status', ['pending', 'paused', 'running']).orderBy('id', 'desc').first()
+    if (open?.status === 'running') return res.status(409).json({ error: `Run #${open.id} is working in its tab now — wait for it, or Cancel it first.` })
+    let row = open
+    if (open) {
+      try { forgetRunTab(open.id) } catch {}
+      await db('automation_queue').where('id', open.id).update({ status: 'done', pause_reason: 'Done by hand', finished_at: now, updated_at: now })
+      if (['insurance_certificate', 'tasheer_schedule'].includes(workflowId)) await (await import('../services/insuranceCertificate.js')).settleMembers(db, open.id, 'done')
+    } else {
+      const [id] = await db('automation_queue').insert({
+        profile_id: profileId, workflow_id: workflowId, status: 'done', pause_reason: 'Done by hand', current_step: 0,
+        context: seal('{}'), log: JSON.stringify([{ at: now, level: 'info', msg: 'Marked done by hand' }]), created_at: now, updated_at: now, finished_at: now,
+      })
+      row = { id: Number(id?.id ?? id), profile_id: profileId, workflow_id: workflowId }
+    }
+    await noteRun(db, row, 'done — ticked by hand')
+    const next = await whatDoneStarts(db, row)
+    res.json({ ok: true, message: `Marked done.${next}` })
+  } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
 export default router

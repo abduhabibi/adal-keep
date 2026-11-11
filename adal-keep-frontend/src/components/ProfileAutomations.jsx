@@ -18,7 +18,9 @@ const PAUSE_TEXT = {
   'awaiting-visa-save':       'waiting for you to type the captcha and press Save on the visa platform',
   'awaiting-insurance-save':  'waiting for you to finish the insurance certificate on FetaP',
   'awaiting-epro-save':       'waiting for you to tick the pledge and press SAVE on Musaned (Contract Upload)',
-  'with-run':  'on a shared insurance certificate — it finishes with that run',
+  'awaiting-tasheer-save':    'waiting for you to look the applicants over and press Save on Tasheer',
+  'with-run':  'in a group run (one certificate / one Tasheer appointment) — it finishes with that run',
+  'Done by hand': 'marked done by hand',
   'awaiting-visa-pay':        'waiting for you to pay the visa fees on the visa platform',
   'awaiting-wafid-robot':     'waiting for you to answer Wafid\'s "I am not a robot"',
   'awaiting-musaned-login':   'waiting for you to sign in to Musaned',
@@ -42,6 +44,7 @@ const COMPLETE_LABEL = {
   'awaiting-visa-save':    '✔️ Visa saved',
   'awaiting-insurance-save': '✔️ Insurance done',
   'awaiting-epro-save':      '✔️ EPRO saved',
+  'awaiting-tasheer-save':   '✔️ Tasheer saved',
   'awaiting-visa-pay':       '✔️ Visa paid',
 }
 
@@ -49,7 +52,7 @@ const COMPLETE_LABEL = {
 const REPEATABLE = new Set(['musaned_check_chosen', 'musaned_cv_import', 'musaned_delete', 'wafid_check', 'wafid_slip', 'mofa_find_app'])
 
 // Waits that must not run again (a second run would make a second application).
-const NO_CONTINUE = new Set(['awaiting-visa-save', 'awaiting-insurance-save', 'awaiting-epro-save', 'with-run'])
+const NO_CONTINUE = new Set(['awaiting-visa-save', 'awaiting-insurance-save', 'awaiting-epro-save', 'awaiting-tasheer-save', 'with-run'])
 // "with-run-812" (on run #812's certificate) reads as "with-run".
 const reasonKey = (r) => /^with-run-/.test(r || '') ? 'with-run' : r
 
@@ -277,6 +280,16 @@ export default function ProfileAutomations({ profileId }) {
     }
   }
 
+  // A step done by hand: its tick on the card.
+  const markDone = async (w, done) => {
+    try {
+      const r = await api.post(`/profiles/${profileId}/automations/${w.id}/mark-done`, { done })
+      toast.success(`${w.name}: ${r.data?.message || (done ? 'marked done' : 'not done')}`, { duration: 5000 })
+      load({ quiet: true })
+      setTimeout(() => window.dispatchEvent(new Event('adal-profile-changed')), 300)
+    } catch (e) { toast.error(`${w.name}: ${e.response?.data?.error || e.message}`, { duration: 7000 }) }
+  }
+
   const resume = () => act('resume', 'Continued')
   const pause = () => act('pause', 'Paused')
   const complete = () => act('complete', 'Marked complete', () => { setOpen(null); setDetail(null) })
@@ -304,9 +317,10 @@ export default function ProfileAutomations({ profileId }) {
           const isDone = st === 'done'
           const isActive = isRunning || isQueued || isPaused
           const isSending = !!sending[w.id]
+          const byHand = isDone && latest?.pause_reason === 'Done by hand'
           return (
+            <div key={w.id} className="flex min-w-[15rem] flex-col gap-1 sm:min-w-0">
             <button
-              key={w.id}
               data-tour={`run-${w.id}`}
               onClick={async () => {
                 // Every click says at once what is happening. A live run opens
@@ -334,7 +348,7 @@ export default function ProfileAutomations({ profileId }) {
                 }
                 start(w.id)
               }}
-              className={`min-w-[15rem] sm:min-w-0 text-left px-3 py-2 rounded-xl border transition-colors ${
+              className={`w-full flex-1 text-left px-3 py-2 rounded-xl border transition-colors ${
                 isDone
                   ? 'border-emerald-400 bg-emerald-50 dark:bg-emerald-900/20'
                   : isPaused
@@ -379,6 +393,7 @@ export default function ProfileAutomations({ profileId }) {
                       : latest.pause_reason === 'awaiting-visa-save' ? '⏳ Awaiting your visa Save'
                       : latest.pause_reason === 'awaiting-insurance-save' ? '⏳ Awaiting you on FetaP'
                       : latest.pause_reason === 'awaiting-epro-save' ? '⏳ Awaiting your SAVE on Musaned'
+                      : latest.pause_reason === 'awaiting-tasheer-save' ? '⏳ Awaiting your Save on Tasheer'
                       : '● Paused'}
                   </span>
                 )}
@@ -392,6 +407,13 @@ export default function ProfileAutomations({ profileId }) {
                 )}
               </div>
             </button>
+            <label className={`flex items-center gap-1.5 px-1 text-[11px] ${isRunning ? 'opacity-50' : 'cursor-pointer'} text-slate-600 dark:text-slate-300`}
+              title={isDone && !byHand ? 'Done by the robot' : 'Done it yourself? Tick it: the step counts as done'}>
+              <input type="checkbox" className="h-3.5 w-3.5 accent-emerald-600" checked={isDone} disabled={isRunning || (isDone && !byHand)}
+                onChange={() => markDone(w, !isDone)} />
+              {isDone ? (byHand ? 'Done (ticked by hand)' : 'Done') : 'Mark as done'}
+            </label>
+            </div>
           )
   }
 
@@ -400,7 +422,7 @@ export default function ProfileAutomations({ profileId }) {
   const GROUPS = [
     { title: 'Musaned', ids: ['musaned_add_candidate', 'musaned_check_chosen', 'musaned_cv_import', 'musaned_delete', 'musaned_epro_approve'], box: 'border-indigo-200 dark:border-indigo-800', head: 'text-indigo-700 dark:text-indigo-300' },
     { title: 'Wafid medical', ids: ['wafid_book', 'wafid_slip', 'wafid_check'], box: 'border-emerald-200 dark:border-emerald-800', head: 'text-emerald-700 dark:text-emerald-300' },
-    { title: 'Tasheer', ids: [], empty: 'Coming soon — the Tasheer steps are added next.', box: 'border-amber-200 dark:border-amber-800 border-dashed', head: 'text-amber-700 dark:text-amber-300' },
+    { title: 'Tasheer', ids: ['tasheer_schedule'], box: 'border-amber-200 dark:border-amber-800', head: 'text-amber-700 dark:text-amber-300' },
     { title: 'Insurance', ids: ['insurance_certificate'], box: 'border-rose-200 dark:border-rose-800', head: 'text-rose-700 dark:text-rose-300' },
     { title: 'Enjaz · Visa', ids: ['mofa_visa', 'mofa_find_app', 'mofa_pay'], box: 'border-sky-200 dark:border-sky-800', head: 'text-sky-700 dark:text-sky-300' },
     { title: 'LMIS · Police clearance', ids: ['police_certificate'], box: 'border-slate-200 dark:border-slate-700', head: 'text-slate-600 dark:text-slate-300' },

@@ -40,7 +40,7 @@ export function plainReason(text) {
 const WORKFLOWS = {
   musaned_add_candidate: 'Musaned', musaned_delete: 'Delete from Musaned', musaned_check_chosen: 'Musaned check', musaned_cv_import: 'Musaned CV',
   wafid_book: 'Wafid', lmis: 'LMIS', lmis_contract: 'LMIS contract', contract_import_labour: 'LMIS contract', delete_labour: 'LMIS delete',
-  police_certificate: 'Police certificate', insurance_certificate: 'Insurance', mofa_visa: 'Enjaz visa', mofa_find_app: 'Enjaz',
+  police_certificate: 'Police certificate', insurance_certificate: 'Insurance', tasheer_schedule: 'Tasheer', mofa_visa: 'Enjaz visa', mofa_find_app: 'Enjaz',
 }
 export const workflowName = (id) => WORKFLOWS[id] || String(id || '').replace(/_/g, ' ')
 

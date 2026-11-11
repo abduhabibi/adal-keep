@@ -451,8 +451,34 @@ router.get('/sessions', async (req, res) => {
   try { res.json(await (await import('../services/sessionKeeper.js')).sessionsNow()) } catch (e) { res.status(500).json({ error: e.message }) }
 })
 router.post('/sessions/:key/open', async (req, res) => {
-  try { res.json(await (await import('../services/sessionKeeper.js')).openSite(req.params.key, req.app.locals.db)) } catch (e) { res.status(400).json({ error: e.message }) }
+  try {
+    // Tasheer: one sign-in for the agency — "Sign in here" takes it over for this person.
+    if (req.params.key === 'tasheer') return res.json(await (await import('../services/tasheerSession.js')).takeOver(req.app.locals.db, whoAndPc(req)))
+    res.json(await (await import('../services/sessionKeeper.js')).openSite(req.params.key, req.app.locals.db))
+  } catch (e) { res.status(400).json({ error: e.message }) }
 })
+// Her status, day by day (services/profileDays.js), and FMOL from Musaned's stage.
+router.get('/profiles/:profileId/days', async (req, res) => {
+  try {
+    const db = req.app.locals.db
+    const id = Number(req.params.profileId)
+    const d = await import('../services/profileDays.js')
+    if (!(await db('profile_days').where({ profile_id: id, day: new Date().toLocaleDateString('en-CA') }).first('id').catch(() => null))) await d.snapshotDays(db).catch(() => {})
+    const p = await db('profiles').where('id', id).first('musaned_stage', 'contract_checked_at')
+    res.json({ fmol: d.fmolOf(p?.musaned_stage), musaned_stage: p?.musaned_stage || '', checked_at: p?.contract_checked_at || null, days: await d.daysOf(db, id) })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+router.get('/tasheer/session', async (req, res) => {
+  try { res.json(await (await import('../services/tasheerSession.js')).tasheerNow(req.app.locals.db)) } catch (e) { res.status(500).json({ error: e.message }) }
+})
+/** The person (the employee chosen on that PC) and the PC a request comes from. */
+function whoAndPc(req) {
+  let by = ''
+  try { by = decodeURIComponent(req.get('x-adal-who') || '') } catch {}
+  const ip = String(req.socket?.remoteAddress || '').replace(/^::ffff:/, '')
+  const local = ['127.0.0.1', '::1'].includes(ip)
+  return { by, pc: local ? 'the main PC' : (req.pcAccess?.name || req.pcAccess?.label || ip) }
+}
 
 router.post('/browser/open', async (req, res) => {
   try { await openForPerson(); res.json({ ok: true }) } catch (e) { res.status(e.status || 500).json({ error: e.message, ...(e.feature ? { feature: e.feature, plan: e.plan } : {}) }) }
@@ -682,8 +708,12 @@ export function cvMissing(p, docs = new Set(), hasCv = false) {
 }
 
 router.get('/automations/stages', async (req, res) => {
-  try {
-    const db = req.app.locals.db
+  try { res.json(await allStages(req.app.locals.db)) } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+/** Every profile's stage and journey steps (the list's columns; services/profileDays.js keeps them per day). */
+export async function allStages(db) {
+  {
     const profiles = await db('profiles').select('id', 'status', 'musaned_stage', 'chosen_at', 'visa_stage', 'visa_application_number',
       'musaned_pro', 'employer_name', 'work_city', 'contract_number', 'labor_id', 'visa_number', 'medical_valid_until', 'musaned_payment')
     const rows = await db('automation_queue').select('id', 'profile_id', 'workflow_id', 'status', 'pause_reason', 'finished_at').orderBy('id', 'asc')
@@ -708,11 +738,9 @@ router.get('/automations/stages', async (req, res) => {
         missing: Object.fromEntries(all.map(s => [s.key, (s.docs || []).filter(x => !x.have).map(x => x.name)]).filter(([, m]) => m.length)),
       }
     }
-    res.json({ stages: STAGES, profiles: profiles.map(p => ({ profile_id: p.id, stage: stageOf(p, latest.get(p.id)), ...stepsOf(p) })) })
-  } catch (e) {
-    res.status(500).json({ error: e.message })
+    return { stages: STAGES, profiles: profiles.map(p => ({ profile_id: p.id, stage: stageOf(p, latest.get(p.id)), musaned_stage: p.musaned_stage || '', ...stepsOf(p) })) }
   }
-})
+}
 
 router.get('/automations/:id', async (req, res) => {
   try {
@@ -751,6 +779,8 @@ router.get('/automations/:id/login', async (req, res) => {
  * Submit / Save itself; a person can, from here).
  */
 export async function runTab(db, runId) {
+  // A site's sign-in tab, not a run's ("site-tasheer"): the same live view.
+  if (/^site-/.test(String(runId))) return (await import('../services/tasheerSession.js')).siteTab(String(runId))
   const run = await db('automation_queue').where('id', runId).first('id', 'workflow_id').catch(() => null)
   if (!run) return null
   return findRunTab(await openBrowserIfAny(), run.id, run.workflow_id)

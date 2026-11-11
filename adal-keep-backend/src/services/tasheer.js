@@ -201,6 +201,8 @@ async function signIn(page, ctx) {
     await ctx.notify(`🛂 ${ctx.groupTitle}: sign in to Tasheer`, 'The Tasheer tab is in front with the name and password filled. Type its captcha and sign in; Adal Keep goes on by itself (GROUP SCHEDULING).', 'warn', { login: page })
     if (!(await until(async () => !(await hasPassword(page)) && (await home()), LOGIN_WAIT_MS, ctx))) throw new Error('Nobody signed in to Tasheer within 30 minutes')
     log(ctx, '✓ signed in to Tasheer')
+    // The agency's one Tasheer sign-in is now this one (every PC sees it).
+    if (ctx.db) await import('./tasheerSession.js').then(s => s.robotSignedIn(ctx.db, ctx.by || '', 'the main PC')).catch(() => {})
   } finally { release() }
 }
 
@@ -354,4 +356,4 @@ export async function runTasheer(page, ctx) {
   log(ctx, `✅ Excel uploaded${said ? ` — Tasheer says: ${said}` : ''}`)
   return { ok: true, pauseReason: 'awaiting-tasheer-save', seconds: secs() }
 }
-export { uploadFrame }
+export { uploadFrame, START, hasPassword, fillLogin }

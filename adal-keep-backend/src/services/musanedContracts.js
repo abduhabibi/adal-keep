@@ -24,7 +24,7 @@ import path from 'path'
 import crypto from 'crypto'
 import { fileURLToPath } from 'url'
 import { getBrowser, openBrowserIfAny } from './browser.js'
-import { setupTab, borrowTab, doneWithTab, activeRunIds } from './tabManager.js'
+import { setupTab, borrowTab, borrowOpenTab, doneWithTab, activeRunIds } from './tabManager.js'
 
 const SAFE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'data', 'SafeStorage')
 const LIST_URL = 'https://tawtheeq.musaned.com.sa/employment-requests?sort=createdAt,DESC&page=0&size=10'
@@ -152,12 +152,20 @@ export async function scanContracts(db, { auto = false } = {}) {
   // The check every 4 hours never opens Brave itself: it waits until Brave is
   // open (a person closed it, or quit Adal Keep — it must not come back).
   if (auto && !(await openBrowserIfAny())) { console.log('[contracts] Brave is closed — checking when it is open'); return { skipped: true } }
-  Object.assign(contractCheck, { running: true, results: [], signedOut: false, mode: 'list', unknown: [] })
-  let page = null
+  // By itself: only in a Musaned tab already open, signed in and free — never a new tab.
+  let page = null, backTo = ''
+  if (auto) {
+    const browser = await openBrowserIfAny()
+    page = browser ? await borrowOpenTab(browser, 'musaned_check_chosen', await activeRunIds(db)) : null
+    if (!page) return { skipped: true, why: 'no free Musaned tab open' }
+    if (/\/(login|auth)\b|sso\.|wahid\.sa|\/realms\//i.test(page.url())) { await doneWithTab(page).catch(() => {}); return { skipped: true, why: 'Musaned is signed out' } }
+    backTo = page.url()
+  }
+  Object.assign(contractCheck, { running: true, results: [], signedOut: false, mode: 'list', unknown: [], auto })
   try {
     const profiles = await db('profiles').select('*')
     const browser = await getBrowser()
-    page = await borrowTab(browser, 'musaned_check_chosen', await activeRunIds(db))
+    if (!page) page = await borrowTab(browser, 'musaned_check_chosen', await activeRunIds(db))
     await setupTab(page, { runId: 'musaned-contracts' })
     page.__adalAllowImages = true
     const open = async (url) => {
@@ -165,7 +173,8 @@ export async function scanContracts(db, { auto = false } = {}) {
       return signedIn(page)
     }
     let ok = await open(LIST_URL.replace('size=10', 'size=50'))
-    if (!ok && await signInForCheck(db, page)) ok = await open(LIST_URL.replace('size=10', 'size=50'))
+    if (!ok && !auto && await signInForCheck(db, page)) ok = await open(LIST_URL.replace('size=10', 'size=50'))
+    if (!ok && auto) return { signedOut: true }
     if (!ok) {
       contractCheck.signedOut = true
       await task(db, null, SIGN_IN_TASKS[1], 'Adal Keep looks at the Musaned list for newly chosen girls, but Musaned is signed out. Sign in to Musaned in Adal Browser whenever you can (captcha + code) — Adal Keep notices it by itself and checks again.')
@@ -232,8 +241,11 @@ export async function scanContracts(db, { auto = false } = {}) {
     }
     await doneSignInTasks(db)
     const fresh = contractCheck.results.filter(r => r.first)
+    import('./profileDays.js').then(d => d.snapshotDays(db)).catch(() => {})
     return { checked: cards.length, newlyChosen: fresh.map(r => r.name), results: contractCheck.results, unknown: contractCheck.unknown }
   } finally {
+    // The tab goes back to the page it was on (the person's place there).
+    if (backTo && page && !page.isClosed?.()) await page.goto(backTo, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {})
     await doneWithTab(page).catch(() => {})
     contractCheck.running = false
     contractCheck.last = new Date().toISOString()
@@ -856,10 +868,26 @@ export async function checkContracts(db, { onlyId = null } = {}) {
   }
 }
 
-// No check runs by itself: it opened tabs in people's way. A person presses the button.
-let timer = null
+// By itself every 2 hours (7:00–21:00), in the Musaned tab already open and
+// signed in — never a new tab, never a sign-in prompt, never while a robot
+// works (asked on 2026-11-11: the tabs are open all day now, Morning sign-in).
+// New selections, and each girl's stage (EPRO → FMOL approved → embassy …).
+const AUTO_MS = 2 * 3600 * 1000
+let timer = null, lastAuto = 0
 export function startContractChecker(db) {
   if (timer) return
-  timer = true
   setTimeout(() => readSavedTemplates(db).catch(e => console.warn('[contracts] templates:', e.message)), 20000)
+  const tick = async () => {
+    const h = new Date().getHours()
+    if (h < 7 || h >= 21 || contractCheck.running || Date.now() - lastAuto < AUTO_MS) return
+    const working = await db('automation_queue').where('status', 'running').first('id').catch(() => null)
+    if (working) return
+    lastAuto = Date.now()
+    const r = await scanContracts(db, { auto: true }).catch(e => ({ error: e.message }))
+    if (r?.skipped) { lastAuto = Date.now() - AUTO_MS + 15 * 60000; console.log(`[contracts] automatic check waits: ${r.why}`) }  // again in 15 minutes
+    else console.log(`[contracts] automatic check: ${r?.checked ?? 0} requests${r?.newlyChosen?.length ? `, newly chosen: ${r.newlyChosen.join(', ')}` : ''}${r?.error ? ` — ${r.error}` : ''}`)
+  }
+  setTimeout(() => tick().catch(() => {}), 5 * 60000)
+  timer = setInterval(() => tick().catch(() => {}), 5 * 60000)
+  timer.unref?.()
 }

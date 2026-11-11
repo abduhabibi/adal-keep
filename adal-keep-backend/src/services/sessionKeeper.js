@@ -20,6 +20,8 @@ export const SITES = [
   { key: 'mofa', name: 'Enjaz (visa)', host: /(^|\.)visa\.mofa\.gov\.sa$/, start: 'https://visa.mofa.gov.sa/', out: /\/account\/login/i },
   { key: 'insurance', name: 'Insurance', host: /(^|\.)niscofetap\.com$/, start: 'https://agency.niscofetap.com/', out: /login|sign-?in|auth/i },
   { key: 'lmis', name: 'LMIS', host: /(^|\.)lmis\.gov\.et$/, start: 'https://lmis.gov.et/', out: /\/(auth|login)/i },
+  // One sign-in for the agency (services/tasheerSession.js): signed in = its inner pages (/auth/…).
+  { key: 'tasheer', name: 'Tasheer', host: /(^|\.)tasheer\.com$/, start: 'https://agents.tasheer.com/AgentTasheer/', out: /^(?!.*\/auth\/)/i },
 ]
 const EVERY_MS = 4 * 60000, RELOAD_MS = 20 * 60000
 export const kept = {}   // site key → { at, tabs, signedIn, error }
@@ -95,7 +97,9 @@ export function startSessionKeeper(database) {
 /** Each site, for the "Morning sign-in" list. */
 export async function sessionsNow() {
   await keepAlive().catch(() => {})
-  return SITES.map(s => ({ key: s.key, name: s.name, ...(kept[s.key] || { tabs: 0, signedIn: false }) }))
+  const { holderOf } = await import('./tasheerSession.js')
+  const holder = db ? await holderOf(db).catch(() => null) : null
+  return SITES.map(s => ({ key: s.key, name: s.name, ...(kept[s.key] || { tabs: 0, signedIn: false }), ...(s.key === 'tasheer' ? { holder, shared: true } : {}) }))
 }
 
 /** A window on that site, to sign in (its tab is then kept signed in all day). */

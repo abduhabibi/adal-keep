@@ -347,6 +347,19 @@ export async function borrowTab(browser, workflowId, busyRuns = new Set()) {
   if (free) await letPageGo(free)
   return free || newRunTab(browser)
 }
+/**
+ * Only a tab already open on that site and free (never a new one): the
+ * automatic checks work where a person already signed in, and nowhere else.
+ */
+export async function borrowOpenTab(browser, workflowId, busyRuns = new Set()) {
+  const free = await oneAtATime(async () => {
+    const p = await findFreeTab(browser, workflowId, busyRuns)
+    if (p) p.__adalBorrowed = true
+    return p
+  })
+  if (free) await letPageGo(free)
+  return free || null
+}
 export async function doneWithTab(page) {
   if (!page) return
   if (!page.__adalBorrowed) { await page.close().catch(() => {}); return }

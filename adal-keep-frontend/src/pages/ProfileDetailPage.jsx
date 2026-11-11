@@ -10,6 +10,7 @@ import { formatDate } from '../lib/utils'
 import FieldCard from '../components/fields/FieldCard'
 import ProfileAutomations from '../components/ProfileAutomations'
 import ProfileJourney from '../components/ProfileJourney'
+import ProfileDays from '../components/ProfileDays'
 import WhatsAppSend from '../components/WhatsAppSend'
 import EmbassyPrintButton from '../components/EmbassyPrintButton'
 import NotesTimeline from '../components/NotesTimeline'
@@ -170,6 +171,7 @@ export default function ProfileDetailPage() {
       )}
 
       <ProfileJourney profileId={id} />
+      <ProfileDays profileId={id} />
 
       {import.meta.env.VITE_DEMO !== '1' && <WhatsAppSend profile={profile} />}
 

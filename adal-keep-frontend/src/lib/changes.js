@@ -73,8 +73,8 @@ export async function startChanges() {
     // The PC restarted or the line dropped: the browser reconnects by itself;
     // when it is back, everything is refreshed once (changes may have been missed).
     let wasDown = false
-    es.onerror = () => { wasDown = true }
-    es.onopen = () => { if (wasDown) { wasDown = false; tellChanged(['*']) } }
+    es.onerror = () => { wasDown = true; window.__adalLiveUp = false }
+    es.onopen = () => { window.__adalLiveUp = true; if (wasDown) { wasDown = false; tellChanged(['*']) } }
   }
   open()
 }

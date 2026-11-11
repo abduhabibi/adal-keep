@@ -57,6 +57,15 @@ if (import.meta.env.VITE_DEMO !== '1') {
   api.interceptors.request.use((c) => { if (c.method && c.method.toLowerCase() !== 'get' && !QUIET.test(String(c.url))) dirtyUntil = Date.now() + 8000; return c })
 }
 
+// How fast the PC answers: on a slow line (answers taking 1.5 s+ on average)
+// the pages' repeating refreshes ask less often (main.jsx).
+{
+  let avg = 0
+  api.interceptors.request.use((c) => { if (!c.responseType || c.responseType === "json") c.__t0 = performance.now(); return c })
+  const took = (c) => { if (!c?.__t0) return; avg = avg ? avg * 0.8 + (performance.now() - c.__t0) * 0.2 : performance.now() - c.__t0; window.__adalSlowLine = avg > 1500 }
+  api.interceptors.response.use((r) => { took(r.config); return r }, (e) => { took(e?.config); return Promise.reject(e) })
+}
+
 // Who is working (the employee chosen on this PC): the Trash shows who deleted what.
 api.interceptors.request.use((config) => {
   try {

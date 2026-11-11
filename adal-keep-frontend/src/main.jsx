@@ -16,6 +16,13 @@ import './index.css'
 // something changed, they all run at once (lib/changes.js) — so every list,
 // count and status on screen follows the change without waiting.
 const liveRefreshes = new Map()
+// Out of focus (another window or tab in front): every animation stops (index.css).
+if (typeof window !== 'undefined') {
+  const still = () => document.documentElement.classList.toggle('adal-still', document.hidden || !document.hasFocus())
+  window.addEventListener('blur', still); window.addEventListener('focus', still)
+  document.addEventListener('visibilitychange', still)
+  setTimeout(still, 0)
+}
 if (typeof document !== 'undefined') {
   const every = window.setInterval.bind(window)
   const stop = window.clearInterval.bind(window)
@@ -23,7 +30,19 @@ if (typeof document !== 'undefined') {
   window.setInterval = (fn, ms, ...args) => {
     if (typeof fn !== 'function' || !(ms < 60000)) return every(fn, ms, ...args)
     const run = () => fn(...args)
-    const id = every(() => { if (document.hidden) later.add(run); else run() }, ms)
+    // While the PC's live link is up (it says at once what changed, and every
+    // refresh then runs), a refresh of 3 s+ is needed less often: every 3rd
+    // tick; on a slow line (answers taking 1.5 s+) half as often again. At
+    // least once a minute.
+    let n = 0
+    const id = every(() => {
+      if (document.hidden) { later.add(run); return }
+      let k = 1
+      if (ms >= 3000) { if (window.__adalLiveUp) k *= 3; if (window.__adalSlowLine) k *= 2 }
+      k = Math.max(1, Math.min(k, Math.floor(60000 / ms)))
+      if (k > 1 && (++n % k)) return
+      run()
+    }, ms)
     if (ms >= 2000) liveRefreshes.set(id, run)
     return id
   }

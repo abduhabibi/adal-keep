@@ -61,7 +61,15 @@ router.get('/profiles/:profileId/automations', async (req, res) => {
     // She has a contract: she is chosen on Musaned and her Musaned record is
     // there — "Check if chosen" and "Add from Musaned" count as done (✓) unless
     // a run of them is working now.
-    const p = await db('profiles').where('id', profileId).first('chosen_at', 'contract_number', 'musaned_stage', 'status')
+    const p = await db('profiles').where('id', profileId).first('chosen_at', 'contract_number', 'musaned_stage', 'status', 'visa_application_number')
+    // Her application number is there (found or typed by hand): "Find
+    // application number" counts as done (✓) unless a run of it is working now.
+    if (p?.visa_application_number && String(p.visa_application_number).trim()) {
+      const l = latest.mofa_find_app
+      if (!l || !['running', 'pending', 'paused', 'done'].includes(l.status)) {
+        latest.mofa_find_app = { id: l?.id || null, workflow_id: 'mofa_find_app', status: 'done', finished_at: l?.finished_at || null, from_number: true }
+      }
+    }
     const contract = (p?.contract_number && String(p.contract_number).trim()) ||
       (p?.chosen_at && !/CANCEL|REJECT/i.test(p.musaned_stage || '')) ||
       await db('profile_fields').join('files', 'files.profile_field_id', 'profile_fields.id')

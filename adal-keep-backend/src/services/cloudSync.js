@@ -218,6 +218,7 @@ async function pushKeys(db) {
   if (vaultSoon) { vaultSoon = false; await pushVault(db, agency, state).catch(() => {}) }
   const rows = [], hashes = []
   for (const key of keys) {
+    if (full) await new Promise(res => setTimeout(res, PACE_MS))
     let r
     try { r = await local('GET', key) } catch { continue }
     if (!r.ok) continue
@@ -254,7 +255,13 @@ async function pushKeys(db) {
 // each minute, the agency's pages and only the profiles that changed lately.
 // (Changes made through the app go online at once anyway — pushSoon.) On a
 // small office PC the full sweep was ~1,300 requests a minute.
-const FULL_MS = 30 * 60 * 1000
+// The full sweep only catches what a change somehow missed: every 6 hours,
+// paced (an old PC stays free), and NOT again at each start — when it was
+// done, and the last sweep, are kept (cloud_sync "sweep:full" / "sweep:at"),
+// so a start only reads the profiles changed since. It was every 30 minutes
+// and at every start: ~1,800 reads at once, a busy PC for a minute or two.
+const FULL_MS = 6 * 3600 * 1000
+const PACE_MS = 60
 let lastFullAt = 0, lastSweepAt = 0, lastDiagAt = 0
 
 /** Profiles touched since `since` (runs, documents, CVs, tasks, the profile itself). */
@@ -276,6 +283,8 @@ async function changedProfiles(db, since) {
 
 async function pushAnswers(db, agency, state) {
   const started = Date.now()
+  if (!lastFullAt) lastFullAt = Number(state.get('sweep:full') || 0)
+  if (!lastSweepAt) lastSweepAt = Number(state.get('sweep:at') || 0)
   const full = !lastFullAt || started - lastFullAt >= FULL_MS
   const ids = full
     ? (await db('profiles').select('id')).map(r => r.id)
@@ -320,8 +329,10 @@ async function pushAnswers(db, agency, state) {
   } catch (e) { console.warn('[cloud] summary:', e.message) }
   await flush()
   lastSweepAt = started
+  await setState(db, 'sweep:at', String(started)).catch(() => {})
   if (!full) return
   lastFullAt = started
+  await setState(db, 'sweep:full', String(started)).catch(() => {})
   // Profiles that are gone: their answers go too.
   for (const key of state.keys()) {
     if (!key.startsWith('/') || wanted.has(key) || key === '/_summary' || key === '/vault') continue
@@ -495,7 +506,8 @@ export function startCloudSync(db) {
   timer = setInterval(tick, EVERY_MS)
   startRelay(db)
   watchStorageChat()
-  setTimeout(() => setInterval(() => watchJoins(db), 4000), 15000)
+  // A phone asking to join is seen within 10 s (it was every 4 s: ~21,000 internet calls a day).
+  setTimeout(() => setInterval(() => watchJoins(db), 10000), 15000)
   console.log('☁️  Online copy for phones: what changed every minute, everything every 30 minutes (when on)')
 }
 export const syncNow = (db) => syncOnce(db)

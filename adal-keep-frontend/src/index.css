@@ -637,3 +637,23 @@ body {
 :is(.dark, [data-theme="dark"], [data-theme="gradient"]) .solid-sheet { background-color: #111117 !important; }
 /* Profiles ticked (the selection bar is open on the right): the search pad steps aside. */
 body[data-picking="1"] .search-pad { display: none !important; }
+
+/* Light on old PCs (2026-11-11): nothing moves forever. The colours stay —
+   painted once, still — so the processor and the graphics chip are free while
+   the window just sits there (the drifting layers and flowing titles kept an
+   8 GB PC's graphics busy every frame). Small "live" dots (a run working, a
+   new message) still pulse. */
+[data-theme="gradient"] .gradient-backdrop span,
+[data-theme="gradient"] h1,
+.lock-backdrop span, .lock-frame, .lock-flow, .lock-button {
+  animation: none !important;
+  will-change: auto !important;
+}
+[data-theme="gradient"] h1 { background-position: 0% 50%; }
+.journey-pulse { filter: none !important; }
+
+/* The window is not in front (a robot's tab, another program): nothing moves
+   at all — not even the small "live" dots — so the PC is free (main.jsx). */
+html.adal-still *, html.adal-still *::before, html.adal-still *::after {
+  animation-play-state: paused !important;
+}

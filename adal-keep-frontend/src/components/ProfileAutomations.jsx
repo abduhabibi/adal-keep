@@ -411,7 +411,7 @@ export default function ProfileAutomations({ profileId }) {
               title={isDone && !byHand ? 'Done by the robot' : 'Done it yourself? Tick it: the step counts as done'}>
               <input type="checkbox" className="h-3.5 w-3.5 accent-emerald-600" checked={isDone} disabled={isRunning || (isDone && !byHand)}
                 onChange={() => markDone(w, !isDone)} />
-              {isDone ? (byHand ? 'Done (ticked by hand)' : 'Done') : 'Mark as done'}
+              {isDone ? (byHand ? 'Done (ticked by hand)' : latest?.from_number ? 'Done (she has her application number)' : 'Done') : 'Mark as done'}
             </label>
             </div>
           )

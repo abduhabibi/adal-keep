@@ -235,10 +235,21 @@ function chooseBy(page, id, labelSrc, optionSrc) {
 }
 
 const bodyText = (page) => page.evaluate(() => document.body?.innerText || '').catch(() => '')
-const uploadShown = (page) => page.evaluate(() => {
-  const f = [...document.querySelectorAll('input[type="file"]')].find(i => i.offsetParent !== null || i.getBoundingClientRect().width > 0)
-  return !!f && /upload sheet/i.test(document.body?.innerText || '')
-}).catch(() => false)
+// The upload page (Option 1): a Choose File box and an "Upload Sheet" control —
+// a button whose words may be its value (not in the page's text), in the page
+// or in a frame inside it. Returns that frame, or null.
+async function uploadFrame(page) {
+  for (const f of page.frames()) {
+    const ok = await f.evaluate(() => {
+      if (!document.querySelector('input[type="file"]')) return false
+      const words = [document.body?.innerText || '', ...[...document.querySelectorAll('input[type="button"], input[type="submit"], button, a')].map(e => e.value || e.innerText || '')].join(' ')
+      return /upload\s*sheet/i.test(words)
+    }).catch(() => false)
+    if (ok) return f
+  }
+  return null
+}
+const uploadShown = async (page) => !!(await uploadFrame(page))
 
 export async function runTasheer(page, ctx) {
   const t0 = Date.now()
@@ -299,26 +310,27 @@ export async function runTasheer(page, ctx) {
   if (!(await until(() => uploadShown(page), PICK_WAIT_MS, ctx))) throw new Error('Nobody pressed Submit on Tasheer within an hour')
   log(ctx, '✓ the upload page is open')
   await sleep(1500)
+  const frame = (await uploadFrame(page)) || page.mainFrame()
 
   // The Excel: made here, chosen, Upload Sheet.
   const file = path.join(os.tmpdir(), `Tasheer_${new Date().toISOString().slice(0, 10)}_${ctx.runId || Date.now()}.xlsx`)
   fs.writeFileSync(file, tasheerXlsx(people, settings))
-  const input = await page.evaluateHandle(() => [...document.querySelectorAll('input[type="file"]')].find(i => i.offsetParent !== null || i.getBoundingClientRect().width > 0) || document.querySelector('input[type="file"]'))
+  const input = await frame.evaluateHandle(() => [...document.querySelectorAll('input[type="file"]')].find(i => i.offsetParent !== null || i.getBoundingClientRect().width > 0) || document.querySelector('input[type="file"]'))
   const el = input.asElement()
   if (!el) throw new Error('The Choose File box was not found on the upload page')
   await el.uploadFile(file)
   await el.evaluate(i => { i.dispatchEvent(new Event('input', { bubbles: true })); i.dispatchEvent(new Event('change', { bubbles: true })) }).catch(() => {})
   log(ctx, `✓ Excel chosen (${people.length} applicant${people.length === 1 ? '' : 's'})`)
   await sleep(1000)
-  if (await clickText(page, /^\s*upload sheet\s*$/)) log(ctx, '✓ Upload Sheet pressed')
+  if (await clickText(frame, /^\s*upload\s*sheet\s*$/)) log(ctx, '✓ Upload Sheet pressed')
   else left.push('Upload Sheet (press it)')
   await sleep(4000)
   // A message the site gave after the upload (an error in a row), if any.
-  const said = await page.evaluate(() => [...document.querySelectorAll('.error, .alert, .ui-messages, .ui-growl, [role="alert"], .text-danger, .msg')]
+  const said = await frame.evaluate(() => [...document.querySelectorAll('.error, .alert, .ui-messages, .ui-growl, [role="alert"], .text-danger, .msg')]
     .map(e => (e.innerText || '').trim()).filter(Boolean).slice(0, 3).join(' · ')).catch(() => '')
 
   // The consent box ("By clicking here I indicate that, I have the permission …").
-  const ticked = await page.evaluate(() => {
+  const ticked = await frame.evaluate(() => {
     const boxes = [...document.querySelectorAll('input[type="checkbox"]')]
     const box = boxes.find(b => /permission|consent|privacy/i.test((b.closest('div, td, tr, label, p') || b.parentElement)?.innerText || '')) || boxes[boxes.length - 1]
     if (!box) return false
@@ -342,3 +354,4 @@ export async function runTasheer(page, ctx) {
   log(ctx, `✅ Excel uploaded${said ? ` — Tasheer says: ${said}` : ''}`)
   return { ok: true, pauseReason: 'awaiting-tasheer-save', seconds: secs() }
 }
+export { uploadFrame }

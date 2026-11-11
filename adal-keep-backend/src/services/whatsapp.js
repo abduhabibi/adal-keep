@@ -140,7 +140,11 @@ export async function connect(db, key = 'owner', { phone = '' } = {}, tries = 2)
   opts.authStrategy = new wweb.LocalAuth({ clientId: key, dataPath: DIR })
   opts.userAgent = realUserAgent(exe)
   // A page busy loading the chats answers late: find out in 90s, not WhatsApp's 3 minutes.
-  opts.puppeteer = { executablePath: exe, headless: true, protocolTimeout: 90_000, args: ['--no-first-run', '--no-default-browser-check', '--disable-gpu', '--disable-dev-shm-usage', '--mute-audio', '--disable-extensions'] }
+  opts.puppeteer = { executablePath: exe, headless: true, protocolTimeout: 90_000, args: ['--no-first-run', '--no-default-browser-check', '--disable-gpu', '--disable-dev-shm-usage', '--mute-audio', '--disable-extensions',
+    // Light: nothing the hidden WhatsApp does not need (updates, sync, translate, spell check…).
+    '--disable-background-networking', '--disable-component-update', '--disable-sync', '--disable-default-apps', '--no-pings',
+    '--disable-features=Translate,MediaRouter,OptimizationHints,CalculateNativeWinOcclusion,SpareRendererForSitePerProcess,AutofillServerCommunication',
+    '--disable-site-isolation-trials', '--renderer-process-limit=2'] }
   // Always today's WhatsApp Web (a saved old copy of its page cannot link new devices).
   opts.webVersionCache = { type: 'none' }
   const digits = String(phone || '').replace(/\D/g, '')
@@ -352,8 +356,49 @@ export async function logout(key = 'owner') {
 // Every morning (from 6:00) each account signs in afresh: its hidden window
 // starts again with the saved sign-in (no QR), so WhatsApp never goes stale.
 const DAILY_FROM = 6
+// One WhatsApp for the agency, so ONE hidden browser runs (each is ~700 MB):
+// while one account is ready, the others (still signed in on disk) are not
+// started — and one left running is stopped. One being linked now (QR, code,
+// its own window) is never touched. With none ready, one starts at a time.
+function oneAccount() {
+  const n = readNote()
+  const on = n.on || []
+  if (on.length < 2) return on
+  // Being linked by a person now (or just pressed Connect): left alone.
+  // (A QR nobody scans for 5 minutes — an account its phone unlinked — is not.)
+  const busy = (k) => { const st = stateOf(k), ss = session(k)
+    if (st.status === 'web') return true
+    const recent = ss.startingAt && Date.now() - ss.startingAt < 5 * 60_000
+    return recent && (['qr', 'code', 'signing-in', 'starting'].includes(st.status) || !!st.qr || !!st.code) }
+  const stop = (k, why) => {
+    const s = session(k)
+    if (!s.client) return
+    console.log(`[whatsapp ${k}] stopped: ${why} (one hidden browser at a time)`)
+    const old = s.client; s.client = null; s.startingAt = 0
+    setState(k, { status: 'off', qr: null, code: null })
+    release(old).catch(() => {})
+  }
+  const ready = [...new Set([n.brave, ...on].filter(k => k && on.includes(k)))].filter(k => stateOf(k).status === 'ready' && session(k).client)
+  // The one most lately ready is the one in use (a newly linked one wins).
+  const keep = ready.sort((a, b) => new Date(stateOf(b).since || 0) - new Date(stateOf(a).since || 0))[0]
+  if (!keep) {
+    // None ready: the one starting goes on; else the next in turn starts —
+    // first the one that was in use last (then the others, one at a time).
+    const going = on.find(busy)
+    if (going) return [going]
+    const daily = n.daily || {}
+    const order = [...on].sort((a, b) => (b === n.lastReady) - (a === n.lastReady) || String(daily[b] || '').localeCompare(String(daily[a] || '')))
+    const s0 = (oneAccount.turn = ((oneAccount.turn ?? -1) + 1) % order.length)
+    for (const k of on) if (k !== order[s0]) stop(k, `trying ${order[s0]} instead`)
+    return [order[s0]]
+  }
+  if (n.lastReady !== keep) writeNote({ ...readNote(), lastReady: keep })
+  for (const k of on) if (k !== keep && !busy(k)) stop(k, `${keep} is the WhatsApp in use`)
+  return [keep, ...on.filter(k => k !== keep && busy(k))]
+}
+
 function keepConnected() {
-  ;(readNote().on || []).forEach((key, i) => setTimeout(async () => {
+  oneAccount().forEach((key, i) => setTimeout(async () => {
     const s = session(key), st = stateOf(key).status
     const today = new Date().toLocaleDateString('en-CA')
     const n = readNote()

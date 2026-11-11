@@ -23,7 +23,10 @@ import { signInTurn } from './tabManager.js'
 import { visaNames, clickText } from './mofaVisa.js'
 
 export const TASHEER = 'tasheer_schedule'
-const HOME = 'https://agents.tasheer.com/AgentTasheer/auth/cnav'
+// Tasheer's own front page (its sign-in). Its inner pages (/auth/cnav,
+// /auth/agentGroupScheduling) open only from inside the site (a POST): typed
+// as an address they say "Method 'GET' is not supported".
+const START = 'https://agents.tasheer.com/AgentTasheer/'
 const LOGIN_WAIT_MS = 30 * 60 * 1000
 const PICK_WAIT_MS = 60 * 60 * 1000
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
@@ -160,23 +163,43 @@ function fillLogin(page, user, pass) {
   }, user, pass)
 }
 
+// Cloudflare's "Just a moment…" / "Verify you are human" before the site.
+const challenged = (page) => page.evaluate(() => /just a moment|verify you are human|attention required|checking your browser/i.test(document.title + ' ' + (document.body?.innerText || '').slice(0, 400))).catch(() => false)
+const notAllowed = (page) => page.evaluate(() => /method\s+'?get'?\s+is not supported/i.test(document.body?.innerText || '')).catch(() => false)
+
+/** Past Cloudflare's check: by itself, or a person ticks it (rung once). */
+async function pastCloudflare(page, ctx) {
+  if (!(await challenged(page))) return
+  log(ctx, '⏳ Cloudflare is checking the browser')
+  if (await until(async () => !(await challenged(page)), 20000, ctx)) return
+  await page.bringToFront().catch(() => {})
+  await ctx.notify(`🛂 ${ctx.groupTitle}: Tasheer — tick "Verify you are human"`, 'Tasheer\'s Cloudflare check is in front: tick it. Adal Keep goes on by itself.', 'warn', { login: page })
+  if (!(await until(async () => !(await challenged(page)), LOGIN_WAIT_MS, ctx))) throw new Error('Tasheer\'s Cloudflare check was not passed within 30 minutes')
+}
+
 async function signIn(page, ctx) {
   const release = await signInTurn('tasheer')
   try {
+    const home = async () => /group scheduling/i.test(await page.evaluate(() => document.body?.innerText || '').catch(() => ''))
+    // A Tasheer tab of this run already signed in and at home: nothing to do.
+    if (/tasheer\.com/i.test(page.url()) && await home()) return log(ctx, '✓ already signed in to Tasheer')
     log(ctx, 'opening Tasheer (agents.tasheer.com)')
-    await page.goto(HOME, { waitUntil: 'domcontentloaded', timeout: 120000 }).catch(e => log(ctx, `navigation threw: ${e.message}`, 'warn'))
+    await page.goto(START, { waitUntil: 'domcontentloaded', timeout: 120000 }).catch(e => log(ctx, `navigation threw: ${e.message}`, 'warn'))
     await sleep(2500)
-    if (!(await hasPassword(page)) && /group scheduling/i.test(await page.evaluate(() => document.body?.innerText || '').catch(() => ''))) { log(ctx, '✓ already signed in to Tasheer'); return }
-    if (!(await until(() => hasPassword(page), 30000, ctx))) {
-      if (/group scheduling/i.test(await page.evaluate(() => document.body?.innerText || '').catch(() => ''))) return log(ctx, '✓ signed in to Tasheer')
-      throw new Error('Tasheer showed neither its sign-in page nor GROUP SCHEDULING')
+    await pastCloudflare(page, ctx)
+    if (await notAllowed(page)) await page.goto(START, { waitUntil: 'domcontentloaded', timeout: 120000 }).catch(() => {})
+    if (!(await until(async () => (await hasPassword(page)) || (await home()), 30000, ctx))) {
+      await page.bringToFront().catch(() => {})
+      await ctx.notify(`🛂 ${ctx.groupTitle}: open Tasheer's sign-in`, 'The Tasheer tab is in front but its sign-in did not show. Open the sign-in (or the home page with GROUP SCHEDULING) in that tab; Adal Keep goes on by itself.', 'warn', { login: page })
+      if (!(await until(async () => (await hasPassword(page)) || (await home()), LOGIN_WAIT_MS, ctx))) throw new Error('Tasheer showed neither its sign-in page nor GROUP SCHEDULING')
     }
+    if (!(await hasPassword(page))) return log(ctx, '✓ signed in to Tasheer')
     if (!ctx.tasheer_username || !ctx.tasheer_password) throw new Error('No Tasheer account — add one under AI Actions → Tasheer → Login')
     const ok = await fillLogin(page, ctx.tasheer_username, ctx.tasheer_password)
     log(ctx, ok ? `🔐 name and password filled (${ctx.tasheer_name || ctx.tasheer_username})` : 'the sign-in boxes were not all found', ok ? 'info' : 'warn')
     await page.bringToFront().catch(() => {})
     await ctx.notify(`🛂 ${ctx.groupTitle}: sign in to Tasheer`, 'The Tasheer tab is in front with the name and password filled. Type its captcha and sign in; Adal Keep goes on by itself (GROUP SCHEDULING).', 'warn', { login: page })
-    if (!(await until(async () => !(await hasPassword(page)), LOGIN_WAIT_MS, ctx))) throw new Error('Nobody signed in to Tasheer within 30 minutes')
+    if (!(await until(async () => !(await hasPassword(page)) && (await home()), LOGIN_WAIT_MS, ctx))) throw new Error('Nobody signed in to Tasheer within 30 minutes')
     log(ctx, '✓ signed in to Tasheer')
   } finally { release() }
 }
@@ -228,18 +251,21 @@ export async function runTasheer(page, ctx) {
   await signIn(page, ctx)
 
   // GROUP SCHEDULING
+  let clicked = true
   if (!/agentGroupScheduling/i.test(page.url())) {
-    if (!(await until(async () => /group scheduling/i.test(await bodyText(page)), 30000, ctx))) await page.goto(HOME, { waitUntil: 'domcontentloaded', timeout: 120000 }).catch(() => {})
-    const clicked = await page.evaluate(() => {
+    await until(async () => /group scheduling/i.test(await bodyText(page)), 30000, ctx)
+    clicked = await page.evaluate(() => {
       const el = [...document.querySelectorAll('a, button, div, span, p, td')].filter(e => /^\s*group scheduling\s*$/i.test(e.innerText || '') && e.offsetParent !== null).pop()
       if (!el) return false
       ;(el.closest('a, button, [onclick]') || el).click()
       return true
     }).catch(() => false)
-    if (!clicked) await page.goto('https://agents.tasheer.com/AgentTasheer/auth/agentGroupScheduling', { waitUntil: 'domcontentloaded', timeout: 120000 }).catch(() => {})
-    log(ctx, '✓ GROUP SCHEDULING')
+    if (!clicked) {
+      await page.bringToFront().catch(() => {})
+      await ctx.notify(`🛂 ${ctx.groupTitle}: press GROUP SCHEDULING on Tasheer`, 'Adal Keep could not find GROUP SCHEDULING on the page: press it in the Tasheer tab; it goes on by itself.', 'warn', { login: page })
+    } else log(ctx, '✓ GROUP SCHEDULING')
   }
-  if (!(await until(async () => /visa\s*type/i.test(await bodyText(page)) && /vsc\s*center/i.test(await bodyText(page)), 60000, ctx))) throw new Error('The group scheduling page (VISA Type, VSC Center) did not open')
+  if (!(await until(async () => /visa\s*type/i.test(await bodyText(page)) && /vsc\s*cent(er|re)/i.test(await bodyText(page)), clicked ? 60000 : LOGIN_WAIT_MS, ctx))) throw new Error('The group scheduling page (VISA Type, VSC Center) did not open')
   await sleep(1500)
 
   // VISA Type → VSC Center → Number of Applicants (each may reload the next list).

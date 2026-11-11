@@ -75,8 +75,13 @@ const unreachableMsg = "The main Adal Keep PC is not reachable.\n\n" +
 func runEmployee(root string, background bool) {
 	if !firstCopy() {
 		// Already running for this user: just open the window again.
-		if u := waitForMainPC(root, 8*time.Second); u != "" {
-			openAppWindow(root, u)
+		// With the online pages a few seconds only: the online copy works without the main PC.
+		wait := 8 * time.Second
+		if hasOnlinePages(root) {
+			wait = 4 * time.Second
+		}
+		if u := waitForMainPC(root, wait); u != "" {
+			openAppWindow(root, companionURL(root, u))
 		} else {
 			// The first copy serves the online pages (or "Looking for the main PC").
 			openAppWindow(root, offlineURL(root))
@@ -97,7 +102,7 @@ func runEmployee(root string, background bool) {
 	// The Companion may still be searching the network: give it a moment.
 	budget := 40 * time.Second
 	if online {
-		budget = 20 * time.Second // the online pages are ready: no long wait
+		budget = 5 * time.Second // the online pages work without the main PC: no waiting for it
 	}
 	u := waitForMainPC(root, budget)
 	if u == "" && online {
@@ -118,8 +123,18 @@ func runEmployee(root string, background bool) {
 		}
 	}
 	logf("main PC answers at %s", u)
-	openAppWindow(root, u)
+	openAppWindow(root, companionURL(root, u))
 	select {} // stay in the background: the Adal Keep logo on its window
+}
+
+// companionURL: the main PC's page, marked as opened in a Companion that has
+// the online pages — there it gives this PC its own online account once
+// (lib/companionOnline.js), so the Companion works without the main PC.
+func companionURL(root, u string) string {
+	if !hasOnlinePages(root) {
+		return u
+	}
+	return strings.TrimRight(u, "/") + "/?adal_companion=1"
 }
 
 // openAppWindow: the main PC's Adal Keep as its own app-style window (no
@@ -195,7 +210,7 @@ func openMainOrFollowed(root string) {
 		resp.Body.Close()
 		if resp.StatusCode < 500 {
 			logf("this PC follows the main PC at %s", u)
-			openAppWindow(root, u)
+			openAppWindow(root, companionURL(root, u))
 			return
 		}
 	}

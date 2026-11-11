@@ -84,16 +84,35 @@ td.l { color: #333; width: 15% } td.v { font-weight: bold; width: 18% } td.r { t
 .form { display: flex; flex-direction: column } .foot { margin-top: auto; width: 100%; display: block }
 `
 
+/**
+ * What the embassy page cannot be printed without: she is selected (chosen by
+ * an employer), both numbers, her photo and what the form prints.
+ */
+export function embassyMissing(p, hasPhoto) {
+  const has = (v) => String(v ?? '').trim() !== ''
+  return [
+    !p.chosen_at && 'Selected (chosen by an employer)',
+    !has(p.visa_application_number) && 'Application number',
+    !has(p.visa_number) && 'Visa number',
+    !hasPhoto && 'Photo',
+    !has(p.full_name) && 'Full name',
+    !has(p.date_of_birth) && 'Date of birth',
+    !has(p.place_of_birth) && 'Place of birth',
+    !has(p.religion) && 'Religion',
+    !has(p.marital_status) && 'Marital status',
+    !has(p.passport_number) && 'Passport number',
+    !has(p.passport_issue_date) && 'Passport issue date',
+    !has(p.passport_expiry_date) && 'Passport expiry date',
+    !has(p.employer_name) && 'Sponsor (employer) name',
+  ].filter(Boolean)
+}
+
 /** What each girl's embassy pages need, and what she lacks: [{ g, missing: [...] }]. */
 export async function loadEmbassy(ids) {
   const { data } = await api.get('/embassy/print', { params: { ids: ids.join(',') } })
   const girls = (data.girls || []).map(g => ({
     g,
-    missing: [
-      !g.profile.visa_application_number && 'Application number',
-      !g.profile.visa_number && 'Visa number',
-      !g.photo && 'Photo',
-    ].filter(Boolean),
+    missing: embassyMissing(g.profile, !!g.photo),
   }))
   return { email: data.agency_email, girls }
 }

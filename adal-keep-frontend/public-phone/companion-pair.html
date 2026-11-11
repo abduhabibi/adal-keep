@@ -1,0 +1,41 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Adal Keep</title>
+<style>body{font:15px system-ui,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;color:#334}</style>
+<script src="config.js"></script>
+</head>
+<body><p id="m">Getting this PC ready to work without the main PC…</p>
+<script>
+/*
+ * On an Adal Companion PC (the online pages, served by AdalKeep.exe on
+ * 127.0.0.1:47801). The first time the Companion opens the main PC's Adal
+ * Keep, that page comes here once with the Companion's own online account
+ * (in the address after #, never sent anywhere) and is sent straight back.
+ * From then on the Companion opens the agency's online copy (Supabase +
+ * Telegram) by itself whenever the main PC is off — anywhere.
+ * Taken only for this Adal Keep's own Supabase, and only back to an Adal Keep
+ * main PC's address (an office or Tailscale address, port 4000).
+ */
+(function () {
+  var CFG = window.ADAL_CLOUD_CONFIG || {}
+  function mainPC(href) {
+    try {
+      var u = new URL(href)
+      if (!/^https?:$/.test(u.protocol) || u.port !== '4000') return false
+      var h = u.hostname.toLowerCase(), ip = h.split('.').map(Number)
+      if (ip.length === 4 && ip.every(function (n) { return n >= 0 && n <= 255 })) {
+        return ip[0] === 10 || ip[0] === 127 || (ip[0] === 192 && ip[1] === 168) || (ip[0] === 172 && ip[1] >= 16 && ip[1] <= 31) || (ip[0] === 100 && ip[1] >= 64 && ip[1] <= 127)
+      }
+      return h.indexOf('.') < 0 || /\.(ts\.net|local|lan|home)$/.test(h)
+    } catch (e) { return false }
+  }
+  var d = null
+  try { d = JSON.parse(decodeURIComponent(location.hash.slice(1))) } catch (e) {}
+  history.replaceState(null, '', location.pathname)     // the account leaves the address at once
+  if (!d || !d.pc || !d.pc.cloud || !mainPC(d.back)) { document.getElementById('m').textContent = 'Nothing to do here.'; return }
+  if (CFG.url && d.pc.cloud.url === CFG.url) localStorage.setItem('adal-pc', JSON.stringify(d.pc))
+  var back = new URL(d.back)
+  back.searchParams.set('adal_online', localStorage.getItem('adal-pc') ? 'ok' : 'no')
+  location.replace(back.toString())
+})()
+</script>
+</body></html>

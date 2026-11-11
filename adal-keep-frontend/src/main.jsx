@@ -183,6 +183,8 @@ async function adminBoot() {
 
 boot().finally(() => {
   if (import.meta.env.VITE_DEMO !== '1' && import.meta.env.VITE_ADMIN !== '1') import('./lib/changes.js').then(c => c.startChanges()).catch(() => {})
+  // An Adal Companion PC: its own online account, so it works with the main PC off.
+  if (import.meta.env.VITE_DEMO !== '1' && import.meta.env.VITE_ADMIN !== '1' && import.meta.env.VITE_PHONE !== '1') setTimeout(() => import('./lib/companionOnline.js').then(m => m.shareOnlineCopy()).catch(() => {}), 6000)
 }).finally(() => ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <App />

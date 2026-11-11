@@ -153,10 +153,7 @@ export default function SelectionBar({ picked, onRemove, onClear, onAllShown, on
       if (ready.length) await printEmbassy(loaded, ready, company || '')
       showLacking(`Print embassy: ${rows.length} not printed — they lack something`,
         ready.length ? `Printed for the ${ready.length} who have everything (${ready.length} page${ready.length === 1 ? "" : "s"}).` : 'Nobody had everything yet.',
-        rows, {
-          anywayLabel: `Print these ${rows.length} anyway (what is missing is left as a marked gap)`,
-          anyway: () => printEmbassy(loaded, rows.map(r => loaded.girls.find(x => x.g.profile.id === r.p.id).g), company || '').catch(e => toast.error(err(e))),
-        })
+        rows)
     } catch (e) { toast.error(err(e)) }
     setBusy('')
   }

@@ -7,6 +7,7 @@
  *   POST /pc-access/answer {id,yes} (this PC only) Yes / No
  *   GET  /pc-access/list            (this PC only) the computers allowed
  *   DELETE /pc-access/:id           (this PC only) take one off the list
+ *   POST /pc-access/online-copy      (a computer let in) its own online account
  */
 import express from 'express'
 import bcrypt from 'bcryptjs'
@@ -47,6 +48,21 @@ router.post('/pc-access/signin', async (req, res) => {
     setKeyCookie(res, r.key)
     console.log(`[pc-access] ${String(req.body?.name || 'A computer').slice(0, 60)} came in with ${user.username}'s account`)
     res.json({ ok: true, id: r.id, key: r.key })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+/**
+ * An Adal Companion PC (let in already) takes its own online account once:
+ * from then on it opens the agency's online copy (Supabase + the documents in
+ * Telegram) by itself whenever this PC is off or out of reach — anywhere.
+ */
+router.post('/pc-access/online-copy', async (req, res) => {
+  if (!req.pcAccess && !isLocal(req)) return res.status(403).json({ error: 'Only a computer that is let in' })
+  try {
+    const { makeDevice, cloudOn } = await import('../services/cloudSync.js')
+    if (!(await cloudOn(req.app.locals.db))) return res.status(409).json({ error: 'The online copy is off on the main PC' })
+    const { pcNumber } = await import('../services/mainPC.js')
+    const name = `Companion · ${String(req.pcAccess?.name || req.body?.name || 'PC').slice(0, 40)}`
+    res.json({ number: pcNumber(), cloud: await makeDevice(req.app.locals.db, name) })
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 router.get('/pc-access/status', (req, res) => res.json(isLocal(req) ? { state: 'approved', here: true } : statusOf(req)))

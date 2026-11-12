@@ -5,7 +5,7 @@ import api from '../services/api'
 import { usePickFile } from './shared/PickFile'
 import { SHARED, BRANCHES } from './ProfileJourney'
 import { printOnPhone } from '../lib/phoneApp'
-import { AmharicKeys, typeAmharic, useAmharicTyping } from '../lib/amharicInput'
+import { AmharicKeys, amharicProps, useAmharicTyping } from '../lib/amharicInput'
 import { onDataChange } from '../lib/changes'
 
 // COC, Saudi letter, Musaned, Broker ID, the tickets, Police Clearance, Labour ID,
@@ -302,7 +302,7 @@ export default function ChecklistGridView({ checklist, onClose }) {
               <th className="border-b border-slate-300 dark:border-slate-700 p-1.5 min-w-[150px] text-left">
                 {adding == null
                   ? <button type="button" onClick={() => setAdding('')} className="rounded-lg border border-dashed border-teal-400 px-3 py-1.5 text-xs font-semibold text-teal-700 hover:bg-teal-50 dark:text-teal-300 dark:hover:bg-teal-900/30">＋ Note</button>
-                  : <form onSubmit={addNote}><input autoFocus value={adding} onChange={(e) => setAdding(e.target.value)} placeholder="Note name, then Enter"
+                  : <form onSubmit={addNote}><input autoFocus value={adding} {...amharicProps(amharic, setAdding)} onChange={(e) => setAdding(e.target.value)} placeholder="Note name, then Enter"
                       onKeyDown={(e) => { if (e.key === 'Escape') setAdding(null) }} onBlur={() => { if (!adding.trim()) setAdding(null) }}
                       className="w-36 rounded border border-teal-400 bg-white px-2 py-1 text-xs font-normal dark:bg-slate-900" /></form>}
               </th>
@@ -332,7 +332,7 @@ export default function ChecklistGridView({ checklist, onClose }) {
                         <td key={k} className={cell}>
                           {c.type === 'tick'
                             ? <input type="checkbox" checked={!!v} onChange={(e) => setCell(profile.id, c.key, e.target.checked ? '1' : '')} className="w-5 h-5 accent-teal-600 cursor-pointer" />
-                            : <input key={v} defaultValue={v} lang={amharic ? 'am' : 'en'} onInput={(e) => { if (amharic) typeAmharic(e); else e.target.dataset.was = e.target.value }} onFocus={(e) => { e.target.dataset.was = e.target.value }} onBlur={(e) => { if (e.target.value !== v) setCell(profile.id, c.key, e.target.value) }}
+                            : <input key={v} defaultValue={v} {...amharicProps(amharic)} onBlur={(e) => { if (e.target.value !== v) setCell(profile.id, c.key, e.target.value) }}
                                 placeholder="…" className="w-36 rounded border border-slate-200 dark:border-slate-700 bg-transparent px-1.5 py-1 text-xs" />}
                         </td>
                       )
@@ -379,7 +379,7 @@ export default function ChecklistGridView({ checklist, onClose }) {
                 <section>
                   <h4 className="text-xs font-bold uppercase text-slate-500 mb-2">➕ Your own column</h4>
                   <form onSubmit={addOwn} className="flex flex-wrap gap-2">
-                    <input value={newCol.label} onChange={(e) => setNewCol({ ...newCol, label: e.target.value })} placeholder="Name, e.g. Paid, Called, Note"
+                    <input value={newCol.label} {...amharicProps(amharic, (v) => setNewCol(c => ({ ...c, label: v })))} onChange={(e) => setNewCol({ ...newCol, label: e.target.value })} placeholder="Name, e.g. Paid, Called, Note"
                       className="flex-1 min-w-[150px] rounded-lg border border-slate-300 dark:border-slate-700 bg-transparent px-3 py-2 text-sm" />
                     <select value={newCol.type} onChange={(e) => setNewCol({ ...newCol, type: e.target.value })}
                       className="rounded-lg border border-slate-300 dark:border-slate-700 bg-transparent px-2 py-2 text-sm">

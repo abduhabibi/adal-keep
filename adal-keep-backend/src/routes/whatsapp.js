@@ -70,6 +70,17 @@ router.delete('/whatsapp/agents/:id', async (req, res) => {
 })
 
 // One profile's CV to the chosen agents (none chosen → all of mine).
+// Which of these profiles' CVs each agent was ever sent (?profile_ids=1,2,3): { agent_id: [profile ids] }.
+router.get('/whatsapp/sent', async (req, res) => {
+  try {
+    const ids = String(req.query.profile_ids || '').split(',').map(Number).filter(n => n > 0).slice(0, 500)
+    if (!ids.length) return res.json({})
+    const rows = await req.app.locals.db('whatsapp_sends').whereIn('profile_id', ids).whereNot('status', 'failed').distinct('agent_id', 'profile_id')
+    const out = {}
+    for (const r of rows) (out[r.agent_id] ||= []).push(r.profile_id)
+    res.json(out)
+  } catch (e) { fail(res, e) }
+})
 router.get('/profiles/:id/whatsapp', async (req, res) => { try { res.json(await sendsOf(req.app.locals.db, req.params.id)) } catch (e) { fail(res, e) } })
 router.post('/profiles/:id/whatsapp/send', async (req, res) => {
   try { res.json({ results: await sendCV(req.app.locals.db, who(req), Number(req.params.id), req.body?.agent_ids || [], by(req)) }) }

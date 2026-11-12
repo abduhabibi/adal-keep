@@ -65,6 +65,8 @@ export function toAmharic(text) {
  * (Compares with the text before, so it works with phone keyboards that send whole words.)
  */
 export function typeAmharic(e) {
+  // A phone keyboard still building a word: it is turned once the word is done.
+  if (e.nativeEvent?.isComposing || e.isComposing) return
   const el = e.target
   const was = el.dataset.was ?? ''
   const now = el.value
@@ -85,6 +87,21 @@ export function typeAmharic(e) {
   el.value = head + tail
   el.setSelectionRange(head.length, head.length)
   el.dataset.was = el.value
+}
+
+/**
+ * Everything a text box needs to be typed in Amharic when `on` (and in
+ * English when not): <input {...amharicProps(on)} />. With `onValue` the
+ * box's new value is told after each change (a controlled box).
+ */
+export function amharicProps(on, onValue) {
+  const after = (e) => { if (onValue) onValue(e.target.value) }
+  return {
+    lang: on ? 'am' : 'en',
+    onFocus: (e) => { e.target.dataset.was = e.target.value },
+    onInput: (e) => { if (on) typeAmharic(e); else e.target.dataset.was = e.target.value; after(e) },
+    onCompositionEnd: (e) => { if (on) { typeAmharic({ target: e.target }); after(e) } },
+  }
 }
 
 const KEY = 'adal-type-amharic'

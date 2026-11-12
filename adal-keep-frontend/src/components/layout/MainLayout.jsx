@@ -76,8 +76,28 @@ export default function MainLayout() {
     window.addEventListener('adal-fullscreen', on)
     return () => window.removeEventListener('adal-fullscreen', on)
   }, [])
+  // On a phone the top bar goes away while scrolling down (more room) and
+  // comes back on the way up, or at the top of the page.
+  const mainRef = useRef(null)
+  const [barHidden, setBarHidden] = useState(false)
+  useEffect(() => {
+    const el = mainRef.current
+    if (!el || wide) { setBarHidden(false); return }
+    let last = el.scrollTop
+    const on = () => {
+      const y = el.scrollTop, d = y - last
+      if (y < 40) setBarHidden(false)
+      else if (d > 8) setBarHidden(true)
+      else if (d < -8) setBarHidden(false)
+      if (Math.abs(d) > 8) last = y
+    }
+    el.addEventListener('scroll', on, { passive: true })
+    return () => el.removeEventListener('scroll', on)
+  }, [wide])
+  useEffect(() => { setBarHidden(false) }, [pathname])
   // A swipe from left to right (a phone): back — out of the open chat or
-  // profile; with nothing to go back from, the sidebar. Right to left closes it.
+  // profile; with nothing to go back from, the sidebar. Right to left closes
+  // the sidebar, else goes forward again (what the back swipe left).
   useEffect(() => {
     if (wide) return
     let start = null
@@ -85,11 +105,14 @@ export default function MainLayout() {
       const t = e.touches?.[0]
       if (!t || e.touches.length > 1) { start = null; return }
       // Not from something that moves sideways itself (a slider, a list scrolling sideways, the mic).
+      let sideways = false
       for (let el = e.target; el && el !== document.body; el = el.parentElement) {
         if (el.dataset?.noSwipe !== undefined || el.tagName === 'INPUT' && el.type === 'range') { start = null; return }
-        if (el.scrollWidth > el.clientWidth + 4 && /(auto|scroll)/.test(getComputedStyle(el).overflowX) && el.scrollLeft > 0) { start = null; return }
+        const scrollsX = el.scrollWidth > el.clientWidth + 4 && /(auto|scroll)/.test(getComputedStyle(el).overflowX)
+        if (scrollsX && el.scrollLeft > 0) { start = null; return }
+        if (scrollsX) sideways = true   // a table or tab row that scrolls sideways: no forward swipe from it
       }
-      start = { x: t.clientX, y: t.clientY, at: Date.now() }
+      start = { x: t.clientX, y: t.clientY, at: Date.now(), sideways }
     }
     const up = (e) => {
       const s = start; start = null
@@ -101,6 +124,7 @@ export default function MainLayout() {
         if (sidebarOpen) return
         if (!swipeBack()) setSidebarOpen(true)
       } else if (sidebarOpen) setSidebarOpen(false)
+      else if (!s.sideways) history.forward()
     }
     window.addEventListener('touchstart', down, { passive: true })
     window.addEventListener('touchend', up, { passive: true })
@@ -141,9 +165,13 @@ export default function MainLayout() {
         {DEMO && <Suspense fallback={null}><DemoBanner /></Suspense>}
         {!DEMO && <FollowerBanner />}
         {!DEMO && <UpdateBanner />}
-        {!(bare && !wide) && <Navbar onMenuClick={() => setSidebarOpen(!sidebarOpen)} />}
+        {!(bare && !wide) && (
+          <div className={`shrink-0 transition-[margin,opacity] duration-200 ${barHidden ? 'pointer-events-none opacity-0' : ''}`} style={barHidden ? { marginTop: '-5.5rem' } : undefined}>
+            <Navbar onMenuClick={() => setSidebarOpen(!sidebarOpen)} />
+          </div>
+        )}
         <div className="flex flex-1 min-h-0">
-          <main className="flex-1 min-w-0 overflow-y-auto transition-colors duration-500 custom-scrollbar">
+          <main ref={mainRef} className="flex-1 min-w-0 overflow-y-auto transition-colors duration-500 custom-scrollbar">
             <div className={inChat ? 'h-full' : 'px-3 py-4 sm:p-6'}>
               <Outlet key={pageKey} />
             </div>

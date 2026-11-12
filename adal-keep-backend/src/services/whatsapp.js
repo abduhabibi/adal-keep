@@ -725,7 +725,7 @@ export function officeMatches(agentOffice, musanedPro) {
  * "Selected" when too old to delete — each from the WhatsApp that sent it.
  * Works later too (that WhatsApp off now → done when it is back).
  */
-export async function onChosen(db, profileId) {
+export async function onChosen(db, profileId, { clientOf = null } = {}) {
   db ||= dbRef
   if (!db) return
   const p = await db('profiles').where('id', profileId).first('id', 'full_name', 'musaned_pro', 'chosen_at')
@@ -741,9 +741,10 @@ export async function onChosen(db, profileId) {
       await db('whatsapp_sends').where('id', s.id).update({ status: 'chosen_here', closed_at: now })
       continue
     }
-    const ses = sessions.get(s.user_key || brave)
-    if (!ses?.client || ses.state.status !== 'ready') continue // later, when that WhatsApp is back
-    const client = ses.client
+    // (clientOf: a test hands its own WhatsApp.)
+    const ses = clientOf ? null : sessions.get(s.user_key || brave)
+    const client = clientOf ? clientOf(s.user_key || brave) : (ses?.client && ses.state.status === 'ready' ? ses.client : null)
+    if (!client) continue // later, when that WhatsApp is back
     await shim(client)
     try {
       const r = await takeBack(client, s.message_id)

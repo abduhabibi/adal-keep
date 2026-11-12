@@ -16,6 +16,8 @@ import './index.css'
 // something changed, they all run at once (lib/changes.js) — so every list,
 // count and status on screen follows the change without waiting.
 const liveRefreshes = new Map()
+// This device's wallpaper behind the pages (lib/wallpaper.js).
+import('./lib/wallpaper.js').then(w => w.showWallpaper()).catch(() => {})
 // Out of focus (another window or tab in front): every animation stops (index.css).
 if (typeof window !== 'undefined') {
   const still = () => document.documentElement.classList.toggle('adal-still', document.hidden || !document.hasFocus())

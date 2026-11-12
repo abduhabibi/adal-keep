@@ -34,7 +34,7 @@ const GLOBAL = ['/profiles', '/brokers', '/tasks', '/employees', '/settings', '/
   '/automations/stages', '/automations/active', '/notifications', '/checklists', '/cv/templates', '/quick-links',
   '/dashboard', '/tasks/documents', '/wafid/settings', '/health', '/tutor/tour', '/trash', '/cv/generated',
   '/lmis/accounts', '/musaned/accounts', '/tasheer/accounts', '/insurance/accounts', '/visa/accounts',
-  '/automations/ready-for-submit', '/tutor/adoption', '/main-pc']
+  '/automations/ready-for-submit', '/tutor/adoption', '/main-pc', '/plan', '/whatsapp', '/whatsapp/agents']
 const PER_PROFILE = (id) => [`/profiles/${id}`, `/profiles/${id}/fields`, `/profiles/${id}/automations`,
   `/profiles/${id}/journey`, `/profiles/${id}/fill-plan`, `/cv/profile-readiness/${id}`, `/cv/generated?profile_id=${id}`]
 // A broker's page: the broker and the profiles it brought (text only).

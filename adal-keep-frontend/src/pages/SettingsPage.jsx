@@ -29,6 +29,8 @@ import PlanCard from '../components/PlanCard'
 import EproSignatureCard from '../components/EproSignatureCard'
 
 // The tabs of Settings: [id, icon, name].
+// The phone app, or a phone-sized screen.
+const isPhoneView = () => !!window.Capacitor?.isNativePlatform?.() || import.meta.env.VITE_PHONE === '1' || (typeof matchMedia !== 'undefined' && matchMedia('(max-width: 767px)').matches)
 const SETTINGS_TABS = [
   ['agency', '🏢', 'Agency'],
   ['plan', '⭐', 'Plan'],
@@ -45,7 +47,9 @@ export default function SettingsPage() {
   const [params, setParams] = useSearchParams()
   // ?tab=whatsapp (older links) opens Integrations, where WhatsApp now is.
   const asked = params.get('tab') === 'whatsapp' ? 'integrations' : params.get('tab')
-  const tab = SETTINGS_TABS.some(([id]) => id === asked) ? asked : 'agency'
+  // A phone has no Transitions (moving from another system is done on a PC).
+  const TABS = window.__ADAL_CLOUD || isPhoneView() ? SETTINGS_TABS.filter(([id]) => id !== 'transitions') : SETTINGS_TABS
+  const tab = TABS.some(([id]) => id === asked) ? asked : 'agency'
   const setTab = (id) => { setParams(id === 'agency' ? {} : { tab: id }, { replace: true }); window.scrollTo({ top: 0 }) }
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -99,13 +103,10 @@ export default function SettingsPage() {
     }
   }
 
+  // The wallpaper is this device's own (lib/wallpaper.js): PC or phone.
   const loadWallpaper = async () => {
-    try {
-      const res = await api.get(`/wallpaper?t=${Date.now()}`, { responseType: 'blob' })
-      setCurrentWallpaper(URL.createObjectURL(res.data))
-    } catch {
-      setCurrentWallpaper(null)
-    }
+    const { currentWallpaper } = await import('../lib/wallpaper')
+    setCurrentWallpaper(await currentWallpaper())
   }
 
   const chooseTheme = (t) => setTheme(applyTheme(t))
@@ -114,17 +115,14 @@ export default function SettingsPage() {
   const handleWallpaperUpload = async (e) => {
     const file = e.target.files?.[0]
     if (!file) return
-    if (file.size > 5 * 1024 * 1024) return toast.error('Max 5MB')
+    if (file.size > 25 * 1024 * 1024) return toast.error('Max 25 MB')
     setUploadingWallpaper(true)
-    const fd = new FormData()
-    fd.append('wallpaper', file)
     try {
-      await api.post('/settings/wallpaper', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
-      toast.success('Wallpaper updated')
-      loadWallpaper()
-      window.dispatchEvent(new Event('wallpaper-changed'))
-    } catch {
-      toast.error('Upload failed')
+      const { setWallpaper } = await import('../lib/wallpaper')
+      setCurrentWallpaper(await setWallpaper(file))
+      toast.success('Wallpaper set on this device')
+    } catch (err) {
+      toast.error(err?.message || 'That picture could not be used')
     } finally {
       setUploadingWallpaper(false)
     }
@@ -133,10 +131,10 @@ export default function SettingsPage() {
   const handleRemoveWallpaper = async () => {
     if (!confirm('Remove wallpaper?')) return
     try {
-      await api.delete('/settings/wallpaper')
+      const { removeWallpaper } = await import('../lib/wallpaper')
+      await removeWallpaper()
       setCurrentWallpaper(null)
       toast.success('Removed')
-      window.dispatchEvent(new Event('wallpaper-changed'))
     } catch {
       toast.error('Failed')
     }
@@ -206,7 +204,7 @@ export default function SettingsPage() {
       />
       {/* Settings in tabs — a short page instead of one long scroll. */}
       <nav className="sticky top-0 z-20 -mx-1 flex gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-white/90 p-1 backdrop-blur dark:border-slate-700 dark:bg-slate-900/90" translate="no">
-        {SETTINGS_TABS.map(([id, icon, label]) => (
+        {TABS.map(([id, icon, label]) => (
           <button key={id} type="button" onClick={() => setTab(id)}
             className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${tab === id ? 'bg-teal-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'}`}>
             <span>{icon}</span>{label}
@@ -491,7 +489,7 @@ export default function SettingsPage() {
           <div className="flex flex-col justify-center gap-3">
             <label className="flex flex-col items-center justify-center h-32 border-2 border-dashed rounded-xl cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800">
               <span className="text-sm text-slate-500">{uploadingWallpaper ? 'Uploading…' : 'Upload wallpaper'}</span>
-              <input type="file" className="hidden" accept="image/jpeg,image/png" onChange={handleWallpaperUpload} />
+              <input type="file" className="hidden" accept="image/*" onChange={handleWallpaperUpload} />
             </label>
             {currentWallpaper && (
               <button onClick={handleRemoveWallpaper} className="text-sm text-red-600">Remove</button>

@@ -657,3 +657,15 @@ body[data-picking="1"] .search-pad { display: none !important; }
 html.adal-still *, html.adal-still *::before, html.adal-still *::after {
   animation-play-state: paused !important;
 }
+
+/* This device's wallpaper (lib/wallpaper.js): behind every page, darkened a
+   little so the text stays readable; the theme's own backdrop steps aside. */
+html.has-wallpaper .app-shell {
+  background-image: linear-gradient(rgba(2, 6, 23, 0.55), rgba(2, 6, 23, 0.55)), var(--adal-wallpaper) !important;
+  background-size: cover !important;
+  background-position: center !important;
+}
+html.has-wallpaper:not(.dark) .app-shell {
+  background-image: linear-gradient(rgba(248, 250, 252, 0.6), rgba(248, 250, 252, 0.6)), var(--adal-wallpaper) !important;
+}
+html.has-wallpaper .gradient-backdrop { display: none !important; }

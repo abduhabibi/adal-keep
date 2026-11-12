@@ -8,6 +8,8 @@ import Spinner from '../components/shared/Spinner'
 import Input from '../components/shared/Input'
 import { profilesList } from '../lib/profilesCache'
 import { cachedGet } from '../lib/deviceCache'
+import Modal from '../components/shared/Modal'
+import Button from '../components/shared/Button'
 
 export default function BrokersPage() {
   const navigate = useNavigate()
@@ -15,6 +17,27 @@ export default function BrokersPage() {
   const [profiles, setProfiles] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  // + Add broker (here too — on a phone as on a PC).
+  const [adding, setAdding] = useState(false)
+  const [form, setForm] = useState({ name: '', contact1: '', address: '' })
+  const [saving, setSaving] = useState(false)
+  const addBroker = async (e) => {
+    e.preventDefault()
+    if (!form.name.trim()) return toast.error('የደላላ ስም ያስፈልጋል')
+    setSaving(true)
+    try {
+      let by = ''
+      try { const a = JSON.parse(localStorage.getItem('adal_active_employee') || 'null'); by = a?.name || a?.full_name || a?.username || '' } catch {}
+      const { data } = await api.post('/brokers', { ...form, name: form.name.trim(), created_by: by || 'unknown' })
+      toast.success(data?.queued ? 'ደላላ ተፈጥሯል — the PC saves it when it is on' : 'ደላላ ተፈጥሯል')
+      setAdding(false)
+      setForm({ name: '', contact1: '', address: '' })
+      if (data?.queued) setBrokers(bs => [...bs, data])
+      else loadData()
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'መቀመጥ አልተቻለም')
+    } finally { setSaving(false) }
+  }
 
   useEffect(() => {
     loadData()
@@ -56,12 +79,15 @@ export default function BrokersPage() {
         title="ደላሎች"
         subtitle="ሁሉም ደላሎች · ለዝርዝር ጠቅ ያድርጉ"
         action={
-          <div className="w-full sm:w-64">
-            <Input
-              placeholder="ደላላ ይፈልጉ..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
+          <div className="flex w-full items-center gap-2 sm:w-auto">
+            <div className="min-w-0 flex-1 sm:w-64">
+              <Input
+                placeholder="ደላላ ይፈልጉ..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+            <Button onClick={() => setAdding(true)} className="shrink-0">+ ደላላ አክል</Button>
           </div>
         }
       />
@@ -72,7 +98,7 @@ export default function BrokersPage() {
 
       {filtered.length === 0 ? (
         <div className="text-center py-20 text-slate-400">
-          {search ? 'ምንም ደላላ አልተገኘም' : 'እስካሁን ደላላ የለም · ከሰራተኞች ገጽ ይፍጠሩ'}
+          {search ? 'ምንም ደላላ አልተገኘም' : 'እስካሁን ደላላ የለም · + ደላላ አክል ይጫኑ'}
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
@@ -108,6 +134,17 @@ export default function BrokersPage() {
           })}
         </div>
       )}
+      <Modal isOpen={adding} onClose={() => setAdding(false)} title="አዲስ ደላላ አክል" size="sm">
+        <form onSubmit={addBroker} className="space-y-4">
+          <Input label="የደላላ ስም *" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required autoFocus />
+          <Input label="ስልክ ቁጥር" type="tel" inputMode="tel" value={form.contact1} onChange={(e) => setForm({ ...form, contact1: e.target.value })} />
+          <Input label="አድራሻ" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
+          <div className="flex justify-end gap-3 pt-2">
+            <Button type="button" variant="secondary" onClick={() => setAdding(false)}>ሰርዝ</Button>
+            <Button type="submit" isLoading={saving}>ፍጠር</Button>
+          </div>
+        </form>
+      </Modal>
     </div>
   )
 }

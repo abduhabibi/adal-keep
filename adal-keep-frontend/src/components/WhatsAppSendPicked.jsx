@@ -16,11 +16,13 @@ export default function WhatsAppSendPicked({ picked, onClose }) {
   const [agents, setAgents] = useState(null)
   const [to, setTo] = useState(new Set())
   const [job, setJob] = useState(null)
+  const [had, setHad] = useState({})   // agent id → the picked profiles it already has
 
   useEffect(() => {
     wa.get('/whatsapp').then(r => setConn(r.data)).catch(() => setConn(false))
     wa.get('/whatsapp/agents').then(r => setAgents((r.data || []).filter(a => a.active))).catch(() => setAgents([]))
     wa.get('/whatsapp/bulk').then(r => r.data?.running && setJob(r.data)).catch(() => {})
+    wa.get('/whatsapp/sent', { params: { profile_ids: picked.map(p => p.id).join(',') } }).then(r => setHad(r.data || {})).catch(() => {})
   }, [])
   useEffect(() => {
     if (!job?.running) return
@@ -39,7 +41,11 @@ export default function WhatsAppSendPicked({ picked, onClose }) {
   const flip = (id) => setTo(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
   const send = async () => {
     if (!to.size) return toast.error('Pick the agents (or Select all)')
-    try { setJob((await wa.post('/whatsapp/bulk', { profile_ids: picked.map(p => p.id), agent_ids: [...to] })).data); toast.success(`Sending ${picked.length} CV${picked.length === 1 ? '' : 's'} to ${to.size} agent${to.size === 1 ? '' : 's'}…`) }
+    try {
+      const { data } = await wa.post('/whatsapp/bulk', { profile_ids: picked.map(p => p.id), agent_ids: [...to] })
+      // A phone with the PC off: it is sent the moment the PC is on.
+      if (data?.queued) return toast.success(`${picked.length} CV${picked.length === 1 ? '' : 's'} to ${to.size} agent${to.size === 1 ? '' : 's'}: sent as soon as the PC is on`, { duration: 7000 })
+      setJob(data); toast.success(`Sending ${picked.length} CV${picked.length === 1 ? '' : 's'} to ${to.size} agent${to.size === 1 ? '' : 's'}…`) }
     catch (e) { toast.error(err(e)) }
   }
 
@@ -65,6 +71,12 @@ export default function WhatsAppSendPicked({ picked, onClose }) {
               <input type="checkbox" checked={to.has(a.id)} onChange={() => flip(a.id)} />
               <span className="min-w-0 flex-1 truncate font-medium">{a.name}</span>
               {a.musaned_office && <span className="truncate text-[10px] text-slate-500">{a.musaned_office}</span>}
+              {had[a.id]?.length > 0 && (
+                <span className="shrink-0 rounded bg-amber-100 px-1 text-[10px] font-semibold text-amber-800 dark:bg-amber-900/30 dark:text-amber-200"
+                  title={`Already sent before: ${picked.filter(p => had[a.id].includes(p.id)).map(p => p.full_name).join(', ')}`}>
+                  has {had[a.id].length}/{picked.length}
+                </span>
+              )}
             </label>
           ))}
         </div>

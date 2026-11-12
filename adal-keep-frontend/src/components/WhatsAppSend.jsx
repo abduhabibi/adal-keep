@@ -45,8 +45,20 @@ export default function WhatsAppSend({ profile }) {
 
   // WhatsApp outside this agency's plan: not offered here (Settings → Plan says so).
   if (plan?.features?.find(f => f.key === 'whatsapp')?.state === 'off') return null
-  if (!due || profile.chosen_at || !conn || (!agents.length && !sends.length)) return null
-  const ready = conn.status === 'ready'
+  // Where her CV went is always shown (even after she is chosen, or with
+  // WhatsApp off); sending only while it can still be sent.
+  const canSend = due && !profile.chosen_at && !!conn && agents.length > 0
+  if (!canSend && !sends.length) return null
+  const ready = conn?.status === 'ready'
+  // Each agent she was ever sent to: how many times, first and last.
+  const everTo = new Map()
+  for (const s of [...sends].reverse()) {
+    if (s.status === 'failed') continue
+    const e = everTo.get(s.agent_id) || { name: s.agent_name || 'Agent', times: 0, first: s.sent_at, last: s.sent_at }
+    e.times++; e.last = s.sent_at
+    everTo.set(s.agent_id, e)
+  }
+  const day = (t) => t ? new Date(t).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' }) : ''
   const send = async (ids) => {
     setBusy(true)
     const t = toast.loading('Making the CVs and sending…')
@@ -62,13 +74,15 @@ export default function WhatsAppSend({ profile }) {
   }
   // Newest line per agent.
   const latest = [...new Map([...sends].reverse().map(s => [`${s.agent_id}-${s.template_id}`, s])).values()]
+  const timesTo = (id) => everTo.get(id)?.times || 0
 
   return (
     <div className="panel p-4">
       <div className="flex flex-wrap items-center gap-2">
         <p className="font-display font-bold">💬 CV on WhatsApp</p>
-        {!ready && <span className="text-xs text-amber-700">WhatsApp is not connected (Settings → Integrations)</span>}
-        {!profile.chosen_at && agents.length > 0 && (
+        {everTo.size > 0 && <span className="rounded-full bg-sky-50 px-2 py-0.5 text-xs font-semibold text-sky-800 dark:bg-sky-900/30 dark:text-sky-300">sent to {everTo.size} agent{everTo.size === 1 ? '' : 's'}</span>}
+        {canSend && !ready && <span className="text-xs text-amber-700">WhatsApp is not connected (Settings → Integrations)</span>}
+        {canSend && (
           <span className="ml-auto flex gap-2">
             <Button size="sm" variant="secondary" disabled={!ready || busy} onClick={() => setPick(pick ? null : new Set())}>Choose agents</Button>
             <Button size="sm" disabled={!ready || busy} onClick={() => { if (confirm(`Send ${profile.full_name}'s CV to all ${agents.length} agent(s)?`)) send([]) }}>📤 Show for all</Button>
@@ -79,8 +93,9 @@ export default function WhatsAppSend({ profile }) {
         <div className="mt-3 flex flex-wrap items-center gap-1.5">
           {agents.map(a => (
             <button key={a.id} type="button" onClick={() => { const n = new Set(pick); n.has(a.id) ? n.delete(a.id) : n.add(a.id); setPick(n) }}
-              className={`rounded-full border px-2.5 py-1 text-xs ${pick.has(a.id) ? 'border-teal-500 bg-teal-600 text-white' : 'border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800'}`}>
-              {a.name}
+              title={everTo.has(a.id) ? `Already sent to ${a.name}: ${everTo.get(a.id).times}× · last ${day(everTo.get(a.id).last)}` : ''}
+              className={`rounded-full border px-2.5 py-1 text-xs ${pick.has(a.id) ? 'border-teal-500 bg-teal-600 text-white' : everTo.has(a.id) ? 'border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-200' : 'border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800'}`}>
+              {a.name}{everTo.has(a.id) && <span className="ml-1 opacity-80">· sent {day(everTo.get(a.id).last)}</span>}
             </button>
           ))}
           <Button size="sm" disabled={!pick.size || busy} onClick={() => send([...pick])}>Send to {pick.size || ''}</Button>
@@ -95,6 +110,7 @@ export default function WhatsAppSend({ profile }) {
                 <span className="font-semibold">{s.agent_name || 'Agent'}</span>
                 {s.template_name && <span className="text-xs text-slate-500">{s.template_name}</span>}
                 <span className={`rounded-full px-2 py-0.5 text-xs ${cls}`}>{label}</span>
+                {timesTo(s.agent_id) > 1 && <span className="text-xs text-slate-500">sent {timesTo(s.agent_id)}× · first {day(everTo.get(s.agent_id)?.first)}</span>}
                 <span className="ml-auto text-xs text-slate-400">{new Date(s.sent_at).toLocaleString()}</span>
                 {s.status === 'failed' && s.error && <span className="w-full text-xs text-red-600">{s.error}</span>}
               </li>

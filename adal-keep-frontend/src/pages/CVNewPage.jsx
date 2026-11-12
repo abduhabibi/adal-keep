@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import api from '../services/api'
+import PickBrokerHere from '../components/PickBrokerHere'
 import PageHeader from '../components/shared/PageHeader'
 import Button from '../components/shared/Button'
 import Input from '../components/shared/Input'
@@ -195,6 +196,18 @@ export default function CVNewPage() {
     return () => URL.revokeObjectURL(url)
   }, [previewHtml])
 
+  // Her broker set here: the readiness again (the block goes) and the broker's phone.
+  const reloadReadiness = async (setId) => {
+    // A phone with the PC off: the broker shows at once (the PC saves it when it is on).
+    if (setId) setReadiness(r => r ? { ...r, profile: { ...(r.profile || {}), broker_id: setId } } : r)
+    try {
+      const r = await api.get(`/cv/profile-readiness/${profileId}`, { adalNoCache: true })
+      setReadiness(setId && !r.data?.profile?.broker_id ? { ...r.data, profile: { ...(r.data.profile || {}), broker_id: setId } } : r.data)
+      const bid = r.data?.profile?.broker_id || setId
+      if (bid) { try { setBroker((await api.get(`/brokers/${bid}`)).data) } catch {} }
+    } catch {}
+  }
+
   const validate = () => {
     if (!readiness) return 'Not ready'
     if (!readiness.profile?.broker_id) return 'Assign a broker to this profile first'
@@ -329,9 +342,13 @@ export default function CVNewPage() {
       {blocker && (
         <div className="panel p-4 border-l-4 border-l-red-500">
           <p className="text-sm font-semibold text-red-700 dark:text-red-400">⚠ {blocker}</p>
-          <p className="text-xs text-slate-500 mt-1">
-            Fix this on the profile page, then come back. Your form input is being saved automatically.
-          </p>
+          {!readiness?.profile?.broker_id ? (
+            <PickBrokerHere profileId={profileId} onDone={reloadReadiness} />
+          ) : (
+            <p className="text-xs text-slate-500 mt-1">
+              Fix this on the profile page, then come back. Your form input is being saved automatically.
+            </p>
+          )}
         </div>
       )}
 

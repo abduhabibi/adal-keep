@@ -133,6 +133,15 @@ async function get(path, query) {
     return fields.find(f => String(f.id) === files[2])?.files || []
   }
   if (path === '/cv/generated' && query.profile_id) return (await answer(`/cv/generated?profile_id=${query.profile_id}`)) || []
+  // A checklist's girls and their documents, from the list and each one's fields.
+  const live = path.match(/^\/checklists\/(\d+)\/live$/)
+  if (live) {
+    const me = ((await answer('/checklists')) || []).find(c => String(c.id) === live[1])
+    const profiles = me?.profiles || []
+    const fields = {}
+    for (const p of profiles) fields[p.id] = (await answer(`/profiles/${p.id}/fields`)) || []
+    return { profiles, fields }
+  }
   const data = await answer(path)
   if (data === undefined) throw httpError(503, 'This needs the PC — it is not in the online copy.')
   return data
@@ -170,6 +179,12 @@ function optimistic(method, path, body) {
     if (cache[path]) remember(path, { ...cache[path], ...body })
     if (Array.isArray(cache['/profiles'])) remember('/profiles', cache['/profiles'].map(p => String(p.id) === one[1] ? { ...p, ...body } : p))
     return { ...(cache[path] || {}), ...body, success: true, queued: true }
+  }
+  // A new broker shows on the phone at once (the PC gives it its number when it is on).
+  if (method === 'post' && path === '/brokers' && body && typeof body === 'object') {
+    const b = { id: -Date.now(), ...body, created_at: new Date().toISOString(), queued: true }
+    remember('/brokers', [...(Array.isArray(cache['/brokers']) ? cache['/brokers'] : []), b])
+    return { ...b, success: true }
   }
   return { ok: true, success: true, queued: true, message: 'Saved — the PC carries it out when it is on.' }
 }

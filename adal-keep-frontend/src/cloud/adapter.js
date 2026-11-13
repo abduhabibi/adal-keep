@@ -160,6 +160,15 @@ const matchText = (p, q) => {
 async function get(path, query) {
   if (path === '/auth/me') throw httpError(401, 'Not signed in')
   if (path === '/mobile/ping' || path === '/tasks/calls') return path === '/tasks/calls' ? [] : { ok: true, cloud: true }
+  // The dashboard's counts from the phone's own list of profiles: never older than the list.
+  if (path === '/dashboard') {
+    const d = (await answer('/dashboard')) || {}
+    const all = await answer('/profiles')
+    if (!Array.isArray(all)) return d
+    const statusCounts = {}
+    for (const p of all) statusCounts[p.status || 'pending'] = (statusCounts[p.status || 'pending'] || 0) + 1
+    return { ...d, totalProfiles: all.length, statusCounts: { ...(d.statusCounts || {}), ...statusCounts } }
+  }
   if (path === '/profiles') {
     const all = (await answer('/profiles')) || []
     return all.filter(p => (!query.broker_id || String(p.broker_id) === String(query.broker_id))

@@ -284,10 +284,21 @@ export async function musanedSignIn(db, page, accountId, say, check) {
       if (f.captcha) say(`${acct.name} is filled in: type the picture's letters in the Musaned window and press Log in`)
     }
     // Signed in: Musaned shows its agencies — this account's own card, then the dashboard.
-    for (const end = Date.now() + 5 * 60_000; Date.now() < end;) {
+    // (Up to 30 minutes: the person types the picture's letters when they get to it.)
+    let denied = 0
+    for (const end = Date.now() + 30 * 60_000; Date.now() < end;) {
       check()
       // Signed in already (by the person, or Musaned in Arabic): a Musaned page that is not the sign-in.
       const at = (() => { try { return new URL(page.url()) } catch { return null } })()
+      // Musaned's "Access Denied" (/403): a page opened before the agency was chosen.
+      // Back to its front page, where the agency's own card is chosen again.
+      if (at && at.host === 'tawtheeq.musaned.com.sa' && /^\/403\b/.test(at.pathname)) {
+        if (++denied > 3) { say('Musaned keeps saying "Access Denied": choose the agency on the first Musaned page in that window'); return }
+        say('Musaned said "Access Denied" — choosing the agency again')
+        await page.goto('https://tawtheeq.musaned.com.sa/', { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {})
+        await sleep(3000)
+        continue
+      }
       if (at && at.host === 'tawtheeq.musaned.com.sa' && /^\/(hr-pool|employment-requests|dashboard|candidates|contracts|organizations)/.test(at.pathname)) return
       const s = await w.snapshotState(page).catch(() => null)
       // The agency's card first: "Organizations" is on that page too, and the HR pool opened before it is "Access Denied".

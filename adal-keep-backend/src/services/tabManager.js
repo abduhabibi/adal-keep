@@ -447,10 +447,14 @@ export async function borrowSignIn(page, peer) {
     const other = await t.page().catch(() => null)
     if (!other) continue
     const st = await other.evaluate(() => ({
+      // A site's public front page (LMIS's home with its Login button) is not signed in.
+      pub: (() => { const t = [...document.querySelectorAll('a, button')].map(e => (e.innerText || '').trim()); return t.some(x => /^(log ?in|sign ?in)$/i.test(x)) && !t.some(x => /log ?out|sign ?out|ውጣ/i.test(x)) })(),
       pw: !!document.querySelector('input[type="password"]'),
+      drawn: document.readyState === 'complete' && (document.body?.innerText || '').trim().length > 80,
       data: JSON.stringify(Object.fromEntries(Object.keys(sessionStorage).map(k => [k, sessionStorage.getItem(k)]))),
     })).catch(() => null)
-    if (!st || st.pw) continue
+    // (A page still drawing itself — little text yet — is not taken as signed in either.)
+    if (!st || st.pw || st.pub || !st.drawn) continue
     await page.evaluateOnNewDocument((data, hosts) => {
       try {
         const h = location.hostname

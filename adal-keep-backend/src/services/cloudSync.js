@@ -334,7 +334,10 @@ async function pushAnswers(db, agency, state, { light = false } = {}) {
     try { data = clean(key, JSON.parse(text)) } catch { continue }
     const body = JSON.stringify(data)
     const hash = sha(body)
-    if (state.get(key) === hash) continue
+    // The full sweep sends the agency's own pages (the dashboard, the lists…)
+    // even when this PC thinks they are online already: what it remembers and
+    // what is online can part (the dashboard stayed a day behind its list).
+    if (state.get(key) === hash && !(full && GLOBAL.includes(key))) continue
     batch.push({ row: { agency_id: agency, key, data, updated_at: new Date().toISOString() }, hash, readAt: Date.now() })
     if (batch.length >= 20) await flush()
   }

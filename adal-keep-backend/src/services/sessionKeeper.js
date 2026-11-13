@@ -56,7 +56,28 @@ export async function keepAlive() {
         const st = await Promise.race([import('./musanedWorkflow.js').then(w => w.snapshotState(p)).catch(() => null), new Promise(r => setTimeout(() => r(null), 8000))])
         inNow = !!(st && (st.hasDashboardNav || st.hasHrPoolPage) && !st.hasPassword)
       }
+      // LMIS's public home (a Login button, nothing to log out of) is not signed in.
+      if (inNow && site.key === 'lmis') {
+        const pub = await Promise.race([p.evaluate(() => { const pub = (() => { const t = [...document.querySelectorAll('a, button')].map(e => (e.innerText || '').trim()); return t.some(x => /^(log ?in|sign ?in)$/i.test(x)) && !t.some(x => /log ?out|sign ?out|ውጣ/i.test(x)) })(); return pub }).catch(() => false), new Promise(r => setTimeout(() => r(false), 8000))])
+        if (pub) inNow = false
+      }
       if (inNow) seen[site.key].signedIn = true
+      // Musaned's "Access Denied" (/403, a page opened before the agency was
+      // chosen): back to its front page and the agency's own card again.
+      if (site.key === 'musaned' && /\/403\b/.test(p.url()) && !p.__adalBorrowed && !running.has(Number(p.__adalRunId))) {
+        try {
+          await p.goto('https://tawtheeq.musaned.com.sa/', { waitUntil: 'domcontentloaded', timeout: 60000 })
+          await new Promise(r => setTimeout(r, 3000))
+          const acct = await db('musaned_accounts').orderBy('is_default', 'desc').orderBy('id').first().catch(() => null)
+          const w = await import('./musanedWorkflow.js')
+          const st = await w.snapshotState(p).catch(() => null)
+          const ctx = { db, account_id: acct?.id, musaned_username: acct?.username, musaned_name: acct?.name }
+          if (st?.hasAgencyPicker) { await w.stepClickAgencyCard(p, ctx).catch(() => {}); await w.stepClickGoToDashboard(p, ctx).catch(() => {}) }
+          else if (st?.hasGoToDashboard) await w.stepClickGoToDashboard(p, ctx).catch(() => {})
+          console.log('[sessions] Musaned was on "Access Denied" — back to the agency dashboard')
+        } catch {}
+        continue
+      }
       // Never a tab a robot is working in, nor one a person is typing in.
       if (!inNow || p.__adalBorrowed || running.has(Number(p.__adalRunId))) continue
       try {
@@ -123,6 +144,40 @@ export async function openSite(key, database = null) {
           keepAlive().catch(() => {})
         })
         .catch(e => console.warn('[sessions] Musaned sign-in:', e.message))
+      return { ok: true, auto: true }
+    }
+  }
+  // Enjaz (visa): its company sign-in, in English, the saved account filled — the person types the picture's numbers.
+  if (key === 'mofa' && db) {
+    const acct = await db('visa_accounts').orderBy('is_default', 'desc').orderBy('id').first().catch(() => null)
+    if (acct?.username && acct?.password) {
+      const v = await import('./mofaVisa.js')
+      const { toEnglish } = await import('./tabManager.js')
+      ;(async () => {
+        await page.goto(v.VISA_LOGIN_URL, { waitUntil: 'domcontentloaded', timeout: 120000 }).catch(() => {})
+        await new Promise(r => setTimeout(r, 2500))
+        await toEnglish(page, {}).catch(() => {})
+        for (let i = 0; i < 20; i++) {
+          if (await v.fillVisaLogin(page, { visa_username: acct.username, visa_password: acct.password }).catch(() => 'no-form') === 'filled') break
+          await new Promise(r => setTimeout(r, 1500))
+        }
+        console.log('[sessions] Enjaz: the sign-in is filled — the person types the numbers and presses Login')
+      })().catch(e => console.warn('[sessions] Enjaz sign-in:', e.message))
+      return { ok: true, auto: true }
+    }
+  }
+  // LMIS: its own sign-in (the saved account, Sign In pressed) — the person types the SMS code in the window.
+  if (key === 'lmis' && db) {
+    const acct = await db('lmis_accounts').orderBy('is_default', 'desc').orderBy('id').first().catch(() => null)
+    if (acct && (acct.login_value || acct.phone) && acct.password) {
+      const { stepLogin } = await import('./lmisWorkflow.js')
+      const ctx = {
+        login_value: acct.login_value || acct.phone, login_password: acct.password, account_name: acct.name, account_id: acct.id,
+        profileName: 'Morning sign-in', onLog: (level, msg) => console.log('[sessions] LMIS:', msg), notify: async () => {},
+      }
+      // Straight to its sign-in page (its home page is public and only looks signed in).
+      await page.goto('https://lmis.gov.et/auth', { waitUntil: 'domcontentloaded', timeout: 120000 }).catch(() => {})
+      stepLogin(page, ctx).then(() => keepAlive().catch(() => {})).catch(e => console.warn('[sessions] LMIS sign-in:', e.message))
       return { ok: true, auto: true }
     }
   }

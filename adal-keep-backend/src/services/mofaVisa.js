@@ -1015,4 +1015,4 @@ export async function runMofaFindApp(page, ctx) {
   }
   return { ok: true, done: true, seconds: secs() }
 }
-export { captchaPicture, typeCaptcha, pressLogin }   // tests
+export { captchaPicture, typeCaptcha, pressLogin, fillLogin as fillVisaLogin, LOGIN_URL as VISA_LOGIN_URL }   // tests and Morning sign-in

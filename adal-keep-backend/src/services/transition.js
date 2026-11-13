@@ -89,7 +89,14 @@ export function checkLink(link) {
   try { u = new URL(/^https?:\/\//i.test(String(link || '').trim()) ? String(link).trim() : `https://${String(link || '').trim()}`) }
   catch { throw new Error('Paste the Pextran address, for example https://zadulmead.agency.pextran.com/') }
   if (!/(^|\.)pextran\.com$/i.test(u.hostname)) throw new Error('That is not a Pextran address (it ends in pextran.com)')
-  return `https://${u.hostname}/`
+  // The sign-in page's address carries the agency's own one.
+  const back = u.searchParams.get('callbackUrl') || u.searchParams.get('callbackurl')
+  if (back) { try { const b = new URL(back); if (/(^|\.)pextran\.com$/i.test(b.hostname)) u = b } catch {} }
+  let host = u.hostname.toLowerCase()
+  const m = host.match(/^([a-z0-9-]+)\.(?:(?:home|tenant|finance|app|www)\.)?pextran\.com$/)
+  if (m && !/^(www|home|tenant|finance|app|agency|api)$/.test(m[1])) host = `${m[1]}.agency.pextran.com`
+  if (!/^[a-z0-9-]+\.agency\.pextran\.com$/.test(host)) throw new Error('Paste your agency\'s own Pextran address, for example https://zadulmead.agency.pextran.com/')
+  return `https://${host}/`
 }
 
 // ── Reading a person out of whatever shape the site uses ─────────────────────
@@ -347,7 +354,7 @@ export function startTransition(db, id, link, deps = {}) {
   if (['signing-in', 'copying'].includes(stateOf(id).status)) return stateOf(id)
   const url = link || source.url
   if (!url) throw new Error('Paste the address first')
-  set(id, { ...blank(), status: 'signing-in', step: `Sign in to ${source.name} in the window that opened` })
+  set(id, { ...blank(), status: 'signing-in', step: `Sign in to ${source.name} in the window that opened`, site: url })
   // A move takes hours on a slow line: the PC must not sleep in the middle.
   const letSleep = (deps.keepAwake || keepAwake)(`moving from ${source.name}`)
   run(db, id, source, url, deps).finally(letSleep).then(async () => {
@@ -502,6 +509,7 @@ async function run(db, id, source, url, deps) {
     const seen = new Set()
     const pick = () => queue.sort((a, b) => PEOPLE.test(b) - PEOPLE.test(a)).shift()
     const cvPages = []
+    const notFound = []   // pages the site said do not exist (404)
     const take = async () => {
       for (const l of await links(page)) {
         const u = new URL(l)
@@ -518,6 +526,7 @@ async function run(db, id, source, url, deps) {
       seen.add(at)
       set(id, { step: `Reading ${new URL(at).pathname}` })
       await page.goto(at, { waitUntil: 'networkidle2', timeout: 45000 }).catch(() => {})
+      if (await page.evaluate(() => /\b404\b|could not be found|page not found/i.test(document.title + ' ' + (document.body?.innerText || '').slice(0, 600))).catch(() => false)) notFound.push(new URL(at).pathname)
       if (await onSignIn(page)) throw new Error('The site signed out. Press the button again')
       add(findPeople(await readTables(page)))
       await take()
@@ -570,6 +579,17 @@ async function run(db, id, source, url, deps) {
       }
     }
     set(id, { step: `Brokers found: ${brokersFound.size}` })
+    const brokerOf = new Map()   // the site's broker id → Adal Keep broker id
+    if (brokersFound.size && !deps.limit) {
+      set(id, { step: `Making the brokers: ${brokersFound.size}` })
+      const b = await saveBrokers(db, [], brokersFound, source.name)
+      set(id, { brokers: b.created + b.filled })
+      console.log(`[transition ${id}] brokers first: ${b.created} new, ${b.filled} filled`)
+    }
+    for (const r of await db('brokers').where('notes', 'like', `${source.name} broker %`).select('id', 'notes').catch(() => [])) {
+      const m = String(r.notes).split('\n')[0].match(/ broker (.+)$/)
+      if (m) brokerOf.set(m[1], r.id)
+    }
 
     // Lists are often short: her own record says more, when the site has one.
     const [base, firstList] = [...lists.entries()][0] || []
@@ -594,6 +614,7 @@ async function run(db, id, source, url, deps) {
         await sleep(80)
       }
     }
+    if (!people.size && notFound.length) throw new Error(`${source.name} says “page not found” (404) for ${notFound.join(', ')} at ${origin}. Check the address is your agency's own (like https://NAME.agency.pextran.com/) and that this account can open Recruits.`)
     fs.writeFileSync(path.join(folder, 'people.json'), JSON.stringify([...people.values()].map(p => p.raw), null, 1))
 
     // Into Adal Keep.
@@ -605,8 +626,10 @@ async function run(db, id, source, url, deps) {
       for (const { person, raw } of people.values()) {
         check()
         if (deps.limit && n >= deps.limit) break
-        set(id, { step: `Saving ${++n} of ${people.size}: ${person.full_name}` })
+        set(id, { step: `Saving ${++n} of ${people.size}: ${person.full_name}`, saved: n })
         const profileId = await saveProfile(db, id, source, person)
+        const myBroker = brokerOf.get(String(raw.brokerId ?? raw.broker_id ?? raw.data?.brokerId ?? ''))
+        if (myBroker) await db('profiles').where('id', profileId).where(q => q.whereNull('broker_id').orWhere('broker_id', 0)).update({ broker_id: myBroker }).catch(() => {})
         saved.push({ person, raw, profileId })
         const wanted = [...filesOf(raw, origin), ...(source.files?.(raw, origin) || [])]
         for (const f of wanted) {

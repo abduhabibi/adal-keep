@@ -497,14 +497,16 @@ app.post('/api/profiles', async (req, res) => {
       .where('profiles.id', id)
       .first()
 
-    try {
-      const { onProfileUpdated } = await import('./src/services/autoTrigger.js')
-      await onProfileUpdated(db, id)
-    } catch (e) {
-      console.error('[profiles] autoTrigger after create:', e.message)
-    }
-
+    // Saved: the page goes on at once; what the robots start because of it runs behind.
     res.status(201).json(profile)
+    setImmediate(async () => {
+      try {
+        const { onProfileUpdated } = await import('./src/services/autoTrigger.js')
+        await onProfileUpdated(db, id)
+      } catch (e) {
+        console.error('[profiles] autoTrigger after create:', e.message)
+      }
+    })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Failed to create profile' })
@@ -596,14 +598,16 @@ app.put('/api/profiles/:id', async (req, res) => {
       .first()
 
     // AUTO-TRIGGER HOOK
-    try {
-      const { onProfileUpdated } = await import('./src/services/autoTrigger.js')
-      await onProfileUpdated(db, req.params.id)
-    } catch (e) {
-      console.error('[profiles] autoTrigger after update:', e.message)
-    }
-
     res.json(profile)
+    const changedId = req.params.id
+    setImmediate(async () => {
+      try {
+        const { onProfileUpdated } = await import('./src/services/autoTrigger.js')
+        await onProfileUpdated(db, changedId)
+      } catch (e) {
+        console.error('[profiles] autoTrigger after update:', e.message)
+      }
+    })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Failed to update profile' })

@@ -256,6 +256,57 @@ export default function CVNewPage() {
   }
 
   // Makes the PDF and saves it straight to Downloads (no new tab to allow).
+  // Save as: where and under what name is asked first (while the click still
+  // counts), then the PDF is made and written there.
+  const saveAs = async () => {
+    const tid = (showPreview && previewTemplateId) || templateId
+    const err = validate()
+    if (err) return toast.error(err)
+    const who = (readiness?.profile?.full_name || 'CV').replace(/[\\/:*?"<>|]+/g, ' ').trim()
+    const tname = (templates.find(t => String(t.id) === String(tid))?.name || '').replace(/[\\/:*?"<>|]+/g, ' ').trim()
+    const suggested = `${who}${tname ? ' - ' + tname : ''}.pdf`
+    let handle = null, name = suggested
+    if (window.showSaveFilePicker) {
+      try { handle = await window.showSaveFilePicker({ suggestedName: suggested, types: [{ description: 'PDF', accept: { 'application/pdf': ['.pdf'] } }] }) }
+      catch (e) { if (e?.name === 'AbortError') return; handle = null }
+    }
+    if (!handle) {
+      const typed = window.prompt('Save the CV as:', suggested)
+      if (typed == null) return
+      name = /\.pdf$/i.test(typed.trim()) ? typed.trim() : `${typed.trim() || who}.pdf`
+    }
+    setSaving(true)
+    const t = toast.loading('Making the PDF…')
+    try {
+      const primary = form.countries_applying[0] || {}
+      const res = await api.post('/cv/generate', {
+        profile_id: Number(profileId),
+        template_id: Number(tid),
+        overrides: { ...form, country: primary.country || '', salary: primary.salary || 0, currency: primary.currency || 'SAR' },
+      })
+      if (res.data?.queued || !res.data?.download_url) {
+        toast.success('Saved — the office PC makes the PDF when it is on; it then shows under CVs', { id: t, duration: 7000 })
+        return
+      }
+      setGenResult(res.data)
+      if (handle) {
+        const blob = (await api.get(res.data.download_url.replace(/^\/api/, ''), { responseType: 'blob' })).data
+        const w = await handle.createWritable()
+        await w.write(blob); await w.close()
+        toast.success(`Saved as ${handle.name}`, { id: t })
+      } else {
+        const a = document.createElement('a')
+        a.href = res.data.download_url
+        a.download = name
+        document.body.appendChild(a); a.click(); a.remove()
+        if (!window.Capacitor?.Plugins?.AdalDiscovery?.saveFile) toast.success(`Saved as ${name}`, { id: t })
+        else toast.dismiss(t)
+      }
+      try { localStorage.removeItem('cv-draft-' + profileId) } catch {}
+    } catch (e) { toast.error(e.response?.data?.error || e.message || 'Save failed', { id: t }) }
+    finally { setSaving(false) }
+  }
+
   const downloadCurrent = async () => {
     const tid = (showPreview && previewTemplateId) || templateId
     const err = validate()
@@ -352,6 +403,7 @@ export default function CVNewPage() {
             >Reset</button>
             <Button variant="secondary" onClick={generate} isLoading={busy} disabled={!!blocker}>Preview</Button>
             <Button onClick={downloadCurrent} isLoading={saving} disabled={!!blocker}>⬇ Download PDF</Button>
+            <Button variant="secondary" onClick={saveAs} disabled={saving || !!blocker}>💾 Save as…</Button>
           </div>
         }
       />
@@ -609,6 +661,7 @@ export default function CVNewPage() {
         <div className="pt-3 border-t border-slate-100 dark:border-slate-700 flex justify-end gap-2">
           <Button variant="secondary" onClick={generate} isLoading={busy} disabled={!!blocker}>Preview</Button>
           <Button onClick={downloadCurrent} isLoading={saving} disabled={!!blocker}>⬇ Download PDF</Button>
+            <Button variant="secondary" onClick={saveAs} disabled={saving || !!blocker}>💾 Save as…</Button>
         </div>
       </section>
           {/* Preview modal */}
@@ -631,6 +684,14 @@ export default function CVNewPage() {
                   className="px-4 py-1.5 rounded-lg bg-teal-600 text-white text-xs font-semibold hover:bg-teal-700 disabled:opacity-50"
                 >
                   {saving ? 'Saving…' : '⬇ Download PDF'}
+                </button>
+                <button
+                  onClick={saveAs}
+                  disabled={saving}
+                  title="Choose where to save it and its name"
+                  className="px-4 py-1.5 rounded-lg border border-teal-600 text-teal-700 dark:text-teal-300 text-xs font-semibold hover:bg-teal-50 dark:hover:bg-teal-900/30 disabled:opacity-50"
+                >
+                  💾 Save as…
                 </button>
                 <button
                   onClick={() => setShowPreview(false)}

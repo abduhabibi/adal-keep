@@ -334,8 +334,10 @@ router.post('/generated/:id/reformat', async (req, res) => {
     const profile = await db('profiles').where('id', row.profile_id).first()
     if (!profile) return res.status(404).json({ error: 'Profile not found' })
 
-    const data = JSON.parse(row.data_snapshot || '{}')
-    const freshData = await buildTemplateData(db, profile, template, data)
+    // Her details as they are now; from the old CV only what its form chose (salary, country …).
+    const snap = JSON.parse(row.data_snapshot || '{}')
+    const keepFromForm = { salary: snap.SALARY, currency: snap.CURRENCY, country: snap.COUNTRY, contract_years: snap.CONTRACT_YEARS, ref_no: snap.REF_NO, post_applied: snap.POST_APPLIED }
+    const freshData = await buildTemplateData(db, profile, template, Object.fromEntries(Object.entries(keepFromForm).filter(([, v]) => v !== undefined && v !== '')))
     const html = mergeTemplate(template.html_content, template.css_content, freshData)
 
     const slug = (profile.full_name || 'profile').replace(/[^A-Za-z0-9]+/g, '_').slice(0, 40)

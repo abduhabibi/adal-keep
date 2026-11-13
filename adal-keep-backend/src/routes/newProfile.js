@@ -95,12 +95,9 @@ router.post('/new-profile/attach', async (req, res) => {
     const { attachFileToProfile } = await import('../services/profileFiles.js')
     await attachFileToProfile(Number(profileId), 'Passport', file, filename || path.basename(file))
     fs.unlink(file, () => {})
-    let verification = null
-    try {
-      const { runPassportVerification } = await import('../services/verification.js')
-      verification = await runPassportVerification(Number(profileId), { handle: db })
-    } catch {}
-    res.json({ ok: true, ticks: verification?.ticks_count ?? null })
+    // Attached: the page goes on; the passport is checked behind.
+    res.json({ ok: true })
+    import('../services/verification.js').then(v => v.runPassportVerification(Number(profileId), { handle: db })).catch(() => {})
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 

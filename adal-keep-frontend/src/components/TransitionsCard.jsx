@@ -28,7 +28,7 @@ function Result({ s }) {
       {s.status === 'done' && <p className="font-semibold text-teal-700 dark:text-teal-400">✓ Finished</p>}
       {s.status !== 'signing-in' && (
         <p className="text-slate-500">
-          {s.people} found · {s.created} new profiles · {s.updated} filled in · {s.files} files · {s.templates} CV templates
+          {s.brokers ? `${s.brokers} brokers · ` : ''}{s.people} found · {s.created} new profiles · {s.updated} filled in · {s.files} files · {s.templates} CV templates
           {s.skipped > 0 && ` · ${s.skipped} templates could not be made`}
           {s.failed > 0 && ` · ${s.failed} files could not be read: press the button again to try them`}
         </p>

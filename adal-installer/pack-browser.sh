@@ -27,6 +27,12 @@ case "$(uname -s)" in
   *) WINEDEBUG=-all wine "$BASE/adal-installer/tools/seticon.exe" "$WORK/browser/AdalBrowser.exe" "$BASE/adal.ico" | tr -d '\r' ;;
 esac
 rm -f "$OUT"
-( cd "$WORK" && zip -q -r -9 "$OUT.tmp.zip" browser ) && mv "$OUT.tmp.zip" "$OUT"
+# zip where it is installed; else Windows' own tar.exe (it writes .zip too: -a)
+if command -v zip >/dev/null; then
+  ( cd "$WORK" && zip -q -r -9 "$OUT.tmp.zip" browser )
+else
+  ( cd "$WORK" && "${SYSTEMROOT:-C:/Windows}/System32/tar.exe" -a -c -f "$(cygpath -w "$OUT.tmp.zip" 2>/dev/null || echo "$OUT.tmp.zip")" browser )
+fi
+mv "$OUT.tmp.zip" "$OUT"
 echo "$VERSION" > "$DEPS/adal-browser.version"
 echo "   Adal Browser $VERSION: $(du -h "$OUT" | cut -f1)"

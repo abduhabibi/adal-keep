@@ -46,7 +46,13 @@ export const SOURCES = {
       { field: 'Photo', url: `${origin}/api/hrpool/${r.id}/photo/PERSONAL` },
     ] : [],
   },
-  pextran: { name: 'Pextran', url: null },
+  pextran: {
+    name: 'Pextran', url: null, start: ['/recruits', '/brokers'],
+    // Nothing else is opened (submissions, finance, batches …).
+    only: /^\/(recruits|brokers)\/?$/i,
+    // A broker is someone in its broker list — never a person, a photo record or a partner agency.
+    brokersFrom: /\/api\/brokers(\/|\?|$)/i,
+  },
 }
 
 const DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'data', 'transitions')
@@ -364,6 +370,7 @@ async function run(db, id, source, url, deps) {
   const lists = new Map()       // address → how to read it again
   const htmlTemplates = []
   const brokersFound = new Map() // the site's brokers, by its own id
+  const brokerLists = new Map()  // the broker list's address → how to read its next pages
   const add = (found) => {
     for (const f of found) {
       const had = people.get(f.person.passport_number)
@@ -383,7 +390,14 @@ async function run(db, id, source, url, deps) {
       }
       if (!/json/i.test(r.headers()['content-type'] || '') || !['xhr', 'fetch'].includes(req.resourceType())) return
       const json = await r.json()
-      collectBrokers(json, r.url(), brokersFound)
+      const brokerList = source.brokersFrom?.test(r.url())
+      if (!source.brokersFrom || brokerList) collectBrokers(json, r.url(), brokersFound)
+      if (brokerList) {
+        const h0 = req.headers()
+        const n = [json?.data?.data, json?.data, json?.items, json?.results].find(Array.isArray)?.length || 0
+        if (n && !brokerLists.has(r.url().replace(/[?#].*/, ''))) brokerLists.set(r.url().replace(/[?#].*/, ''), { url: r.url(), headers: Object.fromEntries(Object.entries(h0).filter(([k]) => k === 'authorization' || k === 'accept' || k.startsWith('x-'))), json, count: n })
+        return
+      }
       const found = findPeople(json)
       if (/template/i.test(r.url())) htmlTemplates.push(...templatesIn(json))
       if (!found.length) return
@@ -488,6 +502,7 @@ async function run(db, id, source, url, deps) {
       for (const l of await links(page)) {
         const u = new URL(l)
         if (u.origin !== origin) continue
+        if (source.only && !source.only.test(u.pathname)) continue
         if (/\/(cv|print)\b/i.test(u.pathname) && cvPages.length < MAX_TEMPLATES) cvPages.push(u.href)
         if (!AVOID.test(u.pathname) && !hasId(u.pathname) && !seen.has(u.href) && !queue.includes(u.href)) queue.push(u.href)
       }
@@ -531,6 +546,26 @@ async function run(db, id, source, url, deps) {
         await sleep(120)
       }
     }
+
+    for (const l of brokerLists.values()) {
+      let at = l.url, json = l.json, count = l.count
+      for (let i = 0; i < 200; i++) {
+        check()
+        const total = Number(json?.data?.total ?? json?.total ?? 0)
+        const u = new URL(at)
+        const pg = Number(u.searchParams.get('page') || json?.data?.page || 1)
+        if (!total || pg * count >= total) break
+        u.searchParams.set('page', String(pg + 1))
+        if (!u.searchParams.has('pageSize') && count) u.searchParams.set('pageSize', String(count))
+        const got = await ask(page, u.href, l.headers)
+        try { json = JSON.parse(got?.text) } catch { break }
+        const before = brokersFound.size
+        collectBrokers(json, u.href, brokersFound)
+        if (brokersFound.size === before) break
+        at = u.href
+      }
+    }
+    set(id, { step: `Brokers found: ${brokersFound.size}` })
 
     // Lists are often short: her own record says more, when the site has one.
     const [base, firstList] = [...lists.entries()][0] || []

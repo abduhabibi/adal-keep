@@ -302,6 +302,8 @@ async function busyNow(db) {
   let running = 0, waiting = 0
   try { const { runsWorking } = await import('../services/busy.js'); running = runsWorking() } catch {}
   try { if (db) waiting = Number((await db('automation_queue').where('status', 'pending').count({ c: '*' }).first())?.c || 0) } catch {}
+  // A move from another system (Transitions) is lost by a restart: the update waits for it too.
+  try { if ((await import('../services/transition.js')).transitionRunning()) running++ } catch {}
   return { running, waiting, busy: running > 0 || waiting > 0 }
 }
 

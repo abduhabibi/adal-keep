@@ -174,7 +174,8 @@ export async function buildTemplateData(db, profile, template, overrides = {}) {
   const headerUrl = headerFile ? await imageDataUri(resolveStoredPath(headerFile), null, 2000) : ''
   const footerUrl = footerFile ? await imageDataUri(resolveStoredPath(footerFile), null, 2000) : ''
 
-  const merged = { ...profile, ...overrides }
+  const { fieldsFromContract } = await import('./contractFields.js')
+  const merged = { ...profile, ...fieldsFromContract(profile), ...Object.fromEntries(Object.entries(overrides).filter(([, v]) => v !== '' && v != null)) }
   const parse = (v, fallback) => { try { return typeof v === 'string' ? JSON.parse(v) : (v ?? fallback) } catch { return fallback } }
 
   // Skills: what the CV form sent; else what the profile saved; else the

@@ -655,6 +655,7 @@ async function saveDetails(db, browser, page, p, card, cardText, d) {
   }
   for (const k of Object.keys(update)) if (update[k] === '' || update[k] === undefined) delete update[k]
   await db('profiles').where('id', p.id).update(update)
+  try { await (await import('./contractFields.js')).fillFromContracts(db, p.id) } catch (e) { console.warn(`[contracts] ${p.full_name}: details not filled — ${e.message}`) }
 
   // The PDFs at the bottom.
   const saved = []

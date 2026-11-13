@@ -181,6 +181,10 @@ export function readPerson(obj) {
 export function findPeople(json, out = [], depth = 0) {
   if (!json || typeof json !== 'object' || depth > 8) return out
   if (Array.isArray(json)) { for (const v of json) findPeople(v, out, depth + 1); return out }
+  for (const k of ['data', 'result', 'item', 'record', 'payload']) {
+    const inner = json[k]
+    if (inner && typeof inner === 'object' && !Array.isArray(inner) && readPerson(inner)) return findPeople(inner, out, depth + 1)
+  }
   const p = readPerson(json)
   if (p) { out.push({ person: p, raw: json }); return out }
   for (const v of Object.values(json)) findPeople(v, out, depth + 1)
@@ -265,7 +269,7 @@ const ask = (page, url, headers, binary = false, init = {}) => page.evaluate(asy
 const readTables = (page) => page.evaluate(() => [...document.querySelectorAll('table')].flatMap(t => {
   const heads = [...t.querySelectorAll('thead th, thead td')].map(h => h.innerText.trim())
   if (!heads.length) return []
-  return [...t.querySelectorAll('tbody tr')].map(r => Object.fromEntries([...r.cells].map((c, i) => [heads[i] || `c${i}`, c.innerText.trim()])))
+  return [...t.querySelectorAll('tbody tr')].map(r => Object.fromEntries([...r.cells].map((c, i) => { const img = c.querySelector('img'); return [heads[i] || `c${i}`, c.innerText.trim() || (img && (img.currentSrc || img.src)) || ''] })))
 })).catch(() => [])
 
 const links = (page) => page.evaluate(() => [...new Set([...document.querySelectorAll('a[href]')].map(a => a.href))]).catch(() => [])
@@ -425,7 +429,7 @@ async function run(db, id, source, url, deps) {
           const body = t.tBodies?.[0] ? [...t.tBodies[0].rows] : [...t.rows].slice(1)
           for (const r of body) {
             const o = {}
-            ;[...r.cells].forEach((c, i) => { if (head[i]) o[head[i]] = (c.innerText || '').trim() })
+            ;[...r.cells].forEach((c, i) => { if (!head[i]) return; const img = c.querySelector('img'); o[head[i]] = (c.innerText || '').trim() || (img && (img.currentSrc || img.src)) || '' })
             out.push(o)
           }
         }
@@ -574,6 +578,7 @@ async function run(db, id, source, url, deps) {
       let works = 0, tried = 0
       for (const p of people.values()) {
         check()
+        if (deps.limit && tried >= deps.limit) break
         const rid = p.raw.id ?? p.raw._id ?? p.raw.uuid
         if (rid == null || (tried >= 3 && !works)) continue
         tried++
@@ -599,6 +604,7 @@ async function run(db, id, source, url, deps) {
       const saved = []
       for (const { person, raw } of people.values()) {
         check()
+        if (deps.limit && n >= deps.limit) break
         set(id, { step: `Saving ${++n} of ${people.size}: ${person.full_name}` })
         const profileId = await saveProfile(db, id, source, person)
         saved.push({ person, raw, profileId })
@@ -627,7 +633,9 @@ async function run(db, id, source, url, deps) {
       }
       if (brokersFound.size) {
         set(id, { step: 'Making the brokers' })
-        const b = await saveBrokers(db, saved, brokersFound, source.name)
+        // A trial move: only the brokers of the girls it saved.
+        const found = deps.limit ? new Map([...brokersFound].map(([k, v]) => [k, { ...v, __fromBrokerList: false }])) : brokersFound
+        const b = await saveBrokers(db, saved, found, source.name)
         set(id, { brokers: b.created + b.filled })
         console.log(`[transition ${id}] brokers: ${b.created} new, ${b.filled} filled, ${b.assigned} people given theirs`)
       }

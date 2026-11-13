@@ -453,8 +453,9 @@ router.get('/sessions', async (req, res) => {
 router.post('/sessions/:key/open', async (req, res) => {
   try {
     // Tasheer: one sign-in for the agency — "Sign in here" takes it over for this person.
-    if (req.params.key === 'tasheer') return res.json(await (await import('../services/tasheerSession.js')).takeOver(req.app.locals.db, whoAndPc(req)))
-    res.json(await (await import('../services/sessionKeeper.js')).openSite(req.params.key, req.app.locals.db))
+    const accountId = Number(req.body?.account_id) || null   // the account chosen (Morning sign-in asks when there are several)
+    if (req.params.key === 'tasheer') return res.json(await (await import('../services/tasheerSession.js')).takeOver(req.app.locals.db, { ...whoAndPc(req), accountId }))
+    res.json(await (await import('../services/sessionKeeper.js')).openSite(req.params.key, req.app.locals.db, { accountId }))
   } catch (e) { res.status(400).json({ error: e.message }) }
 })
 // Her status, day by day (services/profileDays.js), and FMOL from Musaned's stage.

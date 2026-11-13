@@ -12,19 +12,30 @@ import toast from 'react-hot-toast'
 import api from '../services/api'
 import LiveTab from './LiveTab'
 
+// Each site's list of saved accounts (AI Actions): the visa platform's is /visa/accounts.
+const ACCOUNT_LIST = { mofa: 'visa' }
 const err = (e) => e?.response?.data?.error || e.message
 const when = (iso) => { try { const d = new Date(iso); return d.toDateString() === new Date().toDateString() ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : d.toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) } catch { return '' } }
 
 export default function MorningSignIn() {
   const [sites, setSites] = useState(null)
   const [live, setLive] = useState(null)
+  const [choose, setChoose] = useState(null)   // { site, accounts } while the person picks the account
   const load = () => api.get('/sessions').then(r => setSites(Array.isArray(r.data) ? r.data : [])).catch(() => setSites([]))
   useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t) }, [])
   if (!sites?.length) return null
-  const open = async (s) => {
+  // Sign in: with several accounts for the site, the person chooses which one first.
+  const start = async (s) => {
     if (s.shared && s.signedIn && s.holder?.by && !confirm(`${s.name} is signed in by ${s.holder.by} (${s.holder.pc}). Tasheer allows one sign-in for the agency: sign in as you instead? Their sign-in ends.`)) return
+    let accounts = []
+    try { accounts = (await api.get(`/${ACCOUNT_LIST[s.key] || s.key}/accounts`)).data || [] } catch {}
+    if (accounts.length > 1) return setChoose({ site: s, accounts })
+    open(s, accounts[0]?.id)
+  }
+  const open = async (s, accountId) => {
+    setChoose(null)
     try {
-      const { data } = await api.post(`/sessions/${s.key}/open`)
+      const { data } = await api.post(`/sessions/${s.key}/open`, accountId ? { account_id: accountId } : {})
       if (data?.live) {
         setLive(data.live)
         toast.success(`${s.name}: the name and password are filled — type the captcha and sign in, here`, { duration: 7000 })
@@ -53,13 +64,31 @@ export default function MorningSignIn() {
             </span>
             {s.signedIn && !s.shared
               ? <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-300">Signed in</span>
-              : <button type="button" onClick={() => open(s)} title={s.shared ? 'One sign-in for the agency: this takes it over for you' : ''}
+              : <button type="button" onClick={() => start(s)} title={s.shared ? 'One sign-in for the agency: this takes it over for you' : ''}
                   className={`shrink-0 rounded-lg px-2.5 py-1 text-xs font-semibold ${s.shared && s.signedIn ? 'border border-teal-600 text-teal-700 hover:bg-teal-50 dark:text-teal-300' : 'bg-teal-600 text-white hover:bg-teal-700'}`}>
                   {s.shared && s.signedIn ? 'Sign in here' : 'Sign in'}
                 </button>}
           </div>
         ))}
       </div>
+      {choose && createPortal(
+        <div className="fixed inset-0 z-[80] flex items-end justify-center bg-black/30 sm:items-center" onClick={() => setChoose(null)}>
+          <div onClick={e => e.stopPropagation()} className="solid-sheet w-full max-w-sm space-y-2 rounded-t-2xl border border-slate-200 p-4 shadow-2xl dark:border-slate-700 sm:rounded-2xl"
+            style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}>
+            <p className="font-bold">Sign in to {choose.site.name} as…</p>
+            {choose.accounts.map(a => (
+              <button key={a.id} type="button" onClick={() => open(choose.site, a.id)}
+                className="flex w-full items-center justify-between gap-2 rounded-xl border border-slate-200 px-3 py-2.5 text-left hover:border-teal-400 hover:bg-teal-50 dark:border-slate-700 dark:hover:bg-teal-900/20">
+                <span className="min-w-0">
+                  <span className="block truncate font-semibold">{a.name || a.username || a.login_value}</span>
+                  <span className="block truncate text-xs text-slate-500">{a.username || a.login_value || a.phone || ''}</span>
+                </span>
+                {a.is_default ? <span className="shrink-0 rounded bg-teal-100 px-1.5 text-[10px] font-semibold text-teal-800 dark:bg-teal-900/40 dark:text-teal-200">default</span> : null}
+              </button>
+            ))}
+            <button type="button" onClick={() => setChoose(null)} className="w-full rounded-lg py-2 text-sm text-slate-500">Cancel</button>
+          </div>
+        </div>, document.body)}
       {live && createPortal(<LiveTab runId={live} startFull onClose={() => { setLive(null); load() }} />, document.body)}
     </div>
   )

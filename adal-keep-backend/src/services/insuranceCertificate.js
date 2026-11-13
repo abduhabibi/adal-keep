@@ -414,3 +414,5 @@ async function runGroupCertificate(page, ctx, t0) {
   log(ctx, `✅ ${summary}`)
   return { ok: true, pauseReason: 'awaiting-insurance-save', seconds: secs() }
 }
+
+export { signIn as insuranceSignIn }   // Morning sign-in

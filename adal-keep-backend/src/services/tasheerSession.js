@@ -18,6 +18,7 @@ export const signedInUrl = (url) => { try { const u = new URL(url); return /tash
 
 let tab = null          // the take-over's tab (live view "site-tasheer")
 let watching = false
+let chosen = null       // the Tasheer account chosen for this sign-in
 
 export async function holderOf(db) {
   const r = await db('settings').where({ key: KEY }).first('value').catch(() => null)
@@ -48,10 +49,11 @@ export async function tasheerNow(db) {
 }
 
 /** "Sign in here": the agency's Tasheer sign-in moves to this person. */
-export async function takeOver(db, { by = '', pc = '' } = {}) {
+export async function takeOver(db, { by = '', pc = '', accountId = null } = {}) {
   const working = await db('automation_queue').where('status', 'running').where('workflow_id', 'like', 'tasheer%').first('id').catch(() => null)
   if (working) throw new Error(`A Tasheer robot is working now (run #${working.id}) — wait until it is done, or stop it, then sign in.`)
-  const acct = await db('tasheer_accounts').orderBy('is_default', 'desc').first().catch(() => null)
+  const acct = await (accountId ? db('tasheer_accounts').where('id', Number(accountId)) : db('tasheer_accounts').orderBy('is_default', 'desc')).first().catch(() => null)
+  chosen = acct?.id || null
   if (!acct?.username || !acct?.password) throw new Error('No Tasheer account yet — add one under AI Actions → Tasheer → Login')
   const browser = await getBrowser()
   const pages = (await browser.pages().catch(() => [])).filter(p => onTasheer(p) && !p.isClosed?.())
@@ -89,7 +91,7 @@ function watch(db, page, who) {
         if (page.isClosed?.()) break
         // The form came back empty (a wrong captcha, Cloudflare): filled again.
         if (await hasPassword(page)) {
-          const acct = await db('tasheer_accounts').orderBy('is_default', 'desc').first().catch(() => null)
+          const acct = await (chosen ? db('tasheer_accounts').where('id', chosen) : db('tasheer_accounts').orderBy('is_default', 'desc')).first().catch(() => null)
           const empty = await page.evaluate(() => ![...document.querySelectorAll('input[type="password"]')].some(i => i.value)).catch(() => false)
           if (acct && empty) await fillLogin(page, acct.username, acct.password).catch(() => {})
           continue

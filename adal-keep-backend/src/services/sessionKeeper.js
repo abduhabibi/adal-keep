@@ -124,8 +124,13 @@ export async function sessionsNow() {
 }
 
 /** A window on that site, to sign in (its tab is then kept signed in all day). */
-export async function openSite(key, database = null) {
+export async function openSite(key, database = null, { accountId = null } = {}) {
   if (database) db = database
+  // The account the person chose (Morning sign-in asks when there are several), else the default one.
+  const accountOf = (table, cols) => {
+    const q = db(table)
+    return (accountId ? q.where('id', Number(accountId)) : q.orderBy('is_default', 'desc').orderBy('id')).first(...(cols ? [cols] : [])).catch(() => null)
+  }
   const site = SITES.find(s => s.key === key)
   if (!site) throw new Error('Unknown site')
   const page = await openForPerson()
@@ -133,7 +138,7 @@ export async function openSite(key, database = null) {
   await page.bringToFront().catch(() => {})
   // Musaned: Adal Keep signs in by itself (the saved account and its authenticator code), then the tab goes out of sight.
   if (key === 'musaned' && db) {
-    const acct = await db('musaned_accounts').orderBy('is_default', 'desc').orderBy('id').first('id').catch(() => null)
+    const acct = await accountOf('musaned_accounts', 'id')
     if (acct) {
       const { musanedSignIn } = await import('./transition.js')
       musanedSignIn(db, page, acct.id, (step) => console.log('[sessions] Musaned:', step), () => {})
@@ -149,7 +154,7 @@ export async function openSite(key, database = null) {
   }
   // Enjaz (visa): its company sign-in, in English, the saved account filled — the person types the picture's numbers.
   if (key === 'mofa' && db) {
-    const acct = await db('visa_accounts').orderBy('is_default', 'desc').orderBy('id').first().catch(() => null)
+    const acct = await accountOf('visa_accounts')
     if (acct?.username && acct?.password) {
       const v = await import('./mofaVisa.js')
       const { toEnglish } = await import('./tabManager.js')
@@ -166,9 +171,19 @@ export async function openSite(key, database = null) {
       return { ok: true, auto: true }
     }
   }
+  // Insurance (FetaP): its own sign-in with the chosen account (already signed in: nothing to do).
+  if (key === 'insurance' && db) {
+    const acct = await accountOf('insurance_accounts')
+    if (acct?.username && acct?.password) {
+      const { insuranceSignIn } = await import('./insuranceCertificate.js')
+      const ctx = { insurance_username: acct.username, insurance_password: acct.password, insurance_name: acct.name, profileName: 'Morning sign-in', onLog: (l, m) => console.log('[sessions] Insurance:', m), notify: async () => {} }
+      insuranceSignIn(page, ctx).then(() => keepAlive().catch(() => {})).catch(e => console.warn('[sessions] Insurance sign-in:', e.message))
+      return { ok: true, auto: true }
+    }
+  }
   // LMIS: its own sign-in (the saved account, Sign In pressed) — the person types the SMS code in the window.
   if (key === 'lmis' && db) {
-    const acct = await db('lmis_accounts').orderBy('is_default', 'desc').orderBy('id').first().catch(() => null)
+    const acct = await accountOf('lmis_accounts')
     if (acct && (acct.login_value || acct.phone) && acct.password) {
       const { stepLogin } = await import('./lmisWorkflow.js')
       const ctx = {

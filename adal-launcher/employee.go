@@ -74,13 +74,13 @@ const unreachableMsg = "The main Adal Keep PC is not reachable.\n\n" +
 
 func runEmployee(root string, background bool) {
 	if !firstCopy() {
-		// Already running for this user: just open the window again.
-		// With the online pages a few seconds only: the online copy works without the main PC.
-		wait := 8 * time.Second
+		// Already running for this user: just open the window again — the
+		// online copy at once (it never searches for the main PC).
 		if hasOnlinePages(root) {
-			wait = 4 * time.Second
+			openAppWindow(root, offlineURL(root))
+			return
 		}
-		if u := waitForMainPC(root, wait); u != "" {
+		if u := waitForMainPC(root, 8*time.Second); u != "" {
 			openAppWindow(root, companionURL(root, u))
 		} else {
 			// The first copy serves the online pages (or "Looking for the main PC").
@@ -99,17 +99,16 @@ func runEmployee(root string, background bool) {
 		select {}
 	}
 
-	// The Companion may still be searching the network: give it a moment.
-	budget := 40 * time.Second
+	// With the online pages the Companion starts at once, without looking for
+	// the main PC: they work with the main PC on (through the online link) or
+	// off, anywhere. Not paired yet, they ask for the main PC's number.
 	if online {
-		budget = 5 * time.Second // the online pages work without the main PC: no waiting for it
-	}
-	u := waitForMainPC(root, budget)
-	if u == "" && online {
-		logf("main PC not reachable — opening the online copy")
+		logf("opening the online copy (no search for the main PC)")
 		openAppWindow(root, onlineURL)
 		select {}
 	}
+	// An older install without the online pages: it needs the main PC.
+	u := waitForMainPC(root, 40*time.Second)
 	if u == "" {
 		logf("main PC not reachable yet — showing the connect page, still trying")
 		if startConnectPage(root) {

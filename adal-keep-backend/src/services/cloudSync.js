@@ -400,7 +400,13 @@ export async function agencySecrets(db, agency) {
 }
 
 // ------------------------------------------------------------ 3. documents
-async function pushFiles(db, agency, state) {
+// One at a time (the round and a new upload must not send the same document twice).
+let filesRun = null
+let tgDownUntil = 0   // Telegram did not answer: tried again after this
+function pushFiles(db, agency, state) {
+  return (filesRun ||= pushFilesNow(db, agency, state).finally(() => { filesRun = null }))
+}
+async function pushFilesNow(db, agency, state) {
   // Documents go to Telegram (encrypted) once it is set up; the copies in
   // Supabase storage are moved there and removed — Supabase keeps no files.
   const tg = tgReady()
@@ -427,12 +433,24 @@ async function pushFiles(db, agency, state) {
       const buf = Buffer.from(await r.arrayBuffer())
       const safe = String(f.original_name || 'file').replace(/[^\w.\-]+/g, '_').slice(-80)
       const [old] = await cloudCall(db, 'GET', `/rest/v1/keep_files?agency_id=eq.${agency}&id=eq.${f.id}&select=object`).catch(() => []) || []
-      let object
-      if (tg) object = await tgPut(buf, `${f.id}-${safe}`, secret.file_key)
-      else {
+      let object = null, waiting = false
+      // Telegram first; blocked or down (it happens on some lines), the
+      // document is kept in the online storage meanwhile and moved to
+      // Telegram once it answers — never only on this PC.
+      if (tg && Date.now() > tgDownUntil) {
+        try { object = await tgPut(buf, `${f.id}-${safe}`, secret.file_key) }
+        catch (e) {
+          if (!/fetch failed|ETIMEDOUT|ENOTFOUND|ECONNRESET|ECONNREFUSED|aborted|timeout|socket/i.test(String(e?.message || e))) throw e
+          tgDownUntil = Date.now() + 10 * 60000
+          console.warn('[cloud] Telegram does not answer — documents go to the online storage until it does (again in 10 minutes)')
+        }
+      }
+      if (!object) {
+        if (tg && old?.object && !old.object.startsWith('tg:')) continue   // already kept online, waiting for Telegram
         object = `${agency}/${f.profile_id}/${f.id}-${safe}`
         await cloudCall(db, 'POST', `/storage/v1/object/keep/${object}`, buf,
           { headers: { 'Content-Type': f.mimetype || 'application/octet-stream', 'x-upsert': 'true' } })
+        waiting = !!tg
       }
       // The older copy (Supabase storage, or an older Telegram post) goes.
       if (old?.object && old.object !== object) {
@@ -443,7 +461,8 @@ async function pushFiles(db, agency, state) {
         agency_id: agency, id: f.id, profile_id: f.profile_id, field: f.field, name: f.original_name,
         mimetype: f.mimetype, size: buf.length, object, created_at: f.created_at || null, updated_at: new Date().toISOString(), deleted: false,
       }], 'agency_id,id')
-      await setState(db, `file:${f.id}`, sig)
+      // Kept online while Telegram is down: looked at again (moved to Telegram) once it answers.
+      await setState(db, `file:${f.id}`, waiting ? `${sig}|waiting` : sig)
       cloudStatus.files++
       cloudStatus.filesLeft--
     } catch (e) {
@@ -487,8 +506,9 @@ async function syncOnce(db, { light = false } = {}) {
     const applied = await applyChanges(db, agency)
     const state = await stateOf(db)
     await pushAnswers(db, agency, state, { light })
-    // Documents (big uploads) wait while a robot uses the internet.
-    if (!light) await pushFiles(db, agency, await stateOf(db))
+    // Documents too, every round (also while a robot works): every one is kept
+    // in Telegram as well as on this PC as soon as it can be.
+    await pushFiles(db, agency, await stateOf(db))
     // This PC's health and last errors, for Adal (every 5 minutes).
     if (Date.now() - lastDiagAt >= 5 * 60000) {
       lastDiagAt = Date.now()
@@ -518,12 +538,28 @@ export async function cloudOn(db) {
 }
 
 let timer = null
+// A document was added or changed (an upload on any PC or phone, a robot's
+// PDF): it goes to Telegram within seconds — not at the next round.
+let filesSoonTimer = null, filesBusy = null
+function filesSoon(db) {
+  clearTimeout(filesSoonTimer)
+  filesSoonTimer = setTimeout(async () => {
+    if (filesBusy) { filesSoon(db); return }
+    filesBusy = (async () => {
+      if (!(await cloudOn(db).catch(() => false))) return
+      const agency = await cloudAgencyId(db)
+      if (agency) await pushFiles(db, agency, await stateOf(db))
+    })().catch(e => console.warn('[cloud] documents:', e.message)).finally(() => { filesBusy = null })
+  }, 3000)
+}
+
 export function startCloudSync(db) {
   if (timer) return
+  import('./changes.js').then(c => c.onChanged(({ tables }) => { if (tables.includes('files')) filesSoon(db) })).catch(() => {})
   const tick = async () => {
     cloudStatus.on = await cloudOn(db).catch(() => false)
     // A move from another system is working: the copy catches up when it is done.
-    // A robot working: a light round (the changed profiles only, no documents) —
+    // A robot working: a light round (the changed profiles only) —
     // the phones must never fall hours behind because the robots work all day.
     const { transitionRunning } = await import('./transition.js')
     if (cloudStatus.on && !transitionRunning()) await syncOnce(db, { light: runsWorking() > 0 })

@@ -102,20 +102,20 @@ const KEYS = {
   marital_status: ['maritalstatus'],
   place_of_birth: ['placeofbirth', 'birthplace'],
   passport_issue_date: ['passportissuedate', 'passportdateofissue', 'dateofissue', 'issuedate'],
-  passport_expiry_date: ['passportexpirydate', 'passportexpiry', 'dateofexpiry', 'expirydate', 'expirationdate'],
+  passport_expiry_date: ['passportexpirydate', 'passportexpirationdate', 'passportexpiry', 'dateofexpiry', 'expirydate', 'expirationdate'],
   children_count: ['childrencount', 'numberofchildren', 'noofchildren', 'children'],
   weight: ['weight'], height: ['height'], complexion: ['complexion'],
   education_level: ['educationlevel', 'education'],
-  job_title: ['jobtitle', 'job', 'profession', 'occupation'],
-  salary: ['salary', 'monthlysalary'],
+  job_title: ['jobtitle', 'job', 'profession', 'occupation', 'position'],
+  salary: ['salary', 'monthlysalary', 'desiredsalary'],
   mother_name: ['mothername'], father_name: ['fathername'], spouse_name: ['spousename'],
   region: ['region'], living_town: ['livingtown', 'city'],
   labor_id: ['laborid', 'labourid'],
   visa_number: ['visanumber', 'visano'],
   contract_number: ['contractnumber', 'contractno'],
   employer_name: ['employername', 'sponsorname'],
-  emergency_name: ['emergencyname', 'emergencycontactname'],
-  emergency_phone: ['emergencyphone', 'emergencycontactphone'],
+  emergency_name: ['emergencyname', 'emergencycontactname', 'emmergencycontactname'],
+  emergency_phone: ['emergencyphone', 'emergencycontactphone', 'emmergencycontactphone'],
 }
 const WANT = new Map(Object.entries(KEYS).flatMap(([col, ks]) => ks.map((k, i) => [k, { col, rank: i }])))
 const norm = (s) => String(s).toLowerCase().replace(/[^a-z0-9]/g, '')
@@ -129,7 +129,9 @@ const plain = (v) => {
 function flatten(obj, depth = 3, at = []) {
   const out = [], deeper = []
   for (const [k, v] of Object.entries(obj || {})) {
-    if (v && typeof v === 'object' && !Array.isArray(v) && depth > 1 && !plain(v)) deeper.push([k, v])
+    // A named record that is more than a name (Pextran's emergency contact: name, phone, address) is read inside.
+    const person = v && typeof v === 'object' && Object.keys(v).some(x => /^phone|address$/i.test(x))
+    if (v && typeof v === 'object' && !Array.isArray(v) && depth > 1 && (!plain(v) || person)) deeper.push([k, v])
     else out.push([[...at, k], v])
   }
   for (const [k, v] of deeper) out.push(...flatten(v, depth - 1, [...at, k]))
@@ -180,6 +182,7 @@ export function findPeople(json, out = [], depth = 0) {
 }
 
 const FIELD_OF = [
+  [/passport.?size|size.?photo|headshot|profile.?(photo|picture|image)/i, 'Photo'],
   [/full.?body|fullbody|body.?photo|long.?photo/i, 'Full Body Photo'],
   [/medical/i, 'Medical Report'],
   [/visa/i, 'Visa'],
@@ -204,6 +207,19 @@ export function filesOf(raw, origin) {
     try { url = new URL(v, origin).href } catch { continue }
     if (!seen.has(url)) { seen.add(url); out.push({ field, url }) }
   }
+  for (const list of [raw?.medias, raw?.media, raw?.attachments, raw?.documents, raw?.files]) {
+    if (!Array.isArray(list)) continue
+    for (const m of list) {
+      if (!m || typeof m !== 'object' || m.deleted) continue
+      const link = m.signedUrl || m.url || m.pdfSignedUrl || m.pdfUrl || m.fileUrl
+      if (typeof link !== 'string' || !link) continue
+      const label = [m.category, m.type, m.name, m.description].filter(v => typeof v === 'string').join(' ')
+      const field = FIELD_OF.find(([re]) => re.test(label))?.[1] || 'Other'
+      let url
+      try { url = new URL(link, origin).href } catch { continue }
+      if (!seen.has(url)) { seen.add(url); out.push({ field, url, label }) }
+    }
+  }
   return out
 }
 
@@ -225,7 +241,7 @@ export function nextPage(url, json, count) {
 // ── In the site's tab ───────────────────────────────────────────────────────
 const onSignIn = (page) => page.evaluate(() => {
   const seen = [...document.querySelectorAll('input[type="password"]')].some(i => i.offsetParent !== null)
-  return seen || /\/(login|log-in|signin|sign-in|auth|realms)(\/|\?|$)/i.test(location.pathname)
+  return seen || /\/(login|log-in|signin|sign-in|auth|realms)([\/?_-]|$)/i.test(location.pathname)
 }).catch(() => true)
 
 /** One read from the site as its own page would ask: its sign-in comes along. */
@@ -355,9 +371,16 @@ async function run(db, id, source, url, deps) {
     }
     set(id, { people: people.size })
   }
+  const netLog = path.join(folder, 'network.txt')
+  const keysOf = (j, d = 0) => !j || typeof j !== 'object' || d > 3 ? '' : Array.isArray(j) ? `[${j.length}]` + keysOf(j[0], d + 1) : '{' + Object.keys(j).slice(0, 60).map(k => k + (j[k] && typeof j[k] === 'object' ? keysOf(j[k], d + 1) : '')).join(',') + '}'
   const onResponse = async (r) => {
     try {
       const req = r.request()
+      if (['xhr', 'fetch', 'document'].includes(req.resourceType())) {
+        let shape = ''
+        if (/json/i.test(r.headers()['content-type'] || '')) shape = keysOf(await r.json().catch(() => null))
+        fs.appendFile(netLog, `${req.method()} ${r.status()} ${req.resourceType()} ${(r.headers()['content-type'] || '').split(';')[0]} ${r.url().replace(/[?#].*/, '')} ${shape.slice(0, 3000)}\n`, () => {})
+      }
       if (!/json/i.test(r.headers()['content-type'] || '') || !['xhr', 'fetch'].includes(req.resourceType())) return
       const json = await r.json()
       collectBrokers(json, r.url(), brokersFound)
@@ -415,7 +438,9 @@ async function run(db, id, source, url, deps) {
         if (Date.now() - t0 > SIGN_IN_WAIT) throw new Error('Nobody signed in within 15 minutes. Press the button again: it goes on from where it stopped.')
         await sleep(1500)
         if (source.token) { const t = await source.token(tab); if (t) return t; continue }
-        calm = (await onSignIn(tab)) ? 0 : calm + 1
+        let home = false
+        try { home = new URL(tab.url()).origin === origin } catch {}
+        calm = (!home || await onSignIn(tab)) ? 0 : calm + 1
         if (calm >= 2) return true
       }
     }
@@ -545,7 +570,14 @@ async function run(db, id, source, url, deps) {
         const wanted = [...filesOf(raw, origin), ...(source.files?.(raw, origin) || [])]
         for (const f of wanted) {
           const headers = firstList?.headers || {}
-          const got = await ask(page, f.url, headers, true)
+          let got = await ask(page, f.url, headers, true)
+          if (!got?.base64 && /^https:/.test(f.url)) {
+            try {
+              const r = await fetch(f.url, { signal: AbortSignal.timeout(60000) })
+              if (r.ok) got = { base64: Buffer.from(await r.arrayBuffer()).toString('base64'), type: r.headers.get('content-type') || '' }
+            } catch {}
+          }
+          if (got?.base64 && /octet/i.test(got.type)) got.type = /\.pdf(\?|$)/i.test(f.url) ? 'application/pdf' : /\.png(\?|$)/i.test(f.url) ? 'image/png' : 'image/jpeg'
           if (!got?.base64 || !/image|pdf|octet/i.test(got.type)) continue
           const ext = /pdf/i.test(got.type) ? '.pdf' : /png/i.test(got.type) ? '.png' : /webp/i.test(got.type) ? '.webp' : '.jpg'
           const file = path.join(tmp, `${person.passport_number}-${f.field}${ext}`.replace(/\s/g, '_'))

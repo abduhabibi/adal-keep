@@ -14,7 +14,9 @@ export default {
     connection,
     useNullAsDefault: true,
     postProcessResponse: openRows,
+    // One connection (SQLite): on a swamped PC a request waits up to 2 minutes for it instead of failing.
     pool: {
+      acquireTimeoutMillis: 120000,
       afterCreate(conn, done) {
         conn.run('PRAGMA journal_mode = WAL;')
         conn.run('PRAGMA busy_timeout = 8000;')

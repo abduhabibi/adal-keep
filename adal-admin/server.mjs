@@ -705,6 +705,41 @@ async function startDownload(agency) {
 // that agency's rows (the window names it as its apikey), with the service key.
 const KEEP_APP = path.join(HERE, 'keep-app')
 const AGENCY_PORT = PORT + 1
+
+// The agency pages are made from adal-keep-frontend (beside this folder) by
+// Admin itself: when they are missing, or older than the Adal Keep pages,
+// they are built again (a minute) — at start and every 10 minutes. Nobody has
+// to remember "npm run build:admin".
+const FRONTEND = path.join(HERE, '..', 'adal-keep-frontend')
+let building = null
+function newestIn(dir) {
+  let t = 0
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const p = path.join(dir, e.name)
+    t = Math.max(t, e.isDirectory() ? newestIn(p) : fs.statSync(p).mtimeMs)
+  }
+  return t
+}
+function agencyPagesStale() {
+  const index = path.join(KEEP_APP, 'index.html')
+  if (!fs.existsSync(index)) return true
+  try { return newestIn(path.join(FRONTEND, 'src')) > fs.statSync(index).mtimeMs } catch { return false }
+}
+async function buildAgencyPages() {
+  if (building) return building
+  const vite = path.join(FRONTEND, 'node_modules', 'vite', 'bin', 'vite.js')
+  if (!fs.existsSync(vite) || !agencyPagesStale()) return
+  const { spawn } = await import('node:child_process')
+  console.log('[admin] building the agency pages (adal-keep-frontend → keep-app)…')
+  building = new Promise((done) => {
+    const p = spawn(process.execPath, [vite, 'build', '--mode', 'admin'], { cwd: FRONTEND, env: { ...process.env, VITE_ADMIN: '1' }, stdio: 'ignore', windowsHide: true })
+    p.on('exit', (code) => { console.log(`[admin] agency pages ${code === 0 ? 'built' : 'not built (code ' + code + ')'}`); building = null; done() })
+    p.on('error', (e) => { console.warn('[admin] agency pages:', e.message); building = null; done() })
+  })
+  return building
+}
+setTimeout(() => buildAgencyPages().catch(() => {}), 2000)
+setInterval(() => buildAgencyPages().catch(() => {}), 10 * 60000).unref?.()
 const SB_TABLES = /^(keep_meta|keep_files|keep_calls|keep_changes|keep_secrets)$/
 const TYPES = { '.js': 'text/javascript', '.css': 'text/css', '.html': 'text/html; charset=utf-8', '.png': 'image/png', '.ico': 'image/x-icon', '.svg': 'image/svg+xml', '.webp': 'image/webp', '.json': 'application/json', '.woff2': 'font/woff2', '.webmanifest': 'application/manifest+json' }
 let knownAgencies = { at: 0, ids: new Set() }
@@ -759,7 +794,8 @@ http.createServer(async (req, res) => {
     }
     if (u.pathname.startsWith('/sb/')) return await sbProxy(req, res, u)
     if (!fs.existsSync(path.join(KEEP_APP, 'index.html'))) {
-      res.writeHead(503, { 'Content-Type': 'text/plain' }).end('The agency pages are not built yet: in adal-keep-frontend run  npm run build:admin'); return
+      buildAgencyPages().catch(() => {})
+      res.writeHead(503, { 'Content-Type': 'text/html; charset=utf-8', 'Refresh': '15' }).end('<p style="font:16px system-ui;padding:40px">Getting the agency pages ready (about a minute) — this page opens by itself…</p>'); return
     }
     let f = path.normalize(path.join(KEEP_APP, decodeURIComponent(u.pathname)))
     if (!f.startsWith(KEEP_APP) || !fs.existsSync(f) || fs.statSync(f).isDirectory()) f = path.join(KEEP_APP, 'index.html')

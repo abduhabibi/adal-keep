@@ -29,8 +29,8 @@ import PlanCard from '../components/PlanCard'
 import EproSignatureCard from '../components/EproSignatureCard'
 
 // The tabs of Settings: [id, icon, name].
-// The phone app, or a phone-sized screen.
-const isPhoneView = () => !!window.Capacitor?.isNativePlatform?.() || import.meta.env.VITE_PHONE === '1' || (typeof matchMedia !== 'undefined' && matchMedia('(max-width: 767px)').matches)
+// The phone app (a narrow PC window keeps every tab).
+const isPhoneView = () => !!window.Capacitor?.isNativePlatform?.() || import.meta.env.VITE_PHONE === '1'
 const SETTINGS_TABS = [
   ['agency', '🏢', 'Agency'],
   ['plan', '⭐', 'Plan'],

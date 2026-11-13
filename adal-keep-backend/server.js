@@ -1176,6 +1176,12 @@ if (frontendDir) {
 
 // Global error handler
 app.use((err, req, res, next) => {
+  // A refused upload (wrong kind of file, too big) is the person's to fix: said plainly, not "internal error".
+  if (err?.name === 'MulterError' || (err?.status >= 400 && err.status < 500)) {
+    const msg = err.code === 'LIMIT_FILE_SIZE' ? 'The file is too big (10 MB at most)' : err.message
+    console.warn('[upload] refused:', msg)
+    return res.status(err.status && err.status < 500 ? err.status : 400).json({ error: msg })
+  }
   console.error('Unhandled error:', err)
   res.status(err.status || 500).json({
     error: process.env.NODE_ENV === 'production'

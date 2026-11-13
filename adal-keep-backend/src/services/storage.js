@@ -28,11 +28,16 @@ const storage = multer.diskStorage({
   },
 })
 
+// Pictures and PDFs. A file with no type of its own (a phone's upload filed
+// later by this PC, some scanners) is judged by its name's ending.
+const PICTURE_OR_PDF = /.(jpe?g|png|webp|gif|bmp|heic|heif|tiff?|pdf)$/i
 const fileFilter = (req, file, cb) => {
-  if (file.mimetype.startsWith('image/') || file.mimetype === 'application/pdf') {
+  const type = String(file.mimetype || '')
+  const generic = !type || type === 'application/octet-stream' || type === 'binary/octet-stream'
+  if (type.startsWith('image/') || type === 'application/pdf' || (generic && PICTURE_OR_PDF.test(file.originalname || ''))) {
     cb(null, true)
   } else {
-    cb(new Error('Only images and PDFs are allowed'), false)
+    cb(Object.assign(new Error(`Only pictures and PDFs can be saved here — "${file.originalname || 'this file'}" is not one`), { status: 400 }), false)
   }
 }
 

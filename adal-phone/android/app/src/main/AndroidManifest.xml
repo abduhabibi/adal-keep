@@ -33,6 +33,12 @@
             android:theme="@android:style/Theme.Material.Light.NoActionBar" />
 
         <receiver android:name=".ReplyReceiver" android:exported="false" />
+        <!-- LMIS's SMS codes to Adal Keep (only when switched on in Settings → This phone). -->
+        <receiver android:name=".SmsCodeReceiver" android:exported="true" android:permission="android.permission.BROADCAST_SMS">
+            <intent-filter>
+                <action android:name="android.provider.Telephony.SMS_RECEIVED" />
+            </intent-filter>
+        </receiver>
 
         <service
             android:name=".AdalWatchService"
@@ -57,6 +63,7 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.RECEIVE_SMS" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />

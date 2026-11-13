@@ -546,6 +546,19 @@ async function stepLoginNow(page, ctx) {
           'LMIS sent a code by SMS. Type it here; Adal Keep continues by itself.', 'info', { login: page }).catch(() => {})
         askCode('Type the LMIS SMS code')
       }
+      // The agency's phone sent LMIS's SMS code (Settings → This phone): typed at once.
+      if (!codeSent) {
+        const { takeSmsCode } = await import('./smsCodes.js')
+        const fromPhone = takeSmsCode(codeSince - 60000)
+        if (fromPhone && await typeCodeInto(page, fromPhone).catch(() => false)) {
+          log(ctx, '📱 the SMS code came from the agency phone — typed')
+          codeSent = Date.now()
+          await sleep(400)
+          await pressCodeButton(page).catch(() => {})
+          await sleep(1000)
+          continue
+        }
+      }
       if (codeSent && Date.now() - codeSent > 8000) {
         codeSent = 0
         log(ctx, 'the code was not accepted — asking again', 'warn')

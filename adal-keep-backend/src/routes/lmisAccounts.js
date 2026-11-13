@@ -9,6 +9,11 @@ router.get('/accounts', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
+// An LMIS code from the agency's phone (its SMS, sent through the online link).
+router.post('/sms-code', async (req, res) => {
+  try { const { addSmsCode } = await import('../services/smsCodes.js'); res.json(addSmsCode(req.body || {})) }
+  catch (e) { res.status(e.status || 500).json({ error: e.message }) }
+})
 router.post('/accounts', async (req, res) => {
   try {
     const db = req.app.locals.db

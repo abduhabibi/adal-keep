@@ -7,7 +7,7 @@ async function fresh() {
   const db = knex({ client: 'sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true, pool: { min: 1, max: 1 } })
   await db.schema.createTable('settings', t => { t.increments('id'); t.string('key'); t.text('value') })
   await db.schema.createTable('whatsapp_agents', t => { t.increments('id'); t.string('name'); t.string('chat_id'); t.text('template_ids'); t.string('musaned_office'); t.integer('active'); t.string('user_key'); t.string('created_at'); t.string('updated_at') })
-  await db.schema.createTable('cv_templates', t => { t.increments('id'); for (const c of ['name', 'agency_name', 'agency_name_ar', 'currency', 'country', 'source_file', 'created_at', 'updated_at']) t.string(c); t.integer('salary'); t.integer('contract_years'); t.text('html_content'); t.text('css_content'); t.text('placeholders'); t.boolean('is_active') })
+  await db.schema.createTable('cv_templates', t => { t.increments('id'); for (const c of ['name', 'agency_name', 'agency_name_ar', 'currency', 'country', 'source_file', 'created_at', 'updated_at']) t.string(c); t.integer('salary'); t.integer('contract_years'); t.text('html_content'); t.text('css_content'); t.text('placeholders'); t.boolean('is_active'); t.boolean('include_passport'); t.string('passport_h1'); t.boolean('passport_include_header') })
   return db
 }
 const tpl = { name: 'Riyadh office', html_content: '<p>{{NAME}}</p>' }

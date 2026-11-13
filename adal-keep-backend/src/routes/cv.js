@@ -48,6 +48,8 @@ router.post('/templates/upload', tplUpload.array('files', 30), async (req, res) 
         html_content: meta.html_content,
         css_content: meta.css_content,
         placeholders: meta.placeholders,
+        // A dropped template comes with her passport page (asked on 2026-11-13).
+        include_passport: true, passport_h1: 'Passport', passport_include_header: true,
         source_file: f.originalname,
         is_active: true,
         created_at: new Date().toISOString(),

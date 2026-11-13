@@ -373,6 +373,32 @@ async function run(db, id, source, url, deps) {
     } catch {}
   }
   if (!source.deep) page.on('response', onResponse)
+  // Systems that send finished pages instead of data (Pextran): every list
+  // table shown (a column header naming the passport) is read row by row, as
+  // { header: cell } — the same people reader then knows them.
+  let tableTimer = null
+  if (!source.deep) {
+    tableTimer = setInterval(async () => {
+      if (page.isClosed?.()) return
+      const rows = await page.evaluate(() => {
+        const out = []
+        for (const t of document.querySelectorAll('table')) {
+          const head = [...(t.tHead?.rows?.[0]?.cells || t.rows?.[0]?.cells || [])].map(c => (c.innerText || '').trim())
+          if (!head.some(h => /passport/i.test(h))) continue
+          const body = t.tBodies?.[0] ? [...t.tBodies[0].rows] : [...t.rows].slice(1)
+          for (const r of body) {
+            const o = {}
+            ;[...r.cells].forEach((c, i) => { if (head[i]) o[head[i]] = (c.innerText || '').trim() })
+            out.push(o)
+          }
+        }
+        return out
+      }).catch(() => [])
+      const found = rows.length ? findPeople(rows) : []
+      if (found.length) add(found)
+    }, 3000)
+    tableTimer.unref?.()
+  }
 
   try {
     windows.set(id, page)
@@ -400,6 +426,7 @@ async function run(db, id, source, url, deps) {
 
     if (source.deep) {
       // The window has done its work: from here on the browser is not needed.
+      clearInterval(tableTimer)
       if (!deps.page && !source.keepTab) await page.close().catch(() => {})
       await source.deep({
         progressName: `${id}-progress${deps.accountId ? '-' + deps.accountId : ''}.json`,
@@ -639,7 +666,7 @@ async function copyTemplates(db, id, source, page, { htmlTemplates, cvPages, cvF
       await db('cv_templates').insert({
         name: meta.name, agency_name: meta.agency_name, agency_name_ar: meta.agency_name_ar, salary: meta.salary || null,
         currency: meta.currency, country: meta.country, contract_years: meta.contract_years, html_content: meta.html_content,
-        css_content: meta.css_content, placeholders: meta.placeholders, source_file: `Transition: ${j.name}`, is_active: true, created_at: now, updated_at: now,
+        css_content: meta.css_content, placeholders: meta.placeholders, source_file: `Transition: ${j.name}`, is_active: true, include_passport: true, passport_h1: 'Passport', passport_include_header: true, created_at: now, updated_at: now,
       })
       set(id, { templates: stateOf(id).templates + 1 })
     } catch (e) {

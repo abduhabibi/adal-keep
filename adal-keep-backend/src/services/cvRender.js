@@ -243,7 +243,8 @@ export async function buildTemplateData(db, profile, template, overrides = {}) {
     FATHER_NAME:      merged.father_name || '',
     SPOUSE_NAME:      merged.spouse_name || '',
     PHONE:            merged.phone_number || '',
-    EDUCATION:        merged.education_level || 'New', /* EDUCATION_DEFAULT_PATCH */
+    // Education: Preparatory when nothing (or the old placeholder "New") is filled in.
+    EDUCATION:        (merged.education_level && !/^new$/i.test(String(merged.education_level).trim())) ? merged.education_level : 'Preparatory', /* EDUCATION_DEFAULT_PATCH */
     // One cell per language: what she can do ("SPEAK", "SPEAK, READ, WRITE"), else NO.
     ENGLISH:          languageText(merged, 'english'),
     ARABIC:           languageText(merged, 'arabic'),
@@ -353,6 +354,8 @@ body{background:#fff!important;}
 .right-col{display:flex;flex-direction:column;}
 .body-photo{position:relative;flex:1 1 auto;min-height:50mm;padding:0!important;overflow:hidden;background:#fff;}
 .body-photo img{position:absolute;left:0;top:0;width:100%!important;height:100%!important;max-width:none!important;max-height:none!important;object-fit:contain!important;}
+/* Her photos are never cut: every picture on the CV shows whole in its box (asked on 2026-11-13). */
+img{object-fit:contain!important;object-position:center!important;}
 `
 // Templates whose photos were capped small (Al-Shahd and those made like it).
 const WIDE_PHOTOS_CSS = `
@@ -363,7 +366,7 @@ const WIDE_PHOTOS_CSS = `
 .right-col{flex:0 0 62mm;}
 .name-panel .inner{height:36mm;}
 .headshot-cell{width:34mm;padding:0!important;}
-.headshot-cell img{display:block;width:100%;max-width:none;height:40mm;object-fit:cover;object-position:center top;border:0;}
+.headshot-cell img{display:block;width:100%;max-width:none;height:40mm;object-fit:contain;object-position:center;background:#fff;border:0;}
 `
 // Runs in the preview and before the PDF, so both show the same page. A CV too
 // tall for A4 first loses cell padding, then shrinks its body; one that fits is

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import Card from './shared/Card'
+import SmsCodesSwitch from './SmsCodesSwitch'
 
 /**
  * Settings → This phone (only in the phone app): is the office PC live,
@@ -40,6 +41,7 @@ export default function PhoneCard() {
         <button type="button" onClick={() => { if (confirm('Pair this phone with another agency (its PC number)?')) window.__adalPair?.() }}
           className="ml-auto rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold dark:border-slate-700">Pair with another agency</button>
       </div>
+      <SmsCodesSwitch />
     </Card>
   )
 }

@@ -168,6 +168,17 @@ export async function scanContracts(db, { auto = false } = {}) {
     if (!page) page = await borrowTab(browser, 'musaned_check_chosen', await activeRunIds(db))
     await setupTab(page, { runId: 'musaned-contracts' })
     page.__adalAllowImages = true
+    // Musaned's own list data first (no passport searched, every detail at once).
+    const viaApi = await scanListByApi(db, page, { log: (m) => console.log('[contracts] ' + m) }).catch(e => ({ ok: false, why: e.message }))
+    if (viaApi.ok) {
+      contractCheck.results = viaApi.results
+      contractCheck.added = viaApi.added
+      await doneSignInTasks(db)
+      import('./profileDays.js').then(d => d.snapshotDays(db)).catch(() => {})
+      console.log('[contracts] Musaned list: ' + viaApi.checked + ' requests read, ' + viaApi.added.length + ' added, ' + viaApi.results.filter(r => !r.unchanged).length + ' updated')
+      return { checked: viaApi.checked, newlyChosen: viaApi.results.filter(r => r.first).map(r => r.name), results: viaApi.results, unknown: [], added: viaApi.added }
+    }
+    console.warn('[contracts] Musaned list data not read (' + viaApi.why + ') — reading its pages instead')
     const open = async (url) => {
       await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 })
       return signedIn(page)
@@ -693,7 +704,26 @@ export async function checkChosenInRun(page, ctx) {
   const p = await db('profiles').where('id', ctx.profileId).first()
   if (!p?.passport_number) return { ok: false, error: 'Profile is missing the passport number' }
   page.__adalAllowImages = true
-  ctx.onLog?.('info', `🔎 Employment Requests → passport ${p.passport_number}`)
+  // The whole chosen list, as Musaned's page reads it (no passport search): she
+  // is on it or not, and every other new girl on it is added as well.
+  ctx.onLog?.('info', '🔎 Employment Requests → the chosen list')
+  const all = await scanListByApi(db, page, { log: (m) => ctx.onLog?.('info', m), onlyId: p.id }).catch(e => ({ ok: false, why: e.message }))
+  if (all.ok) {
+    const mine = all.results.find(x => x.id === p.id)
+    if (!mine) {
+      await db('profiles').where('id', p.id).update({ contract_checked_at: new Date().toISOString() })
+      ctx.onLog?.('info', 'Not on the chosen list — nobody has chosen her yet')
+      return { ok: true, done: true, note: 'not chosen yet' }
+    }
+    if (mine.state === 'error') return { ok: false, error: mine.error }
+    const note = mine.unchanged
+      ? 'Chosen on Musaned · ' + (mine.stage || '') + ' (nothing new)'
+      : 'Chosen on Musaned — contract ' + (mine.contract || '?') + ' · ' + (mine.stage || '') + (mine.pdfs?.length ? ' · ' + mine.pdfs.length + ' PDF(s) saved' : '')
+    ctx.onLog?.('info', '✅ ' + note)
+    if (mine.first) await ctx.notify?.('🎉 ' + ctx.profileName + ': chosen by an employer on Musaned', note)
+    return { ok: true, done: true, note }
+  }
+  ctx.onLog?.('warn', 'Musaned list data not read (' + all.why + ') — searching her passport instead')
   const r = await checkOne(db, page.browser(), page, p)
   if (r.state === 'signed-out') return { ok: false, error: 'Musaned signed out during the check' }
   if (r.state === 'not-chosen') {
@@ -890,4 +920,202 @@ export function startContractChecker(db) {
   setTimeout(() => tick().catch(() => {}), 5 * 60000)
   timer = setInterval(() => tick().catch(() => {}), 5 * 60000)
   timer.unref?.()
+}
+
+// ---------------------------------------------------------------------------
+// The chosen list as Musaned's own page reads it (asked on 2026-11-13): no
+// passport is searched. Employment Requests' data (api-tawtheeq…/api/search/
+// employment, newest first, 200 at a time) holds every request with the
+// passport, the stage, the visa and order numbers and her HR-pool record. A
+// request new to Adal Keep — or whose stage moved — is opened straight at its
+// contract page (details and PDFs, as before). A girl on the list who is not
+// in Adal Keep gets her profile: every detail of the contract's candidate,
+// her photo and her passport scan (her HR-pool record), then the contract.
+// Nothing on Musaned is changed: it only reads.
+// ---------------------------------------------------------------------------
+const API = 'https://api-tawtheeq.musaned.com.sa'
+const STAGE_OF = {
+  EPRO_APPROVAL_PENDING: 'EPRO APPROVAL', EPRO_APPROVED: 'EPRO APPROVED', FMOL_APPROVAL_PENDING: 'FMOL APPROVAL',
+  FMOL_APPROVED: 'FMOL APPROVED', SENT_TO_MOFA: 'SENT TO SAUDI EMBASSY', VISA_ISSUED: 'VISA ISSUED', ARRIVED_KSA: 'ARRIVED KSA',
+  ARRIVED: 'ARRIVED KSA', REJECTED: 'REJECTED', CANCELLED: 'CANCELED', CANCELED: 'CANCELED', VISA_CANCELLED: 'VISA CANCELED',
+  VISA_CANCELED: 'VISA CANCELED', OUTSIDE_KSA: 'OUTSIDE KSA',
+}
+export const stageOfStatus = (s) => STAGE_OF[String(s || '').toUpperCase()] || String(s || '').toUpperCase().replace(/_PENDING$/, '').replace(/_/g, ' ')
+
+/** One request of the list, as the card the rest of this file knows. */
+export function cardOfRow(r) {
+  const pay = String(r.paymentStatus || '').toUpperCase()
+  return {
+    stage: stageOfStatus(r.status),
+    contract_number: String(r.orderNumber || ''),
+    visa_number: String(r.visaNumber || ''),
+    employer_id: String(r.employerIdNumber || ''),
+    employer_name: [r.employerFirstNameEn, r.employerLastNameEn].filter(Boolean).join(' ').toUpperCase(),
+    candidate: String(r.candidateName || '').toUpperCase(),
+    passport: String(r.passportNumber || '').toUpperCase().replace(/\s+/g, ''),
+    job: r.careerNameEn || '',
+    pro: r.proNameEn || '',
+    payment: pay === 'PAID' ? 'Paid' : pay === 'UNPAID' ? 'Unpaid' : (r.paymentStatus || ''),
+    created: String(r.createdAt || '').slice(0, 10),
+    id: r.id, candidateId: r.candidateId,
+  }
+}
+
+/** The headers Musaned's own page sends (its sign-in, role, organization): seen once the list loads. */
+async function apiHeadersOf(page) {
+  let H = null
+  const on = (r) => { const h = r.headers(); if (r.url().startsWith(API) && h.authorization && h['app-organization']) H = Object.fromEntries(Object.entries(h).filter(([k]) => /^(authorization|app-|accept-language)/.test(k))) }
+  page.on('request', on)
+  try {
+    await page.goto('https://tawtheeq.musaned.com.sa/employment-requests?sort=createdAt,DESC&page=0&size=10', { waitUntil: 'networkidle2', timeout: 90000 }).catch(() => {})
+    for (let i = 0; i < 20 && !H; i++) await sleep(500)
+  } finally { page.off('request', on) }
+  return H
+}
+
+/** GET from Musaned's data address inside the page (its own sign-in): JSON, or { b64, type } for a picture. */
+function apiGet(page, H, url, { binary = false } = {}) {
+  return page.evaluate(async (A, H, url, binary) => {
+    const r = await fetch(A + url, { headers: { ...H, Accept: binary ? '*/*' : 'application/json' } })
+    if (!r.ok) return { status: r.status }
+    if (!binary) return { status: 200, json: await r.json() }
+    const b = new Uint8Array(await r.arrayBuffer())
+    let s = ''; for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode(...b.subarray(i, i + 0x8000))
+    return { status: 200, type: r.headers.get('content-type') || '', b64: btoa(s) }
+  }, API, H, url, binary)
+}
+
+/** Her photo and passport scan from her HR-pool record, each into its own document (only what she lacks). */
+async function savePictures(db, page, H, profileId, candidateId, passport) {
+  if (!candidateId) return []
+  const { saveOnProfile } = await import('./musanedImport.js')
+  const os = await import('os')
+  const saved = []
+  let lastHash = null
+  // Musaned keeps her photo only (asked for her passport it gives the same photo).
+  for (const [kind, field] of [['PERSONAL', 'Photo']]) {
+    const has = await db('profile_fields').join('files', 'files.profile_field_id', 'profile_fields.id')
+      .where({ 'profile_fields.profile_id': profileId, 'profile_fields.name': field }).first('files.id').catch(() => null)
+    if (has) continue
+    // Full size (without it Musaned gives a small copy).
+    const r = await apiGet(page, H, `/api/hrpool/${candidateId}/photo/${kind}?size=ORIGINAL`, { binary: true }).catch(() => null)
+    if (r?.status !== 200 || !r.b64) continue
+    const buf = Buffer.from(r.b64, 'base64')
+    const hash = crypto.createHash('sha1').update(buf).digest('hex')
+    // Musaned keeps one picture per girl (her photo) and gives it for every kind:
+    // the same picture again is not filed as her passport.
+    if (hash === lastHash) continue
+    lastHash = hash
+    const ext = /png/i.test(r.type) ? '.png' : /webp/i.test(r.type) ? '.webp' : /pdf/i.test(r.type) ? '.pdf' : '.jpg'
+    const name = `${passport || profileId}-Musaned-${field}${ext}`
+    const file = path.join(os.tmpdir(), `${Date.now()}-${name}`)
+    fs.writeFileSync(file, buf)
+    try { if (await saveOnProfile(db, profileId, field, file, name)) saved.push(field) } finally { fs.rmSync(file, { force: true }) }
+  }
+  return saved
+}
+
+/** A girl on the list who is not in Adal Keep: her profile from the contract's candidate (every detail). */
+async function profileFromRequest(db, page, H, card) {
+  const { fieldsFromMusaned } = await import('./musanedImport.js')
+  const det = (await apiGet(page, H, `/api/employment/${card.id}`).catch(() => null))?.json || {}
+  const c = det.candidate || {}
+  const hr = card.candidateId ? (await apiGet(page, H, `/api/hrpool/${card.candidateId}`).catch(() => null))?.json || {} : {}
+  const f = Object.fromEntries(Object.entries(fieldsFromMusaned({ ...hr, ...c })).filter(([, v]) => v))
+  const now = new Date().toISOString()
+  const company = await db('companies').first('id').catch(() => null)
+  // The fullest form of her name (the contract sometimes has her first name only).
+  const name = [f.full_name, card.candidate, hr.name, c.name].map(x => String(x || '').trim().toUpperCase()).sort((a, b) => b.split(/s+/).length - a.split(/s+/).length || b.length - a.length)[0] || ''
+  const words = name.split(/\s+/).filter(Boolean)
+  const row = {
+    ...f, full_name: name, status: 'active', nationality: 'Ethiopian',
+    passport_number: card.passport || String(c.passportNumber || '').toUpperCase() || null,
+    first_name: words[0] || null, last_name: words.slice(1).join(' ') || null,
+    place_of_birth: c.passportIssuePlace || hr.passportIssuePlace || null,
+    job_title: card.job || null,
+    notes: `Added from the Musaned list (contract ${card.contract_number}) — not in Adal Keep before. Her details, photo and passport came from Musaned.`,
+    company_id: company?.id || 1, created_by: 'Musaned list', created_at: now, updated_at: now,
+  }
+  for (const k of Object.keys(row)) if (row[k] === null || row[k] === '') delete row[k]
+  const cols = await db('profiles').columnInfo().catch(() => null)
+  if (cols) for (const k of Object.keys(row)) if (!(k in cols)) delete row[k]
+  const [id] = await db('profiles').insert(row)
+  await task(db, id, `On Musaned, added to Adal Keep: ${name}`, `She was on the Musaned list (${card.stage || 'request'}, contract ${card.contract_number}) but not in Adal Keep. Her profile was made from Musaned with her photo and passport — look it over.`)
+  return db('profiles').where('id', id).first()
+}
+
+/** Her contract page, opened straight (no search) and read. */
+async function openContract(page, card) {
+  await page.goto(`https://tawtheeq.musaned.com.sa/employment-requests/contract/${card.id}`, { waitUntil: 'networkidle2', timeout: 60000 }).catch(() => {})
+  await page.waitForFunction(() => /Contract\s*#\s*\d+/i.test(document.body.innerText || ''), { timeout: 30000 }).catch(() => {})
+  await page.evaluate(() => [...document.querySelectorAll('button, a, span, div')].filter(e => /^\s*Expand\s*$/i.test(e.textContent || '') && e.children.length <= 2).forEach(e => e.click())).catch(() => {})
+  await sleep(1200)
+  return page.evaluate(readDetails)
+}
+
+/**
+ * The whole list through Musaned's data (in a signed-in Musaned tab): every
+ * new or moved request saved, every girl not in Adal Keep added. Returns
+ * { ok, checked, results, added } — or { ok: false, why } when the data
+ * cannot be read (the caller falls back to the page).
+ */
+// onlyId: one girl's check (her row only; nothing else is opened or added).
+// addLimit: at most this many girls added per round (the next round goes on),
+// so a first check of a long list never takes hours in one go.
+export async function scanListByApi(db, page, { log = () => {}, maxPages = 10, onlyId = null, addLimit = 40 } = {}) {
+  const H = await apiHeadersOf(page)
+  if (!H) return { ok: false, why: 'Musaned did not answer as signed in' }
+  const browser = page.browser()
+  let profiles = await db('profiles').select('*')
+  const results = [], added = []
+  let checked = 0, more = false
+  const only = onlyId ? profiles.find(x => x.id === Number(onlyId)) : null
+  const onlyPassport = only ? String(only.passport_number || '').toUpperCase().replace(/\s+/g, '') : ''
+  for (let n = 0; n < maxPages; n++) {
+    const r = await apiGet(page, H, `/api/search/employment?sort=createdAt,DESC&page=${n}&size=200`)
+    if (r.status !== 200) return n ? { ok: true, checked, results, added } : { ok: false, why: `Musaned answered ${r.status}` }
+    const rows = r.json?.content || []
+    if (!rows.length) break
+    let anyNew = false
+    for (const row of rows) {
+      checked++
+      const card = cardOfRow(row)
+      let p = matchCard(card, profiles)
+      // A girl this check added with a shorter name than the list's: her full name now.
+      if (p && p.created_by === 'Musaned list' && card.candidate && card.candidate.split(/s+/).length > String(p.full_name || '').split(/s+/).length) {
+        const w = card.candidate.split(/s+/)
+        await db('profiles').where('id', p.id).update({ full_name: card.candidate, first_name: w[0], last_name: w.slice(1).join(' '), updated_at: new Date().toISOString() }).catch(() => {})
+        log(`${p.full_name} → ${card.candidate} (her full name from the list)`)
+        p = { ...p, full_name: card.candidate }
+        profiles = profiles.map(x => x.id === p.id ? p : x)
+      }
+      if (only && !(p?.id === only.id || (onlyPassport && card.passport === onlyPassport))) continue
+      if (only && !p) p = only
+      if (p && !cardIsNew(p, card)) { results.push({ id: p.id, name: p.full_name, state: 'chosen', stage: card.stage, unchanged: true }); continue }
+      if (!p && /CANCEL|REJECT/i.test(card.stage)) continue        // someone else's request that ended: nothing to add
+      anyNew = true
+      try {
+        let made = false
+        if (!p) {
+          if (added.length >= addLimit) { more = true; continue }
+          p = await profileFromRequest(db, page, H, card); made = true; profiles.push(p); added.push({ id: p.id, name: p.full_name, stage: card.stage })
+        }
+        const pics = await savePictures(db, page, H, p.id, card.candidateId, card.passport)
+        await sleep(BETWEEN_MS / 2)
+        const d = await openContract(page, card)
+        const res = await saveDetails(db, browser, page, p, card, JSON.stringify(row), d)
+        results.push({ id: p.id, name: p.full_name, passport: p.passport_number, ...res, added: made, pictures: pics })
+        log(`${p.full_name}: ${made ? 'added from Musaned' : res.first ? 'newly chosen' : 'updated'} · ${card.stage}${pics.length ? ` · ${pics.join(' and ')} saved` : ''}`)
+        profiles = profiles.map(x => x.id === p.id ? { ...x, musaned_stage: card.stage, contract_number: x.contract_number || card.contract_number, chosen_at: x.chosen_at || new Date().toISOString() } : x)
+      } catch (e) {
+        results.push({ id: p?.id, name: p?.full_name || card.candidate, state: 'error', error: e.message })
+        log(`${p?.full_name || card.candidate}: ${e.message}`)
+      }
+    }
+    // Her row found (one girl's check), or a whole page with nothing new: done.
+    if (only && results.some(x => x.id === only.id)) break
+    if ((!only && !anyNew) || rows.length < 200) break
+  }
+  if (more) log(`more girls on Musaned are not in Adal Keep yet — the next check adds the next ${addLimit}`)
+  return { ok: true, checked, results, added, more }
 }

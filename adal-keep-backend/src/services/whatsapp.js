@@ -495,7 +495,7 @@ export async function giveTemplate(db, t) {
     ...(header_path ? { header_path } : {}),
     name, agency_name: t.agency_name || '', agency_name_ar: t.agency_name_ar || '', salary: t.salary ?? null, currency: t.currency || 'SAR',
     country: t.country || '', contract_years: t.contract_years ?? 2, html_content: t.html_content, css_content: t.css_content || '',
-    placeholders: t.placeholders || '[]', source_file: 'from Adal', is_active: true, created_at: at, updated_at: at,
+    placeholders: t.placeholders || '[]', source_file: 'from Adal', is_active: true, include_passport: true, passport_h1: 'Passport', passport_include_header: true, created_at: at, updated_at: at,
   })
   return id
 }

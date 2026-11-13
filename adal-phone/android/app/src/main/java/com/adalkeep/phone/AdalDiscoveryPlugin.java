@@ -243,6 +243,34 @@ public class AdalDiscoveryPlugin extends Plugin {
         }
     }
 
+    /**
+     * smsForward({on, url, anon, email, password, agency}): LMIS's SMS codes
+     * go to Adal Keep (SmsCodeReceiver). On asks Android for the SMS
+     * permission once; the phone's online account is kept for the receiver.
+     * smsForward({}) only says whether it is on: { on, allowed }.
+     */
+    @PluginMethod
+    public void smsForward(PluginCall call) {
+        android.content.SharedPreferences p = getContext().getSharedPreferences(SmsCodeReceiver.PREFS, Context.MODE_PRIVATE);
+        if (call.getData().has("on")) {
+            boolean on = call.getBoolean("on", false);
+            android.content.SharedPreferences.Editor e = p.edit().putBoolean("on", on);
+            if (on) {
+                for (String k : new String[] { "url", "anon", "email", "password", "agency" }) e.putString(k, call.getString(k, ""));
+                if (androidx.core.content.ContextCompat.checkSelfPermission(getContext(), android.Manifest.permission.RECEIVE_SMS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                    androidx.core.app.ActivityCompat.requestPermissions(getActivity(), new String[] { android.Manifest.permission.RECEIVE_SMS }, 7003);
+                }
+            } else {
+                for (String k : new String[] { "url", "anon", "email", "password", "agency" }) e.remove(k);
+            }
+            e.apply();
+        }
+        JSObject r = new JSObject();
+        r.put("on", p.getBoolean("on", false));
+        r.put("allowed", androidx.core.content.ContextCompat.checkSelfPermission(getContext(), android.Manifest.permission.RECEIVE_SMS) == android.content.pm.PackageManager.PERMISSION_GRANTED);
+        call.resolve(r);
+    }
+
     private static AdalDiscoveryPlugin live = null;
 
     @Override

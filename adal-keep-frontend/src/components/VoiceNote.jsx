@@ -23,9 +23,17 @@ export default function VoiceNote({ src, mine }) {
     let alive = true, made = null
     ;(async () => {
       try {
-        const r = await fetch(src, { credentials: 'include' })
-        if (!r.ok) throw new Error(String(r.status))
-        const blob = await r.blob()
+        // Through the API: on a phone it is the PC, or the chat server itself (cloud/chatDirect.js).
+        let blob
+        if (window.__ADAL_CLOUD && /^\/api\//.test(src)) {
+          const u = new URL(src, location.origin)
+          const { default: api } = await import('../services/api')
+          blob = (await api.get(u.pathname.replace(/^\/api/, ''), { params: Object.fromEntries(u.searchParams), responseType: 'blob' })).data
+        } else {
+          const r = await fetch(src, { credentials: 'include' })
+          if (!r.ok) throw new Error(String(r.status))
+          blob = await r.blob()
+        }
         made = URL.createObjectURL(blob)
         if (!alive) return
         setUrl(made)

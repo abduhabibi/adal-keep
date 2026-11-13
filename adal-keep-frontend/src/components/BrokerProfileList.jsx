@@ -10,6 +10,7 @@ import { useProfileFilters, ageOf } from './profileFilters'
 export default function BrokerProfileList({ profiles, onUnassign }) {
   const navigate = useNavigate()
   const [q, setQ] = useState('')
+  const [showFilters, setShowFilters] = useState(false)
   // Search first, then the filters and sort on what it found.
   const found = useMemo(() => {
     const term = q.trim().toLowerCase()
@@ -34,7 +35,9 @@ export default function BrokerProfileList({ profiles, onUnassign }) {
           {sortBar}
         </div>
 
-        {filterBar}
+        {/* On a phone the filters fold away (the list comes first). */}
+        <button type="button" onClick={() => setShowFilters(v => !v)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-left text-sm font-semibold text-slate-600 dark:border-slate-700 dark:text-slate-300 md:hidden">⚙ Filters {showFilters ? "▴" : "▾"}</button>
+        <div className={showFilters ? "" : "hidden md:block"}>{filterBar}</div>
 
         <div className="flex items-center justify-between text-xs text-slate-500">
           <span>{rows.length} of {profiles.length} profiles</span>
@@ -52,7 +55,24 @@ export default function BrokerProfileList({ profiles, onUnassign }) {
       ) : rows.length === 0 ? (
         <div className="text-center py-14 text-slate-500">No profile matches this search.</div>
       ) : (
-        <div className="overflow-x-auto max-h-[640px] overflow-y-auto">
+        <>
+        {/* A phone: one card per girl, her buttons always in sight. */}
+        <ul className="divide-y divide-slate-100 dark:divide-slate-800 md:hidden">
+          {rows.map(p => {
+            const age = ageOf(p.date_of_birth)
+            return (
+              <li key={p.id} onClick={() => navigate(`/profiles/${p.id}`)} className="cursor-pointer px-4 py-3 active:bg-slate-50 dark:active:bg-slate-800/40">
+                <div className="font-medium">{p.full_name}</div>
+                <div className="text-xs text-slate-500">{[p.passport_number, p.labor_id, p.phone_number, age !== null && `${age} yrs`, p.destination_country].filter(Boolean).join(" · ") || "—"}</div>
+                <div className="mt-2 flex gap-2">
+                  <Button variant="secondary" size="sm" onClick={(e) => { e.stopPropagation(); navigate(`/profiles/${p.id}`) }}>ይመልከቱ</Button>
+                  <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700 hover:bg-red-50" onClick={(e) => { e.stopPropagation(); onUnassign(p.id) }}>አስወግድ</Button>
+                </div>
+              </li>
+            )
+          })}
+        </ul>
+        <div className="hidden overflow-x-auto max-h-[640px] overflow-y-auto md:block">
           <table className="w-full text-sm">
             <thead className="sticky top-0 text-xs text-slate-500 uppercase bg-slate-50 dark:bg-slate-800">
               <tr>
@@ -91,6 +111,7 @@ export default function BrokerProfileList({ profiles, onUnassign }) {
             </tbody>
           </table>
         </div>
+        </>
       )}
     </div>
   )

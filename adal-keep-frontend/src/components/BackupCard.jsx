@@ -10,7 +10,7 @@ import Button from './shared/Button'
 const field = 'w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm'
 const err = (e) => e?.response?.data?.error || e.message
 
-export default function BackupCard() {
+function BackupCardHere() {
   const [c, setC] = useState(null)
   const [token, setToken] = useState('')
   const [pw, setPw] = useState('')
@@ -168,4 +168,15 @@ function Restore({ shared }) {
       {done && <p className="text-teal-700 dark:text-teal-300">✅ Restored {done.files} documents{done.database ? ' and the database (made ' + new Date(done.made).toLocaleString() + ')' : ''}. Adal Keep restarts now — open it again in a minute.</p>}
     </div>
   )
+}
+
+/** Set up on the main PC itself: a phone says so instead of asking for what only the PC has. */
+export default function BackupCard() {
+  if (window.__ADAL_CLOUD) return (
+    <div className="panel p-4 text-sm text-slate-600 dark:text-slate-300">
+      <p className="font-semibold">💾 Backups</p>
+      <p className="mt-1 text-xs text-slate-500">Set up on the main office PC itself. This phone keeps working with what the PC set.</p>
+    </div>
+  )
+  return <BackupCardHere />
 }

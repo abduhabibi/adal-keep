@@ -7,7 +7,8 @@
 const listeners = new Set()
 let ch = null, pcSeen = 0, ref = 0
 
-export const pcLive = () => Date.now() - pcSeen < 25000
+// ("adal-pretend-pc-off": a phone tried as if the office PC were off — support, tests.)
+export const pcLive = () => { try { if (localStorage.getItem('adal-pretend-pc-off') === '1') return false } catch {} return Date.now() - pcSeen < 25000 }
 export function onLive(fn) { listeners.add(fn); return () => listeners.delete(fn) }
 
 /** Connect once (the channel name is the agency's live secret). */

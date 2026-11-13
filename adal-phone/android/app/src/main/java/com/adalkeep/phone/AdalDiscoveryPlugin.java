@@ -199,6 +199,50 @@ public class AdalDiscoveryPlugin extends Plugin {
         });
     }
 
+    /**
+     * saveFile({base64, name, mime, open, share}): a file the pages made (a CV
+     * PDF, an Excel list, a picture) — the WebView ignores page downloads —
+     * goes to Downloads/Adal Keep and opens (or is shared: WhatsApp, Telegram…).
+     */
+    @PluginMethod
+    public void saveFile(final PluginCall call) {
+        try {
+            byte[] data = Base64.decode(call.getString("base64", ""), Base64.DEFAULT);
+            String name = call.getString("name", "Adal Keep file").replaceAll("[\\/:*?\"<>|]+", "_");
+            String mime = call.getString("mime", "application/octet-stream");
+            Uri uri;
+            if (Build.VERSION.SDK_INT >= 29) {
+                android.content.ContentValues v = new android.content.ContentValues();
+                v.put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, name);
+                v.put(android.provider.MediaStore.MediaColumns.MIME_TYPE, mime);
+                v.put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS + "/Adal Keep");
+                uri = getContext().getContentResolver().insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, v);
+                if (uri == null) throw new Exception("Downloads is not writable");
+                try (java.io.OutputStream o = getContext().getContentResolver().openOutputStream(uri)) { o.write(data); }
+            } else {
+                // Older Android: the app's own folder (no storage permission needed), shared through the FileProvider.
+                File dir = new File(getContext().getExternalFilesDir(null), "Downloads");
+                dir.mkdirs();
+                File out = new File(dir, name);
+                try (FileOutputStream o = new FileOutputStream(out)) { o.write(data); }
+                uri = FileProvider.getUriForFile(getContext(), getContext().getPackageName() + ".fileprovider", out);
+            }
+            boolean share = call.getBoolean("share", false);
+            if (share || call.getBoolean("open", true)) {
+                Intent i = share ? new Intent(Intent.ACTION_SEND) : new Intent(Intent.ACTION_VIEW);
+                if (share) { i.setType(mime); i.putExtra(Intent.EXTRA_STREAM, uri); } else i.setDataAndType(uri, mime);
+                i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+                try { getActivity().startActivity(Intent.createChooser(i, name)); } catch (Exception ignored) {}
+            }
+            JSObject r = new JSObject();
+            r.put("uri", uri.toString());
+            r.put("name", name);
+            call.resolve(r);
+        } catch (Exception e) {
+            call.reject(e.getMessage());
+        }
+    }
+
     private static AdalDiscoveryPlugin live = null;
 
     @Override

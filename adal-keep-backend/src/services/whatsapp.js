@@ -37,7 +37,9 @@ const sessions = new Map() // key → { client, state, own }
 export const keyOf = () => {
   const n = readNote()
   const all = [...new Set([n.brave, ...(n.on || [])].filter(Boolean))]
-  return all.find(k => sessions.get(k)?.state?.status === 'ready') || n.brave || all[0] || 'owner'
+  // None ready: the one that was in use last (not an old one that would need a new QR).
+  const last = n.lastReady && (n.on || []).includes(n.lastReady) ? n.lastReady : null
+  return all.find(k => sessions.get(k)?.state?.status === 'ready') || last || n.brave || all[0] || 'owner'
 }
 
 const readNote = () => { try { return JSON.parse(fs.readFileSync(NOTE, 'utf8')) } catch { return { brave: null, on: [] } } }

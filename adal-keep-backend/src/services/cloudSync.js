@@ -36,7 +36,8 @@ const GLOBAL = ['/profiles', '/brokers', '/tasks', '/employees', '/settings', '/
   '/lmis/accounts', '/musaned/accounts', '/tasheer/accounts', '/insurance/accounts', '/visa/accounts',
   '/automations/ready-for-submit', '/tutor/adoption', '/main-pc', '/plan', '/whatsapp', '/whatsapp/agents']
 const PER_PROFILE = (id) => [`/profiles/${id}`, `/profiles/${id}/fields`, `/profiles/${id}/automations`,
-  `/profiles/${id}/journey`, `/profiles/${id}/fill-plan`, `/cv/profile-readiness/${id}`, `/cv/generated?profile_id=${id}`]
+  `/profiles/${id}/journey`, `/profiles/${id}/fill-plan`, `/cv/profile-readiness/${id}`, `/cv/generated?profile_id=${id}`,
+  `/profiles/${id}/whatsapp`, `/profiles/${id}/days`]
 // A broker's page: the broker and the profiles it brought (text only).
 const PER_BROKER = (id) => [`/brokers/${id}`, `/profiles?broker_id=${id}`]
 // The portals' sign-ins (LMIS, Musaned …): the lists go online without their
@@ -86,6 +87,12 @@ async function pushVault(db, agency, state) {
   for (const key of ACCOUNT_LISTS) {
     try { const r = await local('GET', key); if (r.ok) vault[key] = await r.json() } catch {}
   }
+  // The agency's chat account: its phones chat straight with the chat server
+  // when this PC is off (frontend cloud/chatDirect.js). Locked like the rest.
+  try {
+    const chat = JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../..', '.adal_chat.json'), 'utf8'))
+    if (chat?.email && chat?.password) vault['/chat-account'] = { email: chat.email, password: chat.password, user_id: chat.user_id || null }
+  } catch {}
   const hash = sha(JSON.stringify(vault))
   if (state.get('/vault') === hash) return
   const { encrypt } = await import('./tgStore.js')
@@ -126,7 +133,20 @@ async function applyChangesNow(db, agency) {
         // Filed on this PC: the phone's upload leaves Supabase storage.
         if (r.ok) for (const f of p.files || []) await cloudCall(db, 'DELETE', `/storage/v1/object/keep/${f.object}`).catch(() => {})
       } else {
-        r = await local(String(p.method || 'POST').toUpperCase(), p.path, { body: p.body, headers: who })
+        // Something a phone made with the PC off (a checklist) has the phone's
+        // own number (below 0) until here: the real one is put in its place.
+        let path_ = p.path
+        const ref = path_.match(/^\/checklists\/(-\d+)(\/|$)/)?.[1]
+        if (ref) {
+          const real = (await db('cloud_sync').where({ key: `ref:checklist:${ref}` }).first('hash').catch(() => null))?.hash
+          if (!real) throw new Error('that checklist was not made')
+          path_ = path_.replace(ref, real)
+        }
+        r = await local(String(p.method || 'POST').toUpperCase(), path_, { body: p.body, headers: who })
+        if (r.ok && p.path === '/checklists' && Number(p.body?.phone_ref) < 0) {
+          const made = await r.clone().json().catch(() => null)
+          if (made?.id) await setState(db, `ref:checklist:${Number(p.body.phone_ref)}`, String(made.id))
+        }
       }
       result = `${r.status}${r.ok ? '' : ' ' + (await r.text()).slice(0, 200)}`
     } catch (e) {
@@ -218,7 +238,6 @@ async function pushKeys(db) {
   if (vaultSoon) { vaultSoon = false; await pushVault(db, agency, state).catch(() => {}) }
   const rows = [], hashes = []
   for (const key of keys) {
-    if (full) await new Promise(res => setTimeout(res, PACE_MS))
     let r
     try { r = await local('GET', key) } catch { continue }
     if (!r.ok) continue
@@ -281,11 +300,11 @@ async function changedProfiles(db, since) {
   return [...ids]
 }
 
-async function pushAnswers(db, agency, state) {
+async function pushAnswers(db, agency, state, { light = false } = {}) {
   const started = Date.now()
   if (!lastFullAt) lastFullAt = Number(state.get('sweep:full') || 0)
   if (!lastSweepAt) lastSweepAt = Number(state.get('sweep:at') || 0)
-  const full = !lastFullAt || started - lastFullAt >= FULL_MS
+  const full = !light && (!lastFullAt || started - lastFullAt >= FULL_MS)
   const ids = full
     ? (await db('profiles').select('id')).map(r => r.id)
     : await changedProfiles(db, new Date((lastSweepAt || started) - 3 * 60000))
@@ -306,6 +325,7 @@ async function pushAnswers(db, agency, state) {
     batch = []
   }
   for (const key of keys) {
+    if (full) await new Promise(res => setTimeout(res, PACE_MS))
     let r
     try { r = await local('GET', key) } catch { continue }
     if (!r.ok) continue
@@ -444,7 +464,7 @@ async function pushFiles(db, agency, state) {
 
 // ------------------------------------------------------------ the loop
 let joined = false
-async function syncOnce(db) {
+async function syncOnce(db, { light = false } = {}) {
   if (cloudStatus.running) return
   cloudStatus.running = true
   try {
@@ -463,8 +483,9 @@ async function syncOnce(db) {
     await publishPC(db).catch(e => console.warn('[cloud] PC number:', e.message))
     const applied = await applyChanges(db, agency)
     const state = await stateOf(db)
-    await pushAnswers(db, agency, state)
-    await pushFiles(db, agency, await stateOf(db))
+    await pushAnswers(db, agency, state, { light })
+    // Documents (big uploads) wait while a robot uses the internet.
+    if (!light) await pushFiles(db, agency, await stateOf(db))
     // This PC's health and last errors, for Adal (every 5 minutes).
     if (Date.now() - lastDiagAt >= 5 * 60000) {
       lastDiagAt = Date.now()
@@ -498,9 +519,11 @@ export function startCloudSync(db) {
   if (timer) return
   const tick = async () => {
     cloudStatus.on = await cloudOn(db).catch(() => false)
-    // An agent or a move is working: it has the internet. The copy catches up when it is done.
+    // A move from another system is working: the copy catches up when it is done.
+    // A robot working: a light round (the changed profiles only, no documents) —
+    // the phones must never fall hours behind because the robots work all day.
     const { transitionRunning } = await import('./transition.js')
-    if (cloudStatus.on && !runsWorking() && !transitionRunning()) await syncOnce(db)
+    if (cloudStatus.on && !transitionRunning()) await syncOnce(db, { light: runsWorking() > 0 })
   }
   setTimeout(tick, 45000)
   timer = setInterval(tick, EVERY_MS)

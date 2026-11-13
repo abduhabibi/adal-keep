@@ -88,8 +88,46 @@ let pending = {}
 try { pending = JSON.parse(localStorage.getItem(PENDING) || '{}') } catch {}
 const savePending = () => { try { localStorage.setItem(PENDING, JSON.stringify(pending)) } catch {} }
 
+// Checklist changes made on this phone (PC off): shown at once, and kept on
+// top of the online copy until the PC has carried them out (the copy is newer).
+const LISTS = 'adal-cloud-pending-lists' + SUFFIX
+let listOps = []
+try { listOps = JSON.parse(localStorage.getItem(LISTS) || '[]') } catch {}
+const saveListOps = () => { try { localStorage.setItem(LISTS, JSON.stringify(listOps)) } catch {} }
+function applyListOps(lists, updatedAt) {
+  if (!Array.isArray(lists)) return lists
+  if (updatedAt) { const n = listOps.length; listOps = listOps.filter(o => new Date(o.at) >= new Date(updatedAt)); if (listOps.length !== n) saveListOps() }
+  if (!listOps.length) return lists
+  const people = new Map((mirrorGet('/profiles') || []).map(p => [Number(p.id), p]))
+  let out = lists.map(c => ({ ...c, profiles: [...(c.profiles || [])], cells: [...(c.cells || [])] }))
+  for (const o of listOps) {
+    const c = out.find(x => Number(x.id) === Number(o.list))
+    if (o.op === 'new') { if (!c) out = [{ id: o.list, name: o.name, columns: null, cells: [], profiles: [], created_at: o.at, queued: true }, ...out]; continue }
+    if (o.op === 'delete') { out = out.filter(x => Number(x.id) !== Number(o.list)); continue }
+    if (!c) continue
+    if (o.op === 'add') for (const id of o.ids) { if (!c.profiles.some(p => Number(p.id) === Number(id)) && people.has(Number(id))) c.profiles.push(people.get(Number(id))) }
+    if (o.op === 'remove') c.profiles = c.profiles.filter(p => Number(p.id) !== Number(o.id))
+    if (o.op === 'cell') { c.cells = c.cells.filter(x => !(Number(x.profile_id) === Number(o.profile) && x.column === o.column)); if (o.value) c.cells.push({ profile_id: o.profile, column: o.column, value: o.value }) }
+    if (o.op === 'columns') c.columns = o.columns
+  }
+  return out
+}
+/** A checklist change of this phone, as an op to show until the PC has it. */
+function listOpOf(method, path, body) {
+  const at = new Date().toISOString()
+  let m
+  if (method === 'post' && path === '/checklists' && body?.name) return { op: 'new', list: -Date.now(), name: String(body.name).trim(), at }
+  if (method === 'delete' && (m = path.match(/^\/checklists\/(-?\d+)$/))) return { op: 'delete', list: Number(m[1]), at }
+  if (method === 'post' && (m = path.match(/^\/checklists\/(-?\d+)\/profiles$/))) return { op: 'add', list: Number(m[1]), ids: (body?.profile_ids || []).map(Number), at }
+  if (method === 'delete' && (m = path.match(/^\/checklists\/(-?\d+)\/profiles\/(\d+)$/))) return { op: 'remove', list: Number(m[1]), id: Number(m[2]), at }
+  if (method === 'put' && (m = path.match(/^\/checklists\/(-?\d+)\/cells$/))) return { op: 'cell', list: Number(m[1]), profile: Number(body?.profile_id), column: body?.column, value: body?.value || '', at }
+  if (['put', 'patch'].includes(method) && (m = path.match(/^\/checklists\/(-?\d+)$/)) && Array.isArray(body?.columns)) return { op: 'columns', list: Number(m[1]), columns: body.columns, at }
+  return null
+}
+
 // This phone's edits stay visible until the online copy is newer than them.
 function withPending(key, data, updatedAt) {
+  if (key === '/checklists') return applyListOps(data, updatedAt)
   const fresh = (id) => {
     const p = pending[id]
     if (p && updatedAt && new Date(updatedAt) > new Date(p.at)) { delete pending[id]; savePending(); return null }
@@ -134,7 +172,7 @@ async function get(path, query) {
   }
   if (path === '/cv/generated' && query.profile_id) return (await answer(`/cv/generated?profile_id=${query.profile_id}`)) || []
   // A checklist's girls and their documents, from the list and each one's fields.
-  const live = path.match(/^\/checklists\/(\d+)\/live$/)
+  const live = path.match(/^\/checklists\/(-?\d+)\/live$/)
   if (live) {
     const me = ((await answer('/checklists')) || []).find(c => String(c.id) === live[1])
     const profiles = me?.profiles || []
@@ -143,12 +181,20 @@ async function get(path, query) {
     return { profiles, fields }
   }
   const data = await answer(path)
+  // Live lists the PC makes as things happen: with the PC off, nothing waits on a person.
+  if (data === undefined && /^\/(automations\/attention|whatsapp\/(bulk|notify)|sessions|tasheer\/session|system\/update\/notice|musaned\/authenticators|musaned\/epro-signature|wafid\/check|mobile\/cloud|profiles\/\d+\/whatsapp)$/.test(path)) {
+    if (path === '/system/update/notice') return { hasUpdate: false, count: 0, changes: [] }
+    // (The authenticator codes stay on the PC: secrets never go to the online copy.)
+    if (/^\/(musaned\/epro-signature|wafid\/check|mobile\/cloud)$/.test(path)) return { phone: true }
+    return path === '/whatsapp/bulk' || path === '/whatsapp/notify' ? { running: false } : []
+  }
   if (data === undefined) throw httpError(503, 'This needs the PC — it is not in the online copy.')
   return data
 }
 
 // ---------------------------------------------------------------- changes
-const NEEDS_PC = /^\/(chat|system|backup|branch|main-pc|mobile|subscription|setup|automations\/\d+\/(input|screen))/
+// (A CV preview is drawn by the PC: with it off the page says so, nothing waits in line.)
+const NEEDS_PC = /^\/(chat|system|backup|branch|main-pc|mobile|subscription|setup|cv\/preview|automations\/\d+\/(input|screen))/
 const QUIET = /^\/(tutor|employees\/device-(login|resume|logout)|chat\/ping)/
 
 async function request(kind, payload, profileId = null) {
@@ -172,6 +218,11 @@ async function uploadParts(form) {
 
 // What the page sees right away for a change it made (the PC confirms later).
 function optimistic(method, path, body) {
+  // A profile given to a broker (or taken off): her broker changes at once.
+  if (method === 'post' && /^\/brokers\/(un)?assign$/.test(path) && Number(body?.profileId) > 0) {
+    const pid = String(Number(body.profileId))
+    return optimistic('put', `/profiles/${pid}`, { broker_id: path.endsWith('/unassign') ? null : Number(body.brokerId) || null })
+  }
   const one = path.match(/^\/profiles\/(\d+)$/)
   if (one && ['put', 'patch'].includes(method) && body && typeof body === 'object') {
     pending[one[1]] = { body: { ...(pending[one[1]]?.body || {}), ...body }, at: new Date().toISOString() }
@@ -199,6 +250,16 @@ function dropTasks(method, path, body) {
 
 async function change(method, path, body) {
   if (NEEDS_PC.test(path)) throw httpError(503, 'This needs the PC (it is off or far away). It works again when the phone reaches the PC.')
+  const lop = listOpOf(method, path, body)
+  if (lop) {
+    // A checklist made on this phone has its own number (below 0) until the PC
+    // makes it: the PC puts the real number in its place (backend cloudSync.js).
+    const sent = lop.op === 'new' ? { ...body, phone_ref: lop.list } : body
+    await request('api', { method: method.toUpperCase(), path, body: sent ?? null }, null)
+    listOps.push(lop); saveListOps()
+    if (lop.op === 'new') return { id: lop.list, name: lop.name, queued: true, success: true }
+    return { ok: true, success: true, queued: true }
+  }
   if (QUIET.test(path)) return { ok: true }
   const pid = Number(path.match(/^\/profiles\/(\d+)/)?.[1]) || null
   if (body instanceof FormData) {
@@ -215,6 +276,8 @@ async function change(method, path, body) {
 // chat, everything. Off: the online copy above.
 let alive = { at: 0, on: false }
 export async function pcOnline() {
+  // For trying a phone as if the office PC were off (support, tests).
+  try { if (localStorage.getItem('adal-pretend-pc-off') === '1') return false } catch {}
   if (pcLive()) return true
   if (Date.now() - alive.at < 10000) return alive.on
   let on = false
@@ -369,6 +432,12 @@ export async function cloudAdapter(config) {
       if (method !== 'get') throw httpError(504, 'The PC did not answer in time — it may still do it. Look again in a moment.')
       // A GET with no answer: the online copy below.
     }
+    // The chat with the PC off: straight to the chat server (cloud/chatDirect.js).
+    if (path.startsWith('/chat')) {
+      const { chatDirect } = await import('./chatDirect.js')
+      const d = await chatDirect(method, path, query, body)
+      if (d !== undefined) return reply(200, d)
+    }
     const data = method === 'get' ? await get(path, query) : await change(method, path, body)
     if (config.responseType === 'blob' && !(data instanceof Blob)) throw httpError(503, 'This needs the PC.')
     return reply(200, data)
@@ -400,10 +469,10 @@ async function openAK1(buf, keyB64) {
 }
 
 /** The portals' sign-ins (LMIS, Musaned …) with their passwords — "/vault", opened here. */
-export async function openVault() {
+export async function openVault({ fresh = false } = {}) {
   const c = cloudCreds()
   await mirrorReady(c.agency)
-  let v = mirrorGet('/vault')
+  let v = fresh ? null : mirrorGet('/vault')
   if (!v) { const rows = await rest('GET', '/rest/v1/keep_meta?key=eq./vault&select=data'); v = rows?.[0]?.data; if (v) remember('/vault', v) }
   const s = await cloudSecrets()
   if (!v?.v || !s?.file_key) return {}
@@ -513,9 +582,22 @@ export async function fileBlob(fileId) {
   return (await fetch(u)).blob()
 }
 
+// A chat picture, file or voice note (/api/chat/file?path=…): fetched through
+// the API (the PC, or straight from the chat server) and shown from memory.
+const chatBlobs = new Map()
+function fixChat(el, attr, v) {
+  if (el.dataset.cloudFixed === v) return
+  el.dataset.cloudFixed = v
+  const u = new URL(v, location.origin)
+  const p = chatBlobs.get(v) || import('../services/api.js').then(m => m.default.get(u.pathname.replace(/^\/api/, ''), { params: Object.fromEntries(u.searchParams), responseType: 'blob' }))
+    .then(r => URL.createObjectURL(r.data)).catch(() => { chatBlobs.delete(v); return null })
+  chatBlobs.set(v, p)
+  p.then(url => { if (url && el.getAttribute(attr) === v) el.setAttribute(attr, url) })
+}
 function fixNode(el) {
   for (const attr of ['src', 'href']) {
     const v = el.getAttribute?.(attr)
+    if (v && /^\/api\/chat\/(file|image)\?/.test(v)) { fixChat(el, attr, v); continue }
     const m = v && v.match(/^\/api\/files\/(\d+)\b/)
     if (!m || el.dataset.cloudFixed === v) continue
     el.dataset.cloudFixed = v
@@ -532,7 +614,7 @@ export async function startLive() {
 }
 
 export function startCloudDocuments() {
-  const scan = (root) => { if (root.querySelectorAll) { fixNode(root); root.querySelectorAll('img[src^="/api/files/"], a[href^="/api/files/"]').forEach(fixNode) } }
+  const scan = (root) => { if (root.querySelectorAll) { fixNode(root); root.querySelectorAll('img[src^="/api/files/"], a[href^="/api/files/"], img[src^="/api/chat/"], a[href^="/api/chat/"], audio[src^="/api/chat/"], source[src^="/api/chat/"]').forEach(fixNode) } }
   scan(document.body)
   new MutationObserver(list => {
     for (const m of list) {

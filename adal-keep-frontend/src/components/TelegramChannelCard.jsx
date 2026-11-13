@@ -14,7 +14,7 @@ import Button from './shared/Button'
 
 const err = (e) => e?.response?.data?.error || e.message
 
-export default function TelegramChannelCard() {
+function TelegramChannelCardHere() {
   const [c, setC] = useState(null)
   const [bot, setBot] = useState(null)
   const [chats, setChats] = useState(null)
@@ -85,4 +85,15 @@ export default function TelegramChannelCard() {
       )}
     </Card>
   )
+}
+
+/** Set up on the main PC itself: a phone says so instead of asking for what only the PC has. */
+export default function TelegramChannelCard() {
+  if (window.__ADAL_CLOUD) return (
+    <div className="panel p-4 text-sm text-slate-600 dark:text-slate-300">
+      <p className="font-semibold">📨 Telegram storage</p>
+      <p className="mt-1 text-xs text-slate-500">Set up on the main office PC itself. This phone keeps working with what the PC set.</p>
+    </div>
+  )
+  return <TelegramChannelCardHere />
 }

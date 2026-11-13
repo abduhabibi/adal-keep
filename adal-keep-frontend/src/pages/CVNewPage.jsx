@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import api from '../services/api'
 import PickBrokerHere from '../components/PickBrokerHere'
+import UploadPhotoHere from '../components/UploadPhotoHere'
 import PageHeader from '../components/shared/PageHeader'
 import Button from '../components/shared/Button'
 import Input from '../components/shared/Input'
@@ -197,13 +198,22 @@ export default function CVNewPage() {
   }, [previewHtml])
 
   // Her broker set here: the readiness again (the block goes) and the broker's phone.
+  // What was fixed here (a broker, a photo): kept on top of an older answer
+  // (a phone with the PC off gets the PC's answer only once it has filed it).
+  const fixedHere = useRef({})
   const reloadReadiness = async (setId) => {
-    // A phone with the PC off: the broker shows at once (the PC saves it when it is on).
-    if (setId) setReadiness(r => r ? { ...r, profile: { ...(r.profile || {}), broker_id: setId } } : r)
+    if (typeof setId === 'number' && setId > 0) fixedHere.current.broker_id = setId
+    const withFixes = (d) => d && {
+      ...d,
+      has_photo: d.has_photo || !!fixedHere.current.has_photo,
+      has_full_body_photo: d.has_full_body_photo || !!fixedHere.current.has_full_body_photo,
+      profile: { ...(d.profile || {}), broker_id: d.profile?.broker_id || fixedHere.current.broker_id || null },
+    }
+    setReadiness(r => withFixes(r))
     try {
       const r = await api.get(`/cv/profile-readiness/${profileId}`, { adalNoCache: true })
-      setReadiness(setId && !r.data?.profile?.broker_id ? { ...r.data, profile: { ...(r.data.profile || {}), broker_id: setId } } : r.data)
-      const bid = r.data?.profile?.broker_id || setId
+      setReadiness(withFixes(r.data))
+      const bid = r.data?.profile?.broker_id || fixedHere.current.broker_id
       if (bid) { try { setBroker((await api.get(`/brokers/${bid}`)).data) } catch {} }
     } catch {}
   }
@@ -264,12 +274,20 @@ export default function CVNewPage() {
           currency: primary.currency || 'SAR',
         },
       })
+      // A phone with the office PC off: the PC makes it when it is on (it shows under CVs then).
+      if (res.data?.queued || !res.data?.download_url) {
+        toast.success('Saved — the office PC makes the PDF when it is on; it then shows under CVs', { id: t, duration: 7000 })
+        try { localStorage.removeItem('cv-draft-' + profileId) } catch {}
+        return
+      }
       setGenResult(res.data)
       const a = document.createElement('a')
       a.href = res.data.download_url
       a.download = res.data.filename || 'CV.pdf'
       document.body.appendChild(a); a.click(); a.remove()
-      toast.success('PDF downloaded', { id: t })
+      // (In the phone app the click is caught and the PDF saved to Downloads — lib/phoneSave.js.)
+      if (!window.Capacitor?.Plugins?.AdalDiscovery?.saveFile) toast.success('PDF downloaded', { id: t })
+      else toast.dismiss(t)
       try { localStorage.removeItem('cv-draft-' + profileId) } catch {}
     } catch (e) { toast.error(e.response?.data?.error || 'Save failed', { id: t }) }
     finally { setSaving(false) }
@@ -342,11 +360,15 @@ export default function CVNewPage() {
       {blocker && (
         <div className="panel p-4 border-l-4 border-l-red-500">
           <p className="text-sm font-semibold text-red-700 dark:text-red-400">⚠ {blocker}</p>
+          {/* Each thing it lacks is fixed right here (a phone has no other page open). */}
           {!readiness?.profile?.broker_id ? (
             <PickBrokerHere profileId={profileId} onDone={reloadReadiness} />
+          ) : !readiness?.has_photo || !readiness?.has_full_body_photo ? (
+            <UploadPhotoHere profileId={profileId} field={!readiness?.has_photo ? 'Photo' : 'Full Body Photo'}
+              onDone={(f) => { fixedHere.current[f === 'Photo' ? 'has_photo' : 'has_full_body_photo'] = true; reloadReadiness() }} />
           ) : (
             <p className="text-xs text-slate-500 mt-1">
-              Fix this on the profile page, then come back. Your form input is being saved automatically.
+              Fill it in below. Your form input is being saved automatically.
             </p>
           )}
         </div>
@@ -644,6 +666,16 @@ export default function CVNewPage() {
               src={previewUrl}
               title="CV Preview"
               className="flex-1 w-full border-0 bg-white"
+              // A phone: the A4 page shrinks to the screen's width (nothing cut off on the right).
+              onLoad={(e) => {
+                try {
+                  const f = e.currentTarget, d = f.contentDocument
+                  if (!d?.documentElement) return
+                  d.documentElement.style.zoom = ''
+                  const k = f.clientWidth / Math.max(d.documentElement.scrollWidth, d.body?.scrollWidth || 0)
+                  if (k > 0 && k < 1) d.documentElement.style.zoom = String(Math.max(0.3, k))
+                } catch {}
+              }}
             />
           </div>
         </div>

@@ -61,6 +61,14 @@ func main() {
 	}
 	background := len(args) > 0 && args[0] == "--background"
 
+	// Adal Keep never opens by itself and never works in the background
+	// (asked on 2026-11-14): a start by Windows at sign-in does nothing,
+	// unless someone switched on "open Adal Keep when the PC starts".
+	if background && !openAtStart(filepath.Join(root, "backend", "data")) {
+		logf("started by Windows at sign-in: Adal Keep opens only from its icon — nothing started")
+		return
+	}
+
 	if employeePC(root) {
 		runEmployee(root, background)
 		return

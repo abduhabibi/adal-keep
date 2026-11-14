@@ -134,7 +134,7 @@ Section "Install"
 
   ; Employees use Adal Keep through this PC: AdalKeep.exe opens the main PC's
   ; Adal Keep in an app-style window with the Adal Keep logo, and runs the
-  ; Companion (sends new scans) in the background. Opens at Windows login too.
+  ; Companion (sends new scans) in the background. Never opens with Windows.
 
   CreateDirectory "$SMPROGRAMS\${APP_NAME}"
   Delete "$INSTDIR\start-companion.bat"
@@ -146,7 +146,8 @@ Section "Install"
   ; The taskbar shows the Adal Keep window as Adal Keep (its logo).
   nsExec::Exec '"$INSTDIR\AdalKeep.exe" --set-shortcut-ids "$DESKTOP\${APP_NAME}.lnk" "$SMPROGRAMS\${APP_NAME}\${APP_NAME}.lnk"'
   Pop $0
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "${APP_KEY}" '"$INSTDIR\AdalKeep.exe" --background'
+  ; Never with Windows (2026-11-14): Adal Keep opens only from its icon; an older install's entry goes.
+  DeleteRegValue HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "${APP_KEY}"
 !else
   ; ============================= SERVER PC =============================
   DetailPrint "Copying Adal Keep..."
@@ -200,10 +201,10 @@ Section "Install"
   ; The taskbar shows the Adal Keep window as Adal Keep (its logo).
   nsExec::Exec '"$INSTDIR\AdalKeep.exe" --set-shortcut-ids "$DESKTOP\${APP_NAME}.lnk" "$SMPROGRAMS\${APP_NAME}\${APP_NAME}.lnk"'
   Pop $0
-  ; start the server with Windows: no window, it restarts itself if it stops
   Delete "$INSTDIR\run-server.bat"
   Delete "$INSTDIR\start-companion.bat"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "${APP_KEY}" '"$INSTDIR\AdalKeep.exe" --background'
+  ; Never with Windows (2026-11-14): Adal Keep opens only from its icon; an older install's entry goes.
+  DeleteRegValue HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "${APP_KEY}"
 !endif
 
   WriteRegStr HKLM "Software\${APP_KEY}" "InstallDir" "$INSTDIR"
@@ -222,10 +223,10 @@ Section "Install"
   IfSilent done
 !ifdef COMPANION
   DetailPrint "Starting Adal Keep..."
-  Exec '"$INSTDIR\AdalKeep.exe" --background'
+  Exec '"$INSTDIR\AdalKeep.exe"'   ; opens its window; closing it ends everything
 !else
   DetailPrint "Starting Adal Keep..."
-  Exec '"$INSTDIR\AdalKeep.exe" --background'
+  Exec '"$INSTDIR\AdalKeep.exe"'   ; opens its window; closing it ends everything
 !endif
   DetailPrint "Done."
   done:

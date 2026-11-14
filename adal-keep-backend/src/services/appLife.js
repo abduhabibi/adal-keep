@@ -70,5 +70,31 @@ export async function endEverything(why) {
   setTimeout(() => process.exit(0), 500)
 }
 
+/**
+ * Started by Windows at sign-in (the launcher, --background) with no window:
+ * Adal Keep never works in the background (asked on 2026-11-14: "never make
+ * Adal Keep open itself after I close it, never work in the background").
+ * When no window opens within a minute, everything ends — unless someone
+ * switched on "open Adal Keep when the PC starts" (then its window opens).
+ * Older launchers on the PCs still start at sign-in; this ends them.
+ */
+export async function endIfStartedAlone({ waitMs = 60_000, end = endEverything } = {}) {
+  if (process.platform !== 'win32') return false
+  try {
+    const fs = await import('fs')
+    const startFile = path.join(INSTALL, 'backend', 'data', 'open-at-start.json')
+    const openAtStart = /"on"\s*:\s*true/.test(fs.readFileSync(startFile, 'utf8'))
+    if (openAtStart) return false
+  } catch {}
+  const root = INSTALL.toLowerCase().replace(/'/g, "''")
+  const byWindows = await new Promise(done => execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+    `@(Get-CimInstance Win32_Process -Filter "Name='AdalKeep.exe'" | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.ToLower().StartsWith('${root}\\') -and $_.CommandLine -match '--background' }).Count`],
+  { windowsHide: true, timeout: 30_000 }, (e, out) => done(!e && Number(String(out).trim()) > 0)))
+  if (!byWindows) return false
+  console.log(`[app] started by Windows at sign-in: it ends in ${Math.round(waitMs / 1000)} s unless its window is opened`)
+  setTimeout(() => { if (!seen && !open.size) end('Windows started Adal Keep at sign-in and no window was opened (it does not work in the background)') }, waitMs).unref?.()
+  return true
+}
+
 /** Tests only. */
 export function _reset() { open.clear(); seen = false; ending = false; clearTimeout(timer); timer = null }

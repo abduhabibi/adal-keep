@@ -120,7 +120,8 @@ export async function sessionsNow() {
   await keepAlive().catch(() => {})
   const { holderOf } = await import('./tasheerSession.js')
   const holder = db ? await holderOf(db).catch(() => null) : null
-  return SITES.map(s => ({ key: s.key, name: s.name, ...(kept[s.key] || { tabs: 0, signedIn: false }), ...(s.key === 'tasheer' ? { holder, shared: true } : {}) }))
+  // Insurance is not in the morning sign-in: its robot signs in by itself (FetaP's reCAPTCHA needs nobody).
+  return SITES.filter(s => s.key !== 'insurance').map(s => ({ key: s.key, name: s.name, ...(kept[s.key] || { tabs: 0, signedIn: false }), ...(s.key === 'tasheer' ? { holder, shared: true } : {}) }))
 }
 
 /** A window on that site, to sign in (its tab is then kept signed in all day). */

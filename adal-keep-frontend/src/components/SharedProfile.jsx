@@ -25,16 +25,47 @@ const label = (k) => (SHOWN.find(([c]) => c === k)?.[1]) || k.replace(/_/g, ' ')
 
 export function SharedProfileCard({ m, mine }) {
   const [open, setOpen] = useState(false)
+  const [state, setState] = useState(null)   // null · 'adding' · 'done'
+  const timer = useRef(null)
+  useEffect(() => () => clearInterval(timer.current), [])
+  // Already in (or being added)? Asked once when the card shows.
+  useEffect(() => {
+    if (mine) return
+    api.get('/chat/profile/pending', { adalNoCache: true }).then(r => {
+      const p = (r.data || []).find(x => x.message === m.id)
+      setState(!p ? 'done' : p.running ? 'adding' : null)
+    }).catch(() => {})
+  }, [m.id, mine])
+  const accept = async (e) => {
+    e.stopPropagation()
+    setState('adding')
+    try {
+      await api.post(`/chat/profile/${m.id}/add`, {}, { timeout: 120000 })
+      clearInterval(timer.current)
+      timer.current = setInterval(async () => {
+        const r = await api.get(`/chat/profile/${m.id}/add`, { adalNoCache: true }).catch(() => null)
+        if (r?.data && !r.data.running) {
+          clearInterval(timer.current); setState('done')
+          toast.success(`Added ${r.data.made} profile${r.data.made === 1 ? '' : 's'} with ${r.data.documents} documents`)
+        }
+      }, 3000)
+    } catch (err) { setState(null); toast.error(err.response?.data?.error || err.message) }
+  }
   return (
     <>
-      <button type="button" onClick={() => setOpen(true)}
-        className="my-1 flex w-full items-center gap-3 rounded-lg bg-black/5 px-3 py-2 text-left hover:bg-black/10 dark:bg-white/10">
-        <span className="text-2xl">🧑‍💼</span>
-        <span className="min-w-0">
-          <span className="block truncate text-sm font-semibold">{String(m.file_name || 'Profiles').replace(/\.adalprofile$/, '')}</span>
-          <span className="text-[11px] text-slate-500">{mine ? 'you sent them · View' : 'View · Add all to my Adal Keep'}</span>
-        </span>
-      </button>
+      <div className="my-1 flex w-full items-center gap-3 rounded-lg bg-black/5 px-3 py-2 dark:bg-white/10">
+        <button type="button" onClick={() => setOpen(true)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+          <span className="text-2xl">🧑‍💼</span>
+          <span className="min-w-0">
+            <span className="block truncate text-sm font-semibold">{String(m.file_name || 'Profiles').replace(/.adalprofile$/, '')}</span>
+            <span className="text-[11px] text-slate-500">{mine ? 'you sent them · View' : 'View'}</span>
+          </span>
+        </button>
+        {!mine && (state === 'done'
+          ? <span className="shrink-0 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700">✓ Added</span>
+          : <button type="button" disabled={state === 'adding'} onClick={accept}
+              className="shrink-0 rounded-full bg-emerald-600 px-3 py-1 text-xs font-bold text-white hover:bg-emerald-700 disabled:opacity-60">{state === 'adding' ? '⏳ Adding…' : '✓ Accept'}</button>)}
+      </div>
       {open && <SharedProfileView id={m.id} onClose={() => setOpen(false)} />}
     </>
   )

@@ -107,6 +107,20 @@ export default function ChatPage() {
   const [agencies, setAgencies] = useState([])
   const [convs, setConvs] = useState([])
   const [open, setOpen] = useState(null)          // conversation row (or a direct chat just opened)
+  // Profiles other agencies sent that are not in yet: "Accept" on the chat's name adds them all.
+  const [pending, setPending] = useState([])
+  const loadPending = useCallback(() => api.get('/chat/profile/pending', { adalNoCache: true }).then(r => setPending(Array.isArray(r.data) ? r.data : [])).catch(() => {}), [])
+  useEffect(() => { loadPending(); const t = setInterval(loadPending, 15000); return () => clearInterval(t) }, [loadPending])
+  const pendingOf = (convId) => { const l = pending.filter(p => p.conversation === convId); return l.length ? { count: l.length, running: l.some(p => p.running), titles: l.map(p => p.title) } : null }
+  const acceptChat = async (convId) => {
+    try {
+      const r = await api.post('/chat/profile/accept', { conversation: convId }, { timeout: 120000 })
+      toast.success(`Accepted: ${r.data.started.map(x => x.title).join(', ')} — their details first, then every document`)
+      setPending(p => p.map(x => (x.conversation === convId ? { ...x, running: true } : x)))
+      const t = setInterval(async () => { await loadPending() }, 4000)
+      setTimeout(() => clearInterval(t), 10 * 60000)
+    } catch (e) { toast.error(e.response?.data?.error || e.message) }
+  }
   const [msgs, setMsgs] = useState([])
   const [members, setMembers] = useState([])
   const [typing, setTyping] = useState([])
@@ -254,7 +268,7 @@ export default function ChatPage() {
     setPicked([])
   }
   const copyPicked = async () => {
-    const text = [...picked].sort((a, b) => a.id - b.id).map(m => m.body).filter(Boolean).join('\n\n')
+    const text = [...picked].sort((a, b) => a.id - b.id).map(m => cleanBody(m.body)).filter(Boolean).join('\n\n')
     try { await navigator.clipboard.writeText(text); toast.success(picked.length === 1 ? 'Copied' : picked.length + ' messages copied') } catch { toast.error('Could not copy') }
     setPicked([])
   }
@@ -427,7 +441,7 @@ export default function ChatPage() {
     try {
       if (what === 'reply') { setEditing(null); setReplyTo(m); inputRef.current?.focus() }
       if (what === 'edit') { setReplyTo(null); setEditing(m); setText(m.body || ''); inputRef.current?.focus() }
-      if (what === 'copy') { await navigator.clipboard.writeText(m.body || ''); toast.success('Copied') }
+      if (what === 'copy') { await navigator.clipboard.writeText(cleanBody(m.body)); toast.success('Copied') }
       if (what === 'forward') setForwarding(m)
       if (what === 'pin') { await api.post(`/chat/conversations/${current.id}/pin`, { message: m.id }); loadSide() }
       if (what === 'unpin') { await api.post(`/chat/conversations/${current.id}/pin`, { message: null }); loadSide() }
@@ -493,8 +507,9 @@ export default function ChatPage() {
           {chatList.map(c => (
             <ChatRow key={c.id} active={current?.id === c.id} kind={kindOf(c)} title={c.title || 'Chat'}
               online={c.kind === 'direct' && now - new Date(c.other_last_seen || seenOf[c.other_id] || 0).getTime() < ONLINE_MS}
-              sub={c.last_kind === 'voice' ? '🎤 Voice message' : c.last_kind === 'file' ? `📎 ${c.last_body || 'File'}` : c.last_has_image ? `📷 ${c.last_body || 'Picture'}` : (c.last_body || (c.kind === 'admin' ? 'Support, payments — talk to Adal' : c.kind === 'group' ? `${c.member_count || ''} members` : ''))}
+              sub={c.last_kind === 'voice' ? '🎤 Voice message' : c.last_kind === 'file' ? `📎 ${cleanBody(c.last_body).split(String.fromCharCode(10))[0] || 'File'}` : c.last_has_image ? `📷 ${c.last_body || 'Picture'}` : (cleanBody(c.last_body) || (c.kind === 'admin' ? 'Support, payments — talk to Adal' : c.kind === 'group' ? `${c.member_count || ''} members` : ''))}
               time={c.last_body || c.last_has_image || c.last_kind ? c.last_message_at : null} unread={c.unread}
+              accept={pendingOf(c.id)} onAccept={() => acceptChat(c.id)}
               onClick={() => setOpen(c)} />
           ))}
           {newAgencies.length > 0 && <p className="px-4 pt-3 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Agencies — start a chat</p>}
@@ -511,7 +526,7 @@ export default function ChatPage() {
                   <button key={f.id} type="button" onClick={() => { setOpen(c || { id: f.conversation_id }); setTimeout(() => jumpTo(f.id), 900) }}
                     className="block w-full px-4 py-2 text-left hover:bg-slate-50 dark:hover:bg-slate-800">
                     <span className="flex justify-between text-xs"><b className="truncate">{c?.title || 'Chat'}</b><span className="text-slate-400">{shortWhen(f.created_at)}</span></span>
-                    <span className="block truncate text-xs text-slate-500">{names[f.sender_id] ? `${names[f.sender_id]}: ` : ''}{f.body}</span>
+                    <span className="block truncate text-xs text-slate-500">{names[f.sender_id] ? `${names[f.sender_id]}: ` : ''}{cleanBody(f.body)}</span>
                   </button>
                 )
               })}
@@ -555,6 +570,12 @@ export default function ChatPage() {
                   <span className={`block truncate text-xs ${/typing|online/.test(subtitle()) ? 'text-sky-500' : 'text-slate-500 dark:text-slate-400'}`}>{subtitle()}</span>
                 </span>
               </button>
+              {pendingOf(current.id) && (
+                <button type="button" disabled={pendingOf(current.id).running} onClick={() => acceptChat(current.id)} title={pendingOf(current.id).titles.join(String.fromCharCode(10))}
+                  className="shrink-0 rounded-full bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white shadow hover:bg-emerald-700 disabled:opacity-60">
+                  {pendingOf(current.id).running ? '⏳ Adding…' : `✓ Accept ${pendingOf(current.id).count === 1 ? pendingOf(current.id).titles[0] : `${pendingOf(current.id).count} sends`}`}
+                </button>
+              )}
               {isGroup && <button type="button" onClick={() => setInfo(v => !v)} className="rounded-lg px-2 py-1 text-xs text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800">Group info</button>}
             </header>
             )}
@@ -796,7 +817,7 @@ export default function ChatPage() {
   )
 }
 
-function ChatRow({ active, kind, title, sub, time, unread, online, onClick }) {
+function ChatRow({ active, kind, title, sub, time, unread, online, onClick, accept = null, onAccept }) {
   return (
     <button type="button" onClick={onClick}
       className={`flex w-full items-center gap-3 px-2.5 py-2 text-left transition-colors md:mx-1.5 md:w-[calc(100%-12px)] md:rounded-xl ${active ? 'bg-sky-500 text-white' : 'hover:bg-slate-100 dark:hover:bg-[#202b36]'}`}>
@@ -804,6 +825,15 @@ function ChatRow({ active, kind, title, sub, time, unread, online, onClick }) {
       <span className="min-w-0 flex-1">
         <span className="flex items-baseline justify-between gap-2">
           <span className="truncate text-[15px] font-semibold">{title}</span>
+          {accept && (
+            // Profiles sent here: one press adds them all (a span: this row is already a button).
+            <span role="button" tabIndex={0} title={accept.titles.join(String.fromCharCode(10))}
+              onClick={e => { e.stopPropagation(); if (!accept.running) onAccept?.() }}
+              onKeyDown={e => { if (e.key === 'Enter') { e.stopPropagation(); if (!accept.running) onAccept?.() } }}
+              className={`ml-auto shrink-0 rounded-full px-2 py-0.5 text-[11px] font-bold ${accept.running ? 'bg-slate-200 text-slate-600' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}>
+              {accept.running ? '⏳ adding' : `✓ Accept${accept.count > 1 ? ` (${accept.count})` : ''}`}
+            </span>
+          )}
           {time && <span className={`shrink-0 text-xs ${active ? 'text-white/80' : 'text-slate-400'}`}>{shortWhen(time)}</span>}
         </span>
         <span className="mt-0.5 flex items-center justify-between gap-2">

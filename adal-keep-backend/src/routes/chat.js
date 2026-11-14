@@ -106,6 +106,11 @@ router.post('/chat/profile/send', wrap(async (req, db) => {
   if (ids.length > 300) throw new chat.ChatError('At most 300 profiles at a time.', 400)
   return sendProfiles(db, { profileIds: ids, toAgency: String(req.body.to), who: who(req) })
 }))
+router.get('/chat/profile/pending', wrap(async (req, db) => (await import('../services/profileShare.js')).pendingProfiles(db, req.query.conversation || null)))
+router.post('/chat/profile/accept', wrap(async (req, db) => {
+  if (!req.body?.conversation) throw new chat.ChatError('Which chat?', 400)
+  return (await import('../services/profileShare.js')).acceptAll(db, String(req.body.conversation), { who: who(req) })
+}))
 router.get('/chat/profile/sent', wrap(async () => (await import('../services/profileShare.js')).sentList()))
 router.get('/chat/profile/:messageId', wrap(async (req, db) => (await import('../services/profileShare.js')).viewSent(db, req.params.messageId)))
 router.get('/chat/profile/:messageId/girl/:i/file/:n', async (req, res) => {

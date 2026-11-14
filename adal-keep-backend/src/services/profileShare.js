@@ -30,6 +30,7 @@ export const MARK = /\[adal-profile v2 k=([A-Za-z0-9_-]{43}) s=([a-f0-9]{16})\]/
 const DATA_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'data')
 const SENDS_FILE = path.join(DATA_DIR, 'profile-sends.json')
 const ADDED_FILE = path.join(DATA_DIR, 'profile-received.json')
+const ACCEPTED_FILE = path.join(DATA_DIR, 'profile-accepted.json')   // sends whose girls and documents are all in
 
 // What stays with this agency: its own numbering, people and places on its PC.
 const LOCAL_COLUMNS = new Set(['id', 'broker_id', 'assigned_to', 'company_id', 'branch_id', 'room', 'table_name', 'box_number',
@@ -335,6 +336,7 @@ export async function run(db, o, job, who, { tell = true, waitMs = 30 * 60000 } 
     await new Promise(r => setTimeout(r, 15000))
   }
   writeJson(ADDED_FILE, list.slice(-5000))
+  if (!left.length) { const done = readJson(ACCEPTED_FILE); if (!done.includes(o.sendId)) { done.push(o.sendId); writeJson(ACCEPTED_FILE, done.slice(-5000)) } }
   if (tell) {
     try {
       const meRow = await chatMe(db)
@@ -352,4 +354,34 @@ export async function addStatus(db, messageId) {
   const o = await openSent(db, messageId)
   return addJobs.get(o.sendId) || null
 }
+/**
+ * Profiles other agencies sent that are not in yet: [{ conversation, message,
+ * title, send_id, running }] — for "Accept" on the chat's name and its cards.
+ */
+export async function pendingProfiles(db, conversation = null) {
+  const me = await cloudAgencyId(db)
+  const rows = await cloudCall(db, 'GET', `/rest/v1/messages?file_mime=eq.application%2Fx-adal-profile&sender_id=neq.${me}&deleted_at=is.null` +
+    (conversation ? `&conversation_id=eq.${encodeURIComponent(conversation)}` : '') + '&select=id,conversation_id,body,file_name,created_at&order=id.desc&limit=200') || []
+  const done = new Set(readJson(ACCEPTED_FILE))
+  const out = []
+  for (const m of rows) {
+    const mark = String(m.body || '').match(MARK)
+    if (!mark || done.has(mark[2])) continue
+    const job = addJobs.get(mark[2])
+    out.push({ conversation: m.conversation_id, message: m.id, send_id: mark[2], title: String(m.file_name || 'Profiles').replace(/.adalprofile$/, ''), at: m.created_at, running: !!job?.running, job: job || null })
+  }
+  return out
+}
+
+/** "Accept" on a chat: every profile waiting in it goes in (details first, then documents). */
+export async function acceptAll(db, conversation, { who = null } = {}) {
+  const list = await pendingProfiles(db, conversation)
+  const started = []
+  for (const p of list) {
+    try { started.push({ message: p.message, title: p.title, job: await addSent(db, p.message, { who }) }) }
+    catch (e) { started.push({ message: p.message, title: p.title, error: e.message }) }
+  }
+  return { ok: true, accepted: started.length, started }
+}
+
 export const _test = { docsCache, ADDED_FILE }

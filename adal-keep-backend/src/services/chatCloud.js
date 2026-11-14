@@ -138,7 +138,15 @@ async function mainAgencyName() {
   return mainName
 }
 
+// Who this agency is, kept a minute (every chat call asked the cloud first: two round trips each).
+let meKept = null, meAt = 0
 export async function me(db) {
+  if (meKept && Date.now() - meAt < 60000 && sess?.user_id === meKept.id) { await token(db); return meKept }
+  const r = await meNow(db)
+  meKept = r; meAt = Date.now()
+  return r
+}
+async function meNow(db) {
   await token(db)
   const company = await db('companies').first().catch(() => null)
   let name = String(company?.name || 'Adal Keep agency').trim()
@@ -153,7 +161,13 @@ export async function me(db) {
   return rows?.[0] || { id: sess.user_id, name, banned: false }
 }
 
-export const agencies = (db) => rpc(db, 'list_agencies')
+// The agencies, kept 20 s (the chat page and the send window ask often; who is online moves slowly).
+let agKept = null, agAt = 0
+export async function agencies(db) {
+  if (agKept && Date.now() - agAt < 20000) return agKept
+  agKept = await rpc(db, 'list_agencies'); agAt = Date.now()
+  return agKept
+}
 export const conversations = async (db) => { await me(db); return rpc(db, 'my_conversations') }
 export const openDirect = (db, other) => rpc(db, 'open_direct', { other })
 

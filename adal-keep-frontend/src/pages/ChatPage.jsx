@@ -18,6 +18,11 @@ const touchScreen = () => window.matchMedia?.('(pointer: coarse)').matches
 const LINK = /(https?:\/\/|www\.|t\.me\/|wa\.me\/|[a-z0-9-]+\.(com|net|org|io|me|et|sa|ae|kw|qa|info|biz|co|app|link|xyz|ly|gl|site|online|shop)(\/|\s|$))/i
 const fileUrl = (p, name) => `/api/chat/file?path=${encodeURIComponent(p)}${name ? `&name=${encodeURIComponent(name)}` : ''}`
 
+// Same answer as before (a poll that brought nothing new): the page is left as it is.
+const same = (a, b) => { try { return JSON.stringify(a) === JSON.stringify(b) } catch { return false } }
+// Each chat's last messages while Adal Keep is open: opening it again shows them at once.
+const kept = new Map()
+
 const sameDay = (a, b) => new Date(a).toDateString() === new Date(b).toDateString()
 const timeOf = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 const shortWhen = (t) => {
@@ -109,7 +114,7 @@ export default function ChatPage() {
   const [open, setOpen] = useState(null)          // conversation row (or a direct chat just opened)
   // Profiles other agencies sent that are not in yet: "Accept" on the chat's name adds them all.
   const [pending, setPending] = useState([])
-  const loadPending = useCallback(() => api.get('/chat/profile/pending', { adalNoCache: true }).then(r => setPending(Array.isArray(r.data) ? r.data : [])).catch(() => {}), [])
+  const loadPending = useCallback(() => api.get('/chat/profile/pending', { adalNoCache: true }).then(r => setPending(cur => same(cur, r.data) ? cur : (Array.isArray(r.data) ? r.data : []))).catch(() => {}), [])
   useEffect(() => { loadPending(); const t = setInterval(loadPending, 15000); return () => clearInterval(t) }, [loadPending])
   const pendingOf = (convId) => { const l = pending.filter(p => p.conversation === convId); return l.length ? { count: l.length, running: l.some(p => p.running), titles: l.map(p => p.title) } : null }
   const acceptChat = async (convId) => {
@@ -164,7 +169,7 @@ export default function ChatPage() {
         cachedGet('/chat/conversations', { onSaved: first ? (d) => setConvs(Array.isArray(d) ? d : []) : undefined }),
         cachedGet('/chat/agencies', { onSaved: first ? (d) => setAgencies(Array.isArray(d) ? d : []) : undefined }),
       ])
-      setConvs(Array.isArray(c) ? c : []); setAgencies(Array.isArray(a) ? a : [])
+      setConvs(cur => same(cur, c) ? cur : (Array.isArray(c) ? c : [])); setAgencies(cur => same(cur, a) ? cur : (Array.isArray(a) ? a : []))
     } catch (e) { setStatus(s => (s?.configured ? s : { error: e.response?.data?.error || e.message })) }
   }, [])
   useEffect(() => {
@@ -189,7 +194,7 @@ export default function ChatPage() {
     if (!open?.id) return
     let alive = true
     lastId.current = 0; since.current = null
-    setMsgs([]); setMembers([]); setTyping([]); setInfo(false)
+    setMsgs(kept.get(open.id) || []); setMembers([]); setTyping([]); setInfo(false)
     const pull = async () => {
       try {
         const { data } = await api.get('/chat/messages', { params: { conversation: open.id, after: lastId.current, since: since.current } })
@@ -200,16 +205,18 @@ export default function ChatPage() {
           setMsgs(cur => {
             const byId = new Map(cur.map(m => [m.id, m]))
             for (const m of [...(data.changed || []), ...(data.messages || [])]) byId.set(m.id, m)
-            return [...byId.values()].sort((a, b) => a.id - b.id)
+            const next = [...byId.values()].sort((a, b) => a.id - b.id)
+            kept.set(open.id, next.slice(-150))
+            return next
           })
         }
       } catch {}
     }
     const typingNow = async () => {
-      try { const t = await api.get('/chat/typing', { params: { conversation: open.id } }); if (alive) setTyping(Array.isArray(t.data) ? t.data : []) } catch {}
+      try { const t = await api.get('/chat/typing', { params: { conversation: open.id } }); if (alive) setTyping(cur => same(cur, t.data) ? cur : (Array.isArray(t.data) ? t.data : [])) } catch {}
     }
     const membersNow = async () => {
-      try { const mem = await api.get(`/chat/groups/${open.id}/members`); if (alive) setMembers(Array.isArray(mem.data) ? mem.data : []) } catch {}
+      try { const mem = await api.get(`/chat/groups/${open.id}/members`); if (alive) setMembers(cur => same(cur, mem.data) ? cur : (Array.isArray(mem.data) ? mem.data : [])) } catch {}
     }
     const stops = [every(pull, 2000), every(typingNow, 3000), every(membersNow, 15000)]
     return () => { alive = false; stops.forEach(f => f()) }
@@ -467,6 +474,76 @@ export default function ChatPage() {
     el.classList.add('ring-2', 'ring-teal-400'); setTimeout(() => el.classList.remove('ring-2', 'ring-teal-400'), 1500)
   }
 
+  // The message list is drawn once per change of what it shows — typing a
+  // message or a poll that brings nothing new no longer draws every bubble
+  // again (the chat page was the slowest place, 2026-11-14). The handlers are
+  // read through H, so the list never holds old ones.
+  const H = useRef({})
+  H.current = { act, jumpTo, togglePick, pressStart, pressMove, pressEnd }
+  const byIdOf = useMemo(() => Object.fromEntries(msgs.map(m => [m.id, m])), [msgs])
+  const pickedKey = picked.map(p => p.id).join(',')
+  const thread = useMemo(() => !current ? null : shown.map((m, i) => {
+                  const mine = m.sender_id === me?.id
+                  const prev = shown[i - 1]
+                  const isPicked = picked.some(x => x.id === m.id)
+                  const newDay = !prev || !sameDay(prev.created_at, m.created_at)
+                  const showName = current.kind !== 'direct' && !mine && (newDay || prev?.sender_id !== m.sender_id)
+                  const quoted = m.reply_to ? byIdOf[m.reply_to] : null
+                  return (
+                    <div key={m.id}>
+                      {newDay && <div className="sticky top-1 z-[1] my-3 text-center"><span className="rounded-full bg-black/25 px-3 py-1 text-xs font-medium text-white dark:bg-black/40">{dayLabel(m.created_at)}</span></div>}
+                      <div className={`-mx-2 mb-1 flex px-2 sm:-mx-6 sm:px-6 ${mine ? 'justify-end' : 'justify-start'} ${isPicked ? 'bg-sky-500/20' : ''}`}
+                        onClick={() => picked.length && H.current.togglePick(m)}>
+                        <div id={`msg-${m.id}`}
+                          onTouchStart={e => H.current.pressStart(m, e)} onTouchMove={e => H.current.pressMove(e)} onTouchEnd={() => H.current.pressEnd()} onTouchCancel={() => H.current.pressEnd()}
+                          onContextMenu={e => { e.preventDefault(); if (touchScreen()) return; if (!m.deleted_at) setMenu({ m, x: e.clientX, y: e.clientY }) }}
+                          onDoubleClick={() => !m.deleted_at && H.current.act('reply', m)}
+                          style={picked.length ? { pointerEvents: 'none' } : undefined}
+                          className={`tg-bubble group relative max-w-[85%] sm:max-w-[65%] select-none sm:select-text rounded-2xl px-2.5 pb-1 pt-1.5 shadow-sm transition ${mine ? 'tg-out rounded-br-[4px] bg-[#effdde] dark:bg-[#2b5278]' : 'tg-in rounded-bl-[4px] bg-white dark:bg-[#182533]'}`}>
+                          {showName && <p className="text-[13px] font-semibold text-sky-600 dark:text-sky-400">{names[m.sender_id] || 'Agency'}</p>}
+                          {m.forwarded_from && !m.deleted_at && <p className="text-[11px] italic text-sky-700 dark:text-sky-300">Forwarded from {m.forwarded_from}</p>}
+                          {quoted && !m.deleted_at && (
+                            <button type="button" onClick={() => H.current.jumpTo(quoted.id)} className="mb-1 block w-full rounded-md border-l-4 border-teal-500 bg-black/5 px-2 py-1 text-left dark:bg-white/10">
+                              <span className="block text-[11px] font-bold text-teal-700 dark:text-teal-300">{quoted.sender_id === me?.id ? 'You' : names[quoted.sender_id] || 'Agency'}</span>
+                              <span translate="no" className="block truncate text-xs text-slate-600 dark:text-slate-300">{preview(quoted)}</span>
+                            </button>
+                          )}
+                          {m.deleted_at ? (
+                            <p className="text-sm italic text-slate-400">🚫 Message deleted</p>
+                          ) : (
+                            <>
+                              {m.image_path && (
+                                <a href={fileUrl(m.image_path)} target="_blank" rel="noreferrer">
+                                  <img src={fileUrl(m.image_path)} alt="" className="my-1 max-h-72 rounded-lg" />
+                                </a>
+                              )}
+                              {m.kind === 'voice' && m.file_path && <VoiceNote src={fileUrl(m.file_path)} mine={mine} />}
+                              {isSharedProfile(m) && <SharedProfileCard m={m} mine={mine} />}
+                              {m.kind === 'file' && m.file_path && !isSharedProfile(m) && (
+                                <a href={fileUrl(m.file_path, m.file_name)} target="_blank" rel="noreferrer"
+                                  className="my-1 flex items-center gap-3 rounded-lg bg-black/5 px-3 py-2 hover:bg-black/10 dark:bg-white/10">
+                                  <span className="text-2xl">📄</span>
+                                  <span className="min-w-0"><span className="block truncate text-sm font-semibold">{m.file_name}</span><span className="text-[11px] text-slate-500">{m.file_size ? sizeOf(m.file_size) : ''} · open</span></span>
+                                </a>
+                              )}
+                              {cleanBody(m.body) && <p translate="no" className="whitespace-pre-wrap break-words text-[15px] leading-snug text-slate-900 dark:text-slate-100">{cleanBody(m.body)}</p>}
+                            </>
+                          )}
+                          <p className={`-mb-0.5 ml-3 flex items-center justify-end gap-1 text-[11px] ${mine ? 'text-emerald-600 dark:text-sky-200/70' : 'text-slate-400'}`}>
+                            {m.edited_at && !m.deleted_at && <span>edited</span>}
+                            <span>{timeOf(m.created_at)}</span>
+                            {mine && !m.deleted_at && <span className="font-semibold tracking-[-0.2em]" title={m.id <= seenUpTo ? 'Seen' : 'Sent'}>{m.id <= seenUpTo ? '✓✓' : '✓'}</span>}
+                          </p>
+                          {!m.deleted_at && (
+                            <button type="button" onClick={e => { e.stopPropagation(); setMenu({ m, x: e.clientX, y: e.clientY }) }}
+                              className="absolute -top-2 right-1 hidden rounded-full bg-white px-1.5 text-xs text-slate-500 shadow group-hover:block dark:bg-slate-700">⌄</button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )
+                }), [shown, byIdOf, pickedKey, me?.id, names, seenUpTo, current?.kind]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // --- render ---------------------------------------------------------
   if (!status) return <div className="p-10 text-slate-500">Opening the chat…</div>
   if (!status.configured) {
@@ -592,67 +669,7 @@ export default function ChatPage() {
             <div className="flex min-h-0 flex-1">
               <div ref={threadRef} className="tg-wall flex-1 overflow-y-auto px-2 py-3 sm:px-6">
                 {shown.length === 0 && <p className="mx-auto mt-10 w-fit rounded-2xl bg-black/25 px-4 py-2 text-center text-sm text-white">No messages yet — say hello.</p>}
-                {shown.map((m, i) => {
-                  const mine = m.sender_id === me?.id
-                  const prev = shown[i - 1]
-                  const isPicked = picked.some(x => x.id === m.id)
-                  const newDay = !prev || !sameDay(prev.created_at, m.created_at)
-                  const showName = current.kind !== 'direct' && !mine && (newDay || prev?.sender_id !== m.sender_id)
-                  const quoted = m.reply_to ? byId[m.reply_to] : null
-                  return (
-                    <div key={m.id}>
-                      {newDay && <div className="sticky top-1 z-[1] my-3 text-center"><span className="rounded-full bg-black/25 px-3 py-1 text-xs font-medium text-white dark:bg-black/40">{dayLabel(m.created_at)}</span></div>}
-                      <div className={`-mx-2 mb-1 flex px-2 sm:-mx-6 sm:px-6 ${mine ? 'justify-end' : 'justify-start'} ${isPicked ? 'bg-sky-500/20' : ''}`}
-                        onClick={() => picked.length && togglePick(m)}>
-                        <div id={`msg-${m.id}`}
-                          onTouchStart={e => pressStart(m, e)} onTouchMove={pressMove} onTouchEnd={pressEnd} onTouchCancel={pressEnd}
-                          onContextMenu={e => { e.preventDefault(); if (touchScreen()) return; if (!m.deleted_at) setMenu({ m, x: e.clientX, y: e.clientY }) }}
-                          onDoubleClick={() => !m.deleted_at && act('reply', m)}
-                          style={picked.length ? { pointerEvents: 'none' } : undefined}
-                          className={`tg-bubble group relative max-w-[85%] sm:max-w-[65%] select-none sm:select-text rounded-2xl px-2.5 pb-1 pt-1.5 shadow-sm transition ${mine ? 'tg-out rounded-br-[4px] bg-[#effdde] dark:bg-[#2b5278]' : 'tg-in rounded-bl-[4px] bg-white dark:bg-[#182533]'}`}>
-                          {showName && <p className="text-[13px] font-semibold text-sky-600 dark:text-sky-400">{names[m.sender_id] || 'Agency'}</p>}
-                          {m.forwarded_from && !m.deleted_at && <p className="text-[11px] italic text-sky-700 dark:text-sky-300">Forwarded from {m.forwarded_from}</p>}
-                          {quoted && !m.deleted_at && (
-                            <button type="button" onClick={() => jumpTo(quoted.id)} className="mb-1 block w-full rounded-md border-l-4 border-teal-500 bg-black/5 px-2 py-1 text-left dark:bg-white/10">
-                              <span className="block text-[11px] font-bold text-teal-700 dark:text-teal-300">{quoted.sender_id === me?.id ? 'You' : names[quoted.sender_id] || 'Agency'}</span>
-                              <span translate="no" className="block truncate text-xs text-slate-600 dark:text-slate-300">{preview(quoted)}</span>
-                            </button>
-                          )}
-                          {m.deleted_at ? (
-                            <p className="text-sm italic text-slate-400">🚫 Message deleted</p>
-                          ) : (
-                            <>
-                              {m.image_path && (
-                                <a href={fileUrl(m.image_path)} target="_blank" rel="noreferrer">
-                                  <img src={fileUrl(m.image_path)} alt="" className="my-1 max-h-72 rounded-lg" />
-                                </a>
-                              )}
-                              {m.kind === 'voice' && m.file_path && <VoiceNote src={fileUrl(m.file_path)} mine={mine} />}
-                              {isSharedProfile(m) && <SharedProfileCard m={m} mine={mine} />}
-                              {m.kind === 'file' && m.file_path && !isSharedProfile(m) && (
-                                <a href={fileUrl(m.file_path, m.file_name)} target="_blank" rel="noreferrer"
-                                  className="my-1 flex items-center gap-3 rounded-lg bg-black/5 px-3 py-2 hover:bg-black/10 dark:bg-white/10">
-                                  <span className="text-2xl">📄</span>
-                                  <span className="min-w-0"><span className="block truncate text-sm font-semibold">{m.file_name}</span><span className="text-[11px] text-slate-500">{m.file_size ? sizeOf(m.file_size) : ''} · open</span></span>
-                                </a>
-                              )}
-                              {cleanBody(m.body) && <p translate="no" className="whitespace-pre-wrap break-words text-[15px] leading-snug text-slate-900 dark:text-slate-100">{cleanBody(m.body)}</p>}
-                            </>
-                          )}
-                          <p className={`-mb-0.5 ml-3 flex items-center justify-end gap-1 text-[11px] ${mine ? 'text-emerald-600 dark:text-sky-200/70' : 'text-slate-400'}`}>
-                            {m.edited_at && !m.deleted_at && <span>edited</span>}
-                            <span>{timeOf(m.created_at)}</span>
-                            {mine && !m.deleted_at && <span className="font-semibold tracking-[-0.2em]" title={m.id <= seenUpTo ? 'Seen' : 'Sent'}>{m.id <= seenUpTo ? '✓✓' : '✓'}</span>}
-                          </p>
-                          {!m.deleted_at && (
-                            <button type="button" onClick={e => { e.stopPropagation(); setMenu({ m, x: e.clientX, y: e.clientY }) }}
-                              className="absolute -top-2 right-1 hidden rounded-full bg-white px-1.5 text-xs text-slate-500 shadow group-hover:block dark:bg-slate-700">⌄</button>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  )
-                })}
+                {thread}
               </div>
 
               {info && isGroup && (

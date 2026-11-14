@@ -373,7 +373,11 @@ async function analyzeWithJev(originalPath, db, { unsure = () => {} } = {}) {
       if (crop) {
         try {
           const { readMrzStrip } = await import('./passportOcr.js')
-          const got = verifiedLine2(await readMrzStrip(crop))
+          const { readStripOcrb, verifiedIn } = await import('./quickMrz.js')
+          const ocrb = await readStripOcrb(crop)
+          const got = verifiedLine2(ocrb) || verifiedLine2(await readMrzStrip(crop))
+          // OCR-B reads the name line well: the MRZ's own name when everything verified there.
+          const whole = ocrb.map(verifiedIn).find(Boolean)
           if (got) {
             // Number + dates are proven by the check digits. The name: from the
             // matched profile when its passport number is the same, else JEV
@@ -382,6 +386,8 @@ async function analyzeWithJev(originalPath, db, { unsure = () => {} } = {}) {
             let name = null
             if (person && String(person.passport_number || '').toUpperCase() === m.passport_number) {
               name = person.full_name
+            } else if (whole && whole.passport_number === m.passport_number) {
+              name = `${whole.given_names} ${whole.surname}`.trim()
             } else {
               const pick = await pickPrintedName(r, nameCandidates(got.line1raw)).catch(() => null)
               if (pick && pick.confidence >= JEV_MIN) name = pick.name
@@ -408,6 +414,7 @@ async function analyzeWithJev(originalPath, db, { unsure = () => {} } = {}) {
     }
 
     if (NEEDS_TEXT.has(r.doc_type)) return { hint: r, person }
+    if (!r.doc_type) return { hint: null, person }
 
     // Settled: the type is one of our field names, the person is a profile id.
     const fields = person ? { full_name: person.full_name, ...(person.passport_number ? { passport_number: person.passport_number } : {}) } : {}
@@ -419,6 +426,14 @@ async function analyzeWithJev(originalPath, db, { unsure = () => {} } = {}) {
 
 export async function analyzeWithMineru(originalPath, { db = null } = {}) {
   const filename = path.basename(originalPath)
+
+  // 0. The passport's bottom lines, read here with the OCR-B model in about a
+  // second: when every check digit verifies, nobody else is asked (free, fast).
+  const { quickMrz } = await import('./quickMrz.js')
+  const tq = Date.now()
+  setStage('reading the passport lines on this PC')
+  const quick = await quickMrz(originalPath, { tries: 1 }).catch(() => null)
+  if (quick) { console.log(`[classify] MRZ (OCR-B) ${Date.now() - tq}ms: Passport, every check digit verified`); return quick }
 
   // This PC starts reading at once (free). Gemini (paid) waits until JEV is
   // unsure, down or slower than JEV_HEADSTART_MS; when JEV settles the file,
@@ -434,12 +449,14 @@ export async function analyzeWithMineru(originalPath, { db = null } = {}) {
   const first = await firstTruthy([
     jevP.then(j => (j?.result ? { jev: j.result } : null)),
     usualP.then(u => (verifiedPassport(u) ? { usual: u.r } : null)),
+    // The other crops of the bottom lines (taller, upside down, sideways), meanwhile.
+    quickMrz(originalPath, { skip: 1 }).then(q => (q ? { quick: q } : null), () => null),
   ])
   if (first) {
     clearTimeout(timer)
     gate.cancelled = true
     gate.go(false)
-    return first.jev || first.usual
+    return first.jev || first.quick || first.usual
   }
   const jev = await jevP
   const usual = await usualP

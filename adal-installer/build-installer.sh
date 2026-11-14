@@ -53,7 +53,7 @@ echo "== [2/6] Backend (no personal data, no node_modules) =="
 rsync -a --exclude node_modules --exclude data --exclude uploads \
   --exclude '*.sqlite*' --exclude '.env*' "$BACK/src/" "$STAGE/main/backend/src/"
 rsync -a "$BACK/scripts/" "$STAGE/main/backend/scripts/"
-for f in server.js knexfile.js package.json package-lock.json eng.traineddata amh.traineddata; do
+for f in server.js knexfile.js package.json package-lock.json eng.traineddata amh.traineddata ocrb.traineddata; do
   [ -f "$BACK/$f" ] && cp -f "$BACK/$f" "$STAGE/main/backend/$f"
 done
 # Windows .env: the keys from this PC, minus settings that only make sense

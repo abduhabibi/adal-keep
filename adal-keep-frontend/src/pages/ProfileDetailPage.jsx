@@ -8,6 +8,7 @@ import StatusBadge from '../components/shared/StatusBadge'
 import Button from '../components/shared/Button'
 import { formatDate } from '../lib/utils'
 import FieldCard from '../components/fields/FieldCard'
+import PrioritizeButton from '../components/PrioritizeButton'
 import ProfileAutomations from '../components/ProfileAutomations'
 import ProfileJourney from '../components/ProfileJourney'
 import ProfileDays from '../components/ProfileDays'
@@ -18,6 +19,20 @@ import VisaBarcodes from '../components/VisaBarcodes'
 import MedicalBattery from '../components/MedicalBattery'
 import { onDataChange } from '../lib/changes'
 import { isPhoneApp } from '../lib/phoneMode'
+
+// Her father's name as the emergency contact: his name and his father's (her surname),
+// e.g. "ABAGOLE KEDIR". A saved name that was only his first name gets the surname too.
+function fatherFull(p = {}) {
+  const base = String(p.father_name || p.middle_name || '').trim()
+  const sur = String(p.last_name || '').trim()
+  if (!base) return ''
+  return sur && !base.toUpperCase().split(/s+/).includes(sur.toUpperCase()) ? `${base} ${sur}` : base
+}
+function emergencyName(p = {}) {
+  const e = String(p.emergency_name || '').trim()
+  const bare = [p.father_name, p.middle_name].map(x => String(x || '').trim().toUpperCase()).filter(Boolean)
+  return (!e || bare.includes(e.toUpperCase())) ? fatherFull(p) || e : e
+}
 
 export default function ProfileDetailPage() {
   const { id } = useParams()
@@ -113,8 +128,11 @@ export default function ProfileDetailPage() {
       <PageHeader
         title={amharicName || profile.full_name}
         subtitle={amharicName ? profile.full_name : (profile.phone_number || 'No phone on file')}
+        // The medical deadline: between her name and the buttons.
+        middle={<div className="flex justify-center"><MedicalBattery profile={profile} onSaved={(v) => setProfile(p => ({ ...p, ...v }))} /></div>}
         action={
           <div className="flex flex-wrap items-center gap-2">
+            <PrioritizeButton profileId={id} />
             <Button variant="secondary" onClick={() => navigate('/profiles')} title="Back" aria-label="Back"><span aria-hidden="true">←</span><span className="hidden sm:inline"> Back</span></Button>
             <Button
               className="bg-purple-600 hover:bg-purple-700 text-white"
@@ -148,9 +166,6 @@ export default function ProfileDetailPage() {
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="ml-auto"><MedicalBattery profile={profile} onSaved={(v) => setProfile(p => ({ ...p, ...v }))} /></span>
-      </div>
 
       {/* Auto-trigger status */}
       {profile.destination_country?.toLowerCase() === 'kuwait' && (
@@ -167,6 +182,13 @@ export default function ProfileDetailPage() {
             Requires: Passport, Photo, Full Body Photo, Slip, Labor ID, Order ID.
             {profile.order_id && ` Order ID: ${profile.order_id}`}
           </p>
+        </div>
+      )}
+
+      {/* She has experience: her self video is a must (it goes to WhatsApp with her CV). */}
+      {/^\s*have/i.test(profile.work_experience || '') && !(fields || []).some(f => /^self video/i.test(f.name || '') && (f.files || []).length) && (
+        <div className="panel p-3 border-l-4 border-l-amber-500 text-sm font-semibold text-amber-800 dark:text-amber-300">
+          🎥 She has experience: upload her Self Video — it is required, and it is sent to WhatsApp with her CV.
         </div>
       )}
 
@@ -217,7 +239,7 @@ export default function ProfileDetailPage() {
             <Field label="Zone / Sub-city" value={profile.zone_subcity} />
             <Field label="Personal number" value={profile.personal_number} />
             <Field label="Cooking skill" value={profile.cooking_skill} />
-            <Field label="Emergency name (father)" value={profile.emergency_name || profile.father_name} />
+            <Field label="Emergency name (father)" value={emergencyName(profile)} />
             <Field label="Emergency phone" value={profile.emergency_phone} />
             <Field label="Emergency relationship" value={profile.emergency_relationship} />
             <Field label="Destination Country" value={profile.destination_country} />

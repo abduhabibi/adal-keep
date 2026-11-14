@@ -607,7 +607,8 @@ export function agentsOf(db) {
 async function selfVideo(db, profileId) {
   const f = await db('profile_fields').join('files', 'files.profile_field_id', 'profile_fields.id')
     .where('profile_fields.profile_id', profileId).where('profile_fields.name', 'like', 'Self Video%')
-    .where('files.mimetype', 'like', 'video/%').orderBy('files.id', 'desc').first('files.path', 'files.original_name', 'files.size').catch(() => null)
+    .where(q => q.where('files.mimetype', 'like', 'video/%').orWhere('files.path', 'like', '%.mp4').orWhere('files.path', 'like', '%.mov').orWhere('files.path', 'like', '%.3gp').orWhere('files.path', 'like', '%.webm').orWhere('files.path', 'like', '%.mkv').orWhere('files.path', 'like', '%.m4v'))
+    .orderBy('files.id', 'desc').first('files.path', 'files.original_name', 'files.size').catch(() => null)
   if (!f) return null
   const { resolveStoredPath } = await import('./cvRender.js')
   const abs = resolveStoredPath(f.path)
@@ -648,6 +649,8 @@ export async function sendCV(db, key, profileId, agentIds, by = '') {
   if (!agents.length) throw new Error('You have no WhatsApp agents yet — add them in Settings → Integrations → WhatsApp')
   const made = new Map() // one PDF per template, shared by the agents that use it
   const video = await selfVideo(db, p.id)
+  // She has worked abroad before: the agents want to see her, so her self video must go too.
+  if (!video && /^s*have/i.test(p.work_experience || '')) throw Object.assign(new Error(`${p.full_name} has experience: upload her self video first (Self Video on her profile) — it is sent with her CV`), { status: 400 })
   const out = []
   for (const a of agents) {
     const tids = a.template_ids.length ? a.template_ids : [(await db('cv_templates').where('is_active', 1).orderBy('id').first('id'))?.id].filter(Boolean)
@@ -671,7 +674,9 @@ export async function sendCV(db, key, profileId, agentIds, by = '') {
       await new Promise(r => setTimeout(r, 1500 + Math.random() * 1500)) // a person's pace
     }
     // Her self video goes with her CV, once per agent (taken back with it when she is chosen).
-    if (video && out.some(o => o.agent === a.name && o.ok && !o.already)) {
+    // (Also when her CV went before without it.)
+    const videoSent = video && await db('whatsapp_sends').where({ profile_id: p.id, agent_id: a.id, status: 'sent' }).whereNull('template_id').first().catch(() => null)
+    if (video && !videoSent && out.some(o => o.agent === a.name && o.ok)) {
       const vrow = { profile_id: p.id, agent_id: a.id, template_id: null, chat_id: a.chat_id, user_key: key, sent_at: new Date().toISOString() }
       try {
         const media = wweb.MessageMedia.fromFilePath(video.path)

@@ -8,9 +8,10 @@ import api from '../services/api'
 
 const err = (e) => e?.response?.data?.error || e.message
 
-export default function PickBrokerHere({ profileId, onDone }) {
+export default function PickBrokerHere({ profileId, onDone, current }) {
   const [brokers, setBrokers] = useState(null)
-  const [id, setId] = useState('')
+  const [id, setId] = useState(current ? String(current) : '')
+  useEffect(() => { if (current) setId(String(current)) }, [current])
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
   const [busy, setBusy] = useState(false)

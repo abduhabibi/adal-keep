@@ -8,6 +8,20 @@ import { REGIONS, regionByName } from '../lib/regions'
 import { useAuth } from '../context/AuthContext'
 import PassportFirst from '../components/PassportFirst'
 
+// Her father's name as the emergency contact: his name and his father's (her surname),
+// e.g. "ABAGOLE KEDIR". A saved name that was only his first name gets the surname too.
+function fatherFull(p = {}) {
+  const base = String(p.father_name || p.middle_name || '').trim()
+  const sur = String(p.last_name || '').trim()
+  if (!base) return ''
+  return sur && !base.toUpperCase().split(/s+/).includes(sur.toUpperCase()) ? `${base} ${sur}` : base
+}
+function emergencyName(p = {}) {
+  const e = String(p.emergency_name || '').trim()
+  const bare = [p.father_name, p.middle_name].map(x => String(x || '').trim().toUpperCase()).filter(Boolean)
+  return (!e || bare.includes(e.toUpperCase())) ? fatherFull(p) || e : e
+}
+
 // Her saved religion as one of the choices ("ISLAM" → Muslim), so the list shows it
 // and Save is not stopped with "select an item"; another word stays as it is.
 function religionOption(v) {
@@ -199,7 +213,7 @@ export default function ProfileFormPage() {
             experience_country: p.experience_country || '',
             experience_years: p.experience_years ?? '',
             personal_number: p.personal_number || '',
-            emergency_name: p.emergency_name || p.father_name || '',
+            emergency_name: emergencyName(p),
             tasheer_date: p.tasheer_date || '',
             tasheer_time: p.tasheer_time || '',
             tasheer_center: p.tasheer_center || '',
@@ -287,7 +301,7 @@ export default function ProfileFormPage() {
       ...(f.nationality ? { nationality: f.nationality } : {}),
       ...(region ? { region: region.name, zone_subcity: zone || '' } : {}),
       // The middle name is the father's name: the guardian by default.
-      emergency_name: prev.emergency_name || f.middle_name || '',
+      emergency_name: prev.emergency_name || fatherFull({ middle_name: f.middle_name, last_name: f.last_name }),
       father_name: prev.father_name || f.middle_name || '',
     }))
     setPassport(r)

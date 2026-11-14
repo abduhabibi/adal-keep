@@ -3,6 +3,20 @@ import os from 'os'
 import path from 'path'
 import { fileURLToPath } from 'url'
 
+// Her father's name as the emergency contact: his name and his father's (her surname),
+// e.g. "ABAGOLE KEDIR". A saved name that was only his first name gets the surname too.
+function fatherFull(p = {}) {
+  const base = String(p.father_name || p.middle_name || '').trim()
+  const sur = String(p.last_name || '').trim()
+  if (!base) return ''
+  return sur && !base.toUpperCase().split(/s+/).includes(sur.toUpperCase()) ? `${base} ${sur}` : base
+}
+function emergencyName(p = {}) {
+  const e = String(p.emergency_name || '').trim()
+  const bare = [p.father_name, p.middle_name].map(x => String(x || '').trim().toUpperCase()).filter(Boolean)
+  return (!e || bare.includes(e.toUpperCase())) ? fatherFull(p) || e : e
+}
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SAFE_STORAGE_DIR = path.join(__dirname, '../../data/SafeStorage')
 
@@ -280,7 +294,7 @@ export async function buildTemplateData(db, profile, template, overrides = {}) {
     PERSONAL_NUMBER:  merged.personal_number || '',
     REGION:           merged.region || '',
     ZONE_SUBCITY:     merged.zone_subcity || '',
-    EMERGENCY_NAME:   (merged.emergency_name && String(merged.emergency_name).trim()) || merged.father_name || '',
+    EMERGENCY_NAME:   emergencyName(merged),
     EMERGENCY_PHONE:  merged.emergency_phone || '',
     EMERGENCY_GENDER: merged.emergency_gender || 'Male',
     EMERGENCY_RELATIONSHIP: merged.emergency_relationship || 'Father',

@@ -11,6 +11,20 @@ import Input from '../components/shared/Input'
 import Spinner from '../components/shared/Spinner'
 import { REGIONS, regionByName, WORK_COUNTRIES, COUNTRIES_APPLY } from '../lib/regions'
 
+// Her father's name as the emergency contact: his name and his father's (her surname),
+// e.g. "ABAGOLE KEDIR". A saved name that was only his first name gets the surname too.
+function fatherFull(p = {}) {
+  const base = String(p.father_name || p.middle_name || '').trim()
+  const sur = String(p.last_name || '').trim()
+  if (!base) return ''
+  return sur && !base.toUpperCase().split(/s+/).includes(sur.toUpperCase()) ? `${base} ${sur}` : base
+}
+function emergencyName(p = {}) {
+  const e = String(p.emergency_name || '').trim()
+  const bare = [p.father_name, p.middle_name].map(x => String(x || '').trim().toUpperCase()).filter(Boolean)
+  return (!e || bare.includes(e.toUpperCase())) ? fatherFull(p) || e : e
+}
+
 const RELIGIONS = ['Muslim', 'Orthodox', 'Protestant']
 // Her religion as one of the choices ("ISLAM", "muslim " → Muslim); another word stays as it is.
 function religionOption(v) {
@@ -54,6 +68,10 @@ export default function CVNewPage() {
   const [genResult, setGenResult] = useState(null)
   const [showPreview, setShowPreview] = useState(false)
   const [previewHtml, setPreviewHtml] = useState(null)
+  // Words changed in the preview (double-click): from → to, kept for the PDF.
+  const [textEdits, setTextEdits] = useState({})
+  const editsRef = useRef({})
+  const editList = () => Object.entries(editsRef.current).map(([from, to]) => ({ from, to }))
   const [previewTemplateId, setPreviewTemplateId] = useState(null)
   const [previewUrl, setPreviewUrl] = useState(null)
   const [saving, setSaving] = useState(false)
@@ -120,7 +138,7 @@ export default function CVNewPage() {
         zone_subcity: p.zone_subcity || '',
         labor_id: p.labor_id || '',
         personal_number: p.personal_number || brokerObj?.contact1 || '',
-        emergency_name: p.emergency_name || p.father_name || '',
+        emergency_name: emergencyName(p),
         emergency_phone: p.emergency_phone || brokerObj?.contact1 || '',
         emergency_gender: p.emergency_gender || 'Male',
         emergency_relationship: p.emergency_relationship || 'Father',
@@ -259,6 +277,7 @@ export default function CVNewPage() {
         profile_id: Number(profileId),
         template_id: Number(tid),
         overrides: {
+          __edits: editList(),
           ...form,
           country: primary.country || '',
           salary: primary.salary || 0,
@@ -301,7 +320,7 @@ export default function CVNewPage() {
       const res = await api.post('/cv/generate', {
         profile_id: Number(profileId),
         template_id: Number(tid),
-        overrides: { ...form, country: primary.country || '', salary: primary.salary || 0, currency: primary.currency || 'SAR' },
+        overrides: { __edits: editList(), ...form, country: primary.country || '', salary: primary.salary || 0, currency: primary.currency || 'SAR' },
       })
       if (res.data?.queued || !res.data?.download_url) {
         toast.success('Saved — the office PC makes the PDF when it is on; it then shows under CVs', { id: t, duration: 7000 })
@@ -338,6 +357,7 @@ export default function CVNewPage() {
         profile_id: Number(profileId),
         template_id: Number(tid),
         overrides: {
+          __edits: editList(),
           ...form,
           country: primary.country || '',
           salary: primary.salary || 0,
@@ -488,6 +508,15 @@ export default function CVNewPage() {
       <section className="panel p-5 space-y-5">
         <h3 className="font-display text-lg font-bold text-slate-900 dark:text-white border-b border-slate-100 dark:border-slate-700 pb-3">Fill in details</h3>
 
+        {/* Her broker: seen and changed right here. */}
+        <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3">
+          <div className="flex flex-wrap items-baseline justify-between gap-2 text-sm">
+            <span className="text-xs font-medium text-slate-600 dark:text-slate-300">Broker</span>
+            <span className="font-semibold">{broker?.name || 'Not assigned'}{broker?.contact1 ? ` · ${broker.contact1}` : ''}</span>
+          </div>
+          <PickBrokerHere profileId={profileId} current={readiness?.profile?.broker_id || ''} onDone={reloadReadiness} />
+        </div>
+
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
             <label className="text-xs font-medium text-slate-600 dark:text-slate-300 mb-1 block">Religion</label>
@@ -559,7 +588,7 @@ export default function CVNewPage() {
         <div className="pt-3 border-t border-slate-100 dark:border-slate-700">
           <p className="text-xs font-semibold text-slate-500 mb-2 uppercase tracking-wide">Emergency contact</p>
           <div className="grid gap-3 sm:grid-cols-2">
-            <Input label="Name" value={form.emergency_name} onChange={e => upd('emergency_name', e.target.value)} placeholder={form.father_name || 'Father name'} />
+            <Input label="Name" value={form.emergency_name} onChange={e => upd('emergency_name', e.target.value)} placeholder={fatherFull({ ...p, ...form }) || 'Father name and surname'} />
             <Input label="Phone" value={form.emergency_phone} onChange={e => upd('emergency_phone', e.target.value)} placeholder={broker?.contact1 || 'Broker phone'} />
             <div>
               <label className="text-xs font-medium text-slate-600 dark:text-slate-300 mb-1 block">Gender</label>
@@ -745,7 +774,7 @@ export default function CVNewPage() {
             {/* Iframe */}
             <iframe
               src={previewUrl}
-              title="CV Preview"
+              title="CV Preview — double-click a text to change it"
               className="flex-1 w-full border-0 bg-white"
               // A phone: the A4 page shrinks to the screen's width (nothing cut off on the right).
               onLoad={(e) => {
@@ -753,6 +782,28 @@ export default function CVNewPage() {
                   const f = e.currentTarget, d = f.contentDocument
                   if (!d?.documentElement) return
                   d.documentElement.style.zoom = ''
+                  // Double-click a text to change it; it is kept for the PDF.
+                  d.addEventListener('dblclick', (ev) => {
+                    let el = ev.target
+                    while (el && el !== d.body && !(el.childNodes.length && [...el.childNodes].every(c => c.nodeType === 3 || c.nodeName === 'BR'))) el = el.parentElement
+                    if (!el || el === d.body || !el.textContent.trim()) return
+                    if (el.isContentEditable) return
+                    const before = el.textContent.trim()
+                    const first = Object.entries(editsRef.current).find(([, to]) => to.trim() === before)?.[0] || before
+                    el.contentEditable = 'true'
+                    el.style.outline = '2px solid #14b8a6'
+                    el.focus()
+                    const done = () => {
+                      el.contentEditable = 'false'; el.style.outline = ''
+                      const now = el.textContent.trim()
+                      if (now === before) return
+                      editsRef.current = { ...editsRef.current, [first]: now }
+                      if (now === first) { const { [first]: _, ...rest } = editsRef.current; editsRef.current = rest }
+                      setTextEdits(editsRef.current)
+                    }
+                    el.addEventListener('blur', done, { once: true })
+                    el.addEventListener('keydown', (k) => { if (k.key === 'Enter' && !k.shiftKey) { k.preventDefault(); el.blur() } if (k.key === 'Escape') { el.textContent = before; el.blur() } })
+                  })
                   const k = f.clientWidth / Math.max(d.documentElement.scrollWidth, d.body?.scrollWidth || 0)
                   if (k > 0 && k < 1) d.documentElement.style.zoom = String(Math.max(0.3, k))
                 } catch {}

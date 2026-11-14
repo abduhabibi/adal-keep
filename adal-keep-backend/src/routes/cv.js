@@ -205,11 +205,26 @@ router.get('/profile-readiness/:profileId', async (req, res) => {
  * Her CV with one template, as a PDF saved in her CV field (and in
  * generated_cvs). Also used by the WhatsApp sends.
  */
+/**
+ * Words a person changed by double-clicking them in the preview: each text
+ * that read "from" now reads "to". A small script in the page does it, so the
+ * preview and the PDF (drawn by the same browser) show the same.
+ */
+export function withEdits(html, edits) {
+  const list = (Array.isArray(edits) ? edits : []).filter(e => e && typeof e.from === 'string' && typeof e.to === 'string' && e.from.trim() && e.from !== e.to)
+    .slice(0, 300).map(e => ({ from: e.from.trim().slice(0, 4000), to: e.to.slice(0, 4000) }))
+  if (!list.length) return html
+  const json = JSON.stringify(list).replace(/</g, '\u003c')
+  const js = `<script>(function(){var E=${json};var w=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT),n,a=[];while(n=w.nextNode())a.push(n);a.forEach(function(t){var v=t.nodeValue,k=v.trim();if(!k)return;for(var i=0;i<E.length;i++)if(E[i].from===k){t.nodeValue=v.replace(k,E[i].to);break}})})()</script>`
+  const at = html.toLowerCase().lastIndexOf('</body>')
+  return at >= 0 ? html.slice(0, at) + js + html.slice(at) : html + js
+}
+
 export async function generateCvFile(db, fresh, template, overrides = {}, createdBy = 'user') {
   // Religion is a must on every CV (asked on 2026-11-10).
   if (!String(fresh?.religion || '').trim()) throw Object.assign(new Error(`Religion is missing for ${fresh?.full_name || 'her'}: fill it in on the profile, then make the CV.`), { status: 400 })
   const data = await buildTemplateData(db, fresh, template, overrides)
-  const html = mergeTemplate(template.html_content, template.css_content, data)
+  const html = withEdits(mergeTemplate(template.html_content, template.css_content, data), overrides.__edits)
 
   const slug = (fresh.full_name || 'profile').replace(/[^A-Za-z0-9]+/g, '_').slice(0, 40)
   const tslug = (template.name || 'template').replace(/[^A-Za-z0-9]+/g, '_').slice(0, 30)
@@ -443,7 +458,7 @@ router.post('/preview', async (req, res) => {
     if (!template) return res.status(404).json({ error: 'Template not found' })
 
     const data = await buildTemplateData(db, profile, template, overrides)
-    const html = mergeTemplate(template.html_content, template.css_content, data)
+    const html = withEdits(mergeTemplate(template.html_content, template.css_content, data), overrides.__edits)
     res.set('Content-Type', 'text/html; charset=utf-8').send(html)
   } catch (e) {
     console.error('[CV] preview error:', e.message)

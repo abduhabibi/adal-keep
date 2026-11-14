@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readPerson, findPeople, filesOf, nextPage, checkLink } from '../src/services/transition.js'
+import { readPerson, findPeople, filesOf, nextPage, checkLink, newestFirst, madeHere, fileTier, prioritize, filesWaiting } from '../src/services/transition.js'
 
 test('a person is read from any shape, and needs a real passport number', () => {
   const p = readPerson({ id: 7, name: 'Milki Aliyi', passport: { number: 'eq1743746', expiryDate: '31/08/2030' }, religion: { nameEn: 'Muslim' }, dob: '1999-11-30T00:00:00Z' })
@@ -241,4 +241,22 @@ test('Musaned: the HR pool page by page as the page shows it (10 a page), status
   assert.equal(fs.existsSync(path.join(dir, 'musaned-progress.json')), false)
   await db.destroy()
   fs.rmSync(dir, { recursive: true, force: true })
+})
+
+test('a move: newest girls first, simple files first, made-here papers skipped, Prioritize only for a waiting girl', () => {
+  const g = (id, createdAt) => ({ raw: { id, ...(createdAt ? { createdAt } : {}) } })
+  assert.deepEqual(newestFirst([g(1, '2026-01-01'), g(2, '2026-11-01'), g(3, '2026-05-01')]).map(x => x.raw.id), [2, 3, 1])
+  assert.deepEqual(newestFirst([g(1), g(2), g(3)]).map(x => x.raw.id), [1, 2, 3]) // no dates: as the list showed them (page 1 = newest)
+  assert.equal(madeHere({ field: 'CV' }), true)
+  assert.equal(madeHere({ field: 'Visa' }), true)
+  assert.equal(madeHere({ field: 'Other', label: 'AppointmentSlip' }), true)
+  assert.equal(madeHere({ field: 'Other', label: 'payment receipt' }), true)
+  assert.equal(madeHere({ field: 'Passport', label: 'PassportScanImage' }), false)
+  assert.equal(madeHere({ field: 'Medical Report', label: 'medicalResult' }), false)
+  assert.deepEqual([{ field: 'Medical Report' }, { field: 'Full Body Photo' }, { field: 'Passport' }, { field: 'Photo' }].map(fileTier), [2, 1, 0, 0])
+  assert.deepEqual(filesWaiting(), [])
+  assert.equal(prioritize(12345), false)
+  const files = filesOf({ cvUrl: 'https://x/a.pdf', visaCopyUrl: 'https://x/v.pdf', passportUrl: 'https://x/p.jpg' }, 'https://x')
+  assert.deepEqual(files.filter(f => !madeHere(f)).map(f => f.field), ['Passport'])
+  assert.equal(readPerson({ passportNumber: 'EP1234567', fullName: 'A B', applicationNumber: 'E123' }).visa_application_number, 'E123')
 })

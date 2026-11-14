@@ -163,8 +163,8 @@ export default function SelectionBar({ picked, onRemove, onClear, onAllShown, on
       const day = new Date().toISOString().slice(0, 10)
       await downloadTable(format, {
         title: `Selected (${picked.length}) — ${day}`,
-        head: ['Name', 'Labour ID', 'Passport'],
-        rows: picked.map(p => [p.full_name || '', p.labor_id || '', p.passport_number || '']),
+        head: ['No.', 'Name', 'Labour ID', 'Passport'],
+        rows: picked.map((p, i) => [String(i + 1), p.full_name || '', p.labor_id || '', p.passport_number || '']),
         name: `Selected_${picked.length}_${day}`,
       })
     } catch (e) { toast.error(err(e)) }
@@ -199,7 +199,7 @@ export default function SelectionBar({ picked, onRemove, onClear, onAllShown, on
             onClick={() => setMessaging(m => !m)}>💬 WhatsApp <span className="ml-auto hidden text-[10px] font-normal opacity-80 lg:inline">send CVs</span></button>
           {messaging && <WhatsAppSendPicked picked={picked} onClose={() => setMessaging(false)} />}
           <button type="button" className={`${btn} bg-lime-50 text-lime-800 hover:bg-lime-100 dark:bg-lime-900/30 dark:text-lime-300`}
-            onClick={() => { setExporting(true); download('xlsx') }} title="Name · Labour ID · Passport of the selected">📥 Excel download <span className="ml-auto hidden text-[10px] font-normal opacity-80 lg:inline">name · labour ID · passport</span></button>
+            onClick={() => { setExporting(true); download('xlsx') }} title="No. · Name · Labour ID · Passport of the selected">📥 Excel download <span className="ml-auto hidden text-[10px] font-normal opacity-80 lg:inline">no. · name · labour ID · passport</span></button>
           <div className="col-span-2 lg:col-span-1">
             <button type="button" onClick={() => setExporting(x => !x)} className="px-1 text-[11px] text-slate-500 hover:underline">{exporting ? '▾' : '▸'} Other formats</button>
             {exporting && (

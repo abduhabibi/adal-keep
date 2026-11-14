@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import PrioritizeButton, { useWaitingFiles } from '../components/PrioritizeButton'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import api from '../services/api'
@@ -57,6 +58,9 @@ export default function ProfilesPage() {
   }, [query, status, brokerId])
   // A profile changed anywhere (a person, a robot, a phone): the list follows at once.
   useEffect(() => onDataChange(['profiles', 'brokers'], () => load(true), 3000), [load])
+  // A move running: its new girls show as they come (every 5 s), even if a change notice is missed.
+  const waitingFiles = useWaitingFiles()
+  useEffect(() => { if (!waitingFiles.size) return; const t = setInterval(() => load(true), 5000); return () => clearInterval(t) }, [waitingFiles.size > 0, load]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const t = setTimeout(load, 200)
@@ -281,6 +285,7 @@ export default function ProfilesPage() {
                 <span className="hidden sm:block"><StatusBadge status={p.status} /></span>
               </div>
 
+              <PrioritizeButton profileId={p.id} className="mt-2" />
               <MiniJourney steps={journey.steps[p.id]} who={journey.who[p.id]} missing={journey.missing[p.id]} picked={step?.split(':')[0]} />
               {lacking[p.id]?.length > 0 && (
                 <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-2 py-1.5 text-[11px] text-red-700 animate-slide-up dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">

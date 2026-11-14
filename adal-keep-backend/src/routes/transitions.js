@@ -1,6 +1,6 @@
 /** Settings → Transitions: bring an agency's data over from the system it used before. */
 import express from 'express'
-import { transitionStates, startTransition, stopTransition, showTransition, checkLink } from '../services/transition.js'
+import { transitionStates, startTransition, stopTransition, showTransition, checkLink, filesWaiting, prioritize } from '../services/transition.js'
 import { needFeature } from '../services/plans.js'
 
 const router = express.Router()
@@ -28,3 +28,11 @@ router.post('/transitions/:source/show', async (req, res) => {
 })
 
 export default router
+
+// Profiles a running move saved whose files have not come yet (their Prioritize button).
+router.get('/transitions/waiting-files', (req, res) => res.json({ profileIds: filesWaiting() }))
+// Her record and files next, before everyone else.
+router.post('/transitions/prioritize/:profileId', (req, res) => {
+  if (!prioritize(req.params.profileId)) return res.status(404).json({ error: 'Her files are not waiting in a running move' })
+  res.json({ ok: true })
+})

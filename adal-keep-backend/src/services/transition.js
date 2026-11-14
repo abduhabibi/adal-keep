@@ -61,6 +61,17 @@ const SIGN_IN_WAIT = 15 * 60_000
 const MAX_PAGES = 40, MAX_REQUESTS = 3000, MAX_TEMPLATES = 5
 
 const states = new Map()
+const waitingFiles = new Map()   // profile id → the move she belongs to
+const firstPlease = []           // profile ids a person pressed Prioritize on
+/** The profiles saved by a running move whose files have not come yet. */
+export const filesWaiting = () => [...waitingFiles.keys()]
+/** Her files (and her own record) next, before everyone else; then the move goes on as before. */
+export function prioritize(profileId) {
+  const pid = Number(profileId)
+  if (!waitingFiles.has(pid)) return false
+  if (!firstPlease.includes(pid)) firstPlease.unshift(pid)
+  return true
+}
 const windows = new Map()     // a system → the window a person signs in to
 const blank = () => ({ status: 'idle', step: '', people: 0, created: 0, updated: 0, files: 0, templates: 0, brokers: 0, skipped: 0, failed: 0, error: null, folder: null })
 const stateOf = (id) => states.get(id) || blank()
@@ -125,6 +136,7 @@ const KEYS = {
   region: ['region'], living_town: ['livingtown', 'city'],
   labor_id: ['laborid', 'labourid'],
   visa_number: ['visanumber', 'visano'],
+  visa_application_number: ['visaapplicationnumber', 'visaapplicationno', 'enjazapplicationnumber', 'enjaznumber', 'applicationnumber', 'applicationno'],
   contract_number: ['contractnumber', 'contractno'],
   employer_name: ['employername', 'sponsorname'],
   emergency_name: ['emergencyname', 'emergencycontactname', 'emmergencycontactname'],
@@ -209,6 +221,20 @@ const FIELD_OF = [
   [/photo|image|picture|avatar|face|personal/i, 'Photo'],
 ]
 const IS_FILE = /\.(jpe?g|png|webp|pdf)(\?|#|$)/i
+// Made in Adal Keep (a CV, the visa, an appointment slip, a receipt): only their numbers come.
+export const MADE_HERE = /\bcv\b|^cv|cv$|resume|visa|slip|receipt|appointment|ticket|invoice|payment|tasheer|wakala|enjaz/i
+export const madeHere = (f) => f.field === 'CV' || f.field === 'Visa' || MADE_HERE.test(`${f.field} ${f.label || ''}`)
+// Simple files first: her face and passport, then the full body, then the rest.
+export const fileTier = (f) => /^(Photo|Passport)$/.test(f.field) ? 0 : f.field === 'Full Body Photo' ? 1 : 2
+/** Newest first: by the date the site gave her, else as its list showed her (newest on page 1). */
+export function newestFirst(items) {
+  const when = (raw) => { for (const k of ['createdAt', 'created_at', 'registeredAt', 'registrationDate', 'dateCreated', 'createdDate', 'updatedAt']) { const t = Date.parse(raw?.[k] ?? raw?.data?.[k] ?? ''); if (t) return t } return 0 }
+  return items.map((p, i) => ({ p, i, t: when(p.raw) })).sort((a, b) => (b.t - a.t) || (a.i - b.i)).map(x => x.p)
+}
+/** n at a time; each worker takes the next job when it is free. */
+async function pool(n, next, work) {
+  await Promise.all(Array.from({ length: n }, async () => { for (let j; (j = next());) await work(j) }))
+}
 
 /** The files a record points to: { field, url }. */
 export function filesOf(raw, origin) {
@@ -222,7 +248,7 @@ export function filesOf(raw, origin) {
     if (!field) continue
     let url
     try { url = new URL(v, origin).href } catch { continue }
-    if (!seen.has(url)) { seen.add(url); out.push({ field, url }) }
+    if (!seen.has(url)) { seen.add(url); out.push({ field, url, label: key }) }
   }
   for (const list of [raw?.medias, raw?.media, raw?.attachments, raw?.documents, raw?.files]) {
     if (!Array.isArray(list)) continue
@@ -592,69 +618,108 @@ async function run(db, id, source, url, deps) {
       if (m && !brokerOf.has(m[1])) brokerOf.set(m[1], r.id)
     }
 
-    // Lists are often short: her own record says more, when the site has one.
-    const [base, firstList] = [...lists.entries()][0] || []
-    if (base) {
-      const stem = base.replace(/[?#].*/, '').replace(/\/$/, '')
-      let works = 0, tried = 0
-      for (const p of people.values()) {
-        check()
-        if (deps.limit && tried >= deps.limit) break
-        const rid = p.raw.id ?? p.raw._id ?? p.raw.uuid
-        if (rid == null || (tried >= 3 && !works)) continue
-        tried++
-        const got = await ask(page, `${stem}/${rid}`, firstList.headers)
-        let json = null
-        try { json = JSON.parse(got?.text) } catch {}
-        const more = json && findPeople(json).find(f => f.person.passport_number === p.person.passport_number)
-        if (!more) continue
-        works++
-        p.person = { ...more.person, ...p.person }
-        p.raw = { ...p.raw, ...more.raw }
-        set(id, { step: `Reading each person: ${works} of ${people.size}` })
-        await sleep(80)
-      }
-    }
     if (!people.size && notFound.length) throw new Error(`${source.name} says “page not found” (404) for ${notFound.join(', ')} at ${origin}. Check the address is your agency's own (like https://NAME.agency.pextran.com/) and that this account can open Recruits.`)
     fs.writeFileSync(path.join(folder, 'people.json'), JSON.stringify([...people.values()].map(p => p.raw), null, 1))
 
-    // Into Adal Keep.
+    // Into Adal Keep, the newest girls first:
+    //   1. every girl as a profile with what the list says (she shows at once),
+    //   2. her own record (more text), several at a time,
+    //   3. her files — simple ones first — several at a time.
+    // A girl a person presses Prioritize on gets 2 and 3 at once, then the rest go on.
+    const order = newestFirst([...people.values()]).slice(0, deps.limit || Infinity)
+    const [base, firstList] = [...lists.entries()][0] || []
+    const stem = base ? base.replace(/[?#].*/, '').replace(/\/$/, '') : null
+    const headers = firstList?.headers || {}
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'adal-transition-'))
-    const cvFiles = []
+    const saved = []
+    const byProfile = new Map()
     try {
+      // 1. Text.
       let n = 0
-      const saved = []
-      for (const { person, raw } of people.values()) {
+      for (const g of order) {
         check()
-        if (deps.limit && n >= deps.limit) break
-        set(id, { step: `Saving ${++n} of ${people.size}: ${person.full_name}`, saved: n })
-        const profileId = await saveProfile(db, id, source, person)
-        const myBroker = brokerOf.get(String(raw.brokerId ?? raw.broker_id ?? raw.data?.brokerId ?? ''))
-        if (myBroker) await db('profiles').where('id', profileId).where(q => q.whereNull('broker_id').orWhere('broker_id', 0)).update({ broker_id: myBroker }).catch(() => {})
-        saved.push({ person, raw, profileId })
-        const wanted = [...filesOf(raw, origin), ...(source.files?.(raw, origin) || [])]
-        for (const f of wanted) {
-          const headers = firstList?.headers || {}
-          let got = await ask(page, f.url, headers, true)
-          if (!got?.base64 && /^https:/.test(f.url)) {
-            try {
-              const r = await fetch(f.url, { signal: AbortSignal.timeout(60000) })
-              if (r.ok) got = { base64: Buffer.from(await r.arrayBuffer()).toString('base64'), type: r.headers.get('content-type') || '' }
-            } catch {}
-          }
-          if (got?.base64 && /octet/i.test(got.type)) got.type = /\.pdf(\?|$)/i.test(f.url) ? 'application/pdf' : /\.png(\?|$)/i.test(f.url) ? 'image/png' : 'image/jpeg'
-          if (!got?.base64 || !/image|pdf|octet/i.test(got.type)) continue
-          const ext = /pdf/i.test(got.type) ? '.pdf' : /png/i.test(got.type) ? '.png' : /webp/i.test(got.type) ? '.webp' : '.jpg'
-          const file = path.join(tmp, `${person.passport_number}-${f.field}${ext}`.replace(/\s/g, '_'))
-          fs.writeFileSync(file, Buffer.from(got.base64, 'base64'))
-          if (await saveOnProfile(db, profileId, f.field, file, path.basename(file))) set(id, { files: stateOf(id).files + 1 })
-          if (f.field === 'CV' && ext === '.pdf' && cvFiles.length < MAX_TEMPLATES) {
-            const keep = path.join(tmp, `cv-${cvFiles.length}.pdf`)
-            fs.copyFileSync(file, keep)
-            cvFiles.push(keep)
-          }
-        }
+        set(id, { step: `Making the profiles: ${++n} of ${order.length}`, saved: n })
+        g.profileId = await saveProfile(db, id, source, g.person)
+        const myBroker = brokerOf.get(String(g.raw.brokerId ?? g.raw.broker_id ?? g.raw.data?.brokerId ?? ''))
+        if (myBroker) await db('profiles').where('id', g.profileId).where(q => q.whereNull('broker_id').orWhere('broker_id', 0)).update({ broker_id: myBroker }).catch(() => {})
+        saved.push(g)
+        byProfile.set(g.profileId, g)
+        waitingFiles.set(g.profileId, id)
       }
+
+      // 2. Her own record.
+      let works = 0, tried = 0, settled = 0
+      const readRecord = async (g) => {
+        if (g.recordRead || !stem) return
+        g.recordRead = true
+        const rid = g.raw.id ?? g.raw._id ?? g.raw.uuid
+        // Six answered and none was her record: this site has no record page.
+        if (rid == null || (settled >= 6 && !works)) return
+        tried++
+        const got = await ask(page, `${stem}/${rid}`, headers).catch(() => null).finally(() => { settled++ })
+        let json = null
+        try { json = JSON.parse(got?.text) } catch {}
+        const more = json && findPeople(json).find(f => f.person.passport_number === g.person.passport_number)
+        if (!more) return
+        works++
+        g.person = { ...more.person, ...g.person }
+        g.raw = { ...g.raw, ...more.raw }
+        await saveProfile(db, id, source, g.person)
+      }
+      // 3. Her files.
+      const filesFor = (g) => [...filesOf(g.raw, origin), ...(source.files?.(g.raw, origin) || [])].filter(f => !madeHere(f))
+      const fetchFile = async (g, f) => {
+        let got = await ask(page, f.url, headers, true).catch(() => null)
+        if (!got?.base64 && /^https:/.test(f.url)) {
+          try {
+            const r = await fetch(f.url, { signal: AbortSignal.timeout(60000) })
+            if (r.ok) got = { base64: Buffer.from(await r.arrayBuffer()).toString('base64'), type: r.headers.get('content-type') || '' }
+          } catch {}
+        }
+        if (got?.base64 && /octet/i.test(got.type)) got.type = /\.pdf(\?|$)/i.test(f.url) ? 'application/pdf' : /\.png(\?|$)/i.test(f.url) ? 'image/png' : 'image/jpeg'
+        if (!got?.base64 || !/image|pdf|octet/i.test(got.type)) return
+        const ext = /pdf/i.test(got.type) ? '.pdf' : /png/i.test(got.type) ? '.png' : /webp/i.test(got.type) ? '.webp' : '.jpg'
+        const file = path.join(tmp, `${g.person.passport_number}-${f.field}-${Math.random().toString(36).slice(2, 7)}${ext}`.replace(/\s/g, '_'))
+        fs.writeFileSync(file, Buffer.from(got.base64, 'base64'))
+        try { if (await saveOnProfile(db, g.profileId, f.field, file, path.basename(file))) set(id, { files: stateOf(id).files + 1 }) } catch { set(id, { failed: stateOf(id).failed + 1 }) }
+        fs.rm(file, { force: true }, () => {})
+      }
+      const filesDone = (g) => { if (g.tiersLeft && !g.tiersLeft.size) waitingFiles.delete(g.profileId) }
+      const takeTier = async (g, tier) => {
+        if (!g.tiersLeft?.has(tier)) return
+        g.tiersLeft.delete(tier)
+        for (const f of filesFor(g).filter(x => fileTier(x) === tier)) { check(); await fetchFile(g, f) }
+        filesDone(g)
+      }
+      // Asked for first: her record and every file now.
+      const urgent = async () => {
+        const pid = firstPlease.shift()
+        const g = byProfile.get(pid)
+        if (!g) return
+        set(id, { step: `First: ${g.person.full_name}` })
+        await readRecord(g)
+        g.tiersLeft ??= new Set([0, 1, 2])
+        for (const t of [0, 1, 2]) await takeTier(g, t)
+        waitingFiles.delete(g.profileId)
+      }
+      const jobsOf = (list) => { let i = 0; return () => firstPlease.some(p => byProfile.has(p)) ? { urgent: true } : list[i++] }
+
+      let r = 0
+      await pool(6, jobsOf(order), async (g) => {
+        check()
+        if (g.urgent) return urgent()
+        await readRecord(g)
+        set(id, { step: `Reading each girl's record: ${++r} of ${order.length}` })
+      })
+      for (const g of order) g.tiersLeft ??= new Set([0, 1, 2])
+      const fileJobs = [0, 1, 2].flatMap(t => order.map(g => ({ g, t })))
+      let k = 0
+      await pool(4, jobsOf(fileJobs), async (j) => {
+        check()
+        if (j.urgent) return urgent()
+        set(id, { step: `Files (${['photos and passports', 'full body photos', 'other documents'][j.t]}): ${Math.min(++k, fileJobs.length)} of ${fileJobs.length}` })
+        await takeTier(j.g, j.t)
+      })
       if (brokersFound.size) {
         set(id, { step: 'Making the brokers' })
         // A trial move: only the brokers of the girls it saved.
@@ -666,7 +731,10 @@ async function run(db, id, source, url, deps) {
       // The agency's CV header (not its template): cut out and kept for "Add CV template".
       set(id, { step: 'Cutting out the CV header' })
       await takeCvHeader(db, id, source)
-    } finally { fs.rmSync(tmp, { recursive: true, force: true }) }
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true })
+      for (const [pid, of] of waitingFiles) if (of === id) waitingFiles.delete(pid)
+    }
     set(id, { status: 'done', step: '' })
   } finally {
     page.off('response', onResponse)

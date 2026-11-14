@@ -40,9 +40,11 @@ function Result({ s }) {
 
 export default function TransitionsCard() {
   const [all, setAll] = useState({})
-  const [link, setLink] = useState('')
+  // The Pextran address stays in the box once typed (this device remembers it).
+  const [link, setLinkNow] = useState(() => { try { return localStorage.getItem('adal-pextran-link') || '' } catch { return '' } })
+  const setLink = (v) => { setLinkNow(v); try { localStorage.setItem('adal-pextran-link', v) } catch {} }
   const [starting, setStarting] = useState(null)
-  const load = () => api.get('/transitions').then(r => setAll(r.data)).catch(() => {})
+  const load = () => api.get('/transitions').then(r => { setAll(r.data); if (r.data?.pextran?.link) setLinkNow(l => l || r.data.pextran.link) }).catch(() => {})
   useEffect(() => { load() }, [])
   const running = Object.values(all).some(busy)
   useEffect(() => {

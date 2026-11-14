@@ -253,7 +253,7 @@ test('a move: newest girls first, simple files first, made-here papers skipped, 
   assert.equal(madeHere({ field: 'Other', label: 'payment receipt' }), true)
   assert.equal(madeHere({ field: 'Passport', label: 'PassportScanImage' }), false)
   assert.equal(madeHere({ field: 'Medical Report', label: 'medicalResult' }), false)
-  assert.deepEqual([{ field: 'Medical Report' }, { field: 'Full Body Photo' }, { field: 'Passport' }, { field: 'Photo' }].map(fileTier), [2, 1, 0, 0])
+  assert.deepEqual([{ field: 'Medical Report' }, { field: 'Full Body Photo' }, { field: 'Passport' }, { field: 'Photo' }].map(fileTier), [2, 0, 1, 0]) // her photos first, then the passport, then the rest
   assert.deepEqual(filesWaiting(), [])
   assert.equal(prioritize(12345), false)
   const files = filesOf({ cvUrl: 'https://x/a.pdf', visaCopyUrl: 'https://x/v.pdf', passportUrl: 'https://x/p.jpg' }, 'https://x')

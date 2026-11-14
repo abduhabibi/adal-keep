@@ -5,12 +5,23 @@ import { needFeature } from '../services/plans.js'
 
 const router = express.Router()
 
-router.get('/transitions', (req, res) => res.json(transitionStates()))
+// The Pextran address used last time, kept on this PC: the box shows it again (any device).
+const LINK_KEY = 'transition_pextran_link'
+router.get('/transitions', async (req, res) => {
+  const st = transitionStates()
+  try { const row = await req.app.locals.db('settings').where({ key: LINK_KEY }).first(); if (st.pextran && row?.value) st.pextran.link = row.value } catch {}
+  res.json(st)
+})
 
 router.post('/transitions/:source/start', async (req, res) => {
   try {
     needFeature('moves')
     const link = req.params.source === 'pextran' ? checkLink(req.body?.link) : null
+    if (link) {
+      const db = req.app.locals.db, typed = String(req.body.link).trim()
+      if (await db('settings').where({ key: LINK_KEY }).first()) await db('settings').where({ key: LINK_KEY }).update({ value: typed })
+      else await db('settings').insert({ key: LINK_KEY, value: typed })
+    }
     const accountId = Number(req.body?.account_id) || null
     const limit = Math.max(0, Math.min(1000, Number(req.body?.limit) || 0)) || undefined
     res.json(startTransition(req.app.locals.db, req.params.source, link, { ...(accountId ? { accountId } : {}), ...(limit ? { limit } : {}) }))

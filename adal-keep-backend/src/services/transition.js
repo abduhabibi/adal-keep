@@ -47,7 +47,7 @@ export const SOURCES = {
     ] : [],
   },
   pextran: {
-    name: 'Pextran', url: null, start: ['/recruits', '/brokers'],
+    name: 'Pextran', url: null, start: ['/brokers', '/recruits'],
     // Nothing else is opened (submissions, finance, batches …).
     only: /^\/(recruits|brokers)\/?$/i,
     // A broker is someone in its broker list — never a person, a photo record or a partner agency.
@@ -225,7 +225,7 @@ const IS_FILE = /\.(jpe?g|png|webp|pdf)(\?|#|$)/i
 export const MADE_HERE = /\bcv\b|^cv|cv$|resume|visa|slip|receipt|appointment|ticket|invoice|payment|tasheer|wakala|enjaz/i
 export const madeHere = (f) => f.field === 'CV' || f.field === 'Visa' || MADE_HERE.test(`${f.field} ${f.label || ''}`)
 // Simple files first: her face and passport, then the full body, then the rest.
-export const fileTier = (f) => /^(Photo|Passport)$/.test(f.field) ? 0 : f.field === 'Full Body Photo' ? 1 : 2
+export const fileTier = (f) => /^(Photo|Full Body Photo)$/.test(f.field) ? 0 : f.field === 'Passport' ? 1 : 2
 /** Newest first: by the date the site gave her, else as its list showed her (newest on page 1). */
 export function newestFirst(items) {
   const when = (raw) => { for (const k of ['createdAt', 'created_at', 'registeredAt', 'registrationDate', 'dateCreated', 'createdDate', 'updatedAt']) { const t = Date.parse(raw?.[k] ?? raw?.data?.[k] ?? ''); if (t) return t } return 0 }
@@ -288,15 +288,33 @@ const onSignIn = (page) => page.evaluate(() => {
 }).catch(() => true)
 
 /** One read from the site as its own page would ask: its sign-in comes along. */
-const ask = (page, url, headers, binary = false, init = {}) => page.evaluate(async (url, headers, binary, init) => {
-  const r = await fetch(url, { credentials: 'include', headers, ...init })
-  if (!r.ok) return null
+const askOnce = (page, url, headers, binary = false, init = {}) => page.evaluate(async (url, headers, binary, init) => {
+  // A slow line: one read gives up after 90 s (a big file) or 45 s, and is tried again.
+  const stop = new AbortController()
+  setTimeout(() => stop.abort(), binary ? 90000 : 45000)
+  const r = await fetch(url, { credentials: 'include', headers, signal: stop.signal, ...init })
+  if (!r.ok) return { status: r.status }
   if (!binary) return { text: await r.text(), type: r.headers.get('content-type') || '' }
   const buf = new Uint8Array(await r.arrayBuffer())
   let s = ''
   for (let i = 0; i < buf.length; i += 0x8000) s += String.fromCharCode(...buf.subarray(i, i + 0x8000))
   return { base64: btoa(s), type: r.headers.get('content-type') || '' }
 }, url, headers, binary, init).catch(() => null)
+
+/**
+ * The same, tried 3 times when the line drops (no answer, a time-out, the site
+ * busy: 429 / 5xx), waiting 2 s then 6 s between. "Not there" (404 …) is final.
+ * Answers null when it did not work, so the callers stay as they were.
+ */
+async function ask(page, url, headers, binary = false, init = {}) {
+  for (let i = 0; i < 3; i++) {
+    const got = await askOnce(page, url, headers, binary, init)
+    if (got && !got.status) return got
+    if (got?.status && got.status !== 429 && got.status < 500) return null
+    if (i < 2) await sleep(i ? 6000 : 2000)
+  }
+  return null
+}
 
 /** Lists drawn on the page itself: each table row as { header: cell }. */
 const readTables = (page) => page.evaluate(() => [...document.querySelectorAll('table')].flatMap(t => {
@@ -630,6 +648,18 @@ async function run(db, id, source, url, deps) {
     const [base, firstList] = [...lists.entries()][0] || []
     const stem = base ? base.replace(/[?#].*/, '').replace(/\/$/, '') : null
     const headers = firstList?.headers || {}
+    // What each girl has (her files, found when she is first read) and what is done,
+    // kept in data/transitions: a move that stopped goes on from where it was.
+    const ledgerFile = path.join(deps.dir || DIR, `${id}-${new URL(origin).hostname}-ledger.json`)
+    let ledger = {}
+    try { ledger = JSON.parse(fs.readFileSync(ledgerFile, 'utf8')) } catch {}
+    let ledgerTimer = null
+    const saveLedger = (now) => {
+      clearTimeout(ledgerTimer)
+      const write = () => { try { fs.writeFileSync(ledgerFile, JSON.stringify(ledger)) } catch {} }
+      if (now) write(); else ledgerTimer = setTimeout(write, 2000)
+    }
+    const entry = (g) => (ledger[g.person.passport_number] ||= { text: false, files: null, done: [] })
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'adal-transition-'))
     const saved = []
     const byProfile = new Map()
@@ -645,13 +675,17 @@ async function run(db, id, source, url, deps) {
         saved.push(g)
         byProfile.set(g.profileId, g)
         waitingFiles.set(g.profileId, id)
+        entry(g).profile = g.profileId
       }
+      saveLedger(true)
 
       // 2. Her own record.
       let works = 0, tried = 0, settled = 0
       const readRecord = async (g) => {
         if (g.recordRead || !stem) return
         g.recordRead = true
+        const e = entry(g)
+        if (e.text && e.files) return   // a move before read her already: her text is in, her files are listed
         const rid = g.raw.id ?? g.raw._id ?? g.raw.uuid
         // Six answered and none was her record: this site has no record page.
         if (rid == null || (settled >= 6 && !works)) return
@@ -665,30 +699,41 @@ async function run(db, id, source, url, deps) {
         g.person = { ...more.person, ...g.person }
         g.raw = { ...g.raw, ...more.raw }
         await saveProfile(db, id, source, g.person)
+        e.text = true
+        e.files = filesFor(g).map(x => ({ field: x.field, url: x.url, label: x.label || '' }))
+        saveLedger()
       }
       // 3. Her files.
       const filesFor = (g) => [...filesOf(g.raw, origin), ...(source.files?.(g.raw, origin) || [])].filter(f => !madeHere(f))
+      const filesLeft = (g) => { const e = entry(g); return (e.files || filesFor(g)).filter(x => !madeHere(x) && !e.done.includes(x.url)) }
       const fetchFile = async (g, f) => {
         let got = await ask(page, f.url, headers, true).catch(() => null)
-        if (!got?.base64 && /^https:/.test(f.url)) {
+        for (let i = 0; i < 3 && !got?.base64 && /^https:/.test(f.url); i++) {
           try {
-            const r = await fetch(f.url, { signal: AbortSignal.timeout(60000) })
+            const r = await fetch(f.url, { signal: AbortSignal.timeout(90000) })
             if (r.ok) got = { base64: Buffer.from(await r.arrayBuffer()).toString('base64'), type: r.headers.get('content-type') || '' }
+            else if (r.status !== 429 && r.status < 500) break
           } catch {}
+          if (!got?.base64 && i < 2) await sleep(i ? 6000 : 2000)
         }
         if (got?.base64 && /octet/i.test(got.type)) got.type = /\.pdf(\?|$)/i.test(f.url) ? 'application/pdf' : /\.png(\?|$)/i.test(f.url) ? 'image/png' : 'image/jpeg'
-        if (!got?.base64 || !/image|pdf|octet/i.test(got.type)) return
+        if (!got?.base64 || !/image|pdf|octet/i.test(got.type)) return false
         const ext = /pdf/i.test(got.type) ? '.pdf' : /png/i.test(got.type) ? '.png' : /webp/i.test(got.type) ? '.webp' : '.jpg'
         const file = path.join(tmp, `${g.person.passport_number}-${f.field}-${Math.random().toString(36).slice(2, 7)}${ext}`.replace(/\s/g, '_'))
         fs.writeFileSync(file, Buffer.from(got.base64, 'base64'))
-        try { if (await saveOnProfile(db, g.profileId, f.field, file, path.basename(file))) set(id, { files: stateOf(id).files + 1 }) } catch { set(id, { failed: stateOf(id).failed + 1 }) }
+        let ok = false
+        try { if (await saveOnProfile(db, g.profileId, f.field, file, path.basename(file))) set(id, { files: stateOf(id).files + 1 }); ok = true } catch { set(id, { failed: stateOf(id).failed + 1 }) }
         fs.rm(file, { force: true }, () => {})
+        return ok
       }
       const filesDone = (g) => { if (g.tiersLeft && !g.tiersLeft.size) waitingFiles.delete(g.profileId) }
       const takeTier = async (g, tier) => {
         if (!g.tiersLeft?.has(tier)) return
         g.tiersLeft.delete(tier)
-        for (const f of filesFor(g).filter(x => fileTier(x) === tier)) { check(); await fetchFile(g, f) }
+        for (const f of filesLeft(g).filter(x => fileTier(x) === tier)) {
+          check()
+          if (await fetchFile(g, f)) { entry(g).done.push(f.url); saveLedger() }
+        }
         filesDone(g)
       }
       // Asked for first: her record and every file now.
@@ -712,14 +757,16 @@ async function run(db, id, source, url, deps) {
         set(id, { step: `Reading each girl's record: ${++r} of ${order.length}` })
       })
       for (const g of order) g.tiersLeft ??= new Set([0, 1, 2])
-      const fileJobs = [0, 1, 2].flatMap(t => order.map(g => ({ g, t })))
-      let k = 0
-      await pool(4, jobsOf(fileJobs), async (j) => {
-        check()
-        if (j.urgent) return urgent()
-        set(id, { step: `Files (${['photos and passports', 'full body photos', 'other documents'][j.t]}): ${Math.min(++k, fileJobs.length)} of ${fileJobs.length}` })
-        await takeTier(j.g, j.t)
-      })
+      // Everyone's personal and full body photos first, then everyone's passport, then the rest.
+      for (const t of [0, 1, 2]) {
+        let k = 0
+        await pool(4, jobsOf(order.map(g => ({ g, t }))), async (j) => {
+          check()
+          if (j.urgent) return urgent()
+          set(id, { step: `Files (${['personal and full body photos', 'passports', 'other documents'][t]}): ${Math.min(++k, order.length)} of ${order.length} girls` })
+          await takeTier(j.g, j.t)
+        })
+      }
       if (brokersFound.size) {
         set(id, { step: 'Making the brokers' })
         // A trial move: only the brokers of the girls it saved.
@@ -732,6 +779,7 @@ async function run(db, id, source, url, deps) {
       set(id, { step: 'Cutting out the CV header' })
       await takeCvHeader(db, id, source)
     } finally {
+      saveLedger(true)
       fs.rmSync(tmp, { recursive: true, force: true })
       for (const [pid, of] of waitingFiles) if (of === id) waitingFiles.delete(pid)
     }

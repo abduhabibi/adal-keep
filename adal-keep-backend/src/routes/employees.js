@@ -205,6 +205,32 @@ router.put('/:id', async (req, res) => {
   }
 })
 
+/**
+ * Her sign-in for other computers (an Adal Companion asks "Sign in to the main
+ * PC"): a username of 5 letters and a PIN of 6 digits. Set only on the main PC
+ * itself — never from a phone or the online copy. The PIN is kept hashed; it is
+ * shown once, here, to write down.
+ */
+router.put('/:id/sign-in', async (req, res) => {
+  try {
+    const { isLocal } = await import('../services/networkGate.js')
+    if (!isLocal(req) || req.headers['x-adal-cloud']) return res.status(403).json({ error: 'Set it on the main PC itself' })
+    const db = req.app.locals.db
+    const username = String(req.body?.username || '').trim().toLowerCase()
+    const pin = String(req.body?.pin || '').trim()
+    if (!/^[a-z]{5}$/.test(username)) return res.status(400).json({ error: 'The username is 5 letters (a–z), e.g. abebe' })
+    if (!/^\d{6}$/.test(pin)) return res.status(400).json({ error: 'The PIN is 6 digits' })
+    const user = await db('users').where({ id: req.params.id }).first()
+    if (!user) return res.status(404).json({ error: 'Employee not found' })
+    const taken = await db('users').whereRaw('LOWER(username) = ?', [username]).whereNot({ id: user.id }).first()
+    if (taken) return res.status(400).json({ error: `"${username}" is someone else's username — pick another` })
+    await db('users').where({ id: user.id }).update({ username, password: await bcrypt.hash(pin, 10), updated_at: new Date().toISOString() })
+    res.json({ success: true, username })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
 router.delete('/:id', async (req, res) => {
   try {
     const { moveToTrash } = await import('../services/trash.js')

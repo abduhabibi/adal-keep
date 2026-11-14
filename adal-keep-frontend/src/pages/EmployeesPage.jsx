@@ -8,6 +8,8 @@ import Spinner from '../components/shared/Spinner'
 import Input from '../components/shared/Input'
 import Button from '../components/shared/Button'
 import Modal from '../components/shared/Modal'
+import EmployeeSignIn from '../components/EmployeeSignIn'
+import { isPhoneApp } from '../lib/phoneMode'
 
 const COUNTRY_CODES = ['+251', '+966', '+971', '+974', '+965', '+249']
 const digitsOnly = (v) => (v || '').replace(/\D/g, '').slice(0, 9)
@@ -543,6 +545,8 @@ export default function EmployeesPage() {
                 <div className="mt-3 text-sm text-slate-600 dark:text-slate-300">
                   📞 {emp.phone_work || '—'}
                 </div>
+                {/* Her username + PIN for another computer's Adal Companion (main PC only). */}
+                {!isPhoneApp() && !import.meta.env.VITE_ADMIN && <EmployeeSignIn emp={emp} onSaved={loadEmployees} />}
                 <div className="mt-4 text-xs text-teal-600 opacity-0 group-hover:opacity-100 transition-opacity">
                   ለመግባት ጠቅ ያድርጉ →
                 </div>

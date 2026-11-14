@@ -39,7 +39,7 @@ router.post('/pc-access/signin', async (req, res) => {
   if (!username || !password) return res.status(400).json({ error: 'Type the username and password of this Adal Keep' })
   try {
     const db = req.app.locals.db
-    const user = await db('users').where('username', username).orWhere('phone_work', username).first()
+    const user = await db('users').whereRaw('LOWER(username) = ?', [username.toLowerCase()]).orWhere('phone_work', username).first()
     if (!user?.password || !(await bcrypt.compare(password, user.password))) {
       tries.set(ip, [...recent, now])
       return res.status(401).json({ error: 'That username or password is not right for the main PC' })

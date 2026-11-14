@@ -45,7 +45,18 @@ export default function PassportFirst({ onRead, onSkip }) {
     try {
       const fd = new FormData()
       fd.append('file', file, file.name || 'passport.jpg')
-      const { data } = await api.post('/new-profile/read', fd, { timeout: 120000, headers: { 'Content-Type': 'multipart/form-data' } })
+      let data
+      try {
+        data = (await api.post('/new-profile/read', fd, { timeout: 120000, headers: { 'Content-Type': 'multipart/form-data' } })).data
+      } catch (e) {
+        // Adal Admin: the office PC did not answer — Admin reads it itself.
+        if (!import.meta.env.VITE_ADMIN) throw e
+        data = { queued: true }
+      }
+      if (import.meta.env.VITE_ADMIN && (data?.queued || !data?.doc_type)) {
+        const r = await fetch('/admin/read-passport', { method: 'POST', headers: { 'Content-Type': file.type || 'application/octet-stream' }, body: file })
+        data = { ...(await r.json()), offline: true, file, filename: file.name }
+      }
       // Adal Admin / a phone with the office PC not answering: the reading is done there, not here.
       if (data.queued || (!data.doc_type && !data.error && !data.fields)) setProblem({ text: 'The office PC did not answer, and a passport is read there. Open Adal Keep on the office PC (or check its internet), then try again.', result: data })
       else if (data.error) setProblem({ text: `The passport could not be read (${data.error}). Try a sharper picture, or fill the form by hand.`, result: data })

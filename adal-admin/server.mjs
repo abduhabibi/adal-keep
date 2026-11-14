@@ -17,7 +17,7 @@ import http from 'node:http'
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import os from 'node:os'
 import zlib from 'node:zlib'
 import net from 'node:net'
@@ -775,6 +775,31 @@ async function agencyExists(id) {
 }
 async function rawBody(req) { const c = []; for await (const x of req) c.push(x); return Buffer.concat(c) }
 
+// A passport picture → what the "new profile" form fills, as the agency PC answers it.
+async function readPassportHere(req, res) {
+  const send = (code, data) => res.writeHead(code, { 'Content-Type': 'application/json' }).end(JSON.stringify(data))
+  const buf = await rawBody(req)
+  if (!buf.length || buf.length > 25 * 1024 * 1024) return send(400, { error: 'No picture' })
+  const tmp = path.join(os.tmpdir(), `adal_admin_pp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`)
+  fs.writeFileSync(tmp, buf)
+  try {
+    const { quickMrz } = await import(pathToFileURL(path.join(HERE, '..', 'adal-keep-backend', 'src', 'services', 'quickMrz.js')).href)
+    const r = await quickMrz(tmp)
+    if (!r) return send(200, { error: 'its two bottom lines could not be read here — try a sharper, straight picture, or fill the form by hand' })
+    const f = r.fields
+    const given = String(f.given_names || '').split(' ')
+    send(200, {
+      doc_type: 'Passport', confidence: r.confidence, verified: true, source: 'admin:' + r.source,
+      fields: {
+        full_name: f.full_name, first_name: given[0] || '', middle_name: given.slice(1).join(' '), last_name: f.surname || '',
+        passport_number: f.passport_number, date_of_birth: f.date_of_birth || '', gender: f.sex || '',
+        place_of_birth: '', passport_issue_date: '', passport_expiry_date: f.date_of_expiry || '', nationality: f.nationality || '',
+      },
+      existing: null,
+    })
+  } catch (e) { send(500, { error: e.message }) } finally { fs.rm(tmp, { force: true }, () => {}) }
+}
+
 async function sbProxy(req, res, u) {
   const send = (code, data, type = 'application/json') => res.writeHead(code, { 'Content-Type': type }).end(typeof data === 'string' || Buffer.isBuffer(data) ? data : JSON.stringify(data))
   const p = u.pathname.slice(3)                     // /sb/rest/v1/… → /rest/v1/…
@@ -819,6 +844,9 @@ http.createServer(async (req, res) => {
       res.writeHead(303, { Location: `http://localhost:${PORT}/` }).end(); return
     }
     if (u.pathname.startsWith('/sb/')) return await sbProxy(req, res, u)
+    // The agency's PC does not answer: Admin reads the passport here (its bottom
+    // lines, every check digit verified — adal-keep-backend/src/services/quickMrz.js).
+    if (req.method === 'POST' && u.pathname === '/admin/read-passport') return await readPassportHere(req, res)
     if (!fs.existsSync(path.join(KEEP_APP, 'index.html'))) {
       buildAgencyPages().catch(() => {})
       res.writeHead(503, { 'Content-Type': 'text/html; charset=utf-8', 'Refresh': '15' }).end('<p style="font:16px system-ui;padding:40px">Getting the agency pages ready (about a minute) — this page opens by itself…</p>'); return

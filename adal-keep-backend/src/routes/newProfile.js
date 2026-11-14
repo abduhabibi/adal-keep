@@ -102,3 +102,41 @@ router.post('/new-profile/attach', async (req, res) => {
 })
 
 export default router
+
+/**
+ * The profile and her passport in one go (FormData: file + profile as JSON).
+ * Made for Adal Admin and the phones while the office PC does not answer: the
+ * request waits online and this PC runs it when it is back — nobody at the
+ * agency has to do anything. Sent twice (a replay), it never makes two
+ * profiles: a profile with the same passport number gets the passport instead.
+ */
+router.post('/new-profile/with-passport', upload.single('file'), async (req, res) => {
+  const db = req.app.locals.db
+  try {
+    let profile = {}
+    try { profile = JSON.parse(req.body?.profile || '{}') } catch {}
+    const pn = String(profile.passport_number || '').toUpperCase().replace(/\s/g, '')
+    let id = pn ? (await db('profiles').where('passport_number', pn).first())?.id : null
+    if (!id) {
+      // The usual "create profile" of this PC (its checks and robots), asked here.
+      const fwd = Object.fromEntries(['authorization', 'cookie', 'x-adal-cloud', 'x-adal-who'].filter(h => req.headers[h]).map(h => [h, req.headers[h]]))
+      const r = await fetch(`http://127.0.0.1:${process.env.PORT || 4000}/api/profiles`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', ...fwd }, body: JSON.stringify(profile), signal: AbortSignal.timeout(60000),
+      })
+      const made = await r.json().catch(() => ({}))
+      if (!r.ok) return res.status(r.status).json(made)
+      id = made.id
+    }
+    // The same passport file already on her (the request came twice): not again.
+    const twice = req.file && id && await db('files').join('profile_fields', 'files.profile_field_id', 'profile_fields.id')
+      .where('profile_fields.profile_id', id).where('profile_fields.name', 'Passport').where('files.size', req.file.size).first().catch(() => null)
+    if (twice) fs.unlink(req.file.path, () => {})
+    if (req.file && id && !twice) {
+      const { attachFileToProfile } = await import('../services/profileFiles.js')
+      await attachFileToProfile(Number(id), 'Passport', req.file.path, req.file.originalname || 'passport.jpg')
+      fs.unlink(req.file.path, () => {})
+      import('../services/verification.js').then(v => v.runPassportVerification(Number(id), { handle: db })).catch(() => {})
+    }
+    res.status(201).json({ ok: true, id })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})

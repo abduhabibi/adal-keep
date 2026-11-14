@@ -37,6 +37,11 @@ after that it asks for it (12 hours per sign-in). Forgot it? Delete the
 `ADMIN_PASSWORD_HASH=` line in `.env`, restart the panel and choose a new one.
 By hand: `node server.mjs` in this folder.
 
+It keeps running by itself: "Adal Keep Admin (keep running)" in the Windows
+Startup folder runs `start-admin.vbs /keep` at sign-in, which starts the panel
+again within 10 seconds whenever it stops (opening the window starts it too).
+What it did is in `launcher.log`.
+
 - **Work** — **Needs you** at the top lists what deserves a look first. Every agency live: PC on/off, profiles, chosen, runs waiting for
   a person, failures this week, open tasks, medicals running out, where the
   profiles stand. Pick an agency: **Continue** / **Cancel** its runs, mark its

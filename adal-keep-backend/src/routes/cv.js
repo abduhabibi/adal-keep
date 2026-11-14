@@ -94,7 +94,7 @@ router.get('/templates/:id/preview', async (req, res) => {
     const db = req.app.locals.db
     const tpl = await db('cv_templates').where('id', req.params.id).first()
     if (!tpl) return res.status(404).send('Template not found')
-    const dummy = { id: 0, full_name: 'SAMPLE CANDIDATE NAME', first_name: 'SAMPLE', last_name: 'CANDIDATE', nationality: 'ETHIOPIAN', gender: 'F', date_of_birth: '1999-05-31', passport_number: 'EP0000000', place_of_birth: 'SAMPLE TOWN', religion: 'MUSLIM', marital_status: 'SINGLE', children_count: 0, weight: 'Normal', height: 'Normal', complexion: '-', living_town: 'SAMPLE', mother_name: 'SAMPLE MOTHER', father_name: 'SAMPLE FATHER', spouse_name: '', phone_number: '0912345678', education_level: '-', speaks_english: false, speaks_arabic: false, skills: JSON.stringify({ cleaning: true, ironing: true, washing: true, baby_sitting: true, cooking: false }), previous_employment: JSON.stringify([]) }
+    const dummy = { id: 0, full_name: 'SAMPLE CANDIDATE NAME', first_name: 'SAMPLE', last_name: 'CANDIDATE', nationality: 'ETHIOPIAN', gender: 'F', date_of_birth: '1999-05-31', passport_number: 'EP0000000', place_of_birth: 'SAMPLE TOWN', religion: 'MUSLIM', marital_status: 'SINGLE', children_count: 0, weight: '58.6', height: '159.2', complexion: '-', living_town: 'SAMPLE', mother_name: 'SAMPLE MOTHER', father_name: 'SAMPLE FATHER', spouse_name: '', phone_number: '0912345678', education_level: '-', speaks_english: false, speaks_arabic: false, skills: JSON.stringify({ cleaning: true, ironing: true, washing: true, baby_sitting: true, cooking: false }), previous_employment: JSON.stringify([]) }
     const data = await buildTemplateData(db, dummy, tpl, {})
     const html = mergeTemplate(tpl.html_content, tpl.css_content, data)
     res.set('Content-Type', 'text/html').send(html)
@@ -539,7 +539,7 @@ router.post('/templates/preview-html', async (req, res) => {
       nationality: 'ETHIOPIAN', gender: 'F', date_of_birth: '1999-05-31',
       passport_number: 'EP0000000', place_of_birth: 'SAMPLE TOWN',
       religion: 'MUSLIM', marital_status: 'SINGLE', children_count: 0,
-      weight: 'Normal', height: 'Normal', complexion: '-', living_town: 'SAMPLE',
+      weight: '58.6', height: '159.2', complexion: '-', living_town: 'SAMPLE',
       mother_name: 'SAMPLE MOTHER', father_name: 'SAMPLE FATHER', spouse_name: '',
       phone_number: '0912345678', education_level: '-',
       speaks_english: false, speaks_arabic: false,

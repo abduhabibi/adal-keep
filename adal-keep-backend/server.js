@@ -88,6 +88,7 @@ const db = knex(knexConfig.development)
 // Store db in app.locals for routes to access
 app.locals.db = db
 watchChanges(db)   // every window is told at once when something changes
+import('./src/services/bodySize.js').then(b => import('./src/services/changes.js').then(c => b.keepBodySizesFilled(db, c.onChanged))).catch(() => {})
 
 app.use(diagMiddleware)
 app.use(featureUseMiddleware)   // how much each feature is used (Adal Keep Admin → Usage)

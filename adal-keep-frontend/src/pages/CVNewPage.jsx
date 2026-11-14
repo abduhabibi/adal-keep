@@ -39,7 +39,7 @@ const DEFAULT_SKILLS = { cleaning: true, ironing: true, washing: true, baby_sitt
 
 const DEFAULT_FORM = {
   religion: '', marital_status: 'SINGLE', children_count: '',
-  weight: 'Normal', height: 'Normal',
+  weight: '', height: '',
   mother_name: '', father_name: '',
   education_level: 'Preparatory', speaks_english: false, speaks_arabic: false,
   english_read: false, english_write: false, arabic_read: false, arabic_write: false,
@@ -122,8 +122,8 @@ export default function CVNewPage() {
         religion: religionOption(p.religion),
         marital_status: p.marital_status || 'SINGLE',
         children_count: p.children_count ?? '',
-        weight: p.weight || 'Normal',
-        height: p.height || 'Normal',
+        weight: /^normal$/i.test(p.weight || '') ? '' : (p.weight || ''),
+        height: /^normal$/i.test(p.height || '') ? '' : (p.height || ''),
         mother_name: p.mother_name || '',
         father_name: p.father_name || '',
         education_level: (p.education_level && !/^new$/i.test(String(p.education_level).trim())) ? p.education_level : 'Preparatory',

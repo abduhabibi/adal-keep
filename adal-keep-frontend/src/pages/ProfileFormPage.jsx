@@ -78,8 +78,8 @@ const emptyForm = {
   marital_status: '',
   gender: '',
   children_count: 0,
-  weight: 'Normal',
-  height: 'Normal',
+  weight: '',
+  height: '',
   education_level: '',
   mother_name: '',
   father_name: '',
@@ -201,8 +201,8 @@ export default function ProfileFormPage() {
             marital_status: p.marital_status || '',
             gender: p.gender || '',
             children_count: childrenOrZero(p.children_count),
-            weight: p.weight || 'Normal',
-            height: p.height || 'Normal',
+            weight: /^normal$/i.test(p.weight || '') ? '' : (p.weight || ''),
+            height: /^normal$/i.test(p.height || '') ? '' : (p.height || ''),
             education_level: p.education_level || '',
             mother_name: p.mother_name || '',
             father_name: p.father_name || '',
@@ -331,6 +331,15 @@ export default function ProfileFormPage() {
         await api.put(`/profiles/${id}`, payload)
         toast.success('ፕሮፋይሉ በስኬት ተዘምኗል')
         navigate(`/profiles/${id}`)
+      } else if (passport?.offline && passport.file) {
+        // Read by Adal Admin while the office PC did not answer: the profile and
+        // her passport go together and wait online; the PC makes them when it is back.
+        const fd = new FormData()
+        fd.append('file', passport.file, passport.filename || 'passport.jpg')
+        fd.append('profile', JSON.stringify(payload))
+        const res = await api.post('/new-profile/with-passport', fd, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 120000 })
+        if (Number(res.data?.id) > 0) { toast.success('አዲስ ፕሮፋይል ተፈጥሯል'); navigate(`/profiles/${res.data.id}`) }
+        else { toast.success('Saved — the office PC makes the profile with her passport as soon as it answers', { duration: 7000 }); navigate('/profiles') }
       } else {
         const res = await api.post('/profiles', payload)
         if (passport?.upload) {
@@ -679,11 +688,11 @@ export default function ProfileFormPage() {
             </div>
           <div>
             <label className={smallLabel} htmlFor="weight">Weight</label>
-            <input id="weight" className={smallInput} value={form.weight} onChange={setField('weight')} placeholder="Normal" />
+            <input id="weight" className={smallInput} value={form.weight} onChange={setField('weight')} placeholder="55–65, filled by itself" inputMode="decimal" />
           </div>
           <div>
             <label className={smallLabel} htmlFor="height">Height</label>
-            <input id="height" className={smallInput} value={form.height} onChange={setField('height')} placeholder="Normal" />
+            <input id="height" className={smallInput} value={form.height} onChange={setField('height')} placeholder="155–165, filled by itself" inputMode="decimal" />
           </div>
           <div>
             <label className={smallLabel} htmlFor="education_level">Education</label>

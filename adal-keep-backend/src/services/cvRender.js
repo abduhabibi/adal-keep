@@ -223,8 +223,10 @@ export async function buildTemplateData(db, profile, template, overrides = {}) {
   }
   // Living town is no longer asked: the region (from the passport) stands in.
   if (!merged.living_town) merged.living_town = merged.zone_subcity || merged.region || merged.place_of_birth || ''
-  if (!merged.height || merged.height === '--') {
-    merged.height = 'Normal'
+  // Height and weight: what is written, else her own believable numbers (services/bodySize.js).
+  {
+    const { withBodySize } = await import('./bodySize.js')
+    Object.assign(merged, withBodySize(merged))
   }
 
   // A sentence from the ticked skills, e.g. "She can do cleaning, ironing and cooking."
@@ -250,8 +252,8 @@ export async function buildTemplateData(db, profile, template, overrides = {}) {
     RELIGION:         merged.religion || '',
     MARITAL_STATUS:   merged.marital_status || 'SINGLE',
     CHILDREN_COUNT:   merged.children_count == null || merged.children_count === '' ? 'None' : String(merged.children_count),
-    WEIGHT:           merged.weight || 'Normal',
-    HEIGHT:           merged.height || 'Normal',
+    WEIGHT:           merged.weight,
+    HEIGHT:           merged.height,
     COMPLEXION:       merged.complexion || '',
     LIVING_TOWN:      merged.living_town || '',
     MOTHER_NAME:      merged.mother_name || '',

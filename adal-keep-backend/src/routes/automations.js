@@ -414,6 +414,7 @@ const PLAIN_WAIT = {
   'awaiting-musaned-login': 'Musaned: sign in',
   'awaiting-musaned-captcha': 'Musaned: tick the reCAPTCHA',
   'awaiting-musaned-otp': 'Musaned: type the code',
+  'awaiting-musaned-precheck': 'Musaned: put her passport in the pre-check and press Continue',
   'awaiting-human-save': 'Look it over and press Save',
   'awaiting-human-submit': 'Look it over and press Submit',
 }

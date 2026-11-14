@@ -2589,13 +2589,32 @@ async function musanedRun(page, ctx) {
     // Registered already (in our list, or by another agency): noted, stopped.
     const already = await readAlreadyRegistered(page, 6000)
     if (already) return await stopAlreadyRegistered(page, ctx, already, Math.round((Date.now() - t0) / 1000))
+    // The pre-check could not be done here (no passport picture to upload):
+    // the person does it in the window. Wait for the form quietly — no clicks,
+    // no other pages, so nothing moves under their hand — then fill it.
+    if (!pre?.ok && /passport|ID Number/i.test(pre?.error || '')) {
+      const why = /file/i.test(pre.error) ? 'her passport picture is not in Adal Keep' : pre.error
+      log(ctx, `🖐 pre-check left for a person (${why}) — waiting for the Add Candidate form`, 'warn')
+      await ctx.notify(`🖐 ${ctx.profileName}: Musaned pre-check`, `Adal Keep could not upload the passport (${why}). Put the passport photo in the pre-check window and press Continue — Adal Keep fills the rest.`, 'info')
+      let open = false
+      for (let i = 0; i < 1200 && !open; i++) {
+        if (await readAlreadyRegistered(page, 0)) break
+        open = await addFormOpen(page)
+        if (!open) await sleep(1000)
+      }
+      const seen = await readAlreadyRegistered(page, 1500)
+      if (seen) return await stopAlreadyRegistered(page, ctx, seen, Math.round((Date.now() - t0) / 1000))
+      if (!open) return { ok: true, pauseReason: 'awaiting-musaned-precheck', seconds: Math.round((Date.now() - t0) / 1000) }
+      log(ctx, '✓ the Add Candidate form is open — filling it')
+      await sleep(1500)
+    }
     // The form did not open and Musaned said nothing: is she in our list?
     let formOpen = false
     for (let i = 0; i < 24 && !formOpen; i++) {
       formOpen = await addFormOpen(page)
       if (!formOpen) { if (await readAlreadyRegistered(page, 0)) break; await sleep(500) }
     }
-    if (!formOpen) {
+    if (!formOpen && pre?.ok) {
       const passport = String(ctx.profile?.passport_number || '').trim().toUpperCase()
       log(ctx, 'the Add Candidate form did not open after the passport check', 'warn')
       const seen = await readAlreadyRegistered(page, 1500)

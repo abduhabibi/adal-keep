@@ -73,56 +73,33 @@ export function beep() {
 // File resolution
 // --------------------------------------------------------------------------
 async function resolveFilePaths(db, profileId) {
-  const get = async (fieldName) => {
-    const row = await db('files')
+  // The newest file of that field that is really on disk. Files are kept as a
+  // path under the program, in SafeStorage, or (moved in from another system,
+  // attached by a run) with their full address — storedFilePath knows them all.
+  const { storedFilePath } = await import('./musanedPreflight.js')
+  const pick = async (fieldName, only) => {
+    const q = db('files')
       .join('profile_fields', 'files.profile_field_id', 'profile_fields.id')
       .where('profile_fields.profile_id', profileId)
       .andWhere('profile_fields.name', fieldName)
-      .select('files.path')
-      .orderBy('files.id', 'desc')
-      .first()
-    if (!row) return null
-    const abs = path.join(SAFE_STORAGE_DIR, path.basename(row.path))
-    return fs.existsSync(abs) ? abs : path.join(process.cwd(), row.path)
+    if (only) q.where(only)
+    const rows = await q.select('files.path').orderBy('files.id', 'desc').limit(20)
+    for (const r of rows) { const abs = r.path && storedFilePath(r.path); if (abs) return abs }
+    return null
   }
-
-  const getPassportImage = async () => {
-    const row = await db('files')
-      .join('profile_fields', 'files.profile_field_id', 'profile_fields.id')
-      .where('profile_fields.profile_id', profileId)
-      .andWhere('profile_fields.name', 'Passport')
-      .where(function () {
-        this.where('files.mimetype', 'like', 'image/%')
-          .orWhere('files.path', 'like', '%.jpg')
-          .orWhere('files.path', 'like', '%.jpeg')
-          .orWhere('files.path', 'like', '%.png')
-          .orWhere('files.path', 'like', '%.webp')
-      })
-      .select('files.path')
-      .orderBy('files.id', 'desc')
-      .first()
-    if (!row) return null
-    const abs = path.join(SAFE_STORAGE_DIR, path.basename(row.path))
-    return fs.existsSync(abs) ? abs : path.join(process.cwd(), row.path)
-  }
-
+  const get = (fieldName) => pick(fieldName)
+  const getPassportImage = () => pick('Passport', function () {
+    this.where('files.mimetype', 'like', 'image/%')
+      .orWhere('files.path', 'like', '%.jpg')
+      .orWhere('files.path', 'like', '%.jpeg')
+      .orWhere('files.path', 'like', '%.png')
+      .orWhere('files.path', 'like', '%.webp')
+  })
   // The LMIS passport field takes a PDF. Use the newest passport PDF; fall back to
   // the newest passport file when the profile has no PDF (the job makes one).
-  const getPassportPdf = async () => {
-    const row = await db('files')
-      .join('profile_fields', 'files.profile_field_id', 'profile_fields.id')
-      .where('profile_fields.profile_id', profileId)
-      .andWhere('profile_fields.name', 'Passport')
-      .where(function () {
-        this.where('files.mimetype', 'application/pdf').orWhere('files.path', 'like', '%.pdf')
-      })
-      .select('files.path')
-      .orderBy('files.id', 'desc')
-      .first()
-    if (!row) return null
-    const abs = path.join(SAFE_STORAGE_DIR, path.basename(row.path))
-    return fs.existsSync(abs) ? abs : path.join(process.cwd(), row.path)
-  }
+  const getPassportPdf = () => pick('Passport', function () {
+    this.where('files.mimetype', 'application/pdf').orWhere('files.path', 'like', '%.pdf')
+  })
 
   return {
     photoPath: await get('Photo'),

@@ -11,6 +11,16 @@ import Input from '../components/shared/Input'
 import Spinner from '../components/shared/Spinner'
 import { REGIONS, regionByName, WORK_COUNTRIES, COUNTRIES_APPLY } from '../lib/regions'
 
+const RELIGIONS = ['Muslim', 'Orthodox', 'Protestant']
+// Her religion as one of the choices ("ISLAM", "muslim " → Muslim); another word stays as it is.
+function religionOption(v) {
+  const t = String(v || '').trim()
+  if (/muslim|islam/i.test(t) && !/non/i.test(t)) return 'Muslim'
+  if (/orthodox/i.test(t)) return 'Orthodox'
+  if (/protestant|pente|evangel/i.test(t)) return 'Protestant'
+  return t
+}
+
 const DEFAULT_SKILLS = { cleaning: true, ironing: true, washing: true, baby_sitting: true }
 
 const DEFAULT_FORM = {
@@ -91,7 +101,7 @@ export default function CVNewPage() {
 
       const base = {
         ...DEFAULT_FORM,
-        religion: p.religion || '',
+        religion: religionOption(p.religion),
         marital_status: p.marital_status || 'SINGLE',
         children_count: p.children_count ?? '',
         weight: p.weight || 'Normal',
@@ -118,11 +128,19 @@ export default function CVNewPage() {
 
       // Apply localStorage draft overrides (user's unsaved edits)
       const draftRaw = localStorage.getItem(`cv-draft-${profileId}`)
+      // Only what was changed here wins over her profile; a box changed on her
+      // profile since (religion set, a phone fixed) shows the profile's value.
+      profileBase.current = JSON.parse(JSON.stringify(base))
       if (draftRaw) {
         try {
-          const draft = JSON.parse(draftRaw)
-          Object.assign(base, draft)
-          console.log('[CV] restored draft for', profileId)
+          const saved = JSON.parse(draftRaw)
+          const from = saved && saved.__from
+          const draft = from ? saved.values || {} : saved
+          const same = (a, b) => JSON.stringify(a ?? '') === JSON.stringify(b ?? '')
+          for (const [k, v] of Object.entries(draft)) {
+            if (v === '' || v == null) continue
+            if (from ? (same(from[k], base[k]) && !same(v, from[k])) : (base[k] === '' || base[k] == null)) base[k] = v
+          }
         } catch {}
       }
 
@@ -135,9 +153,10 @@ export default function CVNewPage() {
   }, [step, profileId])
 
   // Persist draft on every change (only after initial load)
+  const profileBase = useRef(null)
   useEffect(() => {
     if (!formReady || !profileId) return
-    try { localStorage.setItem(`cv-draft-${profileId}`, JSON.stringify(form)) } catch {}
+    try { localStorage.setItem(`cv-draft-${profileId}`, JSON.stringify({ __from: profileBase.current || {}, values: form })) } catch {}
   }, [form, formReady, profileId])
 
   // AUTO_GENERATE_EFFECT — when arriving with ?auto=1 and everything is ready, open preview
@@ -475,6 +494,7 @@ export default function CVNewPage() {
             <select className="field w-full" value={form.religion} onChange={e => upd('religion', e.target.value)}>
               <option value="">— Select —</option>
               <option>Muslim</option><option>Orthodox</option><option>Protestant</option>
+              {form.religion && !RELIGIONS.includes(form.religion) && <option>{form.religion}</option>}
             </select>
           </div>
           <div>

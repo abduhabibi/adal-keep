@@ -8,6 +8,16 @@ import { REGIONS, regionByName } from '../lib/regions'
 import { useAuth } from '../context/AuthContext'
 import PassportFirst from '../components/PassportFirst'
 
+// Her saved religion as one of the choices ("ISLAM" → Muslim), so the list shows it
+// and Save is not stopped with "select an item"; another word stays as it is.
+function religionOption(v) {
+  const t = String(v || '').trim()
+  if (/muslim|islam/i.test(t) && !/non/i.test(t)) return 'Muslim'
+  if (/orthodox/i.test(t)) return 'Orthodox'
+  if (/protestant|pente|evangel/i.test(t)) return 'Protestant'
+  return t
+}
+
 const STATUS_OPTIONS_AM = [
   { value: 'pending', label: 'በመጠባበቅ ላይ' },
   { value: 'in_progress', label: 'በሂደት ላይ' },
@@ -173,7 +183,7 @@ export default function ProfileFormPage() {
             status: p.status || 'pending',
             broker_id: p.broker_id ?? '',
             notes: p.notes || '',
-            religion: p.religion || '',
+            religion: religionOption(p.religion),
             marital_status: p.marital_status || '',
             gender: p.gender || '',
             children_count: childrenOrZero(p.children_count),
@@ -401,6 +411,7 @@ export default function ProfileFormPage() {
                 <option value="Muslim">Muslim</option>
                 <option value="Orthodox">Orthodox</option>
                 <option value="Protestant">Protestant</option>
+                {form.religion && !['Muslim', 'Orthodox', 'Protestant'].includes(form.religion) && <option value={form.religion}>{form.religion}</option>}
               </select>
             </div>
             <div>
@@ -522,6 +533,7 @@ export default function ProfileFormPage() {
               <option value="Muslim">Muslim</option>
               <option value="Orthodox">Orthodox</option>
               <option value="Protestant">Protestant</option>
+              {form.religion && !['Muslim', 'Orthodox', 'Protestant'].includes(form.religion) && <option value={form.religion}>{form.religion}</option>}
             </select>
           </div>
           <div>

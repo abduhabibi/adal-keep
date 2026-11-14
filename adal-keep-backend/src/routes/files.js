@@ -322,6 +322,41 @@ router.get('/files/:fileId/thumbnail', async (req, res) => {
    ========================================================================== */
 
 /* MULTI-FILE-ROUTE-MARKER — appends (does not replace) files to a field */
+// "Refine" on a Photo or Full Body Photo: the same girl, cleaned and at 4K
+// (services/photoRefine.js). The original stays; the refined one is the newest file.
+router.post('/files/:fileId/refine', async (req, res) => {
+  try {
+    const db = req.app.locals.db
+    const file = await db('files').where('id', req.params.fileId).first()
+    if (!file) return res.status(404).json({ error: 'File not found' })
+    const field = await db('profile_fields').where('id', file.profile_field_id).first()
+    const { refinePhoto, REFINABLE } = await import('../services/photoRefine.js')
+    if (!field || !REFINABLE.includes(field.name)) return res.status(400).json({ error: 'Only a Photo or Full Body Photo can be refined' })
+    if (!String(file.mimetype || '').startsWith('image/')) return res.status(400).json({ error: 'That file is not a picture' })
+    const { resolveStoredPath } = await import('../services/cvRender.js')
+    const src = resolveStoredPath(file.path)
+    if (!src || !fs.existsSync(src)) return res.status(404).json({ error: 'The picture is not on this PC' })
+    const r = await refinePhoto(fs.readFileSync(src), field.name)
+    const dir = path.join(process.cwd(), 'data', 'SafeStorage')
+    fs.mkdirSync(dir, { recursive: true })
+    const stem = String(file.original_name || field.name).replace(/\.[^.]+$/, '').replace(/[^\w.\-]+/g, '_').slice(0, 60)
+    const stored = `${Date.now()}_${stem}-refined.jpg`
+    const abs = path.join(dir, stored)
+    fs.writeFileSync(abs, r.buf)
+    try { await generateThumbnail(abs) } catch {}
+    const now = new Date().toISOString()
+    const [newId] = await db('files').insert({
+      profile_field_id: field.id, original_name: `${stem}-refined.jpg`, path: stored,
+      mimetype: 'image/jpeg', size: r.buf.length, created_at: now, updated_at: now,
+    })
+    console.log(`[refine] ${field.name} of profile ${field.profile_id}: ${r.by}, ${r.width}x${r.height}${r.note ? ' — Gemini not used: ' + r.note.slice(0, 200) : ''}`)
+    res.json({ ok: true, file: await db('files').where('id', newId).first(), by: r.by, width: r.width, height: r.height, ai: r.by !== 'local' })
+  } catch (e) {
+    console.error('[refine]', e)
+    res.status(500).json({ error: 'Refine failed: ' + e.message })
+  }
+})
+
 router.post('/profiles/:id/fields/:fieldId/files', upload.array('files', 20), async (req, res) => {
   try {
     const { id: profileId, fieldId } = req.params

@@ -102,5 +102,6 @@ export async function saveBrokers(db, people, found, siteName) {
     const n = await db('profiles').where('id', p.profileId).where(q => q.whereNull('broker_id').orWhere('broker_id', 0)).update({ broker_id: b })
     out.assigned += n
   }
+  Object.defineProperty(out, "mine", { value: mine })   // the site's broker id → Adal Keep broker (not part of the counts)
   return out
 }

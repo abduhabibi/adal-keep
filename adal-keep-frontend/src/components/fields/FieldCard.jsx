@@ -65,6 +65,7 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
   const cvBlockers = cvReadiness?.cv_blockers || []
   const { capturedFiles } = useFileCapture()
   const [uploading, setUploading] = useState(false)
+  const [refining, setRefining] = useState(false)
   const [pendingFile, setPendingFile] = useState(null)
   // Full Body Photo: cropped to the CV's 1:3 shape before it is uploaded.
   const [cropFile, setCropFile] = useState(null)
@@ -228,6 +229,10 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
   }
 
   const isImage = (f) => f?.mimetype?.startsWith('image/')
+  // Photo and Full Body Photo: the newest picture is shown (it is the one the CV takes; a refined one is newest).
+  const mainFile = (field.name === 'Photo' || field.name === 'Full Body Photo') && field.files?.length
+    ? field.files.filter(isImage).reduce((a, b) => (b.id > a.id ? b : a), field.files.find(isImage) || field.files[0])
+    : field.files?.[0]
 
   return (
     <div
@@ -259,6 +264,26 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
               className="text-[10px] px-2 py-0.5 rounded-md bg-slate-800 text-white hover:bg-slate-700 dark:bg-slate-600 dark:hover:bg-slate-500 font-semibold"
               title="Print the newest slip"
             >🖨 Print</button>
+          )}
+          {(field.name === 'Photo' || field.name === 'Full Body Photo') && isImage(mainFile) && (
+            <button
+              type="button"
+              disabled={refining}
+              onClick={async () => {
+                setRefining(true)
+                const t = toast.loading('Refining the picture… (up to a minute)')
+                try {
+                  const { data } = await api.post(`/files/${mainFile.id}/refine`, {}, { timeout: 300000 })
+                  const res = await api.get(`/profiles/${profileId}/fields`)
+                  const updated = res.data.find(f => f.id === field.id)
+                  onFileUpdate(field.id, updated ? updated.files : [])
+                  toast.success(`Refined to ${data.width}×${data.height}${data.ai ? ' with AI' : ''} — the original is kept below`, { id: t, duration: 6000 })
+                } catch (e) { toast.error(e.response?.data?.error || 'Refine failed', { id: t }) }
+                setRefining(false)
+              }}
+              className="text-[10px] px-2 py-0.5 rounded-md bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 font-semibold"
+              title="Clean the picture, make it a little more beautiful and 4K — the same girl; the original stays"
+            >{refining ? '⏳' : '✨'}<span className="hidden sm:inline"> {refining ? 'Refining…' : 'Refine'}</span></button>
           )}
           <button
             type="button"
@@ -346,12 +371,12 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
                 className="h-full w-full object-cover rounded"
                 muted
               />
-            ) : isImage(field.files[0]) ? (
+            ) : isImage(mainFile) ? (
               <img
-                src={`/api/files/${field.files[0].id}/thumbnail`}
+                src={`/api/files/${mainFile.id}/thumbnail`}
                 alt=""
                 className="h-full w-full object-cover cursor-zoom-in transition-transform hover:scale-[1.02]"
-                onClick={() => setPreviewFile(field.files[0])}
+                onClick={() => setPreviewFile(mainFile)}
               />
             ) : (
               <div className="flex h-full w-full flex-col items-center justify-center text-slate-400 dark:text-slate-500 gap-2">

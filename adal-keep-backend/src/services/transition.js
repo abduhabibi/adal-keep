@@ -583,12 +583,13 @@ async function run(db, id, source, url, deps) {
     if (brokersFound.size && !deps.limit) {
       set(id, { step: `Making the brokers: ${brokersFound.size}` })
       const b = await saveBrokers(db, [], brokersFound, source.name)
-      set(id, { brokers: b.created + b.filled })
+      for (const [k, v] of b.mine || []) brokerOf.set(String(k), v)
+      set(id, { brokers: (b.mine?.size) || (b.created + b.filled) })
       console.log(`[transition ${id}] brokers first: ${b.created} new, ${b.filled} filled`)
     }
     for (const r of await db('brokers').where('notes', 'like', `${source.name} broker %`).select('id', 'notes').catch(() => [])) {
       const m = String(r.notes).split('\n')[0].match(/ broker (.+)$/)
-      if (m) brokerOf.set(m[1], r.id)
+      if (m && !brokerOf.has(m[1])) brokerOf.set(m[1], r.id)
     }
 
     // Lists are often short: her own record says more, when the site has one.
@@ -659,7 +660,7 @@ async function run(db, id, source, url, deps) {
         // A trial move: only the brokers of the girls it saved.
         const found = deps.limit ? new Map([...brokersFound].map(([k, v]) => [k, { ...v, __fromBrokerList: false }])) : brokersFound
         const b = await saveBrokers(db, saved, found, source.name)
-        set(id, { brokers: b.created + b.filled })
+        set(id, { brokers: Math.max(stateOf(id).brokers || 0, b.mine?.size || 0, b.created + b.filled) })
         console.log(`[transition ${id}] brokers: ${b.created} new, ${b.filled} filled, ${b.assigned} people given theirs`)
       }
       // The agency's CV header (not its template): cut out and kept for "Add CV template".

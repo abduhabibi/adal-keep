@@ -281,6 +281,7 @@ export async function copyMusaned({ db, token, folder, set, state, check, readPe
   const pages = pool ? pool() : poolByPages(cred.page, { check, wait, newest, say: (step) => set({ step }) })
   let seenRows = 0, total = 0, copied = 0, statuses = 0, stopped = ''
   const chosen = []   // profile ids to fetch the contract of
+  const pictures = [] // { profileId, key, passport }: their pictures come once everyone's text is in
   set({ status: 'copying', step: 'Opening the HR pool' })
   try {
     for await (const list of pages) {
@@ -311,25 +312,31 @@ export async function copyMusaned({ db, token, folder, set, state, check, readPe
           const to = newerStage(had.musaned_stage, stage)
           if (to) { await db('profiles').where('id', had.id).update({ musaned_stage: to, updated_at: new Date().toISOString() }).catch(() => {}); statuses++ }
         }
-        // Her photo and passport, each where it belongs (only when her profile has none).
-        for (const [kind, field] of [['PASSPORT', 'Passport'], ['PERSONAL', 'Photo']]) {
-          check()
-          if (await hasFile(profileId, field)) continue
-          const f = await get(`/api/hrpool/${key}/photo/${kind}`, { binary: true })
-          if (!f?.buf?.length) continue
-          const ext = TYPES.find(([re]) => re.test(f.type))?.[1] || '.jpg'
-          const fname = `${passport}-Musaned-${field}${ext}`
-          const file = path.join(tmp, `${Date.now()}-${fname}`)
-          fs.writeFileSync(file, f.buf)
-          try { if (await saveOnProfile(db, profileId, field, file, fname)) set({ files: (state().files || 0) + 1 }) }
-          finally { fs.rmSync(file, { force: true }) }
-        }
+        pictures.push({ profileId, key, passport })
         // Chosen by an employer: her contract comes after the list.
         if (stage && !POOL_ONLY.test(stage) && !(await hasFile(profileId, 'Contract'))) chosen.push(profileId)
         copied++
         await wait(700)
       }
       if (seenRows >= newest || copied >= limit) break
+    }
+    // Everyone's text is in: then everyone's personal photo, then everyone's
+    // passport (only when her profile has none), still at a person's pace.
+    for (const [kind, field] of [['PERSONAL', 'Photo'], ['PASSPORT', 'Passport']]) {
+      for (const [i, g] of pictures.entries()) {
+        check()
+        set({ step: `${field === 'Photo' ? 'Personal photos' : 'Passports'}: ${i + 1} of ${pictures.length}` })
+        if (await hasFile(g.profileId, field)) continue
+        const f = await get(`/api/hrpool/${g.key}/photo/${kind}`, { binary: true })
+        if (!f?.buf?.length) continue
+        const ext = TYPES.find(([re]) => re.test(f.type))?.[1] || '.jpg'
+        const fname = `${g.passport}-Musaned-${field}${ext}`
+        const file = path.join(tmp, `${Date.now()}-${fname}`)
+        fs.writeFileSync(file, f.buf)
+        try { if (await saveOnProfile(db, g.profileId, field, file, fname)) set({ files: (state().files || 0) + 1 }) }
+        finally { fs.rmSync(file, { force: true }) }
+        await wait(500)
+      }
     }
   } finally { fs.rmSync(tmp, { recursive: true, force: true }) }
 

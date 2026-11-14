@@ -120,40 +120,71 @@ export async function copyEnjazPlus({ db, token, folder, set, state, check, read
 
   const records = path.join(folder, 'records')
   fs.mkdirSync(records, { recursive: true })
+  // What each one has and what is done (her text, each file): a move that
+  // stopped goes on from there and fetches only what is left.
   const progressFile = path.join(path.dirname(folder), 'enjazplus-progress.json')
-  let done = new Set()
-  try { done = new Set(JSON.parse(fs.readFileSync(progressFile, 'utf8'))) } catch {}
-  const todo = all.filter(e => !done.has(String(e._id))).slice(0, limit)
+  let ledger = {}
+  try { const old = JSON.parse(fs.readFileSync(progressFile, 'utf8')); ledger = Array.isArray(old) ? Object.fromEntries(old.map(k => [k, { text: true, all: true, done: [] }])) : old } catch {}
+  const note = (e) => (ledger[String(e._id)] ||= { text: false, all: false, done: [] })
+  let saveTimer = null
+  const keep = (now) => { clearTimeout(saveTimer); const w = () => { try { fs.writeFileSync(progressFile, JSON.stringify(ledger)) } catch {} }; if (now) w(); else saveTimer = setTimeout(w, 2000) }
+  // The newest first (as EnjazPlus dates them), then as its list gave them.
+  const when = (e) => Date.parse(e.createdAt || e.created_at || e.updatedAt || '') || 0
+  const order = all.map((e, i) => ({ e, i })).sort((x, y) => (when(y.e) - when(x.e)) || (x.i - y.i)).map(x => x.e)
+    .filter(e => !note(e).all).slice(0, limit)
   set({ people: all.length })
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'adal-enjazplus-'))
-  let finished = all.length - todo.length
+  const profileOf = new Map()
   try {
-    for (const e of todo) {
+    // 1. Everyone's text: her profile, at once.
+    let n = 0
+    for (const e of order) {
       check()
       fs.writeFileSync(path.join(records, `${e._id}.json`), JSON.stringify(e, null, 1))
       const person = personOf(e, readPerson)
-      if (person) {
-        const profileId = await save(person)
-        for (const [key, field] of Object.entries(FILES)) {
-          const url = e[key]
-          if (typeof url !== 'string' || !/^https?:|^\//.test(url)) continue
-          check()
-          const abs = url.startsWith('/') ? SITE + url : url
-          const r = await download(abs, { headers: new URL(abs).host === new URL(SITE).host && cred?.cookie ? { Cookie: cred.cookie } : {} }).catch(() => null)
-          if (!r?.ok) { set({ failed: (state().failed || 0) + 1 }); continue }
-          const type = r.headers.get('content-type') || ''
-          const ext = TYPES.find(([re]) => re.test(type))?.[1] || TYPES.find(([re]) => re.test(abs))?.[1] || '.jpg'
-          const name = `${person.passport_number}-EnjazPlus-${field.replace(/\s/g, '-')}${ext}`
-          const file = path.join(tmp, `${Date.now()}-${name}`)
-          fs.writeFileSync(file, Buffer.from(await r.arrayBuffer()))
-          try { if (await saveOnProfile(db, profileId, field, file, name)) set({ files: (state().files || 0) + 1 }) }
-          finally { fs.rmSync(file, { force: true }) }
-        }
-      }
-      done.add(String(e._id))
-      fs.writeFileSync(progressFile, JSON.stringify([...done]))
-      set({ step: `Copying everyone: ${++finished} of ${all.length}` })
+      if (!person) { note(e).all = true; continue }
+      profileOf.set(String(e._id), { id: await save(person), person })
+      note(e).text = true
+      set({ step: `Making the profiles: ${++n} of ${order.length}` })
     }
-  } finally { fs.rmSync(tmp, { recursive: true, force: true }) }
+    keep(true)
+    // 2. Her files: everyone's face and full body photos, then everyone's
+    // passport, then the rest — 4 at a time, each tried 3 times on a slow line.
+    // The visa is made in Adal Keep: not copied.
+    const TIERS = [['facePhoto', 'standPhoto'], ['passportScan'], Object.keys(FILES).filter(k => !['facePhoto', 'standPhoto', 'passportScan', 'workingVisaScan'].includes(k))]
+    const fetchOne = async (e, key) => {
+      const url = e[key], field = FILES[key], who = profileOf.get(String(e._id))
+      if (!who || typeof url !== 'string' || !/^https?:|^\//.test(url) || note(e).done.includes(key)) return
+      const abs = url.startsWith('/') ? SITE + url : url
+      let r = null
+      for (let i = 0; i < 3; i++) {
+        check()
+        r = await download(abs, { headers: new URL(abs).host === new URL(SITE).host && cred?.cookie ? { Cookie: cred.cookie } : {}, signal: AbortSignal.timeout(120000) }).catch(() => null)
+        if (r?.ok || (r && r.status !== 429 && r.status < 500)) break
+        if (i < 2) await wait(i ? 6000 : 2000)
+      }
+      if (!r?.ok) { set({ failed: (state().failed || 0) + 1 }); return }
+      const type = r.headers.get('content-type') || ''
+      const ext = TYPES.find(([re]) => re.test(type))?.[1] || TYPES.find(([re]) => re.test(abs))?.[1] || '.jpg'
+      const name = `${who.person.passport_number}-EnjazPlus-${field.replace(/\s/g, '-')}${ext}`
+      const file = path.join(tmp, `${Date.now()}-${Math.random().toString(36).slice(2, 7)}-${name}`)
+      fs.writeFileSync(file, Buffer.from(await r.arrayBuffer()))
+      try { if (await saveOnProfile(db, who.id, field, file, name)) set({ files: (state().files || 0) + 1 }) }
+      finally { fs.rmSync(file, { force: true }) }
+      note(e).done.push(key); keep()
+    }
+    for (const [t, keys] of TIERS.entries()) {
+      let i = 0, k = 0
+      const next = () => order[i++]
+      await Promise.all(Array.from({ length: 4 }, async () => {
+        for (let e; (e = next());) {
+          for (const key of keys) await fetchOne(e, key)
+          set({ step: `Files (${['face and full body photos', 'passports', 'other documents'][t]}): ${++k} of ${order.length}` })
+        }
+      }))
+    }
+    for (const e of order) if (note(e).text) note(e).all = true
+  } finally { keep(true); fs.rmSync(tmp, { recursive: true, force: true }) }
+  const done = new Set(Object.entries(ledger).filter(([, v]) => v.all).map(([k]) => k))
   if (done.size >= all.length) fs.rmSync(progressFile, { force: true })
 }

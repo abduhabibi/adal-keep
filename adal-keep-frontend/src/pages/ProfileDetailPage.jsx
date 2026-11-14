@@ -132,11 +132,11 @@ export default function ProfileDetailPage() {
         title={amharicName || profile.full_name}
         subtitle={amharicName ? profile.full_name : (profile.phone_number || 'No phone on file')}
         // The medical deadline: between her name and the buttons.
-        middle={<div className="flex justify-center"><MedicalBattery profile={profile} onSaved={(v) => setProfile(p => ({ ...p, ...v }))} /></div>}
+        middle={<div className="flex min-w-0 justify-center"><MedicalBattery profile={profile} onSaved={(v) => setProfile(p => ({ ...p, ...v }))} /></div>}
         action={
           <div className="flex flex-wrap items-center gap-2">
             <PrioritizeButton profileId={id} />
-            <Button variant="secondary" onClick={() => navigate('/profiles')} title="Back" aria-label="Back"><span aria-hidden="true">←</span><span className="hidden sm:inline"> Back</span></Button>
+            <Button variant="secondary" onClick={() => navigate('/profiles')} title="Back" aria-label="Back"><span aria-hidden="true">←</span><span className="hidden 2xl:inline"> Back</span></Button>
             <Button
               className="bg-purple-600 hover:bg-purple-700 text-white"
               data-tour="cv-create"
@@ -155,7 +155,7 @@ export default function ProfileDetailPage() {
               onClick={deleteProfile}
               title="Delete" aria-label="Delete"
             >
-              🗑️<span className="hidden sm:inline"> Delete</span>
+              🗑️<span className="hidden 2xl:inline"> Delete</span>
             </Button>
           </div>
         }

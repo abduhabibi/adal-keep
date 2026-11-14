@@ -24,6 +24,26 @@ export const REGIONS = [
   { name: 'South West Ethiopia', label: 'Zone', areas: [
     'Bench Sheko','Dawro','Keffa','Konta','Sheka','West Omo',
   ]},
+  { name: 'Oromia', label: 'Zone', areas: [
+    'Arsi','West Arsi','Bale','East Bale','Borana','East Borana','Guji','West Guji','East Hararghe','West Hararghe',
+    'Horo Guduru Wollega','East Wollega','West Wollega','Kelam Wollega','Illubabor','Buno Bedele','Jimma',
+    'East Shewa','North Shewa','West Shewa','South West Shewa','Finfinne Special',
+  ]},
+  { name: 'Central Ethiopia', label: 'Zone', areas: [
+    'Gurage','East Gurage','Silte','Hadiya','Kembata','Halaba','Yem','Tembaro',
+  ]},
+  { name: 'Sidama', label: 'Zone', areas: [
+    'Sidama','Hawassa',
+  ]},
+  { name: 'Somali', label: 'Zone', areas: [
+    'Fafan','Sitti','Jarar','Korahe','Shabelle','Liben','Afder','Dawa','Nogob','Erer','Dollo',
+  ]},
+  { name: 'Harari', label: 'Zone', areas: [
+    'Harar',
+  ]},
+  { name: 'Gambela', label: 'Zone', areas: [
+    'Anuak','Nuer','Majang','Itang',
+  ]},
   { name: 'Tigray', label: 'Zone', areas: [
     'Central Tigray','Eastern Tigray','Mekelle','North Western Tigray',
     'Southern Tigray','Western Tigray',

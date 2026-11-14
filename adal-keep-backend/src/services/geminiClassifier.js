@@ -251,4 +251,32 @@ export async function askGemini(system, question) {
   return text.trim()
 }
 
+/**
+ * A passport whose bottom lines were already read (number, name, dates, sex):
+ * only what those lines never carry — place of birth, its region, date of issue.
+ * One small question to the quick model with a shrunken picture: about a second.
+ */
+export const ETHIOPIAN_REGIONS = ['Addis Ababa', 'Afar', 'Amhara', 'Benishangul-Gumuz', 'Central Ethiopia', 'Dire Dawa', 'Gambela', 'Harari', 'Oromia', 'Sidama', 'Somali', 'South Ethiopia', 'South West Ethiopia', 'Tigray']
+const PLACE_PROMPT = `You read one field area of an Ethiopian passport data page.
+Return ONLY this JSON: {"place_of_birth":"","region":"","date_of_issue":""}
+- place_of_birth: exactly as printed under "Place of Birth" (Latin capitals), or "" if not visible.
+- region: the Ethiopian region that place is in, EXACTLY one of: ${ETHIOPIAN_REGIONS.join(' | ')}.
+  If the place itself is a region or a city that is one (e.g. ADDIS ABABA, OROMIA), use it. "" only if you truly cannot tell.
+- date_of_issue: the "Date of Issue" as YYYY-MM-DD (printed like 09 APR 24), or "".`
+
+export async function passportPlaceWithGemini(filePath, models = [process.env.GEMINI_QUICK_MODEL || 'gemini-3.5-flash-lite', ...MODELS]) {
+  const { default: sharp } = await import('sharp')
+  // Small enough to go fast on a slow line, big enough for the printed words.
+  const buf = await sharp(filePath).rotate().resize({ width: 1400, height: 1400, fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 82 }).toBuffer()
+  const t0 = Date.now()
+  const { text, model } = await generate([{ inline_data: { mime_type: 'image/jpeg', data: buf.toString('base64') } }, { text: 'Return the JSON object only.' }],
+    [...new Set(models)].slice(0, 2), { system: PLACE_PROMPT })
+  const j = tryParse(text) || {}
+  const place = String(j.place_of_birth || '').replace(/[^A-Za-z .'-]/g, '').replace(/\s+/g, ' ').trim().toUpperCase()
+  const region = ETHIOPIAN_REGIONS.find(r => r.toLowerCase() === String(j.region || '').trim().toLowerCase().replace(/\s*region$/, '')) || ''
+  const issued = /^\d{4}-\d{2}-\d{2}$/.test(String(j.date_of_issue || '')) ? j.date_of_issue : ''
+  console.log(`[classify] place of birth from ${model} in ${Date.now() - t0}ms: ${place ? 'found' : 'none'}${region ? ', region found' : ''}`)
+  return { place_of_birth: place, region, date_of_issue: issued }
+}
+
 export default { classifyWithGemini, isGeminiConfigured, askGemini }

@@ -39,8 +39,8 @@ export default function MedicalBattery({ profile, onSaved }) {
   if (!until) {
     return (
       <button type="button" onClick={() => setEditing(true)} title="Medical deadline: run Check Wafid result, or click to set it"
-        className="inline-flex items-center gap-1.5 whitespace-nowrap text-xs text-slate-400 hover:text-slate-600">
-        <BatteryShape pct={0} color="bg-slate-300" /> Medical
+        className="mx-auto flex w-full min-w-0 max-w-md items-center gap-1.5 whitespace-nowrap text-xs text-slate-400 hover:text-slate-600">
+        <BatteryShape pct={0} color="bg-slate-300" /> <span className="min-w-0 truncate">Medical</span>
       </button>
     )
   }
@@ -55,22 +55,22 @@ export default function MedicalBattery({ profile, onSaved }) {
 
   return (
     <button type="button" onClick={() => setEditing(true)} title={`${from ? `Medical examination ${nice(from)} · ` : ''}deadline ${nice(until)} · click to change`}
-      className={`inline-flex flex-nowrap items-center gap-x-2 whitespace-nowrap text-left text-xs font-semibold ${left <= 7 ? 'text-red-600 dark:text-red-400' : left <= 14 ? 'text-amber-700 dark:text-amber-300' : 'text-slate-600 dark:text-slate-300'}`}>
+      className={`mx-auto flex w-full min-w-0 max-w-xl flex-nowrap items-center gap-x-2 whitespace-nowrap text-left text-xs font-semibold ${left <= 7 ? 'text-red-600 dark:text-red-400' : left <= 14 ? 'text-amber-700 dark:text-amber-300' : 'text-slate-600 dark:text-slate-300'}`}>
       <BatteryShape pct={pct} color={color} blink={left <= 3} />
-      <span className="whitespace-nowrap">{text}</span>
-      <span className="hidden whitespace-nowrap font-normal text-slate-400 xl:inline">· deadline {nice(until)}{from ? ` · exam ${nice(from)}` : ''}</span>
+      <span className="min-w-0 shrink truncate">{text}</span>
+      <span className="hidden min-w-0 shrink-[2] truncate font-normal text-slate-400 2xl:inline">· deadline {nice(until)}{from ? ` · exam ${nice(from)}` : ''}</span>
     </button>
   )
 }
 
 function BatteryShape({ pct, color, blink = false }) {
   return (
-    <span className="inline-flex items-center">
-      <span className="relative w-40 sm:w-56 h-7 rounded-lg border-2 border-slate-400 dark:border-slate-500 p-[2px] bg-white dark:bg-slate-900">
+    <span className="flex min-w-[6rem] max-w-[14rem] flex-1 items-center">
+      <span className="relative h-7 w-full rounded-lg border-2 border-slate-400 dark:border-slate-500 p-[2px] bg-white dark:bg-slate-900">
         <span className={`block h-full rounded-sm transition-all duration-700 ${color} ${blink ? 'animate-pulse' : ''}`} style={{ width: `${Math.max(pct, pct > 0 ? 6 : 0)}%` }} />
         <span className="absolute inset-0 flex items-center justify-center text-[11px] font-bold text-slate-700 dark:text-slate-200 mix-blend-normal">{pct}%</span>
       </span>
-      <span className="w-1.5 h-3.5 rounded-r-sm bg-slate-400 dark:bg-slate-500" />
+      <span className="w-1.5 h-3.5 shrink-0 rounded-r-sm bg-slate-400 dark:bg-slate-500" />
     </span>
   )
 }

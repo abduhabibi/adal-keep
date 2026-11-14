@@ -120,7 +120,9 @@ app.use((req, res, next) => {
   }
   next()
 })
-app.use(express.json({ limit: '15mb' }))   // CV designs preview with their header image
+// strict: false — a body of just null (an older Update button sent one) is taken as nothing, not refused.
+app.use(express.json({ limit: '15mb', strict: false }))   // CV designs preview with their header image
+app.use((req, res, next) => { if (req.body === null || typeof req.body !== 'object') req.body = {}; next() })
 // Any change (from the PC, a phone or Admin): what it touches goes online in
 // about a second and the phones refresh their own copy (services/cloudSync.js).
 app.use('/api', (req, res, next) => {

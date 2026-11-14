@@ -424,6 +424,31 @@ async function analyzeWithJev(originalPath, db, { unsure = () => {} } = {}) {
   }
 }
 
+/**
+ * A passport read from its bottom lines has no place of birth (those lines never
+ * carry it): one small question for just that — place of birth, its region and
+ * the date of issue — at most 8 s, only for a verified passport, never for other files.
+ */
+const PLACE_WAIT_MS = 8000
+async function withPlace(r, originalPath) {
+  const f = r?.fields || {}
+  if (r?.doc_type !== 'Passport' || (f.place_of_birth && f.region && f.date_of_issue) || /\.pdf$/i.test(originalPath)) return r
+  try {
+    const g = await import('./geminiClassifier.js')
+    if (!g.isGeminiConfigured()) return r
+    setStage('reading the place of birth')
+    const got = await Promise.race([g.passportPlaceWithGemini(originalPath), new Promise(res => setTimeout(() => res(null), PLACE_WAIT_MS))])
+    if (!got) return r
+    r.fields = {
+      ...f,
+      ...(!f.place_of_birth && got.place_of_birth ? { place_of_birth: got.place_of_birth } : {}),
+      ...(!f.region && got.region ? { region: got.region } : {}),
+      ...(!f.date_of_issue && !f.passport_issue_date && got.date_of_issue ? { date_of_issue: got.date_of_issue } : {}),
+    }
+  } catch (e) { console.warn('[classify] place of birth not read:', e.message) }
+  return r
+}
+
 export async function analyzeWithMineru(originalPath, { db = null } = {}) {
   const filename = path.basename(originalPath)
 
@@ -433,7 +458,7 @@ export async function analyzeWithMineru(originalPath, { db = null } = {}) {
   const tq = Date.now()
   setStage('reading the passport lines on this PC')
   const quick = await quickMrz(originalPath, { tries: 1 }).catch(() => null)
-  if (quick) { console.log(`[classify] MRZ (OCR-B) ${Date.now() - tq}ms: Passport, every check digit verified`); return quick }
+  if (quick) { console.log(`[classify] MRZ (OCR-B) ${Date.now() - tq}ms: Passport, every check digit verified`); return withPlace(quick, originalPath) }
 
   // This PC starts reading at once (free). Gemini (paid) waits until JEV is
   // unsure, down or slower than JEV_HEADSTART_MS; when JEV settles the file,
@@ -456,7 +481,7 @@ export async function analyzeWithMineru(originalPath, { db = null } = {}) {
     clearTimeout(timer)
     gate.cancelled = true
     gate.go(false)
-    return first.jev || first.quick || first.usual
+    return withPlace(first.jev || first.quick || first.usual, originalPath)
   }
   const jev = await jevP
   const usual = await usualP

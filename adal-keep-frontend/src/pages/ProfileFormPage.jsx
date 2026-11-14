@@ -283,7 +283,9 @@ export default function ProfileFormPage() {
     const f = r.fields || {}
     const place = String(f.place_of_birth || '').trim()
     const low = place.toLowerCase()
-    const region = low && REGIONS.find(x => x.name.toLowerCase() === low || x.areas.some(a => a.toLowerCase() === low))
+    const named = String(f.region || '').trim().toLowerCase()
+    const region = (low && REGIONS.find(x => x.name.toLowerCase() === low || x.areas.some(a => a.toLowerCase() === low)))
+      || (named && REGIONS.find(x => x.name.toLowerCase() === named))
     const zone = region && region.areas.find(a => a.toLowerCase() === low)
     const sex = String(f.gender || '').toUpperCase().startsWith('F') ? 'F' : String(f.gender || '').toUpperCase().startsWith('M') ? 'M' : ''
     setForm(prev => ({

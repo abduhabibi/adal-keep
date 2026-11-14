@@ -65,6 +65,7 @@ router.post('/new-profile/read', upload.single('file'), async (req, res) => {
         date_of_birth: f.date_of_birth || '',
         gender: f.sex || f.gender || '',
         place_of_birth: f.place_of_birth || '',
+        region: f.region || '',
         passport_issue_date: f.date_of_issue || f.passport_issue_date || '',
         passport_expiry_date: f.date_of_expiry || f.passport_expiry_date || '',
         nationality: f.nationality || '',

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import api from '../services/api'
@@ -42,6 +42,7 @@ export default function ProfileDetailPage() {
   const [fields, setFields] = useState([])
   const [cvs, setCvs] = useState([])
   const [sharingAgency, setSharingAgency] = useState(false) // the "Send to another agency" window
+  const sentAway = useRef(false) // she was sent: closing the window leaves her page (she is in the Trash)
   const [cvReadiness, setCvReadiness] = useState(null)
   const [loading, setLoading] = useState(true)
 
@@ -205,7 +206,7 @@ export default function ProfileDetailPage() {
         {import.meta.env.VITE_DEMO !== '1' && <button type="button" onClick={() => setSharingAgency(true)}
           className="rounded-lg border border-violet-300 bg-violet-50 px-3 py-2 text-sm font-semibold text-violet-800 hover:bg-violet-100 dark:border-violet-700 dark:bg-violet-900/30 dark:text-violet-300">🏢 Send to another agency</button>}
       </div>
-      {sharingAgency && <SendProfilesDialog profileIds={[profile.id]} onClose={() => setSharingAgency(false)} />}
+      {sharingAgency && <SendProfilesDialog profileIds={[profile.id]} onClose={() => { setSharingAgency(false); if (sentAway.current) navigate('/profiles') }} onSent={() => { sentAway.current = true }} />}
 
       <VisaBarcodes profile={profile} />
 

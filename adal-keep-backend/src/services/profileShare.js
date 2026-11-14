@@ -1,19 +1,22 @@
 /**
- * profileShare.js — a profile sent to another agency, with every document
+ * profileShare.js — profiles sent to another agency, with every document
  * (asked on 2026-11-14: "the girl should have any document when changing
- * agency", "send profiles to make the other agency see the profile").
+ * agency"; "the profile should be deleted when I send any profile"; "in
+ * bulk … creating profile, then copy the text stuff first and the documents").
  *
- *   send     her details and every document, packed in one file locked with
- *            a new key, go to the other agency in the private chat between
- *            the two agencies; the key is only in that private message, so
- *            nobody else can open the file.
- *   two ways "transfer": when the other agency adds her, she leaves this
- *            agency (to the Trash, restorable); "show": she stays here, the
- *            other agency sees her and may add her too.
- *   receive  the other agency opens the card in its chat (View) and adds her
- *            to its Adal Keep (Add): a new profile with every document — or,
- *            when it already has her passport number, her documents and
- *            missing details are added to that profile.
+ * Sending (one girl or many, in the background):
+ *   1. every girl's details (text) go at once: one file, locked with a new
+ *      key, in a message in the private chat between the two agencies — the
+ *      key is only in that private message, so nobody else can open it;
+ *   2. then each girl's documents, one locked file per girl;
+ *   3. a girl whose documents are up leaves this agency (to the Trash,
+ *      restorable from the main PC). A girl whose documents could not go
+ *      stays here and is said so.
+ * Receiving ("Add all to my Adal Keep", in the background):
+ *   1. every profile is made with her details first (or, when this PC has her
+ *      passport number already, her missing details are added to that one);
+ *   2. then her documents, field by field (a document already in that field
+ *      is not added twice). Documents still on their way are waited for.
  */
 import fs from 'fs'
 import path from 'path'
@@ -22,9 +25,8 @@ import { fileURLToPath } from 'url'
 import { cloudCall, cloudAgencyId, openDirect, agencies as listAgencies, me as chatMe } from './chatCloud.js'
 
 const BUCKET = 'chat'
-const MAX_BYTES = 45 * 1024 * 1024
-const MARK = /\[adal-profile v1 k=([A-Za-z0-9_-]{43}) m=(transfer|show) s=([a-f0-9]{16})\]/
-const OK_MARK = (s) => `[adal-profile-ok s=${s}]`
+const MAX_GIRL_BYTES = 45 * 1024 * 1024
+export const MARK = /\[adal-profile v2 k=([A-Za-z0-9_-]{43}) s=([a-f0-9]{16})\]/
 const DATA_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'data')
 const SENDS_FILE = path.join(DATA_DIR, 'profile-sends.json')
 const ADDED_FILE = path.join(DATA_DIR, 'profile-received.json')
@@ -34,35 +36,48 @@ const LOCAL_COLUMNS = new Set(['id', 'broker_id', 'assigned_to', 'company_id', '
   'photo_path', 'full_body_photo_path', 'passport_file', 'editing_started_at', 'last_opened_at', 'created_at', 'updated_at',
   'created_by', 'notes', 'medical_alerts_sent', 'appointment_alerts_sent'])
 
-const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')) } catch { return [] } }
+const readJson = (f, d = []) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')) } catch { return d } }
 const writeJson = (f, v) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify(v)) } catch {} }
+const err = (message, status) => Object.assign(new Error(message), { status })
 
-// ------------------------------------------------------------- the file --
-function lock(buf, key) {
+// ------------------------------------------------------------- locking --
+export function lock(buf, key) {
   const iv = crypto.randomBytes(12)
   const c = crypto.createCipheriv('aes-256-gcm', key, iv)
   const body = Buffer.concat([c.update(buf), c.final()])
   return Buffer.concat([iv, c.getAuthTag(), body])
 }
-function unlock(buf, key) {
+export function unlock(buf, key) {
   const d = crypto.createDecipheriv('aes-256-gcm', key, buf.subarray(0, 12))
   d.setAuthTag(buf.subarray(12, 28))
   return Buffer.concat([d.update(buf.subarray(28)), d.final()])
 }
-export function pack(manifest, blobs) {
+/** Documents in one buffer: [4 bytes: list length][list JSON][the files one after another]. */
+export function pack(list, blobs) {
   let offset = 0
-  manifest.files = manifest.files.map((f, i) => { const o = { ...f, offset, length: blobs[i].length }; offset += blobs[i].length; return o })
-  const head = Buffer.from(JSON.stringify(manifest))
+  const files = list.map((f, i) => { const o = { ...f, offset, length: blobs[i].length }; offset += blobs[i].length; return o })
+  const head = Buffer.from(JSON.stringify(files))
   const len = Buffer.alloc(4); len.writeUInt32BE(head.length)
   return Buffer.concat([len, head, ...blobs])
 }
 export function unpack(buf) {
   const n = buf.readUInt32BE(0)
-  const manifest = JSON.parse(buf.subarray(4, 4 + n).toString())
+  const files = JSON.parse(buf.subarray(4, 4 + n).toString())
   const start = 4 + n
-  return { manifest, blob: (f) => buf.subarray(start + f.offset, start + f.offset + f.length) }
+  return { files, blob: (f) => buf.subarray(start + f.offset, start + f.offset + f.length) }
 }
-export const _test = { lock, unlock, MARK, collect, ADDED_FILE }
+
+async function upload(db, object, buf) {
+  for (let i = 1; ; i++) {
+    try { return await cloudCall(db, 'POST', `/storage/v1/object/${BUCKET}/${object}`, buf, { headers: { 'Content-Type': 'application/octet-stream' } }) }
+    catch (e) { if (i >= 3) throw e; await new Promise(r => setTimeout(r, 3000 * i)) }
+  }
+}
+async function download(db, object) {
+  const res = await cloudCall(db, 'GET', `/storage/v1/object/authenticated/${BUCKET}/${object}`, undefined, { raw: true })
+  if (!res.ok) return null
+  return Buffer.from(await res.arrayBuffer())
+}
 
 // ------------------------------------------------------------------ send --
 async function storedPathOf(p) {
@@ -70,146 +85,192 @@ async function storedPathOf(p) {
   return resolveStoredPath(p)
 }
 
-/** Her details and every document, as they are on this PC. */
-async function collect(db, profileId) {
+/** Her details and the list of her documents (their contents are read when they go). */
+export async function collect(db, profileId) {
   const profile = await db('profiles').where('id', profileId).first()
-  if (!profile) throw Object.assign(new Error('That profile is not on this PC.'), { status: 404 })
+  if (!profile) return null
   const details = {}
   for (const [k, v] of Object.entries(profile)) if (!LOCAL_COLUMNS.has(k) && v !== null && v !== '') details[k] = v
   const fields = await db('profile_fields').where('profile_id', profileId).select('id', 'name')
   const byField = new Map(fields.map(f => [f.id, f.name]))
   const rows = fields.length ? await db('files').whereIn('profile_field_id', fields.map(f => f.id)).orderBy('id') : []
-  const files = [], blobs = []
-  let total = 0
+  const docs = []
   for (const r of rows) {
     const abs = await storedPathOf(r.path)
     if (!abs || !fs.existsSync(abs)) continue
-    const buf = fs.readFileSync(abs)
-    total += buf.length
-    if (total > MAX_BYTES) throw Object.assign(new Error(`Her documents are too big to send at once (over ${Math.round(MAX_BYTES / 1048576)} MB).`), { status: 413 })
-    files.push({ field: byField.get(r.profile_field_id) || 'Other', name: r.original_name || path.basename(abs), mimetype: r.mimetype || 'application/octet-stream', created_at: r.created_at })
-    blobs.push(buf)
+    docs.push({ field: byField.get(r.profile_field_id) || 'Other', name: r.original_name || path.basename(abs), mimetype: r.mimetype || 'application/octet-stream', created_at: r.created_at, abs, size: fs.statSync(abs).size })
   }
-  return { profile, details, files, blobs }
+  return { profile, details, docs }
 }
+
+export const sendJobs = new Map()   // send id → progress
 
 /**
- * Send a profile to another agency: mode "transfer" (she moves to them when
- * they add her) or "show" (she stays here; they see her).
+ * Send profiles to another agency. Answers at once; the documents go in the
+ * background (sendJobs / sentList show how far it is).
  */
-export async function sendProfile(db, { profileId, toAgency, mode = 'show', who = null }) {
-  mode = mode === 'transfer' ? 'transfer' : 'show'
+export async function sendProfiles(db, { profileIds, toAgency, who = null }) {
   const meRow = await chatMe(db)
-  const list = await listAgencies(db) || []
-  const to = list.find(a => a.id === toAgency && !a.is_admin)
-  if (!to) throw Object.assign(new Error('That agency is not in Adal Keep (or it is this agency).'), { status: 404 })
-  if (to.id === meRow?.id) throw Object.assign(new Error('That is this agency.'), { status: 400 })
-  const { profile, details, files, blobs } = await collect(db, Number(profileId))
-  const key = crypto.randomBytes(32)
-  const sendId = crypto.randomBytes(8).toString('hex')
-  const manifest = { v: 1, mode, send_id: sendId, from: meRow?.name || 'an agency', sent_by: who || null, sent_at: new Date().toISOString(), profile: details, files }
-  const locked = lock(pack(manifest, blobs), key)
+  const to = ((await listAgencies(db)) || []).find(a => a.id === toAgency && !a.is_admin)
+  if (!to) throw err('That agency is not in Adal Keep.', 404)
+  if (to.id === meRow?.id) throw err('That is this agency.', 400)
   const me = await cloudAgencyId(db)
-  const object = `${me}/${Date.now()}-${crypto.randomBytes(6).toString('hex')}.adalprofile`
-  await cloudCall(db, 'POST', `/storage/v1/object/${BUCKET}/${object}`, locked, { headers: { 'Content-Type': 'application/octet-stream' } })
+  const sendId = crypto.randomBytes(8).toString('hex')
+  const key = crypto.randomBytes(32)
+  const girls = []
+  for (const id of profileIds) {
+    const c = await collect(db, Number(id))
+    if (!c) continue
+    const total = c.docs.reduce((s, d) => s + d.size, 0)
+    girls.push({ id: Number(id), name: c.profile.full_name || 'a profile', c, tooBig: total > MAX_GIRL_BYTES, object: `${me}/${sendId}-${girls.length}.adaldocs` })
+  }
+  if (!girls.length) throw err('Those profiles are not on this PC.', 404)
+  // 1. Every girl's details at once.
+  const details = {
+    v: 2, send_id: sendId, from: meRow?.name || 'an agency', sent_by: who, sent_at: new Date().toISOString(),
+    girls: girls.map((g, i) => ({ i, profile: g.c.details, documents: g.tooBig ? 0 : g.c.docs.length, docs: g.tooBig ? [] : g.c.docs.map(({ abs, ...d }) => d), object: g.tooBig ? null : g.object })),
+  }
+  const detailsObject = `${me}/${sendId}.adalprofile`
+  const locked = lock(Buffer.from(JSON.stringify(details)), key)
+  await upload(db, detailsObject, locked)
   const conv = await openDirect(db, to.id)
-  const name = profile.full_name || 'a profile'
-  const body = `📋 Profile: ${name} — ${files.length} document${files.length === 1 ? '' : 's'}` +
-    (mode === 'transfer' ? ' · transferred to you (she moves to your agency when you add her)' : ' · sent for you to see') +
-    `\n[adal-profile v1 k=${key.toString('base64url')} m=${mode} s=${sendId}]`
+  const names = girls.map(g => g.name)
+  const title = girls.length === 1 ? names[0] : `${girls.length} profiles`
+  const body = `📋 ${girls.length === 1 ? `Profile: ${names[0]}` : `${girls.length} profiles: ${names.slice(0, 6).join(', ')}${names.length > 6 ? ` and ${names.length - 6} more` : ''}`}` +
+    ` — transferred to you with ${girls.reduce((s, g) => s + (g.tooBig ? 0 : g.c.docs.length), 0)} documents.\n[adal-profile v2 k=${key.toString('base64url')} s=${sendId}]`
   const [msg] = await cloudCall(db, 'POST', '/rest/v1/messages', {
-    conversation_id: conv, body, kind: 'file', file_path: object, file_name: `${name}.adalprofile`.slice(0, 200),
+    conversation_id: conv, body: body.slice(0, 3900), kind: 'file', file_path: detailsObject, file_name: `${title}.adalprofile`.slice(0, 200),
     file_mime: 'application/x-adal-profile', file_size: locked.length,
   }, { headers: { Prefer: 'return=representation' } })
-  const sends = readJson(SENDS_FILE)
-  sends.push({ send_id: sendId, profile_id: Number(profileId), name, to: to.id, to_name: to.name, conversation: conv, message: msg?.id || null, mode, at: manifest.sent_at, state: 'sent' })
-  writeJson(SENDS_FILE, sends.slice(-500))
-  return { ok: true, send_id: sendId, conversation: conv, message: msg?.id || null, documents: files.length, to: to.name, mode }
+  const job = { send_id: sendId, to: to.id, to_name: to.name, conversation: conv, message: msg?.id || null, at: details.sent_at,
+    total: girls.length, sent: 0, failed: [], running: true, girls: girls.map(g => ({ id: g.id, name: g.name, state: 'waiting' })) }
+  sendJobs.set(sendId, job)
+  const saveJob = () => { const all = readJson(SENDS_FILE).filter(s => s.send_id !== sendId); all.push(job); writeJson(SENDS_FILE, all.slice(-300)) }
+  saveJob()
+  // 2–3. Each girl's documents, then she leaves this agency.
+  ;(async () => {
+    const { moveToTrash } = await import('./trash.js')
+    const fakeReq = { get: () => encodeURIComponent(`Sent to ${to.name}`.slice(0, 80)), headers: {} }
+    for (const [i, g] of girls.entries()) {
+      const s = job.girls[i]
+      try {
+        if (g.tooBig) throw new Error(`her documents are over ${Math.round(MAX_GIRL_BYTES / 1048576)} MB`)
+        s.state = 'sending'
+        const blobs = g.c.docs.map(d => fs.readFileSync(d.abs))
+        await upload(db, g.object, lock(pack(g.c.docs.map(({ abs, size, ...d }) => d), blobs), key))
+        await moveToTrash(db, 'profile', g.id, fakeReq)
+        s.state = 'sent'; job.sent++
+      } catch (e) {
+        s.state = 'failed'; s.error = String(e.message || e).slice(0, 200); job.failed.push(g.name)
+        console.warn(`[profile-share] ${g.name}: not sent (${s.error}) — she stays here`)
+      }
+      saveJob()
+    }
+    job.running = false; job.done_at = new Date().toISOString(); saveJob()
+    console.log(`[profile-share] sent ${job.sent} of ${job.total} profile(s) to ${to.name}`)
+  })().catch(e => { job.running = false; job.error = e.message; saveJob() })
+  return { ok: true, send_id: sendId, total: girls.length, to: to.name, conversation: conv, too_big: girls.filter(g => g.tooBig).map(g => g.name) }
 }
 
-/** What this PC has sent (newest first). */
-export const sentList = () => readJson(SENDS_FILE).slice().reverse()
+/** What this PC has sent (newest first), with how far each send is. */
+export const sentList = () => readJson(SENDS_FILE).map(s => sendJobs.get(s.send_id) || s).reverse()
 
 // --------------------------------------------------------------- receive --
-const opened = new Map()   // message id → { manifest, blob, sender, mine, conv }
+const opened = new Map()   // message id → { details, key, sender, mine, conv, sendId }
 async function openSent(db, messageId) {
   const id = Number(messageId)
   if (opened.has(id)) return opened.get(id)
   const [m] = await cloudCall(db, 'GET', `/rest/v1/messages?id=eq.${id}&select=id,conversation_id,sender_id,body,file_path,deleted_at`) || []
   const mark = m && !m.deleted_at && String(m.body || '').match(MARK)
-  if (!mark || !m.file_path) throw Object.assign(new Error('That profile is not there any more.'), { status: 404 })
-  const res = await cloudCall(db, 'GET', `/storage/v1/object/authenticated/${BUCKET}/${m.file_path}`, undefined, { raw: true })
-  if (!res.ok) throw Object.assign(new Error('Its file could not be downloaded.'), { status: 404 })
-  const { manifest, blob } = unpack(unlock(Buffer.from(await res.arrayBuffer()), Buffer.from(mark[1], 'base64url')))
+  if (!mark || !m.file_path) throw err('That profile is not there any more.', 404)
+  const raw = await download(db, m.file_path)
+  if (!raw) throw err('Its file could not be downloaded.', 404)
+  const key = Buffer.from(mark[1], 'base64url')
+  const details = JSON.parse(unlock(raw, key).toString())
   const me = await cloudAgencyId(db)
-  const out = { manifest, blob, sender: m.sender_id, mine: m.sender_id === me, conv: m.conversation_id, sendId: mark[3] }
+  const out = { details, key, sender: m.sender_id, mine: m.sender_id === me, conv: m.conversation_id, sendId: mark[2] }
   opened.set(id, out)
-  if (opened.size > 4) opened.delete(opened.keys().next().value)
+  if (opened.size > 8) opened.delete(opened.keys().next().value)
   return out
 }
+const docsCache = new Map()   // object → { files, blob }
+async function girlDocs(db, o, girl) {
+  if (!girl.object) return null
+  if (docsCache.has(girl.object)) return docsCache.get(girl.object)
+  const raw = await download(db, girl.object)
+  if (!raw) return null   // not up yet
+  const d = unpack(unlock(raw, o.key))
+  docsCache.set(girl.object, d)
+  if (docsCache.size > 6) docsCache.delete(docsCache.keys().next().value)
+  return d
+}
+async function readyObjects(db, o) {
+  try {
+    const list = await cloudCall(db, 'POST', `/storage/v1/object/list/${BUCKET}`, { prefix: `${o.sender}/`, search: o.sendId, limit: 1000 })
+    return new Set((list || []).map(x => `${o.sender}/${x.name}`))
+  } catch { return null }
+}
 
-/** The card's View: her details and her documents (no file contents). */
+export const addJobs = new Map()   // send id → progress of "Add all"
+const addedOf = (sendId) => readJson(ADDED_FILE).filter(a => a.send_id === sendId)
+
+/** The card's View: every girl's details, her documents, what was added. */
 export async function viewSent(db, messageId) {
   const o = await openSent(db, messageId)
-  const added = readJson(ADDED_FILE).find(a => a.send_id === o.sendId) || null
-  const p = o.manifest.profile
-  const existing = p.passport_number ? await db('profiles').where('passport_number', p.passport_number).first('id', 'full_name') : null
-  return {
-    mode: o.manifest.mode, from: o.manifest.from, sent_at: o.manifest.sent_at, mine: o.mine,
-    profile: p,
-    documents: o.manifest.files.map((f, n) => ({ n, field: f.field, name: f.name, mimetype: f.mimetype, size: f.length })),
-    added: added ? { profile_id: added.profile_id, at: added.at } : null,
-    already_here: existing ? { profile_id: existing.id, full_name: existing.full_name } : null,
+  const ready = await readyObjects(db, o)
+  const added = addedOf(o.sendId)
+  const girls = []
+  for (const g of o.details.girls) {
+    const p = g.profile || {}
+    const a = added.find(x => x.i === g.i)
+    const here = !a && p.passport_number ? await db('profiles').where('passport_number', p.passport_number).first('id', 'full_name') : null
+    girls.push({
+      i: g.i, profile: p, documents: (g.docs || []).map((f, n) => ({ n, field: f.field, name: f.name, mimetype: f.mimetype })),
+      documents_ready: !g.object ? false : ready ? ready.has(g.object) : null,
+      added: a ? { profile_id: a.profile_id, documents: a.documents, done: !!a.docs_done } : null,
+      already_here: here ? { profile_id: here.id, full_name: here.full_name } : null,
+    })
   }
+  return { from: o.details.from, sent_at: o.details.sent_at, mine: o.mine, girls, job: addJobs.get(o.sendId) || null }
 }
 
-/** One document of a sent profile (to look at it before adding her). */
-export async function sentFile(db, messageId, n) {
+/** One document of a sent girl (to look at it before adding her). */
+export async function sentFile(db, messageId, i, n) {
   const o = await openSent(db, messageId)
-  const f = o.manifest.files[Number(n)]
-  if (!f) throw Object.assign(new Error('No such document.'), { status: 404 })
-  return { type: f.mimetype, name: f.name, body: o.blob(f) }
+  const g = o.details.girls[Number(i)]
+  const d = g && await girlDocs(db, o, g)
+  const f = d?.files[Number(n)]
+  if (!f) throw err(d ? 'No such document.' : 'Her documents are still on their way.', 404)
+  return { type: f.mimetype, name: f.name, body: d.blob(f) }
 }
 
-/**
- * Add her to this agency's Adal Keep with every document. When this PC has
- * her passport number already, that profile gets the documents it does not
- * have and the details it is missing. Tells the sender (a transfer then
- * leaves the sending agency).
- */
-export async function addSent(db, messageId, { who = null } = {}) {
-  return addOpened(db, await openSent(db, messageId), { who, messageId })
-}
-
-/** Adds an opened profile (`o`: what openSent gives) — also used by the tests. */
-export async function addOpened(db, o, { who = null, messageId = null, tell = true } = {}) {
-  if (o.mine) throw Object.assign(new Error('This agency sent her.'), { status: 400 })
-  const done = readJson(ADDED_FILE).find(a => a.send_id === o.sendId)
-  if (done && await db('profiles').where('id', done.profile_id).first('id')) return { ok: true, profile_id: done.profile_id, again: true }
-  const p = o.manifest.profile
+/** Makes (or completes) her profile from her details. Returns { profileId, created }. */
+async function profileFromDetails(db, p, from, sentAt, who) {
   const cols = new Set(Object.keys(await db('profiles').columnInfo()))
   const now = new Date().toISOString()
-  let profileId = null, created = false
   const existing = p.passport_number ? await db('profiles').where('passport_number', p.passport_number).first() : null
   if (existing) {
-    profileId = existing.id
     const upd = {}
     for (const [k, v] of Object.entries(p)) if (cols.has(k) && !LOCAL_COLUMNS.has(k) && (existing[k] === null || existing[k] === '')) upd[k] = v
-    if (Object.keys(upd).length) await db('profiles').where('id', profileId).update({ ...upd, updated_at: now })
-  } else {
-    const row = {}
-    for (const [k, v] of Object.entries(p)) if (cols.has(k) && !LOCAL_COLUMNS.has(k)) row[k] = v
-    row.notes = `From ${o.manifest.from} (${o.manifest.mode === 'transfer' ? 'transferred' : 'sent'} ${String(o.manifest.sent_at).slice(0, 10)})`
-    row.created_by = who || `From ${o.manifest.from}`.slice(0, 120)
-    row.created_at = now; row.updated_at = now
-    ;[profileId] = await db('profiles').insert(row)
-    created = true
+    if (Object.keys(upd).length) await db('profiles').where('id', existing.id).update({ ...upd, updated_at: now })
+    return { profileId: existing.id, created: false }
   }
-  // Every document, in its own field; one already in that field (same content) is not added twice.
+  const row = {}
+  for (const [k, v] of Object.entries(p)) if (cols.has(k) && !LOCAL_COLUMNS.has(k)) row[k] = v
+  row.notes = `From ${from} (transferred ${String(sentAt).slice(0, 10)})`
+  row.created_by = (who || `From ${from}`).slice(0, 120)
+  row.created_at = now; row.updated_at = now
+  const [id] = await db('profiles').insert(row)
+  return { profileId: id, created: true }
+}
+
+/** Her documents into her profile, field by field. Returns how many were new. */
+export async function addDocs(db, profileId, d) {
   const { SAFE_STORAGE_DIR } = await import('./docPipeline.js')
+  const now = new Date().toISOString()
   let added = 0
-  for (const f of o.manifest.files) {
-    const buf = o.blob(f)
+  for (const f of d.files) {
+    const buf = d.blob(f)
     const hash = crypto.createHash('sha256').update(buf).digest('hex')
     let field = await db('profile_fields').where({ profile_id: profileId, name: f.field }).first()
     if (!field) {
@@ -218,55 +279,77 @@ export async function addOpened(db, o, { who = null, messageId = null, tell = tr
       field = { id: fid }
     } else if (await db('files').where({ profile_field_id: field.id, content_hash: hash }).first('id')) continue
     const safe = path.basename(String(f.name || 'document')).replace(/[^\w.\- ]+/g, '_').slice(-120)
-    const stored = `${Date.now()}_${added}_${safe}`
+    const stored = `${Date.now()}_${crypto.randomBytes(3).toString('hex')}_${safe}`
     fs.writeFileSync(path.join(SAFE_STORAGE_DIR, stored), buf)
     await db('files').insert({ profile_field_id: field.id, original_name: f.name, path: stored, mimetype: f.mimetype, size: buf.length, content_hash: hash, created_at: f.created_at || now, updated_at: now })
     added++
   }
+  return added
+}
+
+/**
+ * "Add all to my Adal Keep": every profile with her details first, then her
+ * documents. Answers at once; addJobs shows how far it is.
+ */
+export async function addSent(db, messageId, { who = null } = {}) {
+  const o = await openSent(db, messageId)
+  if (o.mine) throw err('This agency sent them.', 400)
+  if (addJobs.get(o.sendId)?.running) return addJobs.get(o.sendId)
+  const job = { running: true, total: o.details.girls.length, made: 0, documents: 0, girls_done: 0, waiting: 0, error: null }
+  addJobs.set(o.sendId, job)
+  run(db, o, job, who).catch(e => { job.error = e.message }).finally(() => { job.running = false })
+  return job
+}
+
+export async function run(db, o, job, who, { tell = true, waitMs = 30 * 60000 } = {}) {
   const list = readJson(ADDED_FILE)
-  list.push({ send_id: o.sendId, message: Number(messageId), profile_id: profileId, from: o.manifest.from, at: now })
-  writeJson(ADDED_FILE, list.slice(-2000))
-  // Tell the sender (its PC moves a transferred girl to its Trash).
-  if (tell) try {
-    const meRow = await chatMe(db)
-    await cloudCall(db, 'POST', '/rest/v1/messages', {
-      conversation_id: o.conv, kind: 'text',
-      body: `✅ ${meRow?.name || 'We'} added ${p.full_name || 'her'} to its Adal Keep (${added} document${added === 1 ? '' : 's'}).\n${OK_MARK(o.sendId)}`,
-    }, { headers: { Prefer: 'return=minimal' } })
-  } catch (e) { console.warn('[profile-share] could not tell the sender:', e.message) }
-  return { ok: true, profile_id: profileId, created, documents: added }
-}
-
-// ----------------------------------------------- the sender hears back --
-/** A transferred girl the other agency added leaves this agency (to the Trash). */
-export async function checkTransfers(db) {
-  const sends = readJson(SENDS_FILE)
-  const open = sends.filter(s => s.state === 'sent')
-  if (!open.length) return 0
-  let n = 0
-  for (const s of open) {
-    try {
-      const rows = await cloudCall(db, 'GET', `/rest/v1/messages?conversation_id=eq.${s.conversation}&id=gt.${Number(s.message) || 0}` +
-        `&body=like.*${encodeURIComponent(OK_MARK(s.send_id))}*&select=id&limit=1`) || []
-      if (!rows.length) continue
-      s.state = 'added'
-      s.added_at = new Date().toISOString()
-      if (s.mode === 'transfer') {
-        const { moveToTrash } = await import('./trash.js')
-        const still = await db('profiles').where('id', s.profile_id).first('id')
-        if (still) {
-          await moveToTrash(db, 'profile', s.profile_id, { get: () => encodeURIComponent(`Transferred to ${s.to_name}`), headers: {} })
-          s.state = 'transferred'
-          console.log(`[profile-share] profile #${s.profile_id} transferred to ${s.to_name}: moved to the Trash`)
-        }
-      }
-      n++
-    } catch (e) { console.warn('[profile-share] check:', e.message) }
+  const rec = (g) => list.find(a => a.send_id === o.sendId && a.i === g.i)
+  // 1. Every profile with her details.
+  for (const g of o.details.girls) {
+    let r = rec(g)
+    if (r && await db('profiles').where('id', r.profile_id).first('id')) { job.made++; continue }
+    const { profileId, created } = await profileFromDetails(db, g.profile || {}, o.details.from, o.details.sent_at, who)
+    if (r) Object.assign(r, { profile_id: profileId, docs_done: false })
+    else list.push(r = { send_id: o.sendId, i: g.i, profile_id: profileId, created, documents: 0, docs_done: false, from: o.details.from, at: new Date().toISOString() })
+    job.made++
   }
-  if (n) writeJson(SENDS_FILE, sends)
-  return n
+  writeJson(ADDED_FILE, list.slice(-5000))
+  // 2. Her documents (waiting for the ones still on their way).
+  const until = Date.now() + waitMs
+  let left = o.details.girls.filter(g => g.object && !rec(g).docs_done)
+  for (const g of o.details.girls) if (!g.object) rec(g).docs_done = true   // sent without documents (too big)
+  job.girls_done = o.details.girls.filter(g => rec(g).docs_done).length
+  while (left.length) {
+    const next = []
+    for (const g of left) {
+      const d = await girlDocs(db, o, g).catch(() => null)
+      if (!d) { next.push(g); continue }
+      const r = rec(g)
+      const n = await addDocs(db, r.profile_id, d)
+      r.documents += n; r.docs_done = true; job.documents += n; job.girls_done++
+      writeJson(ADDED_FILE, list.slice(-5000))
+    }
+    job.waiting = next.length
+    left = next
+    if (!left.length || Date.now() > until) break
+    await new Promise(r => setTimeout(r, 15000))
+  }
+  writeJson(ADDED_FILE, list.slice(-5000))
+  if (tell) {
+    try {
+      const meRow = await chatMe(db)
+      await cloudCall(db, 'POST', '/rest/v1/messages', {
+        conversation_id: o.conv, kind: 'text',
+        body: `✅ ${meRow?.name || 'We'} added ${job.made} profile${job.made === 1 ? '' : 's'} with ${job.documents} document${job.documents === 1 ? '' : 's'} to its Adal Keep.` + (left.length ? ` ${left.length} girl's documents had not come yet.` : ''),
+      }, { headers: { Prefer: 'return=minimal' } })
+    } catch (e) { console.warn('[profile-share] could not tell the sender:', e.message) }
+  }
+  return job
 }
 
-export function startTransferChecks(db) {
-  setInterval(() => checkTransfers(db).catch(() => {}), 60000).unref?.()
+/** How far "Add all" is for this message. */
+export async function addStatus(db, messageId) {
+  const o = await openSent(db, messageId)
+  return addJobs.get(o.sendId) || null
 }
+export const _test = { docsCache, ADDED_FILE }

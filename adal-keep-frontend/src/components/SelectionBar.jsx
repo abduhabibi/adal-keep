@@ -201,8 +201,8 @@ export default function SelectionBar({ picked, onRemove, onClear, onAllShown, on
             onClick={() => setMessaging(m => !m)}>💬 WhatsApp <span className="ml-auto hidden text-[10px] font-normal opacity-80 lg:inline">send CVs</span></button>
           {messaging && <WhatsAppSendPicked picked={picked} onClose={() => setMessaging(false)} />}
           {import.meta.env.VITE_DEMO !== '1' && <button type="button" className={`${btn} bg-violet-50 text-violet-800 hover:bg-violet-100 dark:bg-violet-900/30 dark:text-violet-300`} disabled={!!busy}
-            onClick={() => setSharing(true)}>🏢 Another agency <span className="ml-auto hidden text-[10px] font-normal opacity-80 lg:inline">send or transfer</span></button>}
-          {sharing && <SendProfilesDialog profileIds={picked.map(p => p.id)} onClose={() => setSharing(false)} />}
+            onClick={() => setSharing(true)}>🏢 Send to another agency <span className="ml-auto hidden text-[10px] font-normal opacity-80 lg:inline">with documents</span></button>}
+          {sharing && <SendProfilesDialog profileIds={picked.map(p => p.id)} onClose={() => setSharing(false)} onSent={() => onClear?.()} />}
           <button type="button" className={`${btn} bg-lime-50 text-lime-800 hover:bg-lime-100 dark:bg-lime-900/30 dark:text-lime-300`}
             onClick={() => { setExporting(true); download('xlsx') }} title="No. · Name · Labour ID · Passport of the selected">📥 Excel download <span className="ml-auto hidden text-[10px] font-normal opacity-80 lg:inline">no. · name · labour ID · passport</span></button>
           <div className="col-span-2 lg:col-span-1">

@@ -31,6 +31,8 @@ const DATA_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '
 const SENDS_FILE = path.join(DATA_DIR, 'profile-sends.json')
 const ADDED_FILE = path.join(DATA_DIR, 'profile-received.json')
 const ACCEPTED_FILE = path.join(DATA_DIR, 'profile-accepted.json')   // sends whose girls and documents are all in
+const ADDING_FILE = path.join(DATA_DIR, 'profile-adding.json')       // message ids being accepted right now (go on after a restart)
+const noteAdding = (m, on) => { const l = readJson(ADDING_FILE).filter(x => x !== Number(m)); if (on) l.push(Number(m)); writeJson(ADDING_FILE, l) }
 
 // What stays with this agency: its own numbering, people and places on its PC.
 const LOCAL_COLUMNS = new Set(['id', 'broker_id', 'assigned_to', 'company_id', 'branch_id', 'room', 'table_name', 'box_number',
@@ -71,7 +73,10 @@ export function unpack(buf) {
 async function upload(db, object, buf) {
   for (let i = 1; ; i++) {
     try { return await cloudCall(db, 'POST', `/storage/v1/object/${BUCKET}/${object}`, buf, { headers: { 'Content-Type': 'application/octet-stream' } }) }
-    catch (e) { if (i >= 3) throw e; await new Promise(r => setTimeout(r, 3000 * i)) }
+    catch (e) {
+      if (/already exists|duplicate|409/i.test(String(e.message))) return { already: true }   // it went up before a restart
+      if (i >= 3) throw e; await new Promise(r => setTimeout(r, 3000 * i))
+    }
   }
 }
 async function download(db, object) {
@@ -143,38 +148,64 @@ export async function sendProfiles(db, { profileIds, toAgency, who = null }) {
     conversation_id: conv, body: body.slice(0, 3900), kind: 'file', file_path: detailsObject, file_name: `${title}.adalprofile`.slice(0, 200),
     file_mime: 'application/x-adal-profile', file_size: locked.length,
   }, { headers: { Prefer: 'return=representation' } })
+  // Kept in data/profile-sends.json (this PC only), with the key and each girl's
+  // file name: a send cut off by a restart goes on from the girl it was at.
   const job = { send_id: sendId, to: to.id, to_name: to.name, conversation: conv, message: msg?.id || null, at: details.sent_at,
-    total: girls.length, sent: 0, failed: [], running: true, girls: girls.map(g => ({ id: g.id, name: g.name, state: 'waiting' })) }
+    total: girls.length, sent: 0, failed: [], running: true, key: key.toString('base64'),
+    girls: girls.map(g => ({ id: g.id, name: g.name, state: 'waiting', object: g.object, too_big: g.tooBig })) }
   sendJobs.set(sendId, job)
-  const saveJob = () => { const all = readJson(SENDS_FILE).filter(s => s.send_id !== sendId); all.push(job); writeJson(SENDS_FILE, all.slice(-300)) }
-  saveJob()
-  // 2–3. Each girl's documents, then she leaves this agency.
-  ;(async () => {
-    const { moveToTrash } = await import('./trash.js')
-    const fakeReq = { get: () => encodeURIComponent(`Sent to ${to.name}`.slice(0, 80)), headers: {} }
-    for (const [i, g] of girls.entries()) {
-      const s = job.girls[i]
-      try {
-        if (g.tooBig) throw new Error(`her documents are over ${Math.round(MAX_GIRL_BYTES / 1048576)} MB`)
-        s.state = 'sending'
-        const blobs = g.c.docs.map(d => fs.readFileSync(d.abs))
-        await upload(db, g.object, lock(pack(g.c.docs.map(({ abs, size, ...d }) => d), blobs), key))
-        await moveToTrash(db, 'profile', g.id, fakeReq)
-        s.state = 'sent'; job.sent++
-      } catch (e) {
-        s.state = 'failed'; s.error = String(e.message || e).slice(0, 200); job.failed.push(g.name)
-        console.warn(`[profile-share] ${g.name}: not sent (${s.error}) — she stays here`)
-      }
-      saveJob()
-    }
-    job.running = false; job.done_at = new Date().toISOString(); saveJob()
-    console.log(`[profile-share] sent ${job.sent} of ${job.total} profile(s) to ${to.name}`)
-  })().catch(e => { job.running = false; job.error = e.message; saveJob() })
+  saveSendJob(job)
+  sendDocs(db, job).catch(e => { job.running = false; job.error = e.message; saveSendJob(job) })
   return { ok: true, send_id: sendId, total: girls.length, to: to.name, conversation: conv, too_big: girls.filter(g => g.tooBig).map(g => g.name) }
 }
 
-/** What this PC has sent (newest first), with how far each send is. */
-export const sentList = () => readJson(SENDS_FILE).map(s => sendJobs.get(s.send_id) || s).reverse()
+function saveSendJob(job) { const all = readJson(SENDS_FILE).filter(s => s.send_id !== job.send_id); all.push(job); writeJson(SENDS_FILE, all.slice(-300)) }
+
+/** 2–3. Each girl's documents (from the one it was at), then she leaves this agency. */
+async function sendDocs(db, job) {
+  const { moveToTrash } = await import('./trash.js')
+  const key = Buffer.from(job.key, 'base64')
+  const fakeReq = { get: () => encodeURIComponent(`Sent to ${job.to_name}`.slice(0, 80)), headers: {} }
+  for (const s of job.girls) {
+    if (s.state === 'sent' || s.state === 'failed') continue
+    try {
+      if (s.too_big) throw new Error(`her documents are over ${Math.round(MAX_GIRL_BYTES / 1048576)} MB`)
+      s.state = 'sending'; saveSendJob(job)
+      const c = await collect(db, s.id)
+      if (!c) throw new Error('she is no longer on this PC')
+      const blobs = c.docs.map(d => fs.readFileSync(d.abs))
+      await upload(db, s.object, lock(pack(c.docs.map(({ abs, size, ...d }) => d), blobs), key))
+      await moveToTrash(db, 'profile', s.id, fakeReq)
+      s.state = 'sent'; job.sent++
+    } catch (e) {
+      s.state = 'failed'; s.error = String(e.message || e).slice(0, 200); job.failed.push(s.name)
+      console.warn(`[profile-share] ${s.name}: not sent (${s.error}) — she stays here`)
+    }
+    saveSendJob(job)
+  }
+  job.running = false; job.done_at = new Date().toISOString(); saveSendJob(job)
+  console.log(`[profile-share] sent ${job.sent} of ${job.total} profile(s) to ${job.to_name}`)
+}
+
+/** What this PC has sent (newest first), with how far each send is (never the key). */
+export const sentList = () => readJson(SENDS_FILE).map(s => sendJobs.get(s.send_id) || s).map(({ key, ...s }) => s).reverse()
+
+/**
+ * At start-up: sends and "Accept"s cut off by a restart go on — a send from
+ * the girl it was at, an Accept from the girl whose documents were next.
+ */
+export async function resumeProfileShares(db) {
+  for (const job of readJson(SENDS_FILE)) {
+    if (!job.running || !job.key || sendJobs.get(job.send_id)?.running) continue
+    console.log(`[profile-share] going on with the send to ${job.to_name} (${job.sent} of ${job.total} sent)`)
+    sendJobs.set(job.send_id, job)
+    sendDocs(db, job).catch(e => { job.running = false; job.error = e.message; saveSendJob(job) })
+  }
+  for (const m of readJson(ADDING_FILE)) {
+    console.log(`[profile-share] going on with accepting message #${m}`)
+    await addSent(db, m).catch(e => console.warn('[profile-share] accept could not go on:', e.message))
+  }
+}
 
 // --------------------------------------------------------------- receive --
 const opened = new Map()   // message id → { details, key, sender, mine, conv, sendId }
@@ -298,7 +329,9 @@ export async function addSent(db, messageId, { who = null } = {}) {
   if (addJobs.get(o.sendId)?.running) return addJobs.get(o.sendId)
   const job = { running: true, total: o.details.girls.length, made: 0, documents: 0, girls_done: 0, waiting: 0, error: null }
   addJobs.set(o.sendId, job)
-  run(db, o, job, who).catch(e => { job.error = e.message }).finally(() => { job.running = false })
+  noteAdding(messageId, true)
+  run(db, o, job, who).then(() => { if (!job.waiting) noteAdding(messageId, false) })
+    .catch(e => { job.error = e.message }).finally(() => { job.running = false })
   return job
 }
 

@@ -26,7 +26,7 @@ function Result({ s }) {
     <div className="space-y-1 text-sm">
       {s.step && <p className="flex items-center gap-2 text-slate-600 dark:text-slate-300"><span className="h-2 w-2 shrink-0 animate-ping rounded-full bg-teal-500" />{s.step}</p>}
       {s.status === 'done' && <p className="font-semibold text-teal-700 dark:text-teal-400">✓ Finished</p>}
-      {s.status !== 'signing-in' && (
+      {s.status !== 'signing-in' && s.status !== 'waiting' && (
         <p className="text-slate-500">
           {s.brokers ? `${s.brokers} brokers · ` : ''}{s.people} found · {s.created} new profiles · {s.updated} filled in · {s.files} files · {s.templates} CV templates
           {s.skipped > 0 && ` · ${s.skipped} templates could not be made`}

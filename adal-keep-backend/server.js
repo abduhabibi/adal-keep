@@ -1238,6 +1238,8 @@ initSystem().then(() => {
     }
     startFolderWatcher(db, 1)     // watches the inbox for new files
     startWorker(db)               // runs queued jobs, each in its own tab
+    import("./src/services/transition.js").then(m => m.resumeTransitions(db)).catch(() => {})            // a move cut off by a restart goes on
+    import("./src/services/profileShare.js").then(m => m.resumeProfileShares(db)).catch(() => {})       // so do profiles being sent or accepted
     startScanner(db)              // discovers new work every 2 min
     startWafidChecker(db)         // Medical · Applied → Fit / Rejected from wafid.com
     startBackupSchedule(db)       // locked copy to Telegram in the lunch break

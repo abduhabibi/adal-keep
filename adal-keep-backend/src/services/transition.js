@@ -391,6 +391,35 @@ export async function musanedSignIn(db, page, accountId, say, check) {
   }
 }
 
+// ── Going on after a restart ────────────────────────────────────────────────
+// A move that was running when Adal Keep stopped (a restart, an update, the
+// PC turned off) is noted here and started again by itself: its ledger makes
+// it go on from where it was. Stopped by a person or finished: forgotten.
+const RUNNING_FILE = path.join(DIR, 'running.json')
+const readRunning = () => { try { return JSON.parse(fs.readFileSync(RUNNING_FILE, 'utf8')) } catch { return {} } }
+const writeRunning = (r) => { try { fs.mkdirSync(DIR, { recursive: true }); fs.writeFileSync(RUNNING_FILE, JSON.stringify(r)) } catch {} }
+function noteRunning(id, url, resumed) {
+  const r = readRunning()
+  r[id] = { url, at: new Date().toISOString(), tries: resumed ? (r[id]?.tries || 0) + 1 : 0 }
+  writeRunning(r)
+}
+function forgetRunning(id) { const r = readRunning(); if (r[id]) { delete r[id]; writeRunning(r) } }
+
+/** At start-up: the moves that were cut off go on (up to 5 times each, 90 s after start). */
+export function resumeTransitions(db, { delayMs = 90000 } = {}) {
+  const r = readRunning()
+  for (const [id, m] of Object.entries(r)) {
+    if (!SOURCES[id] || !m?.url) { forgetRunning(id); continue }
+    if ((m.tries || 0) >= 5) { console.warn(`[transition ${id}] stopped 5 times in a row: not started again by itself`); forgetRunning(id); continue }
+    set(id, { ...blank(), status: 'waiting', step: `Going on from where it stopped (in ${Math.round(delayMs / 1000)} s)…`, site: m.url })
+    setTimeout(() => {
+      if (['signing-in', 'copying'].includes(stateOf(id).status)) return
+      console.log(`[transition ${id}] going on from where it stopped`)
+      try { startTransition(db, id, m.url, { resumed: true }) } catch (e) { console.warn(`[transition ${id}] could not go on:`, e.message) }
+    }, delayMs).unref?.()
+  }
+}
+
 // ── The copy ────────────────────────────────────────────────────────────────
 export function startTransition(db, id, link, deps = {}) {
   const source = deps.source || SOURCES[id]
@@ -398,13 +427,16 @@ export function startTransition(db, id, link, deps = {}) {
   if (['signing-in', 'copying'].includes(stateOf(id).status)) return stateOf(id)
   const url = link || source.url
   if (!url) throw new Error('Paste the address first')
-  set(id, { ...blank(), status: 'signing-in', step: `Sign in to ${source.name} in the window that opened`, site: url })
+  set(id, { ...blank(), status: 'signing-in', step: deps.resumed ? `Going on from where it stopped: sign in to ${source.name} if the window asks` : `Sign in to ${source.name} in the window that opened`, site: url })
+  if (!deps.limit && !deps.page) noteRunning(id, url, deps.resumed)   // (tests and trial moves are not noted)
   // A move takes hours on a slow line: the PC must not sleep in the middle.
   const letSleep = (deps.keepAwake || keepAwake)(`moving from ${source.name}`)
   run(db, id, source, url, deps).finally(letSleep).then(async () => {
+    forgetRunning(id)
     // Done: what came in is backed up as soon as no agent is working.
     try { (await import('./telegramBackup.js')).backupSoon() } catch {}
   }).catch(e => {
+    if (e.stopped) forgetRunning(id)   // a person pressed Stop
     console.error(`[transition ${id}]`, e)
     set(id, { status: e.stopped ? 'stopped' : 'failed', step: '', error: e.stopped ? null : e.message })
   })
@@ -426,10 +458,31 @@ async function run(db, id, source, url, deps) {
   const htmlTemplates = []
   const brokersFound = new Map() // the site's brokers, by its own id
   const brokerLists = new Map()  // the broker list's address → how to read its next pages
+  // Each girl is made as a profile as soon as her line is read (asked on
+  // 2026-11-14: "when 1 profile is downloaded, create the profile — don't wait
+  // until the whole thing finishes"): one at a time, behind the reading. Her
+  // record, broker and files come after, as before.
+  const early = new Map()        // passport → her profile id (made while the pages are read)
+  let making = Promise.resolve()
+  const makeNow = (pn) => {
+    if (deps.limit || early.has(pn)) return
+    early.set(pn, null)
+    making = making.then(async () => {
+      const g = people.get(pn)
+      if (!g || stateOf(id).stop) return
+      try {
+        const pid = await saveProfile(db, id, source, g.person)
+        early.set(pn, pid)
+        waitingFiles.set(pid, id)
+        set(id, { saved: [...early.values()].filter(Boolean).length, step: `Reading the pages: ${people.size} found, ${[...early.values()].filter(Boolean).length} already made as profiles` })
+      } catch (e) { console.warn(`[transition ${id}] could not make a profile yet: ${e.message}`) }
+    })
+  }
   const add = (found) => {
     for (const f of found) {
       const had = people.get(f.person.passport_number)
       people.set(f.person.passport_number, had ? { person: { ...f.person, ...had.person }, raw: { ...f.raw, ...had.raw } } : f)
+      makeNow(f.person.passport_number)
     }
     set(id, { people: people.size })
   }
@@ -644,6 +697,7 @@ async function run(db, id, source, url, deps) {
     //   2. her own record (more text), several at a time,
     //   3. her files — simple ones first — several at a time.
     // A girl a person presses Prioritize on gets 2 and 3 at once, then the rest go on.
+    await making   // the profiles made while reading are all in
     const order = newestFirst([...people.values()]).slice(0, deps.limit || Infinity)
     const [base, firstList] = [...lists.entries()][0] || []
     const stem = base ? base.replace(/[?#].*/, '').replace(/\/$/, '') : null

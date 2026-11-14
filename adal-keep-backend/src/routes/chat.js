@@ -97,6 +97,29 @@ router.get('/chat/unlock-status', wrap(async (req, db) => {
   return r || { status: 'none' }
 }))
 
+// A profile sent to another agency with every document (services/profileShare.js).
+const who = (req) => { try { return decodeURIComponent(req.get('x-adal-who') || '') || null } catch { return null } }
+router.post('/chat/profile/send', wrap(async (req, db) => {
+  const { sendProfile } = await import('../services/profileShare.js')
+  const ids = [].concat(req.body?.profile_ids || req.body?.profile_id || []).map(Number).filter(Boolean)
+  if (!ids.length || !req.body?.to) throw new chat.ChatError('Choose the profile and the agency.', 400)
+  const sent = []
+  for (const id of ids.slice(0, 50)) sent.push(await sendProfile(db, { profileId: id, toAgency: String(req.body.to), mode: req.body.mode, who: who(req) }))
+  return { ok: true, sent }
+}))
+router.get('/chat/profile/sent', wrap(async () => (await import('../services/profileShare.js')).sentList()))
+router.get('/chat/profile/:messageId', wrap(async (req, db) => (await import('../services/profileShare.js')).viewSent(db, req.params.messageId)))
+router.get('/chat/profile/:messageId/file/:n', async (req, res) => {
+  try {
+    const f = await (await import('../services/profileShare.js')).sentFile(req.app.locals.db, req.params.messageId, req.params.n)
+    res.setHeader('Content-Type', f.type || 'application/octet-stream')
+    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(f.name || 'document')}"`)
+    res.setHeader('Cache-Control', 'private, max-age=600')
+    res.send(f.body)
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }) }
+})
+router.post('/chat/profile/:messageId/add', wrap(async (req, db) => (await import('../services/profileShare.js')).addSent(db, req.params.messageId, { who: who(req) })))
+
 // A PC Adal marked paid unlocks itself, also during the trial (not only
 // from the lock screen): checked a minute after start, then every 30 minutes.
 export function watchPaid(db) {

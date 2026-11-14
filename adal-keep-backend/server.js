@@ -1237,6 +1237,7 @@ initSystem().then(() => {
     startWorker(db)               // runs queued jobs, each in its own tab
     startScanner(db)              // discovers new work every 2 min
     startWafidChecker(db)         // Medical · Applied → Fit / Rejected from wafid.com
+    import("./src/services/profileShare.js").then(m => m.startTransferChecks(db)).catch(() => {})   // a transferred girl the other agency added leaves this agency
     startBackupSchedule(db)       // locked copy to Telegram in the lunch break
     startContractChecker(db)      // chosen by a Saudi employer? contract + PDFs from Musaned
     import('./src/services/profileDays.js').then(d => d.startProfileDays(db)).catch(e => console.warn('[days]', e.message)) // each profile's status, per day

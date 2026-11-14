@@ -13,6 +13,7 @@ import ProfileAutomations from '../components/ProfileAutomations'
 import ProfileJourney from '../components/ProfileJourney'
 import ProfileDays from '../components/ProfileDays'
 import WhatsAppSend from '../components/WhatsAppSend'
+import { SendProfilesDialog } from '../components/SharedProfile'
 import EmbassyPrintButton from '../components/EmbassyPrintButton'
 import NotesTimeline from '../components/NotesTimeline'
 import VisaBarcodes from '../components/VisaBarcodes'
@@ -40,6 +41,7 @@ export default function ProfileDetailPage() {
   const [profile, setProfile] = useState(null)
   const [fields, setFields] = useState([])
   const [cvs, setCvs] = useState([])
+  const [sharingAgency, setSharingAgency] = useState(false) // the "Send to another agency" window
   const [cvReadiness, setCvReadiness] = useState(null)
   const [loading, setLoading] = useState(true)
 
@@ -199,7 +201,11 @@ export default function ProfileDetailPage() {
 
       {(profile.chosen_at || profile.contract_number) && <ContractCard profile={profile} />}
 
-      <div className="flex flex-wrap items-center gap-2"><EmbassyPrintButton profile={profile} /></div>
+      <div className="flex flex-wrap items-center gap-2"><EmbassyPrintButton profile={profile} />
+        {import.meta.env.VITE_DEMO !== '1' && <button type="button" onClick={() => setSharingAgency(true)}
+          className="rounded-lg border border-violet-300 bg-violet-50 px-3 py-2 text-sm font-semibold text-violet-800 hover:bg-violet-100 dark:border-violet-700 dark:bg-violet-900/30 dark:text-violet-300">🏢 Send to another agency</button>}
+      </div>
+      {sharingAgency && <SendProfilesDialog profileIds={[profile.id]} onClose={() => setSharingAgency(false)} />}
 
       <VisaBarcodes profile={profile} />
 

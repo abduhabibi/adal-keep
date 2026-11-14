@@ -4,6 +4,7 @@ import api from '../services/api'
 import { cachedGet } from '../lib/deviceCache'
 import { onBack } from '../lib/phoneApp'
 import VoiceNote from '../components/VoiceNote'
+import { SharedProfileCard, isSharedProfile, cleanBody } from '../components/SharedProfile'
 
 // A finger (a phone) rather than a mouse: a long press selects, as in Telegram.
 const touchScreen = () => window.matchMedia?.('(pointer: coarse)').matches
@@ -43,7 +44,7 @@ function presence(lastSeen, now) {
   return `last seen ${shortWhen(lastSeen)}`
 }
 const sizeOf = (n) => (n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`)
-const preview = (m) => !m ? '' : m.deleted_at ? 'Message deleted' : m.kind === 'image' ? `📷 ${m.body || 'Picture'}` : m.kind === 'voice' ? '🎤 Voice message' : m.kind === 'file' ? `📎 ${m.file_name || 'File'}` : (m.body || '')
+const preview = (m) => !m ? '' : m.deleted_at ? 'Message deleted' : m.kind === 'image' ? `📷 ${m.body || 'Picture'}` : m.kind === 'voice' ? '🎤 Voice message' : m.kind === 'file' ? `📎 ${m.file_name || 'File'}` : cleanBody(m.body)
 
 const SIZES = { 8: 'h-8 w-8 text-xs', 10: 'h-10 w-10 text-sm', 12: 'h-[52px] w-[52px] text-lg' }
 // Like Telegram: every name has its own colour.
@@ -606,14 +607,15 @@ export default function ChatPage() {
                                 </a>
                               )}
                               {m.kind === 'voice' && m.file_path && <VoiceNote src={fileUrl(m.file_path)} mine={mine} />}
-                              {m.kind === 'file' && m.file_path && (
+                              {isSharedProfile(m) && <SharedProfileCard m={m} mine={mine} />}
+                              {m.kind === 'file' && m.file_path && !isSharedProfile(m) && (
                                 <a href={fileUrl(m.file_path, m.file_name)} target="_blank" rel="noreferrer"
                                   className="my-1 flex items-center gap-3 rounded-lg bg-black/5 px-3 py-2 hover:bg-black/10 dark:bg-white/10">
                                   <span className="text-2xl">📄</span>
                                   <span className="min-w-0"><span className="block truncate text-sm font-semibold">{m.file_name}</span><span className="text-[11px] text-slate-500">{m.file_size ? sizeOf(m.file_size) : ''} · open</span></span>
                                 </a>
                               )}
-                              {m.body && <p translate="no" className="whitespace-pre-wrap break-words text-[15px] leading-snug text-slate-900 dark:text-slate-100">{m.body}</p>}
+                              {cleanBody(m.body) && <p translate="no" className="whitespace-pre-wrap break-words text-[15px] leading-snug text-slate-900 dark:text-slate-100">{cleanBody(m.body)}</p>}
                             </>
                           )}
                           <p className={`-mb-0.5 ml-3 flex items-center justify-end gap-1 text-[11px] ${mine ? 'text-emerald-600 dark:text-sky-200/70' : 'text-slate-400'}`}>

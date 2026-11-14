@@ -16,6 +16,7 @@ import { useAuth } from '../context/AuthContext'
 import { loadEmbassy, printEmbassy } from '../lib/embassyPrint'
 import { dragProfiles } from '../lib/profileDrag'
 import WhatsAppSendPicked from './WhatsAppSendPicked'
+import { SendProfilesDialog } from './SharedProfile'
 import { FORMATS, downloadTable } from '../lib/tableExport'
 
 const err = (e) => e?.response?.data?.error || e.message
@@ -65,6 +66,7 @@ export default function SelectionBar({ picked, onRemove, onClear, onAllShown, on
   const [sheet, setSheet] = useState(null)
   const [naming, setNaming] = useState(null) // the checklist panel is open: the new one's name, while typed
   const [messaging, setMessaging] = useState(false) // the WhatsApp message panel is open
+  const [sharing, setSharing] = useState(false) // sending them to another agency
   const [exporting, setExporting] = useState(false) // the download formats are shown
   const [lists, setLists] = useState(null)     // the checklists already made (to add the selected to)
   const navigate = useNavigate()
@@ -198,6 +200,9 @@ export default function SelectionBar({ picked, onRemove, onClear, onAllShown, on
           <button type="button" className={`${btn} bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:bg-emerald-900/30 dark:text-emerald-300`} disabled={!!busy}
             onClick={() => setMessaging(m => !m)}>💬 WhatsApp <span className="ml-auto hidden text-[10px] font-normal opacity-80 lg:inline">send CVs</span></button>
           {messaging && <WhatsAppSendPicked picked={picked} onClose={() => setMessaging(false)} />}
+          {import.meta.env.VITE_DEMO !== '1' && <button type="button" className={`${btn} bg-violet-50 text-violet-800 hover:bg-violet-100 dark:bg-violet-900/30 dark:text-violet-300`} disabled={!!busy}
+            onClick={() => setSharing(true)}>🏢 Another agency <span className="ml-auto hidden text-[10px] font-normal opacity-80 lg:inline">send or transfer</span></button>}
+          {sharing && <SendProfilesDialog profileIds={picked.map(p => p.id)} onClose={() => setSharing(false)} />}
           <button type="button" className={`${btn} bg-lime-50 text-lime-800 hover:bg-lime-100 dark:bg-lime-900/30 dark:text-lime-300`}
             onClick={() => { setExporting(true); download('xlsx') }} title="No. · Name · Labour ID · Passport of the selected">📥 Excel download <span className="ml-auto hidden text-[10px] font-normal opacity-80 lg:inline">no. · name · labour ID · passport</span></button>
           <div className="col-span-2 lg:col-span-1">

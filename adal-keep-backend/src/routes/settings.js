@@ -23,6 +23,7 @@ router.get('/', authenticate, async (req, res) => {
     const settings = await req.app.locals.db('settings').select('key', 'value')
     const formatted = {}
     settings.forEach((row) => {
+      if (row.key === 'ai_keys') return   // Google keys: never sent to a page (Settings → Photo refining keys)
       formatted[row.key] = row.value
     })
     res.json(formatted)

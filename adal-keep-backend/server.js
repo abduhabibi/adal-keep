@@ -22,6 +22,7 @@ import tasksRouter from './src/routes/tasks.js'
 import updatesRouter from './src/routes/updates.js'
 import tutorRouter from './src/routes/tutor.js'
 import systemUpdateRouter, { startUpdateWatcher } from './src/routes/systemUpdate.js'
+import aiKeysRouter from './src/routes/aiKeys.js'
 import { startMedicalWatcher } from './src/services/medicalValidity.js'
 import { startAppointmentWatcher } from './src/services/appointmentReminders.js'
 import { startCloudSync } from './src/services/cloudSync.js'
@@ -176,6 +177,7 @@ app.use("/api/branches", branchesRouter)
 app.use('/api/updates', updatesRouter)
 app.use('/api', tutorRouter)   // daily in-app tutor
 app.use('/api/system', systemUpdateRouter)
+app.use('/api/system', aiKeysRouter)   // Settings → Photo refining keys (this PC only)
 app.use("/api/quick-links", quickLinksRouter)
 app.use("/api/auth", authRouter)
 app.use('/api/lmis', lmisAccountsRouter)
@@ -215,6 +217,8 @@ async function initSystem() {
       await db.migrate.latest()
       console.log('✅ Database migrations up to date')
       await ensureTenancySchema(db)
+      // The Google keys pasted in Settings (photo refining), ready before the first Refine.
+      import('./src/services/aiKeys.js').then(k => k.loadAiKeys(db)).catch(() => {})
       // Once, a minute after start: profiles whose passport left place of birth /
       // issue date empty get them read from the passport picture.
       setTimeout(async () => {

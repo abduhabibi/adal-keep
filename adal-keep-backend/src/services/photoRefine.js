@@ -14,12 +14,15 @@
  */
 import sharp from 'sharp'
 
+import { refineKeys } from './aiKeys.js'
 const API = 'https://generativelanguage.googleapis.com/v1beta/models'
-const MODELS = (process.env.GEMINI_IMAGE_MODELS || 'gemini-3.1-flash-image,gemini-2.5-flash-image,gemini-3-pro-image')
+// The most capable picture model first (best retouch, best at keeping the same face); the faster ones after.
+const MODELS = (process.env.GEMINI_IMAGE_MODELS || 'gemini-3-pro-image,gemini-3.1-flash-image,gemini-2.5-flash-image')
   .split(',').map(s => s.trim()).filter(Boolean)
 const LONG_SIDE = 3840
 
-const keys = () => [...new Set([process.env.GEMINI_API_KEY, ...String(process.env.GEMINI_API_KEYS || '').split(/[,;\s]+/)]
+// The keys pasted in Settings → Photo refining keys first, then the PC's own.
+const keys = () => [...new Set([...refineKeys(), process.env.GEMINI_API_KEY, ...String(process.env.GEMINI_API_KEYS || '').split(/[,;\s]+/)]
   .map(k => String(k || '').trim()).filter(Boolean))]
 
 // The agency's own words for the retouch (2026-11-14): identity before beauty.
@@ -93,3 +96,19 @@ export async function refinePhoto(buf, field = 'Photo', { useGemini = true } = {
 }
 
 export const REFINABLE = ['Photo', 'Full Body Photo']
+
+/** Settings' check of one key: 'ok', 'needs-billing' (Google's free plan edits no pictures) or 'refused'. */
+export async function canEditPictures(key) {
+  const tiny = await sharp({ create: { width: 64, height: 64, channels: 3, background: '#c8b49a' } }).jpeg().toBuffer()
+  const body = JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'Make this picture slightly brighter. Return only the picture.' }, { inline_data: { mime_type: 'image/jpeg', data: tiny.toString('base64') } }] }], generationConfig: { responseModalities: ['IMAGE'] } })
+  let saw429 = false
+  for (const model of MODELS) {
+    try {
+      const r = await fetch(`${API}/${model}:generateContent`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key }, body, signal: AbortSignal.timeout(90000) })
+      if (r.ok) { noQuotaUntil = 0; return 'ok' }
+      if (r.status === 429) saw429 = true
+      if (r.status === 401 || r.status === 403) return 'refused'
+    } catch {}
+  }
+  return saw429 ? 'needs-billing' : 'refused'
+}

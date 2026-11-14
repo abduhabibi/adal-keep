@@ -24,6 +24,7 @@ import MusanedAuthenticatorCard, { MusanedCodesCard } from '../components/Musane
 import ErrorBoundary from '../components/shared/ErrorBoundary'
 import PhoneCard from '../components/PhoneCard'
 import WhatsAppCard from '../components/WhatsAppCard'
+import AiKeysCard from '../components/AiKeysCard'
 import TransitionsCard from '../components/TransitionsCard'
 import PlanCard from '../components/PlanCard'
 import EproSignatureCard from '../components/EproSignatureCard'
@@ -289,6 +290,7 @@ export default function SettingsPage() {
       {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Musaned code"><MusanedCodesCard /></ErrorBoundary>}
       {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="EPRO signature"><EproSignatureCard /></ErrorBoundary>}
       {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="WhatsApp"><WhatsAppCard /></ErrorBoundary>}
+      {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Photo refining keys"><AiKeysCard /></ErrorBoundary>}
       {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Telegram"><TelegramChannelCard /></ErrorBoundary>}
       </>}
       {tab === 'transitions' && import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Transitions"><TransitionsCard /></ErrorBoundary>}

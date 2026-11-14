@@ -706,7 +706,14 @@ async function run(db, id, source, url, deps) {
       // 3. Her files.
       const filesFor = (g) => [...filesOf(g.raw, origin), ...(source.files?.(g.raw, origin) || [])].filter(f => !madeHere(f))
       const filesLeft = (g) => { const e = entry(g); return (e.files || filesFor(g)).filter(x => !madeHere(x) && !e.done.includes(x.url)) }
+      // A file of this kind an earlier move of hers already brought (named "<passport>-<field>…"):
+      // not downloaded again — a move done twice is quick.
+      const broughtBefore = (g, f) => db('files').join('profile_fields', 'files.profile_field_id', 'profile_fields.id')
+        .where('profile_fields.profile_id', g.profileId).where('profile_fields.name', f.field)
+        .where('files.original_name', 'like', `${g.person.passport_number}-${f.field}%`.replace(/\s/g, '_')).first('files.id').catch(() => null)
       const fetchFile = async (g, f) => {
+        // (Her one photo, full body photo and passport: a girl can have several other documents of one kind.)
+        if (/^(Photo|Full Body Photo|Passport)$/.test(f.field) && await broughtBefore(g, f)) return true
         let got = await ask(page, f.url, headers, true).catch(() => null)
         for (let i = 0; i < 3 && !got?.base64 && /^https:/.test(f.url); i++) {
           try {

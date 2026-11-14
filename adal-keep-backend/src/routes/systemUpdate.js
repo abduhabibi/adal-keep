@@ -547,6 +547,13 @@ async function handleApply(req, res) {
   if (updateNotice.applying) {
     return res.status(409).json({ error: 'The update is already being installed — wait for the page to reload by itself.', applying: true })
   }
+  // A move from another system (Transitions) is lost by the restart: even a
+  // pressed "Update now" waits for it (it installs by itself when the move ends).
+  try {
+    if ((await import('../services/transition.js')).transitionRunning() && !req.body?.force) {
+      return res.status(409).json({ error: 'A move from another system is running (Settings → Transitions). The update installs by itself as soon as it ends.', moving: true })
+    }
+  } catch {}
   updateNotice.applying = true
   updateNotice.applyingSince = new Date().toISOString()
   try { return await applyUpdate(req, res) } finally {
@@ -688,11 +695,13 @@ router.post('/update', handleApply)
 router.get('/update/notice', async (req, res) => {
   let running = 0
   try { const { queueSnapshot } = await import('../services/worker.js'); running = queueSnapshot().running.length } catch {}
+  let moving = false
+  try { moving = (await import('../services/transition.js')).transitionRunning() } catch {}
   const r = updateNotice.result
   res.json({
     hasUpdate: !!r?.hasUpdate, count: r?.count || 0, changes: r?.changes || [], latest: r?.latest || null,
     installed: r?.installed || null, note: r?.note || null, checkedAt: updateNotice.checkedAt,
-    applying: updateNotice.applying, running,
+    applying: updateNotice.applying, running, moving,
     // The version this server runs now: an open page reloads when it changes.
     version: BOOT_VERSION, auto: updateNotice.auto, autoError: updateNotice.autoError,
     autoUpdate: await autoUpdateOn(req.app.locals.db),

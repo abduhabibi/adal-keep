@@ -63,10 +63,11 @@ export default function UpdateBanner() {
   if (!busy && phase !== 'error' && hiddenFor && hiddenFor.sha === n.latest?.sha && Date.now() < hiddenFor.until) return null
 
   const update = async () => {
+    if (n.moving) { setPhase('error'); setMsg('A move from another system is running (Settings → Transitions). The update installs by itself as soon as it ends.'); return }
     if (n.running > 0 && !confirm(`${n.running} automation run(s) are working now. Updating restarts Adal Keep and stops them (they can be started again). Update now?`)) return
     setPhase('installing'); setMsg('')
     try {
-      const r = await api.post('/system/update/apply', null, { timeout: 15 * 60 * 1000 })
+      const r = await api.post('/system/update/apply', {}, { timeout: 15 * 60 * 1000 })
       setMsg(r.data?.message || '')
       setPhase('restarting')
       // The server restarts: reload once it answers again.
@@ -76,6 +77,7 @@ export default function UpdateBanner() {
         if (Date.now() - t0 > 5 * 60 * 1000) clearInterval(wait)
       }, 3000)
     } catch (e) {
+      if (e?.response?.status === 409 && e.response.data?.moving) { setPhase('error'); setMsg(e.response.data.error); return }
       if (e?.response?.status === 409) { setPhase('restarting'); setMsg(e.response.data.error); return }
       setPhase('error'); setMsg(e?.response?.data?.error || e.message)
     }

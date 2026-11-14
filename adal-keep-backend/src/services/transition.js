@@ -444,6 +444,9 @@ export function startTransition(db, id, link, deps = {}) {
 }
 
 async function run(db, id, source, url, deps) {
+  let stopUrgent = () => {}
+  const earlyMade = new Map()   // her profile id → her passport (made while the pages were read)
+  let byProfileEarly = (pid, pn) => { earlyMade.set(pid, pn) }
   const check = () => { if (stateOf(id).stop) { const e = new Error('Stopped'); e.stopped = true; throw e } }
   const browser = deps.browser || await getBrowser()
   const page = deps.page || await openForPerson()
@@ -474,6 +477,7 @@ async function run(db, id, source, url, deps) {
         const pid = await saveProfile(db, id, source, g.person)
         early.set(pn, pid)
         waitingFiles.set(pid, id)
+        byProfileEarly(pid, pn)
         set(id, { saved: [...early.values()].filter(Boolean).length, step: `Reading the pages: ${people.size} found, ${[...early.values()].filter(Boolean).length} already made as profiles` })
       } catch (e) { console.warn(`[transition ${id}] could not make a profile yet: ${e.message}`) }
     })
@@ -569,6 +573,122 @@ async function run(db, id, source, url, deps) {
     const signedIn = await waitSignIn(page)
     windows.delete(id)
     if (!source.deep) await (deps.sendAway || sendAway)(page).catch(() => {})
+    // Prioritize works from the first girl made, whatever the move is doing
+    // (reading the pages, making brokers, making the profiles, records or
+    // files): her record and files come within a second or two (2026-11-14:
+    // before, a press waited until the move reached the records).
+    // The list's address and headers (known once its first page came): her record is read there.
+    let stem = null, headers = {}
+    const listNow = () => {
+      const [base, firstList] = [...lists.entries()][0] || []
+      if (base) { stem = base.replace(/[?#].*/, '').replace(/\/$/, ''); headers = firstList?.headers || {} }
+    }
+    // What each girl has (her files, found when she is first read) and what is done,
+    // kept in data/transitions: a move that stopped goes on from where it was.
+    const ledgerFile = path.join(deps.dir || DIR, `${id}-${new URL(origin).hostname}-ledger.json`)
+    let ledger = {}
+    try { ledger = JSON.parse(fs.readFileSync(ledgerFile, 'utf8')) } catch {}
+    let ledgerTimer = null
+    const saveLedger = (now) => {
+      clearTimeout(ledgerTimer)
+      const write = () => { try { fs.writeFileSync(ledgerFile, JSON.stringify(ledger)) } catch {} }
+      if (now) write(); else ledgerTimer = setTimeout(write, 2000)
+    }
+    const entry = (g) => (ledger[g.person.passport_number] ||= { text: false, files: null, done: [] })
+    let tmpDir = null
+    const tmpOf = () => (tmpDir ||= fs.mkdtempSync(path.join(os.tmpdir(), 'adal-transition-')))
+    const saved = []
+    const byProfile = new Map()
+    for (const [pid, pn] of earlyMade) { const g = people.get(pn); if (g) { g.profileId = pid; byProfile.set(pid, g) } }
+    byProfileEarly = (pid, pn) => { const g = people.get(pn); if (g) { g.profileId = pid; byProfile.set(pid, g) } }
+    // 2. Her own record.
+    let works = 0, tried = 0, settled = 0
+    const readRecord = async (g) => {
+      if (g.recordRead || !stem) return
+      g.recordRead = true
+      const e = entry(g)
+      if (e.text && e.files) return   // a move before read her already: her text is in, her files are listed
+      const rid = g.raw.id ?? g.raw._id ?? g.raw.uuid
+      // Six answered and none was her record: this site has no record page.
+      if (rid == null || (settled >= 6 && !works)) return
+      tried++
+      const got = await ask(page, `${stem}/${rid}`, headers).catch(() => null).finally(() => { settled++ })
+      let json = null
+      try { json = JSON.parse(got?.text) } catch {}
+      const more = json && findPeople(json).find(f => f.person.passport_number === g.person.passport_number)
+      if (!more) return
+      works++
+      g.person = { ...more.person, ...g.person }
+      g.raw = { ...g.raw, ...more.raw }
+      await saveProfile(db, id, source, g.person)
+      e.text = true
+      e.files = filesFor(g).map(x => ({ field: x.field, url: x.url, label: x.label || '' }))
+      saveLedger()
+    }
+    // 3. Her files.
+    const filesFor = (g) => [...filesOf(g.raw, origin), ...(source.files?.(g.raw, origin) || [])].filter(f => !madeHere(f))
+    const filesLeft = (g) => { const e = entry(g); return (e.files || filesFor(g)).filter(x => !madeHere(x) && !e.done.includes(x.url)) }
+    // A file of this kind an earlier move of hers already brought (named "<passport>-<field>…"):
+    // not downloaded again — a move done twice is quick.
+    const broughtBefore = (g, f) => db('files').join('profile_fields', 'files.profile_field_id', 'profile_fields.id')
+      .where('profile_fields.profile_id', g.profileId).where('profile_fields.name', f.field)
+      .where('files.original_name', 'like', `${g.person.passport_number}-${f.field}%`.replace(/\s/g, '_')).first('files.id').catch(() => null)
+    const fetchFile = async (g, f) => {
+      // (Her one photo, full body photo and passport: a girl can have several other documents of one kind.)
+      if (/^(Photo|Full Body Photo|Passport)$/.test(f.field) && await broughtBefore(g, f)) return true
+      let got = await ask(page, f.url, headers, true).catch(() => null)
+      for (let i = 0; i < 3 && !got?.base64 && /^https:/.test(f.url); i++) {
+        try {
+          const r = await fetch(f.url, { signal: AbortSignal.timeout(90000) })
+          if (r.ok) got = { base64: Buffer.from(await r.arrayBuffer()).toString('base64'), type: r.headers.get('content-type') || '' }
+          else if (r.status !== 429 && r.status < 500) break
+        } catch {}
+        if (!got?.base64 && i < 2) await sleep(i ? 6000 : 2000)
+      }
+      if (got?.base64 && /octet/i.test(got.type)) got.type = /\.pdf(\?|$)/i.test(f.url) ? 'application/pdf' : /\.png(\?|$)/i.test(f.url) ? 'image/png' : 'image/jpeg'
+      if (!got?.base64 || !/image|pdf|octet/i.test(got.type)) return false
+      const ext = /pdf/i.test(got.type) ? '.pdf' : /png/i.test(got.type) ? '.png' : /webp/i.test(got.type) ? '.webp' : '.jpg'
+      const file = path.join(tmpOf(), `${g.person.passport_number}-${f.field}-${Math.random().toString(36).slice(2, 7)}${ext}`.replace(/\s/g, '_'))
+      fs.writeFileSync(file, Buffer.from(got.base64, 'base64'))
+      let ok = false
+      try { if (await saveOnProfile(db, g.profileId, f.field, file, path.basename(file))) set(id, { files: stateOf(id).files + 1 }); ok = true } catch { set(id, { failed: stateOf(id).failed + 1 }) }
+      fs.rm(file, { force: true }, () => {})
+      return ok
+    }
+    const filesDone = (g) => { if (g.tiersLeft && !g.tiersLeft.size) waitingFiles.delete(g.profileId) }
+    const takeTier = async (g, tier) => {
+      if (!g.tiersLeft?.has(tier)) return
+      g.tiersLeft.delete(tier)
+      for (const f of filesLeft(g).filter(x => fileTier(x) === tier)) {
+        check()
+        if (await fetchFile(g, f)) { entry(g).done.push(f.url); saveLedger() }
+      }
+      filesDone(g)
+    }
+    // Asked for first: her record and every file now.
+    const urgent = async () => {
+      const pid = firstPlease.shift()
+      const g = byProfile.get(pid)
+      if (!g) return
+      listNow()
+      g.profileId = pid
+      set(id, { step: `First: ${g.person.full_name}` })
+      await readRecord(g)
+      g.tiersLeft ??= new Set([0, 1, 2])
+      for (const t of [0, 1, 2]) await takeTier(g, t)
+      waitingFiles.delete(g.profileId)
+    }
+    const jobsOf = (list) => { let i = 0; return () => firstPlease.some(p => byProfile.has(p)) ? { urgent: true } : list[i++] }
+
+    let urgentBusy = false
+    const urgentTimer = setInterval(async () => {
+      if (urgentBusy || !firstPlease.some(p => byProfile.has(p))) return
+      urgentBusy = true
+      try { await urgent() } catch (e) { console.warn(`[transition ${id}] Prioritize:`, e.message) } finally { urgentBusy = false }
+    }, 1000)
+    urgentTimer.unref?.()
+    stopUrgent = () => clearInterval(urgentTimer)
+
     set(id, { status: 'copying', step: 'Reading the lists' })
 
     if (source.deep) {
@@ -699,24 +819,6 @@ async function run(db, id, source, url, deps) {
     // A girl a person presses Prioritize on gets 2 and 3 at once, then the rest go on.
     await making   // the profiles made while reading are all in
     const order = newestFirst([...people.values()]).slice(0, deps.limit || Infinity)
-    const [base, firstList] = [...lists.entries()][0] || []
-    const stem = base ? base.replace(/[?#].*/, '').replace(/\/$/, '') : null
-    const headers = firstList?.headers || {}
-    // What each girl has (her files, found when she is first read) and what is done,
-    // kept in data/transitions: a move that stopped goes on from where it was.
-    const ledgerFile = path.join(deps.dir || DIR, `${id}-${new URL(origin).hostname}-ledger.json`)
-    let ledger = {}
-    try { ledger = JSON.parse(fs.readFileSync(ledgerFile, 'utf8')) } catch {}
-    let ledgerTimer = null
-    const saveLedger = (now) => {
-      clearTimeout(ledgerTimer)
-      const write = () => { try { fs.writeFileSync(ledgerFile, JSON.stringify(ledger)) } catch {} }
-      if (now) write(); else ledgerTimer = setTimeout(write, 2000)
-    }
-    const entry = (g) => (ledger[g.person.passport_number] ||= { text: false, files: null, done: [] })
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'adal-transition-'))
-    const saved = []
-    const byProfile = new Map()
     try {
       // 1. Text.
       let n = 0
@@ -733,83 +835,7 @@ async function run(db, id, source, url, deps) {
       }
       saveLedger(true)
 
-      // 2. Her own record.
-      let works = 0, tried = 0, settled = 0
-      const readRecord = async (g) => {
-        if (g.recordRead || !stem) return
-        g.recordRead = true
-        const e = entry(g)
-        if (e.text && e.files) return   // a move before read her already: her text is in, her files are listed
-        const rid = g.raw.id ?? g.raw._id ?? g.raw.uuid
-        // Six answered and none was her record: this site has no record page.
-        if (rid == null || (settled >= 6 && !works)) return
-        tried++
-        const got = await ask(page, `${stem}/${rid}`, headers).catch(() => null).finally(() => { settled++ })
-        let json = null
-        try { json = JSON.parse(got?.text) } catch {}
-        const more = json && findPeople(json).find(f => f.person.passport_number === g.person.passport_number)
-        if (!more) return
-        works++
-        g.person = { ...more.person, ...g.person }
-        g.raw = { ...g.raw, ...more.raw }
-        await saveProfile(db, id, source, g.person)
-        e.text = true
-        e.files = filesFor(g).map(x => ({ field: x.field, url: x.url, label: x.label || '' }))
-        saveLedger()
-      }
-      // 3. Her files.
-      const filesFor = (g) => [...filesOf(g.raw, origin), ...(source.files?.(g.raw, origin) || [])].filter(f => !madeHere(f))
-      const filesLeft = (g) => { const e = entry(g); return (e.files || filesFor(g)).filter(x => !madeHere(x) && !e.done.includes(x.url)) }
-      // A file of this kind an earlier move of hers already brought (named "<passport>-<field>…"):
-      // not downloaded again — a move done twice is quick.
-      const broughtBefore = (g, f) => db('files').join('profile_fields', 'files.profile_field_id', 'profile_fields.id')
-        .where('profile_fields.profile_id', g.profileId).where('profile_fields.name', f.field)
-        .where('files.original_name', 'like', `${g.person.passport_number}-${f.field}%`.replace(/\s/g, '_')).first('files.id').catch(() => null)
-      const fetchFile = async (g, f) => {
-        // (Her one photo, full body photo and passport: a girl can have several other documents of one kind.)
-        if (/^(Photo|Full Body Photo|Passport)$/.test(f.field) && await broughtBefore(g, f)) return true
-        let got = await ask(page, f.url, headers, true).catch(() => null)
-        for (let i = 0; i < 3 && !got?.base64 && /^https:/.test(f.url); i++) {
-          try {
-            const r = await fetch(f.url, { signal: AbortSignal.timeout(90000) })
-            if (r.ok) got = { base64: Buffer.from(await r.arrayBuffer()).toString('base64'), type: r.headers.get('content-type') || '' }
-            else if (r.status !== 429 && r.status < 500) break
-          } catch {}
-          if (!got?.base64 && i < 2) await sleep(i ? 6000 : 2000)
-        }
-        if (got?.base64 && /octet/i.test(got.type)) got.type = /\.pdf(\?|$)/i.test(f.url) ? 'application/pdf' : /\.png(\?|$)/i.test(f.url) ? 'image/png' : 'image/jpeg'
-        if (!got?.base64 || !/image|pdf|octet/i.test(got.type)) return false
-        const ext = /pdf/i.test(got.type) ? '.pdf' : /png/i.test(got.type) ? '.png' : /webp/i.test(got.type) ? '.webp' : '.jpg'
-        const file = path.join(tmp, `${g.person.passport_number}-${f.field}-${Math.random().toString(36).slice(2, 7)}${ext}`.replace(/\s/g, '_'))
-        fs.writeFileSync(file, Buffer.from(got.base64, 'base64'))
-        let ok = false
-        try { if (await saveOnProfile(db, g.profileId, f.field, file, path.basename(file))) set(id, { files: stateOf(id).files + 1 }); ok = true } catch { set(id, { failed: stateOf(id).failed + 1 }) }
-        fs.rm(file, { force: true }, () => {})
-        return ok
-      }
-      const filesDone = (g) => { if (g.tiersLeft && !g.tiersLeft.size) waitingFiles.delete(g.profileId) }
-      const takeTier = async (g, tier) => {
-        if (!g.tiersLeft?.has(tier)) return
-        g.tiersLeft.delete(tier)
-        for (const f of filesLeft(g).filter(x => fileTier(x) === tier)) {
-          check()
-          if (await fetchFile(g, f)) { entry(g).done.push(f.url); saveLedger() }
-        }
-        filesDone(g)
-      }
-      // Asked for first: her record and every file now.
-      const urgent = async () => {
-        const pid = firstPlease.shift()
-        const g = byProfile.get(pid)
-        if (!g) return
-        set(id, { step: `First: ${g.person.full_name}` })
-        await readRecord(g)
-        g.tiersLeft ??= new Set([0, 1, 2])
-        for (const t of [0, 1, 2]) await takeTier(g, t)
-        waitingFiles.delete(g.profileId)
-      }
-      const jobsOf = (list) => { let i = 0; return () => firstPlease.some(p => byProfile.has(p)) ? { urgent: true } : list[i++] }
-
+      listNow()
       let r = 0
       await pool(6, jobsOf(order), async (g) => {
         check()
@@ -841,11 +867,12 @@ async function run(db, id, source, url, deps) {
       await takeCvHeader(db, id, source)
     } finally {
       saveLedger(true)
-      fs.rmSync(tmp, { recursive: true, force: true })
+      if (tmpDir) fs.rmSync(tmpDir, { recursive: true, force: true })
       for (const [pid, of] of waitingFiles) if (of === id) waitingFiles.delete(pid)
     }
     set(id, { status: 'done', step: '' })
   } finally {
+    stopUrgent()
     page.off('response', onResponse)
     windows.delete(id)
     if (!deps.page) await page.close().catch(() => {})

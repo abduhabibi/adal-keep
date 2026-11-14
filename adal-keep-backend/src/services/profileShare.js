@@ -244,6 +244,17 @@ async function readyObjects(db, o) {
 }
 
 export const addJobs = new Map()   // send id → progress of "Add all"
+// Girls accepted whose documents have not come yet: "Prioritize" on her card
+// (the same button as for a move) brings hers next.
+const shareWaiting = new Map()   // profile id → send id
+const sharePlease = []           // profile ids pressed
+export const shareFilesWaiting = () => [...shareWaiting.keys()]
+export function sharePrioritize(profileId) {
+  const pid = Number(profileId)
+  if (!shareWaiting.has(pid)) return false
+  if (!sharePlease.includes(pid)) sharePlease.unshift(pid)
+  return true
+}
 const addedOf = (sendId) => readJson(ADDED_FILE).filter(a => a.send_id === sendId)
 
 /** The card's View: every girl's details, her documents, what was added. */
@@ -353,14 +364,21 @@ export async function run(db, o, job, who, { tell = true, waitMs = 30 * 60000 } 
   let left = o.details.girls.filter(g => g.object && !rec(g).docs_done)
   for (const g of o.details.girls) if (!g.object) rec(g).docs_done = true   // sent without documents (too big)
   job.girls_done = o.details.girls.filter(g => rec(g).docs_done).length
+  for (const g of left) shareWaiting.set(rec(g).profile_id, o.sendId)
   while (left.length) {
     const next = []
-    for (const g of left) {
+    const queue = [...left]
+    while (queue.length) {
+      // A girl someone pressed Prioritize on goes first.
+      const ui = queue.findIndex(g => sharePlease.includes(rec(g).profile_id))
+      const g = ui >= 0 ? queue.splice(ui, 1)[0] : queue.shift()
+      if (ui >= 0) sharePlease.splice(sharePlease.indexOf(rec(g).profile_id), 1)
       const d = await girlDocs(db, o, g).catch(() => null)
       if (!d) { next.push(g); continue }
       const r = rec(g)
       const n = await addDocs(db, r.profile_id, d)
       r.documents += n; r.docs_done = true; job.documents += n; job.girls_done++
+      shareWaiting.delete(r.profile_id)
       writeJson(ADDED_FILE, list.slice(-5000))
     }
     job.waiting = next.length

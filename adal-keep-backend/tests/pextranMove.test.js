@@ -74,6 +74,65 @@ function fakePage() {
   return page
 }
 
+async function freshDb() {
+  const { default: knex } = await import('knex')
+  const db = knex({ client: 'sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true })
+  await db.schema.createTable('profiles', t => {
+    t.increments('id'); for (const c of ['full_name', 'first_name', 'last_name', 'passport_number', 'religion', 'place_of_birth', 'created_by', 'created_at', 'updated_at']) t.string(c)
+    t.integer('broker_id')
+  })
+  await db.schema.createTable('brokers', t => { t.increments('id'); for (const c of ['name', 'contact1', 'contact2', 'address', 'notes', 'logo']) t.string(c); t.timestamps(true, true) })
+  await db.schema.createTable('profile_fields', t => { t.increments('id'); t.integer('profile_id'); t.integer('field_template_id'); t.string('name'); t.string('data_type'); t.integer('is_permanent'); t.string('created_at'); t.string('updated_at') })
+  await db.schema.createTable('files', t => { t.increments('id'); t.integer('profile_field_id'); for (const c of ['original_name', 'path', 'mimetype', 'content_hash', 'created_at', 'updated_at']) t.string(c); t.integer('size') })
+  await db.schema.createTable('field_templates', t => { t.increments('id'); t.string('name') })
+  return db
+}
+
+test('Pextran move: Prioritize while the pages are still read brings her files at once, before everyone', async () => {
+  const db = await freshDb()
+  const realFetch = globalThis.fetch
+  // Page 2 of the list is slow: the move is still reading pages for 15 s.
+  globalThis.fetch = async (url) => {
+    const u = new URL(String(url))
+    if (u.pathname === '/api/registration' && u.searchParams.get('page') === '2') await new Promise(r => setTimeout(r, 15000))
+    return answer(site(String(url)))
+  }
+  downloads = []; tries = new Map()
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'adal-pextran-prio-'))
+  try {
+    const { startTransition, transitionStates, prioritize, filesWaiting } = await import('../src/services/transition.js')
+    startTransition(db, 'pextran', `${ORIGIN}/`, { page: fakePage(), browser: {}, dir, sendAway: async () => {}, keepAwake: () => () => {} })
+    // Page 1's girls are made as profiles while page 2 is still coming.
+    let her = null
+    for (let i = 0; i < 40 && !her; i++) {
+      await new Promise(r => setTimeout(r, 100))
+      her = await db('profiles').where('passport_number', 'EP1000003').first()
+    }
+    assert.ok(her, 'her profile is made while the pages are still read')
+    assert.ok(filesWaiting().includes(her.id))
+    assert.match(transitionStates().pextran.step, /Reading the pages/)
+    assert.equal(prioritize(her.id), true)
+    // Within seconds (page 2 still not in): her files, before anyone else's
+    // (every file here fails once on purpose, as on a dropping line).
+    for (let i = 0; i < 120 && !downloads.some(d => /g3\/passport/.test(d)); i++) await new Promise(r => setTimeout(r, 100))
+    assert.ok(downloads.some(d => /g3\/passport/.test(d)), 'her passport came while the pages were read')
+    assert.ok(downloads.every(d => /\/g3\//.test(d)), 'only hers so far')
+    assert.ok(!(await db('profiles').where('passport_number', 'EP1000024').first()), 'page 2 is still being read')
+    // Then the move goes on and finishes as before.
+    for (let i = 0; i < 2400; i++) {
+      await new Promise(r => setTimeout(r, 100))
+      if (['done', 'failed', 'stopped'].includes(transitionStates().pextran.status)) break
+    }
+    assert.equal(transitionStates().pextran.status, 'done', transitionStates().pextran.error || '')
+    assert.equal(await db('profiles').count('* as n').first().then(r => r.n), 25)
+  } finally {
+    globalThis.fetch = realFetch
+    downloads = []; tries = new Map()   // the next test counts from nothing
+    fs.rmSync(dir, { recursive: true, force: true })
+    await db.destroy()
+  }
+})
+
 test('Pextran move: brokers, every page, text first, photos first, 3 tries, goes on later', async () => {
   const { default: knex } = await import('knex')
   const db = knex({ client: 'sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true })

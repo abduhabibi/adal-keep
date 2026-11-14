@@ -62,6 +62,7 @@ import notesRouter from './src/routes/notes.js'
 import { watchChanges } from './src/services/changes.js'
 import { answerCache, forget as forgetAnswer } from './src/services/answerCache.js'
 import { diagMiddleware, diagReport } from './src/services/diag.js'
+import { featureUseMiddleware, startFeatureUse } from './src/services/featureUse.js'
 import { removeSecret } from './src/services/secretStore.js'
 import { startContractChecker } from './src/services/musanedContracts.js'
 import { startBackupSchedule, applyRestoredDatabase } from './src/services/telegramBackup.js'
@@ -88,6 +89,8 @@ app.locals.db = db
 watchChanges(db)   // every window is told at once when something changes
 
 app.use(diagMiddleware)
+app.use(featureUseMiddleware)   // how much each feature is used (Adal Keep Admin → Usage)
+startFeatureUse(db)
 // Security headers first, for every answer.
 app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false, crossOriginResourcePolicy: { policy: "cross-origin" }, frameguard: false }))
 // Only Adal Keep's own pages may call it from a browser (no other website).

@@ -110,6 +110,27 @@
   .kv { display:grid; grid-template-columns:auto 1fr; gap:6px 14px; font-size:13px; } .kv span { color:var(--muted); }
   .tags { display:flex; flex-wrap:wrap; gap:6px; } .tags span { background:var(--panel2); border:1px solid var(--line); border-radius:999px; padding:3px 10px; font-size:12px; }
   .wait { border-left:3px solid var(--amber); }
+  /* Usage: one graph per agency */
+  .uctl { display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-bottom:14px; }
+  .uctl button { border:1px solid var(--line); background:var(--panel); color:var(--muted); border-radius:999px; padding:5px 12px; font:600 12.5px "Segoe UI", system-ui, sans-serif; cursor:pointer; }
+  .uctl button.on { background:var(--teal-soft); color:var(--teal-d); border-color:transparent; }
+  .uag { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:16px 18px; box-shadow:var(--shadow); margin-bottom:16px; }
+  .uag h3 { margin:0; font-size:16px; } .uag .sub { color:var(--muted); font-size:12.5px; margin:2px 0 12px; }
+  .uhead { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; flex-wrap:wrap; }
+  .ustats { display:flex; gap:18px; } .ustats div { text-align:right; } .ustats b { font-size:20px; display:block; letter-spacing:-.02em; } .ustats span { color:var(--muted); font-size:11.5px; }
+  .udays { display:flex; align-items:flex-end; gap:2px; height:70px; border-bottom:1px solid var(--line); margin:6px 0 4px; }
+  .udays i { flex:1; background:var(--teal); border-radius:3px 3px 0 0; min-height:0; opacity:.9; }
+  .udays i:hover { opacity:1; background:var(--teal-d); }
+  .udaysx { display:flex; justify-content:space-between; color:var(--muted); font-size:11px; margin-bottom:14px; }
+  .ugrp { color:var(--muted); font-size:11.5px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; margin:12px 0 4px; }
+  .urow { display:grid; grid-template-columns:minmax(150px,260px) 1fr 56px; gap:10px; align-items:center; font-size:13px; padding:2px 0; }
+  .urow .bar { height:12px; background:var(--panel2); border-radius:4px; overflow:hidden; }
+  .urow .bar i { display:block; height:100%; background:var(--teal); border-radius:0 4px 4px 0; min-width:2px; }
+  .urow .n { text-align:right; font-variant-numeric:tabular-nums; font-weight:600; }
+  .urow:hover .bar i { background:var(--teal-d); }
+  .unever { margin-top:12px; font-size:12.5px; } .unever .tags span { color:var(--muted); }
+  .urank .urow { grid-template-columns:minmax(150px,260px) 1fr 70px; cursor:pointer; }
+  #utip { position:fixed; pointer-events:none; background:var(--text); color:var(--bg); font-size:12px; padding:5px 9px; border-radius:8px; display:none; z-index:80; white-space:nowrap; }
   #toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:#0f172a; color:#fff; padding:10px 18px; border-radius:12px; font-size:13px; box-shadow:0 10px 30px #0005; display:none; z-index:70; max-width:80vw; }
 </style>
 </head>
@@ -122,6 +143,7 @@
     <button data-tab="inbox"><span class="ic">💬</span>Inbox</button>
     <button data-tab="payments"><span class="ic">💳</span>Payments</button>
     <button data-tab="plans"><span class="ic">⭐</span>Plans</button>
+    <button data-tab="usage"><span class="ic">📊</span>Usage</button>
     <button data-tab="cvt"><span class="ic">📄</span>CV templates</button>
     <button data-tab="agents"><span class="ic">🤝</span>Agents</button>
     <button data-tab="ceos"><span class="ic">👤</span>CEOs</button>
@@ -189,7 +211,7 @@ document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
   document.body.classList.toggle('chats', tab === 'inbox' || tab === 'chats')
   $('#sideT').textContent = tab === 'inbox' ? 'Inbox — your chat with each agency' : 'All chats'
   if (tab !== 'inbox' && tab !== 'chats') { $('#thread').style.display = 'none'; $('#compose').style.display = 'none' }
-  if (tab === 'payments' || tab === 'agencies' || tab === 'work' || tab === 'agents' || tab === 'ceos' || tab === 'plans' || tab === 'cvt') { open = null; showTable() } else renderList()
+  if (tab === 'payments' || tab === 'agencies' || tab === 'work' || tab === 'agents' || tab === 'ceos' || tab === 'plans' || tab === 'cvt' || tab === 'usage') { open = null; showTable() } else renderList()
   renderList()
 })
 
@@ -418,6 +440,79 @@ async function cvtView() {
 }
 
 // Plans: each agency's plan, paid days, trial days and features — Adal's signed licence (plans.js).
+// ------------------------------------------------------------------ Usage --
+// How much each agency uses every feature: a graph per agency (its PC sends
+// the counts every 30 minutes).
+let usage = null, usageDays = 30, usageAt = 0
+const dayKey = (d) => d.toLocaleDateString('en-CA')
+async function usageView() {
+  $('#title').textContent = 'Usage — how much each agency uses every feature'
+  if (!usage || Date.now() - usageAt > 120000) {
+    if (!usage) $('#table').innerHTML = '<p class="muted">Loading…</p>'
+    try { usage = await api('/api/usage'); usageAt = Date.now() } catch (e) { $('#table').innerHTML = `<p class="muted">Could not load: ${esc(e.message)}</p>`; return }
+    if (tab !== 'usage') return
+  }
+  const N = usageDays   // 0 = all time
+  const days = []
+  for (let i = (N || 90) - 1; i >= 0; i--) days.push(dayKey(new Date(Date.now() - i * 86400000)))
+  const inPeriod = new Set(days)
+  const count = (f) => N ? Object.entries(f.d || {}).reduce((s, [d, n]) => s + (inPeriod.has(d) ? n : 0), 0) : f.total
+  const q = (typeof query === 'string' ? query : '')
+  const list = usage.filter(a => !q || String(a.name).toLowerCase().includes(q) || String(a.pc_number || '').includes(q)).map(a => {
+    const feats = (a.usage?.features || []).map(f => ({ ...f, n: count(f) }))
+    const perDay = days.map(d => feats.reduce((s, f) => s + (f.d?.[d] || 0), 0))
+    return { ...a, feats, perDay, total: feats.reduce((s, f) => s + f.n, 0), active: perDay.filter(Boolean).length }
+  }).sort((x, y) => y.total - x.total)
+  const period = N ? `last ${N} days` : 'all time'
+  const fmt = (n) => Number(n).toLocaleString()
+  const top = Math.max(1, ...list.map(a => a.total))
+  const shortDay = (d) => new Date(d + 'T12:00').toLocaleDateString([], { day: 'numeric', month: 'short' })
+
+  const card = (a) => {
+    if (!a.usage) return `<div class="uag" id="u-${a.id}"><h3>${esc(a.name)}</h3><div class="sub">PC ${esc(a.pc_number || '—')} · no usage sent yet — it comes once this agency's PC has the newest Adal Keep and is on.</div></div>`
+    const used = a.feats.filter(f => f.n > 0).sort((x, y) => y.n - x.n)
+    const max = Math.max(1, ...used.map(f => f.n))
+    const groups = [...new Set(used.map(f => f.g))]
+    const usedNames = new Set(used.map(f => f.f))
+    const never = (a.usage.catalog || []).filter(c => !usedNames.has(c.f))
+    const dmax = Math.max(1, ...a.perDay)
+    const groupTotal = (g) => used.filter(f => f.g === g).reduce((s, f) => s + f.n, 0)
+    return `<div class="uag" id="u-${a.id}">
+      <div class="uhead"><div><h3>${esc(a.name)}</h3><div class="sub">PC ${esc(a.pc_number || '—')} · counts sent ${a.usage.at ? when(a.usage.at) : '—'}</div></div>
+        <div class="ustats"><div><b>${fmt(a.total)}</b><span>uses · ${period}</span></div>
+          <div><b>${used.length}<small style="font-size:13px;color:var(--muted)"> / ${used.length + never.length}</small></b><span>features used</span></div>
+          <div><b>${a.active}<small style="font-size:13px;color:var(--muted)"> / ${days.length}</small></b><span>days active</span></div></div></div>
+      <div class="udays">${a.perDay.map((n, i) => `<i style="height:${n ? Math.max(3, Math.round(n / dmax * 100)) : 0}%" data-tip="${shortDay(days[i])}: ${fmt(n)} uses"></i>`).join('')}</div>
+      <div class="udaysx"><span>${shortDay(days[0])}</span><span>uses per day${N ? '' : ' (last 90 days)'}</span><span>${shortDay(days[days.length - 1])}</span></div>
+      ${used.length ? groups.sort((x, y) => groupTotal(y) - groupTotal(x)).map(g => `<div class="ugrp">${esc(g)} · ${fmt(groupTotal(g))}</div>` +
+        used.filter(f => f.g === g).map(f => `<div class="urow" data-tip="${esc(f.f)}: ${fmt(f.n)} ${period} · ${fmt(f.total)} all time"><span>${esc(f.f)}</span><div class="bar"><i style="width:${(f.n / max * 100).toFixed(1)}%"></i></div><span class="n">${fmt(f.n)}</span></div>`).join('')).join('')
+        : `<p class="muted">Nothing used in the ${period}.</p>`}
+      ${never.length ? `<div class="unever"><div class="ugrp">Not used ${N ? `in the ${period}` : 'yet'} (${never.length})</div><div class="tags">${never.map(c => `<span title="${esc(c.g)}">${esc(c.f)}</span>`).join('')}</div></div>` : ''}
+    </div>`
+  }
+
+  $('#table').innerHTML = `
+    <div class="uctl">${[[7, '7 days'], [30, '30 days'], [90, '90 days'], [0, 'All time']].map(([d, t]) => `<button data-ud="${d}" class="${d === N ? 'on' : ''}">${t}</button>`).join('')}
+      <span class="muted" style="margin-left:8px;font-size:12px">${list.length} agencies · every PC sends its counts every 30 minutes (only numbers, nothing personal)</span></div>
+    <div class="uag urank"><h3>All agencies</h3><div class="sub">Uses in the ${period} — click one to see its graph</div>
+      ${list.map(a => `<div class="urow" data-go="${a.id}" data-tip="${esc(a.name)}: ${fmt(a.total)} uses, ${a.active} active days"><span>${esc(a.name)}</span><div class="bar">${a.total ? `<i style="width:${(a.total / top * 100).toFixed(1)}%"></i>` : ""}</div><span class="n">${a.usage ? fmt(a.total) : '—'}</span></div>`).join('') || '<p class="muted">No agencies.</p>'}
+    </div>
+    ${list.map(card).join('')}
+    <div id="utip"></div>`
+  const T = $('#table')
+  T.querySelectorAll('[data-ud]').forEach(b => b.onclick = () => { usageDays = Number(b.dataset.ud); usageView() })
+  T.querySelectorAll('[data-go]').forEach(r => r.onclick = () => document.getElementById('u-' + r.dataset.go)?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+  T.onmousemove = (e) => {
+    const tip = document.getElementById('utip'); if (!tip) return
+    const el = e.target.closest('[data-tip]')
+    if (!el) { tip.style.display = 'none'; return }
+    tip.textContent = el.dataset.tip; tip.style.display = 'block'
+    const w = tip.offsetWidth
+    tip.style.left = Math.min(window.innerWidth - w - 8, e.clientX + 12) + 'px'; tip.style.top = (e.clientY + 14) + 'px'
+  }
+  T.onmouseleave = () => { const tip = document.getElementById('utip'); if (tip) tip.style.display = 'none' }
+}
+
 async function plansView() {
   $('#title').textContent = 'Plans — loading…'
   const d = await api('/api/plans').catch(e => ({ error: e.message }))
@@ -760,6 +855,7 @@ function showTable() {
   if (tab === 'agents') return agentsView()
   if (tab === 'ceos') return ceosView()
   if (tab === 'plans') return plansView()
+  if (tab === 'usage') return usageView()
   if (tab === 'cvt') return cvtView()
   if (tab === 'payments') {
     $('#title').textContent = 'Payment receipts'
@@ -866,7 +962,7 @@ async function refresh() {
 }
 // Open at once with what was seen last time; the fresh copy follows.
 data = KEPT('overview') || data; work = KEPT('work') || work
-$('#search').oninput = (e) => { query = e.target.value.trim().toLowerCase(); pageOf = null; if (tab !== 'agencies') switchTab('agencies'); else agenciesView() }
+$('#search').oninput = (e) => { query = e.target.value.trim().toLowerCase(); pageOf = null; if (tab === 'usage') return usageView(); if (tab !== 'agencies') switchTab('agencies'); else agenciesView() }
 showTable(); renderList(); refresh(); setInterval(refresh, 5000)
 </script>
 </body>

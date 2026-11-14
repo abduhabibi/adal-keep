@@ -594,6 +594,32 @@ const api = {
       }
     })
   },
+  // Usage: how much each agency uses every feature (its PC sends the counts
+  // every 30 minutes, adal-keep-backend services/featureUse.js). An agency on
+  // more than one account (a new PC) is added up.
+  'GET /api/usage': async () => {
+    const [agencies, meta] = await Promise.all([
+      mainAgencies(),
+      rest('GET', 'keep_meta?key=eq./_usage&select=agency_id,data,updated_at').catch(() => []),
+    ])
+    return agencies.map(a => {
+      const reports = meta.filter(m => a.ids.includes(m.agency_id)).map(m => m.data).filter(Boolean)
+      if (!reports.length) return { id: a.id, name: a.name, pc_number: a.pc_number, usage: null }
+      const by = new Map(), cat = new Map()
+      for (const r of reports) {
+        for (const c of r.catalog || []) cat.set(c.f, c.g)
+        for (const f of r.features || []) {
+          const x = by.get(f.f) || { g: f.g, f: f.f, total: 0, d: {} }
+          x.total += f.total || 0
+          for (const [day, n] of Object.entries(f.d || {})) x.d[day] = (x.d[day] || 0) + n
+          by.set(f.f, x)
+        }
+      }
+      const newest = reports.map(r => r.at).sort().pop()
+      return { id: a.id, name: a.name, pc_number: a.pc_number,
+        usage: { at: newest, features: [...by.values()], catalog: [...cat].map(([f, g]) => ({ f, g })) } }
+    })
+  },
   // Backups (Telegram, locked with the agency's key, which Adal holds too).
   'POST /api/backup-run': async (q, b) => agencyCall(String(b.agency || ''), 'POST', '/_adal/backup/run', {}),
   'POST /api/backup-status': async (q, b) => agencyCall(String(b.agency || ''), 'GET', '/_adal/backup', null),

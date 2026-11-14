@@ -281,7 +281,7 @@ async function pushKeys(db) {
 // and at every start: ~1,800 reads at once, a busy PC for a minute or two.
 const FULL_MS = 6 * 3600 * 1000
 const PACE_MS = 60
-let lastFullAt = 0, lastSweepAt = 0, lastDiagAt = 0
+let lastFullAt = 0, lastSweepAt = 0, lastDiagAt = 0, lastUsageAt = 0
 
 /** Profiles touched since `since` (runs, documents, CVs, tasks, the profile itself). */
 async function changedProfiles(db, since) {
@@ -517,6 +517,15 @@ async function syncOnce(db, { light = false } = {}) {
         const data = await healthReport(db, installedVersion())
         await upsert(db, 'keep_meta', [{ agency_id: agency, key: '/_diag', data, updated_at: data.at }], 'agency_id,key')
       } catch (e) { console.warn('[cloud] health:', e.message) }
+    }
+    // How much each feature is used, for Adal Keep Admin → Usage (every 30 minutes; only counts).
+    if (Date.now() - lastUsageAt >= 30 * 60000) {
+      lastUsageAt = Date.now()
+      try {
+        const { usageReport } = await import('./featureUse.js')
+        const data = await usageReport(db)
+        await upsert(db, 'keep_meta', [{ agency_id: agency, key: '/_usage', data, updated_at: data.at }], 'agency_id,key')
+      } catch (e) { console.warn('[cloud] usage:', e.message) }
     }
     cloudStatus.error = null
     cloudStatus.last = new Date().toISOString()

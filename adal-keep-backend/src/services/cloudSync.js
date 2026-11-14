@@ -787,6 +787,25 @@ export function startRelay(db) {
     relayTimer = setTimeout(loop, wait)
   }
   relayTimer = setTimeout(loop, 15000)
+  // "The PC is on" on its own clock: every 15 s whatever the loop above is
+  // waiting for (a slow call, phone changes on a slow line), so Adal Keep Admin
+  // and the phones never see this PC as off while it works. Admin calls a PC off
+  // after 60 s without this.
+  let beating = false
+  setInterval(async () => {
+    if (beating || !relayStatus.on || Date.now() - lastBeat < 14000) return
+    beating = true
+    try {
+      const agency = await cloudAgencyId(db)
+      if (agency) {
+        await Promise.race([
+          upsert(db, 'keep_meta', [{ agency_id: agency, key: '/_pc', data: { at: new Date().toISOString() }, updated_at: new Date().toISOString() }], 'agency_id,key'),
+          new Promise((_, no) => setTimeout(() => no(new Error('slow')), 12000)),
+        ])
+        lastBeat = Date.now()
+      }
+    } catch {} finally { beating = false }
+  }, 5000).unref?.()
 }
 
 // ------------------------------------------------------------ pairing

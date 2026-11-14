@@ -35,13 +35,19 @@ async function noteSkipped(db, filePath, stat, why) {
   }).catch(() => {})
 }
 
-export async function enqueueFile(db, filePath) {
+/**
+ * Queue a file that arrived in a watched folder. `since` (ms): it may have
+ * arrived that long ago — the start-up pick-up of what came while Adal Keep
+ * was closed; otherwise only files of the last 10 minutes.
+ */
+export async function enqueueFile(db, filePath, { since = null } = {}) {
   const filename = path.basename(filePath)
   let stat
   try { stat = fs.statSync(filePath) } catch { return }
   if (!stat.isFile()) return
 
-  if (Date.now() - arrivedAt(stat) > NEW_FILE_MS) return // was already there
+  const arrived = arrivedAt(stat)
+  if (since ? arrived < since : Date.now() - arrived > NEW_FILE_MS) return // was already there
 
   // Skip non-document file types
   const ext = path.extname(filename).toLowerCase()
@@ -67,10 +73,20 @@ export async function enqueueFile(db, filePath) {
     .first()
   if (existing) return
 
-  // Already ingested into `files` with same name+size?
+  // Seen already since it arrived (read, or left alone with a reason): the
+  // folder check every 30 s must not take it again.
+  const seen = await db('ingest_queue')
+    .where('full_path', filePath).andWhere('file_size', stat.size)
+    .andWhere('created_at', '>=', new Date(arrived - 60000).toISOString())
+    .first()
+  if (seen) return
+
+  // Already ingested into `files` with same name+size? (A copy the Companion
+  // parked in the tray is not read yet: it does not count.)
   const done = await db('files')
     .where('original_name', filename)
     .andWhere('size', stat.size)
+    .whereNotNull('profile_field_id')
     .first()
   if (done) return
 
@@ -87,14 +103,19 @@ export async function enqueueFile(db, filePath) {
 }
 
 /**
- * Boot-time purge: any row left pending/processing from a previous run
- * is stale — we only process files that appear while the server is up.
+ * At start-up: files that were waiting (or being read) when Adal Keep closed
+ * are read now — a restart no longer loses them. Only older than a day: left.
  */
 export async function purgeStale(db) {
+  const now = new Date().toISOString()
+  const dayAgo = new Date(Date.now() - 24 * 3600000).toISOString()
+  const back = await db('ingest_queue')
+    .whereIn('status', ['pending', 'processing']).andWhere('created_at', '>=', dayAgo)
+    .update({ status: 'pending', started_at: null, updated_at: now })
   const n = await db('ingest_queue')
     .whereIn('status', ['pending', 'processing'])
-    .update({ status: 'expired', last_error: 'server restart', updated_at: new Date().toISOString() })
-  if (n > 0) console.log('[QUEUE] expired', n, 'stale row(s) from previous session')
+    .update({ status: 'expired', last_error: 'older than a day', updated_at: now })
+  if (back || n) console.log('[QUEUE] after the restart:', back, 'file(s) read again,', n, 'too old')
 }
 
 /**

@@ -250,6 +250,32 @@ export async function findOnPage(png, boxes) {
   }
 }
 
+/**
+ * Show JEV one page image and ask questions whose answer is one of a few.
+ * `questions` is { name: [question, { label: description }] }. Returns
+ * { name: { choice, confidence } }, or null when JEV is off or did not answer.
+ */
+export async function chooseOnPage(png, questions) {
+  if (!jevReady() || Date.now() < _lookPausedUntil) return null
+  try {
+    const { sdk, api } = await client()
+    const img = await sharp(png).resize({ width: JEV_MAX_SIDE, height: JEV_MAX_SIDE, fit: 'inside', withoutEnlargement: true }).png().toBuffer()
+    const qs = {}
+    for (const [k, [text, crit]] of Object.entries(questions)) qs[k] = sdk.choice(text, crit)
+    const res = await api.systemOne({ state: { page: sdk.image(img) }, questions: qs })
+    const out = {}
+    for (const k of Object.keys(questions)) {
+      const a = res.answers?.[k]
+      out[k] = a?.choice ? { choice: a.choice, confidence: Number(a.confidence ?? 0) } : null
+    }
+    return out
+  } catch (e) {
+    if ([401, 402, 403].includes(e?.status)) _lookPausedUntil = Date.now() + 10 * 60 * 1000
+    console.warn('[jev] choose on page failed:', e?.status || '', String(e?.message || e).slice(0, 120))
+    return null
+  }
+}
+
 /** Delete the temporary page image of a classifyWithJev() result. */
 export function release(result) {
   if (result?._tmp) try { fs.unlinkSync(result._tmp) } catch {}

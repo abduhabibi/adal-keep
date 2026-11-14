@@ -231,6 +231,7 @@ export async function runPipeline(filePath, db, analyzer, tag = '[pipeline]') {
       const existing = await db('files')
         .where('original_name', fname)
         .andWhere('size', fsize)
+        .whereNotNull('profile_field_id')   // a tray copy is not read yet
         .first()
       if (existing) {
         console.log(tag, 'skip — already ingested (name+size match):', fname)
@@ -283,6 +284,17 @@ export async function runPipeline(filePath, db, analyzer, tag = '[pipeline]') {
   }
 
   const ex = normalizeNameOrder(result.fields || {})
+  // A CV, visa or contract: every detail on it (JEV points, this PC reads,
+  // JEV picks the choices). It only adds what the reading above did not have.
+  try {
+    const { DETAIL_TYPES, readDocumentDetails } = await import('./docDetails.js')
+    if (DETAIL_TYPES.has(result.doc_type)) {
+      setStage(`reading every detail of the ${result.doc_type}`)
+      const more = await readDocumentDetails(filePath, result.doc_type, log)
+      for (const [k, v] of Object.entries(more)) if (v && !ex[k]) ex[k] = v
+      if (more.full_name && !result.fields?.full_name) normalizeNameOrder(ex)
+    }
+  } catch (e) { log('details:', e.message) }
   ex.phone_number = cleanPhone(ex.phone_number)
 
   // The name printed in the document. The file's own name ("IMG-2026…",
@@ -296,7 +308,7 @@ export async function runPipeline(filePath, db, analyzer, tag = '[pipeline]') {
   // profile too (kept as her CV; her passport is still asked for).
   const passportNo = String(ex.passport_number || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
   if (passportNo) ex.passport_number = passportNo
-  const cvWithPassport = result.doc_type === 'CV' && /^[A-Z]{1,2}d{6,8}$/.test(passportNo) && fullName.split(' ').length >= 2
+  const cvWithPassport = result.doc_type === 'CV' && /^[A-Z]{1,2}\d{6,9}$/.test(passportNo) && fullName.split(' ').length >= 2
   log(`name in the document: "${fullName}" (doc=${result.doc_type}, conf=${result.confidence})`)
 
   if (!db) return { ok: false, reason: 'no_db' }
@@ -397,12 +409,32 @@ export async function runPipeline(filePath, db, analyzer, tag = '[pipeline]') {
     })
   }
 
+  // The Companion's unread copy of this same download in the tray goes: it is
+  // filed now (only a copy of the last hour, same name and size).
+  try {
+    const origSize = fs.statSync(filePath).size
+    const trayCopies = await db('files').whereNull('profile_field_id')
+      .where('original_name', filename).andWhere('size', origSize)
+      .andWhere('created_at', '>=', new Date(Date.now() - 3600000).toISOString())
+    for (const t of trayCopies) {
+      await db('files').where('id', t.id).del()
+      try { const { resolveStoredPath } = await import('./cvRender.js'); const p = resolveStoredPath(t.path); if (p) fs.unlinkSync(p) } catch {}
+    }
+    if (trayCopies.length) log(`its copy in the tray (${trayCopies.length}) is filed now`)
+  } catch {}
+
   // A verified passport sets the details. Any other document only fills
   // what the profile does not have yet — it never renames anyone.
   const read = {}
   for (const k of ['first_name','middle_name','last_name','date_of_birth','gender','nationality','order_id',
                    'passport_issue_date','passport_expiry_date','place_of_birth',
-                   'surname_am','given_names_am','phone_number']) {
+                   'surname_am','given_names_am','phone_number',
+                   // what a CV, visa or contract tells (docDetails.js)
+                   'religion','marital_status','children_count','height','weight','education_level','living_town',
+                   'job_title','salary','experience_years','work_experience','experience_country','speaks_arabic',
+                   'speaks_english','cooking_skill','emergency_name','emergency_phone','mother_name','father_name',
+                   'spouse_name','labor_id','visa_number','visa_application_number','employer_name','employer_id',
+                   'employer_phone','employer_address','work_city','destination_country','contract_number','contract_date']) {
     if (ex[k]) read[k] = ex[k]
   }
   if (ex.sex && !ex.gender) read.gender = ex.sex
@@ -452,6 +484,37 @@ export async function runPipeline(filePath, db, analyzer, tag = '[pipeline]') {
   return { ok: true, profileId, taskId, docType: result.doc_type, files: formats.length, created: !!profile.created }
 }
 
+// When Adal Keep last watched (saved every 30 s): at start-up, what arrived
+// in the folders since then — while it was closed or restarting — is read too.
+const ALIVE_FILE = path.join(SAFE_STORAGE_DIR, '..', 'watcher-alive.json')
+const BOOT_AT = Date.now()
+function lastAlive() {
+  try { return Number(JSON.parse(fs.readFileSync(ALIVE_FILE, 'utf8')).at) || 0 } catch { return 0 }
+}
+const LAST_ALIVE = lastAlive()
+setInterval(() => { try { fs.writeFileSync(ALIVE_FILE, JSON.stringify({ at: Date.now() })) } catch {} }, 30000).unref?.()
+
+/** Every file in the folder that arrived since `since` goes to the queue (it skips what it has seen). */
+async function sweepFolder(watchDir, db, since) {
+  let names = []
+  try { names = await fs.promises.readdir(watchDir) } catch { return 0 }
+  let n = 0
+  for (const name of names) {
+    if (name.startsWith('.') || !ALLOWED_EXTS[path.extname(name).toLowerCase()]) continue
+    const fp = path.join(watchDir, name)
+    try {
+      const st = await fs.promises.stat(fp)
+      if (!st.isFile() || Math.max(st.birthtimeMs || 0, st.ctimeMs || 0) < since) continue
+      if (Date.now() - st.mtimeMs < 3000) continue   // still being written: next round
+      const before = await db('ingest_queue').count('* as c').first()
+      await enqueueFile(db, fp, { since })
+      const after = await db('ingest_queue').count('* as c').first()
+      if (Number(after.c) > Number(before.c)) n++
+    } catch {}
+  }
+  return n
+}
+
 export function startWatcher(watchDir, db, processorFn, tag = '[pipeline]') {
   if (!fs.existsSync(watchDir)) {
     // e.g. Telegram's folder before its first download: look again later.
@@ -463,6 +526,18 @@ export function startWatcher(watchDir, db, processorFn, tag = '[pipeline]') {
     return
   }
   console.log(`${tag} watching ${watchDir}`)
+  // Windows sometimes says nothing about a new file (many at once, a file
+  // moved in, a restart): the folder is also looked at every 30 seconds, and
+  // at start-up for everything since Adal Keep last watched (at most a day).
+  if (!startWatcher.swept) startWatcher.swept = new Set()
+  if (!startWatcher.swept.has(watchDir)) {
+    startWatcher.swept.add(watchDir)
+    const bootSince = Math.max(LAST_ALIVE ? LAST_ALIVE - 60000 : BOOT_AT - 10 * 60000, Date.now() - 24 * 3600000)
+    setTimeout(() => sweepFolder(watchDir, db, bootSince)
+      .then(n => { if (n) console.log(`${tag} ${n} file(s) that came while Adal Keep was closed: reading them`) }).catch(() => {}), 5000).unref?.()
+    setInterval(() => sweepFolder(watchDir, db, Date.now() - 10 * 60000)
+      .then(n => { if (n) console.log(`${tag} ${n} file(s) Windows did not report: reading them`) }).catch(() => {}), 30000).unref?.()
+  }
   const timers = new Map()
   const watcher = fs.watch(watchDir, (evt, fname) => {
     if (!fname || fname.startsWith('.')) return

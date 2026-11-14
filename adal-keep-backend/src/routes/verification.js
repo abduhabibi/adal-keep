@@ -7,6 +7,7 @@
 import express from 'express'
 import path from 'path'
 import fs from 'fs'
+import os from 'os'
 import { upload, generateThumbnail, getRelativePath } from '../services/storage.js'
 import {
   TICKS,
@@ -158,6 +159,31 @@ router.post('/companion/ingest', upload.single('file'), async (req, res) => {
     }
 
     // ── Park in the tray ──────────────────────────────────────────────
+    // The same download sent again (the Companion sees it twice): one copy.
+    const again = await handle('files').whereNull('profile_field_id')
+      .where('original_name', req.file.originalname).andWhere('size', req.file.size)
+      .andWhere('created_at', '>=', new Date(Date.now() - 10 * 60000).toISOString()).first()
+    if (again) {
+      try { fs.unlinkSync(req.file.path) } catch {}
+      return res.status(200).json({ ok: true, mode: 'tray', client_id: clientId, fileId: again.id, original_name: again.original_name, mimetype: again.mimetype, size: again.size, again: true })
+    }
+    // An employee's PC: its download is read here like this PC's own (this
+    // PC's own Downloads is read by its own watcher). It stays in the tray
+    // until it is filed, so nothing is lost when it cannot be.
+    const fromThisPC = clientId.toLowerCase().endsWith('-' + os.hostname().toLowerCase())
+    if (!fromThisPC) {
+      try {
+        const { ALLOWED_EXTS } = await import('../services/docPipeline.js')
+        if (ALLOWED_EXTS[path.extname(req.file.originalname).toLowerCase()]) {
+          const inbox = path.join(process.cwd(), 'data', 'companion-inbox', String(Date.now()))
+          fs.mkdirSync(inbox, { recursive: true })
+          const copy = path.join(inbox, path.basename(req.file.originalname))
+          fs.copyFileSync(req.file.path, copy)
+          const { enqueueFile } = await import('../services/ingestQueue.js')
+          await enqueueFile(handle, copy, { since: Date.now() - 60000 })
+        }
+      } catch (e) { console.warn('[companion] could not queue it for reading:', e.message) }
+    }
     if (req.file.mimetype?.startsWith('image/')) {
       const thumbPath = req.file.path.replace(/(\.\w+)$/, '_thumb$1')
       try { await generateThumbnail(req.file.path, thumbPath) } catch {}

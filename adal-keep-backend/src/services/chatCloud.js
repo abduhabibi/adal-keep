@@ -98,10 +98,13 @@ async function token(db) {
   return sess.access_token
 }
 
-async function call(db, method, pathAndQuery, body, { headers = {}, raw = false } = {}) {
+async function call(db, method, pathAndQuery, body, { headers = {}, raw = false, timeout } = {}) {
   const { url, anon } = cfg()
   const t = await token(db)
+  // Never waits for ever: on a line that drops, a dead connection used to hold the
+  // PC's answers to Admin and the phones, and the update check, until a restart.
   const res = await fetch(`${url}${pathAndQuery}`, {
+    signal: AbortSignal.timeout(timeout || (raw || Buffer.isBuffer(body) ? 10 * 60_000 : 60_000)),
     method,
     headers: {
       apikey: anon,

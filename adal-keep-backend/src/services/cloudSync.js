@@ -55,6 +55,8 @@ const sha = (s) => crypto.createHash('sha1').update(s).digest('hex')
 // (No body — undefined or null, e.g. a phone's DELETE — is sent as none: "null" is refused as JSON.)
 const local = (method, p, { body, headers = {} } = {}) => fetch(`http://127.0.0.1:${PORT()}/api${p}`, {
   method,
+  // A page of this PC that never answers (a stuck reading) gives up after 3 minutes.
+  signal: AbortSignal.timeout(3 * 60_000),
   headers: { ...(body != null && !(body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}), 'X-Adal-Cloud': '1', ...headers },
   body: body == null || method === 'GET' ? undefined : body instanceof FormData ? body : JSON.stringify(body),
 })
@@ -747,13 +749,16 @@ async function relayOnce(db) {
     lastBeat = Date.now()
   }
   // A phone is busy: its uploads are filed at once too, not at the next minute.
-  if (Date.now() - relayStatus.lastCall < 3 * 60000) await applyChanges(db, agency).catch(() => {})
+  if (Date.now() - relayStatus.lastCall < 3 * 60000) await Promise.race([applyChanges(db, agency).catch(() => {}), new Promise(r => setTimeout(r, 30000))])
   const todo = (calls || []).filter(c => !working.has(c.id))
   if (todo.length) relayStatus.lastCall = Date.now()
-  await Promise.all(todo.map(async c => {
+  // One slow call (a passport being read, a big file) never holds the others:
+  // the loop goes on after 20 s, and the slow one answers when it is done.
+  const all = Promise.all(todo.map(async c => {
     working.add(c.id)
-    try { await answerCall(db, agency, c) } finally { setTimeout(() => working.delete(c.id), 10000) }
+    try { await answerCall(db, agency, c) } catch {} finally { setTimeout(() => working.delete(c.id), 10000) }
   }))
+  await Promise.race([all, new Promise(r => setTimeout(r, 20000))])
   if (Date.now() - lastClean > 5 * 60000) {
     lastClean = Date.now()
     const old = new Date(Date.now() - 10 * 60000).toISOString()

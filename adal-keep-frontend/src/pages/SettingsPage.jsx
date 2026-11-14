@@ -150,7 +150,7 @@ export default function SettingsPage() {
       setUpdateModal(res.data.hasUpdate ? 'available' : 'uptodate')
     } catch (err) {
       setUpdateInfo(null)
-      setUpdateMessage(err.response?.data?.error || 'Could not reach GitHub to check for updates.')
+      setUpdateMessage([err.response?.data?.error || 'Could not reach the updates.', err.response?.data?.details].filter(Boolean).join(' — '))
       setUpdateModal('error')
     } finally {
       setChecking(false)

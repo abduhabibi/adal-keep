@@ -46,7 +46,9 @@ export default function PassportFirst({ onRead, onSkip }) {
       const fd = new FormData()
       fd.append('file', file, file.name || 'passport.jpg')
       const { data } = await api.post('/new-profile/read', fd, { timeout: 120000, headers: { 'Content-Type': 'multipart/form-data' } })
-      if (data.error) setProblem({ text: `The passport could not be read (${data.error}). Try a sharper picture, or fill the form by hand.`, result: data })
+      // Adal Admin / a phone with the office PC not answering: the reading is done there, not here.
+      if (data.queued || (!data.doc_type && !data.error && !data.fields)) setProblem({ text: 'The office PC did not answer, and a passport is read there. Open Adal Keep on the office PC (or check its internet), then try again.', result: data })
+      else if (data.error) setProblem({ text: `The passport could not be read (${data.error}). Try a sharper picture, or fill the form by hand.`, result: data })
       else if (data.doc_type !== 'Passport') setProblem({ text: `This looks like ${!data.doc_type || data.doc_type === 'other' ? 'something other than a passport' : `a ${data.doc_type}`}, not a passport data page.`, result: data })
       else if (data.existing) setProblem({ text: 'This passport already has a profile:', result: data })
       else onRead(data)

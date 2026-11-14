@@ -1,5 +1,10 @@
 /** Adal Keep's window on this PC: while one is open Adal Keep lives (services/appLife.js). */
 import express from 'express'
+import fs from 'fs'
+import os from 'os'
+import path from 'path'
+import { execFile } from 'child_process'
+import { fileURLToPath } from 'url'
 import { isLocal } from '../services/networkGate.js'
 import { windowOpened, windowsOpen, busyNow, endEverything } from '../services/appLife.js'
 import { onChanged } from '../services/changes.js'
@@ -26,6 +31,21 @@ router.get('/changes', (req, res) => {
   const off = onChanged((c) => res.write(`data: ${JSON.stringify(c)}\n\n`))
   const ping = setInterval(() => res.write(': ping\n\n'), 25000)
   req.on('close', () => { clearInterval(ping); off() })
+})
+
+// Double "C" in Adal Keep: Windows' own screen crop (as Win+Shift+S) on this
+// PC; the cropped picture comes back to the page (it goes into the tray).
+router.post('/app/screen-clip', async (req, res) => {
+  if (!isLocal(req) || process.platform !== 'win32') return res.status(403).json({ error: 'The screen crop works on the main PC itself: on this computer press Win+Shift+S, then Ctrl+V in Adal Keep.' })
+  const out = path.join(os.tmpdir(), `adal-clip-${Date.now()}.png`)
+  const script = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'scripts', 'screen-clip.ps1')
+  execFile('powershell.exe', ['-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-File', script, '-Out', out, '-WaitSeconds', '120'],
+    { windowsHide: true, timeout: 130000 }, (e, stdout) => {
+      if (String(stdout).trim() !== 'ok' || !fs.existsSync(out)) return res.status(204).end()   // nothing cropped
+      res.setHeader('Content-Type', 'image/png')
+      res.send(fs.readFileSync(out))
+      fs.unlink(out, () => {})
+    })
 })
 
 // "Quit Adal Keep": the same as closing its last window, at once.

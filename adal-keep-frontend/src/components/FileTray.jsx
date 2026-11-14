@@ -56,6 +56,38 @@ export default function FileTray() {
     return () => document.removeEventListener('paste', handlePaste)
   }, [addFiles])
 
+  // "C" pressed twice quickly (not while typing): Windows' screen crop, as
+  // Win+Shift+S; the cropped picture comes into the tray.
+  useEffect(() => {
+    if (import.meta.env.VITE_PHONE === '1' || import.meta.env.VITE_DEMO === '1') return
+    let last = 0, busy = false
+    const onKey = async (e) => {
+      if (e.repeat || e.ctrlKey || e.altKey || e.metaKey || String(e.key).toLowerCase() !== 'c') return
+      const t = e.target
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
+      const now = Date.now()
+      if (now - last > 450) { last = now; return }
+      last = 0
+      if (busy) return
+      busy = true
+      const wait = toast.loading('Crop what you need on the screen… (Esc: no crop)')
+      try {
+        const r = await api.post('/app/screen-clip', {}, { responseType: 'blob', timeout: 140000 })
+        toast.dismiss(wait)
+        if (r.status === 204 || !r.data?.size) { toast('Nothing was cropped'); return }
+        const file = new File([r.data], `Screenshot ${new Date().toLocaleString().replace(/[/:]/g, '-')}.png`, { type: 'image/png' })
+        if (addFiles([file])) toast.success('Cropped picture is in the tray — drag it onto a field')
+      } catch (err) {
+        toast.dismiss(wait)
+        let msg = err.message
+        try { msg = JSON.parse(await err.response?.data?.text?.())?.error || msg } catch {}
+        toast.error(msg)
+      } finally { busy = false }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [addFiles])
+
   // Global drag & drop — ONLY intervenes for external OS file drags.
   // Internal profile/tray drags are left 100% alone (this was the bug).
   useEffect(() => {

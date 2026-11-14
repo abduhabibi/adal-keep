@@ -445,9 +445,10 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
         />
       )}
 
-      {pendingFile && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 animate-fade-in">
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden border border-slate-200 dark:border-slate-700">
+      {/* On top of the page itself (a portal): inside the card its glass and hover showed through and made it flicker. */}
+      {pendingFile && createPortal(
+        <div className="fixed inset-0 bg-black/60 z-[95] flex items-center justify-center p-4" onClick={() => setPendingFile(null)}>
+          <div className="solid-sheet bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden border border-slate-200 dark:border-slate-700" onClick={e => e.stopPropagation()}>
             <div className="p-5 border-b border-slate-100 dark:border-slate-700">
               <h4 className="font-bold text-slate-800 dark:text-white text-lg">Choose Save Format</h4>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 truncate">File: {pendingFile.name}</p>
@@ -469,13 +470,14 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
               <button onClick={() => setPendingFile(null)} className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-lg transition-colors">Cancel</button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Download Format Modal */}
-      {isDownloadModalOpen && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 animate-fade-in">
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden border border-slate-200 dark:border-slate-700">
+      {isDownloadModalOpen && createPortal(
+        <div className="fixed inset-0 bg-black/60 z-[95] flex items-center justify-center p-4" onClick={() => setIsDownloadModalOpen(false)}>
+          <div className="solid-sheet bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden border border-slate-200 dark:border-slate-700" onClick={e => e.stopPropagation()}>
             <div className="p-5 border-b border-slate-100 dark:border-slate-700 flex justify-between items-center">
               <h3 className="font-bold text-slate-800 dark:text-white text-lg">Download Format</h3>
               <button onClick={() => setIsDownloadModalOpen(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
@@ -501,7 +503,8 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
               ))}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Full-screen file preview — Portal + Telegram style */}

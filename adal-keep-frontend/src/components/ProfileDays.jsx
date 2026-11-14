@@ -21,7 +21,6 @@ export function FmolBadge({ fmol, stage }) {
 
 export default function ProfileDays({ profileId }) {
   const [d, setD] = useState(null)
-  const [all, setAll] = useState(false)
   useEffect(() => {
     let alive = true
     const load = () => api.get(`/profiles/${profileId}/days`).then(r => alive && setD(r.data)).catch(() => {})
@@ -30,32 +29,36 @@ export default function ProfileDays({ profileId }) {
     return () => { alive = false; off() }
   }, [profileId])
   if (!d) return null
-  const days = all ? d.days : d.days.slice(0, 7)
+  // Sideways (asked on 2026-11-14, to save height): one tile per day, newest first; many days scroll sideways.
   return (
-    <section className="panel p-4">
-      <div className="mb-3 flex flex-wrap items-center gap-2">
+    <section className="panel px-4 py-3">
+      <div className="mb-2 flex flex-wrap items-center gap-2">
         <h2 className="font-display text-base font-bold text-slate-900 dark:text-white">📅 Day by day</h2>
         <FmolBadge fmol={d.fmol} stage={d.musaned_stage} />
         {d.musaned_stage && <span className="text-xs text-slate-500">Musaned: {d.musaned_stage}</span>}
         <span className="ml-auto text-[11px] text-slate-400">{d.checked_at ? `Musaned looked at ${new Date(d.checked_at).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · ` : ''}checked by itself every 2 hours</span>
       </div>
       {!d.days.length ? <p className="text-sm text-slate-500">Her first day is kept within the hour.</p> : (
-        <ol className="space-y-1.5">
-          {days.map(x => (
-            <li key={x.day} className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-slate-100 px-3 py-1.5 dark:border-slate-800">
-              <span className="w-24 shrink-0 text-xs font-semibold text-slate-700 dark:text-slate-200">{dayName(x.day)}</span>
-              <span className="flex items-center gap-1" title={ORDER.map(k => `${TITLES[k]}: ${x.steps?.[k] || '—'}`).join('\n')}>
-                {ORDER.map(k => <span key={k} className={`h-2.5 w-2.5 rounded-full ${DOT[x.steps?.[k]] || DOT.todo}`} title={`${TITLES[k]}: ${x.steps?.[k] || '—'}`} />)}
-              </span>
-              {x.musaned_stage && <span className="text-[11px] text-indigo-700 dark:text-indigo-300">{x.musaned_stage}</span>}
-              <span className="min-w-0 flex-1 text-xs text-slate-600 dark:text-slate-300">
-                {x.changes.length ? x.changes.join(' · ') : x.first ? 'first day kept' : 'no change'}
-              </span>
-            </li>
-          ))}
+        <ol className="flex gap-2 overflow-x-auto pb-1 custom-scrollbar">
+          {d.days.map(x => {
+            const said = x.changes.length ? x.changes.join(' · ') : x.first ? 'first day kept' : 'no change'
+            return (
+              <li key={x.day} className="w-44 shrink-0 rounded-lg border border-slate-100 px-2.5 py-1.5 dark:border-slate-800" title={`${dayName(x.day)}: ${said}${x.musaned_stage ? `
+Musaned: ${x.musaned_stage}` : ''}`}>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">{dayName(x.day)}</span>
+                  <span className="flex items-center gap-0.5">
+                    {ORDER.map(k => <span key={k} className={`h-2 w-2 rounded-full ${DOT[x.steps?.[k]] || DOT.todo}`} title={`${TITLES[k]}: ${x.steps?.[k] || '—'}`} />)}
+                  </span>
+                </div>
+                <p className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-slate-600 dark:text-slate-300">
+                  {x.musaned_stage && <span className="text-indigo-700 dark:text-indigo-300">{x.musaned_stage} · </span>}{said}
+                </p>
+              </li>
+            )
+          })}
         </ol>
       )}
-      {d.days.length > 7 && <button type="button" onClick={() => setAll(a => !a)} className="mt-2 text-xs font-semibold text-teal-700 hover:underline dark:text-teal-300">{all ? 'Show the last 7 days' : `Show all ${d.days.length} days`}</button>}
     </section>
   )
 }

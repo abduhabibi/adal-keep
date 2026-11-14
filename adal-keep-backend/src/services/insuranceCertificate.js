@@ -3,9 +3,10 @@
  * Insurance's agency platform (agency.niscofetap.com). Workflow id:
  * insurance_certificate.
  *
- *   1. Sign in with the insurance account (one for every run). Anything the
- *      sign-in asks besides the name and password (a code, a captcha) is a
- *      person's: the tab comes to the front and rings.
+ *   1. Sign in with the insurance account (one for every run): Adal Keep
+ *      presses Sign in itself — FetaP's reCAPTCHA needs nothing (said by the
+ *      agency, 2026-11-14). Still on the sign-in page 15 s later: the tab
+ *      comes to the front and rings for a person.
  *   2. Certificate → Draft Certificates (/certificate/draft) → New Certificate.
  *   3. The form: Insurance Branch (Settings → Insurance), Number Of Insured 1,
  *      Title, First / Father / Grand Father Name, Gender, Date Of Birth,
@@ -116,7 +117,8 @@ async function signIn(page, ctx) {
     if (!(await hasPassword(page))) { log(ctx, '✓ already signed in to FetaP'); return }
     if (!ctx.insurance_username || !ctx.insurance_password) throw new Error('No insurance account — add one under AI Actions → Insurance login account')
     const f = await fillLogin(page, ctx)
-    if (f.ok && !f.extra) {
+    // FetaP's reCAPTCHA needs no person: with the name and password in, Sign in is pressed.
+    if (f.ok) {
       log(ctx, `🔐 signing in as ${ctx.insurance_name || ctx.insurance_username}`)
       await clickText(page, /^\s*(log ?in|sign ?in|login)\s*$/)
     } else {
@@ -124,7 +126,7 @@ async function signIn(page, ctx) {
       await ctx.notify(`🛡 ${ctx.profileName}: insurance sign-in needs you`, 'The FetaP tab is in front with the name and password filled. Finish the sign-in; Adal Keep continues by itself.', 'warn', { login: page })
     }
     const t0 = Date.now()
-    let asked = f.extra
+    let asked = !f.ok
     while (Date.now() - t0 < LOGIN_WAIT_MS) {
       if (cancelled(ctx)) { const e = new Error('Cancelled by user'); e.cancelled = true; throw e }
       await sleep(2000)

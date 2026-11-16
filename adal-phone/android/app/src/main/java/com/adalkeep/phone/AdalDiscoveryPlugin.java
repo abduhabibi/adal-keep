@@ -237,6 +237,39 @@ public class AdalDiscoveryPlugin extends Plugin {
         call.resolve();
     }
 
+    /** noticeState() → { allowed, background }: notifications allowed; Android lets the app wake in the background. */
+    @PluginMethod
+    public void noticeState(PluginCall call) {
+        Context c = getContext();
+        JSObject r = new JSObject();
+        r.put("allowed", androidx.core.app.NotificationManagerCompat.from(c).areNotificationsEnabled());
+        android.os.PowerManager pm = c.getSystemService(android.os.PowerManager.class);
+        r.put("background", pm != null && pm.isIgnoringBatteryOptimizations(c.getPackageName()));
+        call.resolve(r);
+    }
+
+    /**
+     * letRunInBackground({settings}): Android's question "let Adal Keep run in the
+     * background?" (its battery saver stops waking it otherwise); settings: true
+     * opens the app's own page instead (notifications, battery, auto-start).
+     */
+    @PluginMethod
+    public void letRunInBackground(PluginCall call) {
+        Context c = getContext();
+        try {
+            Intent i;
+            android.os.PowerManager pm = c.getSystemService(android.os.PowerManager.class);
+            if (!Boolean.TRUE.equals(call.getBoolean("settings", false)) && pm != null && !pm.isIgnoringBatteryOptimizations(c.getPackageName())) {
+                i = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + c.getPackageName()));
+            } else {
+                i = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + c.getPackageName()));
+            }
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getActivity().startActivity(i);
+            call.resolve();
+        } catch (Exception e) { call.reject(e.getMessage()); }
+    }
+
     /** clearNotices({all, id}): the bell was cleared — its Android notifications go too. */
     @PluginMethod
     public void clearNotices(PluginCall call) {

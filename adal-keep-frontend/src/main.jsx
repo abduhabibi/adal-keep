@@ -101,6 +101,13 @@ async function phoneBoot() {
   import('./cloud/adapter.js').then(({ cloudCreds }) => {
     const c = cloudCreds(), p = window.Capacitor?.Plugins?.AdalDiscovery
     if (c?.email && p?.notices) p.notices({ on: true, url: c.url, anon: c.anon, email: c.email, password: c.password, agency: c.agency }).catch(() => {})
+    // Once: Android's "let Adal Keep run in the background?" — else its battery
+    // saver stops the notifications once the app is swiped away (asked on 2026-11-16).
+    if (p?.noticeState && p?.letRunInBackground) setTimeout(() => p.noticeState().then(s => {
+      let asked = false
+      try { asked = localStorage.getItem('adal-asked-background') === '1' } catch {}
+      if (!s?.background && !asked) { try { localStorage.setItem('adal-asked-background', '1') } catch {} p.letRunInBackground({}).catch(() => {}) }
+    }).catch(() => {}), 4000)
   }).catch(() => {})
   phoneUpdates()
 }

@@ -2,6 +2,37 @@ import { useEffect, useState } from 'react'
 import Card from './shared/Card'
 import SmsCodesSwitch from './SmsCodesSwitch'
 
+const plugin = () => window.Capacitor?.Plugins?.AdalDiscovery
+
+/** Notifications with the app closed (also swiped away): what Android allows, and where to allow the rest. */
+function NoticesRow() {
+  const [st, setSt] = useState(null)
+  const load = () => plugin()?.noticeState?.().then(setSt).catch(() => setSt(null))
+  useEffect(() => {
+    load()
+    const on = () => { if (!document.hidden) load() }
+    document.addEventListener('visibilitychange', on)
+    return () => document.removeEventListener('visibilitychange', on)
+  }, [])
+  if (!plugin()?.noticeState) return null
+  const ok = st?.allowed && st?.background
+  return (
+    <div className={`mt-3 rounded-xl border p-3 ${ok ? 'border-emerald-200 dark:border-emerald-800' : 'border-amber-300 dark:border-amber-700'}`}>
+      <p className="text-sm font-semibold">🔔 Notifications when the app is closed {ok ? <span className="text-emerald-600">— on</span> : <span className="text-amber-600">— not fully allowed</span>}</p>
+      <p className="mt-1 text-xs text-slate-500">They come also after Adal Keep is swiped away (about every minute; a sleeping phone may wait a few minutes).</p>
+      <ul className="mt-2 space-y-1 text-xs">
+        <li>{st?.allowed ? '✅' : '❌'} Notifications allowed</li>
+        <li>{st?.background ? '✅' : '❌'} Runs in the background (no battery saving)</li>
+      </ul>
+      <div className="mt-2 flex flex-wrap gap-2">
+        {!st?.background && <button type="button" onClick={() => plugin().letRunInBackground({}).catch(() => {})} className="rounded-full bg-teal-600 px-3 py-1.5 text-xs font-bold text-white">Allow in the background</button>}
+        <button type="button" onClick={() => plugin().letRunInBackground({ settings: true }).catch(() => {})} className="rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold dark:border-slate-700">App settings (auto-start, battery)</button>
+      </div>
+      <p className="mt-2 text-[11px] text-slate-400">Tecno, Infinix, itel, Xiaomi, Oppo: also turn on <b>Auto-start</b> for Adal Keep in App settings (or the phone's Phone Master / Security app), and lock it in the recent apps.</p>
+    </div>
+  )
+}
+
 /**
  * Settings → This phone (only in the phone app): is the office PC live,
  * the app's version and its update, pairing with another agency.
@@ -41,6 +72,7 @@ export default function PhoneCard() {
         <button type="button" onClick={() => { if (confirm('Pair this phone with another agency (its PC number)?')) window.__adalPair?.() }}
           className="ml-auto rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold dark:border-slate-700">Pair with another agency</button>
       </div>
+      <NoticesRow />
       <SmsCodesSwitch />
     </Card>
   )

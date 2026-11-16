@@ -55,11 +55,19 @@ public class AdalNoticeJob extends JobService {
         }
         e.apply();
         JobScheduler js = c.getSystemService(JobScheduler.class);
-        if (!on) { js.cancel(SOON); js.cancel(EVERY); return; }
+        if (!on) { js.cancel(SOON); js.cancel(EVERY); AdalNoticeAlarm.cancel(c); return; }
+        again(c);
+    }
+
+    /** The job and the alarm (again): at pairing, at every start of the app, after a restart of the phone. */
+    static void again(Context c) {
+        JobScheduler js = c.getSystemService(JobScheduler.class);
         ComponentName me = new ComponentName(c, AdalNoticeJob.class);
         js.schedule(new JobInfo.Builder(EVERY, me).setPeriodic(15 * 60000L).setPersisted(true)
             .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY).build());
         soon(c, 5000);
+        // Android's alarm too: it also wakes the app after it was swiped away.
+        AdalNoticeAlarm.schedule(c, 30_000L);
     }
 
     private static void soon(Context c, long ms) {
@@ -74,6 +82,8 @@ public class AdalNoticeJob extends JobService {
     public boolean onStartJob(final JobParameters params) {
         new Thread(() -> {
             try { look(getApplicationContext()); } catch (Exception ignored) { }
+            // (A phone that dropped the alarm when the app was swiped away gets it back here.)
+            if (getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("on", false)) AdalNoticeAlarm.schedule(getApplicationContext(), 60_000L);
             if (getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("on", false)) soon(getApplicationContext(), 60000);
             jobFinished(params, false);
         }).start();
@@ -84,7 +94,7 @@ public class AdalNoticeJob extends JobService {
     public boolean onStopJob(JobParameters params) { return true; }
 
     /** One look at the bell: new ones shown, gone ones taken away. */
-    static void look(Context c) throws Exception {
+    static synchronized void look(Context c) throws Exception {
         SharedPreferences p = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         if (!p.getBoolean("on", false)) return;
         String url = p.getString("url", ""), anon = p.getString("anon", ""), agency = p.getString("agency", "");

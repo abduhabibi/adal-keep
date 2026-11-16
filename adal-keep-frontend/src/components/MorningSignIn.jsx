@@ -62,7 +62,20 @@ export default function MorningSignIn() {
                 </span>
               )}
             </span>
-            {s.signedIn && !s.shared
+            {s.accounts?.length > 1
+              // Several accounts: each one apart, in a browser space of its own — signing in as one never signs the other out.
+              ? <span className="flex shrink-0 flex-col gap-1">
+                  {s.accounts.map(a => (
+                    <span key={a.id} className="flex items-center justify-end gap-1.5 text-xs">
+                      <span className={`h-2 w-2 rounded-full ${a.signedIn ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`} />
+                      <span className="max-w-[7rem] truncate" title={a.main ? "Main account (the browser's own window)" : 'Its own browser window'}>{a.name}</span>
+                      {a.signedIn
+                        ? <span className="font-semibold text-emerald-700 dark:text-emerald-300">✓</span>
+                        : <button type="button" onClick={() => open(s, a.id)} className="rounded-md bg-teal-600 px-2 py-0.5 font-semibold text-white hover:bg-teal-700">Sign in</button>}
+                    </span>
+                  ))}
+                </span>
+              : s.signedIn && !s.shared
               ? <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-300">Signed in</span>
               : <button type="button" onClick={() => start(s)} title={s.shared ? 'One sign-in for the agency: this takes it over for you' : ''}
                   className={`shrink-0 rounded-lg px-2.5 py-1 text-xs font-semibold ${s.shared && s.signedIn ? 'border border-teal-600 text-teal-700 hover:bg-teal-50 dark:text-teal-300' : 'bg-teal-600 text-white hover:bg-teal-700'}`}>

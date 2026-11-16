@@ -322,7 +322,9 @@ async function newWindow(browser, bounds, background) {
  * A run's new tab, in the agents' window: no new window ever shows. A plain new
  * tab would go to the last used window, a person's.
  */
-export async function newRunTab(browser) {
+export async function newRunTab(browser, space = null) {
+  // An account's own space: a tab there (its window), signed in as that account.
+  if (space && space !== browser.defaultBrowserContext?.()) return backgroundTab(browser, space.id).catch(() => space.newPage())
   if (!browser.target) return browser.newPage()
   // On the person's screen: the run's tab opens behind, the person stays on the tab they are on.
   if (!HIDDEN) return backgroundTab(browser).catch(() => browser.newPage())
@@ -334,10 +336,11 @@ export async function newRunTab(browser) {
 let _opening = Promise.resolve()
 
 /** A new tab that opens behind the one the person is on (it is not brought forward). */
-async function backgroundTab(browser) {
+async function backgroundTab(browser, browserContextId = undefined) {
   const cdp = await browser.target().createCDPSession()
   try {
-    const { targetId } = await cdp.send('Target.createTarget', { url: 'about:blank', background: true })
+    // (browserContextId: an account's own space — its window, behind the person's.)
+    const { targetId } = await cdp.send('Target.createTarget', { url: 'about:blank', background: true, ...(browserContextId ? { browserContextId } : {}) })
     const target = await browser.waitForTarget(t => t._targetId === targetId, { timeout: 15000 })
     return await target.page()
   } finally { cdp.detach().catch(() => {}) }
@@ -374,9 +377,47 @@ async function hideRunWindows(browser) {
   for (const w of windows.values()) if (w.run && !w.person && !(await outOfSight(w.page))) await hide(w.page).catch(() => {})
 }
 
+// ── Each portal account in a browser space of its own (asked on 2026-11-15) ──
+// A portal keeps its sign-in in the browser's cookies, which every tab of one
+// space shares: two Musaned accounts could not be signed in together ("nuzla
+// is signed in: log out to sign in as zadulmead"). The site's main account
+// stays in the browser's own space (the person's tabs, saved passwords); every
+// other account gets a space of its own — its own window, its own sign-in.
+// Spaces stay while Adal Browser is open (also over a restart of Adal Keep);
+// a restarted Adal Browser asks those accounts to sign in once again.
+const SPACES = process.env.ADAL_SPACES_FILE || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'data', 'browser-spaces.json')
+const readSpaces = () => { try { return JSON.parse(fs.readFileSync(SPACES, 'utf8')) } catch { return {} } }
+const _making = new Map()
+/** The browser space of one portal account ("musaned:7"): found again by its id, else made. */
+export function accountSpace(browser, key) {
+  if (!_making.has(key)) {
+    _making.set(key, (async () => {
+      const id = readSpaces()[key]
+      const have = id && browser.browserContexts().find(c => c.id === id)
+      if (have) return have
+      const made = await browser.createBrowserContext()
+      const all = readSpaces(); all[key] = made.id
+      try { fs.mkdirSync(path.dirname(SPACES), { recursive: true }); fs.writeFileSync(SPACES, JSON.stringify(all, null, 1)) } catch {}
+      console.log(`[browser] ${key} has a browser space of its own`)
+      return made
+    })().finally(() => setTimeout(() => _making.delete(key), 0)))
+  }
+  return _making.get(key)
+}
+/** Which account's space a tab is in ("musaned:7"), or '' for the browser's own. */
+export function spaceOf(page) {
+  try {
+    const id = page.browserContext()?.id
+    if (!id) return ''
+    return Object.entries(readSpaces()).find(([, v]) => v === id)?.[0] || ''
+  } catch { return '' }
+}
+
 /** The browser for a person's own use: its own window, apart from the agents', with the saved passwords. */
-export async function openForPerson() {
+export async function openForPerson(space = null) {
   const browser = await getBrowser()
+  // An account with a space of its own: a window of that space.
+  if (space && space !== browser.defaultBrowserContext()) { const p = await space.newPage(); await p.bringToFront().catch(() => {}); return p }
   if (!HIDDEN) return browser.newPage()
   const page = await newWindow(browser, {}, false)
   if (process.platform !== 'linux') {

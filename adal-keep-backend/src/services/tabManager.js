@@ -213,6 +213,29 @@ const RUN_HOSTS = [
   [/^insurance/, /niscofetap\.com/], [/^tasheer/, /tasheer\.com/], [/^(police|lmis|contract_import|delete_labour)/, /lmis\.gov\.et/],
 ]
 const RUN_PEERS = [[/^musaned/, 'musaned'], [/^mofa|^visa/, 'mofa'], [/^insurance/, 'insurance'], [/^tasheer/, 'tasheer'], [/^(police|lmis|contract_import|delete_labour)/, 'lmis']]
+export const peerOf = (workflowId) => RUN_PEERS.find(([w]) => w.test(String(workflowId || '')))?.[1] || null
+
+// The accounts of each portal. Its main account (the default, else the first)
+// works in the browser's own space; every other account in a space of its own
+// (browser.js accountSpace), so two accounts are signed in side by side (asked
+// on 2026-11-15). Tasheer has one sign-in for the agency.
+const ACCOUNT_TABLES = { musaned: 'musaned_accounts', lmis: 'lmis_accounts', mofa: 'visa_accounts', insurance: 'insurance_accounts' }
+/** The space a portal account works in: null = the browser's own. */
+export async function spaceForAccount(db, browser, peer, accountId) {
+  const table = ACCOUNT_TABLES[peer]
+  if (!table || !accountId || !db || !browser?.createBrowserContext) return null
+  const main = await db(table).orderBy('is_default', 'desc').orderBy('id').first('id').catch(() => null)
+  if (!main || Number(main.id) === Number(accountId)) return null
+  const { accountSpace } = await import('./browser.js')
+  return accountSpace(browser, `${peer}:${Number(accountId)}`)
+}
+/** A run's space, from its account (the run's row, else what it saved). */
+export async function spaceForRun(db, browser, job) {
+  let id = job?.account_id
+  if (!id) { try { id = JSON.parse(job?.context || '{}').account_id } catch {} }
+  return spaceForAccount(db, browser, peerOf(job?.workflow_id), id)
+}
+const spaceIs = (p, space) => { try { return p.browserContext() === space } catch { return !space } }
 
 /** The runs that still need their tabs (a paused one's tab waits for it). */
 export async function activeRunIds(db) {
@@ -224,7 +247,7 @@ const PERSON_MS = 60000
 const inTime = (p, ms = 3000) => Promise.race([p, new Promise(r => setTimeout(() => r(null), ms))])
 
 /** Is this tab free to take? (A frozen tab answers nothing: not free.) */
-async function isFree(p, busyRuns) {
+async function isFree(p, busyRuns, signedIn = false) {
   if (p.__adalBorrowed || (p.__adalRunId !== undefined && !Number.isFinite(Number(p.__adalRunId)))) return false
   if (!(await outOfSight(p))) return false   // a run is never seen working: only in the agents' window
   const st = await inTime(p.evaluate(() => ({
@@ -237,6 +260,8 @@ async function isFree(p, busyRuns) {
   if (!st) return false
   // A tab a run drove always says "visible" (its focus is faked), so there a
   // person shows by their clicks and keys since the run let go.
+  // Never the tab a person is on (asked on 2026-11-16: "don't change the tab I am
+  // working on"): the run works quietly in a tab behind it, signed in from it.
   if (p.__adalCdp ? Date.now() - st.touched < PERSON_MS : st.front) return false
   const run = /^adal-run-(\d+)$/.exec(st.name || '')?.[1]
   if (run) return !busyRuns.has(Number(run))
@@ -244,15 +269,17 @@ async function isFree(p, busyRuns) {
 }
 
 /** A tab on this workflow's site nobody needs, signed in if there is one. */
-async function findFreeTab(browser, workflowId, busyRuns) {
+async function findFreeTab(browser, workflowId, busyRuns, space = null) {
   const host = RUN_HOSTS.find(([w]) => w.test(String(workflowId)))?.[1]
   if (!host || !browser?.pages) return null
   const owned = new Set(_tabs.values())
   const peer = RUN_PEERS.find(([w]) => w.test(String(workflowId)))?.[1]
-  const onSite = (await browser.pages().catch(() => [])).filter(p => !isClosed(p) && !owned.has(p) && host.test(p.url()))
+  // Only a tab of this account's space (another space is another account's sign-in).
+  const mine = space || browser.defaultBrowserContext?.() || null
+  const onSite = (await browser.pages().catch(() => [])).filter(p => !isClosed(p) && !owned.has(p) && host.test(p.url()) && (!mine || spaceIs(p, mine)))
   const signedIn = (p) => { try { return !!signedInHere[peer]?.(p.url()) } catch { return false } }
   for (const p of onSite.sort((a, b) => signedIn(b) - signedIn(a))) {
-    if (await isFree(p, busyRuns)) return p
+    if (await isFree(p, busyRuns, signedIn(p))) return p
   }
   return null
 }
@@ -299,7 +326,7 @@ export function runsWithTabs() {
  * Submit) gets the same tab back when it resumes; otherwise a free tab on its
  * site, else a new tab. The run then goes to the page it needs by itself.
  */
-export async function openRunTab(browser, runId, { workflowId = '', busyRuns = new Set() } = {}) {
+export async function openRunTab(browser, runId, { workflowId = '', busyRuns = new Set(), space = null } = {}) {
   const id = Number(runId)
   const own = tabOfRun(id)
   if (own) {
@@ -309,7 +336,7 @@ export async function openRunTab(browser, runId, { workflowId = '', busyRuns = n
   }
   if (!browser || typeof browser.newPage !== 'function') throw new Error('No browser to open a tab in')
   const free = await oneAtATime(async () => {
-    const p = await findFreeTab(browser, workflowId, busyRuns)
+    const p = await findFreeTab(browser, workflowId, busyRuns, space)
     if (p) _tabs.set(id, p)
     return p
   })
@@ -320,10 +347,14 @@ export async function openRunTab(browser, runId, { workflowId = '', busyRuns = n
     console.log(`[tabManager] run #${id} took the free tab on ${free.url().slice(0, 60)}`)
     return free
   }
-  const page = await newRunTab(browser)
+  const page = await newRunTab(browser, space)
   _tabs.set(id, page)
   await setupTab(page, { runId: id })
-  console.log(`[tabManager] run #${id} opened its own tab (${runsWithTabs().length} run tab(s) open)`)
+  // Every site: a tab of the same space signed in already lends its sign-in to
+  // the new tab before its first page loads (no second sign-in, no new code).
+  const peer = peerOf(workflowId)
+  const lent = peer ? await borrowSignIn(page, peer).catch(() => null) : null
+  console.log(`[tabManager] run #${id} opened its own tab${space ? ' (in its account own space)' : ''}${lent ? ', signed in from another tab' : ''} (${runsWithTabs().length} run tab(s) open)`)
   return page
 }
 
@@ -443,7 +474,9 @@ export async function borrowSignIn(page, peer) {
   // and then the run carries on right here (asked on 2026-11-15).
   const mine = (() => { try { return page.target?.() } catch { return null } })()
   const isMine = (t) => !!mine && (t === mine || (t._targetId && t._targetId === mine._targetId))
-  const targets = page.browser().targets().filter(t => { try { return t.type() === 'page' } catch { return false } })
+  // Only tabs of this tab's own space: another space is another account's sign-in.
+  const space = (() => { try { return page.browserContext() } catch { return null } })()
+  const targets = page.browser().targets().filter(t => { try { return t.type() === 'page' && (!space || t.browserContext() === space) } catch { return false } })
   targets.sort((a, b) => isMine(b) - isMine(a))
   for (const t of targets) {
     let url = ''

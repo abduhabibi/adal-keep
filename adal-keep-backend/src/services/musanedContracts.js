@@ -335,39 +335,82 @@ function pick(pairs, ...labels) {
 }
 
 /**
- * Click a PDF link: Musaned opens file-viewer.html in a new tab with the PDF
- * as a blob in an iframe. Read the blob inside that tab, then close it.
+ * A contract PDF, read right in the Musaned page — no file-viewer.html tab
+ * (asked on 2026-11-16: "don't make that tab"). Musaned makes the PDF in the
+ * page (a blob) and then opens its viewer: here the page's window.open is
+ * held back for the click, and the PDF is taken from the blob it made, or
+ * from the answer that brought it. Null when it could not be had that way.
  */
-async function downloadPdf(browser, page, name) {
-  const newTab = new Promise(resolve => {
-    const on = async (t) => { if (t.opener() === page.target() || /file-viewer/.test(t.url())) { browser.off('targetcreated', on); resolve(t) } }
-    browser.on('targetcreated', on)
-    setTimeout(() => { browser.off('targetcreated', on); resolve(null) }, 30000)
-  })
-  const clicked = await page.evaluate((name) => {
-    const a = [...document.querySelectorAll('a, span, button')].find(x => (x.textContent || '').trim() === name)
-    if (!a) return false
-    a.scrollIntoView({ block: 'center' }); a.click(); return true
-  }, name)
-  if (!clicked) throw new Error(`link ${name} not found`)
-  const target = await newTab
-  if (!target) throw new Error(`${name}: no viewer tab opened`)
-  const viewer = await target.page()
-  try {
-    await viewer.waitForFunction(() => /^blob:/.test(document.querySelector('iframe')?.src || ''), { timeout: 45000, polling: 300 })
-    const b64 = await viewer.evaluate(async () => {
-      const r = await fetch(document.querySelector('iframe').src)
-      const buf = new Uint8Array(await r.arrayBuffer())
-      let s = ''
-      for (let i = 0; i < buf.length; i += 0x8000) s += String.fromCharCode(...buf.subarray(i, i + 0x8000))
-      return btoa(s)
-    })
-    const buf = Buffer.from(b64, 'base64')
-    if (buf.subarray(0, 4).toString() !== '%PDF') throw new Error(`${name}: not a PDF`)
-    return buf
-  } finally {
-    await viewer.close().catch(() => {})
+async function pdfWithoutViewer(page, name) {
+  const answers = []
+  const onResponse = async (r) => {
+    try {
+      const type = r.headers()['content-type'] || ''
+      if (!/pdf|octet-stream|json/i.test(type)) return
+      const body = await r.buffer().catch(() => null)
+      if (!body) return
+      if (body.subarray(0, 4).toString() === '%PDF') return answers.push(body)
+      // An answer with the file inside as base64 ("JVBERi0" is "%PDF-").
+      const m = /JVBERi0[A-Za-z0-9+/=\\]+/.exec(body.toString('latin1'))
+      if (m) answers.push(Buffer.from(m[0].replace(/\\/g, ''), 'base64'))
+    } catch {}
   }
+  page.on('response', onResponse)
+  try {
+    const clicked = await page.evaluate((name) => {
+      window.__adalPdfs = []
+      if (!window.__adalHeld) {
+        window.__adalHeld = { open: window.open, blob: URL.createObjectURL }
+        URL.createObjectURL = function (b) { try { if (b instanceof Blob) window.__adalPdfs.push(b) } catch {} return window.__adalHeld.blob.call(this, b) }
+        // The viewer would open in a new tab: it does not (a stand-in window answers the page).
+        window.open = function (u) { window.__adalOpened = String(u || ''); return { closed: false, close() {}, focus() {}, blur() {}, postMessage() {}, addEventListener() {}, document: { write() {}, close() {}, open() {} }, location: {} } }
+        if (!window.__adalNoViewer) document.addEventListener('click', (e) => {
+          const a = e.target?.closest?.('a[href*="file-viewer"], a[target="_blank"]')
+          if (a && /file-viewer|\.pdf/i.test(a.getAttribute('href') || '')) { e.preventDefault(); window.__adalOpened = a.href }
+        }, true)
+        window.__adalNoViewer = true
+      }
+      const a = [...document.querySelectorAll('a, span, button')].find(x => (x.textContent || '').trim() === name)
+      if (!a) return false
+      a.scrollIntoView({ block: 'center' }); a.click(); return true
+    }, name)
+    if (!clicked) throw new Error(`link ${name} not found`)
+    for (let i = 0; i < 60; i++) {
+      await sleep(500)
+      if (answers.length) return answers[answers.length - 1]
+      const b64 = await page.evaluate(async () => {
+        for (const b of [...(window.__adalPdfs || [])].reverse()) {
+          const buf = new Uint8Array(await b.arrayBuffer())
+          if (String.fromCharCode(...buf.subarray(0, 4)) !== '%PDF') continue
+          let s = ''
+          for (let i = 0; i < buf.length; i += 0x8000) s += String.fromCharCode(...buf.subarray(i, i + 0x8000))
+          return btoa(s)
+        }
+        // A viewer address that names the file: fetched here instead.
+        const u = window.__adalOpened || ''
+        const inner = /[?&#](?:file|url|src|path)=([^&#]+)/i.exec(u)?.[1]
+        if (inner) {
+          const r = await fetch(decodeURIComponent(inner), { credentials: 'include' }).catch(() => null)
+          const buf = r ? new Uint8Array(await r.arrayBuffer()) : null
+          if (buf && String.fromCharCode(...buf.subarray(0, 4)) === '%PDF') { let s = ''; for (let i = 0; i < buf.length; i += 0x8000) s += String.fromCharCode(...buf.subarray(i, i + 0x8000)); return btoa(s) }
+        }
+        return null
+      }).catch(() => null)
+      if (b64) return Buffer.from(b64, 'base64')
+    }
+    return null
+  } finally {
+    page.off('response', onResponse)
+    await page.evaluate(() => { const h = window.__adalHeld; if (h) { window.open = h.open; URL.createObjectURL = h.blob; delete window.__adalHeld } }).catch(() => {})
+  }
+}
+
+async function downloadPdf(browser, page, name) {
+  // Read in the page itself first: no viewer tab at all.
+  const here = await pdfWithoutViewer(page, name).catch(e => { if (/not found/.test(e.message)) throw e; return null })
+  if (here && here.subarray(0, 4).toString() === '%PDF') return here
+  // Musaned's viewer was never opened: say so (no tab is made for it).
+  throw new Error(`${name}: the PDF could not be read without opening Musaned's viewer tab`)
 }
 
 /**
@@ -682,8 +725,7 @@ async function saveDetails(db, browser, page, p, card, cardText, d) {
   }
 
   if (first) {
-    await task(db, p.id, `Chosen on Musaned: ${p.full_name}`, `Contract ${update.contract_number || ''} · ${update.employer_name || ''} · ${update.musaned_stage || ''}. Wafid medical booking started.`)
-    try { const { queueWafidBooking } = await import('./wafidStatus.js'); await queueWafidBooking(db, p.id, 'chosen') } catch (e) { console.warn('[contracts] wafid:', e.message) }
+    await task(db, p.id, `Chosen on Musaned: ${p.full_name}`, `Contract ${update.contract_number || ''} · ${update.employer_name || ''} · ${update.musaned_stage || ''}. Book her Wafid medical when you are ready (her page → Book Wafid medical).`)
     import('./whatsapp.js').then(w => w.onChosen(db, p.id)).catch(e => console.warn('[contracts] whatsapp:', e.message))
   } else if (dead && p.chosen_at && !/CANCEL|REJECT/i.test(p.musaned_stage || '')) {
     await task(db, p.id, `Musaned: ${p.full_name}'s contract was ${update.musaned_stage}`, `Contract ${update.contract_number || ''} · ${update.employer_name || ''}. She is free for another employer.`)

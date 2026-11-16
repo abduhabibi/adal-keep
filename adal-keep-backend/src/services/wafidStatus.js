@@ -23,10 +23,9 @@ export async function queueWafidBooking(db, profileId, trigger = 'button') {
     .whereIn('status', ['pending', 'running', 'paused'])
     .orderBy('id', 'desc').first()
   if (existing) return { queued: false, runId: existing.id, reason: `already ${existing.status}` }
-  if (trigger !== 'button') {
-    const done = await db('automation_queue').where({ profile_id: profileId, workflow_id: WAFID_BOOK, status: 'done' }).first()
-    if (done) return { queued: false, runId: done.id, reason: 'already booked' }
-  }
+  // A Wafid booking starts only when a person presses Book — never by itself
+  // (asked on 2026-11-15: "don't book Wafid until you are told to").
+  if (trigger !== 'button') return { queued: false, reason: 'Wafid is booked only when a person presses Book' }
   const now = new Date().toISOString()
   const [runId] = await db('automation_queue').insert({
     profile_id: profileId, workflow_id: WAFID_BOOK, status: 'pending', current_step: 0,

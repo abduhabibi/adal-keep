@@ -2328,8 +2328,18 @@ export const savedOnPage = (page) => page.evaluate(() => !!window.__adalSaved).c
  * the earlier runs to finish (the earliest run goes first, so two never wait
  * for each other), then signs in as its own account.
  */
-async function waitForOtherAccounts(ctx) {
+async function waitForOtherAccounts(ctx, page = null) {
   if (!ctx.db || !ctx.account_id) return
+  // Each Musaned account has a browser space of its own now (tabManager
+  // spaceForAccount): another account's run is in another space — no waiting.
+  // Only when this run's space could not be made (it is in the browser's own
+  // space but is not its main account) does it wait as before.
+  try {
+    const { spaceForAccount } = await import('./tabManager.js')
+    const own = page && page.browserContext() !== page.browser().defaultBrowserContext()
+    const shouldOwn = page && await spaceForAccount(ctx.db, page.browser(), 'musaned', ctx.account_id).then(s => !!s).catch(() => false)
+    if (own || !shouldOwn) return
+  } catch {}
   for (let told = false; ;) {
     if (ctx.isCancelled?.()) { const e = new Error('Cancelled by user'); e.cancelled = true; throw e }
     const other = await ctx.db('automation_queue').where('status', 'running').where('workflow_id', 'like', 'musaned%')
@@ -2414,7 +2424,8 @@ async function pressLogout(page) {
  */
 async function logOutInNewTab(page, ctx) {
   let left = false
-  const tab = await newRunTab(page.browser())
+  // In the same browser space as the run (another space is another account).
+  const tab = await page.browserContext().newPage().catch(() => newRunTab(page.browser()))
   try {
     await tab.setViewport({ width: 1366, height: 900 }).catch(() => {})
     await tab.goto(DASHBOARD_URL, { waitUntil: 'domcontentloaded', timeout: 45000 })
@@ -2429,11 +2440,15 @@ async function logOutInNewTab(page, ctx) {
 async function leaveMusaned(page) {
   const cdp = await page.target().createCDPSession()
   try {
-    const { cookies } = await cdp.send('Storage.getCookies')
+    // (This tab's own space only: Network.* is the tab's, Storage.* would be the whole browser's.)
+    const { cookies } = await cdp.send('Network.getAllCookies')
     for (const c of cookies.filter(c => /(^|\.)(musaned\.com\.sa|wahid\.sa)$/i.test(c.domain.replace(/^\./, '')))) {
       await cdp.send('Network.deleteCookies', { name: c.name, domain: c.domain, path: c.path })
     }
-    for (const origin of ['https://tawtheeq.musaned.com.sa', 'https://accounts.wahid.sa']) {
+    // (Storage.* reaches the browser's own space: never from an account's own space,
+    // where it would sign the main account out instead.)
+    const ownSpace = page.browserContext() !== page.browser().defaultBrowserContext()
+    if (!ownSpace) for (const origin of ['https://tawtheeq.musaned.com.sa', 'https://accounts.wahid.sa']) {
       await cdp.send('Storage.clearDataForOrigin', { origin, storageTypes: 'local_storage,indexeddb,service_workers,cache_storage' })
     }
   } finally { cdp.detach().catch(() => {}) }
@@ -2459,13 +2474,14 @@ async function checkAccount(page, ctx) {
 }
 
 export async function runMusanedWorkflow(page, ctx) {
-  await waitForOtherAccounts(ctx)
+  await waitForOtherAccounts(ctx, page)
   // Musaned runs take turns signing in; a run uses a Musaned tab that is
   // already signed in (the person's or another run's) instead of signing in
   // again. The turn is let go as soon as this run is signed in.
   let waiting = true
   const note = setTimeout(() => { if (waiting) log(ctx, '⏳ another run is signing in to Musaned — waiting for it, then using its sign-in') }, 1000)
-  ctx.releaseSignIn = await signInTurn('musaned')
+  // (Per account: each account signs in in its own browser space.)
+  ctx.releaseSignIn = await signInTurn(`musaned:${ctx.account_id || ''}`)
   waiting = false; clearTimeout(note)
   try {
     if (await borrowSignIn(page, 'musaned')) log(ctx, '🔗 Musaned is already signed in in another tab — using that sign-in')

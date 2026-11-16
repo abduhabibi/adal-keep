@@ -13,7 +13,7 @@
  * GET  /api/sessions             each site: signed in or not, its tabs, last kept
  * POST /api/sessions/:key/open   a window on that site to sign in
  */
-import { getBrowser, openForPerson } from './browser.js'
+import { getBrowser, openForPerson, spaceOf } from './browser.js'
 import { hostOf } from './tabManager.js'
 
 export const SITES = [
@@ -93,7 +93,7 @@ export async function keepAlive() {
     if (!browser) return kept
     const running = await runningTabs()
     const pages = await browser.pages().catch(() => [])
-    const seen = Object.fromEntries(SITES.map(s => [s.key, { tabs: 0, signedIn: false }]))
+    const seen = Object.fromEntries(SITES.map(s => [s.key, { tabs: 0, signedIn: false, spaces: {} }]))
     for (const p of pages) {
       if (p.isClosed?.()) continue
       const site = siteOf(p.url())
@@ -110,7 +110,8 @@ export async function keepAlive() {
         const pub = await Promise.race([p.evaluate(() => { const pub = (() => { const t = [...document.querySelectorAll('a, button')].map(e => (e.innerText || '').trim()); return t.some(x => /^(log ?in|sign ?in)$/i.test(x)) && !t.some(x => /log ?out|sign ?out|ውጣ/i.test(x)) })(); return pub }).catch(() => false), new Promise(r => setTimeout(() => r(false), 8000))])
         if (pub) inNow = false
       }
-      if (inNow) seen[site.key].signedIn = true
+      // Which account: its browser space ("musaned:7"; '' = the site's main account).
+      if (inNow) { seen[site.key].signedIn = true; seen[site.key].spaces[spaceOf(p)] = true }
       // Musaned's "Access Denied" (/403, a page opened before the agency was
       // chosen): back to its front page and the agency's own card again.
       if (site.key === 'musaned' && /\/403\b/.test(p.url()) && !p.__adalBorrowed && !running.has(Number(p.__adalRunId))) {
@@ -176,7 +177,20 @@ export async function sessionsNow() {
   const { holderOf } = await import('./tasheerSession.js')
   const holder = db ? await holderOf(db).catch(() => null) : null
   // Insurance is not in the morning sign-in: its robot signs in by itself (FetaP's reCAPTCHA needs nobody).
-  return SITES.filter(s => s.key !== 'insurance').map(s => ({ key: s.key, name: s.name, ...(kept[s.key] || { tabs: 0, signedIn: false }), ...(s.key === 'tasheer' ? { holder, shared: true } : {}) }))
+  // Sites with several accounts: each account signed in or not, apart (each in its own browser space).
+  const TABLES = { musaned: 'musaned_accounts', lmis: 'lmis_accounts', mofa: 'visa_accounts' }
+  const out = []
+  for (const s of SITES.filter(s => s.key !== 'insurance')) {
+    const k = kept[s.key] || { tabs: 0, signedIn: false, spaces: {} }
+    let accounts
+    if (db && TABLES[s.key]) {
+      const rows = await db(TABLES[s.key]).orderBy('is_default', 'desc').orderBy('id').select('id', 'name').catch(() => [])
+      if (rows.length > 1) accounts = rows.map((a, i) => ({ id: a.id, name: a.name || `Account ${a.id}`, main: i === 0, signedIn: !!(k.spaces || {})[i === 0 ? '' : `${s.key}:${a.id}`] }))
+    }
+    const { spaces, ...rest } = k
+    out.push({ key: s.key, name: s.name, ...rest, ...(accounts ? { accounts, signedIn: accounts.every(a => a.signedIn) } : {}), ...(s.key === 'tasheer' ? { holder, shared: true } : {}) })
+  }
+  return out
 }
 
 /** A window on that site, to sign in (its tab is then kept signed in all day). */
@@ -189,7 +203,16 @@ export async function openSite(key, database = null, { accountId = null } = {}) 
   }
   const site = SITES.find(s => s.key === key)
   if (!site) throw new Error('Unknown site')
-  const page = await openForPerson()
+  // The chosen account in its own browser space when it is not the site's main
+  // one: signing in as it never signs the other account out (asked on 2026-11-15).
+  let space = null
+  if (db && accountId) {
+    try {
+      const { spaceForAccount } = await import('./tabManager.js')
+      space = await spaceForAccount(db, await getBrowser(), key, accountId)
+    } catch (e) { console.warn('[sessions] no space of its own:', e.message) }
+  }
+  const page = await openForPerson(space)
   await page.goto(site.start, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {})
   await page.bringToFront().catch(() => {})
   // Musaned: Adal Keep signs in by itself (the saved account and its authenticator code), then the tab goes out of sight.

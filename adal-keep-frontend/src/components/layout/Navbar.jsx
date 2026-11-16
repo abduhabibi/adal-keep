@@ -212,6 +212,7 @@ export default function Navbar({ onMenuClick, capturedFiles, setCapturedFiles })
 /** Backs up to Telegram now (the main PC), with its progress in one notice. */
 function BackupButton() {
   const [busy, setBusy] = useState(false)
+  const [pct, setPct] = useState(null)
   const watch = useRef(null)
   useEffect(() => () => clearInterval(watch.current), [])
   const follow = () => {
@@ -223,10 +224,11 @@ function BackupButton() {
         const p = data.progress || {}
         if (p.running) {
           const docs = p.files_todo ? ` · ${p.files_done || 0} of ${p.files_todo} new documents` : ''
-          toast.loading(`💾 Backing up — ${p.step === 'database' ? 'the database' : p.step === 'index' ? 'finishing' : 'documents'}${docs}`, { id })
+          setPct(p.percent ?? null)
+          toast.loading(`💾 Backing up${p.percent != null ? ` ${p.percent}%` : ''} — ${p.step === 'database' ? 'the database' : p.step === 'index' ? 'finishing' : 'documents'}${docs}`, { id })
           return
         }
-        clearInterval(watch.current); setBusy(false)
+        clearInterval(watch.current); setBusy(false); setPct(null)
         if (p.error) toast.error(`Backup stopped: ${p.error}`, { id, duration: 8000 })
         else toast.success(`💾 Backed up · ${data.files_sent ?? '?'} of ${data.files_total ?? '?'} documents online`, { id, duration: 6000 })
       } catch { clearInterval(watch.current); setBusy(false) }
@@ -247,7 +249,7 @@ function BackupButton() {
   return (
     <button onClick={run} disabled={busy} title="Back up to Telegram now (whenever the robots are free it also runs by itself)"
       className={`ml-1 flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 ${busy ? 'text-teal-500 bg-teal-500/10' : 'text-slate-500 dark:text-slate-400 hover:text-teal-400 hover:bg-teal-500/10'}`}>
-      <span className={busy ? 'animate-pulse' : ''}>💾</span> {busy ? 'Backing up…' : 'Backup'}
+      <span className={busy ? 'animate-pulse' : ''}>💾</span> {busy ? `Backing up${pct != null ? ` ${pct}%` : '…'}` : 'Backup'}
     </button>
   )
 }

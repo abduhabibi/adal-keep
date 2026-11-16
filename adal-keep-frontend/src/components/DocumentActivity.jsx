@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import api from '../services/api'
+import { stagePercent, Bar } from '../lib/progress'
 
 /**
  * Every document Adal Keep noticed in the last day, live: waiting, being read
@@ -92,8 +93,12 @@ export default function DocumentActivity() {
               label = 'Waiting'
               detail = r.attempts ? `Trying again (attempt ${r.attempts + 1}) — ${WHY[r.last_error] || r.last_error || ''}` : 'Next in line to be read.'
             } else if (r.status === 'processing') {
-              label = `Reading · ${ago(since)}`
-              detail = r.stage ? `Now: ${r.stage}` : 'Reading…'
+              const pc = stagePercent(r.stage)
+              label = pc != null ? `Reading · ${pc}%` : `Reading · ${ago(since)}`
+              detail = <>
+                {r.stage ? `Now: ${r.stage}` : 'Reading…'}{pc != null ? ` · ${ago(since)}` : ''}
+                {pc != null && <Bar percent={pc} className="mt-1 max-w-xs" />}
+              </>
             } else if (r.status === 'done') {
               label = res.created ? 'New profile' : 'Added'
               detail = <>

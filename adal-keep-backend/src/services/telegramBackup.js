@@ -274,6 +274,7 @@ async function sendSet(token, chat_id, password, buf, label) {
     const piece = locked.subarray(i * PART, (i + 1) * PART)
     ids.push(await sendPiece(token, chat_id, piece, `adal-${label}-${i + 1}of${count}.bin`, `Adal Keep backup · ${label} · ${i + 1}/${count}`))
     progress.bytes_sent = (progress.bytes_sent || 0) + piece.length
+    if (progress.bytes_total) progress.percent = Math.min(99, Math.floor(progress.bytes_sent / progress.bytes_total * 100))   // 100 when the index is in
   }
   return ids
 }
@@ -288,14 +289,18 @@ export async function runBackup(db, { force = false, docsOnly = false, light = f
   const s = readState()
   const chat_id = chatOf(s)
   if (!token || !password || !chat_id) throw new Error('Backup is not set up: the backup password is needed.')
-  Object.assign(progress, { running: true, started_at: new Date().toISOString(), step: docsOnly ? 'documents' : 'database', bytes_sent: 0, files_done: 0, files_todo: 0, error: null, docs_only: docsOnly })
+  Object.assign(progress, { running: true, started_at: new Date().toISOString(), step: docsOnly ? 'documents' : 'database', bytes_sent: 0, bytes_total: 0, percent: 0, files_done: 0, files_todo: 0, error: null, docs_only: docsOnly })
   s[docsOnly ? 'last_docs_run' : 'last_run'] = new Date().toISOString(); writeState(s)
   try {
     s.sent ||= {}; s.sets ||= []
     // 1. The database (the newest replaces the older ones in the index) —
     //    not on the quick runs that only carry new documents.
+    // Everything this run will send, measured first, so it can say how far it is (percent).
+    for (const n of listDocuments().filter(n => !s.sent[n])) { try { progress.bytes_total += fs.statSync(path.join(SAFE, n)).size } catch {} }
     if (!docsOnly) {
-      const dbIds = await sendSet(token, chat_id, password, await databaseSnapshot(db), `database-${today()}`)
+      const snap = await databaseSnapshot(db)
+      progress.bytes_total += snap.length
+      const dbIds = await sendSet(token, chat_id, password, snap, `database-${today()}`)
       s.sets = s.sets.filter(x => x.type !== 'db')
       s.sets.push({ type: 'db', date: new Date().toISOString(), parts: dbIds })
       writeState(s)
@@ -340,6 +345,7 @@ export async function runBackup(db, { force = false, docsOnly = false, light = f
     s.last_ok = new Date().toISOString(); s.last_error = null
     if (!docsOnly) s.last_day = today()
     writeState(s)
+    progress.percent = 100
     return { ok: true, documents_left: left }
   } catch (e) {
     const st = readState(); st.last_error = e.message; st.last_error_at = new Date().toISOString(); writeState(st)

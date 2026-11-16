@@ -6,6 +6,7 @@ import toast from 'react-hot-toast'
 import api from '../services/api'
 import Card from './shared/Card'
 import Button from './shared/Button'
+import { Bar } from '../lib/progress'
 
 const field = 'w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm'
 const err = (e) => e?.response?.data?.error || e.message
@@ -109,7 +110,10 @@ function BackupCardHere() {
 
       <div className="mt-4 rounded-xl bg-slate-50 dark:bg-slate-800 p-3 text-sm" translate="no">
         {p.running
-          ? <p>⏳ Backing up — {p.step}{p.files_todo ? ` · ${p.files_done}/${p.files_todo} new documents` : ''} · {Math.round((p.bytes_sent || 0) / 1048576)} MB sent</p>
+          ? <div className="space-y-1">
+              <p>⏳ Backing up{p.percent != null ? <b> {p.percent}%</b> : null} — {p.step}{p.files_todo ? ` · ${p.files_done}/${p.files_todo} new documents` : ''} · {Math.round((p.bytes_sent || 0) / 1048576)}{p.bytes_total ? ` of ${Math.max(1, Math.round(p.bytes_total / 1048576))}` : ''} MB sent</p>
+              {p.percent != null && <Bar percent={p.percent} />}
+            </div>
           : <p>
               Documents in the backup: <b>{c.files_sent}</b> of {c.files_total}.
               {c.last_ok ? ` Last backup: ${new Date(c.last_ok).toLocaleString()}.` : ' No backup yet.'}

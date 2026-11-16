@@ -7,6 +7,7 @@ import PageHeader from '../components/shared/PageHeader'
 import Button from '../components/shared/Button'
 import Spinner from '../components/shared/Spinner'
 import DocumentActivity from '../components/DocumentActivity'
+import { Bar } from '../lib/progress'
 import { isPhoneApp } from '../lib/phoneMode'
 
 const COLUMNS = [
@@ -172,6 +173,7 @@ export default function TasksPage() {
       />
 
       {/* The PC's Downloads watch: shown on the PC only — a phone never takes its downloads in. */}
+      {!window.__ADAL_CLOUD && !isPhoneApp() && <BackupNow />}
       {!window.__ADAL_CLOUD && !isPhoneApp() && <DocumentActivity />}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -286,6 +288,29 @@ export default function TasksPage() {
           )
         })}
       </div>
+    </div>
+  )
+}
+
+// A backup running now (the Backup button, or by itself when the robots are free): how far it is.
+function BackupNow() {
+  const [p, setP] = useState(null)
+  useEffect(() => {
+    let alive = true
+    const look = () => api.get('/backup', { adalNoCache: true }).then(r => { if (alive) setP(r.data?.progress?.running ? r.data.progress : null) }).catch(() => {})
+    look()
+    const t = setInterval(() => { if (!document.hidden) look() }, 3000)
+    return () => { alive = false; clearInterval(t) }
+  }, [])
+  if (!p) return null
+  const what = p.step === 'database' ? 'the database' : p.step === 'index' ? 'finishing' : 'documents'
+  return (
+    <div className="panel mb-4 px-4 py-3">
+      <div className="flex items-center justify-between gap-3 text-sm">
+        <span className="font-semibold text-slate-800 dark:text-slate-100">💾 Backing up — {what}{p.files_todo ? ` · ${p.files_done || 0} of ${p.files_todo} new documents` : ''}</span>
+        <span className="font-bold text-teal-600 dark:text-teal-400">{p.percent != null ? `${p.percent}%` : '…'}</span>
+      </div>
+      <Bar percent={p.percent || 0} className="mt-2" />
     </div>
   )
 }

@@ -42,7 +42,9 @@ function LiveCode({ info }) {
       <span className="text-xs text-slate-600 dark:text-slate-300">Authenticator: <b>{info.label || 'Musaned'}</b></span>
       <span className="font-mono text-xl font-bold tracking-[0.25em] text-emerald-700 dark:text-emerald-300">{code.slice(0, 3)} {code.slice(3)}</span>
       <span className="relative h-1.5 w-16 overflow-hidden rounded-full bg-emerald-100 dark:bg-emerald-900/40">
-        <span className="absolute inset-y-0 left-0 bg-emerald-500 transition-all duration-1000" style={{ width: `${(left / 30) * 100}%` }} />
+        {/* Shrinks with transform (the graphics chip), not width: a width that
+            animated re-laid the whole Settings page every frame (Portals stuttered). */}
+        <span className="absolute inset-0 origin-left bg-emerald-500 transition-transform duration-1000 ease-linear" style={{ transform: `scaleX(${Math.max(0, Math.min(1, left / 30))})` }} />
       </span>
       <span className="text-[11px] text-slate-500">{left}s · 📋 click to copy</span>
     </button>

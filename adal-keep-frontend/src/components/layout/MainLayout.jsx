@@ -124,7 +124,7 @@ export default function MainLayout() {
   })
 
   return (
-    <div className="app-shell flex h-[var(--app-h,100vh)] overflow-hidden bg-slate-50 dark:bg-slate-900">
+    <div className="app-shell flex h-[var(--app-h,100vh)] overflow-hidden bg-[var(--bg)]">
       {newVersion && (
         <button type="button" onClick={() => window.location.reload()}
           className="fixed bottom-4 left-1/2 z-[9990] -translate-x-1/2 rounded-full bg-teal-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg hover:bg-teal-700">

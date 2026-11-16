@@ -12,6 +12,20 @@ router.get('/', async (req, res) => {
   }
 })
 
+// The top bar's number: tasks still to do (it asked for every task, with all
+// their text, every 10 s just to count them).
+router.get('/count', async (req, res) => {
+  try {
+    const db = req.app.locals.db
+    const rows = await db('tasks').select('status').count({ n: '*' }).groupBy('status')
+    const by_status = Object.fromEntries(rows.map(r => [r.status || '', Number(r.n || 0)]))
+    const undone = ['pending', 'todo', 'in_progress', 'ongoing'].reduce((t, s) => t + (by_status[s] || 0), 0)
+    res.json({ undone, by_status, total: rows.reduce((t, r) => t + Number(r.n || 0), 0) })
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to count tasks' })
+  }
+})
+
 // The phone app asks every few seconds: "any new call for a person?" —
 // runs' notices (type 'automation') newer than `after` (a task id).
 router.get('/calls', async (req, res) => {

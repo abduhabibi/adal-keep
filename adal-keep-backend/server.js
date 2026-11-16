@@ -400,6 +400,21 @@ app.get('/api/profiles', async (req, res) => {
   }
 })
 
+// The search pad beside every page: only what it shows and searches (the full
+// list is 3 MB+ for a thousand profiles and was fetched on every page).
+app.get('/api/profiles/brief', async (req, res) => {
+  try {
+    res.json(await db('profiles')
+      .leftJoin('brokers', 'profiles.broker_id', 'brokers.id')
+      .select('profiles.id', 'profiles.full_name', 'profiles.passport_number', 'profiles.labor_id', 'profiles.phone_number',
+        'profiles.order_id', 'profiles.updated_at', 'profiles.broker_id', 'brokers.name as broker_name')
+      .orderBy('profiles.created_at', 'desc'))
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Failed to load profiles' })
+  }
+})
+
 // A profile was opened: it becomes the most recent one on the list.
 app.post('/api/profiles/:id/opened', async (req, res) => {
   try {

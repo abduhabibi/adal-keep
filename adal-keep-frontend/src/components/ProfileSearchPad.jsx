@@ -32,7 +32,11 @@ export default function ProfileSearchPad({
   useEffect(() => {
     if (given) return
     let alive = true
-    const load = () => api.get('/profiles', { params: brokerId ? { broker_id: brokerId } : {} })
+    // Every profile: the PC's slim list (only what the pad shows: the full one
+    // is megabytes); a phone's copy has only the full one.
+    const all = () => api.get('/profiles/brief').then(r => { if (!Array.isArray(r.data)) throw new Error('no brief list'); return r })
+      .catch(() => api.get('/profiles'))
+    const load = () => (brokerId ? api.get('/profiles', { params: { broker_id: brokerId } }) : all())
       .then(r => { if (alive) setLoaded(Array.isArray(r.data) ? r.data : r.data?.profiles || []) })
       .catch(() => { if (alive) setLoaded([]) })
     load()

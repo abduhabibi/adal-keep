@@ -11,8 +11,13 @@ export default {
       colors: {
         ink: '#0f1c1a',
       },
+      // Smaller, tighter shadows (a big soft shadow is a big area to paint
+      // again each time something near it changes).
       boxShadow: {
-        soft: '0 10px 40px -20px rgba(15, 28, 26, 0.25)',
+        soft: '0 6px 18px -10px rgba(15, 28, 26, 0.25)',
+        lg: '0 6px 16px -6px rgb(15 23 42 / 0.16)',
+        xl: '0 10px 24px -8px rgb(15 23 42 / 0.22)',
+        '2xl': '0 16px 32px -12px rgb(15 23 42 / 0.3)',
       },
       keyframes: {
         'fade-up': {
@@ -29,9 +34,10 @@ export default {
         },
       },
       animation: {
-        'fade-up': 'fade-up 0.35s ease-out backwards',
-        'fade-in': 'fade-in 0.25s ease-out backwards',
-        'slide-up': 'slide-up 0.35s cubic-bezier(.2,.8,.2,1) backwards',
+        // Short: a page never waits for its own entrance.
+        'fade-up': 'fade-in 0.12s ease-out backwards',
+        'fade-in': 'fade-in 0.12s ease-out backwards',
+        'slide-up': 'slide-up 0.2s cubic-bezier(.2,.8,.2,1) backwards',
       },
     },
   },

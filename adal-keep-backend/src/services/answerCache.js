@@ -11,6 +11,7 @@ import { onChanged } from './changes.js'
 // Path (exactly, without a query) → the tables it is made from.
 const KEPT = {
   '/api/profiles': ['profiles', 'brokers'],
+  '/api/profiles/brief': ['profiles', 'brokers'],
   '/api/automations/stages': ['profiles', 'automation_queue', 'profile_automations', 'profile_fields', 'files', 'generated_cvs', 'whatsapp_sends'],
   '/api/brokers': ['brokers', 'profiles'],
   '/api/dashboard': ['profiles', 'brokers', 'tasks'],

@@ -1,8 +1,9 @@
 import React from 'react'
 
+// A card: solid, a hairline and a whisper of shadow (index.css .panel).
 export default function Card({ children, className = '', noPadding = false }) {
   return (
-    <div className={`bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm transition-colors duration-300 ${noPadding ? '' : 'p-6'} ${className}`}>
+    <div className={`panel ${noPadding ? '' : 'p-5 sm:p-6'} ${className}`}>
       {children}
     </div>
   )

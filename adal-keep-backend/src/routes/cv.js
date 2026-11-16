@@ -101,13 +101,24 @@ router.get('/templates/:id/preview', async (req, res) => {
   } catch (e) { res.status(500).send('Preview failed: ' + e.message) }
 })
 
+// generated_cvs' columns except the full data copy, read once: the list used
+// to read every CV's 1–2 MB copy from the disk only to drop it (1 s per ask).
+let cvListCols = null
+async function generatedListColumns(db) {
+  if (!cvListCols) {
+    const info = await db('generated_cvs').columnInfo()
+    cvListCols = Object.keys(info).filter(c => c !== 'data_snapshot').map(c => `generated_cvs.${c}`)
+  }
+  return cvListCols
+}
+
 router.get('/generated', async (req, res) => {
   try {
     const db = req.app.locals.db
     let q = db('generated_cvs')
       .leftJoin('profiles', 'generated_cvs.profile_id', 'profiles.id')
       .leftJoin('cv_templates', 'generated_cvs.template_id', 'cv_templates.id')
-      .select('generated_cvs.*', 'profiles.full_name as profile_name', 'profiles.passport_number', 'cv_templates.name as template_name', 'cv_templates.agency_name')
+      .select(...await generatedListColumns(db), 'profiles.full_name as profile_name', 'profiles.passport_number', 'cv_templates.name as template_name', 'cv_templates.agency_name')
       .orderBy('generated_cvs.created_at', 'desc')
     if (req.query.profile_id) q = q.where('generated_cvs.profile_id', req.query.profile_id)
     // The list leaves out each CV's full copy of the data (1–2 MB each; no page shows it).

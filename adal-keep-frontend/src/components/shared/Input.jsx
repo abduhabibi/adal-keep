@@ -27,7 +27,7 @@ export default function Input({
         <input
           id={inputId}
           type={type}
-          className={`w-full px-3.5 py-2.5 border rounded-xl shadow-sm text-sm transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 
+          className={`w-full px-3.5 py-2.5 border rounded-xl bg-white text-sm transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 
             dark:bg-slate-900 dark:text-white dark:border-slate-700 dark:placeholder-slate-500
             ${icon ? 'pl-10' : ''}
             ${error 

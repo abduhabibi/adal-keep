@@ -126,7 +126,12 @@ async function call(db, method, pathAndQuery, body, { headers = {}, raw = false,
   return data
 }
 
-const rpc = (db, name, args = {}) => call(db, 'POST', `/rest/v1/rpc/${name}`, args)
+// Calls that only read: the kept chat list stays.
+const READS = new Set(['my_conversations', 'list_agencies', 'ping', 'typing_in', 'set_typing', 'group_members', 'search_messages', 'my_invite_paid'])
+const rpc = (db, name, args = {}) => {
+  if (!READS.has(name)) forgetConversations()
+  return call(db, 'POST', `/rest/v1/rpc/${name}`, args)
+}
 
 /** Sign in, and join (or rename) this agency: Everyone group + inbox with Adal. */
 let mainName = null
@@ -168,7 +173,21 @@ export async function agencies(db) {
   agKept = await rpc(db, 'list_agencies'); agAt = Date.now()
   return agKept
 }
-export const conversations = async (db) => { await me(db); return rpc(db, 'my_conversations') }
+// The chat list, kept 6 s and asked once for everyone waiting: it is half a
+// second over the internet, and every page's Inbox button, the chat page and
+// the phones asked for it at the same time. Anything that changes a chat
+// (a message read or sent, a group changed) forgets it at once.
+let convKept = null, convAt = 0, convAsking = null
+export const forgetConversations = () => { convKept = null; convAt = 0 }
+export async function conversations(db) {
+  if (convKept && Date.now() - convAt < 6000) return convKept
+  if (convAsking) return convAsking
+  const started = Date.now()
+  convAsking = (async () => { await me(db); return rpc(db, 'my_conversations') })()
+    .then(r => { if (convAt <= started) { convKept = r; convAt = Date.now() } return r })
+    .finally(() => { convAsking = null })
+  return convAsking
+}
 export const openDirect = (db, other) => rpc(db, 'open_direct', { other })
 
 const MSG_FIELDS_V2 = 'id,sender_id,body,image_path,created_at,reply_to,edited_at,deleted_at,updated_at,forwarded_from,kind,file_path,file_name,file_mime,file_size'
@@ -185,6 +204,7 @@ function dropToV1() { v2 = false; MSG_FIELDS = MSG_FIELDS_V1; console.warn('[cha
  * since `since`. Marks the chat read up to the newest.
  */
 export async function messages(db, conversationId, afterId = 0, since = null) {
+  forgetConversations()   // reading marks the chat read: its unread number changes
   try { return await messagesOnce(db, conversationId, afterId, since) }
   catch (e) { if (v2 && missingColumn(e)) { dropToV1(); return messagesOnce(db, conversationId, afterId, since) } throw e }
 }
@@ -226,6 +246,7 @@ export async function send(db, conversationId, body, file, { kind = null, replyT
   const text = String(body || '').trim()
   if (LINK_RE.test(text)) throw new ChatError('Links are not allowed in the chat.', 400)
   if (!text && !file && !forward) throw new ChatError('Nothing to send.', 400)
+  forgetConversations()
   await me(db)
   const row = { conversation_id: conversationId, body: text || null, kind: 'text' }
   if (replyTo) row.reply_to = Number(replyTo)

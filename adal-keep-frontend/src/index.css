@@ -13,48 +13,48 @@
 @tailwind utilities;
 
 /* ============================================
-   1. APPLE GLASS VARIABLES - Softer & Premium
+   1. ADAL KEEP 2 — solid, crisp, fast (2026-11-16)
+   Solid colours and hairlines: no glass, no live blur, small shadows, and
+   nothing that lifts or springs on hover (each of those repainted the page).
    ============================================ */
 :root {
-  /* Light Mode */
-  --bg: #f5f5f7;
-  --surface: rgba(255, 255, 255, 0.72);
-  --surface-hover: rgba(255, 255, 255, 0.92);
-  --border: rgba(255, 255, 255, 0.6);
-  --text: #1d1d1f;
-  --text-muted: #86868b;
+  --bg: #f3f5f9;
+  --surface: #ffffff;
+  --surface-hover: #ffffff;
+  --border: #e3e7ef;
+  --text: #0f172a;
+  --text-muted: #64748b;
   --primary: #0d9488;
-  --primary-glow: rgba(13, 148, 136, 0.15);
+  --primary-glow: rgba(13, 148, 136, 0.16);
   --danger: #ef4444;
-  
-  --radius-lg: 20px;
+
+  --radius-lg: 18px;
   --radius-md: 14px;
   --radius-sm: 10px;
-  
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.04);
-  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.06);
-  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.08);
-  --shadow-xl: 0 24px 48px rgba(0, 0, 0, 0.10);
-  
-  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05);
+  --shadow-md: 0 1px 2px rgba(15, 23, 42, 0.05), 0 3px 8px -2px rgba(15, 23, 42, 0.06);
+  --shadow-lg: 0 6px 16px -6px rgba(15, 23, 42, 0.16);
+  --shadow-xl: 0 10px 24px -8px rgba(15, 23, 42, 0.22);
+
+  --ease-spring: cubic-bezier(0.2, 0.8, 0.2, 1);
   --ease-smooth: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 [data-theme="dark"] {
-  /* Dark Mode - Softer, Less Heavy */
-  --bg: #0a0a0b;
-  --surface: rgba(28, 28, 30, 0.70);
-  --surface-hover: rgba(44, 44, 46, 0.85);
-  --border: rgba(255, 255, 255, 0.08);
-  --text: #f5f5f7;
-  --text-muted: #8e8e93;
+  --bg: #0b0d12;
+  --surface: #141821;
+  --surface-hover: #181d27;
+  --border: #252b38;
+  --text: #f1f5f9;
+  --text-muted: #94a3b8;
   --primary: #14b8a6;
-  --primary-glow: rgba(20, 184, 166, 0.12);
-  
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.4);
-  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.5);
-  --shadow-xl: 0 24px 48px rgba(0, 0, 0, 0.6);
+  --primary-glow: rgba(20, 184, 166, 0.16);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 6px 16px -6px rgba(0, 0, 0, 0.6);
+  --shadow-xl: 0 10px 24px -8px rgba(0, 0, 0, 0.7);
 }
 
 /* ============================================
@@ -72,11 +72,10 @@ html, body, #root {
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "DM Sans Variable", "DM Sans", "Inter", system-ui, sans-serif;
+  font-family: "DM Sans Variable", "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", "Nyala", "Ebrima", system-ui, sans-serif;
   background: var(--bg);
   color: var(--text);
   line-height: 1.5;
-  transition: background 0.5s var(--ease-smooth), color 0.5s var(--ease-smooth);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overflow-x: hidden; /* Prevents horizontal scroll from animations */
@@ -93,15 +92,14 @@ body {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-md);
-  transition: all 0.4s var(--ease-spring);
+  box-shadow: var(--shadow-sm);
+  transition: border-color .15s ease, box-shadow .15s ease;
 }
 
-.glass-panel:hover, .panel:hover {
-  background: var(--surface-hover);
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-lg);
-  border-color: rgba(255, 255, 255, 0.15);
+/* Only a card that is a link answers the pointer — with its border, no lift. */
+a.glass-panel:hover, a.panel:hover {
+  border-color: rgba(13, 148, 136, 0.5);
+  box-shadow: var(--shadow-md);
 }
 
 /* ============================================
@@ -135,7 +133,7 @@ body {
   padding: 0.6rem 1.2rem;
   font-size: 0.875rem;
   font-weight: 600;
-  transition: all 0.3s var(--ease-spring);
+  transition: background-color .15s, box-shadow .15s, color .15s;
   cursor: pointer;
   border: none;
   text-decoration: none;
@@ -148,8 +146,7 @@ body {
 }
 
 .btn-primary:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 24px rgba(13, 148, 136, 0.35);
+  box-shadow: 0 6px 16px -4px rgba(13, 148, 136, 0.45);
 }
 
 .btn-secondary {
@@ -161,7 +158,6 @@ body {
 
 .btn-secondary:hover {
   background: var(--surface-hover);
-  transform: translateY(-1px);
   box-shadow: var(--shadow-md);
 }
 
@@ -172,8 +168,7 @@ body {
 }
 
 .btn-danger:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 24px rgba(239, 68, 68, 0.35);
+  box-shadow: 0 6px 16px -4px rgba(239, 68, 68, 0.45);
 }
 
 .btn-ghost {
@@ -194,7 +189,7 @@ body {
   padding: 0.6rem 0.875rem;
   font-size: 0.875rem;
   color: var(--text);
-  transition: all 0.3s var(--ease-smooth);
+  transition: border-color .15s, box-shadow .15s;
   font-family: inherit;
 }
 
@@ -317,14 +312,14 @@ body {
 }
 
 .animate-fade-in {
-  animation: fadeInUp 0.5s var(--ease-spring) backwards;
+  animation: ak-appear .12s ease-out backwards;
 }
 
 /* "backwards", not "forwards": once shown, no transform stays on the page —
    a kept transform made every popup inside it (position: fixed) stick to the
    page instead of the screen (Trash → Empty showed at the bottom of the list). */
 .animate-fade-up {
-  animation: fadeInUp 0.4s var(--ease-spring) backwards;
+  animation: ak-appear .12s ease-out backwards;
 }
 
 /* ============================================
@@ -391,7 +386,7 @@ body {
 }
 
 .animate-fade-in-up {
-  animation: fadeInUp 0.3s var(--ease-spring) forwards;
+  animation: ak-appear .12s ease-out backwards;
 }
 /* =====================================================================
    Dark mode safety net: text and white boxes hard-coded for light mode
@@ -706,3 +701,104 @@ html.has-wallpaper .gradient-backdrop { display: none !important; }
 @media (max-width: 767px) {
   .panel, .glass-panel { border-radius: 14px; }
 }
+
+/* =====================================================================
+   ADAL KEEP 2 — the new look (2026-11-16). Everything here is painted once:
+   still gradients, hairlines and small shadows. Nothing animates forever,
+   nothing blurs, nothing animates its size (that re-lays the whole page).
+   ===================================================================== */
+@keyframes ak-appear { from { opacity: 0; } to { opacity: 1; } }
+
+/* "transition-all" also animated widths and heights (the side menu folding,
+   bars filling) — each frame re-laid the page out. Only cheap things move. */
+.transition-all { transition-property: color, background-color, border-color, opacity, box-shadow, transform !important; }
+/* Hover lifts and grows repainted big cards: they stay put. */
+.hover\:scale-\[1\.02\]:hover, .hover\:scale-105:hover, .hover\:-translate-y-0\.5:hover, .hover\:-translate-y-1:hover { transform: none !important; }
+
+/* The brand: teal into indigo, on the main buttons. */
+:root { --ak-brand: linear-gradient(135deg, #0d9488 0%, #0e7490 60%, #4f46e5 140%); --ak-brand-hover: linear-gradient(135deg, #0f766e 0%, #155e75 60%, #4338ca 140%); }
+:is(button, a, label).bg-teal-600:not(.keep-light) { background-image: var(--ak-brand); }
+:is(button, a, label).bg-teal-600:not(.keep-light):hover { background-image: var(--ak-brand-hover); }
+:is(button, a).bg-teal-600:disabled { background-image: none; }
+
+/* Inputs: a clear focus ring in the brand colour. */
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):focus-visible, textarea:focus-visible, select:focus-visible {
+  outline: none; border-color: #14b8a6 !important; box-shadow: 0 0 0 3px rgba(20, 184, 166, .18) !important;
+}
+
+/* ── The side menu: a deep ink column in every theme ── */
+.ak-side { background: #0b1020; color: #cbd5e1; border-right: 1px solid rgba(255,255,255,.06); }
+[data-theme="gradient"] aside.ak-side { background-color: #0b1020 !important; }
+.ak-side-brand { color: #fff; }
+.ak-side-sub { color: #64748b; }
+.ak-side-link { position: relative; display: flex; align-items: center; gap: .75rem; border-radius: 12px; padding: .62rem .85rem; font-size: .875rem; font-weight: 600; color: #94a3b8; transition: background-color .12s, color .12s; }
+.ak-side-link:hover { background: rgba(255,255,255,.06); color: #f1f5f9; }
+.ak-side-link.is-on { color: #fff; background: linear-gradient(90deg, rgba(20,184,166,.28), rgba(79,70,229,.2)); box-shadow: inset 0 0 0 1px rgba(94,234,212,.16); }
+.ak-side-link.is-on::before { content: ""; position: absolute; left: -12px; top: 9px; bottom: 9px; width: 3px; border-radius: 0 3px 3px 0; background: linear-gradient(#5eead4, #818cf8); }
+.ak-side-link.is-on svg { color: #5eead4; }
+.ak-side-sep { border-color: rgba(255,255,255,.07) !important; }
+.ak-side-logo { box-shadow: 0 0 0 1px rgba(255,255,255,.12), 0 6px 18px -6px rgba(20,184,166,.6); }
+.ak-side-toggle { color: #64748b; }
+.ak-side-toggle:hover { color: #e2e8f0; background: rgba(255,255,255,.06); }
+
+/* ── The top bar: flat, part of the page ── */
+.ak-top { border-bottom: 1px solid var(--border); background: var(--bg); }
+[data-theme="gradient"] nav.ak-top { background-color: rgba(10, 10, 20, 0.6) !important; }
+.ak-icon-btn { display: inline-flex; align-items: center; justify-content: center; gap: .35rem; height: 36px; min-width: 36px; padding: 0 .6rem; border-radius: 10px; font-size: .75rem; font-weight: 600; color: #475569; transition: background-color .12s, color .12s; }
+.ak-icon-btn:hover { background: rgba(15,23,42,.06); color: #0f172a; }
+.dark .ak-icon-btn { color: #94a3b8; }
+.dark .ak-icon-btn:hover { background: rgba(255,255,255,.07); color: #f1f5f9; }
+
+/* ── Page titles: big, tight, with the brand mark ── */
+.ak-title { font-size: 1.6rem; line-height: 1.2; font-weight: 800; letter-spacing: -0.02em; color: #0b1020; }
+.dark .ak-title { color: #f8fafc; }
+.ak-title-mark { display: inline-block; width: 6px; height: 1.1rem; margin-right: .6rem; border-radius: 3px; background: linear-gradient(#14b8a6, #6366f1); vertical-align: -0.1rem; }
+
+/* ── Dashboard ── */
+.ak-hero { position: relative; overflow: hidden; border-radius: 22px; padding: 1.5rem; color: #fff;
+  background:
+    radial-gradient(120% 140% at 100% 0%, rgba(99,102,241,.55) 0%, transparent 55%),
+    radial-gradient(90% 120% at 0% 100%, rgba(45,212,191,.45) 0%, transparent 60%),
+    linear-gradient(135deg, #0b1020 0%, #0f2a3a 55%, #1e1b4b 100%);
+  box-shadow: 0 12px 30px -16px rgba(15,23,42,.6); }
+.ak-hero::after { content: ""; position: absolute; inset: 0; pointer-events: none;
+  background-image: radial-gradient(rgba(255,255,255,.09) 1px, transparent 1.2px); background-size: 18px 18px;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 70%); mask-image: linear-gradient(90deg, transparent, #000 70%); }
+@media (min-width: 640px) { .ak-hero { padding: 2rem 2.25rem; } }
+.ak-hero-title { font-size: 2.1rem; line-height: 1.1; font-weight: 800; letter-spacing: -0.02em; color: #fff !important; background: none !important; animation: none !important; }
+.ak-hero-chip { display: inline-flex; align-items: center; gap: .45rem; border-radius: 999px; padding: .5rem .95rem; font-size: .8rem; font-weight: 700; color: #fff; background: rgba(255,255,255,.1); box-shadow: inset 0 0 0 1px rgba(255,255,255,.18); transition: background-color .12s; }
+.ak-hero-chip:hover { background: rgba(255,255,255,.2); }
+.ak-stat { position: relative; display: flex; flex-direction: column; gap: .2rem; overflow: hidden; border-radius: 18px; padding: 1.1rem 1.1rem 1rem; background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow-sm); transition: border-color .12s, box-shadow .12s; }
+.ak-stat:hover { box-shadow: var(--shadow-md); border-color: var(--ak-tone); }
+.ak-stat::after { content: ""; position: absolute; right: -30px; top: -30px; width: 110px; height: 110px; border-radius: 50%; background: radial-gradient(closest-side, var(--ak-tone-soft), transparent); pointer-events: none; }
+.ak-stat-icon { display: inline-flex; width: 40px; height: 40px; align-items: center; justify-content: center; border-radius: 12px; color: #fff; background: var(--ak-tone-grad); box-shadow: 0 6px 14px -6px var(--ak-tone); margin-bottom: .5rem; }
+.ak-stat-value { font-size: 2rem; line-height: 1; font-weight: 800; letter-spacing: -0.03em; color: var(--text); }
+.ak-stat-label { font-size: .8rem; font-weight: 600; color: var(--text-muted); }
+.ak-tone-teal { --ak-tone: #14b8a6; --ak-tone-soft: rgba(20,184,166,.18); --ak-tone-grad: linear-gradient(135deg, #2dd4bf, #0d9488); }
+.ak-tone-blue { --ak-tone: #3b82f6; --ak-tone-soft: rgba(59,130,246,.16); --ak-tone-grad: linear-gradient(135deg, #60a5fa, #2563eb); }
+.ak-tone-amber { --ak-tone: #f59e0b; --ak-tone-soft: rgba(245,158,11,.18); --ak-tone-grad: linear-gradient(135deg, #fbbf24, #ea580c); }
+.ak-tone-violet { --ak-tone: #8b5cf6; --ak-tone-soft: rgba(139,92,246,.18); --ak-tone-grad: linear-gradient(135deg, #a78bfa, #6d28d9); }
+.ak-avatar { flex: none; display: inline-flex; width: 38px; height: 38px; align-items: center; justify-content: center; border-radius: 12px; font-size: .75rem; font-weight: 800; color: #0f766e; background: linear-gradient(135deg, #ccfbf1, #e0e7ff); }
+.dark .ak-avatar { color: #5eead4; background: linear-gradient(135deg, rgba(20,184,166,.2), rgba(99,102,241,.2)); }
+.ak-badge { flex: none; border-radius: 999px; padding: .2rem .6rem; font-size: .7rem; font-weight: 700; white-space: nowrap; }
+.ak-badge-green { background: #dcfce7; color: #15803d; }
+.ak-badge-blue { background: #dbeafe; color: #1d4ed8; }
+.ak-badge-violet { background: #ede9fe; color: #6d28d9; }
+.ak-badge-red { background: #fee2e2; color: #b91c1c; }
+.ak-badge-amber { background: #fef3c7; color: #b45309; }
+.dark .ak-badge-green { background: rgba(34,197,94,.16); color: #86efac; }
+.dark .ak-badge-blue { background: rgba(59,130,246,.16); color: #93c5fd; }
+.dark .ak-badge-violet { background: rgba(139,92,246,.18); color: #c4b5fd; }
+.dark .ak-badge-red { background: rgba(239,68,68,.16); color: #fca5a5; }
+.dark .ak-badge-amber { background: rgba(245,158,11,.16); color: #fcd34d; }
+
+/* Scrollbars: thin everywhere. */
+* { scrollbar-width: thin; scrollbar-color: rgba(100,116,139,.35) transparent; }
+
+/* Tab rows that scroll sideways: no scrollbar under the tabs. */
+nav.overflow-x-auto, .overflow-x-auto[role="tablist"] { scrollbar-width: none; }
+nav.overflow-x-auto::-webkit-scrollbar { display: none; }
+
+/* The window not in front pauses animations (main.jsx): an entrance that
+   would stay paused at its first frame (invisible) is skipped instead. */
+html.adal-still :is(.animate-fade-up, .animate-fade-in, .animate-fade-in-up, .animate-slide-up, .phone-push, .phone-pop, .phone-fade) { animation: none !important; }

@@ -1225,7 +1225,7 @@ initSystem().then(() => {
   app.listen(PORT, () => {
     console.log(`🚀 Backend running on http://localhost:${PORT}`)
     startUpdateWatcher(app.locals.db) // a new version installs by itself when no run is working
-    import("./src/services/appLife.js").then(m => m.endIfStartedAlone()).catch(() => {})   // started by Windows with no window: it ends
+    import("./src/services/appLife.js").then(m => m.endIfStartedAlone()).catch(() => {})   // no Adal Keep page open within 90 s: it ends (never works in the background)
     startMedicalWatcher(app.locals.db) // the medical's battery: warnings as it runs out
     import('./src/services/sessionKeeper.js').then(k => k.startSessionKeeper(app.locals.db)).catch(e => console.warn('[sessions]', e.message)) // signed in once, kept all day
     import('./src/services/screenClip.js').then(c => c.startClipWatcher(PORT)).catch(e => console.warn('[clip]', e.message)) // double C crops the screen anywhere on this PC

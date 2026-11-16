@@ -126,7 +126,7 @@ app.use((req, res, next) => { if (req.body === null || typeof req.body !== 'obje
 // Any change (from the PC, a phone or Admin): what it touches goes online in
 // about a second and the phones refresh their own copy (services/cloudSync.js).
 app.use('/api', (req, res, next) => {
-  if (req.method !== 'GET' && req.method !== 'HEAD' && !/^\/api\/(chat|mobile|tutor|system|updates|employees\/device)/.test(req.originalUrl) && !/^\/api\/profiles\/\d+\/opened/.test(req.originalUrl)) {
+  if (req.method !== 'GET' && req.method !== 'HEAD' && !/^\/api\/(chat|mobile|tutor|system|updates|employees\/device|app\/clip)/.test(req.originalUrl) && !/^\/api\/profiles\/\d+\/opened/.test(req.originalUrl)) {
     res.on('finish', () => {
       if (res.statusCode < 400) import('./src/services/cloudSync.js').then(c => c.pushSoon(req.app.locals.db, req.originalUrl)).catch(() => {})
     })
@@ -1228,6 +1228,7 @@ initSystem().then(() => {
     import("./src/services/appLife.js").then(m => m.endIfStartedAlone()).catch(() => {})   // started by Windows with no window: it ends
     startMedicalWatcher(app.locals.db) // the medical's battery: warnings as it runs out
     import('./src/services/sessionKeeper.js').then(k => k.startSessionKeeper(app.locals.db)).catch(e => console.warn('[sessions]', e.message)) // signed in once, kept all day
+    import('./src/services/screenClip.js').then(c => c.startClipWatcher(PORT)).catch(e => console.warn('[clip]', e.message)) // double C crops the screen anywhere on this PC
     import('./src/services/plans.js').then(p => p.startLicenseWatch(app.locals.db)).catch(e => console.warn('[plans]', e.message)) // Adal's signed licence: plan, dates, features
     startAppointmentWatcher(app.locals.db) // Tasheer / Wafid appointments: a reminder the day before
     startCloudSync(app.locals.db)      // the online copy phones use when this PC is off

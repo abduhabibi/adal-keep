@@ -63,7 +63,15 @@ export default function FileTray() {
   useEffect(() => {
     if (import.meta.env.VITE_PHONE === '1' || import.meta.env.VITE_DEMO === '1') return
     let last = 0, busy = false
+    // The PC's own watcher (adal-clip, lib/clipWatch.js) crops at once from any
+    // program and sends the picture here: then it does it, not this page.
+    const fromWatcher = (e) => {
+      const n = addFiles(e.detail || [])
+      if (n) toast.success('Cropped picture is in the tray — drag it onto a field')
+    }
+    window.addEventListener('adal-tray-files', fromWatcher)
     const onKey = async (e) => {
+      if (window.__adalClipHook) return
       if (e.repeat || e.ctrlKey || e.altKey || e.metaKey || String(e.key).toLowerCase() !== 'c') return
       const t = e.target
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
@@ -87,7 +95,7 @@ export default function FileTray() {
       } finally { busy = false }
     }
     document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
+    return () => { document.removeEventListener('keydown', onKey); window.removeEventListener('adal-tray-files', fromWatcher) }
   }, [addFiles])
 
   // Global drag & drop — ONLY intervenes for external OS file drags.

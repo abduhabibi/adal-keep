@@ -48,6 +48,31 @@ router.post('/app/screen-clip', async (req, res) => {
     })
 })
 
+// The double-C watcher (bin/adal-clip.exe) sends its picture, or how the crop
+// stands; every open Adal Keep page of this PC gets it in its tray (services/screenClip.js).
+router.post('/app/clip', express.raw({ type: 'image/png', limit: '60mb' }), async (req, res) => {
+  if (!isLocal(req)) return res.status(403).end()
+  const { took } = await import('../services/screenClip.js')
+  took(Buffer.isBuffer(req.body) ? req.body : null, req.query.state ? String(req.query.state) : '')
+  res.json({ ok: true })
+})
+router.get('/app/clips', async (req, res) => {
+  if (!isLocal(req)) return res.status(204).end()
+  res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' })
+  res.flushHeaders()
+  const { listen } = await import('../services/screenClip.js')
+  const off = listen(res)
+  const ping = setInterval(() => res.write(': ping\n\n'), 25000)
+  req.on('close', () => { clearInterval(ping); off() })
+})
+router.get('/app/clips/:id', async (req, res) => {
+  if (!isLocal(req)) return res.status(403).end()
+  const { clipOf } = await import('../services/screenClip.js')
+  const c = clipOf(req.params.id)
+  if (!c) return res.status(404).end()
+  res.type('image/png').send(c.png)
+})
+
 // "Quit Adal Keep": the same as closing its last window, at once.
 router.post('/app/quit', (req, res) => {
   if (!isLocal(req)) return res.status(403).json({ error: 'Only on the main PC itself' })

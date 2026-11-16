@@ -65,7 +65,9 @@ try {
   const files = sh('git', ['ls-files', '-z', '--', 'adal-keep-backend/src', 'adal-keep-backend/scripts', 'adal-keep-backend/server.js',
     'adal-keep-backend/knexfile.js', 'adal-keep-backend/package.json', 'adal-keep-backend/package-lock.json',
     // The passport-lines reader's model (src/services/quickMrz.js).
-    'adal-keep-backend/ocrb.traineddata']).split('\0').filter(Boolean)
+    'adal-keep-backend/ocrb.traineddata',
+    // Small Windows helpers the server starts (bin/adal-clip.exe: double-C crop, services/screenClip.js).
+    'adal-keep-backend/bin']).split('\0').filter(Boolean)
   for (const f of files) {
     if (/(^|\/)\.env|\.sqlite|\/data\/|\/uploads\//.test(f)) continue
     fs.mkdirSync(path.join(stage, path.dirname(f)), { recursive: true })

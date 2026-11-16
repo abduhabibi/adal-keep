@@ -4,7 +4,7 @@ import toast from 'react-hot-toast'
 import api from '../../services/api'
 import { isPhoneApp } from '../../lib/phoneMode'
 
-const links = [
+export const links = [
   {
     to: '/',
     end: true,
@@ -97,7 +97,7 @@ const links = [
 // The Trash: only in the menu on the main PC itself (it opens only there).
 // The phone app is served from http://localhost too: it is never the main PC.
 export const onMainPC = () => ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname) && !isPhoneApp() && !window.Capacitor?.isNativePlatform?.()
-const trashLink = {
+export const trashLink = {
   to: '/trash',
   label: 'Trash',
   icon: (
@@ -107,7 +107,7 @@ const trashLink = {
   ),
 }
 
-const settingsLink = {
+export const settingsLink = {
   to: '/settings',
   label: 'ማስተካከያዎች',
   icon: (

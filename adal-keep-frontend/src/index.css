@@ -669,3 +669,40 @@ html.has-wallpaper:not(.dark) .app-shell {
   background-image: linear-gradient(rgba(248, 250, 252, 0.6), rgba(248, 250, 252, 0.6)), var(--adal-wallpaper) !important;
 }
 html.has-wallpaper .gradient-backdrop { display: none !important; }
+
+/* ── The phone, the iPhone's way (layout/PhoneChrome.jsx, asked on 2026-11-16) ──
+   Solid colours (no live blur: it redraws every frame), hairlines, the
+   system font sizes; pages slide with transform and opacity only. */
+:root { --phone-bar: rgba(249, 249, 251, 0.97); --phone-hair: rgba(60, 60, 67, 0.18); --phone-group: #ffffff; --phone-ink: #8e8e93; }
+.dark, [data-theme="dark"], [data-theme="gradient"] { --phone-bar: rgba(22, 22, 26, 0.97); --phone-hair: rgba(255, 255, 255, 0.12); --phone-group: #1c1c1e; --phone-ink: #8e8e93; }
+@media (max-width: 767px) {
+  html, body { -webkit-tap-highlight-color: transparent; }
+  a, button, [role="button"], input, select, label { touch-action: manipulation; }
+  body { -webkit-font-smoothing: antialiased; }
+}
+.phone-topbar { background: var(--phone-bar); position: relative; z-index: 30; }
+.phone-topbar::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 1px; background: var(--phone-hair); opacity: 0; transition: opacity .2s; }
+.phone-topbar.is-scrolled::after { opacity: 1; }
+.phone-tabbar { background: var(--phone-bar); border-color: var(--phone-hair); }
+.phone-tab { color: var(--phone-ink); min-height: 50px; }
+.phone-tab.is-on { color: #0d9488; }
+.dark .phone-tab.is-on, [data-theme="dark"] .phone-tab.is-on, [data-theme="gradient"] .phone-tab.is-on { color: #2dd4bf; }
+.phone-tab:active svg { transform: scale(.88); }
+.phone-tab svg { transition: transform .12s ease; }
+.phone-press { transition: transform .12s ease, opacity .12s ease, background-color .15s; }
+.phone-press:active { transform: scale(.97); opacity: .7; }
+.phone-group { background: var(--phone-group); border-radius: 14px; }
+.phone-row { position: relative; }
+.phone-row:not(:first-child)::before { content: ''; position: absolute; left: 56px; right: 0; top: 0; height: 1px; background: var(--phone-hair); }
+.phone-row:active { background: rgba(127, 127, 127, .12); }
+/* A page opened slides in; back slides it from the left; a tab just fades. */
+@keyframes phone-push { from { transform: translate3d(28%, 0, 0); opacity: .35; } to { transform: none; opacity: 1; } }
+@keyframes phone-pop { from { transform: translate3d(-18%, 0, 0); opacity: .5; } to { transform: none; opacity: 1; } }
+@keyframes phone-fade { from { opacity: .25; } to { opacity: 1; } }
+.phone-push { animation: phone-push .28s cubic-bezier(.2, .8, .2, 1) both; }
+.phone-pop { animation: phone-pop .26s cubic-bezier(.2, .8, .2, 1) both; }
+.phone-fade { animation: phone-fade .16s ease-out both; }
+/* On a phone, cards press like iPhone cells. */
+@media (max-width: 767px) {
+  .panel, .glass-panel { border-radius: 14px; }
+}

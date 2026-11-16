@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-route
 import ErrorBoundary from './components/shared/ErrorBoundary'
 import { Toaster } from 'react-hot-toast'
 import MainLayout from './components/layout/MainLayout'
+import { MorePage } from './components/layout/PhoneChrome'
 const DashboardPage = lazy(() => fresh(() => import('./pages/DashboardPage')))
 const ProfilesPage = lazy(() => fresh(() => import('./pages/ProfilesPage')))
 const ProfileDetailPage = lazy(() => fresh(() => import('./pages/ProfileDetailPage')))
@@ -167,6 +168,8 @@ function Shell() {
             <Route path="cvs/templates/design" element={page(CVTemplateDesignPage)} />
             <Route path="cvs/templates/:id/edit" element={page(CVTemplateEditPage)} />
             <Route path="settings" element={page(SettingsPage)} />
+            {/* The phone's More tab: every other page as one list (layout/PhoneChrome.jsx). */}
+            <Route path="more" element={<Guarded><MorePage /></Guarded>} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>

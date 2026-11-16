@@ -13,6 +13,7 @@ import useNewVersion from '../../hooks/useNewVersion'
 import api from '../../services/api'
 import UpdateBanner from '../UpdateBanner'
 import { swipeBack } from '../../lib/phoneApp'
+import { PhoneTabBar, PhoneTopBar, usePageMotion, prefetchTabs } from './PhoneChrome'
 
 const PAD_KEY = 'adal-search-pad'
 
@@ -76,41 +77,15 @@ export default function MainLayout() {
     window.addEventListener('adal-fullscreen', on)
     return () => window.removeEventListener('adal-fullscreen', on)
   }, [])
-  // On a phone the top bar goes away while scrolling down (more room) and
-  // comes back on the way up, or at the top of the page.
+  // The phone (a narrow screen): the iPhone's way — a slim top bar, the tabs at
+  // the bottom, pages that slide in and out (PhoneChrome.jsx, asked on 2026-11-16).
+  // The page never changes size while it scrolls (Settings → Portals stuttered).
   const mainRef = useRef(null)
-  const [barHidden, setBarHidden] = useState(false)
-  useEffect(() => {
-    const el = mainRef.current
-    if (!el || wide) { setBarHidden(false); return }
-    let last = el.scrollTop
-    const on = () => {
-      const y = el.scrollTop, d = y - last
-      if (y < 40) setBarHidden(false)
-      else if (d > 8) setBarHidden(true)
-      else if (d < -8) setBarHidden(false)
-      if (Math.abs(d) > 8) last = y
-    }
-    el.addEventListener('scroll', on, { passive: true })
-    return () => el.removeEventListener('scroll', on)
-  }, [wide])
-  useEffect(() => { setBarHidden(false) }, [pathname])
-  // The bar lies over the page on a phone and slides away (transform): the
-  // page itself never changes size while it scrolls — the bar's margin used to
-  // move, and the whole page was laid out again every frame (Settings →
-  // Portals stuttered; asked on 2026-11-15).
-  const barRef = useRef(null)
-  const [barH, setBarH] = useState(0)
-  useEffect(() => {
-    const el = barRef.current
-    if (!el || wide || typeof ResizeObserver === 'undefined') return
-    const ro = new ResizeObserver(() => setBarH(el.offsetHeight))
-    ro.observe(el); setBarH(el.offsetHeight)
-    return () => ro.disconnect()
-  }, [wide, bare])
+  const motion = usePageMotion()
+  useEffect(() => { if (!wide) prefetchTabs() }, [wide])
   // A swipe from left to right (a phone): back — out of the open chat or
-  // profile; with nothing to go back from, the sidebar. Right to left closes
-  // the sidebar, else goes forward again (what the back swipe left).
+  // profile (the More tab holds the rest: no sidebar on a phone). Right to
+  // left goes forward again (what the back swipe left).
   useEffect(() => {
     if (wide) return
     let start = null
@@ -135,7 +110,7 @@ export default function MainLayout() {
       if (Math.abs(dx) < 70 || Math.abs(dy) > Math.abs(dx) * 0.6) return
       if (dx > 0) {
         if (sidebarOpen) return
-        if (!swipeBack()) setSidebarOpen(true)
+        swipeBack()
       } else if (sidebarOpen) setSidebarOpen(false)
       else if (!s.sideways) history.forward()
     }
@@ -167,12 +142,13 @@ export default function MainLayout() {
       {!DEMO && <PcAccessRequests />}
       {!DEMO && <AttentionBar />}
       {!DEMO && <PhoneCalls />}
-      <Sidebar
+      {/* (A phone has the More tab instead of the side menu.) */}
+      {wide && <Sidebar
         isOpen={sidebarOpen}
         onToggle={() => setSidebarOpen(!sidebarOpen)}
         collapsed={sidebarCollapsed}
         onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
-      />
+      />}
 
       <div className="flex flex-col flex-1 min-w-0 h-[var(--app-h,100vh)] overflow-hidden relative">
         {DEMO && <Suspense fallback={null}><DemoBanner /></Suspense>}
@@ -183,14 +159,11 @@ export default function MainLayout() {
             <Navbar onMenuClick={() => setSidebarOpen(!sidebarOpen)} />
           </div>
         )}
+        {!wide && !bare && <PhoneTopBar scroller={mainRef} />}
         <div className="relative flex flex-1 min-h-0">
-          {!wide && !bare && (
-            <div ref={barRef} className={`absolute inset-x-0 top-0 z-30 transition-[transform,opacity] duration-200 will-change-transform ${barHidden ? 'pointer-events-none opacity-0' : ''}`} style={{ transform: barHidden ? 'translateY(-100%)' : 'none' }}>
-              <Navbar onMenuClick={() => setSidebarOpen(!sidebarOpen)} />
-            </div>
-          )}
-          <main ref={mainRef} className="flex-1 min-w-0 overflow-y-auto overscroll-contain transition-colors duration-500 custom-scrollbar" style={!wide && !bare ? { paddingTop: barH } : undefined}>
-            <div className={inChat ? 'h-full' : 'px-3 py-4 sm:p-6'}>
+          <main ref={mainRef} className="flex-1 min-w-0 overflow-y-auto overscroll-contain custom-scrollbar"
+            style={!wide && !bare ? { paddingBottom: 'calc(58px + env(safe-area-inset-bottom))' } : undefined}>
+            <div key={wide ? 'page' : pathname} className={`${inChat ? 'h-full' : wide ? 'px-3 py-4 sm:p-6' : 'px-4 pb-4 pt-1'} ${wide ? '' : motion}`}>
               <Outlet key={pageKey} />
             </div>
           </main>
@@ -202,6 +175,7 @@ export default function MainLayout() {
           )}
         </div>
 
+        {!wide && !bare && <PhoneTabBar />}
         {!inChat && <button
           type="button"
           onClick={togglePad}

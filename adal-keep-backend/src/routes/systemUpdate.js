@@ -506,8 +506,19 @@ export async function installFromRelease(cfg, logs, manifest, localArchive = nul
     if (!tar.ok) throw new Error(`Extraction failed: ${tar.out.slice(-300)}`)
     const keepData = (from) => (src) => {
       const rel = path.relative(from, src)
-      return !rel || !rel.split(path.sep).some((part) => PROTECTED.has(part))
+      if (rel && rel.split(path.sep).some((part) => PROTECTED.has(part))) return false
+      // A program the server runs (bin/*.exe) that has not changed is left as it
+      // is: Windows refuses to overwrite a running one, and that stopped the whole update.
+      if (/\.exe$/i.test(src)) {
+        try {
+          const dest = path.join(backendDirOf(cfg.projectRoot), rel)
+          if (fs.existsSync(dest) && fs.statSync(dest).size === fs.statSync(src).size && fs.readFileSync(dest).equals(fs.readFileSync(src))) return false
+        } catch {}
+      }
+      return true
     }
+    // The double-C watcher lets go of its file (it starts again with the new server).
+    try { await (await import('../services/screenClip.js')).stopClipWatcher() } catch {}
     const backendDir = backendDirOf(cfg.projectRoot)
     const from = path.join(extracted, 'adal-keep-backend')
     if (!fs.existsSync(path.join(from, 'server.js'))) throw new Error('the release has no backend')

@@ -10,7 +10,7 @@
  * Documents open from online storage (/api/files/<id>/… links are rewritten).
  */
 import { connectLive, liveCall, liveReady, pcLive, onLive } from './live.js'
-import { mirrorReady, mirrorHas, mirrorGet, mirrorAt, mirrorAge, mirrorPut, mirrorSync, mirrorFetch, mirrorPrune, mirrorTake } from './mirror.js'
+import { mirrorReady, mirrorHas, mirrorGet, mirrorAt, mirrorAge, mirrorPut, mirrorSync, mirrorFetch, mirrorPrune, mirrorTake, mirrorLoad } from './mirror.js'
 
 const SAVED = 'adal-pc'
 // Adal Keep Admin opens one agency per window (window.__ADAL_CREDS): its own copies.
@@ -156,8 +156,11 @@ function realPathOf(path) {
 const madeHere = (id) => newProfiles.find(n => String(n.ref) === String(id))
 
 // The fields every profile has (from any profile on the phone), empty: a new profile's documents.
-function blankFields() {
-  for (const k of [...(function* () { const p = mirrorGet('/profiles'); for (const r of (Array.isArray(p) ? p : [])) yield `/profiles/${r.id}/fields` })()]) {
+async function blankFields() {
+  const p = mirrorGet('/profiles')
+  for (const r of (Array.isArray(p) ? p : []).slice(0, 30)) {
+    const k = `/profiles/${r.id}/fields`
+    await mirrorLoad(k)
     const f = mirrorGet(k)
     if (Array.isArray(f) && f.length) return f.map((x, i) => ({ id: -(i + 1), name: x.name, data_type: x.data_type, is_permanent: x.is_permanent, field_template_id: x.field_template_id, files: [] }))
   }
@@ -238,7 +241,8 @@ function withPending(key, data, updatedAt) {
 async function answer(key) {
   const c = cloudCreds()
   await mirrorReady(c.agency)
-  if (mirrorHas(key)) return withPending(key, mirrorGet(key), mirrorAt(key))
+  await mirrorLoad(key)   // (one profile's answer is read from the phone's database when asked)
+  if (mirrorHas(key) && mirrorGet(key) !== undefined) return withPending(key, mirrorGet(key), mirrorAt(key))
   // Not on the phone yet (the first copy is still coming): just this one.
   const rows = await rest('GET', `/rest/v1/keep_meta?key=eq.${encodeURIComponent(key)}&select=data,updated_at`)
   if (!rows?.length) return undefined
@@ -262,9 +266,9 @@ async function get(path, query) {
     const n = madeHere(ref)
     if (!n) throw httpError(404, 'Profile not found')
     if (!rest) return newProfileView(n)
-    if (rest === '/fields') return withFiles(ref, blankFields(), null)
+    if (rest === '/fields') return withFiles(ref, await blankFields(), null)
     const files = rest.match(/^\/fields\/(-?\d+)\/files$/)
-    if (files) return withFiles(ref, blankFields(), null).find(f => String(f.id) === files[1])?.files || []
+    if (files) return withFiles(ref, await blankFields(), null).find(f => String(f.id) === files[1])?.files || []
     if (/^\/(automations|whatsapp|days|notes)$/.test(rest)) return []
     throw httpError(503, 'Made on this phone — the PC adds this when it is on.')
   }
@@ -609,7 +613,8 @@ export async function cloudAdapter(config) {
       const c = cloudCreds()
       if (key && !isDirty(key)) {
         await mirrorReady(c.agency)
-        if (mirrorHas(key)) {
+        await mirrorLoad(key)
+        if (mirrorHas(key) && mirrorGet(key) !== undefined) {
           if (key === path && pcLive() && mirrorAge(key) > 60000) revalidate(key)
           return reply(200, await get(path, query))
         }

@@ -13,7 +13,17 @@ import path from 'path'
 import { spawn } from 'child_process'
 import { fileURLToPath } from 'url'
 
-const EXE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'bin', 'adal-clip.exe')
+// Each version of the watcher has its own name (adal-clip-2.exe, -3 …): an update
+// never has to overwrite the running one — Windows refuses that, and the
+// whole update stopped ("Access is denied … adal-clip.exe", 2026-11-16).
+const BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'bin')
+const newestExe = () => {
+  try {
+    const all = fs.readdirSync(BIN).map(f => [f, /^adal-clip(?:-(\d+))?\.exe$/i.exec(f)]).filter(([, m]) => m)
+    all.sort((a, b) => Number(b[1][1] || 0) - Number(a[1][1] || 0))
+    return all.length ? path.join(BIN, all[0][0]) : ''
+  } catch { return '' }
+}
 const KEEP_MS = 10 * 60000
 const clips = []            // { id, at, png }
 const pages = new Set()     // the open pages' streams
@@ -44,7 +54,8 @@ export const clipOf = (id) => clips.find(c => c.id === Number(id)) || null
 
 /** Starts the watcher (Windows; one per PC). It ends with this server. */
 export function startClipWatcher(port) {
-  if (process.platform !== 'win32' || watcher || !fs.existsSync(EXE)) return
+  const EXE = newestExe()
+  if (process.platform !== 'win32' || watcher || !EXE) return
   watcher = spawn(EXE, ['--server', `http://127.0.0.1:${port}`, '--parent', String(process.pid)], { windowsHide: true, stdio: 'ignore' })
   clipState.running = true
   send({ hook: true })
@@ -57,4 +68,12 @@ export function startClipWatcher(port) {
   })
   watcher.on('error', (e) => { console.warn('[clip] watcher:', e.message); clipState.running = false })
   console.log('[clip] double C crops the screen anywhere on this PC')
+}
+
+/** Before an update: the watcher stops (its file is free), and starts again with the new server. */
+export function stopClipWatcher() {
+  if (!watcher) return Promise.resolve()
+  const w = watcher
+  tries = 99   // (not started again by itself now)
+  return new Promise(res => { w.once('exit', () => res()); try { w.kill() } catch { res() } setTimeout(res, 3000) })
 }

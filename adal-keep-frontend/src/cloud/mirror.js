@@ -3,20 +3,31 @@
  * profiles, fields, journeys, tasks …) in the phone's database (IndexedDB),
  * so every page opens at once from the phone itself.
  *
- *   first time   everything (≈ 250 KB compressed), the profile list first
+ *   first time   everything, the profile list first
  *   then         only what changed (keep_meta.updated_at), every 20 s while
  *                the app is open, and at once when the PC says what changed
  *                (live link: { t: 'changed', keys })
  *   now and then the answers the PC removed are removed here too
  *
+ * Fast start (asked on 2026-11-16: "not fast"): the app no longer reads the
+ * whole copy (thousands of answers, many MB) before the first page shows. At
+ * the start it reads only which answers it has and when they changed (one
+ * small index) and the agency-wide answers (the lists); one profile's own
+ * answers are read from the phone's database the moment a page asks
+ * (mirrorLoad — a few milliseconds).
+ *
  * Pictures and documents are not copied: they come from Telegram when they
  * are opened, and stay on the phone after (adapter.js, file cache).
  */
-const mem = new Map()          // key → { data, at }
-let dbP = null, readyP = null, lastAt = '', syncing = null
+const mem = new Map()          // key → { data, at }   (read so far)
+const ats = new Map()          // key → at             (everything the phone has)
+let dbP = null, readyP = null, lastAt = '', syncing = null, indexTimer = null
 const listeners = new Set()
 const NAME = (agency) => `adal-keep-${agency}`
 const LAST = (agency) => `adal-mirror-at-${agency}`
+const INDEX = '__index'
+// One profile's (or one broker's, template's) own answer: read when asked.
+const perOne = (key) => /\/-?\d+(\/|$|\?)|[?&](profile_id|broker_id)=/.test(key)
 
 function open(agency) {
   return (dbP ||= new Promise((ok, no) => {
@@ -26,6 +37,16 @@ function open(agency) {
     r.onerror = () => no(r.error)
   }))
 }
+const req = (r) => new Promise((ok) => { r.onsuccess = () => ok(r.result); r.onerror = () => ok(undefined) })
+function saveIndexSoon() {
+  clearTimeout(indexTimer)
+  indexTimer = setTimeout(async () => {
+    try {
+      const db = await dbP
+      db.transaction('meta', 'readwrite').objectStore('meta').put(Object.fromEntries(ats), INDEX)
+    } catch {}
+  }, 1500)
+}
 async function store(rows) {
   const db = await dbP
   await new Promise((ok) => {
@@ -34,40 +55,64 @@ async function store(rows) {
     for (const r of rows) r.del ? os.delete(r.key) : os.put({ data: r.data, at: r.updated_at }, r.key)
     tx.oncomplete = tx.onerror = tx.onabort = () => ok()
   })
+  saveIndexSoon()
 }
 
-/** Load the copy into memory (once). */
+/** Ready: the index and the agency-wide answers in memory (once). */
 export function mirrorReady(agency) {
   return (readyP ||= (async () => {
     try {
       const db = await open(agency)
       lastAt = localStorage.getItem(LAST(agency)) || ''
-      await new Promise((ok) => {
-        const req = db.transaction('meta').objectStore('meta').openCursor()
-        req.onsuccess = () => { const c = req.result; if (!c) return ok(); mem.set(c.key, c.value); c.continue() }
-        req.onerror = () => ok()
-      })
+      const index = await req(db.transaction('meta').objectStore('meta').get(INDEX))
+      if (index && typeof index === 'object') {
+        for (const [k, at] of Object.entries(index)) ats.set(k, at)
+        // The lists and the agency's answers now; each profile's own when a page asks.
+        const os = db.transaction('meta').objectStore('meta')
+        const wanted = [...ats.keys()].filter(k => !perOne(k))
+        const rows = await Promise.all(wanted.map(k => req(os.get(k)).then(v => [k, v])))
+        for (const [k, v] of rows) if (v) mem.set(k, v)
+      } else {
+        // A phone from before the index: everything once, and the index made.
+        await new Promise((ok) => {
+          const r = db.transaction('meta').objectStore('meta').openCursor()
+          r.onsuccess = () => { const c = r.result; if (!c) return ok(); if (c.key !== INDEX) { mem.set(c.key, c.value); ats.set(c.key, c.value?.at) } c.continue() }
+          r.onerror = () => ok()
+        })
+        saveIndexSoon()
+      }
     } catch { dbP = null }
   })())
 }
 
-export const mirrorHas = (key) => mem.has(key)
+/** One answer read from the phone's database into memory, when it has it. */
+export async function mirrorLoad(key) {
+  if (mem.has(key) || !ats.has(key) || !dbP) return
+  try {
+    const db = await dbP
+    const v = await req(db.transaction('meta').objectStore('meta').get(key))
+    if (v && !mem.has(key)) mem.set(key, v)
+  } catch {}
+}
+
+export const mirrorHas = (key) => mem.has(key) || ats.has(key)
 export const mirrorGet = (key) => mem.get(key)?.data
-export const mirrorAt = (key) => mem.get(key)?.at
-export const mirrorAge = (key) => { const v = mem.get(key); return v ? Date.now() - new Date(v.at).getTime() : Infinity }
-export const mirrorSize = () => mem.size
+export const mirrorAt = (key) => mem.get(key)?.at ?? ats.get(key)
+export const mirrorAge = (key) => { const at = mirrorAt(key); return at ? Date.now() - new Date(at).getTime() : Infinity }
+export const mirrorSize = () => ats.size
 export function onMirror(fn) { listeners.add(fn); return () => listeners.delete(fn) }
 
 /** An answer the PC just gave (live): kept as the newest copy. */
 export function mirrorPut(key, data) {
   const at = new Date().toISOString()
   mem.set(key, { data, at })
+  ats.set(key, at)
   if (dbP) store([{ key, data, updated_at: at }]).catch(() => {})
 }
 
 function take(rows, agency, move = true) {
   const keep = rows.filter(r => !String(r.key).startsWith('/_'))
-  for (const r of keep) mem.set(r.key, { data: r.data, at: r.updated_at })
+  for (const r of keep) { mem.set(r.key, { data: r.data, at: r.updated_at }); ats.set(r.key, r.updated_at) }
   if (keep.length) { store(keep).catch(() => {}); listeners.forEach(fn => { try { fn(keep.map(r => r.key)) } catch {} }) }
   if (!move) return
   const newest = rows.reduce((m, r) => (r.updated_at > m ? r.updated_at : m), lastAt)
@@ -88,8 +133,8 @@ export function mirrorSync(rest, agency) {
         take(await rest('GET', `/rest/v1/keep_meta?key=in.(/profiles,/brokers,/settings,/dashboard)&${sel}`) || [], agency, false)
       }
       if (!lastAt) {
-        // The first time: everything, in pages.
-        for (let page = 0; page < 40; page++) {
+        // The first time: everything, in pages (an agency with a thousand girls has ~10 000 answers).
+        for (let page = 0; page < 400; page++) {
           const since = lastAt ? `&updated_at=gte.${encodeURIComponent(lastAt)}` : ''
           const rows = await rest('GET', `/rest/v1/keep_meta?${sel}${since}&order=updated_at.asc&limit=150`) || []
           take(rows, agency)
@@ -102,7 +147,7 @@ export function mirrorSync(rest, agency) {
       // phone does not have yet.
       const back = new Date(new Date(lastAt).getTime() - 10 * 60000).toISOString()
       const list = await rest('GET', `/rest/v1/keep_meta?select=key,updated_at&updated_at=gte.${encodeURIComponent(back)}&order=updated_at.asc&limit=2000`) || []
-      const need = list.filter(r => !String(r.key).startsWith('/_') && mem.get(r.key)?.at !== r.updated_at).map(r => r.key)
+      const need = list.filter(r => !String(r.key).startsWith('/_') && ats.get(r.key) !== r.updated_at).map(r => r.key)
       for (let i = 0; i < need.length; i += 40) {
         const q = need.slice(i, i + 40).map(k => `"${String(k).replace(/"/g, '')}"`).join(',')
         take(await rest('GET', `/rest/v1/keep_meta?key=in.(${encodeURIComponent(q)})&${sel}`) || [], agency, false)
@@ -131,10 +176,10 @@ export async function mirrorFetch(rest, agency, keys) {
 export async function mirrorPrune(rest, agency) {
   const rows = await rest('GET', '/rest/v1/keep_meta?select=key,updated_at') || []
   const there = new Map(rows.map(r => [r.key, r.updated_at]))
-  const gone = [...mem.keys()].filter(k => !there.has(k))
-  for (const k of gone) mem.delete(k)
+  const gone = [...ats.keys()].filter(k => !there.has(k))
+  for (const k of gone) { mem.delete(k); ats.delete(k) }
   if (gone.length) store(gone.map(key => ({ key, del: true }))).catch(() => {})
-  const need = rows.filter(r => !String(r.key).startsWith('/_') && mem.get(r.key)?.at !== r.updated_at).map(r => r.key)
+  const need = rows.filter(r => !String(r.key).startsWith('/_') && ats.get(r.key) !== r.updated_at).map(r => r.key)
   for (let i = 0; i < need.length; i += 40) {
     const q = need.slice(i, i + 40).map(k => `"${String(k).replace(/"/g, '')}"`).join(',')
     take(await rest('GET', `/rest/v1/keep_meta?key=in.(${encodeURIComponent(q)})&select=key,data,updated_at`) || [], agency, false)

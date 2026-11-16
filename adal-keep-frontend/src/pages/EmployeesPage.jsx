@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react'
+import { cachedGet } from '../lib/deviceCache'
+import { profilesList } from '../lib/profilesCache'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import api from '../services/api'
@@ -100,13 +102,15 @@ export default function EmployeesPage() {
     }
   }
 
+  // An employee's workspace, fast (asked on 2026-11-16: the brokers did not
+  // show, and it was slow): the brokers list is small and shows as soon as it
+  // comes; the profiles come from the list every page shares (lib/profilesCache:
+  // the copy kept on this device shows at once, the fresh one behind it) —
+  // the brokers never wait for thousands of profiles.
   const loadWorkspace = async (emp) => {
     if (!emp) return
     setWsLoading(true)
     try {
-      const [bRes, pRes] = await Promise.all([api.get('/brokers'), api.get('/profiles')])
-      const allBrokers = bRes.data || []
-      const allProfiles = pRes.data || []
       const keys = [
         (emp.name || emp.full_name || ''),
         (emp.username || ''),
@@ -117,8 +121,11 @@ export default function EmployeesPage() {
         if (!c) return false
         return keys.some(k => c === k || c.includes(k) || k.includes(c))
       }
-      setMyBrokers(allBrokers.filter(matchCreator))
-      setMyProfiles(allProfiles.filter(matchCreator))
+      const brokers = cachedGet('/brokers', { onSaved: (b) => { if (Array.isArray(b)) { setMyBrokers(b.filter(matchCreator)); setWsLoading(false) } } })
+        .then(b => { setMyBrokers((Array.isArray(b) ? b : []).filter(matchCreator)); setWsLoading(false) })
+      const profiles = profilesList({ onSaved: (p) => { if (Array.isArray(p)) setMyProfiles(p.filter(matchCreator)) } })
+        .then(p => setMyProfiles((Array.isArray(p) ? p : []).filter(matchCreator)))
+      await Promise.all([brokers, profiles])
     } catch (err) {
       console.error('loadWorkspace', err)
       toast.error('መረጃ መጫን አልተቻለም')

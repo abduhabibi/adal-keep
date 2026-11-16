@@ -260,9 +260,10 @@ async function isFree(p, busyRuns, signedIn = false) {
   if (!st) return false
   // A tab a run drove always says "visible" (its focus is faked), so there a
   // person shows by their clicks and keys since the run let go.
-  // Never the tab a person is on (asked on 2026-11-16: "don't change the tab I am
-  // working on"): the run works quietly in a tab behind it, signed in from it.
-  if (p.__adalCdp ? Date.now() - st.touched < PERSON_MS : st.front) return false
+  // The tab already signed in is used — also the one in front — quietly (muted,
+  // never brought forward), instead of a new tab that signs in again (asked on
+  // 2026-11-16). Never one with something typed in it.
+  if (p.__adalCdp ? Date.now() - st.touched < PERSON_MS : (st.front && !(signedIn && !st.typed))) return false
   const run = /^adal-run-(\d+)$/.exec(st.name || '')?.[1]
   if (run) return !busyRuns.has(Number(run))
   return !!p.__adalCdp || !st.typed   // never a run's tab: what is typed there is a person's

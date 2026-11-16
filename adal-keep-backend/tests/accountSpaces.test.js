@@ -1,8 +1,7 @@
 /**
  * accountSpaces.test.js — asked on 2026-11-15:
- *  - a run uses the tab already signed in to its site instead of a new tab
- *    that signs in again — never the tab a person is on (2026-11-16): then a
- *    tab behind it, which borrows the sign-in;
+ *  - a run uses the tab already signed in to its site (also the one in front,
+ *    quietly) instead of a new tab that signs in again;
  *  - each portal account other than the main one works in a browser space of
  *    its own, so two Musaned accounts are signed in side by side, and a run
  *    never takes a tab of another account's space.
@@ -66,15 +65,13 @@ test('the main account stays in the browser\'s own space, another gets its own',
   assert.equal(peerOf('police_clearance'), 'lmis')
 })
 
-test('a run takes the signed-in tab behind, never the one a person is on', async () => {
+test('a run takes the signed-in tab, also the one in front — no new tab', async () => {
   const { b, page, main } = fakeBrowser()
   const behind = page('https://visa.mofa.gov.sa/Enjaz/Main', main)
   assert.equal(await openRunTab(b, 9001, { workflowId: 'mofa_visa', busyRuns: new Set() }), behind)
   const { b: b2, page: page2, main: main2 } = fakeBrowser()
-  const front = page2('https://visa.mofa.gov.sa/Enjaz/Main', main2, { front: true })
-  const got = await openRunTab(b2, 9003, { workflowId: 'mofa_visa', busyRuns: new Set() })
-  assert.notEqual(got, front)
-  assert.equal(got.url(), 'about:blank')
+  const front = page2('https://tawtheeq.musaned.com.sa/dashboard', main2, { front: true })
+  assert.equal(await openRunTab(b2, 9003, { workflowId: 'musaned_upload_cv', busyRuns: new Set() }), front)
 })
 
 test('a run of another account never takes the main account\'s tab', async () => {

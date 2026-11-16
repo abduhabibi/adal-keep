@@ -6,6 +6,7 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import api from '../services/api'
+import { onPhone } from '../lib/phoneMode'
 
 const LATER_KEY = 'adal-update-later'
 const later = () => { try { return JSON.parse(localStorage.getItem(LATER_KEY) || 'null') } catch { return null } }
@@ -98,7 +99,10 @@ export default function UpdateBanner() {
         {!busy && (
           <>
             <button type="button" onClick={() => setOpen(o => !o)} className="underline">{open ? 'Hide' : 'What is new · how to update'}</button>
-            <button type="button" onClick={update} className="rounded-md bg-teal-600 px-3 py-1 font-semibold text-white hover:bg-teal-700">Update now</button>
+            {/* A phone cannot update the office PC: it says so instead of a button that can only fail. */}
+            {onPhone()
+              ? <span className="text-xs opacity-80">The office PC installs it (by itself, or its Update now).</span>
+              : <button type="button" onClick={update} className="rounded-md bg-teal-600 px-3 py-1 font-semibold text-white hover:bg-teal-700">Update now</button>}
             {phase !== 'error' && (
               <button type="button" className="text-xs opacity-70 hover:opacity-100" onClick={() => {
                 const v = { sha: n.latest?.sha, until: Date.now() + 4 * 3600 * 1000 }

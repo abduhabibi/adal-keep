@@ -162,7 +162,7 @@ export default function Navbar({ onMenuClick, capturedFiles, setCapturedFiles })
             </button>
             {/* The girls an employer chose (the Selected step on Profiles). */}
             <button type="button" onClick={() => navigate('/profiles?chosen=1')} title="See the selected profiles (chosen by an employer)"
-              className="ak-icon-btn">✓ Selected</button>
+              className="ak-icon-btn">✓ የተመረጡ</button>
             <BackupButton />
           </div>
 
@@ -256,7 +256,7 @@ function BackupButton() {
   return (
     <button onClick={run} disabled={busy} title="Back up to Telegram now (whenever the robots are free it also runs by itself)"
       className={`ak-icon-btn ${busy ? '!text-teal-600 bg-teal-500/10' : ''}`}>
-      <span className={busy ? 'animate-pulse' : ''}>💾</span> {busy ? `Backing up${pct != null ? ` ${pct}%` : '…'}` : 'Backup'}
+      <span className={busy ? 'animate-pulse' : ''}>💾</span> {busy ? `ምትኬ በመያዝ ላይ${pct != null ? ` ${pct}%` : '…'}` : 'ምትኬ'}
     </button>
   )
 }
@@ -279,7 +279,7 @@ function InboxButton() {
     <button onClick={() => navigate('/chat')} title={`${n} unread message${n === 1 ? '' : 's'}`}
       className="flex items-center gap-1.5 rounded-full bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 text-xs font-bold shadow-sm">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2" /><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" /></svg>
-      Inbox <span className="rounded-full bg-white text-red-600 px-1.5 leading-4">{n > 99 ? '99+' : n}</span>
+      የገቢ መልእክት <span className="rounded-full bg-white text-red-600 px-1.5 leading-4">{n > 99 ? '99+' : n}</span>
     </button>
   )
 }

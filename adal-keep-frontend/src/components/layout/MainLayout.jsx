@@ -182,7 +182,7 @@ export default function MainLayout() {
           title={padOpen ? 'Hide the profiles search pad' : 'Show the profiles search pad (Ctrl+K)'}
           className="hidden md:flex absolute right-3 bottom-3 z-30 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold shadow-lg bg-teal-600 text-white hover:bg-teal-700"
         >
-          ⌕ {padOpen ? 'Hide search' : 'Search profiles'}
+          ⌕ {padOpen ? 'ፍለጋውን ደብቅ' : 'ፕሮፋይሎችን ፈልግ'}
         </button>}
       </div>
     </div>

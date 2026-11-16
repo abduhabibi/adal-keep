@@ -140,9 +140,10 @@ export default function PassportFirst({ onRead, onSkip }) {
             <div className="text-5xl">🛂</div>
             <p className="text-lg font-bold text-slate-800 dark:text-slate-100">Start with the passport</p>
             <p className="max-w-md text-sm text-slate-500 dark:text-slate-400">
-              Drag the passport page here — from the tray, the desktop or Telegram — paste it with <b>Ctrl+V</b>,
-              or <span className="font-semibold text-teal-700 dark:text-teal-300 underline">choose it from this PC</span>.
-              Name, passport number, birth date, sex and place of birth fill in by themselves.
+              {/* Amharic as written; English from lib/i18n.js (each piece reads right alone). */}
+              የፓስፖርቱን ገጽ እዚህ ይጎትቱ — ከትሪው፣ ከዴስክቶፕ ወይም ከቴሌግራም — ወይም ይለጥፉ: <b>Ctrl+V</b>
+              {' — ወይም '}<span className="font-semibold text-teal-700 dark:text-teal-300 underline">ከዚህ ኮምፒውተር ይምረጡ</span>.{' '}
+              ስም፣ የፓስፖርት ቁጥር፣ የልደት ቀን፣ ጾታ እና የትውልድ ቦታ ራሳቸው ይሞላሉ።
             </p>
           </>
         )}

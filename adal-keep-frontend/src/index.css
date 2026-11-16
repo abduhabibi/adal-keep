@@ -802,3 +802,59 @@ nav.overflow-x-auto::-webkit-scrollbar { display: none; }
 /* The window not in front pauses animations (main.jsx): an entrance that
    would stay paused at its first frame (invisible) is skipped instead. */
 html.adal-still :is(.animate-fade-up, .animate-fade-in, .animate-fade-in-up, .animate-slide-up, .phone-push, .phone-pop, .phone-fade) { animation: none !important; }
+
+/* ── Adal Keep's own touches (2026-11-16): a tibeb (woven Ethiopian border),
+   today in the Ethiopian calendar, Ge'ez numbers and her road to Riyadh.
+   All painted once: gradients and an SVG, nothing moves. ── */
+.ak-tibeb {
+  height: 10px;
+  background:
+    linear-gradient(#fcd34d, #fcd34d) 0 0 / 100% 1px no-repeat,
+    linear-gradient(#fcd34d, #fcd34d) 0 100% / 100% 1px no-repeat,
+    conic-gradient(from 135deg at 50% 0, #2dd4bf 90deg, transparent 0) 0 2px / 12px 6px repeat-x,
+    conic-gradient(from -45deg at 50% 100%, #818cf8 90deg, transparent 0) 6px 2px / 12px 6px repeat-x;
+}
+.ak-hero { padding-bottom: 2.1rem; }
+.ak-hero-tibeb { position: absolute; left: 0; right: 0; bottom: 0; opacity: .9; }
+.ak-side-tibeb { height: 8px; opacity: .85; }
+
+/* Today: the Ethiopian date, its day in Ge'ez numerals large. */
+.ak-date { display: flex; align-items: center; gap: .85rem; padding: .8rem 1rem .8rem .8rem; border-radius: 18px; color: #fff;
+  background: rgba(255,255,255,.07); box-shadow: inset 0 0 0 1px rgba(255,255,255,.14); min-width: 0; }
+.ak-date-day { flex: none; display: inline-flex; align-items: center; justify-content: center; min-width: 58px; height: 58px; padding: 0 .4rem; border-radius: 16px;
+  font-size: 1.9rem; font-weight: 700; line-height: 1; color: #1e1b4b; background: linear-gradient(135deg, #fde68a, #f59e0b); box-shadow: 0 8px 18px -10px rgba(245,158,11,.9); }
+.ak-date-text { min-width: 0; }
+
+/* Her road: Addis Ababa → Riyadh, with how many are on each part of it. */
+.ak-journey { position: relative; height: 96px; }
+.ak-journey-line { position: absolute; left: 0; right: 0; top: 14px; width: 100%; height: 44px; overflow: visible; }
+.ak-journey-end { position: absolute; bottom: 0; display: flex; align-items: center; gap: .4rem; font-size: .75rem; font-weight: 700; color: rgba(255,255,255,.85); white-space: nowrap; }
+.ak-journey-from { left: 0; }
+.ak-journey-to { right: 0; }
+.ak-journey-dot { width: 10px; height: 10px; border-radius: 50%; background: #5eead4; box-shadow: 0 0 0 4px rgba(94,234,212,.2); }
+.ak-journey-dot-to { background: #fcd34d; box-shadow: 0 0 0 4px rgba(252,211,77,.2); }
+.ak-journey-plane { position: absolute; left: 50%; top: 2px; transform: translateX(-50%) rotate(8deg); font-size: 1rem; color: #e0e7ff; }
+.ak-journey-leg { position: absolute; top: 30px; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; text-align: center; max-width: 30%; }
+.ak-journey-n { display: inline-flex; min-width: 2.2rem; justify-content: center; padding: .1rem .55rem; border-radius: 999px; font-size: .95rem; font-weight: 800;
+  color: #0b1020; background: #fff; box-shadow: 0 6px 14px -8px rgba(0,0,0,.6); }
+.ak-journey-label { margin-top: .25rem; font-size: .7rem; font-weight: 600; line-height: 1.25; color: rgba(255,255,255,.75); }
+@media (max-width: 480px) {
+  .ak-journey { height: 104px; }
+  .ak-journey-end { font-size: .68rem; }
+}
+
+/* A Ge'ez number quietly under each big number. */
+.ak-stat-geez { position: absolute; right: .9rem; bottom: .7rem; font-size: 1.05rem; font-weight: 700; color: var(--ak-tone); opacity: .55; }
+.ak-stat-label { padding-right: 2.2rem; }
+
+/* Page titles: a small woven diamond instead of a bar. */
+.ak-title-mark { width: 10px; height: 10px; margin-right: .7rem; border-radius: 2px; transform: rotate(45deg); vertical-align: .12rem;
+  background: conic-gradient(#2dd4bf 0 25%, #fcd34d 0 50%, #818cf8 0 75%, #14b8a6 0); box-shadow: 0 0 0 3px rgba(20,184,166,.14); }
+
+/* Ethiopic text: a little more line height, and long words wrap instead of being cut. */
+.ak-hero-title, .ak-title, .ak-stat-label, .ak-hero-chip, .ak-side-link { overflow-wrap: anywhere; }
+.ak-title { line-height: 1.3; }
+
+/* Names on cards (profiles, brokers, the CV picker): they wrap instead of
+   being cut off with an ellipsis, in either script. */
+main h3.truncate, main .font-display.truncate { white-space: normal !important; text-overflow: clip !important; overflow: visible !important; overflow-wrap: anywhere; line-height: 1.25; }

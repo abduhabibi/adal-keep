@@ -37,7 +37,7 @@ export default function CVTemplatesPage() {
     <div className="animate-fade-up space-y-6">
       <PageHeader
         title="CV Templates"
-        subtitle={`${rows.length} template(s) — each one is an agency`}
+        subtitle={`${rows.length} ቅጦች — እያንዳንዱ አንድ ኤጀንሲ ነው`}
         action={
           <div className="flex gap-2">
             <Button variant="secondary" onClick={() => navigate('/cvs')}>← CVs</Button>
@@ -48,9 +48,10 @@ export default function CVTemplatesPage() {
       />
 
       <div className="panel p-4 text-xs text-slate-500 leading-relaxed">
-        Each template is a hand-authored HTML/CSS layout with <code className="bg-slate-100 dark:bg-slate-800 px-1 rounded">{'{{TOKENS}}'}</code> for the profile fields.
-        Click <b>🎨 Create template</b>: upload the agency's header, pick two colours and one of the designs — the passport page is always included.
-        <b>Edit</b> on any card changes it; <b>Write HTML…</b> is for a hand-made layout.
+        {/* Amharic as written; English from lib/i18n.js (each piece reads right alone). */}
+        እያንዳንዱ ቅጥ ለፕሮፋይሉ መረጃዎች <code className="bg-slate-100 dark:bg-slate-800 px-1 rounded" translate="no">{'{{TOKENS}}'}</code> ያሉት በእጅ የተጻፈ HTML/CSS ቅርጽ ነው።{' '}
+        <b>🎨 ቅጥ ፍጠር</b> — ይጫኑት፦ የኤጀንሲውን ራስጌ ይስቀሉ፣ ሁለት ቀለሞችና አንድ ንድፍ ይምረጡ፤ የፓስፖርቱ ገጽ ሁሌም ይካተታል።{' '}
+        <b>አርም</b> በማንኛውም ካርድ ላይ ይቀይረዋል፤ <b>HTML ጻፍ…</b> በእጅ ለሚሠራ ቅርጽ ነው።
       </div>
 
       {loading ? <Spinner /> : rows.length === 0 ? (

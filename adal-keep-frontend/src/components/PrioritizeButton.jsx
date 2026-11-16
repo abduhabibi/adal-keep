@@ -7,6 +7,7 @@
 import { useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
 import api from '../services/api'
+import { onPhone } from '../lib/phoneMode'
 
 let ids = new Set(), timer = null
 const subs = new Set()
@@ -33,7 +34,7 @@ export function useWaitingFiles() {
 export default function PrioritizeButton({ profileId, className = '' }) {
   const waiting = useWaitingFiles()
   const [asked, setAsked] = useState(false)
-  if (!waiting.has(Number(profileId))) return null
+  if (onPhone() || !waiting.has(Number(profileId))) return null
   const go = async (e) => {
     e.stopPropagation()
     try {

@@ -89,6 +89,13 @@ async function pushVault(db, agency, state) {
   for (const key of ACCOUNT_LISTS) {
     try { const r = await local('GET', key); if (r.ok) vault[key] = await r.json() } catch {}
   }
+  // The Musaned authenticators: the phones show each account's code (locked like the rest).
+  try {
+    const ids = (await db('musaned_accounts').select('id').catch(() => [])).map(r => r.id)
+    const { authenticatorKeys } = await import('./musanedTotp.js')
+    const keys = authenticatorKeys(ids)
+    if (Object.keys(keys).length) vault['/musaned-totp'] = keys
+  } catch {}
   // The agency's chat account: its phones chat straight with the chat server
   // when this PC is off (frontend cloud/chatDirect.js). Locked like the rest.
   try {
@@ -116,6 +123,49 @@ async function formOf(db, p) {
   return form
 }
 
+// A profile a phone made with the PC off has the phone's own number (below 0)
+// until the PC makes it; then its real one (asked on 2026-11-15: profiles,
+// their documents and CVs made on a phone with the PC off). Her documents the
+// phone added name their field (field_name): the field's real number is hers.
+export async function realPath(db, p) {
+  let path_ = String(p.path || '')
+  const ref = path_.match(/^\/profiles\/(-\d+)(\/|$)/)?.[1]
+  if (ref) {
+    const real = (await db('cloud_sync').where({ key: `ref:profile:${ref}` }).first('hash').catch(() => null))?.hash
+    if (!real) throw new Error('that profile was not made')
+    path_ = path_.replace(`/profiles/${ref}`, `/profiles/${real}`)
+  }
+  const field = path_.match(/^\/profiles\/(\d+)\/fields\/(-\d+)(\/|$)/)
+  if (field) {
+    const name = String(p.field_name || '')
+    if (!name) throw new Error('which document field is not said')
+    const find = () => db('profile_fields').where({ profile_id: Number(field[1]), name }).orderBy('id').first('id')
+    let f = await find()
+    if (!f) { await local('GET', `/profiles/${field[1]}/fields`).catch(() => {}); f = await find() }
+    if (!f) throw new Error(`no "${name}" field`)
+    path_ = path_.replace(`/fields/${field[2]}`, `/fields/${f.id}`)
+  }
+  // A CV asked for her (body.profile_id) while she had the phone's number.
+  if (Number(p.body?.profile_id) < 0) {
+    const real = (await db('cloud_sync').where({ key: `ref:profile:${Number(p.body.profile_id)}` }).first('hash').catch(() => null))?.hash
+    if (!real) throw new Error('that profile was not made')
+    p.body = { ...p.body, profile_id: Number(real) }
+  }
+  const list = path_.match(/^\/checklists\/(-\d+)(\/|$)/)?.[1]
+  if (list) {
+    const real = (await db('cloud_sync').where({ key: `ref:checklist:${list}` }).first('hash').catch(() => null))?.hash
+    if (!real) throw new Error('that checklist was not made')
+    path_ = path_.replace(list, real)
+  }
+  return path_
+}
+/** The profiles phones made: their own number → the real one, for the phones (keep_meta "/phone-refs"). */
+async function pushRefs(db, agency) {
+  const rows = await db('cloud_sync').where('key', 'like', 'ref:profile:%').select('key', 'hash').catch(() => [])
+  const data = Object.fromEntries(rows.map(r => [r.key.slice('ref:profile:'.length), Number(r.hash)]))
+  await upsert(db, 'keep_meta', [{ agency_id: agency, key: '/phone-refs', data, updated_at: new Date().toISOString() }], 'agency_id,key')
+}
+
 let applying = null
 const applyChanges = (db, agency) => (applying ||= applyChangesNow(db, agency).finally(() => { applying = null }))
 async function applyChangesNow(db, agency) {
@@ -130,21 +180,26 @@ async function applyChangesNow(db, agency) {
       // (Chat messages written while the PC was off are sent now.)
       if (!String(p.path || '').startsWith('/') || (NOT_FROM_PHONES.test(p.path) && !/^\/chat\b/.test(p.path))) throw new Error('not allowed from a phone')
       let r
-      if (c.kind === 'upload') {
-        r = await local('POST', p.path, { body: await formOf(db, p), headers: who })
+      const makesProfile = /^\/(profiles|new-profile\/with-passport)$/.test(String(p.path || ''))
+      const phoneRef = makesProfile ? Number(p.body?.phone_ref ?? p.form?.phone_ref) || 0 : 0
+      const made = async (res) => {
+        if (!res.ok || phoneRef >= 0) return
+        const m = await res.clone().json().catch(() => null)
+        if (m?.id) { await setState(db, `ref:profile:${phoneRef}`, String(m.id)); await pushRefs(db, agency).catch(() => {}) }
+      }
+      // Made once only, even when the phone's request came twice.
+      const already = phoneRef < 0 && (await db('cloud_sync').where({ key: `ref:profile:${phoneRef}` }).first('hash').catch(() => null))?.hash
+      if (already) r = new Response(JSON.stringify({ id: Number(already) }), { status: 200 })
+      else if (c.kind === 'upload') {
+        r = await local('POST', await realPath(db, p), { body: await formOf(db, p), headers: who })
+        await made(r)
         // Filed on this PC: the phone's upload leaves Supabase storage.
         if (r.ok) for (const f of p.files || []) await cloudCall(db, 'DELETE', `/storage/v1/object/keep/${f.object}`).catch(() => {})
       } else {
-        // Something a phone made with the PC off (a checklist) has the phone's
-        // own number (below 0) until here: the real one is put in its place.
-        let path_ = p.path
-        const ref = path_.match(/^\/checklists\/(-\d+)(\/|$)/)?.[1]
-        if (ref) {
-          const real = (await db('cloud_sync').where({ key: `ref:checklist:${ref}` }).first('hash').catch(() => null))?.hash
-          if (!real) throw new Error('that checklist was not made')
-          path_ = path_.replace(ref, real)
-        }
-        r = await local(String(p.method || 'POST').toUpperCase(), path_, { body: p.body, headers: who })
+        // Something a phone made with the PC off (a checklist, a profile) has the
+        // phone's own number (below 0) until here: the real one is put in its place.
+        r = await local(String(p.method || 'POST').toUpperCase(), await realPath(db, p), { body: p.body, headers: who })
+        await made(r)
         if (r.ok && p.path === '/checklists' && Number(p.body?.phone_ref) < 0) {
           const made = await r.clone().json().catch(() => null)
           if (made?.id) await setState(db, `ref:checklist:${Number(p.body.phone_ref)}`, String(made.id))
@@ -311,7 +366,8 @@ async function pushAnswers(db, agency, state, { light = false } = {}) {
     ? (await db('profiles').select('id')).map(r => r.id)
     : await changedProfiles(db, new Date((lastSweepAt || started) - 3 * 60000))
   const brokers = (await db('brokers').select('id').catch(() => [])).map(r => r.id)
-  const templates = (await db('cv_templates').select('id').catch(() => [])).map(r => `/cv/templates/${r.id}`)
+  // Each template, and its header and footer pictures (the phone draws CVs with the PC off).
+  const templates = (await db('cv_templates').select('id').catch(() => [])).flatMap(r => [`/cv/templates/${r.id}`, `/cv/templates/${r.id}/banners`])
   const keys = [...GLOBAL, ...ids.flatMap(PER_PROFILE), ...brokers.flatMap(PER_BROKER), ...templates]
   await pushVault(db, agency, state).catch(e => console.warn('[cloud] vault:', e.message))
   const wanted = new Set(keys)

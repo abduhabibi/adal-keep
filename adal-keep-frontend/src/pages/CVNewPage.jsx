@@ -5,6 +5,7 @@ import toast from 'react-hot-toast'
 import api from '../services/api'
 import PickBrokerHere from '../components/PickBrokerHere'
 import UploadPhotoHere from '../components/UploadPhotoHere'
+import { pdfHere } from '../lib/pdfHere'
 import PageHeader from '../components/shared/PageHeader'
 import Button from '../components/shared/Button'
 import Input from '../components/shared/Input'
@@ -322,6 +323,13 @@ export default function CVNewPage() {
         template_id: Number(tid),
         overrides: { __edits: editList(), ...form, country: primary.country || '', salary: primary.salary || 0, currency: primary.currency || 'SAR' },
       })
+      if (res.data?.local_html) {
+        // The PC is off: this phone made the CV itself (the PC files the same CV when it is on).
+        const how = await pdfHere(res.data.local_html, name)
+        toast.success(how === 'saved' ? `Saved: Downloads/Adal Keep/${name}` : 'Choose Save as PDF', { id: t, duration: 6000 })
+        try { localStorage.removeItem('cv-draft-' + profileId) } catch {}
+        return
+      }
       if (res.data?.queued || !res.data?.download_url) {
         toast.success('Saved — the office PC makes the PDF when it is on; it then shows under CVs', { id: t, duration: 7000 })
         return
@@ -364,7 +372,13 @@ export default function CVNewPage() {
           currency: primary.currency || 'SAR',
         },
       })
-      // A phone with the office PC off: the PC makes it when it is on (it shows under CVs then).
+      // A phone with the office PC off: this phone makes the PDF itself (the PC files the same CV when it is on).
+      if (res.data?.local_html) {
+        const how = await pdfHere(res.data.local_html, res.data.filename || 'CV.pdf')
+        toast.success(how === 'saved' ? `Saved: Downloads/Adal Keep/${res.data.filename || 'CV.pdf'}` : 'Choose Save as PDF', { id: t, duration: 6000 })
+        try { localStorage.removeItem('cv-draft-' + profileId) } catch {}
+        return
+      }
       if (res.data?.queued || !res.data?.download_url) {
         toast.success('Saved — the office PC makes the PDF when it is on; it then shows under CVs', { id: t, duration: 7000 })
         try { localStorage.removeItem('cv-draft-' + profileId) } catch {}

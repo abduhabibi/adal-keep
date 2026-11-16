@@ -415,6 +415,13 @@ async function waitTurn(ctx) {
 
 async function stepLoginNow(page, ctx) {
   const shared = await borrowSignIn(page, 'lmis')
+  // This tab is the signed-in one: carry on in it, no page load (a load of
+  // LMIS's app can lose the sign-in, and a new one costs an SMS code) (asked on 2026-11-15).
+  if (shared && page.__adalSignedInHere) {
+    log(ctx, '🔗 LMIS is already signed in in this tab — carrying on here (no new SMS code)')
+    await closePopups(page, ctx)
+    return
+  }
   if (shared) {
     log(ctx, '🔗 LMIS is already signed in in another tab — using that sign-in (no new SMS code)')
     try { await page.goto(shared, { waitUntil: 'domcontentloaded', timeout: 240000 }) } catch (e) { log(ctx, `navigation threw: ${e.message}`, 'warn') }
@@ -609,9 +616,44 @@ async function stepLoginNow(page, ctx) {
   log(ctx, 'logged in')
 }
 
+/**
+ * In a signed-in LMIS tab: to that page inside the app, by its own router (a
+ * link to it, else the address changed the way the app does it) — no new page
+ * load, so the sign-in stays (asked on 2026-11-15). False: not there; the
+ * caller then loads the address.
+ */
+export async function goInApp(page, url, ctx = null) {
+  const want = new URL(url).pathname
+  let here = ''
+  try { here = new URL(page.url()) } catch { return false }
+  if (here.hostname !== new URL(url).hostname || /\/(auth|login)/i.test(here.pathname)) return false
+  if (here.pathname === want) return true
+  const before = await page.evaluate(() => (document.body?.innerText || '').slice(0, 2000)).catch(() => '')
+  const how = await page.evaluate((want) => {
+    const seen = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 }
+    const link = [...document.querySelectorAll('a[href]')].find(a => { try { return new URL(a.href).pathname === want && seen(a) } catch { return false } })
+    if (link) { link.click(); return 'link' }
+    history.pushState({}, '', want)
+    window.dispatchEvent(new PopStateEvent('popstate', { state: {} }))
+    return 'router'
+  }, want).catch(() => '')
+  if (!how) return false
+  for (let i = 0; i < 16; i++) {
+    await sleep(500)
+    let p = ''
+    try { p = new URL(page.url()).pathname } catch {}
+    if (/\/(auth|login)/i.test(p)) return false
+    // There, and the app drew the new page (an address the app did not follow leaves the old page up).
+    const now = p === want ? await page.evaluate(() => (document.body?.innerText || '').slice(0, 2000)).catch(() => '') : ''
+    if (p === want && now && now !== before) { if (ctx) log(ctx, `in the LMIS app to ${want} (${how}, no page load)`); return true }
+  }
+  return false
+}
+
 export async function stepDirectNavigate(page, ctx) {
-  // Never through the dashboard menus: the police page's own address.
-  if (!page.url().includes('police-certificate')) {
+  // Never through the dashboard menus: the police page's own address —
+  // inside the signed-in app when it can be, else loaded.
+  if (!page.url().includes('police-certificate') && !(await goInApp(page, POLICE_URL, ctx).catch(() => false))) {
     log(ctx, `navigating to ${POLICE_URL}`)
     try {
       await page.goto(POLICE_URL, { waitUntil: 'domcontentloaded', timeout: STEP_GOTO_TIMEOUT })
@@ -661,7 +703,7 @@ export async function stepDirectNavigate(page, ctx) {
         reloggedIn = true
         log(ctx, `redirected to login at ${elapsed}s — signing in again`, 'warn')
         await stepLogin(page, ctx)
-        if (!page.url().includes('police-certificate')) {
+        if (!page.url().includes('police-certificate') && !(await goInApp(page, POLICE_URL, ctx).catch(() => false))) {
           await page.goto(POLICE_URL, { waitUntil: 'domcontentloaded', timeout: STEP_GOTO_TIMEOUT })
             .catch(e => log(ctx, `navigation threw: ${e.message}`, 'warn'))
         }

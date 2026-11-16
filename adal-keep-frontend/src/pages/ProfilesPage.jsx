@@ -14,6 +14,7 @@ import SelectionBar from '../components/SelectionBar'
 import { onDataChange } from '../lib/changes'
 import { profilesList } from '../lib/profilesCache'
 import { cachedGet } from '../lib/deviceCache'
+import { onPhone } from '../lib/phoneMode'
 
 const STATUS_OPTIONS_AM = [
   { value: 'pending', label: 'በመጠባበቅ ላይ' },
@@ -163,9 +164,9 @@ export default function ProfilesPage() {
           <Button data-tour="new-profile" className="col-span-2 lg:col-span-1 w-full whitespace-nowrap" onClick={() => navigate('/profiles/new')}>
             + ፕሮፋይል አክል
           </Button>
-          <Button variant="secondary" className="col-span-2 lg:col-span-1 w-full whitespace-nowrap !px-2 text-xs sm:text-sm" onClick={scanMusaned} disabled={scanning} title="Reads the Musaned Employment Requests list: anyone newly chosen gets her contract saved and a task; girls not in Adal Keep are added">
+          {!onPhone() && <Button variant="secondary" className="col-span-2 lg:col-span-1 w-full whitespace-nowrap !px-2 text-xs sm:text-sm" onClick={scanMusaned} disabled={scanning} title="Reads the Musaned Employment Requests list: anyone newly chosen gets her contract saved and a task; girls not in Adal Keep are added">
             {scanning ? '🔎 Checking…' : '🔎 Check for new selections'}
-          </Button>
+          </Button>}
         </div>
       </div>
 

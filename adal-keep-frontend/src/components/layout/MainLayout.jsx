@@ -95,6 +95,19 @@ export default function MainLayout() {
     return () => el.removeEventListener('scroll', on)
   }, [wide])
   useEffect(() => { setBarHidden(false) }, [pathname])
+  // The bar lies over the page on a phone and slides away (transform): the
+  // page itself never changes size while it scrolls — the bar's margin used to
+  // move, and the whole page was laid out again every frame (Settings →
+  // Portals stuttered; asked on 2026-11-15).
+  const barRef = useRef(null)
+  const [barH, setBarH] = useState(0)
+  useEffect(() => {
+    const el = barRef.current
+    if (!el || wide || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => setBarH(el.offsetHeight))
+    ro.observe(el); setBarH(el.offsetHeight)
+    return () => ro.disconnect()
+  }, [wide, bare])
   // A swipe from left to right (a phone): back — out of the open chat or
   // profile; with nothing to go back from, the sidebar. Right to left closes
   // the sidebar, else goes forward again (what the back swipe left).
@@ -165,13 +178,18 @@ export default function MainLayout() {
         {DEMO && <Suspense fallback={null}><DemoBanner /></Suspense>}
         {!DEMO && <FollowerBanner />}
         {!DEMO && <UpdateBanner />}
-        {!(bare && !wide) && (
-          <div className={`shrink-0 transition-[margin,opacity] duration-200 ${barHidden ? 'pointer-events-none opacity-0' : ''}`} style={barHidden ? { marginTop: '-5.5rem' } : undefined}>
+        {wide && (
+          <div className="shrink-0">
             <Navbar onMenuClick={() => setSidebarOpen(!sidebarOpen)} />
           </div>
         )}
-        <div className="flex flex-1 min-h-0">
-          <main ref={mainRef} className="flex-1 min-w-0 overflow-y-auto transition-colors duration-500 custom-scrollbar">
+        <div className="relative flex flex-1 min-h-0">
+          {!wide && !bare && (
+            <div ref={barRef} className={`absolute inset-x-0 top-0 z-30 transition-[transform,opacity] duration-200 will-change-transform ${barHidden ? 'pointer-events-none opacity-0' : ''}`} style={{ transform: barHidden ? 'translateY(-100%)' : 'none' }}>
+              <Navbar onMenuClick={() => setSidebarOpen(!sidebarOpen)} />
+            </div>
+          )}
+          <main ref={mainRef} className="flex-1 min-w-0 overflow-y-auto overscroll-contain transition-colors duration-500 custom-scrollbar" style={!wide && !bare ? { paddingTop: barH } : undefined}>
             <div className={inChat ? 'h-full' : 'px-3 py-4 sm:p-6'}>
               <Outlet key={pageKey} />
             </div>

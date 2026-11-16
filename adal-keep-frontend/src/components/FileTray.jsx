@@ -5,10 +5,12 @@ import { useNavigate } from 'react-router-dom'
 import { useFileCapture } from '../context/FileCaptureContext'
 import { dragProfiles, isProfileDrag, profileCardsDropped } from '../lib/profileDrag'
 import api from '../services/api'
+import { useSmsCodes, SmsCodesRows } from './SmsCodesTray'
 
 export default function FileTray() {
   const { capturedFiles, addFiles, removeFile, clearAll, trayProfiles, addProfiles, removeProfile, clearProfiles } = useFileCapture()
   const navigate = useNavigate()
+  const smsCodes = useSmsCodes()   // LMIS's SMS codes from the agency's phone
   const [hot, setHot] = useState(false) // a profile is dragged over the tray
   const [isOpen, setIsOpen] = useState(false)
   const [showGlobalOverlay, setShowGlobalOverlay] = useState(false)
@@ -251,6 +253,9 @@ export default function FileTray() {
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="text-slate-600 dark:text-slate-400 group-hover:text-slate-900 dark:group-hover:text-white transition-colors">
           <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" /><polyline points="13 2 13 9 20 9" />
         </svg>
+        {smsCodes.some(c => Date.now() - c.at < 5 * 60000) && (
+          <span className="absolute -bottom-0.5 -right-0.5 rounded-full bg-amber-500 px-1 text-[8px] font-bold text-white ring-2 ring-white dark:ring-slate-900" title="An LMIS code came: open the tray">SMS</span>
+        )}
         {capturedFiles.length + trayProfiles.length > 0 && (
           <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-teal-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center ring-2 ring-white dark:ring-slate-900">
             {capturedFiles.length + trayProfiles.length}
@@ -276,6 +281,7 @@ export default function FileTray() {
               <button onClick={() => { clearAll(); toast.success('Tray cleared') }} className="text-xs text-red-500 hover:text-red-600 dark:text-red-400 dark:hover:text-red-300 transition-colors font-medium">Clear all</button>
             )}
           </div>
+          <SmsCodesRows codes={smsCodes} />
           {trayProfiles.length > 0 && (
             <div className="border-b border-slate-200/60 dark:border-slate-800/60 p-2">
               <div className="flex items-center justify-between px-1 pb-1">

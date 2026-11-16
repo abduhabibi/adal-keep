@@ -5,6 +5,9 @@ import PageHeader from '../components/shared/PageHeader'
 import Spinner from '../components/shared/Spinner'
 import { openOutside } from '../lib/phoneApp'
 
+// The phone app: the same ones leave Android's notifications too.
+const offPhone = (o) => { try { window.Capacitor?.Plugins?.AdalDiscovery?.clearNotices?.(o) } catch {} }
+
 export default function NotificationsPage() {
   const [notifications, setNotifications] = useState([])
   const [loading, setLoading] = useState(true)
@@ -30,6 +33,7 @@ export default function NotificationsPage() {
     try {
       await api.delete(`/notifications/${id}`)
       setNotifications(notifications.filter(n => n.id !== id))
+      offPhone({ id: Number(id) })
       toast.success('ማሳወቂያ ተሰርዟል')
     } catch (err) {
       toast.error('ማሳወቂያ መሰረዝ አልተቻለም')
@@ -41,6 +45,7 @@ export default function NotificationsPage() {
     try {
       await api.delete('/notifications/all')
       setNotifications([])
+      offPhone({ all: true })
       toast.success('ሁሉም ማሳወቂያዎች ተጽድተዋል')
     } catch (err) {
       toast.error('ማሳወቂያዎችን ማጽዳት አልተቻለም')

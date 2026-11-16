@@ -433,18 +433,23 @@ const signedInHere = {
  * Before a run signs in: when another tab is already signed in to this
  * portal, its sign-in is used. Cookies are shared by every tab; what a portal
  * keeps per tab (sessionStorage) is copied into this tab before its pages
- * load. Returns the address of that signed-in tab, or null.
+ * load. Returns the address of that signed-in tab, or null
+ * (page.__adalSignedInHere: true when it is this very tab).
  */
 export async function borrowSignIn(page, peer) {
   const isIn = signedInHere[peer]
   if (!isIn || !page?.browser) return null
-  // This tab too: one taken from an earlier run is usually signed in itself.
-  for (const t of page.browser().targets()) {
-    if (t.type() !== 'page') continue
+  // This tab first: one taken from an earlier run is usually signed in itself,
+  // and then the run carries on right here (asked on 2026-11-15).
+  const mine = (() => { try { return page.target?.() } catch { return null } })()
+  const isMine = (t) => !!mine && (t === mine || (t._targetId && t._targetId === mine._targetId))
+  const targets = page.browser().targets().filter(t => { try { return t.type() === 'page' } catch { return false } })
+  targets.sort((a, b) => isMine(b) - isMine(a))
+  for (const t of targets) {
     let url = ''
     try { url = t.url() } catch { continue }
     if (!isIn(url)) continue
-    const other = await t.page().catch(() => null)
+    const other = isMine(t) ? page : await t.page().catch(() => null)
     if (!other) continue
     const st = await other.evaluate(() => ({
       // A site's public front page (LMIS's home with its Login button) is not signed in.
@@ -455,6 +460,9 @@ export async function borrowSignIn(page, peer) {
     })).catch(() => null)
     // (A page still drawing itself — little text yet — is not taken as signed in either.)
     if (!st || st.pw || st.pub || !st.drawn) continue
+    // Signed in in this very tab: nothing to copy, and the run loads no page (a load can lose LMIS's sign-in).
+    if (other === page) { page.__adalSignedInHere = true; return url }
+    page.__adalSignedInHere = false
     await page.evaluateOnNewDocument((data, hosts) => {
       try {
         const h = location.hostname

@@ -40,6 +40,12 @@
             </intent-filter>
         </receiver>
 
+        <!-- Adal Keep's notifications, also with the app closed (no lasting notification). -->
+        <service
+            android:name=".AdalNoticeJob"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
+
         <service
             android:name=".AdalWatchService"
             android:exported="false"
@@ -65,6 +71,8 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- the notifications job starts again after the phone restarts -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <!-- find the office PC on the Wi-Fi (UDP broadcast) -->

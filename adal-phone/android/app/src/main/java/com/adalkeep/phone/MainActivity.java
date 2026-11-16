@@ -57,9 +57,25 @@ public class MainActivity extends BridgeActivity {
 
     // Out of sight the app rests (it does not listen in the background); a
     // "listening" service left from an older version is stopped.
+    // A tap on one of Adal Keep's notifications: the bell's page.
+    @Override
+    protected void onNewIntent(android.content.Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+    }
+
+    private void openAsked() {
+        android.content.Intent i = getIntent();
+        if (i == null || i.getData() == null || !"adalkeep".equals(i.getData().getScheme())) return;
+        i.setData(null);
+        WebView web = getBridge() != null ? getBridge().getWebView() : null;
+        if (web != null) web.postDelayed(() -> web.evaluateJavascript("try{history.pushState({},'','/notifications');dispatchEvent(new PopStateEvent('popstate'))}catch(e){}", null), 800);
+    }
+
     @Override
     public void onResume() {
         super.onResume();
+        openAsked();
         try { stopService(new android.content.Intent(this, AdalWatchService.class)); } catch (Exception e) { /* none running */ }
     }
 

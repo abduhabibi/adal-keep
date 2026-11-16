@@ -176,6 +176,74 @@ public class AdalDiscoveryPlugin extends Plugin {
         });
     }
 
+    /**
+     * htmlToPdf({html}) → { base64 }: the page as an A4 PDF made right here,
+     * without the print screen (a CV with the office PC off, asked on 2026-11-15).
+     */
+    @PluginMethod
+    public void htmlToPdf(final PluginCall call) {
+        final String html = call.getString("html", "");
+        getActivity().runOnUiThread(() -> {
+            final WebView w = new WebView(getContext());
+            w.getSettings().setJavaScriptEnabled(true);
+            w.setWebViewClient(new WebViewClient() {
+                private boolean sent = false;
+                @Override public void onPageFinished(WebView view, String url) {
+                    if (sent) return;
+                    sent = true;
+                    // Its pictures and the page's own fitting (window.adalFit) settle first.
+                    view.postDelayed(() -> {
+                        try {
+                            final File out = File.createTempFile("adal-cv", ".pdf", getContext().getCacheDir());
+                            PrintAttributes a4 = new PrintAttributes.Builder()
+                                .setMediaSize(PrintAttributes.MediaSize.ISO_A4)
+                                .setResolution(new PrintAttributes.Resolution("pdf", "pdf", 300, 300))
+                                .setMinMargins(PrintAttributes.Margins.NO_MARGINS).build();
+                            android.print.AdalPdf.write(view.createPrintDocumentAdapter("Adal Keep CV"), a4, out, new android.print.AdalPdf.Done() {
+                                @Override public void ok(File pdf) {
+                                    try {
+                                        byte[] bytes = java.nio.file.Files.readAllBytes(pdf.toPath());
+                                        pdf.delete();
+                                        JSObject r = new JSObject();
+                                        r.put("base64", Base64.encodeToString(bytes, Base64.NO_WRAP));
+                                        call.resolve(r);
+                                    } catch (Exception e) { call.reject(e.getMessage()); }
+                                    printing = null;
+                                }
+                                @Override public void fail(String why) { printing = null; call.reject("PDF: " + why); }
+                            });
+                        } catch (Throwable e) { printing = null; call.reject("PDF: " + e.getMessage()); }
+                    }, 700);
+                }
+            });
+            printing = w;
+            w.loadDataWithBaseURL("https://localhost/", html, "text/html", "UTF-8", null);
+        });
+    }
+
+    /**
+     * notices({on, url, anon, email, password, agency}): Adal Keep's
+     * notifications come as Android notifications, also with the app closed
+     * (AdalNoticeJob). Asks once for notifications.
+     */
+    @PluginMethod
+    public void notices(PluginCall call) {
+        Context c = getContext();
+        if (Build.VERSION.SDK_INT >= 33 && androidx.core.content.ContextCompat.checkSelfPermission(c, android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            androidx.core.app.ActivityCompat.requestPermissions(getActivity(), new String[] { android.Manifest.permission.POST_NOTIFICATIONS }, 7004);
+        }
+        AdalNoticeJob.setUp(c, call.getBoolean("on", true), call.getString("url", ""), call.getString("anon", ""),
+            call.getString("email", ""), call.getString("password", ""), call.getString("agency", ""));
+        call.resolve();
+    }
+
+    /** clearNotices({all, id}): the bell was cleared — its Android notifications go too. */
+    @PluginMethod
+    public void clearNotices(PluginCall call) {
+        AdalNoticeJob.clear(getContext(), Boolean.TRUE.equals(call.getBoolean("all", false)), call.getInt("id", 0));
+        call.resolve();
+    }
+
     /** printPdf({base64, name}) → prints that PDF as it is. */
     @PluginMethod
     public void printPdf(final PluginCall call) {
@@ -257,6 +325,8 @@ public class AdalDiscoveryPlugin extends Plugin {
             android.content.SharedPreferences.Editor e = p.edit().putBoolean("on", on);
             if (on) {
                 for (String k : new String[] { "url", "anon", "email", "password", "agency" }) e.putString(k, call.getString(k, ""));
+                // The LMIS account(s) whose number is this phone's SIM: named with each code.
+                e.putString("account", call.getString("account", ""));
                 if (androidx.core.content.ContextCompat.checkSelfPermission(getContext(), android.Manifest.permission.RECEIVE_SMS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
                     androidx.core.app.ActivityCompat.requestPermissions(getActivity(), new String[] { android.Manifest.permission.RECEIVE_SMS }, 7003);
                 }
@@ -267,6 +337,7 @@ public class AdalDiscoveryPlugin extends Plugin {
         }
         JSObject r = new JSObject();
         r.put("on", p.getBoolean("on", false));
+        r.put("account", p.getString("account", ""));
         r.put("allowed", androidx.core.content.ContextCompat.checkSelfPermission(getContext(), android.Manifest.permission.RECEIVE_SMS) == android.content.pm.PackageManager.PERMISSION_GRANTED);
         call.resolve(r);
     }

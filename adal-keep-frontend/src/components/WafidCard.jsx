@@ -7,6 +7,7 @@ import toast from 'react-hot-toast'
 import api from '../services/api'
 import Card from './shared/Card'
 import Button from './shared/Button'
+import { onPhone } from '../lib/phoneMode'
 
 const CITIES = ['Addis Ababa', 'Adama', 'Jimma']
 const STATE = { fit: '✅ FIT', unfit: '❌ UNFIT', pending: '⏳ not final yet', none: '— no record yet', challenge: '⚠ robot check', unknown: '? could not read' }
@@ -57,7 +58,7 @@ export default function WafidCard() {
         Email on the form: {s.email || <b className="text-red-600">none — set the Agency Email above</b>}. Phone, names, dates and passport come from each profile.
       </p>
 
-      <div className="mt-4 border-t border-slate-200 dark:border-slate-700 pt-3" translate="no">
+      {!onPhone() && <div className="mt-4 border-t border-slate-200 dark:border-slate-700 pt-3" translate="no">
         <div className="flex flex-wrap items-center gap-3">
           <Button variant="secondary" size="sm" disabled={check?.running}
             onClick={async () => { await api.post('/wafid/check').catch(() => {}); setCheck({ running: true, results: [] }) }}>
@@ -72,7 +73,7 @@ export default function WafidCard() {
             {check.results.map(r => <li key={r.id}><span className="font-medium">{r.name}</span> <span className="text-slate-400 font-mono text-xs">{r.passport}</span> — {STATE[r.state] || r.state}</li>)}
           </ul>
         )}
-      </div>
+      </div>}
     </Card>
   )
 }

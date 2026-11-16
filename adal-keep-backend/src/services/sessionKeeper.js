@@ -6,7 +6,8 @@
  * its own page asked for again in the background — never brought to the
  * front, never a tab a robot is working in, never a page with something typed
  * in it. Every 20 minutes a quiet tab is reloaded too (a site that keeps its
- * sign-in only while its pages load). The robots then find the site signed in
+ * sign-in only while its pages load) — never LMIS: there two of its own menu
+ * links are clicked in turn instead (asked on 2026-11-15). The robots then find the site signed in
  * and go straight to work there (tabManager.borrowSignIn / findFreeTab).
  *
  * GET  /api/sessions             each site: signed in or not, its tabs, last kept
@@ -33,6 +34,54 @@ const signedInAt = (site, url) => { try { return !site.out.test(new URL(url).pat
 async function runningTabs() {
   const ids = new Set((await db('automation_queue').where('status', 'running').select('id').catch(() => [])).map(r => Number(r.id)))
   return ids
+}
+
+// Never a link that does something: out, delete, pay, a new form.
+const RISKY = /log ?out|sign ?out|ውጣ|delete|remove|cancel|pay|submit|create|add|new\b|apply|print|download|ሰርዝ/i
+
+/**
+ * Which two LMIS menu links to click: one away from this page, then the one
+ * back to it (else a second menu page). links: [{ path, text, menu }].
+ */
+export function pickLmisLinks(links, here) {
+  const ok = links.filter(l => l.path && !/\/(auth|login)/i.test(l.path) && !RISKY.test(l.text || '') && !RISKY.test(l.path.replace(/^\/new-agency/, '')))
+  const away = ok.filter(l => l.path !== here).sort((a, b) => (b.menu ? 1 : 0) - (a.menu ? 1 : 0))
+  if (!away.length) return []
+  const back = ok.find(l => l.path === here) || away.find(l => l.path !== away[0].path)
+  return back ? [away[0], back] : [away[0]]
+}
+
+/**
+ * LMIS's sign of life: two of its own menu links clicked in turn, inside the
+ * app (its router, no page load), out of sight. False when no link was found
+ * or the tab left the app (the mouse/key nudge was still given).
+ */
+async function clickBackAndForth(p) {
+  const inTime = (x, ms = 8000) => Promise.race([x, new Promise(r => setTimeout(() => r(null), ms))])
+  const links = await inTime(p.evaluate(() => {
+    const seen = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 }
+    return [...document.querySelectorAll('a[href]')].filter(a => seen(a) && a.host === location.host && a.target !== '_blank' && !/^javascript:/i.test(a.getAttribute('href') || ''))
+      .map(a => ({ path: a.pathname, text: (a.innerText || a.getAttribute('aria-label') || '').trim().slice(0, 60), menu: !!a.closest('nav, aside, [class*="sidebar" i], [class*="menu" i], [role="menu"]') }))
+  }).catch(() => null))
+  let here = ''
+  try { here = new URL(p.url()).pathname } catch { return false }
+  const pick = pickLmisLinks(links || [], here)
+  if (!pick.length) return false
+  // No run takes the tab while it is clicked through (tabManager.findFreeTab skips a borrowed tab).
+  p.__adalBorrowed = true
+  try {
+    for (const l of pick) {
+      const clicked = await inTime(p.evaluate((path) => {
+        const a = [...document.querySelectorAll('a[href]')].find(x => x.pathname === path && x.host === location.host && x.getBoundingClientRect().width > 0)
+        a?.click()
+        return !!a
+      }, l.path).catch(() => false))
+      if (!clicked) return false
+      await new Promise(r => setTimeout(r, 4000))
+      try { if (/\/(auth|login)/i.test(new URL(p.url()).pathname)) return false } catch { return false }
+    }
+    return true
+  } finally { p.__adalBorrowed = false }
 }
 
 /** One round: every site tab that is signed in gets its sign of life. */
@@ -93,6 +142,12 @@ export async function keepAlive() {
           try { await fetch(location.href, { credentials: 'include', cache: 'no-store' }) } catch {}
           return typed
         }), new Promise(r => setTimeout(() => r(null), 15000))])
+        // LMIS: back and forth between two of its own menu pages, never a reload
+        // (a reload of its app can lose the sign-in, and a new one costs an SMS code) (asked on 2026-11-15).
+        if (site.key === 'lmis') {
+          if (typed === false && !(await clickBackAndForth(p)) && !signedInAt(site, p.url())) seen[site.key].signedIn = false
+          continue
+        }
         // Now and then a quiet tab loads again (sites that keep the sign-in only while pages load).
         if (typed === false && Date.now() - (p.__adalReloaded || 0) > RELOAD_MS) {
           p.__adalReloaded = Date.now()
@@ -193,7 +248,11 @@ export async function openSite(key, database = null, { accountId = null } = {}) 
       }
       // Straight to its sign-in page (its home page is public and only looks signed in).
       await page.goto('https://lmis.gov.et/auth', { waitUntil: 'domcontentloaded', timeout: 120000 }).catch(() => {})
-      stepLogin(page, ctx).then(() => keepAlive().catch(() => {})).catch(e => console.warn('[sessions] LMIS sign-in:', e.message))
+      // Signed in: the window goes out of sight, so a robot's task can carry on in this very tab (asked on 2026-11-15).
+      stepLogin(page, ctx).then(async () => {
+        if (!/\/(auth|login)/i.test(page.url())) { const { sendAway } = await import('./browser.js'); await sendAway(page).catch(() => {}) }
+        keepAlive().catch(() => {})
+      }).catch(e => console.warn('[sessions] LMIS sign-in:', e.message))
       return { ok: true, auto: true }
     }
   }

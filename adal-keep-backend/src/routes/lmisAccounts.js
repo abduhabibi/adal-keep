@@ -14,6 +14,11 @@ router.post('/sms-code', async (req, res) => {
   try { const { addSmsCode } = await import('../services/smsCodes.js'); res.json(addSmsCode(req.body || {})) }
   catch (e) { res.status(e.status || 500).json({ error: e.message }) }
 })
+// The codes of the last 10 minutes: every PC's document tray shows them to copy.
+router.get('/sms-codes', async (req, res) => {
+  const { listSmsCodes } = await import('../services/smsCodes.js')
+  res.json(listSmsCodes())
+})
 router.post('/accounts', async (req, res) => {
   try {
     const db = req.app.locals.db

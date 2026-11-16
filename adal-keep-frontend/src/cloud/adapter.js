@@ -125,9 +125,105 @@ function listOpOf(method, path, body) {
   return null
 }
 
+// ---------------------------------------------------------------- made here
+// Asked on 2026-11-15: with the PC off a phone makes a profile, adds her
+// documents and opens her CV at once — in a move's order: her text first
+// (the profile is there at once, with its own number below 0), then each
+// document. The PC does the same when it is on (keep_changes, in order) and
+// says the profile's real number ("/phone-refs"); her documents show here
+// from the phone itself until the PC's copy has them.
+const NEWP = 'adal-cloud-new-profiles' + SUFFIX     // [{ ref, body, at }]
+const PFILES = 'adal-cloud-pending-files' + SUFFIX  // [{ pid, fid, name, file, replace, at }]
+const NOTES = 'adal-cloud-pending-notes' + SUFFIX   // [{ all } | { id }, at]
+const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k) || 'null') ?? d } catch { return d } }
+const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)) } catch {} }
+let newProfiles = load(NEWP, []), pendingFiles = load(PFILES, []), noteOps = load(NOTES, [])
+
+/** The real number of a profile made on this phone, once the PC made it. */
+export const realId = (id) => {
+  if (Number(id) >= 0) return Number(id)
+  const r = (mirrorGet('/phone-refs') || {})[String(id)]
+  return r ? Number(r) : null
+}
+const isNew = (id) => Number(id) < 0
+/** A path with a profile made here: its real number (null: the PC has not made her yet). */
+function realPathOf(path) {
+  const m = path.match(/^\/profiles\/(-\d+)(\/.*)?$/)
+  if (!m) return path
+  const r = realId(m[1])
+  return r ? `/profiles/${r}${m[2] || ''}` : null
+}
+const madeHere = (id) => newProfiles.find(n => String(n.ref) === String(id))
+
+// The fields every profile has (from any profile on the phone), empty: a new profile's documents.
+function blankFields() {
+  for (const k of [...(function* () { const p = mirrorGet('/profiles'); for (const r of (Array.isArray(p) ? p : [])) yield `/profiles/${r.id}/fields` })()]) {
+    const f = mirrorGet(k)
+    if (Array.isArray(f) && f.length) return f.map((x, i) => ({ id: -(i + 1), name: x.name, data_type: x.data_type, is_permanent: x.is_permanent, field_template_id: x.field_template_id, files: [] }))
+  }
+  return ['Photo', 'Full Body Photo', 'Passport', 'Self Video'].map((name, i) => ({ id: -(i + 1), name, data_type: 'file', is_permanent: true, files: [] }))
+}
+
+/** Her documents added on this phone, on top of the copy (until the copy is newer). */
+function withFiles(pid, fields, updatedAt) {
+  if (!Array.isArray(fields)) return fields
+  const n = pendingFiles.length
+  // Gone from here once the PC's copy has the same file (its size) in that field — or,
+  // newer than it by 15 minutes and still without it, it was not filed (the copy is right).
+  const filed = (f) => fields.some(fl => fl.name === f.name && (fl.files || []).some(x => Number(x.size) === Number(f.file.size)))
+  pendingFiles = pendingFiles.filter(f => !(updatedAt && new Date(updatedAt) > new Date(f.at) && (Number(f.pid) === Number(pid) || realId(f.pid) === Number(pid))
+    && (filed(f) || new Date(updatedAt) - new Date(f.at) > 15 * 60000)))
+  if (pendingFiles.length !== n) save(PFILES, pendingFiles)
+  const mine = pendingFiles.filter(f => Number(f.pid) === Number(pid) || realId(f.pid) === Number(pid))
+  if (!mine.length) return fields
+  return fields.map(fl => {
+    const add = mine.filter(f => f.name === fl.name)
+    if (!add.length) return fl
+    const replace = add.some(f => f.replace)
+    return { ...fl, files: [...add.map(f => f.file).reverse(), ...(replace ? [] : (fl.files || []))] }
+  })
+}
+
+/** What the CV page needs to know of her (the PC's /cv/profile-readiness, made here). */
+function readinessOf(profile, fields) {
+  const count = (name) => (fields || []).filter(f => f.name === name).reduce((n, f) => n + (f.files || []).length, 0)
+  const required = ['full_name','first_name','last_name','passport_number','date_of_birth','place_of_birth','nationality','gender','religion','marital_status','children_count','weight','height','living_town','phone_number']
+  const has_photo = count('Photo') > 0 || !!profile.photo_path
+  const has_full_body_photo = count('Full Body Photo') > 0
+  const cv_blockers = [!profile.broker_id && 'Broker not assigned', !has_photo && 'Photo missing', !has_full_body_photo && 'Full body photo missing', !profile.religion && 'Religion missing', !profile.marital_status && 'Marital status missing'].filter(Boolean)
+  const field_file_counts = {}
+  for (const f of fields || []) field_file_counts[f.name] = (field_file_counts[f.name] || 0) + (f.files || []).length
+  return {
+    profile, missing: required.filter(k => profile[k] == null || profile[k] === ''), has_photo, has_full_body_photo, field_file_counts,
+    missing_photos: [!has_photo && 'Photo', !has_full_body_photo && 'Full Body Photo'].filter(Boolean), cv_blockers, can_generate: !cv_blockers.length,
+  }
+}
+
+function newProfileView(n) {
+  const brokers = mirrorGet('/brokers') || []
+  const b = Array.isArray(brokers) ? brokers.find(x => String(x.id) === String(n.body.broker_id)) : null
+  return { status: 'pending', created_by: 'phone', ...n.body, id: n.ref, broker_name: b?.name || null, created_at: n.at, updated_at: n.at, queued: true }
+}
+
 // This phone's edits stay visible until the online copy is newer than them.
 function withPending(key, data, updatedAt) {
   if (key === '/checklists') return applyListOps(data, updatedAt)
+  if (key === '/notifications' && Array.isArray(data)) {
+    const n = noteOps.length
+    noteOps = noteOps.filter(o => !(updatedAt && new Date(updatedAt) > new Date(o.at)))
+    if (noteOps.length !== n) save(NOTES, noteOps)
+    return data.filter(r => !noteOps.some(o => (o.all && new Date(r.created_at || 0) <= new Date(o.at)) || String(o.id) === String(r.id)))
+  }
+  const fieldsOf = key.match(/^\/profiles\/(\d+)\/fields$/)
+  if (fieldsOf) return withFiles(fieldsOf[1], data, updatedAt)
+  if (key === '/profiles' && Array.isArray(data) && newProfiles.length) {
+    // Made on this phone: on top of the list until the PC's list has her.
+    const have = new Set(data.map(r => Number(r.id)))
+    const n = newProfiles.length
+    newProfiles = newProfiles.filter(x => !(realId(x.ref) && have.has(realId(x.ref))) && Date.now() - new Date(x.at).getTime() < 30 * 86400000)
+    if (newProfiles.length !== n) save(NEWP, newProfiles)
+    data = [...newProfiles.map(newProfileView).reverse(), ...data]
+  }
   const fresh = (id) => {
     const p = pending[id]
     if (p && updatedAt && new Date(updatedAt) > new Date(p.at)) { delete pending[id]; savePending(); return null }
@@ -158,6 +254,44 @@ const matchText = (p, q) => {
 }
 
 async function get(path, query) {
+  // A profile made on this phone: her real one once the PC made it, else what the phone has.
+  if (/^\/profiles\/-\d+/.test(path)) {
+    const real = realPathOf(path)
+    if (real) return get(real, query)
+    const [, ref, rest = ''] = path.match(/^\/profiles\/(-\d+)(\/.*)?$/)
+    const n = madeHere(ref)
+    if (!n) throw httpError(404, 'Profile not found')
+    if (!rest) return newProfileView(n)
+    if (rest === '/fields') return withFiles(ref, blankFields(), null)
+    const files = rest.match(/^\/fields\/(-?\d+)\/files$/)
+    if (files) return withFiles(ref, blankFields(), null).find(f => String(f.id) === files[1])?.files || []
+    if (/^\/(automations|whatsapp|days|notes)$/.test(rest)) return []
+    throw httpError(503, 'Made on this phone — the PC adds this when it is on.')
+  }
+  if (query?.profile_id && isNew(query.profile_id)) {
+    const r = realId(query.profile_id)
+    if (r) return get(path, { ...query, profile_id: r })
+    if (path === '/cv/generated') return []
+  }
+  const ready = path.match(/^\/cv\/profile-readiness\/(-?\d+)$/)
+  if (ready) {
+    const id = realId(ready[1]) ?? ready[1]
+    const profile = await get(`/profiles/${id}`, {})
+    const fields = await get(`/profiles/${id}/fields`, {}).catch(() => [])
+    return readinessOf(profile, fields)
+  }
+  // A document (or a made CV) as a file: from this phone's copy, else Telegram / online storage.
+  const doc = path.match(/^\/files\/(-?\d+)\/(download|thumbnail|view)$/)
+  if (doc) { const b = await fileBlob(doc[1]); if (b) return b; throw httpError(404, 'This document is not online yet.') }
+  const made = path.match(/^\/cv\/generated\/(\d+)\/(download|view)$/)
+  if (made) {
+    const row = ((await answer('/cv/generated')) || []).find(c => String(c.id) === made[1])
+    const fields = row ? (await answer(`/profiles/${row.profile_id}/fields`)) || [] : []
+    const f = fields.flatMap(x => x.files || []).find(x => x.path === row?.pdf_path || String(x.path || '').endsWith(String(row?.pdf_path || '-')))
+    const b = f ? await fileBlob(f.id) : null
+    if (b) return b
+    throw httpError(404, 'This CV is not online yet.')
+  }
   if (path === '/auth/me') throw httpError(401, 'Not signed in')
   if (path === '/mobile/ping' || path === '/tasks/calls') return path === '/tasks/calls' ? [] : { ok: true, cloud: true }
   // The dashboard's counts from the phone's own list of profiles: never older than the list.
@@ -257,7 +391,61 @@ function dropTasks(method, path, body) {
   remember('/tasks', cache['/tasks'].filter(t => !ids.includes(Number(t.id))))
 }
 
+/** Her CV page drawn on this phone (lib/cvLocal.js), from what the phone has. */
+async function cvHere(body) {
+  const { cvHtml } = await import('../lib/cvLocal.js')
+  const pid = realId(body?.profile_id) ?? body?.profile_id
+  return cvHtml({
+    profile: (id) => get(`/profiles/${id}`, {}),
+    fields: (id) => get(`/profiles/${id}/fields`, {}).catch(() => []),
+    template: async (id) => (await answer(`/cv/templates/${id}`)) || ((await answer('/cv/templates')) || []).find(t => String(t.id) === String(id)),
+    banners: async (id) => (await answer(`/cv/templates/${id}/banners`).catch(() => null)) || null,
+    broker: async (id) => (await answer(`/brokers/${id}`).catch(() => null)) || ((await answer('/brokers')) || []).find(b => String(b.id) === String(id)),
+    blob: (id) => fileBlob(id),
+  }, pid, body?.template_id, body?.overrides || {})
+}
+
 async function change(method, path, body) {
+  // The CV with the PC off: drawn here; made into a PDF by the phone itself.
+  if (method === 'post' && path === '/cv/preview') return cvHere(body)
+  if (method === 'post' && path === '/cv/generate') {
+    const profile = await get(`/profiles/${realId(body?.profile_id) ?? body?.profile_id}`, {})
+    if (!String(profile?.religion || body?.overrides?.religion || '').trim()) throw httpError(400, `Religion is missing for ${profile?.full_name || 'her'}: fill it in on the profile, then make the CV.`)
+    const html = await cvHere(body)
+    // The PC makes and files the same CV when it is on (it then shows under CVs).
+    await request('api', { method: 'POST', path, body: body ?? null }, Number(body?.profile_id) || null).catch(() => {})
+    const tpl = ((await answer('/cv/templates')) || []).find(t => String(t.id) === String(body?.template_id))
+    const name = `${String(profile?.full_name || 'CV').replace(/[\\/:*?"<>|]+/g, ' ').trim()}${tpl?.name ? ' - ' + tpl.name : ''}.pdf`
+    return { ok: true, queued: true, local_html: html, filename: name }
+  }
+  // Notifications removed here are gone from this phone at once.
+  if (method === 'delete' && /^\/notifications\/(all|\d+)$/.test(path)) {
+    const which = path.split('/').pop()
+    noteOps.push(which === 'all' ? { all: true, at: new Date().toISOString() } : { id: which, at: new Date().toISOString() }); save(NOTES, noteOps)
+  }
+  // A new profile: there at once, with this phone's own number until the PC makes her.
+  const makes = method === 'post' && (path === '/profiles' || path === '/new-profile/with-passport')
+  if (makes) {
+    const ref = -Date.now()
+    let fields = body
+    if (body instanceof FormData) {
+      try { fields = JSON.parse(body.get('profile') || '{}') } catch { fields = {} }
+      body.append('phone_ref', String(ref))
+      const file = body.get('file')
+      if (file instanceof Blob) await keepHere(ref, -1, 'Passport', file, true)
+      await request('upload', { path, ...(await uploadParts(body)) }, null)
+    } else {
+      await request('api', { method: 'POST', path, body: { ...(body || {}), phone_ref: ref } }, null)
+    }
+    newProfiles.push({ ref, body: fields || {}, at: new Date().toISOString() }); save(NEWP, newProfiles)
+    try { window.dispatchEvent(new CustomEvent('adal-data-change', { detail: { paths: ['/profiles'] } })) } catch {}
+    return { ...newProfileView(madeHere(ref)), success: true, message: 'Saved on this phone — the PC adds her when it is on.' }
+  }
+  // Her details changed before the PC made her: kept with her.
+  const one = path.match(/^\/profiles\/(-\d+)$/)
+  if (one && ['put', 'patch'].includes(method) && madeHere(one[1]) && body && typeof body === 'object') {
+    const n = madeHere(one[1]); n.body = { ...n.body, ...body }; save(NEWP, newProfiles)
+  }
   if (NEEDS_PC.test(path)) throw httpError(503, 'This needs the PC (it is off or far away). It works again when the phone reaches the PC.')
   const lop = listOpOf(method, path, body)
   if (lop) {
@@ -272,8 +460,17 @@ async function change(method, path, body) {
   if (QUIET.test(path)) return { ok: true }
   const pid = Number(path.match(/^\/profiles\/(\d+)/)?.[1]) || null
   if (body instanceof FormData) {
-    await request('upload', { path, ...(await uploadParts(body)) }, pid)
-    return { ok: true, success: true, queued: true, files: [], message: 'Uploaded — the PC files it when it is on.' }
+    // Her document shows on this phone at once (the PC files it when it is on).
+    const fieldUp = path.match(/^\/profiles\/(-?\d+)\/fields\/(-?\d+)\/(upload|files)$/)
+    let field_name, kept = []
+    if (fieldUp) {
+      const fields = await get(`/profiles/${fieldUp[1]}/fields`, {}).catch(() => [])
+      field_name = (fields || []).find(f => String(f.id) === fieldUp[2])?.name
+      const blobs = [...body.entries()].filter(([, v]) => v instanceof Blob).map(([, v]) => v)
+      for (const [i, b] of blobs.entries()) kept.push(await keepHere(fieldUp[1], fieldUp[2], field_name, b, fieldUp[3] === 'upload' && i === 0))
+    }
+    await request('upload', { path, ...(field_name ? { field_name } : {}), ...(await uploadParts(body)) }, pid > 0 ? pid : null)
+    return { ok: true, success: true, queued: true, files: kept, message: 'Saved on this phone — the PC files it when it is on.' }
   }
   await request('api', { method: method.toUpperCase(), path, body: body ?? null }, pid)
   return optimistic(method, path, body)
@@ -391,10 +588,18 @@ export function startMirror() {
 export async function cloudAdapter(config) {
   const method = (config.method || 'get').toLowerCase()
   const u = new URL(String(config.url || ''), 'http://cloud/api/')
-  const path = (u.pathname.startsWith('/api') ? u.pathname.slice(4) : u.pathname) || '/'
+  let path = (u.pathname.startsWith('/api') ? u.pathname.slice(4) : u.pathname) || '/'
   const query = { ...Object.fromEntries(u.searchParams), ...(config.params || {}) }
   let body = config.data
   if (typeof body === 'string') { try { body = JSON.parse(body) } catch {} }
+  // A profile made on this phone: once the PC made her, her real number; until
+  // then everything about her stays on this phone (and waits for the PC in order).
+  let onlyHere = false
+  if (/^\/profiles\/-\d+/.test(path)) { const r = realPathOf(path); if (r) path = r; else onlyHere = true }
+  if (body && typeof body === 'object' && !(body instanceof FormData) && isNew(body.profile_id)) {
+    const r = realId(body.profile_id); if (r) body = { ...body, profile_id: r }; else onlyHere = true
+  }
+  if (isNew(query.profile_id)) { const r = realId(query.profile_id); if (r) query.profile_id = r; else onlyHere = true }
   const reply = (status, data, headers = {}) => ({ data, status, statusText: String(status), headers, config, request: {} })
   try {
     // Fast: pages read the phone's own copy at once; with the PC live, an
@@ -410,12 +615,19 @@ export async function cloudAdapter(config) {
         }
       }
     }
+    // The Musaned codes: made right here from the agency's locked vault (no
+    // call to the PC every 2 s; works with the PC off). Keys not in the vault
+    // yet (an older PC): asked of the PC as before.
+    if (method === 'get' && path === '/musaned/authenticators') {
+      const keys = await vaultSoon().then(v => v['/musaned-totp']).catch(() => null)
+      if (keys && Object.keys(keys).length) { const { codesOf } = await import('../lib/totp.js'); return reply(200, await codesOf(keys)) }
+    }
     if (method !== 'get') { markDirty(path); dropTasks(method, path, body) }
     // A new profile with her passport can wait online when the PC does not answer
     // (the PC makes it when it is back; it never makes two).
     const canWait = method === 'post' && path === '/new-profile/with-passport'
-    if (await pcOnline()) {
-      const qs = u.search || (config.params ? '?' + new URLSearchParams(Object.entries(config.params).filter(([, v]) => v != null)).toString() : '')
+    if (!onlyHere && await pcOnline()) {
+      const qs = Object.keys(query).length ? '?' + new URLSearchParams(Object.entries(query).filter(([, v]) => v != null)).toString() : ''
       // Uploads: the files go online first; the PC files them at once.
       // A form: its text goes as it is; its files go online first and the PC
       // files them at once and answers (a chat message shows straight away).
@@ -492,6 +704,13 @@ export async function openVault({ fresh = false } = {}) {
   return JSON.parse(new TextDecoder().decode(plain))
 }
 
+// The vault opened at most once a minute (the Musaned codes ask every 2 s).
+let vaultAt = 0, vaultP = null
+function vaultSoon() {
+  if (!vaultP || Date.now() - vaultAt > 60000) { vaultAt = Date.now(); vaultP = openVault().catch(() => { vaultAt = 0; return {} }) }
+  return vaultP
+}
+
 /**
  * Bytes from an address. Telegram's file downloads do not allow pages to read
  * them (no CORS); inside the phone app its own (native) HTTP has no such rule.
@@ -559,6 +778,16 @@ async function keepFile(id, blob) {
   } catch {}
 }
 
+/** A document added on this phone with the PC off: kept here (own number below 0) and shown in her field. */
+let lastHere = 0
+async function keepHere(pid, fid, name, blob, replace) {
+  lastHere = Math.min(lastHere - 1, -Date.now() * 10)
+  const file = { id: lastHere, original_name: blob.name || `${name || 'document'}`, mimetype: blob.type || 'application/octet-stream', size: blob.size, path: '', queued: true }
+  await keepFile(String(lastHere), blob)
+  pendingFiles.push({ pid: Number(pid), fid: Number(fid), name, file, replace: !!replace, at: new Date().toISOString() }); save(PFILES, pendingFiles)
+  return file
+}
+
 const signed = new Map()
 async function signedUrl(fileId) {
   if (signed.has(fileId)) return signed.get(fileId)
@@ -610,7 +839,7 @@ function fixNode(el) {
   for (const attr of ['src', 'href']) {
     const v = el.getAttribute?.(attr)
     if (v && /^\/api\/chat\/(file|image)\?/.test(v)) { fixChat(el, attr, v); continue }
-    const m = v && v.match(/^\/api\/files\/(\d+)\b/)
+    const m = v && v.match(/^\/api\/files\/(-?\d+)\b/)
     if (!m || el.dataset.cloudFixed === v) continue
     el.dataset.cloudFixed = v
     signedUrl(m[1]).then(url => { if (url && el.getAttribute(attr) === v) el.setAttribute(attr, url) })

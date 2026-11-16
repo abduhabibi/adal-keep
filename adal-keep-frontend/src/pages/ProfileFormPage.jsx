@@ -7,6 +7,7 @@ import Spinner from '../components/shared/Spinner'
 import { REGIONS, regionByName } from '../lib/regions'
 import { useAuth } from '../context/AuthContext'
 import PassportFirst from '../components/PassportFirst'
+import { onPhone } from '../lib/phoneMode'
 
 // Her father's name as the emergency contact: his name and his father's (her surname),
 // e.g. "ABAGOLE KEDIR". A saved name that was only his first name gets the surname too.
@@ -281,6 +282,7 @@ export default function ProfileFormPage() {
   // The passport was read: fill what it says. The person adds the rest.
   const fromPassport = (r) => {
     const f = r.fields || {}
+    if (r.hand) { toast('The PC is off: type her details — her passport goes with the profile.', { icon: '✍️', duration: 6000 }); setShowAll(true) }
     const place = String(f.place_of_birth || '').trim()
     const low = place.toLowerCase()
     const named = String(f.region || '').trim().toLowerCase()
@@ -340,7 +342,8 @@ export default function ProfileFormPage() {
         fd.append('file', passport.file, passport.filename || 'passport.jpg')
         fd.append('profile', JSON.stringify(payload))
         const res = await api.post('/new-profile/with-passport', fd, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 120000 })
-        if (Number(res.data?.id) > 0) { toast.success('አዲስ ፕሮፋይል ተፈጥሯል'); navigate(`/profiles/${res.data.id}`) }
+        // (Made on a phone with the PC off: her number is below 0 until the PC makes her.)
+        if (Number(res.data?.id)) { toast.success(res.data.queued ? 'Saved on this phone — the PC adds her when it is on' : 'አዲስ ፕሮፋይል ተፈጥሯል'); navigate(`/profiles/${res.data.id}`) }
         else { toast.success('Saved — the office PC makes the profile with her passport as soon as it answers', { duration: 7000 }); navigate('/profiles') }
       } else {
         const res = await api.post('/profiles', payload)
@@ -743,10 +746,10 @@ export default function ProfileFormPage() {
                 ? <span className="rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300 px-3 py-0.5 text-xs font-semibold">Chosen {new Date(contract.chosen_at).toLocaleDateString()}</span>
                 : <span className="rounded-full bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300 px-3 py-0.5 text-xs">Not chosen yet</span>}
               {form.musaned_stage && <span className="rounded-full bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300 px-3 py-0.5 text-xs font-semibold">{form.musaned_stage}</span>}
-              <button type="button" disabled={checkingContract} onClick={checkContractNow}
+              {!onPhone() && <button type="button" disabled={checkingContract} onClick={checkContractNow}
                 className="ml-auto rounded-lg border border-indigo-300 px-3 py-1.5 text-xs font-semibold text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 disabled:opacity-50">
                 {checkingContract ? 'Looking on Musaned…' : 'Check Musaned now'}
-              </button>
+              </button>}
             </div>
             <p className="text-xs text-slate-500">Filled by itself every 4 hours from Musaned (Employment Requests → passport → Details). The contract PDFs go into the Contract documents. You can correct anything here.</p>
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">

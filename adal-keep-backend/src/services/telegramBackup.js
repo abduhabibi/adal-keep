@@ -24,7 +24,7 @@ import path from 'path'
 import zlib from 'zlib'
 import crypto from 'crypto'
 import { fileURLToPath } from 'url'
-import { getSecret, setSecret } from './secretStore.js'
+import { getSecret, setSecret, secretBlobs, restoreSecretBlobs } from './secretStore.js'
 
 const BACKEND = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const DATA = path.join(BACKEND, 'data')
@@ -326,7 +326,10 @@ export async function runBackup(db, { force = false, docsOnly = false, light = f
 
     // 3. The index — what a restore needs to find every piece.
     progress.step = 'index'
-    const index = Buffer.from(JSON.stringify({ adal_backup: 1, made: new Date().toISOString(), sets: s.sets, vault_key: vaultKey() }))
+    // With the locked secrets (Musaned authenticators, keys, bot) and the chat account: a restored PC has them again.
+    let chat = null
+    try { chat = fs.readFileSync(path.join(BACKEND, '.adal_chat.json'), 'utf8') } catch {}
+    const index = Buffer.from(JSON.stringify({ adal_backup: 1, made: new Date().toISOString(), sets: s.sets, vault_key: vaultKey(), secrets: secretBlobs(), chat_account: chat }))
     const indexId = await sendPiece(token, chat_id, lock(zlib.gzipSync(index), password), 'adal-backup-index.enc',
       `🗂 Adal Keep backup index · ${(await db('companies').first().catch(() => null))?.name || 'agency'} · ${new Date().toLocaleString()} · keep the NEWEST one — it is what a restore needs`)
     s.index_file_id = indexId
@@ -494,6 +497,8 @@ export async function restoreFrom(indexBuf, { bot_token, password }) {
       if (fs.existsSync(DB_FILE)) fs.copyFileSync(DB_FILE, `${DB_FILE}.before-restore-${Date.now()}`)
       fs.writeFileSync(`${DB_FILE}.restored`, raw)
       stageVaultKey(index.vault_key)   // the restored passwords open with it
+      restoreSecretBlobs(index.secrets)  // and the authenticators, keys and bot with it
+      if (index.chat_account && !fs.existsSync(path.join(BACKEND, '.adal_chat.json'))) fs.writeFileSync(path.join(BACKEND, '.adal_chat.json'), index.chat_account)
     }
     // The database is swapped in on the next start (the open one cannot be replaced live).
     return { ok: true, files, database: !!dbSet, made: index.made }

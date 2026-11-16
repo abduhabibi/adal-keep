@@ -70,6 +70,22 @@ export function getSecret(name) {
   }
 }
 
+/**
+ * The locked secrets as they are (each already locked with the vault's key):
+ * the Telegram backup keeps them, so a restored PC has its Musaned
+ * authenticators, bot and keys again (asked on 2026-11-15).
+ */
+export function secretBlobs() { return readStore() }
+/** A backup's secrets put back (they open once the backup's vault key is in place). */
+export function restoreSecretBlobs(blobs) {
+  if (!blobs || typeof blobs !== 'object') return 0
+  const store = readStore()
+  let n = 0
+  for (const [name, blob] of Object.entries(blobs)) if (typeof blob === 'string' && String(blob).startsWith(V2)) { store[name] = blob; n++ }
+  if (n) writeStore(store)
+  return n
+}
+
 function readStore() {
   try { return JSON.parse(fs.readFileSync(SECRETS_PATH, 'utf8')) } catch { return {} }
 }

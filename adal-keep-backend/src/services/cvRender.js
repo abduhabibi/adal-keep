@@ -112,6 +112,17 @@ async function imageDataUri(absPath, mime, maxPx, { trim = false } = {}) {
   return uri
 }
 
+/**
+ * A template's header and footer banners as the CV shows them (2000 px):
+ * for the phones, which draw CVs themselves with the PC off (cloudSync).
+ */
+export async function bannersOf(template) {
+  return {
+    header: template?.header_path ? await imageDataUri(resolveStoredPath(template.header_path), null, 2000) : '',
+    footer: template?.footer_path ? await imageDataUri(resolveStoredPath(template.footer_path), null, 2000) : '',
+  }
+}
+
 async function renderPdfFirstPageToDataUri(pdfPath) {
   try {
     const mupdf = await import('mupdf')

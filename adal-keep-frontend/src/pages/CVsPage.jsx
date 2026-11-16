@@ -8,6 +8,7 @@ import Spinner from '../components/shared/Spinner'
 import EmptyState from '../components/shared/EmptyState'
 import WhatsAppCVs from '../components/WhatsAppCVs'
 import AddFromMusaned from '../components/AddFromMusaned'
+import { onPhone } from '../lib/phoneMode'
 
 export default function CVsPage() {
   const navigate = useNavigate()
@@ -47,7 +48,7 @@ export default function CVsPage() {
         action={
           <div className="flex gap-2">
             <Button variant="secondary" onClick={() => navigate('/cvs/templates')}>Templates</Button>
-            <Button variant="secondary" onClick={() => setFromMusaned(true)}>📥 Add from Musaned</Button>
+            {!onPhone() && <Button variant="secondary" onClick={() => setFromMusaned(true)}>📥 Add from Musaned</Button>}
             <Button data-tour="new-cv" onClick={openNew}>+ New CV</Button>
           </div>
         }

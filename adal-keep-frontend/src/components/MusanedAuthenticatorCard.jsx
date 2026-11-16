@@ -10,6 +10,7 @@ import toast from 'react-hot-toast'
 import api from '../services/api'
 import Card from './shared/Card'
 import Button from './shared/Button'
+import { onPhone } from '../lib/phoneMode'
 
 const err = (e) => e?.response?.data?.error || e.message
 
@@ -53,6 +54,9 @@ export function Account({ a, has, onChange }) {
   const [busy, setBusy] = useState(false)
   const [key, setKey] = useState('')
   const input = useRef(null)
+  // A phone: the code first; adding or changing the authenticator behind one button (no dropping there).
+  const phone = onPhone()
+  const [open, setOpen] = useState(false)
   const send = async (file, text = '') => {
     setBusy(true)
     try {
@@ -77,7 +81,26 @@ export function Account({ a, has, onChange }) {
           : <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500 dark:bg-slate-800">A person types the code</span>}
       </div>
       {has && <LiveCode info={has} />}
-      <div
+      {phone && !open && (
+        <button type="button" onClick={() => setOpen(true)} className="mt-2 text-xs font-semibold text-teal-700 hover:underline dark:text-teal-300">
+          {has ? 'Change the authenticator' : '＋ Add the authenticator (its QR picture or key)'}
+        </button>
+      )}
+      {phone && open && (
+        <div className="mt-2 space-y-2 rounded-lg border border-slate-200 p-3 text-xs dark:border-slate-700">
+          <Button size="sm" variant="secondary" className="w-full" disabled={busy} onClick={() => input.current?.click()}>{busy ? 'Reading…' : '📷 Choose the QR picture'}</Button>
+          <input ref={input} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) send(f) }} />
+          <div className="text-center text-slate-400">or the key</div>
+          <input value={key} onChange={(e) => setKey(e.target.value)} placeholder="JBSW Y3DP EHPK 3PXP…" autoComplete="off"
+            className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2 font-mono text-sm dark:border-slate-600 dark:bg-slate-800" />
+          <div className="flex gap-2">
+            <Button size="sm" className="flex-1" disabled={busy || key.trim().length < 16} onClick={() => send(null, key)}>Save</Button>
+            <Button size="sm" variant="secondary" onClick={() => setOpen(false)}>Close</Button>
+          </div>
+          <p className="text-slate-500">The office PC reads the QR, so it must be on for this.</p>
+        </div>
+      )}
+      {!phone && <div
         onDragOver={(e) => { e.preventDefault(); setOver(true) }} onDragLeave={() => setOver(false)}
         onDrop={(e) => { e.preventDefault(); setOver(false); const f = e.dataTransfer.files?.[0]; if (f) send(f) }}
         onPaste={(e) => { const f = [...(e.clipboardData?.files || [])][0]; if (f) send(f) }}
@@ -89,7 +112,7 @@ export function Account({ a, has, onChange }) {
         <input value={key} onChange={(e) => setKey(e.target.value)} placeholder="JBSW Y3DP EHPK 3PXP…" autoComplete="off"
           className="min-w-[10rem] flex-1 rounded-lg border border-slate-300 bg-white px-2 py-1 font-mono text-xs dark:border-slate-600 dark:bg-slate-800" />
         <Button size="sm" disabled={busy || key.trim().length < 16} onClick={() => send(null, key)}>Save</Button>
-      </div>
+      </div>}
     </li>
   )
 }
@@ -136,10 +159,12 @@ export default function MusanedAuthenticatorCard() {
   return (
     <Card>
       <h2 className="font-display text-lg font-bold mb-1 flex items-center gap-2" translate="no"><span>🔑</span> Musaned authenticator</h2>
-      <p className="text-sm text-slate-500 mb-3" translate="no">
+      {onPhone() ? <p className="text-sm text-slate-500 mb-3" translate="no">
+        Each Musaned account's 6-digit code right now (it changes every 30 seconds): tap it to copy. Adal Keep types it by itself when it signs in to Musaned.
+      </p> : <p className="text-sm text-slate-500 mb-3" translate="no">
         Give Adal Keep the authenticator's QR code — in Google Authenticator: ⋮ → <b>Transfer codes → Export codes</b>, tick Musaned, and screenshot the QR (or the QR Musaned showed when it was set up) — and Adal Keep types Musaned's 6-digit code itself.
-        When the “I'm not a robot” box passes by itself, signing in to Musaned then needs nobody. The key is kept locked on this PC only.
-      </p>
+        When the “I'm not a robot” box passes by itself, signing in to Musaned then needs nobody. The key is kept locked on this PC, and in the agency's locked copy for its own phones.
+      </p>}
       {accounts.length
         ? <ul className="space-y-2">{accounts.map(a => <Account key={a.id} a={a} has={has[a.id] || null} onChange={load} />)}</ul>
         : <p className="text-sm text-slate-400">No Musaned account yet — add one in a profile's AI actions (Musaned).</p>}

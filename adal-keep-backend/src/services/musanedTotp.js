@@ -140,6 +140,16 @@ function keyOf(accountId) {
   try { return JSON.parse(getSecret(nameOf(accountId)) || 'null') } catch { return null }
 }
 export const hasAuthenticator = (accountId) => !!keyOf(accountId)
+/**
+ * Every account's key, for the agency's own phones (asked on 2026-11-15: the
+ * codes shown on the phone too): it goes online only inside "/vault", locked
+ * with the agency's key like the portals' passwords (cloudSync pushVault).
+ */
+export function authenticatorKeys(accountIds = []) {
+  const out = {}
+  for (const id of accountIds) { const k = keyOf(id); if (k?.secret) out[id] = { secret: k.secret, label: k.label || k.issuer || '', digits: k.digits || 6, period: k.period || 30, algorithm: k.algorithm || 'SHA1' } }
+  return out
+}
 /** What the account's authenticator is (shown in Settings): its name, and the code now. */
 // Musaned takes each code once: the one Adal Keep typed is spent (a person
 // typing it again is told it is invalid) — the page shows the next one then.

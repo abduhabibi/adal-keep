@@ -97,6 +97,11 @@ async function phoneBoot() {
   window.__adalPcOnline = false
   window.addEventListener('adal-pc-online', (e) => { window.__adalPcOnline = !!e.detail })
   window.__adalPair = () => { sessionStorage.removeItem('adal-cloud'); location.replace('/connect.html?pair=1') }
+  // Adal Keep's notifications as Android notifications, also with the app closed (asked on 2026-11-15).
+  import('./cloud/adapter.js').then(({ cloudCreds }) => {
+    const c = cloudCreds(), p = window.Capacitor?.Plugins?.AdalDiscovery
+    if (c?.email && p?.notices) p.notices({ on: true, url: c.url, anon: c.anon, email: c.email, password: c.password, agency: c.agency }).catch(() => {})
+  }).catch(() => {})
   phoneUpdates()
 }
 

@@ -375,6 +375,15 @@ router.post('/generated/:id/reformat', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
+// The header and footer pictures as data: links — the phones keep them, to
+// draw a CV themselves when the PC is off (asked on 2026-11-15).
+router.get('/templates/:id/banners', async (req, res) => {
+  const tpl = await req.app.locals.db('cv_templates').where('id', req.params.id).first()
+  if (!tpl) return res.status(404).json({ error: 'Not found' })
+  const { bannersOf } = await import('../services/cvRender.js')
+  res.json(await bannersOf(tpl))
+})
+
 router.get('/templates/:id/header-image', async (req, res) => {
   const db = req.app.locals.db
   const tpl = await db('cv_templates').where('id', req.params.id).first()

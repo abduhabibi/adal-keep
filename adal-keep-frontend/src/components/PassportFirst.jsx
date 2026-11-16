@@ -43,6 +43,13 @@ export default function PassportFirst({ onRead, onSkip }) {
     const preview = file.type?.startsWith('image/') ? URL.createObjectURL(file) : null
     setBusy({ name: file.name, preview, t0: Date.now() })
     try {
+      // The phone with the office PC off: a passport is read on the PC, so her
+      // details are typed here; the passport goes with her profile and the PC
+      // reads it when it is on (asked on 2026-11-15: profiles made with the PC off).
+      if (window.__ADAL_CLOUD && !import.meta.env.VITE_ADMIN) {
+        const { pcOnline } = await import('../cloud/adapter.js')
+        if (!(await pcOnline())) { onRead({ offline: true, hand: true, file, filename: file.name || 'passport.jpg', fields: {} }); return }
+      }
       const fd = new FormData()
       fd.append('file', file, file.name || 'passport.jpg')
       let data

@@ -18,6 +18,7 @@ import { dragProfiles } from '../lib/profileDrag'
 import WhatsAppSendPicked from './WhatsAppSendPicked'
 import { SendProfilesDialog } from './SharedProfile'
 import { FORMATS, downloadTable } from '../lib/tableExport'
+import { onPhone } from '../lib/phoneMode'
 
 const err = (e) => e?.response?.data?.error || e.message
 
@@ -188,17 +189,18 @@ export default function SelectionBar({ picked, onRemove, onClear, onAllShown, on
       </div>
       <div className={`${open ? '' : 'hidden lg:flex'} flex min-h-0 flex-1 flex-col`}>
         <div className="grid grid-cols-2 gap-1.5 border-b border-slate-100 p-2 dark:border-slate-800 lg:grid-cols-1 lg:p-3">
-          <button type="button" className={`${btn} bg-sky-50 text-sky-800 hover:bg-sky-100 dark:bg-sky-900/30 dark:text-sky-300`} disabled={!!busy}
-            onClick={() => startAll('tasheer_schedule', 'Tasheer')} title="One group appointment on Tasheer for all of them (only those whose visa is made)">🛂 {busy === 'tasheer_schedule' ? 'Checking and starting…' : 'Make Tasheer'} <span className="ml-auto hidden text-[10px] font-normal opacity-80 lg:inline">group</span></button>
-          <button type="button" className={`${btn} bg-amber-50 text-amber-800 hover:bg-amber-100 dark:bg-amber-900/30 dark:text-amber-300`} disabled={!!busy}
-            onClick={() => startAll('insurance_certificate', 'Insurance certificate')}>🛡️ {busy === 'insurance_certificate' ? 'Checking and starting…' : 'Make insurance'}</button>
+          {/* (A phone reaches no website: Tasheer, insurance and WhatsApp sends are the PC's.) */}
+          {!onPhone() && <button type="button" className={`${btn} bg-sky-50 text-sky-800 hover:bg-sky-100 dark:bg-sky-900/30 dark:text-sky-300`} disabled={!!busy}
+            onClick={() => startAll('tasheer_schedule', 'Tasheer')} title="One group appointment on Tasheer for all of them (only those whose visa is made)">🛂 {busy === 'tasheer_schedule' ? 'Checking and starting…' : 'Make Tasheer'} <span className="ml-auto hidden text-[10px] font-normal opacity-80 lg:inline">group</span></button>}
+          {!onPhone() && <button type="button" className={`${btn} bg-amber-50 text-amber-800 hover:bg-amber-100 dark:bg-amber-900/30 dark:text-amber-300`} disabled={!!busy}
+            onClick={() => startAll('insurance_certificate', 'Insurance certificate')}>🛡️ {busy === 'insurance_certificate' ? 'Checking and starting…' : 'Make insurance'}</button>}
           <button type="button" className={`${btn} bg-teal-600 text-white hover:bg-teal-700`} disabled={!!busy}
             onClick={print} title="2 pages a girl: the contract's first page and the embassy form with the visa and application numbers as barcodes">
             🖨️ {busy === 'print' ? 'Checking…' : 'Print embassy'} <span className="ml-auto hidden text-[10px] font-normal opacity-80 lg:inline">{picked.length * 2} pages</span></button>
           <button type="button" className={`${btn} bg-indigo-50 text-indigo-800 hover:bg-indigo-100 dark:bg-indigo-900/30 dark:text-indigo-300`} disabled={!!busy}
             onClick={openLists}>📋 {busy === 'checklist' ? 'Saving…' : 'Checklist'} <span className="ml-auto hidden text-[10px] font-normal opacity-80 lg:inline">new or add</span></button>
-          <button type="button" className={`${btn} bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:bg-emerald-900/30 dark:text-emerald-300`} disabled={!!busy}
-            onClick={() => setMessaging(m => !m)}>💬 WhatsApp <span className="ml-auto hidden text-[10px] font-normal opacity-80 lg:inline">send CVs</span></button>
+          {!onPhone() && <button type="button" className={`${btn} bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:bg-emerald-900/30 dark:text-emerald-300`} disabled={!!busy}
+            onClick={() => setMessaging(m => !m)}>💬 WhatsApp <span className="ml-auto hidden text-[10px] font-normal opacity-80 lg:inline">send CVs</span></button>}
           {messaging && <WhatsAppSendPicked picked={picked} onClose={() => setMessaging(false)} />}
           {import.meta.env.VITE_DEMO !== '1' && <button type="button" className={`${btn} bg-violet-50 text-violet-800 hover:bg-violet-100 dark:bg-violet-900/30 dark:text-violet-300`} disabled={!!busy}
             onClick={() => setSharing(true)}>🏢 Send to another agency <span className="ml-auto hidden text-[10px] font-normal opacity-80 lg:inline">with documents</span></button>}

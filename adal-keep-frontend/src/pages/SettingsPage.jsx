@@ -49,7 +49,8 @@ export default function SettingsPage() {
   // ?tab=whatsapp (older links) opens Integrations, where WhatsApp now is.
   const asked = params.get('tab') === 'whatsapp' ? 'integrations' : params.get('tab')
   // A phone has no Transitions (moving from another system is done on a PC).
-  const TABS = window.__ADAL_CLOUD || isPhoneView() ? SETTINGS_TABS.filter(([id]) => id !== 'transitions') : SETTINGS_TABS
+  // (Backups and software updates are the PC's too: the phone's own update is in This phone.)
+  const TABS = window.__ADAL_CLOUD || isPhoneView() ? SETTINGS_TABS.filter(([id]) => id !== 'transitions' && !(isPhoneView() && id === 'backup')) : SETTINGS_TABS
   const tab = TABS.some(([id]) => id === asked) ? asked : 'agency'
   const setTab = (id) => { setParams(id === 'agency' ? {} : { tab: id }, { replace: true }); window.scrollTo({ top: 0 }) }
   const [loading, setLoading] = useState(true)
@@ -278,7 +279,7 @@ export default function SettingsPage() {
           </form>
         </div>
       </Card>
-      {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Main PC & phones"><MainPCCard /></ErrorBoundary>}
+      {import.meta.env.VITE_DEMO !== '1' && !isPhoneView() && <ErrorBoundary small name="Main PC & phones"><MainPCCard /></ErrorBoundary>}
       </>}
       {tab === 'plan' && import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Plan"><PlanCard /></ErrorBoundary>}
       {tab === 'portals' && <>
@@ -289,9 +290,9 @@ export default function SettingsPage() {
       {tab === 'integrations' && <>
       {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Musaned code"><MusanedCodesCard /></ErrorBoundary>}
       {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="EPRO signature"><EproSignatureCard /></ErrorBoundary>}
-      {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="WhatsApp"><WhatsAppCard /></ErrorBoundary>}
+      {import.meta.env.VITE_DEMO !== '1' && !isPhoneView() && <ErrorBoundary small name="WhatsApp"><WhatsAppCard /></ErrorBoundary>}
       {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Photo refining keys"><AiKeysCard /></ErrorBoundary>}
-      {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Telegram"><TelegramChannelCard /></ErrorBoundary>}
+      {import.meta.env.VITE_DEMO !== '1' && !isPhoneView() && <ErrorBoundary small name="Telegram"><TelegramChannelCard /></ErrorBoundary>}
       </>}
       {tab === 'transitions' && import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Transitions"><TransitionsCard /></ErrorBoundary>}
       {tab === 'backup' && <>

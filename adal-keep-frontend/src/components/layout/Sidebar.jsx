@@ -2,7 +2,7 @@ import { NavLink } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import toast from 'react-hot-toast'
 import api from '../../services/api'
-import { isPhoneApp } from '../../lib/phoneMode'
+import { onPhone } from '../../lib/phoneMode'
 
 export const links = [
   {
@@ -96,7 +96,7 @@ export const links = [
 
 // The Trash: only in the menu on the main PC itself (it opens only there).
 // The phone app is served from http://localhost too: it is never the main PC.
-export const onMainPC = () => ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname) && !isPhoneApp() && !window.Capacitor?.isNativePlatform?.()
+export const onMainPC = () => ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname) && !onPhone() && !window.Capacitor?.isNativePlatform?.()
 export const trashLink = {
   to: '/trash',
   label: 'Trash',
@@ -125,11 +125,7 @@ export default function Sidebar({ isOpen, onToggle, collapsed: narrowWanted, onT
   const brand = company ? `Adal ${company}` : 'Adal Keep'
 
   const getLinkClass = ({ isActive }) =>
-    `flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium transition-all duration-200 ${
-      isActive
-        ? 'bg-teal-600/10 text-teal-600 dark:bg-teal-500/20 dark:text-teal-400'
-        : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100/60 dark:hover:bg-white/5 hover:text-slate-900 dark:hover:text-white'
-    }`
+    `ak-side-link${isActive ? ' is-on' : ''}`
 
   return (
     <>
@@ -145,45 +141,43 @@ export default function Sidebar({ isOpen, onToggle, collapsed: narrowWanted, onT
       <aside
         className={`
           flex flex-col shrink-0
-          bg-white dark:bg-slate-900 md:bg-white/80 md:dark:bg-slate-900/80
-          border-r border-slate-200/60 dark:border-slate-800/60
-          transition-all duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)]
+          ak-side
           h-screen
-          ${collapsed ? 'w-[72px]' : 'w-[260px]'}
+          ${collapsed ? 'w-[72px]' : 'w-[248px]'}
           fixed inset-y-0 left-0 z-[80] shadow-xl
           ${isOpen ? 'translate-x-0' : '-translate-x-full'}
           md:relative md:translate-x-0 md:shadow-none md:z-auto
         `}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-5 border-b border-slate-200/60 dark:border-slate-800/60 min-h-[72px]">
+        <div className="flex items-center justify-between px-4 py-5 border-b ak-side-sep min-h-[72px]">
           <div className={`flex items-center gap-3 overflow-hidden ${collapsed ? 'justify-center w-full' : ''}`}>
             {!collapsed && (
-              <div className="w-9 h-9 rounded-xl overflow-hidden shadow-md shrink-0 ring-1 ring-black/5">
+              <div className="w-9 h-9 rounded-xl overflow-hidden ak-side-logo shrink-0">
                 <img src="/adal-logo.png" alt="Adal" className="h-full w-full object-cover" draggable={false} />
               </div>
             )}
-            <div className={`transition-all duration-300 ${collapsed ? 'opacity-0 w-0 overflow-hidden' : 'opacity-100 w-auto'}`}>
+            <div className={`${collapsed ? 'opacity-0 w-0 overflow-hidden' : 'opacity-100 w-auto'}`}>
               <div
-                className="font-display text-lg font-extrabold tracking-tight text-slate-900 dark:text-white whitespace-nowrap truncate max-w-[168px]"
+                className="ak-side-brand text-[17px] font-extrabold tracking-tight whitespace-nowrap truncate max-w-[150px]"
                 title={brand}
               >
                 {brand}
               </div>
-              <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">ፕሪሚየም CRM</p>
+              <p className="ak-side-sub text-[10px] font-semibold uppercase tracking-[0.14em] leading-tight">ፕሪሚየም CRM</p>
             </div>
           </div>
 
           <button
             type="button"
             onClick={onToggleCollapse}
-            className={`hidden md:flex p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 rounded-lg hover:bg-slate-100/60 dark:hover:bg-white/5 transition-all duration-200 shrink-0 ${
+            className={`ak-side-toggle hidden md:flex p-1.5 rounded-lg shrink-0 ${
               collapsed ? 'absolute right-2 top-6' : ''
             }`}
             aria-label="ሳይድባር ቀይር"
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-              className={`transition-transform duration-300 ${collapsed ? 'rotate-180' : ''}`}>
+              className={`${collapsed ? 'rotate-180' : ''}`}>
               <polyline points="15 18 9 12 15 6" />
             </svg>
           </button>
@@ -208,7 +202,7 @@ export default function Sidebar({ isOpen, onToggle, collapsed: narrowWanted, onT
             </NavLink>
           ))}
 
-          <div className={`pt-4 mt-4 border-t border-slate-200/60 dark:border-slate-800/60 ${collapsed ? 'px-0' : ''}`}>
+          <div className={`pt-3 mt-3 border-t ak-side-sep space-y-1 ${collapsed ? 'px-0' : ''}`}>
             {onMainPC() && [trashLink].map(link => (
               <NavLink key={link.to} to={link.to}
                 onClick={() => { if (window.innerWidth < 768) onToggle() }}
@@ -234,7 +228,7 @@ export default function Sidebar({ isOpen, onToggle, collapsed: narrowWanted, onT
           </div>
         </nav>
 
-        <div className={`border-t border-slate-200/60 dark:border-slate-800/60 px-4 py-3 text-[10px] text-slate-400 dark:text-slate-500 shrink-0 ${collapsed ? 'text-center' : ''}`}>
+        <div className={`border-t ak-side-sep ak-side-sub px-4 py-3 text-[10px] shrink-0 ${collapsed ? 'text-center' : ''}`}>
           {collapsed ? 'v2.0' : 'የአካባቢ የስራ ቦታ · SQLite'}
         </div>
       </aside>

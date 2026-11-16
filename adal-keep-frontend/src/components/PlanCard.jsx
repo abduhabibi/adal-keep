@@ -15,7 +15,7 @@ export default function PlanCard() {
   const plan = usePlan()
   const [busy, setBusy] = useState('')
   if (!plan) return null
-  const p = plan.plans.find(x => x.key === plan.plan)
+  const p = (plan.plans || []).find(x => x.key === plan.plan)
   const refresh = async () => {
     setBusy('refresh')
     try { await loadPlan({ fresh: true }); toast.success('Plan up to date') } catch (e) { toast.error(err(e)) }
@@ -45,8 +45,8 @@ export default function PlanCard() {
 
       {plan.offers?.length > 0 && (
         <div className="mb-3 space-y-2">
-          {plan.offers.map(o => {
-            const f = plan.features.find(x => x.key === o.feature)
+          {(plan.offers || []).map(o => {
+            const f = (plan.features || []).find(x => x.key === o.feature)
             return (
               <div key={o.id} className="flex flex-wrap items-center gap-3 rounded-xl border-2 border-amber-300 bg-amber-50 px-3 py-2 dark:border-amber-700 dark:bg-amber-900/20">
                 <span className="text-xl">🆕</span>
@@ -59,7 +59,7 @@ export default function PlanCard() {
       )}
 
       <ul className="grid gap-2 sm:grid-cols-2">
-        {plan.features.map(f => (
+        {(plan.features || []).map(f => (
           <li key={f.key} className={`flex items-start gap-2 rounded-xl border px-3 py-2 text-sm ${f.state === 'on' ? 'border-emerald-200 bg-emerald-50/50 dark:border-emerald-800 dark:bg-emerald-900/10' : 'border-slate-200 dark:border-slate-700'}`}>
             <span className="mt-0.5">{f.state === 'on' ? '✅' : f.state === 'offered' ? '🆕' : '🔒'}</span>
             <span className="min-w-0 flex-1">

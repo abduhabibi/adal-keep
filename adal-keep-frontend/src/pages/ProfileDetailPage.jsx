@@ -19,7 +19,7 @@ import NotesTimeline from '../components/NotesTimeline'
 import VisaBarcodes from '../components/VisaBarcodes'
 import MedicalBattery from '../components/MedicalBattery'
 import { onDataChange } from '../lib/changes'
-import { isPhoneApp } from '../lib/phoneMode'
+import { onPhone } from '../lib/phoneMode'
 
 // Her father's name as the emergency contact: his name and his father's (her surname),
 // e.g. "ABAGOLE KEDIR". A saved name that was only his first name gets the surname too.
@@ -198,7 +198,7 @@ export default function ProfileDetailPage() {
       <ProfileJourney profileId={id} />
       <ProfileDays profileId={id} />
 
-      {import.meta.env.VITE_DEMO !== '1' && <WhatsAppSend profile={profile} />}
+      {import.meta.env.VITE_DEMO !== '1' && !onPhone() && <WhatsAppSend profile={profile} />}
 
       {(profile.chosen_at || profile.contract_number) && <ContractCard profile={profile} />}
 
@@ -343,7 +343,7 @@ export default function ProfileDetailPage() {
           </div>
         </section>
       </div>
-      {!isPhoneApp() && <div id="ai-actions" className="scroll-mt-24"><ProfileAutomations profileId={id} /></div>}
+      {!onPhone() && <div id="ai-actions" className="scroll-mt-24"><ProfileAutomations profileId={id} /></div>}
 
       {/* Notes */}
       <section className="panel p-6">

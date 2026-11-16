@@ -85,7 +85,7 @@ function PhonesOnline({ here }) {
       )}
       {c.devices?.length > 0 && (
         <ul className="divide-y divide-slate-100 dark:divide-slate-800">
-          {c.devices.map(d => (
+          {(c.devices || []).map(d => (
             <li key={d.user_id} className="flex items-center gap-2 py-1.5">
               <span>📱</span>
               <span className={`flex-1 truncate ${d.revoked ? 'line-through text-slate-400' : ''}`}>{d.name || 'Phone'}</span>
@@ -193,7 +193,7 @@ export default function MainPCCard() {
       {!follower && (
         <div className="space-y-1.5 mb-5" translate="no">
           <h3 className="font-semibold text-sm mb-1">Addresses of this main PC</h3>
-          {info.lan.map(u => <Addr key={u} label="In the office" url={u} />)}
+          {(info.lan || []).map(u => <Addr key={u} label="In the office" url={u} />)}
           {ts.ip
             ? <>
                 <Addr label="Private link (Tailscale)" url={`http://${ts.ip}:${info.port}`} note="from the other branch and from home" />

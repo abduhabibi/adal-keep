@@ -38,7 +38,7 @@ export default function ProfileDays({ profileId }) {
         {d.musaned_stage && <span className="text-xs text-slate-500">Musaned: {d.musaned_stage}</span>}
         <span className="ml-auto text-[11px] text-slate-400">{d.checked_at ? `Musaned looked at ${new Date(d.checked_at).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · ` : ''}checked by itself every 2 hours</span>
       </div>
-      {!d.days.length ? <p className="text-sm text-slate-500">Her first day is kept within the hour.</p> : (
+      {!(d.days || []).length ? <p className="text-sm text-slate-500">Her first day is kept within the hour.</p> : (
         <ol className="flex gap-2 overflow-x-auto pb-1 custom-scrollbar">
           {d.days.map(x => {
             const said = x.changes.length ? x.changes.join(' · ') : x.first ? 'first day kept' : 'no change'

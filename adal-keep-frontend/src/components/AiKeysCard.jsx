@@ -9,7 +9,7 @@ import { useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
 import api from '../services/api'
 import Card from './shared/Card'
-import { isPhoneApp } from '../lib/phoneMode'
+import { onPhone } from '../lib/phoneMode'
 
 const SAID = {
   ok: ['✅ can refine photos', 'text-emerald-600'],
@@ -21,7 +21,7 @@ const err = (e) => e?.response?.data?.error || e.message
 
 export default function AiKeysCard() {
   // Kept on the office PC only: a phone does not manage them.
-  if (isPhoneApp()) return null
+  if (onPhone()) return null
   return <Keys />
 }
 

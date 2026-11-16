@@ -24,6 +24,8 @@ async function poll() {
 export function useWaitingFiles() {
   const [v, setV] = useState(ids)
   useEffect(() => {
+    // (A phone: moves are the PC's — nothing to ask every 5 s.)
+    if (onPhone()) return
     subs.add(setV)
     if (!timer) { poll(); timer = setInterval(poll, 5000) }
     return () => { subs.delete(setV); if (!subs.size) { clearInterval(timer); timer = null } }

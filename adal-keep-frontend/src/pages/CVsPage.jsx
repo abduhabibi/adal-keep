@@ -56,7 +56,7 @@ export default function CVsPage() {
 
       {!profileFilter && import.meta.env.VITE_DEMO !== '1' && (
         <div className="flex w-fit rounded-xl border border-slate-200 bg-white p-1 dark:border-slate-700 dark:bg-slate-800">
-          {[['cvs', '📄 Made CVs'], ['whatsapp', '💬 WhatsApp']].map(([id, label]) => (
+          {[['cvs', '📄 Made CVs'], ...(onPhone() ? [] : [['whatsapp', '💬 WhatsApp']])].map(([id, label]) => (
             <button key={id} type="button" onClick={() => setParams(id === 'whatsapp' ? { tab: 'whatsapp' } : {})}
               className={`rounded-lg px-4 py-1.5 text-sm font-semibold ${tab === id ? 'bg-teal-600 text-white' : 'text-slate-600 dark:text-slate-300'}`}>{label}</button>
           ))}
@@ -65,7 +65,7 @@ export default function CVsPage() {
 
       {fromMusaned && <AddFromMusaned onClose={() => setFromMusaned(false)} />}
 
-      {tab === 'whatsapp' ? <WhatsAppCVs /> : loading ? <Spinner /> : rows.length === 0 ? (
+      {tab === 'whatsapp' && !onPhone() ? <WhatsAppCVs /> : loading ? <Spinner /> : rows.length === 0 ? (
         <EmptyState
           title="No CVs yet"
           description="Click New CV to pick a candidate and generate a formatted CV for one of your agencies."

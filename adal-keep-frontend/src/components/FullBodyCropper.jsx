@@ -24,7 +24,8 @@ export default function FullBodyCropper({ file, onDone, onCancel }) {
     url.current = URL.createObjectURL(file)
     const im = new Image()
     im.onload = () => {
-      const h = Math.min(window.innerHeight * 0.72, 720)
+      // (A phone: the controls sit under the frame — it leaves them room, 2026-11-16.)
+      const h = Math.min(window.innerHeight * (window.innerWidth < 640 ? 0.48 : 0.72), 720)
       const w = h * RATIO
       const cover = Math.max(w / im.naturalWidth, h / im.naturalHeight)
       const contain = Math.min(w / im.naturalWidth, h / im.naturalHeight)
@@ -94,7 +95,7 @@ export default function FullBodyCropper({ file, onDone, onCancel }) {
 
   return createPortal(
     <div className="fixed inset-0 z-[100000] flex items-center justify-center bg-slate-950/80 p-4" onMouseDown={e => e.target === e.currentTarget && onCancel()}>
-      <div className="flex max-h-full flex-col gap-4 rounded-2xl bg-white p-5 shadow-2xl dark:bg-slate-900 sm:flex-row">
+      <div className="flex max-h-full flex-col gap-4 overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl dark:bg-slate-900 sm:flex-row">
         <div
           className="relative shrink-0 cursor-grab touch-none select-none overflow-hidden rounded-lg bg-white ring-2 ring-teal-500 active:cursor-grabbing"
           style={{ width: frame.w, height: frame.h }}

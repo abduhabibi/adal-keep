@@ -269,7 +269,8 @@ async function get(path, query) {
     if (rest === '/fields') return withFiles(ref, await blankFields(), null)
     const files = rest.match(/^\/fields\/(-?\d+)\/files$/)
     if (files) return withFiles(ref, await blankFields(), null).find(f => String(f.id) === files[1])?.files || []
-    if (/^\/(automations|whatsapp|days|notes)$/.test(rest)) return []
+    if (rest === '/days') return { days: [] }
+    if (/^\/(automations|whatsapp|notes)$/.test(rest)) return []
     throw httpError(503, 'Made on this phone — the PC adds this when it is on.')
   }
   if (query?.profile_id && isNew(query.profile_id)) {
@@ -342,7 +343,8 @@ async function get(path, query) {
 // ---------------------------------------------------------------- changes
 // (A CV preview is drawn by the PC: with it off the page says so, nothing waits in line.)
 const NEEDS_PC = /^\/(chat|system|backup|branch|main-pc|mobile|subscription|setup|cv\/preview|automations\/\d+\/(input|screen))/
-const QUIET = /^\/(tutor|employees\/device-(login|resume|logout)|chat\/ping)/
+// (A profile opened on the phone: only the PC's list order — never queued for later.)
+const QUIET = /^\/(tutor|employees\/device-(login|resume|logout)|chat\/ping|profiles\/-?\d+\/opened$)/
 
 async function request(kind, payload, profileId = null) {
   const c = cloudCreds()

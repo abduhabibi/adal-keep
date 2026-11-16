@@ -7,6 +7,7 @@ import api from '../../services/api'
 import { useFileCapture } from '../../context/FileCaptureContext'
 import FullBodyCropper from '../FullBodyCropper'
 import { printFileOnPhone } from '../../lib/phoneApp'
+import { onPhone } from '../../lib/phoneMode'
 
 /** Print a stored file (the slip's PDF) straight from the page. */
 async function printFile(f) {
@@ -265,7 +266,7 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
               title="Print the newest slip"
             >🖨 Print</button>
           )}
-          {(field.name === 'Photo' || field.name === 'Full Body Photo') && isImage(mainFile) && (
+          {(field.name === 'Photo' || field.name === 'Full Body Photo') && isImage(mainFile) && !onPhone() && (
             <button
               type="button"
               disabled={refining}
@@ -420,8 +421,8 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
             <div className="flex w-full flex-col gap-1.5 px-3">
               <button type="button" onClick={pick.open}
                 className="rounded-lg bg-teal-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-teal-700">📁 Scan from my files</button>
-              <button type="button" onClick={() => addFromMusaned(profileId, navigate)}
-                className="rounded-lg border border-teal-300 px-3 py-1.5 text-xs font-semibold text-teal-700 hover:bg-teal-50 dark:border-teal-700 dark:text-teal-300 dark:hover:bg-teal-900/20">📥 Add from Musaned</button>
+              {!onPhone() && <button type="button" onClick={() => addFromMusaned(profileId, navigate)}
+                className="rounded-lg border border-teal-300 px-3 py-1.5 text-xs font-semibold text-teal-700 hover:bg-teal-50 dark:border-teal-700 dark:text-teal-300 dark:hover:bg-teal-900/20">📥 Add from Musaned</button>}
             </div>
           ) : (
           <button type="button" onClick={pick.open} disabled={uploading}

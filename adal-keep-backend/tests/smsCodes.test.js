@@ -1,0 +1,60 @@
+// LMIS's SMS code from the agency's phone (asked on 2026-11-16): to the robot
+// that pressed Sign In (the same LMIS account's), typed there and shown in no
+// tray; nobody in Adal Keep asked for it — every PC's tray shows it.
+import test from 'node:test'
+import assert from 'node:assert/strict'
+
+const fresh = async () => import(`../src/services/smsCodes.js?t=${Math.random()}`)
+
+test('nobody asked: the code goes to every tray', async () => {
+  const s = await fresh()
+  assert.equal(s.addSmsCode({ code: '123456', account: 'nuzla · 0911000000' }).to, 'trays')
+  assert.deepEqual(s.listSmsCodes().map(c => c.code), ['123456'])
+  assert.equal(s.takeSmsCode(0), '123456')   // a robot that comes later may still use it
+})
+
+test('a robot pressed Sign In: the code is that robot\'s, not the trays\'', async () => {
+  const s = await fresh()
+  const w = s.waitForSmsCode({ run: 7, account: { phone: '+251 911 000 000', name: 'nuzla' } })
+  const r = s.addSmsCode({ code: '654321', account: 'nuzla · 0911000000' })
+  assert.equal(r.to, 'robot'); assert.equal(r.run, 7)
+  assert.equal(s.listSmsCodes().length, 0)
+  assert.equal(s.takeSmsCode(0, w), '654321')
+  assert.equal(s.takeSmsCode(0, w), null)     // used once
+  s.stopWaiting(w)
+})
+
+test('two robots: each gets the code of its own LMIS account', async () => {
+  const s = await fresh()
+  const a = s.waitForSmsCode({ run: 1, account: { phone: '0911000000', name: 'nuzla' } })
+  const b = s.waitForSmsCode({ run: 2, account: { phone: '0922000000', name: 'ZAD' } })
+  assert.equal(s.addSmsCode({ code: '2222', account: 'ZAD · 0922000000' }).run, 2)
+  assert.equal(s.addSmsCode({ code: '1111', account: 'nuzla · 0911000000' }).run, 1)
+  assert.equal(s.takeSmsCode(0, a), '1111')
+  assert.equal(s.takeSmsCode(0, b), '2222')
+})
+
+test('the phone named no account: the robot waiting longest gets it', async () => {
+  const s = await fresh()
+  const first = s.waitForSmsCode({ run: 1, account: { phone: '0911000000' } })
+  s.waitForSmsCode({ run: 2, account: { phone: '0922000000' } })
+  assert.equal(s.addSmsCode({ code: '3333', account: '' }).run, 1)
+  assert.equal(s.takeSmsCode(0, first), '3333')
+})
+
+test('a robot that gave up: its code shows in the trays after all', async () => {
+  const s = await fresh()
+  const w = s.waitForSmsCode({ run: 9, account: { phone: '0911000000' } })
+  s.addSmsCode({ code: '4444', account: 'x · 0911000000' })
+  assert.equal(s.listSmsCodes().length, 0)
+  s.stopWaiting(w)
+  assert.deepEqual(s.listSmsCodes().map(c => c.code), ['4444'])
+})
+
+test('the same SMS sent twice counts once; a non-code is refused', async () => {
+  const s = await fresh()
+  s.addSmsCode({ code: '5555' })
+  assert.equal(s.addSmsCode({ code: '5555' }).twice, true)
+  assert.equal(s.listSmsCodes().length, 1)
+  assert.throws(() => s.addSmsCode({ code: '12' }))
+})

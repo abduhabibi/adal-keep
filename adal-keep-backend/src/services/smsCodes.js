@@ -1,12 +1,48 @@
 /**
  * LMIS sign-in codes sent by the agency's phone (adal-phone SmsCodeReceiver:
  * "Send LMIS codes to Adal Keep" in Settings → This phone). Kept in memory
- * only, for 10 minutes. The LMIS robot types the newest one that came after
- * it asked (used once), and every PC's document tray shows them with a Copy
- * button, so anyone can type it and carry on (asked on 2026-11-15).
+ * only, for 10 minutes.
+ *
+ * Who gets a code (asked on 2026-11-16):
+ *   - an Adal Keep robot that pressed LMIS's Sign In (so it made LMIS send
+ *     the SMS) is waiting for it (waitForSmsCode): the code is that robot's —
+ *     the one for the same LMIS account (its phone number or name), else the
+ *     robot that has waited longest. The robot types it, presses the button
+ *     and carries on; the code is not shown in anyone's tray.
+ *   - nobody in Adal Keep asked for it (a person signed in to LMIS by hand,
+ *     somewhere): every PC's document tray shows it with a Copy button.
  */
-const codes = []   // { code, from, account, at, got, used }
+const codes = []    // { code, from, account, at, got, used, forRun }
+const waiters = []  // { id, run, account, since }
 const TTL = 10 * 60000
+let nextWaiter = 1
+
+const digits = (s) => String(s || '').replace(/\D/g, '')
+/** Does the code's account (what the phone was told: "nuzla · 0912345678 | ZAD · …") name this robot's account? */
+function sameAccount(codeAccount, w) {
+  const text = String(codeAccount || '').toLowerCase()
+  if (!text || !w.account) return false
+  const phone = digits(w.account.phone).slice(-9)
+  if (phone.length >= 7 && digits(text).includes(phone)) return true
+  const name = String(w.account.name || '').trim().toLowerCase()
+  return !!name && text.split('|').some(part => part.split('·')[0].trim() === name)
+}
+
+/**
+ * A robot pressed LMIS's Sign In and waits for its SMS code. account: { phone, name }.
+ * Returns the waiter's id; call stopWaiting(id) when signed in (or given up).
+ */
+export function waitForSmsCode({ run = null, account = {} } = {}) {
+  const w = { id: nextWaiter++, run, account, since: Date.now() }
+  waiters.push(w)
+  return w.id
+}
+export function stopWaiting(id) {
+  const i = waiters.findIndex(w => w.id === id)
+  if (i >= 0) waiters.splice(i, 1)
+  // A code it was given and never typed (it gave up): every PC's tray shows it after all.
+  for (const c of codes) if (c.forRun === id && !c.used) c.forRun = null
+}
 
 export function addSmsCode({ code, from = '', account = '', at = Date.now() } = {}) {
   const c = String(code || '').replace(/\D/g, '')
@@ -14,26 +50,35 @@ export function addSmsCode({ code, from = '', account = '', at = Date.now() } = 
   const now = Date.now()
   while (codes.length && now - codes[0].got > TTL) codes.shift()
   // The same SMS twice (the phone tried again): once.
-  if (codes.some(x => x.code === c && now - x.got < 2 * 60000)) return { ok: true }
-  codes.push({ code: c, from: String(from || '').slice(0, 40), account: String(account || '').slice(0, 80), at: Math.min(Number(at) || now, now), got: now, used: false })
-  console.log('[sms] an LMIS code came from the phone')
-  import('./liveChannel.js').then(L => L.broadcast({ t: 'sms-code', at: now })).catch(() => {})
-  return { ok: true }
-}
-
-/** The newest unused code that came after `since` (ms), marked used — or null. */
-export function takeSmsCode(since = 0) {
-  for (let i = codes.length - 1; i >= 0; i--) {
-    const c = codes[i]
-    if (c.used || c.got < since || Date.now() - c.got > TTL) continue
-    c.used = true
-    return c.code
+  if (codes.some(x => x.code === c && now - x.got < 2 * 60000)) return { ok: true, twice: true }
+  for (let i = waiters.length - 1; i >= 0; i--) if (now - waiters[i].since > TTL) waiters.splice(i, 1)
+  // The robot that made LMIS send it: the same account's, else the one waiting longest.
+  const w = waiters.find(x => sameAccount(account, x)) || [...waiters].sort((a, b) => a.since - b.since)[0] || null
+  codes.push({ code: c, from: String(from || '').slice(0, 40), account: String(account || '').slice(0, 80), at: Math.min(Number(at) || now, now), got: now, used: false, forRun: w ? w.id : null })
+  if (w) {
+    console.log(`[sms] an LMIS code came from the phone → the robot signing in${w.run ? ` (run #${w.run})` : ''}`)
+    return { ok: true, to: 'robot', run: w.run || null }
   }
-  return null
+  console.log('[sms] an LMIS code came from the phone → every PC\'s tray (no robot asked for it)')
+  import('./liveChannel.js').then(L => L.broadcast({ t: 'sms-code', at: now })).catch(() => {})
+  return { ok: true, to: 'trays' }
 }
 
-/** The codes of the last 10 minutes, newest first (the trays show them). */
+/**
+ * The newest unused code for this waiter (or, with none of its own, one nobody
+ * was given) that came after `since` (ms), marked used — or null.
+ */
+export function takeSmsCode(since = 0, waiter = null) {
+  const fresh = (c) => !c.used && c.got >= since && Date.now() - c.got <= TTL
+  const pick = [...codes].reverse().find(c => fresh(c) && waiter != null && c.forRun === waiter)
+    || [...codes].reverse().find(c => fresh(c) && c.forRun == null)
+  if (!pick) return null
+  pick.used = true
+  return pick.code
+}
+
+/** The codes of the last 10 minutes no robot was given, newest first (every PC's tray shows them). */
 export function listSmsCodes() {
   const now = Date.now()
-  return codes.filter(c => now - c.got <= TTL).map(c => ({ code: c.code, account: c.account, at: c.got, used: c.used })).reverse()
+  return codes.filter(c => now - c.got <= TTL && c.forRun == null).map(c => ({ code: c.code, account: c.account, at: c.got, used: c.used })).reverse()
 }

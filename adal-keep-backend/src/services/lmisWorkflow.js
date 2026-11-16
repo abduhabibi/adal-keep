@@ -402,7 +402,12 @@ async function asksForCode(page) {
  */
 export async function stepLogin(page, ctx) {
   const release = await waitTurn(ctx)
-  try { return await stepLoginNow(page, ctx) } finally { release() }
+  // From the moment Sign In is pressed, the SMS code LMIS sends is this run's
+  // (services/smsCodes.js): the agency's phone passes it here and nobody else's tray shows it.
+  try { return await stepLoginNow(page, ctx) } finally {
+    release()
+    if (ctx.__smsWaiter) { const { stopWaiting } = await import('./smsCodes.js'); stopWaiting(ctx.__smsWaiter); ctx.__smsWaiter = null }
+  }
 }
 
 async function waitTurn(ctx) {
@@ -526,6 +531,10 @@ async function stepLoginNow(page, ctx) {
   // LMIS can take more than a minute to sign in. Waiting only 60s made runs
   // carry on from the login page and fail with "Session lost".
   log(ctx, `waiting for LMIS to finish signing in (up to ${LOGIN_WAIT_MS / 1000}s — LMIS is often slow)`)
+  {
+    const { waitForSmsCode } = await import('./smsCodes.js')
+    ctx.__smsWaiter = waitForSmsCode({ run: ctx.runId || null, account: { phone: ctx.login_value, name: ctx.account_name || ctx.accountName || '' } })
+  }
   const t0 = Date.now()
   let lastNote = t0
   let lastClick = t0
@@ -556,7 +565,7 @@ async function stepLoginNow(page, ctx) {
       // The agency's phone sent LMIS's SMS code (Settings → This phone): typed at once.
       if (!codeSent) {
         const { takeSmsCode } = await import('./smsCodes.js')
-        const fromPhone = takeSmsCode(codeSince - 60000)
+        const fromPhone = takeSmsCode(Math.min(codeSince, t0) - 60000, ctx.__smsWaiter)
         if (fromPhone && await typeCodeInto(page, fromPhone).catch(() => false)) {
           log(ctx, '📱 the SMS code came from the agency phone — typed')
           codeSent = Date.now()

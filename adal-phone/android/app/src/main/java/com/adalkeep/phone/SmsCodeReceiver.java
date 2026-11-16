@@ -40,16 +40,22 @@ public class SmsCodeReceiver extends BroadcastReceiver {
             if (from.isEmpty() && m.getOriginatingAddress() != null) from = m.getOriginatingAddress();
             body.append(m.getMessageBody());
         }
-        String text = body.toString();
-        if (!(LMIS.matcher(from).find() || LMIS.matcher(text).find())) return;   // not LMIS: left alone
-        Matcher c = CODE.matcher(text);
-        if (!c.find()) return;
-        final String code = c.group(1);
+        final String code = codeOf(from, body.toString());
+        if (code == null) return;   // not LMIS (or no code in it): left alone
         final String sender = from;
         final PendingResult done = goAsync();
         new Thread(() -> {
             try { send(p, code, sender); } catch (Exception ignored) { } finally { done.finish(); }
         }).start();
+    }
+
+    /** LMIS's code in this SMS, or null: only a message from LMIS (or naming it) with a 4–8 digit code. */
+    static String codeOf(String from, String text) {
+        if (from == null) from = "";
+        if (text == null) text = "";
+        if (!(LMIS.matcher(from).find() || LMIS.matcher(text).find())) return null;
+        Matcher c = CODE.matcher(text);
+        return c.find() ? c.group(1) : null;
     }
 
     /** The code to the main PC: this phone's online account, then a call the PC answers. */

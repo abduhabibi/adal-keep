@@ -252,6 +252,7 @@ async function executeRun(db, page, job) {
     activeEmployee,
     login_value:       savedCtx.login_value || '',
     login_password:    savedCtx.login_password || '',
+    account_name:      savedCtx.account_name || '',   // (an LMIS code from the phone names its account)
     account_id:        savedCtx.account_id || job.account_id || null,
     musaned_username:  savedCtx.musaned_username || '',
     musaned_password:  savedCtx.musaned_password || '',

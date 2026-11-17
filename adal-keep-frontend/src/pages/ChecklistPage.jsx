@@ -10,7 +10,12 @@ import { onDataChange } from '../lib/changes'
 import { profilesList } from '../lib/profilesCache'
 import { cachedGet } from '../lib/deviceCache'
 
+// A PC has the profiles search pad docked on the right (it opens with this
+// page): profiles are dragged from it, so the page's own list is phone-only.
+const narrow = () => !(window.matchMedia?.('(min-width: 768px)').matches ?? true)
+
 export default function ChecklistPage() {
+  const [phone] = useState(narrow)
   const [allProfiles, setAllProfiles] = useState([])
   const [checklists, setChecklists] = useState([])
   const [loading, setLoading] = useState(true)
@@ -34,7 +39,7 @@ export default function ChecklistPage() {
     try {
       // What was kept on this device shows at once; the fresh lists replace it.
       const [profilesRes, checklistsRes] = await Promise.all([
-        profilesList({ fresh: quiet === true, onSaved: quiet === true ? undefined : (d) => setAllProfiles(d || []) }),
+        !phone ? Promise.resolve([]) : profilesList({ fresh: quiet === true, onSaved: quiet === true ? undefined : (d) => setAllProfiles(d || []) }),
         cachedGet('/checklists', { onSaved: quiet === true ? undefined : (d) => { setChecklists(d || []); setLoading(false) } })
       ])
       setAllProfiles(profilesRes)
@@ -160,10 +165,10 @@ export default function ChecklistPage() {
 
   return (
     <div className="animate-fade-up h-[calc(100dvh-5.5rem)] flex flex-col">
-      <div className="flex-1 min-h-0 grid grid-cols-1 grid-rows-[minmax(0,2fr)_minmax(0,3fr)] lg:grid-rows-1 lg:grid-cols-3 gap-3 lg:gap-4 overflow-hidden">
-        
-        {/* LEFT PANE: All Profiles */}
-        <div className="panel flex flex-col overflow-hidden lg:col-span-1">
+      <div className={`flex-1 min-h-0 ${phone ? 'grid grid-cols-1 grid-rows-[minmax(0,2fr)_minmax(0,3fr)] gap-3' : 'flex flex-col'} overflow-hidden`}>
+
+        {/* LEFT PANE: All Profiles (phone only — a PC drags from the search pad) */}
+        {phone && <div className="panel flex flex-col overflow-hidden">
           <div className="p-4 border-b border-slate-200/60 dark:border-slate-800/60">
             <h2 className="font-display font-bold text-slate-800 dark:text-white mb-3 flex items-center gap-2">
               <span className="text-lg">📥</span> ሁሉም ፕሮፋይሎች
@@ -206,10 +211,10 @@ export default function ChecklistPage() {
               <div className="text-center py-8 text-slate-400 dark:text-slate-500 text-sm">ምንም ፕሮፋይል አልተገኘም።</div>
             )}
           </div>
-        </div>
+        </div>}
 
         {/* RIGHT PANE: Checklists */}
-        <div className="panel flex flex-col overflow-hidden lg:col-span-2">
+        <div className="panel flex flex-1 min-h-0 flex-col overflow-hidden">
           <div className="p-4 border-b border-slate-200/60 dark:border-slate-800/60">
             <div className="mb-3 flex items-center justify-between gap-2">
               <h2 className="font-display font-bold text-slate-800 dark:text-white flex items-center gap-2">

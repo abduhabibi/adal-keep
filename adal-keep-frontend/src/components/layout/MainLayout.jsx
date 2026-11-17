@@ -118,6 +118,9 @@ export default function MainLayout() {
     window.addEventListener('touchend', up, { passive: true })
     return () => { window.removeEventListener('touchstart', down); window.removeEventListener('touchend', up) }
   }, [wide, sidebarOpen])
+  // The watch list is filled by dragging profiles from the pad: it opens with it.
+  const onWatchList = pathname.startsWith('/checklist')
+  useEffect(() => { if (onWatchList) setPadOpen(true) }, [onWatchList])
   const togglePad = () => setPadOpen(o => {
     try { localStorage.setItem(PAD_KEY, o ? 'closed' : 'open') } catch {}
     return !o

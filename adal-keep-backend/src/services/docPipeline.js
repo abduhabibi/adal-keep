@@ -219,6 +219,58 @@ async function fileInto(db, profileId, fieldName, file, originalName) {
   return true
 }
 
+/**
+ * The pictures inside a PDF (another agency's CV: her photo, her standing
+ * photo, the passport copy on the next page), taken out as they are stored —
+ * sharp, no page drawing. The photo is the near-square one, the full-body one
+ * the tall one, the passport the wide one whose machine lines verify (pages
+ * that say "passport" first). Returns { dir, photo, fullbody, passport, mrz } or null.
+ */
+export async function pdfPictures(pdfPath) {
+  let mupdf
+  try { mupdf = await import('mupdf') } catch { return null }
+  const doc = mupdf.Document.openDocument(fs.readFileSync(pdfPath), 'application/pdf')
+  const found = []
+  for (let i = 0; i < Math.min(doc.countPages(), 6); i++) {
+    const page = doc.loadPage(i)
+    const [x0, y0, x1, y1] = page.getBounds()
+    const pageArea = (x1 - x0) * (y1 - y0) || 1
+    const st = page.toStructuredText('preserve-images')
+    const saysPassport = /passport/i.test(st.asText())
+    st.walk({
+      onImageBlock(bbox, transform, image) {
+        const w = bbox[2] - bbox[0], h = bbox[3] - bbox[1]
+        if (w <= 0 || h <= 0 || (w * h) / pageArea < 0.012) return
+        if (w / h > 3 || h / w > 4) return            // the letterhead and the footer
+        found.push({ page: i, w, h, share: (w * h) / pageArea, saysPassport, image })
+      },
+    })
+  }
+  if (!found.length) return null
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'adal-pdfpics-'))
+  const save = async (f, name) => {
+    const out = path.join(dir, name)
+    await sharp(Buffer.from(f.image.toPixmap().asPNG())).flatten({ background: '#ffffff' }).jpeg({ quality: 92 }).toFile(out)
+    return out
+  }
+  const biggest = (list) => list.sort((a, b) => b.share - a.share)[0]
+  const pics = { dir }
+  const photo = biggest(found.filter(f => f.h / f.w >= 0.85 && f.h / f.w < 1.6))
+  const body = biggest(found.filter(f => f.h / f.w >= 1.6))
+  if (photo) pics.photo = await save(photo, 'photo.jpg')
+  if (body) pics.fullbody = await save(body, 'fullbody.jpg')
+  // The passport: wide pictures, those on a "passport" page and the biggest first, until one's MRZ verifies.
+  const wide = found.filter(f => f.w / f.h >= 1.15).sort((a, b) => (b.saysPassport - a.saysPassport) || (b.share - a.share)).slice(0, 4)
+  const { quickMrz } = await import('./quickMrz.js')
+  for (const [n, f] of wide.entries()) {
+    const file = await save(f, `passport-${n}.jpg`)
+    const mrz = await quickMrz(file, { tries: 2 }).catch(() => null)
+    if (mrz) { pics.passport = file; pics.mrz = mrz; break }
+    fs.rmSync(file, { force: true })
+  }
+  return pics
+}
+
 export async function runPipeline(filePath, db, analyzer, tag = '[pipeline]', opts = {}) {
   const filename = opts.name || path.basename(filePath)
   const ext = path.extname(filename).toLowerCase()
@@ -290,6 +342,36 @@ export async function runPipeline(filePath, db, analyzer, tag = '[pipeline]', op
       } finally { fs.rmSync(parts.dir, { recursive: true, force: true }) }
     }
     if (parts?.dir) fs.rmSync(parts.dir, { recursive: true, force: true })
+  }
+
+  // A PDF with her photos inside (another agency's CV, asked on 2026-11-17):
+  // the passport copy in it is read first (it makes or finds her profile, with
+  // the verified details), then the CV itself (every other detail, kept as her
+  // CV — so she stands at the Musaned step at once), then Photo and Full Body
+  // Photo are filed from it. Nothing is asked.
+  if (!opts.part && ext === '.pdf' && db) {
+    let pics = null
+    try { setStage('taking the photos and the passport out of the PDF'); pics = await pdfPictures(filePath) } catch (e) { log('pdf pictures:', e.message) }
+    if (pics && (pics.photo || pics.fullbody)) {
+      try {
+        const base = filename.replace(/\.[^.]+$/, '')
+        let first = null
+        if (pics.passport) {
+          log('PDF holds a passport copy: read first')
+          first = await runPipeline(pics.passport, db, async () => pics.mrz, tag, { part: true, name: `passport-${base}.jpg` })
+        }
+        const r = await runPipeline(filePath, db, analyzer, tag, { part: true })
+        const profileId = r.profileId || first?.profileId
+        if (profileId) {
+          for (const [k, field] of [['photo', 'Photo'], ['fullbody', 'Full Body Photo']]) {
+            if (pics[k] && await fileInto(db, profileId, field, pics[k], `${k}-${base}.jpg`)) log(`${field} filed from the PDF (profile #${profileId})`)
+          }
+        }
+        const out = r.ok ? r : first?.ok ? { ...first, cv: r.reason } : r
+        return { ...out, profileId, parts: ['passport', 'photo', 'fullbody'].filter(k => pics[k]) }
+      } finally { fs.rmSync(pics.dir, { recursive: true, force: true }) }
+    }
+    if (pics?.dir) fs.rmSync(pics.dir, { recursive: true, force: true })
   }
 
   // Read-only analysis on the source file. Nothing is copied into storage
@@ -478,7 +560,7 @@ export async function runPipeline(filePath, db, analyzer, tag = '[pipeline]', op
                    'speaks_english','cooking_skill','emergency_name','emergency_phone','mother_name','father_name',
                    'spouse_name','labor_id','visa_number','visa_application_number','employer_name','employer_id',
                    'employer_phone','employer_address','work_city','destination_country','contract_number','contract_date']) {
-    if (ex[k]) read[k] = ex[k]
+    if (ex[k] || (k === 'children_count' && ex[k] === 0)) read[k] = ex[k]
   }
   if (ex.sex && !ex.gender) read.gender = ex.sex
   if (ex.date_of_issue)      read.passport_issue_date  = ex.date_of_issue

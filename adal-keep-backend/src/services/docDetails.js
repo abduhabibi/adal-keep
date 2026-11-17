@@ -41,7 +41,7 @@ const FIELDS = {
     passport_issue_date: ['date', 'The passport date of issue', ['date of issue', 'issue date', 'issued date', 'passport issue date']],
     passport_expiry_date: ['date', 'The passport date of expiry', ['date of expiry', 'expiry date', 'expiration date', 'passport expiry date', 'valid until']],
     phone_number: ['phone', 'The worker\'s own phone / mobile number', ['mobile', 'phone', 'tel', 'contact number', 'telephone']],
-    children_count: ['int', 'The number of children', ['number of children', 'no of children', 'children']],
+    children_count: ['int', 'The number of children', ['number of children', 'no. of children', 'no of children', 'children']],
     height: ['int', 'The height (cm)', ['height']],
     weight: ['int', 'The weight (kg)', ['weight']],
     education_level: ['text', 'The education level / qualification', ['education', 'educational level', 'qualification', 'education level']],
@@ -139,8 +139,9 @@ function fromText(text, labels, kind) {
     for (let i = 0; i < lines.length; i++) {
       const m = lines[i].match(re)
       if (!m) continue
-      const v = clean(kind, m[1]) || clean(kind, lines[i + 1] || '')
-      if (v) return v
+      const here = clean(kind, m[1])
+      const v = here || here === 0 ? here : clean(kind, lines[i + 1] || '')   // a 0 (no children) is a value
+      if (v || v === 0) return v
     }
   }
   return null
@@ -231,10 +232,10 @@ export async function readDocumentDetails(filePath, docType, log = () => {}) {
     }
     for (const [col, [kind, , labels]] of missing) {
       const v = fromText(text, labels, kind)
-      if (v) { out[col] = v; fromPage++ }
+      if (v || v === 0) { out[col] = v; fromPage++ }
     }
     if (!out.religion && /\b(muslim|islam)\b/i.test(text)) out.religion = 'Muslim'
-    if (!out.marital_status) { const m = String(text).match(/\b(single|married|divorced|widow(?:ed)?)\b/i); if (m) out.marital_status = m[1].toUpperCase().replace(/^WIDOW$/, 'WIDOWED') }
+    if (!out.marital_status) { const m = String(text).match(/\b(single|singel|sengle|unmarried|married|divorced|widow(?:ed)?)\b/i); if (m) out.marital_status = m[1].toUpperCase().replace(/^(SINGEL|SENGLE|UNMARRIED)$/, 'SINGLE').replace(/^WIDOW$/, 'WIDOWED') }
   }
   // Tidy: a phone from an Ethiopian number, the name split.
   for (const k of ['phone_number', 'emergency_phone']) {

@@ -124,8 +124,6 @@ export default function Navbar({ onMenuClick, capturedFiles, setCapturedFiles })
           <div className="hidden sm:block">
             <div className="flex items-baseline gap-2 text-sm">
               <span className="font-bold text-slate-900 dark:text-white">{getPageName()}</span>
-              <span className="hidden lg:inline text-slate-400 dark:text-slate-500">·</span>
-              <span className="hidden lg:inline text-slate-500 dark:text-slate-400">እንኳን ደህና መጡ፤ {undoneTaskCount} የሚጠብቁ ተግባራት አሉዎት</span>
             </div>
           </div>
         </div>

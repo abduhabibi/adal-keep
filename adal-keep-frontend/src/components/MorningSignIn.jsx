@@ -49,37 +49,41 @@ export default function MorningSignIn() {
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <p className="font-display font-bold">☀️ Morning sign-in <span className="ml-1 text-sm font-normal text-slate-500 tabular-nums">{inCount}/{sites.length}</span></p>
       </div>
-      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(14rem,1fr))]">
         {sites.map(s => (
-          <div key={s.key} className={`flex items-center gap-2 rounded-xl border px-3 py-2 ${s.signedIn ? 'border-emerald-200 bg-emerald-50/60 dark:border-emerald-800 dark:bg-emerald-900/10' : 'border-slate-200 dark:border-slate-700'}`}>
+          // The site's name on its own line (never squeezed); its accounts or button under it.
+          <div key={s.key} className={`rounded-xl border px-3 py-2 ${s.signedIn ? 'border-emerald-200 bg-emerald-50/60 dark:border-emerald-800 dark:bg-emerald-900/10' : 'border-slate-200 dark:border-slate-700'}`}>
+            <div className="flex items-center gap-2">
             <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${s.signedIn ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`} />
             <span className="min-w-0 flex-1">
-              <span className="block break-words text-sm font-semibold leading-snug">{s.name}</span>
+              <span className="block text-sm font-semibold leading-snug">{s.name}</span>
               {s.shared && s.holder?.by && (
-                <span className="block break-words text-[11px] text-slate-500" title={`${s.holder.by} · ${s.holder.pc} · ${when(s.holder.at)}`}>
-                  {s.holder.state === 'signing-in' && !s.signedIn ? 'signing in: ' : s.signedIn ? 'by ' : 'last: '}{s.holder.by} · {s.holder.pc} · {when(s.holder.at)}
+                <span className="block text-[11px] text-slate-500" title={`${s.holder.by} · ${s.holder.pc} · ${when(s.holder.at)}`}>
+                  {s.holder.state === 'signing-in' && !s.signedIn ? 'signing in: ' : s.signedIn ? 'by ' : 'last: '}{s.holder.by} · {when(s.holder.at)}
                 </span>
               )}
             </span>
-            {s.accounts?.length > 1
-              // Several accounts: each one apart, in a browser space of its own — signing in as one never signs the other out.
-              ? <span className="flex shrink-0 flex-col gap-1">
-                  {s.accounts.map(a => (
-                    <span key={a.id} className="flex items-center justify-end gap-1.5 text-xs">
-                      <span className={`h-2 w-2 rounded-full ${a.signedIn ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`} />
-                      <span className="break-words" title={a.main ? "Main account (the browser's own window)" : 'Its own browser window'}>{a.name}</span>
-                      {a.signedIn
-                        ? <span className="font-semibold text-emerald-700 dark:text-emerald-300">✓</span>
-                        : <button type="button" onClick={() => open(s, a.id)} className="rounded-md bg-teal-600 px-2 py-0.5 font-semibold text-white hover:bg-teal-700">Sign in</button>}
-                    </span>
-                  ))}
-                </span>
-              : s.signedIn && !s.shared
+            {!(s.accounts?.length > 1) && (s.signedIn && !s.shared
               ? <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-300">Signed in</span>
               : <button type="button" onClick={() => start(s)} title={s.shared ? 'One sign-in for the agency: this takes it over for you' : ''}
                   className={`shrink-0 rounded-lg px-2.5 py-1 text-xs font-semibold ${s.shared && s.signedIn ? 'border border-teal-600 text-teal-700 hover:bg-teal-50 dark:text-teal-300' : 'bg-teal-600 text-white hover:bg-teal-700'}`}>
                   {s.shared && s.signedIn ? 'Sign in here' : 'Sign in'}
-                </button>}
+                </button>)}
+            </div>
+            {s.accounts?.length > 1 && (
+              // Several accounts: each one apart, in a browser space of its own — signing in as one never signs the other out.
+              <div className="mt-1.5 space-y-1 pl-[1.125rem]">
+                  {s.accounts.map(a => (
+                    <div key={a.id} className="flex items-center gap-1.5 text-xs">
+                      <span className={`h-2 w-2 shrink-0 rounded-full ${a.signedIn ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`} />
+                      <span className="min-w-0 flex-1" title={a.main ? "Main account (the browser's own window)" : 'Its own browser window'}>{a.name}</span>
+                      {a.signedIn
+                        ? <span className="font-semibold text-emerald-700 dark:text-emerald-300">✓</span>
+                        : <button type="button" onClick={() => open(s, a.id)} className="shrink-0 rounded-md bg-teal-600 px-2 py-0.5 font-semibold text-white hover:bg-teal-700">Sign in</button>}
+                    </div>
+                  ))}
+              </div>
+            )}
           </div>
         ))}
       </div>

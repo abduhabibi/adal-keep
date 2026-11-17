@@ -31,7 +31,7 @@ export const WORKFLOWS = {
     id: 'musaned_check_chosen',
     name: 'Check if chosen',
     description:
-      'Musaned sign-in (a person types the code) → Employment Requests → search her passport → if she is there: DETAILS → contract details and the PDFs (template.pdf and the signed contracts) saved to the profile',
+      'Employment Requests on Musaned, read as one list (no passport searched): if she is on it, her contract details and PDFs are saved',
     target: 'https://tawtheeq.musaned.com.sa/employment-requests',
     consts: {},
     stepCount: 3,

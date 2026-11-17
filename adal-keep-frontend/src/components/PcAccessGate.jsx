@@ -31,13 +31,13 @@ export default function PcAccessGate() {
       <div className="w-full max-w-md rounded-2xl bg-white dark:bg-slate-800 p-6 shadow-xl text-center space-y-4 animate-fade-up">
         <div className="text-5xl">🔐</div>
         <form onSubmit={signIn} className="space-y-3">
-          <h1 className="text-xl font-bold text-slate-900 dark:text-white">The main PC's number</h1>
-          <p className="text-sm text-slate-500 dark:text-slate-400">The 5 digits shown on the main PC in Settings (the same number phones are added with). That is all — nobody at the main PC has to approve.</p>
-          <input value={number} onChange={e => setNumber(e.target.value.replace(/\D/g, '').slice(0, 5))} autoFocus required
-            inputMode="numeric" placeholder="•••••"
+          <h1 className="text-xl font-bold text-slate-900 dark:text-white">PC number</h1>
+          <p className="text-sm text-slate-500 dark:text-slate-400">The main PC's 6-digit PC number.</p>
+          <input value={number} onChange={e => setNumber(e.target.value.replace(/\D/g, '').slice(0, 6))} autoFocus required
+            inputMode="numeric" placeholder="••••••"
             className="w-full rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-3 text-center font-mono text-2xl tracking-[0.4em]" />
           {error && <p className="text-sm text-red-600">{error}</p>}
-          <button disabled={busy || number.length !== 5} className="w-full rounded-xl bg-teal-600 hover:bg-teal-700 py-3 font-bold text-white disabled:opacity-50">
+          <button disabled={busy || number.length < 5} className="w-full rounded-xl bg-teal-600 hover:bg-teal-700 py-3 font-bold text-white disabled:opacity-50">
             {busy ? 'Opening…' : 'Open Adal Keep'}
           </button>
         </form>

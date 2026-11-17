@@ -56,7 +56,10 @@ router.post('/pc-access/number', async (req, res) => {
   try {
     const { pcNumber, isFollower } = await import('../services/mainPC.js')
     if (isFollower()) return res.status(409).json({ error: 'This PC follows another main PC. Use the main PC\'s address.' })
-    if (number !== pcNumber()) {
+    // The PC number (6 digits, the licence one shown on the main PC) — or the older 5-digit one.
+    let licence = ''
+    try { licence = (await import('../services/subscription.js')).pcNumber() } catch {}
+    if (number !== licence && number !== pcNumber()) {
       numberMisses.set(ip, [...recent, now])
       return res.status(403).json({ error: 'That is not the main PC\'s number' })
     }

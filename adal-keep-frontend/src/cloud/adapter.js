@@ -633,6 +633,9 @@ export async function cloudAdapter(config) {
     // A new profile with her passport can wait online when the PC does not answer
     // (the PC makes it when it is back; it never makes two).
     const canWait = method === 'post' && path === '/new-profile/with-passport'
+    // A CV the PC cannot make (it has no such profile, or does not answer): drawn on
+    // this phone from its own copy instead (asked on 2026-11-17: "Profile not found").
+    const soft = method === 'post' && /^\/cv\/(preview|generate)$/.test(path)
     if (!onlyHere && await pcOnline()) {
       const qs = Object.keys(query).length ? '?' + new URLSearchParams(Object.entries(query).filter(([, v]) => v != null)).toString() : ''
       // Uploads: the files go online first; the PC files them at once.
@@ -649,18 +652,19 @@ export async function cloudAdapter(config) {
         const m = await liveCall(method, path + qs, method === 'get' ? undefined : sendBody, method === 'get' ? 9000 : sendBody?.__upload ? 90000 : 20000)
         if (m?.row) a = (await rest('GET', `/rest/v1/keep_calls?id=eq.${m.row}&select=status,answer,answer_bin,answer_type,answer_head,answer_code`))?.[0] || null
         else if (m) a = { answer_code: m.code, answer_type: m.type, answer_head: m.head, answer: m.gz ? await gunzipJSON(m.gz) : m.data, answer_bin: m.bin }
-        if (!m && method !== 'get' && !canWait) throw httpError(504, 'The PC did not answer in time — it may still do it. Look again in a moment.')
+        if (!m && method !== 'get' && !canWait && !soft) throw httpError(504, 'The PC did not answer in time — it may still do it. Look again in a moment.')
       }
       if (!a) {
         try { a = await relay(method, path + qs, method === 'get' ? undefined : sendBody, method === 'get' ? 12000 : sendBody?.__upload ? 90000 : 25000) }
-        catch (e) { if (method !== 'get' && !canWait) throw e }
+        catch (e) { if (method !== 'get' && !canWait && !soft) throw e }
       }
-      if (a) {
-        const r = relayed(a, config)
+      let r = null
+      if (a) { try { r = relayed(a, config) } catch (e) { if (!soft) throw e; console.warn('[cv] the PC could not make it — drawn here:', e.message) } }
+      if (r) {
         if (method === 'get' && !qs && r.status < 300 && !(r.data instanceof Blob) && /json/.test(r.headers['content-type'] || '') && !LIVE_FIRST.test(path)) remember(path, r.data)
         return reply(r.status, r.data, r.headers)
       }
-      if (method !== 'get' && !canWait) throw httpError(504, 'The PC did not answer in time — it may still do it. Look again in a moment.')
+      if (method !== 'get' && !canWait && !soft) throw httpError(504, 'The PC did not answer in time — it may still do it. Look again in a moment.')
       // A GET with no answer (or a new profile that waits): the online copy below.
     }
     // The chat with the PC off: straight to the chat server (cloud/chatDirect.js).

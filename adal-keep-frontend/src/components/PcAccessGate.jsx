@@ -12,8 +12,8 @@ export default function PcAccessGate() {
   const [name, setName] = useState(() => { try { return localStorage.getItem('adal_pc_name') || '' } catch { return '' } })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const [acct, setAcct] = useState({ username: '', password: '' })
-  const [way, setWay] = useState('account') // the main PC's account (in at once) · or ask for a Yes
+  const [number, setNumber] = useState('')
+  const [way, setWay] = useState('number') // the main PC's number (in at once) · or ask for a Yes
 
   const check = () => api.get('/pc-access/status').then(r => {
     setState(r.data.state)
@@ -37,13 +37,12 @@ export default function PcAccessGate() {
     setBusy(false)
   }
 
-  // Signed in with the main PC's own account: in at once.
+  // The main PC's number (the one phones are added with): in at once.
   const signIn = async (e) => {
     e.preventDefault()
     setBusy(true); setError('')
     try {
-      try { localStorage.setItem('adal_pc_name', name) } catch {}
-      await api.post('/pc-access/signin', { ...acct, name: name.trim() || 'A computer' })
+      await api.post('/pc-access/number', { number, name: name.trim() || 'Adal Companion PC' })
       location.reload()
     } catch (er) { setError(er.response?.data?.error || er.message); setBusy(false) }
   }
@@ -52,22 +51,17 @@ export default function PcAccessGate() {
     <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900 p-4">
       <div className="w-full max-w-md rounded-2xl bg-white dark:bg-slate-800 p-6 shadow-xl text-center space-y-4 animate-fade-up">
         <div className="text-5xl">{state === 'waiting' ? '⏳' : '🔐'}</div>
-        {asking && way === 'account' ? (
+        {asking && way === 'number' ? (
           <form onSubmit={signIn} className="space-y-3">
-            <h1 className="text-xl font-bold text-slate-900 dark:text-white">Sign in to the main PC</h1>
-            <p className="text-sm text-slate-500 dark:text-slate-400">The username (5 letters) and PIN (6 digits) set for you on the main PC: Employees → your name → 🔑 Sign-in for other computers. This computer then opens all its data at once.</p>
-            <input value={acct.username} onChange={e => setAcct(a => ({ ...a, username: e.target.value }))} autoFocus required autoComplete="username"
-              placeholder="Username (or phone)" className="w-full rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2.5 text-sm" />
-            <input value={acct.password} onChange={e => setAcct(a => ({ ...a, password: e.target.value }))} type="password" required autoComplete="current-password"
-              placeholder="PIN (6 digits) or password" className="w-full rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2.5 text-sm" />
-            <input value={name} onChange={e => setName(e.target.value)} maxLength={60}
-              placeholder="This computer's name (optional) — e.g. Branch 2 reception"
-              className="w-full rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2.5 text-sm" />
+            <h1 className="text-xl font-bold text-slate-900 dark:text-white">The main PC's number</h1>
+            <p className="text-sm text-slate-500 dark:text-slate-400">The 5 digits shown on the main PC in Settings (the same number phones are added with). That is all.</p>
+            <input value={number} onChange={e => setNumber(e.target.value.replace(/\D/g, '').slice(0, 5))} autoFocus required
+              inputMode="numeric" placeholder="•••••"
+              className="w-full rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-3 text-center font-mono text-2xl tracking-[0.4em]" />
             {error && <p className="text-sm text-red-600">{error}</p>}
-            <button disabled={busy || !acct.username || !acct.password} className="w-full rounded-xl bg-teal-600 hover:bg-teal-700 py-3 font-bold text-white disabled:opacity-50">
-              {busy ? 'Signing in…' : 'Sign in'}
+            <button disabled={busy || number.length !== 5} className="w-full rounded-xl bg-teal-600 hover:bg-teal-700 py-3 font-bold text-white disabled:opacity-50">
+              {busy ? 'Opening…' : 'Open Adal Keep'}
             </button>
-            <button type="button" onClick={() => { setWay('ask'); setError('') }} className="text-xs text-slate-500 hover:underline">No account? Ask the main PC instead</button>
           </form>
         ) : asking ? (
           <form onSubmit={ask} className="space-y-3">
@@ -84,7 +78,7 @@ export default function PcAccessGate() {
             <button disabled={busy || !name.trim()} className="w-full rounded-xl bg-teal-600 hover:bg-teal-700 py-3 font-bold text-white disabled:opacity-50">
               {busy ? 'Asking…' : 'Ask the main PC'}
             </button>
-            <button type="button" onClick={() => { setWay('account'); setError('') }} className="text-xs text-slate-500 hover:underline">Sign in with the main PC's account instead</button>
+            <button type="button" onClick={() => { setWay('number'); setError('') }} className="text-xs text-slate-500 hover:underline">Type the main PC's number instead</button>
           </form>
         ) : (
           <>

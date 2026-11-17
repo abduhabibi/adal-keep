@@ -69,6 +69,7 @@ const OPEN = [
   ['POST', /^\/api\/messaging\/ai\/event$/],
   ['POST', /^\/api\/pc-access\/request$/],
   ['POST', /^\/api\/pc-access\/signin$/],
+  ['POST', /^\/api\/pc-access\/number$/],
   ['GET', /^\/api\/pc-access\/status$/],
 ]
 

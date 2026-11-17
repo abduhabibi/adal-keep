@@ -50,6 +50,30 @@ router.post('/pc-access/signin', async (req, res) => {
     res.json({ ok: true, id: r.id, key: r.key })
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
+// The main PC's number (Settings, 5 digits — the one phones are added with): in at once.
+// At most 10 wrong numbers in 10 minutes per address (no guessing).
+const numberMisses = new Map()
+router.post('/pc-access/number', async (req, res) => {
+  const ip = String(req.socket?.remoteAddress || '')
+  const now = Date.now()
+  const recent = (numberMisses.get(ip) || []).filter(t => now - t < 10 * 60000)
+  if (recent.length >= 10) return res.status(429).json({ error: 'Too many wrong numbers — wait 10 minutes' })
+  const number = String(req.body?.number || '').replace(/\D/g, '')
+  if (!number) return res.status(400).json({ error: 'Type the main PC\'s number' })
+  try {
+    const { pcNumber, isFollower } = await import('../services/mainPC.js')
+    if (isFollower()) return res.status(409).json({ error: 'This PC follows another main PC. Use the main PC\'s address.' })
+    if (number !== pcNumber()) {
+      numberMisses.set(ip, [...recent, now])
+      return res.status(403).json({ error: 'That is not the main PC\'s number' })
+    }
+    numberMisses.delete(ip)
+    const r = admitSignedIn(req, req.body?.name || 'Adal Companion PC', 'PC number')
+    setKeyCookie(res, r.key)
+    console.log(`[pc-access] ${String(req.body?.name || 'A Companion PC').slice(0, 60)} came in with the PC number`)
+    res.json({ ok: true, id: r.id, key: r.key })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
 /**
  * An Adal Companion PC (let in already) takes its own online account once:
  * from then on it opens the agency's online copy (Supabase + the documents in

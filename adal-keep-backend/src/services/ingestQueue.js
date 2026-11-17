@@ -20,8 +20,49 @@ export function arrivedAt(stat) {
 // step of the reading can say what it is doing: setStage('asking Gemini').
 let current = null // { db, id }
 
+// How far the reading is, for the bar on the Profiles page:
+// received → looking at it → reading → fields found → saved.
+const STEPS = [
+  [/^saving it/i, 90],
+  [/reading every detail/i, 70],
+  [/gemini|mineru|on this pc|passport lines|place of birth/i, 45],
+  [/^reading the document/i, 30],
+  [/looking at/i, 15],
+  [/^starting/i, 5],
+]
+export function stagePercent(text) {
+  const t = String(text || '')
+  for (const [re, pct] of STEPS) if (re.test(t)) return pct
+  return null
+}
+// id → { pct, at } (in memory: only this PC's worker reads files)
+const progress = new Map()
+const NEXT = [5, 15, 30, 45, 70, 90, 99]
+/** The bar's percent: the step reached, creeping toward the next while it lasts. */
+export function percentNow(p, now = Date.now()) {
+  if (!p) return 0
+  const next = NEXT.find(n => n > p.pct) ?? 99
+  const creep = Math.min(next - p.pct - 2, Math.floor((now - p.at) / 1000))
+  return p.pct + Math.max(0, creep)
+}
+
+/** Files being read now (with percent) and how many wait. */
+export async function readingNow(db) {
+  const rows = await db('ingest_queue').whereIn('status', ['pending', 'processing'])
+    .where('attempts', '<', MAX_ATTEMPTS)
+    .where('created_at', '>=', new Date(Date.now() - 24 * 3600 * 1000).toISOString())
+    .orderBy('id', 'asc').select('id', 'filename', 'status', 'stage')
+  const reading = rows.filter(r => r.status === 'processing').map(r => ({
+    id: r.id, filename: r.filename, stage: r.stage || null, percent: percentNow(progress.get(r.id)),
+  }))
+  return { reading, waiting: rows.length - reading.length }
+}
+
 export function setStage(text) {
   if (!current) return
+  const pct = stagePercent(text)
+  const was = progress.get(current.id)
+  if (pct != null && (!was || pct > was.pct)) progress.set(current.id, { pct, at: Date.now() })
   current.db('ingest_queue').where('id', current.id)
     .update({ stage: String(text).slice(0, 120), updated_at: new Date().toISOString() }).catch(() => {})
 }
@@ -215,6 +256,7 @@ async function processOne(db, processorFn, tag) {
     })
     console.log(tag, 'error', row.filename, '-', e.message)
   } finally {
+    progress.delete(row.id)
     current = null
   }
   return true

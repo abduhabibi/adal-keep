@@ -11,6 +11,7 @@ import Input from '../components/shared/Input'
 import { useProfileFilters } from '../components/profileFilters'
 import { JourneyFork, SHARED, BRANCHES } from '../components/ProfileJourney'
 import SelectionBar from '../components/SelectionBar'
+import ReadingBar from '../components/ReadingBar'
 import { onDataChange } from '../lib/changes'
 import { profilesList } from '../lib/profilesCache'
 import { cachedGet } from '../lib/deviceCache'
@@ -243,6 +244,8 @@ export default function ProfilesPage() {
           {sortBar}
         </div>
       </div>
+
+      <ReadingBar onDone={() => load(true)} />
 
       {loading ? (
         <Spinner />

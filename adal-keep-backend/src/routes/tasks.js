@@ -58,6 +58,15 @@ router.get('/documents', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
+// What is being read right now (name and percent) and how many wait: the bar
+// under the search box on the Profiles page, asked every 1–2 s while it shows.
+router.get('/reading', async (req, res) => {
+  try {
+    const { readingNow } = await import('../services/ingestQueue.js')
+    res.json(await readingNow(req.app.locals.db))
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
 router.post('/', async (req, res) => {
   try {
     const db = req.app.locals.db

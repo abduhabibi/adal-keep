@@ -68,6 +68,10 @@ let joinedAs = null
 async function token(db) {
   if (!chatConfigured()) throw new ChatError('The chat is not set up on this PC yet (SUPABASE_URL / SUPABASE_ANON_KEY).', 503)
   sess ||= readSession()
+  // A sign-in is good for an hour: one "good" for longer was saved while the
+  // PC's clock was ahead (Nuzla, 2026-11-17: a day ahead, then put right — the
+  // PC kept sending an expired sign-in and lost the cloud). Ask for a new one.
+  if (sess?.expires_at > Date.now() + 2 * 3600 * 1000) sess = { ...sess, access_token: null, expires_at: 0 }
   if (sess?.access_token && sess.expires_at > Date.now()) return sess.access_token
 
   if (sess?.refresh_token) {
@@ -98,7 +102,8 @@ async function token(db) {
   return sess.access_token
 }
 
-async function call(db, method, pathAndQuery, body, { headers = {}, raw = false, timeout } = {}) {
+async function call(db, method, pathAndQuery, body, opts = {}, again = false) {
+  const { headers = {}, raw = false, timeout } = opts
   const { url, anon } = cfg()
   const t = await token(db)
   // Never waits for ever: on a line that drops, a dead connection used to hold the
@@ -114,6 +119,14 @@ async function call(db, method, pathAndQuery, body, { headers = {}, raw = false,
     },
     body: body === undefined ? undefined : Buffer.isBuffer(body) ? body : JSON.stringify(body),
   })
+  // The cloud says the sign-in has expired (the PC's clock was wrong): a new sign-in, once.
+  if (res.status === 401 && !again) {
+    const peek = await res.clone().text().catch(() => '')
+    if (/jwt|expired|token/i.test(peek)) {
+      if (sess) sess = { ...sess, access_token: null, expires_at: 0 }
+      return call(db, method, pathAndQuery, body, opts, true)
+    }
+  }
   if (raw) return res
   const text = await res.text()
   let data = null

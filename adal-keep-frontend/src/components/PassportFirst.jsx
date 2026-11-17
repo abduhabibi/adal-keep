@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom'
 import api from '../services/api'
 import { useFileCapture } from '../context/FileCaptureContext'
 import { CameraShot, ON_PHONE } from './shared/PickFile'
+import { onPhone } from '../lib/phoneMode'
+import { readPassportHere, warmPassportReader } from '../lib/passportHere'
 
 /**
  * Step 1 of a new profile: the passport. Drag it in (from the tray, the
@@ -27,6 +29,8 @@ export default function PassportFirst({ onRead, onSkip }) {
   // this PC's webcam), else the phone's own camera app.
   // On a phone the camera opens by itself (Gallery / Files are on it).
   useEffect(() => { if (ON_PHONE) { const t = setTimeout(() => openCamera(), 250); return () => clearTimeout(t) } }, [])
+  // The phone's own passport reader starts while the camera is open: the read is then quick.
+  useEffect(() => { if (onPhone() && !import.meta.env.VITE_ADMIN) warmPassportReader() }, [])
   const openCamera = () => {
     if (navigator.mediaDevices?.getUserMedia && window.isSecureContext) setCamera(true)
     else cameraRef.current?.click()
@@ -46,6 +50,21 @@ export default function PassportFirst({ onRead, onSkip }) {
       // The phone with the office PC off: a passport is read on the PC, so her
       // details are typed here; the passport goes with her profile and the PC
       // reads it when it is on (asked on 2026-11-15: profiles made with the PC off).
+      // A phone reads the passport itself first (lib/passportHere.js: its bottom
+      // lines, check digits verified, and the place of birth by its position) —
+      // no upload, no PC (asked on 2026-11-17).
+      if (onPhone() && !import.meta.env.VITE_ADMIN) {
+        const here = await readPassportHere(file).catch(() => null)
+        if (here) {
+          // The same passport already has a profile: said, not made twice.
+          const pn = String(here.fields.passport_number || '').toUpperCase()
+          const same = pn ? ((await api.get('/profiles', { params: { q: pn } }).catch(() => ({ data: [] }))).data || []).find(p => String(p.passport_number || '').toUpperCase() === pn) : null
+          if (same) setProblem({ text: 'This passport already has a profile:', result: { ...here, existing: same } })
+          else onRead(here)
+          return
+        }
+      }
+      // The PC off: a passport the phone could not read is typed by hand; it goes with her profile.
       if (window.__ADAL_CLOUD && !import.meta.env.VITE_ADMIN) {
         const { pcOnline } = await import('../cloud/adapter.js')
         if (!(await pcOnline())) { onRead({ offline: true, hand: true, file, filename: file.name || 'passport.jpg', fields: {} }); return }

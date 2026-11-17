@@ -399,12 +399,13 @@ export default function ProfileFormPage() {
           </div>
         </div>
 
-        {passport && !isEdit && (
+        {/* (Nothing read — typed by hand: no "read from the passport" box.) */}
+        {passport && !isEdit && !passport.hand && (
           <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50/60 dark:bg-emerald-900/20 p-4">
             <p className="mb-3 text-xs font-semibold text-emerald-800 dark:text-emerald-200">
               {passport.verified ? '✓ Read from the passport (its check digits match)' : 'Read from the passport — check these, the passport lines did not fully verify'}
               <span className="ml-2 font-normal text-emerald-700/70 dark:text-emerald-300/70">
-                {(passport.ms / 1000).toFixed(1)}s{passport.source ? ` · ${passport.source}` : ''}
+                {Number.isFinite(passport.ms) ? `${(passport.ms / 1000).toFixed(1)}s` : ''}{passport.source ? ` · ${passport.source}` : ''}
               </span>
             </p>
             <div className="grid gap-3 sm:grid-cols-2">

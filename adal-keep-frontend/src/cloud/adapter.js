@@ -380,6 +380,13 @@ function optimistic(method, path, body) {
     if (Array.isArray(cache['/profiles'])) remember('/profiles', cache['/profiles'].map(p => String(p.id) === one[1] ? { ...p, ...body } : p))
     return { ...(cache[path] || {}), ...body, success: true, queued: true }
   }
+  // A profile deleted: off this phone's list at once (the PC moves her to the Trash).
+  const gone = method === 'delete' && path.match(/^\/profiles\/(-?\d+)$/)?.[1]
+  if (gone) {
+    if (Array.isArray(cache['/profiles'])) remember('/profiles', cache['/profiles'].filter(p => String(p.id) !== gone))
+    if (Number(gone) < 0) { newProfiles = newProfiles.filter(n => String(n.ref) !== gone); save(NEWP, newProfiles) }
+    return { ok: true, success: true, queued: true }
+  }
   // A new broker shows on the phone at once (the PC gives it its number when it is on).
   if (method === 'post' && path === '/brokers' && body && typeof body === 'object') {
     const b = { id: -Date.now(), ...body, created_at: new Date().toISOString(), queued: true }
@@ -635,7 +642,9 @@ export async function cloudAdapter(config) {
     const canWait = method === 'post' && path === '/new-profile/with-passport'
     // A CV the PC cannot make (it has no such profile, or does not answer): drawn on
     // this phone from its own copy instead (asked on 2026-11-17: "Profile not found").
-    const soft = method === 'post' && /^\/cv\/(preview|generate)$/.test(path)
+    // A profile deleted when the PC does not answer: gone from the phone at once,
+    // and the PC moves her to its Trash when it is back (asked on 2026-11-17: "Delete failed").
+    const soft = (method === 'post' && /^\/cv\/(preview|generate)$/.test(path)) || (method === 'delete' && /^\/profiles\/-?\d+$/.test(path))
     if (!onlyHere && await pcOnline()) {
       const qs = Object.keys(query).length ? '?' + new URLSearchParams(Object.entries(query).filter(([, v]) => v != null)).toString() : ''
       // Uploads: the files go online first; the PC files them at once.

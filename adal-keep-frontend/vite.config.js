@@ -26,6 +26,14 @@ export default defineConfig(({ mode }) => ({
         const out = path.resolve('../adal-phone/www')
         for (const f of fs.readdirSync('public-phone')) fs.copyFileSync(path.join('public-phone', f), path.join(out, f))
         for (const f of ['sw.js', 'manifest.webmanifest']) fs.rmSync(path.join(out, f), { force: true })
+        // The passport reader on the phone itself (lib/passportHere.js, asked on 2026-11-17):
+        // tesseract's worker and engine, and the two models (OCR-B for the bottom lines,
+        // English for the place of birth) — inside the app, so it reads with no internet.
+        const tess = path.join(out, 'tess')
+        fs.mkdirSync(tess, { recursive: true })
+        fs.copyFileSync('node_modules/tesseract.js/dist/worker.min.js', path.join(tess, 'worker.min.js'))
+        fs.copyFileSync('node_modules/tesseract.js-core/tesseract-core-simd-lstm.wasm.js', path.join(tess, 'tesseract-core-simd-lstm.wasm.js'))
+        for (const m of ['ocrb', 'eng']) fs.copyFileSync(`../adal-keep-backend/${m}.traineddata`, path.join(tess, `${m}.traineddata`))
         // The online address (Supabase URL + its public anon key) and where
         // new apps are published — from the backend's .env, never committed.
         const env = Object.fromEntries((fs.existsSync('../adal-keep-backend/.env') ? fs.readFileSync('../adal-keep-backend/.env', 'utf8') : '')

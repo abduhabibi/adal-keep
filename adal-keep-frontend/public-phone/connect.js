@@ -4,9 +4,9 @@
  * only: the agency's online copy, and its PC live while that PC is on.
  *
  * Pairing, from anywhere: the PC's 5-digit number only. The phone makes its
- * own online account and asks to join (Supabase keep_request_join); the PC
- * shows "… wants to join — Yes, it's me / No"; after Yes the phone goes on by
- * itself. No Wi-Fi is shared.
+ * own online account and asks to join (Supabase keep_request_join); Adal
+ * (adal-admin approveJoins) lets it in within a second — nobody presses Yes.
+ * No Wi-Fi is shared.
  * config.js (written when the app is built) gives the Supabase address.
  */
 const KEY = 'adal-pc'
@@ -41,10 +41,11 @@ async function pair(number) {
   if (!s?.access_token) s = await sb('/auth/v1/token?grant_type=password', { body: creds })
   // … asks to join; the PC answers.
   const id = await sb('/rest/v1/rpc/keep_request_join', { body: { p_pc: number, p_name: phoneName() }, token: s.access_token })
+  // Let in at once by Adal (no "Yes" on the office PC, which may be off): asked every half second.
   show('wait')
-  $('waitMsg').innerHTML = 'On the office PC, press <b>“Yes, it\'s me”</b>.<br><span style="font-size:12px">Waiting for the PC…</span>'
-  for (let i = 0; i < 300; i++) {          // up to 10 minutes
-    await new Promise(r => setTimeout(r, 2000))
+  $('waitMsg').textContent = 'Connecting…'
+  for (let i = 0; i < 240; i++) {          // up to 2 minutes
+    if (i) await new Promise(r => setTimeout(r, 500))
     const [q] = await sb(`/rest/v1/keep_join_requests?id=eq.${id}&select=status,agency_id`, { method: 'GET', token: s.access_token }).catch(() => [])
     if (q?.status === 'approved') {
       const pc = { number, cloud: { url: CFG.url, anon: CFG.anon, email: creds.email, password: creds.password, agency: q.agency_id, device: s.user?.id || null } }
@@ -53,7 +54,7 @@ async function pair(number) {
     }
     if (q?.status === 'denied') throw new Error('The PC said No.')
   }
-  throw new Error('Nobody answered on the PC. Try again when someone is at the office PC.')
+  throw new Error('Could not connect — check the internet and try again.')
 }
 
 function open() {

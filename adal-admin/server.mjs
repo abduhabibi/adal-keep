@@ -231,6 +231,28 @@ setInterval(async () => {
   if (changed) writeCvt(c)
 }, 60000).unref?.()
 
+// ------------------------------------------------- joins: in at once, no Yes --
+// A phone or an Adal Companion that typed a right PC number (Supabase
+// keep_request_join checks the number) is let in here within a second — nobody
+// at the agency's PC has to press "Yes, it's me", and it works while that PC is
+// off or cannot reach the cloud. (Asked on 2026-11-17: "never ever make it ask me".)
+let joining = false
+async function approveJoins() {
+  if (joining) return
+  joining = true
+  try {
+    const since = new Date(Date.now() - 30 * 60000).toISOString()
+    const open = await rest('GET', `keep_join_requests?status=eq.pending&created_at=gt.${since}&select=id,user_id,agency_id,name&limit=50`)
+    for (const q of open || []) {
+      await rest('POST', 'keep_devices?on_conflict=user_id', { user_id: q.user_id, agency_id: q.agency_id, name: q.name || 'Device', revoked: false },
+        { Prefer: 'resolution=merge-duplicates,return=minimal' })
+      await rest('PATCH', `keep_join_requests?id=eq.${q.id}&status=eq.pending`, { status: 'approved', decided_at: new Date().toISOString() }, { Prefer: 'return=minimal' })
+      console.log(`[join] ${String(q.name || 'a device').slice(0, 60)} let in (no Yes needed)`)
+    }
+  } catch (e) { console.warn('[join]', e.message) } finally { joining = false }
+}
+setInterval(approveJoins, 1000).unref?.()
+
 // ----------------------------------------------------------------- plans --
 // Each agency's licence (adal-keep-backend/src/services/plans.js): its plan,
 // paid / trial dates and features, signed with Adal's update key so only this

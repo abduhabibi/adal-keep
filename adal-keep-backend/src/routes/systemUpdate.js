@@ -91,6 +91,16 @@ function gitAuthArgs(token) {
   return `-c http.extraHeader="Authorization: Basic ${basic}" `
 }
 
+/** The environment with this Node's folder first on the PATH (one PATH entry, whatever its spelling). */
+export function withOwnNode(env, nodeDir = path.dirname(process.execPath)) {
+  const out = { ...env }
+  const key = Object.keys(out).find(k => k.toUpperCase() === 'PATH') || 'PATH'
+  const rest = out[key] || ''
+  for (const k of Object.keys(out)) if (k.toUpperCase() === 'PATH') delete out[k]
+  out[key] = rest.split(path.delimiter).includes(nodeDir) ? rest : `${nodeDir}${path.delimiter}${rest}`
+  return out
+}
+
 async function run(cmd, cwd, timeout = 5 * 60 * 1000) {
   try {
     const { stdout, stderr } = await execAsync(cmd, {
@@ -100,7 +110,10 @@ async function run(cmd, cwd, timeout = 5 * 60 * 1000) {
       maxBuffer: 32 * 1024 * 1024,
       timeout,
       // Packages never download their own browsers: the robots use the installed Brave.
-      env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: 'echo', PUPPETEER_SKIP_DOWNLOAD: '1' },
+      // Adal Keep's own Node first on the PATH: a package's setup step runs
+      // "node install.mjs", and a PC without a Node of its own failed there
+      // ("'node' is not recognized") and was left with packages half removed (2026-11-17).
+      env: withOwnNode({ ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: 'echo', PUPPETEER_SKIP_DOWNLOAD: '1' }),
     })
     return { ok: true, out: `${stdout || ''}${stderr || ''}`.trim() }
   } catch (err) {

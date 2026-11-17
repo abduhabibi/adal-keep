@@ -1264,7 +1264,8 @@ initSystem().then(() => {
     import("./src/services/profileShare.js").then(m => m.resumeProfileShares(db)).catch(() => {})       // so do profiles being sent or accepted
     startScanner(db)              // discovers new work every 2 min
     startWafidChecker(db)         // Medical · Applied → Fit / Rejected from wafid.com
-    import('./src/services/portalHealth.js').then(p => p.startPortalHealth()).catch(() => {})   // is each portal answering? (Admin sees it)
+    import('./src/services/portalHealth.js').then(p => p.startPortalHealth()).catch(() => {})
+    import('./src/services/pcHealth.js').then(p => p.startPCHealth(db)).catch(() => {})   // disk space, database check, freezes (Admin sees it)   // is each portal answering? (Admin sees it)
     startBackupSchedule(db)       // locked copy to Telegram in the lunch break
     startContractChecker(db)      // chosen by a Saudi employer? contract + PDFs from Musaned
     import('./src/services/profileDays.js').then(d => d.startProfileDays(db)).catch(e => console.warn('[days]', e.message)) // each profile's status, per day

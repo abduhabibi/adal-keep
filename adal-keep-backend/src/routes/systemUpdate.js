@@ -560,6 +560,23 @@ export async function installFromRelease(cfg, logs, manifest, localArchive = nul
       fs.rmSync(old, { recursive: true, force: true })
       logs.push(`Updated ${dist}`)
     }
+    // The Windows programs (AdalKeep.exe, the Companion, the agent): only the
+    // ones that changed. A running program cannot be overwritten, but it can be
+    // renamed: the old one becomes <name>.old and the new one is used from the next start.
+    for (const p of manifest.programs || []) {
+      try {
+        const dest = path.join(cfg.projectRoot, p.name)
+        if (!/^[w.-]+.exe$/i.test(p.name) || !fs.existsSync(dest)) continue
+        const { createHash } = await import('crypto')
+        if (createHash('sha256').update(fs.readFileSync(dest)).digest('hex') === p.sha256) continue
+        const got = path.join(tmp, p.name)
+        await downloadRelease({ file: p.file, sha256: p.sha256 }, got)
+        fs.rmSync(`${dest}.old`, { force: true })
+        fs.renameSync(dest, `${dest}.old`)
+        try { fs.copyFileSync(got, dest) } catch (e) { fs.renameSync(`${dest}.old`, dest); throw e }
+        logs.push(`Updated ${p.name} (used from the next start)`)
+      } catch (e) { logs.push(`${p.name} not updated: ${e.message}`) }
+    }
     // Packages: only when their list changed (or are missing).
     const marker = readMarker(cfg.projectRoot) || {}
     const hasModules = fs.existsSync(path.join(backendDir, 'node_modules'))

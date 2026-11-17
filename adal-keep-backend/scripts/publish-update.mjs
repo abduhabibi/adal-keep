@@ -98,6 +98,40 @@ if (!args.has('--skip-tests')) {
 if (!args.has('--skip-frontend')) { console.log('== building the frontend'); execFileSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['run', '-s', 'build'], { cwd: FRONT, stdio: 'inherit', shell: process.platform === 'win32' }) }
 
 // 2. The bundle: committed backend files (never .env, data, uploads) + dist.
+/**
+ * Builds AdalKeep.exe, adal-companion.exe and adal-agent.exe with Go (the same
+ * way as adal-installer/build-installer.sh, reproducibly: the same source
+ * gives the same file) and uploads each new one once to programs/<sha256>.
+ * No Go on this PC: the programs are left out and PCs keep theirs.
+ */
+async function buildPrograms(dir) {
+  const go = [process.env.GO, 'C:/AdalTools/go/bin/go.exe', 'go'].find(g => { try { return g && execFileSync(g, ['version'], { encoding: 'utf8' }) } catch { return false } })
+  if (!go) { console.log('   (no Go here: the programs are not in this release)'); return [] }
+  const out = path.join(dir, 'programs'); fs.mkdirSync(out, { recursive: true })
+  const env = { ...process.env, GOOS: 'windows', GOARCH: 'amd64', CGO_ENABLED: '0' }
+  const build = (src, name, gui, pkg = '.') => execFileSync(go, ['build', '-trimpath', '-ldflags', `${gui ? '-H windowsgui ' : ''}-buildid=`, '-o', path.join(out, name), pkg], { cwd: path.join(ROOT, src), env, stdio: 'pipe' })
+  build('adal-launcher', 'AdalKeep.exe', true)
+  build('adal-companion', 'adal-companion.exe', true)
+  build('adal-agent', 'adal-agent.exe', false, './cmd/agent')
+  const seticon = path.join(os.tmpdir(), 'adal-seticon.exe')
+  execFileSync(go, ['build', '-o', seticon, '.'], { cwd: path.join(ROOT, 'adal-installer/tools/seticon'), env, stdio: 'pipe' })
+  for (const n of ['AdalKeep.exe', 'adal-companion.exe']) execFileSync(seticon, [path.join(out, n), path.join(ROOT, 'adal.ico')], { stdio: 'pipe' })
+  const list = []
+  for (const name of fs.readdirSync(out)) {
+    const buf = fs.readFileSync(path.join(out, name))
+    const sha256 = crypto.createHash('sha256').update(buf).digest('hex')
+    const file = `programs/${sha256}-${name}`
+    if (!DRY) {
+      const have = await storage('GET', `object/info/${BUCKET}/${file}`).then(r => r.ok).catch(() => false)
+      if (!have) await put(file, buf, 'application/octet-stream')
+    }
+    list.push({ name, sha256, size: buf.length, file })
+  }
+  fs.rmSync(out, { recursive: true, force: true })
+  console.log(`   programs: ${list.map(p => `${p.name} ${p.sha256.slice(0, 8)}`).join(', ')}`)
+  return list
+}
+
 const stage = fs.mkdtempSync(path.join(os.tmpdir(), 'adal-release-'))
 try {
   const files = sh('git', ['ls-files', '-z', '--', 'adal-keep-backend/src', 'adal-keep-backend/scripts', 'adal-keep-backend/server.js',
@@ -131,6 +165,9 @@ try {
     published_at: new Date().toISOString(),
     file: `release/${sha}.tar.gz`, size: buf.length,
     sha256: crypto.createHash('sha256').update(buf).digest('hex'),
+    // The Windows programs (AdalKeep.exe, the Companion, the agent): each PC
+    // downloads only the ones that differ from its own (updates no longer need the USB).
+    programs: await buildPrograms(stage),
     lock_hash: crypto.createHash('sha256').update(fs.readFileSync(path.join(BACK, 'package-lock.json'))).digest('hex'),
     changes,
     // Staged: these agencies at once, everyone else later.

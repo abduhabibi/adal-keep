@@ -144,6 +144,7 @@
     <button data-tab="payments"><span class="ic">💳</span>Payments</button>
     <button data-tab="plans"><span class="ic">⭐</span>Plans</button>
     <button data-tab="usage"><span class="ic">📊</span>Usage</button>
+    <button data-tab="health"><span class="ic">🩺</span>Health</button>
     <button data-tab="cvt"><span class="ic">📄</span>CV templates</button>
     <button data-tab="agents"><span class="ic">🤝</span>Agents</button>
     <button data-tab="ceos"><span class="ic">👤</span>CEOs</button>
@@ -211,7 +212,7 @@ document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
   document.body.classList.toggle('chats', tab === 'inbox' || tab === 'chats')
   $('#sideT').textContent = tab === 'inbox' ? 'Inbox — your chat with each agency' : 'All chats'
   if (tab !== 'inbox' && tab !== 'chats') { $('#thread').style.display = 'none'; $('#compose').style.display = 'none' }
-  if (tab === 'payments' || tab === 'agencies' || tab === 'work' || tab === 'agents' || tab === 'ceos' || tab === 'plans' || tab === 'cvt' || tab === 'usage') { open = null; showTable() } else renderList()
+  if (tab === 'payments' || tab === 'agencies' || tab === 'work' || tab === 'agents' || tab === 'ceos' || tab === 'plans' || tab === 'cvt' || tab === 'usage' || tab === 'health') { open = null; showTable() } else renderList()
   renderList()
 })
 
@@ -288,6 +289,10 @@ function needsYou() {
     if (soon) say(2, `${soon} medical${soon > 1 ? 's' : ''} ending within 7 days`)
     if (a.health?.version?.rolled_back_from) say(0, `version ${a.health.version.rolled_back_from} did not start, so the PC went back to ${a.health.version.sha} by itself: fix it and publish again`)
     if (a.health?.portals?.some(p => !p.ok)) say(1, `portal check failed: ${a.health.portals.filter(p => !p.ok).map(p => `${p.name} (${p.why})`).join(', ')}`)
+    const ph = a.health?.pc_health
+    if (ph?.disk && ph.disk.free_mb < 3072) say(1, `the disk is almost full: ${(ph.disk.free_mb / 1024).toFixed(1)} GB left`)
+    if (ph?.database && !ph.database.ok) say(0, `the database check failed: ${ph.database.why}`)
+    if (ph?.freeze && Date.now() - new Date(ph.freeze.at) < 2 * 864e5) say(2, `its server froze ${ago(ph.freeze.at)} ago and was restarted by itself`)
     if (a.backup?.verify && !a.backup.verify.ok) say(1, `the last backup did not read back: ${a.backup.verify.why}`)
     if (a.latest && a.health?.version?.sha && a.health.version.sha !== a.latest) say(4, `not on the newest version (${a.health.version.sha})`)
     if (s.agent_limit && (s.agents || []).length >= s.agent_limit) say(4, `has used all ${s.agent_limit} agents of its plan: time for a bigger offer?`)
@@ -443,6 +448,37 @@ async function cvtView() {
 }
 
 // Plans: each agency's plan, paid days, trial days and features — Adal's signed licence (plans.js).
+// ----------------------------------------------------------------- Health --
+// Every agency's PC at once: version, portals, disk, database, backup check,
+// and the same error from many PCs added up (the most common are fixed first).
+async function healthView() {
+  $('#title').textContent = 'Health — every PC, and the errors they share'
+  const list = work.length ? work : (work = await api('/api/work').catch(() => []))
+  const norm = (l) => String(l).replace(/d+/g, '#').replace(/'[^']*'|"[^"]*"/g, '…').slice(0, 160)
+  const errs = new Map()
+  for (const a of list) for (const e of a.health?.errors || []) {
+    const k = norm(e.line), x = errs.get(k) || { line: e.line, agencies: new Set(), times: 0, at: e.at }
+    x.agencies.add(a.name); x.times += e.times || 1; if (e.at > x.at) x.at = e.at
+    errs.set(k, x)
+  }
+  const top = [...errs.values()].sort((a, b) => b.agencies.size - a.agencies.size || b.times - a.times).slice(0, 30)
+  const cell = (ok, text, title = '') => `<td class="${ok === null ? 'muted' : ok ? '' : 'num bad'}" title="${esc(title)}">${text}</td>`
+  const rows = list.filter(a => !a.banned).map(a => {
+    const h = a.health || {}, ph = h.pc_health || {}, down = (h.portals || []).filter(p => !p.ok)
+    return `<tr><td><b>${esc(a.name)}</b><br><span class="muted">${a.pcOnline ? 'on now' : a.pcSeen ? 'off · ' + ago(a.pcSeen) : 'never seen'}</span></td>
+      ${cell(h.version?.sha ? !(a.latest && h.version.sha !== a.latest) && !h.version.rolled_back_from : null, h.version?.sha ? esc(h.version.sha) + (h.version.rolled_back_from ? ` ⟲ from ${esc(h.version.rolled_back_from)}` : '') : '—')}
+      ${cell(h.portals?.length ? !down.length : null, h.portals?.length ? (down.length ? down.map(p => esc(p.name)).join(', ') + ' down' : 'all up') : '—')}
+      ${cell(ph.disk ? ph.disk.free_mb >= 3072 : null, ph.disk ? `${(ph.disk.free_mb / 1024).toFixed(0)} GB free` : '—')}
+      ${cell(ph.database ? ph.database.ok : null, ph.database ? (ph.database.ok ? `ok · ${ph.database.size_mb ?? '?'} MB` : esc(ph.database.why)) : '—')}
+      ${cell(a.backup?.verify ? a.backup.verify.ok : null, a.backup?.verify ? (a.backup.verify.ok ? `✓ ${a.backup.verify.profiles ?? ''} profiles` : esc(a.backup.verify.why)) : '—')}
+      ${cell(ph.freeze ? false : (ph.at ? true : null), ph.freeze ? `froze ${ago(ph.freeze.at)} ago` : ph.at ? 'none' : '—')}
+      ${cell(h.errors ? (h.errors.length < 10) : null, String(h.errors?.length ?? '—'))}</tr>`
+  }).join('')
+  $('#table').innerHTML = `<table><tr><th>Agency</th><th>Version</th><th>Portals</th><th>Disk</th><th>Database</th><th>Backup check</th><th>Freezes</th><th>Errors</th></tr>${rows}</table>
+    <h3 style="margin:22px 0 8px">Errors shared by PCs (${top.length})</h3>
+    ${top.length ? `<table><tr><th>Error</th><th>PCs</th><th>Times</th><th>Last</th></tr>${top.map(e => `<tr><td style="font-size:12px">${esc(e.line)}</td><td title="${esc([...e.agencies].join(', '))}">${e.agencies.size}</td><td>${e.times}</td><td class="muted">${ago(e.at)}</td></tr>`).join('')}</table>` : '<p class="muted">No errors reported.</p>'}`
+}
+
 // ------------------------------------------------------------------ Usage --
 // How much each agency uses every feature: a graph per agency (its PC sends
 // the counts every 30 minutes).
@@ -861,6 +897,7 @@ function showTable() {
   if (tab === 'ceos') return ceosView()
   if (tab === 'plans') return plansView()
   if (tab === 'usage') return usageView()
+  if (tab === 'health') return healthView()
   if (tab === 'cvt') return cvtView()
   if (tab === 'payments') {
     $('#title').textContent = 'Payment receipts'
@@ -952,6 +989,7 @@ async function refresh() {
     if (open) open = data.conversations.find(c => c.id === open.id) || open
     renderList()
     if (tab === 'work') { if (!document.querySelector('#table input:focus')) showTable() }
+    else if (tab === 'health') healthView()
     else if (tab === 'cvt') { if (!cvtDragged) cvtView() }
     else if (tab === 'ceos') { if (!document.querySelector('#table input:focus')) ceosView() }
     else if (tab === 'agents') { if (!dragged && !document.querySelector('#table input:focus, #table select:focus')) agentsView() }

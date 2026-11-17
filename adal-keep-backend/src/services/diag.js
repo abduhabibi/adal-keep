@@ -105,6 +105,7 @@ export async function healthReport(db, version = null) {
     browser: await browserInUse(),
     slowest,
     errors: errors.slice(-25),
+    pc_health: await import('./pcHealth.js').then(p => p.pcStatus()).catch(() => null),
     portals: await import('./portalHealth.js').then(p => p.portalStatus().portals.map(({ key, name, ok, why }) => ({ key, name, ok, why }))).catch(() => []),
   }
 }

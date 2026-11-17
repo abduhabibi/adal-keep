@@ -432,7 +432,10 @@ router.get('/automations/attention', async (req, res) => {
     const runs = await db('automation_queue as q').leftJoin('profiles as p', 'p.id', 'q.profile_id')
       .whereIn('q.id', calls.map(c => c.run_id)).select('q.id', 'q.profile_id', 'q.workflow_id', 'p.full_name')
     const of = new Map(runs.map(r => [r.id, r]))
-    res.json(calls.filter(c => of.has(c.run_id)).map(c => ({ ...c, ...of.get(c.run_id), id: undefined })).sort((a, b) => b.at - a.at))
+    // The PC's own dangers (disk almost full, database damaged) — services/pcHealth.js.
+    let pc = []
+    try { pc = (await import('../services/pcHealth.js')).pcCalls() } catch {}
+    res.json([...pc, ...calls.filter(c => of.has(c.run_id)).map(c => ({ ...c, ...of.get(c.run_id), id: undefined }))].sort((a, b) => b.at - a.at))
   } catch (e) { res.status(e.status || 500).json({ error: e.message, ...(e.feature ? { feature: e.feature, plan: e.plan } : {}) }) }
 })
 router.post('/automations/:id/captcha', async (req, res) => {

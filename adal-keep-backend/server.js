@@ -23,6 +23,8 @@ setTimeout(() => startedWell(HERE), 120_000).unref()
 
 try {
   await import('./main.js')
+  // A server that freezes is ended (and started again by the launcher), never left hanging.
+  if (info.guarded) import('./src/services/watchdog.js').then(w => w.startWatchdog(path.join(HERE, 'data'))).catch(() => {})
 } catch (e) {
   console.error('[start] Adal Keep could not start:', e?.stack || e)
   process.exit(1)

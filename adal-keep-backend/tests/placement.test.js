@@ -4,8 +4,13 @@ import { decide, watched } from '../src/services/placement.js'
 
 test('a head photo put into Passport moves to Photo; a standing one to Full Body Photo', () => {
   assert.deepEqual(decide('Passport', { choice: 'photo', confidence: 0.9 }), { act: 'move', to: 'Photo' })
-  assert.deepEqual(decide('Photo', { choice: 'fullbody', confidence: 0.8 }), { act: 'move', to: 'Full Body Photo' })
-  assert.deepEqual(decide('Photo', { choice: 'passport', confidence: 0.95 }), { act: 'move', to: 'Passport' })
+  assert.deepEqual(decide('Passport', { choice: 'fullbody', confidence: 0.8 }), { act: 'move', to: 'Full Body Photo' })
+})
+
+test('nothing ever moves out of Photo or Full Body Photo (a face cut from the passport looks like a passport)', () => {
+  assert.equal(decide('Photo', { choice: 'passport', confidence: 0.99 }).act, 'stay')
+  assert.equal(decide('Photo', { choice: 'fullbody', confidence: 0.9 }).act, 'stay')
+  assert.equal(decide('Full Body Photo', { choice: 'photo', confidence: 0.9 }).act, 'stay')
 })
 
 test('the right box, an unsure answer or something else: it stays', () => {

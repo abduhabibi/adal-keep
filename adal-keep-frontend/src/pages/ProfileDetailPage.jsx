@@ -37,7 +37,7 @@ function emergencyName(p = {}) {
 // One thing at a time (asked on 2026-11-17): each step shows only the
 // documents and details it needs; "Show everything" opens the rest.
 const STEP_FILES = {
-  cv: ['Photo', 'Full Body Photo'],
+  cv: ['Passport', 'Photo', 'Full Body Photo'],
   musaned: ['Photo', 'Passport'],
   selected: ['Passport'],
   wafid: ['Passport', 'Medical Report', 'Appointment Slip'],

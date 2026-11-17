@@ -86,6 +86,15 @@ router.post('/new-profile/read', upload.single('file'), async (req, res) => {
   }
 })
 
+// A passport picture that also holds her photo and her standing photo (how most
+// agencies send them): JEV finds them and they go into Photo and Full Body Photo,
+// and the passport part stays in Passport (services/placement.js).
+function splitLater(db, profileId, fileId) {
+  if (!fileId) return
+  db('files').where('id', fileId).first().then(row => row && import('../services/placement.js').then(p => p.checkPlacement(db, profileId, 'Passport', row)))
+    .catch(e => console.warn('[placement]', e.message))
+}
+
 // The profile is saved: the waiting passport goes onto it and is checked.
 router.post('/new-profile/attach', async (req, res) => {
   const db = req.app.locals.db
@@ -94,11 +103,12 @@ router.post('/new-profile/attach', async (req, res) => {
   if (!file || !profileId) return res.status(400).json({ error: 'Nothing to attach' })
   try {
     const { attachFileToProfile } = await import('../services/profileFiles.js')
-    await attachFileToProfile(Number(profileId), 'Passport', file, filename || path.basename(file))
+    const att = await attachFileToProfile(Number(profileId), 'Passport', file, filename || path.basename(file))
     fs.unlink(file, () => {})
     // Attached: the page goes on; the passport is checked behind.
     res.json({ ok: true })
     import('../services/verification.js').then(v => v.runPassportVerification(Number(profileId), { handle: db })).catch(() => {})
+    splitLater(db, Number(profileId), att?.fileId)
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
@@ -134,7 +144,8 @@ router.post('/new-profile/with-passport', upload.single('file'), async (req, res
     if (twice) fs.unlink(req.file.path, () => {})
     if (req.file && id && !twice) {
       const { attachFileToProfile } = await import('../services/profileFiles.js')
-      await attachFileToProfile(Number(id), 'Passport', req.file.path, req.file.originalname || 'passport.jpg')
+      const att = await attachFileToProfile(Number(id), 'Passport', req.file.path, req.file.originalname || 'passport.jpg')
+      splitLater(db, Number(id), att?.fileId)
       fs.unlink(req.file.path, () => {})
       import('../services/verification.js').then(v => v.runPassportVerification(Number(id), { handle: db })).catch(() => {})
     }

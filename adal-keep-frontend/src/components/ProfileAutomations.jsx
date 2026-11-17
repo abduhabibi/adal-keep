@@ -89,6 +89,7 @@ function aheadText(n) {
 export default function ProfileAutomations({ profileId }) {
   const plan = usePlan()
   const [workflows, setWorkflows] = useState([])
+  const [step, setStep] = useState(null)   // { key, n, of, title }: the one step she is at (backend stepNow)
   const [queue, setQueue] = useState(null)
   const [loading, setLoading] = useState(true)
   const [aiOpen, setAiOpen] = useState(() => { try { return localStorage.getItem('adal-fold-ai') !== '0' } catch { return true } })
@@ -146,6 +147,7 @@ export default function ProfileAutomations({ profileId }) {
     try {
       const r = await api.get(`/profiles/${profileId}/automations`)
       setWorkflows(r.data.workflows || [])
+      setStep(r.data.step || null)
       setQueue(r.data.queue || null)
     } catch {
       if (!quiet) toast.error('Failed to load automations')
@@ -427,7 +429,7 @@ export default function ProfileAutomations({ profileId }) {
   // CV (done on the profile) → Musaned → Wafid → Tasheer → Insurance → Enjaz · Visa,
   // then the LMIS steps, each on its own.
   const GROUPS = [
-    { title: 'Musaned', ids: ['musaned_add_candidate', 'musaned_check_chosen', 'musaned_cv_import', 'musaned_delete', 'musaned_epro_approve'], box: 'border-indigo-200 dark:border-indigo-800', head: 'text-indigo-700 dark:text-indigo-300' },
+    { title: 'Musaned', ids: ['musaned_add_candidate', 'musaned_check_chosen', 'musaned_delete', 'musaned_epro_approve'], box: 'border-indigo-200 dark:border-indigo-800', head: 'text-indigo-700 dark:text-indigo-300' },
     { title: 'Wafid medical', ids: ['wafid_book', 'wafid_slip', 'wafid_check'], box: 'border-emerald-200 dark:border-emerald-800', head: 'text-emerald-700 dark:text-emerald-300' },
     { title: 'Tasheer', ids: ['tasheer_schedule'], box: 'border-amber-200 dark:border-amber-800', head: 'text-amber-700 dark:text-amber-300' },
     { title: 'Insurance', ids: ['insurance_certificate'], box: 'border-rose-200 dark:border-rose-800', head: 'text-rose-700 dark:text-rose-300' },
@@ -435,7 +437,11 @@ export default function ProfileAutomations({ profileId }) {
     { title: 'LMIS · Police clearance', ids: ['police_certificate'], box: 'border-slate-200 dark:border-slate-700', head: 'text-slate-600 dark:text-slate-300' },
   ]
   const grouped = GROUPS.flatMap(g => g.ids)
-  const otherFlows = workflows.filter(w => !grouped.includes(w.id))
+  const otherFlows = workflows.filter(w => !grouped.includes(w.id) && w.id !== 'musaned_cv_import')
+  // Step by step until the EPRO is approved (asked on 2026-11-17): only the step she is at.
+  const STEP_IDS = { musaned: ['musaned_add_candidate'], selected: ['musaned_check_chosen'], wafid: ['wafid_book', 'wafid_check'], epro: ['musaned_epro_approve'] }
+  const STEP_NAMES = ['CV', 'Musaned', 'Chosen', 'Wafid FIT', 'EPRO']
+  const stepping = step && step.key !== 'choices'
 
   // A run's controls: its name and state, its sign-in (small), Continue /
   // done / Hold / Cancel / Run again / Close. Shown in its portal's row, beside
@@ -513,7 +519,7 @@ export default function ProfileAutomations({ profileId }) {
       {aiOpen && <>
 
       {/* What is working right now, across all profiles */}
-      <div className="mb-4 rounded-xl border border-slate-200 dark:border-slate-700 p-3">
+      {running.length > 0 && <div className="mb-4 rounded-xl border border-slate-200 dark:border-slate-700 p-3">
         <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
           Working now
           <span className="text-slate-400 normal-case font-normal"> · {running.length} of {max}</span>
@@ -539,15 +545,29 @@ export default function ProfileAutomations({ profileId }) {
             })}
           </div>
         )}
-        <p className="text-[10px] text-slate-400 mt-2">
-          Each run works in its own browser tab and never touches another run's tab. When {max} are
-          working, the next click waits in line and starts by itself.
-        </p>
-      </div>
+      </div>}
 
       {/* Each portal's login sits in its own box below (with its cards). */}
       {/* The journey, in order: each portal's actions in one box. */}
-      {GROUPS.filter(g => !g.hidden).map(g => {
+      {stepping && (
+        <div className="mb-3 rounded-xl border border-teal-200 bg-teal-50/60 p-3 dark:border-teal-800 dark:bg-teal-900/10">
+          <div className="flex items-center gap-1.5" aria-label={`Step ${step.n} of ${step.of}`}>
+            {STEP_NAMES.map((name, i) => (
+              <div key={name} className="flex min-w-0 flex-1 flex-col items-center gap-1">
+                <span className={`h-1.5 w-full rounded-full ${i < step.n - 1 ? 'bg-emerald-500' : i === step.n - 1 ? 'bg-teal-500' : 'bg-slate-200 dark:bg-slate-700'}`} />
+                <span className={`text-[10px] font-semibold ${i === step.n - 1 ? 'text-teal-700 dark:text-teal-300' : 'text-slate-400'}`}>{name}</span>
+              </div>
+            ))}
+          </div>
+          <p className="mt-2 text-base font-bold text-slate-900 dark:text-white">{step.n}. {step.title}</p>
+          {step.unfit && <p className="text-sm font-semibold text-red-600">Wafid says UNFIT — she cannot go on.</p>}
+          {step.key === 'cv' && (
+            <button type="button" onClick={() => navigate(`/cvs/new?profile=${profileId}`)}
+              className="mt-2 rounded-lg bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-700">📄 Make her CV</button>
+          )}
+        </div>
+      )}
+      {(stepping ? (STEP_IDS[step.key] ? GROUPS.filter(g => g.ids.some(id => STEP_IDS[step.key].includes(id))).map(g => ({ ...g, ids: g.ids.filter(id => STEP_IDS[step.key].includes(id)) })) : []) : GROUPS).filter(g => !g.hidden).map(g => {
         // Robots outside the plan are left out (the backend refuses them too).
         const flows = g.ids.filter(id => !lockedFor(plan, id)).map(id => workflows.find(w => w.id === id)).filter(Boolean)
         // Outside this agency's plan: the robots are not offered — "I want it" asks Adal Keep.
@@ -592,7 +612,7 @@ export default function ProfileAutomations({ profileId }) {
         )
       })}
 
-      {otherFlows.length > 0 && (
+      {!stepping && otherFlows.length > 0 && (
         <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
           {otherFlows.map(w => renderCard(w))}
         </div>

@@ -81,9 +81,13 @@ router.get('/profiles/:profileId/automations', async (req, res) => {
         latest[id] = { id: l?.id || null, workflow_id: id, status: 'done', finished_at: p?.chosen_at || null, from_contract: true }
       }
     }
+    // The one step she is at (the page shows only its robot until EPRO is approved).
+    let step = null
+    try { const full = await db('profiles').where('id', profileId).first(); if (full) step = stepNow(full, await journeyFor(db, profileId, full)) } catch {}
     // A finished "Check if chosen" is not a ✓ unless she really is chosen.
     if (latest.musaned_check_chosen) latest.musaned_check_chosen = { ...latest.musaned_check_chosen, chosen: !!contract }
     res.json({
+      step,
       // EPRO approve: only once her Wafid medical is FIT.
       workflows: workflows.filter(w => w.id !== 'musaned_epro_approve' || p?.status === 'medical_fit' || latest[w.id]).map(w => ({ ...w, latest: latest[w.id] || null })),
       queue: queueSnapshot(),
@@ -101,6 +105,18 @@ router.post('/profiles/:profileId/automations/:workflowId/start', async (req, re
     // The agency's plan (plans.js): a robot outside it does not start.
     const inPlan = featureForWorkflow(workflowId)
     if (inPlan) needFeature(inPlan.key)
+
+    // Step by step until the EPRO is approved: only the robots of the step she is at.
+    if (!req.body?.anyStep) {
+      const full = await db('profiles').where('id', profileId).first()
+      if (full) {
+        const step = stepNow(full, await journeyFor(db, profileId, full))
+        const allowed = STEP_ROBOTS[step.key]
+        if (allowed && !allowed.includes(workflowId)) {
+          return res.status(409).json({ error: `Step ${step.n} of ${step.of} first: ${step.title}.`, step })
+        }
+      }
+    }
 
     // Preflight — depends on the workflow
     // Musaned workflows need no files
@@ -701,6 +717,48 @@ router.get('/profiles/:profileId/journey', async (req, res) => {
     res.json({ ...journeyOf(p, runs, !!cv || docs.has('CV'), docs, (await agentsOut(db, [id])).get(id) || []), cv_missing: cvMissing(p, docs, !!cv || docs.has('CV')) })
   } catch (e) { res.status(e.status || 500).json({ error: e.message, ...(e.feature ? { feature: e.feature, plan: e.plan } : {}) }) }
 })
+
+/**
+ * Where her work stands, step by step (asked on 2026-11-17: never jump a
+ * step): 1 CV → 2 Musaned → 3 chosen → 4 Wafid FIT → 5 EPRO approved; after
+ * that, every other robot is a choice. Returns { key, n, of, why }.
+ */
+export function stepNow(p, journey) {
+  const at = Object.fromEntries(journey.embassy.map(x => [x.key, x]))
+  const done = (k) => at[k]?.state === 'done'
+  const STEPS = [
+    ['cv', 'Make her CV', () => done('cv')],
+    ['musaned', 'Add her to Musaned', () => ['done', 'waiting'].includes(at.musaned?.state)],
+    ['selected', 'Wait until an employer chooses her', () => done('selected')],
+    ['wafid', 'Wafid medical: book it, then check until FIT', () => p.status === 'medical_fit' || done('wafid')],
+    ['epro', 'Approve the EPRO on Musaned', () => done('epro')],
+  ]
+  // The furthest step she reached counts: everything before it is behind her
+  // (a profile made before this rule, or a CV made outside Adal Keep).
+  let reached = -1
+  STEPS.forEach(([, , ok], i) => { if (ok()) reached = i })
+  const i = reached + 1
+  if (i >= STEPS.length) return { key: 'choices', n: STEPS.length + 1, of: STEPS.length, title: 'EPRO approved — choose what is next' }
+  const [key, title] = STEPS[i]
+  return { key, n: i + 1, of: STEPS.length, title, unfit: key === 'wafid' && p.status === 'medical_rejected' }
+}
+
+// The robots each step may start ("Check if chosen" always may: it keeps her stage up to date).
+export const STEP_ROBOTS = {
+  cv: ['musaned_check_chosen'],
+  musaned: ['musaned_add_candidate', 'musaned_check_chosen'],
+  selected: ['musaned_check_chosen'],
+  wafid: ['wafid_book', 'wafid_check', 'wafid_slip', 'musaned_check_chosen'],
+  epro: ['musaned_epro_approve', 'wafid_slip', 'musaned_check_chosen'],
+}
+
+async function journeyFor(db, id, p) {
+  const runs = {}
+  for (const r of await db('automation_queue').where('profile_id', id).select('workflow_id', 'status').orderBy('id', 'asc')) runs[r.workflow_id] = r
+  const cv = await db('generated_cvs').where('profile_id', id).first().catch(() => null)
+  const docs = (await docsOf(db, [id])).get(id) || new Set()
+  return journeyOf(p, runs, !!cv || docs.has('CV'), docs, [])
+}
 
 /** What her CV still lacks before it can go to agents ([] = complete): a CV made, or all a CV shows. */
 export function cvMissing(p, docs = new Set(), hasCv = false) {

@@ -4,11 +4,14 @@ import api from '../services/api'
 import { onDataChange } from '../lib/changes'
 import MorningSignIn from '../components/MorningSignIn'
 import { onPhone } from '../lib/phoneMode'
+import { useAuth } from '../context/AuthContext'
+import { greeting } from '../lib/ethiopic'
 import { lastPlace } from '../lib/lastPlace'
 
-// The page is written in Amharic; English comes from lib/i18n.js (whole phrases).
-// One thing at a time (asked on 2026-11-17): where you were, the morning
-// sign-in, and the tasks to do — only when there are some. Nothing else.
+// The page everyone lands on (written in Amharic; English from lib/i18n.js).
+// Beautiful, and one thing at a time (asked on 2026-11-17): the welcome band
+// with "Continue where you left off", the morning sign-in, and the tasks to
+// do only when there are some. No dates, no numbers for their own sake.
 
 async function tasksToDo() {
   try {
@@ -19,6 +22,7 @@ async function tasksToDo() {
 }
 
 export default function DashboardPage() {
+  const { company } = useAuth()
   const [todo, setTodo] = useState(0)
   const place = lastPlace()
 
@@ -29,23 +33,38 @@ export default function DashboardPage() {
   }, [])
 
   return (
-    <div className="mx-auto max-w-4xl space-y-4">
-      {place && (
-        <Link to={place.path} className="panel flex items-center gap-4 p-4 hover:border-teal-400 hover:bg-teal-50/50 dark:hover:bg-teal-900/20">
-          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-teal-600 text-xl text-white" aria-hidden="true">↩</span>
-          <span className="min-w-0 flex-1">
-            <span className="block text-base font-bold">ካቆሙበት ይቀጥሉ</span>
-            <span className="block text-sm text-slate-500"><span>{place.kind}</span>{place.name ? <span translate="no"> · {place.name}</span> : null}</span>
-          </span>
-        </Link>
-      )}
+    <div className="mx-auto max-w-5xl space-y-5">
+      <section className="ak-hero">
+        <div className="relative z-[1] flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/60" translate="no">{company ? `Adal ${company}` : 'Adal Keep'}</p>
+            <h1 className="ak-hero-title mt-1">{greeting()}</h1>
+          </div>
+          {place ? (
+            <Link to={place.path}
+              className="group flex min-w-0 items-center gap-3 rounded-2xl bg-white/12 px-4 py-3 ring-1 ring-white/25 backdrop-blur-0 transition-colors hover:bg-white/20 md:max-w-sm">
+              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white text-xl text-teal-700 shadow-lg" aria-hidden="true">↩</span>
+              <span className="min-w-0">
+                <span className="block text-base font-bold text-white">ካቆሙበት ይቀጥሉ</span>
+                <span className="block truncate text-sm text-white/75"><span>{place.kind}</span>{place.name ? <span translate="no"> · {place.name}</span> : null}</span>
+              </span>
+            </Link>
+          ) : (
+            <Link to="/profiles/new" className="ak-hero-chip self-start md:self-auto"><span aria-hidden="true">＋</span>አዲስ ፕሮፋይል</Link>
+          )}
+        </div>
+        <div className="ak-tibeb ak-hero-tibeb" aria-hidden="true" />
+      </section>
 
       {!onPhone() && <MorningSignIn />}
 
       {todo > 0 && (
-        <Link to="/tasks" className="panel flex items-center gap-4 p-4 hover:border-amber-400 hover:bg-amber-50/50 dark:hover:bg-amber-900/20">
-          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-500 text-lg font-bold text-white tabular-nums">{todo}</span>
-          <span className="text-base font-bold">ለመስራት ተግባሮች</span>
+        <Link to="/tasks" className="ak-stat ak-tone-amber flex-row items-center gap-4">
+          <span className="ak-stat-icon !mb-0">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="4" /><path d="M8.5 12.2l2.4 2.4 4.6-5" /></svg>
+          </span>
+          <span className="ak-stat-value tabular-nums">{todo}</span>
+          <span className="ak-stat-label">ለመስራት ተግባሮች</span>
         </Link>
       )}
     </div>

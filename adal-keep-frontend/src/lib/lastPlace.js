@@ -14,11 +14,15 @@ export function rememberPlace(path) {
   const save = (name) => { try { localStorage.setItem(KEY, JSON.stringify({ path, kind, name: name || '', at: Date.now() })) } catch {} }
   save('')
   // A profile or broker page: its name too, once the page has drawn it.
-  if (/^\/(profiles|brokers)\/\d+/.test(path)) setTimeout(() => {
-    if (window.location.pathname + window.location.search !== path) return
-    const h = document.querySelector('main h1, h1')?.textContent?.trim()
-    if (h) save(h.slice(0, 60))
-  }, 1500)
+  if (/^\/(profiles|brokers)\/\d+/.test(path)) {
+    const look = (tries) => setTimeout(() => {
+      if (window.location.pathname + window.location.search !== path) return
+      const h = (document.querySelector('main h1') || document.querySelector('h1'))?.textContent?.trim()
+      if (h) save(h.slice(0, 60))
+      else if (tries > 0) look(tries - 1)
+    }, 1500)
+    look(6)
+  }
 }
 
 export function lastPlace() {

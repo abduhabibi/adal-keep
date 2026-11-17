@@ -515,6 +515,17 @@ async function installFromTarball(cfg, logs, sha = '') {
  * already built — no frontend build on the PC, and npm install only when the
  * package list changed. Returns the marker to write.
  */
+/** The packages main.js needs that do not load in `backendDir` (each tried in its own Node). */
+export const CORE_PACKAGES = ['express', 'knex', 'sqlite3', 'sharp', 'puppeteer', 'dotenv', 'bcryptjs']
+export async function brokenPackages(backendDir, names = CORE_PACKAGES) {
+  const out = []
+  for (const n of names) {
+    const r = await run(`"${process.execPath}" -e "require(${JSON.stringify(n).replace(/"/g, '\\"')})"`, backendDir, 60 * 1000)
+    if (!r.ok) out.push(n)
+  }
+  return out
+}
+
 export async function installFromRelease(cfg, logs, manifest, localArchive = null) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'adal-update-'))
   try {
@@ -588,6 +599,18 @@ export async function installFromRelease(cfg, logs, manifest, localArchive = nul
       logs.push(`[backend] npm install → ${ni.ok ? 'ok' : 'failed'}\n${ni.out.slice(-400)}`)
       if (!ni.ok && !hasModules) throw new Error('npm install failed')
     } else logs.push('Packages unchanged — no npm install')
+    // The packages the server cannot start without must load (2026-11-17: an
+    // install cut off half-way left knex and puppeteer gutted, and the PC was
+    // down — a rollback restores code, not packages). Broken: installed again.
+    const broken = await brokenPackages(backendDir)
+    if (broken.length) {
+      logs.push(`Packages broken (${broken.join(', ')}) — installing them again`)
+      const toolchain = findToolchain(cfg.projectRoot)
+      const again = await run(npmCmd(toolchain, 'install --omit=dev --no-audit --no-fund --force'), backendDir, 20 * 60 * 1000)
+      const still = await brokenPackages(backendDir)
+      logs.push(`[backend] npm install again → ${again.ok ? 'ok' : 'failed'}${still.length ? ` — still broken: ${still.join(', ')}` : ' — all load'}`)
+      if (still.length) throw new Error(`packages still broken after a second install: ${still.join(', ')}`)
+    }
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true })
   }

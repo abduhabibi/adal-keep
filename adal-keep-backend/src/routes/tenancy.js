@@ -50,7 +50,20 @@ router.post('/setup/company', async (req, res) => {
   res.json({ success: true, apiKeyName: `Adal ${companyName}` })
 })
 
-router.get('/subscription/status', (req, res) => res.json(statusPayload()))
+// Not unlocked (the trial, or the payment screen): Adal's licence is asked for
+// first (at most every 20 s), so a month given in Adal Admin opens the app at
+// once instead of at the next half-hourly look.
+let licenceAskedAt = 0
+router.get('/subscription/status', async (req, res) => {
+  if (statusPayload().mode !== 'active' && Date.now() - licenceAskedAt > 20000) {
+    licenceAskedAt = Date.now()
+    try {
+      const { refreshLicense } = await import('../services/plans.js')
+      await Promise.race([refreshLicense(), new Promise(ok => setTimeout(ok, 8000))])
+    } catch {}
+  }
+  res.json(statusPayload())
+})
 
 // The agency's plan and features (services/plans.js), from Adal's signed licence.
 router.get('/plan', async (req, res) => {

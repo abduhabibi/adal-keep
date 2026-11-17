@@ -74,6 +74,13 @@ export function AuthProvider({ children }) {
     window.addEventListener('adal-locked', check)
     return () => { clearInterval(t); window.removeEventListener('adal-locked', check) }
   }, [])
+  // On the payment screen: every 30 s, so a month given in Adal Admin opens the app within half a minute.
+  const locked = subscription?.mode === 'locked'
+  useEffect(() => {
+    if (!locked) return
+    const t = setInterval(() => api.get('/subscription/status').then(r => setSubscription(r.data)).catch(() => {}), 30000)
+    return () => clearInterval(t)
+  }, [locked])
 
   // Brand the window title once the company is known, e.g. "Adal Sunrise Recruitment".
   // Components read `company` from this context directly — no DOM patching needed.

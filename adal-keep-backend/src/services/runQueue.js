@@ -11,7 +11,7 @@
  * null) and `runJob(job)` does the work. worker.js wires in the real ones.
  */
 
-export function createRunQueue({ max = 3, claimNext, runJob, log = console.log, warn = console.error } = {}) {
+export function createRunQueue({ max = 3, claimNext, runJob, isIdle = () => false, log = console.log, warn = console.error } = {}) {
   const limit = Math.max(1, Number(max) || 1)
 
   // runId -> { runId, workflowId, profileId, startedAt } for runs working now
@@ -41,8 +41,11 @@ export function createRunQueue({ max = 3, claimNext, runJob, log = console.log, 
       })
   }
 
+  // A run waiting for a person (a Save, a captcha) uses no internet: it does
+  // not hold a slot, so the next click starts at once (asked on 2026-11-17).
+  const working = () => [...running.keys()].filter(id => !isIdle(id)).length
   async function fill() {
-    while (running.size < limit) {
+    while (working() < limit) {
       // Runs still finishing here are skipped even if their row already says
       // pending again (a resume clicked a moment early): one row, one run.
       const job = await claimNext([...running.keys()])

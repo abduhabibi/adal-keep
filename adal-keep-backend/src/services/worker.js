@@ -19,7 +19,7 @@ import path from 'path'
 import { spawn } from 'child_process'
 import { fileURLToPath } from 'url'
 import { getBrowser, openBrowserIfAny } from './browser.js'
-import { needPerson, askCaptcha, doneWith, waiting } from './attention.js'
+import { needPerson, askCaptcha, doneWith, waiting, isWaiting, onWait } from './attention.js'
 import { runFullWorkflow } from './lmisWorkflow.js'
 import { decideAgencyActions } from './jev/agencyManager.js'
 import { getActiveEmployee } from './activeEmployee.js'
@@ -514,10 +514,12 @@ function runs(db) {
   if (!_runs) {
     _runs = createRunQueue({
       max: MAX_RUNS,
+      isIdle: (id) => isWaiting(id),
       claimNext: (exclude) => claimNextJob(db, exclude),
       runJob: (job) => runJob(db, job),
     })
     reportRuns(() => _runs.snapshot().running.length)
+    onWait(() => setTimeout(() => _runs?.drain(), 50))
   }
   return _runs
 }

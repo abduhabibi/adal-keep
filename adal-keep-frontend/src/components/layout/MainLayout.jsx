@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
+import { rememberPlace } from '../../lib/lastPlace'
 import Navbar from './Navbar'
 import Sidebar from './Sidebar'
 import ProfileSearchPad from '../ProfileSearchPad'
@@ -38,7 +39,7 @@ export default function MainLayout() {
   // again with it — once per visit, never while something is being typed.
   const [pageKey, setPageKey] = useState(0)
   const visit = useRef({ path: '', at: 0, redone: false })
-  useEffect(() => { api.adalVisit?.(); visit.current = { path: pathname, at: Date.now(), redone: false } }, [pathname])
+  useEffect(() => { api.adalVisit?.(); visit.current = { path: pathname, at: Date.now(), redone: false }; rememberPlace(pathname + window.location.search) }, [pathname])
   useEffect(() => {
     let timer = null
     const on = () => {

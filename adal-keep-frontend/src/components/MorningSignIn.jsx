@@ -47,17 +47,16 @@ export default function MorningSignIn() {
   return (
     <div className="panel p-4">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <p className="font-display font-bold">☀️ Morning sign-in <span className="ml-1 text-sm font-normal text-slate-500">{inCount} of {sites.length} signed in</span></p>
-        <span className="text-xs text-slate-500">Sign in once — Adal Keep keeps each one signed in all day, out of sight.</span>
+        <p className="font-display font-bold">☀️ Morning sign-in <span className="ml-1 text-sm font-normal text-slate-500 tabular-nums">{inCount}/{sites.length}</span></p>
       </div>
-      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
         {sites.map(s => (
           <div key={s.key} className={`flex items-center gap-2 rounded-xl border px-3 py-2 ${s.signedIn ? 'border-emerald-200 bg-emerald-50/60 dark:border-emerald-800 dark:bg-emerald-900/10' : 'border-slate-200 dark:border-slate-700'}`}>
             <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${s.signedIn ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`} />
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-semibold">{s.name}</span>
+              <span className="block break-words text-sm font-semibold leading-snug">{s.name}</span>
               {s.shared && s.holder?.by && (
-                <span className="block truncate text-[11px] text-slate-500" title={`${s.holder.by} · ${s.holder.pc} · ${when(s.holder.at)}`}>
+                <span className="block break-words text-[11px] text-slate-500" title={`${s.holder.by} · ${s.holder.pc} · ${when(s.holder.at)}`}>
                   {s.holder.state === 'signing-in' && !s.signedIn ? 'signing in: ' : s.signedIn ? 'by ' : 'last: '}{s.holder.by} · {s.holder.pc} · {when(s.holder.at)}
                 </span>
               )}
@@ -68,7 +67,7 @@ export default function MorningSignIn() {
                   {s.accounts.map(a => (
                     <span key={a.id} className="flex items-center justify-end gap-1.5 text-xs">
                       <span className={`h-2 w-2 rounded-full ${a.signedIn ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`} />
-                      <span className="max-w-[7rem] truncate" title={a.main ? "Main account (the browser's own window)" : 'Its own browser window'}>{a.name}</span>
+                      <span className="break-words" title={a.main ? "Main account (the browser's own window)" : 'Its own browser window'}>{a.name}</span>
                       {a.signedIn
                         ? <span className="font-semibold text-emerald-700 dark:text-emerald-300">✓</span>
                         : <button type="button" onClick={() => open(s, a.id)} className="rounded-md bg-teal-600 px-2 py-0.5 font-semibold text-white hover:bg-teal-700">Sign in</button>}

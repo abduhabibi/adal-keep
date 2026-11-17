@@ -97,34 +97,6 @@ router.get('/chat/unlock-status', wrap(async (req, db) => {
   return r || { status: 'none' }
 }))
 
-// A profile sent to another agency with every document (services/profileShare.js).
-const who = (req) => { try { return decodeURIComponent(req.get('x-adal-who') || '') || null } catch { return null } }
-router.post('/chat/profile/send', wrap(async (req, db) => {
-  const { sendProfiles } = await import('../services/profileShare.js')
-  const ids = [...new Set([].concat(req.body?.profile_ids || req.body?.profile_id || []).map(Number).filter(Boolean))]
-  if (!ids.length || !req.body?.to) throw new chat.ChatError('Choose the profiles and the agency.', 400)
-  if (ids.length > 300) throw new chat.ChatError('At most 300 profiles at a time.', 400)
-  return sendProfiles(db, { profileIds: ids, toAgency: String(req.body.to), who: who(req) })
-}))
-router.get('/chat/profile/pending', wrap(async (req, db) => (await import('../services/profileShare.js')).pendingProfiles(db, req.query.conversation || null)))
-router.post('/chat/profile/accept', wrap(async (req, db) => {
-  if (!req.body?.conversation) throw new chat.ChatError('Which chat?', 400)
-  return (await import('../services/profileShare.js')).acceptAll(db, String(req.body.conversation), { who: who(req) })
-}))
-router.get('/chat/profile/sent', wrap(async () => (await import('../services/profileShare.js')).sentList()))
-router.get('/chat/profile/:messageId', wrap(async (req, db) => (await import('../services/profileShare.js')).viewSent(db, req.params.messageId)))
-router.get('/chat/profile/:messageId/girl/:i/file/:n', async (req, res) => {
-  try {
-    const f = await (await import('../services/profileShare.js')).sentFile(req.app.locals.db, req.params.messageId, req.params.i, req.params.n)
-    res.setHeader('Content-Type', f.type || 'application/octet-stream')
-    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(f.name || 'document')}"`)
-    res.setHeader('Cache-Control', 'private, max-age=600')
-    res.send(f.body)
-  } catch (e) { res.status(e.status || 500).json({ error: e.message }) }
-})
-router.post('/chat/profile/:messageId/add', wrap(async (req, db) => (await import('../services/profileShare.js')).addSent(db, req.params.messageId, { who: who(req) })))
-router.get('/chat/profile/:messageId/add', wrap(async (req, db) => (await import('../services/profileShare.js')).addStatus(db, req.params.messageId)))
-
 // A PC Adal marked paid unlocks itself, also during the trial (not only
 // from the lock screen): checked a minute after start, then every 30 minutes.
 export function watchPaid(db) {

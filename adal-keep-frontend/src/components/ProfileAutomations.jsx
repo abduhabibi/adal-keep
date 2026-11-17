@@ -314,7 +314,9 @@ export default function ProfileAutomations({ profileId }) {
           const isRunning = st === 'running'
           const isQueued = st === 'pending'
           const isPaused = st === 'paused'
-          const isDone = st === 'done'
+          // "Check if chosen" ran but nobody chose her: no ✓ and no green — just when it looked.
+          const notChosen = st === 'done' && w.id === 'musaned_check_chosen' && latest?.chosen === false
+          const isDone = st === 'done' && !notChosen
           const isActive = isRunning || isQueued || isPaused
           const isSending = !!sending[w.id]
           const byHand = isDone && latest?.pause_reason === 'Done by hand'
@@ -341,7 +343,7 @@ export default function ProfileAutomations({ profileId }) {
                   if (!live) return setChoose(w.id)
                 }
                 // Checking again is normal: a done check simply runs again.
-                if (isDone && REPEATABLE.has(w.id)) return start(w.id)
+                if ((isDone || notChosen) && REPEATABLE.has(w.id)) return start(w.id)
                 if (isDone) {
                   setOpen(latest.id)
                   return toast(`${w.name} is already complete for this profile. Press "Run again" below to repeat it.`, { icon: 'ℹ️', duration: 6000 })
@@ -368,7 +370,9 @@ export default function ProfileAutomations({ profileId }) {
                 }`}>{w.name}</span>
               </div>
 
-              {isDone ? (
+              {notChosen ? (
+                <p className="text-[11px] text-slate-500 mt-0.5">Not chosen yet{latest.finished_at ? ' · looked ' + new Date(latest.finished_at).toLocaleDateString() : ''}</p>
+              ) : isDone ? (
                 <p className="text-[11px] text-emerald-700 dark:text-emerald-400 mt-0.5 font-medium">
                   ✓ {REPEATABLE.has(w.id) ? 'Checked' : 'Completed'} {latest.finished_at ? '· ' + new Date(latest.finished_at).toLocaleDateString() : ''}
                 </p>
@@ -382,6 +386,9 @@ export default function ProfileAutomations({ profileId }) {
                 </span>
                 {isSending && (
                   <span className="text-[10px] font-semibold text-slate-500">Sending…</span>
+                )}
+                {!isSending && notChosen && (
+                  <span className="text-[10px] font-semibold text-teal-700 dark:text-teal-400">↻ Look again</span>
                 )}
                 {!isSending && isDone && (
                   <span className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-400">{REPEATABLE.has(w.id) ? '↻ Click to check again' : '✔️ Submitted'}</span>

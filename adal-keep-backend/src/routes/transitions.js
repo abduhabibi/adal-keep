@@ -43,14 +43,10 @@ export default router
 // Profiles a running move saved whose files have not come yet (their Prioritize button).
 // Girls whose files have not come: in a running move, or accepted from another agency.
 router.get('/transitions/waiting-files', async (req, res) => {
-  const share = await import('../services/profileShare.js').then(m => m.shareFilesWaiting()).catch(() => [])
-  res.json({ profileIds: [...new Set([...filesWaiting(), ...share])] })
+  res.json({ profileIds: [...new Set(filesWaiting())] })
 })
 // Her record and files next, before everyone else.
 router.post('/transitions/prioritize/:profileId', async (req, res) => {
-  if (!prioritize(req.params.profileId)) {
-    const share = await import('../services/profileShare.js').catch(() => null)
-    if (!share?.sharePrioritize(req.params.profileId)) return res.status(404).json({ error: 'Her files are not waiting any more (they may have come already)' })
-  }
+  if (!prioritize(req.params.profileId)) return res.status(404).json({ error: 'Her files are not waiting any more (they may have come already)' })
   res.json({ ok: true })
 })

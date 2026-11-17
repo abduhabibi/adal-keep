@@ -131,3 +131,23 @@ test('a row still finishing here is skipped, then picked up once it is free', as
   assert.deepEqual(q.claimed, [1, 1])
   assert.equal(runs.isRunning(1), true)
 })
+
+test('a run waiting for a person does not hold the slot: the next one starts at once', async () => {
+  const q = fakeQueue([1, 2, 3])
+  const waiting = new Set()
+  const release = {}
+  const runQ = createRunQueue({
+    max: 1, claimNext: q.claimNext, log: quiet, warn: quiet,
+    isIdle: (id) => waiting.has(id),
+    runJob: (job) => new Promise(done => { release[job.id] = done }),
+  })
+  await runQ.drain()
+  assert.deepEqual(q.claimed, [1])
+  waiting.add(1)            // run 1 now waits for a Save
+  await runQ.drain()
+  assert.deepEqual(q.claimed, [1, 2])
+  await runQ.drain()        // run 2 is working: run 3 waits
+  assert.deepEqual(q.claimed, [1, 2])
+  release[2](); await new Promise(r => setTimeout(r, 10))
+  assert.deepEqual(q.claimed, [1, 2, 3])
+})

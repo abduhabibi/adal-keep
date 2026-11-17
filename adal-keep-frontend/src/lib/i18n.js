@@ -19,6 +19,9 @@ export function setLang(lang) {
 }
 
 const EN = {
+  'ካቆሙበት ይቀጥሉ': 'Continue where you left off',
+  'ለመስራት ተግባሮች': 'Tasks to do',
+  'ገጽ': 'Page',
   'ማስታወሻዎች': 'Notes',
   'ሁሉም ማሳወቂያዎች ተጽድተዋል': 'All notifications cleared',
   'ሁሉም ማሳወቂያዎች ይሰረዙ?': 'Delete all notifications?',

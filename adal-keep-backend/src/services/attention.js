@@ -5,11 +5,18 @@
  * is typed there goes into the tab and the run finishes the step by itself.
  */
 const waits = new Map() // run id → { title, body, at, image, answer, label, confirm }
+const listeners = new Set()
+/** Called when a run starts waiting for a person (worker.js: the next run may start). */
+export const onWait = (fn) => { listeners.add(fn); return () => listeners.delete(fn) }
+const told = () => { for (const fn of listeners) { try { fn() } catch {} } }
+/** Is this run waiting for a person right now? */
+export const isWaiting = (runId) => waits.has(Number(runId))
 
 /** A run is waiting for a person (a sign-in, a code, a reCAPTCHA …). */
 export function needPerson(runId, title, body = '', { confirm = false } = {}) {
   const id = Number(runId)
   waits.set(id, { ...(waits.get(id) || {}), title, body: String(body || '').slice(0, 300), at: Date.now(), confirm })
+  told()
 }
 
 /**
@@ -21,6 +28,7 @@ export function askCaptcha(runId, image, answer, { title, label = 'Numbers', cho
   // phoneAfterMs: the phones are not shown it before then (it goes to this PC first).
   const w = { title: 'Type the captcha', body: '', at: Date.now(), ...(waits.get(id) || {}), image, answer, label, choices, phoneFrom: phoneAfterMs ? Date.now() + phoneAfterMs : 0 }
   waits.set(id, title ? { ...w, title, at: Date.now() } : w)
+  told()
 }
 
 /**

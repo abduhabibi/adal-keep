@@ -267,10 +267,26 @@ function StepCard({ s }) {
 /** On a profile: her journey, refreshed every 15 s — the fork, then each step's who and documents. */
 const narrowScreen = () => !(window.matchMedia?.('(min-width: 640px)').matches ?? true)
 
+/**
+ * Where she is now, in one line (asked on 2026-11-17: one thing at a time):
+ * a step working, waiting for a person or failed; else the step she waits at;
+ * else the next one to do. Everything else opens on a click.
+ */
+export function statusLine(steps) {
+  const pick = steps.find(x => x.state === 'failed') || steps.find(x => x.state === 'active') || steps.find(x => x.state === 'waiting')
+  if (pick) return { step: pick, text: pick.note || { failed: 'needs a look', active: 'in progress', waiting: 'waiting' }[pick.state] }
+  let last = -1
+  steps.forEach((x, i) => { if (x.state === 'done') last = i })
+  if (last === steps.length - 1) return { step: steps[last], text: steps[last].note || 'done' }
+  const next = steps.slice(last + 1).find(x => x.state === 'todo') || steps[last + 1]
+  return { step: { ...next, state: 'todo' }, text: last >= 0 ? `next · ${steps[last].title} done` : 'next' }
+}
+
 export default function ProfileJourney({ profileId }) {
   const [j, setJ] = useState(null)
-  // Closed until opened: the fork says enough at a glance.
-  const [open, setOpen] = useState(() => { try { return localStorage.getItem('adal-journey-details') === '1' } catch { return false } })
+  // One line until opened.
+  const [open, setOpen] = useState(() => { try { return localStorage.getItem('adal-journey-open') === '1' } catch { return false } })
+  const [details, setDetails] = useState(false)
   useEffect(() => {
     let alive = true
     const load = () => api.get(`/profiles/${profileId}/journey`).then(r => alive && setJ(r.data)).catch(() => {})
@@ -282,20 +298,29 @@ export default function ProfileJourney({ profileId }) {
   const all = j.embassy
   const states = Object.fromEntries(all.map(s => [s.key, s.state]))
   const notes = Object.fromEntries(all.map(s => [s.key, s.note]))
-  const toggle = () => setOpen(o => { try { localStorage.setItem('adal-journey-details', o ? '0' : '1') } catch {} return !o })
+  const toggle = () => setOpen(o => { try { localStorage.setItem('adal-journey-open', o ? '0' : '1') } catch {} return !o })
+  const now = statusLine(all)
+  const look = LOOK[now.step.state] || LOOK.todo
   return (
-    <section data-tour="profile-journey" className="panel p-4">
-      <div onClick={(e) => { if (e.target.closest('button')) document.getElementById('ai-actions')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }}>
-        <JourneyFork states={states} notes={notes} compact={narrowScreen()} />
-      </div>
-      <button type="button" onClick={toggle} className="mt-2 text-xs font-semibold text-teal-700 hover:underline dark:text-teal-400">
-        {open ? '▾ Who and documents per step' : '▸ Who and documents per step'}
+    <section data-tour="profile-journey" className="panel p-3">
+      <button type="button" onClick={toggle} className="flex w-full items-center gap-3 text-left">
+        <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${look.dot}`}>{ICON[now.step.state] || '→'}</span>
+        <span className="min-w-0 flex-1 text-sm"><b className={look.text}>{now.step.title}</b> <span className="text-slate-500">— {shortDate(now.text)}</span></span>
+        <span className="shrink-0 text-xs text-slate-400">{open ? '▾' : '▸'}</span>
       </button>
-      {open && (
-        <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-5">
-          {all.map(s => <StepCard key={s.key} s={s} />)}
+      {open && <>
+        <div className="mt-3" onClick={(e) => { if (e.target.closest('button')) document.getElementById('ai-actions')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }}>
+          <JourneyFork states={states} notes={notes} compact={narrowScreen()} />
         </div>
-      )}
+        <button type="button" onClick={() => setDetails(d => !d)} className="mt-2 text-xs font-semibold text-teal-700 hover:underline dark:text-teal-400">
+          {details ? '▾ Who and documents per step' : '▸ Who and documents per step'}
+        </button>
+        {details && (
+          <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-5">
+            {all.map(s => <StepCard key={s.key} s={s} />)}
+          </div>
+        )}
+      </>}
     </section>
   )
 }

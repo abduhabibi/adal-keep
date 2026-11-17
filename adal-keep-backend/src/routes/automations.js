@@ -81,6 +81,8 @@ router.get('/profiles/:profileId/automations', async (req, res) => {
         latest[id] = { id: l?.id || null, workflow_id: id, status: 'done', finished_at: p?.chosen_at || null, from_contract: true }
       }
     }
+    // A finished "Check if chosen" is not a ✓ unless she really is chosen.
+    if (latest.musaned_check_chosen) latest.musaned_check_chosen = { ...latest.musaned_check_chosen, chosen: !!contract }
     res.json({
       // EPRO approve: only once her Wafid medical is FIT.
       workflows: workflows.filter(w => w.id !== 'musaned_epro_approve' || p?.status === 'medical_fit' || latest[w.id]).map(w => ({ ...w, latest: latest[w.id] || null })),

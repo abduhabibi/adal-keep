@@ -913,6 +913,21 @@ export async function checkContracts(db, { onlyId = null } = {}) {
     page = await borrowTab(browser, 'musaned_check_chosen', await activeRunIds(db))
     await setupTab(page, { runId: 'musaned-contracts' })
     page.__adalAllowImages = true
+    // Employment Requests' own list first (asked on 2026-11-17): one read for
+    // everyone, no passport searched one by one. Searching is only the fallback.
+    const viaApi = await scanListByApi(db, page, { onlyId, log: (m) => console.log('[contracts] ' + m) }).catch(e => ({ ok: false, why: e.message }))
+    if (viaApi.ok) {
+      for (const p of list) {
+        const m = viaApi.results.find(r => r.id === p.id)
+        if (!m) await db('profiles').where('id', p.id).update({ contract_checked_at: new Date().toISOString() }).catch(() => {})
+        contractCheck.results.push(m ? { passport: p.passport_number, ...m, id: p.id, name: p.full_name } : { id: p.id, name: p.full_name, passport: p.passport_number, state: 'not-chosen' })
+      }
+      contractCheck.added = viaApi.added
+      await doneSignInTasks(db)
+      console.log(`[contracts] Employment Requests: ${viaApi.checked} read, ${contractCheck.results.filter(r => r.state === 'chosen').length} of ${list.length} chosen`)
+      return { checked: contractCheck.results.length, results: contractCheck.results }
+    }
+    console.warn('[contracts] Employment Requests list not read (' + viaApi.why + ') — searching each passport instead')
     for (const [i, p] of list.entries()) {
       if (i) await sleep(BETWEEN_MS)
       let r

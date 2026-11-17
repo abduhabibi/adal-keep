@@ -704,6 +704,17 @@ router.get('/profiles/:profileId/fill-plan', async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message, ...(e.feature ? { feature: e.feature, plan: e.plan } : {}) }) }
 })
 
+// The one step she is at (the profile page shows only what it needs).
+router.get('/profiles/:profileId/step', async (req, res) => {
+  try {
+    const db = req.app.locals.db
+    const id = Number(req.params.profileId)
+    const p = await db('profiles').where('id', id).first()
+    if (!p) return res.status(404).json({ error: 'Profile not found' })
+    res.json(stepNow(p, await journeyFor(db, id, p)))
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
 router.get('/profiles/:profileId/journey', async (req, res) => {
   try {
     const db = req.app.locals.db

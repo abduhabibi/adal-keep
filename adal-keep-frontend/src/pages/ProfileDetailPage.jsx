@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { Children, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import api from '../services/api'
@@ -34,6 +34,23 @@ function emergencyName(p = {}) {
   return (!e || bare.includes(e.toUpperCase())) ? fatherFull(p) || e : e
 }
 
+// One thing at a time (asked on 2026-11-17): each step shows only the
+// documents and details it needs; "Show everything" opens the rest.
+const STEP_FILES = {
+  cv: ['Photo', 'Full Body Photo'],
+  musaned: ['Photo', 'Passport'],
+  selected: ['Passport'],
+  wafid: ['Passport', 'Medical Report', 'Appointment Slip'],
+  epro: ['Contract', 'Medical Report'],
+}
+const STEP_DETAILS = {
+  cv: ['Full name', 'Passport', 'Date of birth (GE)', 'Phone'],
+  musaned: ['Full name', 'Passport', 'Phone', 'Marital status', 'Religion'],
+  selected: ['Full name', 'Passport', 'Phone', 'Broker'],
+  wafid: ['Full name', 'Passport', 'Date of birth (GE)', 'Passport expiry', '📅 Wafid medical'],
+  epro: ['Full name', 'Passport', 'Contract number (Musaned)', 'Visa number (Musaned)'],
+}
+
 export default function ProfileDetailPage() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -42,6 +59,19 @@ export default function ProfileDetailPage() {
   const [cvs, setCvs] = useState([])
   const [cvReadiness, setCvReadiness] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [step, setStep] = useState(null)        // the step she is at (backend stepNow)
+  const [everything, setEverything] = useState(false)
+  useEffect(() => {
+    const look = () => api.get(`/profiles/${id}/step`).then(r => setStep(r.data)).catch(() => {})
+    look()
+    setEverything(false)
+    return onDataChange(['profiles', 'automation_queue', 'files', 'profile_fields'], look)
+  }, [id])
+  const needFiles = !everything && STEP_FILES[step?.key]
+  const needDetails = !everything && STEP_DETAILS[step?.key]
+  const showAll = (needFiles || needDetails) ? (
+    <button type="button" onClick={() => setEverything(true)} className="mt-3 text-xs font-semibold text-teal-700 hover:underline dark:text-teal-400">▸ Show everything</button>
+  ) : null
 
   useEffect(() => {
     let alive = true
@@ -206,7 +236,7 @@ export default function ProfileDetailPage() {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* Left: client details */}
         <Fold id="details" title="Client details" className="panel p-4 sm:p-6 lg:col-span-1">
-          <dl className="mt-4 grid grid-cols-1 gap-3">
+          <dl className="mt-4 grid grid-cols-1 gap-3">{onlyNeeded(needDetails, <>
             <Field label="Full name" value={profile.full_name} />
             <Field label="Order ID" value={profile.order_id} />
             {amharicName && <Field label="Full name (AM)" value={amharicName} />}
@@ -248,14 +278,15 @@ export default function ProfileDetailPage() {
             <Field label="Broker" value={profile.broker_name || 'Unassigned'} />
             <Field label="Created" value={formatDate(profile.created_at)} />
             <Field label="Updated" value={formatDate(profile.updated_at)} />
-          </dl>
+          </>)}</dl>
+          {needDetails && showAll}
         </Fold>
 
         {/* Right: documents */}
         <section className="panel p-4 sm:p-6 lg:col-span-2 space-y-6">
           <Fold id="documents" title="Documents & Fields">
             <div className="mt-4 grid grid-cols-2 gap-2 sm:gap-4 lg:grid-cols-3">
-              {fields.map(field => (
+              {fields.filter(field => !needFiles || needFiles.includes(field.name)).map(field => (
                 <FieldCard
                   id={`field-${field.name.replace(/\s+/g, '-')}`}
                   key={field.id}
@@ -267,6 +298,7 @@ export default function ProfileDetailPage() {
               ))}
             </div>
           </Fold>
+          {needFiles && showAll}
 
           {/* Generated CVs */}
           <div>
@@ -372,6 +404,12 @@ export default function ProfileDetailPage() {
 }
 
 /** A section folded to its title until opened; opening it is remembered on this device. */
+/** Only the details whose label the step needs (all of them when `labels` is empty). */
+function onlyNeeded(labels, fragment) {
+  const kids = Children.toArray(fragment.props.children)
+  return labels ? kids.filter(k => labels.includes(k?.props?.label)) : kids
+}
+
 function Fold({ id, title, className = '', children }) {
   const key = `adal-folded-${id}`
   const [open, setOpen] = useState(() => { try { return localStorage.getItem(key) === '1' } catch { return false } })

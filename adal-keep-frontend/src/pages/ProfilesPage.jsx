@@ -28,14 +28,25 @@ const STATUS_OPTIONS_AM = [
 
 // One phase at a time (asked on 2026-11-17): the list shows the profiles of
 // one phase; a search looks through all of them.
-const PHASES = [['cv', 'CV'], ['musaned', 'Musaned'], ['selected', 'Selection'], ['wafid', 'Wafid'], ['epro', 'EPRO'], ['choices', 'Ready']]
-export function phaseOf(steps = {}, p = {}) {
+const FIRST = [['cv', 'CV'], ['musaned', 'Musaned'], ['selected', 'Selected'], ['wafid', 'Wafid'], ['epro', 'EPRO']]
+// After the EPRO: the steps in the agency's order (dragged here or on a
+// profile's AI Actions — Settings "journey_order", the step boxes' names).
+const AFTER = [['Tasheer', 'tasheer', 'Tasheer'], ['Insurance', 'insurance', 'Insurance'], ['Enjaz · Visa', 'embassy', 'Visa'], ['LMIS · Police clearance', 'police', 'Police']]
+const READY = ['choices', 'Ready']
+const afterInOrder = (order = []) => [...AFTER].sort((a, b) => {
+  const ia = order.indexOf(a[0]), ib = order.indexOf(b[0])
+  return (ia < 0 ? 99 + AFTER.indexOf(a) : ia) - (ib < 0 ? 99 + AFTER.indexOf(b) : ib)
+})
+export function phaseOf(steps = {}, p = {}, after = AFTER) {
   const ok = [steps.cv === 'done', ['done', 'waiting'].includes(steps.musaned), steps.selected === 'done', p.status === 'medical_fit' || steps.wafid === 'done', steps.epro === 'done']
   let reached = -1
   ok.forEach((v, i) => { if (v) reached = i })
-  return PHASES[reached + 1][0]
+  if (reached + 1 < FIRST.length) return FIRST[reached + 1][0]
+  // Past the EPRO: the first step (in the agency's order) not done yet.
+  return after.find(([, k]) => steps[k] !== 'done')?.[1] || READY[0]
 }
-const NOW_TEXT = { cv: 'CV next', musaned: 'Musaned next', selected: 'Waiting to be chosen', wafid: 'Wafid medical', epro: 'EPRO approval', choices: 'EPRO approved' }
+const NOW_TEXT = { cv: 'CV next', musaned: 'Musaned next', selected: 'Waiting to be chosen', wafid: 'Wafid medical', epro: 'EPRO approval',
+  tasheer: 'Tasheer next', insurance: 'Insurance next', embassy: 'Visa next', police: 'Police clearance next', choices: 'All steps done' }
 
 export default function ProfilesPage() {
   const navigate = useNavigate()
@@ -86,10 +97,31 @@ export default function ProfilesPage() {
   useEffect(() => { if (searchParams.get('chosen') === '1') { setStep('selected'); const n = new URLSearchParams(searchParams); n.delete('chosen'); setSearchParams(n, { replace: true }) } }, [searchParams.get('chosen')]) // eslint-disable-line react-hooks/exhaustive-deps
   const [phase, setPhase] = useState(() => { try { return localStorage.getItem('adal-list-phase') || 'cv' } catch { return 'cv' } })
   useEffect(() => { try { localStorage.setItem('adal-list-phase', phase) } catch {} }, [phase])
+  // The agency's order of the steps after the EPRO; drag a tab to change it.
+  const [order, setOrder] = useState(() => { try { return JSON.parse(localStorage.getItem('adal-journey-order') || '[]') || [] } catch { return [] } })
+  useEffect(() => {
+    api.get('/settings/journey-order').then(r => { if (Array.isArray(r.data?.order)) { setOrder(r.data.order); try { localStorage.setItem('adal-journey-order', JSON.stringify(r.data.order)) } catch {} } }).catch(() => {})
+  }, [])
+  const after = afterInOrder(order)
+  const [dragging, setDragging] = useState(null)
+  const dropOn = (title) => {
+    if (!dragging || dragging === title) return
+    const titles = after.map(a => a[0]).filter(t => t !== dragging)
+    titles.splice(titles.indexOf(title), 0, dragging)
+    // The boxes before the EPRO (Musaned, Wafid) keep their place in front.
+    const full = [...order.filter(t => !AFTER.some(a => a[0] === t)), ...titles]
+    setOrder(full)
+    try { localStorage.setItem('adal-journey-order', JSON.stringify(full)) } catch {}
+    api.put('/settings', { journey_order: JSON.stringify(full) })
+      .then(() => toast.success('Order saved — every girl follows it', { id: 'journey-order' }))
+      .catch(() => toast.error('Could not save the order', { id: 'journey-order' }))
+  }
+  const PHASES = [...FIRST, ...after.map(([title, k, label]) => [k, label, title]), READY]
+  const phaseOfP = (p) => phaseOf(journey.steps[p.id], p, after)
   const phaseCounts = {}
-  for (const p of allRows) { const k = phaseOf(journey.steps[p.id], p); phaseCounts[k] = (phaseCounts[k] || 0) + 1 }
+  for (const p of allRows) { const k = phaseOfP(p); phaseCounts[k] = (phaseCounts[k] || 0) + 1 }
   const searching = !!query.trim()
-  const filtered = searching ? allRows : allRows.filter(p => phaseOf(journey.steps[p.id], p) === phase)
+  const filtered = searching ? allRows : allRows.filter(p => phaseOfP(p) === phase)
   // 100 a page: quick to draw on any phone.
   const PAGE = 100
   const [page, setPage] = useState(1)
@@ -159,9 +191,16 @@ export default function ProfilesPage() {
     <div>
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <div className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto pb-1" role="tablist">
-          {PHASES.map(([k, label]) => (
+          {PHASES.map(([k, label, title]) => (
             <button key={k} type="button" role="tab" aria-selected={!searching && phase === k} onClick={() => { setPhase(k); setStep(null) }}
-              className={`flex shrink-0 items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-bold transition-colors ${!searching && phase === k ? 'bg-teal-600 text-white shadow' : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:ring-teal-400 dark:bg-slate-900 dark:text-slate-300 dark:ring-slate-700'}`}>
+              {...(title ? {
+                draggable: true, title: 'Drag to change the order',
+                onDragStart: (e) => { setDragging(title); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', title) },
+                onDragEnd: () => setDragging(null),
+                onDragOver: (e) => { if (dragging && dragging !== title) { e.preventDefault(); e.dataTransfer.dropEffect = 'move' } },
+                onDrop: (e) => { e.preventDefault(); dropOn(title); setDragging(null) },
+              } : {})}
+              className={`flex shrink-0 items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-bold transition-colors ${title ? 'cursor-grab active:cursor-grabbing' : ''} ${dragging === title && title ? 'opacity-40' : ''} ${!searching && phase === k ? 'bg-teal-600 text-white shadow' : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:ring-teal-400 dark:bg-slate-900 dark:text-slate-300 dark:ring-slate-700'}`}>
               {label}
               <span className={`rounded-full px-1.5 text-xs tabular-nums ${!searching && phase === k ? 'bg-white/25' : 'bg-slate-100 dark:bg-slate-800'}`}>{phaseCounts[k] || 0}</span>
             </button>
@@ -290,7 +329,7 @@ export default function ProfilesPage() {
               </div>
 
               <PrioritizeButton profileId={p.id} className="mt-2" />
-              <p className="mt-1.5 truncate text-xs font-semibold text-teal-700 dark:text-teal-300">{NOW_TEXT[phaseOf(journey.steps[p.id], p)]}{p.status === 'medical_rejected' ? ' · UNFIT' : ''}</p>
+              <p className="mt-1.5 truncate text-xs font-semibold text-teal-700 dark:text-teal-300">{NOW_TEXT[phaseOfP(p)]}{p.status === 'medical_rejected' ? ' · UNFIT' : ''}</p>
               {lacking[p.id]?.length > 0 && (
                 <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-2 py-1.5 text-[11px] text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
                   <b>Missing:</b> {lacking[p.id].join(' · ')}

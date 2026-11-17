@@ -687,7 +687,10 @@ export function journeyOf(p, runs = {}, hasCv = false, docs = null, agents = [])
     lmis: [cv, musaned, selected, wafid],
     embassy: [cv, musaned, selected, wafid, epro, insurance, fmol, embassy, visaStep, arrived],
     // The wakala is not a step on the line: the list's Paid / Unpaid buttons.
-    extra: [wakala],
+    // Tasheer and the police clearance: the Profiles page's tabs after the EPRO.
+    extra: [wakala,
+      step('tasheer', 'Tasheer', ...fromRun(runs.tasheer_schedule, 'scheduled'), 'tasheer_schedule'),
+      step('police', 'Police', ...fromRun(runs.police_certificate, 'certificate done'), 'police_certificate')],
   }
 }
 

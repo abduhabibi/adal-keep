@@ -200,8 +200,27 @@ export async function notifyPassportUnreadable(db, filename, reason) {
   })
 }
 
-export async function runPipeline(filePath, db, analyzer, tag = '[pipeline]') {
-  const filename = path.basename(filePath)
+/**
+ * A photo cut out of a combined picture goes straight into its field (Photo,
+ * Full Body Photo) of the profile its passport made or found — once.
+ */
+async function fileInto(db, profileId, fieldName, file, originalName) {
+  const hash = sha256File(file)
+  let field = await db('profile_fields').where({ profile_id: profileId, name: fieldName }).first()
+  if (field && await db('files').where({ profile_field_id: field.id, content_hash: hash }).first()) return false
+  if (!field) {
+    const tpl = await db('field_templates').where('name', fieldName).first()
+    const [fid] = await db('profile_fields').insert({ profile_id: profileId, field_template_id: tpl ? tpl.id : null, name: fieldName, data_type: 'file', is_permanent: 1, created_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+    field = { id: fid }
+  }
+  const staged = `${Date.now()}_${originalName}`
+  fs.copyFileSync(file, path.join(SAFE_STORAGE_DIR, staged))
+  await db('files').insert({ profile_field_id: field.id, original_name: originalName, path: staged, mimetype: 'image/jpeg', size: fs.statSync(file).size, content_hash: hash, created_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+  return true
+}
+
+export async function runPipeline(filePath, db, analyzer, tag = '[pipeline]', opts = {}) {
+  const filename = opts.name || path.basename(filePath)
   const ext = path.extname(filename).toLowerCase()
   if (!ALLOWED_EXTS[ext]) return { ok: false, reason: 'unsupported_ext' }
   const log = (...a) => console.log(tag, ...a)
@@ -247,6 +266,30 @@ export async function runPipeline(filePath, db, analyzer, tag = '[pipeline]') {
         return { ok: false, reason: 'cv_template_source' }
       }
     } catch {}
+  }
+
+  // One picture with the passport, her photo and her full-body photo side by
+  // side (how most agencies send them): JEV points at each part, each is cut
+  // out — the passport read as a passport, the photos filed into her profile.
+  if (!opts.part && /^image\//.test(ALLOWED_EXTS[ext] || '')) {
+    let parts = null
+    try { setStage('JEV is looking at what the picture holds'); parts = await (await import('./composite.js')).splitComposite(filePath) } catch (e) { log('parts:', e.message) }
+    if (parts?.passport) {
+      try {
+        log(`one picture, several things: ${['passport', 'photo', 'fullbody'].filter(k => parts[k]).join(' + ')} — each on its own`)
+        let r = await runPipeline(parts.passport, db, analyzer, tag, { part: true, name: `passport-${filename.replace(/\.[^.]+$/, '')}.jpg` })
+        // The cut-out did not read: the whole picture as it came.
+        if (!r.ok && r.reason !== 'duplicate_in_field') r = await runPipeline(filePath, db, analyzer, tag, { part: true })
+        const profileId = r.profileId
+        if (profileId) {
+          for (const [k, field] of [['photo', 'Photo'], ['fullbody', 'Full Body Photo']]) {
+            if (parts[k] && await fileInto(db, profileId, field, parts[k], `${k}-${filename.replace(/\.[^.]+$/, '')}.jpg`)) log(`${field} filed from the same picture (profile #${profileId})`)
+          }
+        }
+        return { ...r, parts: ['passport', 'photo', 'fullbody'].filter(k => parts[k]) }
+      } finally { fs.rmSync(parts.dir, { recursive: true, force: true }) }
+    }
+    if (parts?.dir) fs.rmSync(parts.dir, { recursive: true, force: true })
   }
 
   // Read-only analysis on the source file. Nothing is copied into storage

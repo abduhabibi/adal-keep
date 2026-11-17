@@ -23,6 +23,8 @@ const BACKEND_ROOT = path.join(__dirname, '..', '..')
 const DEFAULT_REPO = 'abduhabibi/adal-keep'
 const DEFAULT_BRANCH = 'main'
 const MARKER = '.adal-version.json'
+// The Windows programs an update may replace (only these names, only when the PC has them).
+export const PROGRAMS = new Set(['AdalKeep.exe', 'adal-companion.exe', 'adal-agent.exe'])
 // Never overwrite user data / secrets / deps when installing an update.
 const PROTECTED = new Set([
   '.git', '.env', '.env.bak', 'data', 'uploads', 'logs', 'node_modules', MARKER,
@@ -566,7 +568,7 @@ export async function installFromRelease(cfg, logs, manifest, localArchive = nul
     for (const p of manifest.programs || []) {
       try {
         const dest = path.join(cfg.projectRoot, p.name)
-        if (!/^[w.-]+.exe$/i.test(p.name) || !fs.existsSync(dest)) continue
+        if (!PROGRAMS.has(p.name) || !fs.existsSync(dest)) continue
         const { createHash } = await import('crypto')
         if (createHash('sha256').update(fs.readFileSync(dest)).digest('hex') === p.sha256) continue
         const got = path.join(tmp, p.name)

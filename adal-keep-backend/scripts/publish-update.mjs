@@ -51,7 +51,7 @@ if (args.has('--rollback')) {
   const list = await (await storage('POST', `object/list/${BUCKET}`, JSON.stringify({ prefix: 'release/', limit: 100, sortBy: { column: 'created_at', order: 'desc' } }), { 'Content-Type': 'application/json' })).json()
   const names = new Set(list.map(o => o.name))
   let back = null
-  for (const o of list.filter(o => /^[0-9a-f]{40}.json$/.test(o.name))) {
+  for (const o of list.filter(o => /^[0-9a-f]{40}\.json$/.test(o.name))) {
     const sha = o.name.slice(0, 40)
     if (sha === cur.manifest.sha || !names.has(`${sha}.tar.gz`)) continue
     const j = await (await storage('GET', `object/${BUCKET}/release/${o.name}`)).json()
@@ -198,7 +198,7 @@ try {
   // 5. Only the newest 3 versions stay.
   const list = await (await storage('POST', `object/list/${BUCKET}`, JSON.stringify({ prefix: 'release/', limit: 100, sortBy: { column: 'created_at', order: 'desc' } }), { 'Content-Type': 'application/json' })).json()
   const keep = list.filter(o => o.name.endsWith('.tar.gz')).slice(0, 3).map(o => o.name.slice(0, 40))
-  const old = list.filter(o => /^[0-9a-f]{40}.(tar.gz|json)$/.test(o.name) && !keep.includes(o.name.slice(0, 40))).map(o => `release/${o.name}`)
+  const old = list.filter(o => /^[0-9a-f]{40}\.(tar\.gz|json)$/.test(o.name) && !keep.includes(o.name.slice(0, 40))).map(o => `release/${o.name}`)
   if (old.length) { await storage('DELETE', `object/${BUCKET}`, JSON.stringify({ prefixes: old }), { 'Content-Type': 'application/json' }); console.log(`removed ${old.length} older version(s)`) }
 } finally {
   fs.rmSync(stage, { recursive: true, force: true })

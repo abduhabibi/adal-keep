@@ -454,7 +454,7 @@ async function cvtView() {
 async function healthView() {
   $('#title').textContent = 'Health — every PC, and the errors they share'
   const list = work.length ? work : (work = await api('/api/work').catch(() => []))
-  const norm = (l) => String(l).replace(/d+/g, '#').replace(/'[^']*'|"[^"]*"/g, '…').slice(0, 160)
+  const norm = (l) => String(l).replace(/\d+/g, '#').replace(/'[^']*'|"[^"]*"/g, '…').slice(0, 160)
   const errs = new Map()
   for (const a of list) for (const e of a.health?.errors || []) {
     const k = norm(e.line), x = errs.get(k) || { line: e.line, agencies: new Set(), times: 0, at: e.at }

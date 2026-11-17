@@ -96,7 +96,34 @@ function aheadText(n) {
   return n === 1 ? '1 run is ahead of it' : `${n} runs are ahead of it`
 }
 
+// The order of the step boxes after the EPRO (dragged on any girl's page, the
+// same for every girl and every PC: Settings "journey_order"). Kept here, and
+// on this device, so a page opens with it at once.
+let journeyKept = (() => { try { return JSON.parse(localStorage.getItem('adal-journey-order') || 'null') } catch { return null } })()
+let journeyAsked = null
+function askJourney() {
+  journeyAsked ||= api.get('/settings/journey-order').then(r => {
+    const o = Array.isArray(r.data?.order) ? r.data.order : []
+    journeyKept = o
+    try { localStorage.setItem('adal-journey-order', JSON.stringify(o)) } catch {}
+    return o
+  }).catch(() => journeyKept || [])
+  return journeyAsked
+}
+// The step that makes a box done (finished once by the robot, or ticked by hand).
+const DONE_BY = {
+  Musaned: 'musaned_epro_approve', 'Wafid medical': 'wafid_check', Tasheer: 'tasheer_schedule',
+  Insurance: 'insurance_certificate', 'Enjaz · Visa': 'mofa_pay', 'LMIS · Police clearance': 'police_certificate',
+}
+const BOX_SHORT = { 'Wafid medical': 'Wafid', 'Enjaz · Visa': 'Visa', 'LMIS · Police clearance': 'Police' }
+
 export default function ProfileAutomations({ profileId }) {
+  const [order, setOrder] = useState(() => journeyKept || [])
+  useEffect(() => { let alive = true; askJourney().then(o => alive && setOrder(o)); return () => { alive = false } }, [])
+  const [focus, setFocus] = useState(null)        // a box clicked in the steps row (else: the next one not done)
+  const [showDone, setShowDone] = useState(false)
+  const [showLater, setShowLater] = useState(false)
+  const [dragging, setDragging] = useState(null)
   const plan = usePlan()
   const [workflows, setWorkflows] = useState([])
   const [step, setStep] = useState(null)   // { key, n, of, title }: the one step she is at (backend stepNow)
@@ -477,6 +504,137 @@ export default function ProfileAutomations({ profileId }) {
     : /^Enjaz/.test(title) ? <MusanedAccountPicker value={visaAccountId} onChange={setVisaAccountId} endpoint="/visa/accounts" what="visa platform" placeholder="Nuzla visa" userLabel="Login Name" />
     : null
 
+  // One portal's box: its login and its robots' cards (and the open run's controls).
+  const renderGroup = (g) => {
+      // Robots outside the plan are left out (the backend refuses them too).
+      const flows = g.ids.filter(id => !lockedFor(plan, id)).map(id => workflows.find(w => w.id === id)).filter(Boolean)
+      // Outside this agency's plan: the robots are not offered — "I want it" asks Adal Keep.
+      const locked = g.ids.map(id => lockedFor(plan, id)).find(Boolean)
+      if (locked && g.ids.every(id => lockedFor(plan, id))) return (
+        <div key={g.title} className={`mb-2.5 flex flex-wrap items-center gap-2 rounded-xl border-2 border-dashed px-3 py-2 opacity-80 ${g.box}`}>
+          <p className={`text-[11px] font-semibold uppercase tracking-wide ${g.head}`}>🔒 {g.title}</p>
+          <span className="min-w-0 flex-1 text-xs text-slate-500">In the {planName(plan, locked.plan)} plan</span>
+          <button type="button" onClick={() => wantFeature(locked.key).then(() => toast.success(`Adal Keep was told you want ${locked.title}`)).catch(e => toast.error(e?.response?.data?.error || e.message))}
+            className="rounded-lg bg-white px-2.5 py-1 text-xs font-semibold text-teal-700 ring-1 ring-teal-300 hover:bg-teal-50 dark:bg-slate-900 dark:text-teal-300">I want it</button>
+        </div>
+      )
+      return (
+        <div key={g.title} className={`mb-2.5 rounded-xl border-2 px-3 py-2 ${g.box}`}>
+          <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+            <p className={`text-[11px] font-semibold uppercase tracking-wide ${g.head}`}>{g.title}</p>
+            {g.title === 'Musaned' && <MusanedCode accountId={musanedAccountId} />}
+          </div>
+          {loginOf(g.title) && (
+            // On a phone: "Login" and the account on one line, the picker and its buttons the full width under it.
+            <div className="acct-compact mb-1.5 flex flex-wrap items-center gap-x-2 gap-y-1.5 rounded-lg bg-white/60 px-2 py-1.5 dark:bg-slate-900/40">
+              <span className="order-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">🔑 Login</span>
+              <div className="order-3 min-w-0 basis-full sm:order-2 sm:basis-0 sm:flex-1">{loginOf(g.title)}</div>
+              <div className="order-2 ml-auto min-w-0 sm:order-3 sm:ml-0"><AccountPassword {...passOf(g.title)} /></div>
+            </div>
+          )}
+          {flows.length ? (
+            // One row: the portal's cards side by side, and the open run's controls beside them.
+            <div className="flex gap-2 overflow-x-auto pb-1 sm:grid sm:overflow-visible sm:pb-0"
+              style={{ gridTemplateColumns: `repeat(${flows.length + (inGroup(g) ? 1 : 0)}, minmax(0, 1fr))` }}>
+              {flows.map((w, i) => renderCard(w, flows.length > 1 ? i + 1 : 0))}
+              {inGroup(g) && (
+                <div ref={inlineRef} className="run-actions flex min-w-[15rem] flex-wrap content-start items-center gap-1.5 rounded-xl border-2 border-dashed border-indigo-300 bg-indigo-50/40 p-2 animate-fade-up dark:border-indigo-700 dark:bg-indigo-900/10 sm:min-w-0">
+                  {controls()}
+                </div>
+              )}
+            </div>
+          ) : (
+            <p className="text-xs text-slate-400 py-3 text-center">{g.empty}</p>
+          )}
+        </div>
+      )
+  }
+
+  // After the EPRO: one thing at a time (asked on 2026-11-17). The steps in the
+  // agency's order (dragged), done ones folded into a small "⋯", the next one
+  // open, the rest behind a small "⋯ next". A box with a run working stays open.
+  const latestOf = (id) => workflows.find(w => w.id === id)?.latest
+  const boxDone = (g) => latestOf(DONE_BY[g.title])?.status === 'done'
+  const boxBusy = (g) => inGroup(g) || g.ids.some(id => ['running', 'paused', 'pending'].includes(latestOf(id)?.status))
+  const boxLocked = (g) => g.ids.every(id => lockedFor(plan, id))
+  const ordered = [...GROUPS].sort((a, b) => {
+    const ia = order.indexOf(a.title), ib = order.indexOf(b.title)
+    return (ia < 0 ? 99 + GROUPS.indexOf(a) : ia) - (ib < 0 ? 99 + GROUPS.indexOf(b) : ib)
+  })
+  const saveOrder = (titles) => {
+    setOrder(titles)
+    journeyKept = titles
+    try { localStorage.setItem('adal-journey-order', JSON.stringify(titles)) } catch {}
+    api.put('/settings', { journey_order: JSON.stringify(titles) })
+      .then(() => toast.success('Order saved — every girl follows it', { id: 'journey-order' }))
+      .catch(() => toast.error('Could not save the order', { id: 'journey-order' }))
+  }
+  const move = (title, to) => {
+    const titles = ordered.map(g => g.title).filter(t => t !== title)
+    titles.splice(Math.max(0, Math.min(titles.length, to)), 0, title)
+    saveOrder(titles)
+  }
+  const journey = () => {
+    const next = ordered.find(g => !boxDone(g) && !boxLocked(g))
+    const current = (focus && ordered.find(g => g.title === focus)) || next
+    const openBoxes = ordered.filter(g => g === current || boxBusy(g))
+    const done = ordered.filter(g => boxDone(g) && !openBoxes.includes(g))
+    const later = ordered.filter(g => !boxDone(g) && !openBoxes.includes(g))
+    const fold = (on, set, label) => (
+      <button type="button" onClick={() => set(v => !v)} aria-expanded={on}
+        className="mb-2 flex w-full items-center gap-2 rounded-lg px-2 py-1 text-left text-xs text-slate-400 hover:bg-slate-50 hover:text-slate-600 dark:hover:bg-slate-800/60">
+        <span className="text-base leading-none tracking-widest">⋯</span>
+        <span className="min-w-0 flex-1 truncate">{label}</span>
+        <span className={`text-[10px] transition-transform ${on ? '' : '-rotate-90'}`}>▼</span>
+      </button>
+    )
+    return (<>
+      {/* The steps, in the agency's order: drag one to put it first (or tap it to open it). */}
+      <div className="mb-3 rounded-xl border border-teal-200 bg-teal-50/60 p-2.5 dark:border-teal-800 dark:bg-teal-900/10">
+        <div className="flex flex-wrap items-center gap-1.5" role="list" aria-label="The steps, in order">
+          {ordered.map((g, i) => {
+            const isDone = boxDone(g), isOn = g === current
+            return (
+              <div key={g.title} role="listitem" draggable
+                onDragStart={(e) => { setDragging(g.title); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', g.title) }}
+                onDragEnd={() => setDragging(null)}
+                onDragOver={(e) => { if (dragging) { e.preventDefault(); e.dataTransfer.dropEffect = 'move' } }}
+                onDrop={(e) => { e.preventDefault(); if (dragging && dragging !== g.title) move(dragging, i); setDragging(null) }}
+                className={`group flex items-center rounded-full border text-xs font-semibold ${dragging === g.title ? 'opacity-40' : ''} ${
+                  isOn ? 'border-teal-500 bg-teal-600 text-white' : isDone ? 'border-emerald-300 bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300' : boxLocked(g) ? 'border-slate-200 text-slate-400 dark:border-slate-700' : 'border-slate-300 bg-white text-slate-700 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200'}`}>
+                <button type="button" onClick={() => setFocus(isOn && focus ? null : g.title)} title="Open this step — drag to change the order"
+                  className="cursor-grab px-2.5 py-1 active:cursor-grabbing">
+                  <span className="mr-1 opacity-60">{i + 1}</span>{isDone ? '✓ ' : boxLocked(g) ? '🔒 ' : ''}{BOX_SHORT[g.title] || g.title}
+                </button>
+                {isOn && i > 0 && (
+                  <button type="button" onClick={() => move(g.title, i - 1)} title="Earlier (for every girl)" aria-label="Earlier"
+                    className="border-l border-white/30 px-1.5 py-1 opacity-80 hover:opacity-100">◀</button>
+                )}
+              </div>
+            )
+          })}
+        </div>
+        <p className="mt-1.5 text-[10px] text-slate-500">Drag a step to change the order — every girl follows it. Done steps fold away.</p>
+      </div>
+
+      {done.length > 0 && fold(showDone, setShowDone, `${done.length} done: ${done.map(g => BOX_SHORT[g.title] || g.title).join(' · ')}`)}
+      {showDone && done.map(g => renderGroup(g))}
+
+      {openBoxes.map(g => renderGroup(g))}
+      {!next && !focus && <p className="mb-2 rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300">✓ Every step is done.</p>}
+
+      {(later.length > 0 || otherFlows.length > 0) && fold(showLater, setShowLater, `next: ${[...later.map(g => BOX_SHORT[g.title] || g.title), ...(otherFlows.length ? ['more'] : [])].join(' · ')}`)}
+      {showLater && <>
+        {later.map(g => renderGroup(g))}
+        {otherFlows.length > 0 && (
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+            {otherFlows.map(w => renderCard(w))}
+          </div>
+        )}
+      </>}
+    </>)
+  }
+
   if (loading) return null
 
   const running = queue?.running || []
@@ -543,56 +701,11 @@ export default function ProfileAutomations({ profileId }) {
           )}
         </div>
       )}
-      {(stepping ? (STEP_IDS[step.key] ? GROUPS.filter(g => g.ids.some(id => STEP_IDS[step.key].includes(id))).map(g => ({ ...g, ids: g.ids.filter(id => STEP_IDS[step.key].includes(id)) })) : []) : GROUPS).filter(g => !g.hidden).map(g => {
-        // Robots outside the plan are left out (the backend refuses them too).
-        const flows = g.ids.filter(id => !lockedFor(plan, id)).map(id => workflows.find(w => w.id === id)).filter(Boolean)
-        // Outside this agency's plan: the robots are not offered — "I want it" asks Adal Keep.
-        const locked = g.ids.map(id => lockedFor(plan, id)).find(Boolean)
-        if (locked && g.ids.every(id => lockedFor(plan, id))) return (
-          <div key={g.title} className={`mb-2.5 flex flex-wrap items-center gap-2 rounded-xl border-2 border-dashed px-3 py-2 opacity-80 ${g.box}`}>
-            <p className={`text-[11px] font-semibold uppercase tracking-wide ${g.head}`}>🔒 {g.title}</p>
-            <span className="min-w-0 flex-1 text-xs text-slate-500">In the {planName(plan, locked.plan)} plan</span>
-            <button type="button" onClick={() => wantFeature(locked.key).then(() => toast.success(`Adal Keep was told you want ${locked.title}`)).catch(e => toast.error(e?.response?.data?.error || e.message))}
-              className="rounded-lg bg-white px-2.5 py-1 text-xs font-semibold text-teal-700 ring-1 ring-teal-300 hover:bg-teal-50 dark:bg-slate-900 dark:text-teal-300">I want it</button>
-          </div>
-        )
-        return (
-          <div key={g.title} className={`mb-2.5 rounded-xl border-2 px-3 py-2 ${g.box}`}>
-            <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
-              <p className={`text-[11px] font-semibold uppercase tracking-wide ${g.head}`}>{g.title}</p>
-              {g.title === 'Musaned' && <MusanedCode accountId={musanedAccountId} />}
-            </div>
-            {loginOf(g.title) && (
-              // On a phone: "Login" and the account on one line, the picker and its buttons the full width under it.
-              <div className="acct-compact mb-1.5 flex flex-wrap items-center gap-x-2 gap-y-1.5 rounded-lg bg-white/60 px-2 py-1.5 dark:bg-slate-900/40">
-                <span className="order-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">🔑 Login</span>
-                <div className="order-3 min-w-0 basis-full sm:order-2 sm:basis-0 sm:flex-1">{loginOf(g.title)}</div>
-                <div className="order-2 ml-auto min-w-0 sm:order-3 sm:ml-0"><AccountPassword {...passOf(g.title)} /></div>
-              </div>
-            )}
-            {flows.length ? (
-              // One row: the portal's cards side by side, and the open run's controls beside them.
-              <div className="flex gap-2 overflow-x-auto pb-1 sm:grid sm:overflow-visible sm:pb-0"
-                style={{ gridTemplateColumns: `repeat(${flows.length + (inGroup(g) ? 1 : 0)}, minmax(0, 1fr))` }}>
-                {flows.map((w, i) => renderCard(w, flows.length > 1 ? i + 1 : 0))}
-                {inGroup(g) && (
-                  <div ref={inlineRef} className="run-actions flex min-w-[15rem] flex-wrap content-start items-center gap-1.5 rounded-xl border-2 border-dashed border-indigo-300 bg-indigo-50/40 p-2 animate-fade-up dark:border-indigo-700 dark:bg-indigo-900/10 sm:min-w-0">
-                    {controls()}
-                  </div>
-                )}
-              </div>
-            ) : (
-              <p className="text-xs text-slate-400 py-3 text-center">{g.empty}</p>
-            )}
-          </div>
-        )
-      })}
+      {stepping && (STEP_IDS[step.key] ? GROUPS.filter(g => g.ids.some(id => STEP_IDS[step.key].includes(id))).map(g => ({ ...g, ids: g.ids.filter(id => STEP_IDS[step.key].includes(id)) })) : []).map(g => renderGroup(g))}
 
-      {!stepping && otherFlows.length > 0 && (
-        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-          {otherFlows.map(w => renderCard(w))}
-        </div>
-      )}
+      {!stepping && journey()}
+
+
 
       {open && detail && (
         <div ref={panelRef} className="scroll-mt-24 mt-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-900/40 p-4 space-y-3">

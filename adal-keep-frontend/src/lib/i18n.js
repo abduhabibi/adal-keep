@@ -339,6 +339,9 @@ function translateTree(root) {
  * names and other data are never touched, and nothing inside [translate="no"].
  */
 const AM = {
+  // A girl's steps after the EPRO (ProfileAutomations: the steps row).
+  'Drag a step to change the order — every girl follows it. Done steps fold away.': 'ቅደም ተከተሉን ለመቀየር አንድን ደረጃ ይጎትቱ — ሁሉም ልጃገረዶች ይከተሉታል። የተጠናቀቁ ደረጃዎች ይታጠፋሉ።',
+  '✓ Every step is done.': '✓ ሁሉም ደረጃዎች ተጠናቀዋል።',
   // Profiles
   'Wakala': 'ዋካላ', '✓ Paid': '✓ ተከፍሏል', '⏳ Unpaid': '⏳ አልተከፈለም', 'Musaned': 'ሙሳነድ', 'Selected': 'ተመርጧል',
   'Wafid': 'ዋፊድ', 'Insurance': 'ኢንሹራንስ', 'Embassy': 'ኤምባሲ', 'Visa': 'ቪዛ', 'Arrived': 'ደርሳለች',

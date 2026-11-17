@@ -17,6 +17,15 @@ router.get('/wallpaper', async (req, res) => {
   }
 })
 
+// The order of the steps after the EPRO (Tasheer, Insurance, Visa…), the same for every girl and every PC:
+// dragged on a profile's AI Actions. A JSON list of the step boxes' names.
+router.get('/journey-order', authenticate, async (req, res) => {
+  const row = await req.app.locals.db('settings').where({ key: 'journey_order' }).first().catch(() => null)
+  let order = []
+  try { order = JSON.parse(row?.value || '[]') } catch {}
+  res.json({ order: Array.isArray(order) ? order : [] })
+})
+
 // Get settings
 router.get('/', authenticate, async (req, res) => {
   try {
@@ -54,7 +63,7 @@ router.put('/', authenticate, async (req, res) => {
 
     // Run choices (visa_*, insurance_*) and auto_update (on/off): any of these keys, as text.
     for (const [key, value] of Object.entries(req.body || {})) {
-      if (!/^(visa|insurance)_[a-z_]{1,40}$/.test(key) && key !== 'auto_update') continue
+      if (!/^(visa|insurance)_[a-z_]{1,40}$/.test(key) && key !== 'auto_update' && key !== 'journey_order') continue
       const v = String(value ?? '').trim().slice(0, 300)
       const db = req.app.locals.db
       if (await db('settings').where({ key }).first()) await db('settings').where({ key }).update({ value: v })

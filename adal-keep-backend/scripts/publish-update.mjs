@@ -109,7 +109,7 @@ async function buildPrograms(dir) {
   if (!go) { console.log('   (no Go here: the programs are not in this release)'); return [] }
   const out = path.join(dir, 'programs'); fs.mkdirSync(out, { recursive: true })
   const env = { ...process.env, GOOS: 'windows', GOARCH: 'amd64', CGO_ENABLED: '0' }
-  const build = (src, name, gui, pkg = '.') => execFileSync(go, ['build', '-trimpath', '-ldflags', `${gui ? '-H windowsgui ' : ''}-buildid=`, '-o', path.join(out, name), pkg], { cwd: path.join(ROOT, src), env, stdio: 'pipe' })
+  const build = (src, name, gui, pkg = '.') => execFileSync(go, ['build', '-trimpath', '-buildvcs=false', '-ldflags', `${gui ? '-H windowsgui ' : ''}-buildid=`, '-o', path.join(out, name), pkg], { cwd: path.join(ROOT, src), env, stdio: 'pipe' })
   build('adal-launcher', 'AdalKeep.exe', true)
   build('adal-companion', 'adal-companion.exe', true)
   build('adal-agent', 'adal-agent.exe', false, './cmd/agent')

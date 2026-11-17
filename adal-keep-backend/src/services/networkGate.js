@@ -38,6 +38,21 @@ function write(s) { fs.mkdirSync(DATA, { recursive: true }); fs.writeFileSync(FI
 
 export const ipOf = (req) => String(req.socket?.remoteAddress || '').replace(/^::ffff:/, '')
 export const isLocal = (req) => ['127.0.0.1', '::1'].includes(ipOf(req))
+/**
+ * A computer on the agency's own network: the office Wi-Fi or cable, this
+ * PC's hotspot (192.168.137.x), or the agency's Tailscale (100.64–127.x).
+ * Asked on 2026-11-17: an Adal Companion needs no approval of any kind — it
+ * is in at once. A computer on the internet is still kept out.
+ */
+export function isOwnNetwork(req) {
+  const ip = ipOf(req)
+  if (/^10\./.test(ip) || /^192\.168\./.test(ip) || /^169\.254\./.test(ip)) return true
+  const m = ip.match(/^(\d+)\.(\d+)\./)
+  if (m && m[1] === '172' && Number(m[2]) >= 16 && Number(m[2]) <= 31) return true
+  if (m && m[1] === '100' && Number(m[2]) >= 64 && Number(m[2]) <= 127) return true
+  return /^(fe80|fc|fd)/i.test(ip)
+}
+const OWN_NETWORK_PC = { id: 'own-network', name: 'A computer on this office network', by_account: 'office network' }
 
 function cookieOf(req, name) {
   const m = String(req.headers.cookie || '').split(/;\s*/).find(c => c.startsWith(name + '='))
@@ -101,6 +116,8 @@ export function networkGate(req, res, next) {
   if (OPEN.some(([m, re]) => (req.method === m || (m === 'GET' && req.method === 'HEAD')) && re.test(p))) return next()
   const pc = approvedPC(req)
   if (pc) { req.pcAccess = pc; return next() }
+  // The office network, the hotspot, Tailscale: in at once — nobody approves, nothing is typed.
+  if (isOwnNetwork(req)) { req.pcAccess = { ...OWN_NETWORK_PC, last_ip: ipOf(req) }; return next() }
   return res.status(401).json({ error: 'This computer is not allowed to open Adal Keep yet', pc_access: true })
 }
 
@@ -131,6 +148,8 @@ export function admitSignedIn(req, name, user) {
 }
 
 export function statusOf(req) {
+  // The office network is always in: an old waiting screen sees "approved" and opens Adal Keep.
+  if (isOwnNetwork(req)) return { state: 'approved' }
   const k = keyOf(req)
   if (!k) return { state: 'none' }
   const h = hash(k), s = read()

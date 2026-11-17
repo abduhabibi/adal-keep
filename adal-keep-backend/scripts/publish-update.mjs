@@ -3,7 +3,13 @@
  * Publishes the committed version to every agency PC (and the phone app to
  * every phone) through Supabase — the GitHub repository can be private.
  *
- *   node adal-keep-backend/scripts/publish-update.mjs [--skip-frontend] [--dry-run]
+ *   node adal-keep-backend/scripts/publish-update.mjs [--skip-frontend] [--dry-run] [--now] [--skip-tests]
+ *   node adal-keep-backend/scripts/publish-update.mjs --rollback      (everyone back to the version before)
+ *
+ * The tests run first: when one fails, nothing is published (--skip-tests only
+ * for an emergency). Staged: the agencies marked "updates first" in Adal Keep
+ * Admin (adal-updates/release/early.json) get it at once, every other PC
+ * STAGE_HOURS later (default 2) — unless --now (an urgent fix).
  *
  * 1. the frontend is built here (PCs no longer build it — no npm, no Vite)
  * 2. the backend's committed files + the built frontend → one .tar.gz
@@ -30,12 +36,37 @@ const ROOT = path.join(BACK, '..')
 const FRONT = path.join(ROOT, 'adal-keep-frontend')
 const args = new Set(process.argv.slice(2))
 const DRY = args.has('--dry-run')
+const STAGE_HOURS = Number(process.env.STAGE_HOURS || 2)
 const sh = (cmd, a, opts = {}) => execFileSync(cmd, a, { cwd: ROOT, encoding: 'utf8', ...opts }).trim()
 
 const admin = dotenv.parse(fs.readFileSync(path.join(ROOT, 'adal-admin/.env')))
 const URL = admin.SUPABASE_URL, KEY = admin.SUPABASE_SERVICE_KEY
 if (!URL || !KEY) throw new Error('adal-admin/.env needs SUPABASE_URL and SUPABASE_SERVICE_KEY')
 const PRIV = fs.readFileSync(path.join(os.homedir(), '.adal-keep/update-signing.pem'), 'utf8')
+
+// Everyone back to the version before the newest (it must still be in Storage).
+if (args.has('--rollback')) {
+  const cur = await (await storage('GET', `object/${BUCKET}/release/latest.json`)).json()
+  if (!verifyManifest(cur.manifest, cur.signature)) throw new Error('latest.json is not signed')
+  const list = await (await storage('POST', `object/list/${BUCKET}`, JSON.stringify({ prefix: 'release/', limit: 100, sortBy: { column: 'created_at', order: 'desc' } }), { 'Content-Type': 'application/json' })).json()
+  const names = new Set(list.map(o => o.name))
+  let back = null
+  for (const o of list.filter(o => /^[0-9a-f]{40}.json$/.test(o.name))) {
+    const sha = o.name.slice(0, 40)
+    if (sha === cur.manifest.sha || !names.has(`${sha}.tar.gz`)) continue
+    const j = await (await storage('GET', `object/${BUCKET}/release/${o.name}`)).json()
+    if (verifyManifest(j.manifest, j.signature)) { back = j.manifest; break }
+  }
+  if (!back) { console.error('No earlier version is kept in Storage to go back to.'); process.exit(1) }
+  const now = new Date().toISOString()
+  const manifest = { ...back, published_at: now, everyone_at: now, early: [], rollback_of: cur.manifest.sha,
+    changes: [{ short: back.short, date: now, message: `Back to the version before (${cur.manifest.short} had a problem)` }] }
+  console.log(`== everyone goes back from ${cur.manifest.short} to ${back.short}`)
+  if (DRY) { console.log('dry run — nothing uploaded'); process.exit(0) }
+  await storage('POST', `object/${BUCKET}/release/latest.json`, Buffer.from(JSON.stringify({ manifest, signature: signManifest(manifest, PRIV) })), { 'Content-Type': 'application/json', 'x-upsert': 'true', 'Cache-Control': 'no-cache' })
+  console.log('✓ every PC goes back within 15 minutes')
+  process.exit(0)
+}
 
 const dirty = sh('git', ['status', '--porcelain', '--untracked-files=no', '--', 'adal-keep-backend', 'adal-keep-frontend'])
 if (dirty) { console.error('Commit first — these are not committed:\n' + dirty); process.exit(1) }
@@ -56,6 +87,13 @@ try {
 } catch {}
 if (previous?.sha === sha) { console.log(`Already published: ${sha.slice(0, 7)}`); process.exit(0) }
 
+// 0. The tests: a version that fails one is never published.
+if (!args.has('--skip-tests')) {
+  console.log('== tests')
+  try { execFileSync(process.execPath, ['--test', '--test-reporter=dot', 'tests/**/*.test.js'], { cwd: BACK, stdio: 'inherit', timeout: 15 * 60 * 1000 }) }
+  catch { console.error('✗ A test failed — nothing published. Fix it first (or --skip-tests in an emergency).'); process.exit(1) }
+}
+
 // 1. Frontend.
 if (!args.has('--skip-frontend')) { console.log('== building the frontend'); execFileSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['run', '-s', 'build'], { cwd: FRONT, stdio: 'inherit', shell: process.platform === 'win32' }) }
 
@@ -63,6 +101,7 @@ if (!args.has('--skip-frontend')) { console.log('== building the frontend'); exe
 const stage = fs.mkdtempSync(path.join(os.tmpdir(), 'adal-release-'))
 try {
   const files = sh('git', ['ls-files', '-z', '--', 'adal-keep-backend/src', 'adal-keep-backend/scripts', 'adal-keep-backend/server.js',
+    'adal-keep-backend/main.js', 'adal-keep-backend/safeStart.js',
     'adal-keep-backend/knexfile.js', 'adal-keep-backend/package.json', 'adal-keep-backend/package-lock.json',
     // The passport-lines reader's model (src/services/quickMrz.js).
     'adal-keep-backend/ocrb.traineddata',
@@ -94,6 +133,9 @@ try {
     sha256: crypto.createHash('sha256').update(buf).digest('hex'),
     lock_hash: crypto.createHash('sha256').update(fs.readFileSync(path.join(BACK, 'package-lock.json'))).digest('hex'),
     changes,
+    // Staged: these agencies at once, everyone else later.
+    early: await (async () => { try { const r = await storage('GET', `object/${BUCKET}/release/early.json`); return r.ok ? ((await r.json()).agencies || []) : [] } catch { return [] } })(),
+    everyone_at: new Date(Date.now() + (args.has('--now') ? 0 : STAGE_HOURS * 3600 * 1000)).toISOString(),
   }
   const signature = signManifest(manifest, PRIV)
   console.log(`== release ${manifest.short}: ${(buf.length / 1048576).toFixed(1)} MB, ${files.length} files, ${changes.length} change(s)`)
@@ -101,8 +143,10 @@ try {
 
   // 4. Upload: the bundle first, then the note that points to it.
   await put(manifest.file, buf, 'application/gzip')
+  // Each version's note is kept too (--rollback goes back to one).
+  await put(`release/${sha}.json`, Buffer.from(JSON.stringify({ manifest, signature })), 'application/json')
   await put('release/latest.json', Buffer.from(JSON.stringify({ manifest, signature })), 'application/json')
-  console.log('✓ published for every agency PC')
+  console.log(args.has('--now') ? '✓ published for every agency PC' : `✓ published: ${manifest.early.length} agenc${manifest.early.length === 1 ? 'y' : 'ies'} marked "updates first" now, every other PC at ${new Date(manifest.everyone_at).toLocaleString()}`)
 
   // The phone app, when it is newer than the published one.
   const ver = JSON.parse(fs.readFileSync(path.join(BACK, 'src/phone-app/version.json'), 'utf8'))
@@ -116,7 +160,8 @@ try {
 
   // 5. Only the newest 3 versions stay.
   const list = await (await storage('POST', `object/list/${BUCKET}`, JSON.stringify({ prefix: 'release/', limit: 100, sortBy: { column: 'created_at', order: 'desc' } }), { 'Content-Type': 'application/json' })).json()
-  const old = list.filter(o => o.name.endsWith('.tar.gz')).slice(3).map(o => `release/${o.name}`)
+  const keep = list.filter(o => o.name.endsWith('.tar.gz')).slice(0, 3).map(o => o.name.slice(0, 40))
+  const old = list.filter(o => /^[0-9a-f]{40}.(tar.gz|json)$/.test(o.name) && !keep.includes(o.name.slice(0, 40))).map(o => `release/${o.name}`)
   if (old.length) { await storage('DELETE', `object/${BUCKET}`, JSON.stringify({ prefixes: old }), { 'Content-Type': 'application/json' }); console.log(`removed ${old.length} older version(s)`) }
 } finally {
   fs.rmSync(stage, { recursive: true, force: true })

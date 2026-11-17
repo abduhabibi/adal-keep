@@ -15,6 +15,7 @@ import { whoAmI } from '../lib/tutor'
 import TutorCard from '../components/TutorCard'
 import MainPCCard from '../components/MainPCCard'
 import WafidCard from '../components/WafidCard'
+import PortalsHealthCard from '../components/PortalsHealthCard'
 import InsuranceCard from '../components/InsuranceCard'
 import BackupCard from '../components/BackupCard'
 import TelegramChannelCard from '../components/TelegramChannelCard'
@@ -283,6 +284,7 @@ export default function SettingsPage() {
       </>}
       {tab === 'plan' && import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Plan"><PlanCard /></ErrorBoundary>}
       {tab === 'portals' && <>
+      {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Portals now"><PortalsHealthCard /></ErrorBoundary>}
       {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Musaned authenticator"><MusanedAuthenticatorCard /></ErrorBoundary>}
       {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Wafid"><WafidCard /></ErrorBoundary>}
       {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Insurance"><InsuranceCard /></ErrorBoundary>}

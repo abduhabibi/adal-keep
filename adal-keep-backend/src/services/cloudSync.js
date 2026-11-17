@@ -428,7 +428,7 @@ function installedVersion() {
   for (const root of [path.join(back, '..'), back]) {
     try {
       const m = JSON.parse(fs.readFileSync(path.join(root, '.adal-version.json'), 'utf8'))
-      if (m.sha) return { sha: String(m.sha).slice(0, 7), source: m.source || 'github', at: m.savedAt || null }
+      if (m.sha) return { sha: String(m.sha).slice(0, 7), source: m.source || 'github', at: m.savedAt || null, rolled_back_from: m.rolledBackFrom ? String(m.rolledBackFrom).slice(0, 7) : null }
     } catch {}
     try {
       let head = fs.readFileSync(path.join(root, '.git/HEAD'), 'utf8').trim()

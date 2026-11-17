@@ -203,7 +203,16 @@ export async function checkForUpdate() {
 async function checkSupabase(installed) {
   const m = await latestRelease('release')
   const upToDate = !!installed.sha && installed.sha === m.sha
+  // Staged: the agencies marked "updates first" get it at once, everyone else
+  // at manifest.everyone_at (a bad version reaches one agency, not all of them).
+  let waitUntil = null
+  if (!upToDate && m.everyone_at && Date.parse(m.everyone_at) > Date.now()) {
+    let me = null
+    try { me = await (await import('../services/chatCloud.js')).cloudAgencyId(dbOf()) } catch {}
+    if (!me || !(m.early || []).includes(me)) waitUntil = m.everyone_at
+  }
   return {
+    waitUntil,
     hasUpdate: !upToDate, upToDate, installed,
     latest: { sha: m.sha, short: m.short, message: m.message, date: m.date },
     changes: upToDate ? [] : (m.changes || []).slice(0, 40),
@@ -288,6 +297,8 @@ let watcher = null
  * → "Update by itself" (auto_update = off) or ADAL_AUTO_UPDATE=0 turns it off.
  * A failed install is tried again after 2 hours, never in a loop.
  */
+let updateDb = null
+const dbOf = () => updateDb
 const autoState = { failedSha: '', failedAt: 0, waitingSince: 0 }
 async function autoUpdateOn(db) {
   if (String(process.env.ADAL_AUTO_UPDATE || '').trim() === '0') return false
@@ -313,6 +324,13 @@ async function autoUpdate(db, result) {
   const installed = result.installed || await getInstalled()
   if (installed.isRepo) return // a developer's copy: never pulled by itself
   const sha = result.latest?.sha || ''
+  // Staged release: this PC's turn has not come yet (it can still be installed by hand).
+  if (result.waitUntil && Date.parse(result.waitUntil) > Date.now()) return
+  // A version this PC had to go back from is not installed again by itself.
+  try {
+    const { rolledBack } = await import('../../safeStart.js')
+    if (sha && rolledBack(backendDirOf(config().projectRoot))?.from === sha) return
+  } catch {}
   if (sha && sha === autoState.failedSha && Date.now() - autoState.failedAt < 2 * 3600 * 1000) return
   const b = await busyNow(db)
   if (b.busy) {
@@ -345,6 +363,7 @@ async function autoUpdate(db, result) {
 /** Looks for a new version now and then, and installs it by itself (see autoUpdate). */
 export function startUpdateWatcher(db = null) {
   setUpdateDb(db)
+  if (db) updateDb = db
   if (watcher) return
   const every = Number(process.env.UPDATE_CHECK_MINUTES || 15) * 60 * 1000
   let lastCheck = 0
@@ -522,6 +541,11 @@ export async function installFromRelease(cfg, logs, manifest, localArchive = nul
     const backendDir = backendDirOf(cfg.projectRoot)
     const from = path.join(extracted, 'adal-keep-backend')
     if (!fs.existsSync(path.join(from, 'server.js'))) throw new Error('the release has no backend')
+    // The version that works now is kept: if the new one does not start, the PC goes back to it (safeStart.js).
+    try {
+      const { savePrevious } = await import('../../safeStart.js')
+      if (savePrevious(backendDir, fs.readdirSync(from).filter(n => !PROTECTED.has(n)))) logs.push('Kept the version before it (it comes back by itself if the new one does not start)')
+    } catch (e) { logs.push(`Could not keep the version before it: ${e.message}`) }
     fs.cpSync(from, backendDir, { recursive: true, force: true, filter: keepData(from) })
     logs.push(`Updated ${backendDir} (user data preserved)`)
     // The built pages: a clean folder (old builds' files do not pile up).

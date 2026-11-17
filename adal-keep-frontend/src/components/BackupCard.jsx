@@ -118,6 +118,9 @@ function BackupCardHere() {
               Documents in the backup: <b>{c.files_sent}</b> of {c.files_total}.
               {c.last_ok ? ` Last backup: ${new Date(c.last_ok).toLocaleString()}.` : ' No backup yet.'}
               {c.last_error && <span className="text-red-600"> Last try failed: {c.last_error}</span>}
+              {c.verify && (c.verify.ok
+                ? <span className="block text-emerald-700 dark:text-emerald-400">✓ Checked: read back from Telegram and opened — {c.verify.profiles} profiles ({new Date(c.verify.at).toLocaleString()}).</span>
+                : <span className="block text-red-600">⚠ The last backup did not read back: {c.verify.why}. Press “Back up now”.</span>)}
             </p>}
         <div className="mt-2 flex flex-wrap gap-2">
           <Button size="sm" variant="secondary" disabled={!ready || busy === 'test'} onClick={() => step('test', async () => {

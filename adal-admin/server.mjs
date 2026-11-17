@@ -77,6 +77,10 @@ async function sb(method, p, body, headers = {}) {
   return data
 }
 const rest = (method, p, body, headers) => sb(method, `/rest/v1/${p}`, body, headers)
+/** The agencies that get a new version first (staged releases). */
+async function earlyList() {
+  try { return (await sb('GET', '/storage/v1/object/adal-updates/release/early.json'))?.agencies || [] } catch { return [] }
+}
 
 // Adal's own chat identity ("Adal Keep"), made once; it is in every agency's inbox.
 let ADMIN_ID = null
@@ -283,7 +287,18 @@ const api = {
       receipts, inbox: inbox[0]?.id || null,
       phones: phones.filter(p => !p.revoked).map(p => ({ name: p.name, since: p.created_at })),
       accounts: a.ids.length,
+      early: (await earlyList()).includes(a.id),
     }
+  },
+  // "Updates first": this agency gets a new version as soon as it is published,
+  // every other PC some hours later (adal-keep-backend scripts/publish-update.mjs).
+  'POST /api/early': async (q, b) => {
+    const a = (await mainAgencies()).find(x => x.id === b.id)
+    if (!a) throw new Error('No such agency')
+    const list = new Set(await earlyList())
+    for (const id of a.ids) b.on ? list.add(id) : list.delete(id)
+    await sb('POST', '/storage/v1/object/adal-updates/release/early.json', Buffer.from(JSON.stringify({ agencies: [...list], at: new Date().toISOString() })), { 'Content-Type': 'application/json', 'x-upsert': 'true', 'Cache-Control': 'no-cache' })
+    return { ok: true, early: !!b.on }
   },
   // A command still waiting for its PC: not sent after all.
   'POST /api/waiting/cancel': async (q, b) => {

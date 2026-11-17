@@ -5,8 +5,10 @@
  * WHEN  Once a day in the lunch break (default 12:30–13:30, Settings), so it
  *       never slows the office internet. Whatever is not sent by the end of
  *       the window is sent the next day. "Back up now" runs it at once.
- * WHAT  The whole database every time; documents only once (each new file is
- *       sent the first time it appears).
+ * WHAT  The database: a whole copy (zstd, ~1/6 of its size) every few days,
+ *       and in between only the pages that changed since that copy (usually a
+ *       few KB: seconds instead of minutes). Documents only once (each new
+ *       file is sent the first time it appears).
  * HOW   Everything is locked with the agency's backup password (AES-256-GCM,
  *       key from scrypt) BEFORE it leaves the PC — Telegram only ever holds
  *       unreadable pieces. Pieces are ≤ 19 MB because a bot can download at
@@ -24,11 +26,12 @@ import path from 'path'
 import zlib from 'zlib'
 import crypto from 'crypto'
 import { fileURLToPath } from 'url'
+import sqlite3 from 'sqlite3'
 import { getSecret, setSecret, secretBlobs, restoreSecretBlobs } from './secretStore.js'
 
 const BACKEND = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const DATA = path.join(BACKEND, 'data')
-const SAFE = path.join(DATA, 'SafeStorage')
+const SAFE = process.env.ADAL_BACKUP_SAFE || path.join(DATA, 'SafeStorage')   // (tests: a folder of their own)
 const STATE = process.env.ADAL_BACKUP_STATE || path.join(DATA, 'backup-state.json')
 const TMP = path.join(DATA, 'backup-tmp')
 const DB_FILE = process.env.SQLITE_PATH ? path.resolve(process.env.SQLITE_PATH) : path.join(BACKEND, 'data.sqlite')
@@ -36,6 +39,9 @@ const DB_FILE = process.env.SQLITE_PATH ? path.resolve(process.env.SQLITE_PATH) 
 const PART = 4 * 1024 * 1024           // small pieces: each one gets through a slow office line (a bot downloads ≤ 20 MB)
 const SET_TARGET = 18 * 1024 * 1024    // documents are grouped into sets of about this size
 const MAGIC = Buffer.from('ADALBK1')
+const BASE_HASHES = path.join(path.dirname(STATE), 'backup-base.hashes') // one 8-byte fingerprint per page of the last whole copy sent
+const FULL_EVERY_MS = 3 * 864e5        // a whole copy every 3 days (or when the changes grow big)
+const UPLOADS_AT_ONCE = 2
 
 // ── Settings ─────────────────────────────────────────────────────────────────
 
@@ -68,6 +74,7 @@ export function getConfig() {
     last_run: s.last_run || null,
     last_ok: s.last_ok || null,
     last_error: s.last_error || null,
+    verify: s.verify || null,
     ...documentCounts(s),
   }
 }
@@ -245,12 +252,74 @@ function unpack(buf, intoDir) {
   return n
 }
 
+// ── The database: a whole copy now and then, only changed pages in between ──
+
+const ZL = zlib.constants
+export const HAS_ZSTD = typeof zlib.zstdCompress === 'function'
+const zstd = (buf) => new Promise((ok, no) => zlib.zstdCompress(buf, {
+  params: { [ZL.ZSTD_c_compressionLevel]: 9, [ZL.ZSTD_c_enableLongDistanceMatching]: 1, [ZL.ZSTD_c_windowLog]: 27 },
+}, (e, r) => e ? no(e) : ok(r)))
+export const unzstd = (buf) => zlib.zstdDecompressSync(buf, { params: { [ZL.ZSTD_d_windowLogMax]: 27 } })
+
+/** A page-for-page copy of the open database (SQLite's backup: consistent while the app runs). */
+function rawSnapshot() {
+  fs.mkdirSync(TMP, { recursive: true })
+  const out = path.join(TMP, `raw-${Date.now()}.sqlite`)
+  return new Promise((ok, no) => {
+    const src = new sqlite3.Database(DB_FILE, sqlite3.OPEN_READONLY, (e) => {
+      if (e) return no(e)
+      const b = src.backup(out, (e1) => {
+        if (e1) { src.close(); return no(e1) }
+        b.step(-1, (e2) => b.finish(() => src.close(() => {
+          if (e2) return no(e2)
+          try { const buf = fs.readFileSync(out); fs.rmSync(out, { force: true }); ok(buf) } catch (e3) { no(e3) }
+        })))
+      })
+    })
+  })
+}
+export const pageSizeOf = (buf) => { const n = buf.readUInt16BE(16); return n === 1 ? 65536 : n || 4096 }
+export function pageHashes(buf, ps) {
+  const n = Math.ceil(buf.length / ps), out = Buffer.alloc(n * 8)
+  for (let i = 0; i < n; i++) crypto.createHash('sha1').update(buf.subarray(i * ps, (i + 1) * ps)).digest().copy(out, i * 8, 0, 8)
+  return out
+}
+/** The pages of buf that differ from the whole copy (its fingerprints): [4-byte head length][JSON][pages]. */
+export function makeDelta(buf, ps, baseHashes) {
+  const now = pageHashes(buf, ps), pages = []
+  for (let i = 0; i < now.length / 8; i++) if (!now.subarray(i * 8, i * 8 + 8).equals(baseHashes.subarray(i * 8, i * 8 + 8))) pages.push(i)
+  const head = Buffer.from(JSON.stringify({ ps, length: buf.length, pages }))
+  const len = Buffer.alloc(4); len.writeUInt32BE(head.length)
+  return { delta: Buffer.concat([len, head, ...pages.map(i => buf.subarray(i * ps, (i + 1) * ps))]), pages: pages.length }
+}
+export function applyDelta(base, delta) {
+  const hl = delta.readUInt32BE(0)
+  const { ps, length, pages } = JSON.parse(delta.subarray(4, 4 + hl).toString())
+  const out = Buffer.alloc(length); base.copy(out, 0, 0, Math.min(base.length, length))
+  let off = 4 + hl
+  for (const i of pages) { const n = Math.min(length, (i + 1) * ps) - i * ps; delta.copy(out, i * ps, off, off + n); off += n }
+  return out
+}
+/** The database a restore gets from an index: the whole copy with its changes, or an older gzip copy. */
+export async function databaseFromIndex(index, get) {
+  const full = index.sets.find(x => x.type === 'dbz')
+  if (full) {
+    let raw = unzstd(await get(full))
+    const d = index.sets.find(x => x.type === 'dbz-delta' && x.base_date === full.date)
+    if (d) raw = applyDelta(raw, unzstd(await get(d)))
+    return raw
+  }
+  const old = index.sets.find(x => x.type === 'db')
+  return old ? zlib.gunzipSync(await get(old)) : null
+}
+
 async function databaseSnapshot(db) {
   fs.mkdirSync(TMP, { recursive: true })
   const out = path.join(TMP, `db-${Date.now()}.sqlite`)
   // A consistent copy while the app keeps running.
   await db.raw('VACUUM INTO ?', [out])
-  const buf = zlib.gzipSync(fs.readFileSync(out), { level: 9 })
+  // (Only where this Node has no zstd.) Off the main thread: the app stays quick meanwhile.
+  const buf = await new Promise((ok, no) => zlib.gzip(fs.readFileSync(out), { level: 6 }, (e, r) => e ? no(e) : ok(r)))
   fs.rmSync(out, { force: true })
   return buf
 }
@@ -268,15 +337,54 @@ const today = () => new Date().toLocaleDateString('en-CA')
 
 async function sendSet(token, chat_id, password, buf, label) {
   const locked = lock(buf, password)
-  const ids = []
   const count = Math.ceil(locked.length / PART)
-  for (let i = 0; i < count; i++) {
-    const piece = locked.subarray(i * PART, (i + 1) * PART)
-    ids.push(await sendPiece(token, chat_id, piece, `adal-${label}-${i + 1}of${count}.bin`, `Adal Keep backup · ${label} · ${i + 1}/${count}`))
-    progress.bytes_sent = (progress.bytes_sent || 0) + piece.length
-    if (progress.bytes_total) progress.percent = Math.min(99, Math.floor(progress.bytes_sent / progress.bytes_total * 100))   // 100 when the index is in
+  const ids = new Array(count)
+  // Two pieces go up at once: the line never waits on Telegram's answer to the last one.
+  let next = 0
+  const worker = async () => {
+    while (next < count) {
+      const i = next++
+      const piece = locked.subarray(i * PART, (i + 1) * PART)
+      ids[i] = await sendPiece(token, chat_id, piece, `adal-${label}-${i + 1}of${count}.bin`, `Adal Keep backup · ${label} · ${i + 1}/${count}`)
+      progress.bytes_sent = (progress.bytes_sent || 0) + piece.length
+      if (progress.bytes_total) progress.percent = Math.min(99, Math.floor(progress.bytes_sent / progress.bytes_total * 100))   // 100 when the index is in
+    }
   }
+  await Promise.all(Array.from({ length: Math.min(UPLOADS_AT_ONCE, count) }, worker))
   return ids
+}
+
+/** The database step: a whole copy when due, else only the pages changed since it. */
+async function sendDatabase(s, token, chat_id, password) {
+  const raw = await rawSnapshot()
+  const ps = pageSizeOf(raw)
+  const full = s.sets.find(x => x.type === 'dbz')
+  let baseHashes = null
+  try { baseHashes = fs.readFileSync(BASE_HASHES) } catch {}
+  if (full && baseHashes && full.ps === ps && Date.now() - new Date(full.date).getTime() < FULL_EVERY_MS) {
+    const { delta, pages } = makeDelta(raw, ps, baseHashes)
+    const sum = crypto.createHash('sha256').update(delta).digest('hex')
+    const old = s.sets.find(x => x.type === 'dbz-delta' && x.base_date === full.date)
+    if (old?.sum === sum) return false // the database has not changed since the last backup
+    const z = await zstd(delta)
+    // Changed so much that a new whole copy is hardly bigger: that goes instead.
+    if (z.length < (full.bytes || Infinity) * 0.4) {
+      progress.bytes_total += z.length
+      const parts = await sendSet(token, chat_id, password, z, `database-changes-${today()}`)
+      s.sets = s.sets.filter(x => x.type !== 'dbz-delta')
+      s.sets.push({ type: 'dbz-delta', date: new Date().toISOString(), base_date: full.date, parts, pages, sum })
+      writeState(s)
+      return false
+    }
+  }
+  const z = await zstd(raw)
+  progress.bytes_total += z.length
+  const parts = await sendSet(token, chat_id, password, z, `database-${today()}`)
+  s.sets = s.sets.filter(x => !['db', 'dbz', 'dbz-delta'].includes(x.type))
+  s.sets.push({ type: 'dbz', date: new Date().toISOString(), parts, bytes: z.length, ps })
+  fs.writeFileSync(BASE_HASHES, pageHashes(raw, ps))
+  writeState(s)
+  return true
 }
 
 /**
@@ -297,13 +405,20 @@ export async function runBackup(db, { force = false, docsOnly = false, light = f
     //    not on the quick runs that only carry new documents.
     // Everything this run will send, measured first, so it can say how far it is (percent).
     for (const n of listDocuments().filter(n => !s.sent[n])) { try { progress.bytes_total += fs.statSync(path.join(SAFE, n)).size } catch {} }
+    let profilesAtSnap = null
+    let sentWhole = false   // a whole database copy went up (only then is it read back to check it)
     if (!docsOnly) {
-      const snap = await databaseSnapshot(db)
-      progress.bytes_total += snap.length
-      const dbIds = await sendSet(token, chat_id, password, snap, `database-${today()}`)
-      s.sets = s.sets.filter(x => x.type !== 'db')
-      s.sets.push({ type: 'db', date: new Date().toISOString(), parts: dbIds })
-      writeState(s)
+      try { profilesAtSnap = Number((await db('profiles').count({ n: '*' }).first())?.n) } catch {}
+      if (HAS_ZSTD) sentWhole = await sendDatabase(s, token, chat_id, password)
+      else {
+        const snap = await databaseSnapshot(db)
+        progress.bytes_total += snap.length
+        const dbIds = await sendSet(token, chat_id, password, snap, `database-${today()}`)
+        s.sets = s.sets.filter(x => !['db', 'dbz', 'dbz-delta'].includes(x.type))
+        s.sets.push({ type: 'db', date: new Date().toISOString(), parts: dbIds })
+        writeState(s)
+        sentWhole = true
+      }
     }
 
     // 2. Documents not sent yet, in sets of ~18 MB.
@@ -334,10 +449,23 @@ export async function runBackup(db, { force = false, docsOnly = false, light = f
     // With the locked secrets (Musaned authenticators, keys, bot) and the chat account: a restored PC has them again.
     let chat = null
     try { chat = fs.readFileSync(path.join(BACKEND, '.adal_chat.json'), 'utf8') } catch {}
-    const index = Buffer.from(JSON.stringify({ adal_backup: 1, made: new Date().toISOString(), sets: s.sets, vault_key: vaultKey(), secrets: secretBlobs(), chat_account: chat }))
+    const what = { sets: s.sets, vault_key: vaultKey(), secrets: secretBlobs(), chat_account: chat }
+    // (The chat sign-in's expiry time moves by itself: it alone is no reason to send a new index.)
+    const steady = (() => { try { const c = JSON.parse(chat); delete c.expires_at; return JSON.stringify(c) } catch { return chat } })()
+    const whatHash = crypto.createHash('sha256').update(JSON.stringify({ ...what, chat_account: steady })).digest('hex')
+    if (s.index_file_id && s.index_hash === whatHash) {
+      // Nothing new since the last index: the one online already finds everything.
+      s.last_ok = new Date().toISOString(); s.last_error = null
+      if (!docsOnly) s.last_day = today()
+      writeState(s)
+      progress.percent = 100
+      return { ok: true, documents_left: listDocuments().filter(n => !s.sent[n]).length, unchanged: true }
+    }
+    const index = Buffer.from(JSON.stringify({ adal_backup: 1, made: new Date().toISOString(), ...what }))
     const indexId = await sendPiece(token, chat_id, lock(zlib.gzipSync(index), password), 'adal-backup-index.enc',
       `🗂 Adal Keep backup index · ${(await db('companies').first().catch(() => null))?.name || 'agency'} · ${new Date().toLocaleString()} · keep the NEWEST one — it is what a restore needs`)
     s.index_file_id = indexId
+    s.index_hash = whatHash
     const done = listDocuments()
     await publishBackup(db, { file_id: indexId, key: password, at: new Date().toISOString(), files_sent: Object.keys(s.sent).length, files_total: done.length, error: null }).catch(() => {})
 
@@ -346,6 +474,14 @@ export async function runBackup(db, { force = false, docsOnly = false, light = f
     if (!docsOnly) s.last_day = today()
     writeState(s)
     progress.percent = 100
+    // 4. Proven, not hoped: the backup is read back from Telegram and opened.
+    if (!docsOnly && sentWhole) {
+      progress.step = 'checking'
+      const verify = await verifyBackup(db, { token, password, indexId, profiles: profilesAtSnap })
+      const st = readState(); st.verify = verify; writeState(st)
+      await publishBackup(db, { verify }).catch(() => {})
+      if (!verify.ok) console.error(`[backup] the backup did not read back: ${verify.why}`)
+    }
     return { ok: true, documents_left: left }
   } catch (e) {
     const st = readState(); st.last_error = e.message; st.last_error_at = new Date().toISOString(); writeState(st)
@@ -357,6 +493,48 @@ export async function runBackup(db, { force = false, docsOnly = false, light = f
     progress.finished_at = new Date().toISOString()
     fs.rmSync(TMP, { recursive: true, force: true })
   }
+}
+
+/**
+ * Reads a backup back the way a restore would: the index, the whole database
+ * (unlocked, unzipped and opened: its profiles counted), and that the newest
+ * document pieces are still in Telegram. Never throws: { ok, why, … }.
+ */
+export async function verifyBackup(db, { token, password, indexId, profiles = null, fetch: get = fetchPiece, exists = pieceExists } = {}) {
+  const at = new Date().toISOString()
+  const tmp = path.join(TMP, `verify-${Date.now()}.sqlite`)
+  try {
+    const index = JSON.parse(zlib.gunzipSync(unlock(await get(token, indexId), password)).toString())
+    if (!index.adal_backup) return { ok: false, at, why: 'the index is not an Adal Keep backup' }
+    const raw = await databaseFromIndex(index, async (set) => {
+      const bufs = []
+      for (const id of set.parts) bufs.push(await get(token, id))
+      return unlock(Buffer.concat(bufs), password)
+    })
+    if (!raw) return { ok: false, at, why: 'the index has no database' }
+    if (!raw.subarray(0, 15).equals(Buffer.from('SQLite format 3'))) return { ok: false, at, why: 'the database piece is not a database' }
+    fs.mkdirSync(TMP, { recursive: true })
+    fs.writeFileSync(tmp, raw)
+    const knex = (await import('knex')).default
+    const copy = knex({ client: 'sqlite3', connection: { filename: tmp }, useNullAsDefault: true })
+    let n = null
+    try {
+      const ok = (await copy.raw('PRAGMA quick_check'))?.[0]
+      if (ok && Object.values(ok)[0] !== 'ok') return { ok: false, at, why: `the database copy is damaged (${Object.values(ok)[0]})` }
+      n = Number((await copy('profiles').count({ n: '*' }).first())?.n)
+    } finally { await copy.destroy().catch(() => {}) }
+    if (profiles != null && n < profiles) return { ok: false, at, why: `the copy has ${n} profiles, the PC had ${profiles}` }
+    // The newest document sets are still there (asked, not downloaded).
+    const fileSets = index.sets.filter(x => x.type === 'files')
+    let checked = 0
+    for (const set of fileSets.slice(-3)) for (const id of set.parts) { if (!(await exists(token, id))) return { ok: false, at, why: 'a document piece is missing in Telegram' }; checked++ }
+    return { ok: true, at, profiles: n, database_mb: Math.round(raw.length / 104857.6) / 10, document_sets: fileSets.length, pieces_checked: checked }
+  } catch (e) {
+    return { ok: false, at, why: String(e.message || e).slice(0, 200) }
+  } finally { fs.rmSync(tmp, { force: true }) }
+}
+async function pieceExists(token, fileId) {
+  try { return !!(await tg(token, 'getFile', JSON.stringify({ file_id: fileId })))?.file_path } catch { return false }
 }
 
 // Adal can always recover an agency: after every backup the agency's own
@@ -497,17 +675,17 @@ export async function restoreFrom(indexBuf, { bot_token, password }) {
       files += unpack(await get(set), SAFE)
       progress.files_done = files
     }
-    const dbSet = index.sets.find(x => x.type === 'db')
-    if (dbSet) {
-      const raw = zlib.gunzipSync(await get(dbSet))
+    const raw = await databaseFromIndex(index, get)
+    if (raw) {
       if (fs.existsSync(DB_FILE)) fs.copyFileSync(DB_FILE, `${DB_FILE}.before-restore-${Date.now()}`)
       fs.writeFileSync(`${DB_FILE}.restored`, raw)
+      fs.rmSync(BASE_HASHES, { force: true })   // this PC's next backup sends a whole copy again
       stageVaultKey(index.vault_key)   // the restored passwords open with it
       restoreSecretBlobs(index.secrets)  // and the authenticators, keys and bot with it
       if (index.chat_account && !fs.existsSync(path.join(BACKEND, '.adal_chat.json'))) fs.writeFileSync(path.join(BACKEND, '.adal_chat.json'), index.chat_account)
     }
     // The database is swapped in on the next start (the open one cannot be replaced live).
-    return { ok: true, files, database: !!dbSet, made: index.made }
+    return { ok: true, files, database: !!raw, made: index.made }
   } finally {
     progress.running = false
   }

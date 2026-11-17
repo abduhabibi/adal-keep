@@ -61,28 +61,22 @@ export function mainURL() {
 export const isFollower = () => !!mainURL()
 
 /**
- * This PC's key for the main PC (services/networkGate.js): asked for once,
- * kept here; someone at the main PC says "Yes" to it. A new main PC → a new key.
+ * This PC's key for the main PC (services/networkGate.js): taken once with the
+ * main PC's number (5 digits, in its Settings) and kept here. Nobody at the main
+ * PC approves anything. A new main PC → a new key. (A username and password of
+ * the main PC still work for a PC set up that way before.)
  */
-export async function mainKey({ username, password } = {}) {
+export async function mainKey({ number, username, password } = {}) {
   const f = readFile(), main = mainURL()
   if (!main) return ''
-  if (f.pc_key && f.pc_key_for === main && !username) return f.pc_key
+  if (f.pc_key && f.pc_key_for === main && !number && !username) return f.pc_key
   const os = await import('os')
-  // Signed in with the main PC's own account: in at once, nobody there has to say Yes.
-  if (username && password) {
-    const r = await fetch(`${main}/api/pc-access/signin`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ username, password, name: `${os.hostname()} (Adal Keep Companion)` }), signal: AbortSignal.timeout(8000),
-    })
-    const j = await r.json().catch(() => ({}))
-    if (!j.key) throw new Error(j.error || `The main PC did not answer (${r.status})`)
-    writeFile({ ...readFile(), pc_key: j.key, pc_key_for: main })
-    return j.key
-  }
-  const r = await fetch(`${main}/api/pc-access/request`, {
+  const way = number ? ['number', { number: String(number).replace(/\D/g, '') }]
+    : username && password ? ['signin', { username, password }] : null
+  if (!way) throw new Error("Type the main PC's number (5 digits, in its Settings) on this PC: Settings → Main PC")
+  const r = await fetch(`${main}/api/pc-access/${way[0]}`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ name: `${os.hostname()} (Adal Keep on that PC)` }), signal: AbortSignal.timeout(8000),
+    body: JSON.stringify({ ...way[1], name: `${os.hostname()} (Adal Keep Companion)` }), signal: AbortSignal.timeout(8000),
   })
   const j = await r.json().catch(() => ({}))
   if (!j.key) throw new Error(j.error || `The main PC did not answer (${r.status})`)

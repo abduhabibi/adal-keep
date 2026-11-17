@@ -103,7 +103,7 @@ export default function MainPCCard() {
   const [info, setInfo] = useState(null)
   const [mode, setMode] = useState('main')
   const [mainUrl, setMainUrl] = useState('')
-  const [acct, setAcct] = useState({ username: '', password: '' }) // the main PC's own account: in at once
+  const [num, setNum] = useState('') // the main PC's number (5 digits, in its Settings): in at once
   const [busy, setBusy] = useState('')
   const [msg, setMsg] = useState(null) // { ok, text }
   const [source, setSource] = useState('')
@@ -130,8 +130,8 @@ export default function MainPCCard() {
   const save = async () => {
     setBusy('save'); setMsg(null)
     try {
-      const r = await api.post('/main-pc', { main_url: mode === 'follow' ? mainUrl : '', ...(mode === 'follow' && acct.username && acct.password ? acct : {}) })
-      setAcct({ username: '', password: '' })
+      const r = await api.post('/main-pc', { main_url: mode === 'follow' ? mainUrl : '', ...(mode === 'follow' && num ? { number: num } : {}) })
+      setNum('')
       setMsg({ ok: true, text: mode === 'follow'
         ? (r.data?.signed_in ? 'Signed in to the main PC: this PC opens all its data. Adal Keep restarts now.' : 'Saved. Adal Keep restarts now; from the next start this PC opens the main PC.')
         : 'Saved. This PC is the main PC again. Adal Keep restarts now.' })
@@ -222,15 +222,11 @@ export default function MainPCCard() {
           {mode === 'follow' && (<>
             <input value={mainUrl} onChange={e => setMainUrl(e.target.value)} placeholder="Main PC address, e.g. 100.101.102.103 or http://nuzla-main:4000"
               className="mt-3 w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm font-mono" />
-            <p className="mt-3 text-xs text-slate-500">Sign in with the main PC's account (the same username and password as there): this PC opens all its data at once — nobody at the main PC has to say Yes.</p>
-            <div className="mt-1.5 grid gap-2 sm:grid-cols-2">
-              <input value={acct.username} onChange={e => setAcct(a => ({ ...a, username: e.target.value }))} placeholder="Username (or phone)" autoComplete="username"
-                className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm" />
-              <input value={acct.password} onChange={e => setAcct(a => ({ ...a, password: e.target.value }))} type="password" placeholder="Password" autoComplete="current-password"
-                className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm" />
-            </div>
+            <p className="mt-3 text-xs text-slate-500">The main PC's number (5 digits, shown in its Settings): this PC opens all its data at once — nobody at the main PC approves anything.</p>
+            <input value={num} onChange={e => setNum(e.target.value.replace(/\D/g, '').slice(0, 5))} inputMode="numeric" placeholder="•••••"
+              className="mt-1.5 w-40 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-center font-mono text-lg tracking-[0.3em]" />
           </>)}
-          {((mode === 'main') === follower || (mode === 'follow' && (mainUrl.replace(/\/+$/, '') !== info.main_url || (acct.username && acct.password)))) && (
+          {((mode === 'main') === follower || (mode === 'follow' && (mainUrl.replace(/\/+$/, '') !== info.main_url || num.length === 5))) && (
             <div className="mt-3"><Button onClick={save} disabled={busy === 'save' || (mode === 'follow' && !mainUrl.trim())}>
               {busy === 'save' ? 'Checking that PC…' : 'Save'}
             </Button></div>

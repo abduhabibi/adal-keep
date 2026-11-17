@@ -2,93 +2,45 @@ import { useEffect, useState } from 'react'
 import api from '../services/api'
 
 /**
- * Opened from another computer (a branch PC, a laptop): the main PC lets in
- * only computers someone there said "Yes" to. This computer is named, asks,
- * and waits; once the main PC answers Yes, Adal Keep opens. Asked once —
- * the key stays in this browser.
+ * Opened from another computer (an Adal Companion PC, a branch PC, a laptop):
+ * it types the main PC's number (5 digits, in the main PC's Settings — the one
+ * phones are added with) and is in at once. Nobody at the main PC approves
+ * anything. Typed once — the key stays in this browser.
  */
 export default function PcAccessGate() {
-  const [state, setState] = useState('none')
-  const [name, setName] = useState(() => { try { return localStorage.getItem('adal_pc_name') || '' } catch { return '' } })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [number, setNumber] = useState('')
-  const [way, setWay] = useState('number') // the main PC's number (in at once) · or ask for a Yes
 
-  const check = () => api.get('/pc-access/status').then(r => {
-    setState(r.data.state)
-    if (r.data.state === 'approved') location.reload()
-  }).catch(() => {})
-  useEffect(() => { check() }, [])
   useEffect(() => {
-    if (state !== 'waiting') return
-    const t = setInterval(check, 3000)
-    return () => clearInterval(t)
-  }, [state])
+    api.get('/pc-access/status').then(r => { if (r.data.state === 'approved') location.reload() }).catch(() => {})
+  }, [])
 
-  const ask = async (e) => {
-    e.preventDefault()
-    setBusy(true); setError('')
-    try {
-      try { localStorage.setItem('adal_pc_name', name) } catch {}
-      await api.post('/pc-access/request', { name: name.trim() || 'A computer' })
-      setState('waiting')
-    } catch (er) { setError(er.response?.data?.error || er.message) }
-    setBusy(false)
-  }
-
-  // The main PC's number (the one phones are added with): in at once.
   const signIn = async (e) => {
     e.preventDefault()
     setBusy(true); setError('')
+    let name = ''
+    try { name = localStorage.getItem('adal_pc_name') || '' } catch {}
     try {
-      await api.post('/pc-access/number', { number, name: name.trim() || 'Adal Companion PC' })
+      await api.post('/pc-access/number', { number, name: name || 'Adal Companion PC' })
       location.reload()
     } catch (er) { setError(er.response?.data?.error || er.message); setBusy(false) }
   }
-  const asking = state === 'none' || state === 'denied' || state === 'removed'
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900 p-4">
       <div className="w-full max-w-md rounded-2xl bg-white dark:bg-slate-800 p-6 shadow-xl text-center space-y-4 animate-fade-up">
-        <div className="text-5xl">{state === 'waiting' ? '⏳' : '🔐'}</div>
-        {asking && way === 'number' ? (
-          <form onSubmit={signIn} className="space-y-3">
-            <h1 className="text-xl font-bold text-slate-900 dark:text-white">The main PC's number</h1>
-            <p className="text-sm text-slate-500 dark:text-slate-400">The 5 digits shown on the main PC in Settings (the same number phones are added with). That is all.</p>
-            <input value={number} onChange={e => setNumber(e.target.value.replace(/\D/g, '').slice(0, 5))} autoFocus required
-              inputMode="numeric" placeholder="•••••"
-              className="w-full rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-3 text-center font-mono text-2xl tracking-[0.4em]" />
-            {error && <p className="text-sm text-red-600">{error}</p>}
-            <button disabled={busy || number.length !== 5} className="w-full rounded-xl bg-teal-600 hover:bg-teal-700 py-3 font-bold text-white disabled:opacity-50">
-              {busy ? 'Opening…' : 'Open Adal Keep'}
-            </button>
-          </form>
-        ) : asking ? (
-          <form onSubmit={ask} className="space-y-3">
-            <h1 className="text-xl font-bold text-slate-900 dark:text-white">Ask the main PC to let this computer in</h1>
-            <p className="text-sm text-slate-500 dark:text-slate-400">
-              {state === 'denied' ? 'The main PC said No. Ask again if that was a mistake.'
-                : state === 'removed' ? 'This computer was taken off the main PC\'s list. Ask again to come back.'
-                : 'Adal Keep\'s profiles, passports and passwords open only on computers the main PC said "Yes" to. You ask once.'}
-            </p>
-            <input value={name} onChange={e => setName(e.target.value)} maxLength={60} autoFocus required
-              placeholder="This computer's name — e.g. Branch 2 reception"
-              className="w-full rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2.5 text-sm" />
-            {error && <p className="text-sm text-red-600">{error}</p>}
-            <button disabled={busy || !name.trim()} className="w-full rounded-xl bg-teal-600 hover:bg-teal-700 py-3 font-bold text-white disabled:opacity-50">
-              {busy ? 'Asking…' : 'Ask the main PC'}
-            </button>
-            <button type="button" onClick={() => { setWay('number'); setError('') }} className="text-xs text-slate-500 hover:underline">Type the main PC's number instead</button>
-          </form>
-        ) : (
-          <>
-            <h1 className="text-xl font-bold text-slate-900 dark:text-white">Waiting for the main PC</h1>
-            <p className="text-sm text-slate-500 dark:text-slate-400">
-              At the main PC, a box asks whether <b>{name || 'this computer'}</b> may open Adal Keep. Once someone there says Yes, this opens by itself.
-            </p>
-            <div className="mx-auto h-1.5 w-40 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700"><div className="h-full w-1/3 animate-pulse rounded-full bg-teal-500" /></div>
-          </>
-        )}
+        <div className="text-5xl">🔐</div>
+        <form onSubmit={signIn} className="space-y-3">
+          <h1 className="text-xl font-bold text-slate-900 dark:text-white">The main PC's number</h1>
+          <p className="text-sm text-slate-500 dark:text-slate-400">The 5 digits shown on the main PC in Settings (the same number phones are added with). That is all — nobody at the main PC has to approve.</p>
+          <input value={number} onChange={e => setNumber(e.target.value.replace(/\D/g, '').slice(0, 5))} autoFocus required
+            inputMode="numeric" placeholder="•••••"
+            className="w-full rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-3 text-center font-mono text-2xl tracking-[0.4em]" />
+          {error && <p className="text-sm text-red-600">{error}</p>}
+          <button disabled={busy || number.length !== 5} className="w-full rounded-xl bg-teal-600 hover:bg-teal-700 py-3 font-bold text-white disabled:opacity-50">
+            {busy ? 'Opening…' : 'Open Adal Keep'}
+          </button>
+        </form>
       </div>
     </div>
   )

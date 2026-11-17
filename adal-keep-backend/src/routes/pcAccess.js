@@ -1,7 +1,7 @@
 /**
  * /api/pc-access — another computer asks to open this PC's Adal Keep, and this
  * PC answers (services/networkGate.js).
- *   POST /pc-access/request {name}  ask (gets its key: a cookie, and in the answer)
+ *   POST /pc-access/number {number} the main PC's number: in at once (no approval)
  *   GET  /pc-access/status          waiting · approved · denied · removed
  *   GET  /pc-access/pending         (this PC only) who is asking
  *   POST /pc-access/answer {id,yes} (this PC only) Yes / No
@@ -11,22 +11,15 @@
  */
 import express from 'express'
 import bcrypt from 'bcryptjs'
-import { isLocal, requestAccess, admitSignedIn, statusOf, pending, answer, list, remove, setKeyCookie } from '../services/networkGate.js'
+import { isLocal, admitSignedIn, statusOf, pending, answer, list, remove, setKeyCookie } from '../services/networkGate.js'
 
 const router = express.Router()
-const asks = new Map() // ip → times: at most 5 asks in 10 minutes
 const here = (req, res, next) => isLocal(req) ? next() : res.status(403).json({ error: 'Only on the main PC itself' })
 
-router.post('/pc-access/request', (req, res) => {
-  const ip = String(req.socket?.remoteAddress || '')
-  const now = Date.now()
-  const recent = (asks.get(ip) || []).filter(t => now - t < 10 * 60000)
-  if (recent.length >= 5) return res.status(429).json({ error: 'Asked too often — wait 10 minutes' })
-  asks.set(ip, [...recent, now])
-  const r = requestAccess(req, req.body?.name)
-  setKeyCookie(res, r.key)
-  res.json({ ok: true, id: r.id, key: r.key })
-})
+// Asking for a "Yes" is gone: nobody at the main PC approves computers any more.
+// The other computer types the main PC's number instead (/pc-access/number).
+router.post('/pc-access/request', (req, res) =>
+  res.status(410).json({ error: "Type the main PC's number (5 digits, in its Settings) — no approval is needed" }))
 // The same account as this PC (owner or employee): in at once, no "Yes" needed.
 // At most 5 tries in 10 minutes per address (no guessing passwords).
 const tries = new Map()

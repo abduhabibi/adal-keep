@@ -37,14 +37,16 @@ router.post('/main-pc/open-at-start', thisPCOnly, (req, res) => {
 router.post('/main-pc', thisPCOnly, async (req, res) => {
   try {
     const url = req.body?.main_url ? await checkMainPC(req.body.main_url) : ''
-    // Signed in with the main PC's account: let in there at once (no "Yes" needed). Checked first.
-    const { username, password } = req.body || {}
-    if (url && username && password) {
-      const had = (await describe()).main_url || ''
+    // The main PC's number (5 digits, in its Settings): let in there at once, nobody approves. Checked first.
+    const { number, username, password } = req.body || {}
+    const had = (await describe()).main_url || ''
+    const same = url && url === had
+    if (url && (number || (username && password))) {
       setMainURL(url)
-      try { await mainKey({ username, password }) } catch (e) { setMainURL(had); return res.status(400).json({ error: e.message }) }
-    } else setMainURL(url)
-    res.json({ ok: true, restart: true, signed_in: !!(url && username && password), ...(await describe()) })
+      try { await mainKey(number ? { number } : { username, password }) } catch (e) { setMainURL(had); return res.status(400).json({ error: e.message }) }
+    } else if (url && !same) return res.status(400).json({ error: "Type the main PC's number (5 digits, in its Settings)" })
+    else setMainURL(url)
+    res.json({ ok: true, restart: true, signed_in: !!(url && (number || (username && password))), ...(await describe()) })
     // Restart so automations, the inbox watcher and network discovery follow
     // the new choice. The launcher (AdalKeep.exe) starts the server again.
     if (process.platform === 'win32') setTimeout(() => process.exit(0), 800)

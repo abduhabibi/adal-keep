@@ -22,6 +22,7 @@
 import { runsWorking } from './busy.js'
 import { vaultKey, stageVaultKey, applyStagedVaultKey } from './accountVault.js'
 import fs from 'fs'
+import os from 'os'
 import path from 'path'
 import zlib from 'zlib'
 import crypto from 'crypto'
@@ -502,7 +503,9 @@ export async function runBackup(db, { force = false, docsOnly = false, light = f
  */
 export async function verifyBackup(db, { token, password, indexId, profiles = null, fetch: get = fetchPiece, exists = pieceExists } = {}) {
   const at = new Date().toISOString()
-  const tmp = path.join(TMP, `verify-${Date.now()}.sqlite`)
+  // Its own folder: the backup's folder is emptied when a run ends.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'adal-verify-'))
+  const tmp = path.join(dir, 'copy.sqlite')
   try {
     const index = JSON.parse(zlib.gunzipSync(unlock(await get(token, indexId), password)).toString())
     if (!index.adal_backup) return { ok: false, at, why: 'the index is not an Adal Keep backup' }
@@ -513,7 +516,6 @@ export async function verifyBackup(db, { token, password, indexId, profiles = nu
     })
     if (!raw) return { ok: false, at, why: 'the index has no database' }
     if (!raw.subarray(0, 15).equals(Buffer.from('SQLite format 3'))) return { ok: false, at, why: 'the database piece is not a database' }
-    fs.mkdirSync(TMP, { recursive: true })
     fs.writeFileSync(tmp, raw)
     const knex = (await import('knex')).default
     const copy = knex({ client: 'sqlite3', connection: { filename: tmp }, useNullAsDefault: true })
@@ -531,7 +533,7 @@ export async function verifyBackup(db, { token, password, indexId, profiles = nu
     return { ok: true, at, profiles: n, database_mb: Math.round(raw.length / 104857.6) / 10, document_sets: fileSets.length, pieces_checked: checked }
   } catch (e) {
     return { ok: false, at, why: String(e.message || e).slice(0, 200) }
-  } finally { fs.rmSync(tmp, { force: true }) }
+  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
 }
 async function pieceExists(token, fileId) {
   try { return !!(await tg(token, 'getFile', JSON.stringify({ file_id: fileId })))?.file_path } catch { return false }

@@ -722,8 +722,26 @@ async function startDownload(agency) {
     const index = JSON.parse(zlib.gunzipSync(unlockPiece(await tgPiece(bk.file_id), bk.key)).toString())
     const get = async (set) => unlockPiece(Buffer.concat(await Promise.all(set.parts.map(tgPiece))), bk.key)
     fs.mkdirSync(path.join(dir, 'documents'), { recursive: true })
-    const db = index.sets.find(x => x.type === 'db')
-    if (db) { job.step = 'database'; fs.writeFileSync(path.join(dir, 'data.sqlite'), zlib.gunzipSync(await get(db))) }
+    // The database: a whole zstd copy ('dbz') with the pages changed since ('dbz-delta'), or an older gzip copy ('db').
+    const full = index.sets.find(x => x.type === 'dbz'), old = index.sets.find(x => x.type === 'db')
+    if (full || old) {
+      job.step = 'database'
+      let raw
+      if (full) {
+        const unzstd = (b) => zlib.zstdDecompressSync(b, { params: { [zlib.constants.ZSTD_d_windowLogMax]: 27 } })
+        raw = unzstd(await get(full))
+        const d = index.sets.find(x => x.type === 'dbz-delta' && x.base_date === full.date)
+        if (d) {
+          const delta = unzstd(await get(d)), hl = delta.readUInt32BE(0)
+          const { ps, length, pages } = JSON.parse(delta.subarray(4, 4 + hl).toString())
+          const out = Buffer.alloc(length); raw.copy(out, 0, 0, Math.min(raw.length, length))
+          let off = 4 + hl
+          for (const i of pages) { const n = Math.min(length, (i + 1) * ps) - i * ps; delta.copy(out, i * ps, off, off + n); off += n }
+          raw = out
+        }
+      } else raw = zlib.gunzipSync(await get(old))
+      fs.writeFileSync(path.join(dir, 'data.sqlite'), raw)
+    }
     job.step = 'documents'
     for (const set of index.sets.filter(x => x.type === 'files')) {
       const buf = await get(set)

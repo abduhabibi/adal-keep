@@ -67,9 +67,11 @@ export default function ProfileDetailPage() {
     setEverything(false)
     return onDataChange(['profiles', 'automation_queue', 'files', 'profile_fields'], look)
   }, [id])
-  const needFiles = !everything && STEP_FILES[step?.key]
+  // Only the step's files still missing: an uploaded one leaves the page; all there → the part folds away.
+  const stepFiles = !everything && STEP_FILES[step?.key]
+  const needFiles = stepFiles ? stepFiles.filter(n => !(fields.find(fl => fl.name === n)?.files || []).length) : null
   const needDetails = !everything && STEP_DETAILS[step?.key]
-  const showAll = (needFiles || needDetails) ? (
+  const showAll = (stepFiles || needDetails) ? (
     <button type="button" onClick={() => setEverything(true)} className="mt-3 text-xs font-semibold text-teal-700 hover:underline dark:text-teal-400">▸ Show everything</button>
   ) : null
 
@@ -284,7 +286,9 @@ export default function ProfileDetailPage() {
 
         {/* Right: documents */}
         <section className="panel p-4 sm:p-6 lg:col-span-2 space-y-6">
-          <Fold id="documents" title="Documents & Fields">
+          {needFiles && needFiles.length === 0 ? (
+            <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">✓ Documents for this step are all here</p>
+          ) : <Fold id="documents" title="Documents & Fields">
             <div className="mt-4 grid grid-cols-2 gap-2 sm:gap-4 lg:grid-cols-3">
               {fields.filter(field => !needFiles || needFiles.includes(field.name)).map(field => (
                 <FieldCard
@@ -297,8 +301,8 @@ export default function ProfileDetailPage() {
                 />
               ))}
             </div>
-          </Fold>
-          {needFiles && showAll}
+          </Fold>}
+          {stepFiles && showAll}
 
           {/* Generated CVs */}
           <div>

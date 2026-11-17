@@ -25,6 +25,17 @@ const STATUS_OPTIONS_AM = [
   { value: 'medical_rejected', label: 'ሕክምና › ውድቅ (Rejected)', group: 'medical' },
 ]
 
+// One phase at a time (asked on 2026-11-17): the list shows the profiles of
+// one phase; a search looks through all of them.
+const PHASES = [['cv', 'CV'], ['musaned', 'Musaned'], ['selected', 'Selection'], ['wafid', 'Wafid'], ['epro', 'EPRO'], ['choices', 'Ready']]
+export function phaseOf(steps = {}, p = {}) {
+  const ok = [steps.cv === 'done', ['done', 'waiting'].includes(steps.musaned), steps.selected === 'done', p.status === 'medical_fit' || steps.wafid === 'done', steps.epro === 'done']
+  let reached = -1
+  ok.forEach((v, i) => { if (v) reached = i })
+  return PHASES[reached + 1][0]
+}
+const NOW_TEXT = { cv: 'CV next', musaned: 'Musaned next', selected: 'Waiting to be chosen', wafid: 'Wafid medical', epro: 'EPRO approval', choices: 'EPRO approved' }
+
 export default function ProfilesPage() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -72,12 +83,17 @@ export default function ProfilesPage() {
   const { rows: allRows, filterBar, sortBar, active: filtering, clear, step, setStep, stepCounts, activeCount, journey } = useProfileFilters(profiles)
   // An old link ?chosen=1 (the 🤝 Selected button, now the journey's Selected phase).
   useEffect(() => { if (searchParams.get('chosen') === '1') { setStep('selected'); const n = new URLSearchParams(searchParams); n.delete('chosen'); setSearchParams(n, { replace: true }) } }, [searchParams.get('chosen')]) // eslint-disable-line react-hooks/exhaustive-deps
-  const filtered = allRows
+  const [phase, setPhase] = useState(() => { try { return localStorage.getItem('adal-list-phase') || 'cv' } catch { return 'cv' } })
+  useEffect(() => { try { localStorage.setItem('adal-list-phase', phase) } catch {} }, [phase])
+  const phaseCounts = {}
+  for (const p of allRows) { const k = phaseOf(journey.steps[p.id], p); phaseCounts[k] = (phaseCounts[k] || 0) + 1 }
+  const searching = !!query.trim()
+  const filtered = searching ? allRows : allRows.filter(p => phaseOf(journey.steps[p.id], p) === phase)
   // 100 a page: quick to draw on any phone.
   const PAGE = 100
   const [page, setPage] = useState(1)
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE))
-  useEffect(() => { setPage(1) }, [filtered.length, step])
+  useEffect(() => { setPage(1) }, [filtered.length, step, phase])
   const rows = filtered.slice((Math.min(page, pages) - 1) * PAGE, Math.min(page, pages) * PAGE)
 
   // 🔎 The whole Musaned Employment Requests list: who is newly chosen.
@@ -140,37 +156,25 @@ export default function ProfilesPage() {
 
   return (
     <div>
-      {/* Title · the journey (fills the space between) · the buttons — one
-          line on wide screens; stacked on narrow ones, the journey scrolling sideways. */}
-      <div className="mb-5 flex flex-col lg:flex-row lg:items-center gap-3 lg:gap-4">
-        {/* The wakala (paid on Musaned or not): two buttons — the page's name is already in the header. */}
-        <div className="shrink-0 lg:w-40">
-          <div className="mb-1 px-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">Wakala</div>
-          <div className="grid grid-cols-2 lg:grid-cols-1 gap-1.5">
-            {[['wakala:paid', '✓ Paid', 'border-emerald-300 text-emerald-700 dark:border-emerald-700 dark:text-emerald-300', 'bg-emerald-600 text-white border-emerald-600'],
-              ['wakala:unpaid', '⏳ Unpaid', 'border-red-300 text-red-700 dark:border-red-800 dark:text-red-300', 'bg-red-600 text-white border-red-600']].map(([k, t, look, on]) => (
-              <button key={k} type="button" onClick={() => setStep(k)} title={k === 'wakala:paid' ? 'Chosen, the wakala paid on Musaned' : 'Chosen by an employer, the wakala not paid yet'}
-                className={`flex min-w-0 items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-xs font-bold transition ${step === k ? on + ' shadow-md' : 'bg-white/60 dark:bg-slate-900/60 ' + look}`}>
-                <span className="truncate">{t}</span>
-                <span className={`shrink-0 rounded-full px-1.5 text-[11px] ${step === k ? 'bg-white/25' : 'bg-slate-100 dark:bg-slate-800'}`}>{stepCounts[k] || 0}</span>
-              </button>
-            ))}
-          </div>
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <div className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto pb-1" role="tablist">
+          {PHASES.map(([k, label]) => (
+            <button key={k} type="button" role="tab" aria-selected={!searching && phase === k} onClick={() => { setPhase(k); setStep(null) }}
+              className={`flex shrink-0 items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-bold transition-colors ${!searching && phase === k ? 'bg-teal-600 text-white shadow' : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:ring-teal-400 dark:bg-slate-900 dark:text-slate-300 dark:ring-slate-700'}`}>
+              {label}
+              <span className={`rounded-full px-1.5 text-xs tabular-nums ${!searching && phase === k ? 'bg-white/25' : 'bg-slate-100 dark:bg-slate-800'}`}>{phaseCounts[k] || 0}</span>
+            </button>
+          ))}
         </div>
-        <div className="panel min-w-0 flex-1 px-2 py-2" data-tour="journey-filter">
-          <JourneyFork compact counts={stepCounts} selected={step} onSelect={setStep} />
-        </div>
-        <div className="shrink-0 grid grid-cols-2 lg:grid-cols-1 lg:w-56 gap-2">
-          <Button data-tour="new-profile" className="col-span-2 lg:col-span-1 w-full whitespace-nowrap" onClick={() => navigate('/profiles/new')}>
-            + ፕሮፋይል አክል
+        {phase === 'selected' && !searching && !onPhone() && (
+          <Button variant="secondary" className="whitespace-nowrap !px-3 text-sm" onClick={scanMusaned} disabled={scanning}>
+            {scanning ? '🔎 …' : '🔎 Check now'}
           </Button>
-          {!onPhone() && <Button variant="secondary" className="col-span-2 lg:col-span-1 w-full whitespace-nowrap !px-2 text-xs sm:text-sm" onClick={scanMusaned} disabled={scanning} title="Reads the Musaned Employment Requests list: anyone newly chosen gets her contract saved and a task; girls not in Adal Keep are added">
-            {scanning ? '🔎 Checking…' : '🔎 Check for new selections'}
-          </Button>}
-        </div>
+        )}
+        <Button data-tour="new-profile" className="whitespace-nowrap" onClick={() => navigate('/profiles/new')}>+ ፕሮፋይል አክል</Button>
       </div>
 
-      <div className="panel mb-4 sm:mb-5 grid grid-cols-[minmax(0,1fr)_auto] gap-2 p-2 sm:p-3 sm:grid-cols-[minmax(0,1fr)_auto_auto_auto] items-center animate-fade-up">
+      <div className="panel mb-4 sm:mb-5 grid grid-cols-[minmax(0,1fr)_auto] gap-2 p-2 sm:p-3 sm:grid-cols-[minmax(0,1fr)_auto] items-center">
         <Input
           placeholder="በስም፣ በስልክ ወይም በመታወቂያ ይፈልጉ..."
           value={query}
@@ -189,7 +193,7 @@ export default function ProfilesPage() {
         />
 
         <select
-          className={`field col-span-2 sm:col-span-1 ${showFilters ? '' : 'hidden sm:block'}`}
+          className={`field col-span-2 sm:col-span-1 ${showFilters ? '' : 'hidden'}`}
           value={status}
           onChange={(e) => updateFilter('status', e.target.value)}
         >
@@ -202,7 +206,7 @@ export default function ProfilesPage() {
         </select>
 
         <select
-          className={`field col-span-2 sm:col-span-1 ${showFilters ? '' : 'hidden sm:block'}`}
+          className={`field col-span-2 sm:col-span-1 ${showFilters ? '' : 'hidden'}`}
           value={brokerId}
           onChange={(e) => updateFilter('broker_id', e.target.value)}
         >
@@ -219,11 +223,11 @@ export default function ProfilesPage() {
           ⚙ Filters{activeCount ? ` · ${activeCount}` : ''} {showFilters ? '▴' : '▾'}
         </button>
 
-        {showFilters && <div className="col-span-2 sm:col-span-4 border-t border-slate-100 dark:border-slate-700 pt-3">{filterBar}</div>}
+        {showFilters && <div className="col-span-2 border-t border-slate-100 dark:border-slate-700 pt-3">{filterBar}</div>}
 
-        <div className="sm:col-span-4 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+        <div className="col-span-2 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
           <span>
-            {rows.length} of {profiles.length} profiles
+            {filtered.length}{searching ? ' found' : ''}
             {filtering && (
               <button type="button" className="ml-3 text-teal-700 dark:text-teal-300 hover:underline" onClick={clear}>
                 Clear filters
@@ -263,8 +267,7 @@ export default function ProfilesPage() {
           {rows.map((p, i) => (
             <article
               key={p.id}
-              className={`panel group relative cursor-pointer px-3 py-2.5 sm:p-4 transition hover:-translate-y-0.5 hover:shadow-soft animate-fade-up ${picked.has(p.id) ? 'ring-2 ring-teal-500' : ''}`}
-              style={{ animationDelay: `${Math.min(i, 8) * 40}ms` }}
+              className={`panel group relative cursor-pointer px-3 py-2.5 sm:p-4 transition hover:shadow-soft ${picked.has(p.id) ? 'ring-2 ring-teal-500' : ''}`}
               onClick={() => navigate(`/profiles/${p.id}`)}
             >
               <label onClick={(e) => e.stopPropagation()} title="Select"
@@ -278,63 +281,18 @@ export default function ProfilesPage() {
                     <span className="hidden sm:inline">{p.full_name}</span>
                   </h3>
                   <p className="mt-0.5 truncate text-[11px] sm:text-sm text-slate-500">
-                    <span className="hidden sm:inline">{p.phone_number || 'ስልክ የለም'}</span>
-                    {/* Phones: two short cards a row — first name and passport. */}
-                    <span className="sm:hidden">{p.passport_number || p.phone_number || '—'}</span>
+                    {p.passport_number || p.phone_number || '—'}
                   </p>
                 </div>
-                <span className="hidden sm:block"><StatusBadge status={p.status} /></span>
               </div>
 
               <PrioritizeButton profileId={p.id} className="mt-2" />
-              <MiniJourney steps={journey.steps[p.id]} who={journey.who[p.id]} missing={journey.missing[p.id]} picked={step?.split(':')[0]} />
+              <p className="mt-1.5 truncate text-xs font-semibold text-teal-700 dark:text-teal-300">{NOW_TEXT[phaseOf(journey.steps[p.id], p)]}{p.status === 'medical_rejected' ? ' · UNFIT' : ''}</p>
               {lacking[p.id]?.length > 0 && (
-                <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-2 py-1.5 text-[11px] text-red-700 animate-slide-up dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
+                <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-2 py-1.5 text-[11px] text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
                   <b>Missing:</b> {lacking[p.id].join(' · ')}
                 </div>
               )}
-
-              <dl className="hidden sm:block mt-4 space-y-1.5 text-sm text-slate-600">
-                <div className="flex justify-between gap-2">
-                  <dt className="text-slate-400">ደላላ</dt>
-                  <dd className="truncate font-medium">{p.broker_name || 'ያልተመደበ'}</dd>
-                </div>
-                <div className="flex justify-between gap-2">
-                  <dt className="text-slate-400">ፓስፖርት</dt>
-                  <dd className="truncate font-medium">{p.passport_number || '—'}</dd>
-                </div>
-                {(p.room || p.table_name || p.box_number) && (
-                  <div className="flex justify-between gap-2">
-                    <dt className="text-slate-400">ቦታ</dt>
-                    <dd className="truncate font-medium">
-                      {[p.room, p.table_name, p.box_number].filter(Boolean).join(' / ')}
-                    </dd>
-                  </div>
-                )}
-              </dl>
-
-              <div className="hidden sm:flex mt-4 gap-2 border-t border-slate-100 dark:border-slate-700 pt-3">
-                <button
-                  type="button"
-                  className="btn-secondary flex-1 py-2 text-xs"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    navigate(`/profiles/${p.id}/edit`)
-                  }}
-                >
-                  አርም
-                </button>
-                <button
-                  type="button"
-                  className="flex-1 py-2 text-xs font-medium rounded-lg text-red-600 bg-red-50 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/40 border border-red-200/60 dark:border-red-800/40 transition-colors"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    deleteProfile(p.id, e)
-                  }}
-                >
-                  ሰርዝ
-                </button>
-              </div>
             </article>
           ))}
         </div>

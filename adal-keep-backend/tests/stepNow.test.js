@@ -27,3 +27,8 @@ test('each step allows only its robots; after EPRO everything', () => {
   assert.ok(STEP_ROBOTS.epro.includes('musaned_epro_approve'))
   assert.equal(STEP_ROBOTS.choices, undefined)
 })
+
+test('once she is on Musaned she can be deleted from it at every step', () => {
+  for (const k of ['selected', 'wafid', 'epro']) assert.ok(STEP_ROBOTS[k].includes('musaned_delete'), k)
+  assert.ok(!STEP_ROBOTS.musaned.includes('musaned_delete'))
+})

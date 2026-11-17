@@ -758,9 +758,9 @@ export function stepNow(p, journey) {
 export const STEP_ROBOTS = {
   cv: ['musaned_check_chosen'],
   musaned: ['musaned_add_candidate', 'musaned_check_chosen'],
-  selected: ['musaned_check_chosen'],
-  wafid: ['wafid_book', 'wafid_check', 'wafid_slip', 'musaned_check_chosen'],
-  epro: ['musaned_epro_approve', 'wafid_slip', 'musaned_check_chosen'],
+  selected: ['musaned_check_chosen', 'musaned_delete'],
+  wafid: ['wafid_book', 'wafid_check', 'wafid_slip', 'musaned_check_chosen', 'musaned_delete'],
+  epro: ['musaned_epro_approve', 'wafid_slip', 'musaned_check_chosen', 'musaned_delete'],
 }
 
 async function journeyFor(db, id, p) {

@@ -429,7 +429,7 @@ export default function ProfileAutomations({ profileId }) {
   // CV (done on the profile) → Musaned → Wafid → Tasheer → Insurance → Enjaz · Visa,
   // then the LMIS steps, each on its own.
   const GROUPS = [
-    { title: 'Musaned', ids: ['musaned_add_candidate', 'musaned_check_chosen', 'musaned_delete', 'musaned_epro_approve'], box: 'border-indigo-200 dark:border-indigo-800', head: 'text-indigo-700 dark:text-indigo-300' },
+    { title: 'Musaned', ids: ['musaned_add_candidate', 'musaned_check_chosen', 'musaned_cv_import', 'musaned_delete', 'musaned_epro_approve'], box: 'border-indigo-200 dark:border-indigo-800', head: 'text-indigo-700 dark:text-indigo-300' },
     { title: 'Wafid medical', ids: ['wafid_book', 'wafid_slip', 'wafid_check'], box: 'border-emerald-200 dark:border-emerald-800', head: 'text-emerald-700 dark:text-emerald-300' },
     { title: 'Tasheer', ids: ['tasheer_schedule'], box: 'border-amber-200 dark:border-amber-800', head: 'text-amber-700 dark:text-amber-300' },
     { title: 'Insurance', ids: ['insurance_certificate'], box: 'border-rose-200 dark:border-rose-800', head: 'text-rose-700 dark:text-rose-300' },
@@ -437,9 +437,10 @@ export default function ProfileAutomations({ profileId }) {
     { title: 'LMIS · Police clearance', ids: ['police_certificate'], box: 'border-slate-200 dark:border-slate-700', head: 'text-slate-600 dark:text-slate-300' },
   ]
   const grouped = GROUPS.flatMap(g => g.ids)
-  const otherFlows = workflows.filter(w => !grouped.includes(w.id) && w.id !== 'musaned_cv_import')
+  const otherFlows = workflows.filter(w => !grouped.includes(w.id))
   // Step by step until the EPRO is approved (asked on 2026-11-17): only the step she is at.
-  const STEP_IDS = { musaned: ['musaned_add_candidate'], selected: ['musaned_check_chosen'], wafid: ['wafid_book', 'wafid_check'], epro: ['musaned_epro_approve'] }
+  // From the moment she is on Musaned, she can be deleted from it too; after the EPRO every robot shows.
+  const STEP_IDS = { musaned: ['musaned_add_candidate'], selected: ['musaned_check_chosen', 'musaned_delete'], wafid: ['wafid_book', 'wafid_check', 'musaned_delete'], epro: ['musaned_epro_approve', 'musaned_delete'] }
   const STEP_NAMES = ['CV', 'Musaned', 'Chosen', 'Wafid FIT', 'EPRO']
   const stepping = step && step.key !== 'choices'
 

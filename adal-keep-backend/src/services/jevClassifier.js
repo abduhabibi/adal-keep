@@ -194,6 +194,22 @@ export function lookUnavailableReason() {
 }
 
 /**
+ * The picture as JEV takes it: at most JEV_MAX_SIDE, and a small one (a cut-out
+ * photo, 150 px) enlarged so its short side is at least JEV_MIN_SIDE — JEV
+ * refuses pictures that are too small ("Invalid image dimensions").
+ */
+const JEV_MIN_SIDE = 448
+async function jevImage(png) {
+  const m = await sharp(png).metadata()
+  const short = Math.min(m.width || 0, m.height || 0), long = Math.max(m.width || 0, m.height || 0)
+  if (short && short < JEV_MIN_SIDE) {
+    const k = Math.min(JEV_MIN_SIDE / short, JEV_MAX_SIDE / long)
+    return sharp(png).resize({ width: Math.round(m.width * k), height: Math.round(m.height * k) }).png().toBuffer()
+  }
+  return sharp(png).resize({ width: JEV_MAX_SIDE, height: JEV_MAX_SIDE, fit: 'inside', withoutEnlargement: true }).png().toBuffer()
+}
+
+/**
  * Show JEV a screenshot and ask yes/no questions about it.
  * `questions` is { name: 'question text' }. Returns { name: probability 0..1 }
  * or null when JEV is off, out of credits or did not answer.
@@ -203,7 +219,7 @@ export async function lookAtPage(png, questions) {
   _lookWhy = ''
   try {
     const { sdk, api } = await client()
-    const img = await sharp(png).resize({ width: JEV_MAX_SIDE, height: JEV_MAX_SIDE, fit: 'inside', withoutEnlargement: true }).png().toBuffer()
+    const img = await jevImage(png)
     const qs = {}
     for (const [k, text] of Object.entries(questions)) qs[k] = sdk.noul(text)
     const res = await api.systemOne({ state: { page: sdk.image(img) }, questions: qs })
@@ -232,7 +248,7 @@ export async function findOnPage(png, boxes) {
   if (!jevReady() || Date.now() < _lookPausedUntil) return null
   try {
     const { sdk, api } = await client()
-    const img = await sharp(png).resize({ width: JEV_MAX_SIDE, height: JEV_MAX_SIDE, fit: 'inside', withoutEnlargement: true }).png().toBuffer()
+    const img = await jevImage(png)
     const qs = {}
     for (const [k, text] of Object.entries(boxes)) qs[k] = sdk.box(text)
     // Box questions need the jev-preview model.
@@ -259,7 +275,7 @@ export async function chooseOnPage(png, questions) {
   if (!jevReady() || Date.now() < _lookPausedUntil) return null
   try {
     const { sdk, api } = await client()
-    const img = await sharp(png).resize({ width: JEV_MAX_SIDE, height: JEV_MAX_SIDE, fit: 'inside', withoutEnlargement: true }).png().toBuffer()
+    const img = await jevImage(png)
     const qs = {}
     for (const [k, [text, crit]] of Object.entries(questions)) qs[k] = sdk.choice(text, crit)
     const res = await api.systemOne({ state: { page: sdk.image(img) }, questions: qs })

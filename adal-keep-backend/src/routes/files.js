@@ -119,6 +119,15 @@ router.post('/files/tray', upload.single('file'), async (req, res) => {
 })
 
 // 3. Assign/Move a file from Tray to a Profile Field (Drag and Drop destination)
+// A picture put into Passport, Photo or Full Body Photo is looked at by JEV
+// afterwards (services/placement.js): in the wrong box it moves to the right one.
+function checkLater(db, profileId, field, fileRow) {
+  if (!fileRow || !/^image\//.test(fileRow.mimetype || '')) return
+  import('../services/placement.js')
+    .then(p => p.watched(field.name) && p.checkPlacement(db, Number(profileId), field.name, fileRow))
+    .catch(e => console.warn('[placement]', e.message))
+}
+
 router.post('/profiles/:id/fields/:fieldId/assign-tray-file', async (req, res) => {
   try {
     const { id: profileId, fieldId } = req.params
@@ -152,6 +161,7 @@ router.post('/profiles/:id/fields/:fieldId/assign-tray-file', async (req, res) =
 
     const updatedFile = await db('files').where('id', fileId).first()
     res.json({ success: true, file: updatedFile })
+    checkLater(db, profileId, field, updatedFile)
   } catch (err) {
     console.error('Assign tray file error:', err)
     res.status(500).json({ error: 'Failed to assign tray file to profile field' })
@@ -235,6 +245,7 @@ router.post('/profiles/:id/fields/:fieldId/upload', upload.single('file'), async
     }
 
     res.json({ success: true, files: savedFiles })
+    checkLater(db, profileId, field, await db('files').where('id', origId).first())
   } catch (err) {
     console.error('Upload error:', err)
     res.status(500).json({ error: 'Failed to upload/convert file' })
@@ -381,6 +392,7 @@ router.post('/profiles/:id/fields/:fieldId/files', upload.array('files', 20), as
     }
 
     res.status(201).json({ success: true, files: inserted })
+    for (const row of inserted) checkLater(db, profileId, field, row)
   } catch (err) {
     console.error('Multi-upload error:', err)
     res.status(500).json({ error: 'Failed to upload files' })

@@ -74,14 +74,14 @@ export function apart(parts, pad = 0.012) {
  * of cut-out JPEGs, or null) and `dir` to remove afterwards — or null when it
  * is one thing only, not a picture, or JEV is not there.
  */
-export async function splitComposite(filePath, { find = null } = {}) {
+export async function splitComposite(filePath, { find = null, anyShape = false } = {}) {
   if (!/\.(jpe?g|png|webp)$/i.test(filePath)) return null
   const img = sharp(filePath).rotate()
   const meta = await img.metadata()
   const W = meta.autoOrient?.width || meta.width, H = meta.autoOrient?.height || meta.height
   if (!W || !H || W * H < 400 * 300) return null
   // Side by side means wider than tall: a single photo, a standing photo or a CV page is never asked about (speed).
-  if (W < H * 1.15) return null
+  if (!anyShape && W < H * 1.15) return null
   const png = await sharp(filePath).rotate().png().toBuffer()
   const look = find || (await import('./jevClassifier.js')).findOnPage
   const parts = pickParts(await look(png, PARTS), W, H)

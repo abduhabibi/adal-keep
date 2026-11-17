@@ -1264,6 +1264,7 @@ initSystem().then(() => {
     startScanner(db)              // discovers new work every 2 min
     startWafidChecker(db)         // Medical · Applied → Fit / Rejected from wafid.com
     import('./src/services/portalHealth.js').then(p => p.startPortalHealth()).catch(() => {})
+    setTimeout(() => import('./src/services/placement.js').then(p => p.sweepRecent(db)).catch(() => {}), 4 * 60 * 1000).unref?.()   // pictures put in the wrong box (last 7 days) set right
     import('./src/services/pcHealth.js').then(p => p.startPCHealth(db)).catch(() => {})   // disk space, database check, freezes (Admin sees it)   // is each portal answering? (Admin sees it)
     startBackupSchedule(db)       // locked copy to Telegram in the lunch break
     startContractChecker(db)      // chosen by a Saudi employer? contract + PDFs from Musaned

@@ -18,7 +18,11 @@ import crypto from 'crypto'
 import { plainReason } from './runOutcome.js'
 import { runsWorking } from './busy.js'
 import { me as joinAgency, chatConfigured, cloudCall, cloudAuth, cloudAgencyId, cloudConfig } from './chatCloud.js'
-import { isFollower } from './mainPC.js'
+import { isFollower, pcNumber as myPcNumber } from './mainPC.js'
+// The heartbeat also carries this PC's number: Adal Admin keeps the number on
+// the PC's current online account (an old account kept it before, so a phone or
+// a Companion typing it found an empty copy).
+const beatData = () => ({ at: new Date().toISOString(), ...(isFollower() ? {} : { pc: myPcNumber() }) })
 import { tgReady, tgPut, tgDelete, TG_MAX_DOWNLOAD, findStorageChat } from './tgStore.js'
 import fs from 'fs'
 import path from 'path'
@@ -801,7 +805,7 @@ async function relayOnce(db) {
   const calls = await cloudCall(db, 'GET', `/rest/v1/keep_calls?agency_id=eq.${agency}&status=eq.new&order=id.asc&limit=12&select=id,device_id,method,path,body,created_at`)
   // "The PC is on": (only once keep_calls answers) phones send their calls here instead of queueing them.
   if (Date.now() - lastBeat > 15000) {
-    await upsert(db, 'keep_meta', [{ agency_id: agency, key: '/_pc', data: { at: new Date().toISOString() }, updated_at: new Date().toISOString() }], 'agency_id,key')
+    await upsert(db, 'keep_meta', [{ agency_id: agency, key: '/_pc', data: beatData(), updated_at: new Date().toISOString() }], 'agency_id,key')
     lastBeat = Date.now()
   }
   // A phone is busy: its uploads are filed at once too, not at the next minute.
@@ -855,7 +859,7 @@ export function startRelay(db) {
       const agency = await cloudAgencyId(db)
       if (agency) {
         await Promise.race([
-          upsert(db, 'keep_meta', [{ agency_id: agency, key: '/_pc', data: { at: new Date().toISOString() }, updated_at: new Date().toISOString() }], 'agency_id,key'),
+          upsert(db, 'keep_meta', [{ agency_id: agency, key: '/_pc', data: beatData(), updated_at: new Date().toISOString() }], 'agency_id,key'),
           new Promise((_, no) => setTimeout(() => no(new Error('slow')), 12000)),
         ])
         lastBeat = Date.now()

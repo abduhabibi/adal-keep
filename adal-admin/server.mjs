@@ -253,6 +253,37 @@ async function approveJoins() {
 }
 setInterval(approveJoins, 1000).unref?.()
 
+// A PC number stays on the PC's current online account. A PC that got a new
+// account could not move its number (keep_publish_pc leaves another account's
+// row alone), so phones and Companions typing it joined an old, empty copy.
+// The PC's heartbeat (keep_meta '/_pc') carries its number; the newest wins.
+async function keepNumbersOnTheirPC() {
+  try {
+    const since = new Date(Date.now() - 10 * 60000).toISOString()
+    const beats = await rest('GET', `keep_meta?key=eq./_pc&updated_at=gt.${since}&select=agency_id,data,updated_at&order=updated_at.desc`)
+    const seen = new Set()
+    for (const b of beats || []) {
+      const pc = String(b.data?.pc || '')
+      if (!/^\d{5,6}$/.test(pc) || seen.has(pc)) continue
+      seen.add(pc)
+      const [row] = await rest('GET', `keep_pairing?pc_number=eq.${pc}&select=agency_id`)
+      if (row?.agency_id === b.agency_id) continue
+      // Two PCs alive with the same number (a clash): leave it as it is.
+      if (row && beats.some(x => x.agency_id === row.agency_id)) continue
+      if (row) {
+        await rest('PATCH', `keep_pairing?pc_number=eq.${pc}`, { agency_id: b.agency_id, updated_at: new Date().toISOString() }, { Prefer: 'return=minimal' })
+        // Devices that joined the old account follow the number.
+        await rest('PATCH', `keep_devices?agency_id=eq.${row.agency_id}`, { agency_id: b.agency_id }, { Prefer: 'return=minimal' })
+      } else {
+        await rest('POST', 'keep_pairing', { pc_number: pc, agency_id: b.agency_id, open: false, updated_at: new Date().toISOString() }, { Prefer: 'return=minimal' })
+      }
+      console.log(`[join] a PC number now points to that PC's current online account`)
+    }
+  } catch (e) { console.warn('[join] numbers:', e.message) }
+}
+setInterval(keepNumbersOnTheirPC, 60000).unref?.()
+setTimeout(keepNumbersOnTheirPC, 5000).unref?.()
+
 // ----------------------------------------------------------------- plans --
 // Each agency's licence (adal-keep-backend/src/services/plans.js): its plan,
 // paid / trial dates and features, signed with Adal's update key so only this

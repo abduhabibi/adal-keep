@@ -40,6 +40,18 @@ async function token() {
   const d = await r.json().catch(() => ({}))
   if (!r.ok || !d.access_token) throw httpError(401, 'This phone was removed from the agency, or cannot sign in online.')
   sess = { access_token: d.access_token, refresh_token: d.refresh_token, expires_at: Date.now() + (Number(d.expires_in || 3600) - 60) * 1000 }
+  // The agency this device belongs to now (its PC may have a new online account):
+  // the saved one follows it, so a phone or Companion never stays on an empty copy.
+  if (!window.__ADAL_CREDS && d.user?.id) {
+    try {
+      const q = await fetch(`${c.url}/rest/v1/keep_devices?user_id=eq.${d.user.id}&select=agency_id`, { headers: { apikey: c.anon, Authorization: `Bearer ${d.access_token}` } })
+      const now = (await q.json().catch(() => []))?.[0]?.agency_id
+      if (q.ok && now && now !== c.agency) {
+        const saved = JSON.parse(localStorage.getItem(SAVED) || 'null')
+        if (saved?.cloud) { saved.cloud.agency = now; localStorage.setItem(SAVED, JSON.stringify(saved)); setTimeout(() => location.reload(), 50) }
+      }
+    } catch {}
+  }
   return sess.access_token
 }
 

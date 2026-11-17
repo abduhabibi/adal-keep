@@ -48,6 +48,16 @@ const COMPLETE_LABEL = {
   'awaiting-visa-pay':       '✔️ Visa paid',
 }
 
+// Each card's name inside its portal's box: the box already says Musaned, Wafid…
+const SHORT = {
+  musaned_add_candidate: 'Add', musaned_check_chosen: 'Chosen?', musaned_epro_approve: 'Approve EPRO',
+  musaned_cv_import: 'Import', musaned_delete: 'Delete',
+  wafid_book: 'Book', wafid_check: 'Result', wafid_slip: 'Slip',
+  mofa_visa: 'Make visa', mofa_find_app: 'Find number', mofa_pay: 'Pay',
+  tasheer_schedule: 'Appointment', insurance_certificate: 'Certificate', police_certificate: 'Police certificate',
+}
+const shortName = (w) => SHORT[w.id] || w.name
+
 // Runs that are simply run again when clicked after they finished.
 const REPEATABLE = new Set(['musaned_check_chosen', 'musaned_cv_import', 'musaned_delete', 'wafid_check', 'wafid_slip', 'mofa_find_app'])
 
@@ -364,64 +374,29 @@ export default function ProfileAutomations({ profileId }) {
                   : 'border-slate-200 dark:border-slate-700 hover:border-teal-400 hover:bg-teal-50/40 dark:hover:bg-teal-900/20'
               }`}
             >
-              <div className="flex items-center gap-2">
-                {n ? <span className="w-5 h-5 shrink-0 rounded-full bg-indigo-600 text-white text-[11px] font-bold flex items-center justify-center">{n}</span> : null}
-                <span className="text-base leading-none">{isDone ? '✔️' : '🤖'}</span>
-                <span title={w.name} className={`min-w-0 truncate font-semibold text-sm leading-tight ${
+              <div className="flex items-center justify-between gap-2">
+                <span title={w.description || w.name} className={`min-w-0 font-semibold text-sm leading-tight ${
                   isDone ? 'text-emerald-800 dark:text-emerald-300' : 'text-slate-900 dark:text-white'
-                }`}>{w.name}</span>
-              </div>
-
-              {notChosen ? (
-                <p className="text-[11px] text-slate-500 mt-0.5">Not chosen yet{latest.finished_at ? ' · looked ' + new Date(latest.finished_at).toLocaleDateString() : ''}</p>
-              ) : isDone ? (
-                <p className="text-[11px] text-emerald-700 dark:text-emerald-400 mt-0.5 font-medium">
-                  ✓ {REPEATABLE.has(w.id) ? 'Checked' : 'Completed'} {latest.finished_at ? '· ' + new Date(latest.finished_at).toLocaleDateString() : ''}
-                </p>
-              ) : (
-                <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-1" title={w.description}>{w.description}</p>
-              )}
-
-              <div className="flex items-center justify-between mt-1">
-                <span className="text-[10px] text-slate-400">
-                  {latest && isActive ? `Run #${latest.id}` : `${w.stepCount} steps`}
-                </span>
-                {isSending && (
-                  <span className="text-[10px] font-semibold text-slate-500">Sending…</span>
-                )}
-                {!isSending && notChosen && (
-                  <span className="text-[10px] font-semibold text-teal-700 dark:text-teal-400">↻ Look again</span>
-                )}
-                {!isSending && isDone && (
-                  <span className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-400">{REPEATABLE.has(w.id) ? '↻ Click to check again' : '✔️ Submitted'}</span>
-                )}
-                {!isSending && isPaused && (
-                  <span className="text-[10px] font-semibold text-amber-700 dark:text-amber-400">
-                    {latest.pause_reason === 'awaiting-human-submit' ? '⏳ Awaiting your Submit'
-                      : latest.pause_reason === 'awaiting-human-save' ? '⏳ Awaiting your SAVE'
-                      : latest.pause_reason === 'awaiting-visa-save' ? '⏳ Awaiting your visa Save'
-                      : latest.pause_reason === 'awaiting-insurance-save' ? '⏳ Awaiting you on FetaP'
-                      : latest.pause_reason === 'awaiting-epro-save' ? '⏳ Awaiting your SAVE on Musaned'
-                      : latest.pause_reason === 'awaiting-tasheer-save' ? '⏳ Awaiting your Save on Tasheer'
-                      : '● Paused'}
-                  </span>
-                )}
-                {!isSending && isRunning && (
-                  <span className="text-[10px] font-semibold text-blue-700 dark:text-blue-400">● Working · own tab</span>
-                )}
-                {!isSending && isQueued && (
-                  <span className="text-[10px] font-semibold text-sky-700 dark:text-sky-400">
-                    {isRetry(latest) ? '↻ Retrying soon' : '⏳ Waiting in line'}
-                  </span>
-                )}
+                }`}>{isDone ? '✓ ' : ''}{shortName(w)}</span>
+                {(() => {
+                  const word = isSending ? ['…', 'text-slate-500']
+                    : isRunning ? ['Working', 'text-blue-700 dark:text-blue-400']
+                    : isPaused ? ['Needs you', 'text-amber-700 dark:text-amber-400']
+                    : isQueued ? ['In line', 'text-sky-700 dark:text-sky-400']
+                    : notChosen ? ['Not chosen', 'text-slate-500']
+                    : null
+                  return word ? <span className={`shrink-0 text-[11px] font-semibold ${word[1]}`}>{word[0]}</span> : null
+                })()}
               </div>
             </button>
-            <label className={`flex items-center gap-1.5 px-1 text-[11px] ${isRunning ? 'opacity-50' : 'cursor-pointer'} text-slate-600 dark:text-slate-300`}
-              title={isDone && !byHand ? 'Done by the robot' : 'Done it yourself? Tick it: the step counts as done'}>
-              <input type="checkbox" className="h-3.5 w-3.5 accent-emerald-600" checked={isDone} disabled={isRunning || (isDone && !byHand)}
-                onChange={() => markDone(w, !isDone)} />
-              {isDone ? (byHand ? 'Done (ticked by hand)' : latest?.from_number ? 'Done (she has her application number)' : 'Done') : 'Mark as done'}
-            </label>
+            {/* Done by hand: a bare tick (its words are in the tooltip); a robot's ✓ is on the card itself. */}
+            {!(isDone && !byHand) && (
+              <label className={`flex items-center px-1 ${isRunning ? 'opacity-50' : 'cursor-pointer'}`}
+                title="Done it yourself? Tick it: the step counts as done">
+                <input type="checkbox" aria-label="Done by hand" className="h-3.5 w-3.5 accent-emerald-600" checked={isDone} disabled={isRunning}
+                  onChange={() => markDone(w, !isDone)} />
+              </label>
+            )}
             </div>
           )
   }

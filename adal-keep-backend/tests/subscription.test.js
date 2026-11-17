@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { totp, luhnDigit, isPcNumber, pcNumber, codeMatches, pcSecret, computeMode, TRIAL_DAYS, paidProof } from '../src/services/subscription.js'
+import { askInternetTime, effectiveNow, totp, luhnDigit, isPcNumber, pcNumber, codeMatches, pcSecret, computeMode, TRIAL_DAYS, paidProof } from '../src/services/subscription.js'
 
 const DAY = 86400000
 
@@ -35,12 +35,26 @@ test('a code opens only the PC it was made for, and only for about a minute', ()
   assert.equal(codeMatches('091835', code, now, ''), false)       // no licence key
 })
 
-test('trial → locked after the trial days; clock set back → locked', () => {
+test('trial → locked after the trial days; a clock set back never locks', () => {
   const now = Date.now()
   assert.equal(computeMode({ installation_date: now - (TRIAL_DAYS - 1) * DAY, last_seen: now }), 'trial')
   assert.equal(computeMode({ installation_date: now - (TRIAL_DAYS + 1) * DAY, last_seen: now }), 'locked')
-  assert.equal(computeMode({ installation_date: now - DAY, last_seen: now + 2 * DAY }), 'locked')
+  assert.equal(computeMode({ installation_date: now - DAY, last_seen: now + 2 * DAY }), 'trial')   // the clock was set back: counted from the last time seen, not locked
   assert.equal(computeMode({ installation_date: now - 99 * DAY, paid_until: now + DAY, paid_proof: paidProof(pcNumber(), now + DAY) }), 'active')
   assert.equal(computeMode({ installation_date: now - 99 * DAY, paid_until: now + DAY }), 'locked')   // a date without its proof
   assert.equal(computeMode({ installation_date: now - 99 * DAY, unlocked_pc: pcNumber(), unlock_proof: 'forged' }), 'locked')
+})
+
+test('internet time: how far the PC clock is off, from a Date header', async () => {
+  const ahead = Date.now() + DAY   // the internet says tomorrow: this PC is a day behind
+  const fake = async () => ({ headers: { get: (h) => h === 'date' ? new Date(ahead).toUTCString() : null } })
+  const c = await askInternetTime(fake)
+  assert.ok(Math.abs(c.offset - DAY) < 3000, 'about one day off')
+  assert.equal(await askInternetTime(async () => { throw new Error('no internet') }), null)
+})
+
+test('no internet: the clock set back counts from the last time seen (no days gained, no lock)', () => {
+  const now = Date.now()
+  assert.ok(effectiveNow({ last_seen: now + 5 * DAY }) >= now + 5 * DAY)
+  assert.ok(Math.abs(effectiveNow({ last_seen: now - DAY }) - now) < 1000)
 })

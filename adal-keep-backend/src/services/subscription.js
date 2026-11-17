@@ -34,7 +34,7 @@ import { licenseNow } from './plans.js'
 
 // Adal's signed licence (plans.js): paid until / a longer trial, given in the admin panel.
 const licPaid = () => Number(licenseNow()?.paid_until) || 0
-const trialEnd = (s) => Math.max((s?.installation_date || Date.now()) + TRIAL_DAYS * DAY, Number(licenseNow()?.trial_until) || 0)
+const trialEnd = (s) => Math.max((s?.installation_date || trustedNow()) + TRIAL_DAYS * DAY, Number(licenseNow()?.trial_until) || 0)
 
 dotenv.config()
 
@@ -50,11 +50,83 @@ export const PAID_DAYS = 182            // one code = 6 months
 export const PRICE_ETB = 30000          // for those 6 months
 export const SELLER_PHONE = process.env.ADAL_SELLER_PHONE || '0995668080'
 const DAY = 86400000
-const CLOCK_BACK_TOLERANCE = 6 * 3600000      // clock set back more than this → locked
 const MAX_TRIES = 5                            // wrong codes allowed per 10 minutes
 const TRY_WINDOW = 10 * 60000
 
 const licenseKey = () => process.env.ADAL_LICENSE_KEY || ''
+
+// ---------------------------------------------------------------------------
+// The time: from the internet, never the PC's clock alone
+// ---------------------------------------------------------------------------
+// A PC's clock is often wrong (Nuzla's was a day ahead, then put right — and
+// "the clock was set back" locked the PC). The PC is never locked for its
+// clock now. Adal Keep asks the internet for the time (every hour) and keeps
+// how far the PC's clock is off; the trial and the paid days count with that.
+// With no internet: the PC's clock, never earlier than the last time seen —
+// setting the clock back gains no days, and locks nothing.
+let clock = { offset: 0, at: 0 }   // offset: internet time − PC clock; at: when last asked (internet time)
+let clockLoaded = false, clockAsking = null, clockAskedAt = 0
+function loadClock() {
+  if (clockLoaded) return
+  clockLoaded = true
+  for (const p of [SIDE_PATH, COPY_PATH]) {
+    const c = readFile(p)?.clock
+    if (Number.isFinite(c?.offset) && Number.isFinite(c?.at) && c.at > clock.at) clock = { offset: c.offset, at: c.at }
+  }
+}
+/** The time now: the PC's clock put right by the last internet time. */
+export function trustedNow() { loadClock(); return Date.now() + clock.offset }
+/** Internet time was seen in the last 3 days: the time is sure. */
+const clockSure = () => clock.at > 0 && Math.abs(trustedNow() - clock.at) < 3 * DAY
+/** The time the trial and the paid days count with. */
+export function effectiveNow(s) {
+  const t = trustedNow()
+  return clockSure() ? t : Math.max(t, s?.last_seen || 0)
+}
+
+/** Internet time from an answer's Date header (Adal's cloud, else Google / Cloudflare). */
+export async function askInternetTime(fetchImpl = fetch) {
+  const urls = [process.env.SUPABASE_URL, 'https://www.google.com', 'https://www.cloudflare.com'].filter(Boolean)
+  for (const u of urls) {
+    try {
+      const t0 = Date.now()
+      const r = await fetchImpl(u, { method: 'HEAD', signal: AbortSignal.timeout(8000) })
+      const t1 = Date.now()
+      const net = Date.parse(r.headers.get('date') || '')
+      if (Number.isFinite(net)) return { offset: Math.round(net + 500 - (t0 + t1) / 2), at: net }   // the header drops the ms: +0.5 s
+    } catch {}
+  }
+  return null
+}
+/** Asks the internet for the time at most once an hour (in the background); keeps the answer. */
+export function syncClock({ force = false } = {}) {
+  loadClock()
+  if (process.env.NODE_TEST_CONTEXT && !force) return null   // (tests never ask the real internet)
+  if (clockAsking || (!force && Date.now() - clockAskedAt < 3600000)) return clockAsking
+  clockAskedAt = Date.now()
+  clockAsking = askInternetTime().then(c => {
+    if (!c) return null
+    // Under 2 minutes off: the PC's clock is right (no jitter in the counts).
+    clock = { offset: Math.abs(c.offset) < 120000 ? 0 : c.offset, at: c.at }
+    const st = readSide()
+    if (st) {
+      // A last-seen time from a clock that was ahead is put right.
+      if (st.last_seen && st.last_seen > c.at + 6 * 3600000) st.last_seen = c.at
+      writeSide({ ...st, clock })
+    }
+    if (clock.offset) {
+      console.log(`[clock] this PC's clock is ${Math.round(clock.offset / 60000)} min off — Adal Keep uses internet time`)
+      fixWindowsClock()
+    }
+    return clock
+  }).catch(() => null).finally(() => { clockAsking = null })
+  return clockAsking
+}
+/** Asks Windows to set its clock from the internet (works where Windows allows it; nothing breaks if not). */
+function fixWindowsClock() {
+  if (process.platform !== 'win32') return
+  import('child_process').then(({ exec }) => exec('w32tm /resync /nowait', { windowsHide: true, timeout: 15000 }, () => {})).catch(() => {})
+}
 
 // ---------------------------------------------------------------------------
 // PC number
@@ -111,7 +183,7 @@ export function totp(secret, step) {
 }
 
 /** A code from the last minute or the next 30 s is accepted (a phone call takes time). */
-export function codeMatches(pc, code, now = Date.now(), key = licenseKey()) {
+export function codeMatches(pc, code, now = trustedNow(), key = licenseKey()) {
   if (!key || !/^\d{6}$/.test(code)) return false
   const secret = pcSecret(pc, key)
   const step = Math.floor(now / 30000)
@@ -168,7 +240,7 @@ export function writeSide(s) {
 }
 
 export function initSidecar() {
-  const s = { installation_date: Date.now(), last_seen: Date.now(), paid_until: null }
+  const s = { installation_date: trustedNow(), last_seen: trustedNow(), paid_until: null }
   writeSide(s)
   return s
 }
@@ -178,8 +250,8 @@ function state() { return readSide() || initSidecar() }
 
 let _lastTouch = 0
 function touch(s) {
-  const now = Date.now()
-  if (now - _lastTouch < 10 * 60000 || now < (s.last_seen || 0)) return
+  const now = trustedNow()
+  if (Math.abs(now - _lastTouch) < 10 * 60000 || (now < (s.last_seen || 0) && !clockSure())) return
   _lastTouch = now
   writeSide({ ...s, last_seen: now })
 }
@@ -189,19 +261,19 @@ function touch(s) {
 // ---------------------------------------------------------------------------
 /** 'active' (unlocked) · 'trial' · 'locked' */
 export function computeMode(s) {
+  syncClock()
   if (!s) return 'trial'
-  const now = Date.now()
+  const now = effectiveNow(s)
   const pc = pcNumber()
   if (s.unlocked_pc === pc && s.unlock_proof === proofFor(pc)) return 'active'
   if (paidOk(s, pc) && s.paid_until > now) return 'active'
   if (licPaid() > now) return 'active'
-  if (s.last_seen && now < s.last_seen - CLOCK_BACK_TOLERANCE) return 'locked'
   return now < trialEnd(s) ? 'trial' : 'locked'
 }
 
 export function statusPayload(s = state()) {
   const mode = computeMode(s)
-  const now = Date.now()
+  const now = effectiveNow(s)
   const trialEndsAt = s ? trialEnd(s) : null
   return {
     mode,
@@ -210,7 +282,7 @@ export function statusPayload(s = state()) {
     trialEndsAt,
     pcNumber: pcNumber(),
     sellerPhone: SELLER_PHONE,
-    clockBack: !!(mode === 'locked' && s?.last_seen && now < s.last_seen - CLOCK_BACK_TOLERANCE),
+    clockBack: false,   // never locked for the clock any more (internet time is used)
     unlockedAt: s?.unlocked_at || null,
     forGood: !!(s?.unlocked_pc === pcNumber() && s?.unlock_proof === proofFor(pcNumber())),
     paidUntil: Math.max(s && paidOk(s, pcNumber()) ? s.paid_until : 0, licPaid()) || null,
@@ -241,7 +313,7 @@ function extend(s, pc, now, by) {
 /** Returns { ok: true } or { ok: false, error }. */
 export function applyCode(code) {
   const s = state()
-  const now = Date.now()
+  const now = trustedNow()
   const tries = (s.tries || []).filter(t => now - t < TRY_WINDOW)
   if (tries.length >= MAX_TRIES) {
     const wait = Math.ceil((tries[0] + TRY_WINDOW - now) / 60000)
@@ -272,7 +344,7 @@ export function unlockApproved() {
   const s = state()
   const pc = pcNumber()
   if (computeMode(s) === 'active') return { ok: true }
-  writeSide({ ...extend(s, pc, Date.now(), 'approval'), tries: [] })
+  writeSide({ ...extend(s, pc, trustedNow(), 'approval'), tries: [] })
   _cache.at = 0
   return { ok: true }
 }

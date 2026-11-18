@@ -293,7 +293,11 @@ Section "Uninstall"
   Delete "$INSTDIR\*.ps1"
   Delete "$INSTDIR\*.url"
   Delete "$INSTDIR\backend\*.js"
-  Delete "$INSTDIR\backend\*.json"
+  ; (Only the program's own .json files: the agency's chat sign-in
+  ; .adal_chat.json and the plan's .adal_sub.json stay with its data.)
+  Delete "$INSTDIR\backend\package.json"
+  Delete "$INSTDIR\backend\package-lock.json"
+  Delete "$INSTDIR\backend\.adal-version.json"
   Delete "$INSTDIR\backend\*.traineddata"
   Delete "$INSTDIR\backend\.env"
 !endif

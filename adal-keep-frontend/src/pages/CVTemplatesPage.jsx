@@ -41,7 +41,6 @@ export default function CVTemplatesPage() {
         action={
           <div className="flex gap-2">
             <Button variant="secondary" onClick={() => navigate('/cvs')}>← CVs</Button>
-            <Button variant="secondary" onClick={() => navigate('/cvs/templates/new')}>Write HTML…</Button>
             <Button onClick={() => navigate('/cvs/templates/design')}>🎨 Create template</Button>
           </div>
         }
@@ -51,14 +50,14 @@ export default function CVTemplatesPage() {
         {/* Amharic as written; English from lib/i18n.js (each piece reads right alone). */}
         እያንዳንዱ ቅጥ ለፕሮፋይሉ መረጃዎች <code className="bg-slate-100 dark:bg-slate-800 px-1 rounded" translate="no">{'{{TOKENS}}'}</code> ያሉት በእጅ የተጻፈ HTML/CSS ቅርጽ ነው።{' '}
         <b>🎨 ቅጥ ፍጠር</b> — ይጫኑት፦ የኤጀንሲውን ራስጌ ይስቀሉ፣ ሁለት ቀለሞችና አንድ ንድፍ ይምረጡ፤ የፓስፖርቱ ገጽ ሁሌም ይካተታል።{' '}
-        <b>አርም</b> በማንኛውም ካርድ ላይ ይቀይረዋል፤ <b>HTML ጻፍ…</b> በእጅ ለሚሠራ ቅርጽ ነው።
+        <b>አርም</b> በማንኛውም ካርድ ላይ ይቀይረዋል።
       </div>
 
       {loading ? <Spinner /> : rows.length === 0 ? (
         <EmptyState
           title="No templates yet"
-          description="Click New Template to create your first agency layout."
-          action={<Button onClick={() => navigate('/cvs/templates/new')}>Create template</Button>}
+          description="Click Create template to make your first agency layout."
+          action={<Button onClick={() => navigate('/cvs/templates/design')}>Create template</Button>}
         />
       ) : (
         <div className="grid gap-4 sm:grid-cols-1 lg:grid-cols-2 xl:grid-cols-3">

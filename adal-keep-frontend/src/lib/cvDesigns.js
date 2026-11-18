@@ -274,9 +274,17 @@ export const COLOR_PAIRS = [
   ['#14532d', '#84cc16'], ['#111827', '#c9a227'], ['#9f1239', '#f97316'], ['#0c4a6e', '#14b8a6'],
 ]
 
+// Every design fills the A4 page (see DESIGN_FILL): the full-body photo's frame
+// takes the room left under the other blocks, so nothing runs past the page.
+const FILL = `.fb img{object-fit:contain!important}`
+// The full-body frame's height in px per design, so the page is exactly A4 (measured).
+const DESIGN_FILL = { classic: 643, sidebar: 741, ribbon: 681, cards: 562, elegant: 824, diagonal: 529 }
+
 export function designHtml(id, primary, secondary) {
   const make = DESIGNS[id] || DESIGNS.classic
-  const { html, css } = make(palette(primary, secondary))
+  const made = make(palette(primary, secondary))
+  const html = made.html
+  const css = made.css + FILL + (DESIGN_FILL[id] ? `.cv .fb{height:${DESIGN_FILL[id]}px!important}` : '')
   // A whole page: the CV engine puts the header above it (inside <body>).
   return { html: `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>${html}</body></html>`, css }
 }

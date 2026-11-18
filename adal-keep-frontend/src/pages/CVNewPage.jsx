@@ -304,6 +304,14 @@ export default function CVNewPage() {
     const tname = (templates.find(t => String(t.id) === String(tid))?.name || '').replace(/[\\/:*?"<>|]+/g, ' ').trim()
     const suggested = `${who}${tname ? ' - ' + tname : ''}.pdf`
     let handle = null, name = suggested
+    // The PDF starts being made now, while the name is being chosen (it does not depend on the name).
+    const primary = form.countries_applying[0] || {}
+    const job = api.post('/cv/generate', {
+      profile_id: Number(profileId),
+      template_id: Number(tid),
+      overrides: { __edits: editList(), ...form, country: primary.country || '', salary: primary.salary || 0, currency: primary.currency || 'SAR' },
+    })
+    job.catch(() => {}) // a cancelled save must not leave an unhandled error
     if (window.showSaveFilePicker) {
       try { handle = await window.showSaveFilePicker({ suggestedName: suggested, types: [{ description: 'PDF', accept: { 'application/pdf': ['.pdf'] } }] }) }
       catch (e) { if (e?.name === 'AbortError') return; handle = null }
@@ -316,12 +324,7 @@ export default function CVNewPage() {
     setSaving(true)
     const t = toast.loading('Making the PDF…')
     try {
-      const primary = form.countries_applying[0] || {}
-      const res = await api.post('/cv/generate', {
-        profile_id: Number(profileId),
-        template_id: Number(tid),
-        overrides: { __edits: editList(), ...form, country: primary.country || '', salary: primary.salary || 0, currency: primary.currency || 'SAR' },
-      })
+      const res = await job
       if (res.data?.local_html) {
         // The PC is off: this phone made the CV itself (the PC files the same CV when it is on).
         const how = await pdfHere(res.data.local_html, name)

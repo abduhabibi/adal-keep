@@ -167,7 +167,7 @@ function Shell() {
             <Route path="cvs" element={page(CVsPage)} />
             <Route path="cvs/new" element={page(CVNewPage)} />
             <Route path="cvs/templates" element={page(CVTemplatesPage)} />
-            <Route path="cvs/templates/new" element={page(CVTemplateEditPage)} />
+            <Route path="cvs/templates/new" element={<Navigate to="/cvs/templates/design" replace />} />
             <Route path="cvs/templates/design" element={page(CVTemplateDesignPage)} />
             <Route path="cvs/templates/:id/edit" element={page(CVTemplateEditPage)} />
             <Route path="settings" element={page(SettingsPage)} />

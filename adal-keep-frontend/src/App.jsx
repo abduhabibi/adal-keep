@@ -57,7 +57,8 @@ const page = (P) => <Guarded><Suspense fallback={<div className="p-6 text-sm tex
 
 const toaster = (
   <Toaster
-    position="top-right"
+    position="top-center"
+    containerStyle={{ top: 64 }}
     toastOptions={{
       className: 'text-sm font-medium',
       style: {

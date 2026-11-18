@@ -15,13 +15,32 @@ Say "=== Adal Connect ($Role) on $env:COMPUTERNAME - $(Get-Date -Format 'yyyy-MM
 
 # 1. OpenSSH Server
 Say "[1/4] OpenSSH Server..."
-try {
-  $cap = Get-WindowsCapability -Online -Name 'OpenSSH.Server*' | Select-Object -First 1
-  if ($cap -and $cap.State -ne 'Installed') {
-    Say "      installing (a few minutes)..."
-    Add-WindowsCapability -Online -Name $cap.Name | Out-Null
-  }
-} catch { Say "      Add-WindowsCapability failed: $($_.Exception.Message)" }
+$zip = Join-Path $PSScriptRoot 'OpenSSH-Win64.zip'
+$dest = "$env:ProgramFiles\OpenSSH"
+if (Get-Service sshd -ErrorAction SilentlyContinue) {
+  Say "      already installed"
+} elseif (Test-Path $zip) {
+  try {
+    Say "      unpacking from USB (seconds)..."
+    $tmp = Join-Path $env:TEMP 'adal-openssh'
+    Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+    Expand-Archive -Path $zip -DestinationPath $tmp -Force
+    New-Item -ItemType Directory -Path $dest -Force | Out-Null
+    Copy-Item "$tmp\OpenSSH-Win64\*" $dest -Recurse -Force
+    Say "      registering service..."
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$dest\install-sshd.ps1" | Out-Null
+    $mp = [Environment]::GetEnvironmentVariable('Path','Machine')
+    if ($mp -notlike "*$dest*") { [Environment]::SetEnvironmentVariable('Path', "$mp;$dest", 'Machine') }
+  } catch { Say "      unpack failed: $($_.Exception.Message)" }
+} else {
+  try {
+    $cap = Get-WindowsCapability -Online -Name 'OpenSSH.Server*' | Select-Object -First 1
+    if ($cap -and $cap.State -ne 'Installed') {
+      Say "      zip missing - installing from Windows Update (slow)..."
+      Add-WindowsCapability -Online -Name $cap.Name | Out-Null
+    }
+  } catch { Say "      Add-WindowsCapability failed: $($_.Exception.Message)" }
+}
 try {
   Set-Service -Name sshd -StartupType Automatic -ErrorAction Stop
   Start-Service sshd -ErrorAction Stop

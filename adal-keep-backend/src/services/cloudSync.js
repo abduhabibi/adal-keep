@@ -47,7 +47,9 @@ const GLOBAL = ['/setup/status', '/subscription/status', '/settings', '/profiles
   '/automations/stages', '/automations/active', '/notifications', '/checklists', '/cv/templates', '/quick-links',
   '/dashboard', '/tasks/documents', '/wafid/settings', '/health', '/tutor/tour', '/trash', '/cv/generated',
   '/lmis/accounts', '/musaned/accounts', '/tasheer/accounts', '/insurance/accounts', '/visa/accounts',
-  '/automations/ready-for-submit', '/tutor/adoption', '/main-pc', '/plan', '/whatsapp', '/whatsapp/agents']
+  '/automations/ready-for-submit', '/tutor/adoption', '/main-pc', '/plan', '/whatsapp', '/whatsapp/agents',
+  // What needs a person now: a phone with Adal Keep closed shows it (AdalNoticeJob).
+  '/automations/attention']
 const PER_PROFILE = (id) => [`/profiles/${id}`, `/profiles/${id}/fields`, `/profiles/${id}/automations`,
   `/profiles/${id}/journey`, `/profiles/${id}/fill-plan`, `/cv/profile-readiness/${id}`, `/cv/generated?profile_id=${id}`,
   `/profiles/${id}/whatsapp`, `/profiles/${id}/days`]
@@ -97,6 +99,8 @@ function clean(key, data) {
   const strip = (o) => (o && typeof o === 'object' ? Object.fromEntries(Object.entries(o).filter(([k]) => !SECRET.test(k))) : o)
   if (key === '/settings') return strip(data)
   if (ACCOUNT_LISTS.includes(key) && Array.isArray(data)) return data.map(strip)
+  // The calls without their captcha pictures (a phone's notification needs only the words).
+  if (key === '/automations/attention' && Array.isArray(data)) return data.map(({ image, ...c }) => ({ ...c, image: null }))
   // A generated CV's list entry without its full copy of the data (1–2 MB each).
   if (key.startsWith('/cv/generated') && Array.isArray(data)) return data.map(({ data_snapshot, ...c }) => c)
   return data
@@ -292,6 +296,12 @@ const soonKeys = new Set()
 let vaultSoon = false
 const soonAt = new Map()   // key → when a change of it went online (the minute's copy must not undo it)
 let soonTimer = null
+/** These answers only, online within a second (the "needs you" list as it changes). */
+export function pushKeysSoon(db, keys) {
+  keys.forEach(k => soonKeys.add(k))
+  clearTimeout(soonTimer)
+  soonTimer = setTimeout(() => pushKeys(db).catch(e => console.warn('[cloud] soon:', e.message)), 600)
+}
 export function pushSoon(db, apiPath) {
   const p = String(apiPath || '').replace(/^\/api/, '').split('?')[0]
   const id = p.match(/^\/profiles\/(\d+)/)?.[1] || p.match(/^\/cv\/profile-readiness\/(\d+)/)?.[1]
@@ -681,7 +691,12 @@ function filesSoon(db) {
 
 export function startCloudSync(db) {
   if (timer) return
-  import('./changes.js').then(c => c.onChanged(({ tables }) => { if (tables.includes('files')) filesSoon(db) })).catch(() => {})
+  import('./changes.js').then(c => c.onChanged(({ tables }) => {
+    if (tables.includes('files')) filesSoon(db)
+    // A run paused for a person (or went on): the "needs you" list online at once.
+    if (tables.includes('automation_queue')) pushKeysSoon(db, ['/automations/attention'])
+  })).catch(() => {})
+  import('./attention.js').then(a => a.onAttentionChange(() => pushKeysSoon(db, ['/automations/attention']))).catch(() => {})
   const tick = async () => {
     cloudStatus.on = await cloudOn(db).catch(() => false)
     // A move from another system is working: the copy catches up when it is done.

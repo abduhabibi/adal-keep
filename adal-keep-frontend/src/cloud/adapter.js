@@ -346,6 +346,9 @@ async function get(path, query) {
     for (const p of profiles) fields[p.id] = (await answer(`/profiles/${p.id}/fields`)) || []
     return { profiles, fields }
   }
+  // (The PC's "needs you" list is online for the phone's background notifications;
+  // with the PC off nothing is calling now, whatever the last copy says.)
+  if (path === '/automations/attention') return []
   const data = await answer(path)
   // Live lists the PC makes as things happen: with the PC off, nothing waits on a person.
   if (data === undefined && /^\/(automations\/attention|whatsapp\/(bulk|notify)|sessions|tasheer\/session|system\/update\/notice|musaned\/authenticators|musaned\/epro-signature|wafid\/check|mobile\/cloud|profiles\/\d+\/whatsapp)$/.test(path)) {

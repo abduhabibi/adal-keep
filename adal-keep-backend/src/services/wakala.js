@@ -43,9 +43,19 @@ export async function askToPay(db, profileId, { force = false } = {}) {
   const p = await db('profiles').where('id', profileId).first()
   if (!p || !p.chosen_at || !isUnpaid(p)) return { asked: false, why: 'not unpaid' }
   const title = `💰 Wakala not paid: ${p.full_name}`
+  // Once every 3 days a girl at most — remembered on its own (her task or her
+  // notification may be cleared long before: then every scan asked again).
+  const key = `wakala_asked:${p.id}`
   if (!force) {
-    const last = await db('tasks').where({ profile_id: p.id, title }).orderBy('id', 'desc').first().catch(() => null)
-    if (last && Date.now() - new Date(last.created_at).getTime() < AGAIN) return { asked: false, why: 'asked lately' }
+    const kept = await db('settings').where({ key }).first('value').catch(() => null)
+    const lastTask = await db('tasks').where({ profile_id: p.id, title }).orderBy('id', 'desc').first('created_at').catch(() => null)
+    const lastNote = await db('notifications').where({ type: 'wakala', title }).orderBy('id', 'desc').first('created_at').catch(() => null)
+    const at = Math.max(Number(kept?.value) || 0, ...[lastTask, lastNote].map(r => r ? new Date(String(r.created_at).replace(' ', 'T') + (/[zZ]|[+-]\d\d:?\d\d$/.test(String(r.created_at)) ? '' : 'Z')).getTime() || 0 : 0))
+    if (Date.now() - at < AGAIN) return { asked: false, why: 'asked lately' }
+  }
+  const now = String(Date.now())
+  if (await db('settings').where({ key }).update({ value: now, updated_at: new Date().toISOString() }).catch(() => 0) === 0) {
+    await db('settings').insert({ key, value: now }).catch(() => {})
   }
   const agent = await agentFor(db, p)
   const text = askText(p)

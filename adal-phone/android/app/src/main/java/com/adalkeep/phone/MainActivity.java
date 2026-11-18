@@ -7,6 +7,8 @@ import androidx.activity.OnBackPressedCallback;
 import com.getcapacitor.BridgeActivity;
 
 public class MainActivity extends BridgeActivity {
+    /** Adal Keep is on the screen: its own bar shows what is new (no Android notification for it). */
+    static volatile boolean inFront = false;
     private long lastBack = 0;
 
     @Override
@@ -75,8 +77,15 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onResume() {
         super.onResume();
+        inFront = true;
         openAsked();
         try { stopService(new android.content.Intent(this, AdalWatchService.class)); } catch (Exception e) { /* none running */ }
+    }
+
+    @Override
+    public void onPause() {
+        inFront = false;
+        super.onPause();
     }
 
     private void exitOrWarn() {

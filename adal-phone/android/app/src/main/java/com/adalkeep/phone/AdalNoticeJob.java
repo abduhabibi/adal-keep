@@ -110,6 +110,8 @@ public class AdalNoticeJob extends JobService {
         Set<String> shown = new HashSet<>(p.getStringSet("shown", new HashSet<>()));
         Set<String> now = new HashSet<>();
         long newest = last;
+        java.util.List<JSONObject> fresh = new java.util.ArrayList<>();
+        Set<String> titles = new HashSet<>();
         for (int i = 0; i < list.length(); i++) {
             JSONObject n = list.optJSONObject(i);
             if (n == null) continue;
@@ -119,12 +121,94 @@ public class AdalNoticeJob extends JobService {
             newest = Math.max(newest, id);
             // The first look only remembers where the bell is (nothing old pops up).
             if (last < 0 || id <= last) continue;
-            show(c, (int) id, n.optString("title", "Adal Keep"), n.optString("body", n.optString("message", "")));
-            shown.add(String.valueOf(id));
+            // Not the same words twice in one look, nothing older than a day.
+            if (!titles.add(n.optString("title", ""))) continue;
+            if (ageMs(n.optString("created_at", "")) > 24 * 3600_000L) continue;
+            fresh.add(n);
         }
+        // Adal Keep on the screen: its own bell shows them (no Android notification on top).
+        if (!MainActivity.inFront) {
+            // A pile (the phone was off a while): the newest one, and how many more.
+            fresh.sort((a, b) -> Long.compare(b.optLong("id"), a.optLong("id")));
+            for (int i = 0; i < Math.min(2, fresh.size()); i++) {
+                JSONObject n = fresh.get(i);
+                String title = n.optString("title", "Adal Keep");
+                if (i == 1 && fresh.size() > 2) title = "+" + (fresh.size() - 1) + " more — " + title;
+                show(c, (int) n.optLong("id"), title, n.optString("body", n.optString("message", "")));
+                shown.add(String.valueOf(n.optLong("id")));
+            }
+        }
+        try { calls(c, p, url, anon, agency, token); } catch (Exception ignored) { }
         // Cleared on Adal Keep: away from the phone too.
         for (String s : new HashSet<>(shown)) if (!now.contains(s)) { NotificationManagerCompat.from(c).cancel(BASE + Integer.parseInt(s)); shown.remove(s); }
         p.edit().putLong("last", newest).putStringSet("shown", shown).apply();
+    }
+
+    /** How long ago ("2026-11-18 10:09:35", UTC, or an ISO time); 0 when unknown. */
+    static long ageMs(String when) {
+        try {
+            String t = when.trim().replace(' ', 'T');
+            if (t.length() < 19) return 0;
+            java.text.SimpleDateFormat f = new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US);
+            f.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
+            long ms = f.parse(t.substring(0, 19)).getTime();
+            // An offset at the end (+03:00 / +0300): back to UTC.
+            java.util.regex.Matcher m = java.util.regex.Pattern.compile("([+-])(\\d\\d):?(\\d\\d)$").matcher(t.substring(19));
+            if (m.find()) ms -= ("-".equals(m.group(1)) ? -1 : 1) * (Integer.parseInt(m.group(2)) * 3600_000L + Integer.parseInt(m.group(3)) * 60_000L);
+            return System.currentTimeMillis() - ms;
+        } catch (Exception e) { return 0; }
+    }
+
+    /**
+     * What needs a person now (a sign-in, a code, a reCAPTCHA, a Save …), from
+     * the online copy the PC keeps ("/automations/attention"): each new one is a
+     * notification, also with Adal Keep closed; gone from the PC, gone here. One
+     * a call — the app's own notice of the same call (notifyCall) counts too.
+     */
+    static synchronized void calls(Context c, SharedPreferences p, String url, String anon, String agency, String token) throws Exception {
+        String q = url + "/rest/v1/keep_meta?select=key,data,updated_at&agency_id=eq." + URLEncoder.encode(agency, "UTF-8") + "&key=in.(%22%2Fautomations%2Fattention%22,%22%2F_pc%22)";
+        JSONArray rows = new JSONArray(http("GET", q, anon, token, null));
+        JSONArray list = null;
+        String beat = "";
+        for (int i = 0; i < rows.length(); i++) {
+            JSONObject r = rows.getJSONObject(i);
+            if ("/automations/attention".equals(r.optString("key"))) list = r.optJSONArray("data");
+            else beat = r.optString("updated_at", "");
+        }
+        if (list == null) return;
+        // The PC's heartbeat (every 15 s) is older than 3 minutes: the PC is off — nothing is calling now.
+        if (beat.length() > 0 && ageMs(beat) > 3 * 60_000L) list = new JSONArray();
+        boolean first = !p.getBoolean("calls_seen", false);
+        Set<String> had = new HashSet<>(p.getStringSet("calls", new HashSet<>()));
+        Set<String> keep = new HashSet<>();
+        Set<Integer> runs = new HashSet<>();
+        for (int i = 0; i < list.length(); i++) {
+            JSONObject n = list.optJSONObject(i);
+            if (n == null) continue;
+            int run = n.optInt("run_id", 0);
+            if (run <= 0 || n.optLong("phone_wait_ms", 0) > 0) continue;
+            String key = run + ":" + n.optString("title", "");
+            keep.add(key); runs.add(run);
+            if (first || had.contains(key) || MainActivity.inFront) continue;
+            // Only fresh calls (made in the last 2 hours).
+            long at = n.optLong("at", 0);
+            if (at > 0 && System.currentTimeMillis() - at > 2 * 3600_000L) continue;
+            AdalCalls.show(c, run, n.optString("full_name", "Adal Keep"), n.optString("title", "Needs you"), null, false, null, null);
+        }
+        // Gone on the PC: away from the phone too.
+        for (String k : had) {
+            try { int run = Integer.parseInt(k.split(":")[0]); if (!runs.contains(run)) AdalCalls.cancel(c, run); } catch (Exception ignored) { }
+        }
+        if (MainActivity.inFront) keep.addAll(had);
+        p.edit().putBoolean("calls_seen", true).putStringSet("calls", keep).apply();
+    }
+
+    /** The app showed this call itself: the background look does not show it again. */
+    static void calledHere(Context c, int run, String title) {
+        SharedPreferences p = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        Set<String> had = new HashSet<>(p.getStringSet("calls", new HashSet<>()));
+        had.add(run + ":" + title);
+        p.edit().putStringSet("calls", had).apply();
     }
 
     static void clear(Context c, boolean all, int id) {

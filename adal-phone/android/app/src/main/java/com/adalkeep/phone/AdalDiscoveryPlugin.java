@@ -441,6 +441,7 @@ public class AdalDiscoveryPlugin extends Plugin {
         try { choices = call.getArray("choices"); } catch (Exception e) { /* none */ }
         AdalCalls.show(getContext(), call.getInt("run", 0), call.getString("title", "Adal Keep"), call.getString("body", ""),
             call.getString("image"), Boolean.TRUE.equals(call.getBoolean("asks", false)), call.getString("label"), choices);
+        AdalNoticeJob.calledHere(getContext(), call.getInt("run", 0), call.getString("body", ""));
         call.resolve();
     }
 

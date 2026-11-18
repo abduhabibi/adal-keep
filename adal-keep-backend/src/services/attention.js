@@ -8,7 +8,12 @@ const waits = new Map() // run id → { title, body, at, image, answer, label, c
 const listeners = new Set()
 /** Called when a run starts waiting for a person (worker.js: the next run may start). */
 export const onWait = (fn) => { listeners.add(fn); return () => listeners.delete(fn) }
-const told = () => { for (const fn of listeners) { try { fn() } catch {} } }
+// Any change of the list (a call comes or goes): cloudSync puts it online, so a
+// phone with the app closed sees it (its own background look, AdalNoticeJob).
+const watchers = new Set()
+export const onAttentionChange = (fn) => { watchers.add(fn); return () => watchers.delete(fn) }
+const changed = () => { for (const fn of watchers) { try { fn() } catch {} } }
+const told = () => { for (const fn of listeners) { try { fn() } catch {} } changed() }
 /** Is this run waiting for a person right now? */
 export const isWaiting = (runId) => waits.has(Number(runId))
 
@@ -39,7 +44,7 @@ export function askCaptcha(runId, image, answer, { title, label = 'Numbers', cho
 export function doneWith(runId, { keepCaptcha = false, force = false } = {}) {
   const id = Number(runId), w = waits.get(id)
   if (w?.confirm && !force) return
-  if (!keepCaptcha || !w?.answer) waits.delete(id)
+  if ((!keepCaptcha || !w?.answer) && waits.delete(id)) changed()
 }
 
 export const waiting = () => [...waits.entries()].map(([run_id, w]) => ({ run_id, title: w.title, body: w.body, at: w.at, asks: !!w.answer, label: w.label, choices: w.choices || null, confirm: !!w.confirm, image: w.image || null, phone_wait_ms: w.answer && w.phoneFrom ? Math.max(0, w.phoneFrom - Date.now()) : 0 }))
@@ -51,5 +56,6 @@ export async function answerCaptcha(runId, text) {
   const answer = w.answer
   // Sent: the notice goes (a code that is not accepted comes back as a new one).
   waits.delete(id)
+  changed()
   await answer(String(text).trim())
 }

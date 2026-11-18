@@ -14,6 +14,7 @@ import api from '../services/api'
 const ONLINE = 'http://127.0.0.1:47801'
 const IS = 'adal-is-companion'
 const DONE = 'adal-companion-online'
+const TRIED = 'adal-companion-online-tried'
 const get = (k) => { try { return localStorage.getItem(k) } catch { return null } }
 const set = (k, v) => { try { localStorage.setItem(k, v) } catch {} }
 
@@ -35,13 +36,20 @@ export async function shareOnlineCopy() {
   if (['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)) return   // the main PC itself
   const q = new URLSearchParams(location.search)
   if (q.has('adal_companion')) set(IS, '1')
-  if (q.has('adal_online')) set(DONE, q.get('adal_online') === 'ok' ? String(Date.now()) : '')
+  // Not kept there ("no": the Companion's own online pages are for another
+  // Supabase): asked again in 6 hours, not at once — that went round and round,
+  // the window reloading every few seconds.
+  if (q.has('adal_online')) {
+    if (q.get('adal_online') === 'ok') set(DONE, String(Date.now()))
+    else set(TRIED, String(Date.now()))
+  }
   if (q.has('adal_companion') || q.has('adal_online')) {
     q.delete('adal_companion'); q.delete('adal_online')
     history.replaceState(history.state, '', location.pathname + (q.toString() ? `?${q}` : '') + location.hash)
   }
   if (get(IS) === '1' && get(DONE)) watchMainPC()
   if (get(IS) !== '1' || get(DONE)) return
+  if (Date.now() - Number(get(TRIED) || 0) < 6 * 3600 * 1000) return
   try {
     const { data } = await api.post('/pc-access/online-copy', { name: 'Companion PC' })
     const back = location.href

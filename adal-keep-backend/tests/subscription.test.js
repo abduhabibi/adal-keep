@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { askInternetTime, effectiveNow, totp, luhnDigit, isPcNumber, pcNumber, codeMatches, pcSecret, computeMode, TRIAL_DAYS, paidProof } from '../src/services/subscription.js'
+import { askInternetTime, effectiveNow, trustedNow, totp, luhnDigit, isPcNumber, pcNumber, codeMatches, pcSecret, computeMode, TRIAL_DAYS, paidProof } from '../src/services/subscription.js'
 
 const DAY = 86400000
 
@@ -55,6 +55,9 @@ test('internet time: how far the PC clock is off, from a Date header', async () 
 
 test('no internet: the clock set back counts from the last time seen (no days gained, no lock)', () => {
   const now = Date.now()
-  assert.ok(effectiveNow({ last_seen: now + 5 * DAY }) >= now + 5 * DAY)
-  assert.ok(Math.abs(effectiveNow({ last_seen: now - DAY }) - now) < 1000)
+  // (This PC's own licence file may hold an internet time from the last 3
+  // days: then that time wins, as it must; otherwise the last time seen does.)
+  const later = effectiveNow({ last_seen: now + 5 * DAY })
+  assert.ok(later >= now + 5 * DAY || Math.abs(later - trustedNow()) < 1000)
+  assert.ok(Math.abs(effectiveNow({ last_seen: now - DAY }) - trustedNow()) < 1000)
 })

@@ -7,11 +7,13 @@ import { useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
 import { wa } from '../lib/whatsapp'
 import { useAuth } from '../context/AuthContext'
+import { useNavigate } from 'react-router-dom'
 
 const err = (e) => e?.response?.data?.error || e.message
 
 export default function WhatsAppSendPicked({ picked, onClose }) {
   const { activeEmployee } = useAuth()
+  const navigate = useNavigate()
   const [conn, setConn] = useState(null)
   const [agents, setAgents] = useState(null)
   const [to, setTo] = useState(new Set())
@@ -58,9 +60,9 @@ export default function WhatsAppSendPicked({ picked, onClose }) {
       {conn === null || agents === null ? (
         <p className="text-xs text-slate-500">Looking at the WhatsApp…</p>
       ) : !ready ? (
-        <p className="text-xs text-slate-600 dark:text-slate-300">WhatsApp is not connected now: connect it in Settings → Integrations → WhatsApp.</p>
+        <button type="button" onClick={() => navigate('/settings?tab=whatsapp')} className="w-full rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white">💬 Connect WhatsApp →</button>
       ) : !agents.length ? (
-        <p className="text-xs text-slate-600 dark:text-slate-300">No agents on this WhatsApp yet: add them in Settings → Integrations → WhatsApp.</p>
+        <button type="button" onClick={() => navigate('/settings?tab=whatsapp')} className="w-full rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white">＋ Add your agents →</button>
       ) : (<>
         <label className="flex items-center gap-2 rounded-lg bg-white px-2 py-1.5 text-xs font-semibold dark:bg-slate-900">
           <input type="checkbox" checked={all} onChange={() => setTo(all ? new Set() : new Set(agents.map(a => a.id)))} /> Select all ({agents.length})

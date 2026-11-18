@@ -824,9 +824,21 @@ export async function runCall(db, agency, c) {
     const who = { 'X-Adal-Who': encodeURIComponent(deviceNames.has(c.device_id) ? `${deviceNames.get(c.device_id)} (phone)` : 'Adal support') }
     // An upload from a phone while the PC is on: done now, with the PC's real answer.
     const up = method === 'POST' && c.body?.__upload
-    const r = up
+    // A new profile carries the phone's own number for her: made once only, even
+    // when the phone (on a slow line) also queued her for later.
+    const phoneRef = method === 'POST' && /^\/(profiles|new-profile\/with-passport)$/.test(p.split('?')[0])
+      ? Number(up ? c.body.__upload.form?.phone_ref : c.body?.phone_ref) || 0 : 0
+    const already = phoneRef < 0 && (await db('cloud_sync').where({ key: `ref:profile:${phoneRef}` }).first('hash').catch(() => null))?.hash
+    const r = already
+      ? new Response(JSON.stringify({ id: Number(already), success: true }), { status: 200, headers: { 'content-type': 'application/json' } })
+      : up
       ? await local('POST', p, { body: await formOf(db, c.body.__upload), headers: who })
       : await local(method, p, { body: method === 'GET' ? undefined : (c.body ?? undefined), headers: who })
+    if (phoneRef < 0 && !already && r.ok) {
+      const m = await r.clone().json().catch(() => null)
+      const id = m?.id || m?.profile?.id
+      if (id) { await setState(db, `ref:profile:${phoneRef}`, String(id)); await pushRefs(db, agency).catch(() => {}) }
+    }
     if (up && r.ok) for (const f of c.body.__upload.files || []) cloudCall(db, 'DELETE', `/storage/v1/object/keep/${f.object}`).catch(() => {})
     patch.answer_code = r.status
     const type = r.headers.get('content-type') || ''

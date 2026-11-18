@@ -24,7 +24,7 @@ import path from 'path'
 import crypto from 'crypto'
 import { fileURLToPath } from 'url'
 import { getBrowser, openBrowserIfAny } from './browser.js'
-import { setupTab, borrowTab, borrowOpenTab, doneWithTab, activeRunIds } from './tabManager.js'
+import { setupTab, borrowTab, borrowOpenTab, doneWithTab, activeRunIds, keepingRunIds } from './tabManager.js'
 
 const SAFE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'data', 'SafeStorage')
 const LIST_URL = 'https://tawtheeq.musaned.com.sa/employment-requests?sort=createdAt,DESC&page=0&size=10'
@@ -165,7 +165,7 @@ export async function scanContracts(db, { auto = false } = {}) {
   try {
     const profiles = await db('profiles').select('*')
     const browser = await getBrowser()
-    if (!page) page = await borrowTab(browser, 'musaned_check_chosen', await activeRunIds(db))
+    if (!page) page = await borrowTab(browser, 'musaned_check_chosen', await activeRunIds(db), await keepingRunIds(db))
     await setupTab(page, { runId: 'musaned-contracts' })
     page.__adalAllowImages = true
     // Musaned's own list data first (no passport searched, every detail at once).
@@ -910,7 +910,7 @@ export async function checkContracts(db, { onlyId = null } = {}) {
     const list = await candidates(db, onlyId)
     if (!list.length) return { checked: 0 }
     const browser = await getBrowser()
-    page = await borrowTab(browser, 'musaned_check_chosen', await activeRunIds(db))
+    page = await borrowTab(browser, 'musaned_check_chosen', await activeRunIds(db), await keepingRunIds(db))
     await setupTab(page, { runId: 'musaned-contracts' })
     page.__adalAllowImages = true
     // Employment Requests' own list first (asked on 2026-11-17): one read for

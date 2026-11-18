@@ -27,7 +27,7 @@
  *
  * Cross-platform: pure Puppeteer/CDP — Windows / macOS / Linux identical.
  */
-import { newRunTab, outOfSight } from './browser.js'
+import { newRunTab, outOfSight, sendAway } from './browser.js'
 
 export const PEERS = {
   musaned: { hosts: ['tawtheeq.musaned.com.sa', 'accounts.wahid.sa'], label: 'Musaned' },
@@ -285,6 +285,85 @@ async function findFreeTab(browser, workflowId, busyRuns, space = null) {
   return null
 }
 
+/**
+ * The runs whose tab is theirs alone: the one working now, and one waiting on
+ * its page for a person's Save. Every other run's tab is the site's tab.
+ */
+export async function keepingRunIds(db) {
+  const rows = await db('automation_queue').where('status', 'running')
+    .orWhere(q => q.where('status', 'paused').whereIn('pause_reason', ['awaiting-human-save', 'awaiting-epro-save']))
+    .select('id').catch(() => [])
+  return new Set(rows.map(r => Number(r.id)))
+}
+
+const ownerOf = (p) => { for (const [id, t] of _tabs) if (t === p) return id; return null }
+
+/** A person is using this tab now (clicked or typed in the last minute, or typed a form). */
+async function personIn(p) {
+  const st = await inTime(p.evaluate(() => ({
+    touched: Number(sessionStorage.getItem('adal-touched')) || 0,
+    typed: [...document.querySelectorAll('input, textarea')].some(e =>
+      !['hidden', 'password', 'checkbox', 'radio', 'file', 'submit', 'button'].includes(e.type) && e.value && e.value !== e.defaultValue),
+  })).catch(() => null))
+  if (!st) return true
+  return Date.now() - st.touched < PERSON_MS || (!p.__adalCdp && st.typed)
+}
+
+/**
+ * One tab for each website (asked on 2026-11-18): the tab already on the site,
+ * signed in, is used again by the next run — also one an earlier run still
+ * holds while it waits, or one in sight (it goes out of sight). A new tab only
+ * when the site has none, or its only tab is working or waiting for a Save.
+ */
+async function siteTab(browser, workflowId, keep, space = null) {
+  const host = RUN_HOSTS.find(([w]) => w.test(String(workflowId)))?.[1]
+  if (!host || !browser?.pages) return null
+  const peer = peerOf(workflowId)
+  const mine = space || browser.defaultBrowserContext?.() || null
+  const signedIn = (p) => { try { return !!signedInHere[peer]?.(p.url()) } catch { return false } }
+  const onSite = (await browser.pages().catch(() => []))
+    .filter(p => !isClosed(p) && !p.__adalBorrowed && host.test(p.url()) && (!mine || spaceIs(p, mine)))
+    .filter(p => { const o = ownerOf(p); return o === null || !keep.has(o) })
+  for (const p of onSite.sort((a, b) => signedIn(b) - signedIn(a))) {
+    if (await personIn(p)) continue
+    for (const [id, t] of [..._tabs]) if (t === p) _tabs.delete(id)
+    if (!(await outOfSight(p))) await sendAway(p).catch(() => {})
+    return p
+  }
+  return null
+}
+
+/**
+ * After a run: the site keeps one tab (the signed-in one); the other tabs runs
+ * opened there and nobody needs any more are closed.
+ */
+export async function tidySiteTabs(browser, workflowId, keep = new Set()) {
+  const host = RUN_HOSTS.find(([w]) => w.test(String(workflowId)))?.[1]
+  if (!host || !browser?.pages) return 0
+  const peer = peerOf(workflowId)
+  const signedIn = (p) => { try { return !!signedInHere[peer]?.(p.url()) } catch { return false } }
+  const pages = (await browser.pages().catch(() => [])).filter(p => !isClosed(p) && host.test(p.url()))
+  const bySpace = new Map()
+  for (const p of pages) { let c = null; try { c = p.browserContext() } catch {} ; if (!bySpace.has(c)) bySpace.set(c, []); bySpace.get(c).push(p) }
+  let closed = 0
+  for (const tabs of bySpace.values()) {
+    if (tabs.length < 2) continue
+    const held = (p) => { const o = ownerOf(p); return p.__adalBorrowed || (o !== null && keep.has(o)) }
+    // The one that stays: a held one, else a signed-in one.
+    const stays = tabs.find(held) || tabs.find(signedIn) || tabs[0]
+    for (const p of tabs) {
+      if (p === stays || held(p)) continue
+      const ours = p.__adalCdp || /^adal-run-/.test(await inTime(p.evaluate(() => window.name).catch(() => ''), 2000) || '')
+      if (!ours || !(await outOfSight(p)) || (await personIn(p))) continue
+      for (const [id, t] of [..._tabs]) if (t === p) _tabs.delete(id)
+      await p.close().catch(() => {})
+      closed++
+    }
+  }
+  if (closed) console.log(`[tabManager] ${workflowId}: ${closed} extra tab(s) closed — one tab for the site`)
+  return closed
+}
+
 // One at a time: two runs starting together must not take the same tab.
 let _claims = Promise.resolve()
 const oneAtATime = (fn) => { const p = _claims.then(fn, fn); _claims = p.catch(() => {}); return p }
@@ -294,7 +373,7 @@ const oneAtATime = (fn) => { const p = _claims.then(fn, fn); _claims = p.catch((
  * empty): the tab named after the run, or the only tab on the run's site.
  * Found tabs are adopted, so the run also resumes in them.
  */
-export async function findRunTab(browser, runId, workflowId = '', { bySite = true } = {}) {
+export async function findRunTab(browser, runId, workflowId = '', { bySite = true, adopt = true } = {}) {
   const known = tabOfRun(runId)
   if (known) return known
   if (!browser) return null
@@ -309,6 +388,7 @@ export async function findRunTab(browser, runId, workflowId = '', { bySite = tru
     const onSite = host ? pages.filter(p => host.test(p.url())) : []
     if (onSite.length === 1) found = onSite[0]
   }
+  if (found && !adopt) return found   // only to look at (a finished run's live view): nobody's tab
   if (found) {
     _tabs.set(Number(runId), found)
     await setupTab(found, { runId: Number(runId) }).catch(() => {})
@@ -327,7 +407,7 @@ export function runsWithTabs() {
  * Submit) gets the same tab back when it resumes; otherwise a free tab on its
  * site, else a new tab. The run then goes to the page it needs by itself.
  */
-export async function openRunTab(browser, runId, { workflowId = '', busyRuns = new Set(), space = null } = {}) {
+export async function openRunTab(browser, runId, { workflowId = '', busyRuns = new Set(), keepRuns = null, space = null } = {}) {
   const id = Number(runId)
   const own = tabOfRun(id)
   if (own) {
@@ -337,7 +417,7 @@ export async function openRunTab(browser, runId, { workflowId = '', busyRuns = n
   }
   if (!browser || typeof browser.newPage !== 'function') throw new Error('No browser to open a tab in')
   const free = await oneAtATime(async () => {
-    const p = await findFreeTab(browser, workflowId, busyRuns, space)
+    const p = await findFreeTab(browser, workflowId, busyRuns, space) || (keepRuns && await siteTab(browser, workflowId, keepRuns, space))
     if (p) _tabs.set(id, p)
     return p
   })
@@ -370,9 +450,9 @@ async function letPageGo(page) {
  * For a background check (not a run): a free tab on the site, or a new one.
  * doneWithTab() afterwards closes only a tab the check opened itself.
  */
-export async function borrowTab(browser, workflowId, busyRuns = new Set()) {
+export async function borrowTab(browser, workflowId, busyRuns = new Set(), keepRuns = null) {
   const free = await oneAtATime(async () => {
-    const p = await findFreeTab(browser, workflowId, busyRuns)
+    const p = await findFreeTab(browser, workflowId, busyRuns) || (keepRuns && await siteTab(browser, workflowId, keepRuns))
     if (p) p.__adalBorrowed = true
     return p
   })

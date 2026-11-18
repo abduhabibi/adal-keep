@@ -41,10 +41,17 @@ export function catchDownloads() {
     const href = a.getAttribute('href') || ''
     if (!href || href === '#') return
     e.preventDefault()
-    const name = a.getAttribute('download') || decodeURIComponent((href.split('?')[0].split('/').pop() || 'file'))
+    let name = a.getAttribute('download') || decodeURIComponent((href.split('?')[0].split('/').pop() || 'file'))
+    // A CV link (/api/cv/generated/12/view): its name, not "view".
+    if (/^(view|download)$/.test(name)) name = a.dataset.name || a.getAttribute('title') || 'CV'
     import('react-hot-toast').then(({ default: toast }) => {
       const t = toast.loading('Saving to Downloads…')
-      blobOf(href).then(b => b ? saveOnPhone(b, name) : Promise.reject(new Error('This file cannot be saved here')))
+      Promise.race([blobOf(href), new Promise((_, no) => setTimeout(() => no(new Error('The internet is too slow right now — try again.')), 60000))])
+        .then(b => {
+          if (!b) throw new Error('This file cannot be saved here')
+          if (/pdf/i.test(b.type) && !/\.pdf$/i.test(name)) name += '.pdf'
+          return saveOnPhone(b, name)
+        })
         .then(() => toast.success(`Saved: Downloads/Adal Keep/${name}`, { id: t, duration: 5000 }))
         .catch(err => toast.error(err?.response?.data?.error || err.message || 'Not saved', { id: t }))
     })

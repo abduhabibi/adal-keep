@@ -53,6 +53,12 @@ export default function SettingsPage() {
   // (Backups and software updates are the PC's too: the phone's own update is in This phone.)
   const TABS = window.__ADAL_CLOUD || isPhoneView() ? SETTINGS_TABS.filter(([id]) => id !== 'transitions' && !(isPhoneView() && id === 'backup')) : SETTINGS_TABS
   const tab = TABS.some(([id]) => id === asked) ? asked : 'agency'
+  // "Connect WhatsApp" buttons: straight to its card.
+  useEffect(() => {
+    if (params.get('tab') !== 'whatsapp') return
+    const t = setTimeout(() => document.getElementById('whatsapp')?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 600)
+    return () => clearTimeout(t)
+  }, [params])
   const setTab = (id) => { setParams(id === 'agency' ? {} : { tab: id }, { replace: true }); window.scrollTo({ top: 0 }) }
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -292,8 +298,8 @@ export default function SettingsPage() {
       {tab === 'integrations' && <>
       {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Musaned code"><MusanedCodesCard /></ErrorBoundary>}
       {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="EPRO signature"><EproSignatureCard /></ErrorBoundary>}
-      {import.meta.env.VITE_DEMO !== '1' && !isPhoneView() && <ErrorBoundary small name="WhatsApp"><WhatsAppCard /></ErrorBoundary>}
-      {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Photo refining keys"><AiKeysCard /></ErrorBoundary>}
+      {import.meta.env.VITE_DEMO !== '1' && <div id="whatsapp" className="scroll-mt-20"><ErrorBoundary small name="WhatsApp"><WhatsAppCard /></ErrorBoundary></div>}
+      {import.meta.env.VITE_DEMO !== '1' && !isPhoneView() && <ErrorBoundary small name="Photo refining keys"><AiKeysCard /></ErrorBoundary>}
       {import.meta.env.VITE_DEMO !== '1' && !isPhoneView() && <ErrorBoundary small name="Telegram"><TelegramChannelCard /></ErrorBoundary>}
       </>}
       {tab === 'transitions' && import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Transitions"><TransitionsCard /></ErrorBoundary>}

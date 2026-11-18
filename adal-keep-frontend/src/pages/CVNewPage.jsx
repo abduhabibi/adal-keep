@@ -18,7 +18,7 @@ function fatherFull(p = {}) {
   const base = String(p.father_name || p.middle_name || '').trim()
   const sur = String(p.last_name || '').trim()
   if (!base) return ''
-  return sur && !base.toUpperCase().split(/s+/).includes(sur.toUpperCase()) ? `${base} ${sur}` : base
+  return sur && !base.toUpperCase().split(/\s+/).includes(sur.toUpperCase()) ? `${base} ${sur}` : base
 }
 function emergencyName(p = {}) {
   const e = String(p.emergency_name || '').trim()

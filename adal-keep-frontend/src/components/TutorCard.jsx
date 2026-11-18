@@ -28,6 +28,8 @@ let touring = false
 async function runTour(navigate, page, force = false) {
   if (touring) return
   if (import.meta.env.VITE_ADMIN === '1' && !force) return   // Adal Keep Admin: no tour
+  // The phone: no tour (its tips are about the PC's keys and windows).
+  if ((import.meta.env.VITE_PHONE === '1' || /AdalKeepPhone/.test(navigator.userAgent || '')) && !force) return
   touring = true
   try {
     const { data } = await api.get('/tutor/tour', { params: { who: whoAmI(), page } })

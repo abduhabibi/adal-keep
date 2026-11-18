@@ -317,9 +317,31 @@ export default function LiveTab({ runId, fill = false, startFull = false, onClos
 
 // ------------------------------------------------------------ the light page
 function Mirror({ page, send, className }) {
-  const blocks = page.blocks || []
+  // While the run moves to its next page the tab is briefly empty: the last
+  // page stays (and where the person had scrolled to), not a blank box.
+  const kept = useRef(null)
+  if (page.blocks?.length) kept.current = page
+  const shown = page.blocks?.length ? page : kept.current || page
+  const loading = shown !== page
+  const blocks = shown.blocks || []
   const box = useRef(null)
   const firstUrl = useRef(null)
+  const touched = useRef(0)           // when the person last scrolled here
+  const atEnd = useRef(false)         // at the bottom: stays there as the page grows
+  const [down, setDown] = useState(false)
+  const onScroll = () => {
+    const el = box.current; if (!el) return
+    const end = el.scrollHeight - el.scrollTop - el.clientHeight < 48
+    atEnd.current = end
+    setDown(!end && el.scrollHeight > el.clientHeight * 1.5)
+  }
+  const mark = () => { touched.current = Date.now() }
+  const toEnd = () => { const el = box.current; if (el) { el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' }); atEnd.current = true } }
+  useEffect(() => {
+    const el = box.current; if (!el) return
+    if (atEnd.current) el.scrollTop = el.scrollHeight
+    onScroll()
+  })
   // What the page needs from a person: its error words, captchas, required
   // fields still empty, the field it is waiting in.
   const needs = []
@@ -327,7 +349,7 @@ function Mirror({ page, send, className }) {
     if (b.k === 't' && b.err) needs.push([i, '⚠️ ' + b.text.slice(0, 60)])
     else if (b.k === 'shot' && (b.frame || /captcha|robot|verif|code/i.test(b.label || ''))) needs.push([i, b.frame ? '🧩 ' + (b.label || 'Check box') : '🔤 ' + (b.label || 'Picture code')])
     else if ((b.k === 'input' || b.k === 'textarea' || b.k === 'select') && b.req && !b.value && !b.dis) needs.push([i, '✏️ ' + (b.label || 'Empty field')])
-    else if (b.id && b.id === page.focus && b.k !== 'button' && b.k !== 'link') needs.push([i, '👉 ' + (b.label || 'Here')])
+    else if (b.id && b.id === shown.focus && b.k !== 'button' && b.k !== 'link') needs.push([i, '👉 ' + (b.label || 'Here')])
   })
   const jump = (i) => {
     const el = box.current?.querySelector(`[data-i="${i}"]`)
@@ -337,11 +359,15 @@ function Mirror({ page, send, className }) {
   }
   // A new page: start at what it needs (or the top).
   useEffect(() => {
-    if (firstUrl.current === page.url) return
-    firstUrl.current = page.url
+    if (firstUrl.current === shown.url) return
+    const first = firstUrl.current === null
+    firstUrl.current = shown.url
+    // Not while the person is scrolling here: the run's own moves do not pull them away.
+    if (!first && Date.now() - touched.current < 8000) return
+    atEnd.current = false
     if (needs.length) setTimeout(() => jump(needs[0][0]), 100)
     else box.current?.scrollTo({ top: 0 })
-  }, [page.url])  // eslint-disable-line react-hooks/exhaustive-deps
+  }, [shown.url])  // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!blocks.length) return <p className="text-xs text-slate-500 p-4 text-center">The page is empty or still loading.</p>
   // Buttons side by side wrap into one row, like the website's own bar.
@@ -353,7 +379,8 @@ function Mirror({ page, send, className }) {
     else rows.push(small ? { row: true, items: [[b, i]] } : { items: [[b, i]] })
   })
   return (
-    <div ref={box} className={className}>
+    <div ref={box} className={`relative ${className}`} onScroll={onScroll} onTouchStart={mark} onWheel={mark} onPointerDown={mark}>
+      {loading && <div className="sticky top-0 z-20 mb-1 h-0.5 overflow-hidden rounded bg-indigo-100 dark:bg-indigo-900"><div className="h-full w-1/3 animate-pulse bg-indigo-500" /></div>}
       {needs.length > 0 && (
         <div className="sticky top-0 z-10 -mx-0.5 mb-1.5 flex gap-1.5 overflow-x-auto bg-amber-50/95 dark:bg-amber-950/90 backdrop-blur px-1.5 py-1.5 rounded-lg">
           <span className="shrink-0 self-center text-[10px] font-bold uppercase text-amber-800 dark:text-amber-300">Needs you</span>
@@ -366,8 +393,14 @@ function Mirror({ page, send, className }) {
       <div className="space-y-1.5 text-sm px-0.5 pb-16">
         {rows.map((r, n) => r.row
           ? <div key={n} className="flex flex-wrap gap-1.5">{r.items.map(([b, i]) => <div key={b.id || i} data-i={i} className="rounded-lg"><Block b={b} send={send} focus={false} /></div>)}</div>
-          : r.items.map(([b, i]) => <div key={b.id ? `e${b.id}` : `t${i}`} data-i={i} className="rounded-lg"><Block b={b} send={send} focus={page.focus === b.id} /></div>))}
+          : r.items.map(([b, i]) => <div key={b.id ? `e${b.id}` : `t${i}`} data-i={i} className="rounded-lg"><Block b={b} send={send} focus={shown.focus === b.id} /></div>))}
       </div>
+      {down && (
+        <div className="sticky bottom-2 z-20 h-0 flex justify-end pr-1">
+          <button type="button" onClick={toEnd} aria-label="To the bottom"
+            className="-translate-y-12 h-11 w-11 rounded-full bg-indigo-600 text-white text-xl shadow-lg active:scale-95">↓</button>
+        </div>
+      )}
     </div>
   )
 }

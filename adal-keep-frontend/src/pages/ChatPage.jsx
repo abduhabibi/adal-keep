@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 import api from '../services/api'
 import { cachedGet } from '../lib/deviceCache'
-import { onBack } from '../lib/phoneApp'
+import { onBack, IN_PHONE_APP } from '../lib/phoneApp'
 import VoiceNote from '../components/VoiceNote'
 import { isSharedProfile, cleanBody } from '../lib/chatBody'
 
@@ -499,13 +499,13 @@ export default function ChatPage() {
                           ) : (
                             <>
                               {m.image_path && (
-                                <a href={fileUrl(m.image_path)} target="_blank" rel="noreferrer">
+                                <a href={fileUrl(m.image_path)} target="_blank" rel="noreferrer" download={IN_PHONE_APP ? (m.file_name || 'picture.jpg') : undefined}>
                                   <img src={fileUrl(m.image_path)} alt="" className="my-1 max-h-72 rounded-lg" />
                                 </a>
                               )}
                               {m.kind === 'voice' && m.file_path && <VoiceNote src={fileUrl(m.file_path)} mine={mine} />}
                               {m.kind === 'file' && m.file_path && !isSharedProfile(m) && (
-                                <a href={fileUrl(m.file_path, m.file_name)} target="_blank" rel="noreferrer"
+                                <a href={fileUrl(m.file_path, m.file_name)} target="_blank" rel="noreferrer" download={IN_PHONE_APP ? (m.file_name || 'file') : undefined}
                                   className="my-1 flex items-center gap-3 rounded-lg bg-black/5 px-3 py-2 hover:bg-black/10 dark:bg-white/10">
                                   <span className="text-2xl">📄</span>
                                   <span className="min-w-0"><span className="block truncate text-sm font-semibold">{m.file_name}</span><span className="text-[11px] text-slate-500">{m.file_size ? sizeOf(m.file_size) : ''} · open</span></span>

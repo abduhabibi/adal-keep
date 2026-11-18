@@ -115,7 +115,7 @@ api.interceptors.response.use(
       window.dispatchEvent(new Event('adal-pc-access'))
     }
     if (error.response?.status === 503) {
-      console.error('⚠️ Server is locked due to hardware mismatch.')
+      console.warn('⚠️ Not available right now:', error.config?.url, error.response?.data?.error || '')
     } else if (error.code === 'ERR_NETWORK') {
       console.error('❌ Cannot connect to backend. Is the server running on port 4000?')
     }

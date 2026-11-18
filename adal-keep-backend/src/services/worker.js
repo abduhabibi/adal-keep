@@ -25,7 +25,7 @@ import { decideAgencyActions } from './jev/agencyManager.js'
 import { getActiveEmployee } from './activeEmployee.js'
 import { isAppLocked } from './subscription.js'
 import { plainReason, workflowName, withInternetCheck } from './runOutcome.js'
-import { openRunTab, forgetRunTab, tabOfRun, handTabToPerson, findRunTab, activeRunIds, hostOf, codeBoxUp, spaceForRun } from './tabManager.js'
+import { openRunTab, forgetRunTab, tabOfRun, handTabToPerson, findRunTab, activeRunIds, keepingRunIds, tidySiteTabs, hostOf, codeBoxUp, spaceForRun } from './tabManager.js'
 import { registerTab, unregisterTab, noteLink } from './bandwidth.js'
 import { createRunQueue } from './runQueue.js'
 import { reportRuns } from './busy.js'
@@ -443,7 +443,7 @@ async function runJob(db, job) {
     // Otherwise a free tab already on the site (signed in), else a new one.
     // A portal account other than the main one works in its own browser space (its own sign-in).
     const space = await spaceForRun(db, browser, job).catch(e => { console.warn(`[worker] run #${job.id}: no space of its own (${e.message})`); return null })
-    const page = await openRunTab(browser, job.id, { workflowId: job.workflow_id, busyRuns: await activeRunIds(db), space })
+    const page = await openRunTab(browser, job.id, { workflowId: job.workflow_id, busyRuns: await activeRunIds(db), keepRuns: await keepingRunIds(db), space })
     await executeRun(db, page, job)
   } catch (e) {
     // Could not start at all: no browser, profile deleted, ...
@@ -454,7 +454,12 @@ async function runJob(db, job) {
     try {
       // Done, failed or cancelled: the tab stays open for the person.
       doneWith(job.id, { keepCaptcha: row?.status === 'paused' })
-      if (['cancelled', 'failed', 'done'].includes(row?.status)) forgetRunTab(job.id)
+      if (['cancelled', 'failed', 'done'].includes(row?.status)) {
+        forgetRunTab(job.id)
+        // One tab for the site: the extra ones runs opened there close.
+        const b = await openBrowserIfAny().catch(() => null)
+        if (b) await tidySiteTabs(b, job.workflow_id, await keepingRunIds(db)).catch(() => {})
+      }
       // paused / pending (retry): the tab stays with the run; while a
       // person works in it, file dialogs open normally again.
       else { const t = tabOfRun(job.id); if (t) handTabToPerson(t) }

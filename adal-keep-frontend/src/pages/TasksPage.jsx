@@ -244,7 +244,7 @@ export default function TasksPage() {
                         )}
                       </div>
 
-                      {(() => { try { return JSON.parse(t.payload || '{}').link } catch { return null } })() && (
+                      {!onPhone() && (() => { try { return JSON.parse(t.payload || '{}').link } catch { return null } })() && (
                         <button type="button"
                           onClick={(e) => { e.stopPropagation(); openOutside(JSON.parse(t.payload).link) }}
                           className="mt-2 mr-3 rounded-lg bg-green-600 px-3 py-1 text-xs font-semibold text-white hover:bg-green-700">

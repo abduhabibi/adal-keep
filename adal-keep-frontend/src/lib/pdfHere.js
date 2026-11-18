@@ -10,7 +10,8 @@ const plugin = () => window.Capacitor?.Plugins?.AdalDiscovery
 export async function pdfHere(html, name = 'CV.pdf') {
   const p = plugin()
   if (p?.htmlToPdf) {
-    const r = await p.htmlToPdf({ html })
+    // Never a spinner for ever: an Android that cannot draw it in time prints instead.
+    const r = await Promise.race([p.htmlToPdf({ html }), new Promise(ok => setTimeout(() => ok(null), 45000))]).catch(e => { console.warn('[pdf]', e?.message); return null })
     if (r?.base64) {
       await p.saveFile({ base64: r.base64, name: /\.pdf$/i.test(name) ? name : `${name}.pdf`, mime: 'application/pdf', open: true })
       return 'saved'

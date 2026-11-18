@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom'
 import { useCallback, useEffect, useState } from 'react'
 import PrioritizeButton, { useWaitingFiles } from '../components/PrioritizeButton'
 import { useNavigate, useSearchParams } from 'react-router-dom'
@@ -190,7 +191,7 @@ export default function ProfilesPage() {
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        <div className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto pb-1" role="tablist">
+        <div className="grid w-full grid-cols-5 gap-1 md:flex md:w-auto md:min-w-0 md:flex-1 md:gap-1.5 md:overflow-x-auto md:pb-1" role="tablist">
           {PHASES.map(([k, label, title]) => (
             <button key={k} type="button" role="tab" aria-selected={!searching && phase === k} onClick={() => { setPhase(k); setStep(null) }}
               {...(title ? {
@@ -200,9 +201,9 @@ export default function ProfilesPage() {
                 onDragOver: (e) => { if (dragging && dragging !== title) { e.preventDefault(); e.dataTransfer.dropEffect = 'move' } },
                 onDrop: (e) => { e.preventDefault(); dropOn(title); setDragging(null) },
               } : {})}
-              className={`flex shrink-0 items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-bold transition-colors ${title ? 'cursor-grab active:cursor-grabbing' : ''} ${dragging === title && title ? 'opacity-40' : ''} ${!searching && phase === k ? 'bg-teal-600 text-white shadow' : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:ring-teal-400 dark:bg-slate-900 dark:text-slate-300 dark:ring-slate-700'}`}>
-              {label}
-              <span className={`rounded-full px-1.5 text-xs tabular-nums ${!searching && phase === k ? 'bg-white/25' : 'bg-slate-100 dark:bg-slate-800'}`}>{phaseCounts[k] || 0}</span>
+              className={`flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-xl px-1 py-1.5 text-[11px] leading-tight font-bold transition-colors md:shrink-0 md:flex-row md:gap-2 md:px-3.5 md:py-2 md:text-sm ${title ? 'cursor-grab active:cursor-grabbing' : ''} ${dragging === title && title ? 'opacity-40' : ''} ${!searching && phase === k ? 'bg-teal-600 text-white shadow' : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:ring-teal-400 dark:bg-slate-900 dark:text-slate-300 dark:ring-slate-700'}`}>
+              <span className="max-w-full truncate">{label}</span>
+              <span className={`rounded-full px-1.5 text-[10px] md:text-xs tabular-nums ${!searching && phase === k ? 'bg-white/25' : 'bg-slate-100 dark:bg-slate-800'}`}>{phaseCounts[k] || 0}</span>
             </button>
           ))}
         </div>
@@ -211,7 +212,11 @@ export default function ProfilesPage() {
             {scanning ? '🔎 …' : '🔎 Check now'}
           </Button>
         )}
-        <Button data-tour="new-profile" className="whitespace-nowrap" onClick={() => navigate('/profiles/new')}>+ ፕሮፋይል አክል</Button>
+        {/* On a phone: a round ＋ above the tab bar, always in reach. */}
+        <Button data-tour="new-profile" className="whitespace-nowrap hidden md:inline-flex" onClick={() => navigate('/profiles/new')}>+ ፕሮፋይል አክል</Button>
+        {createPortal(<button type="button" aria-label="ፕሮፋይል አክል" onClick={() => navigate('/profiles/new')}
+          className="md:hidden fixed right-4 z-40 h-14 w-14 rounded-full bg-gradient-to-br from-teal-600 to-indigo-600 text-3xl font-light text-white shadow-xl active:scale-95"
+          style={{ bottom: 'calc(5.5rem + env(safe-area-inset-bottom))' }}>＋</button>, document.body)}
       </div>
 
       <div className="panel mb-4 sm:mb-5 grid grid-cols-[minmax(0,1fr)_auto] gap-2 p-2 sm:p-3 sm:grid-cols-[minmax(0,1fr)_auto] items-center">

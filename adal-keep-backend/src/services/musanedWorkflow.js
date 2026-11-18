@@ -2456,6 +2456,15 @@ async function leaveMusaned(page) {
 }
 
 /** Musaned is signed in as this run's account, or it signs in again as it. */
+/** Musaned shows the account its own way (the agency's full name, other spaces,
+ *  an e-mail …): the same account when one name holds the other. */
+export function sameAccount(who, want) {
+  const norm = (v) => String(v || '').toLowerCase().replace(/@.*$/, '').replace(/[^\p{L}\p{N}]+/gu, '')
+  const w = norm(who)
+  if (!w) return false
+  return want.map(norm).filter(Boolean).some(x => x === w || (Math.min(x.length, w.length) >= 4 && (x.includes(w) || w.includes(x))))
+}
+
 async function checkAccount(page, ctx) {
   const want = [ctx.musaned_username, ctx.musaned_name].map(v => String(v || '').trim().toLowerCase()).filter(Boolean)
   if (!want.length) return true
@@ -2465,7 +2474,7 @@ async function checkAccount(page, ctx) {
     log(ctx, 'Musaned does not show who is signed in', 'warn')
     return true
   }
-  if (want.includes(who)) { log(ctx, `✓ signed in as ${who}`); return true }
+  if (sameAccount(who, want)) { log(ctx, `✓ signed in as ${who}`); return true }
   if (ctx.accountSwitched) throw new Error(`Musaned stays signed in as ${who}, not ${want[0]}`)
   ctx.accountSwitched = true
   log(ctx, `Musaned is signed in as ${who}: logging out in a new tab, to sign in as ${want[0]}`, 'warn')

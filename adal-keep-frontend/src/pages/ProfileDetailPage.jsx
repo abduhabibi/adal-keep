@@ -227,7 +227,7 @@ export default function ProfileDetailPage() {
       <ProfileJourney profileId={id} />
       <ProfileDays profileId={id} />
 
-      {import.meta.env.VITE_DEMO !== '1' && !onPhone() && <WhatsAppSend profile={profile} />}
+      {import.meta.env.VITE_DEMO !== '1' && <WhatsAppSend profile={profile} />}
 
       {(profile.chosen_at || profile.contract_number) && <ContractCard profile={profile} />}
 
@@ -343,7 +343,7 @@ export default function ProfileDetailPage() {
                     </p>
                     <div className="flex gap-1.5 pt-2 border-t border-slate-200 dark:border-slate-700 mt-1">
                       <a
-                        href={`/api/cv/generated/${c.id}/view`}
+                        href={`/api/cv/generated/${c.id}/view`} data-name={`${profile?.full_name || 'CV'}${c.template_name ? ' - ' + c.template_name : ''}.pdf`}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="flex-1 text-center text-[11px] py-1.5 rounded-md bg-teal-600 text-white hover:bg-teal-700"
@@ -351,7 +351,7 @@ export default function ProfileDetailPage() {
                         Preview
                       </a>
                       <a
-                        href={`/api/cv/generated/${c.id}/download`}
+                        href={`/api/cv/generated/${c.id}/download`} data-name={`${profile?.full_name || 'CV'}${c.template_name ? ' - ' + c.template_name : ''}.pdf`}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="flex-1 text-center text-[11px] py-1.5 rounded-md bg-teal-50 text-teal-700 hover:bg-teal-100 dark:bg-teal-900/30 dark:text-teal-400"

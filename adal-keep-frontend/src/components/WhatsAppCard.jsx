@@ -159,7 +159,7 @@ export default function WhatsAppCard() {
     <Card>
       <h2 className="font-display text-lg font-bold mb-1 flex items-center gap-2" translate="no"><span>💬</span> WhatsApp</h2>
       <p className="text-sm text-slate-500 mb-4" translate="no">
-        Everyone links their own WhatsApp here and sends CVs to their own agents in Saudi Arabia (a profile, or CVs → WhatsApp). When Musaned shows who chose her, her CV is taken back from the other agents.
+        Send CVs to your agents — many CVs to many agents at once (Profiles → tick → 💬 WhatsApp). When she is chosen, her CV is taken back from the others.
       </p>
 
       {s.status === 'ready' ? (
@@ -208,8 +208,8 @@ export default function WhatsAppCard() {
           </Button>
           {number && !ask && <p className="text-xs text-slate-500">With +{number} · <button type="button" className="underline" onClick={() => setAsk(true)}>another number</button></p>}
           <p className="text-xs text-slate-500">
-            Your phone gets a WhatsApp notification: tap it, allow, paste the code. It then stays integrated — it signs in afresh by itself every morning and after a restart.
-            {' '}Rather scan a QR? <button type="button" className="underline" onClick={() => connect(false)}>show it here</button>{!window.__ADAL_CLOUD && <> or <button type="button" className="underline" onClick={openWeb}>sign in on web.whatsapp.com</button></>}.
+            WhatsApp sends you a notification: tap it and paste the code (already copied). It stays connected.
+            {!window.__ADAL_CLOUD && <>{' '}Or <button type="button" className="underline" onClick={() => connect(false)}>show a QR</button> · <button type="button" className="underline" onClick={openWeb}>web.whatsapp.com</button></>}
           </p>
           {s.error && <p className="text-sm text-red-600">{s.error}</p>}
         </div>

@@ -137,8 +137,9 @@ function phoneUpdates() {
     busy = true
     btn.textContent = '⬇ Downloading…'; tell({ busy: true })
     try {
-      const r = await plugin.installUpdate({ url: await updateUrl('AdalKeep.apk') })
-      btn.textContent = r?.needsPermission ? '⬆ Allow, then tap here' : `⬆ Update to ${v.versionName}`
+      // A slow line never keeps "Downloading…" up: after 4 minutes it can be tapped again.
+      const r = await Promise.race([plugin.installUpdate({ url: await updateUrl('AdalKeep.apk') }), new Promise(ok => setTimeout(() => ok({ slow: true }), 4 * 60000))])
+      btn.textContent = r?.needsPermission ? '⬆ Allow, then tap here' : r?.slow ? '⬆ Slow internet — tap to try again' : `⬆ Update to ${v.versionName}`
     } catch { btn.textContent = `⬆ Update to ${v.versionName}` }
     busy = false; tell({ busy: false })
   }

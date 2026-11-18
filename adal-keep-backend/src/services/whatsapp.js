@@ -697,21 +697,34 @@ export async function sendCV(db, key, profileId, agentIds, by = '') {
 
 /** Many profiles at once (CVs → WhatsApp), in the background; `bulk[key]` tells how far. */
 export const bulk = {}
+/**
+ * Many CVs to many agents. A send started while one is still going waits its
+ * turn (other girls to other agents, one after another — asked on 2026-11-18).
+ */
 export function sendMany(db, key, profileIds, agentIds, by = '') {
-  if (bulk[key]?.running) throw new Error('Still sending the last ones — wait until it finishes')
   ready(key)
-  const b = bulk[key] = { running: true, total: profileIds.length, done: 0, sent: 0, failed: 0, current: '', errors: [] }
+  const job = { ids: profileIds, agents: agentIds }
+  if (bulk[key]?.running) {
+    const b = bulk[key]
+    b.jobs.push(job)
+    b.total += profileIds.length
+    return b
+  }
+  const b = bulk[key] = { running: true, total: profileIds.length, done: 0, sent: 0, failed: 0, current: '', errors: [], jobs: [job] }
   ;(async () => {
-    for (const id of profileIds) {
-      let name = ''
-      try {
-        name = (await db('profiles').where('id', id).first('full_name'))?.full_name || ''
-        b.current = name
-        const r = await sendCV(db, key, id, agentIds, by)
-        b.sent += r.filter(x => x.ok && !x.already && !x.video).length
-        for (const x of r.filter(x => !x.ok)) { b.failed++; b.errors.push(`${name}: ${x.agent} — ${x.error}`) }
-      } catch (e) { b.failed++; b.errors.push(`${name}: ${e.message}`) }
-      b.done++
+    while (b.jobs.length) {
+      const { ids, agents } = b.jobs.shift()
+      for (const id of ids) {
+        let name = ''
+        try {
+          name = (await db('profiles').where('id', id).first('full_name'))?.full_name || ''
+          b.current = name
+          const r = await sendCV(db, key, id, agents, by)
+          b.sent += r.filter(x => x.ok && !x.already && !x.video).length
+          for (const x of r.filter(x => !x.ok)) { b.failed++; b.errors.push(`${name}: ${x.agent} — ${x.error}`) }
+        } catch (e) { b.failed++; b.errors.push(`${name}: ${e.message}`) }
+        b.done++
+      }
     }
     b.running = false; b.current = ''; b.finished_at = new Date().toISOString()
   })()

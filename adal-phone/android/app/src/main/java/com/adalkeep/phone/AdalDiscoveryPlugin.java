@@ -180,19 +180,41 @@ public class AdalDiscoveryPlugin extends Plugin {
      * htmlToPdf({html}) → { base64 }: the page as an A4 PDF made right here,
      * without the print screen (a CV with the office PC off, asked on 2026-11-15).
      */
+    // Each PDF being made keeps its page alive until it is written (two at once never cancel each other).
+    private final java.util.Set<WebView> making = java.util.Collections.synchronizedSet(new java.util.HashSet<>());
+
     @PluginMethod
     public void htmlToPdf(final PluginCall call) {
         final String html = call.getString("html", "");
+        final android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
         getActivity().runOnUiThread(() -> {
             final WebView w = new WebView(getContext());
+            final boolean[] settled = { false };
+            // The page sits in the window, out of sight (a WebView never attached
+            // never finishes loading, nor runs its timers): A4 wide, invisible.
+            final android.view.ViewGroup root = (android.view.ViewGroup) getActivity().getWindow().getDecorView();
+            final int pw = 794, ph = 1123;
+            android.widget.FrameLayout.LayoutParams lp = new android.widget.FrameLayout.LayoutParams(pw, ph);
+            w.setLayoutParams(lp);
+            w.setTranslationX(-pw * 4f);
+            w.setAlpha(0f);
+            final Runnable finish = () -> { making.remove(w); try { root.removeView(w); } catch (Throwable ignored) { } try { w.destroy(); } catch (Throwable ignored) { } };
+            making.add(w);
+            try { root.addView(w); } catch (Throwable ignored) { }
             w.getSettings().setJavaScriptEnabled(true);
+            // Never waits forever: after 40 s it answers "too slow" (the app then prints instead).
+            main.postDelayed(() -> {
+                synchronized (settled) { if (settled[0]) return; settled[0] = true; }
+                finish.run();
+                call.reject("PDF: too slow");
+            }, 40000);
             w.setWebViewClient(new WebViewClient() {
                 private boolean sent = false;
                 @Override public void onPageFinished(WebView view, String url) {
                     if (sent) return;
                     sent = true;
                     // Its pictures and the page's own fitting (window.adalFit) settle first.
-                    view.postDelayed(() -> {
+                    main.postDelayed(() -> {
                         try {
                             final File out = File.createTempFile("adal-cv", ".pdf", getContext().getCacheDir());
                             PrintAttributes a4 = new PrintAttributes.Builder()
@@ -201,6 +223,7 @@ public class AdalDiscoveryPlugin extends Plugin {
                                 .setMinMargins(PrintAttributes.Margins.NO_MARGINS).build();
                             android.print.AdalPdf.write(view.createPrintDocumentAdapter("Adal Keep CV"), a4, out, new android.print.AdalPdf.Done() {
                                 @Override public void ok(File pdf) {
+                                    synchronized (settled) { if (settled[0]) { pdf.delete(); return; } settled[0] = true; }
                                     try {
                                         byte[] bytes = java.nio.file.Files.readAllBytes(pdf.toPath());
                                         pdf.delete();
@@ -208,15 +231,22 @@ public class AdalDiscoveryPlugin extends Plugin {
                                         r.put("base64", Base64.encodeToString(bytes, Base64.NO_WRAP));
                                         call.resolve(r);
                                     } catch (Exception e) { call.reject(e.getMessage()); }
-                                    printing = null;
+                                    main.post(finish);
                                 }
-                                @Override public void fail(String why) { printing = null; call.reject("PDF: " + why); }
+                                @Override public void fail(String why) {
+                                    synchronized (settled) { if (settled[0]) return; settled[0] = true; }
+                                    main.post(finish);
+                                    call.reject("PDF: " + why);
+                                }
                             });
-                        } catch (Throwable e) { printing = null; call.reject("PDF: " + e.getMessage()); }
+                        } catch (Throwable e) {
+                            synchronized (settled) { if (settled[0]) return; settled[0] = true; }
+                            finish.run();
+                            call.reject("PDF: " + e.getMessage());
+                        }
                     }, 700);
                 }
             });
-            printing = w;
             w.loadDataWithBaseURL("https://localhost/", html, "text/html", "UTF-8", null);
         });
     }

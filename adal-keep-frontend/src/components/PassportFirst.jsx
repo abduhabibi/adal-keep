@@ -54,7 +54,8 @@ export default function PassportFirst({ onRead, onSkip }) {
       // lines, check digits verified, and the place of birth by its position) —
       // no upload, no PC (asked on 2026-11-17).
       if (onPhone() && !import.meta.env.VITE_ADMIN) {
-        const here = await readPassportHere(file).catch(() => null)
+        // Read on the phone; never more than 25 s (then typed in or read by the PC).
+        const here = await Promise.race([readPassportHere(file), new Promise(r => setTimeout(() => r(null), 25000))]).catch(() => null)
         if (here) {
           // The same passport already has a profile: said, not made twice.
           const pn = String(here.fields.passport_number || '').toUpperCase()
@@ -150,20 +151,20 @@ export default function PassportFirst({ onRead, onSkip }) {
               <span className="h-2.5 w-2.5 rounded-full bg-sky-500 animate-pulse" />
               Reading the passport… {secs}s
             </div>
-            <p className="text-xs text-slate-500">
+            {!ON_PHONE && <p className="text-xs text-slate-500">
               {secs < 4 ? 'Asking JEV…' : 'JEV, this PC and Gemini are reading it — the first sure answer fills the form.'}
-            </p>
+            </p>}
           </>
         ) : (
           <>
             <div className="text-5xl">🛂</div>
             <p className="text-lg font-bold text-slate-800 dark:text-slate-100">Start with the passport</p>
-            <p className="max-w-md text-sm text-slate-500 dark:text-slate-400">
+            {ON_PHONE ? <p className="max-w-md text-sm text-slate-500 dark:text-slate-400">የፓስፖርቱን ፎቶ ያንሱ — ቀሪው ራሱ ይሞላል።</p> : <p className="max-w-md text-sm text-slate-500 dark:text-slate-400">
               {/* Amharic as written; English from lib/i18n.js (each piece reads right alone). */}
               የፓስፖርቱን ገጽ እዚህ ይጎትቱ — ከትሪው፣ ከዴስክቶፕ ወይም ከቴሌግራም — ወይም ይለጥፉ: <b>Ctrl+V</b>
               {' — ወይም '}<span className="font-semibold text-teal-700 dark:text-teal-300 underline">ከዚህ ኮምፒውተር ይምረጡ</span>.{' '}
               ስም፣ የፓስፖርት ቁጥር፣ የልደት ቀን፣ ጾታ እና የትውልድ ቦታ ራሳቸው ይሞላሉ።
-            </p>
+            </p>}
           </>
         )}
         <input ref={inputRef} type="file" accept="image/*,.pdf" className="hidden"

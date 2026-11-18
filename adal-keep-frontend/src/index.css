@@ -694,9 +694,12 @@ html.has-wallpaper .gradient-backdrop { display: none !important; }
 @keyframes phone-push { from { transform: translate3d(28%, 0, 0); opacity: .35; } to { transform: none; opacity: 1; } }
 @keyframes phone-pop { from { transform: translate3d(-18%, 0, 0); opacity: .5; } to { transform: none; opacity: 1; } }
 @keyframes phone-fade { from { opacity: .25; } to { opacity: 1; } }
-.phone-push { animation: phone-push .28s cubic-bezier(.2, .8, .2, 1) both; }
-.phone-pop { animation: phone-pop .26s cubic-bezier(.2, .8, .2, 1) both; }
-.phone-fade { animation: phone-fade .16s ease-out both; }
+/* backwards, not both: once a page has slid in it keeps no transform — a kept
+   one would pin every fixed sheet on the page (the ticked girls' bar, pop-ups)
+   to the page's end instead of the screen. */
+.phone-push { animation: phone-push .28s cubic-bezier(.2, .8, .2, 1) backwards; }
+.phone-pop { animation: phone-pop .26s cubic-bezier(.2, .8, .2, 1) backwards; }
+.phone-fade { animation: phone-fade .16s ease-out backwards; }
 /* On a phone, cards press like iPhone cells. */
 @media (max-width: 767px) {
   .panel, .glass-panel { border-radius: 14px; }

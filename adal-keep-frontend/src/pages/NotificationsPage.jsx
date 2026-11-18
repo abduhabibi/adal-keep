@@ -4,6 +4,7 @@ import api from '../services/api'
 import PageHeader from '../components/shared/PageHeader'
 import Spinner from '../components/shared/Spinner'
 import { openOutside } from '../lib/phoneApp'
+import { onPhone } from '../lib/phoneMode'
 
 // The phone app: the same ones leave Android's notifications too.
 const offPhone = (o) => { try { window.Capacitor?.Plugins?.AdalDiscovery?.clearNotices?.(o) } catch {} }
@@ -119,7 +120,7 @@ export default function NotificationsPage() {
                           const link = String(notif.body || '').match(/https:\/\/\S+$/)?.[0]
                           return <>
                             <p className="text-sm text-slate-600 dark:text-slate-300 mt-1">{link ? notif.body.slice(0, -link.length).trim() : notif.body}</p>
-                            {link && <button type="button" onClick={() => openOutside(link)} className="mt-2 rounded-lg bg-green-600 px-3 py-1 text-xs font-semibold text-white hover:bg-green-700">💬 Open WhatsApp</button>}
+                            {link && !onPhone() && <button type="button" onClick={() => openOutside(link)} className="mt-2 rounded-lg bg-green-600 px-3 py-1 text-xs font-semibold text-white hover:bg-green-700">💬 Open WhatsApp</button>}
                           </>
                         })()}
                         <p className="text-xs text-slate-400 dark:text-slate-500 mt-2">

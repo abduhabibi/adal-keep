@@ -71,13 +71,19 @@ export async function gunzipJSON(b64) {
   return JSON.parse(text)
 }
 
+const timeUp = (ms) => { try { return AbortSignal.timeout(ms) } catch { const c = new AbortController(); setTimeout(() => c.abort(), ms); return c.signal } }
+/** A promise that gives up after ms (null instead of waiting for ever). */
+export const within = (p, ms) => Promise.race([p, new Promise(r => setTimeout(() => r(null), ms))])
+
 async function rest(method, p, body, headers = {}) {
   const c = cloudCreds()
   const r = await fetch(`${c.url}${p}`, {
     method,
     headers: { apikey: c.anon, Authorization: `Bearer ${await token()}`, ...(body !== undefined && !(body instanceof Blob) ? { 'Content-Type': 'application/json' } : {}), ...headers },
     body: body === undefined ? undefined : body instanceof Blob ? body : JSON.stringify(body),
-  })
+    // A bad line never leaves a page waiting for ever.
+    signal: timeUp(body instanceof Blob ? 180000 : 25000),
+  }).catch(e => { throw httpError(503, /abort|timeout/i.test(e?.name + e?.message) ? 'The internet is too slow right now — try again.' : 'No internet') })
   if (!r.ok) throw httpError(r.status, (await r.text()).slice(0, 200) || 'Online copy not reachable')
   const t = await r.text()
   return t ? JSON.parse(t) : null
@@ -348,6 +354,10 @@ async function get(path, query) {
     if (/^\/(musaned\/epro-signature|wafid\/check|mobile\/cloud)$/.test(path)) return { phone: true }
     return path === '/whatsapp/bulk' || path === '/whatsapp/notify' ? { running: false } : []
   }
+  // What runs are doing (only the PC knows): with the PC off, none — at once, no error.
+  if (data === undefined && /^\/(automations\/(active|ready-for-submit)|tasks\/reading)$/.test(path)) return []
+  if (data === undefined && path === '/automations/stages') return {}
+  if (data === undefined && path === '/settings/journey-order') return { order: [] }
   if (data === undefined) throw httpError(503, 'This needs the PC — it is not in the online copy.')
   return data
 }
@@ -451,11 +461,12 @@ async function change(method, path, body) {
   // A new profile: there at once, with this phone's own number until the PC makes her.
   const makes = method === 'post' && (path === '/profiles' || path === '/new-profile/with-passport')
   if (makes) {
-    const ref = -Date.now()
+    // Her number on this phone: the same one the PC was asked with (made once only).
+    const ref = Number(body instanceof FormData ? body.get('phone_ref') : body?.phone_ref) || -Date.now()
     let fields = body
     if (body instanceof FormData) {
       try { fields = JSON.parse(body.get('profile') || '{}') } catch { fields = {} }
-      body.append('phone_ref', String(ref))
+      body.set('phone_ref', String(ref))
       const file = body.get('file')
       if (file instanceof Blob) await keepHere(ref, -1, 'Passport', file, true)
       await request('upload', { path, ...(await uploadParts(body)) }, null)
@@ -621,6 +632,11 @@ export async function cloudAdapter(config) {
   // then everything about her stays on this phone (and waits for the PC in order).
   let onlyHere = false
   if (/^\/profiles\/-\d+/.test(path)) { const r = realPathOf(path); if (r) path = r; else onlyHere = true }
+  else if (/\/-\d+(\/|$)/.test(path)) {
+    // Any other page about her (/cv/profile-readiness/-123 …): the same.
+    const m = path.match(/\/(-\d+)(?=\/|$)/); const r = realId(m[1])
+    if (r) path = path.replace(m[0], `/${r}`); else onlyHere = true
+  }
   if (body && typeof body === 'object' && !(body instanceof FormData) && isNew(body.profile_id)) {
     const r = realId(body.profile_id); if (r) body = { ...body, profile_id: r }; else onlyHere = true
   }
@@ -648,7 +664,21 @@ export async function cloudAdapter(config) {
       const keys = await vaultSoon().then(v => v['/musaned-totp']).catch(() => null)
       if (keys && Object.keys(keys).length) { const { codesOf } = await import('../lib/totp.js'); return reply(200, await codesOf(keys)) }
     }
+    // A CV is drawn on this phone at once, from its own copy (no wait for the PC,
+    // never made twice); the PC files the same CV when it hears of it. Only when
+    // the phone cannot draw it (a template it does not have yet) the PC is asked.
+    if (method === 'post' && /^\/cv\/(preview|generate)$/.test(path) && window.Capacitor?.Plugins?.AdalDiscovery?.htmlToPdf) {
+      const here = await within(change(method, path, body).catch(e => { if (e.response?.status === 400) throw e; console.warn('[cv] not drawn here:', e.message); return null }), 25000)
+      if (here) return reply(200, here)
+    }
     if (method !== 'get') { markDirty(path); dropTasks(method, path, body) }
+    // A new profile gets this phone's number for her before the PC is asked: if
+    // the PC answers late and she is also kept for later, the PC makes her once.
+    if (method === 'post' && (path === '/profiles' || path === '/new-profile/with-passport') && !onlyHere) {
+      const ref = -Date.now()
+      if (body instanceof FormData) { if (!body.get('phone_ref')) body.set('phone_ref', String(ref)) }
+      else if (body && typeof body === 'object' && !body.phone_ref) body = { ...body, phone_ref: ref }
+    }
     // A new profile with her passport can wait online when the PC does not answer
     // (the PC makes it when it is back; it never makes two).
     const canWait = method === 'post' && path === '/new-profile/with-passport'
@@ -750,7 +780,7 @@ function vaultSoon() {
 async function fetchBytes(url) {
   const H = window.Capacitor?.Plugins?.CapacitorHttp
   if (H && window.Capacitor?.isNativePlatform?.()) {
-    const r = await H.request({ url, method: 'GET', responseType: 'arraybuffer' })
+    const r = await H.request({ url, method: 'GET', responseType: 'arraybuffer', connectTimeout: 15000, readTimeout: 45000 })
     if (r.status >= 400) throw new Error(`HTTP ${r.status}`)
     // Files come as base64; a JSON answer comes already read (an object).
     if (typeof r.data === 'string') return Uint8Array.from(atob(r.data), ch => ch.charCodeAt(0))
@@ -759,7 +789,7 @@ async function fetchBytes(url) {
   }
   // An employee PC's Adal Keep (adal-launcher/online.go) fetches Telegram's files for the page.
   const viaPC = location.port === '47801' && /^https:\/\/api\.telegram\.org\//.test(url)
-  const r = await fetch(viaPC ? `/tg?u=${encodeURIComponent(url)}` : url)
+  const r = await fetch(viaPC ? `/tg?u=${encodeURIComponent(url)}` : url, { signal: timeUp(60000) })
   if (!r.ok) throw new Error(`HTTP ${r.status}`)
   return new Uint8Array(await r.arrayBuffer())
 }
@@ -834,7 +864,7 @@ async function signedUrl(fileId) {
         const c = cloudCreds()
         const s = await rest('POST', `/storage/v1/object/sign/keep/${rows[0].object}`, { expiresIn: 6 * 3600 })
         if (!s?.signedURL) return null
-        const r = await fetch(`${c.url}/storage/v1${s.signedURL.startsWith('/') ? '' : '/'}${s.signedURL}`)
+        const r = await fetch(`${c.url}/storage/v1${s.signedURL.startsWith('/') ? '' : '/'}${s.signedURL}`, { signal: timeUp(60000) })
         if (!r.ok) return null
         blob = await r.blob()
         if (rows[0].mimetype && !blob.type) blob = new Blob([blob], { type: rows[0].mimetype })

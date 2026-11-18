@@ -3,7 +3,7 @@ import { Account, useMusanedCodes } from './MusanedAuthenticatorCard'
 import { IN_PHONE_APP, onBack } from '../lib/phoneApp'
 import { useCallback, useEffect, useState, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { openOnPhone, portalOf } from '../lib/phoneTask'
+import { portalOf } from '../lib/phoneTask'
 import { useNavigate, useLocation } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import api from '../services/api'
@@ -133,7 +133,6 @@ export default function ProfileAutomations({ profileId }) {
   const foldAI = () => setAiOpen(o => { try { localStorage.setItem('adal-fold-ai', o ? '0' : '1') } catch {} return !o })
   const [open, setOpen] = useState(null)
   const [screen, setScreen] = useState(false)     // the phone's full-screen task view
-  const [choose, setChoose] = useState(null)      // phone: do this step here, or let the PC do it?
   const [pcOn, setPcOn] = useState(false)
   useEffect(() => {
     if (!window.__ADAL_CLOUD) return
@@ -142,7 +141,6 @@ export default function ProfileAutomations({ profileId }) {
     window.addEventListener('adal-pc-online', on)
     return () => window.removeEventListener('adal-pc-online', on)
   }, [])
-  useEffect(() => choose ? onBack(() => setChoose(null)) : undefined, [choose])
   const navigate = useNavigate()
   // Runs calling for a person now (a sign-in, a reCAPTCHA …): their tab shows by itself.
   const [calling, setCalling] = useState(() => new Set())
@@ -247,16 +245,6 @@ export default function ProfileAutomations({ profileId }) {
   }, [open])
 
   const wfName = (id) => workflows.find(w => w.id === id)?.name || id
-
-  // The step on this phone: its website opens here, the sign-in filled.
-  const doOnPhone = async (workflowId) => {
-    setChoose(null)
-    const t = toast.loading('Opening on this phone…')
-    try {
-      const r = await openOnPhone({ workflowId, profileId, accountId: accountFor(workflowId), title: wfName(workflowId) })
-      toast.success(r.signIn ? 'Sign-in filled — press the site\'s Sign in' : 'Opened on this phone', { id: t, duration: 4000 })
-    } catch (e) { toast.error(e.message, { id: t }) }
-  }
 
   // Musaned workflows use the Musaned account picker; everything else LMIS.
   const accountFor = (workflowId) =>
@@ -379,7 +367,8 @@ export default function ProfileAutomations({ profileId }) {
                   const live = await import('../cloud/live.js').then(L => L.pcLive()).catch(() => false)
                   setPcOn(live)
                   if (live && !(isDone && !REPEATABLE.has(w.id))) return start(w.id)
-                  if (!live) return setChoose(w.id)
+                  // The PC off: it waits for the PC (the phone opens no website itself).
+                  if (!live) return start(w.id)
                 }
                 // Checking again is normal: a done check simply runs again.
                 if ((isDone || notChosen) && REPEATABLE.has(w.id)) return start(w.id)
@@ -762,20 +751,6 @@ export default function ProfileAutomations({ profileId }) {
           {controls()}
         </div>,
         document.body)}
-      {choose && createPortal(
-        <div className="fixed inset-0 z-[96] bg-black/40 flex items-end" onClick={() => setChoose(null)}>
-          <div className="w-full rounded-t-2xl bg-white dark:bg-slate-900 p-4 space-y-2.5" style={{ paddingBottom: 'calc(16px + env(safe-area-inset-bottom))' }} onClick={e => e.stopPropagation()}>
-            <p className="font-bold">{wfName(choose)}</p>
-            <button onClick={() => { const w = choose; setChoose(null); start(w) }} className="w-full rounded-xl border border-slate-300 dark:border-slate-600 py-3 text-sm font-semibold text-left px-4">
-              💻 The PC does it<span className="block text-[11px] font-normal text-slate-500">{pcOn ? 'It starts now on the office PC; you watch it here' : 'The office PC is off — it starts when the PC is on'}</span>
-            </button>
-            <button onClick={() => doOnPhone(choose)} className="w-full rounded-xl bg-indigo-600 text-white py-3 text-sm font-semibold text-left px-4">
-              📱 Do it on this phone<span className="block text-[11px] font-normal opacity-90">Its website opens here, signed in for you — only phone and internet</span>
-            </button>
-            <button onClick={() => setChoose(null)} className="w-full py-2 text-sm text-slate-500">Cancel</button>
-          </div>
-        </div>,
-        document.body)}
       {screen && open && !(detail && detail.id === open) && createPortal(
         <div className="fixed inset-0 z-[95] flex flex-col items-center justify-center gap-3 bg-white dark:bg-slate-950 text-sm text-slate-500">
           <div className="w-8 h-8 rounded-full border-4 border-indigo-200 border-t-indigo-600 animate-spin" />
@@ -804,7 +779,7 @@ export default function ProfileAutomations({ profileId }) {
                   <button onClick={() => { complete(); setScreen(false) }} className="shrink-0 px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-semibold">{COMPLETE_LABEL[detail.pause_reason]}</button>
                 )}
                 <button onClick={cancel} className="shrink-0 px-3 py-1.5 rounded-lg border border-red-300 text-red-600 text-xs font-semibold">{cancelArmed ? 'Tap again to cancel' : 'Cancel'}</button>
-                {portalOf(detail.workflow_id) && <button onClick={() => doOnPhone(detail.workflow_id)} className="shrink-0 px-3 py-1.5 rounded-lg border border-indigo-300 text-indigo-700 text-xs font-semibold">📱 On this phone</button>}
+                
               </div>
             )}
           </div>

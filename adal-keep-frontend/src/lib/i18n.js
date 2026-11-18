@@ -19,6 +19,7 @@ export function setLang(lang) {
 }
 
 const EN = {
+  'የፓስፖርቱን ፎቶ ያንሱ — ቀሪው ራሱ ይሞላል።': 'Take a photo of the passport — the rest fills in by itself.',
   'ካቆሙበት ይቀጥሉ': 'Continue where you left off',
   'ለመስራት ተግባሮች': 'Tasks to do',
   'ገጽ': 'Page',

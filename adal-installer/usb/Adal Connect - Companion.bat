@@ -1,5 +1,5 @@
 @echo off
-REM Adal Connect - Companion: lets Adal support reach this PC (SSH + Tailscale)
+REM Adal Connect - Companion: lets Adal support reach this PC (SSH)
 REM and opens the Adal Keep ports on every network type. Asks once for admin.
 title Adal Connect
 set "USBROOT=%~dp0"

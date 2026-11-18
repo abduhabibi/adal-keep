@@ -276,7 +276,7 @@ export const COLOR_PAIRS = [
 
 // Every design fills the A4 page (see DESIGN_FILL): the full-body photo's frame
 // takes the room left under the other blocks, so nothing runs past the page.
-const FILL = `.fb img{object-fit:contain!important}`
+const FILL = `.fb img{object-fit:cover!important;object-position:center top!important}`
 // The full-body frame's height in px per design, so the page is exactly A4 (measured).
 const DESIGN_FILL = { classic: 643, sidebar: 741, ribbon: 681, cards: 562, elegant: 824, diagonal: 529 }
 

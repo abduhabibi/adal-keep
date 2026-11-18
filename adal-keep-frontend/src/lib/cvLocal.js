@@ -280,6 +280,9 @@ body{background:#fff!important;}
 .body-photo img{position:absolute;left:0;top:0;width:100%!important;height:100%!important;max-width:none!important;max-height:none!important;object-fit:contain!important;}
 /* Her photos are never cut: every picture on the CV shows whole in its box (asked on 2026-11-13). */
 img{object-fit:contain!important;object-position:center!important;}
+/* A design (.cv): the photos fill their frames, edge to edge (asked on 2026-11-18). */
+.cv .ph img,.cv .fb img{width:100%!important;height:100%!important;object-fit:cover!important;object-position:center top!important;}
+.cv{margin:0 auto;}
 `
 // Templates whose photos were capped small (Al-Shahd and those made like it).
 const WIDE_PHOTOS_CSS = `
@@ -296,7 +299,26 @@ const WIDE_PHOTOS_CSS = `
 // tall for A4 first loses cell padding, then shrinks its body; one that fits is
 // left alone.
 const FIT_SCRIPT = `<script>(function(){
+function fitDesign(){
+  // A page made from a design (.cv): its full-body photo frame takes exactly the
+  // room the header and the other blocks leave, so the design fills the whole
+  // A4 page at full width — never shrunk to fit (that left the right side empty).
+  var p=document.querySelector('.adal-page'),b=p&&p.querySelector('.adal-body'),fb=b&&b.querySelector('.cv .fb');
+  if(!fb||p.dataset.fitted)return false;p.dataset.fitted='1';
+  var limit=Math.floor(297*96/25.4),min=Math.round(45*96/25.4);
+  for(var i=0;i<3;i++){
+    var top=p.getBoundingClientRect().top,last=b.lastElementChild,bottom=0;
+    for(var c=b.firstElementChild;c;c=c.nextElementSibling)bottom=Math.max(bottom,c.getBoundingClientRect().bottom-top);
+    var d=limit-2-Math.ceil(bottom);if(Math.abs(d)<2)break;
+    var h=Math.max(min,fb.getBoundingClientRect().height+d);fb.style.setProperty('height',h+'px','important');
+    if(h===min)break;
+  }
+  var z=100;while(z>70&&b.scrollHeight>limit+1){z-=3;b.style.zoom=z/100}
+  p.style.height='297mm';p.style.maxHeight='297mm';p.style.overflow='hidden';
+  return true;
+}
 function fit(){
+  if(fitDesign())return;
   var p=document.querySelector('.cv-page');if(!p||p.dataset.fitted)return;p.dataset.fitted='1';
   var limit=Math.floor(297*96/25.4)+1,tall=function(){return p.scrollHeight>limit};
   var st=document.createElement('style');document.head.appendChild(st);

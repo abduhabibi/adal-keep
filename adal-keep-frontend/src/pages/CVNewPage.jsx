@@ -820,8 +820,10 @@ export default function CVNewPage() {
                     el.addEventListener('blur', done, { once: true })
                     el.addEventListener('keydown', (k) => { if (k.key === 'Enter' && !k.shiftKey) { k.preventDefault(); el.blur() } if (k.key === 'Escape') { el.textContent = before; el.blur() } })
                   })
-                  const k = f.clientWidth / Math.max(d.documentElement.scrollWidth, d.body?.scrollWidth || 0)
-                  if (k > 0 && k < 1) d.documentElement.style.zoom = String(Math.max(0.3, k))
+                  // The A4 page fills the preview's width, bigger or smaller (it used to stay
+                  // at its own size on a wide screen, leaving the right side empty).
+                  const k = (f.clientWidth - 24) / 794 // 794 px = A4 width (210 mm)
+                  if (k > 0) d.documentElement.style.zoom = String(Math.min(2.5, Math.max(0.3, k)))
                 } catch {}
               }}
             />

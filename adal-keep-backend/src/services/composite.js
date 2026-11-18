@@ -10,6 +10,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import sharp from 'sharp'
+import { labourIdFrom } from './labourId.js'
 
 export const PARTS = {
   passport: 'The passport scan: the whole open passport with its data page (her small printed photo, name, dates and the two machine-readable lines at the bottom). Not the separate photos of the woman beside it.',
@@ -97,6 +98,15 @@ export async function splitComposite(filePath, { find = null, anyShape = false }
     const file = path.join(dir, `${k}.jpg`)
     await sharp(png).extract({ left, top, width: right - left, height: bottom - top }).jpeg({ quality: 93 }).toFile(file)
     out[k] = file
+  }
+  // The Labour ID in red on the passport: read here, taken off the passport.
+  out.labourId = null
+  out.labourIdFile = null
+  if (out.passport) {
+    try {
+      const lab = await labourIdFrom(out.passport, dir)
+      if (lab) { out.labourId = lab.text; out.labourIdFile = lab.file; out.passport = lab.passport }
+    } catch (e) { console.warn('[composite] labour ID:', e.message) }
   }
   return out
 }

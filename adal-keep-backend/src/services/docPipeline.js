@@ -337,8 +337,14 @@ export async function runPipeline(filePath, db, analyzer, tag = '[pipeline]', op
           for (const [k, field] of [['photo', 'Photo'], ['fullbody', 'Full Body Photo']]) {
             if (parts[k] && await fileInto(db, profileId, field, parts[k], `${k}-${filename.replace(/\.[^.]+$/, '')}.jpg`)) log(`${field} filed from the same picture (profile #${profileId})`)
           }
+          // The red Labour ID: its number goes into Labor ID when empty, and its picture into Labour ID.
+          if (parts.labourId) {
+            const row = await db('profiles').where({ id: profileId }).first()
+            if (row && !String(row.labor_id || '').trim()) { await db('profiles').where({ id: profileId }).update({ labor_id: parts.labourId }); log(`Labor ID ${parts.labourId} read from the passport (profile #${profileId})`) }
+          }
+          if (parts.labourIdFile && await fileInto(db, profileId, 'Labour ID', parts.labourIdFile, `labour-id-${filename.replace(/\.[^.]+$/, '')}.jpg`)) log(`Labour ID picture filed (profile #${profileId})`)
         }
-        return { ...r, parts: ['passport', 'photo', 'fullbody'].filter(k => parts[k]) }
+        return { ...r, parts: ['passport', 'photo', 'fullbody', 'labourId'].filter(k => parts[k]) }
       } finally { fs.rmSync(parts.dir, { recursive: true, force: true }) }
     }
     if (parts?.dir) fs.rmSync(parts.dir, { recursive: true, force: true })

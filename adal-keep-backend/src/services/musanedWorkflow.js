@@ -2701,10 +2701,10 @@ async function waitForPersonCaptcha(page, ctx) {
         const b = document.querySelector('#kc-login') || document.querySelector('button[type="submit"], input[type="submit"]')
         b?.click()
       }).catch(() => {})
-      await sleep(3000)
+      await sleep(1000)
       return 'submitted'
     }
-    await sleep(1000)
+    await sleep(400)
   }
   log(ctx, 'nobody ticked "I\'m not a robot" within 10 minutes', 'warn')
   return 'timeout'
@@ -2723,7 +2723,7 @@ async function passOtp(page, ctx) {
     let screen = 'otp'
     const until = Date.now() + 20000
     // "unknown" is Musaned's page between the code and the dashboard: still going.
-    while (Date.now() < until && ['otp', 'unknown'].includes(screen)) { await sleep(1500); screen = (await classifyScreen(page, ctx)).screen }
+    while (Date.now() < until && ['otp', 'unknown'].includes(screen)) { await sleep(700); screen = (await classifyScreen(page, ctx)).screen }
     if (screen === 'agency-picker') { await stepClickAgencyCard(page, ctx); screen = await waitForDashboard(page, ctx, 30000) }
     else if (screen === 'landing') { await stepClickGoToDashboard(page, ctx); screen = await waitForDashboard(page, ctx, 30000) }
     if (screen !== 'otp') {

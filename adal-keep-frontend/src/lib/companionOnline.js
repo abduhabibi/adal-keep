@@ -31,11 +31,42 @@ function watchMainPC() {
   }, 8000)
 }
 
+/** This window is an Adal Companion's: the main PC's page in it, or its own online pages. Never the main PC. */
+export function inCompanion() {
+  if (typeof window === 'undefined') return false
+  if (location.host === '127.0.0.1:47801') return true
+  if (['localhost', '127.0.0.1', '[::1]'].includes(location.hostname) || window.__ADAL_CLOUD) return false
+  return get(IS) === '1' || new URLSearchParams(location.search).has('adal_companion')
+}
+
+/**
+ * "Log out of this main PC / Connect to another PC": this main PC lets go of
+ * this Companion (its key, when it came in with one), the window forgets it,
+ * and the Companion's own page (127.0.0.1:47801/forget, adal-launcher/leave.go)
+ * stops its online account, clears companion.conf and opens the page to choose
+ * another main PC. The caller asks "Are you sure?" first.
+ */
+export async function leaveMainPC() {
+  if (location.host === '127.0.0.1:47801') { location.href = '/forget'; return }
+  try { await api.post('/pc-access/leave', {}) } catch {}
+  for (const k of [IS, DONE, TRIED]) { try { localStorage.removeItem(k) } catch {} }
+  // With this page's address as the referrer (the server sends none by
+  // default): that is how the Companion's page knows the main PC's window
+  // sent it here, already asked — not another website.
+  const a = document.createElement('a')
+  a.href = `${ONLINE}/forget?from=${encodeURIComponent(location.origin)}`
+  a.referrerPolicy = 'origin'
+  document.body.appendChild(a)
+  a.click()
+}
+
 export async function shareOnlineCopy() {
   if (typeof window === 'undefined' || window.__ADAL_CLOUD) return
   if (['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)) return   // the main PC itself
   const q = new URLSearchParams(location.search)
   if (q.has('adal_companion')) set(IS, '1')
+  // Chosen again after a log out ("Connect to another PC"): a fresh pairing.
+  if (q.has('adal_repair')) { try { localStorage.removeItem(DONE); localStorage.removeItem(TRIED) } catch {} }
   // Not kept there ("no": the Companion's own online pages are for another
   // Supabase): asked again in 6 hours, not at once — that went round and round,
   // the window reloading every few seconds.
@@ -43,8 +74,8 @@ export async function shareOnlineCopy() {
     if (q.get('adal_online') === 'ok') set(DONE, String(Date.now()))
     else set(TRIED, String(Date.now()))
   }
-  if (q.has('adal_companion') || q.has('adal_online')) {
-    q.delete('adal_companion'); q.delete('adal_online')
+  if (q.has('adal_companion') || q.has('adal_online') || q.has('adal_repair')) {
+    q.delete('adal_companion'); q.delete('adal_online'); q.delete('adal_repair')
     history.replaceState(history.state, '', location.pathname + (q.toString() ? `?${q}` : '') + location.hash)
   }
   if (get(IS) === '1' && get(DONE)) watchMainPC()

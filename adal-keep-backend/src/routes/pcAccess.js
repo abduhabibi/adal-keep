@@ -8,6 +8,7 @@
  *   GET  /pc-access/list            (this PC only) the computers allowed
  *   DELETE /pc-access/:id           (this PC only) take one off the list
  *   POST /pc-access/online-copy      (a computer let in) its own online account
+ *   POST /pc-access/leave {device}   (a computer let in) an Adal Companion signs out of this PC
  */
 import express from 'express'
 import bcrypt from 'bcryptjs'
@@ -83,6 +84,33 @@ router.post('/pc-access/online-copy', async (req, res) => {
     const { pcNumber } = await import('../services/mainPC.js')
     const name = `Companion · ${String(req.pcAccess?.name || req.body?.name || 'PC').slice(0, 40)}`
     res.json({ number: pcNumber(), cloud: await makeDevice(req.app.locals.db, name) })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+/**
+ * An Adal Companion signs out of this main PC ("Log out of this main PC /
+ * Connect to another PC"): its key on this PC's list (when it came in with
+ * one) and the online account this PC made for it (POST /online-copy) stop
+ * working. Only that Companion's own: the account must be one this PC made
+ * for a Companion ("Companion · …"), never a phone's.
+ */
+router.post('/pc-access/leave', async (req, res) => {
+  if (!req.pcAccess && !isLocal(req)) return res.status(403).json({ error: 'Only a computer that is let in' })
+  const out = { key: false, device: false }
+  try {
+    if (req.pcAccess?.id && req.pcAccess.id !== 'own-network') { remove(req.pcAccess.id); out.key = true }
+    const device = String(req.body?.device || '')
+    if (/^[0-9a-f-]{36}$/i.test(device)) {
+      const { cloudOn, listDevices, setDeviceRevoked } = await import('../services/cloudSync.js')
+      if (await cloudOn(req.app.locals.db)) {
+        const d = ((await listDevices(req.app.locals.db)) || []).find(x => x.user_id === device)
+        if (d && /^Companion ·/.test(d.name || '')) {
+          if (!d.revoked) await setDeviceRevoked(req.app.locals.db, device, true)
+          out.device = true
+        }
+      }
+    }
+    console.log(`[pc-access] an Adal Companion (${String(req.pcAccess?.name || 'this PC').slice(0, 60)}) signed out${out.key ? ' · key removed' : ''}${out.device ? ' · its online account stopped' : ''}`)
+    res.json({ ok: true, ...out })
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 router.get('/pc-access/status', (req, res) => res.json(isLocal(req) ? { state: 'approved', here: true } : statusOf(req)))

@@ -105,6 +105,9 @@ func firstAnswering(list []string, wait time.Duration) string {
 // findMainPC: the main PC's address when it answers now, else "". One found
 // from the main PC's own list is saved for the Companion too.
 func findMainPC(root, tries string) string {
+	if signedOut(root) { // logged out of it: another main PC is being chosen (leave.go)
+		return ""
+	}
 	u := firstAnswering(candidates(root, tries), 2*time.Second)
 	if u != "" && u != mainPCURL(root) {
 		rememberMainURL(root, u)
@@ -116,6 +119,9 @@ func findMainPC(root, tries string) string {
 // update it later when the main PC moves); an address typed by hand stays.
 func rememberMainURL(root, u string) {
 	p := filepath.Join(root, "companion.conf")
+	if signedOut(root) {
+		return
+	}
 	if old, err := os.ReadFile(p); err == nil && !strings.HasPrefix(string(old), "# Written by the Adal Keep Companion.") {
 		return
 	}

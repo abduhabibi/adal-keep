@@ -77,6 +77,7 @@ func startOnlinePage(root string) bool {
 	files := http.FileServer(http.Dir(dir))
 	mux := http.NewServeMux()
 	mux.HandleFunc("/tg", telegramFile)
+	forgetRoutes(root, mux)
 	mux.HandleFunc("/main", func(w http.ResponseWriter, r *http.Request) {
 		// Only the online pages ask (a header another website cannot send unasked).
 		if r.Header.Get("X-Adal") != "1" {

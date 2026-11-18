@@ -76,6 +76,10 @@ func runEmployee(root string, background bool) {
 	if !firstCopy() {
 		// Already running for this user: just open the window again — the
 		// online copy at once (it never searches for the main PC).
+		if signedOut(root) { // logged out of its main PC: choose another (leave.go)
+			openAppWindow(root, connectURL)
+			return
+		}
 		if hasOnlinePages(root) {
 			if u := firstAnswering(candidates(root, ""), 2*time.Second); u != "" {
 				openAppWindow(root, companionURL(root, u))
@@ -98,6 +102,7 @@ func runEmployee(root string, background bool) {
 	startHidden(filepath.Join(root, "adal-companion.exe"))
 	go brandWindows(root)
 	online := startOnlinePage(root)
+	go retryLeaves(root) // a main PC this Companion logged out of while it was off
 	// At Windows login: the Companion works; the window opens from the icon.
 	if background && !openAtStart(root) {
 		select {}
@@ -106,6 +111,13 @@ func runEmployee(root string, background bool) {
 	// With the online pages the Companion starts at once, without looking for
 	// the main PC: they work with the main PC on (through the online link) or
 	// off, anywhere. Not paired yet, they ask for the main PC's number.
+	// Logged out of its main PC ("Connect to another PC"): the page to choose one.
+	if signedOut(root) {
+		logf("logged out of the main PC — showing the page to choose one")
+		ensureConnectPage(root)
+		openAppWindow(root, connectURL)
+		select {}
+	}
 	if online {
 		// The main PC answering at its saved address: opened directly (fast).
 		// Otherwise the online copy at once; it opens the main PC itself as
@@ -123,7 +135,7 @@ func runEmployee(root string, background bool) {
 	u := waitForMainPC(root, 40*time.Second)
 	if u == "" {
 		logf("main PC not reachable yet — showing the connect page, still trying")
-		if startConnectPage(root) {
+		if ensureConnectPage(root) {
 			// The page opens Adal Keep itself once the main PC answers.
 			openAppWindow(root, connectURL)
 			select {}

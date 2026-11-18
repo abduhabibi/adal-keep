@@ -3,6 +3,7 @@ import { useAuth } from '../../context/AuthContext'
 import toast from 'react-hot-toast'
 import api from '../../services/api'
 import { onPhone } from '../../lib/phoneMode'
+import CompanionSwitchPC from '../CompanionSwitchPC'
 
 export const links = [
   {
@@ -225,6 +226,8 @@ export default function Sidebar({ isOpen, onToggle, collapsed: narrowWanted, onT
               <span className="shrink-0">{settingsLink.icon}</span>
               {!collapsed && <span className="truncate">{settingsLink.label}</span>}
             </NavLink>
+            {/* An Adal Companion only: log out of its main PC, connect to another. */}
+            <CompanionSwitchPC compact={collapsed} />
             {/* Daily tutor: hover to open (public demo has none) */}
           </div>
         </nav>

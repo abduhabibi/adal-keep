@@ -38,7 +38,7 @@ func main() {
 	log.Printf("   Upload: /api/companion/ingest (file tray)")
 
 	// Confirm we reached the right machine, and retry discovery once if not.
-	if !pingServer() {
+	if hostServer != "" && !pingServer() && !signedOut() {
 		log.Printf("⚠️ %s did not answer /api/companion/info", hostServer)
 		if info := discoverServer(2500 * time.Millisecond); info != nil {
 			hostServer = info.URL

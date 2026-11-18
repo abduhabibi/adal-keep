@@ -14,6 +14,7 @@ import { getLang, setLang } from '../lib/i18n'
 import { whoAmI } from '../lib/tutor'
 import TutorCard from '../components/TutorCard'
 import MainPCCard from '../components/MainPCCard'
+import { CompanionSwitchCard } from '../components/CompanionSwitchPC'
 import WafidCard from '../components/WafidCard'
 import PortalsHealthCard from '../components/PortalsHealthCard'
 import InsuranceCard from '../components/InsuranceCard'
@@ -211,6 +212,8 @@ export default function SettingsPage() {
         title="የስርዓት ቅንብሮች"
         subtitle="መልክ፣ አውታረ መረብ፣ ምዝገባ እና ማሻሻያዎች"
       />
+      {/* An Adal Companion only: log out of its main PC, connect to another. */}
+      <CompanionSwitchCard />
       {/* Settings in tabs — a short page instead of one long scroll. */}
       <nav className="sticky top-0 z-20 -mx-1 flex gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-white/90 p-1 backdrop-blur dark:border-slate-700 dark:bg-slate-900/90" translate="no">
         {TABS.map(([id, icon, label]) => (

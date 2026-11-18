@@ -176,6 +176,11 @@ func resolveHostURL() string {
 		os.Setenv("ADAL_HOST_URL", url)
 		return url
 	}
+	// Logged out of its main PC: no search until another one is chosen.
+	if signedOut() {
+		log.Printf("👋 Logged out of the main PC — waiting for another one to be chosen in Adal Keep's window")
+		return ""
+	}
 
 	for attempt := 1; attempt <= 3; attempt++ {
 		log.Printf("🔍 Searching the LAN for the Adal Keep server (%d/3)...", attempt)
@@ -229,7 +234,7 @@ const autoConfHeader = "# Written by the Adal Keep Companion."
 // the router); a file someone wrote by hand is never overwritten.
 func rememberHostURL(url string) {
 	path, err := companionConfPath()
-	if err != nil {
+	if err != nil || signedOut() {
 		return
 	}
 	if old, err := os.ReadFile(path); err == nil {
@@ -245,12 +250,34 @@ func rememberHostURL(url string) {
 	}
 }
 
+// signedOut: Adal Keep's window logged this PC out of its main PC
+// ("Connect to another PC", adal-launcher/leave.go) and no other main PC is
+// chosen yet. Nothing is sent and the old main PC is not looked for.
+func signedOut() bool {
+	exe, err := os.Executable()
+	if err != nil {
+		return false
+	}
+	_, err = os.Stat(filepath.Join(filepath.Dir(exe), "companion.signed-out"))
+	return err == nil
+}
+
 func companionConfPath() (string, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return "", err
 	}
 	return filepath.Join(filepath.Dir(exe), "companion.conf"), nil
+}
+
+// readConfHeader: the first line of companion.conf ("" when there is none).
+func readConfHeader() string {
+	path, err := companionConfPath()
+	if err != nil {
+		return ""
+	}
+	b, _ := os.ReadFile(path)
+	return strings.SplitN(string(b), "\n", 2)[0]
 }
 
 // itoa avoids pulling strconv in for a single call site.
@@ -278,10 +305,28 @@ func itoa(n int) string {
 
 // keepFindingServer: while the main PC does not answer (turned off, moved to
 // a new address), look for it again every 30 seconds and remember where it is.
+// Another main PC chosen in Adal Keep's window (companion.conf), or a log out
+// of this one, is taken within 5 seconds.
 func keepFindingServer() {
-	for {
-		time.Sleep(30 * time.Second)
-		if pingServer() {
+	for tick := 1; ; tick++ {
+		time.Sleep(5 * time.Second)
+		pinned := pinnedHostURL()
+		if signedOut() && pinned == "" {
+			if hostServer != "" {
+				log.Printf("👋 Logged out of the main PC %s — nothing is sent until another one is chosen", hostServer)
+				hostServer = ""
+				os.Setenv("ADAL_HOST_URL", "")
+			}
+			continue
+		}
+		if pinned != "" && pinned != strings.TrimRight(hostServer, "/") && (hostServer == "" || !strings.HasPrefix(readConfHeader(), autoConfHeader)) {
+			log.Printf("👉 Main PC chosen: %s", pinned)
+			hostServer = pinned
+			os.Setenv("ADAL_HOST_URL", pinned)
+			pingServer()
+			continue
+		}
+		if tick%6 != 0 || pingServer() {
 			continue
 		}
 		// An address typed on this PC (the "cannot find the main PC" page).

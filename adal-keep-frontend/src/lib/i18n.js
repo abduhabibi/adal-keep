@@ -7,14 +7,15 @@
  * [translate="no"] (chat messages, people's data) is touched. Choosing
  * Amharic again reloads the page as written. Saved per PC.
  */
-const KEY = 'adal-lang'
+// English by default; a new key so older saved choices reset once. Only a hand-picked Amharic is kept.
+const KEY = 'adal-lang-v2'
 
 export function getLang() {
-  try { return localStorage.getItem(KEY) === 'en' ? 'en' : 'am' } catch { return 'am' }
+  try { return localStorage.getItem(KEY) === 'am' ? 'am' : 'en' } catch { return 'en' }
 }
 
 export function setLang(lang) {
-  try { localStorage.setItem(KEY, lang === 'en' ? 'en' : 'am') } catch {}
+  try { localStorage.setItem(KEY, lang === 'am' ? 'am' : 'en') } catch {}
   window.location.reload()
 }
 

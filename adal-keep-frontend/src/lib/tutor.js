@@ -119,7 +119,7 @@ function bubble(lesson, lang, onClose, tour) {
  * Resolves 'next' when the person closes the bubble or clicks the button,
  * 'stop' when they stop the tour. `tour` = { step, total } during the full tour.
  */
-export async function showMe(lesson, navigate, lang = 'am', tour = null) {
+export async function showMe(lesson, navigate, lang = 'en', tour = null) {
   clearSpot()
   if (lesson.route && window.location.pathname !== lesson.route) navigate(lesson.route)
 

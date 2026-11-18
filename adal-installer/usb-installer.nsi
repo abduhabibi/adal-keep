@@ -214,8 +214,9 @@ Section "Install"
   Pop $0
   Delete "$INSTDIR\run-server.bat"
   Delete "$INSTDIR\start-companion.bat"
-  ; Never with Windows (2026-11-14): Adal Keep opens only from its icon; an older install's entry goes.
+  ; Main starts its server at sign-in, with no window (the launcher reads "open when the PC starts" for the window).
   DeleteRegValue HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "${APP_KEY}"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "AdalKeep" '"$INSTDIR\AdalKeep.exe" --background'
 !endif
 
   WriteRegStr HKLM "Software\${APP_KEY}" "InstallDir" "$INSTDIR"

@@ -107,10 +107,10 @@ const today = () => new Date().toLocaleDateString('en-CA') // YYYY-MM-DD, local
 
 export async function getLang(db, who) {
   const r = await db('tutor_prefs').where({ who }).first()
-  return r?.lang === 'en' ? 'en' : 'am'
+  return r?.lang === 'am' ? 'am' : 'en'
 }
 export async function setLang(db, who, lang) {
-  lang = lang === 'en' ? 'en' : 'am'
+  lang = lang === 'am' ? 'am' : 'en'
   const n = await db('tutor_prefs').where({ who }).update({ lang })
   if (!n) await db('tutor_prefs').insert({ who, lang })
   return lang

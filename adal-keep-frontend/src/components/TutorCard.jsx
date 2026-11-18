@@ -81,7 +81,7 @@ export default function TutorCard() {
     return () => window.removeEventListener('adal-tutor-changed', load)
   }, [load])
   if (!data) return null
-  const t = T[data.lang] || T.am
+  const t = T[data.lang] || T.en
   const setLang = async (lang) => { await api.post('/tutor/lang', { who: data.who, lang }).catch(() => {}); load() }
 
   return (

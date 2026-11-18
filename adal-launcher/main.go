@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"golang.org/x/sys/windows"
+	"golang.org/x/sys/windows/registry"
 )
 
 // uiURL: the one Adal Keep address (backend/.env PORT=4000).
@@ -61,10 +62,10 @@ func main() {
 	}
 	background := len(args) > 0 && args[0] == "--background"
 
-	// Adal Keep never opens by itself and never works in the background
-	// (asked on 2026-11-14): a start by Windows at sign-in does nothing,
-	// unless someone switched on "open Adal Keep when the PC starts".
-	if background && !openAtStart(filepath.Join(root, "backend", "data")) {
+	// Companion: a start by Windows at sign-in does nothing, unless someone
+	// switched on "open Adal Keep when the PC starts". Main: the server always
+	// starts at sign-in (no window); that setting only decides the window.
+	if employeePC(root) && background && !openAtStart(filepath.Join(root, "backend", "data")) {
 		logf("started by Windows at sign-in: Adal Keep opens only from its icon — nothing started")
 		return
 	}
@@ -88,6 +89,7 @@ func main() {
 	}
 
 	logf("Adal Keep starting (background=%v)", background)
+	registerSignInStart(root)
 	go ensureBrowser(root)
 	startHidden(filepath.Join(root, "adal-agent.exe"))
 	startHidden(filepath.Join(root, "adal-companion.exe"))
@@ -222,4 +224,18 @@ func showError(msg string) {
 	title, _ := windows.UTF16PtrFromString("Adal Keep")
 	text, _ := windows.UTF16PtrFromString(strings.ReplaceAll(msg, "\n", "\r\n"))
 	windows.MessageBox(0, text, title, windows.MB_OK|windows.MB_ICONERROR)
+}
+
+// registerSignInStart makes Windows start the Main server (no window) at
+// sign-in; older installs and updates get the entry here too.
+func registerSignInStart(root string) {
+	k, _, err := registry.CreateKey(registry.CURRENT_USER, `Software\Microsoft\Windows\CurrentVersion\Run`, registry.SET_VALUE)
+	if err != nil {
+		logf("sign-in start: %v", err)
+		return
+	}
+	defer k.Close()
+	if err := k.SetStringValue("AdalKeep", `"`+filepath.Join(root, "AdalKeep.exe")+`" --background`); err != nil {
+		logf("sign-in start: %v", err)
+	}
 }

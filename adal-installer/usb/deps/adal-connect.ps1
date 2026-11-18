@@ -14,7 +14,7 @@ function Say($m) { Write-Host $m; $log.Add($m) }
 Say "=== Adal Connect ($Role) on $env:COMPUTERNAME - $(Get-Date -Format 'yyyy-MM-dd HH:mm') ==="
 
 # 1. OpenSSH Server
-Say "[1/4] OpenSSH Server..."
+Say "[1/5] OpenSSH Server..."
 try {
   $cap = Get-WindowsCapability -Online -Name 'OpenSSH.Server*' | Select-Object -First 1
   if ($cap -and $cap.State -ne 'Installed') {
@@ -31,7 +31,7 @@ try {
 } catch { Say "      sshd problem: $($_.Exception.Message)" }
 
 # 2. Adal's key (administrators_authorized_keys: Administrators + SYSTEM only)
-Say "[2/4] Adal support key..."
+Say "[2/5] Adal support key..."
 try {
   $dir = "$env:ProgramData\ssh"
   New-Item -ItemType Directory -Path $dir -Force | Out-Null
@@ -43,12 +43,12 @@ try {
 } catch { Say "      key problem: $($_.Exception.Message)" }
 
 # 3. Firewall: every network type (Public too - the usual blocker)
-Say "[3/4] Firewall (all network types)..."
+Say "[3/5] Firewall (all network types)..."
 function Rule($name, $proto, $port) {
   netsh advfirewall firewall delete rule name="$name" | Out-Null
   netsh advfirewall firewall add rule name="$name" dir=in action=allow protocol=$proto localport=$port profile=any | Out-Null
 }
-Rule 'Adal Remote Support (SSH)' TCP 22
+Rule 'Adal Remote Support (SSH + Tailscale)' TCP 22
 Rule 'Adal Keep' TCP $MAIN_PORT
 Rule 'Adal Keep Discovery' UDP $DISCO_PORT
 function InstDir($k, $d) { try { (Get-ItemProperty "HKLM:\Software\$k" -ErrorAction Stop).InstallDir } catch { $d } }
@@ -72,19 +72,54 @@ try {
 } catch {}
 
 # 4. Adal Keep itself
-Say "[4/4] Adal Keep..."
+Say "[4/5] Adal Keep..."
 $listen = netstat -ano | Select-String ":$MAIN_PORT\s" | Select-Object -First 3 | ForEach-Object { $_.Line.Trim() }
 Say "      port ${MAIN_PORT}: $(if ($listen) { $listen -join ' | ' } else { 'nothing listening' })"
 $conf = "$COMPDIR\companion.conf"
 if (Test-Path $conf) { Say "      companion.conf: $((Get-Content $conf | Where-Object { $_ -match '^ADAL_HOST_URL' }) -join ' ')" }
 
-$lan = (Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -notmatch '^(127\.|169\.254\.)' } | ForEach-Object { $_.IPAddress }) -join ', '
+# 5. Tailscale (to reach this PC from anywhere). SSH on the LAN works without it.
+Say "[5/5] Tailscale..."
+$tsIp = ''
+try {
+  $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
+  if (-not (Test-Path $ts)) {
+    $msi = "$UsbRoot\deps\tailscale\tailscale-setup.msi"
+    if (-not (Test-Path $msi)) {
+      $msi = "$env:TEMP\tailscale-setup.msi"
+      Say "      downloading from pkgs.tailscale.com..."
+      [Net.ServicePointManager]::SecurityProtocol = 'Tls12'
+      Invoke-WebRequest 'https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi' -OutFile $msi -UseBasicParsing
+    }
+    Say "      installing..."
+    Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /quiet /norestart TS_UNATTENDEDMODE=always" -Wait
+    Start-Sleep 5
+  }
+  if (Test-Path $ts) {
+    $tsIp = (& $ts ip -4 2>$null | Select-Object -First 1)
+    if (-not $tsIp) {
+      Say "      A browser opens: sign in to Tailscale with the SAME account as on the other PCs (up to 5 minutes)."
+      $job = Start-Job { param($t) & $t up --unattended 2>&1 } -ArgumentList $ts
+      $opened = $false
+      for ($i = 0; $i -lt 60 -and -not $tsIp; $i++) {
+        Start-Sleep 5
+        $out = Receive-Job $job -Keep 2>$null | Out-String
+        if (-not $opened -and $out -match '(https://login\.tailscale\.com/\S+)') { $opened = $true; Start-Process $Matches[1] }
+        $tsIp = (& $ts ip -4 2>$null | Select-Object -First 1)
+      }
+    }
+  } else { Say "      Tailscale did not install" }
+} catch { Say "      Tailscale problem: $($_.Exception.Message)" }
+Say "      Tailscale IP: $(if ($tsIp) { $tsIp } else { 'not signed in yet - run this again after signing in' })"
+
+$lan = (Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -notmatch '^(127\.|169\.254\.)' -and $_.IPAddress -ne $tsIp } | ForEach-Object { $_.IPAddress }) -join ', '
 $summary = @"
 
 ==============================================
   PC name:       $env:COMPUTERNAME
   Windows user:  $User
   LAN IPs:       $lan
+  Tailscale IP:  $(if ($tsIp) { $tsIp } else { '(not signed in)' })
 
   Tell Claude: $Role ready
 ==============================================

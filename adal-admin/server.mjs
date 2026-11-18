@@ -21,7 +21,11 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import os from 'node:os'
 import zlib from 'node:zlib'
 import net from 'node:net'
+import dns from 'node:dns'
 net.setDefaultAutoSelectFamilyAttemptTimeout?.(2500)   // slow lines: 250 ms is too short to connect
+// Names always resolve: IPv4 first, and the same fallback as Adal Keep (public DNS when the router's fails).
+try { dns.setDefaultResultOrder('ipv4first') } catch {}
+try { await import(pathToFileURL(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'adal-keep-backend', 'src', 'utils', 'netFix.js')).href) } catch {}
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const PORT = Number(process.env.ADMIN_PORT || 4100)
@@ -689,7 +693,14 @@ const api = {
     })
   },
   // Backups (Telegram, locked with the agency's key, which Adal holds too).
-  'POST /api/backup-run': async (q, b) => agencyCall(String(b.agency || ''), 'POST', '/_adal/backup/run', {}),
+  // Never waits: the request is left online and the agency's PC takes it at
+  // once (or as soon as it is on); it backs up by Telegram or the online storage.
+  'POST /api/backup-run': async (q, b) => {
+    const agency = String(b.agency || '')
+    if (!isAgency(agency)) throw new Error('bad agency')
+    await rest('POST', 'keep_calls', { agency_id: agency, device_id: ADMIN_ID, method: 'POST', path: '/_adal/backup/run', body: {} }, { Prefer: 'return=minimal' })
+    return onlineAt(await pcSeenAt([agency])) ? { started: true } : { queued: true, message: 'Its PC is off: the backup starts as soon as it is on.' }
+  },
   'POST /api/backup-status': async (q, b) => agencyCall(String(b.agency || ''), 'GET', '/_adal/backup', null),
   // Restore the newest backup of `from` on the PC of `to` (the same agency, or a replacement PC).
   'POST /api/backup-restore': async (q, b) => {
@@ -744,6 +755,12 @@ async function backupOf(agency) {
   return row.data
 }
 async function tgPiece(fileId) {
+  // Telegram did not answer the agency's PC: that piece is in the online storage ("sb:<object>").
+  if (String(fileId).startsWith('sb:')) {
+    const r = await fetch(`${URL_}/storage/v1/object/authenticated/keep/${String(fileId).slice(3)}`, { headers: { apikey: KEY, Authorization: `Bearer ${KEY}` } })
+    if (!r.ok) throw new Error(`Online storage download ${r.status}`)
+    return Buffer.from(await r.arrayBuffer())
+  }
   for (let i = 0; ; i++) {
     const j = await (await fetch(`https://api.telegram.org/bot${BOT()}/getFile`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ file_id: fileId }) })).json()
     if (j.ok) {
@@ -765,8 +782,8 @@ function unlockPiece(buf, password) {
 const downloads = {}
 async function startDownload(agency) {
   if (downloads[agency]?.running) return downloads[agency]
-  if (!BOT()) throw new Error('adal-admin/.env needs TELEGRAM_BOT_TOKEN.')
   const bk = await backupOf(agency)
+  if (!BOT() && !String(bk.file_id).startsWith('sb:')) throw new Error('adal-admin/.env needs TELEGRAM_BOT_TOKEN.')
   const [ag] = await rest('GET', `agencies?id=eq.${agency}&select=name`)
   const name = String(ag?.name || agency).replace(/[\\/:*?"<>|]+/g, '_').trim()
   const dir = path.join(os.homedir(), 'Adal Backups', name, new Date(bk.at || Date.now()).toISOString().slice(0, 10))

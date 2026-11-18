@@ -66,8 +66,8 @@ const NOT_FROM_PHONES = /^\/(system|backup|branch|main-pc|mobile|subscription|se
 
 export const cloudStatus = { on: false, running: false, last: null, error: null, pushed: 0, files: 0, filesLeft: 0, applied: 0, textDone: null, bytesSaved: 0 }
 
-// The first copy of the text (every page once) is done: documents wait for it,
-// and so does the heavy Telegram backup (it would fight it for the line).
+// The first copy of the text (every page once) is done: documents wait for it.
+// (The backup never waits for it: backups go at once, by their own route.)
 const TEXT_DONE = 'sweep:full'
 /** The online copy is still being filled (text or documents): heavy work waits. */
 export const onlineCopyFilling = () => cloudStatus.on && (cloudStatus.textDone === false || cloudStatus.filesLeft > 0)
@@ -798,7 +798,10 @@ async function adalCommand(db, method, p, body) {
   }
   const B = await import('./telegramBackup.js')
   if (p === '/_adal/backup' && method === 'GET') return { ...B.getConfig(), progress: B.progress, job: adalJob }
-  if (adalJob.running || B.progress.running) return { busy: true, job: adalJob, progress: B.progress }
+  if (adalJob.running || B.progress.running) {
+    if (p === '/_adal/backup/run') B.backupSoon()   // Admin never waits: it follows the one going, by itself
+    return { busy: true, queued: p === '/_adal/backup/run', job: adalJob, progress: B.progress }
+  }
   const go = (kind, fn) => {
     Object.assign(adalJob, { kind, running: true, result: null, error: null, at: new Date().toISOString() })
     fn().then(r => { adalJob.result = r }).catch(e => { adalJob.error = e.message }).finally(() => { adalJob.running = false })

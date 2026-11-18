@@ -18,15 +18,13 @@ router.get('/backup/bot', here, async (req, res) => { try { res.json(await botIn
 router.post('/backup/find-chats', here, async (req, res) => { try { res.json(await findChats(req.body?.agency)) } catch (e) { fail(res, e) } })
 router.post('/backup/test', here, async (req, res) => { try { res.json(await testConnection()) } catch (e) { fail(res, e) } })
 router.post('/backup/run', here, async (req, res) => {
-  if (progress.running) return res.json({ busy: true })
-  // The Companion and the phones work from the online copy: while it is still
-  // being filled the heavy backup waits, and starts by itself after.
-  const { onlineCopyFilling } = await import('../services/cloudSync.js')
-  if (onlineCopyFilling()) {
-    backupSoon()
-    return res.json({ waiting: true, message: 'The online copy for the Companion and the phones goes first. The backup starts by itself when it is done.' })
-  }
-  runBackup(req.app.locals.db, { force: true }).catch(e => console.warn('[backup] failed:', e.message))
+  // A backup already going: this one follows it by itself (never a second click).
+  if (progress.running) { backupSoon(); return res.json({ busy: true, queued: true }) }
+  // Never waits: Telegram when it answers, otherwise the online storage;
+  // neither → it is tried again by itself within minutes.
+  runBackup(req.app.locals.db, { force: true })
+    .then(r => console.log('[backup] done', r))
+    .catch(e => { backupSoon(); console.warn('[backup] failed:', e.message, '— tried again by itself') })
   res.json({ started: true })
 })
 router.post('/backup/restore', here, upload.single('index'), async (req, res) => {

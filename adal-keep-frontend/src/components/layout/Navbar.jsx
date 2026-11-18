@@ -252,7 +252,7 @@ function BackupButton() {
     }
   }
   return (
-    <button onClick={run} disabled={busy} title="Back up to Telegram now (whenever the robots are free it also runs by itself)"
+    <button onClick={run} disabled={busy} title="Back up now: to Telegram, or to the online storage when Telegram does not answer (it also runs by itself)"
       className={`ak-icon-btn ${busy ? '!text-teal-600 bg-teal-500/10' : ''}`}>
       <span className={busy ? 'animate-pulse' : ''}>💾</span> {busy ? `ምትኬ በመያዝ ላይ${pct != null ? ` ${pct}%` : '…'}` : 'ምትኬ'}
     </button>

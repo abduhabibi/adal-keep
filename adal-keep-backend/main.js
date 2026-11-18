@@ -1,3 +1,5 @@
+// First: names always resolve (a router with broken DNS made Telegram ENOTFOUND).
+import './src/utils/netFix.js'
 import net from 'net'
 // Slow or busy office lines: give a connection 2.5 s to open (Node's 250 ms
 // default makes calls to Supabase / Telegram fail with ETIMEDOUT).

@@ -114,7 +114,8 @@ export function saveConfig({ bot_token, password, chat_id, window_start, window_
 
 // ── Telegram ─────────────────────────────────────────────────────────────────
 
-async function tg(token, method, body, timeoutMs = 60000, tries = 0) {
+const NET_DOWN = /No connection to Telegram|fetch failed|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|ECONNRESET|ECONNREFUSED|ENETUNREACH|aborted|timeout|socket/i
+async function tg(token, method, body, timeoutMs = 60000, tries = 0, maxTries = 4) {
   let r
   try {
     r = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
@@ -123,15 +124,15 @@ async function tg(token, method, body, timeoutMs = 60000, tries = 0) {
   })
   } catch (e) {
     // The line dropped: wait a little and send it again (a few times).
-    if (tries >= 4) throw new Error(`No connection to Telegram (${e.cause?.code || e.message})`)
+    if (tries >= maxTries) throw new Error(`No connection to Telegram (${e.cause?.code || e.message})`)
     await new Promise(ok => setTimeout(ok, [5, 15, 30, 60][tries] * 1000))
-    return tg(token, method, body, timeoutMs, tries + 1)
+    return tg(token, method, body, timeoutMs, tries + 1, maxTries)
   }
   const j = await r.json().catch(() => ({}))
   // One channel serves many agencies: when Telegram says "too many", wait as it asks.
   if (j.error_code === 429 && tries < 6) {
     await new Promise(ok => setTimeout(ok, ((j.parameters?.retry_after || 5) + 1) * 1000))
-    return tg(token, method, body, timeoutMs, tries + 1)
+    return tg(token, method, body, timeoutMs, tries + 1, Math.max(maxTries, 6))
   }
   if (!j.ok) throw new Error(`Telegram: ${j.description || r.status}`)
   return j.result
@@ -185,18 +186,57 @@ export async function findChats(agency) {
   return chatsNamed(ups, agency)
 }
 
-async function sendPiece(token, chat_id, buf, filename, caption) {
+// Where a piece goes: Telegram when it answers, otherwise the agency's online
+// storage (Supabase, the "keep" bucket, folder <agency>/_backup) — a piece
+// kept there has the id "sb:<object>". Pieces are locked before either.
+// Once Telegram fails in a run, the rest of that run goes online at once
+// (no minutes of waiting per piece); the next run tries Telegram again.
+const route = { db: null, tgDown: false, online: 0 }
+async function sendToTelegram(token, chat_id, buf, filename, caption) {
   const fd = new FormData()
   fd.append('chat_id', String(chat_id))
   fd.append('caption', caption.slice(0, 1000))
   fd.append('disable_notification', 'true')
   fd.append('document', new Blob([buf]), filename)
   // Slow office lines: allow 10 minutes for one 19 MB piece.
-  const res = await tg(token, 'sendDocument', fd, 10 * 60 * 1000)
+  const res = await tg(token, 'sendDocument', fd, 10 * 60 * 1000, 0, 2)
   return res.document.file_id
+}
+async function sendOnline(buf, filename) {
+  const c = route.db && await cloudOf(route.db).catch(() => null)
+  if (!c?.agency) return null
+  const object = `${c.agency}/_backup/${filename.replace(/[^\w.-]+/g, '_')}-${crypto.randomBytes(4).toString('hex')}`
+  await c.cloudCall(route.db, 'POST', `/storage/v1/object/keep/${object}`, buf,
+    { headers: { 'Content-Type': 'application/octet-stream', 'x-upsert': 'true' } })
+  route.online++
+  return `sb:${object}`
+}
+async function sendPiece(token, chat_id, buf, filename, caption) {
+  let tgErr = null
+  if (token && chat_id && !route.tgDown) {
+    try { return await sendToTelegram(token, chat_id, buf, filename, caption) }
+    catch (e) {
+      if (!NET_DOWN.test(e.message)) throw e   // Telegram answered with a real error: shown as it is
+      tgErr = e
+      route.tgDown = true
+      console.warn(`[backup] Telegram does not answer (${e.message}) — this backup goes to the online storage`)
+    }
+  }
+  let id = null
+  try { id = await sendOnline(buf, filename) }
+  catch (e) { throw new Error(`${tgErr ? tgErr.message + '; ' : ''}online storage: ${e.message}`) }
+  if (id) return id
+  throw tgErr || new Error('No route for the backup: Telegram is not set up and the online copy is off.')
 }
 
 async function fetchPiece(token, fileId) {
+  if (String(fileId).startsWith('sb:')) {
+    const c = route.db && await cloudOf(route.db).catch(() => null)
+    if (!c) throw new Error('This piece is in the online storage: the online copy must be on to read it.')
+    const r = await c.cloudCall(route.db, 'GET', `/storage/v1/object/authenticated/keep/${String(fileId).slice(3)}`, undefined, { raw: true })
+    if (!r.ok) throw new Error(`Online storage download ${r.status}`)
+    return Buffer.from(await r.arrayBuffer())
+  }
   const f = await tg(token, 'getFile', JSON.stringify({ file_id: fileId }))
   const r = await fetch(`https://api.telegram.org/file/bot${token}/${f.file_path}`, { signal: AbortSignal.timeout(10 * 60 * 1000) })
   if (!r.ok) throw new Error(`Telegram download ${r.status}`)
@@ -351,7 +391,8 @@ async function sendSet(token, chat_id, password, buf, label) {
       if (progress.bytes_total) progress.percent = Math.min(99, Math.floor(progress.bytes_sent / progress.bytes_total * 100))   // 100 when the index is in
     }
   }
-  await Promise.all(Array.from({ length: Math.min(UPLOADS_AT_ONCE, count) }, worker))
+  // (One at a time while a robot works: it keeps most of the line.)
+  await Promise.all(Array.from({ length: Math.min(runsWorking() > 0 ? 1 : UPLOADS_AT_ONCE, count) }, worker))
   return ids
 }
 
@@ -397,7 +438,10 @@ export async function runBackup(db, { force = false, docsOnly = false, light = f
   const token = botToken(), password = getSecret('backup_password')
   const s = readState()
   const chat_id = chatOf(s)
-  if (!token || !password || !chat_id) throw new Error('Backup is not set up: the backup password is needed.')
+  if (!password) throw new Error('Backup is not set up: the backup password is needed.')
+  // No Telegram set up: the online storage alone carries it (when the online copy is on).
+  if ((!token || !chat_id) && !(await cloudOf(db).catch(() => null))?.agency) throw new Error('Backup is not set up: no Telegram channel and the online copy is off.')
+  Object.assign(route, { db, tgDown: false, online: 0 })
   Object.assign(progress, { running: true, started_at: new Date().toISOString(), step: docsOnly ? 'documents' : 'database', bytes_sent: 0, bytes_total: 0, percent: 0, files_done: 0, files_todo: 0, error: null, docs_only: docsOnly })
   s[docsOnly ? 'last_docs_run' : 'last_run'] = new Date().toISOString(); writeState(s)
   try {
@@ -437,14 +481,14 @@ export async function runBackup(db, { force = false, docsOnly = false, light = f
       writeState(s)
       group = []; size = 0
     }
+    // (Never waits for the robots: the backup goes now, one piece at a time while one works.)
     for (const name of todo) {
-      if (!force && !light && runsWorking() > 0) break // a run needs the internet: the rest goes when it is free again
       let sz = 0
       try { sz = fs.statSync(path.join(SAFE, name)).size } catch { continue }
       group.push(name); size += sz
       if (size >= SET_TARGET) await flush()
     }
-    if (force || light || runsWorking() === 0) await flush()
+    await flush()
 
     // 3. The index — what a restore needs to find every piece.
     progress.step = 'index'
@@ -461,7 +505,7 @@ export async function runBackup(db, { force = false, docsOnly = false, light = f
       if (!docsOnly) s.last_day = today()
       writeState(s)
       progress.percent = 100
-      return { ok: true, documents_left: listDocuments().filter(n => !s.sent[n]).length, unchanged: true }
+      return { ok: true, documents_left: listDocuments().filter(n => !s.sent[n]).length, unchanged: true, route: route.online ? 'online storage' : 'telegram' }
     }
     const index = Buffer.from(JSON.stringify({ adal_backup: 1, made: new Date().toISOString(), ...what }))
     const indexId = await sendPiece(token, chat_id, lock(zlib.gzipSync(index), password), 'adal-backup-index.enc',
@@ -484,7 +528,7 @@ export async function runBackup(db, { force = false, docsOnly = false, light = f
       await publishBackup(db, { verify }).catch(() => {})
       if (!verify.ok) console.error(`[backup] the backup did not read back: ${verify.why}`)
     }
-    return { ok: true, documents_left: left }
+    return { ok: true, documents_left: left, route: route.online ? `online storage (${route.online} piece(s); Telegram did not answer)` : 'telegram' }
   } catch (e) {
     const st = readState(); st.last_error = e.message; st.last_error_at = new Date().toISOString(); writeState(st)
     progress.error = e.message
@@ -537,6 +581,12 @@ export async function verifyBackup(db, { token, password, indexId, profiles = nu
   } finally { fs.rmSync(dir, { recursive: true, force: true }) }
 }
 async function pieceExists(token, fileId) {
+  if (String(fileId).startsWith('sb:')) {
+    try {
+      const c = route.db && await cloudOf(route.db)
+      return !!c && (await c.cloudCall(route.db, 'HEAD', `/storage/v1/object/authenticated/keep/${String(fileId).slice(3)}`, undefined, { raw: true, timeout: 60_000 })).ok
+    } catch { return false }
+  }
   try { return !!(await tg(token, 'getFile', JSON.stringify({ file_id: fileId })))?.file_path } catch { return false }
 }
 
@@ -584,74 +634,60 @@ export function ensureBackupKey() {
 }
 
 let timer = null
-// A move from another system just ended: everything it brought goes up as soon
-// as no agent is working (not two hours later).
+// "Back up now" (or a move from another system just ended): the whole backup
+// goes at the next tick, not two hours later.
 let wanted = false
 export function backupSoon() { wanted = true }
-async function moving() {
-  try { return (await import('./transition.js')).transitionRunning() } catch { return false }
-}
 /**
- * New documents go online within seconds of arriving: a quick run with only
- * them (and the small index a restore reads). A few MB go even while a robot
- * works — they hardly touch its internet; more wait until the robots are free.
- * The whole database goes every 2 hours (once a day at least), when the robots
- * are free (no run working or waiting). A run that starts pauses a big backup
- * between sets; it carries on when the runs are free again.
+ * Backups never wait — not for the online copy to fill, not for a move, not
+ * for the robots (while one works the pieces go one at a time):
+ *   - new documents go within seconds of arriving (a quick run with only them
+ *     and the small index a restore reads);
+ *   - the whole database every 2 hours (once a day at least).
+ * Each piece goes to Telegram when it answers, otherwise to the agency's
+ * online storage; with neither, the run fails and is tried again soon
+ * (1, 2, 4 … at most 15 minutes after, by itself). Nothing goes twice: what
+ * was sent is in backup-state.json (documents by name, the database by hash).
  */
 const DB_EVERY_MS = 2 * 3600 * 1000
 const QUIET_MS = 10 * 60 * 1000          // full runs: at most one every 10 minutes
 const DOCS_GAP_MS = 15 * 1000            // quick runs: at most one every 15 seconds
-const LIGHT_BYTES = 4 * 1024 * 1024      // new documents this small go even while a robot works
 const TICK_MS = 10 * 1000
 let kick = null
+let failures = 0
+/** After a failed run: when to try again (1, 2, 4, 8, 15 minutes). Exported for tests. */
+export const retryAfterMs = (n) => Math.min(15, 2 ** Math.max(0, n - 1)) * 60 * 1000
 export function startBackupSchedule(db) {
   if (timer) return
-  if (botToken()) ensureBackupKey()
+  route.db = db
+  ensureBackupKey()
+  const done = (what) => (r) => { failures = 0; console.log(what, r) }
+  const failed = (what) => (e) => { failures++; console.warn(`${what} ${e.message} — again in ${retryAfterMs(failures) / 60000} min`) }
   const tick = async () => {
     try {
       const cfg = getConfig()
-      if (!cfg.enabled || !cfg.has_token || !cfg.has_password || !cfg.chat_id || progress.running) return
+      if (!cfg.enabled || !cfg.has_password || progress.running) return
+      // A route: Telegram, or the online storage.
+      if (!(cfg.has_token && cfg.chat_id) && !(await cloudOf(db).catch(() => null))?.agency) return
       const s = readState()
       const ago = (t) => t ? Date.now() - new Date(t).getTime() : Infinity
-      // A move from another system needs the whole (slow) line: nothing goes up meanwhile.
-      if (await moving()) return
-      // The online copy (what the Companion and the phones work from) is still
-      // being filled: it gets the line first. Only the database still goes once
-      // a day, so a stolen PC never loses more than a day.
-      const filling = (await import('./cloudSync.js')).onlineCopyFilling()
-      if (filling) {
-        const lastDb = (s.sets || []).filter(x => /^db/.test(x.type)).map(x => new Date(x.date).getTime()).pop() || 0
-        if (Date.now() - lastDb < 24 * 3600 * 1000 || runsWorking() > 0) return
-        runBackup(db, { dbOnly: true }).then(r => console.log('[backup] database only (the online copy is still filling)', r)).catch(e => console.warn('[backup] failed:', e.message))
-        return
-      }
-      const busy = runsWorking() > 0
+      if (failures && s.last_error && ago(s.last_error_at) < retryAfterMs(failures)) return
 
       // New documents: a quick run.
       const fresh = listDocuments().filter(n => !s.sent?.[n])
-      if (fresh.length && ago(s.last_docs_run) >= DOCS_GAP_MS && !(s.last_error && ago(s.last_error_at) < 2 * 60 * 1000)) {
-        let bytes = 0
-        for (const n of fresh) { try { bytes += fs.statSync(path.join(SAFE, n)).size } catch {} }
-        const light = bytes <= LIGHT_BYTES
-        if (!busy || light) {
-          runBackup(db, { docsOnly: true, light })
-            .then(r => console.log(`[backup] ${fresh.length} new document(s) online`, r.documents_left ? `(${r.documents_left} still to go)` : ''))
-            .catch(e => console.warn('[backup] documents failed:', e.message))
-          return
-        }
+      if (fresh.length && ago(s.last_docs_run) >= DOCS_GAP_MS && !wanted) {
+        runBackup(db, { docsOnly: true, light: true })
+          .then(r => { failures = 0; console.log(`[backup] ${fresh.length} new document(s) backed up (${r.route})`, r.documents_left ? `(${r.documents_left} still to go)` : '') })
+          .catch(failed('[backup] documents failed:'))
+        return
       }
 
-      // The database: every 2 hours (once a day at least), robots free.
-      if (busy) return
-      const waiting = Number((await db('automation_queue').where('status', 'pending').count({ c: '*' }).first().catch(() => null))?.c || 0)
-      if (waiting > 0) return
+      // The database (text first: it goes before the documents in a full run).
       if (ago(s.last_run) < QUIET_MS && !wanted) return
-      if (s.last_error && ago(s.last_error_at || s.last_run) < 15 * 60 * 1000) return // failed lately: again after 15 minutes
-      const lastDb = (s.sets || []).filter(x => x.type === 'db').map(x => new Date(x.date).getTime()).pop() || 0
+      const lastDb = (s.sets || []).filter(x => /^db/.test(x.type)).map(x => new Date(x.date).getTime()).sort((a, b) => a - b).pop() || 0
       if (Date.now() - lastDb < DB_EVERY_MS && s.last_day === today() && !wanted) return
       wanted = false
-      runBackup(db).then(r => console.log('[backup] done', r)).catch(e => console.warn('[backup] failed:', e.message))
+      runBackup(db).then(done('[backup] done')).catch(failed('[backup] failed:'))
     } catch (e) { console.warn('[backup] schedule:', e.message) }
   }
   timer = setInterval(tick, TICK_MS)

@@ -19,10 +19,14 @@ import { plainReason } from './runOutcome.js'
 import { runsWorking } from './busy.js'
 import { me as joinAgency, chatConfigured, cloudCall, cloudAuth, cloudAgencyId, cloudConfig } from './chatCloud.js'
 import { isFollower, pcNumber as myPcNumber } from './mainPC.js'
+import { getLanAddresses } from './discovery.js'
 // The heartbeat also carries this PC's number: Adal Admin keeps the number on
 // the PC's current online account (an old account kept it before, so a phone or
 // a Companion typing it found an empty copy).
-const beatData = () => ({ at: new Date().toISOString(), ...(isFollower() ? {} : { pc: myPcNumber() }) })
+// The PC's office addresses too: a Companion that joined with the PC number
+// opens this PC directly from them (instant) instead of through the cloud.
+const lanNow = () => { try { return getLanAddresses().map(a => a.address).slice(0, 6) } catch { return [] } }
+const beatData = () => ({ at: new Date().toISOString(), ...(isFollower() ? {} : { pc: myPcNumber(), lan: lanNow(), port: PORT() }) })
 import { tgReady, tgPut, tgDelete, TG_MAX_DOWNLOAD, findStorageChat } from './tgStore.js'
 import { viewCopy } from './viewCopy.js'
 import fs from 'fs'

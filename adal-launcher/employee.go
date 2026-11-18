@@ -77,7 +77,11 @@ func runEmployee(root string, background bool) {
 		// Already running for this user: just open the window again — the
 		// online copy at once (it never searches for the main PC).
 		if hasOnlinePages(root) {
-			openAppWindow(root, offlineURL(root))
+			if u := firstAnswering(candidates(root, ""), 2*time.Second); u != "" {
+				openAppWindow(root, companionURL(root, u))
+			} else {
+				openAppWindow(root, offlineURL(root))
+			}
 			return
 		}
 		if u := waitForMainPC(root, 8*time.Second); u != "" {
@@ -103,7 +107,15 @@ func runEmployee(root string, background bool) {
 	// the main PC: they work with the main PC on (through the online link) or
 	// off, anywhere. Not paired yet, they ask for the main PC's number.
 	if online {
-		logf("opening the online copy (no search for the main PC)")
+		// The main PC answering at its saved address: opened directly (fast).
+		// Otherwise the online copy at once; it opens the main PC itself as
+		// soon as it can be reached (direct.go, lib/companionDirect.js).
+		if u := firstAnswering(candidates(root, ""), 2*time.Second); u != "" {
+			logf("main PC answers at %s — opening it directly", u)
+			openAppWindow(root, companionURL(root, u))
+			select {}
+		}
+		logf("opening the online copy (it opens the main PC once it answers)")
 		openAppWindow(root, onlineURL)
 		select {}
 	}

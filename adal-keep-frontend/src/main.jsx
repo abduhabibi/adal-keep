@@ -16,6 +16,8 @@ import './index.css'
 // something changed, they all run at once (lib/changes.js) — so every list,
 // count and status on screen follows the change without waiting.
 const liveRefreshes = new Map()
+// An Adal Companion's online pages: the main PC directly whenever it answers.
+if (typeof location !== 'undefined' && location.host === '127.0.0.1:47801') import('./lib/companionDirect.js').then(m => m.startCompanionDirect()).catch(() => {})
 // This device's wallpaper behind the pages (lib/wallpaper.js).
 import('./lib/wallpaper.js').then(w => w.showWallpaper()).catch(() => {})
 // Out of focus (another window or tab in front): every animation stops (index.css).

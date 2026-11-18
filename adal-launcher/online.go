@@ -13,6 +13,7 @@
 package main
 
 import (
+	"encoding/json"
 	"io"
 	"mime"
 	"net"
@@ -76,6 +77,16 @@ func startOnlinePage(root string) bool {
 	files := http.FileServer(http.Dir(dir))
 	mux := http.NewServeMux()
 	mux.HandleFunc("/tg", telegramFile)
+	mux.HandleFunc("/main", func(w http.ResponseWriter, r *http.Request) {
+		// Only the online pages ask (a header another website cannot send unasked).
+		if r.Header.Get("X-Adal") != "1" {
+			http.Error(w, "no", http.StatusForbidden)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		json.NewEncoder(w).Encode(map[string]string{"url": findMainPC(root, r.URL.Query().Get("try"))})
+	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-cache")
 		p := path.Clean("/" + r.URL.Path)

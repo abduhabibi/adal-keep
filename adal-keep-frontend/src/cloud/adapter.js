@@ -517,6 +517,15 @@ async function change(method, path, body) {
 // through keep_calls and come back in a second or two — live tabs, captchas,
 // chat, everything. Off: the online copy above.
 let alive = { at: 0, on: false }
+// The PC's office addresses (it sends them every 15 s): an Adal Companion opens
+// the PC directly from one of them (lib/companionDirect.js).
+export async function pcAddresses() {
+  try {
+    const d = (await rest('GET', '/rest/v1/keep_meta?key=eq./_pc&select=data'))?.[0]?.data
+    if (d && Date.now() - new Date(d.at).getTime() < 45000 && Array.isArray(d.lan)) return { list: d.lan, port: Number(d.port) || 4000 }
+  } catch {}
+  return { list: [], port: 4000 }
+}
 export async function pcOnline() {
   // For trying a phone as if the office PC were off (support, tests).
   try { if (localStorage.getItem('adal-pretend-pc-off') === '1') return false } catch {}
@@ -525,8 +534,7 @@ export async function pcOnline() {
   let on = false
   try {
     const rows = await rest('GET', '/rest/v1/keep_meta?key=eq./_pc&select=data')
-    on = !!rows?.[0] && Date.now() - new Date(rows[0].data.at).getTime() < 45000
-  } catch {}
+    on = !!rows?.[0] && Date.now() - new Date(rows[0].data.at).getTime() < 45000  } catch {}
   alive = { at: Date.now(), on }
   try { window.dispatchEvent(new CustomEvent('adal-pc-online', { detail: on })) } catch {}
   return on

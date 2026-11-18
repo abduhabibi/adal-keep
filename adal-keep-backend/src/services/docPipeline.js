@@ -151,9 +151,24 @@ async function findProfile(ex, names, db) {
  * A new profile — only from a passport whose MRZ check digits verified, so
  * the name and number on it are the ones printed in the passport.
  */
+// One passport number is one profile: two files of the same person at once
+// wait for each other here, and the database index (migration 061) refuses a second one.
+const passportBusy = new Map()
 async function createProfile(ex, fullName, db) {
+  const key = String(ex.passport_number || '').trim().toUpperCase()
+  if (!key) return null
+  const prev = passportBusy.get(key) || Promise.resolve()
+  const run = prev.catch(() => {}).then(() => createProfileLocked(ex, fullName, db))
+  passportBusy.set(key, run)
+  try { return await run } finally { if (passportBusy.get(key) === run) passportBusy.delete(key) }
+}
+
+async function createProfileLocked(ex, fullName, db) {
   try {
     if (!fullName || !ex.passport_number) return null
+    // Already there (another file of her came first): that profile, not a new one.
+    const existing = await findProfile({ passport_number: String(ex.passport_number).trim().toUpperCase() }, [], db)
+    if (existing) return { id: existing.id, full_name: existing.full_name, created: false }
     // Attribute the new profile to the employee currently bound to this machine
     let createdBy = 'Vision-Auto'
     try {
@@ -175,9 +190,13 @@ async function createProfile(ex, fullName, db) {
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })
-    return { id, full_name: fullName }
+    return { id, full_name: fullName, created: true }
   } catch (e) {
     console.error('[pipeline] profile create failed:', e.message)
+    if (/UNIQUE/i.test(e.message)) {
+      const again = await findProfile({ passport_number: String(ex.passport_number).trim().toUpperCase() }, [], db)
+      if (again) return { id: again.id, full_name: again.full_name, created: false }
+    }
     return null
   }
 }
@@ -461,7 +480,7 @@ export async function runPipeline(filePath, db, analyzer, tag = '[pipeline]', op
     }
   } else {
     profile = await findProfile(ex, [fullName, nameFromFilename(filename)], db)
-    if (!profile && (isPassport || cvWithPassport)) { profile = await createProfile(ex, fullName, db); if (profile) profile.created = true }
+    if (!profile && (isPassport || cvWithPassport)) { profile = await createProfile(ex, fullName, db) }
   }
   if (!profile) {
     if (isPassport) {

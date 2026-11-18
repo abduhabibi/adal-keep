@@ -10,11 +10,17 @@ package main
 // Protocol — keep in sync with backend `src/services/discovery.js`:
 //
 //	request  (UDP broadcast :45454)  ADAL_KEEP_DISCOVER_V1
-//	response (UDP unicast)           ADAL_KEEP_SERVER_V1|<http port>|<lan ip>|<company>
+//	response (UDP unicast)           ADAL_KEEP_SERVER_V1|<http port>|<lan ip>|<company>|<ip>,<ip>,...
+//
+// The address used is the first that answers on the HTTP port: the reply
+// packet's own source address first (it came from there, so it is on this
+// network), then each advertised one. On 2026-11-18 a main PC advertised its
+// Tailscale IP and the Companions on its Wi-Fi could not reach it.
 
 import (
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -142,13 +148,13 @@ func askByBroadcast(timeout time.Duration) *serverInfo {
 		if p, perr := net.LookupPort("tcp", parts[1]); perr == nil && p > 0 {
 			port = p
 		}
-		ip := strings.TrimSpace(parts[2])
-		if ip == "" {
-			ip = from.IP.String()
-		}
 		name := "Adal Keep"
 		if len(parts) > 3 && strings.TrimSpace(parts[3]) != "" {
 			name = strings.TrimSpace(parts[3])
+		}
+		ip := pickReachable(replyCandidates(from.IP, parts), port)
+		if ip == "" {
+			continue
 		}
 		return &serverInfo{
 			URL:  "http://" + net.JoinHostPort(ip, itoa(port)),
@@ -278,6 +284,52 @@ func readConfHeader() string {
 	}
 	b, _ := os.ReadFile(path)
 	return strings.SplitN(string(b), "\n", 2)[0]
+}
+
+// replyCandidates: the reply's source address, then every advertised address
+// (field 3, then the list in field 5), each once; never 0.0.0.0 or loopback.
+func replyCandidates(from net.IP, parts []string) []string {
+	var out []string
+	seen := map[string]bool{}
+	add := func(s string) {
+		ip := net.ParseIP(strings.TrimSpace(s)).To4()
+		if ip == nil || ip.IsUnspecified() || ip.IsLoopback() || seen[ip.String()] {
+			return
+		}
+		seen[ip.String()] = true
+		out = append(out, ip.String())
+	}
+	if from != nil {
+		add(from.String())
+	}
+	if len(parts) > 2 {
+		add(parts[2])
+	}
+	if len(parts) > 4 {
+		for _, s := range strings.Split(parts[4], ",") {
+			add(s)
+		}
+	}
+	return out
+}
+
+// pickReachable: the first candidate where Adal Keep answers on port; when
+// none answers (the server is still starting), the first candidate.
+func pickReachable(cands []string, port int) string {
+	if len(cands) == 0 {
+		return ""
+	}
+	c := &http.Client{Timeout: 1500 * time.Millisecond}
+	for _, ip := range cands {
+		resp, err := c.Get("http://" + net.JoinHostPort(ip, itoa(port)) + "/api/companion/info")
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode < 500 {
+				return ip
+			}
+		}
+	}
+	return cands[0]
 }
 
 // itoa avoids pulling strconv in for a single call site.

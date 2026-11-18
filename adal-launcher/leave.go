@@ -210,9 +210,11 @@ func foundPCs(wait time.Duration) []map[string]string {
 		if len(parts) < 3 || parts[0] != "ADAL_KEEP_SERVER_V1" {
 			continue
 		}
-		ip := strings.TrimSpace(parts[2])
-		if ip == "" {
-			ip = from.IP.String()
+		// The reply's own source address first (it is on this network: an
+		// advertised Tailscale IP was not, 2026-11-18), then the advertised one.
+		ip := from.IP.String()
+		if from.IP.To4() == nil || from.IP.IsLoopback() {
+			ip = strings.TrimSpace(parts[2])
 		}
 		u := privateAddr(ip + ":" + strings.TrimSpace(parts[1]))
 		if u == "" || seen[u] {

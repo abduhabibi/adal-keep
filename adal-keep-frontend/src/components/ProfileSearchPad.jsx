@@ -36,9 +36,17 @@ export default function ProfileSearchPad({
     // is megabytes); a phone's copy has only the full one.
     const all = () => api.get('/profiles/brief').then(r => { if (!Array.isArray(r.data)) throw new Error('no brief list'); return r })
       .catch(() => api.get('/profiles'))
+    // The same list as last time is not drawn again (the pad is on every page).
+    let last = null
     const load = () => (brokerId ? api.get('/profiles', { params: { broker_id: brokerId } }) : all())
-      .then(r => { if (alive) setLoaded(Array.isArray(r.data) ? r.data : r.data?.profiles || []) })
-      .catch(() => { if (alive) setLoaded([]) })
+      .then(r => {
+        const rows = Array.isArray(r.data) ? r.data : r.data?.profiles || []
+        const now = JSON.stringify(rows)
+        if (!alive || now === last) return
+        last = now
+        setLoaded(rows)
+      })
+      .catch(() => { if (alive) { last = null; setLoaded([]) } })
     load()
     // new documents create profiles: keep the list fresh
     const t = setInterval(load, 30000)
@@ -47,8 +55,14 @@ export default function ProfileSearchPad({
 
   useEffect(() => {
     let alive = true
+    let last = ''
     const load = () => api.get('/automations/active')
-      .then(r => { if (alive) setRuns(Object.fromEntries((r.data || []).map(x => [x.profile_id, x.state]))) })
+      .then(r => {
+        const now = JSON.stringify(r.data || [])
+        if (!alive || now === last) return
+        last = now
+        setRuns(Object.fromEntries((r.data || []).map(x => [x.profile_id, x.state])))
+      })
       .catch(() => {})
     load()
     const t = setInterval(load, 10000)
@@ -69,17 +83,22 @@ export default function ProfileSearchPad({
   }, [autoFocusKey])
 
   const list = given || loaded || []
+  // Newest first, and each profile's search text, worked out once per list
+  // (not again on every key typed): the first 200 that match are shown.
+  const sorted = useMemo(() => list
+    .map(p => [norm([p.full_name, p.passport_number, p.labor_id, p.phone_number, p.order_id, p.broker_name].join(' ')), p])
+    .sort((a, b) => String(b[1].updated_at || '').localeCompare(String(a[1].updated_at || ''))), [list])
   const shown = useMemo(() => {
     const words = norm(q).split(' ').filter(Boolean)
-    const byRun = run ? list.filter(p => (run === 'on') === !!runs[p.id]) : list
-    const rows = words.length
-      ? byRun.filter(p => {
-          const hay = norm([p.full_name, p.passport_number, p.labor_id, p.phone_number, p.order_id, p.broker_name].join(' '))
-          return words.every(w => hay.includes(w))
-        })
-      : byRun
-    return [...rows].sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || ''))).slice(0, 200)
-  }, [list, q, run, runs])
+    const out = []
+    for (const [hay, p] of sorted) {
+      if (run && (run === 'on') !== !!runs[p.id]) continue
+      if (words.length && !words.every(w => hay.includes(w))) continue
+      out.push(p)
+      if (out.length === 200) break
+    }
+    return out
+  }, [sorted, q, run, runs])
 
   return (
     <section data-tour={autoFocusKey ? 'search-pad' : undefined} className={`panel p-3 flex flex-col min-h-0 ${className}`}>

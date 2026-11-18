@@ -63,6 +63,9 @@ func isFileLocked(path string) bool {
 // log lines can say "Adal Sunrise Recruitment" instead of an IP.
 var serverDisplayName = "Adal Keep"
 
+// lastPing: what pingServer last wrote to the log.
+var lastPing string
+
 // pingServer confirms the discovered address really is an Adal Keep server
 // and reports which company it belongs to.
 func pingServer() bool {
@@ -84,6 +87,13 @@ func pingServer() bool {
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 8192)).Decode(&info); err != nil {
 		return true // it answered 200 — good enough
 	}
+	// keepFindingServer asks every 30 seconds: say it only when something
+	// changed, not two log lines every 30 seconds all day.
+	said := strings.TrimSpace(info.Name) + "|" + hostServer + "|" + strings.Join(info.Lan, ", ")
+	if said == lastPing {
+		return true
+	}
+	lastPing = said
 	if strings.TrimSpace(info.Name) != "" {
 		serverDisplayName = "Adal " + strings.TrimSpace(info.Name)
 		log.Printf("✅ Connected to %s", serverDisplayName)
@@ -103,16 +113,21 @@ func postIngest(filePath, filename string) error {
 		return err
 	}
 	defer f.Close()
-
-	var buf bytes.Buffer
-	w := multipart.NewWriter(&buf)
-	part, err := w.CreateFormFile("file", filename)
+	st, err := f.Stat()
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(part, f); err != nil {
+
+	// The file itself is read straight from the disk while it is sent: only
+	// the small parts around it are kept in memory (a scan used to be copied
+	// into memory whole first). The bytes sent are the same as before.
+	var head, tail bytes.Buffer
+	sw := &switchWriter{to: &head}
+	w := multipart.NewWriter(sw)
+	if _, err := w.CreateFormFile("file", filename); err != nil {
 		return err
 	}
+	sw.to = &tail
 	_ = w.WriteField("client_id", clientID)
 	_ = w.WriteField("filename", filename)
 
@@ -129,9 +144,24 @@ func postIngest(filePath, filename string) error {
 	}
 
 	url := strings.TrimRight(hostServer, "/") + "/api/companion/ingest"
-	req, err := http.NewRequest(http.MethodPost, url, &buf)
+	size := st.Size()
+	payload := io.MultiReader(bytes.NewReader(head.Bytes()), io.LimitReader(f, size), bytes.NewReader(tail.Bytes()))
+	req, err := http.NewRequest(http.MethodPost, url, payload)
 	if err != nil {
 		return err
+	}
+	req.ContentLength = int64(head.Len()) + size + int64(tail.Len())
+	// Lets Go send it again by itself when a kept-open connection turns out
+	// closed by the main PC (the in-memory copy allowed that before).
+	req.GetBody = func() (io.ReadCloser, error) {
+		g, err := os.Open(filePath)
+		if err != nil {
+			return nil, err
+		}
+		return struct {
+			io.Reader
+			io.Closer
+		}{io.MultiReader(bytes.NewReader(head.Bytes()), io.LimitReader(g, size), bytes.NewReader(tail.Bytes())), g}, nil
 	}
 	req.Header.Set("Content-Type", w.FormDataContentType())
 	req.Header.Set("X-Adal-Client", clientID)
@@ -177,6 +207,12 @@ func postIngest(filePath, filename string) error {
 	}
 	return nil
 }
+
+// switchWriter lets the multipart parts before and after the file go into
+// separate buffers.
+type switchWriter struct{ to io.Writer }
+
+func (s *switchWriter) Write(p []byte) (int, error) { return s.to.Write(p) }
 
 // uploadToIngest delivers a file and, on transport failure, re-scans the LAN
 // once — a DHCP lease change is the most likely reason a previously working

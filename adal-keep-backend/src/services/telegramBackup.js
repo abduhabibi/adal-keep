@@ -392,7 +392,7 @@ async function sendDatabase(s, token, chat_id, password) {
  * One backup run. `force` ignores the time window (the "Back up now" button);
  * otherwise it stops between sets when the window ends.
  */
-export async function runBackup(db, { force = false, docsOnly = false, light = false } = {}) {
+export async function runBackup(db, { force = false, docsOnly = false, light = false, dbOnly = false } = {}) {
   if (progress.running) return { busy: true }
   const token = botToken(), password = getSecret('backup_password')
   const s = readState()
@@ -405,7 +405,7 @@ export async function runBackup(db, { force = false, docsOnly = false, light = f
     // 1. The database (the newest replaces the older ones in the index) —
     //    not on the quick runs that only carry new documents.
     // Everything this run will send, measured first, so it can say how far it is (percent).
-    for (const n of listDocuments().filter(n => !s.sent[n])) { try { progress.bytes_total += fs.statSync(path.join(SAFE, n)).size } catch {} }
+    for (const n of dbOnly ? [] : listDocuments().filter(n => !s.sent[n])) { try { progress.bytes_total += fs.statSync(path.join(SAFE, n)).size } catch {} }
     let profilesAtSnap = null
     let sentWhole = false   // a whole database copy went up (only then is it read back to check it)
     if (!docsOnly) {
@@ -424,7 +424,8 @@ export async function runBackup(db, { force = false, docsOnly = false, light = f
 
     // 2. Documents not sent yet, in sets of ~18 MB.
     progress.step = 'documents'
-    const todo = listDocuments().filter(n => !s.sent[n])
+    // (dbOnly: the online copy still needs the line — documents wait.)
+    const todo = dbOnly ? [] : listDocuments().filter(n => !s.sent[n])
     progress.files_todo = todo.length
     let group = [], size = 0
     const flush = async () => {
@@ -615,6 +616,16 @@ export function startBackupSchedule(db) {
       const ago = (t) => t ? Date.now() - new Date(t).getTime() : Infinity
       // A move from another system needs the whole (slow) line: nothing goes up meanwhile.
       if (await moving()) return
+      // The online copy (what the Companion and the phones work from) is still
+      // being filled: it gets the line first. Only the database still goes once
+      // a day, so a stolen PC never loses more than a day.
+      const filling = (await import('./cloudSync.js')).onlineCopyFilling()
+      if (filling) {
+        const lastDb = (s.sets || []).filter(x => /^db/.test(x.type)).map(x => new Date(x.date).getTime()).pop() || 0
+        if (Date.now() - lastDb < 24 * 3600 * 1000 || runsWorking() > 0) return
+        runBackup(db, { dbOnly: true }).then(r => console.log('[backup] database only (the online copy is still filling)', r)).catch(e => console.warn('[backup] failed:', e.message))
+        return
+      }
       const busy = runsWorking() > 0
 
       // New documents: a quick run.

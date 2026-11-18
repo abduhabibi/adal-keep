@@ -4,7 +4,7 @@
  */
 import express from 'express'
 import multer from 'multer'
-import { getConfig, saveConfig, testConnection, findChats, botInfo, runBackup, progress, restoreFrom, newestBackup } from '../services/telegramBackup.js'
+import { getConfig, saveConfig, testConnection, findChats, botInfo, runBackup, progress, restoreFrom, newestBackup, backupSoon } from '../services/telegramBackup.js'
 import { onThisPC } from './trash.js'
 
 const router = express.Router()
@@ -17,8 +17,15 @@ router.post('/backup/settings', here, (req, res) => { try { res.json(saveConfig(
 router.get('/backup/bot', here, async (req, res) => { try { res.json(await botInfo()) } catch (e) { fail(res, e) } })
 router.post('/backup/find-chats', here, async (req, res) => { try { res.json(await findChats(req.body?.agency)) } catch (e) { fail(res, e) } })
 router.post('/backup/test', here, async (req, res) => { try { res.json(await testConnection()) } catch (e) { fail(res, e) } })
-router.post('/backup/run', here, (req, res) => {
+router.post('/backup/run', here, async (req, res) => {
   if (progress.running) return res.json({ busy: true })
+  // The Companion and the phones work from the online copy: while it is still
+  // being filled the heavy backup waits, and starts by itself after.
+  const { onlineCopyFilling } = await import('../services/cloudSync.js')
+  if (onlineCopyFilling()) {
+    backupSoon()
+    return res.json({ waiting: true, message: 'The online copy for the Companion and the phones goes first. The backup starts by itself when it is done.' })
+  }
   runBackup(req.app.locals.db, { force: true }).catch(e => console.warn('[backup] failed:', e.message))
   res.json({ started: true })
 })

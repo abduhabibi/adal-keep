@@ -26,10 +26,32 @@ export async function idbGet(key) {
   })
 }
 
+// What was last written under each key (its length and a hash): a page that
+// asks every few seconds gets the same answer most times, and writing it to
+// the disk again each time kept a slow PC's hard disk busy for nothing.
+const written = new Map()
+function signature(data) {
+  let s
+  try { s = JSON.stringify(data) } catch { return null }
+  if (typeof s !== 'string') return null
+  let h = 2166136261
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619)
+  return `${s.length}:${h >>> 0}`
+}
+
 export async function idbPut(key, data) {
+  const sig = signature(data)
+  if (sig && written.get(key) === sig) return
   const d = await db()
   if (!d) return
-  try { d.transaction(STORE, 'readwrite').objectStore(STORE).put({ data, at: Date.now() }, key) } catch {}
+  // Noted when the write starts (not when it ends): an older answer asked to be
+  // written again while a newer one is still being written is not skipped.
+  if (sig) written.set(key, sig); else written.delete(key)
+  try {
+    const tx = d.transaction(STORE, 'readwrite')
+    tx.objectStore(STORE).put({ data, at: Date.now() }, key)
+    tx.onerror = tx.onabort = () => { if (written.get(key) === sig) written.delete(key) }
+  } catch { written.delete(key) }
 }
 
 /** The key of one answer: the PC it came from, the address and its parameters. */

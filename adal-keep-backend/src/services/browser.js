@@ -128,7 +128,8 @@ const BROWSER_ARGS = [
   ...(process.platform === 'linux' ? ['--disable-gpu'] : []),
   '--disable-dev-shm-usage',
   '--disable-background-networking',
-  // A minimized run window keeps its full speed.
+  // A minimized run window keeps its full speed: without these Chrome slows
+  // the timers of tabs that are not in front to ~1 tick a minute.
   '--disable-backgrounding-occluded-windows',
   '--disable-renderer-backgrounding',
   '--disable-background-timer-throttling',
@@ -136,15 +137,14 @@ const BROWSER_ARGS = [
   // browser-wide and blanks the Musaned reCAPTCHA images. Image policy is
   // per tab (`page.__adalAllowImages`, see tabManager.setupTab).
   '--disable-notifications',
-  '--disable-features=Translate,MediaRouter,OptimizationHints,CalculateNativeWinOcclusion',
+  // SpareRendererForSitePerProcess: no extra empty page process kept waiting
+  // (tens of MB on a 4 GB PC; runs reuse their tabs, so it is rarely used).
+  '--disable-features=Translate,MediaRouter,OptimizationHints,CalculateNativeWinOcclusion,SpareRendererForSitePerProcess,AutofillServerCommunication',
   '--disable-popup-blocking',
   '--noerrdialogs',
   '--disable-infobars',
-  // Keep background run tabs fully active: without these Chrome slows the
-  // timers of tabs that are not in front to ~1 tick a minute.
-  '--disable-background-timer-throttling',
-  '--disable-renderer-backgrounding',
-  '--disable-backgrounding-occluded-windows',
+  // No crash reports gathered or sent.
+  '--disable-breakpad',
 ]
 
 async function connectTo(puppeteer, url) {

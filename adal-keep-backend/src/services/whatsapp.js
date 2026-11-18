@@ -144,7 +144,7 @@ export async function connect(db, key = 'owner', { phone = '' } = {}, tries = 2)
   // A page busy loading the chats answers late: find out in 90s, not WhatsApp's 3 minutes.
   opts.puppeteer = { executablePath: exe, headless: true, protocolTimeout: 90_000, args: ['--no-first-run', '--no-default-browser-check', '--disable-gpu', '--disable-dev-shm-usage', '--mute-audio', '--disable-extensions',
     // Light: nothing the hidden WhatsApp does not need (updates, sync, translate, spell check…).
-    '--disable-background-networking', '--disable-component-update', '--disable-sync', '--disable-default-apps', '--no-pings',
+    '--disable-background-networking', '--disable-component-update', '--disable-sync', '--disable-default-apps', '--no-pings', '--disable-breakpad',
     '--disable-features=Translate,MediaRouter,OptimizationHints,CalculateNativeWinOcclusion,SpareRendererForSitePerProcess,AutofillServerCommunication',
     '--disable-site-isolation-trials', '--renderer-process-limit=2'] }
   // Always today's WhatsApp Web (a saved old copy of its page cannot link new devices).

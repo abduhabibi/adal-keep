@@ -71,7 +71,8 @@ function PhonesOnline({ here }) {
           : <p className="text-xs text-slate-500">
               Profiles, runs, tasks and all documents are copied online every minute, so paired phones work at home and at night even when this PC is off.
               Changes made on a phone are done here when this PC is on again. Last copy: <b>{ago(c.last)}</b>
-              {c.filesLeft > 0 && <> · {c.filesLeft} documents still to upload</>}
+              {c.textDone === false && <> · <b>first copy of the profiles going online</b> (documents start after)</>}
+              {c.filesLeft > 0 && <> · {c.filesLeft} documents still to upload (smallest first, light copies)</>}
               {c.applied > 0 && <> · {c.applied} phone changes done</>}
             </p>}
       {c.on && <p className="text-[11px] text-slate-500 rounded-lg bg-amber-50 dark:bg-amber-900/20 text-amber-900 dark:text-amber-200 px-2 py-1.5">

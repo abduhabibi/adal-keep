@@ -84,7 +84,7 @@ async function phoneOf(db, agency, jwt) {
 
 // ------------------------------------------------------------ live tabs
 const watching = new Map()   // run → { until, last, busy }
-async function frameOf(db, run) {
+async function frameOf(db, run, w = {}) {
   const { runTab } = await import('../routes/automations.js')
   const page = await runTab(db, run)
   if (!page) return { gone: true }
@@ -97,8 +97,14 @@ async function frameOf(db, run) {
     new Promise((_, no) => setTimeout(() => no(new Error('slow')), 6000)),
   ])
   const [vw, vh] = await page.evaluate(() => [innerWidth, innerHeight])
-  const sharp = (await import('sharp')).default
-  const img = (await sharp(raw).resize({ width: Math.min(1000, vw), withoutEnlargement: true }).jpeg({ quality: 55 }).toBuffer()).toString('base64')
+  // The same picture as last time (a page standing still): its small copy is
+  // used again — made anew five times a second it kept the processor busy.
+  if (w.raw !== raw || w.rawW !== vw || !w.img) {
+    const sharp = (await import('sharp')).default
+    w.img = (await sharp(raw).resize({ width: Math.min(1000, vw), withoutEnlargement: true }).jpeg({ quality: 55 }).toBuffer()).toString('base64')
+    w.raw = raw; w.rawW = vw
+  }
+  const img = w.img
   return { img, w: vw, h: vh, url: page.url(), title: await page.title().catch(() => ''), codeBox: await codeBoxUp(page) }
 }
 
@@ -136,7 +142,7 @@ function startStream(db, ch, run, view) {
         continue
       }
       try {
-        const f = await frameOf(db, run)
+        const f = await frameOf(db, run, w)
         if (f.gone) { ch.send({ t: 'frame', run, gone: true }); await sleep(2000); continue }
         const hash = crypto.createHash('sha1').update(f.img).digest('hex')
         if (hash !== w.last || Date.now() - lastSent > 4000 || w.force) {

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'url'
 import multer from 'multer'
 import { v4 as uuid } from 'uuid'
 import { ingestTemplate } from '../services/cvTemplateIngest.js'
-import { buildTemplateData, mergeTemplate, htmlToPdf } from '../services/cvRender.js'
+import { buildTemplateData, mergeTemplate, htmlToPdf, htmlToSmallPdf } from '../services/cvRender.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SAFE_STORAGE_DIR = path.join(__dirname, '../../data/SafeStorage')
@@ -234,16 +234,20 @@ export function withEdits(html, edits) {
 export async function generateCvFile(db, fresh, template, overrides = {}, createdBy = 'user') {
   // Religion is a must on every CV (asked on 2026-11-10).
   if (!String(fresh?.religion || '').trim()) throw Object.assign(new Error(`Religion is missing for ${fresh?.full_name || 'her'}: fill it in on the profile, then make the CV.`), { status: 400 })
-  const data = await buildTemplateData(db, fresh, template, overrides)
-  const html = withEdits(mergeTemplate(template.html_content, template.css_content, data), overrides.__edits)
 
   const slug = (fresh.full_name || 'profile').replace(/[^A-Za-z0-9]+/g, '_').slice(0, 40)
   const tslug = (template.name || 'template').replace(/[^A-Za-z0-9]+/g, '_').slice(0, 30)
   const filename = 'AdalCV_' + fresh.id + '_' + slug + '_' + tslug + '_' + Date.now() + '.pdf'
   const outPath = path.join(SAFE_STORAGE_DIR, filename)
 
-  try { await htmlToPdf(html, outPath) }
-  catch (e) { throw new Error('PDF render failed: ' + e.message) }
+  // Under 300 KB: the pictures inside get smaller until it fits.
+  let data
+  try {
+    data = await htmlToSmallPdf(async (level) => {
+      const d = await buildTemplateData(db, fresh, template, overrides, { level })
+      return { data: d, html: withEdits(mergeTemplate(template.html_content, template.css_content, d), overrides.__edits) }
+    }, outPath)
+  } catch (e) { throw new Error('PDF render failed: ' + e.message) }
 
   let cvField = await db('profile_fields').where('profile_id', fresh.id).andWhere('name', 'CV').first()
   if (!cvField) {
@@ -363,14 +367,16 @@ router.post('/generated/:id/reformat', async (req, res) => {
     // Her details as they are now; from the old CV only what its form chose (salary, country …).
     const snap = JSON.parse(row.data_snapshot || '{}')
     const keepFromForm = { salary: snap.SALARY, currency: snap.CURRENCY, country: snap.COUNTRY, contract_years: snap.CONTRACT_YEARS, ref_no: snap.REF_NO, post_applied: snap.POST_APPLIED }
-    const freshData = await buildTemplateData(db, profile, template, Object.fromEntries(Object.entries(keepFromForm).filter(([, v]) => v !== undefined && v !== '')))
-    const html = mergeTemplate(template.html_content, template.css_content, freshData)
+    const fromForm = Object.fromEntries(Object.entries(keepFromForm).filter(([, v]) => v !== undefined && v !== ''))
 
     const slug = (profile.full_name || 'profile').replace(/[^A-Za-z0-9]+/g, '_').slice(0, 40)
     const tslug = (template.name || 'template').replace(/[^A-Za-z0-9]+/g, '_').slice(0, 30)
     const filename = 'AdalCV_' + profile.id + '_' + slug + '_' + tslug + '_' + Date.now() + '.pdf'
     const outPath = path.join(SAFE_STORAGE_DIR, filename)
-    await htmlToPdf(html, outPath)
+    const freshData = await htmlToSmallPdf(async (level) => {
+      const d = await buildTemplateData(db, profile, template, fromForm, { level })
+      return { data: d, html: mergeTemplate(template.html_content, template.css_content, d) }
+    }, outPath)
 
     const size = fs.statSync(outPath).size
     let cvField = await db('profile_fields').where('profile_id', profile.id).andWhere('name', 'CV').first()

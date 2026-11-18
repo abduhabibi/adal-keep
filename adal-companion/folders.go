@@ -97,9 +97,22 @@ func contains(list []string, s string) bool {
 	return false
 }
 
+// sweptOld: files a sweep already found to be older than the start, by
+// size and change time. The next sweeps skip them without opening each one
+// (arrivedAt opens the file): a Downloads folder with thousands of old files
+// was opened file by file every 30 seconds. A file that comes in again under
+// the same name has another time or size, and the folder watch sees it anyway.
+type sweepStamp struct {
+	size int64
+	mod  time.Time
+}
+
+var sweptOld = map[string]sweepStamp{}
+
 // missedFiles: files that arrived after `since` and were never handled.
 func missedFiles(dirs []string, since time.Time, handled map[string]time.Time) []string {
 	var out []string
+	keep := map[string]sweepStamp{} // only what is still there stays remembered
 	for _, d := range dirs {
 		entries, err := os.ReadDir(d)
 		if err != nil {
@@ -113,18 +126,28 @@ func missedFiles(dirs []string, since time.Time, handled map[string]time.Time) [
 			if _, done := handled[p]; done {
 				continue
 			}
+			// On Windows the folder listing already carries size and time.
+			info, ierr := e.Info()
+			if ierr == nil {
+				if s, seen := sweptOld[p]; seen && s.size == info.Size() && s.mod.Equal(info.ModTime()) {
+					keep[p] = s
+					continue
+				}
+			}
 			at, ok := arrivedAt(p)
 			if !ok {
-				info, err := e.Info()
-				if err != nil {
+				if ierr != nil {
 					continue
 				}
 				at = info.ModTime()
 			}
 			if at.After(since) {
 				out = append(out, p)
+			} else if ierr == nil {
+				keep[p] = sweepStamp{info.Size(), info.ModTime()}
 			}
 		}
 	}
+	sweptOld = keep
 	return out
 }

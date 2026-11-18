@@ -726,7 +726,7 @@ router.get('/profiles/:profileId/journey', async (req, res) => {
     if (!p) return res.status(404).json({ error: 'Profile not found' })
     const runs = {}
     for (const r of await db('automation_queue').where('profile_id', id).select('workflow_id', 'status').orderBy('id', 'asc')) runs[r.workflow_id] = r
-    const cv = await db('generated_cvs').where('profile_id', id).first().catch(() => null)
+    const cv = await db('generated_cvs').where('profile_id', id).first('id').catch(() => null)   // only whether one exists (its snapshot can be MBs)
     const docs = (await docsOf(db, [id])).get(id) || new Set()
     res.json({ ...journeyOf(p, runs, !!cv || docs.has('CV'), docs, (await agentsOut(db, [id])).get(id) || []), cv_missing: cvMissing(p, docs, !!cv || docs.has('CV')) })
   } catch (e) { res.status(e.status || 500).json({ error: e.message, ...(e.feature ? { feature: e.feature, plan: e.plan } : {}) }) }
@@ -769,7 +769,7 @@ export const STEP_ROBOTS = {
 async function journeyFor(db, id, p) {
   const runs = {}
   for (const r of await db('automation_queue').where('profile_id', id).select('workflow_id', 'status').orderBy('id', 'asc')) runs[r.workflow_id] = r
-  const cv = await db('generated_cvs').where('profile_id', id).first().catch(() => null)
+  const cv = await db('generated_cvs').where('profile_id', id).first('id').catch(() => null)   // only whether one exists (its snapshot can be MBs)
   const docs = (await docsOf(db, [id])).get(id) || new Set()
   return journeyOf(p, runs, !!cv || docs.has('CV'), docs, [])
 }
@@ -860,9 +860,10 @@ router.get('/automations/:id/login', async (req, res) => {
 export async function runTab(db, runId) {
   // A site's sign-in tab, not a run's ("site-tasheer"): the same live view.
   if (/^site-/.test(String(runId))) return (await import('../services/tasheerSession.js')).siteTab(String(runId))
-  const run = await db('automation_queue').where('id', runId).first('id', 'workflow_id').catch(() => null)
+  const run = await db('automation_queue').where('id', runId).first('id', 'workflow_id', 'status').catch(() => null)
   if (!run) return null
-  return findRunTab(await openBrowserIfAny(), run.id, run.workflow_id)
+  // Looking at a finished run's tab does not make it that run's again (the site's next run uses it).
+  return findRunTab(await openBrowserIfAny(), run.id, run.workflow_id, { adopt: ['pending', 'running', 'paused'].includes(run.status) })
 }
 const liveTab = (req) => runTab(req.app.locals.db, req.params.id)
 
@@ -904,14 +905,24 @@ router.get('/automations/:id/tab', async (req, res) => {
 })
 
 export const LIVE_KEYS = ['Enter', 'Backspace', 'Tab', 'Escape', 'ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Delete', 'PageDown', 'PageUp', 'Home', 'End', 'Space']
-/** Scrolls the page, or the box inside it that scrolls (a long form often sits in one). */
+/** Scrolls the page, or the box inside it that scrolls (a long form often sits
+ *  in one, a dialog too): the first of them that can still move that way. */
 function scrollPage(dx, dy) {
-  const can = (e) => e.scrollHeight > e.clientHeight + 4 && /auto|scroll/.test(getComputedStyle(e).overflowY)
-  const boxes = [...document.querySelectorAll('*')].filter(can).sort((a, b) => b.clientHeight * b.clientWidth - a.clientHeight * a.clientWidth)
+  const can = (e) => e.scrollHeight > e.clientHeight + 4 && /auto|scroll|overlay/.test(getComputedStyle(e).overflowY)
+  const room = (e) => dy > 0 ? e.scrollHeight - e.clientHeight - e.scrollTop > 1 : dy < 0 ? e.scrollTop > 0 : true
   const page = document.scrollingElement || document.documentElement
-  const before = page.scrollTop
-  page.scrollBy({ left: dx, top: dy, behavior: 'instant' })
-  if (page.scrollTop === before && boxes[0]) boxes[0].scrollBy({ left: dx, top: dy, behavior: 'instant' })
+  // To the end: the page and every box in it.
+  if (dy >= 1e6) {
+    page.scrollTo({ top: page.scrollHeight, behavior: 'instant' })
+    document.querySelectorAll('*').forEach(e => { if (can(e)) e.scrollTop = e.scrollHeight })
+    return
+  }
+  const boxes = [...document.querySelectorAll('*')].filter(e => can(e) && e.getClientRects().length)
+    .sort((a, b) => b.clientHeight * b.clientWidth - a.clientHeight * a.clientWidth)
+  // A dialog on top first, then the page, then the biggest box that still has room.
+  const dialog = boxes.find(e => e.closest('[role="dialog"], .modal, .MuiDialog-root, .cdk-overlay-pane') && room(e))
+  const target = dialog || (room(page) && page.scrollHeight > page.clientHeight + 4 ? page : boxes.find(room)) || page
+  target.scrollBy({ left: dx, top: dy, behavior: 'instant' })
 }
 
 /** One tap, key, scroll or move in a run's tab (the phone's / Admin's live view). */

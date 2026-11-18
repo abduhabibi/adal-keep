@@ -127,7 +127,10 @@ function BackupCardHere() {
             const r = (await api.post('/backup/test')).data; toast.success(`Connected to “${r.title}” — a test message was sent.`)
           })}>Send a test message</Button>
           <Button size="sm" disabled={!ready || p.running} onClick={() => step('run', async () => {
-            await api.post('/backup/run'); toast('Backing up now — the first time sends every document and can take a while.', { icon: '⏳', duration: 7000 }); load()
+            const { data } = await api.post('/backup/run')
+            if (data?.waiting) toast(data.message, { icon: '☁️', duration: 8000 })
+            else toast('Backing up now — the first time sends every document and can take a while.', { icon: '⏳', duration: 7000 })
+            load()
           })}>Back up now</Button>
         </div>
       </div>

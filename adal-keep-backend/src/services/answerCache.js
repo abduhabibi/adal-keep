@@ -43,10 +43,16 @@ export function answerCache() {
     // Made now: keep what is answered (only a good answer).
     const json = res.json.bind(res)
     res.json = (body) => {
-      if (res.statusCode === 200) {
+      if (res.statusCode === 200 && !res.headersSent) {
         try {
           const text = JSON.stringify(body)
-          cache.set(p, { at: Date.now(), type: 'application/json; charset=utf-8', text, gz: text.length > 16384 ? zlib.gzipSync(text, { level: 5 }) : null })
+          const kept = { at: Date.now(), type: 'application/json; charset=utf-8', text, gz: text.length > 16384 ? zlib.gzipSync(text, { level: 5 }) : null }
+          cache.set(p, kept)
+          // Sent as just made: not turned into JSON and packed a second time.
+          if (kept.gz && /\bgzip\b/.test(req.headers['accept-encoding'] || '')) {
+            res.set({ 'Content-Type': kept.type, 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding' })
+            return res.end(kept.gz)
+          }
         } catch {}
       }
       return json(body)

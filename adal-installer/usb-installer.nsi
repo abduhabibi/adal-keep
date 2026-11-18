@@ -150,6 +150,17 @@ Section "Install"
   DeleteRegValue HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "${APP_KEY}"
 !else
   ; ============================= SERVER PC =============================
+  ; A clean start: the old program, browser caches and left-over files go;
+  ; the database (company info, profiles ...), documents and sign-ins stay.
+  ${If} ${FileExists} "$INSTDIR\backend\*.*"
+    DetailPrint "Cleaning the old copy (database and documents are kept)..."
+    SetOutPath "$PLUGINSDIR"
+    File "stage\clean-main.ps1"
+    nsExec::Exec '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\clean-main.ps1" -InstDir "$INSTDIR"'
+    Pop $0
+    SetOutPath "$INSTDIR"
+  ${EndIf}
+
   DetailPrint "Copying Adal Keep..."
   File /r "stage\main\*"
   CreateDirectory "$INSTDIR\backend\data"

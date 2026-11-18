@@ -2,6 +2,13 @@ import net from 'net'
 // Slow or busy office lines: give a connection 2.5 s to open (Node's 250 ms
 // default makes calls to Supabase / Telegram fail with ETIMEDOUT).
 net.setDefaultAutoSelectFamilyAttemptTimeout?.(2500)
+import os from 'os'
+import sharp from 'sharp'
+// Pictures: no open files held by sharp's cache (Windows cannot move or delete
+// a file sharp still holds), and on a 4 GB PC a smaller cache and 2 threads a
+// picture, so pictures, Chromium and WhatsApp fit without swapping.
+sharp.cache({ files: 0 })
+if (os.totalmem() < 6 * 1024 ** 3) { sharp.cache({ memory: 24, files: 0, items: 50 }); sharp.concurrency(Math.min(2, os.cpus().length || 1)) }
 import zlib from 'zlib'
 import express from 'express'
 import musanedAccountsRouter, { accountsRouter } from './src/routes/musanedAccounts.js'
@@ -133,18 +140,9 @@ app.use('/api', (req, res, next) => {
   }
   next()
 })
-// Big answers (profile lists, journeys …) go gzipped: much faster over Wi-Fi and Tailscale.
-app.use((req, res, next) => {
-  if (!/\bgzip\b/.test(req.headers['accept-encoding'] || '')) return next()
-  const json = res.json.bind(res)
-  res.json = (body) => {
-    const text = JSON.stringify(body)
-    if (text === undefined || text.length < 16384 || res.headersSent) return json(body)
-    res.set({ 'Content-Type': 'application/json; charset=utf-8', 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding' })
-    return res.end(zlib.gzipSync(text, { level: 5 }))
-  }
-  next()
-})
+// (Big answers are packed once, by the gzip step above: a second one here made
+// every big list JSON twice and packed it on the main thread, freezing the PC
+// for a moment on each profiles list.)
 
 // Locked after the trial: every API call and stored document is refused.
 app.use(subscriptionGuard)

@@ -36,20 +36,21 @@ async function findReadyProfiles(db) {
     .whereNot('order_id', '')
     .select('id', 'full_name', 'labor_id', 'order_id')
 
-  const ready = []
-  for (const p of profiles) {
-    // Check all four required files exist
-    const needed = ['Passport', 'Photo', 'Full Body Photo', 'Slip']
-    const have = await db('files')
+  // All four required files exist: one query per 500 profiles, not one per
+  // profile every 2 minutes (hundreds of joins on a slow disk).
+  const needed = ['Passport', 'Photo', 'Full Body Photo', 'Slip']
+  const full = new Set()
+  for (let i = 0; i < profiles.length; i += 500) {
+    const rows = await db('files')
       .join('profile_fields', 'files.profile_field_id', 'profile_fields.id')
-      .where('profile_fields.profile_id', p.id)
+      .whereIn('profile_fields.profile_id', profiles.slice(i, i + 500).map(p => p.id))
       .whereIn('profile_fields.name', needed)
-      .groupBy('profile_fields.name')
-      .select('profile_fields.name')
-    const haveSet = new Set(have.map(r => r.name))
-    if (needed.every(n => haveSet.has(n))) ready.push(p)
+      .groupBy('profile_fields.profile_id')
+      .havingRaw('count(distinct profile_fields.name) = ?', [needed.length])
+      .select('profile_fields.profile_id as id')
+    for (const r of rows) full.add(r.id)
   }
-  return ready
+  return profiles.filter(p => full.has(p.id))
 }
 
 async function isAlreadyQueued(db, profileId, workflowId = WORKFLOW_ID) {

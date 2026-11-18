@@ -274,12 +274,18 @@ export function startQueueWorker(db, processorFn, tag = '[QUEUE]', watchDir = nu
 
   // Fire N parallel loops that each drain one file at a time
   for (let w = 0; w < concurrency; w++) {
+    // A reading takes many seconds: the next tick waits for it, or every
+    // second another file would start beside it (10 files at once on a 4 GB PC).
+    let busy = false
     setInterval(async () => {
+      if (busy) return
+      busy = true
       try {
-        await processOne(db, processorFn, `${tag}#${w}`)
+        // Done with one: the next one at once, not a second later.
+        while (await processOne(db, processorFn, `${tag}#${w}`)) {}
       } catch (e) {
         console.log(tag, 'worker', w, 'error:', e.message)
-      }
+      } finally { busy = false }
     }, TICK_MS + w * 300) // stagger startup
   }
 }

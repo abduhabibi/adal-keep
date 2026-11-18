@@ -12,7 +12,6 @@
 import { useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
 import api from '../services/api'
-import { cloudCreds } from '../cloud/adapter'
 
 const plugin = () => window.Capacitor?.Plugins?.AdalDiscovery
 const nameOf = (a) => `${a.name || 'LMIS'}${a.phone ? ` · ${a.phone}` : ''}`
@@ -28,6 +27,8 @@ export default function SmsCodesSwitch() {
   if (!plugin()?.smsForward) return null
   const chosen = String(st?.account || '').split(' | ').filter(Boolean)
   const send = async (account) => {
+    // The online-copy code (60 kB) only when this is switched: Settings on a PC never needs it.
+    const { cloudCreds } = await import('../cloud/adapter.js')
     const c = cloudCreds()
     if (!c?.email) { toast.error('Pair this phone with the office PC first'); return null }
     return plugin().smsForward({ on: true, url: c.url, anon: c.anon, email: c.email, password: c.password, agency: c.agency, account })

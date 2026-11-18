@@ -93,8 +93,15 @@ function useRunStates() {
   const [states, setStates] = useState({})
   useEffect(() => {
     let alive = true
+    // The same answer as last time changes nothing: the whole list is not filtered and drawn again.
+    let last = ''
     const load = () => api.get('/automations/active')
-      .then(r => { if (alive) setStates(Object.fromEntries((r.data || []).map(x => [x.profile_id, x.state]))) })
+      .then(r => {
+        const now = JSON.stringify(r.data || [])
+        if (!alive || now === last) return
+        last = now
+        setStates(Object.fromEntries((r.data || []).map(x => [x.profile_id, x.state])))
+      })
       .catch(() => {})
     load()
     const t = setInterval(load, 10000)
@@ -112,8 +119,13 @@ function useStages() {
   useEffect(() => {
     let alive = true
     // The saved counts at once (deviceCache), the fresh ones behind them.
+    // Every 8 s the same counts come back most times: only a different answer
+    // is shown (else every profile was filtered, sorted and drawn again).
+    let last = ''
     const show = (data) => {
-      if (!alive) return
+      const now = JSON.stringify(data ?? null)
+      if (!alive || now === last) return
+      last = now
       const list = data?.profiles || []
       setSt({
         names: data?.stages || [],
@@ -125,18 +137,7 @@ function useStages() {
     }
     let first = true
     const load = () => cachedGet('/automations/stages', { onSaved: first ? show : undefined })
-      .then(data => { first = false; return { data } })
-      .then(r => {
-        if (!alive) return
-        const list = r.data?.profiles || []
-        setSt({
-          names: r.data?.stages || [],
-          of: Object.fromEntries(list.map(x => [x.profile_id, x.stage])),
-          steps: Object.fromEntries(list.map(x => [x.profile_id, x.steps || {}])),
-          who: Object.fromEntries(list.map(x => [x.profile_id, x.who || {}])),
-          missing: Object.fromEntries(list.map(x => [x.profile_id, x.missing || {}])),
-        })
-      })
+      .then(data => { first = false; show(data) })
       .catch(() => {})
     load()
     const again = () => { if (!document.hidden) load() }
@@ -195,12 +196,13 @@ export function useProfileFilters(profiles) {
       : sort === 'full_name' ? norm(p.full_name).toLowerCase()
       : sort === 'updated_at' ? Math.max(new Date(p.updated_at || 0).getTime() || 0, new Date(p.last_opened_at || 0).getTime() || 0)
       : new Date(p[sort] || 0).getTime()
-    out.sort((a, b) => {
-      const x = key(a), y = key(b)
+    // Each profile's key worked out once (not in every comparison: dates were read again and again).
+    const keyed = out.map(p => [key(p), p])
+    keyed.sort(([x], [y]) => {
       const c = x < y ? -1 : x > y ? 1 : 0
       return dir === 'asc' ? c : -c
     })
-    return out
+    return keyed.map(k => k[1])
   }, [profiles, f, sort, dir, runStates, stages])
 
   const opts = (any, list) => [['', any], ...list.map(v => [v, label(v)])]

@@ -87,10 +87,10 @@ function fileToDataUri(absPath, mime) {
 // Phone photos are 3-12 MB; a CV prints them a few centimetres wide. Shrink
 // once (cached by path + modified time) so preview and PDF are light and fast.
 const _shrunk = new Map()
-async function imageDataUri(absPath, mime, maxPx, { trim = false } = {}) {
+async function imageDataUri(absPath, mime, maxPx, { trim = false, quality = 85, palette = false } = {}) {
   if (!absPath || !fs.existsSync(absPath)) return ''
   if (mime && !mime.startsWith('image/')) return fileToDataUri(absPath, mime)
-  const key = absPath + ':' + fs.statSync(absPath).mtimeMs + ':' + maxPx + ':' + trim
+  const key = absPath + ':' + fs.statSync(absPath).mtimeMs + ':' + maxPx + ':' + trim + ':' + quality + ':' + palette
   if (_shrunk.has(key)) return _shrunk.get(key)
   let uri
   try {
@@ -102,8 +102,8 @@ async function imageDataUri(absPath, mime, maxPx, { trim = false } = {}) {
     const img = (source === absPath ? sharp(absPath).rotate() : sharp(source)).resize({ width: maxPx, height: maxPx, fit: 'inside', withoutEnlargement: true })
     const { hasAlpha } = await sharp(absPath).metadata()
     uri = hasAlpha   // transparent banners stay PNG
-      ? 'data:image/png;base64,' + (await img.png({ compressionLevel: 9 }).toBuffer()).toString('base64')
-      : 'data:image/jpeg;base64,' + (await img.jpeg({ quality: 85 }).toBuffer()).toString('base64')
+      ? 'data:image/png;base64,' + (await img.png({ compressionLevel: 9, palette }).toBuffer()).toString('base64')
+      : 'data:image/jpeg;base64,' + (await img.jpeg({ quality, mozjpeg: true }).toBuffer()).toString('base64')
   } catch {
     uri = fileToDataUri(absPath, mime)
   }
@@ -113,17 +113,17 @@ async function imageDataUri(absPath, mime, maxPx, { trim = false } = {}) {
 }
 
 /**
- * A template's header and footer banners as the CV shows them (2000 px):
+ * A template's header and footer banners as the CV shows them (1600 px, light):
  * for the phones, which draw CVs themselves with the PC off (cloudSync).
  */
 export async function bannersOf(template) {
   return {
-    header: template?.header_path ? await imageDataUri(resolveStoredPath(template.header_path), null, 2000) : '',
-    footer: template?.footer_path ? await imageDataUri(resolveStoredPath(template.footer_path), null, 2000) : '',
+    header: template?.header_path ? await imageDataUri(resolveStoredPath(template.header_path), null, 1600, { quality: 75, palette: true }) : '',
+    footer: template?.footer_path ? await imageDataUri(resolveStoredPath(template.footer_path), null, 1600, { quality: 75, palette: true }) : '',
   }
 }
 
-async function renderPdfFirstPageToDataUri(pdfPath) {
+async function renderPdfFirstPageToDataUri(pdfPath, maxPx = 1600, quality = 85) {
   try {
     const mupdf = await import('mupdf')
     const data = fs.readFileSync(pdfPath)
@@ -132,7 +132,7 @@ async function renderPdfFirstPageToDataUri(pdfPath) {
     const page = doc.loadPage(0)
     const pix = page.toPixmap([2,0,0,2,0,0], mupdf.ColorSpace.DeviceRGB, false, true)
     const sharp = (await import('sharp')).default
-    const jpg = await sharp(Buffer.from(pix.asPNG())).resize({ width: 1600, height: 1600, fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 85 }).toBuffer()
+    const jpg = await sharp(Buffer.from(pix.asPNG())).resize({ width: maxPx, height: maxPx, fit: 'inside', withoutEnlargement: true }).jpeg({ quality, mozjpeg: true }).toBuffer()
     return 'data:image/jpeg;base64,' + jpg.toString('base64')
   } catch (e) {
     console.warn('[cvRender] PDF render failed:', e.message)
@@ -172,7 +172,21 @@ function formatDate(d) {
   return `${String(dt.getDate()).padStart(2, '0')} ${months[dt.getMonth()]} ${dt.getFullYear()}`
 }
 
-export async function buildTemplateData(db, profile, template, overrides = {}) {
+// How sharp the pictures inside a CV are. A CV PDF must stay under 300 KB
+// (it goes by WhatsApp / Telegram on slow lines): level 0 first, and a
+// smaller level only when the PDF came out bigger (htmlToSmallPdf).
+export const CV_MAX_BYTES = 300 * 1024
+const LEVELS = [
+  { scale: 0.8, q: 70, palette: true },
+  { scale: 0.62, q: 62, palette: true },
+  { scale: 0.48, q: 54, palette: true },
+  { scale: 0.36, q: 46, palette: true },
+]
+const px = (n, L) => Math.round(n * L.scale)
+
+export async function buildTemplateData(db, profile, template, overrides = {}, { level = 0 } = {}) {
+  const L = LEVELS[Math.min(Math.max(level, 0), LEVELS.length - 1)]
+  const pic = { quality: L.q, palette: L.palette }
   const photoFile    = await findProfileFile(db, profile.id, 'Photo')
   const fullBodyFile = await findProfileFile(db, profile.id, 'Full Body Photo')
   const passportFile = await findProfileFile(db, profile.id, 'Passport')
@@ -180,14 +194,14 @@ export async function buildTemplateData(db, profile, template, overrides = {}) {
   const photoAbs    = photoFile    ? resolveStoredPath(photoFile.path)    : null
   const fullBodyAbs = fullBodyFile ? resolveStoredPath(fullBodyFile.path) : null
   const passportAbs = passportFile ? resolveStoredPath(passportFile.path) : null
-  const photoUrl    = photoAbs    ? await imageDataUri(photoAbs, photoFile.mimetype, 800)       : PHOTO_PH
-  const fullBodyUrl = fullBodyAbs ? await imageDataUri(fullBodyAbs, fullBodyFile.mimetype, 1400, { trim: true }) : BODY_PH
+  const photoUrl    = photoAbs    ? await imageDataUri(photoAbs, photoFile.mimetype, px(600, L), pic) : PHOTO_PH
+  const fullBodyUrl = fullBodyAbs ? await imageDataUri(fullBodyAbs, fullBodyFile.mimetype, px(1000, L), { ...pic, trim: true }) : BODY_PH
   let passportUrl = ''
   if (passportAbs) {
     if ((passportFile.mimetype || '').startsWith('image/')) {
-      passportUrl = await imageDataUri(passportAbs, passportFile.mimetype, 1600)
+      passportUrl = await imageDataUri(passportAbs, passportFile.mimetype, px(1300, L), pic)
     } else if (passportFile.mimetype === 'application/pdf' || passportAbs.toLowerCase().endsWith('.pdf')) {
-      passportUrl = await renderPdfFirstPageToDataUri(passportAbs)
+      passportUrl = await renderPdfFirstPageToDataUri(passportAbs, px(1300, L), L.q)
     } else {
       passportUrl = fileToDataUri(passportAbs, passportFile.mimetype)
     }
@@ -196,8 +210,8 @@ export async function buildTemplateData(db, profile, template, overrides = {}) {
   const headerFile = template.header_path || null
   const footerFile = template.footer_path || null
   // Header/footer banners span the page width: 2000 px is sharp at A4.
-  const headerUrl = headerFile ? await imageDataUri(resolveStoredPath(headerFile), null, 2000) : ''
-  const footerUrl = footerFile ? await imageDataUri(resolveStoredPath(footerFile), null, 2000) : ''
+  const headerUrl = headerFile ? await imageDataUri(resolveStoredPath(headerFile), null, px(1600, L), pic) : ''
+  const footerUrl = footerFile ? await imageDataUri(resolveStoredPath(footerFile), null, px(1600, L), pic) : ''
 
   const { fieldsFromContract } = await import('./contractFields.js')
   const merged = { ...profile, ...fieldsFromContract(profile), ...Object.fromEntries(Object.entries(overrides).filter(([, v]) => v !== '' && v != null)) }
@@ -541,6 +555,24 @@ export async function htmlToPdf(html, outPath) {
     _idle = setTimeout(() => { _pdfBrowser?.close().catch(() => {}); _pdfBrowser = null }, 5 * 60000)
     _idle.unref?.()
   }
+}
+
+/**
+ * A CV PDF under CV_MAX_BYTES: build(level) gives the CV's { html, data } with
+ * its pictures at that level; the smallest level that fits is kept (the last
+ * one is kept whatever its size). Returns the data of the PDF that was kept.
+ */
+export async function htmlToSmallPdf(build, outPath) {
+  let data = null
+  for (let level = 0; level < LEVELS.length; level++) {
+    const made = await build(level)
+    data = made.data
+    await htmlToPdf(made.html, outPath)
+    const size = fs.statSync(outPath).size
+    if (size <= CV_MAX_BYTES) break
+    if (level < LEVELS.length - 1) console.log(`[cv] ${Math.round(size / 1024)} KB is over ${CV_MAX_BYTES / 1024} KB - smaller pictures`)
+  }
+  return data
 }
 
 export async function isGeneratedCV(db, filename) {

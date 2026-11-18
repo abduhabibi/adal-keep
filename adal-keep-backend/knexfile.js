@@ -22,6 +22,10 @@ export default {
         conn.run('PRAGMA busy_timeout = 8000;')
         conn.run('PRAGMA synchronous = NORMAL;')
         conn.run('PRAGMA secure_delete = ON;')
+        // 16 MB of pages kept in memory (the default is 2 MB): the lists every page
+        // asks for are read from RAM, not the slow disk. Sorts stay in memory too.
+        conn.run('PRAGMA cache_size = -16000;')
+        conn.run('PRAGMA temp_store = MEMORY;')
         done(null, conn)
       }
     },

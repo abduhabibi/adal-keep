@@ -50,3 +50,29 @@ func TestCandidateFoldersHasDownloadsOnce(t *testing.T) {
 		t.Fatalf("Downloads missing: %v", seen)
 	}
 }
+
+// A second sweep remembers old files without opening them again, and still
+// finds a file that arrived in between.
+func TestMissedFilesSecondSweep(t *testing.T) {
+	dir := t.TempDir()
+	old := filepath.Join(dir, "old.pdf")
+	os.WriteFile(old, []byte("x"), 0o644)
+	long := time.Now().Add(-time.Hour)
+	os.Chtimes(old, long, long)
+	since := time.Now().Add(-time.Minute)
+	missedFiles([]string{dir}, since, map[string]time.Time{})
+	fresh := filepath.Join(dir, "fresh.pdf")
+	os.WriteFile(fresh, []byte("x"), 0o644)
+	got := missedFiles([]string{dir}, since, map[string]time.Time{})
+	if len(got) != 1 || got[0] != fresh {
+		t.Fatalf("want only the fresh file, got %v", got)
+	}
+	if _, ok := sweptOld[old]; !ok {
+		t.Fatalf("old file not remembered")
+	}
+	os.Remove(old)
+	missedFiles([]string{dir}, since, map[string]time.Time{})
+	if _, ok := sweptOld[old]; ok {
+		t.Fatalf("a removed file stays remembered")
+	}
+}

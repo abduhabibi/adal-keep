@@ -162,12 +162,22 @@ async function pages(filePath, max = 2) {
   return { images, text }
 }
 
-let _worker = null
-async function ocr() {
-  if (_worker) return _worker
-  const { createWorker } = await import('tesseract.js')
-  _worker = await createWorker(['eng'], 1, { langPath: ROOT, cachePath: path.join(ROOT, 'data', 'tessdata'), gzip: false })
+// One reader, kept while documents come in; it goes 2 minutes after the last
+// one (it holds ~150 MB: kept for ever, a 4 GB PC never gets it back).
+let _worker = null, _idle = null, _busy = 0
+function ocr() {
+  clearTimeout(_idle)
+  if (!_worker) {
+    const made = _worker = import('tesseract.js').then(({ createWorker }) => createWorker(['eng'], 1, { langPath: ROOT, cachePath: path.join(ROOT, 'data', 'tessdata'), gzip: false }))
+    made.catch(() => { if (_worker === made) _worker = null })
+  }
   return _worker
+}
+function letReaderGo() {
+  clearTimeout(_idle)
+  if (_busy > 0) return
+  _idle = setTimeout(() => { const w = _worker; _worker = null; w?.then(x => x.terminate()).catch(() => {}) }, 120000)
+  _idle.unref?.()
 }
 async function readSpot(png, meta, b, singleLine) {
   const padX = (b.right - b.left) * 0.06 + 0.004, padY = (b.bottom - b.top) * 0.25 + 0.003
@@ -186,8 +196,12 @@ async function readSpot(png, meta, b, singleLine) {
  * `log` gets one line about how it went (no personal data).
  */
 export async function readDocumentDetails(filePath, docType, log = () => {}) {
+  if (!FIELDS[docType]) return {}
+  _busy++; clearTimeout(_idle)
+  try { return await readDetailsNow(filePath, docType, log) } finally { _busy--; letReaderGo() }
+}
+async function readDetailsNow(filePath, docType, log) {
   const fields = FIELDS[docType]
-  if (!fields) return {}
   const t0 = Date.now()
   const out = {}
   const { images, text: layer } = await pages(filePath)
@@ -252,6 +266,6 @@ export async function readDocumentDetails(filePath, docType, log = () => {}) {
   return out
 }
 
-// Tesseract stays loaded between documents; let it go when Adal Keep closes.
-process.once('exit', () => { try { _worker?.terminate() } catch {} })
+// Adal Keep closing: the reader goes with it.
+process.once('exit', () => { _worker?.then(w => w.terminate()).catch(() => {}) })
 export const _test = { clean, fromText }

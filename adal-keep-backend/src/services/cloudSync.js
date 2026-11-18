@@ -24,17 +24,22 @@ import { isFollower, pcNumber as myPcNumber } from './mainPC.js'
 // a Companion typing it found an empty copy).
 const beatData = () => ({ at: new Date().toISOString(), ...(isFollower() ? {} : { pc: myPcNumber() }) })
 import { tgReady, tgPut, tgDelete, TG_MAX_DOWNLOAD, findStorageChat } from './tgStore.js'
+import { viewCopy } from './viewCopy.js'
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 
 const PORT = () => Number(process.env.PORT) || 4000
 const EVERY_MS = 60 * 1000
-const FILES_PER_ROUND = 25
+// Documents: smallest first, for up to this long per round (then the next round at once).
+const FILES_ROUND_MS = 50 * 1000
+const FILES_AT_ONCE = 2
 const MAX_FILE = 45 * 1024 * 1024
 
 // The answers the pages read: once for the agency, and per profile.
-const GLOBAL = ['/profiles', '/brokers', '/tasks', '/employees', '/settings', '/setup/status', '/subscription/status',
+// (What a Companion or phone opens with first comes first: the first copy of a
+// big agency goes online in that order.)
+const GLOBAL = ['/setup/status', '/subscription/status', '/settings', '/profiles', '/brokers', '/employees', '/tasks',
   '/automations/stages', '/automations/active', '/notifications', '/checklists', '/cv/templates', '/quick-links',
   '/dashboard', '/tasks/documents', '/wafid/settings', '/health', '/tutor/tour', '/trash', '/cv/generated',
   '/lmis/accounts', '/musaned/accounts', '/tasheer/accounts', '/insurance/accounts', '/visa/accounts',
@@ -53,7 +58,13 @@ const SECRET = /pass|token|secret|otp|api[_-]?key|license|cookie/i
 // Phone requests never replayed: they change the PC itself, not the agency's work.
 const NOT_FROM_PHONES = /^\/(system|backup|branch|main-pc|mobile|subscription|setup|settings\/wallpaper|trash\/empty|trash\/\d+\/purge|chat)\b/
 
-export const cloudStatus = { on: false, running: false, last: null, error: null, pushed: 0, files: 0, filesLeft: 0, applied: 0 }
+export const cloudStatus = { on: false, running: false, last: null, error: null, pushed: 0, files: 0, filesLeft: 0, applied: 0, textDone: null, bytesSaved: 0 }
+
+// The first copy of the text (every page once) is done: documents wait for it,
+// and so does the heavy Telegram backup (it would fight it for the line).
+const TEXT_DONE = 'sweep:full'
+/** The online copy is still being filled (text or documents): heavy work waits. */
+export const onlineCopyFilling = () => cloudStatus.on && (cloudStatus.textDone === false || cloudStatus.filesLeft > 0)
 
 const sha = (s) => crypto.createHash('sha1').update(s).digest('hex')
 // (No body — undefined or null, e.g. a phone's DELETE — is sent as none: "null" is refused as JSON.)
@@ -363,16 +374,24 @@ async function changedProfiles(db, since) {
 
 async function pushAnswers(db, agency, state, { light = false } = {}) {
   const started = Date.now()
-  if (!lastFullAt) lastFullAt = Number(state.get('sweep:full') || 0)
+  if (!lastFullAt) lastFullAt = Number(state.get(TEXT_DONE) || 0)
   if (!lastSweepAt) lastSweepAt = Number(state.get('sweep:at') || 0)
-  const full = !light && (!lastFullAt || started - lastFullAt >= FULL_MS)
+  const first = !lastFullAt        // nothing went online yet (a new PC or a new online account)
+  cloudStatus.textDone = !first
+  const full = (first || !light) && (!lastFullAt || started - lastFullAt >= FULL_MS)
   const ids = full
     ? (await db('profiles').select('id')).map(r => r.id)
     : await changedProfiles(db, new Date((lastSweepAt || started) - 3 * 60000))
   const brokers = (await db('brokers').select('id').catch(() => [])).map(r => r.id)
   // Each template, and its header and footer pictures (the phone draws CVs with the PC off).
   const templates = (await db('cv_templates').select('id').catch(() => [])).flatMap(r => [`/cv/templates/${r.id}`, `/cv/templates/${r.id}/banners`])
-  const keys = [...GLOBAL, ...ids.flatMap(PER_PROFILE), ...brokers.flatMap(PER_BROKER), ...templates]
+  // The first copy: the agency's lists, then every profile and its documents
+  // list (enough to open her), then the rest — so a Companion can work after
+  // minutes, not hours.
+  const keys = first
+    ? [...new Set([...GLOBAL, ...ids.flatMap(id => [`/profiles/${id}`, `/profiles/${id}/fields`]), ...brokers.flatMap(PER_BROKER), ...ids.flatMap(PER_PROFILE), ...templates])]
+    : [...GLOBAL, ...ids.flatMap(PER_PROFILE), ...brokers.flatMap(PER_BROKER), ...templates]
+  if (first) console.log(`[cloud] first copy of the text: ${keys.length} pages (${ids.length} profiles) before any document`)
   await pushVault(db, agency, state).catch(e => console.warn('[cloud] vault:', e.message))
   const wanted = new Set(keys)
   let batch = []
@@ -386,8 +405,11 @@ async function pushAnswers(db, agency, state, { light = false } = {}) {
     import('./liveChannel.js').then(L => L.broadcast({ t: 'changed', keys: sent })).catch(() => {})
     batch = []
   }
+  let done = 0
   for (const key of keys) {
-    if (full) await new Promise(res => setTimeout(res, PACE_MS))
+    // (The first copy goes as fast as the PC answers; later sweeps leave the PC room.)
+    if (full && !first) await new Promise(res => setTimeout(res, PACE_MS))
+    if (first && ++done % 200 === 0) console.log(`[cloud] first copy: ${done} of ${keys.length} pages`)
     let r
     try { r = await local('GET', key) } catch { continue }
     if (!r.ok) continue
@@ -401,7 +423,8 @@ async function pushAnswers(db, agency, state, { light = false } = {}) {
     // what is online can part (the dashboard stayed a day behind its list).
     if (state.get(key) === hash && !(full && GLOBAL.includes(key))) continue
     batch.push({ row: { agency_id: agency, key, data, updated_at: new Date().toISOString() }, hash, readAt: Date.now() })
-    if (batch.length >= 20) await flush()
+    // The list of profiles goes at once: a Companion opens with it.
+    if (batch.length >= 20 || key === '/profiles') await flush()
   }
   // The work summary (Adal Keep Admin).
   try {
@@ -417,7 +440,11 @@ async function pushAnswers(db, agency, state, { light = false } = {}) {
   await setState(db, 'sweep:at', String(started)).catch(() => {})
   if (!full) return
   lastFullAt = started
-  await setState(db, 'sweep:full', String(started)).catch(() => {})
+  await setState(db, TEXT_DONE, String(started)).catch(() => {})
+  if (first) {
+    cloudStatus.textDone = true
+    console.log(`[cloud] first copy of the text done in ${Math.round((Date.now() - started) / 1000)} s — the documents go now, smallest first`)
+  }
   // Profiles that are gone: their answers go too.
   for (const key of state.keys()) {
     if (!key.startsWith('/') || wanted.has(key) || key === '/_summary' || key === '/vault') continue
@@ -465,10 +492,13 @@ export async function agencySecrets(db, agency) {
 // One at a time (the round and a new upload must not send the same document twice).
 let filesRun = null
 let tgDownUntil = 0   // Telegram did not answer: tried again after this
+let moreFilesSoon = false   // documents were left at the end of a round: the next one starts at once
 function pushFiles(db, agency, state) {
   return (filesRun ||= pushFilesNow(db, agency, state).finally(() => { filesRun = null }))
 }
 async function pushFilesNow(db, agency, state) {
+  // The text first: no document goes before every page went online once.
+  if (!state.get(TEXT_DONE)) { cloudStatus.filesLeft = -1; return }
   // Documents go to Telegram (encrypted) once it is set up; the copies in
   // Supabase storage are moved there and removed — Supabase keeps no files.
   const tg = tgReady()
@@ -484,16 +514,25 @@ async function pushFilesNow(db, agency, state) {
     .select('files.id', 'files.original_name', 'files.mimetype', 'files.size', 'files.created_at', 'files.updated_at',
       'profile_fields.profile_id', 'profile_fields.name as field')
   const live = new Set(rows.map(f => `file:${f.id}`))
+  // Smallest first: hundreds of light documents are online before one big scan.
   const todo = rows.filter(f => state.get(`file:${f.id}`) !== `${f.size}|${f.updated_at}`)
+    .sort((a, b) => (Number(a.size) || 0) - (Number(b.size) || 0) || a.id - b.id)
   cloudStatus.filesLeft = todo.length
-  for (const f of todo.slice(0, FILES_PER_ROUND)) {
+  const until = Date.now() + FILES_ROUND_MS
+  let stop = false
+  const one = async (f) => {
     const sig = `${f.size}|${f.updated_at}`
     try {
-      if (Number(f.size) > LIMIT) { await setState(db, `file:${f.id}`, sig); continue }
+      if (Number(f.size) > LIMIT) { await setState(db, `file:${f.id}`, sig); return }
       const r = await local('GET', `/files/${f.id}/download`)
-      if (!r.ok) { await setState(db, `file:${f.id}`, sig); continue }   // not on disk: nothing to copy
-      const buf = Buffer.from(await r.arrayBuffer())
-      const safe = String(f.original_name || 'file').replace(/[^\w.\-]+/g, '_').slice(-80)
+      if (!r.ok) { await setState(db, `file:${f.id}`, sig); return }   // not on disk: nothing to copy
+      // The light copy goes online; the original stays on this PC.
+      const original = Buffer.from(await r.arrayBuffer())
+      const light = await viewCopy(original, f.mimetype, f.original_name)
+      const buf = light.buf
+      if (light.small) cloudStatus.bytesSaved += original.length - buf.length
+      let safe = String(f.original_name || 'file').replace(/[^\w.\-]+/g, '_').slice(-80)
+      if (light.small && light.mimetype === 'image/jpeg') safe = safe.replace(/\.(png|webp|heic|heif|tiff?|bmp|jpe?g)$/i, '') + '.jpg'
       const [old] = await cloudCall(db, 'GET', `/rest/v1/keep_files?agency_id=eq.${agency}&id=eq.${f.id}&select=object`).catch(() => []) || []
       let object = null, waiting = false
       // Telegram first; blocked or down (it happens on some lines), the
@@ -508,10 +547,10 @@ async function pushFilesNow(db, agency, state) {
         }
       }
       if (!object) {
-        if (tg && old?.object && !old.object.startsWith('tg:')) continue   // already kept online, waiting for Telegram
+        if (tg && old?.object && !old.object.startsWith('tg:')) return   // already kept online, waiting for Telegram
         object = `${agency}/${f.profile_id}/${f.id}-${safe}`
         await cloudCall(db, 'POST', `/storage/v1/object/keep/${object}`, buf,
-          { headers: { 'Content-Type': f.mimetype || 'application/octet-stream', 'x-upsert': 'true' } })
+          { headers: { 'Content-Type': light.mimetype || 'application/octet-stream', 'x-upsert': 'true' } })
         waiting = !!tg
       }
       // The older copy (Supabase storage, or an older Telegram post) goes.
@@ -521,7 +560,7 @@ async function pushFilesNow(db, agency, state) {
       }
       await upsert(db, 'keep_files', [{
         agency_id: agency, id: f.id, profile_id: f.profile_id, field: f.field, name: f.original_name,
-        mimetype: f.mimetype, size: buf.length, object, created_at: f.created_at || null, updated_at: new Date().toISOString(), deleted: false,
+        mimetype: light.mimetype, size: buf.length, object, created_at: f.created_at || null, updated_at: new Date().toISOString(), deleted: false,
       }], 'agency_id,id')
       // Kept online while Telegram is down: looked at again (moved to Telegram) once it answers.
       await setState(db, `file:${f.id}`, waiting ? `${sig}|waiting` : sig)
@@ -529,9 +568,17 @@ async function pushFilesNow(db, agency, state) {
       cloudStatus.filesLeft--
     } catch (e) {
       console.warn(`[cloud] file ${f.id} (${f.original_name}): ${e.message}`)
-      if (/exceeded|quota|too large|payload/i.test(e.message)) break
+      if (/exceeded|quota|too large|payload/i.test(e.message)) stop = true
     }
   }
+  // Two at a time (a slow line waits on each answer), for up to 50 s.
+  let next = 0
+  // (One at a time while a robot works: it needs the line for its own uploads.)
+  await Promise.all(Array.from({ length: runsWorking() > 0 ? 1 : FILES_AT_ONCE }, async () => {
+    while (!stop && next < todo.length && Date.now() < until) await one(todo[next++])
+  }))
+  if (todo.length && next >= todo.length) console.log(`[cloud] every document is online (${Math.round(cloudStatus.bytesSaved / 1048576)} MB saved by light copies)`)
+  else if (todo.length) moreFilesSoon = true
   // Documents deleted on the PC: gone online too.
   for (const key of state.keys()) {
     if (!key.startsWith('file:') || live.has(key)) continue
@@ -561,6 +608,9 @@ async function syncOnce(db, { light = false } = {}) {
       if (was) console.log('[cloud] new online account — copying everything again')
       await db('cloud_sync').del()
       await setState(db, 'agency', agency)
+      // (What this PC remembered of the old copy goes too: it used to send only
+      // the changed profiles, so the new copy stayed nearly empty for hours.)
+      lastFullAt = 0; lastSweepAt = 0
     }
     // Listed as an agency (name + PC number) for Adal Keep Admin, chat or not.
     if (!joined) { await joinAgency(db).then(() => { joined = true }).catch(e => console.warn('[cloud] agency:', e.message)) }
@@ -571,6 +621,7 @@ async function syncOnce(db, { light = false } = {}) {
     // Documents too, every round (also while a robot works): every one is kept
     // in Telegram as well as on this PC as soon as it can be.
     await pushFiles(db, agency, await stateOf(db))
+    if (moreFilesSoon) { moreFilesSoon = false; filesSoon(db) }
     // This PC's health and last errors, for Adal (every 5 minutes).
     if (Date.now() - lastDiagAt >= 5 * 60000) {
       lastDiagAt = Date.now()
@@ -620,7 +671,7 @@ function filesSoon(db) {
       if (!(await cloudOn(db).catch(() => false))) return
       const agency = await cloudAgencyId(db)
       if (agency) await pushFiles(db, agency, await stateOf(db))
-    })().catch(e => console.warn('[cloud] documents:', e.message)).finally(() => { filesBusy = null })
+    })().then(() => { if (moreFilesSoon) { moreFilesSoon = false; filesSoon(db) } }).catch(e => console.warn('[cloud] documents:', e.message)).finally(() => { filesBusy = null })
   }, 3000)
 }
 

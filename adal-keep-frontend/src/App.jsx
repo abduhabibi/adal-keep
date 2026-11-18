@@ -19,10 +19,12 @@ const NotificationsPage = lazy(() => fresh(() => import('./pages/NotificationsPa
 import { FileCaptureProvider } from './context/FileCaptureContext'
 import { AuthProvider, useAuth } from './context/AuthContext'
 const TasksPage = lazy(() => fresh(() => import('./pages/TasksPage')))
-import LockScreen from './components/LockScreen'
+// The lock screen and the first-start wizard are seen rarely: their code is
+// fetched only when one is shown (a smaller first download on every start).
+const LockScreen = lazy(() => fresh(() => import('./components/LockScreen')))
 import PcAccessGate from './components/PcAccessGate'
 import api from './services/api'
-import IntroWizard from './pages/IntroWizard'
+const IntroWizard = lazy(() => fresh(() => import('./pages/IntroWizard')))
 const CVsPage = lazy(() => fresh(() => import('./pages/CVsPage')))
 const CVNewPage = lazy(() => fresh(() => import('./pages/CVNewPage')))
 const CVTemplatesPage = lazy(() => fresh(() => import('./pages/CVTemplatesPage')))
@@ -76,7 +78,7 @@ function TrialBanner({ days, renew }) {
         {renew ? `Your 6 paid months end in ${days} day${days === 1 ? '' : 's'} — renew now →`
           : `Your free trial ends in ${days} day${days === 1 ? '' : 's'} — unlock Adal Keep now →`}
       </button>
-      {open && <LockScreen onClose={() => setOpen(false)} />}
+      {open && <Suspense fallback={null}><LockScreen onClose={() => setOpen(false)} /></Suspense>}
     </>
   )
 }
@@ -137,8 +139,8 @@ function Shell() {
   }
 
   // After the free trial nothing else is shown until this PC is unlocked.
-  if (subscription?.mode === 'locked') return <>{toaster}<LockScreen /></>
-  if (state === 'setup') return <>{toaster}<IntroWizard /></>
+  if (subscription?.mode === 'locked') return <>{toaster}<Suspense fallback={null}><LockScreen /></Suspense></>
+  if (state === 'setup') return <>{toaster}<Suspense fallback={null}><IntroWizard /></Suspense></>
 
   return (
     <FileCaptureProvider>

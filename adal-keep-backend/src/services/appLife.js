@@ -1,16 +1,14 @@
 /**
- * appLife.js — Adal Keep lives as long as its window on this PC.
+ * appLife.js — Adal Keep's window on this PC, and quitting it.
  *
- * It never works without its window (2026-11-16): started with no Adal Keep page
- * open within 90 s — by Windows at sign-in, an update, a restart — it ends.
- * Once a window has been open on this PC and the last one is closed — its X, or
- * Adal Keep closed — everything ends after a short wait: the launcher (which
- * would start the server again), the Companion and the agent, the agents' and
- * WhatsApp's browsers, and this server. The icon starts it all again.
+ * Closing the window keeps Adal Keep working (2026-11-18, the user's decision):
+ * the server, the agents, WhatsApp and the timers go on in the background under
+ * the hidden launcher AdalKeep.exe, so the Companions and phones still connect.
+ * The icon opens the window again on the running server. Everything stops only
+ * through "Quit Adal Keep" (after a Yes): POST /api/app/quit → endEverything.
  *
- * Each window on this PC keeps one stream open (GET /api/app/alive); a page that
- * reloads is back well within the wait. Windows on other computers and phones
- * do not count: they cannot end the main PC.
+ * Each window on this PC keeps one stream open (GET /api/app/alive), so the
+ * page can say what is working and how many windows are open.
  */
 import { execFile } from 'child_process'
 import path from 'path'
@@ -31,7 +29,7 @@ export async function busyNow() {
 }
 
 /** A window on this PC opened its stream; `gone` is called when it closes. */
-export function windowOpened(stream, { grace = GRACE_MS, end = endEverything } = {}) {
+export function windowOpened(stream, { grace = GRACE_MS } = {}) {
   open.add(stream)
   seen = true
   clearTimeout(timer)
@@ -40,7 +38,9 @@ export function windowOpened(stream, { grace = GRACE_MS, end = endEverything } =
     open.delete(stream)
     if (open.size || ending) return
     clearTimeout(timer)
-    timer = setTimeout(() => { if (!open.size && seen) end('the last Adal Keep window was closed') }, grace)
+    // The last window closed: Adal Keep keeps working in the background (never ends here).
+    timer = setTimeout(() => { if (!open.size && seen) console.log('[app] the last Adal Keep window was closed — Adal Keep keeps working in the background (Quit Adal Keep stops it)') }, grace)
+    timer.unref?.()
   }
 }
 
@@ -99,23 +99,10 @@ export function closeScript(me) {
 }
 
 /**
- * Adal Keep never works without its window (asked on 2026-11-14 and again
- * 2026-11-16: "if I click X then never open by itself at all"). Whatever
- * started this server — Windows at sign-in, a launcher that survived a close,
- * an update or a restart — when no Adal Keep page is open within 90 s,
- * everything ends. Unless "open Adal Keep when the PC starts" is on.
+ * Started with no window (the launcher after a crash or an update, or Windows
+ * at sign-in when allowed): it keeps working (2026-11-18). Nothing ends here.
  */
-export async function endIfStartedAlone({ waitMs = 90_000, end = endEverything } = {}) {
-  if (process.platform !== 'win32') return false
-  try {
-    const fs = await import('fs')
-    const startFile = path.join(INSTALL, 'backend', 'data', 'open-at-start.json')
-    if (/"on"\s*:\s*true/.test(fs.readFileSync(startFile, 'utf8'))) return false
-  } catch {}
-  console.log(`[app] started: it ends in ${Math.round(waitMs / 1000)} s unless an Adal Keep page is open`)
-  setTimeout(() => { if (!seen && !open.size) end('no Adal Keep page was opened after it started (it never works in the background)') }, waitMs).unref?.()
-  return true
-}
+export async function endIfStartedAlone() { return false }
 
 /** Tests only. */
 export function _reset() { open.clear(); seen = false; ending = false; clearTimeout(timer); timer = null }

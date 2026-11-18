@@ -1,4 +1,4 @@
-/** Adal Keep's window on this PC: while one is open Adal Keep lives (services/appLife.js). */
+/** Adal Keep's window on this PC; closing it keeps Adal Keep working, Quit stops it (services/appLife.js). */
 import express from 'express'
 import fs from 'fs'
 import os from 'os'
@@ -73,7 +73,7 @@ router.get('/app/clips/:id', async (req, res) => {
   res.type('image/png').send(c.png)
 })
 
-// "Quit Adal Keep": the same as closing its last window, at once.
+// "Quit Adal Keep" (after a Yes in the page): stops everything on this PC.
 router.post('/app/quit', (req, res) => {
   if (!isLocal(req)) return res.status(403).json({ error: 'Only on the main PC itself' })
   res.json({ ok: true })

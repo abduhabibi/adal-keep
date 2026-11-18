@@ -236,19 +236,11 @@ if ('serviceWorker' in navigator && import.meta.env.PROD && import.meta.env.VITE
   window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}))
 }
 
-// On the main PC itself, this window keeps Adal Keep alive: when the last one
-// is closed everything ends (backend services/appLife.js). Closing while a run or
-// a move is working asks first.
+// On the main PC itself: closing this window keeps Adal Keep working in the
+// background (backend services/appLife.js); "Quit Adal Keep" stops it.
 if (import.meta.env.VITE_DEMO !== '1' && import.meta.env.VITE_PHONE !== '1' && import.meta.env.VITE_ADMIN !== '1'
   && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && 'EventSource' in window) {
-  let busy = false
-  const alive = new EventSource('/api/app/alive')
-  alive.onmessage = (e) => { try { busy = !!JSON.parse(e.data).busy } catch {} }
-  window.addEventListener('beforeunload', (e) => {
-    if (!busy) return
-    e.preventDefault()
-    e.returnValue = 'Adal Keep is still working. Closing it stops everything; it goes on when you open it again.'
-  })
+  new EventSource('/api/app/alive')
 }
 
 // English (Settings → Language): shows the Amharic pages in English.

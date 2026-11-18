@@ -97,6 +97,13 @@ export const links = [
 
 // The Trash: only in the menu on the main PC itself (it opens only there).
 // The phone app is served from http://localhost too: it is never the main PC.
+/** Quit Adal Keep on the main PC: the server, the agents, WhatsApp, the Companions' connection. */
+async function quitAdalKeep() {
+  if (!window.confirm('Quit Adal Keep?\n\nThe server, the agents and WhatsApp stop on this PC, and the Companions and phones cannot connect until Adal Keep is opened again from its icon.')) return
+  try { await api.post('/app/quit') } catch {}
+  toast.success('Adal Keep is stopping. Open it again from its icon.')
+}
+
 export const onMainPC = () => ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname) && !onPhone() && !window.Capacitor?.isNativePlatform?.()
 export const trashLink = {
   to: '/trash',
@@ -226,6 +233,20 @@ export default function Sidebar({ isOpen, onToggle, collapsed: narrowWanted, onT
               <span className="shrink-0">{settingsLink.icon}</span>
               {!collapsed && <span className="truncate">{settingsLink.label}</span>}
             </NavLink>
+            {/* The main PC (Windows): closing the window keeps Adal Keep working in
+                the background; this stops it all, after a Yes. */}
+            {onMainPC() && /Windows/i.test(navigator.userAgent) && import.meta.env.VITE_DEMO !== '1' && import.meta.env.VITE_ADMIN !== '1' && (
+              <button type="button" onClick={quitAdalKeep}
+                className={`${getLinkClass({ isActive: false })} w-full ${collapsed ? 'justify-center px-0' : ''}`}
+                title={collapsed ? 'Quit Adal Keep' : ''}>
+                <span className="shrink-0">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M12 3v9M7.05 6.05a7 7 0 1 0 9.9 0" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                  </svg>
+                </span>
+                {!collapsed && <span className="truncate">Quit Adal Keep</span>}
+              </button>
+            )}
             {/* An Adal Companion only: log out of its main PC, connect to another. */}
             <CompanionSwitchPC compact={collapsed} />
             {/* Daily tutor: hover to open (public demo has none) */}

@@ -4,7 +4,7 @@ import { windowOpened, windowsOpen, _reset } from '../src/services/appLife.js'
 
 const wait = (ms) => new Promise(r => setTimeout(r, ms))
 
-test('closing the last window ends Adal Keep after the wait; a reload does not', async () => {
+test('closing the last window never ends Adal Keep (it keeps working in the background)', async () => {
   _reset()
   const ended = []
   const end = (why) => ended.push(why)
@@ -25,10 +25,11 @@ test('closing the last window ends Adal Keep after the wait; a reload does not',
   await wait(grace + 40)
   assert.equal(ended.length, 0)
 
-  // The last one closes: everything ends, once.
+  // The last one closes: nothing ends.
   gone3()
   await wait(grace + 40)
-  assert.equal(ended.length, 1)
+  assert.equal(ended.length, 0)
+  assert.equal(windowsOpen(), 0)
   _reset()
 })
 

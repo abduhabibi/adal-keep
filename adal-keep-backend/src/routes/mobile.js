@@ -16,7 +16,7 @@ import { fileURLToPath } from 'url'
 import { pcNumber, isFollower, tailscaleInfo } from '../services/mainPC.js'
 import { getLanAddresses } from '../services/discovery.js'
 import { liveStatus } from '../services/liveChannel.js'
-import { joinRequests, answerJoin, setPhonePassword, phonePasswordSet, relayStatus, cloudOn, cloudStatus, makeDevice, listDevices, setDeviceRevoked, syncNow } from '../services/cloudSync.js'
+import { joinRequests, joinPresence, answerJoin, setPhonePassword, phonePasswordSet, relayStatus, cloudOn, cloudStatus, makeDevice, listDevices, setDeviceRevoked, syncNow } from '../services/cloudSync.js'
 import { onThisPC, fromCompanion } from './trash.js'
 
 const router = express.Router()
@@ -85,7 +85,14 @@ router.post('/mobile/phone-password', async (req, res) => {
   catch (e) { res.status(400).json({ error: /keep_set_phone_password|schema cache|PGRST/i.test(e.message) ? 'Run adal-admin/supabase/keep-sync.sql in Supabase once more first.' : e.message }) }
 })
 // Phones asking to join: the PC answers "Yes, it's me" / No (never a phone itself).
-router.get('/mobile/join-requests', (req, res) => res.json(isFollower() ? [] : joinRequests.list))
+router.get('/mobile/join-requests', async (req, res) => {
+  // Asked by this PC's own open page: someone is here to say Yes.
+  if (onThisPC(req)) {
+    joinPresence.at = Date.now()
+    joinPresence.who = await req.app.locals.db('settings').where({ key: 'active_employee_name' }).first('value').then(r => r?.value || '').catch(() => '')
+  }
+  res.json(isFollower() ? [] : joinRequests.list)
+})
 router.post('/mobile/join-requests/:id', async (req, res) => {
   if (req.headers['x-adal-cloud']) return res.status(403).json({ error: 'Answer on a PC of the agency.' })
   try { await answerJoin(req.app.locals.db, req.params.id, req.body?.ok === true); res.json({ ok: true }) }

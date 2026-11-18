@@ -52,8 +52,10 @@ async function pair(number) {
   // Let in at once by Adal (no "Yes" on the office PC, which may be off): asked every half second.
   show('wait')
   $('waitMsg').textContent = 'Connecting…'
-  for (let i = 0; i < 240; i++) {          // up to 2 minutes
+  for (let i = 0; i < 600; i++) {          // up to 5 minutes
     if (i) await new Promise(r => setTimeout(r, 500))
+    // Not in yet: someone is using Adal Keep on the main PC — it asks them.
+    if (i === 30) $('waitMsg').textContent = 'Someone is using Adal Keep on the main PC: ask them to press Yes there.'
     const [q] = await sb(`/rest/v1/keep_join_requests?id=eq.${id}&select=status,agency_id`, { method: 'GET', token: s.access_token }).catch(() => [])
     if (q?.status === 'approved') {
       const pc = { number, cloud: { url: CFG.url, anon: CFG.anon, email: creds.email, password: creds.password, agency: q.agency_id, device: s.user?.id || null } }
@@ -63,7 +65,7 @@ async function pair(number) {
     }
     if (q?.status === 'denied') throw new Error('The PC said No.')
   }
-  throw new Error('Could not connect — check the internet and try again.')
+  throw new Error('Nobody pressed Yes on the main PC — ask the person using it, then try again.')
 }
 
 function open() {

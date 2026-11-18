@@ -1098,6 +1098,10 @@ async function publishPC(db) {
  * "Phone X wants to join — Yes, it's me / No" — and as a desktop notice.
  */
 export const joinRequests = { list: [], error: null }
+// Someone is using Adal Keep on this PC now: its open page asks for the join
+// requests every few seconds (routes/mobile.js marks it; a hidden or locked page does not ask).
+export const joinPresence = { at: 0, who: '' }
+const someoneHere = () => Date.now() - joinPresence.at < 20000
 const announced = new Set()
 async function watchJoins(db) {
   try {
@@ -1109,9 +1113,18 @@ async function watchJoins(db) {
     joinRequests.list = (rows || []).filter(r => Date.now() - new Date(r.created_at).getTime() < 10 * 60000)
     joinRequests.error = null
     for (const r of joinRequests.list) {
+      // Nobody at this PC to say Yes: it lets its own phone or Companion in by
+      // itself (asked on 2026-11-18). Someone here: they get the question.
+      if (!someoneHere()) {
+        try {
+          await answerJoin(db, r.id, true)
+          console.log(`[cloud] "${r.name}" typed this PC's number, nobody at the PC: let in`)
+          continue
+        } catch (e) { console.warn(`[cloud] "${r.name}" could not be let in: ${e.message}`) }
+      }
       if (announced.has(r.id)) continue
       announced.add(r.id)
-      console.log(`[cloud] phone "${r.name}" asks to join`)
+      console.log(`[cloud] phone "${r.name}" asks to join${joinPresence.who ? ` — ${joinPresence.who} is at the PC` : ''}`)
       try {
         ;(await import('./worker.js')).beep()
       } catch {}

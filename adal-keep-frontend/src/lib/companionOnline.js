@@ -17,6 +17,19 @@ const DONE = 'adal-companion-online'
 const get = (k) => { try { return localStorage.getItem(k) } catch { return null } }
 const set = (k, v) => { try { localStorage.setItem(k, v) } catch {} }
 
+// The main PC stops answering (turned off, the Companion left the office): the
+// window goes back to the online copy at once, at the same page; that copy
+// comes back here by itself when the main PC answers (lib/companionDirect.js).
+function watchMainPC() {
+  let misses = 0
+  const t = setInterval(async () => {
+    let ok = false
+    try { ok = (await fetch('/api/health', { cache: 'no-store', signal: AbortSignal.timeout(5000) })).status < 500 } catch {}
+    misses = ok ? 0 : misses + 1
+    if (misses >= 2) { clearInterval(t); location.replace(`${ONLINE}${location.pathname}`) }
+  }, 8000)
+}
+
 export async function shareOnlineCopy() {
   if (typeof window === 'undefined' || window.__ADAL_CLOUD) return
   if (['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)) return   // the main PC itself
@@ -27,6 +40,7 @@ export async function shareOnlineCopy() {
     q.delete('adal_companion'); q.delete('adal_online')
     history.replaceState(history.state, '', location.pathname + (q.toString() ? `?${q}` : '') + location.hash)
   }
+  if (get(IS) === '1' && get(DONE)) watchMainPC()
   if (get(IS) !== '1' || get(DONE)) return
   try {
     const { data } = await api.post('/pc-access/online-copy', { name: 'Companion PC' })

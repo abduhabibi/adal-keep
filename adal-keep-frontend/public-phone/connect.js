@@ -115,7 +115,21 @@ function startPair(msg = '') {
   }
 }
 
+// On an Adal Companion PC (AdalKeep.exe serves these pages on 127.0.0.1:47801):
+// the main PC answering on the network opens directly — fast, no number. It
+// makes this PC its online copy by itself too (lib/companionOnline.js).
+async function mainPCDirect() {
+  if (location.host !== '127.0.0.1:47801') return
+  try {
+    const r = await fetch('/main', { headers: { 'X-Adal': '1' }, cache: 'no-store' })
+    const url = r.ok ? (await r.json())?.url : ''
+    if (url) return location.replace(url.replace(/\/$/, '') + '/?adal_companion=1')
+  } catch {}
+  if (!saved()?.cloud) setTimeout(mainPCDirect, 5000)
+}
+
 ;(async () => {
+  mainPCDirect()
   const pc = saved()
   // Paired: straight in (the app looks for updates itself).
   if (pc?.cloud && !new URLSearchParams(location.search).has('pair')) return open()

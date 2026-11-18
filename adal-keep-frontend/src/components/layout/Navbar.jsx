@@ -4,6 +4,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import api from '../../services/api'
 import toast from 'react-hot-toast'
 import { beep } from '../AttentionBar'
+import { onDataChange } from '../../lib/changes'
 
 export default function Navbar({ onMenuClick, capturedFiles, setCapturedFiles }) {
   const location = useLocation()
@@ -265,12 +266,15 @@ function InboxButton() {
   const [n, setN] = useState(0)
   useEffect(() => {
     let alive = true
-    const load = () => api.get('/chat/conversations')
+    // The number is the chat server's (never a copy kept on this device): a
+    // chat read on another PC, the online copy or a phone is read here too.
+    const load = () => api.get('/chat/conversations', { adalNoCache: true })
       .then(r => { if (alive) setN((r.data || []).reduce((t, c) => t + Number(c.unread || 0), 0)) })
       .catch(() => {})
     load()
     const t = setInterval(load, 20000)
-    return () => { alive = false; clearInterval(t) }
+    const off = onDataChange(['chat'], load, 500)
+    return () => { alive = false; clearInterval(t); off() }
   }, [location.pathname])
   if (!n || location.pathname.startsWith('/chat')) return null
   return (

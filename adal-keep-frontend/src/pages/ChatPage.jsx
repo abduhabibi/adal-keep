@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 import api from '../services/api'
 import { cachedGet } from '../lib/deviceCache'
+import { onDataChange } from '../lib/changes'
 import { onBack, IN_PHONE_APP } from '../lib/phoneApp'
 import VoiceNote from '../components/VoiceNote'
 import { isSharedProfile, cleanBody } from '../lib/chatBody'
@@ -137,6 +138,7 @@ export default function ChatPage() {
   const fileRef = useRef(null)
   const inputRef = useRef(null)
   const lastId = useRef(0)
+  const unreadHere = useRef(false)   // messages fetched while nobody looked (not read yet)
   const since = useRef(null)
   const lastTypingSent = useRef(0)
 
@@ -170,9 +172,11 @@ export default function ChatPage() {
     if (!status?.configured) return
     api.post('/chat/ping').catch(() => {})
     const stop1 = every(loadSide, 4000)
+    // Read or sent on another window (another PC, the online copy, a phone): at once.
+    const off = onDataChange(['chat'], loadSide, 500)
     const t2 = setInterval(() => api.post('/chat/ping').catch(() => {}), 30000)
     const t3 = setInterval(() => setNow(Date.now()), 15000)
-    return () => { stop1(); clearInterval(t2); clearInterval(t3) }
+    return () => { stop1(); off(); clearInterval(t2); clearInterval(t3) }
   }, [status?.configured, loadSide])
 
   // the open chat: messages (new + edited/deleted), typing, members
@@ -183,10 +187,13 @@ export default function ChatPage() {
     setMsgs(kept.get(open.id) || []); setMembers([]); setTyping([]); setInfo(false)
     const pull = async () => {
       try {
-        const { data } = await api.get('/chat/messages', { params: { conversation: open.id, after: lastId.current, since: since.current } })
+        // Read only while someone looks: a window left open in the background
+        // fetches without marking the chat read for everyone.
+        const looking = !document.hidden
+        const { data } = await api.get('/chat/messages', { params: { conversation: open.id, after: lastId.current, since: since.current, ...(looking ? {} : { read: 0 }) } })
         if (!alive) return
         since.current = data.now
-        if (data.messages?.length) lastId.current = data.messages[data.messages.length - 1].id
+        if (data.messages?.length) { lastId.current = data.messages[data.messages.length - 1].id; if (!looking) unreadHere.current = true }
         if (data.messages?.length || data.changed?.length) {
           setMsgs(cur => {
             const byId = new Map(cur.map(m => [m.id, m]))
@@ -204,8 +211,17 @@ export default function ChatPage() {
     const membersNow = async () => {
       try { const mem = await api.get(`/chat/groups/${open.id}/members`); if (alive) setMembers(cur => same(cur, mem.data) ? cur : (Array.isArray(mem.data) ? mem.data : [])) } catch {}
     }
+    // Seen again (this window in front once more): read up to what it shows.
+    unreadHere.current = false
+    const seen = () => {
+      if (document.hidden || !unreadHere.current || !lastId.current) return
+      unreadHere.current = false
+      api.post(`/chat/conversations/${encodeURIComponent(open.id)}/read`, { up_to: lastId.current }).catch(() => { unreadHere.current = true })
+    }
+    document.addEventListener('visibilitychange', seen)
+    window.addEventListener('focus', seen)
     const stops = [every(pull, 2000), every(typingNow, 3000), every(membersNow, 15000)]
-    return () => { alive = false; stops.forEach(f => f()) }
+    return () => { alive = false; stops.forEach(f => f()); document.removeEventListener('visibilitychange', seen); window.removeEventListener('focus', seen) }
   }, [open?.id])
 
   useEffect(() => {

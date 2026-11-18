@@ -16,7 +16,8 @@ import { fileURLToPath } from 'url'
 import { pcNumber } from './subscription.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const SESSION_FILE = path.join(__dirname, '../..', '.adal_chat.json')
+// (ADAL_CHAT_SESSION_FILE: tests only — never the agency's real sign-in.)
+const SESSION_FILE = process.env.ADAL_CHAT_SESSION_FILE || path.join(__dirname, '../..', '.adal_chat.json')
 const BUCKET = 'chat'
 
 const cfg = () => ({
@@ -190,16 +191,70 @@ export async function agencies(db) {
 // second over the internet, and every page's Inbox button, the chat page and
 // the phones asked for it at the same time. Anything that changes a chat
 // (a message read or sent, a group changed) forgets it at once.
-let convKept = null, convAt = 0, convAsking = null
-export const forgetConversations = () => { convKept = null; convAt = 0 }
+// A question already on its way when a chat was read is not kept (nor shared):
+// its unread numbers are from before.
+let convKept = null, convAt = 0, convAsking = null, convGen = 0
+export const forgetConversations = () => { convKept = null; convAt = 0; convAsking = null; convGen++ }
 export async function conversations(db) {
   if (convKept && Date.now() - convAt < 6000) return convKept
   if (convAsking) return convAsking
-  const started = Date.now()
-  convAsking = (async () => { await me(db); return rpc(db, 'my_conversations') })()
-    .then(r => { if (convAt <= started) { convKept = r; convAt = Date.now() } return r })
-    .finally(() => { convAsking = null })
-  return convAsking
+  const gen = convGen
+  const asking = convAsking = (async () => { await me(db); return rpc(db, 'my_conversations') })()
+    .then(r => {
+      if (gen === convGen) { convKept = r; convAt = Date.now(); noticeUnread(r) }
+      return r
+    })
+    .finally(() => { if (convAsking === asking) convAsking = null })
+  return asking
+}
+
+/*
+ * Read or unread lives in one place: the agency's row in the chat server
+ * (members.last_read_id). This PC, its Companions, the online copy and the
+ * phones all read and write that same row, so a chat read anywhere is read
+ * everywhere. Each change is told to every open window at once ("chat" on
+ * GET /api/changes, and over the live link to the phones): their badges and
+ * lists ask again instead of waiting for their next refresh.
+ */
+let unreadSeen = null
+function noticeUnread(list) {
+  if (!Array.isArray(list)) return
+  const now = list.map(c => `${c.id}:${Number(c.unread || 0)}:${c.last_message_at || ''}`).sort().join('|')
+  if (unreadSeen !== null && unreadSeen !== now) tellChat()
+  unreadSeen = now
+}
+function tellChat() {
+  import('./changes.js').then(m => m.changed('chat')).catch(() => {})
+}
+
+/**
+ * The chat was read up to message `upTo` (never back: an older window that
+ * reads later does not make newer messages unread again).
+ */
+async function markReadUpTo(db, conversationId, upTo) {
+  const id = Number(upTo) || 0
+  if (!id) return false
+  const conv = encodeURIComponent(conversationId)
+  await call(db, 'PATCH',
+    `/rest/v1/members?conversation_id=eq.${conv}&agency_id=eq.${sess.user_id}&or=(last_read_id.is.null,last_read_id.lt.${id})`,
+    { last_read_id: id }, { headers: { Prefer: 'return=minimal' } })
+  forgetConversations()
+  tellChat()
+  return true
+}
+
+/** Opening a chat (or coming back to a window that had it open): read up to `upTo`, or to its newest message. */
+export async function markRead(db, conversationId, upTo = null) {
+  if (!conversationId) throw new ChatError('Which chat?', 400)
+  await me(db)
+  let id = Number(upTo) || 0
+  if (!id) {
+    const conv = encodeURIComponent(conversationId)
+    const [last] = await call(db, 'GET', `/rest/v1/messages?conversation_id=eq.${conv}&select=id&order=id.desc&limit=1`) || []
+    id = Number(last?.id) || 0
+  }
+  if (id) await markReadUpTo(db, conversationId, id)
+  return { ok: true, read_up_to: id }
 }
 export const openDirect = (db, other) => rpc(db, 'open_direct', { other })
 
@@ -216,13 +271,12 @@ function dropToV1() { v2 = false; MSG_FIELDS = MSG_FIELDS_V1; console.warn('[cha
  * New messages after `afterId`, plus older ones changed (edited, deleted)
  * since `since`. Marks the chat read up to the newest.
  */
-export async function messages(db, conversationId, afterId = 0, since = null) {
-  forgetConversations()   // reading marks the chat read: its unread number changes
-  try { return await messagesOnce(db, conversationId, afterId, since) }
-  catch (e) { if (v2 && missingColumn(e)) { dropToV1(); return messagesOnce(db, conversationId, afterId, since) } throw e }
+export async function messages(db, conversationId, afterId = 0, since = null, { read = true } = {}) {
+  try { return await messagesOnce(db, conversationId, afterId, since, read) }
+  catch (e) { if (v2 && missingColumn(e)) { dropToV1(); return messagesOnce(db, conversationId, afterId, since, read) } throw e }
 }
 
-async function messagesOnce(db, conversationId, afterId = 0, since = null) {
+async function messagesOnce(db, conversationId, afterId = 0, since = null, read = true) {
   const conv = encodeURIComponent(conversationId)
   const rows = await call(db, 'GET',
     `/rest/v1/messages?conversation_id=eq.${conv}&id=gt.${Number(afterId) || 0}` +
@@ -233,11 +287,9 @@ async function messagesOnce(db, conversationId, afterId = 0, since = null) {
     changed = await call(db, 'GET',
       `/rest/v1/messages?conversation_id=eq.${conv}&id=lte.${Number(afterId)}&updated_at=gt.${encodeURIComponent(since)}&select=${MSG_FIELDS}`) || []
   }
-  if (list.length) {
-    await call(db, 'PATCH',
-      `/rest/v1/members?conversation_id=eq.${conv}&agency_id=eq.${sess.user_id}`,
-      { last_read_id: list[list.length - 1].id }, { headers: { Prefer: 'return=minimal' } }).catch(() => {})
-  }
+  // A window nobody looks at (hidden, minimised) fetches without reading: it
+  // says "read" (POST …/read) when it is looked at again.
+  if (list.length && read) await markReadUpTo(db, conversationId, list[list.length - 1].id).catch(() => {})
   return { messages: list, changed, now: new Date().toISOString() }
 }
 
@@ -286,6 +338,8 @@ export async function send(db, conversationId, body, file, { kind = null, replyT
   }
   try {
     const rows = await call(db, 'POST', '/rest/v1/messages', row, { headers: { Prefer: 'return=representation' } })
+    forgetConversations()
+    tellChat()
     return rows?.[0]
   } catch (e) {
     if (v2 && missingColumn(e)) { dropToV1(); return send(db, conversationId, body, file, { replyTo, forward }) }

@@ -129,7 +129,7 @@ Section "Install"
   DetailPrint "Allowing it through the Windows firewall..."
   nsExec::Exec 'netsh advfirewall firewall delete rule name="Adal Keep Companion"'
   Pop $0
-  nsExec::Exec 'netsh advfirewall firewall add rule name="Adal Keep Companion" dir=in action=allow program="$INSTDIR\adal-companion.exe"'
+  nsExec::Exec 'netsh advfirewall firewall add rule name="Adal Keep Companion" dir=in action=allow program="$INSTDIR\adal-companion.exe" profile=any'
   Pop $0
 
   ; Employees use Adal Keep through this PC: AdalKeep.exe opens the main PC's
@@ -186,11 +186,11 @@ Section "Install"
   DetailPrint "Allowing it through the Windows firewall..."
   nsExec::Exec 'netsh advfirewall firewall delete rule name="Adal Keep"'
   Pop $0
-  nsExec::Exec 'netsh advfirewall firewall add rule name="Adal Keep" dir=in action=allow protocol=TCP localport=${SERVER_PORT}'
+  nsExec::Exec 'netsh advfirewall firewall add rule name="Adal Keep" dir=in action=allow protocol=TCP localport=${SERVER_PORT} profile=any'
   Pop $0
   nsExec::Exec 'netsh advfirewall firewall delete rule name="Adal Keep Discovery"'
   Pop $0
-  nsExec::Exec 'netsh advfirewall firewall add rule name="Adal Keep Discovery" dir=in action=allow protocol=UDP localport=${DISCO_PORT}'
+  nsExec::Exec 'netsh advfirewall firewall add rule name="Adal Keep Discovery" dir=in action=allow protocol=UDP localport=${DISCO_PORT} profile=any'
   Pop $0
   ; The first time node.exe listens, Windows may ask "Allow access?" on the
   ; screen (or, with nobody there, add a BLOCK rule for it by itself). A block

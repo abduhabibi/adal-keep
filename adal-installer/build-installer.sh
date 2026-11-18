@@ -128,6 +128,8 @@ rm -f "$USB/2 - Install Adal Main.exe" "$USB/3 - Install Adal Companion.exe" "$U
 mv -f "$INST/2 - Install Adal Main.exe" "$INST/3 - Install Adal Companion.exe" "$USB/"
 cp -f "$INST/usb/1 - PREPARE (once, needs internet).bat" "$USB/"
 cp -f "$INST/usb/4 - Copy logs to this USB.bat" "$USB/"
+cp -f "$INST/usb/Adal Connect - Main.bat" "$INST/usb/Adal Connect - Companion.bat" "$USB/"
+cp -f "$INST/usb/deps/adal-connect.ps1" "$USB/deps/"
 cp -f "$INST/usb/deps/prepare-deps.ps1" "$USB/deps/"
 # Tailscale (the private link) for both installers: fetched here when this PC
 # has internet, so an already prepared USB need not run PREPARE again.

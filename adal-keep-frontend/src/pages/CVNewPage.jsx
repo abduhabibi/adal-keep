@@ -26,13 +26,12 @@ function emergencyName(p = {}) {
   return (!e || bare.includes(e.toUpperCase())) ? fatherFull(p) || e : e
 }
 
-const RELIGIONS = ['Muslim', 'Orthodox', 'Protestant']
+const RELIGIONS = ['Muslim', 'Christian']
 // Her religion as one of the choices ("ISLAM", "muslim " → Muslim); another word stays as it is.
 function religionOption(v) {
   const t = String(v || '').trim()
   if (/muslim|islam/i.test(t) && !/non/i.test(t)) return 'Muslim'
-  if (/orthodox/i.test(t)) return 'Orthodox'
-  if (/protestant|pente|evangel/i.test(t)) return 'Protestant'
+  if (/christ|orthodox|protestant|pente|evangel/i.test(t)) return 'Christian'
   return t
 }
 
@@ -536,7 +535,7 @@ export default function CVNewPage() {
             <label className="text-xs font-medium text-slate-600 dark:text-slate-300 mb-1 block">Religion</label>
             <select className="field w-full" value={form.religion} onChange={e => upd('religion', e.target.value)}>
               <option value="">— Select —</option>
-              <option>Muslim</option><option>Orthodox</option><option>Protestant</option>
+              <option>Muslim</option><option>Christian</option>
               {form.religion && !RELIGIONS.includes(form.religion) && <option>{form.religion}</option>}
             </select>
           </div>

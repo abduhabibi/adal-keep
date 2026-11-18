@@ -28,8 +28,7 @@ function emergencyName(p = {}) {
 function religionOption(v) {
   const t = String(v || '').trim()
   if (/muslim|islam/i.test(t) && !/non/i.test(t)) return 'Muslim'
-  if (/orthodox/i.test(t)) return 'Orthodox'
-  if (/protestant|pente|evangel/i.test(t)) return 'Protestant'
+  if (/christ|orthodox|protestant|pente|evangel/i.test(t)) return 'Christian'
   return t
 }
 
@@ -438,9 +437,8 @@ export default function ProfileFormPage() {
               <select id="religion" required className={inputClass} value={form.religion} onChange={setField('religion')}>
                 <option value="">— Select —</option>
                 <option value="Muslim">Muslim</option>
-                <option value="Orthodox">Orthodox</option>
-                <option value="Protestant">Protestant</option>
-                {form.religion && !['Muslim', 'Orthodox', 'Protestant'].includes(form.religion) && <option value={form.religion}>{form.religion}</option>}
+                <option value="Christian">Christian</option>
+                {form.religion && !['Muslim', 'Christian'].includes(form.religion) && <option value={form.religion}>{form.religion}</option>}
               </select>
             </div>
             <div>
@@ -560,9 +558,8 @@ export default function ProfileFormPage() {
             <select id="religion" required className={inputClass} value={form.religion} onChange={setField('religion')}>
               <option value="">— Select —</option>
               <option value="Muslim">Muslim</option>
-              <option value="Orthodox">Orthodox</option>
-              <option value="Protestant">Protestant</option>
-              {form.religion && !['Muslim', 'Orthodox', 'Protestant'].includes(form.religion) && <option value={form.religion}>{form.religion}</option>}
+              <option value="Christian">Christian</option>
+              {form.religion && !['Muslim', 'Christian'].includes(form.religion) && <option value={form.religion}>{form.religion}</option>}
             </select>
           </div>
           <div>

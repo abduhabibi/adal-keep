@@ -21,6 +21,12 @@ import org.json.JSONArray;
  */
 final class AdalCalls {
     static final String CHANNEL = "adal-calls";
+    static final int TEAL = 0xFF0D9488;
+
+    /** Where a call's tap goes: her profile at the run that waits, else the profiles. */
+    static String goOf(int profile, int run) {
+        return profile > 0 ? "/profiles/" + profile + "?run=" + run + "&t=" + System.currentTimeMillis() : "/profiles";
+    }
     static final String TEXT = "text";
 
     static void channels(Context c) {
@@ -41,15 +47,22 @@ final class AdalCalls {
     }
 
     static void show(Context c, int run, String title, String body, String image, boolean asks, String label, JSONArray choices) {
+        show(c, run, title, body, image, asks, label, choices, null);
+    }
+
+    static void show(Context c, int run, String title, String body, String image, boolean asks, String label, JSONArray choices, String go) {
         channels(c);
-        Intent open = new Intent(c, MainActivity.class).setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        // The tap (and its "Fix it" button): straight to the run that waits for the person.
+        PendingIntent tap = PendingIntent.getActivity(c, run, MainActivity.openTo(c, go), PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         NotificationCompat.Builder b = new NotificationCompat.Builder(c, CHANNEL)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle(title)
             .setContentText(body)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setAutoCancel(true)
-            .setContentIntent(PendingIntent.getActivity(c, run, open, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE));
+            .setColor(TEAL)
+            .setCategory(NotificationCompat.CATEGORY_CALL)
+            .setContentIntent(tap);
         if (image != null && image.contains(",")) {
             byte[] raw = Base64.decode(image.substring(image.indexOf(',') + 1), Base64.DEFAULT);
             Bitmap pic = BitmapFactory.decodeByteArray(raw, 0, raw.length);
@@ -64,6 +77,8 @@ final class AdalCalls {
             RemoteInput input = new RemoteInput.Builder(TEXT).setLabel(label == null ? "Numbers" : label).build();
             b.addAction(new NotificationCompat.Action.Builder(0, "Answer", reply(c, run, 0, null)).addRemoteInput(input).build());
         }
+        // Room left (Android shows 3 buttons): "Fix it" opens the place.
+        if (choices == null || choices.length() < 3) b.addAction(new NotificationCompat.Action.Builder(0, "Fix it", tap).build());
         try { NotificationManagerCompat.from(c).notify(run, b.build()); } catch (SecurityException e) { /* notifications are off */ }
     }
 

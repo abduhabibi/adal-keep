@@ -49,7 +49,7 @@ public class AdalNoticeAlarm extends BroadcastReceiver {
         }
         final PendingResult done = goAsync();
         new Thread(() -> {
-            try { AdalNoticeJob.look(c); } catch (Exception ignored) { }
+            try { AdalNoticeJob.look(c); } catch (Exception e) { android.util.Log.w("AdalNotice", "look: " + e); }
             finally {
                 schedule(c, EVERY_MS);
                 done.finish();

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import api from '../services/api'
 import PageHeader from '../components/shared/PageHeader'
@@ -10,6 +11,7 @@ import { onPhone } from '../lib/phoneMode'
 const offPhone = (o) => { try { window.Capacitor?.Plugins?.AdalDiscovery?.clearNotices?.(o) } catch {} }
 
 export default function NotificationsPage() {
+  const navigate = useNavigate()
   const [notifications, setNotifications] = useState([])
   const [loading, setLoading] = useState(true)
 
@@ -120,7 +122,13 @@ export default function NotificationsPage() {
                           const link = String(notif.body || '').match(/https:\/\/\S+$/)?.[0]
                           return <>
                             <p className="text-sm text-slate-600 dark:text-slate-300 mt-1">{link ? notif.body.slice(0, -link.length).trim() : notif.body}</p>
-                            {link && !onPhone() && <button type="button" onClick={() => openOutside(link)} className="mt-2 rounded-lg bg-green-600 px-3 py-1 text-xs font-semibold text-white hover:bg-green-700">💬 Open WhatsApp</button>}
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              {/* Where it needs the person: her profile, Settings, or the profiles. */}
+                              <button type="button" onClick={() => navigate(notif.go || '/profiles')} className="rounded-lg bg-teal-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-teal-700">
+                                {String(notif.go || '').startsWith('/profiles/') ? 'Open her profile →' : notif.go === '/settings' ? 'Open Settings →' : 'Open profiles →'}
+                              </button>
+                              {link && !onPhone() && <button type="button" onClick={() => openOutside(link)} className="rounded-lg bg-green-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-700">💬 Open WhatsApp</button>}
+                            </div>
                           </>
                         })()}
                         <p className="text-xs text-slate-400 dark:text-slate-500 mt-2">

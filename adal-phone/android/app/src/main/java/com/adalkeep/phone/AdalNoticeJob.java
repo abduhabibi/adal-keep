@@ -81,7 +81,7 @@ public class AdalNoticeJob extends JobService {
     @Override
     public boolean onStartJob(final JobParameters params) {
         new Thread(() -> {
-            try { look(getApplicationContext()); } catch (Exception ignored) { }
+            try { look(getApplicationContext()); } catch (Exception e) { android.util.Log.w("AdalNotice", "look: " + e); }
             // (A phone that dropped the alarm when the app was swiped away gets it back here.)
             if (getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("on", false)) AdalNoticeAlarm.schedule(getApplicationContext(), 60_000L);
             if (getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("on", false)) soon(getApplicationContext(), 60000);
@@ -100,7 +100,9 @@ public class AdalNoticeJob extends JobService {
         String url = p.getString("url", ""), anon = p.getString("anon", ""), agency = p.getString("agency", "");
         if (url.isEmpty() || anon.isEmpty() || agency.isEmpty()) return;
         String token = token(p, url, anon);
-        if (token == null) return;
+        if (token == null) { android.util.Log.w("AdalNotice", "no sign-in"); return; }
+        // What needs a person first (it does not wait on the bell's own look).
+        try { calls(c, p, url, anon, agency, token); } catch (Exception e) { android.util.Log.w("AdalNotice", "calls: " + e); }
         String q = url + "/rest/v1/keep_meta?select=data&agency_id=eq." + URLEncoder.encode(agency, "UTF-8") + "&key=eq." + URLEncoder.encode("/notifications", "UTF-8");
         JSONArray rows = new JSONArray(http("GET", q, anon, token, null));
         if (rows.length() == 0) return;
@@ -134,11 +136,10 @@ public class AdalNoticeJob extends JobService {
                 JSONObject n = fresh.get(i);
                 String title = n.optString("title", "Adal Keep");
                 if (i == 1 && fresh.size() > 2) title = "+" + (fresh.size() - 1) + " more — " + title;
-                show(c, (int) n.optLong("id"), title, n.optString("body", n.optString("message", "")));
+                show(c, (int) n.optLong("id"), title, n.optString("body", n.optString("message", "")), n.optString("go", "/profiles"));
                 shown.add(String.valueOf(n.optLong("id")));
             }
         }
-        try { calls(c, p, url, anon, agency, token); } catch (Exception ignored) { }
         // Cleared on Adal Keep: away from the phone too.
         for (String s : new HashSet<>(shown)) if (!now.contains(s)) { NotificationManagerCompat.from(c).cancel(BASE + Integer.parseInt(s)); shown.remove(s); }
         p.edit().putLong("last", newest).putStringSet("shown", shown).apply();
@@ -187,14 +188,18 @@ public class AdalNoticeJob extends JobService {
             if (n == null) continue;
             int run = n.optInt("run_id", 0);
             if (run <= 0 || n.optLong("phone_wait_ms", 0) > 0) continue;
-            String key = run + ":" + n.optString("title", "");
+            // A new wait (the same run paused again later) is a new call.
+            String key = run + ":" + n.optString("title", "") + ":" + n.optLong("at", 0);
             keep.add(key); runs.add(run);
             if (first || had.contains(key) || MainActivity.inFront) continue;
             // Only fresh calls (made in the last 2 hours).
             long at = n.optLong("at", 0);
             if (at > 0 && System.currentTimeMillis() - at > 2 * 3600_000L) continue;
-            AdalCalls.show(c, run, n.optString("full_name", "Adal Keep"), n.optString("title", "Needs you"), null, false, null, null);
+            int profile = n.optInt("profile_id", 0);
+            AdalCalls.show(c, run, n.optString("full_name", "Adal Keep"), n.optString("title", "Needs you"), null, false, null, null, AdalCalls.goOf(profile, run));
+            android.util.Log.i("AdalNotice", "call shown: run " + run);
         }
+        android.util.Log.i("AdalNotice", "calls: " + list.length() + " now, first=" + first + ", front=" + MainActivity.inFront + ", known=" + had.size());
         // Gone on the PC: away from the phone too.
         for (String k : had) {
             try { int run = Integer.parseInt(k.split(":")[0]); if (!runs.contains(run)) AdalCalls.cancel(c, run); } catch (Exception ignored) { }
@@ -204,10 +209,10 @@ public class AdalNoticeJob extends JobService {
     }
 
     /** The app showed this call itself: the background look does not show it again. */
-    static void calledHere(Context c, int run, String title) {
+    static void calledHere(Context c, int run, String title, long at) {
         SharedPreferences p = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         Set<String> had = new HashSet<>(p.getStringSet("calls", new HashSet<>()));
-        had.add(run + ":" + title);
+        had.add(run + ":" + title + ":" + at);
         p.edit().putStringSet("calls", had).apply();
     }
 
@@ -220,14 +225,14 @@ public class AdalNoticeJob extends JobService {
         p.edit().putStringSet("shown", shown).apply();
     }
 
-    private static void show(Context c, int id, String title, String body) {
+    private static void show(Context c, int id, String title, String body, String go) {
         if (Build.VERSION.SDK_INT >= 26) {
             c.getSystemService(NotificationManager.class).createNotificationChannel(new NotificationChannel(CHANNEL, "Notifications", NotificationManager.IMPORTANCE_HIGH));
         }
         // The body's last line may be a link (a WhatsApp chat): shown as text, the tap opens Adal Keep's bell.
         String text = body.replaceAll("\\s*https?://\\S+\\s*$", "").trim();
-        Intent open = new Intent(c, MainActivity.class).setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_NEW_TASK)
-            .setData(Uri.parse("adalkeep://notifications"));
+        // The tap (and its Open button): her profile, or the profiles.
+        PendingIntent tap = PendingIntent.getActivity(c, BASE + id, MainActivity.openTo(c, go), PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         NotificationCompat.Builder b = new NotificationCompat.Builder(c, CHANNEL)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle(title)
@@ -235,7 +240,10 @@ public class AdalNoticeJob extends JobService {
             .setStyle(new NotificationCompat.BigTextStyle().bigText(text))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setAutoCancel(true)
-            .setContentIntent(PendingIntent.getActivity(c, BASE + id, open, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE));
+            .setColor(AdalCalls.TEAL)
+            .setCategory(NotificationCompat.CATEGORY_REMINDER)
+            .setContentIntent(tap)
+            .addAction(new NotificationCompat.Action.Builder(0, go != null && go.startsWith("/profiles/") ? "Open her profile" : "Open", tap).build());
         try { NotificationManagerCompat.from(c).notify(BASE + id, b.build()); } catch (SecurityException e) { /* notifications are off */ }
     }
 

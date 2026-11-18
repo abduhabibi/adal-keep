@@ -66,12 +66,27 @@ public class MainActivity extends BridgeActivity {
         setIntent(intent);
     }
 
+    /**
+     * The tap on a notification: Adal Keep opens where it needs the person (her
+     * profile, at the run that waits for them), else the profiles — never the
+     * list of notifications.
+     */
+    static android.content.Intent openTo(android.content.Context c, String go) {
+        String to = go != null && go.startsWith("/") && !go.startsWith("//") ? go : "/profiles";
+        return new android.content.Intent(c, MainActivity.class)
+            .setFlags(android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP | android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            .setData(android.net.Uri.parse("adalkeep://open").buildUpon().appendQueryParameter("to", to).build());
+    }
+
     private void openAsked() {
         android.content.Intent i = getIntent();
         if (i == null || i.getData() == null || !"adalkeep".equals(i.getData().getScheme())) return;
+        String to = i.getData().getQueryParameter("to");
+        if (to == null || !to.startsWith("/") || to.startsWith("//")) to = "/profiles";
         i.setData(null);
         WebView web = getBridge() != null ? getBridge().getWebView() : null;
-        if (web != null) web.postDelayed(() -> web.evaluateJavascript("try{history.pushState({},'','/notifications');dispatchEvent(new PopStateEvent('popstate'))}catch(e){}", null), 800);
+        String js = "try{history.pushState({},''," + org.json.JSONObject.quote(to) + ");dispatchEvent(new PopStateEvent('popstate'))}catch(e){}";
+        if (web != null) web.postDelayed(() -> web.evaluateJavascript(js, null), 800);
     }
 
     @Override

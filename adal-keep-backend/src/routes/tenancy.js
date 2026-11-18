@@ -100,8 +100,25 @@ router.post('/subscription/unlock', async (req, res) => {
   res.json({ success: true, subscription: statusPayload() })
 })
 
+// Where a tap on a notification takes the person (the phone's notification and
+// the bell): the place that needs them, else the profiles — never a list of logs.
+//   about a girl ("Wakala not paid: <her name>") → her profile
+//   WhatsApp signed out, the plan / trial → Settings
+async function goOf(db, n) {
+  if (n.type === 'whatsapp' || n.type === 'trial_warning') return '/settings'
+  const name = String(n.title || '').match(/:\s*(.+)$/)?.[1]?.trim()
+  if (n.type === 'wakala' && name) {
+    const p = await db('profiles').where('full_name', name).orderBy('id', 'desc').first('id').catch(() => null)
+    if (p) return `/profiles/${p.id}`
+  }
+  return '/profiles'
+}
+
 router.get('/notifications', async (req, res) => {
-  res.json(await req.app.locals.db('notifications').orderBy('created_at', 'desc').limit(100))
+  const db = req.app.locals.db
+  const rows = await db('notifications').orderBy('created_at', 'desc').limit(100)
+  for (const n of rows) n.go = await goOf(db, n)
+  res.json(rows)
 })
 router.delete('/notifications/all', async (req, res) => {
   await req.app.locals.db('notifications').del()

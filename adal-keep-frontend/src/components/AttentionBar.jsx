@@ -102,7 +102,7 @@ export default function AttentionBar() {
       }
       // Out of sight: the phone's or the PC's own notification.
       if (!document.hidden) continue
-      if (phone()) phone().notifyCall?.({ run: c.run_id, title, body: c.title, image: c.image || undefined, asks: !!c.asks, label: c.label, choices: c.choices || undefined })
+      if (phone()) phone().notifyCall?.({ run: c.run_id, at: c.at || 0, profile: c.profile_id || 0, title, body: c.title, image: c.image || undefined, asks: !!c.asks, label: c.label, choices: c.choices || undefined })
       else if (window.Notification?.permission === 'granted') {
         const n = new Notification(title, { body: c.title, tag: String(c.run_id), silent: true })
         n.onclick = () => { window.focus(); n.close() }

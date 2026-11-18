@@ -440,8 +440,10 @@ public class AdalDiscoveryPlugin extends Plugin {
         org.json.JSONArray choices = null;
         try { choices = call.getArray("choices"); } catch (Exception e) { /* none */ }
         AdalCalls.show(getContext(), call.getInt("run", 0), call.getString("title", "Adal Keep"), call.getString("body", ""),
-            call.getString("image"), Boolean.TRUE.equals(call.getBoolean("asks", false)), call.getString("label"), choices);
-        AdalNoticeJob.calledHere(getContext(), call.getInt("run", 0), call.getString("body", ""));
+            call.getString("image"), Boolean.TRUE.equals(call.getBoolean("asks", false)), call.getString("label"), choices,
+            AdalCalls.goOf(call.getInt("profile", 0), call.getInt("run", 0)));
+        Double at = call.getDouble("at");
+        AdalNoticeJob.calledHere(getContext(), call.getInt("run", 0), call.getString("body", ""), at == null ? 0L : at.longValue());
         call.resolve();
     }
 

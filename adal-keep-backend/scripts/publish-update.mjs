@@ -113,8 +113,10 @@ async function buildPrograms(dir) {
   build('adal-launcher', 'AdalKeep.exe', true)
   build('adal-companion', 'adal-companion.exe', true)
   build('adal-agent', 'adal-agent.exe', false, './cmd/agent')
-  const seticon = path.join(os.tmpdir(), 'adal-seticon.exe')
-  execFileSync(go, ['build', '-o', seticon, '.'], { cwd: path.join(ROOT, 'adal-installer/tools/seticon'), env, stdio: 'pipe' })
+  // The logo tool runs here, so it is built for this PC (Windows or Linux), not for the agencies' PCs.
+  const seticon = path.join(os.tmpdir(), process.platform === 'win32' ? 'adal-seticon.exe' : 'adal-seticon')
+  const hostEnv = { ...process.env, CGO_ENABLED: '0' }; delete hostEnv.GOOS; delete hostEnv.GOARCH
+  execFileSync(go, ['build', '-o', seticon, '.'], { cwd: path.join(ROOT, 'adal-installer/tools/seticon'), env: hostEnv, stdio: 'pipe' })
   for (const n of ['AdalKeep.exe', 'adal-companion.exe']) execFileSync(seticon, [path.join(out, n), path.join(ROOT, 'adal.ico')], { stdio: 'pipe' })
   const list = []
   for (const name of fs.readdirSync(out)) {

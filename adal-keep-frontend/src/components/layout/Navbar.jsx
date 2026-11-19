@@ -244,6 +244,8 @@ function BackupButton() {
     setBusy(true)
     try {
       const { data } = await api.post('/backup/run')
+      // The main PC is off or far: the request waits and goes by itself.
+      if (data.queued && !data.busy) { setBusy(false); toast(data.message || 'The backup starts as soon as the main PC answers.', { id: 'backup-now', icon: '☁️', duration: 8000 }); return }
       toast.loading(data.busy ? '💾 A backup is already running…' : '💾 Backup started…', { id: 'backup-now' })
       follow()
     } catch (e) {

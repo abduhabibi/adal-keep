@@ -128,7 +128,7 @@ function BackupCardHere() {
           })}>Send a test message</Button>
           <Button size="sm" disabled={!ready || p.running} onClick={() => step('run', async () => {
             const { data } = await api.post('/backup/run')
-            if (data?.waiting) toast(data.message, { icon: '☁️', duration: 8000 })
+            if (data?.waiting || (data?.queued && data?.message)) toast(data.message, { icon: '☁️', duration: 8000 })
             else toast('Backing up now — the first time sends every document and can take a while.', { icon: '⏳', duration: 7000 })
             load()
           })}>Back up now</Button>

@@ -62,7 +62,8 @@ const ACCOUNT_LISTS = ['/lmis/accounts', '/musaned/accounts', '/tasheer/accounts
 const SECRET = /pass|token|secret|otp|api[_-]?key|license|cookie/i
 
 // Phone requests never replayed: they change the PC itself, not the agency's work.
-const NOT_FROM_PHONES = /^\/(system|backup|branch|main-pc|mobile|subscription|setup|settings\/wallpaper|trash\/empty|trash\/\d+\/purge|chat)\b/
+// ("Back up now" is allowed: a phone or a Companion asks the main PC to back up.)
+const NOT_FROM_PHONES = /^\/(system|backup(?!\/run(?:$|\?))|branch|main-pc|mobile|subscription|setup|settings\/wallpaper|trash\/empty|trash\/\d+\/purge|chat)\b/
 
 export const cloudStatus = { on: false, running: false, last: null, error: null, pushed: 0, files: 0, filesLeft: 0, applied: 0, textDone: null, bytesSaved: 0 }
 

@@ -351,14 +351,12 @@ export async function musanedSignIn(db, page, accountId, say, check) {
   page.__adalMusanedCtx = ctx // the HR pool is reached through this agency's own card
   try {
     say(`Signing in to Musaned as ${acct.name}…`)
-    // Musaned moves to its sign-in page while it is looked at ("detached frame"): look again.
-    let opened = null
-    for (let i = 0; i < 3 && !opened; i++) {
-      opened = await w.stepOpenMusaned(page, ctx).catch(async (e) => { if (!/detached|Execution context/i.test(e.message) || i === 2) throw e; await sleep(2000); return null })
-    }
-    if (opened.onKeycloak) {
-      const f = await w.stepFillMusanedLogin(page, ctx)
-      if (f.captcha) say(`${acct.name} is filled in: type the picture's letters in the Musaned window and press Log in`)
+    // The name and password from the vault, a person's tick only, Sign in
+    // pressed at once, the authenticator code, the agency's card (signInMusaned).
+    // (Musaned moves to its sign-in page while it is looked at, "detached frame": again.)
+    const sctx = { ...ctx, profileName: acct.name, notify: async (title) => say(title), isCancelled: () => { check(); return false } }
+    for (let i = 0; i < 3; i++) {
+      try { await w.signInMusaned(page, sctx); break } catch (e) { if (e.cancelled || !/detached|Execution context/i.test(e.message) || i === 2) throw e; await sleep(2000) }
     }
     // Signed in: Musaned shows its agencies — this account's own card, then the dashboard.
     // (Up to 30 minutes: the person types the picture's letters when they get to it.)

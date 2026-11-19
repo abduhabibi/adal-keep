@@ -13,8 +13,8 @@
  * GET  /api/sessions             each site: signed in or not, its tabs, last kept
  * POST /api/sessions/:key/open   a window on that site to sign in
  */
-import { getBrowser, openForPerson, spaceOf } from './browser.js'
-import { hostOf } from './tabManager.js'
+import { getBrowser, newRunTab, spaceOf } from './browser.js'
+import { hostOf, handTabToPerson } from './tabManager.js'
 
 export const SITES = [
   { key: 'musaned', name: 'Musaned', host: /(^|\.)musaned\.com\.sa$/, start: 'https://tawtheeq.musaned.com.sa/', out: /\/(login|auth)\b|sso\.|wahid\.sa/i },
@@ -84,6 +84,20 @@ async function clickBackAndForth(p) {
   } finally { p.__adalBorrowed = false }
 }
 
+/** Is this tab signed in to its site? (Musaned by its own menu, LMIS not its public home.) */
+export async function tabSignedIn(site, p) {
+  let inNow = signedInAt(site, p.url())
+  if (inNow && site.key === 'musaned') {
+    const st = await Promise.race([import('./musanedWorkflow.js').then(w => w.snapshotState(p)).catch(() => null), new Promise(r => setTimeout(() => r(null), 8000))])
+    inNow = !!(st && (st.hasDashboardNav || st.hasHrPoolPage) && !st.hasPassword)
+  }
+  if (inNow && site.key === 'lmis') {
+    const pub = await Promise.race([p.evaluate(() => { const t = [...document.querySelectorAll('a, button')].map(e => (e.innerText || '').trim()); return t.some(x => /^(log ?in|sign ?in)$/i.test(x)) && !t.some(x => /log ?out|sign ?out|ውጣ/i.test(x)) }).catch(() => false), new Promise(r => setTimeout(() => r(false), 8000))])
+    if (pub) inNow = false
+  }
+  return inNow
+}
+
 /** One round: every site tab that is signed in gets its sign of life. */
 export async function keepAlive() {
   if (busy) return kept
@@ -99,17 +113,7 @@ export async function keepAlive() {
       const site = siteOf(p.url())
       if (!site) continue
       seen[site.key].tabs++
-      // Musaned's front page looks the same signed in or not: its own menu says so.
-      let inNow = signedInAt(site, p.url())
-      if (inNow && site.key === 'musaned') {
-        const st = await Promise.race([import('./musanedWorkflow.js').then(w => w.snapshotState(p)).catch(() => null), new Promise(r => setTimeout(() => r(null), 8000))])
-        inNow = !!(st && (st.hasDashboardNav || st.hasHrPoolPage) && !st.hasPassword)
-      }
-      // LMIS's public home (a Login button, nothing to log out of) is not signed in.
-      if (inNow && site.key === 'lmis') {
-        const pub = await Promise.race([p.evaluate(() => { const pub = (() => { const t = [...document.querySelectorAll('a, button')].map(e => (e.innerText || '').trim()); return t.some(x => /^(log ?in|sign ?in)$/i.test(x)) && !t.some(x => /log ?out|sign ?out|ውጣ/i.test(x)) })(); return pub }).catch(() => false), new Promise(r => setTimeout(() => r(false), 8000))])
-        if (pub) inNow = false
-      }
+      const inNow = await tabSignedIn(site, p)
       // Which account: its browser space ("musaned:7"; '' = the site's main account).
       if (inNow) { seen[site.key].signedIn = true; seen[site.key].spaces[spaceOf(p)] = true }
       // Musaned's "Access Denied" (/403, a page opened before the agency was
@@ -193,8 +197,71 @@ export async function sessionsNow() {
   return out
 }
 
-/** A window on that site, to sign in (its tab is then kept signed in all day). */
-export async function openSite(key, database = null, { accountId = null } = {}) {
+// The sign-in tabs shown in the live view ("site-musaned", "site-musaned-7").
+const live = new Map()
+/** The live view's tab of a Morning sign-in, or null. */
+export function siteTab(name) {
+  const p = live.get(String(name))
+  return p && !p.isClosed?.() ? p : null
+}
+
+const spaceIs = (p, space) => { try { return p.browserContext() === space } catch { return false } }
+
+/**
+ * The tab this account already has on the site (its own browser space): the
+ * signed-in one first, else one nobody works or types in. Never a tab a run
+ * works in, nor one borrowed by a check.
+ */
+export async function siteTabOf(browser, site, space, running = new Set()) {
+  const mine = space || browser.defaultBrowserContext?.() || null
+  const pages = (await browser.pages().catch(() => [])).filter(p => !p.isClosed?.() && siteOf(p.url())?.key === site.key && (!mine || spaceIs(p, mine)))
+  const free = []
+  for (const p of pages) {
+    if (p.__adalBorrowed || running.has(Number(p.__adalRunId))) continue
+    if (await tabSignedIn(site, p)) return { page: p, signedIn: true }
+    free.push(p)
+  }
+  for (const p of free) {
+    const typed = await Promise.race([p.evaluate(() => [...document.querySelectorAll('input, textarea')].some(e => !['hidden', 'password', 'checkbox', 'radio', 'file', 'submit', 'button'].includes(e.type) && e.value && e.value !== e.defaultValue)).catch(() => true), new Promise(r => setTimeout(() => r(true), 5000))])
+    if (!typed) return { page: p, signedIn: false }
+  }
+  return { page: null, signedIn: false }
+}
+
+/** Presses a sign-in form's own button (never a "Login" link elsewhere). */
+const pressFormButton = (page) => page.evaluate(() => {
+  const pw = document.querySelector('input[type="password"]')
+  const form = pw?.closest('form') || document
+  const b = [...form.querySelectorAll('button, input[type="submit"]')].filter(e => e.offsetParent !== null && !e.disabled)
+    .find(e => e.type === 'submit' || /log ?in|sign ?in|submit|ግባ|دخول/i.test(e.innerText || e.value || ''))
+  b?.click()
+  return !!b
+}).catch(() => false)
+
+/** A site with an "I'm not a robot": Sign in is pressed as soon as the person ticks it. */
+async function pressOnTick(page, site) {
+  const { robotCheck, waitForTick } = await import('./robotCheck.js')
+  await new Promise(r => setTimeout(r, 1500))
+  if (!(await robotCheck(page)).present) return 'none'
+  const w = await waitForTick(page, {
+    onForm: () => page.evaluate(() => !!document.querySelector('input[type="password"]')),
+    submit: () => pressFormButton(page),
+    timeoutMs: 30 * 60000, log: (m) => console.log(`[sessions] ${site.name}:`, m),
+  })
+  console.log(`[sessions] ${site.name}: robot check ${w}`)
+  return w
+}
+
+/**
+ * Morning sign-in for one site and account (asked on 2026-11-19):
+ *  - this account's tab already signed in → used, nothing opens, no new sign-in;
+ *  - else its tab on the site (or a new one, out of sight, in the account's own
+ *    browser space) is filled from the account vault and shown in the live
+ *    view: the person only ticks "I'm not a robot" (Musaned), types a picture's
+ *    numbers (Enjaz) or the SMS code (LMIS). Musaned's authenticator code is
+ *    typed by Adal Keep. Each account's tab is labelled with its name.
+ */
+export async function openSite(key, database = null, { accountId = null, browser = null } = {}) {
   if (database) db = database
   // The account the person chose (Morning sign-in asks when there are several), else the default one.
   const accountOf = (table, cols) => {
@@ -203,32 +270,55 @@ export async function openSite(key, database = null, { accountId = null } = {}) 
   }
   const site = SITES.find(s => s.key === key)
   if (!site) throw new Error('Unknown site')
+  browser = browser || await getBrowser()
   // The chosen account in its own browser space when it is not the site's main
   // one: signing in as it never signs the other account out (asked on 2026-11-15).
   let space = null
   if (db && accountId) {
     try {
       const { spaceForAccount } = await import('./tabManager.js')
-      space = await spaceForAccount(db, await getBrowser(), key, accountId)
+      space = await spaceForAccount(db, browser, key, accountId)
     } catch (e) { console.warn('[sessions] no space of its own:', e.message) }
   }
-  const page = await openForPerson(space)
-  await page.goto(site.start, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {})
-  await page.bringToFront().catch(() => {})
-  // Musaned: Adal Keep signs in by itself (the saved account and its authenticator code), then the tab goes out of sight.
+  const { labelTab, accountLabel } = await import('./robotCheck.js')
+  const label = db ? await accountLabel(db, key, accountId) : ''
+  // (A run working, or one waiting on its page for a person's Save, keeps its tab.)
+  const running = db ? await (await import('./tabManager.js')).keepingRunIds(db) : new Set()
+  const found = await siteTabOf(browser, site, space, running)
+  const liveKey = `site-${key}${accountId ? `-${Number(accountId)}` : ''}`
+  if (found.signedIn) {
+    // Musaned's main space can hold another account (a person signed in by hand): its menu says who.
+    if (key === 'musaned' && label && !space) {
+      const w = await import('./musanedWorkflow.js')
+      const acct = await accountOf('musaned_accounts')
+      const who = await w.signedInUser(found.page).catch(() => '')
+      if (who && acct && !w.sameAccount(who, [acct.username, acct.name])) throw new Error(`This Musaned tab is signed in as ${who}, not ${acct.name || acct.username}. Log out there first.`)
+      handTabToPerson(found.page)   // Adal Keep's own clicks on its menu are not a person's
+    }
+    await labelTab(found.page, label)
+    live.set(liveKey, found.page)
+    console.log(`[sessions] ${site.name}${label ? ` (${label})` : ''}: already signed in — that tab is used, no new sign-in`)
+    keepAlive().catch(() => {})
+    return { ok: true, already: true }
+  }
+  const { setupTab } = await import('./tabManager.js')
+  const page = found.page || await newRunTab(browser, space)
+  page.__adalAllowImages = true          // the robot check's pictures
+  await setupTab(page, {}).catch(() => {})
+  page.__adalBorrowed = true             // no run takes it while it signs in
+  await labelTab(page, label)
+  live.set(liveKey, page)
+  // Signed in: the tab is free for the runs at once (the person's tick is not "someone working in it").
+  const done = () => { page.__adalBorrowed = false; handTabToPerson(page); keepAlive().catch(() => {}) }
+  console.log(`[sessions] ${site.name}${label ? ` (${label})` : ''}: signing in in ${found.page ? 'its tab on the site' : 'a new tab'} (live view ${liveKey})`)
+  // Musaned: the vault's name and password, the person's tick, Sign in at once, the authenticator code.
   if (key === 'musaned' && db) {
     const acct = await accountOf('musaned_accounts', 'id')
     if (acct) {
       const { musanedSignIn } = await import('./transition.js')
       musanedSignIn(db, page, acct.id, (step) => console.log('[sessions] Musaned:', step), () => {})
-        .then(async () => {
-          // Out of sight only once it is really signed in (a picture code is a person's to type).
-          const st = await import('./musanedWorkflow.js').then(w => w.snapshotState(page)).catch(() => null)
-          if (st?.hasDashboardNav || st?.hasHrPoolPage) { const { sendAway } = await import('./browser.js'); await sendAway(page).catch(() => {}) }
-          keepAlive().catch(() => {})
-        })
-        .catch(e => console.warn('[sessions] Musaned sign-in:', e.message))
-      return { ok: true, auto: true }
+        .catch(e => console.warn('[sessions] Musaned sign-in:', e.message)).finally(done)
+      return { ok: true, auto: true, live: liveKey }
     }
   }
   // Enjaz (visa): its company sign-in, in English, the saved account filled — the person types the picture's numbers.
@@ -246,8 +336,9 @@ export async function openSite(key, database = null, { accountId = null } = {}) 
           await new Promise(r => setTimeout(r, 1500))
         }
         console.log('[sessions] Enjaz: the sign-in is filled — the person types the numbers and presses Login')
-      })().catch(e => console.warn('[sessions] Enjaz sign-in:', e.message))
-      return { ok: true, auto: true }
+        await pressOnTick(page, site)
+      })().catch(e => console.warn('[sessions] Enjaz sign-in:', e.message)).finally(done)
+      return { ok: true, auto: true, live: liveKey }
     }
   }
   // Insurance (FetaP): its own sign-in with the chosen account (already signed in: nothing to do).
@@ -256,11 +347,11 @@ export async function openSite(key, database = null, { accountId = null } = {}) 
     if (acct?.username && acct?.password) {
       const { insuranceSignIn } = await import('./insuranceCertificate.js')
       const ctx = { insurance_username: acct.username, insurance_password: acct.password, insurance_name: acct.name, profileName: 'Morning sign-in', onLog: (l, m) => console.log('[sessions] Insurance:', m), notify: async () => {} }
-      insuranceSignIn(page, ctx).then(() => keepAlive().catch(() => {})).catch(e => console.warn('[sessions] Insurance sign-in:', e.message))
-      return { ok: true, auto: true }
+      insuranceSignIn(page, ctx).catch(e => console.warn('[sessions] Insurance sign-in:', e.message)).finally(done)
+      return { ok: true, auto: true, live: liveKey }
     }
   }
-  // LMIS: its own sign-in (the saved account, Sign In pressed) — the person types the SMS code in the window.
+  // LMIS: its own sign-in (the saved account, Sign In pressed) — the person types the SMS code (never stored).
   if (key === 'lmis' && db) {
     const acct = await accountOf('lmis_accounts')
     if (acct && (acct.login_value || acct.phone) && acct.password) {
@@ -271,13 +362,12 @@ export async function openSite(key, database = null, { accountId = null } = {}) 
       }
       // Straight to its sign-in page (its home page is public and only looks signed in).
       await page.goto('https://lmis.gov.et/auth', { waitUntil: 'domcontentloaded', timeout: 120000 }).catch(() => {})
-      // Signed in: the window goes out of sight, so a robot's task can carry on in this very tab (asked on 2026-11-15).
-      stepLogin(page, ctx).then(async () => {
-        if (!/\/(auth|login)/i.test(page.url())) { const { sendAway } = await import('./browser.js'); await sendAway(page).catch(() => {}) }
-        keepAlive().catch(() => {})
-      }).catch(e => console.warn('[sessions] LMIS sign-in:', e.message))
-      return { ok: true, auto: true }
+      // (LMIS has no robot check: its SMS code is the person's.)
+      stepLogin(page, ctx).catch(e => console.warn('[sessions] LMIS sign-in:', e.message)).finally(done)
+      return { ok: true, auto: true, live: liveKey }
     }
   }
-  return { ok: true }
+  page.__adalBorrowed = false
+  await page.goto(site.start, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {})
+  return { ok: true, live: liveKey }
 }

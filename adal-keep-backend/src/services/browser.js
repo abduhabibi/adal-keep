@@ -203,6 +203,8 @@ export async function getBrowser(fresh = false) {
     // not open yet — start it
   }
 
+  // (Tests: only their own browser, never one started here.)
+  if (process.env.ADAL_NO_BROWSER_START === '1') throw new Error('No browser (not started in tests)')
   const exec = findBrowserExecutable()
   if (!exec) {
     throw new Error(
@@ -324,7 +326,12 @@ async function newWindow(browser, bounds, background) {
  */
 export async function newRunTab(browser, space = null) {
   // An account's own space: a tab there (its window), signed in as that account.
-  if (space && space !== browser.defaultBrowserContext?.()) return backgroundTab(browser, space.id).catch(() => space.newPage())
+  // (Out of sight too: a space's first tab is a window of its own, and a run is never seen working.)
+  if (space && space !== browser.defaultBrowserContext?.()) {
+    const page = await backgroundTab(browser, space.id).catch(() => space.newPage())
+    if (HIDDEN) await hide(page).catch(() => {})
+    return page
+  }
   if (!browser.target) return browser.newPage()
   // On the person's screen: the run's tab opens behind, the person stays on the tab they are on.
   if (!HIDDEN) return backgroundTab(browser).catch(() => browser.newPage())

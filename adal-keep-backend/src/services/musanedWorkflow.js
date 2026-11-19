@@ -19,7 +19,7 @@ import {
   reviewMusanedScreen, reviewStageComplete, reviewPreCheckReady,
 } from './jev/musanedDecisions.js'
 import { pasteText, pasteAndCommit } from './domPaste.js'
-import { isPeerUrl, expectFile, disarmFile, signInTurn, borrowSignIn, toEnglish, typeCodeInto, pressCodeButton } from './tabManager.js'
+import { isPeerUrl, expectFile, disarmFile, signInTurn, borrowSignIn, toEnglish, typeCodeInto, pressCodeButton, codeBoxUp } from './tabManager.js'
 import { newRunTab } from './browser.js'
 import { musanedMissing, personalPhotoFile } from './musanedPreflight.js'
 
@@ -2689,34 +2689,55 @@ async function musanedRun(page, ctx) {
  * carries on: the authenticator code and the rest of the work follow.
  */
 async function waitForPersonCaptcha(page, ctx) {
-  await page.bringToFront().catch(() => {})
   await ctx.notify(`🖐 ${ctx.profileName}: tick "I'm not a robot" on Musaned`,
     'Only the tick (and the pictures, if Google shows some). Adal Keep signs in and continues by itself.', 'info', { login: page })
   log(ctx, '🖐 waiting for a person to tick "I\'m not a robot" (up to 10 min)')
-  const deadline = Date.now() + 10 * 60 * 1000
-  while (Date.now() < deadline) {
-    if (typeof ctx.isCancelled === 'function' && ctx.isCancelled()) { const e = new Error('Cancelled by user'); e.cancelled = true; throw e }
-    const st = await page.evaluate(() => ({
-      ticked: [...document.querySelectorAll('textarea[name="g-recaptcha-response"]')].some(t => (t.value || '').length > 20),
-      onLogin: !!document.querySelector('input[type="password"]'),
-    })).catch(() => null)
-    if (st && !st.onLogin) { log(ctx, '✓ the person signed in'); return 'signed-in' }
-    if (st?.ticked) {
-      log(ctx, '✓ "I\'m not a robot" ticked — pressing Sign In')
-      // Musaned may have cleared the password meanwhile: fill it again.
+  const { waitForTick } = await import('./robotCheck.js')
+  const w = await waitForTick(page, {
+    onForm: () => page.evaluate(() => !!document.querySelector('input[type="password"]')),
+    // Musaned may have cleared the name or password meanwhile: filled again.
+    refill: async () => {
+      const user = await page.$('#username, input[name="username"]')
+      if (user && !(await user.evaluate(e => e.value).catch(() => ''))) await fillField(page, user, String(ctx.musaned_username || ''), 'username', ctx)
       const pw = await page.$('#password, input[name="password"], input[type="password"]')
       if (pw && !(await pw.evaluate(e => e.value).catch(() => ''))) await fillField(page, pw, String(ctx.musaned_password || ''), 'password', ctx)
-      await page.evaluate(() => {
-        const b = document.querySelector('#kc-login') || document.querySelector('button[type="submit"], input[type="submit"]')
-        b?.click()
-      }).catch(() => {})
-      await sleep(1000)
-      return 'submitted'
-    }
-    await sleep(400)
+    },
+    submit: () => page.evaluate(() => {
+      const b = document.querySelector('#kc-login') || document.querySelector('button[type="submit"], input[type="submit"]')
+      b?.click()
+    }),
+    isCancelled: ctx.isCancelled, timeoutMs: ctx.captchaWaitMs || 10 * 60 * 1000, log: (m) => log(ctx, m),
+  })
+  if (w === 'left') { log(ctx, '✓ the person signed in'); return 'signed-in' }
+  if (w === 'timeout') log(ctx, 'nobody ticked "I\'m not a robot" within 10 minutes', 'warn')
+  // Musaned's next page (the code) takes a moment to draw: the run reads it once it is there.
+  if (w === 'submitted') await waitForDashboard(page, ctx, 15000)
+  return w
+}
+
+/**
+ * Musaned's whole sign-in, for a tab that is not signed in yet (Morning
+ * sign-in): the account's name and password from the vault, a person's tick,
+ * Sign in pressed at once, the authenticator code, the agency's card.
+ * Returns the screen it ends on ('dashboard' when signed in).
+ */
+export async function signInMusaned(page, ctx) {
+  const open = await stepOpenMusaned(page, ctx)
+  await toEnglish(page, ctx)
+  if (open.onKeycloak) { await stepFillMusanedLogin(page, ctx); await sleep(800) }
+  let screen = (await classifyScreen(page, ctx)).screen
+  for (let turn = 0; turn < 6; turn++) {
+    // A code box wins over a robot check still drawn on the page.
+    if (screen === 'captcha' && await codeBoxUp(page)) screen = 'otp'
+    if (screen === 'captcha' || (screen === 'login-form' && (await import('./robotCheck.js').then(r => r.robotCheck(page))).present)) {
+      if (await waitForPersonCaptcha(page, ctx) === 'timeout') return 'captcha'
+    } else if (screen === 'otp') { screen = await passOtp(page, ctx); continue }
+    else if (screen === 'agency-picker') { await stepClickAgencyCard(page, ctx); screen = await waitForDashboard(page, ctx, 30000); continue }
+    else if (screen === 'landing') { await stepClickGoToDashboard(page, ctx); screen = await waitForDashboard(page, ctx, 30000); continue }
+    else return screen
+    screen = await waitForDashboard(page, ctx, 20000)
   }
-  log(ctx, 'nobody ticked "I\'m not a robot" within 10 minutes', 'warn')
-  return 'timeout'
+  return screen
 }
 
 /**
@@ -2804,4 +2825,4 @@ async function waitForDashboard(page, ctx, timeoutMs) {
   return last
 }
 // For tests (mock Musaned pages): the field fillers.
-export { leaveMusaned, checkAccount, signedInUser, logOutInNewTab, typeAndCommitDropdown, fillDateByLabel, readFieldValues, chosenChips, typeAuthenticatorCode, classifyScreen }
+export { waitForPersonCaptcha, passOtp, leaveMusaned, checkAccount, signedInUser, logOutInNewTab, typeAndCommitDropdown, fillDateByLabel, readFieldValues, chosenChips, typeAuthenticatorCode, classifyScreen }

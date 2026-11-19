@@ -191,7 +191,7 @@ export default function ProfilesPage() {
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        <div className="grid w-full grid-cols-5 gap-1 md:flex md:w-auto md:min-w-0 md:flex-1 md:gap-1.5 md:overflow-x-auto md:pb-1" role="tablist">
+        <div className="ak-status-tabs grid w-full grid-cols-5 gap-1 md:flex md:flex-wrap md:w-auto md:min-w-0 md:flex-1 md:gap-1.5" role="tablist">
           {PHASES.map(([k, label, title]) => (
             <button key={k} type="button" role="tab" aria-selected={!searching && phase === k} onClick={() => { setPhase(k); setStep(null) }}
               {...(title ? {
@@ -201,9 +201,9 @@ export default function ProfilesPage() {
                 onDragOver: (e) => { if (dragging && dragging !== title) { e.preventDefault(); e.dataTransfer.dropEffect = 'move' } },
                 onDrop: (e) => { e.preventDefault(); dropOn(title); setDragging(null) },
               } : {})}
-              className={`flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-xl px-1 py-1.5 text-[11px] leading-tight font-bold transition-colors md:shrink-0 md:flex-row md:gap-2 md:px-3.5 md:py-2 md:text-sm ${title ? 'cursor-grab active:cursor-grabbing' : ''} ${dragging === title && title ? 'opacity-40' : ''} ${!searching && phase === k ? 'bg-teal-600 text-white shadow' : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:ring-teal-400 dark:bg-slate-900 dark:text-slate-300 dark:ring-slate-700'}`}>
+              className={`flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-xl px-1 py-1.5 text-[11px] leading-tight font-bold transition-colors md:shrink-0 md:flex-row md:gap-2 md:px-3.5 md:py-2 md:text-sm ${title ? 'cursor-grab active:cursor-grabbing' : ''} ${dragging === title && title ? 'opacity-40' : ''} ${!searching && phase === k ? 'is-on' : ''}`}>
               <span className="max-w-full truncate">{label}</span>
-              <span className={`rounded-full px-1.5 text-[10px] md:text-xs tabular-nums ${!searching && phase === k ? 'bg-white/25' : 'bg-slate-100 dark:bg-slate-800'}`}>{phaseCounts[k] || 0}</span>
+              <span className={`rounded-full px-1.5 text-[10px] md:text-xs tabular-nums ak-seg-badge`}>{phaseCounts[k] || 0}</span>
             </button>
           ))}
         </div>

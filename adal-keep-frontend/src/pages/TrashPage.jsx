@@ -1,3 +1,4 @@
+import GlassSelect from '../components/shared/GlassSelect'
 import { useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
 import { createPortal } from 'react-dom'
@@ -39,10 +40,10 @@ export default function TrashPage() {
         <div className="panel rounded-2xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800">
           <div className="flex flex-wrap items-center gap-3 border-b border-slate-200 p-4 dark:border-slate-700">
             <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search the trash…" className="min-w-[220px] flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900" />
-            <select value={kind} onChange={e => setKind(e.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900">
+            <GlassSelect value={kind} onChange={e => setKind(e.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900">
               <option value="">Everything</option>
               {Object.entries(KIND).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-            </select>
+            </GlassSelect>
             {rows?.length > 0 && <button type="button" onClick={empty} className="rounded-lg border border-red-300 px-3 py-2 text-sm text-red-600 hover:bg-red-50">Empty the Trash</button>}
           </div>
           {rows === null ? <p className="p-6 text-sm text-slate-400">Loading…</p>

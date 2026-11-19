@@ -1,3 +1,4 @@
+import GlassSelect from '../components/shared/GlassSelect'
 import { createPortal } from 'react-dom'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import PrioritizeButton, { useWaitingFiles } from '../components/PrioritizeButton'
@@ -267,7 +268,7 @@ export default function ProfilesPage() {
           }
         />
 
-        <select
+        <GlassSelect
           className={`field col-span-2 sm:col-span-1 ${showFilters ? '' : 'hidden'}`}
           value={status}
           onChange={(e) => updateFilter('status', e.target.value)}
@@ -278,9 +279,9 @@ export default function ProfilesPage() {
               {s.label}
             </option>
           ))}
-        </select>
+        </GlassSelect>
 
-        <select
+        <GlassSelect
           className={`field col-span-2 sm:col-span-1 ${showFilters ? '' : 'hidden'}`}
           value={brokerId}
           onChange={(e) => updateFilter('broker_id', e.target.value)}
@@ -291,7 +292,7 @@ export default function ProfilesPage() {
               {b.name}
             </option>
           ))}
-        </select>
+        </GlassSelect>
 
         <button type="button" onClick={() => setShowFilters(v => !v)}
           className={`field !w-auto whitespace-nowrap !px-3 text-sm font-semibold ${activeCount ? 'border-teal-400 text-teal-700 dark:text-teal-300' : ''}`}>

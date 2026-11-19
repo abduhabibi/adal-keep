@@ -1,3 +1,4 @@
+import GlassSelect from './shared/GlassSelect'
 /**
  * Make a CV → "Assign a broker first": the broker is picked right here (a
  * phone has no other page open to go and do it), or a new one is added.
@@ -41,11 +42,11 @@ export default function PickBrokerHere({ profileId, onDone, current }) {
 
   return (
     <div className="mt-3 flex flex-wrap items-end gap-2">
-      <select value={id} onChange={e => setId(e.target.value)} className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm dark:border-slate-600 dark:bg-slate-900">
+      <GlassSelect value={id} onChange={e => setId(e.target.value)} className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm dark:border-slate-600 dark:bg-slate-900">
         <option value="">{brokers === null ? 'Loading brokers…' : '— Pick her broker —'}</option>
         {(brokers || []).filter(b => Number(b.id) > 0).map(b => <option key={b.id} value={b.id}>{b.name}{b.contact1 ? ` · ${b.contact1}` : ''}</option>)}
         <option value="new">＋ A new broker…</option>
-      </select>
+      </GlassSelect>
       {id === 'new' && <>
         <input value={name} onChange={e => setName(e.target.value)} placeholder="Broker's name" className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm dark:border-slate-600 dark:bg-slate-900" />
         <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="Phone" inputMode="tel" className="w-36 rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm dark:border-slate-600 dark:bg-slate-900" />

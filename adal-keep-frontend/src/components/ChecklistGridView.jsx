@@ -1,3 +1,4 @@
+import GlassSelect from './shared/GlassSelect'
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
@@ -381,11 +382,11 @@ export default function ChecklistGridView({ checklist, onClose }) {
                   <form onSubmit={addOwn} className="flex flex-wrap gap-2">
                     <input value={newCol.label} {...amharicProps(amharic, (v) => setNewCol(c => ({ ...c, label: v })))} onChange={(e) => setNewCol({ ...newCol, label: e.target.value })} placeholder="Name, e.g. Paid, Called, Note"
                       className="flex-1 min-w-[150px] rounded-lg border border-slate-300 dark:border-slate-700 bg-transparent px-3 py-2 text-sm" />
-                    <select value={newCol.type} onChange={(e) => setNewCol({ ...newCol, type: e.target.value })}
+                    <GlassSelect value={newCol.type} onChange={(e) => setNewCol({ ...newCol, type: e.target.value })}
                       className="rounded-lg border border-slate-300 dark:border-slate-700 bg-transparent px-2 py-2 text-sm">
                       <option value="tick">✓ tick</option>
                       <option value="text">✎ text</option>
-                    </select>
+                    </GlassSelect>
                     <button className="rounded-lg bg-teal-600 text-white px-3 py-2 text-sm font-semibold">Add</button>
                   </form>
                 </section>

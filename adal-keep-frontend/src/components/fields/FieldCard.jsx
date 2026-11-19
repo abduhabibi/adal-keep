@@ -71,6 +71,7 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
   // Full Body Photo: cropped to the CV's 1:3 shape before it is uploaded.
   const [cropFile, setCropFile] = useState(null)
   const isFullBody = field.name === 'Full Body Photo'
+  const isPhotoSlot = field.name === 'Photo' || isFullBody
   const [previewFile, setPreviewFile] = useState(null) // PREVIEW_MODAL_MARKER
   const [downloadFiles, setDownloadFiles] = useState([])
   const [isDownloadModalOpen, setIsDownloadModalOpen] = useState(false)
@@ -93,14 +94,17 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
       return
     }
     if (isFullBody && /^image\//.test(file.type || '')) { setCropFile(file); return }
+    // Her photo: one click or drop and it is in (kept as an image, no format question).
+    if (isPhotoSlot && /^image\//.test(file.type || '')) { handleFormatChoice('image', file); return }
     setPendingFile(file)
   }
 
-  const handleFormatChoice = async (targetFormat) => {
-    if (!pendingFile) return
+  const handleFormatChoice = async (targetFormat, direct = null) => {
+    const file = direct || pendingFile
+    if (!file) return
     setUploading(true)
     const formData = new FormData()
-    formData.append('file', pendingFile)
+    formData.append('file', file)
     if (targetFormat) formData.append('targetFormat', targetFormat)
 
     try {
@@ -412,7 +416,8 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
           </div>
         </div>
       ) : (
-        <div className={`flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed bg-slate-50/50 dark:bg-slate-900/50 py-6 text-center transition-all duration-200 ${
+        <div onClick={isPhotoSlot && !uploading ? (e) => { if (!e.target.closest('button')) pick.open() } : undefined}
+          className={`${isPhotoSlot ? 'cursor-pointer ' : ''}flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed bg-slate-50/50 dark:bg-slate-900/50 py-6 text-center transition-all duration-200 ${
           isDragOver ? 'border-teal-500 bg-teal-50 dark:bg-teal-900/20' : 'border-slate-200 dark:border-slate-700 hover:border-teal-400 hover:bg-teal-50/50 dark:hover:bg-teal-900/10'
         }`}>
           <svg className={`h-8 w-8 transition-colors ${isDragOver ? 'text-teal-500' : 'text-slate-300 dark:text-slate-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
@@ -442,7 +447,7 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
         <FullBodyCropper
           file={cropFile}
           onCancel={() => { setCropFile(null); if (fileInputRef.current) fileInputRef.current.value = '' }}
-          onDone={(f) => { setCropFile(null); setPendingFile(f) }}
+          onDone={(f) => { setCropFile(null); handleFormatChoice('image', f) }}
         />
       )}
 

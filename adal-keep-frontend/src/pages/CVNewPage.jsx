@@ -1,3 +1,4 @@
+import GlassSelect from '../components/shared/GlassSelect'
 import { useEffect, useState, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate, useSearchParams } from 'react-router-dom'
@@ -536,17 +537,17 @@ export default function CVNewPage() {
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
             <label className="text-xs font-medium text-slate-600 dark:text-slate-300 mb-1 block">Religion</label>
-            <select className="field w-full" value={form.religion} onChange={e => upd('religion', e.target.value)}>
+            <GlassSelect className="field w-full" value={form.religion} onChange={e => upd('religion', e.target.value)}>
               <option value="">— Select —</option>
               <option>Muslim</option><option>Christian</option>
               {form.religion && !RELIGIONS.includes(form.religion) && <option>{form.religion}</option>}
-            </select>
+            </GlassSelect>
           </div>
           <div>
             <label className="text-xs font-medium text-slate-600 dark:text-slate-300 mb-1 block">Marital status</label>
-            <select className="field w-full" value={form.marital_status} onChange={e => upd('marital_status', e.target.value)}>
+            <GlassSelect className="field w-full" value={form.marital_status} onChange={e => upd('marital_status', e.target.value)}>
               <option value="SINGLE">Single</option><option value="MARRIED">Married</option>
-            </select>
+            </GlassSelect>
           </div>
           <Input label="Children count" value={form.children_count} onChange={e => upd('children_count', e.target.value)} />
           <Input label="Weight" value={form.weight} onChange={e => upd('weight', e.target.value)} />
@@ -561,17 +562,17 @@ export default function CVNewPage() {
         <div className="grid gap-3 sm:grid-cols-2 pt-2 border-t border-slate-100 dark:border-slate-700">
           <div>
             <label className="text-xs font-medium text-slate-600 dark:text-slate-300 mb-1 block">Region</label>
-            <select className="field w-full" value={form.region} onChange={e => { upd('region', e.target.value); upd('zone_subcity', '') }}>
+            <GlassSelect className="field w-full" value={form.region} onChange={e => { upd('region', e.target.value); upd('zone_subcity', '') }}>
               <option value="">— Select —</option>
               {REGIONS.map(r => <option key={r.name} value={r.name}>{r.name}</option>)}
-            </select>
+            </GlassSelect>
           </div>
           <div>
             <label className="text-xs font-medium text-slate-600 dark:text-slate-300 mb-1 block">{regionObj?.label || 'Zone / Sub City'}</label>
-            <select className="field w-full" value={form.zone_subcity} onChange={e => upd('zone_subcity', e.target.value)} disabled={!regionObj}>
+            <GlassSelect className="field w-full" value={form.zone_subcity} onChange={e => upd('zone_subcity', e.target.value)} disabled={!regionObj}>
               <option value="">— Select —</option>
               {regionObj?.areas.map(a => <option key={a} value={a}>{a}</option>)}
-            </select>
+            </GlassSelect>
           </div>
         </div>
 
@@ -608,9 +609,9 @@ export default function CVNewPage() {
             <Input label="Phone" value={form.emergency_phone} onChange={e => upd('emergency_phone', e.target.value)} placeholder={broker?.contact1 || 'Broker phone'} />
             <div>
               <label className="text-xs font-medium text-slate-600 dark:text-slate-300 mb-1 block">Gender</label>
-              <select className="field w-full" value={form.emergency_gender} onChange={e => upd('emergency_gender', e.target.value)}>
+              <GlassSelect className="field w-full" value={form.emergency_gender} onChange={e => upd('emergency_gender', e.target.value)}>
                 <option>Male</option><option>Female</option>
-              </select>
+              </GlassSelect>
             </div>
             <Input label="Relationship" value={form.emergency_relationship} onChange={e => upd('emergency_relationship', e.target.value)} />
           </div>
@@ -652,10 +653,10 @@ export default function CVNewPage() {
               </div>
               <div>
                 <label className="text-[11px] text-slate-500 block mb-1">Country</label>
-                <select className="field w-full" value={exp.country} onChange={e => updExperience(i, 'country', e.target.value)}>
+                <GlassSelect className="field w-full" value={exp.country} onChange={e => updExperience(i, 'country', e.target.value)}>
                   <option value="">— Select —</option>
                   {WORK_COUNTRIES.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
-                </select>
+                </GlassSelect>
               </div>
               <Input label="From" type="date" value={exp.from || ''} onChange={e => updExperience(i, 'from', e.target.value)} />
               <Input label="To" type="date" value={exp.to || ''} onChange={e => updExperience(i, 'to', e.target.value)} />
@@ -684,10 +685,10 @@ export default function CVNewPage() {
               </div>
               <div>
                 <label className="text-[11px] text-slate-500 block mb-1">Country</label>
-                <select className="field w-full" value={c.country} onChange={e => updCountry(i, 'country', e.target.value)}>
+                <GlassSelect className="field w-full" value={c.country} onChange={e => updCountry(i, 'country', e.target.value)}>
                   <option value="">— Select —</option>
                   {COUNTRIES_APPLY.map(x => <option key={x.name} value={x.name}>{x.name}</option>)}
-                </select>
+                </GlassSelect>
               </div>
               <Input label="Salary" type="number" value={c.salary || ''} onChange={e => updCountry(i, 'salary', e.target.value)} />
               <Input label="Currency" value={c.currency || ''} onChange={e => updCountry(i, 'currency', e.target.value)} />

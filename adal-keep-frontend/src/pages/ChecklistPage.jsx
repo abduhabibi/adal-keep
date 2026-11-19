@@ -1,3 +1,4 @@
+import GlassSelect from '../components/shared/GlassSelect'
 import { useEffect, useState, useRef } from 'react'
 import toast from 'react-hot-toast'
 import api from '../services/api'
@@ -194,7 +195,7 @@ export default function ChecklistPage() {
                     <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">{profile.phone_number || 'ስልክ የለም'}</div>
                   </div>
                   {checklists.length > 0 && (
-                    <select aria-label="Put in a checklist" value="" title="Put in a checklist"
+                    <GlassSelect hideChevron aria-label="Put in a checklist" value="" title="Put in a checklist"
                       onChange={async (e) => {
                         const id = Number(e.target.value); if (!id) return
                         try { await api.post(`/checklists/${id}/profiles`, { profile_ids: [profile.id] }); toast.success(`Added to “${checklists.find(c => c.id === id)?.name}”`); loadData(true) } catch { toast.error('ፕሮፋይሉን ማከል አልተቻለም') }
@@ -202,7 +203,7 @@ export default function ChecklistPage() {
                       className="h-8 w-9 shrink-0 cursor-pointer appearance-none rounded-lg border border-teal-300 bg-teal-50 text-center text-base font-bold text-teal-700 dark:border-teal-700 dark:bg-teal-900/30 dark:text-teal-300">
                       <option value="">＋</option>
                       {checklists.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                    </select>
+                    </GlassSelect>
                   )}
                 </div>
               </div>

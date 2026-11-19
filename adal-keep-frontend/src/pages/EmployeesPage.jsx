@@ -1,3 +1,4 @@
+import GlassSelect from '../components/shared/GlassSelect'
 import { useState, useEffect } from 'react'
 import { cachedGet } from '../lib/deviceCache'
 import { profilesList } from '../lib/profilesCache'
@@ -27,7 +28,7 @@ function PhoneField({ label, cc, num, onChange }) {
     <div>
       <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">{label}</label>
       <div className="flex gap-2">
-        <select
+        <GlassSelect
           value={cc}
           onChange={(e) => onChange({ cc: e.target.value, num })}
           className="w-24 px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500/40"
@@ -35,7 +36,7 @@ function PhoneField({ label, cc, num, onChange }) {
           {COUNTRY_CODES.map((c) => (
             <option key={c} value={c}>{c}</option>
           ))}
-        </select>
+        </GlassSelect>
         <input
           inputMode="numeric"
           value={formatPhone(num)}

@@ -1,3 +1,4 @@
+import GlassSelect from './shared/GlassSelect'
 /**
  * Settings → Wafid medical: what the booking form uses for every profile,
  * and the medical result check (Medical · Applied → Fit / Rejected).
@@ -39,9 +40,9 @@ export default function WafidCard() {
       <h2 className="font-display text-lg font-bold mb-3 flex items-center gap-2" translate="no">Wafid medical</h2>
       <div className="grid gap-3 sm:grid-cols-3" translate="no">
         <label className="text-sm">City of the medical
-          <select className={field} value={s.city} onChange={e => save({ city: e.target.value })}>
+          <GlassSelect className={field} value={s.city} onChange={e => save({ city: e.target.value })}>
             {CITIES.map(c => <option key={c}>{c}</option>)}
-          </select>
+          </GlassSelect>
         </label>
         <label className="text-sm">Passport issue place
           <input className={field} defaultValue={s.issue_place} onBlur={e => e.target.value.trim() !== s.issue_place && save({ issue_place: e.target.value })} />

@@ -1,3 +1,4 @@
+import GlassSelect from './shared/GlassSelect'
 import { useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
 import api from '../services/api'
@@ -54,7 +55,7 @@ export default function MusanedAccountPicker({ value, onChange, endpoint = '/mus
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2">
-        <select
+        <GlassSelect
           className="field min-w-0 flex-1"
           value={value || ''}
           onChange={e => onChange(e.target.value ? Number(e.target.value) : null)}
@@ -67,7 +68,7 @@ export default function MusanedAccountPicker({ value, onChange, endpoint = '/mus
               {a.is_default ? ' (default)' : ''}
             </option>
           ))}
-        </select>
+        </GlassSelect>
 
         {selected && (
           <button

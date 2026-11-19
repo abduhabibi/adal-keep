@@ -1,3 +1,4 @@
+import GlassSelect from './shared/GlassSelect'
 import { useEffect, useMemo, useState } from 'react'
 import api from '../services/api'
 import { after } from './ProfileJourney'
@@ -54,7 +55,7 @@ export function Select({ title, value, onChange, options }) {
   return (
     <label className="flex flex-col gap-1.5 min-w-0">
       <span className="text-xs font-medium text-slate-500 dark:text-slate-400">{title}</span>
-      <select
+      <GlassSelect
         value={value}
         onChange={e => onChange(e.target.value)}
         className={`w-full rounded-lg border px-3 py-2 text-sm bg-slate-50 dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-500/40 ${
@@ -62,7 +63,7 @@ export function Select({ title, value, onChange, options }) {
         }`}
       >
         {options.map(([v, t]) => <option key={v} value={v}>{t}</option>)}
-      </select>
+      </GlassSelect>
     </label>
   )
 }
@@ -211,10 +212,10 @@ export function useProfileFilters(profiles) {
   const sortBar = (
     <div className="flex items-center gap-2 text-sm">
       <span className="text-slate-500 whitespace-nowrap">Sort by:</span>
-      <select value={sort} onChange={e => setSort(e.target.value)}
+      <GlassSelect value={sort} onChange={e => setSort(e.target.value)}
         className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-3 py-2 text-sm">
         {SORTS.map(([v, t]) => <option key={v} value={v}>{t}</option>)}
-      </select>
+      </GlassSelect>
       {[['asc', '↑', 'Oldest / A–Z / youngest first'], ['desc', '↓', 'Newest / Z–A / oldest first']].map(([d, arrow, tip]) => (
         <button key={d} type="button" title={tip} onClick={() => setDir(d)}
           className={`h-8 w-8 rounded-md text-lg font-bold ${dir === d ? 'text-teal-600 bg-teal-50 dark:bg-teal-900/30' : 'text-slate-400 hover:text-slate-600'}`}>

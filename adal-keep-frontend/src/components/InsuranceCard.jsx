@@ -1,3 +1,4 @@
+import GlassSelect from './shared/GlassSelect'
 /**
  * Settings → Insurance (FetaP): the Insurance Branch the certificate form
  * chooses for every profile.
@@ -35,10 +36,10 @@ export default function InsuranceCard() {
   }
   const pick = (title, key, list, hint) => (
     <label className="text-sm block" translate="no">{title}
-      <select className={field} value={s[key]} onChange={e => save(key)(e.target.value)}>
+      <GlassSelect className={field} value={s[key]} onChange={e => save(key)(e.target.value)}>
         <option value="">— choose —</option>
         {list.map(b => <option key={b}>{b}</option>)}
-      </select>
+      </GlassSelect>
       {hint && <span className="text-[11px] text-slate-400">{hint}</span>}
     </label>
   )

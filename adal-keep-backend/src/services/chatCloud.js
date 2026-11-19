@@ -103,13 +103,22 @@ async function token(db) {
   return sess.access_token
 }
 
+const isNetDrop = (e) => e?.name !== 'TimeoutError' && e?.name !== 'AbortError' && /fetch failed|ECONNRESET|UND_ERR|socket|EPIPE|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ENETUNREACH/i.test(`${e?.message} ${e?.cause?.code || ''} ${e?.cause?.message || ''}`)
+const safeTwice = (method, p, headers = {}) => ['GET', 'HEAD', 'DELETE', 'PUT'].includes(method)
+  || /on_conflict=/.test(p) || String(headers['x-upsert'] || headers['X-Upsert'] || '') === 'true'
+function netError(e) {
+  const c = e?.cause
+  const why = [c?.code, c?.message && c.message !== c?.code ? c.message : null].filter(Boolean).join(' ')
+  return Object.assign(new Error(why ? `fetch failed (${why})` : String(e?.message || e)), { cause: c })
+}
+
 async function call(db, method, pathAndQuery, body, opts = {}, again = false) {
   const { headers = {}, raw = false, timeout } = opts
   const { url, anon } = cfg()
   const t = await token(db)
   // Never waits for ever: on a line that drops, a dead connection used to hold the
   // PC's answers to Admin and the phones, and the update check, until a restart.
-  const res = await fetch(`${url}${pathAndQuery}`, {
+  const send = () => fetch(`${url}${pathAndQuery}`, {
     signal: AbortSignal.timeout(timeout || (raw || Buffer.isBuffer(body) ? 10 * 60_000 : 60_000)),
     method,
     headers: {
@@ -120,6 +129,17 @@ async function call(db, method, pathAndQuery, body, opts = {}, again = false) {
     },
     body: body === undefined ? undefined : Buffer.isBuffer(body) ? body : JSON.stringify(body),
   })
+  // "fetch failed" is a dropped connection, not DNS (netFix covers names): an office
+  // router closes idle kept-alive sockets, so the next call on one fails at once.
+  // A call that is safe twice (a read, a delete, an upsert) gets one fresh try;
+  // the real reason (ECONNRESET, UND_ERR_SOCKET, …) goes into the message.
+  let res
+  try { res = await send() } catch (e) {
+    if (!isNetDrop(e)) throw e
+    if (!safeTwice(method, pathAndQuery, headers)) throw netError(e)
+    await new Promise(r => setTimeout(r, 1500))
+    try { res = await send() } catch (e2) { throw netError(e2) }
+  }
   // The cloud says the sign-in has expired (the PC's clock was wrong): a new sign-in, once.
   if (res.status === 401 && !again) {
     const peek = await res.clone().text().catch(() => '')

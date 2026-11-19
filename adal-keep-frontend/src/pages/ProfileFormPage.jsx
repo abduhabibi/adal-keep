@@ -1,3 +1,4 @@
+import GlassSelect from '../components/shared/GlassSelect'
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
@@ -434,34 +435,34 @@ export default function ProfileFormPage() {
             </div>
               <div>
               <label className={labelClass} htmlFor="religion">Religion *</label>
-              <select id="religion" required className={inputClass} value={form.religion} onChange={setField('religion')}>
+              <GlassSelect id="religion" required className={inputClass} value={form.religion} onChange={setField('religion')}>
                 <option value="">— Select —</option>
                 <option value="Muslim">Muslim</option>
                 <option value="Christian">Christian</option>
                 {form.religion && !['Muslim', 'Christian'].includes(form.religion) && <option value={form.religion}>{form.religion}</option>}
-              </select>
+              </GlassSelect>
             </div>
             <div>
               <label className={labelClass} htmlFor="marital_status">Marital status *</label>
-              <select id="marital_status" required className={inputClass} value={form.marital_status} onChange={setField('marital_status')}>
+              <GlassSelect id="marital_status" required className={inputClass} value={form.marital_status} onChange={setField('marital_status')}>
                 <option value="">— Select —</option>
                 <option value="SINGLE">Single</option>
                 <option value="MARRIED">Married</option>
-              </select>
+              </GlassSelect>
             </div>
             <div>
               <label className={labelClass} htmlFor="destination_country_q">Destination country *</label>
-              <select id="destination_country_q" required className={inputClass} value={form.destination_country} onChange={setField('destination_country')}>
+              <GlassSelect id="destination_country_q" required className={inputClass} value={form.destination_country} onChange={setField('destination_country')}>
                 <option value="">— Select —</option>
                 {['Kuwait', 'Saudi Arabia', 'Jordan', 'UAE', 'Qatar', 'Bahrain', 'Oman'].map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
+              </GlassSelect>
             </div>
             <div>
               <label className={labelClass} htmlFor="broker_id_q">ደላላ *</label>
-              <select id="broker_id_q" required className={inputClass} value={form.broker_id} onChange={setField('broker_id')}>
+              <GlassSelect id="broker_id_q" required className={inputClass} value={form.broker_id} onChange={setField('broker_id')}>
                 <option value="">— Select —</option>
                 {brokers.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-              </select>
+              </GlassSelect>
             </div>
             <div className="sm:col-span-2">
               <button type="button" onClick={() => setShowAll(true)} className="text-xs text-teal-700 dark:text-teal-300 hover:underline">
@@ -474,11 +475,11 @@ export default function ProfileFormPage() {
         {!isEdit && (
           <div className="rounded-xl border-2 border-teal-200 bg-teal-50/50 p-3 dark:border-teal-800 dark:bg-teal-900/10">
             <label className={labelClass} htmlFor="created_by">Who created this profile? *</label>
-            <select id="created_by" required className={inputClass} value={createdBy} onChange={e => setCreatedBy(e.target.value)}>
+            <GlassSelect id="created_by" required className={inputClass} value={createdBy} onChange={e => setCreatedBy(e.target.value)}>
               <option value="">— Pick the employee —</option>
               {staff.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
               {createdBy && !staff.some(s => s.name === createdBy) && <option value={createdBy}>{createdBy}</option>}
-            </select>
+            </GlassSelect>
           </div>
         )}
 
@@ -503,12 +504,12 @@ export default function ProfileFormPage() {
           </div>
           <div>
             <label className={labelClass} htmlFor="status">ሁኔታ</label>
-            <select id="status" className={inputClass} value={form.status} onChange={setField('status')}>
+            <GlassSelect id="status" className={inputClass} value={form.status} onChange={setField('status')}>
               {STATUS_OPTIONS_AM.filter(s => !s.group).map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
               <optgroup label="ሕክምና · Medical (Wafid)">
                 {STATUS_OPTIONS_AM.filter(s => s.group === 'medical').map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
               </optgroup>
-            </select>
+            </GlassSelect>
           </div>
           <div>
             <label className={labelClass} htmlFor="national_id">ብሔራዊ መታወቂያ</label>
@@ -520,10 +521,10 @@ export default function ProfileFormPage() {
           </div>
           <div className="sm:col-span-2">
             <label className={labelClass} htmlFor="broker_id">ደላላ *</label>
-            <select id="broker_id" required className={inputClass} value={form.broker_id} onChange={setField('broker_id')}>
+            <GlassSelect id="broker_id" required className={inputClass} value={form.broker_id} onChange={setField('broker_id')}>
               <option value="">ያልተመደበ</option>
               {brokers.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-            </select>
+            </GlassSelect>
           </div>
         </div>
 
@@ -536,7 +537,7 @@ export default function ProfileFormPage() {
                 (Kuwait auto-starts Police Clearance)
               </span>
             </label>
-            <select
+            <GlassSelect
               id="destination_country"
               required
               className={inputClass}
@@ -551,32 +552,32 @@ export default function ProfileFormPage() {
               <option value="Qatar">Qatar</option>
               <option value="Bahrain">Bahrain</option>
               <option value="Oman">Oman</option>
-            </select>
+            </GlassSelect>
           </div>
           <div>
             <label className={labelClass} htmlFor="religion">Religion *</label>
-            <select id="religion" required className={inputClass} value={form.religion} onChange={setField('religion')}>
+            <GlassSelect id="religion" required className={inputClass} value={form.religion} onChange={setField('religion')}>
               <option value="">— Select —</option>
               <option value="Muslim">Muslim</option>
               <option value="Christian">Christian</option>
               {form.religion && !['Muslim', 'Christian'].includes(form.religion) && <option value={form.religion}>{form.religion}</option>}
-            </select>
+            </GlassSelect>
           </div>
           <div>
             <label className={labelClass} htmlFor="marital_status">Marital status *</label>
-            <select id="marital_status" required className={inputClass} value={form.marital_status} onChange={setField('marital_status')}>
+            <GlassSelect id="marital_status" required className={inputClass} value={form.marital_status} onChange={setField('marital_status')}>
               <option value="">— Select —</option>
               <option value="SINGLE">Single</option>
               <option value="MARRIED">Married</option>
-            </select>
+            </GlassSelect>
           </div>
           <div>
             <label className={labelClass} htmlFor="gender">Gender</label>
-            <select id="gender" className={inputClass} value={form.gender} onChange={setField('gender')}>
+            <GlassSelect id="gender" className={inputClass} value={form.gender} onChange={setField('gender')}>
               <option value="">— Select —</option>
               <option value="M">Male</option>
               <option value="F">Female</option>
-            </select>
+            </GlassSelect>
           </div>
           <div>
             <label className={labelClass} htmlFor="children_count">Children count</label>
@@ -584,21 +585,21 @@ export default function ProfileFormPage() {
           </div>
           <div>
             <label className={labelClass} htmlFor="work_experience">Work experience</label>
-            <select id="work_experience" className={inputClass} value={form.work_experience}
+            <GlassSelect id="work_experience" className={inputClass} value={form.work_experience}
               onChange={e => setForm(f => {
                 const has = e.target.value === 'Have experience'
                 return { ...f, work_experience: e.target.value, experience_country: has ? f.experience_country : '', experience_years: has ? f.experience_years : '' }
               })}>
               {EXPERIENCE_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
-            </select>
+            </GlassSelect>
           </div>
           {form.work_experience === 'Have experience' && (
             <div>
               <label className={labelClass} htmlFor="experience_country">Experience country *</label>
-              <select id="experience_country" required className={inputClass} value={form.experience_country} onChange={setField('experience_country')}>
+              <GlassSelect id="experience_country" required className={inputClass} value={form.experience_country} onChange={setField('experience_country')}>
                 <option value="">— Select —</option>
                 {EXPERIENCE_COUNTRIES.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
+              </GlassSelect>
             </div>
           )}
           {form.work_experience === 'Have experience' && (
@@ -614,27 +615,27 @@ export default function ProfileFormPage() {
           </div>
           <div>
             <label className={labelClass} htmlFor="cooking_skill">Cooking skill</label>
-            <select id="cooking_skill" className={inputClass} value={form.cooking_skill} onChange={setField('cooking_skill')}>
+            <GlassSelect id="cooking_skill" className={inputClass} value={form.cooking_skill} onChange={setField('cooking_skill')}>
               <option value="None">None</option>
               <option value="Cooking">Cooking</option>
               <option value="Cooking Helper">Cooking Helper</option>
-            </select>
+            </GlassSelect>
           </div>
           <div>
             <label className={labelClass} htmlFor="speaks_english">Speaks English</label>
-            <select id="speaks_english" className={inputClass} value={form.speaks_english ? 'yes' : 'no'}
+            <GlassSelect id="speaks_english" className={inputClass} value={form.speaks_english ? 'yes' : 'no'}
               onChange={e => setForm(f => ({ ...f, speaks_english: e.target.value === 'yes' }))}>
               <option value="no">No</option>
               <option value="yes">Yes</option>
-            </select>
+            </GlassSelect>
           </div>
           <div>
             <label className={labelClass} htmlFor="speaks_arabic">Speaks Arabic</label>
-            <select id="speaks_arabic" className={inputClass} value={form.speaks_arabic ? 'yes' : 'no'}
+            <GlassSelect id="speaks_arabic" className={inputClass} value={form.speaks_arabic ? 'yes' : 'no'}
               onChange={e => setForm(f => ({ ...f, speaks_arabic: e.target.value === 'yes' }))}>
               <option value="no">No</option>
               <option value="yes">Yes</option>
-            </select>
+            </GlassSelect>
           </div>
           <div>
             <label className={labelClass} htmlFor="emergency_name">Emergency name (her father — from the middle name)</label>
@@ -646,21 +647,21 @@ export default function ProfileFormPage() {
           </div>
           <div>
             <label className={labelClass} htmlFor="emergency_gender">Emergency gender</label>
-            <select id="emergency_gender" className={inputClass} value={form.emergency_gender} onChange={setField('emergency_gender')}>
+            <GlassSelect id="emergency_gender" className={inputClass} value={form.emergency_gender} onChange={setField('emergency_gender')}>
               <option value="Male">Male</option>
               <option value="Female">Female</option>
-            </select>
+            </GlassSelect>
           </div>
           <div>
             <label className={labelClass} htmlFor="emergency_relationship">Emergency relationship</label>
-            <select id="emergency_relationship" className={inputClass} value={form.emergency_relationship} onChange={setField('emergency_relationship')}>
+            <GlassSelect id="emergency_relationship" className={inputClass} value={form.emergency_relationship} onChange={setField('emergency_relationship')}>
               <option value="Father">Father</option>
               <option value="Mother">Mother</option>
               <option value="Brother">Brother</option>
               <option value="Sister">Sister</option>
               <option value="Spouse">Spouse</option>
               <option value="Other">Other</option>
-            </select>
+            </GlassSelect>
           </div>
         </div>
 
@@ -703,18 +704,18 @@ export default function ProfileFormPage() {
           </div>
           <div>
             <label className={smallLabel} htmlFor="region">Region</label>
-            <select id="region" className={smallInput} value={form.region}
+            <GlassSelect id="region" className={smallInput} value={form.region}
               onChange={e => setForm(f => ({ ...f, region: e.target.value, zone_subcity: '' }))}>
               <option value="">— Select —</option>
               {REGIONS.map(r => <option key={r.name} value={r.name}>{r.name}</option>)}
-            </select>
+            </GlassSelect>
           </div>
           <div>
             <label className={smallLabel} htmlFor="zone_subcity">{regionByName(form.region)?.label || 'Zone / Sub-city'}</label>
-            <select id="zone_subcity" className={smallInput} value={form.zone_subcity} onChange={setField('zone_subcity')} disabled={!form.region}>
+            <GlassSelect id="zone_subcity" className={smallInput} value={form.zone_subcity} onChange={setField('zone_subcity')} disabled={!form.region}>
               <option value="">— Select —</option>
               {(regionByName(form.region)?.areas || []).map(a => <option key={a} value={a}>{a}</option>)}
-            </select>
+            </GlassSelect>
           </div>
           <div>
             <label className={smallLabel} htmlFor="complexion">Complexion</label>

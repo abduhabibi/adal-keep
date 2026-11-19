@@ -1,3 +1,4 @@
+import GlassSelect from './shared/GlassSelect'
 /**
  * CVs → 📥 Add from Musaned: pick a girl (search) and the CV template; the run
  * signs in to Musaned (a person types the code), opens her in the HR Pool,
@@ -60,9 +61,9 @@ export default function AddFromMusaned({ onClose }) {
           </div>
           <label className="flex items-center gap-2 text-sm">
             <span className="shrink-0 font-semibold">CV template</span>
-            <select className="field flex-1" value={templateId} onChange={e => setTemplateId(Number(e.target.value))}>
+            <GlassSelect className="field flex-1" value={templateId} onChange={e => setTemplateId(Number(e.target.value))}>
               {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-            </select>
+            </GlassSelect>
           </label>
           <input autoFocus className="field w-full" placeholder="Search name, passport or phone…" value={q} onChange={e => setQ(e.target.value)} />
         </div>

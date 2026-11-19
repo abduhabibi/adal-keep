@@ -1,3 +1,4 @@
+import GlassSelect from './shared/GlassSelect'
 import { useEffect, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 import api from '../services/api'
@@ -418,9 +419,9 @@ function Block({ b, send, focus }) {
       return (
         <label className="block">
           <Label>{b.label}</Label>
-          <select className={field} disabled={b.dis} value={b.value} onChange={(e) => send({ kind: 'pick', id: b.id, value: e.target.value })}>
+          <GlassSelect className={field} disabled={b.dis} value={b.value} onChange={(e) => send({ kind: 'pick', id: b.id, value: e.target.value })}>
             {(b.options || []).map(([v, t, , d], i) => <option key={i} value={v} disabled={d}>{t || v || '—'}</option>)}
-          </select>
+          </GlassSelect>
         </label>
       )
     case 'checkbox': case 'radio':

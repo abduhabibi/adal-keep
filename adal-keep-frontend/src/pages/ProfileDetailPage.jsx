@@ -19,6 +19,7 @@ import VisaBarcodes from '../components/VisaBarcodes'
 import MedicalBattery from '../components/MedicalBattery'
 import { onDataChange } from '../lib/changes'
 import { onPhone } from '../lib/phoneMode'
+import { photosFirst, missingPhotos, hasFiles } from '../lib/photosFirst'
 
 // Her father's name as the emergency contact: his name and his father's (her surname),
 // e.g. "ABAGOLE KEDIR". A saved name that was only his first name gets the surname too.
@@ -69,7 +70,8 @@ export default function ProfileDetailPage() {
   }, [id])
   // Only the step's files still missing: an uploaded one leaves the page; all there → the part folds away.
   const stepFiles = !everything && STEP_FILES[step?.key]
-  const needFiles = stepFiles ? stepFiles.filter(n => !(fields.find(fl => fl.name === n)?.files || []).length) : null
+  // A missing Photo / Full Body Photo is always in front, whatever the step.
+  const needFiles = stepFiles ? [...new Set([...missingPhotos(fields), ...stepFiles.filter(n => !hasFiles(fields.find(fl => fl.name === n)))])] : null
   const needDetails = !everything && STEP_DETAILS[step?.key]
   const showAll = (stepFiles || needDetails) ? (
     <button type="button" onClick={() => setEverything(true)} className="mt-3 text-xs font-semibold text-teal-700 hover:underline dark:text-teal-400">▸ Show everything</button>
@@ -113,6 +115,22 @@ export default function ProfileDetailPage() {
     })
     return () => { window.removeEventListener('adal-profile-changed', again); off() }
   }, [id])
+
+  // Photo and Full Body Photo first; a missing one sits outside the fold, always in view.
+  const orderedFields = photosFirst(fields)
+  const gapNames = missingPhotos(fields)
+  const photoGaps = orderedFields.filter(f => gapNames.includes(f.name))
+  const restFiles = orderedFields.filter(f => !gapNames.includes(f.name) && (!needFiles || needFiles.includes(f.name)))
+  const fieldCard = (field) => (
+    <FieldCard
+      id={`field-${field.name.replace(/\s+/g, '-')}`}
+      key={field.id}
+      field={field}
+      profileId={id}
+      onFileUpdate={handleFileUpdate}
+      cvReadiness={field.name === 'CV' ? cvReadiness : null}
+    />
+  )
 
   const deleteProfile = async () => {
     if (!confirm('Delete this profile permanently?')) return
@@ -286,20 +304,17 @@ export default function ProfileDetailPage() {
 
         {/* Right: documents */}
         <section className="panel p-4 sm:p-6 lg:col-span-2 space-y-6">
-          {needFiles && needFiles.length === 0 ? (
-            <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">✓ Documents for this step are all here</p>
+          {/* Her missing Photo / Full Body Photo: empty slots right at the front, never folded away. */}
+          {photoGaps.length > 0 && (
+            <div className="grid grid-cols-2 gap-2 sm:gap-4 lg:grid-cols-3">
+              {photoGaps.map(field => fieldCard(field))}
+            </div>
+          )}
+          {restFiles.length === 0 ? (
+            needFiles && photoGaps.length === 0 && <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">✓ Documents for this step are all here</p>
           ) : <Fold id="documents" title="Documents & Fields">
             <div className="mt-4 grid grid-cols-2 gap-2 sm:gap-4 lg:grid-cols-3">
-              {fields.filter(field => !needFiles || needFiles.includes(field.name)).map(field => (
-                <FieldCard
-                  id={`field-${field.name.replace(/\s+/g, '-')}`}
-                  key={field.id}
-                  field={field}
-                  profileId={id}
-                  onFileUpdate={handleFileUpdate}
-                  cvReadiness={field.name === 'CV' ? cvReadiness : null}
-                />
-              ))}
+              {restFiles.map(field => fieldCard(field))}
             </div>
           </Fold>}
           {stepFiles && showAll}

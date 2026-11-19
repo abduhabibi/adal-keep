@@ -17,7 +17,7 @@ import {
   getProfileVerification,
   assertPoliceReady,
 } from '../services/verification.js'
-import { getLanAddresses, getPrimaryLanAddress, DISCOVERY_PORT } from '../services/discovery.js'
+import { getLanAddresses, getPrimaryLanAddress, macsOf, DISCOVERY_PORT } from '../services/discovery.js'
 
 const router = express.Router()
 
@@ -88,6 +88,8 @@ router.get('/companion/info', async (req, res) => {
       discovery_port: DISCOVERY_PORT,
       lan_addresses: getLanAddresses(),
       primary_address: getPrimaryLanAddress(),
+      // Its network cards: a Companion finds this PC by them after the router moves it.
+      macs: macsOf(getLanAddresses()),
       uptime_seconds: Math.round(process.uptime()),
       version: process.env.ADAL_VERSION || '1.0.0',
       time: new Date().toISOString(),

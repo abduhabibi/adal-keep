@@ -1,0 +1,184 @@
+/**
+ * replica.js — the main PC hands a copy of the agency's data to its Companions.
+ *
+ * Every Companion (adal-companion, replica.go) keeps a copy of the database
+ * and the documents on its own disk, so that when the main PC is off or dead
+ * a Companion can still back the agency up (to Telegram) and a new main PC can
+ * be restored from it over the office network.
+ *
+ *   manifest  a consistent snapshot of the database (SQLite's backup), cut in
+ *             1 MB chunks; each chunk has a fingerprint made from the page
+ *             fingerprints the backup already uses (pageHashes). The documents
+ *             of SafeStorage by name, size and time. The Companion asks only
+ *             for what it does not have: after the first copy, a few chunks.
+ *   pieces    each chunk (zstd inside) and each document (in ≤ 4 MB pieces) is
+ *             LOCKED with the agency's backup key before it leaves this PC —
+ *             the same lock as the Telegram backup (AES-256-GCM, scrypt). The
+ *             Companion stores them as they come: its copy is locked at rest,
+ *             and the same pieces go to Telegram as they are.
+ *   keys      the backup key, the bot and channel, and what a restore needs
+ *             (the vault key, the locked secrets): a Companion keeps them
+ *             locked with Windows' own protection (DPAPI) for its user.
+ *
+ * Only computers let in with the main PC's number (networkGate: req.pcAccess)
+ * get any of it, and never through the online link (X-Adal-Cloud).
+ */
+import fs from 'fs'
+import path from 'path'
+import zlib from 'zlib'
+import crypto from 'crypto'
+import { fileURLToPath } from 'url'
+import { rawSnapshot, pageSizeOf, pageHashes, lockFast, HAS_ZSTD, backupHealth, getConfig } from './telegramBackup.js'
+import { getSecret, secretBlobs } from './secretStore.js'
+import { vaultKey } from './accountVault.js'
+
+const BACKEND = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
+const DATA = path.join(BACKEND, 'data')
+const SAFE = process.env.ADAL_BACKUP_SAFE || path.join(DATA, 'SafeStorage')
+const SNAPS = process.env.ADAL_REPLICA_SNAPS || path.join(DATA, 'replica-snap')
+const LIST = process.env.ADAL_REPLICA_LIST || path.join(DATA, 'replicas.json')
+
+export const CHUNK = 1024 * 1024        // database chunk (a whole number of pages for any page size)
+export const PIECE = 4 * 1024 * 1024    // document piece (a bot downloads ≤ 20 MB; small pieces get through slow lines)
+const SNAP_TTL = 20 * 60 * 1000
+const ZL = zlib.constants
+
+// ── The snapshot ────────────────────────────────────────────────────────────
+
+const snaps = new Map()   // id → { file, at, length, ps }
+function dropOldSnaps() {
+  for (const [id, s] of snaps) if (Date.now() - s.at > SNAP_TTL) { fs.rmSync(s.file, { force: true }); snaps.delete(id) }
+  // Leftovers from before a restart.
+  try { for (const f of fs.readdirSync(SNAPS)) if (![...snaps.values()].some(s => path.basename(s.file) === f)) fs.rmSync(path.join(SNAPS, f), { force: true }) } catch {}
+}
+
+/** One fingerprint per chunk: from the page fingerprints in it (and its length). */
+export function chunkSums(raw, ps = pageSizeOf(raw), chunk = CHUNK) {
+  const fp = pageHashes(raw, ps)
+  const perChunk = chunk / ps
+  const out = []
+  for (let i = 0; i * chunk < raw.length; i++) {
+    const len = Math.min(chunk, raw.length - i * chunk)
+    out.push(crypto.createHash('sha1').update(String(len)).update(fp.subarray(i * perChunk * 8, (i + 1) * perChunk * 8)).digest('hex').slice(0, 20))
+  }
+  return out
+}
+
+/** What a document is (cheap: no reading of the file): its name, size and time. */
+export const docSum = (name, st) => crypto.createHash('sha1').update(`${name}|${st.size}|${Math.round(st.mtimeMs)}`).digest('hex').slice(0, 20)
+
+function listDocs() {
+  let names = []
+  try { names = fs.readdirSync(SAFE, { withFileTypes: true }).filter(d => d.isFile()).map(d => d.name) } catch {}
+  const out = []
+  for (const name of names) {
+    try {
+      const st = fs.statSync(path.join(SAFE, name))
+      out.push({ name, size: st.size, sum: docSum(name, st), parts: Math.max(1, Math.ceil(st.size / PIECE)) })
+    } catch {}
+  }
+  return out
+}
+
+/** The manifest: a fresh snapshot of the database and the list of documents. */
+export async function manifest({ snapshot = rawSnapshot } = {}) {
+  if (!getSecret('backup_password')) throw new Error('No backup key on the main PC yet')
+  dropOldSnaps()
+  const raw = await snapshot()
+  const ps = pageSizeOf(raw)
+  const id = crypto.randomBytes(8).toString('hex')
+  fs.mkdirSync(SNAPS, { recursive: true })
+  const file = path.join(SNAPS, `${id}.sqlite`)
+  fs.writeFileSync(file, raw)
+  snaps.set(id, { file, at: Date.now(), length: raw.length, ps })
+  let number = null
+  try { number = (await import('./mainPC.js')).pcNumber() } catch {}
+  return {
+    v: 1,
+    pc_number: number,
+    made: new Date().toISOString(),
+    snap: id,
+    db: { length: raw.length, ps, chunk: CHUNK, z: HAS_ZSTD ? 'zstd' : 'gzip', chunks: chunkSums(raw, ps) },
+    docs: listDocs(),
+    backup: backupHealth(),
+  }
+}
+
+/** One database chunk of a snapshot, compressed and locked. */
+export function dbChunk(snap, i) {
+  const s = snaps.get(String(snap))
+  if (!s) throw Object.assign(new Error('That snapshot is gone: ask for a new manifest'), { status: 410 })
+  const n = Number(i)
+  if (!Number.isInteger(n) || n < 0 || n * CHUNK >= s.length) throw Object.assign(new Error('No such chunk'), { status: 404 })
+  const fd = fs.openSync(s.file, 'r')
+  try {
+    const len = Math.min(CHUNK, s.length - n * CHUNK)
+    const buf = Buffer.alloc(len)
+    fs.readSync(fd, buf, 0, len, n * CHUNK)
+    const z = HAS_ZSTD ? zlib.zstdCompressSync(buf, { params: { [ZL.ZSTD_c_compressionLevel]: 6 } }) : zlib.gzipSync(buf, { level: 6 })
+    return lockFast(z, getSecret('backup_password'))
+  } finally { fs.closeSync(fd) }
+}
+
+/** One piece of a document, locked. */
+export function docPiece(name, part) {
+  const base = path.basename(String(name || ''))
+  if (!base || base !== String(name)) throw Object.assign(new Error('No such document'), { status: 404 })
+  const file = path.join(SAFE, base)
+  let st
+  try { st = fs.statSync(file) } catch { throw Object.assign(new Error('No such document'), { status: 404 }) }
+  const k = Number(part)
+  const parts = Math.max(1, Math.ceil(st.size / PIECE))
+  if (!Number.isInteger(k) || k < 0 || k >= parts) throw Object.assign(new Error('No such piece'), { status: 404 })
+  const fd = fs.openSync(file, 'r')
+  try {
+    const len = Math.max(0, Math.min(PIECE, st.size - k * PIECE))
+    const buf = Buffer.alloc(len)
+    if (len) fs.readSync(fd, buf, 0, len, k * PIECE)
+    return lockFast(buf, getSecret('backup_password'))
+  } finally { fs.closeSync(fd) }
+}
+
+/** What a Companion needs to back up from its copy, and what a restore from it needs. */
+export function replicaKeys() {
+  const password = getSecret('backup_password')
+  if (!password) throw new Error('No backup key on the main PC yet')
+  const cfg = getConfig()
+  let chat = null
+  try { chat = fs.readFileSync(path.join(BACKEND, '.adal_chat.json'), 'utf8') } catch {}
+  return {
+    password,
+    bot_token: getSecret('telegram_bot_token') || process.env.TELEGRAM_BOT_TOKEN || '',
+    chat_id: cfg.chat_id || '',
+    vault_key: vaultKey(),
+    secrets: secretBlobs(),
+    chat_account: chat,
+  }
+}
+
+// ── The Companions that hold a copy ─────────────────────────────────────────
+
+function readList() { try { return JSON.parse(fs.readFileSync(LIST, 'utf8')) } catch { return {} } }
+function writeList(l) { fs.mkdirSync(path.dirname(LIST), { recursive: true }); fs.writeFileSync(LIST, JSON.stringify(l, null, 1)) }
+
+/** A Companion says how its copy stands (after a sync), or that it backed up from it. */
+export function recordReport(pc, ip, body = {}) {
+  const l = readList()
+  const id = String(pc?.id || ip || 'unknown')
+  const r = l[id] || {}
+  r.name = String(body.name || pc?.name || r.name || 'Companion').slice(0, 60)
+  r.ip = ip || r.ip || null
+  if (Number(body.port) > 0 && Number(body.port) < 65536) r.port = Number(body.port)
+  if (body.made) r.made = String(body.made).slice(0, 40)
+  if (body.synced_at) r.synced_at = String(body.synced_at).slice(0, 40)
+  if (Number.isFinite(Number(body.bytes))) r.bytes = Number(body.bytes)
+  if (Number.isFinite(Number(body.docs))) r.docs = Number(body.docs)
+  if (body.backup_at) r.backup_at = String(body.backup_at).slice(0, 40)
+  r.seen = new Date().toISOString()
+  l[id] = r
+  writeList(l)
+  return r
+}
+
+export const replicas = () => Object.entries(readList()).map(([id, r]) => ({ id, ...r }))
+  .sort((a, b) => String(b.synced_at || '').localeCompare(String(a.synced_at || '')))

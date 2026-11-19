@@ -52,7 +52,9 @@ const GLOBAL = ['/setup/status', '/subscription/status', '/settings', '/profiles
   '/lmis/accounts', '/musaned/accounts', '/tasheer/accounts', '/insurance/accounts', '/visa/accounts',
   '/automations/ready-for-submit', '/tutor/adoption', '/main-pc', '/plan', '/whatsapp', '/whatsapp/agents',
   // What needs a person now: a phone with Adal Keep closed shows it (AdalNoticeJob).
-  '/automations/attention']
+  '/automations/attention',
+  // The newest good backup and the licence's end: every screen warns (SafetyAlerts).
+  '/safety']
 const PER_PROFILE = (id) => [`/profiles/${id}`, `/profiles/${id}/fields`, `/profiles/${id}/automations`,
   `/profiles/${id}/journey`, `/profiles/${id}/fill-plan`, `/cv/profile-readiness/${id}`, `/cv/generated?profile_id=${id}`,
   `/profiles/${id}/whatsapp`, `/profiles/${id}/days`]
@@ -313,6 +315,8 @@ async function summary(db) {
     },
     version: await (async () => { try { return (await (await import('../routes/systemUpdate.js')).getInstalled()).short || null } catch { return null } })(),
     plan: await (async () => { try { return (await import('./plans.js')).planOf() } catch { return null } })(),
+    // Admin warns too: no good backup for 48 h, the licence ending (7 d, 3 d, 1 d, 12 h).
+    safety: await (async () => { try { return await (await import('../routes/replica.js')).safetyPayload() } catch { return null } })(),
   }
 }
 

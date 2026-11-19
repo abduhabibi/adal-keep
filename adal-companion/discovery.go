@@ -10,7 +10,10 @@ package main
 // Protocol — keep in sync with backend `src/services/discovery.js`:
 //
 //	request  (UDP broadcast :45454)  ADAL_KEEP_DISCOVER_V1
-//	response (UDP unicast)           ADAL_KEEP_SERVER_V1|<http port>|<lan ip>|<company>|<ip>,<ip>,...
+//	response (UDP unicast)           ADAL_KEEP_SERVER_V1|<http port>|<lan ip>|<company>|<ip>,<ip>,...|<mac>,<mac>,...
+//
+// With the main PC's number known (mainid.go), only the main PC that says the
+// number is its own is taken; one with the network card it had is asked first.
 //
 // The address used is the first that answers on the HTTP port: the reply
 // packet's own source address first (it came from there, so it is on this
@@ -39,6 +42,7 @@ type serverInfo struct {
 	IP   string
 	Port int
 	Name string
+	Macs []string
 }
 
 // broadcastTargets returns 255.255.255.255 plus the directed broadcast
@@ -86,6 +90,11 @@ func broadcastTargets() []*net.UDPAddr {
 // discoverServer asks the LAN for an Adal Keep server and returns the first
 // valid answer, or nil when nobody replies within the timeout.
 func discoverServer(timeout time.Duration) *serverInfo {
+	// The network card it had, in this PC's neighbour table: its address now.
+	if u := findByMAC(); u != "" {
+		log.Printf("🪪 Main PC found by its network card at %s", u)
+		return infoFromURL(u)
+	}
 	if info := askByBroadcast(timeout); info != nil {
 		return info
 	}
@@ -130,11 +139,13 @@ func askByBroadcast(timeout time.Duration) *serverInfo {
 
 	buf := make([]byte, 1024)
 	deadline := time.Now().Add(timeout)
+	known := loadIdentity().Macs
+	var other *serverInfo // a main PC that is not the one with our card (when nothing better answers)
 
 	for time.Now().Before(deadline) {
 		n, from, err := conn.ReadFromUDP(buf)
 		if err != nil {
-			return nil // deadline or socket error — either way we are done
+			return other // deadline or socket error — either way we are done
 		}
 		text := strings.TrimSpace(string(buf[:n]))
 		if !strings.HasPrefix(text, discoveryResponse) {
@@ -156,14 +167,45 @@ func askByBroadcast(timeout time.Duration) *serverInfo {
 		if ip == "" {
 			continue
 		}
-		return &serverInfo{
+		info := &serverInfo{
 			URL:  "http://" + net.JoinHostPort(ip, itoa(port)),
 			IP:   ip,
 			Port: port,
 			Name: name,
+			Macs: macsInReply(parts),
+		}
+		// Not the main PC with our number: never taken.
+		if !acceptServer(info.URL) {
+			continue
+		}
+		// The one with the card we know: at once. Another (a new card?): only if nothing better answers.
+		if len(known) == 0 || sameCard(known, info.Macs) || len(info.Macs) == 0 {
+			return info
+		}
+		if other == nil {
+			other = info
 		}
 	}
-	return nil
+	return other
+}
+
+// infoFromURL: a serverInfo for an address that answered.
+func infoFromURL(u string) *serverInfo {
+	host, port := hostPort(u)
+	return &serverInfo{URL: strings.TrimRight(u, "/"), IP: host, Port: port, Name: "Adal Keep"}
+}
+
+func hostPort(u string) (string, int) {
+	hp := strings.TrimPrefix(strings.TrimPrefix(strings.TrimRight(u, "/"), "http://"), "https://")
+	h, p, err := net.SplitHostPort(hp)
+	if err != nil {
+		return hp, 4000
+	}
+	n := 0
+	for _, c := range p {
+		n = n*10 + int(c-'0')
+	}
+	return h, n
 }
 
 // resolveHostURL picks the server address: an explicit ADAL_HOST_URL wins
@@ -251,6 +293,10 @@ func rememberHostURL(url string) {
 	body := autoConfHeader + " Edit ADAL_HOST_URL or delete\n" +
 		"# this file to let the Companion search the LAN again.\n" +
 		"ADAL_HOST_URL=" + url + "\n"
+	// The main PC's number (its identity) stays with it.
+	if n := confNumber(); n != "" {
+		body += "ADAL_PC_NUMBER=" + n + "\n"
+	}
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		log.Printf("   (could not save %s: %v)", path, err)
 	}

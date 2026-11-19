@@ -774,7 +774,7 @@ func (u *updater) fromCloud() error {
 }
 
 // serveLAN: the release kept here and its pieces (only those its signed manifest names).
-func (u *updater) handler() http.Handler {
+func (u *updater) handler() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/lan/latest", func(w http.ResponseWriter, r *http.Request) {
 		_, env := u.current()
@@ -809,7 +809,9 @@ func (u *updater) handler() http.Handler {
 func startSelfUpdate(root string) *updater {
 	u := newUpdater(root)
 	if ln, err := net.Listen("tcp", fmt.Sprintf(":%d", lanHTTPPort)); err == nil {
-		go http.Serve(ln, u.handler())
+		mux := u.handler()
+		addReplicaRoutes(mux) // the copy, for a restore on a new main PC (replica.go)
+		go http.Serve(ln, mux)
 	} else {
 		log.Printf("⚠️ update sharing: %v", err)
 	}

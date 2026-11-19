@@ -83,10 +83,19 @@ func pingServer() bool {
 		Port    int      `json:"port"`
 		Primary string   `json:"primary_address"`
 		Lan     []string `json:"lan_addresses"`
+		Macs    []string `json:"macs"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 8192)).Decode(&info); err != nil {
 		return true // it answered 200 — good enough
 	}
+	// The router gave this address to another PC, which also runs Adal Keep:
+	// not ours unless it says our number is its own (mainid.go).
+	if known := loadIdentity(); len(known.Macs) > 0 && len(info.Macs) > 0 && !sameCard(known.Macs, normMACs(info.Macs)) && !serverIsOurs(hostServer) {
+		log.Printf("⚠️ %s is another main PC now (not number %s) — looking for ours", hostServer, known.Number)
+		return false
+	}
+	// Its network card: found by it next time the router moves it (mainid.go).
+	learnMain(hostServer, info.Macs)
 	// keepFindingServer asks every 30 seconds: say it only when something
 	// changed, not two log lines every 30 seconds all day.
 	said := strings.TrimSpace(info.Name) + "|" + hostServer + "|" + strings.Join(info.Lan, ", ")

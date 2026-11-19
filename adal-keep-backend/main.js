@@ -61,6 +61,7 @@ import mobileRouter from './src/routes/mobile.js'
 import branchMergeRouter from './src/routes/branchMerge.js'
 import wafidRouter from './src/routes/wafid.js'
 import backupRouter from './src/routes/backup.js'
+import replicaRouter from './src/routes/replica.js'
 import contractsRouter from './src/routes/contracts.js'
 import embassyRouter from './src/routes/embassy.js'
 import pcAccessRouter from './src/routes/pcAccess.js'
@@ -201,6 +202,7 @@ app.use('/api', mobileRouter)   // the phone app pairs with this PC
 app.use('/api', branchMergeRouter)
 app.use('/api', wafidRouter)
 app.use('/api', backupRouter)
+app.use('/api', replicaRouter)   // Companions keep a locked copy; /safety (backup age, licence end)
 app.use('/api', contractsRouter)
 app.use('/api', embassyRouter)   // the embassy print (3 pages a girl)
 app.use('/api', whatsappRouter)   // Settings → WhatsApp, CVs to agents
@@ -1267,7 +1269,7 @@ initSystem().then(() => {
     import('./src/services/portalHealth.js').then(p => p.startPortalHealth()).catch(() => {})
     setTimeout(() => import('./src/services/placement.js').then(p => p.sweepRecent(db)).catch(() => {}), 4 * 60 * 1000).unref?.()   // pictures put in the wrong box (last 7 days) set right
     import('./src/services/pcHealth.js').then(p => p.startPCHealth(db)).catch(() => {})   // disk space, database check, freezes (Admin sees it)   // is each portal answering? (Admin sees it)
-    startBackupSchedule(db)       // locked copy to Telegram in the lunch break
+    startBackupSchedule(db)       // locked copy to Telegram: within minutes of switching on, then every 2 h
     startContractChecker(db)      // chosen by a Saudi employer? contract + PDFs from Musaned
     import('./src/services/profileDays.js').then(d => d.startProfileDays(db)).catch(e => console.warn('[days]', e.message)) // each profile's status, per day
     console.log('🤖 Automation: worker + scanner running')

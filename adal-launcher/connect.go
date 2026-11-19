@@ -142,7 +142,14 @@ func joinByNumber(root, number, typed string) (string, string) {
 	if u == "" {
 		return "", "No main PC with that number answers. Is it on, with Adal Keep open, and this PC on the same network? From another branch type its address too."
 	}
-	if err := saveTypedMainURL(root, u); err != nil {
+	// Found by its number: the number is saved with it (its identity), and the
+	// Companion may move the address when the router hands out new ones —
+	// unless the address was typed here (another branch, Tailscale).
+	save := saveTypedMainURL
+	if strings.TrimRight(normalizeMainURL(typed), "/") != u {
+		save = func(root, u string) error { return saveFoundMainURL(root, u, number) }
+	}
+	if err := save(root, u); err != nil {
 		return "", "Could not save it: " + err.Error()
 	}
 	logf("main PC with the typed number: %s", u)
@@ -152,6 +159,18 @@ func joinByNumber(root, number, typed string) (string, string) {
 	}
 	// A fresh pairing: the main PC gives this PC a new online account.
 	return companionURL(root, u) + "&adal_repair=1#adal_number=" + number, ""
+}
+
+// saveFoundMainURL: written the way the Companion writes it (so it may
+// update it), with the main PC's number.
+func saveFoundMainURL(root, u, number string) error {
+	body := "# Written by the Adal Keep Companion. Edit ADAL_HOST_URL or delete\r\n" +
+		"# this file to let the Companion search the LAN again.\r\n" +
+		"ADAL_HOST_URL=" + u + "\r\n"
+	if number != "" {
+		body += "ADAL_PC_NUMBER=" + number + "\r\n"
+	}
+	return os.WriteFile(filepath.Join(root, "companion.conf"), []byte(body), 0o644)
 }
 
 func saveTypedMainURL(root, u string) error {

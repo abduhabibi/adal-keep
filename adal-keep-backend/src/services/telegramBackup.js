@@ -2,9 +2,11 @@
  * telegramBackup.js — an off-site copy of the main PC in a private Telegram
  * channel, so a stolen, broken or burnt PC loses nothing.
  *
- * WHEN  Once a day in the lunch break (default 12:30–13:30, Settings), so it
- *       never slows the office internet. Whatever is not sent by the end of
- *       the window is sent the next day. "Back up now" runs it at once.
+ * WHEN  Agency PCs are unplugged at night, so nothing waits for the night:
+ *       new documents go within seconds, the database every 2 hours during
+ *       the day (when the robots are quiet), and a PC switched on in the
+ *       morning whose last whole backup is more than 20 hours old starts one
+ *       within a few minutes. "Back up now" runs it at once.
  * WHAT  The database: a whole copy (zstd, ~1/6 of its size) every few days,
  *       and in between only the pages that changed since that copy (usually a
  *       few KB: seconds instead of minutes). Documents only once (each new
@@ -76,6 +78,9 @@ export function getConfig() {
     last_ok: s.last_ok || null,
     last_error: s.last_error || null,
     verify: s.verify || null,
+    last_full_ok: lastFullAt(s),
+    last_good_at: backupHealth(s).last_good_at,
+    companion_backup: s.companion_backup || null,
     ...documentCounts(s),
   }
 }
@@ -191,7 +196,7 @@ export async function findChats(agency) {
 // kept there has the id "sb:<object>". Pieces are locked before either.
 // Once Telegram fails in a run, the rest of that run goes online at once
 // (no minutes of waiting per piece); the next run tries Telegram again.
-const route = { db: null, tgDown: false, online: 0 }
+const route = { db: null, tgDown: false, online: 0, replica: null }
 async function sendToTelegram(token, chat_id, buf, filename, caption) {
   const fd = new FormData()
   fd.append('chat_id', String(chat_id))
@@ -230,6 +235,13 @@ async function sendPiece(token, chat_id, buf, filename, caption) {
 }
 
 async function fetchPiece(token, fileId) {
+  // A piece of a Companion's copy, read straight from that Companion on the office network.
+  if (String(fileId).startsWith('rp:')) {
+    if (!route.replica) throw new Error("This piece is in a Companion's copy: restore it from that Companion.")
+    const r = await fetch(`${route.replica.url}/replica/piece/${encodeURIComponent(String(fileId).slice(3))}`, { headers: { 'x-adal-number': route.replica.number }, signal: AbortSignal.timeout(5 * 60 * 1000) })
+    if (!r.ok) throw new Error(`The Companion answered ${r.status}`)
+    return Buffer.from(await r.arrayBuffer())
+  }
   if (String(fileId).startsWith('sb:')) {
     const c = route.db && await cloudOf(route.db).catch(() => null)
     if (!c) throw new Error('This piece is in the online storage: the online copy must be on to read it.')
@@ -259,6 +271,46 @@ export function unlock(buf, password) {
   const d = crypto.createDecipheriv('aes-256-gcm', key, iv)
   d.setAuthTag(tag)
   try { return Buffer.concat([d.update(buf.subarray(51)), d.final()]) } catch { throw new Error('Wrong backup password (or a damaged piece)') }
+}
+
+/**
+ * The same lock (a piece unlock() opens), with the key worked out once per
+ * process: the copy for a Companion is many small pieces, and scrypt for each
+ * would hold the server up for seconds. (A fresh IV per piece, as always.)
+ */
+let fastKey = null
+export function lockFast(buf, password) {
+  if (fastKey?.password !== password) {
+    const salt = crypto.randomBytes(16)
+    fastKey = { password, salt, key: crypto.scryptSync(password, salt, 32) }
+  }
+  const iv = crypto.randomBytes(12)
+  const c = crypto.createCipheriv('aes-256-gcm', fastKey.key, iv)
+  const ct = Buffer.concat([c.update(buf), c.final()])
+  return Buffer.concat([MAGIC, fastKey.salt, iv, c.getAuthTag(), ct])
+}
+
+/**
+ * Reads one set of an index back: its pieces fetched, unlocked, put together.
+ *   files / db / dbz / dbz-delta  one locked whole, cut in pieces
+ *   rdb    a Companion's copy of the database: each piece one locked chunk
+ *          (zstd or gzip inside), the chunks in order make the database
+ *   rfile  a Companion's copy of one document: each piece locked on its own
+ */
+export function setReader(fetchOne, password) {
+  return async (set) => {
+    const bufs = []
+    for (const id of set.parts) bufs.push(await fetchOne(id))
+    if (set.type === 'rdb') {
+      const raw = Buffer.concat(bufs.map(b => {
+        const u = unlock(b, password)
+        return set.z === 'zstd' ? unzstd(u) : set.z === 'gzip' ? zlib.gunzipSync(u) : u
+      }))
+      return raw.subarray(0, set.length ?? raw.length)
+    }
+    if (set.type === 'rfile') return Buffer.concat(bufs.map(b => unlock(b, password)))
+    return unlock(Buffer.concat(bufs), password)
+  }
 }
 
 // ── What to back up ──────────────────────────────────────────────────────────
@@ -303,7 +355,7 @@ const zstd = (buf) => new Promise((ok, no) => zlib.zstdCompress(buf, {
 export const unzstd = (buf) => zlib.zstdDecompressSync(buf, { params: { [ZL.ZSTD_d_windowLogMax]: 27 } })
 
 /** A page-for-page copy of the open database (SQLite's backup: consistent while the app runs). */
-function rawSnapshot() {
+export function rawSnapshot() {
   fs.mkdirSync(TMP, { recursive: true })
   const out = path.join(TMP, `raw-${Date.now()}.sqlite`)
   return new Promise((ok, no) => {
@@ -343,6 +395,9 @@ export function applyDelta(base, delta) {
 }
 /** The database a restore gets from an index: the whole copy with its changes, or an older gzip copy. */
 export async function databaseFromIndex(index, get) {
+  // A backup a Companion made from its copy: the whole database in chunks.
+  const chunks = index.sets.find(x => x.type === 'rdb')
+  if (chunks) return await get(chunks)
   const full = index.sets.find(x => x.type === 'dbz')
   if (full) {
     let raw = unzstd(await get(full))
@@ -502,7 +557,7 @@ export async function runBackup(db, { force = false, docsOnly = false, light = f
     if (s.index_file_id && s.index_hash === whatHash) {
       // Nothing new since the last index: the one online already finds everything.
       s.last_ok = new Date().toISOString(); s.last_error = null
-      if (!docsOnly) s.last_day = today()
+      if (!docsOnly) { s.last_day = today(); s.last_full_ok = s.last_ok }
       writeState(s)
       progress.percent = 100
       return { ok: true, documents_left: listDocuments().filter(n => !s.sent[n]).length, unchanged: true, route: route.online ? 'online storage' : 'telegram' }
@@ -517,7 +572,7 @@ export async function runBackup(db, { force = false, docsOnly = false, light = f
 
     const left = listDocuments().filter(n => !s.sent[n]).length
     s.last_ok = new Date().toISOString(); s.last_error = null
-    if (!docsOnly) s.last_day = today()
+    if (!docsOnly) { s.last_day = today(); s.last_full_ok = s.last_ok }
     writeState(s)
     progress.percent = 100
     // 4. Proven, not hoped: the backup is read back from Telegram and opened.
@@ -554,11 +609,7 @@ export async function verifyBackup(db, { token, password, indexId, profiles = nu
   try {
     const index = JSON.parse(zlib.gunzipSync(unlock(await get(token, indexId), password)).toString())
     if (!index.adal_backup) return { ok: false, at, why: 'the index is not an Adal Keep backup' }
-    const raw = await databaseFromIndex(index, async (set) => {
-      const bufs = []
-      for (const id of set.parts) bufs.push(await get(token, id))
-      return unlock(Buffer.concat(bufs), password)
-    })
+    const raw = await databaseFromIndex(index, setReader((id) => get(token, id), password))
     if (!raw) return { ok: false, at, why: 'the index has no database' }
     if (!raw.subarray(0, 15).equals(Buffer.from('SQLite format 3'))) return { ok: false, at, why: 'the database piece is not a database' }
     fs.writeFileSync(tmp, raw)
@@ -572,7 +623,7 @@ export async function verifyBackup(db, { token, password, indexId, profiles = nu
     } finally { await copy.destroy().catch(() => {}) }
     if (profiles != null && n < profiles) return { ok: false, at, why: `the copy has ${n} profiles, the PC had ${profiles}` }
     // The newest document sets are still there (asked, not downloaded).
-    const fileSets = index.sets.filter(x => x.type === 'files')
+    const fileSets = index.sets.filter(x => x.type === 'files' || x.type === 'rfile')
     let checked = 0
     for (const set of fileSets.slice(-3)) for (const id of set.parts) { if (!(await exists(token, id))) return { ok: false, at, why: 'a document piece is missing in Telegram' }; checked++ }
     return { ok: true, at, profiles: n, database_mb: Math.round(raw.length / 104857.6) / 10, document_sets: fileSets.length, pieces_checked: checked }
@@ -651,6 +702,72 @@ export function backupSoon() { wanted = true }
  */
 const DB_EVERY_MS = 2 * 3600 * 1000
 const QUIET_MS = 10 * 60 * 1000          // full runs: at most one every 10 minutes
+// Agency PCs are unplugged at night: a PC switched on whose last whole backup
+// is older than this starts one within a few minutes of starting.
+export const CATCH_UP_MS = 20 * 3600 * 1000
+const BOOT_SETTLE_MS = 90 * 1000         // let the PC finish starting first
+const BOOT_IDLE_MAX_MS = 5 * 60 * 1000   // waits this long at most for the robots to be quiet
+const IDLE_MAX_LATE_MS = 30 * 60 * 1000  // a day-time run waits for quiet robots at most this long
+const bootAt = Date.now()
+const ms = (t) => t ? new Date(t).getTime() || 0 : 0
+
+/** When the last whole backup (database + documents + index) went well. */
+export function lastFullAt(s = readState()) {
+  if (s.last_full_ok) return s.last_full_ok
+  const lastDb = (s.sets || []).filter(x => /^(db|rdb)/.test(x.type)).map(x => ms(x.date)).sort((a, b) => a - b).pop()
+  return lastDb ? new Date(lastDb).toISOString() : null
+}
+
+/**
+ * Is a whole backup due now? (No time window: PCs are off at night.)
+ *   - just switched on and the last one is older than 20 h: after 90 s, as
+ *     soon as the robots are quiet, and after 5 minutes whatever they do;
+ *   - otherwise every 2 hours, waiting for quiet robots at most 30 minutes;
+ *   - never two within 10 minutes (a failed one is tried again by the retry).
+ */
+export function fullBackupDue({ now = Date.now(), lastFull = null, lastRun = null, bootAt: boot = bootAt, robots = 0 } = {}) {
+  const since = now - ms(lastFull)
+  const sinceBoot = now - boot
+  if (now - ms(lastRun) < QUIET_MS && ms(lastRun) > boot) return false
+  if (since > CATCH_UP_MS) {
+    if (sinceBoot < BOOT_SETTLE_MS) return false
+    return robots === 0 || sinceBoot >= BOOT_IDLE_MAX_MS
+  }
+  if (now - ms(lastRun) < QUIET_MS) return false
+  if (since < DB_EVERY_MS) return false
+  return robots === 0 || since >= DB_EVERY_MS + IDLE_MAX_LATE_MS
+}
+
+/**
+ * The newest good backup, whoever made it: this PC, or a Companion from its
+ * copy while this PC was off (it says so when it reaches this PC again).
+ */
+export function backupHealth(s = readState()) {
+  const own = lastFullAt(s)
+  const companion = s.companion_backup?.at || null
+  const good = [own, companion].filter(Boolean).sort().pop() || null
+  return {
+    last_good_at: good,
+    last_full_ok: own,
+    last_ok: s.last_ok || null,
+    last_error: s.last_error || null,
+    last_error_at: s.last_error_at || null,
+    companion_backup: s.companion_backup || null,
+    enabled: s.enabled !== false,
+    since: s.first_seen || null,   // backing up since (no backup yet is a warning only 48 h after this)
+  }
+}
+
+/** A Companion backed up from its copy (this PC was off): it counts as a good backup. */
+export function recordCompanionBackup({ at, index_file_id, by } = {}) {
+  const t = ms(at)
+  if (!t || t > Date.now() + 5 * 60000) throw new Error('A time is needed')
+  const s = readState()
+  if (ms(s.companion_backup?.at) >= t) return s.companion_backup
+  s.companion_backup = { at: new Date(t).toISOString(), index_file_id: String(index_file_id || '').slice(0, 300) || null, by: String(by || 'a Companion').slice(0, 80) }
+  writeState(s)
+  return s.companion_backup
+}
 const DOCS_GAP_MS = 15 * 1000            // quick runs: at most one every 15 seconds
 const TICK_MS = 10 * 1000
 let kick = null
@@ -661,6 +778,7 @@ export function startBackupSchedule(db) {
   if (timer) return
   route.db = db
   ensureBackupKey()
+  try { const s = readState(); if (!s.first_seen) { s.first_seen = new Date().toISOString(); writeState(s) } } catch {}
   const done = (what) => (r) => { failures = 0; console.log(what, r) }
   const failed = (what) => (e) => { failures++; console.warn(`${what} ${e.message} — again in ${retryAfterMs(failures) / 60000} min`) }
   const tick = async () => {
@@ -683,9 +801,7 @@ export function startBackupSchedule(db) {
       }
 
       // The database (text first: it goes before the documents in a full run).
-      if (ago(s.last_run) < QUIET_MS && !wanted) return
-      const lastDb = (s.sets || []).filter(x => /^db/.test(x.type)).map(x => new Date(x.date).getTime()).sort((a, b) => a - b).pop() || 0
-      if (Date.now() - lastDb < DB_EVERY_MS && s.last_day === today() && !wanted) return
+      if (!wanted && !fullBackupDue({ now: Date.now(), lastFull: lastFullAt(s), lastRun: s.last_run, bootAt, robots: runsWorking() })) return
       wanted = false
       runBackup(db).then(done('[backup] done')).catch(failed('[backup] failed:'))
     } catch (e) { console.warn('[backup] schedule:', e.message) }
@@ -696,7 +812,7 @@ export function startBackupSchedule(db) {
     fs.mkdirSync(SAFE, { recursive: true })
     fs.watch(SAFE, () => { clearTimeout(kick); kick = setTimeout(tick, 3000) }).on('error', () => {})
   } catch {}
-  console.log('💾 Telegram backup: new documents within seconds, the database every 2 hours when the robots are free')
+  console.log('💾 Telegram backup: new documents within seconds, the database every 2 hours when the robots are free (and within minutes of switching on when the last one is older than 20 h)')
 }
 
 // ── Restore ──────────────────────────────────────────────────────────────────
@@ -706,22 +822,23 @@ export function startBackupSchedule(db) {
  * current database is kept as data.sqlite.before-restore-<time>; documents
  * that already exist are left alone. The server must restart afterwards.
  */
-export async function restoreFrom(indexBuf, { bot_token, password }) {
+export async function restoreFrom(indexBuf, { bot_token, password, fromReplica = false }) {
   const token = String(bot_token || botToken() || '').trim()
-  if (!token || !password) throw new Error('The backup key is needed.')
+  if ((!token && !fromReplica) || !password) throw new Error('The backup key is needed.')
   const index = JSON.parse(zlib.gunzipSync(unlock(indexBuf, password)).toString())
   if (!index.adal_backup) throw new Error('That is not an Adal Keep backup index.')
   Object.assign(progress, { running: true, step: 'restore', files_done: 0, error: null })
   try {
-    const get = async (set) => {
-      const bufs = []
-      for (const id of set.parts) bufs.push(await fetchPiece(token, id))
-      return unlock(Buffer.concat(bufs), password)
-    }
+    const get = setReader((id) => fetchPiece(token, id), password)
     fs.mkdirSync(SAFE, { recursive: true })
     let files = 0
-    for (const set of index.sets.filter(x => x.type === 'files')) {
-      files += unpack(await get(set), SAFE)
+    for (const set of index.sets.filter(x => x.type === 'files' || x.type === 'rfile')) {
+      if (set.type === 'files') files += unpack(await get(set), SAFE)
+      else {
+        const dest = path.join(SAFE, path.basename(set.name))
+        if (!fs.existsSync(dest)) fs.writeFileSync(dest, await get(set))
+        files++
+      }
       progress.files_done = files
     }
     const raw = await databaseFromIndex(index, get)
@@ -738,6 +855,24 @@ export async function restoreFrom(indexBuf, { bot_token, password }) {
   } finally {
     progress.running = false
   }
+}
+
+/**
+ * Restore from a Companion's copy on the office network (the main PC died, or
+ * this is the new main PC). The Companion hands its copy as a backup index
+ * whose pieces it serves itself, all still locked with the backup key.
+ */
+export async function restoreFromCompanion(address, { number, password } = {}) {
+  const url = String(address || '').trim().replace(/\/+$/, '')
+  if (!/^https?:\/\/[\w.:-]+$/.test(url)) throw new Error("Type the Companion's address, like http://192.168.1.20:47810")
+  const num = String(number || '').replace(/\D/g, '')
+  if (!num) throw new Error("The main PC's number is needed (the Companion checks it)")
+  const r = await fetch(`${url}/replica/index`, { headers: { 'x-adal-number': num }, signal: AbortSignal.timeout(60000) })
+  if (!r.ok) throw new Error(r.status === 403 ? 'That Companion holds the copy of another main PC (the number does not match)' : `The Companion answered ${r.status}`)
+  const indexBuf = Buffer.from(await r.arrayBuffer())
+  route.replica = { url, number: num }
+  try { return await restoreFrom(indexBuf, { password: password || getSecret('backup_password'), fromReplica: true }) }
+  finally { route.replica = null }
 }
 
 /** On start: put a restored database in place before anything opens it. */

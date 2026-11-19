@@ -114,6 +114,8 @@ function BackupCardHere() {
           : <p>
               Documents in the backup: <b>{c.files_sent}</b> of {c.files_total}.
               {c.last_ok ? ` Last backup: ${new Date(c.last_ok).toLocaleString()}.` : ' No backup yet.'}
+              {c.last_full_ok && c.last_full_ok !== c.last_ok ? ` Last whole backup (with the database): ${new Date(c.last_full_ok).toLocaleString()}.` : ''}
+              {c.companion_backup?.at && <span className="block">💻 While this PC was off, {c.companion_backup.by || 'a Companion'} backed up from its copy: {new Date(c.companion_backup.at).toLocaleString()}.</span>}
               {c.last_error && <span className="text-red-600"> Last try failed: {c.last_error}</span>}
               {c.verify && (c.verify.ok
                 ? <span className="block text-emerald-700 dark:text-emerald-400">✓ Checked: read back from Telegram and opened — {c.verify.profiles} profiles ({new Date(c.verify.at).toLocaleString()}).</span>
@@ -137,7 +139,9 @@ function BackupCardHere() {
           {restoreOpen ? '▾' : '▸'} Restore from the backup (new or repaired PC)
         </button>
         {restoreOpen && <Restore shared={c.shared} />}
+        {restoreOpen && <RestoreFromCompanion />}
       </div>
+      <Replicas />
     </Card>
   )
 }
@@ -173,6 +177,58 @@ function Restore({ shared }) {
         setBusy(false)
       }}>{busy ? 'Restoring… (this takes a while)' : 'Restore'}</Button>
       {done && <p className="text-teal-700 dark:text-teal-300">✅ Restored {done.files} documents{done.database ? ' and the database (made ' + new Date(done.made).toLocaleString() + ')' : ''}. Adal Keep restarts now — open it again in a minute.</p>}
+    </div>
+  )
+}
+
+/** The Companion PCs that hold a locked copy of everything (they take it by themselves). */
+function Replicas() {
+  const [list, setList] = useState(null)
+  useEffect(() => { api.get('/replica/list').then(r => setList(r.data)).catch(() => setList([])) }, [])
+  if (!list?.length) return null
+  return (
+    <div className="mt-3 border-t border-slate-200 dark:border-slate-700 pt-3 text-sm" translate="no">
+      <p className="font-semibold">💻 Companions holding a copy</p>
+      <p className="text-xs text-slate-500">Each keeps a locked copy of the database and the documents. When this PC is off, one of them backs up from its copy; a new PC can be restored from it.</p>
+      <ul className="mt-1 space-y-0.5">
+        {list.map(r => (
+          <li key={r.id}><b>{r.name}</b> · {r.ip}{r.port ? `:${r.port}` : ''} · copy of {r.made ? new Date(r.made).toLocaleString() : '—'}{r.docs != null ? ` · ${r.docs} documents` : ''}{r.backup_at ? ` · backed up ${new Date(r.backup_at).toLocaleString()}` : ''}</li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+/** A new (or repaired) main PC takes everything back from a Companion's copy, over the office network. */
+function RestoreFromCompanion() {
+  const [list, setList] = useState([])
+  const [address, setAddress] = useState('')
+  const [number, setNumber] = useState('')
+  const [pw, setPw] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [done, setDone] = useState(null)
+  useEffect(() => { api.get('/replica/list').then(r => setList(r.data || [])).catch(() => {}) }, [])
+  return (
+    <div className="mt-4 space-y-2 text-sm">
+      <p className="font-semibold">From a Companion's copy (office network)</p>
+      <p className="text-slate-500">Every Companion PC keeps a locked copy. Type its address (shown in its Adal Companion log, port 47810) and the old main PC's number (5 digits).</p>
+      {list.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {list.filter(r => r.ip).map(r => (
+            <button key={r.id} type="button" onClick={() => setAddress(`http://${r.ip}:${r.port || 47810}`)} className="rounded-md border border-slate-300 dark:border-slate-600 px-2 py-0.5 text-xs hover:bg-slate-100 dark:hover:bg-slate-700">{r.name}</button>
+          ))}
+        </div>
+      )}
+      <input className={field} value={address} onChange={e => setAddress(e.target.value)} placeholder="http://192.168.1.20:47810" autoComplete="off" />
+      <input className={field} value={number} onChange={e => setNumber(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="The old main PC's number (empty = this PC's)" inputMode="numeric" autoComplete="off" />
+      <input className={field} type="password" value={pw} onChange={e => setPw(e.target.value)} placeholder="Backup password (empty = the one on this PC)" autoComplete="off" />
+      <Button size="sm" disabled={!address || busy} onClick={async () => {
+        setBusy(true)
+        try { setDone((await api.post('/backup/restore-companion', { address, number, password: pw }, { timeout: 0 })).data) }
+        catch (e) { toast.error(err(e), { duration: 9000 }) }
+        setBusy(false)
+      }}>{busy ? 'Restoring… (this takes a while)' : 'Restore from this Companion'}</Button>
+      {done && <p className="text-teal-700 dark:text-teal-300">✅ Restored {done.files} documents{done.database ? ' and the database (copy of ' + new Date(done.made).toLocaleString() + ')' : ''}. Adal Keep restarts now — open it again in a minute.</p>}
     </div>
   )
 }

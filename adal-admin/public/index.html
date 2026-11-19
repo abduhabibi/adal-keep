@@ -196,7 +196,7 @@
   </form>
 </main>
 <div id="zoom" onclick="this.style.display='none'"><img alt=""></div>
-<div id="dlg"><div class="box"><h3 id="dlgT"></h3><p id="dlgP"></p><input id="dlgI" type="text" style="display:none"><div class="row"><button class="ghost" id="dlgNo">Cancel</button><button class="go" id="dlgOk">OK</button></div></div></div>
+<div id="dlg"><div class="box"><h3 id="dlgT"></h3><p id="dlgP" style="white-space:pre-line"></p><input id="dlgI" type="text" style="display:none"><div class="row"><button class="ghost" id="dlgNo">Cancel</button><button class="go" id="dlgOk">OK</button></div></div></div>
 <div id="toast"></div>
 <script>
 let data = { agencies: [], conversations: [], requests: [] }
@@ -302,6 +302,33 @@ const wf = (w) => WF[w] || String(w || '').replace(/_/g, ' ')
 const ago = (t) => { if (!t) return '—'; const m = Math.round((Date.now() - new Date(t)) / 60000); return m < 1 ? 'now' : m < 60 ? `${m} min` : m < 1440 ? `${Math.round(m / 60)} h` : `${Math.round(m / 1440)} d` }
 const cls = (n, warn, bad) => n >= bad ? 'num bad' : n >= warn ? 'num warn' : 'num'
 
+// Safety (the agency PCs send it in their summary): the newest good backup
+// (older than 48 h is a warning) and the licence's end (7 d, 3 d, 1 d, 12 h).
+const LIC_STEPS = [[7 * 864e5, '7 days'], [3 * 864e5, '3 days'], [864e5, '1 day'], [12 * 36e5, '12 hours']]
+function licenceStepOf(a) {
+  const l = a.summary?.safety?.licence, end = Date.parse(l?.expires_at || '') || 0
+  if (!end || l?.suspended || a.banned) return null
+  const left = end - Date.now()
+  if (left <= 0) return null
+  let step = null
+  for (const [ms, label] of LIC_STEPS) if (left <= ms) step = label
+  return step ? { step, left, end, mode: l.mode, key: `${a.id}|${new Date(end).toISOString()}|${step}` } : null
+}
+function lastGoodBackup(a) {
+  return [a.summary?.safety?.backup?.last_good_at, a.backup?.at].filter(Boolean).map(t => Date.parse(t) || 0).sort((x, y) => x - y).pop() || 0
+}
+const leftTxt = (ms) => ms >= 2 * 864e5 ? `${Math.floor(ms / 864e5)} days` : ms >= 864e5 ? '1 day' : `${Math.max(1, Math.round(ms / 36e5))} hours`
+// Each licence step shows once on this PC (a notice), and stays in "Needs you".
+function licenceNotices() {
+  let shown = {}
+  try { shown = JSON.parse(localStorage.getItem('adal-admin-licence-steps') || '{}') } catch {}
+  const fresh = work.map(a => ({ a, st: licenceStepOf(a) })).filter(x => x.st && !shown[x.st.key])
+  if (!fresh.length) return
+  for (const { st } of fresh) shown[st.key] = Date.now()
+  try { localStorage.setItem('adal-admin-licence-steps', JSON.stringify(Object.fromEntries(Object.entries(shown).sort((x, y) => y[1] - x[1]).slice(0, 300)))) } catch {}
+  tell('Licences ending', fresh.map(({ a, st }) => `${a.name}: the ${st.mode === 'trial' ? 'free trial' : 'paid time'} ends in ${leftTxt(st.left)} (${new Date(st.end).toLocaleString()})`).join('\n'))
+}
+
 // What deserves Adal's eye first, worked out from every agency's summary.
 function needsYou() {
   const out = []
@@ -322,6 +349,10 @@ function needsYou() {
     if (ph?.database && !ph.database.ok) say(0, `the database check failed: ${ph.database.why}`)
     if (ph?.freeze && Date.now() - new Date(ph.freeze.at) < 2 * 864e5) say(2, `its server froze ${ago(ph.freeze.at)} ago and was restarted by itself`)
     if (a.backup?.verify && !a.backup.verify.ok) say(1, `the last backup did not read back: ${a.backup.verify.why}`)
+    const good = lastGoodBackup(a)
+    if (good && Date.now() - good > 48 * 36e5) say(1, `no good backup for ${Math.floor((Date.now() - good) / 864e5) >= 2 ? `${Math.floor((Date.now() - good) / 864e5)} days` : `${Math.floor((Date.now() - good) / 36e5)} hours`}`)
+    const lic = licenceStepOf(a)
+    if (lic) say(lic.step === '12 hours' || lic.step === '1 day' ? 0 : 2, `the ${lic.mode === 'trial' ? 'free trial' : 'licence'} ends in ${leftTxt(lic.left)}`)
     if (a.latest && a.health?.version?.sha && a.health.version.sha !== a.latest) say(4, `not on the newest version (${a.health.version.sha})`)
     if (s.agent_limit && (s.agents || []).length >= s.agent_limit) say(4, `has used all ${s.agent_limit} agents of its plan: time for a bigger offer?`)
   }
@@ -1035,6 +1066,7 @@ async function refresh() {
   try {
     data = await api('/api/overview'); KEEP('overview', data)
     work = await api('/api/work').catch(() => work); KEEP('work', work)
+    try { licenceNotices() } catch {}
     synced = Date.now(); $('#sync').className = ''; $('#sync').textContent = '● synced'
     if (open) open = data.conversations.find(c => c.id === open.id) || open
     renderList()

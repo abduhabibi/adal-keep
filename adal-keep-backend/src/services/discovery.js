@@ -14,7 +14,11 @@
  * Protocol (keep in sync with adal-companion/discovery.go)
  * -------------------------------------------------------
  *   request  -> "ADAL_KEEP_DISCOVER_V1"                (UTF-8, UDP 45454)
- *   response -> "ADAL_KEEP_SERVER_V1|<port>|<lan-ip>|<name>|<lan-ip>,<lan-ip>,..."
+ *   response -> "ADAL_KEEP_SERVER_V1|<port>|<lan-ip>|<name>|<lan-ip>,<lan-ip>,...|<mac>,<mac>,..."
+ *
+ * <mac> are this PC's network cards (the one of <lan-ip> first). A Companion
+ * remembers the main PC's card and its number, and finds it again by the card
+ * in its neighbour table (ARP) when the router hands out new addresses.
  *
  * <lan-ip> is the best LAN address (the one on the asking PC's network first);
  * the last field lists every LAN address (older Companions ignore it). A
@@ -64,6 +68,20 @@ export function getLanAddresses() {
     return s
   }
   return out.sort((a, b) => score(b) - score(a)).map((x) => x.address)
+}
+
+/**
+ * The network cards (MAC addresses) of these addresses, in the same order,
+ * each once: how a Companion recognises this PC whatever address it has.
+ */
+export function macsOf(addresses = getLanAddresses(), ifaces = os.networkInterfaces()) {
+  const byIp = new Map()
+  for (const addrs of Object.values(ifaces || {})) {
+    for (const a of addrs || []) if (a?.address && a.mac && a.mac !== '00:00:00:00:00:00') byIp.set(a.address, a.mac.toLowerCase())
+  }
+  const out = []
+  for (const ip of addresses) { const m = byIp.get(ip); if (m && !out.includes(m)) out.push(m) }
+  return out
 }
 
 /** 100.64.0.0/10: Tailscale and carrier-grade NAT, never reachable on the LAN. */
@@ -129,6 +147,7 @@ export function startDiscoveryResponder(opts = {}) {
         ips[0] || '', // empty: the Companion uses this reply's source address
         String(companyName || 'Adal Keep').replace(/\|/g, ' '),
         ips.join(','),
+        macsOf(ips).join(','),
       ].join('|')
       sock.send(Buffer.from(payload, 'utf8'), rinfo.port, rinfo.address, () => {})
       log.info?.(`[discovery] answered ${rinfo.address} with ${payload}`)
@@ -193,6 +212,7 @@ export function discoverServer(opts = {}) {
         port: httpPort,
         name: parts[3] || 'Adal Keep',
         addresses: (parts[4] || parts[2] || '').split(',').filter(Boolean),
+        macs: (parts[5] || '').split(',').filter(Boolean),
       })
     })
 
@@ -217,6 +237,7 @@ export default {
   getLanAddresses,
   getPrimaryLanAddress,
   advertisedAddresses,
+  macsOf,
   isCgnat,
   startDiscoveryResponder,
   stopDiscoveryResponder,

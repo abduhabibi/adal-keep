@@ -55,6 +55,8 @@ func main() {
 		root := filepath.Dir(exe)
 		if _, err := os.Stat(filepath.Join(root, "runtime", "node.exe")); err != nil || os.Getenv("ADAL_SELFUPDATE") == "1" {
 			startSelfUpdate(root)
+			// A locked copy of the agency's data, backed up from here when the main PC is off (replica.go).
+			watchReplica()
 		}
 	}
 

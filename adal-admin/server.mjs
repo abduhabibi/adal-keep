@@ -818,7 +818,16 @@ async function startDownload(agency) {
     fs.mkdirSync(path.join(dir, 'documents'), { recursive: true })
     // The database: a whole zstd copy ('dbz') with the pages changed since ('dbz-delta'), or an older gzip copy ('db').
     const full = index.sets.find(x => x.type === 'dbz'), old = index.sets.find(x => x.type === 'db')
-    if (full || old) {
+    // A backup a Companion made from its copy (the main PC was off): the database in
+    // chunks and each document on its own, every piece locked by itself.
+    const chunks = index.sets.find(x => x.type === 'rdb')
+    const unz = (b, z) => z === 'zstd' ? zlib.zstdDecompressSync(b, { params: { [zlib.constants.ZSTD_d_windowLogMax]: 27 } }) : z === 'gzip' ? zlib.gunzipSync(b) : b
+    const each = async (set) => Promise.all(set.parts.map(async id => unlockPiece(await tgPiece(id), bk.key)))
+    if (chunks) {
+      job.step = 'database'
+      const raw = Buffer.concat((await each(chunks)).map(b => unz(b, chunks.z)))
+      fs.writeFileSync(path.join(dir, 'data.sqlite'), raw.subarray(0, chunks.length ?? raw.length))
+    } else if (full || old) {
       job.step = 'database'
       let raw
       if (full) {
@@ -837,6 +846,10 @@ async function startDownload(agency) {
       fs.writeFileSync(path.join(dir, 'data.sqlite'), raw)
     }
     job.step = 'documents'
+    for (const set of index.sets.filter(x => x.type === 'rfile')) {
+      fs.writeFileSync(path.join(dir, 'documents', path.basename(set.name)), Buffer.concat(await each(set)))
+      job.files++
+    }
     for (const set of index.sets.filter(x => x.type === 'files')) {
       const buf = await get(set)
       for (let off = 0; off < buf.length;) {

@@ -128,6 +128,14 @@ func rememberMainURL(root, u string) {
 	body := "# Written by the Adal Keep Companion. Edit ADAL_HOST_URL or delete\r\n" +
 		"# this file to let the Companion search the LAN again.\r\n" +
 		"ADAL_HOST_URL=" + u + "\r\n"
+	// The main PC's number (its identity) stays with it.
+	if old, err := os.ReadFile(p); err == nil {
+		for _, line := range strings.Split(string(old), "\n") {
+			if k, v, ok := strings.Cut(strings.TrimSpace(line), "="); ok && strings.TrimSpace(k) == "ADAL_PC_NUMBER" {
+				body += "ADAL_PC_NUMBER=" + strings.TrimSpace(v) + "\r\n"
+			}
+		}
+	}
 	if err := os.WriteFile(p, []byte(body), 0o644); err == nil {
 		logf("main PC found at %s (from its own list)", u)
 	}

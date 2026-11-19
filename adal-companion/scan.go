@@ -98,6 +98,10 @@ func scanForServer(port int) *serverInfo {
 				if resp.StatusCode != http.StatusOK || info.Service != "adal-keep" {
 					continue
 				}
+				// Another agency's main PC on the same network: not ours.
+				if !acceptServer("http://" + addr) {
+					continue
+				}
 				once.Do(func() {
 					name := info.Name
 					if name == "" {

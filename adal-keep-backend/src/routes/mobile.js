@@ -6,6 +6,7 @@
  *   GET  /mobile/ping           "is the PC there?" (the app's start-up check)
  *   GET  /mobile/app(.apk)      the newest phone app (the app updates itself from it)
  *   GET  /mobile/cloud          the online copy for phones: state + paired phones
+ *   POST /mobile/push-token     a phone's Firebase push token (instant "needs you")
  * Only the main PC pairs; wrong numbers are counted per phone and slowed down.
  */
 import express from 'express'
@@ -89,6 +90,15 @@ router.post('/mobile/join-requests/:id', async (req, res) => {
   if (req.headers['x-adal-cloud']) return res.status(403).json({ error: 'Answer on a PC of the agency.' })
   try { await answerJoin(req.app.locals.db, req.params.id, req.body?.ok === true); res.json({ ok: true }) }
   catch (e) { res.status(400).json({ error: e.message }) }
+})
+// A phone's Firebase push token: the main PC wakes it at once for a "needs you" (services/fcmPush.js).
+router.post('/mobile/push-token', async (req, res) => {
+  if (isFollower()) return res.status(409).json({ error: 'The main PC keeps the phones\' push tokens.' })
+  try {
+    const { savePushToken, pushReady } = await import('../services/fcmPush.js')
+    await savePushToken(req.app.locals.db, req.body?.token, req.body?.device)
+    res.json({ ok: true, push: pushReady() })
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }) }
 })
 router.post('/mobile/cloud/sync', async (req, res) => {
   syncNow(req.app.locals.db).catch(() => {})

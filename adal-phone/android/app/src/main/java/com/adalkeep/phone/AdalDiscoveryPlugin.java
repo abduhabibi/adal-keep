@@ -267,6 +267,12 @@ public class AdalDiscoveryPlugin extends Plugin {
         call.resolve();
     }
 
+    /** pushToken() → { token }: this phone's Firebase push token ("" without Firebase), for the main PC. */
+    @PluginMethod
+    public void pushToken(PluginCall call) {
+        AdalPushService.token(getContext(), t -> { JSObject r = new JSObject(); r.put("token", t); call.resolve(r); });
+    }
+
     /** noticeState() → { allowed, background }: notifications allowed; Android lets the app wake in the background. */
     @PluginMethod
     public void noticeState(PluginCall call) {

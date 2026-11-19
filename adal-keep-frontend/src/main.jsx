@@ -107,6 +107,17 @@ async function phoneBoot() {
   import('./cloud/adapter.js').then(({ cloudCreds }) => {
     const c = cloudCreds(), p = window.Capacitor?.Plugins?.AdalDiscovery
     if (c?.email && p?.notices) p.notices({ on: true, url: c.url, anon: c.anon, email: c.email, password: c.password, agency: c.agency }).catch(() => {})
+    // Instant "needs you": this phone's Firebase push token to the main PC (again when it changed, or once a day).
+    if (c?.email && p?.pushToken) setTimeout(() => p.pushToken().then(async ({ token } = {}) => {
+      if (!token) return
+      const mark = `${c.agency}:${token}`
+      let sent = null
+      try { sent = JSON.parse(localStorage.getItem('adal-push-token') || 'null') } catch {}
+      if (sent?.mark === mark && Date.now() - sent.at < 24 * 3600_000) return
+      const { default: api } = await import('./services/api')
+      await api.post('/mobile/push-token', { token, device: navigator.userAgent.match(/\(([^)]+)\)/)?.[1]?.split(';').pop()?.trim() || '' })
+      try { localStorage.setItem('adal-push-token', JSON.stringify({ mark, at: Date.now() })) } catch {}
+    }).catch(() => {}), 8000)
     // Once: Android's "let Adal Keep run in the background?" — else its battery
     // saver stops the notifications once the app is swiped away (asked on 2026-11-16).
     if (p?.noticeState && p?.letRunInBackground) setTimeout(() => p.noticeState().then(s => {

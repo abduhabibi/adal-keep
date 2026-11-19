@@ -7,11 +7,15 @@ import { onPhone } from '../lib/phoneMode'
 import { useAuth } from '../context/AuthContext'
 import { greeting } from '../lib/ethiopic'
 import { lastPlace } from '../lib/lastPlace'
+import Icon from '../components/shared/Icon'
 
 // The page everyone lands on (written in Amharic; English from lib/i18n.js).
-// Beautiful, and one thing at a time (asked on 2026-11-17): the welcome band
-// with "Continue where you left off", the morning sign-in, and the tasks to
-// do only when there are some. No dates, no numbers for their own sake.
+// One thing at a time: the greeting with "Continue where you left off", the
+// morning sign-in and the tasks to do. Both cards draw at once from what this
+// device saw last (or a skeleton), then fill in when the PC answers.
+
+const TODO_KEY = 'ak-dash-todo'
+const readTodo = () => { try { const n = Number(localStorage.getItem(TODO_KEY)); return Number.isFinite(n) && localStorage.getItem(TODO_KEY) != null ? n : null } catch { return null } }
 
 async function tasksToDo() {
   try {
@@ -23,48 +27,47 @@ async function tasksToDo() {
 
 export default function DashboardPage() {
   const { company } = useAuth()
-  const [todo, setTodo] = useState(0)
+  const [todo, setTodo] = useState(readTodo)   // null: not known yet (skeleton)
   const place = lastPlace()
 
   useEffect(() => {
-    const load = () => tasksToDo().then(setTodo)
+    const load = () => tasksToDo().then(n => { setTodo(n); try { localStorage.setItem(TODO_KEY, String(n)) } catch {} })
     load()
     return onDataChange(['tasks'], load)
   }, [])
 
   return (
-    <div className="mx-auto max-w-5xl space-y-5">
+    <div className="mx-auto max-w-5xl space-y-4">
       <section className="ak-hero">
-        <div className="relative z-[1] flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
+        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div className="min-w-0">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/60" translate="no">{company ? `Adal ${company}` : 'Adal Keep'}</p>
-            <h1 className="ak-hero-title mt-1">{greeting()}</h1>
+            <p className="ak-eyebrow" translate="no">{company ? `Adal ${company}` : 'Adal Keep'}</p>
+            <h1 className="ak-hero-title">{greeting()}</h1>
           </div>
           {place ? (
-            <Link to={place.path}
-              className="group flex min-w-0 items-center gap-3 rounded-2xl bg-white/12 px-4 py-3 ring-1 ring-white/25 backdrop-blur-0 transition-colors hover:bg-white/20 md:max-w-sm">
-              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white text-xl text-teal-700 shadow-lg" aria-hidden="true">↩</span>
+            <Link to={place.path} className="ak-glass-card group flex min-w-0 items-center gap-3 md:max-w-sm">
+              <span className="ak-tile flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"><Icon name="continue" /></span>
               <span className="min-w-0">
-                <span className="block text-base font-bold text-white">ካቆሙበት ይቀጥሉ</span>
-                <span className="block truncate text-sm text-white/75"><span>{place.kind}</span>{place.name ? <span translate="no"> · {place.name}</span> : null}</span>
+                <span className="block text-[15px] font-semibold">ካቆሙበት ይቀጥሉ</span>
+                <span className="block truncate text-[13px] ak-muted"><span>{place.kind}</span>{place.name ? <span translate="no"> · {place.name}</span> : null}</span>
               </span>
             </Link>
           ) : (
-            <Link to="/profiles/new" className="ak-hero-chip self-start md:self-auto"><span aria-hidden="true">＋</span>አዲስ ፕሮፋይል</Link>
+            <Link to="/profiles/new" className="ak-pill-btn self-start md:self-auto"><Icon name="plus" size={18} />አዲስ ፕሮፋይል</Link>
           )}
         </div>
-        <div className="ak-tibeb ak-hero-tibeb" aria-hidden="true" />
       </section>
 
       {!onPhone() && <MorningSignIn />}
 
-      {todo > 0 && (
-        <Link to="/tasks" className="ak-stat ak-tone-amber flex-row items-center gap-4">
-          <span className="ak-stat-icon !mb-0">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="4" /><path d="M8.5 12.2l2.4 2.4 4.6-5" /></svg>
-          </span>
+      {todo == null ? (
+        <div className="ak-stat flex-row items-center gap-4" aria-hidden="true">
+          <span className="ak-skel h-8 w-12" /><span className="ak-skel h-4 w-32" />
+        </div>
+      ) : todo > 0 && (
+        <Link to="/tasks" className="ak-stat flex-row items-center gap-4">
           <span className="ak-stat-value tabular-nums">{todo}</span>
-          <span className="ak-stat-label">ለመስራት ተግባሮች</span>
+          <span className="ak-stat-label flex-1">ለመስራት ተግባሮች</span>
         </Link>
       )}
     </div>

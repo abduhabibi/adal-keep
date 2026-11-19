@@ -17,13 +17,26 @@ const ACCOUNT_LIST = { mofa: 'visa' }
 const err = (e) => e?.response?.data?.error || e.message
 const when = (iso) => { try { const d = new Date(iso); return d.toDateString() === new Date().toDateString() ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : d.toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) } catch { return '' } }
 
+// What this device saw last: the card draws at once, then the PC's answer fills it in.
+const CACHE = 'ak-morning-sites'
+const cached = () => { try { const v = JSON.parse(localStorage.getItem(CACHE)); return Array.isArray(v) ? v : null } catch { return null } }
+
 export default function MorningSignIn() {
-  const [sites, setSites] = useState(null)
+  const [sites, setSitesNow] = useState(cached)
+  const setSites = (v) => { setSitesNow(v); try { if (v.length) localStorage.setItem(CACHE, JSON.stringify(v)) } catch {} }
   const [live, setLive] = useState(null)
   const [choose, setChoose] = useState(null)   // { site, accounts } while the person picks the account
   const load = () => api.get('/sessions').then(r => setSites(Array.isArray(r.data) ? r.data : [])).catch(() => setSites([]))
   useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t) }, [])
-  if (!sites?.length) return null
+  if (sites == null) return (
+    <div className="panel p-4" aria-hidden="true">
+      <span className="ak-skel mb-3 block h-5 w-40" />
+      <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(14rem,1fr))]">
+        {[0, 1, 2, 3].map(i => <span key={i} className="ak-skel block h-12" />)}
+      </div>
+    </div>
+  )
+  if (!sites.length) return null
   // Sign in: with several accounts for the site, the person chooses which one first.
   const start = async (s) => {
     if (s.shared && s.signedIn && s.holder?.by && !confirm(`${s.name} is signed in by ${s.holder.by} (${s.holder.pc}). Tasheer allows one sign-in for the agency: sign in as you instead? Their sign-in ends.`)) return
@@ -47,7 +60,7 @@ export default function MorningSignIn() {
   return (
     <div className="panel p-4">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <p className="font-display font-bold">☀️ Morning sign-in <span className="ml-1 text-sm font-normal text-slate-500 tabular-nums">{inCount}/{sites.length}</span></p>
+        <p className="ak-card-title">Morning sign-in <span className="ml-1 text-sm font-normal text-slate-500 tabular-nums">{inCount}/{sites.length}</span></p>
       </div>
       <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(14rem,1fr))]">
         {sites.map(s => (

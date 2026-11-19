@@ -121,8 +121,8 @@ async function phoneBoot() {
 // A newer phone app (Adal publishes it in Supabase, adal-updates/phone —
 // only there; the GitHub repository is private): looked for at the
 // start, whenever the app is opened again (at most every 10 minutes) and every
-// 30 minutes. Android's "Update?" opens by itself once per new version; a red
-// button in the bottom bar stays until it is installed.
+// 30 minutes. A red "Update available" button (bottom right, and in Settings →
+// This phone) stays until it is installed: one tap downloads and installs.
 // The published file's address in Supabase (signed in as this phone).
 async function updateUrl(file) {
   const { updateLink } = await import('./cloud/adapter.js')
@@ -145,8 +145,8 @@ function phoneUpdates() {
     try {
       // A slow line never keeps "Downloading…" up: after 4 minutes it can be tapped again.
       const r = await Promise.race([plugin.installUpdate({ url: await updateUrl('AdalKeep.apk') }), new Promise(ok => setTimeout(() => ok({ slow: true }), 4 * 60000))])
-      btn.textContent = r?.needsPermission ? '⬆ Allow, then tap here' : r?.slow ? '⬆ Slow internet — tap to try again' : `⬆ Update to ${v.versionName}`
-    } catch { btn.textContent = `⬆ Update to ${v.versionName}` }
+      btn.textContent = r?.needsPermission ? '⬆ Allow, then tap here' : r?.slow ? '⬆ Slow internet — tap to try again' : `⬆ Update available (${v.versionName}) — tap to install`
+    } catch { btn.textContent = `⬆ Update available (${v.versionName}) — tap to install` }
     busy = false; tell({ busy: false })
   }
   const check = async (force) => {
@@ -159,12 +159,12 @@ function phoneUpdates() {
       const newer = v.versionCode > mine.versionCode
       tell({ mine: mine.versionName || mine.versionCode, latest: v.versionName, newer, checkedAt: Date.now() })
       if (!newer) { btn.style.display = 'none'; return }
+      // "Update available": one tap downloads the signed APK and opens Android's installer
+      // (nothing is downloaded before the tap — asked on 2026-11-19).
       btn.style.display = ''
-      btn.textContent = `⬆ Update to ${v.versionName}`
+      if (!busy) btn.textContent = `⬆ Update available (${v.versionName}) — tap to install`
       btn.onclick = () => install(v)
       window.__adalInstallUpdate = () => install(v)
-      const asked = `adal-update-${v.versionCode}`
-      if (!sessionStorage.getItem(asked)) { sessionStorage.setItem(asked, '1'); install(v) }
     } catch {}
   }
   window.__adalCheckUpdate = () => check(true)

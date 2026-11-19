@@ -704,6 +704,13 @@ export async function cloudAdapter(config) {
       if (r) return reply(r.status, r.data, r.headers)
       const fieldUp = method === 'post' && body instanceof FormData && [...body.values()].some(v => v instanceof Blob) && path.match(/^\/profiles\/(\d+)\/fields\/(\d+)\/(upload|files)$/)
       if (fieldUp) return reply(200, await queueForMain(path, body, fieldUp))
+      // Her details, fields, notes, tasks …: kept here and shown at once, sent to
+      // the main PC when it answers — never waiting on the internet.
+      if (method !== 'get' && !(body instanceof FormData) && LAN_QUEUEABLE.test(path)) {
+        queueJsonForMain(method, path, query, body)
+        dropTasks(method, path, body)
+        return reply(200, optimistic(method, path, body))
+      }
     }
     // Fast: pages read the phone's own copy at once; with the PC live, an
     // answer older than a minute is asked for behind it (the next look is newer).
@@ -1059,6 +1066,16 @@ async function viaLan(method, path, query, body, config) {
   return { status: r.status, data, headers: head }
 }
 
+// The changes a Companion keeps for the main PC while it is out of reach (the rest go as before).
+const LAN_QUEUEABLE = /^\/(profiles\/\d+(\/(fields|notes|days|journey)(\/[\w/-]*)?)?|brokers\/(un)?assign|tasks(\/[\w/-]*)?|notifications(\/[\w/-]*)?|checklists\/\d+\/cells)$/
+
+function queueJsonForMain(method, path, query, body) {
+  const qs = Object.keys(query || {}).length ? '?' + new URLSearchParams(Object.entries(query).filter(([, v]) => v != null)).toString() : ''
+  lanQueue.push({ id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, json: true, method, path: path + qs, body: body ?? null, at: new Date().toISOString() })
+  save(LANQ, lanQueue)
+  setTimeout(() => flushLanQueue().catch(() => {}), 3000)
+}
+
 async function lanQueueCache() { return caches.open(LANQ_CACHE) }
 const lanQueueReq = (id) => new Request(`https://lan-queue.adal.local/${id}`)
 let lanQueue = load(LANQ, [])
@@ -1102,6 +1119,7 @@ async function formOf(item) {
 
 async function dropQueued(item) {
   lanQueue = lanQueue.filter(x => x.id !== item.id); save(LANQ, lanQueue)
+  if (item.json) return
   pendingFiles = pendingFiles.filter(f => !(item.shown || []).includes(f.file?.id)); save(PFILES, pendingFiles)
   try { const c = await lanQueueCache(); for (const [, v] of item.parts) if (v?.blob) await c.delete(lanQueueReq(v.blob)) } catch {}
 }
@@ -1112,11 +1130,11 @@ async function flushLanQueue() {
   lanFlushing = true
   try {
     for (const item of [...lanQueue]) {
-      const form = await formOf(item)
-      if (!form) { await dropQueued(item); continue }
+      const form = item.json ? item.body : await formOf(item)
+      if (!item.json && !form) { await dropQueued(item); continue }
       if (await lanUp(true)) {
         try {
-          const r = await viaLan('post', item.path, {}, form, {})
+          const r = await viaLan(item.json ? item.method : 'post', item.path, {}, form, {})
           if (!r) break
         } catch (e) {
           // The main PC refused it (it will never take it): not tried for ever.
@@ -1132,7 +1150,7 @@ async function flushLanQueue() {
       if (away < LAN_WAIT_MS) break
       // Out of reach for a long time: through the internet after all (the main PC files it from there).
       await dropQueued(item)
-      try { await cloudAdapter({ method: 'post', url: `/api${item.path}`, data: form, __noLan: true }) } catch (e) { console.warn('[lan] online upload failed:', e.message) }
+      try { await cloudAdapter({ method: item.json ? item.method : 'post', url: `/api${item.path}`, data: form, __noLan: true }) } catch (e) { console.warn('[lan] online upload failed:', e.message) }
     }
   } finally { lanFlushing = false }
 }

@@ -58,6 +58,22 @@ func answersAsAdalKeep(u string, wait time.Duration) bool {
 	return resp.StatusCode == http.StatusOK && info.Service == "adal-keep"
 }
 
+// companionHost: where adal-companion.exe finds the main PC now (empty when it does not say).
+func companionHost() string {
+	req, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:47810/local/host", nil)
+	req.Header.Set("X-Adal", "1")
+	resp, err := (&http.Client{Timeout: time.Second}).Do(req)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+	if resp.StatusCode != http.StatusOK {
+		return ""
+	}
+	return privateAddr(strings.TrimPrefix(strings.TrimSpace(string(b)), "http://"))
+}
+
 // candidates: the saved address first, then the ones the main PC sent.
 func candidates(root, tries string) []string {
 	var out []string
@@ -70,6 +86,7 @@ func candidates(root, tries string) []string {
 		}
 	}
 	add(mainPCURL(root))
+	add(companionHost())
 	for _, t := range strings.Split(tries, ",") {
 		if len(out) >= 10 {
 			break

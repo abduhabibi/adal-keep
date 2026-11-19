@@ -66,6 +66,16 @@ var proxyAsk = []string{"Content-Type", "Accept", "Accept-Encoding", "Range", "I
 var proxyAnswer = []string{"Content-Type", "Content-Length", "Content-Encoding", "Content-Disposition", "Content-Range", "Accept-Ranges", "Cache-Control", "ETag", "Last-Modified", "Vary"}
 
 func addMainProxy(mux *http.ServeMux) {
+	// Where this program finds the main PC now (by its network card, discovery):
+	// AdalKeep.exe tries it too, so the window stays on the office network.
+	mux.HandleFunc("/local/host", func(w http.ResponseWriter, r *http.Request) {
+		if !fromThisPC(r) {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain")
+		w.Write([]byte(strings.TrimRight(hostServer, "/")))
+	})
 	mux.HandleFunc("/local/main/", func(w http.ResponseWriter, r *http.Request) {
 		if !fromThisPC(r) {
 			http.NotFound(w, r)

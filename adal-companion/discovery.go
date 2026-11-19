@@ -418,6 +418,12 @@ func keepFindingServer() {
 			continue
 		}
 		if pinned != "" && pinned != strings.TrimRight(hostServer, "/") && (hostServer == "" || !strings.HasPrefix(readConfHeader(), autoConfHeader)) {
+			// An address typed on this PC that no longer answers (the main PC got a
+			// new address from the router) never pushes out the one found by its
+			// network card: the Companion stays on the office network.
+			if hostServer != "" && !answersAt(pinned) && pingServer() {
+				continue
+			}
 			log.Printf("👉 Main PC chosen: %s", pinned)
 			hostServer = pinned
 			os.Setenv("ADAL_HOST_URL", pinned)
@@ -440,7 +446,35 @@ func keepFindingServer() {
 			log.Printf("👉 Server found at %s", info.URL)
 			hostServer = info.URL
 			os.Setenv("ADAL_HOST_URL", info.URL)
+			// A typed address that stopped answering is replaced too (with the number kept).
+			if p := pinnedHostURL(); p != "" && p != info.URL && !strings.HasPrefix(readConfHeader(), autoConfHeader) && !answersAt(p) {
+				forgetTypedHostURL()
+			}
 			rememberHostURL(info.URL)
 		}
 	}
+}
+
+// answersAt: an Adal Keep server answers at u now.
+func answersAt(u string) bool {
+	resp, err := (&http.Client{Timeout: 3 * time.Second}).Get(strings.TrimRight(u, "/") + "/api/companion/info")
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
+}
+
+// forgetTypedHostURL: a typed companion.conf becomes one the Companion may
+// update (its number stays), so the address found now is written in its place.
+func forgetTypedHostURL() {
+	path, err := companionConfPath()
+	if err != nil {
+		return
+	}
+	body := autoConfHeader + " Edit ADAL_HOST_URL or delete\n# this file to let the Companion search the LAN again.\n"
+	if n := confNumber(); n != "" {
+		body += "ADAL_PC_NUMBER=" + n + "\n"
+	}
+	os.WriteFile(path, []byte(body), 0o644)
 }

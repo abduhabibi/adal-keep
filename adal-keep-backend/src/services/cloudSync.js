@@ -51,6 +51,8 @@ const GLOBAL = ['/setup/status', '/subscription/status', '/settings', '/profiles
   '/dashboard', '/tasks/documents', '/wafid/settings', '/health', '/tutor/tour', '/trash', '/cv/generated',
   '/lmis/accounts', '/musaned/accounts', '/tasheer/accounts', '/insurance/accounts', '/visa/accounts',
   '/automations/ready-for-submit', '/tutor/adoption', '/main-pc', '/plan', '/whatsapp', '/whatsapp/agents',
+  // The dashboard's "Needs action today" (also with the PC off).
+  '/needs-action',
   // What needs a person now: a phone with Adal Keep closed shows it (AdalNoticeJob).
   '/automations/attention']
 const PER_PROFILE = (id) => [`/profiles/${id}`, `/profiles/${id}/fields`, `/profiles/${id}/automations`,

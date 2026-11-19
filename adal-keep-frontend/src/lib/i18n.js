@@ -23,6 +23,7 @@ const EN = {
   'የፓስፖርቱን ፎቶ ያንሱ — ቀሪው ራሱ ይሞላል።': 'Take a photo of the passport — the rest fills in by itself.',
   'ካቆሙበት ይቀጥሉ': 'Continue where you left off',
   'ለመስራት ተግባሮች': 'Tasks to do',
+  'ዛሬ መደረግ ያለባቸው': 'Needs action today',
   'ገጽ': 'Page',
   'ማስታወሻዎች': 'Notes',
   'ሁሉም ማሳወቂያዎች ተጽድተዋል': 'All notifications cleared',

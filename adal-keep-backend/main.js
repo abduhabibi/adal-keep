@@ -1264,6 +1264,7 @@ initSystem().then(() => {
     import("./src/services/transition.js").then(m => m.resumeTransitions(db)).catch(() => {})            // a move cut off by a restart goes on
     startScanner(db)              // discovers new work every 2 min
     startWafidChecker(db)         // Medical · Applied → Fit / Rejected from wafid.com
+    import('./src/services/needsAction.js').then(n => n.startNeedsAction(db, { isFollower })).catch(e => console.warn('[needs-action]', e.message))   // "Needs action today": one notification a day
     import('./src/services/portalHealth.js').then(p => p.startPortalHealth()).catch(() => {})
     setTimeout(() => import('./src/services/placement.js').then(p => p.sweepRecent(db)).catch(() => {}), 4 * 60 * 1000).unref?.()   // pictures put in the wrong box (last 7 days) set right
     import('./src/services/pcHealth.js').then(p => p.startPCHealth(db)).catch(() => {})   // disk space, database check, freezes (Admin sees it)   // is each portal answering? (Admin sees it)

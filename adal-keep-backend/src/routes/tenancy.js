@@ -106,6 +106,7 @@ router.post('/subscription/unlock', async (req, res) => {
 //   WhatsApp signed out, the plan / trial → Settings
 async function goOf(db, n) {
   if (n.type === 'whatsapp' || n.type === 'trial_warning') return '/settings'
+  if (n.type === 'needs_action') return '/'   // the dashboard's "Needs action today"
   const name = String(n.title || '').match(/:\s*(.+)$/)?.[1]?.trim()
   if (n.type === 'wakala' && name) {
     const p = await db('profiles').where('full_name', name).orderBy('id', 'desc').first('id').catch(() => null)

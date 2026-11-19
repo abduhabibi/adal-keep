@@ -78,6 +78,50 @@ func startOnlinePage(root string) bool {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/tg", telegramFile)
 	forgetRoutes(root, mux)
+	// The pairing page (connect.html) on this PC: the number typed there finds
+	// the main PC on this network first (fast, no internet needed) …
+	mux.HandleFunc("/lan-number", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.Header.Get("X-Adal") != "1" {
+			http.Error(w, "no", http.StatusForbidden)
+			return
+		}
+		var in struct{ Number string }
+		json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&in)
+		u, msg := joinByNumber(root, cleanNumber(in.Number), "")
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"url": u, "error": msg})
+	})
+	// … else it pairs online with it (from anywhere); either way the log-out is over.
+	mux.HandleFunc("/chosen", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.Header.Get("X-Adal") != "1" {
+			http.Error(w, "no", http.StatusForbidden)
+			return
+		}
+		chosenMainPC(root)
+		w.WriteHeader(http.StatusNoContent)
+	})
+	// The online account the window keeps: adal-companion.exe reads Adal's
+	// signed updates from Supabase with it (adal-companion/selfupdate.go).
+	mux.HandleFunc("/cloud-creds", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.Header.Get("X-Adal") != "1" {
+			http.Error(w, "no", http.StatusForbidden)
+			return
+		}
+		var c struct {
+			URL      string `json:"url"`
+			Anon     string `json:"anon"`
+			Email    string `json:"email"`
+			Password string `json:"password"`
+			Agency   string `json:"agency"`
+		}
+		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192)).Decode(&c) != nil || c.URL == "" || c.Email == "" {
+			http.Error(w, "bad", http.StatusBadRequest)
+			return
+		}
+		b, _ := json.Marshal(c)
+		os.WriteFile(filepath.Join(root, "companion-cloud.json"), b, 0o600)
+		w.WriteHeader(http.StatusNoContent)
+	})
 	mux.HandleFunc("/main", func(w http.ResponseWriter, r *http.Request) {
 		// Only the online pages ask (a header another website cannot send unasked).
 		if r.Header.Get("X-Adal") != "1" {

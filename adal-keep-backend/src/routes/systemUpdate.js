@@ -6,10 +6,11 @@ import fs from 'fs'
 import os from 'os'
 import { Readable } from 'stream'
 import { fileURLToPath } from 'url'
-import { latestRelease, downloadRelease, setUpdateDb } from '../services/updateChannel.js'
+import { latestRelease, downloadRelease, setUpdateDb, lastEnvelope } from '../services/updateChannel.js'
 
 const execAsync = promisify(exec)
 const router = Router()
+const lanRouter = Router()
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const BACKEND_ROOT = path.join(__dirname, '..', '..')
 
@@ -216,7 +217,20 @@ export async function checkForUpdate() {
 }
 
 async function checkSupabase(installed) {
-  const m = await latestRelease('release')
+  // Supabase first (the source of truth); without it, a newer signed release
+  // another PC of this office has (services/lanRelease.js).
+  const L = await import('../services/lanRelease.js')
+  let m
+  try {
+    m = await latestRelease('release')
+    // Up to date already (installed before this PC kept its release): kept now to hand on.
+    if (installed.sha === m.sha && L.current()?.manifest?.sha !== m.sha && lastEnvelope?.manifest?.sha === m.sha) L.recordInstalled(lastEnvelope, config().projectRoot).catch(() => {})
+  } catch (e) {
+    const peer = await L.newestFromPeers(L.current()?.manifest || (installed.sha ? { sha: installed.sha, published_at: '' } : null))
+    if (!peer) throw e
+    lanEnvelope = peer
+    m = peer.manifest
+  }
   const upToDate = !!installed.sha && installed.sha === m.sha
   // Staged: the agencies marked "updates first" get it at once, everyone else
   // at manifest.everyone_at (a bad version reaches one agency, not all of them).
@@ -304,6 +318,9 @@ async function handleCheck(req, res) {
 }
 
 let watcher = null
+let lastCheck = 0
+// The signed release a PC of this office offered while Supabase could not be reached.
+let lanEnvelope = null
 
 /**
  * Updates by itself: an installed PC (USB install, not a developer's git
@@ -381,7 +398,8 @@ export function startUpdateWatcher(db = null) {
   if (db) updateDb = db
   if (watcher) return
   const every = Number(process.env.UPDATE_CHECK_MINUTES || 15) * 60 * 1000
-  let lastCheck = 0
+  // A PC of this office has a newer release: looked at at the next minute, not in 15.
+  import('../services/lanRelease.js').then(L => L.startLan({ onNews: () => { lastCheck = 0 } })).catch(e => console.warn('[lan-update]', e.message))
   const tick = async () => {
     if (updateNotice.applying) return
     try {
@@ -543,8 +561,11 @@ export async function installFromRelease(cfg, logs, manifest, localArchive = nul
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'adal-update-'))
   try {
     const archive = localArchive || path.join(tmp, 'release.tar.gz')
-    if (!localArchive) await downloadRelease(manifest, archive)
-    logs.push(`Downloaded ${(fs.statSync(archive).size / 1048576).toFixed(1)} MB from Supabase (signed by Adal, checked)`)
+    const L = await import('../services/lanRelease.js')
+    // From a PC of this office that has it, else Supabase; checked against the signed manifest either way.
+    if (!localArchive) await L.fetchPiece(manifest, { file: manifest.file, sha256: manifest.sha256 }, archive)
+    logs.push(`Downloaded ${(fs.statSync(archive).size / 1048576).toFixed(1)} MB (signed by Adal, checked)`)
+    await L.keepPiece(manifest.sha256, archive).catch(() => {})   // to hand on to the office's other PCs
     const extracted = path.join(tmp, 'src')
     fs.mkdirSync(extracted, { recursive: true })
     const tar = await run(`tar -xzf "${archive}" -C "${extracted}"`, tmp, 5 * 60 * 1000)
@@ -596,7 +617,7 @@ export async function installFromRelease(cfg, logs, manifest, localArchive = nul
         const { createHash } = await import('crypto')
         if (createHash('sha256').update(fs.readFileSync(dest)).digest('hex') === p.sha256) continue
         const got = path.join(tmp, p.name)
-        await downloadRelease({ file: p.file, sha256: p.sha256 }, got)
+        await L.fetchPiece(manifest, p, got)
         fs.rmSync(`${dest}.old`, { force: true })
         fs.renameSync(dest, `${dest}.old`)
         try { fs.copyFileSync(got, dest) } catch (e) { fs.renameSync(`${dest}.old`, dest); throw e }
@@ -661,11 +682,20 @@ async function applyUpdate(req, res) {
 
     // --- Installed PC: Adal's signed release from Supabase -----------------
     if (!installed.isRepo) {
-      let manifest = null
-      try { manifest = await latestRelease('release') } catch (e) { throw new Error(`Supabase updates: ${e.message}`) }
+      let manifest = null, env = null
+      try { manifest = await latestRelease('release'); env = lastEnvelope } catch (e) {
+        // No Supabase: a newer signed release from a PC of this office.
+        const L = await import('../services/lanRelease.js')
+        const peer = lanEnvelope || await L.newestFromPeers(L.current()?.manifest || null)
+        if (!peer) throw new Error(`Supabase updates: ${e.message}`)
+        manifest = peer.manifest; env = peer
+        logs.push(`Supabase not reachable — the signed release from ${peer.base}`)
+      }
       if (!manifest) throw new Error('Supabase updates: no release published yet')
       {
         await installFromRelease(cfg, logs, manifest)
+        lanEnvelope = null
+        if (env?.manifest?.sha === manifest.sha) await (await import('../services/lanRelease.js')).recordInstalled(env, cfg.projectRoot).catch(e => logs.push(`Not kept for the other PCs: ${e.message}`))
         writeMarker(cfg.projectRoot, { sha: manifest.sha, branch: 'release', source: 'supabase', lock_hash: manifest.lock_hash, message: manifest.message })
         const restarts = ['AdalKeep.exe', 'run-server.bat'].some(f => fs.existsSync(path.join(cfg.projectRoot, f)))
         if (restarts) setTimeout(() => process.exit(0), 3000)
@@ -773,6 +803,9 @@ getInstalled().then(i => { BOOT_VERSION = i.sha || '' }).catch(() => {})
 
 // Routes (mounted at /api/system)
 // ---------------------------------------------------------------------------
+// The release this PC keeps for the office's other PCs (services/lanRelease.js).
+import('../services/lanRelease.js').then(L => L.lanRoutes(lanRouter))
+router.use(lanRouter)
 router.get('/update/check', handleCheck)
 router.post('/update/apply', handleApply)
 

@@ -20,7 +20,7 @@ import PortalsHealthCard from '../components/PortalsHealthCard'
 import InsuranceCard from '../components/InsuranceCard'
 import BackupCard from '../components/BackupCard'
 import TelegramChannelCard from '../components/TelegramChannelCard'
-import { PcAccessList } from '../components/PcAccessGate'
+import { ConnectedDevices } from '../components/PcAccessGate'
 import { StartupCard } from '../components/AttentionBar'
 import MusanedAuthenticatorCard, { MusanedCodesCard } from '../components/MusanedAuthenticatorCard'
 import ErrorBoundary from '../components/shared/ErrorBoundary'
@@ -31,10 +31,12 @@ import TransitionsCard from '../components/TransitionsCard'
 import PlanCard from '../components/PlanCard'
 import EproSignatureCard from '../components/EproSignatureCard'
 import Segmented from '../components/shared/Segmented'
+import { onCompanionOnline, phoneCloud } from '../lib/phoneMode'
 
 // The tabs of Settings: [id, name].
 // The phone app (a narrow PC window keeps every tab).
-const isPhoneView = () => !!window.Capacitor?.isNativePlatform?.() || import.meta.env.VITE_PHONE === '1'
+// An Adal Companion's online pages are a PC: every tab (lib/phoneMode.js).
+const isPhoneView = () => !onCompanionOnline() && (!!window.Capacitor?.isNativePlatform?.() || import.meta.env.VITE_PHONE === '1')
 const SETTINGS_TABS = [
   ['agency', 'Agency'],
   ['plan', 'Plan'],
@@ -53,7 +55,7 @@ export default function SettingsPage() {
   const asked = params.get('tab') === 'whatsapp' ? 'integrations' : params.get('tab')
   // A phone has no Transitions (moving from another system is done on a PC).
   // (Backups and software updates are the PC's too: the phone's own update is in This phone.)
-  const TABS = window.__ADAL_CLOUD || isPhoneView() ? SETTINGS_TABS.filter(([id]) => id !== 'transitions' && !(isPhoneView() && id === 'backup')) : SETTINGS_TABS
+  const TABS = phoneCloud() || isPhoneView() ? SETTINGS_TABS.filter(([id]) => id !== 'transitions' && !(isPhoneView() && id === 'backup')) : SETTINGS_TABS
   const tab = TABS.some(([id]) => id === asked) ? asked : 'agency'
   // "Connect WhatsApp" buttons: straight to its card.
   useEffect(() => {
@@ -217,8 +219,8 @@ export default function SettingsPage() {
         <Segmented wrap options={TABS} value={tab} onChange={setTab} />
       </div>
       {tab === 'agency' && <>
-      {window.__ADAL_CLOUD && <ErrorBoundary small name="This phone"><PhoneCard /></ErrorBoundary>}
-      {!window.__ADAL_CLOUD && import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Computers"><PcAccessList /></ErrorBoundary>}
+      {phoneCloud() && <ErrorBoundary small name="This phone"><PhoneCard /></ErrorBoundary>}
+      {!window.__ADAL_CLOUD && import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Connected devices"><ConnectedDevices /></ErrorBoundary>}
       {!window.__ADAL_CLOUD && import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Startup"><StartupCard /></ErrorBoundary>}
       {/* NEW: Agency Settings Card */}
       <Card>

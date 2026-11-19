@@ -49,6 +49,15 @@ func main() {
 	}
 	go keepFindingServer()
 
+	// An employee PC (no server here): it updates itself from Supabase and the
+	// office network, and helps the other PCs update (selfupdate.go).
+	if exe, err := os.Executable(); err == nil && os.Getenv("ADAL_SELFUPDATE") != "0" {
+		root := filepath.Dir(exe)
+		if _, err := os.Stat(filepath.Join(root, "runtime", "node.exe")); err != nil || os.Getenv("ADAL_SELFUPDATE") == "1" {
+			startSelfUpdate(root)
+		}
+	}
+
 	// Not paid for: stop and show the payment popup on this PC too.
 	watchLock()
 	// Files that could not be sent before wait in the outbox until delivered.

@@ -28,7 +28,15 @@ async function sb(path, { method = 'POST', body, token } = {}) {
 }
 const rand = (n) => Array.from(crypto.getRandomValues(new Uint8Array(n)), b => b.toString(16).padStart(2, '0')).join('')
 
+const ON_COMPANION = location.host === '127.0.0.1:47801'
+// The window of an Adal Companion PC comes in on the main PC with the same number (and its online account).
+const handOver = (pc) => pc?.number ? `#adal_number=${encodeURIComponent(pc.number)}${pc.cloud?.device ? `&adal_device=${encodeURIComponent(pc.cloud.device)}` : ''}` : ''
+const tellLauncher = (path, body) => fetch(path, { method: 'POST', headers: { 'X-Adal': '1', 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
+
 const phoneName = () => {
+  // An Adal Companion PC is named so on the main PC's Connected devices (and
+  // its log-out stops this account there): "Companion · …".
+  if (ON_COMPANION) return 'Companion · PC ' + new Date().toLocaleDateString('en-GB')
   const ua = navigator.userAgent || ''
   const model = (ua.match(/Android [\d.]+; ([^;)]+?)(?: Build|\))/) || [])[1]
   return (model ? model.trim() : 'Phone') + ' · ' + new Date().toLocaleDateString('en-GB')
@@ -50,6 +58,7 @@ async function pair(number) {
     if (q?.status === 'approved') {
       const pc = { number, cloud: { url: CFG.url, anon: CFG.anon, email: creds.email, password: creds.password, agency: q.agency_id, device: s.user?.id || null } }
       localStorage.setItem(KEY, JSON.stringify(pc))
+      if (ON_COMPANION) await tellLauncher('/chosen').catch(() => {})   // the log-out (if any) is over
       return pc
     }
     if (q?.status === 'denied') throw new Error('The PC said No.')
@@ -107,7 +116,16 @@ function startPair(msg = '') {
     $('go').disabled = true
     $('pairMsg').className = 'msg'
     $('pairMsg').textContent = 'Asking the PC…'
-    try { await pair(number()); open() }
+    try {
+      // An Adal Companion PC: the main PC with this number on this network
+      // opens directly (fast, no internet needed); else it pairs online.
+      if (ON_COMPANION) {
+        $('pairMsg').textContent = 'Looking for the main PC with that number…'
+        const r = await (await tellLauncher('/lan-number', { number: number() })).json().catch(() => ({}))
+        if (r?.url) { location.replace(r.url); return }
+      }
+      await pair(number()); open()
+    }
     catch (e) {
       boxes.forEach(b => { b.value = '' })
       startPair(/fetch|network/i.test(e.message) ? 'No internet — connect the phone to the internet and try again.' : e.message)
@@ -123,7 +141,7 @@ async function mainPCDirect() {
   try {
     const r = await fetch('/main', { headers: { 'X-Adal': '1' }, cache: 'no-store' })
     const url = r.ok ? (await r.json())?.url : ''
-    if (url) return location.replace(url.replace(/\/$/, '') + '/?adal_companion=1')
+    if (url) return location.replace(url.replace(/\/$/, '') + '/?adal_companion=1' + handOver(saved()))
   } catch {}
   if (!saved()?.cloud) setTimeout(mainPCDirect, 5000)
 }

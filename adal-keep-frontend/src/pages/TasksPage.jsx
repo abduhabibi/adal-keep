@@ -8,7 +8,7 @@ import Button from '../components/shared/Button'
 import Spinner from '../components/shared/Spinner'
 import DocumentActivity from '../components/DocumentActivity'
 import { Bar } from '../lib/progress'
-import { onPhone } from '../lib/phoneMode'
+import { onPhone, phoneCloud } from '../lib/phoneMode'
 
 const COLUMNS = [
   { key: 'pending', label: 'ለመሰራት', color: 'amber' },
@@ -173,8 +173,8 @@ export default function TasksPage() {
       />
 
       {/* The PC's Downloads watch: shown on the PC only — a phone never takes its downloads in. */}
-      {!window.__ADAL_CLOUD && !onPhone() && <BackupNow />}
-      {!window.__ADAL_CLOUD && !onPhone() && <DocumentActivity />}
+      {!phoneCloud() && !onPhone() && <BackupNow />}
+      {!phoneCloud() && !onPhone() && <DocumentActivity />}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {COLUMNS.map(col => {

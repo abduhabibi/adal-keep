@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import api from '../services/api'
+import { phoneCloud } from '../lib/phoneMode'
 // The live view's code (30 kB) only when a notification is opened: not part of every start.
 // (After an update its old file is gone: the page reloads with the new files.)
 const LiveTab = lazy(() => import('./LiveTab').catch(() => { location.reload(); return new Promise(() => {}) }))
@@ -87,7 +88,7 @@ export default function AttentionBar() {
   const seen = useRef(null)
   const load = () => api.get('/automations/attention').then(r => {
     // A phone does not get what goes to the PC first (an Enjaz captcha: 30 s) until then.
-    const onPhone = !!phone() || !!window.__ADAL_CLOUD
+    const onPhone = !!phone() || phoneCloud()
     const list = (r.data || []).filter(c => !onPhone || !(c.phone_wait_ms > 0))
     const fresh = seen.current ? list.filter(c => !seen.current.has(keyOf(c))) : []
     // Every new notification rings (asked on 2026-11-10), on this PC too.

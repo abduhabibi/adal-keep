@@ -91,6 +91,12 @@ async function phoneBoot() {
   startCloudDocuments()
   startLive().catch(() => {})
   startMirror()        // the agency's text on the phone itself: pages open at once
+  import('./cloud/adapter.js').then(m => m.watchSuspended()).catch(() => {})   // suspended by the main PC: its screen
+  // An Adal Companion: its online account to AdalKeep.exe, so the Companion reads Adal's signed updates itself.
+  if (location.host === '127.0.0.1:47801') import('./cloud/adapter.js').then(({ cloudCreds }) => {
+    const c = cloudCreds()
+    if (c?.email) fetch('/cloud-creds', { method: 'POST', headers: { 'X-Adal': '1', 'Content-Type': 'application/json' }, body: JSON.stringify({ url: c.url, anon: c.anon, email: c.email, password: c.password, agency: c.agency }) }).catch(() => {})
+  }).catch(() => {})
   // Downloads (CV PDFs, Excel lists…) go to the phone's Downloads and open (lib/phoneSave.js).
   import('./lib/phoneSave.js').then(m => m.catchDownloads()).catch(() => {})
   // Whether the office PC is live, and pairing: in Settings → This phone (no bar on the pages).

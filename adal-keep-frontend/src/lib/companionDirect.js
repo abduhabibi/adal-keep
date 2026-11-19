@@ -34,7 +34,11 @@ export function startCompanionDirect() {
       stopped = true
       // A page about a profile made here (not on the PC yet) opens the list instead.
       const here = /\/-\d+/.test(location.pathname) ? '/' : location.pathname
-      location.replace(`${url.replace(/\/$/, '')}${here}?adal_companion=1&adal_online=ok`)
+      // With the main PC's number (and this PC's online account): in there at once, nothing typed again.
+      let pc = null
+      try { pc = JSON.parse(localStorage.getItem('adal-pc') || 'null') } catch {}
+      const hand = pc?.number ? `#adal_number=${encodeURIComponent(pc.number)}${pc.cloud?.device ? `&adal_device=${encodeURIComponent(pc.cloud.device)}` : ''}` : ''
+      location.replace(`${url.replace(/\/$/, '')}${here}?adal_companion=1&adal_online=ok${hand}`)
       return
     }
     setTimeout(run, 10000)

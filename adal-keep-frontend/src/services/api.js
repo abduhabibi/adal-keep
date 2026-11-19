@@ -111,6 +111,8 @@ api.interceptors.response.use(
       window.dispatchEvent(new Event('adal-locked'))
     }
     // Another computer this PC has not said "Yes" to yet: ask first (PcAccessGate).
+    // Suspended by the main PC (Settings → Connected devices): cut off, with its own screen (App.jsx).
+    if (error.response?.status === 403 && error.response?.data?.suspended) window.dispatchEvent(new Event('adal-suspended'))
     if (error.response?.status === 401 && error.response?.data?.pc_access) {
       window.dispatchEvent(new Event('adal-pc-access'))
     }

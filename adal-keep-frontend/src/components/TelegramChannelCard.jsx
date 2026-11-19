@@ -11,6 +11,7 @@ import api from '../services/api'
 import { useAuth } from '../context/AuthContext'
 import Card from './shared/Card'
 import Button from './shared/Button'
+import { phoneCloud } from '../lib/phoneMode'
 
 const err = (e) => e?.response?.data?.error || e.message
 
@@ -89,7 +90,7 @@ function TelegramChannelCardHere() {
 
 /** Set up on the main PC itself: a phone says so instead of asking for what only the PC has. */
 export default function TelegramChannelCard() {
-  if (window.__ADAL_CLOUD) return (
+  if (phoneCloud()) return (
     <div className="panel p-4 text-sm text-slate-600 dark:text-slate-300">
       <p className="font-semibold">📨 Telegram storage</p>
     </div>

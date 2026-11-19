@@ -18,7 +18,7 @@ import { useEffect, useRef, useState } from 'react'
 import { NavLink, useLocation, useNavigate, useNavigationType } from 'react-router-dom'
 import api from '../../services/api'
 import { useAuth } from '../../context/AuthContext'
-import { links, settingsLink, trashLink, onMainPC } from './Sidebar'
+import { links, settingsLink, trashLink, showTrash } from './Sidebar'
 import { swipeBack } from '../../lib/phoneApp'
 import Icon from '../shared/Icon'
 
@@ -163,7 +163,7 @@ export function MorePage() {
   const rest = links.filter(l => !shown.includes(l.to))
   const groups = [
     { title: 'ሥራ', items: rest },
-    { title: 'Adal Keep', items: [settingsLink, ...(onMainPC() ? [trashLink] : [])] },
+    { title: 'Adal Keep', items: [settingsLink, ...(showTrash() ? [trashLink] : [])] },
   ]
   return (
     <div className="phone-more mx-auto max-w-xl pb-6">

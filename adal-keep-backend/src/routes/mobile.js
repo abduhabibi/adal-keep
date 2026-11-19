@@ -16,7 +16,7 @@ import { pcNumber, isFollower, tailscaleInfo } from '../services/mainPC.js'
 import { getLanAddresses } from '../services/discovery.js'
 import { liveStatus } from '../services/liveChannel.js'
 import { joinRequests, answerJoin, setPhonePassword, phonePasswordSet, relayStatus, cloudOn, cloudStatus, makeDevice, listDevices, setDeviceRevoked, syncNow } from '../services/cloudSync.js'
-import { onThisPC } from './trash.js'
+import { onThisPC, fromCompanion } from './trash.js'
 
 const router = express.Router()
 const misses = new Map()   // ip → [times of wrong numbers]
@@ -78,7 +78,7 @@ router.get('/mobile/cloud', async (req, res) => {
 })
 // The agency's phone password (pairing from anywhere). Set on the main PC itself.
 router.post('/mobile/phone-password', async (req, res) => {
-  if (!onThisPC(req)) return res.status(403).json({ error: 'Set the phone password on the main PC itself.' })
+  if (!onThisPC(req) && !fromCompanion(req)) return res.status(403).json({ error: 'Set the phone password on the main PC itself.' })
   if (isFollower()) return res.status(403).json({ error: 'This PC follows the main PC — set it there.' })
   try { await setPhonePassword(req.app.locals.db, pcNumber(), req.body?.password); res.json({ ok: true }) }
   catch (e) { res.status(400).json({ error: /keep_set_phone_password|schema cache|PGRST/i.test(e.message) ? 'Run adal-admin/supabase/keep-sync.sql in Supabase once more first.' : e.message }) }

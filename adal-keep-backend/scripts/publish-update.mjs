@@ -136,6 +136,33 @@ async function buildPrograms(dir) {
   return list
 }
 
+/**
+ * The Adal Companion's own pages (the phone build, served on 127.0.0.1:47801
+ * while the main PC cannot be reached): one .tar.gz, uploaded once to
+ * online/<sha256>.tar.gz. Each Companion installs it itself (adal-companion
+ * selfupdate.go) — from Supabase or from a PC of its office that has it.
+ */
+async function buildOnlinePages() {
+  const www = path.join(ROOT, 'adal-phone/www')
+  if (!args.has('--skip-frontend')) {
+    try { execFileSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['run', '-s', 'build:phone'], { cwd: FRONT, stdio: 'inherit', shell: process.platform === 'win32' }) }
+    catch { console.log('   (the Companion pages could not be built: not in this release)'); return null }
+  }
+  if (!fs.existsSync(path.join(www, 'index.html'))) { console.log('   (no adal-phone/www: the Companion pages are not in this release)'); return null }
+  const archive = path.join(os.tmpdir(), `adal-online-${Date.now()}.tar.gz`)
+  execFileSync(process.platform === 'win32' ? path.join(process.env.SystemRoot || 'C:/Windows', 'System32', 'tar.exe') : 'tar', ['-czf', archive, '-C', www, '.'])
+  const buf = fs.readFileSync(archive)
+  fs.unlinkSync(archive)
+  const sha256 = crypto.createHash('sha256').update(buf).digest('hex')
+  const file = `online/${sha256}.tar.gz`
+  if (!DRY) {
+    const have = await storage('GET', `object/info/${BUCKET}/${file}`).then(r => r.ok).catch(() => false)
+    if (!have) await put(file, buf, 'application/gzip')
+  }
+  console.log(`   Companion pages: ${(buf.length / 1048576).toFixed(1)} MB ${sha256.slice(0, 8)}`)
+  return { file, sha256, size: buf.length }
+}
+
 const stage = fs.mkdtempSync(path.join(os.tmpdir(), 'adal-release-'))
 try {
   const files = sh('git', ['ls-files', '-z', '--', 'adal-keep-backend/src', 'adal-keep-backend/scripts', 'adal-keep-backend/server.js',
@@ -172,6 +199,8 @@ try {
     // The Windows programs (AdalKeep.exe, the Companion, the agent): each PC
     // downloads only the ones that differ from its own (updates no longer need the USB).
     programs: await buildPrograms(stage),
+    // The Adal Companion's own pages (each Companion installs them itself).
+    online: await buildOnlinePages(),
     lock_hash: crypto.createHash('sha256').update(fs.readFileSync(path.join(BACK, 'package-lock.json'))).digest('hex'),
     changes,
     // Staged: these agencies at once, everyone else later.

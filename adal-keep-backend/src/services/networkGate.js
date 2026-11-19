@@ -29,20 +29,22 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 
 const DATA = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'data')
-const FILE = path.join(DATA, 'pc-access.json')
+const FILE = process.env.ADAL_PC_ACCESS_FILE || path.join(DATA, 'pc-access.json')
 const COOKIE = 'adal_pc'
 const hash = (t) => crypto.createHash('sha256').update(String(t)).digest('hex')
 
 function read() { try { return { pcs: [], pending: [], ...JSON.parse(fs.readFileSync(FILE, 'utf8')) } } catch { return { pcs: [], pending: [] } } }
-function write(s) { fs.mkdirSync(DATA, { recursive: true }); fs.writeFileSync(FILE, JSON.stringify(s, null, 1)) }
+function write(s) { fs.mkdirSync(path.dirname(FILE), { recursive: true }); fs.writeFileSync(FILE, JSON.stringify(s, null, 1)) }
 
 export const ipOf = (req) => String(req.socket?.remoteAddress || '').replace(/^::ffff:/, '')
 export const isLocal = (req) => ['127.0.0.1', '::1'].includes(ipOf(req))
 /**
  * A computer on the agency's own network: the office Wi-Fi or cable, this
  * PC's hotspot (192.168.137.x), or the agency's Tailscale (100.64–127.x).
- * Asked on 2026-11-17: an Adal Companion needs no approval of any kind — it
- * is in at once. A computer on the internet is still kept out.
+ * Since 2026-11-19 being on that network is not enough to get in: every
+ * Companion types the main PC's number once (POST /pc-access/number) and
+ * keeps the key it gets, so the main PC knows each one and can suspend it.
+ * Nobody at the main PC approves anything.
  */
 export function isOwnNetwork(req) {
   const ip = ipOf(req)
@@ -52,7 +54,6 @@ export function isOwnNetwork(req) {
   if (m && m[1] === '100' && Number(m[2]) >= 64 && Number(m[2]) <= 127) return true
   return /^(fe80|fc|fd)/i.test(ip)
 }
-const OWN_NETWORK_PC = { id: 'own-network', name: 'A computer on this office network', by_account: 'office network' }
 
 function cookieOf(req, name) {
   const m = String(req.headers.cookie || '').split(/;\s*/).find(c => c.startsWith(name + '='))
@@ -67,6 +68,7 @@ export function approvedPC(req) {
   const h = hash(k)
   const s = read()
   const pc = s.pcs.find(p => p.key === h && !p.revoked)
+  if (pc?.suspended) return null
   if (pc && Date.now() - (pc.last_seen || 0) > 10 * 60000) { pc.last_seen = Date.now(); pc.last_ip = ipOf(req); write(s) }
   return pc || null
 }
@@ -85,7 +87,10 @@ const OPEN = [
   ['POST', /^\/api\/pc-access\/request$/],
   ['POST', /^\/api\/pc-access\/signin$/],
   ['POST', /^\/api\/pc-access\/number$/],
+  ['POST', /^\/api\/pc-access\/check-number$/],
   ['GET', /^\/api\/pc-access\/status$/],
+  // Adal's signed release, which every PC of the office hands on (services/lanRelease.js).
+  ['GET', /^\/api\/system\/update\/lan\/(latest|file\/[0-9a-f]{64})$/],
 ]
 
 /** Only Adal Keep's own pages may call it: the same address, or its own app windows. */
@@ -116,8 +121,8 @@ export function networkGate(req, res, next) {
   if (OPEN.some(([m, re]) => (req.method === m || (m === 'GET' && req.method === 'HEAD')) && re.test(p))) return next()
   const pc = approvedPC(req)
   if (pc) { req.pcAccess = pc; return next() }
-  // The office network, the hotspot, Tailscale: in at once — nobody approves, nothing is typed.
-  if (isOwnNetwork(req)) { req.pcAccess = { ...OWN_NETWORK_PC, last_ip: ipOf(req) }; return next() }
+  // Suspended on the main PC (Settings → Connected devices): cut off at once.
+  if (isSuspended(req)) return res.status(403).json({ error: 'This computer was suspended by the main PC', suspended: true })
   return res.status(401).json({ error: 'This computer is not allowed to open Adal Keep yet', pc_access: true })
 }
 
@@ -147,12 +152,19 @@ export function admitSignedIn(req, name, user) {
   return { id, key }
 }
 
+/** This request carries the key of a computer the main PC suspended. */
+export function isSuspended(req) {
+  const k = keyOf(req)
+  if (!k) return false
+  const h = hash(k)
+  return read().pcs.some(p => p.key === h && !p.revoked && p.suspended)
+}
+
 export function statusOf(req) {
-  // The office network is always in: an old waiting screen sees "approved" and opens Adal Keep.
-  if (isOwnNetwork(req)) return { state: 'approved' }
   const k = keyOf(req)
   if (!k) return { state: 'none' }
   const h = hash(k), s = read()
+  if (s.pcs.some(p => p.key === h && !p.revoked && p.suspended)) return { state: 'suspended' }
   if (s.pcs.some(p => p.key === h && !p.revoked)) return { state: 'approved' }
   if (s.pcs.some(p => p.key === h && p.revoked)) return { state: 'removed' }
   const q = s.pending.find(x => x.key === h)
@@ -173,6 +185,25 @@ export function answer(id, yes) {
 }
 
 export const list = () => read().pcs.filter(p => !p.revoked).map(({ key, ...p }) => p)
+
+/** Suspend a computer (it keeps its place on the list) or allow it again. Its online account id, if any. */
+export function setSuspended(id, on) {
+  const s = read()
+  const pc = s.pcs.find(p => p.id === id && !p.revoked)
+  if (!pc) throw new Error('No such computer')
+  if (on) pc.suspended = Date.now(); else delete pc.suspended
+  write(s)
+  return pc.device || null
+}
+
+/** The online account (keep_devices user id) this computer's Companion uses. */
+export function linkDevice(id, device) {
+  const s = read()
+  const pc = s.pcs.find(p => p.id === id && !p.revoked)
+  if (!pc || !device) return
+  pc.device = String(device)
+  write(s)
+}
 
 export function remove(id) {
   const s = read()

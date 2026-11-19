@@ -20,18 +20,15 @@ import api from '../../services/api'
 import { useAuth } from '../../context/AuthContext'
 import { links, settingsLink, trashLink, onMainPC } from './Sidebar'
 import { swipeBack } from '../../lib/phoneApp'
+import Icon from '../shared/Icon'
 
-const icon = (d, extra = null) => (
-  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-    <path d={d} stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />{extra}
-  </svg>
-)
+const icon = (name) => <Icon name={name} size={26} strokeWidth={1.6} />
 const TABS = [
-  { to: '/', label: 'መነሻ', end: true, icon: icon('M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-9.5Z') },
-  { to: '/profiles', label: 'ፕሮፋይሎች', icon: icon('M16 19v-1a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v1M9.5 10a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7ZM21 19v-1a4 4 0 0 0-3-3.87M15.5 3.13a3.5 3.5 0 0 1 0 6.75') },
-  { to: '/cvs', label: 'ሲቪዎች', icon: icon('M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Z M14 3v5h5 M9 13h6 M9 17h4') },
-  { to: '/chat', label: 'ቻት', icon: icon('M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12Z') },
-  { to: '/more', label: 'ተጨማሪ', icon: icon('M5 12h.01M12 12h.01M19 12h.01', <><circle cx="5" cy="12" r="1.4" fill="currentColor" /><circle cx="12" cy="12" r="1.4" fill="currentColor" /><circle cx="19" cy="12" r="1.4" fill="currentColor" /></>) },
+  { to: '/', label: 'መነሻ', end: true, icon: icon('home') },
+  { to: '/profiles', label: 'ፕሮፋይሎች', icon: icon('profiles') },
+  { to: '/cvs', label: 'ሲቪዎች', icon: icon('cv') },
+  { to: '/chat', label: 'ቻት', icon: icon('chat') },
+  { to: '/more', label: 'ተጨማሪ', icon: icon('more') },
 ]
 const tabOf = (path) => TABS.slice(1).find(t => path === t.to || path.startsWith(t.to + '/'))?.to || (path === '/' ? '/' : null)
 
@@ -139,7 +136,7 @@ export function PhoneTopBar({ scroller }) {
       <div className="flex w-24 items-center">
         {inner && (
           <button type="button" onClick={() => { if (!swipeBack()) navigate(-1) }} className="phone-press flex items-center gap-0.5 rounded-lg py-1 pl-1 pr-2 text-[17px] font-medium text-teal-600 dark:text-teal-400" aria-label="ተመለስ">
-            <svg width="13" height="21" viewBox="0 0 13 21" fill="none" aria-hidden="true"><path d="M11 2 2.5 10.5 11 19" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+            <Icon name="chevronLeft" size={24} strokeWidth={2.2} />
             <span className="ml-1">ተመለስ</span>
           </button>
         )}
@@ -158,7 +155,6 @@ export function PhoneTopBar({ scroller }) {
   )
 }
 
-const TINTS = ['#0ea5e9', '#22c55e', '#f59e0b', '#a855f7', '#ef4444', '#14b8a6', '#6366f1', '#f97316', '#64748b']
 
 /** More: every other page as one grouped list, as iPhone Settings. */
 export function MorePage() {
@@ -169,7 +165,6 @@ export function MorePage() {
     { title: 'ሥራ', items: rest },
     { title: 'Adal Keep', items: [settingsLink, ...(onMainPC() ? [trashLink] : [])] },
   ]
-  let n = 0
   return (
     <div className="phone-more mx-auto max-w-xl pb-6">
       <h1 className="px-1 pb-4 pt-1 text-[34px] font-bold leading-tight tracking-tight">ተጨማሪ</h1>
@@ -177,7 +172,6 @@ export function MorePage() {
         <img src="/adal-logo.png" alt="" className="h-14 w-14 rounded-2xl object-cover" />
         <div className="min-w-0">
           <div className="truncate text-[17px] font-semibold">{company ? `Adal ${company}` : 'Adal Keep'}</div>
-          <div className="text-[13px] text-slate-500">የእርስዎ ኤጀንሲ</div>
         </div>
       </div>
       {groups.map(g => (
@@ -186,10 +180,10 @@ export function MorePage() {
           <div className="phone-group overflow-hidden">
             {g.items.map((l, i) => (
               <NavLink key={l.to} to={l.to} className="phone-row phone-press flex items-center gap-3 px-3 py-2.5">
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white [&_svg]:h-[18px] [&_svg]:w-[18px]" style={{ background: TINTS[n++ % TINTS.length] }}>{l.icon}</span>
+                <span className="ak-tile flex h-8 w-8 shrink-0 items-center justify-center rounded-lg [&_svg]:h-[18px] [&_svg]:w-[18px]">{l.icon}</span>
                 <span className="flex min-w-0 flex-1 items-center justify-between gap-2 py-1">
                   <span className="min-w-0 text-[17px] leading-snug">{l.label}</span>
-                  <svg width="8" height="13" viewBox="0 0 8 13" fill="none" className="shrink-0 text-slate-300 dark:text-slate-600" aria-hidden="true"><path d="m1.5 1.5 5 5-5 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                  <Icon name="chevronRight" size={16} strokeWidth={2} className="shrink-0 text-slate-300 dark:text-slate-600" />
                 </span>
               </NavLink>
             ))}

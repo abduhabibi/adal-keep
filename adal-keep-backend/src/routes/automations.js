@@ -11,6 +11,17 @@ import { assertPoliceReady, getProfileVerification, runPassportVerification } fr
 
 const router = express.Router()
 
+/** Why a new insurance for her would be a second one, or null (her certificate on file, or already requested). */
+export async function insuranceAlreadyDone(db, profileId) {
+  const cert = await db('profile_fields').join('files', 'files.profile_field_id', 'profile_fields.id')
+    .where({ 'profile_fields.profile_id': profileId, 'profile_fields.name': 'Insurance' }).first('files.id').catch(() => null)
+  if (cert) return 'Her insurance is already done: the certificate is on her profile (Documents → Insurance).'
+  const { insuranceHistory, dayOf } = await import('../services/insuranceFetch.js')
+  const h = await insuranceHistory(db, profileId)
+  if (!h.count) return null
+  return `Her insurance was already requested on ${dayOf(h.last)} (${h.count} time${h.count === 1 ? '' : 's'}). FetaP issues it about a day later: use "Get insurance certificate" instead.`
+}
+
 /** Run rows go to the browser: never send login passwords back with them. */
 function publicRun(row) {
   if (!row) return row
@@ -210,6 +221,15 @@ router.post('/profiles/:profileId/automations/:workflowId/start', async (req, re
       const { insuranceValues, missingForInsurance } = await import('../services/insuranceCertificate.js')
       const missing = missingForInsurance(insuranceValues(prof || {}))
       if (missing.length) return res.status(400).json({ error: 'Profile is missing for the insurance: ' + missing.join(', '), missing })
+      if (!(await db('insurance_accounts').first())) return res.status(400).json({ error: 'No insurance account yet — add one under "Insurance login account"', missing: ['Insurance account'] })
+      // Her insurance already done (asked on 2026-11-19): the agency is told; force only on purpose.
+      if (!req.body?.force) {
+        const done = await insuranceAlreadyDone(db, profileId)
+        if (done) return res.status(409).json({ error: done, alreadyDone: true })
+      }
+    } else if (workflowId === 'insurance_fetch') {
+      const prof = await db('profiles').where('id', profileId).first()
+      if (!String(prof?.passport_number || '').trim()) return res.status(400).json({ error: 'Profile is missing the passport number', missing: ['Passport number'] })
       if (!(await db('insurance_accounts').first())) return res.status(400).json({ error: 'No insurance account yet — add one under "Insurance login account"', missing: ['Insurance account'] })
     } else if (workflowId === 'mofa_visa') {
       const prof = await db('profiles').where('id', profileId).first()

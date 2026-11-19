@@ -70,6 +70,8 @@ export const ACTIONS = {
   visa_barcodes:         { label: 'Visa barcodes: find / type the application number', where: 'Profile', at: ['embassy'], next: true, also: ['choices'] },
   print_embassy:         { label: '🖨 Print for embassy / Print embassy', where: 'Profile, selection bar', at: ['embassy'], next: true, also: ['choices'] },
   police_certificate:    { label: 'LMIS: Police certificate', where: 'AI Actions', at: ['police'], next: true },
+  // FetaP issues the certificate about a day after the request: it comes back to her Documents.
+  insurance_fetch:       { label: '🛡️ Get insurance certificate', where: 'AI Actions', at: ['insurance'], next: true },
   // Chosen on Musaned and Wafid FIT: the LMIS contract (it also starts by itself then).
   lmis_contract:         { label: 'LMIS: Create contract', where: 'AI Actions', at: ['wafid', 'epro'], next: true },
 }

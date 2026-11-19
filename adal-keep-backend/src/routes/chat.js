@@ -56,7 +56,9 @@ router.get('/chat/status', wrap(async (req, db) => {
 }))
 router.get('/chat/agencies', wrap((req, db) => chat.agencies(db)))
 router.get('/chat/conversations', wrap((req, db) => chat.conversations(db)))
-router.get('/chat/messages', wrap((req, db) => chat.messages(db, req.query.conversation, req.query.after, req.query.since)))
+router.get('/chat/messages', wrap((req, db) => chat.messages(db, req.query.conversation, req.query.after, req.query.since, { read: req.query.read !== '0' })))
+// Read on any window (this PC, a Companion, the online copy, a phone): read everywhere.
+router.post('/chat/conversations/:id/read', express.json(), wrap((req, db) => chat.markRead(db, req.params.id, req.body?.up_to)))
 router.post('/chat/direct/:agencyId', wrap(async (req, db) => ({ id: await chat.openDirect(db, req.params.agencyId) })))
 router.post('/chat/send', upload.single('file'), wrap((req, db) => chat.send(db, req.body.conversation, req.body.body,
   req.file ? { buffer: req.file.buffer, mimetype: req.file.mimetype, name: req.file.originalname } : null,

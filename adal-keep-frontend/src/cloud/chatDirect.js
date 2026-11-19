@@ -66,15 +66,25 @@ async function me() {
   return rows?.[0] || { id: sess.user_id, name: 'This agency', banned: false }
 }
 
-async function messages(conversation, afterId = 0, since = null) {
+// Read or unread is the agency's row on the chat server (members.last_read_id),
+// the same one the PC writes: read here, read on the PC and every phone. Never back.
+async function markRead(conversation, upTo) {
+  await token()
+  const conv = encodeURIComponent(conversation)
+  let id = Number(upTo) || 0
+  if (!id) id = Number((await call('GET', `/rest/v1/messages?conversation_id=eq.${conv}&select=id&order=id.desc&limit=1`) || [])[0]?.id) || 0
+  if (!id) return { ok: true, read_up_to: 0 }
+  await call('PATCH', `/rest/v1/members?conversation_id=eq.${conv}&agency_id=eq.${sess.user_id}&or=(last_read_id.is.null,last_read_id.lt.${id})`, { last_read_id: id }, { headers: { Prefer: 'return=minimal' } })
+  return { ok: true, read_up_to: id }
+}
+
+async function messages(conversation, afterId = 0, since = null, read = true) {
   const conv = encodeURIComponent(conversation)
   const rows = await call('GET', `/rest/v1/messages?conversation_id=eq.${conv}&id=gt.${Number(afterId) || 0}&select=${MSG_FIELDS}&order=id.desc&limit=${afterId ? 200 : 100}`)
   const list = (rows || []).reverse()
   let changed = []
   if (afterId && since) changed = await call('GET', `/rest/v1/messages?conversation_id=eq.${conv}&id=lte.${Number(afterId)}&updated_at=gt.${encodeURIComponent(since)}&select=${MSG_FIELDS}`) || []
-  if (list.length) {
-    await call('PATCH', `/rest/v1/members?conversation_id=eq.${conv}&agency_id=eq.${sess.user_id}`, { last_read_id: list[list.length - 1].id }, { headers: { Prefer: 'return=minimal' } }).catch(() => {})
-  }
+  if (list.length && read) await markRead(conversation, list[list.length - 1].id).catch(() => {})
   return { messages: list, changed, now: new Date().toISOString() }
 }
 
@@ -129,7 +139,7 @@ export async function chatDirect(method, path, query = {}, body) {
     if (path === '/chat/status') return { configured: true, me: await me(), direct: true }
     if (path === '/chat/agencies') return rpc('list_agencies')
     if (path === '/chat/conversations') { await token(); return rpc('my_conversations') }
-    if (path === '/chat/messages') return messages(query.conversation, query.after, query.since)
+    if (path === '/chat/messages') return messages(query.conversation, query.after, query.since, String(query.read) !== '0')
     if (path === '/chat/typing') return rpc('typing_in', { conv: query.conversation }).catch(() => [])
     if (path === '/chat/search') {
       const term = String(query.q || '').trim().replace(/[%*,()]/g, ' ')
@@ -143,6 +153,7 @@ export async function chatDirect(method, path, query = {}, body) {
   }
   const b = body && !(body instanceof FormData) ? body : {}
   if (path === '/chat/send') return send(body)
+  if (id(/^\/chat\/conversations\/([^/]+)\/read$/)) return markRead(id(/^\/chat\/conversations\/([^/]+)\/read$/), b.up_to)
   if (path === '/chat/ping') { await rpc('ping').catch(() => null); return { ok: true } }
   if (path === '/chat/typing') { await rpc('set_typing', { conv: b.conversation }).catch(() => null); return { ok: true } }
   if (id(/^\/chat\/direct\/([^/]+)$/)) return { id: await rpc('open_direct', { other: id(/^\/chat\/direct\/([^/]+)$/) }) }

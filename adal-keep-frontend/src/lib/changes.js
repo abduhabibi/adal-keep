@@ -48,6 +48,7 @@ const BY_PATH = [
   [/^\/?tasks/, ['tasks']],
   [/^\/?notifications/, ['notifications']],
   [/automations|runs/, ['automation_queue', 'profile_automations', 'profiles']],
+  [/^\/?chat\/(send|conversations\/[^/]+\/read|messages\/\d+|direct|groups)/, ['chat']],
 ]
 export function tablesOfRequest(url = '') {
   const p = String(url).replace(/^https?:\/\/[^/]+/, '').replace(/^\/api/, '').split('?')[0]

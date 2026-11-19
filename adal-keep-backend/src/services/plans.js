@@ -12,8 +12,16 @@
  * features turned on or off for that agency alone, or offered to it (the
  * agency answers "I want it"; Adal turns it on when Adal wants).
  *
- * The PC reads it when it starts and every 30 minutes, checks the signature,
+ * The PC reads it when it starts and every 5 minutes, checks the signature,
  * and keeps the last good one (data/license.json), so it works offline too.
+ * Adal Keep Admin also nudges the PC the moment it saves a licence (a Realtime
+ * message on the PC's live channel, and an Adal command in keep_calls that
+ * waits online while the PC is off): the PC reads its licence again at once.
+ * The nudge carries nothing: only the signed licence counts.
+ *
+ * Suspended (Admin → Suspend): the licence says `suspended`; Adal Keep on
+ * that PC stops (the lock screen says "suspended") until Admin allows it
+ * again. Nothing is deleted. A code from the Authenticator does not lift it.
  */
 import fs from 'fs'
 import path from 'path'
@@ -54,7 +62,12 @@ export const signedPart = (l) => ({
   pc: String(l.pc || ''), plan: l.plan || 'premium',
   paid_until: l.paid_until || null, trial_until: l.trial_until || null,
   features: l.features || {}, offers: l.offers || [], note: l.note || '', at: l.at || null,
+  // Only when set: a licence that is not suspended is signed exactly as before
+  // (PCs on an older version keep accepting it).
+  ...(l.suspended ? { suspended: { at: l.suspended.at || null, note: String(l.suspended.note || '').slice(0, 300) } } : {}),
 })
+/** The licence says this PC is suspended by Adal. */
+export const isSuspended = (l = current) => !!l?.suspended
 export function verifyLicense(file, pc) {
   if (!file?.license || !file?.signature) return null
   const l = signedPart(file.license)
@@ -74,6 +87,8 @@ export async function license() {
   return current
 }
 export const licenseNow = () => current
+/** Tests only: the licence in use, without a signature. */
+export function __setLicenseForTest(l) { if (process.env.NODE_TEST_CONTEXT) current = l }
 
 /** The plan: the licence's, else Premium (the trial lets an agency try everything). */
 export function planOf(l = current) { return l?.plan && RANK[l.plan] ? l.plan : 'premium' }
@@ -120,9 +135,12 @@ export async function refreshLicense() {
     const l = verifyLicense(file, pc)
     if (!l) { console.warn('[plans] the licence on the server is not signed by Adal — ignored'); return license() }
     const had = current
+    // Never an older licence than the one in use (a copy put back to undo a suspension).
+    if (had?.at && l.at && Date.parse(l.at) < Date.parse(had.at)) return had
     current = l
+    if (!had || had.at !== l.at) { try { (await import('./subscription.js')).licenseChanged() } catch {} }
     try { fs.mkdirSync(path.dirname(SAVED), { recursive: true }); fs.writeFileSync(SAVED, JSON.stringify(file, null, 1)) } catch {}
-    if (!had || had.at !== l.at) console.log(`[plans] licence from Adal: ${planOf(l)}${l.paid_until ? `, paid until ${new Date(l.paid_until).toISOString().slice(0, 10)}` : ''}`)
+    if (!had || had.at !== l.at) console.log(`[plans] licence from Adal: ${planOf(l)}${l.paid_until ? `, paid until ${new Date(l.paid_until).toISOString().slice(0, 10)}` : ''}${l.suspended ? ' — SUSPENDED' : ''}`)
     return l
   } catch (e) {
     console.warn('[plans] licence:', e.message)
@@ -130,11 +148,25 @@ export async function refreshLicense() {
   }
 }
 
+/**
+ * Adal Keep Admin saved this PC's licence (a nudge from Realtime or keep_calls):
+ * read it again now. A nudge during a read gets one more read after it.
+ */
+let again = false, running = null
+export function licenseNudge() {
+  again = true
+  if (!running) running = (async () => {
+    try { while (again) { again = false; await refreshLicense().catch(() => {}) } } finally { running = null }
+  })()
+  return running
+}
+
 export function startLicenseWatch(db) {
   if (db) dbRef = db
   license().catch(() => {})
   setTimeout(() => refreshLicense().catch(() => {}), 20000)
-  setInterval(() => refreshLicense().catch(() => {}), 30 * 60000).unref?.()
+  // The fallback when no nudge arrives (Realtime down): every 5 minutes.
+  setInterval(() => refreshLicense().catch(() => {}), 5 * 60000).unref?.()
 }
 
 /** What the pages need: the plan, each feature's state, what is offered. */
@@ -146,6 +178,7 @@ export function planPayload(l = current) {
     offers: (l?.offers || []).map(o => ({ ...o, feature_title: featureOf(o.feature)?.title || o.title || o.feature })),
     from_adal: !!l, note: l?.note || '',
     paid_until: l?.paid_until || null, trial_until: l?.trial_until || null,
+    suspended: !!l?.suspended,
   }
 }
 

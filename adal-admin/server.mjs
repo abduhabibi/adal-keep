@@ -303,7 +303,26 @@ async function saveLicense(pc, l) {
   const license = plans.signedPart({ ...l, pc, at: new Date().toISOString() })
   const signature = signManifest(license, fs.readFileSync(SIGNING, 'utf8'))
   await sb('POST', `/storage/v1/object/adal-updates/licenses/${pc}.json`, Buffer.from(JSON.stringify({ license, signature })), { 'Content-Type': 'application/json', 'x-upsert': 'true', 'Cache-Control': 'no-cache' })
+  await nudgePc(pc).catch(e => console.warn('[plans] nudge:', e.message))
   return license
+}
+/**
+ * The PC reads its new licence within seconds: a Realtime message on its live
+ * channel (instant while it is on), and an Adal command in keep_calls (its relay
+ * reads them every few seconds; kept online up to 30 days while the PC is off,
+ * then run the moment it is on). Neither carries the licence: the PC fetches
+ * the signed file itself, so only what this panel signed counts.
+ */
+async function nudgePc(pc) {
+  const a = (await mainAgencies()).find(x => x.pc_number === pc)
+  if (!a) return
+  if (!ADMIN_ID) await ensureAdmin()
+  // One waiting nudge is enough: older ones still waiting are replaced.
+  await rest('DELETE', `keep_calls?agency_id=in.(${a.ids.join(',')})&device_id=eq.${ADMIN_ID}&path=eq./_adal/license&status=eq.new`, undefined, { Prefer: 'return=minimal' }).catch(() => {})
+  await rest('POST', 'keep_calls', { agency_id: a.id, device_id: ADMIN_ID, method: 'POST', path: '/_adal/license', body: {} }, { Prefer: 'return=minimal' })
+  const sec = await rest('GET', `keep_secrets?agency_id=in.(${a.ids.join(',')})&select=agency_id,live`).catch(() => [])
+  const topics = [...new Set((sec || []).map(x => x.live).filter(Boolean))].map(l => `keep-${l}`)
+  if (topics.length) await sb('POST', '/realtime/v1/api/broadcast', { messages: topics.map(topic => ({ topic, event: 'm', payload: { t: 'adal', at: Date.now() } })) }).catch(e => console.warn('[plans] realtime:', e.message))
 }
 const inboxOf = async (agencyId) => (await rest('GET', `conversations?kind=eq.admin&key=eq.admin:${agencyId}&select=id`))?.[0]?.id || null
 async function tell(agencyId, body) {
@@ -334,6 +353,8 @@ const api = {
     const WHAT = { '/_adal/agents/give': 'Give an agent', '/_adal/agents/take': 'Take an agent back', '/_adal/agents/limit': 'Agents allowed', '/_adal/agents/template': 'Give a CV template', '/_adal/company': 'CEO details', '/_adal/backup/run': 'Back up now', '/_adal/backup/restore': 'Restore a backup' }
     return {
       ...a, pcOnline: onlineAt(pcAt), pcSeen: pcAt, code: codeFor(a.pc_number),
+      // What the PC says it uses now (its heartbeat): the licence's time, suspended or not.
+      pcLicAt: of('/_pc')?.lic_at || null, pcSuspended: of('/_pc')?.suspended ?? null,
       summary: of('/_summary'), backup: of('/_backup'), license: lic,
       plan: lic?.plan || 'premium',
       waiting: waiting.map(w => ({ ...w, what: WHAT[w.path] || `${w.method} ${w.path}` })),
@@ -448,6 +469,9 @@ const api = {
     if (b.offer) l.offers = [...(had.offers || []).filter(o => o.feature !== b.offer), { id: `${b.offer}-${now}`, feature: b.offer, at: new Date(now).toISOString() }]
     if (b.unoffer) l.offers = (had.offers || []).filter(o => o.feature !== b.unoffer)
     if (b.note !== undefined) l.note = String(b.note || '').slice(0, 300)
+    // Suspend: Adal Keep on that PC stops until allowed again (nothing is deleted).
+    if (b.suspend === true) l.suspended = { at: new Date(now).toISOString(), note: String(b.suspend_note || '').slice(0, 300) }
+    if (b.suspend === false) delete l.suspended
     // Turned on: the offer is done.
     if (l.features) l.offers = (l.offers || []).filter(o => l.features[o.feature] !== 'on')
     const saved = await saveLicense(pc, l)

@@ -191,6 +191,26 @@ export default function LockScreen({ onClose }) {
     try { await navigator.clipboard.writeText(pc); setCopied(true); setTimeout(() => setCopied(false), 1500) } catch {}
   }
 
+  // Suspended by Adal (Adal Keep Admin): nothing to pay or type here; only Adal allows it again.
+  // Everything on this PC is kept as it is.
+  if (subscription?.suspended) return (
+    <div className="lock-screen fixed inset-0 z-[10000] overflow-y-auto" role="dialog" aria-modal="true" aria-label="Adal Keep is suspended">
+      <div className="lock-backdrop" aria-hidden="true"><span /><span /><span /></div>
+      <div className="relative min-h-full flex items-center justify-center px-4 py-8">
+        <div className="lock-frame w-full max-w-xl">
+          <div className="lock-card p-6 sm:p-10 text-center">
+            <div className="text-5xl" aria-hidden="true">⏸️</div>
+            <h1 className="mt-4 text-2xl sm:text-3xl font-extrabold text-white">Adal Keep is suspended</h1>
+            <p className="mt-3 text-slate-300">Adal has suspended Adal Keep on this PC. Nothing is deleted: all your profiles, documents and settings are kept, and everything works again as soon as Adal allows it.</p>
+            {subscription.suspendNote && <p className="mt-4 rounded-xl bg-white/10 px-4 py-3 text-white">{subscription.suspendNote}</p>}
+            <p className="mt-5 text-slate-300">Call Adal: <a className="font-bold text-white" href={`tel:${phone}`}>{phone}</a> · PC number <span className="font-mono font-bold text-white">{pc}</span></p>
+            {subscription.suspendedAt && <p className="mt-2 text-xs text-slate-400">Since {new Date(subscription.suspendedAt).toLocaleString()}</p>}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+
   return (
     <div className="lock-screen fixed inset-0 z-[10000] overflow-y-auto" role="dialog" aria-modal="true" aria-label="Unlock Adal Keep">
       <div className="lock-backdrop" aria-hidden="true"><span /><span /><span /></div>

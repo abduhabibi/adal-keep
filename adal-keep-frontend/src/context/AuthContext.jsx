@@ -66,19 +66,20 @@ export function AuthProvider({ children }) {
     refresh()
   }, [refresh])
 
-  // The trial can end while the app is open: check every 5 minutes, and at
+  // The trial can end (or Adal can suspend this PC) while the app is open: check often, and at
   // once when the server refuses a request because the app is locked.
   useEffect(() => {
     const check = () => api.get('/subscription/status').then(r => setSubscription(r.data)).catch(() => {})
-    const t = setInterval(check, 5 * 60000)
+    // Every 5 s while the page is shown: a suspension (or a month given) in Adal Keep Admin shows within seconds.
+    const t = setInterval(() => { if (!document.hidden) check() }, 5000)
     window.addEventListener('adal-locked', check)
     return () => { clearInterval(t); window.removeEventListener('adal-locked', check) }
   }, [])
-  // On the payment screen: every 30 s, so a month given in Adal Admin opens the app within half a minute.
+  // On the lock screen: every 3 s, so "Allow" or a month given in Adal Admin opens the app within seconds.
   const locked = subscription?.mode === 'locked'
   useEffect(() => {
     if (!locked) return
-    const t = setInterval(() => api.get('/subscription/status').then(r => setSubscription(r.data)).catch(() => {}), 30000)
+    const t = setInterval(() => api.get('/subscription/status').then(r => setSubscription(r.data)).catch(() => {}), 3000)
     return () => clearInterval(t)
   }, [locked])
 

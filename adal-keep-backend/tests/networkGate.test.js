@@ -48,7 +48,9 @@ test('a computer on the internet is still kept out', () => {
 })
 
 test('through the online link a Companion may do what a phone may not, except managing devices and the main PC', () => {
-  assert.equal(allowedFrom('Pixel 8 · 1/11/2026', 'POST', '/backup/run'), false)
+  // "Back up now" from a phone asks the main PC to back up (backup-anywhere); its settings stay on the PC.
+  assert.equal(allowedFrom('Pixel 8 · 1/11/2026', 'POST', '/backup/run'), true)
+  assert.equal(allowedFrom('Pixel 8 · 1/11/2026', 'POST', '/backup/settings'), false)
   assert.equal(allowedFrom('Pixel 8 · 1/11/2026', 'POST', '/pc-access/devices/suspend'), false)
   assert.equal(allowedFrom('Companion · Desk 2', 'POST', '/backup/run'), true)
   assert.equal(allowedFrom('Companion · Desk 2', 'POST', '/trash/empty'), true)

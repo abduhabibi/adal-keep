@@ -328,6 +328,11 @@ app.get('/api/system/portals', async (req, res) => {
   const p = await import('./src/services/portalHealth.js')
   res.json(req.query.now ? await p.checkPortals({ retryMs: 5000 }) : p.portalStatus())
 })
+// Settings → Health: each robot's last success and failure (read-only, starts nothing).
+app.get('/api/system/automation-health', async (req, res) => {
+  try { res.json(await (await import('./src/services/automationHealth.js')).automationHealth(app.locals.db)) }
+  catch (e) { res.status(500).json({ error: e.message }) }
+})
 app.get('/api/health', (req, res) => {
   // role/instance let another PC check it is choosing a real main PC.
   res.json({ status: 'ok', role: isFollower() ? 'follower' : 'main', main_url: mainURL() || undefined, instance: instanceId() })

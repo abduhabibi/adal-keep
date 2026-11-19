@@ -90,7 +90,7 @@ function whoHeaders(names, id) {
     : { 'X-Adal-Who': encodeURIComponent(`${n} (phone)`) }
 }
 
-export const cloudStatus = { on: false, running: false, last: null, error: null, pushed: 0, files: 0, filesLeft: 0, applied: 0, textDone: null, bytesSaved: 0 }
+export const cloudStatus = { on: false, running: false, last: null, error: null, lastFail: null, lastFailAt: null, pushed: 0, files: 0, filesLeft: 0, applied: 0, textDone: null, bytesSaved: 0 }
 
 // The first copy of the text (every page once) is done: documents wait for it.
 // (The backup never waits for it: backups go at once, by their own route.)
@@ -694,6 +694,7 @@ async function syncOnce(db, { light = false } = {}) {
     cloudStatus.error = /keep_(meta|changes|files|devices)|relation|schema cache|PGRST/i.test(e.message)
       ? 'The online tables are missing: run adal-admin/supabase/keep-sync.sql in Supabase (SQL Editor).'
       : e.message
+    cloudStatus.lastFail = cloudStatus.error; cloudStatus.lastFailAt = new Date().toISOString()   // Settings → Health
     console.warn('[cloud]', cloudStatus.error)
   } finally {
     cloudStatus.running = false

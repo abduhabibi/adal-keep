@@ -17,6 +17,7 @@ import MainPCCard from '../components/MainPCCard'
 import { CompanionSwitchCard } from '../components/CompanionSwitchPC'
 import WafidCard from '../components/WafidCard'
 import PortalsHealthCard from '../components/PortalsHealthCard'
+import AutomationHealthCard from '../components/AutomationHealthCard'
 import InsuranceCard from '../components/InsuranceCard'
 import BackupCard from '../components/BackupCard'
 import TelegramChannelCard from '../components/TelegramChannelCard'
@@ -41,6 +42,7 @@ const SETTINGS_TABS = [
   ['agency', 'Agency'],
   ['plan', 'Plan'],
   ['portals', 'Portals'],
+  ['health', 'Health'],
   ['integrations', 'Integrations'],
   ['transitions', 'Transitions'],
   ['backup', 'Backup & updates'],
@@ -292,6 +294,7 @@ export default function SettingsPage() {
       {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Wafid"><WafidCard /></ErrorBoundary>}
       {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Insurance"><InsuranceCard /></ErrorBoundary>}
       </>}
+      {tab === 'health' && import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Health"><AutomationHealthCard /></ErrorBoundary>}
       {tab === 'integrations' && <>
       {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Musaned code"><MusanedCodesCard /></ErrorBoundary>}
       {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="EPRO signature"><EproSignatureCard /></ErrorBoundary>}

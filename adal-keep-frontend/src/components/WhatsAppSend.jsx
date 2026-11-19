@@ -10,6 +10,7 @@ import { wa } from '../lib/whatsapp'
 import Button from './shared/Button'
 import { usePlan } from '../lib/plan'
 import { useAuth } from '../context/AuthContext'
+import { inWaitingPhase } from '../lib/phase'
 
 const err = (e) => e?.response?.data?.error || e.message
 const STATUS = {
@@ -28,8 +29,8 @@ export default function WhatsAppSend({ profile }) {
   const [busy, setBusy] = useState(false)
   const plan = usePlan()
   const { activeEmployee } = useAuth()
-  // Only between a complete CV and her being selected: before, there is no CV
-  // to send; after, it is gone for good.
+  // Only while she is in Waiting (a complete CV, added to Musaned, not chosen
+  // yet): before, there is nothing to send; after, it is gone for good.
   const [due, setDue] = useState(false)
 
   const loadSends = () => wa.get(`/profiles/${profile.id}/whatsapp`).then(r => setSends(r.data)).catch(() => {})
@@ -38,10 +39,11 @@ export default function WhatsAppSend({ profile }) {
     wa.get('/whatsapp/agents').then(r => setAgents(r.data.filter(a => a.active))).catch(() => {})
     loadSends()
     api.get(`/profiles/${profile.id}/journey`).then(({ data }) => {
-      const st = (k) => (data?.embassy || []).find(x => x.key === k)?.state
-      setDue(Array.isArray(data?.cv_missing) && !data.cv_missing.length && st('selected') !== 'done')
+      const steps = Object.fromEntries((data?.embassy || []).map(x => [x.key, x.state]))
+      // Only while she is in Waiting (on Musaned, nobody chose her yet — asked on 2026-11-19).
+      setDue(Array.isArray(data?.cv_missing) && !data.cv_missing.length && inWaitingPhase(steps, profile))
     }).catch(() => setDue(false))
-  }, [profile.id, profile.chosen_at])
+  }, [profile.id, profile.chosen_at, profile.status])
 
   // WhatsApp outside this agency's plan: not offered here (Settings → Plan says so).
   if (plan?.features?.find(f => f.key === 'whatsapp')?.state === 'off') return null

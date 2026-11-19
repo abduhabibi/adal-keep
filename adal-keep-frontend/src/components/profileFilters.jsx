@@ -250,5 +250,7 @@ export function useProfileFilters(profiles) {
     activeCount: Object.entries(f).filter(([k, v]) => v && k !== 'step').length,
     step: f.step, setStep: (k) => setF(prev => ({ ...prev, step: prev.step === k ? '' : k })), stepCounts,
     journey: stages,
+    // Changes when a filter changes (the list goes back to page 1).
+    filterKey: JSON.stringify(f),
   }
 }

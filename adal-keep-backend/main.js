@@ -1250,6 +1250,8 @@ initSystem().then(() => {
     startAppointmentWatcher(app.locals.db) // Tasheer / Wafid appointments: a reminder the day before
     startCloudSync(app.locals.db)      // the online copy phones use when this PC is off
     startLiveChannel(app.locals.db)    // phones ↔ this PC, instant (Supabase Realtime)
+    // New selections on Musaned, every hour, on ONE PC of the agency (the main PC picks the strongest).
+    import('./src/services/selectionCheck.js').then(s => s.startSelectionCheck(app.locals.db)).catch(e => console.warn('[selection-check]', e.message))
     if (isFollower()) {
       // Another PC is the main PC: all work happens there, nothing here.
       console.log(`🔗 This PC follows the main PC at ${mainURL()} — no automations, no discovery here`)

@@ -59,7 +59,8 @@ function MissingSheet({ sheet, onClose }) {
     document.body)
 }
 
-export default function SelectionBar({ picked, onRemove, onClear, onAllShown, onLacking }) {
+// whatsappHere: on the Waiting tab (the only place CVs go to agents); waitingPicked: the ticked ones in Waiting.
+export default function SelectionBar({ picked, onRemove, onClear, onAllShown, onLacking, whatsappHere = false, waitingPicked = [] }) {
   const { company } = useAuth()
   const [busy, setBusy] = useState('')
   const [open, setOpen] = useState(true)
@@ -197,9 +198,12 @@ export default function SelectionBar({ picked, onRemove, onClear, onAllShown, on
             🖨️ {busy === 'print' ? 'Checking…' : 'Print embassy'} <span className="ml-auto hidden text-[10px] font-normal opacity-80 lg:inline">{picked.length * 2} pages</span></button>
           <button type="button" className={`${btn} bg-indigo-50 text-indigo-800 hover:bg-indigo-100 dark:bg-indigo-900/30 dark:text-indigo-300`} disabled={!!busy}
             onClick={openLists}>📋 {busy === 'checklist' ? 'Saving…' : 'Checklist'} <span className="ml-auto hidden text-[10px] font-normal opacity-80 lg:inline">new or add</span></button>
-          <button type="button" className={`${btn} bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:bg-emerald-900/30 dark:text-emerald-300`} disabled={!!busy}
-            onClick={() => setMessaging(m => !m)}>💬 WhatsApp <span className="ml-auto hidden text-[10px] font-normal opacity-80 lg:inline">send CVs</span></button>
-          {messaging && <WhatsAppSendPicked picked={picked} onClose={() => setMessaging(false)} />}
+          {/* CVs to agents only from the Waiting tab, and only the girls in Waiting (asked on 2026-11-19). */}
+          <button type="button" className={`${btn} bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:bg-emerald-900/30 dark:text-emerald-300`}
+            disabled={!!busy || !whatsappHere || !waitingPicked.length}
+            title={!whatsappHere ? 'CVs go to WhatsApp only from the Waiting tab' : !waitingPicked.length ? 'None of them is in Waiting' : waitingPicked.length < picked.length ? `Only the ${waitingPicked.length} in Waiting are sent` : undefined}
+            onClick={() => setMessaging(m => !m)}>💬 WhatsApp <span className="ml-auto hidden text-[10px] font-normal opacity-80 lg:inline">{whatsappHere ? `send ${waitingPicked.length} CV${waitingPicked.length === 1 ? '' : 's'}` : 'Waiting tab only'}</span></button>
+          {messaging && whatsappHere && waitingPicked.length > 0 && <WhatsAppSendPicked picked={waitingPicked} onClose={() => setMessaging(false)} />}
           <button type="button" className={`${btn} bg-lime-50 text-lime-800 hover:bg-lime-100 dark:bg-lime-900/30 dark:text-lime-300`}
             onClick={() => { setExporting(true); download('xlsx') }} title="No. · Name · Labour ID · Passport of the selected">📥 Excel download <span className="ml-auto hidden text-[10px] font-normal opacity-80 lg:inline">no. · name · labour ID · passport</span></button>
           <div className="col-span-2 lg:col-span-1">

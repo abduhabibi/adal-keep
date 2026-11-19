@@ -5,7 +5,7 @@
  * copy, which passes no headers).
  */
 import express from 'express'
-import { lastNumber, keyOf, stateOf, allStates, connect, openWeb, logout, listChats, chatForNumber, agentRow, agentsOf, sendCV, sendMany, bulk, notifyMany, notices, sendsOf, onChosen, available, agentLimit, roomForAgent } from '../services/whatsapp.js'
+import { lastNumber, keyOf, stateOf, allStates, connect, openWeb, logout, listChats, chatForNumber, agentRow, agentsOf, sendCV, sendMany, bulk, notifyMany, notices, sendsOf, onChosen, available, agentLimit, roomForAgent, waitingOnly } from '../services/whatsapp.js'
 
 const router = express.Router()
 // WhatsApp is in the Standard plan (plans.js): connecting and sending need it; looking does not.
@@ -91,11 +91,15 @@ router.post('/profiles/:id/whatsapp/close', async (req, res) => { try { await on
 // CVs → WhatsApp: the ones not chosen yet, and many at once.
 router.get('/whatsapp/available', async (req, res) => { try { res.json(await available(req.app.locals.db, who(req))) } catch (e) { fail(res, e) } })
 router.get('/whatsapp/bulk', (req, res) => res.json(bulk[who(req)] || { running: false }))
-router.post('/whatsapp/bulk', (req, res) => {
+router.post('/whatsapp/bulk', async (req, res) => {
   try {
-    const ids = (req.body?.profile_ids || []).map(Number).filter(Boolean)
-    if (!ids.length) throw new Error('Choose the profiles to send')
-    res.json(sendMany(req.app.locals.db, who(req), ids, req.body?.agent_ids || [], by(req)))
+    const asked = (req.body?.profile_ids || []).map(Number).filter(Boolean)
+    if (!asked.length) throw new Error('Choose the profiles to send')
+    // Only the Waiting tab's girls (on Musaned, not chosen yet) go to agents.
+    const waiting = await waitingOnly(req.app.locals.db, asked)
+    const ids = asked.filter(id => waiting.has(id))
+    if (!ids.length) throw new Error('None of them is in Waiting (added to Musaned, not chosen yet): only those CVs go to agents on WhatsApp')
+    res.json({ ...sendMany(req.app.locals.db, who(req), ids, req.body?.agent_ids || [], by(req)), not_waiting: asked.length - ids.length })
   } catch (e) { fail(res, e) }
 })
 

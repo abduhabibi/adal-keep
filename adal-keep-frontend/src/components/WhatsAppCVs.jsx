@@ -1,5 +1,5 @@
 /**
- * CVs → WhatsApp: every girl not chosen yet who has a CV. Tick some (or all)
+ * CVs → WhatsApp: every girl in Waiting (on Musaned, not chosen yet) who has a CV. Tick some (or all)
  * and send them to all your agents, or only to the agents you pick. A girl
  * chosen on Musaned leaves this list (her CV is taken back from the others).
  */
@@ -105,7 +105,7 @@ export default function WhatsAppCVs() {
       </div>
 
       {!shown.length ? (
-        <p className="panel p-6 text-center text-sm text-slate-500">{rows.length ? 'No one here with this filter.' : 'No girl with a CV who is not chosen yet. Make CVs first (+ New CV).'}</p>
+        <p className="panel p-6 text-center text-sm text-slate-500">{rows.length ? 'No one here with this filter.' : 'No girl with a CV in Waiting (added to Musaned, not chosen yet). Only those CVs go to agents.'}</p>
       ) : (
         <div className="panel overflow-hidden">
           <label className="flex items-center gap-3 border-b border-slate-100 px-4 py-2 text-xs font-semibold text-slate-500 dark:border-slate-800">

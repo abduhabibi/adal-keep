@@ -1,5 +1,5 @@
 import { createPortal } from 'react-dom'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import PrioritizeButton, { useWaitingFiles } from '../components/PrioritizeButton'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
@@ -17,6 +17,7 @@ import { onDataChange } from '../lib/changes'
 import { profilesList } from '../lib/profilesCache'
 import { cachedGet } from '../lib/deviceCache'
 import { onPhone } from '../lib/phoneMode'
+import { FIRST, phaseOf as phaseFrom, inWaitingPhase, stepMarks } from '../lib/phase'
 
 const STATUS_OPTIONS_AM = [
   { value: 'pending', label: 'በመጠባበቅ ላይ' },
@@ -28,8 +29,8 @@ const STATUS_OPTIONS_AM = [
 ]
 
 // One phase at a time (asked on 2026-11-17): the list shows the profiles of
-// one phase; a search looks through all of them.
-const FIRST = [['cv', 'CV'], ['musaned', 'Musaned'], ['selected', 'Selected'], ['wafid', 'Wafid'], ['epro', 'EPRO']]
+// one phase; a search looks through all of them. The phases: lib/phase.js
+// (Waiting and Unfit asked for on 2026-11-19).
 // After the EPRO: the steps in the agency's order (dragged here or on a
 // profile's AI Actions — Settings "journey_order", the step boxes' names).
 const AFTER = [['Tasheer', 'tasheer', 'Tasheer'], ['Insurance', 'insurance', 'Insurance'], ['Enjaz · Visa', 'embassy', 'Visa'], ['LMIS · Police clearance', 'police', 'Police']]
@@ -38,15 +39,8 @@ const afterInOrder = (order = []) => [...AFTER].sort((a, b) => {
   const ia = order.indexOf(a[0]), ib = order.indexOf(b[0])
   return (ia < 0 ? 99 + AFTER.indexOf(a) : ia) - (ib < 0 ? 99 + AFTER.indexOf(b) : ib)
 })
-export function phaseOf(steps = {}, p = {}, after = AFTER) {
-  const ok = [steps.cv === 'done', ['done', 'waiting'].includes(steps.musaned), steps.selected === 'done', p.status === 'medical_fit' || steps.wafid === 'done', steps.epro === 'done']
-  let reached = -1
-  ok.forEach((v, i) => { if (v) reached = i })
-  if (reached + 1 < FIRST.length) return FIRST[reached + 1][0]
-  // Past the EPRO: the first step (in the agency's order) not done yet.
-  return after.find(([, k]) => steps[k] !== 'done')?.[1] || READY[0]
-}
-const NOW_TEXT = { cv: 'CV next', musaned: 'Musaned next', selected: 'Waiting to be chosen', wafid: 'Wafid medical', epro: 'EPRO approval',
+export const phaseOf = (steps = {}, p = {}, after = AFTER) => phaseFrom(steps, p, after)
+const NOW_TEXT = { cv: 'CV next', musaned: 'Musaned next', waiting: 'Waiting to be chosen', selected: 'Chosen — book Wafid', wafid: 'Wafid medical', unfit: 'Medical UNFIT', epro: 'EPRO approval',
   tasheer: 'Tasheer next', insurance: 'Insurance next', embassy: 'Visa next', police: 'Police clearance next', choices: 'All steps done' }
 
 export default function ProfilesPage() {
@@ -56,44 +50,52 @@ export default function ProfilesPage() {
   const [brokers, setBrokers] = useState([])
   const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState(searchParams.get('q') || '')
+  // The search looks 500 ms after the last key (not on every letter).
+  const [q, setQ] = useState(query)
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setQ(query)
+      setSearchParams(prev => {
+        const next = new URLSearchParams(prev)
+        if (query.trim()) next.set('q', query.trim())
+        else next.delete('q')
+        return next
+      }, { replace: true })
+    }, 500)
+    return () => clearTimeout(t)
+  }, [query]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const status = searchParams.get('status') || 'all'
   const brokerId = searchParams.get('broker_id') || ''
 
+  // The whole list once (cached); the search, status and broker filter it here, in the browser.
   const load = useCallback(async (quiet) => {
     if (quiet !== true) setLoading(true)
     try {
-      const params = {}
-      if (query.trim()) params.q = query.trim()
-      if (status && status !== 'all') params.status = status
-      if (brokerId) params.broker_id = brokerId
-
       const [profilesRes, brokersRes] = await Promise.all([
-        Object.keys(params).length ? api.get('/profiles', { params }).then(r => r.data)
-          : profilesList({ fresh: quiet === true, onSaved: quiet === true ? undefined : (d) => { setProfiles(d || []); setLoading(false) } }),
+        profilesList({ fresh: quiet === true, onSaved: quiet === true ? undefined : (d) => { setProfiles(d || []); setLoading(false) } }),
         cachedGet('/brokers', { onSaved: quiet === true ? undefined : (d) => setBrokers(d || []) }),
       ])
-      setProfiles(profilesRes)
-      setBrokers(brokersRes)
+      setProfiles(profilesRes || [])
+      setBrokers(brokersRes || [])
     } catch {
       if (quiet !== true) toast.error('ፕሮፋይሎችን መጫን አልተቻለም')
     } finally {
       setLoading(false)
     }
-  }, [query, status, brokerId])
+  }, [])
+  const byStatusBroker = useMemo(() => profiles.filter(p =>
+    (status === 'all' || (p.status || 'pending') === status) && (!brokerId || String(p.broker_id ?? '') === String(brokerId))), [profiles, status, brokerId])
   // A profile changed anywhere (a person, a robot, a phone): the list follows at once.
   useEffect(() => onDataChange(['profiles', 'brokers'], () => load(true), 3000), [load])
   // A move running: its new girls show as they come (every 5 s), even if a change notice is missed.
   const waitingFiles = useWaitingFiles()
   useEffect(() => { if (!waitingFiles.size) return; const t = setInterval(() => load(true), 5000); return () => clearInterval(t) }, [waitingFiles.size > 0, load]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => {
-    const t = setTimeout(load, 200)
-    return () => clearTimeout(t)
-  }, [load])
+  useEffect(() => { load() }, [load])
 
   // Date range, experience, age, married, country, skill, religion + sort.
-  const { rows: allRows, filterBar, sortBar, active: filtering, clear, step, setStep, stepCounts, activeCount, journey } = useProfileFilters(profiles)
+  const { rows: allRows, filterBar, sortBar, active: filtering, clear, step, setStep, stepCounts, activeCount, journey, filterKey } = useProfileFilters(byStatusBroker)
   // An old link ?chosen=1 (the 🤝 Selected button, now the journey's Selected phase).
   useEffect(() => { if (searchParams.get('chosen') === '1') { setStep('selected'); const n = new URLSearchParams(searchParams); n.delete('chosen'); setSearchParams(n, { replace: true }) } }, [searchParams.get('chosen')]) // eslint-disable-line react-hooks/exhaustive-deps
   const [phase, setPhase] = useState(() => { try { return localStorage.getItem('adal-list-phase') || 'cv' } catch { return 'cv' } })
@@ -119,31 +121,54 @@ export default function ProfilesPage() {
   }
   const PHASES = [...FIRST, ...after.map(([title, k, label]) => [k, label, title]), READY]
   const phaseOfP = (p) => phaseOf(journey.steps[p.id], p, after)
+  // The tabs' counts: every profile (the search does not change them — greyed while searching).
   const phaseCounts = {}
   for (const p of allRows) { const k = phaseOfP(p); phaseCounts[k] = (phaseCounts[k] || 0) + 1 }
-  const searching = !!query.trim()
-  const filtered = searching ? allRows : allRows.filter(p => phaseOfP(p) === phase)
+  const term = q.trim().toLowerCase()
+  const searching = !!term
+  const found = (p) => ['full_name', 'phone_number', 'national_id', 'passport_number', 'labor_id'].some(k => String(p[k] ?? '').toLowerCase().includes(term))
+  const filtered = searching ? allRows.filter(found) : allRows.filter(p => phaseOfP(p) === phase)
   // 100 a page: quick to draw on any phone.
   const PAGE = 100
   const [page, setPage] = useState(1)
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE))
-  useEffect(() => { setPage(1) }, [filtered.length, step, phase])
+  // Back to page 1 only when the tab, the search or a filter changes (not on the 5-second refresh).
+  useEffect(() => { setPage(1) }, [step, phase, term, status, brokerId, filterKey])
+  // Only the Waiting tab sends CVs to agents on WhatsApp.
+  const waitingHere = !searching && phase === 'waiting'
   const rows = filtered.slice((Math.min(page, pages) - 1) * PAGE, Math.min(page, pages) * PAGE)
 
-  // 🔎 The whole Musaned Employment Requests list: who is newly chosen.
+  // 🔎 The whole Musaned Employment Requests list: who is newly chosen (the
+  // Waiting tab). By itself every hour on one PC; Check now here, at most
+  // 10 minutes, with Cancel.
   const [scanning, setScanning] = useState(false)
+  const [checkInfo, setCheckInfo] = useState(null)
+  const loadCheckInfo = () => api.get('/contracts/check').then(r => setCheckInfo(r.data)).catch(() => {})
+  // On the Waiting tab: whether a check is on (here or on another PC), every 30 s.
+  useEffect(() => {
+    if (phase !== 'waiting' || onPhone()) return
+    loadCheckInfo()
+    const t = setInterval(() => { if (!document.hidden) loadCheckInfo() }, 30000)
+    return () => clearInterval(t)
+  }, [phase]) // eslint-disable-line react-hooks/exhaustive-deps
+  const cancelScan = () => api.post('/contracts/cancel').then(() => toast('Cancelling the check…', { id: 'scan-cancel' })).catch(() => {})
   const scanMusaned = async () => {
     setScanning(true)
     const id = toast.loading('Looking at the Musaned list… (sign in if Musaned asks)')
     try {
       const r = await api.post('/contracts/scan')
       if (!r.data.started && !r.data.busy) throw new Error(r.data.error || 'Could not start')
+      if (r.data.busy) toast.loading(`A check is already on${r.data.by ? ` (${r.data.by})` : ''} — following it…`, { id })
+      const limit = Date.now() + (r.data.limit_ms || 10 * 60000) + 60000
       let s
       for (;;) {
         await new Promise(res => setTimeout(res, 4000))
         s = (await api.get('/contracts/check')).data
+        setCheckInfo(s)
         if (!s.running) break
+        if (Date.now() > limit) { await api.post('/contracts/cancel').catch(() => {}); throw new Error('The check took more than 10 minutes — stopped') }
       }
+      if (s.cancel) { toast.error(s.cancel, { id, duration: 6000 }); load(); return }
       const fresh = (s.results || []).filter(x => x.first).map(x => x.name)
       const moved = (s.results || []).filter(x => !x.first && x.state === 'chosen' && !x.unchanged).length
       const added = s.added || []
@@ -154,7 +179,7 @@ export default function ProfilesPage() {
       load()
     } catch (e) {
       toast.error(e.response?.data?.error || e.message, { id })
-    } finally { setScanning(false) }
+    } finally { setScanning(false); loadCheckInfo() }
   }
 
   // Ticked profiles (the box at the top centre of each card) → the side bar.
@@ -194,6 +219,7 @@ export default function ProfilesPage() {
         <div className="grid w-full grid-cols-5 gap-1 md:flex md:w-auto md:min-w-0 md:flex-1 md:gap-1.5 md:overflow-x-auto md:pb-1" role="tablist">
           {PHASES.map(([k, label, title]) => (
             <button key={k} type="button" role="tab" aria-selected={!searching && phase === k} onClick={() => { setPhase(k); setStep(null) }}
+              title={searching ? 'All profiles in this tab (not the search)' : undefined}
               {...(title ? {
                 draggable: true, title: 'Drag to change the order',
                 onDragStart: (e) => { setDragging(title); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', title) },
@@ -203,15 +229,25 @@ export default function ProfilesPage() {
               } : {})}
               className={`flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-xl px-1 py-1.5 text-[11px] leading-tight font-bold transition-colors md:shrink-0 md:flex-row md:gap-2 md:px-3.5 md:py-2 md:text-sm ${title ? 'cursor-grab active:cursor-grabbing' : ''} ${dragging === title && title ? 'opacity-40' : ''} ${!searching && phase === k ? 'bg-teal-600 text-white shadow' : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:ring-teal-400 dark:bg-slate-900 dark:text-slate-300 dark:ring-slate-700'}`}>
               <span className="max-w-full truncate">{label}</span>
-              <span className={`rounded-full px-1.5 text-[10px] md:text-xs tabular-nums ${!searching && phase === k ? 'bg-white/25' : 'bg-slate-100 dark:bg-slate-800'}`}>{phaseCounts[k] || 0}</span>
+              <span className={`rounded-full px-1.5 text-[10px] md:text-xs tabular-nums ${searching ? 'opacity-40' : ''} ${!searching && phase === k ? 'bg-white/25' : 'bg-slate-100 dark:bg-slate-800'}`}>{phaseCounts[k] || 0}</span>
             </button>
           ))}
         </div>
-        {phase === 'selected' && !searching && !onPhone() && (
-          <Button variant="secondary" className="whitespace-nowrap !px-3 text-sm" onClick={scanMusaned} disabled={scanning}>
-            {scanning ? '🔎 …' : '🔎 Check now'}
+        {phase === 'waiting' && !searching && !onPhone() && (<>
+          <Button variant="secondary" className="whitespace-nowrap !px-3 text-sm" onClick={scanMusaned} disabled={scanning || checkInfo?.running}
+            title={`Check for new selections on Musaned (by itself every ${checkInfo?.every_min || 60} minutes; Check now stops after ${checkInfo?.manual_limit_min || 10} minutes)`}>
+            {scanning || checkInfo?.running ? '🔎 Checking…' : '🔎 Check now'}
           </Button>
-        )}
+          {(scanning || checkInfo?.running) && (
+            <Button variant="secondary" className="whitespace-nowrap !px-3 text-sm" onClick={cancelScan}>✕ Cancel</Button>
+          )}
+          {checkInfo && (
+            <span className="text-xs text-slate-500">
+              {checkInfo.running ? `Checking on ${checkInfo.checking_on || checkInfo.by || 'this PC'}…`
+                : `${checkInfo.last ? `Last checked ${new Date(checkInfo.last).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Not checked yet'}${checkInfo.next_at ? ` · next ${new Date(checkInfo.next_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}${checkInfo.why ? ` · ${checkInfo.why}` : ''}`}
+            </span>
+          )}
+        </>)}
         {/* On a phone: a round ＋ above the tab bar, always in reach. */}
         <Button data-tour="new-profile" className="whitespace-nowrap hidden md:inline-flex" onClick={() => navigate('/profiles/new')}>+ ፕሮፋይል አክል</Button>
         {createPortal(<button type="button" aria-label="ፕሮፋይል አክል" onClick={() => navigate('/profiles/new')}
@@ -223,13 +259,7 @@ export default function ProfilesPage() {
         <Input
           placeholder="በስም፣ በስልክ ወይም በመታወቂያ ይፈልጉ..."
           value={query}
-          onChange={(e) => {
-            setQuery(e.target.value)
-            const next = new URLSearchParams(searchParams)
-            if (e.target.value.trim()) next.set('q', e.target.value.trim())
-            else next.delete('q')
-            setSearchParams(next, { replace: true })
-          }}
+          onChange={(e) => setQuery(e.target.value)}
           icon={
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -272,14 +302,14 @@ export default function ProfilesPage() {
 
         <div className="col-span-2 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
           <span>
-            {filtered.length}{searching ? ' found' : ''}
+            {searching ? `Search: ${filtered.length} found` : filtered.length}
             {filtering && (
               <button type="button" className="ml-3 text-teal-700 dark:text-teal-300 hover:underline" onClick={clear}>
                 Clear filters
               </button>
             )}
             {/* Any filter on (a step, a search, a status…): tick every profile it found, on every page. */}
-            {(filtering || step || query.trim() || status !== 'all' || brokerId) && filtered.length > 0 && (
+            {(filtering || step || searching || status !== 'all' || brokerId) && filtered.length > 0 && (
               filtered.every(p => picked.has(p.id))
                 ? <button type="button" className="ml-3 font-semibold text-slate-500 hover:underline" onClick={() => { setPicked(new Map()); setLacking({}) }}>☐ Untick all</button>
                 : <button type="button" className="ml-3 rounded-md bg-teal-600 px-2 py-0.5 font-semibold text-white hover:bg-teal-700" onClick={() => setPicked(m => { const n = new Map(m); filtered.forEach(p => n.set(p.id, p)); return n })}>☑ Select all {filtered.length}</button>
@@ -334,7 +364,8 @@ export default function ProfilesPage() {
               </div>
 
               <PrioritizeButton profileId={p.id} className="mt-2" />
-              <p className="mt-1.5 truncate text-xs font-semibold text-teal-700 dark:text-teal-300">{NOW_TEXT[phaseOfP(p)]}{p.status === 'medical_rejected' ? ' · UNFIT' : ''}</p>
+              <p className="mt-1.5 truncate text-xs font-semibold text-teal-700 dark:text-teal-300">{NOW_TEXT[phaseOfP(p)]}{p.status === 'medical_rejected' && phaseOfP(p) !== 'unfit' ? ' · UNFIT' : ''}</p>
+              <StepMarks {...stepMarks(journey.steps[p.id], p, after)} />
               {lacking[p.id]?.length > 0 && (
                 <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-2 py-1.5 text-[11px] text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
                   <b>Missing:</b> {lacking[p.id].join(' · ')}
@@ -347,12 +378,27 @@ export default function ProfilesPage() {
         </>
       )}
       {picked.size > 0 && (
-        <SelectionBar picked={[...picked.values()]} onRemove={togglePick} onClear={() => { setPicked(new Map()); setLacking({}) }} onLacking={setLacking}
+        <SelectionBar picked={[...picked.values()]} onRemove={togglePick}
+          whatsappHere={waitingHere} waitingPicked={[...picked.values()].filter(p => inWaitingPhase(journey.steps[p.id], p))} onClear={() => { setPicked(new Map()); setLacking({}) }} onLacking={setLacking}
           onAllShown={() => setPicked(m => { const n = new Map(m); rows.forEach(r => n.set(r.id, r)); return n })} />
       )}
     </div>
   )
 }
+/**
+ * On each card: a step skipped up to the EPRO ("skipped"), and each stage
+ * done after it (those can come in any order, so they are never "skipped").
+ */
+function StepMarks({ skipped = [], done = [] }) {
+  if (!skipped.length && !done.length) return null
+  return (
+    <div className="mt-1 flex flex-wrap gap-1 text-[10px] font-semibold leading-tight">
+      {skipped.map(s => <span key={`s-${s}`} title={`${s} was not ticked, but a later step was`} className="rounded bg-amber-100 px-1 py-px text-amber-800 dark:bg-amber-900/30 dark:text-amber-200">{s} skipped</span>)}
+      {done.map(s => <span key={`d-${s}`} title={`${s} done`} className="rounded bg-emerald-100 px-1 py-px text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200">✓ {s}</span>)}
+    </div>
+  )
+}
+
 // The seven steps in journey order, for the small dots on each card.
 const STEP_LIST = [...SHARED, ...BRANCHES.flatMap(b => b.steps)].map(([k, t]) => [k, t])
 const DOT = { waiting: 'bg-sky-400', done: 'bg-emerald-500', active: 'bg-amber-400 animate-pulse', failed: 'bg-red-500', todo: 'bg-slate-200 dark:bg-slate-700', soon: 'bg-slate-100 dark:bg-slate-800' }

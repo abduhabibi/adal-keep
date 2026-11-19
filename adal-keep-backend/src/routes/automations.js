@@ -757,6 +757,39 @@ export function stepNow(p, journey) {
   return { key, n: i + 1, of: STEPS.length, title, unfit: key === 'wafid' && p.status === 'medical_rejected' }
 }
 
+/**
+ * The Profiles page's Waiting tab (asked on 2026-11-19): on Musaned, nobody
+ * chose her yet, nothing after it done — and not UNFIT. The only girls whose
+ * CVs may go to agents on WhatsApp. steps: { key: state } (journeyOf).
+ * (The same rule as phaseOf() in the frontend's ProfilesPage.jsx.)
+ */
+export function inWaitingPhase(steps = {}, p = {}) {
+  return ['done', 'waiting'].includes(steps.musaned) && steps.selected !== 'done'
+    && !(p.status === 'medical_fit' || steps.wafid === 'done') && steps.epro !== 'done'
+    && p.status !== 'medical_rejected'
+}
+
+/** Of these profiles, the ones in the Waiting tab: Set(id). */
+export async function waitingIds(db, ids) {
+  const list = [...new Set((ids || []).map(Number).filter(Boolean))]
+  if (!list.length) return new Set()
+  const out = new Set()
+  for (let i = 0; i < list.length; i += 500) {
+    const part = list.slice(i, i + 500)
+    const profiles = await db('profiles').whereIn('id', part).select('*')
+    const runs = new Map()
+    for (const r of await db('automation_queue').whereIn('profile_id', part).select('profile_id', 'workflow_id', 'status', 'pause_reason').orderBy('id', 'asc')) {
+      if (!runs.has(r.profile_id)) runs.set(r.profile_id, {})
+      runs.get(r.profile_id)[r.workflow_id] = r
+    }
+    for (const p of profiles) {
+      const steps = Object.fromEntries(journeyOf(p, runs.get(p.id) || {}, true).embassy.map(s => [s.key, s.state]))
+      if (inWaitingPhase(steps, p)) out.add(p.id)
+    }
+  }
+  return out
+}
+
 // The robots each step may start ("Check if chosen" always may: it keeps her stage up to date).
 export const STEP_ROBOTS = {
   cv: ['musaned_check_chosen'],

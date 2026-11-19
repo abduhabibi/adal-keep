@@ -660,6 +660,7 @@ export function startMirror() {
   const c = cloudCreds()
   if (!c || mirrorOn) return
   mirrorOn = true
+  startLanCompanion()   // an Adal Companion: the main PC over the office network
   const sync = () => { if (!document.hidden) mirrorSync(rest, c.agency).catch(() => {}) }
   sync()
   setInterval(sync, 20000)
@@ -696,6 +697,14 @@ export async function cloudAdapter(config) {
   if (isNew(query.profile_id)) { const r = realId(query.profile_id); if (r) query.profile_id = r; else onlyHere = true }
   const reply = (status, data, headers = {}) => ({ data, status, statusText: String(status), headers, config, request: {} })
   try {
+    // An Adal Companion: the main PC over the office network first (fast, not
+    // through the internet); a document waits here while the main PC is away.
+    if (ON_COMPANION && !onlyHere && !config.__noLan) {
+      const r = await viaLan(method, path, query, body, config)
+      if (r) return reply(r.status, r.data, r.headers)
+      const fieldUp = method === 'post' && body instanceof FormData && [...body.values()].some(v => v instanceof Blob) && path.match(/^\/profiles\/(\d+)\/fields\/(\d+)\/(upload|files)$/)
+      if (fieldUp) return reply(200, await queueForMain(path, body, fieldUp))
+    }
     // Fast: pages read the phone's own copy at once; with the PC live, an
     // answer older than a minute is asked for behind it (the next look is newer).
     if (method === 'get' && config.responseType !== 'blob' && !LIVE_FIRST.test(path)) {
@@ -909,6 +918,13 @@ async function signedUrl(fileId) {
   const p = (async () => {
     // On the phone already: no download at all.
     let blob = await cachedFile(fileId)
+    // An Adal Companion: from the main PC over the office network (as on the main PC itself).
+    if (!blob && ON_COMPANION && Number(fileId) > 0 && await lanUp()) {
+      try {
+        const r = await fetch(`/lan-api/files/${fileId}/download`, { headers: { 'X-Adal': '1' }, signal: timeUp(60000) })
+        if (r.ok && r.headers.get('X-Adal-Via') === 'lan') blob = await r.blob()
+      } catch {}
+    }
     if (!blob) {
       const rows = await rest('GET', `/rest/v1/keep_files?id=eq.${fileId}&select=object,mimetype`)
       if (!rows?.[0]?.object) return null
@@ -926,7 +942,7 @@ async function signedUrl(fileId) {
       keepFile(fileId, blob)
     }
     return URL.createObjectURL(blob)
-  })().catch(() => { signed.delete(fileId); return null })
+  })().catch(() => null).then(u => { if (!u) signed.delete(fileId); return u })
   signed.set(fileId, p)
   return p
 }
@@ -978,4 +994,153 @@ export function startCloudDocuments() {
       else m.addedNodes.forEach(scan)
     }
   }).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['src', 'href'] })
+}
+
+// ---------------------------------------------------------------- office network
+// An Adal Companion's own online pages (127.0.0.1:47801): whenever the main PC
+// answers on the office network, every call, document and upload goes to it
+// straight over the network — AdalKeep.exe /lan-api → adal-companion.exe
+// (mainproxy.go) → the main PC, with this Companion's key — as fast as on the
+// main PC, and nothing goes through the internet first (asked on 2026-11-19:
+// "make the Companion really fast, like on Main; it will back up later").
+// With the main PC out of reach, a document waits here and goes to the main PC
+// when it is back; only after LAN_WAIT_MS without it, through the internet.
+export const ON_COMPANION = typeof location !== 'undefined' && location.host === '127.0.0.1:47801'
+const LAN_WAIT_MS = 30 * 60 * 1000
+const LANQ = 'adal-lan-queue' + SUFFIX   // [{ id, path, parts: [[k, v] | [k, { blob, name, type }]], at, shown }]
+const LANQ_CACHE = 'adal-lan-queue-v1'
+let lan = { at: 0, ok: false, p: null }
+let lanOkAt = 0
+const lanDown = () => { lan = { at: Date.now(), ok: false, p: null } }
+
+/** The main PC answers on the office network now (asked at most every few seconds). */
+export async function lanUp(fresh = false) {
+  if (!ON_COMPANION) return false
+  if (!fresh && Date.now() - lan.at < (lan.ok ? 20000 : 6000)) return lan.ok
+  if (!lan.p) {
+    lan.p = fetch('/lan-api/health', { headers: { 'X-Adal': '1' }, cache: 'no-store', signal: timeUp(2500) })
+      .then(r => r.ok && r.headers.get('X-Adal-Via') === 'lan').catch(() => false)
+      .then(ok => { lan = { at: Date.now(), ok, p: null }; if (ok) lanOkAt = Date.now(); return ok })
+  }
+  return lan.p
+}
+
+/** One call to the main PC over the network; null when it cannot be reached that way. */
+async function viaLan(method, path, query, body, config) {
+  if (!(await lanUp())) return null
+  const qs = Object.keys(query || {}).length ? '?' + new URLSearchParams(Object.entries(query).filter(([, v]) => v != null)).toString() : ''
+  const headers = { 'X-Adal': '1' }
+  let send
+  if (method !== 'get' && method !== 'head' && body != null) {
+    if (body instanceof FormData || body instanceof Blob) send = body
+    else { send = JSON.stringify(body); headers['Content-Type'] = 'application/json' }
+  }
+  let r
+  try {
+    r = await fetch(`/lan-api${path}${qs}`, { method: method.toUpperCase(), headers, body: send, cache: 'no-store', signal: timeUp(send instanceof FormData ? 180000 : 30000) })
+  } catch { lanDown(); return null }
+  if (r.headers.get('X-Adal-Via') !== 'lan') { lanDown(); return null }
+  lanOkAt = Date.now()
+  const type = r.headers.get('content-type') || ''
+  let data
+  if (config?.responseType === 'blob') data = await r.blob()
+  else if (/json/.test(type)) data = await r.json().catch(() => null)
+  else if (/^text\//.test(type)) data = await r.text()
+  else data = await r.blob()
+  // This Companion is not let in on the main PC (yet): the online way, as before.
+  if (r.status === 401 && data?.pc_access) { lanDown(); return null }
+  const head = Object.fromEntries(r.headers.entries())
+  if (r.status >= 400) {
+    const e = httpError(r.status, data?.error || data?.message || `Error ${r.status}`)
+    e.response = { status: r.status, data, headers: head }
+    throw e
+  }
+  if (method !== 'get') markDirty(path)
+  return { status: r.status, data, headers: head }
+}
+
+async function lanQueueCache() { return caches.open(LANQ_CACHE) }
+const lanQueueReq = (id) => new Request(`https://lan-queue.adal.local/${id}`)
+let lanQueue = load(LANQ, [])
+let lanFlushing = false
+
+/** A document for the main PC while it is out of reach: kept here, shown at once, sent when it is back. */
+async function queueForMain(path, form, fieldUp) {
+  const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  const parts = [], shown = []
+  let n = 0
+  const c = await lanQueueCache()
+  let fieldName
+  try { fieldName = ((await get(`/profiles/${fieldUp[1]}/fields`, {}).catch(() => [])) || []).find(f => String(f.id) === fieldUp[2])?.name } catch {}
+  for (const [k, v] of form.entries()) {
+    if (v instanceof Blob) {
+      const key = `${id}-${n++}`
+      await c.put(lanQueueReq(key), new Response(v, { headers: { 'Content-Type': v.type || 'application/octet-stream' } }))
+      parts.push([k, { blob: key, name: v.name || 'file', type: v.type || '' }])
+      const kept = await keepHere(fieldUp[1], fieldUp[2], fieldName, v, fieldUp[3] === 'upload' && shown.length === 0)
+      shown.push(kept)
+    } else parts.push([k, String(v)])
+  }
+  lanQueue.push({ id, path, parts, at: new Date().toISOString(), shown: shown.map(f => f.id) })
+  save(LANQ, lanQueue)
+  return { ok: true, success: true, queued: true, files: shown, message: 'Kept on this PC — it goes to the main PC as soon as the main PC is reachable.' }
+}
+
+async function formOf(item) {
+  const c = await lanQueueCache()
+  const form = new FormData()
+  for (const [k, v] of item.parts) {
+    if (v && typeof v === 'object' && v.blob) {
+      const hit = await c.match(lanQueueReq(v.blob))
+      if (!hit) return null
+      const b = await hit.blob()
+      form.append(k, new File([b], v.name, { type: v.type || b.type }))
+    } else form.append(k, v)
+  }
+  return form
+}
+
+async function dropQueued(item) {
+  lanQueue = lanQueue.filter(x => x.id !== item.id); save(LANQ, lanQueue)
+  pendingFiles = pendingFiles.filter(f => !(item.shown || []).includes(f.file?.id)); save(PFILES, pendingFiles)
+  try { const c = await lanQueueCache(); for (const [, v] of item.parts) if (v?.blob) await c.delete(lanQueueReq(v.blob)) } catch {}
+}
+
+/** The documents that waited: to the main PC when it answers; through the internet only after LAN_WAIT_MS without it. */
+async function flushLanQueue() {
+  if (lanFlushing || !lanQueue.length) return
+  lanFlushing = true
+  try {
+    for (const item of [...lanQueue]) {
+      const form = await formOf(item)
+      if (!form) { await dropQueued(item); continue }
+      if (await lanUp(true)) {
+        try {
+          const r = await viaLan('post', item.path, {}, form, {})
+          if (!r) break
+        } catch (e) {
+          // The main PC refused it (it will never take it): not tried for ever.
+          if (!(e.response?.status >= 400 && e.response.status < 500)) break
+          console.warn('[lan] the main PC refused a document that waited:', e.message)
+        }
+        await dropQueued(item)
+        const pid = item.path.match(/^\/profiles\/(\d+)/)?.[1]
+        try { window.dispatchEvent(new CustomEvent('adal-data-change', { detail: { paths: pid ? [`/profiles/${pid}`, `/profiles/${pid}/fields`] : ['/profiles'] } })) } catch {}
+        continue
+      }
+      const away = Date.now() - Math.max(lanOkAt, new Date(item.at).getTime())
+      if (away < LAN_WAIT_MS) break
+      // Out of reach for a long time: through the internet after all (the main PC files it from there).
+      await dropQueued(item)
+      try { await cloudAdapter({ method: 'post', url: `/api${item.path}`, data: form, __noLan: true }) } catch (e) { console.warn('[lan] online upload failed:', e.message) }
+    }
+  } finally { lanFlushing = false }
+}
+
+let lanStarted = false
+export function startLanCompanion() {
+  if (!ON_COMPANION || lanStarted) return
+  lanStarted = true
+  lanUp(true).then(() => flushLanQueue()).catch(() => {})
+  setInterval(() => { flushLanQueue().catch(() => {}) }, 10000)
 }

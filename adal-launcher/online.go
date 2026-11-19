@@ -18,10 +18,12 @@ import (
 	"mime"
 	"net"
 	"net/http"
+	"net/http/httputil"
 	"net/url"
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -77,6 +79,32 @@ func startOnlinePage(root string) bool {
 	files := http.FileServer(http.Dir(dir))
 	mux := http.NewServeMux()
 	mux.HandleFunc("/tg", telegramFile)
+	// The main PC over the office network (adal-companion mainproxy.go): the
+	// pages' calls, documents and uploads, fast and not through the internet.
+	// Only these pages (a header another website cannot send unasked).
+	lan := &httputil.ReverseProxy{
+		Director: func(r *http.Request) {
+			r.URL.Scheme, r.URL.Host = "http", "127.0.0.1:47810"
+			r.URL.Path = "/local/main/" + strings.TrimPrefix(r.URL.Path, "/lan-api/")
+			r.URL.RawPath = ""
+			r.Host = "127.0.0.1:47810"
+			r.Header.Del("Cookie")
+			r.Header.Del("Origin")
+			r.Header.Del("Referer")
+			r.Header.Set("X-Adal", "1")
+		},
+		FlushInterval: -1,
+		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			http.Error(w, `{"error":"the Companion program does not answer"}`, http.StatusBadGateway)
+		},
+	}
+	mux.HandleFunc("/lan-api/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Adal") != "1" {
+			http.Error(w, "no", http.StatusForbidden)
+			return
+		}
+		lan.ServeHTTP(w, r)
+	})
 	forgetRoutes(root, mux)
 	// The pairing page (connect.html) on this PC: the number typed there finds
 	// the main PC on this network first (fast, no internet needed) …

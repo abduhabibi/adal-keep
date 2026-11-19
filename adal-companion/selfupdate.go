@@ -890,6 +890,7 @@ func startSelfUpdate(root string) *updater {
 	if ln, err := net.Listen("tcp", fmt.Sprintf(":%d", lanHTTPPort)); err == nil {
 		mux := u.handler()
 		addReplicaRoutes(mux) // the copy, for a restore on a new main PC (replica.go)
+		addMainProxy(mux)     // the online pages reach the main PC over the network (mainproxy.go)
 		go http.Serve(ln, mux)
 	} else {
 		log.Printf("⚠️ update sharing: %v", err)

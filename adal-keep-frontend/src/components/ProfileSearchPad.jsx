@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../services/api'
 import { dragProfiles } from '../lib/profileDrag'
+import Segmented from './shared/Segmented'
 
 /**
  * Search pad: a searchable list of profiles. Type a name, passport number,
@@ -122,14 +123,8 @@ export default function ProfileSearchPad({
           className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white/80 dark:bg-slate-900/60 pl-7 pr-2 py-1.5 text-sm text-slate-800 dark:text-slate-100 placeholder:text-slate-400 focus:border-teal-500 focus:outline-none"
         />
       </div>
-      <div className="flex gap-1 mb-2" role="group" aria-label="Run">
-        {[['', 'All'], ['on', 'Running'], ['off', 'Not running']].map(([v, t]) => (
-          <button key={v} type="button" onClick={() => setRun(v)}
-            className={`flex-1 rounded-md px-1.5 py-1 text-[11px] font-semibold ${run === v ? 'bg-teal-600 text-white' : 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300'}`}>
-            {t}
-          </button>
-        ))}
-      </div>
+      <Segmented size="sm" className="mb-2 flex w-full [&>button]:flex-1" aria-label="Run"
+        options={[['', 'All'], ['on', 'Running'], ['off', 'Not running']]} value={run} onChange={setRun} />
       <ul className={`overflow-y-auto custom-scrollbar -mx-1 ${maxHeight}`}>
         {shown.map(p => (
           <li key={p.id}>

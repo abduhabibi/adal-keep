@@ -30,18 +30,19 @@ import AiKeysCard from '../components/AiKeysCard'
 import TransitionsCard from '../components/TransitionsCard'
 import PlanCard from '../components/PlanCard'
 import EproSignatureCard from '../components/EproSignatureCard'
+import Segmented from '../components/shared/Segmented'
 
-// The tabs of Settings: [id, icon, name].
+// The tabs of Settings: [id, name].
 // The phone app (a narrow PC window keeps every tab).
 const isPhoneView = () => !!window.Capacitor?.isNativePlatform?.() || import.meta.env.VITE_PHONE === '1'
 const SETTINGS_TABS = [
-  ['agency', '🏢', 'Agency'],
-  ['plan', '⭐', 'Plan'],
-  ['portals', '🤖', 'Portals'],
-  ['integrations', '🔌', 'Integrations'],
-  ['transitions', '🚚', 'Transitions'],
-  ['backup', '💾', 'Backup & updates'],
-  ['look', '🎨', 'Look & language'],
+  ['agency', 'Agency'],
+  ['plan', 'Plan'],
+  ['portals', 'Portals'],
+  ['integrations', 'Integrations'],
+  ['transitions', 'Transitions'],
+  ['backup', 'Backup & updates'],
+  ['look', 'Look & language'],
 ]
 
 export default function SettingsPage() {
@@ -210,17 +211,11 @@ export default function SettingsPage() {
     <div className="animate-fade-up max-w-4xl mx-auto space-y-6 pb-12">
       <PageHeader
         title="የስርዓት ቅንብሮች"
-        subtitle="መልክ፣ አውታረ መረብ፣ ምዝገባ እና ማሻሻያዎች"
       />
       {/* Settings in tabs — a short page instead of one long scroll. */}
-      <nav className="sticky top-0 z-20 -mx-1 flex gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-white/90 p-1 backdrop-blur dark:border-slate-700 dark:bg-slate-900/90" translate="no">
-        {TABS.map(([id, icon, label]) => (
-          <button key={id} type="button" onClick={() => setTab(id)}
-            className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${tab === id ? 'bg-teal-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'}`}>
-            <span>{icon}</span>{label}
-          </button>
-        ))}
-      </nav>
+      <div className="sticky top-0 z-20 py-1" translate="no">
+        <Segmented wrap options={TABS} value={tab} onChange={setTab} />
+      </div>
       {tab === 'agency' && <>
       {window.__ADAL_CLOUD && <ErrorBoundary small name="This phone"><PhoneCard /></ErrorBoundary>}
       {!window.__ADAL_CLOUD && import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Computers"><PcAccessList /></ErrorBoundary>}
@@ -228,7 +223,7 @@ export default function SettingsPage() {
       {/* NEW: Agency Settings Card */}
       <Card>
         <h2 className="font-display text-lg font-bold mb-4 flex items-center gap-2">
-          <span>🏢</span> የኤጀንሲ ቅንብሮች (Agency Settings)
+          የኤጀንሲ ቅንብሮች
         </h2>
         <div className="space-y-4">
           <div>
@@ -241,9 +236,6 @@ export default function SettingsPage() {
               value={agencyEmail}
               onChange={(e) => setAgencyEmail(e.target.value)}
             />
-            <p className="text-xs text-slate-500 mt-1.5">
-              This email will be used as the default contact for automated workflows like Musaned.
-            </p>
           </div>
           <div className="flex justify-end">
             <Button onClick={saveSettings} isLoading={saving}>
@@ -254,7 +246,7 @@ export default function SettingsPage() {
       </Card>
       <Card>
         <h2 className="font-display text-lg font-bold mb-4 flex items-center gap-2">
-          <span>🔑</span> ምዝገባ
+          ምዝገባ
         </h2>
         <div className="space-y-4">
           <div className="flex justify-between items-center p-4 bg-slate-50 dark:bg-slate-800/60 rounded-xl border">
@@ -310,7 +302,7 @@ export default function SettingsPage() {
       {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Backup"><BackupCard /></ErrorBoundary>}
       <Card>
         <h2 className="font-display text-lg font-bold mb-4 flex items-center gap-2">
-          <span>🔄</span> ማሻሻያዎች
+          ማሻሻያዎች
         </h2>
         <div className="space-y-4">
       <Modal
@@ -372,7 +364,6 @@ export default function SettingsPage() {
           <div className="flex flex-wrap items-center justify-between gap-4 p-4 bg-slate-50 dark:bg-slate-800/60 rounded-xl border">
             <div>
               <h3 className="font-medium">Software Updates</h3>
-              <p className="text-sm text-slate-500">Check GitHub for the latest version and install it</p>
               <label className="mt-2 flex items-center gap-2 text-sm cursor-pointer">
                 <input type="checkbox" checked={autoUpdate} onChange={async (e) => {
                   const on = e.target.checked
@@ -443,56 +434,26 @@ export default function SettingsPage() {
       {tab === 'look' && <>
       <Card>
         <h2 className="font-display text-lg font-bold mb-4 flex items-center gap-2">
-          <span>🌐</span> Language · ቋንቋ
+          Language · ቋንቋ
         </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {[['am', 'አማርኛ', 'Amharic'], ['en', 'English', 'እንግሊዝኛ']].map(([id, label, other]) => (
-            <button key={id} type="button" onClick={async () => {
-                if (getLang() === id) return
-                // The tips panel follows the app's language — told in the
-                // background (on a phone the PC can be slow or off; the switch
-                // never waits for it).
-                Promise.race([api.post('/tutor/lang', { who: whoAmI(), lang: id }).catch(() => {}), new Promise(r => setTimeout(r, 800))])
-                  .finally(() => setLang(id))
-              }}
-              className={`rounded-xl border-2 p-4 text-left transition ${getLang() === id ? 'border-teal-500 bg-teal-50/60 dark:bg-teal-900/20' : 'border-slate-200 dark:border-slate-700 hover:border-teal-300'}`}>
-              <span className="block font-semibold" translate="no">{label}</span>
-              <span className="block text-xs text-slate-500 dark:text-slate-400" translate="no">{other}{getLang() === id ? ' · on' : ''}</span>
-            </button>
-          ))}
-        </div>
-        <p className="mt-2 text-xs text-slate-500" translate="no">Saved on this PC. Profile data and chat messages stay as they were written.</p>
+        <Segmented translate="no" options={[['am', 'አማርኛ'], ['en', 'English']]} value={getLang()} onChange={(id) => {
+            if (getLang() === id) return
+            // The tips panel follows the app's language — told in the
+            // background (on a phone the PC can be slow or off; the switch
+            // never waits for it).
+            Promise.race([api.post('/tutor/lang', { who: whoAmI(), lang: id }).catch(() => {}), new Promise(r => setTimeout(r, 800))])
+              .finally(() => setLang(id))
+          }} />
       </Card>
       <Card>
         <h2 className="font-display text-lg font-bold mb-4 flex items-center gap-2">
-          <span>🎨</span> መልክ
+          መልክ
         </h2>
-        <div data-tour="theme-picker" className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          {[
-            { id: 'light', label: 'Light', am: 'ብርሃን', swatch: 'bg-gradient-to-br from-white to-slate-200' },
-            { id: 'dark', label: 'Dark', am: 'ጨለማ', swatch: 'bg-gradient-to-br from-slate-800 to-black' },
-            { id: 'gradient', label: 'Gradient', am: 'ቀለማት', swatch: 'theme-swatch-gradient' },
-          ].map(t => (
-            <button
-              key={t.id}
-              type="button"
-              onClick={() => chooseTheme(t.id)}
-              className={`flex items-center gap-3 p-3 rounded-xl border-2 text-left transition-colors ${
-                theme === t.id ? 'border-teal-500 bg-teal-50/60 dark:bg-teal-900/20' : 'border-slate-200 dark:border-slate-700 hover:border-teal-300'
-              }`}
-            >
-              <span className={`h-10 w-10 shrink-0 rounded-lg border border-slate-300 dark:border-slate-600 ${t.swatch}`} />
-              <span>
-                <span className="block font-semibold text-slate-800 dark:text-slate-100">{t.label}</span>
-                <span className="block text-xs text-slate-500 dark:text-slate-400">{t.am}{theme === t.id ? ' · on' : ''}</span>
-              </span>
-            </button>
-          ))}
-        </div>
+        <Segmented data-tour="theme-picker" options={[['light', 'Light'], ['dark', 'Dark'], ['gradient', 'Gradient']]} value={theme} onChange={chooseTheme} />
       </Card>
       <Card>
         <h2 className="font-display text-lg font-bold mb-4 flex items-center gap-2">
-          <span>🖼️</span> የጀርባ ምስል
+          የጀርባ ምስል
         </h2>
         <div className="grid gap-6 md:grid-cols-2">
           <div className="aspect-video rounded-xl border-2 border-dashed flex items-center justify-center bg-slate-100 dark:bg-slate-900 overflow-hidden">

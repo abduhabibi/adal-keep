@@ -3,10 +3,8 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'
 // The fonts are part of the app (no waiting for Google Fonts, works offline).
-import '@fontsource-variable/dm-sans/index.css'
-import '@fontsource/syne/600.css'
-import '@fontsource/syne/700.css'
-import '@fontsource/syne/800.css'
+import '@fontsource-variable/hanken-grotesk/index.css'
+import '@fontsource-variable/sora/index.css'
 import './index.css'
 
 // A page in a hidden tab does not need its every-few-seconds refreshes: they

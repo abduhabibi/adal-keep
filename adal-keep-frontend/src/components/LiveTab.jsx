@@ -224,7 +224,7 @@ export default function LiveTab({ runId, fill = false, startFull = false, onClos
   const btn = 'shrink-0 rounded-lg border border-slate-300 dark:border-slate-600 px-2 py-1.5 text-xs font-semibold active:bg-slate-100 dark:active:bg-slate-800'
   const tabBtn = (v, label) => (
     <button type="button" onClick={() => pickView(v)}
-      className={`flex-1 rounded-md py-1 text-xs font-semibold ${view === v ? 'bg-white dark:bg-slate-700 shadow text-indigo-700 dark:text-indigo-300' : 'text-slate-500'}`}>{label}</button>
+      className={`ak-seg-item flex-1 !min-h-[28px] text-xs ${view === v ? 'is-on' : ''}`}>{label}</button>
   )
   return (
     <div className={fill
@@ -246,9 +246,9 @@ export default function LiveTab({ runId, fill = false, startFull = false, onClos
           : <button type="button" className={`${btn} border-indigo-400 text-indigo-700 dark:text-indigo-300`} onClick={() => setFull(true)}>⛶ Expand</button>)}
       </div>
       <div className="flex items-center gap-2">
-        <div className="flex flex-1 rounded-lg bg-slate-100 dark:bg-slate-900 p-0.5">
-          {tabBtn('mirror', '📄 Page')}
-          {tabBtn('picture', '🖼 Picture')}
+        <div className="ak-seg flex flex-1">
+          {tabBtn('mirror', 'Page')}
+          {tabBtn('picture', 'Picture')}
         </div>
         <span className="shrink-0 text-[10px] text-slate-500">{busy ? '⏳' : mode === 'live' ? `⚡ ${fps}/s` : mode === 'pictures' ? '🔄' : '…'}</span>
       </div>

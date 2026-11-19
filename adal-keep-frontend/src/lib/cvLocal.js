@@ -299,6 +299,64 @@ const WIDE_PHOTOS_CSS = `
 // tall for A4 first loses cell padding, then shrinks its body; one that fits is
 // left alone.
 const FIT_SCRIPT = `<script>(function(){
+function personBox(img){
+  // Where she stands in the picture (natural px): the pixels that differ from the
+  // background, which is read row by row from the left and right edges (a wall and
+  // a floor of different colours both work). null when it cannot tell.
+  var nw=img.naturalWidth,nh=img.naturalHeight;if(!nw||!nh)return null;
+  var k=Math.min(1,160/Math.max(nw,nh)),w=Math.max(8,Math.round(nw*k)),h=Math.max(8,Math.round(nh*k));
+  var c=document.createElement('canvas');c.width=w;c.height=h;var x=c.getContext('2d',{willReadFrequently:true});
+  try{x.drawImage(img,0,0,w,h);var d=x.getImageData(0,0,w,h).data}catch(e){return null}
+  var s=Math.max(2,Math.round(w*0.04)),L=[],R=[],y,i,o,j;
+  for(y=0;y<h;y++){var l=[0,0,0],r=[0,0,0],n=0;
+    for(j=Math.max(0,y-2);j<=Math.min(h-1,y+2);j++)for(i=0;i<s;i++){o=(j*w+i)*4;l[0]+=d[o];l[1]+=d[o+1];l[2]+=d[o+2];o=(j*w+w-1-i)*4;r[0]+=d[o];r[1]+=d[o+1];r[2]+=d[o+2];n++}
+    L.push([l[0]/n,l[1]/n,l[2]/n]);R.push([r[0]/n,r[1]/n,r[2]/n])}
+  // her pixels differ from both edges of their row (a wall, a floor, a backdrop's dark edge)
+  var dist=function(o,a){var dr=d[o]-a[0],dg=d[o+1]-a[1],db=d[o+2]-a[2];return Math.sqrt(dr*dr+dg*dg+db*db)};
+  var T=[];for(y=0;y<h;y++){var nz=0,m=0;for(j=Math.max(0,y-2);j<=Math.min(h-1,y+2);j++)for(i=0;i<s;i++){nz+=dist((j*w+i)*4,L[y])+dist((j*w+w-1-i)*4,R[y]);m+=2}T.push(Math.max(28,2.5*nz/m+12))}
+  var col=[],fg=new Uint8Array(w*h),all=0;for(i=0;i<w;i++)col.push(0);
+  for(y=0;y<h;y++)for(i=s;i<w-s;i++){o=(y*w+i)*4;if(Math.min(dist(o,L[y]),dist(o,R[y]))>T[y]){fg[y*w+i]=1;col[i]++;all++}}
+  var best=0;for(i=1;i<w;i++)if(col[i]>col[best])best=i;
+  if(col[best]<h*0.25)return null;
+  // every column with much of her in it stays (a shadow beside her may widen the box: never narrower)
+  var min=Math.max(h*0.08,col[best]*0.3),x0=-1,x1=-1;
+  for(i=0;i<w;i++)if(col[i]>min){if(x0<0)x0=i;x1=i}
+  var rowOn=function(y){var n=0;for(var i=x0;i<=x1;i++)n+=fg[y*w+i];return n>Math.max(1,(x1-x0+1)*0.04)};
+  var y0=0,y1=h-1;
+  for(y=0;y<h-2;y++)if(rowOn(y)&&rowOn(y+1)&&rowOn(y+2)){y0=y;break}
+  for(y=h-1;y>1;y--)if(rowOn(y)&&rowOn(y-1)&&rowOn(y-2)){y1=y;break}
+  var inBox=0;for(y=y0;y<=y1;y++)for(i=x0;i<=x1;i++)inBox+=fg[y*w+i];
+  if(inBox<all*0.85)return null;
+  if((x1-x0+1)<w*0.1||(y1-y0+1)<h*0.4)return null;
+  return {x0:x0/k,y0:y0/k,x1:(x1+1)/k,y1:(y1+1)/k,w:nw,h:nh};
+}
+function frameBody(img){
+  // Her full-body photo framed head to feet, centred on her: the empty sides of a
+  // wide photo are cut, never her head or her feet (a little room is kept around).
+  var b=img._adalBox;if(b===undefined)b=img._adalBox=personBox(img);if(!b)return;
+  var r=img.getBoundingClientRect();if(!r.width||!r.height)return;
+  var A=r.width/r.height,nw=b.w,nh=b.h,bh=b.y1-b.y0;
+  // a picture sized by itself (width/height auto): framed to the box it sits in
+  var q=img.parentElement&&img.parentElement.getBoundingClientRect();
+  if(q&&q.width&&q.height&&Math.abs(A-nw/nh)<nw/nh*0.02)A=q.width/q.height;
+  // Sideways she is cut to her box; above her head only a little empty wall goes,
+  // and nothing below: shoes on a dark floor are easy to miss, so her feet stay.
+  var x0=Math.max(0,b.x0-bh*0.06),x1=Math.min(nw,b.x1+bh*0.06),y0=b.y0-bh*0.07,y1=nh;
+  y0=y0<nh*0.04?0:Math.min(y0,nh*0.12);
+  var cw=x1-x0,ch=y1-y0,cx=(x0+x1)/2,cy=(y0+y1)/2;
+  if(cw/ch<A){cw=Math.min(nw,ch*A);x0=Math.max(0,Math.min(nw-cw,cx-cw/2));x1=x0+cw}
+  else{ch=Math.min(nh,cw/A);y0=Math.max(0,Math.min(nh-ch,cy-ch/2));y1=y0+ch}
+  var pc=function(v,t){return Math.max(0,v/t*100).toFixed(2)+'%'};
+  var st=img.style;
+  if(window.CSS&&CSS.supports&&CSS.supports('object-view-box','inset(1%)')){
+    st.setProperty('object-view-box','inset('+pc(y0,nh)+' '+pc(nw-x1,nw)+' '+pc(nh-y1,nh)+' '+pc(x0,nw)+')','important');
+  }else if(!img._adalCut){
+    var c=document.createElement('canvas');c.width=Math.round(x1-x0);c.height=Math.round(y1-y0);
+    try{c.getContext('2d').drawImage(img,x0,y0,x1-x0,y1-y0,0,0,c.width,c.height);img._adalCut=1;img._adalBox=null;img.src=c.toDataURL('image/jpeg',0.88)}catch(e){}
+  }
+  st.setProperty('object-fit','contain','important');st.setProperty('object-position','center','important');
+}
+function frameBodies(){var l=document.querySelectorAll('img[data-adal-body]');for(var i=0;i<l.length;i++)frameBody(l[i])}
 function fitDesign(){
   // A page made from a design (.cv): its full-body photo frame takes exactly the
   // room the header and the other blocks leave, so the design fills the whole
@@ -318,14 +376,16 @@ function fitDesign(){
   return true;
 }
 function fit(){
-  if(fitDesign())return;
-  var p=document.querySelector('.cv-page');if(!p||p.dataset.fitted)return;p.dataset.fitted='1';
+  frameBodies();
+  if(fitDesign()){frameBodies();return}
+  var p=document.querySelector('.cv-page');if(!p||p.dataset.fitted){frameBodies();return}p.dataset.fitted='1';
   var limit=Math.floor(297*96/25.4)+1,tall=function(){return p.scrollHeight>limit};
   var st=document.createElement('style');document.head.appendChild(st);
   for(var n=6;n>=2&&tall();n--)st.textContent='.cv-page td{padding-top:'+n+'px!important;padding-bottom:'+n+'px!important}';
   var b=p.querySelector('.cv-body')||p;
   for(var z=98;z>=60&&tall();z-=2)b.style.zoom=z/100;
   p.style.height='297mm';p.style.overflow='hidden';
+  frameBodies();
 }
 window.adalFit=fit;
 if(document.readyState==='complete')fit();else addEventListener('load',fit);
@@ -354,6 +414,9 @@ export function mergeTemplate(html, css, data) {
   for (const k of ['HEADER_IMAGE', 'FOOTER_IMAGE']) {
     if (!data[k]) out = out.replace(new RegExp(`<img\\b[^>]*\\{\\{${k}\\}\\}[^>]*>`, 'gi'), '')
   }
+
+  // Her full-body photo is framed on her by the page itself (frameBody in FIT_SCRIPT).
+  out = out.replace(/<img\b(?=[^>]*\{\{FULL_BODY_PHOTO_URL\}\})/gi, '<img data-adal-body="1"')
 
   // Replace tokens
   out = out.replace(/\{\{([A-Z_]+)\}\}/g, (_, k) => {

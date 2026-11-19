@@ -238,6 +238,8 @@ function BackupButton() {
     setBusy(true)
     try {
       const { data } = await api.post('/backup/run')
+      // The main PC is off or far: the request waits and goes by itself.
+      if (data.queued && !data.busy) { setBusy(false); toast(data.message || 'The backup starts as soon as the main PC answers.', { id: 'backup-now', duration: 8000 }); return }
       toast.loading(data.busy ? 'A backup is already running…' : 'Backup started…', { id: 'backup-now' })
       follow()
     } catch (e) {
@@ -246,7 +248,7 @@ function BackupButton() {
     }
   }
   return (
-    <button onClick={run} disabled={busy} title="Back up to Telegram now (whenever the robots are free it also runs by itself)"
+    <button onClick={run} disabled={busy} title="Back up now: to Telegram, or to the online storage when Telegram does not answer (it also runs by itself)"
       className={`ak-icon-btn ${busy ? '!text-teal-600 bg-teal-500/10' : ''}`}>
       <Icon name="backup" size={16} className={busy ? 'animate-pulse' : ''} /> {busy ? `ምትኬ በመያዝ ላይ${pct != null ? ` ${pct}%` : '…'}` : 'ምትኬ'}
     </button>

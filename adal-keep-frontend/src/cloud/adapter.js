@@ -505,6 +505,14 @@ async function change(method, path, body) {
   if (one && ['put', 'patch'].includes(method) && madeHere(one[1]) && body && typeof body === 'object') {
     const n = madeHere(one[1]); n.body = { ...n.body, ...body }; save(NEWP, newProfiles)
   }
+  // "Back up now" with the PC off: kept online once; the PC backs up as soon as it is on
+  // (and it backs up by itself every 2 hours anyway). Never a second request waiting.
+  if (method === 'post' && path === '/backup/run') {
+    const c = cloudCreds()
+    const waiting = await rest('GET', `/rest/v1/keep_changes?agency_id=eq.${c.agency}&applied_at=is.null&kind=eq.api&payload->>path=eq./backup/run&select=id&limit=1`).catch(() => [])
+    if (!waiting?.length) await request('api', { method: 'POST', path: '/backup/run', body: null }, null)
+    return { queued: true, message: 'The PC is off: it backs up as soon as it is on (Telegram, or the online storage).' }
+  }
   if (NEEDS_PC.test(path)) throw httpError(503, 'This needs the PC (it is off or far away). It works again when the phone reaches the PC.')
   const lop = listOpOf(method, path, body)
   if (lop) {

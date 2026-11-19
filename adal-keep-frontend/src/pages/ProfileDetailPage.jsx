@@ -21,6 +21,8 @@ import MedicalBattery from '../components/MedicalBattery'
 import { onDataChange } from '../lib/changes'
 import { onPhone } from '../lib/phoneMode'
 import { photosFirst, missingPhotos, hasFiles } from '../lib/photosFirst'
+import { ACTIONS, shows } from '../lib/stageActions'
+import useProfilePhase from '../hooks/useProfilePhase'
 
 // Her father's name as the emergency contact: his name and his father's (her surname),
 // e.g. "ABAGOLE KEDIR". A saved name that was only his first name gets the surname too.
@@ -63,6 +65,7 @@ export default function ProfileDetailPage() {
   const [loading, setLoading] = useState(true)
   const [step, setStep] = useState(null)        // the step she is at (backend stepNow)
   const [everything, setEverything] = useState(false)
+  const { phase, after } = useProfilePhase(profile)
   useEffect(() => {
     const look = () => api.get(`/profiles/${id}/step`).then(r => setStep(r.data)).catch(() => {})
     look()
@@ -187,6 +190,8 @@ export default function ProfileDetailPage() {
 
   if (loading) return <div className="flex h-64 items-center justify-center"><Spinner /></div>
   if (!profile) return null
+  // Her stage's buttons only (lib/stageActions.js); the stage ones wait until her stage is known.
+  const can = (key) => phase ? shows(key, phase, after) : !!ACTIONS[key]?.all
 
   const location = [profile.room, profile.table_name, profile.box_number].filter(Boolean).join(' / ')
   const amharicName = (profile.given_names_am && profile.surname_am)
@@ -199,7 +204,7 @@ export default function ProfileDetailPage() {
         title={amharicName || profile.full_name}
         subtitle={amharicName ? profile.full_name : (profile.phone_number || 'No phone on file')}
         // The medical deadline: between her name and the buttons.
-        middle={<div className="flex min-w-0 justify-center"><MedicalBattery profile={profile} onSaved={(v) => setProfile(p => ({ ...p, ...v }))} /></div>}
+        middle={can('medical_battery') ? <div className="flex min-w-0 justify-center"><MedicalBattery profile={profile} onSaved={(v) => setProfile(p => ({ ...p, ...v }))} /></div> : null}
         action={
           <div className="flex flex-wrap items-center gap-2">
             <PrioritizeButton profileId={id} />
@@ -263,15 +268,15 @@ export default function ProfileDetailPage() {
       )}
 
       <ProfileJourney profileId={id} />
-      <ProfileDays profileId={id} />
+      {can('day_by_day') && <ProfileDays profileId={id} />}
 
       {import.meta.env.VITE_DEMO !== '1' && <WhatsAppSend profile={profile} />}
 
       {(profile.chosen_at || profile.contract_number) && <ContractCard profile={profile} />}
 
-      <div className="flex flex-wrap items-center gap-2"><EmbassyPrintButton profile={profile} /></div>
+      {can('print_embassy') && <div className="flex flex-wrap items-center gap-2"><EmbassyPrintButton profile={profile} /></div>}
 
-      <VisaBarcodes profile={profile} />
+      {can('visa_barcodes') && <VisaBarcodes profile={profile} />}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* Left: client details */}
@@ -407,7 +412,7 @@ export default function ProfileDetailPage() {
           </div>
         </section>
       </div>
-      {!onPhone() && <div id="ai-actions" className="scroll-mt-24"><ProfileAutomations profileId={id} /></div>}
+      {!onPhone() && <div id="ai-actions" className="scroll-mt-24"><ProfileAutomations profileId={id} phase={phase} after={after} /></div>}
 
       {/* Notes */}
       <section className="panel p-6">

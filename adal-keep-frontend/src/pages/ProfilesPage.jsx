@@ -19,7 +19,8 @@ import { profilesList } from '../lib/profilesCache'
 import { prefetchProfile, prefetchRecent } from '../lib/profileCache'
 import { cachedGet } from '../lib/deviceCache'
 import { onPhone } from '../lib/phoneMode'
-import { FIRST, phaseOf as phaseFrom, inWaitingPhase, stepMarks } from '../lib/phase'
+import { FIRST, AFTER, READY, afterInOrder, phaseOf as phaseFrom, inWaitingPhase, stepMarks } from '../lib/phase'
+import { shows } from '../lib/stageActions'
 
 const STATUS_OPTIONS_AM = [
   { value: 'pending', label: 'በመጠባበቅ ላይ' },
@@ -35,12 +36,6 @@ const STATUS_OPTIONS_AM = [
 // (Waiting and Unfit asked for on 2026-11-19).
 // After the EPRO: the steps in the agency's order (dragged here or on a
 // profile's AI Actions — Settings "journey_order", the step boxes' names).
-const AFTER = [['Tasheer', 'tasheer', 'Tasheer'], ['Insurance', 'insurance', 'Insurance'], ['Enjaz · Visa', 'embassy', 'Visa'], ['LMIS · Police clearance', 'police', 'Police']]
-const READY = ['choices', 'Ready']
-const afterInOrder = (order = []) => [...AFTER].sort((a, b) => {
-  const ia = order.indexOf(a[0]), ib = order.indexOf(b[0])
-  return (ia < 0 ? 99 + AFTER.indexOf(a) : ia) - (ib < 0 ? 99 + AFTER.indexOf(b) : ib)
-})
 export const phaseOf = (steps = {}, p = {}, after = AFTER) => phaseFrom(steps, p, after)
 const NOW_TEXT = { cv: 'CV next', musaned: 'Musaned next', waiting: 'Waiting to be chosen', selected: 'Chosen — book Wafid', wafid: 'Wafid medical', unfit: 'Medical UNFIT', epro: 'EPRO approval',
   tasheer: 'Tasheer next', insurance: 'Insurance next', embassy: 'Visa next', police: 'Police clearance next', choices: 'All steps done' }
@@ -150,7 +145,7 @@ export default function ProfilesPage() {
   const loadCheckInfo = () => api.get('/contracts/check').then(r => setCheckInfo(r.data)).catch(() => {})
   // On the Waiting tab: whether a check is on (here or on another PC), every 30 s.
   useEffect(() => {
-    if (phase !== 'waiting' || onPhone()) return
+    if (!shows('musaned_scan', phase, after) || onPhone()) return
     loadCheckInfo()
     const t = setInterval(() => { if (!document.hidden) loadCheckInfo() }, 30000)
     return () => clearInterval(t)
@@ -237,7 +232,7 @@ export default function ProfilesPage() {
             </button>
           ))}
         </div>
-        {phase === 'waiting' && !searching && !onPhone() && (<>
+        {shows('musaned_scan', phase, after) && !searching && !onPhone() && (<>
           <Button variant="secondary" className="whitespace-nowrap !px-3 text-sm" onClick={scanMusaned} disabled={scanning || checkInfo?.running}
             title={`Check for new selections on Musaned (by itself every ${checkInfo?.every_min || 60} minutes; Check now stops after ${checkInfo?.manual_limit_min || 10} minutes)`}>
             {scanning || checkInfo?.running ? 'Checking…' : 'Check now'}
@@ -384,6 +379,7 @@ export default function ProfilesPage() {
       )}
       {picked.size > 0 && (
         <SelectionBar picked={[...picked.values()]} onRemove={togglePick}
+          phases={[...new Set([...picked.values()].map(phaseOfP))]} after={after}
           whatsappHere={waitingHere} waitingPicked={[...picked.values()].filter(p => inWaitingPhase(journey.steps[p.id], p))} onClear={() => { setPicked(new Map()); setLacking({}) }} onLacking={setLacking}
           onAllShown={() => setPicked(m => { const n = new Map(m); rows.forEach(r => n.set(r.id, r)); return n })} />
       )}

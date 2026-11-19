@@ -10,7 +10,8 @@ import { wa } from '../lib/whatsapp'
 import Button from './shared/Button'
 import { usePlan } from '../lib/plan'
 import { useAuth } from '../context/AuthContext'
-import { inWaitingPhase } from '../lib/phase'
+import { AFTER, phaseOf } from '../lib/phase'
+import { shows } from '../lib/stageActions'
 
 const err = (e) => e?.response?.data?.error || e.message
 const STATUS = {
@@ -41,7 +42,7 @@ export default function WhatsAppSend({ profile }) {
     api.get(`/profiles/${profile.id}/journey`).then(({ data }) => {
       const steps = Object.fromEntries((data?.embassy || []).map(x => [x.key, x.state]))
       // Only while she is in Waiting (on Musaned, nobody chose her yet — asked on 2026-11-19).
-      setDue(Array.isArray(data?.cv_missing) && !data.cv_missing.length && inWaitingPhase(steps, profile))
+      setDue(Array.isArray(data?.cv_missing) && !data.cv_missing.length && shows('whatsapp_send', phaseOf(steps, profile, AFTER)))
     }).catch(() => setDue(false))
   }, [profile.id, profile.chosen_at, profile.status])
 

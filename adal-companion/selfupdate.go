@@ -43,7 +43,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
@@ -264,27 +263,17 @@ func releaseTime(s string) time.Time {
 	return t
 }
 
-// builtRelease: the release this program was built from (go build stamps the
-// commit and its date), for a Companion installed from the USB that has no
-// updates/current.json yet.
+// builtRelease: the release this program was built from, for a Companion
+// installed from the USB that has no updates/current.json yet. Set by the
+// installer build (-ldflags -X main.buildSHA=… -X main.buildDate=…). Not Go's
+// own vcs stamp: in a git worktree it names another checkout's commit.
+var buildSHA, buildDate string
+
 var builtRelease = func() *releaseManifest {
-	bi, ok := debug.ReadBuildInfo()
-	if !ok {
+	if buildSHA == "" || buildDate == "" {
 		return nil
 	}
-	m := &releaseManifest{}
-	for _, s := range bi.Settings {
-		switch s.Key {
-		case "vcs.revision":
-			m.SHA = s.Value
-		case "vcs.time":
-			m.Date = s.Value
-		}
-	}
-	if m.SHA == "" || m.Date == "" {
-		return nil
-	}
-	return m
+	return &releaseManifest{SHA: buildSHA, Date: buildDate}
 }()
 
 // ── what this Companion has ────────────────────────────────────────────────

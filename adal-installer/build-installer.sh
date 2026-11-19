@@ -82,7 +82,9 @@ fi
 echo "== [3/6] Windows programs (Go, windows/amd64) =="
 # -H windowsgui: no command window ever opens for these two.
 ( cd "$BASE/adal-launcher"  && GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "-H windowsgui" -o "$STAGE/main/AdalKeep.exe" . )
-( cd "$BASE/adal-companion" && GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "-H windowsgui" -o "$STAGE/main/adal-companion.exe" . )
+# The release this Companion is (it never installs an older one: selfupdate.go builtRelease).
+REL="-X main.buildSHA=$(git -C "$BASE" rev-parse HEAD) -X main.buildDate=$(git -C "$BASE" log -1 --pretty=%cI)"
+( cd "$BASE/adal-companion" && GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -buildvcs=false -ldflags "-H windowsgui $REL" -o "$STAGE/main/adal-companion.exe" . )
 # The Adal Keep logo inside both programs (taskbar, shortcuts, Explorer).
 ( cd "$INST/tools/seticon" && GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o "$INST/tools/seticon.exe" . )
 for exe in AdalKeep.exe adal-companion.exe; do

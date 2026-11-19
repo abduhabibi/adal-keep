@@ -213,8 +213,8 @@ router.put('/:id', async (req, res) => {
  */
 router.put('/:id/sign-in', async (req, res) => {
   try {
-    const { isLocal } = await import('../services/networkGate.js')
-    if (!isLocal(req) || req.headers['x-adal-cloud']) return res.status(403).json({ error: 'Set it on the main PC itself' })
+    const { onThisPC, fromCompanion } = await import('./trash.js')
+    if (!onThisPC(req) && !fromCompanion(req)) return res.status(403).json({ error: 'Set it on the main PC or one of its Companions' })
     const db = req.app.locals.db
     const username = String(req.body?.username || '').trim().toLowerCase()
     const pin = String(req.body?.pin || '').trim()

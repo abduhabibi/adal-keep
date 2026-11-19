@@ -62,7 +62,25 @@ const ACCOUNT_LISTS = ['/lmis/accounts', '/musaned/accounts', '/tasheer/accounts
 const SECRET = /pass|token|secret|otp|api[_-]?key|license|cookie/i
 
 // Phone requests never replayed: they change the PC itself, not the agency's work.
-const NOT_FROM_PHONES = /^\/(system|backup|branch|main-pc|mobile|subscription|setup|settings\/wallpaper|trash\/empty|trash\/\d+\/purge|chat)\b/
+const NOT_FROM_PHONES = /^\/(system|backup|branch|main-pc|mobile|subscription|setup|settings\/wallpaper|trash\/empty|trash\/\d+\/purge|chat|pc-access)\b/
+// An Adal Companion PC (its online account is "Companion · …") is the same
+// Adal Keep as this PC (asked on 2026-11-19): through the online link it may
+// do all a phone may not, except choosing the main PC and managing devices.
+const NOT_FROM_COMPANIONS = /^\/(main-pc|pc-access)\b/
+export const isCompanionName = (name) => /^Companion ·/.test(String(name || ''))
+/** Whether a call from this online account may go to this path (method: a call's; changes count as writes). */
+export function allowedFrom(name, method, p) {
+  if (String(method || 'POST').toUpperCase() === 'GET' || /^\/chat\b/.test(p)) return true
+  return !(isCompanionName(name) ? NOT_FROM_COMPANIONS : NOT_FROM_PHONES).test(p)
+}
+/** Who made the call, for the PC's own API (X-Adal-Who, and X-Adal-Companion for a Companion). */
+function whoHeaders(names, id) {
+  if (!names.has(id)) return { 'X-Adal-Who': encodeURIComponent('Adal support') }
+  const n = names.get(id)
+  return isCompanionName(n)
+    ? { 'X-Adal-Who': encodeURIComponent(n), 'X-Adal-Companion': '1' }
+    : { 'X-Adal-Who': encodeURIComponent(`${n} (phone)`) }
+}
 
 export const cloudStatus = { on: false, running: false, last: null, error: null, pushed: 0, files: 0, filesLeft: 0, applied: 0, textDone: null, bytesSaved: 0 }
 
@@ -197,11 +215,16 @@ async function applyChangesNow(db, agency) {
   for (const c of list || []) {
     let result = ''
     try {
-      names ||= new Map(((await cloudCall(db, 'GET', `/rest/v1/keep_devices?agency_id=eq.${agency}&select=user_id,name`)) || []).map(d => [d.user_id, d.name]))
-      const who = { 'X-Adal-Who': encodeURIComponent(names.has(c.device_id) ? `${names.get(c.device_id)} (phone)` : 'Adal support') }
+      if (!names) {
+        const rows = (await cloudCall(db, 'GET', `/rest/v1/keep_devices?agency_id=eq.${agency}&select=user_id,name,revoked`)) || []
+        names = new Map(rows.map(d => [d.user_id, d.name]))
+        names.off = new Set(rows.filter(d => d.revoked).map(d => d.user_id))
+      }
+      if (names.off.has(c.device_id)) throw new Error('this device was suspended by the main PC')
+      const who = whoHeaders(names, c.device_id)
       const p = c.payload || {}
       // (Chat messages written while the PC was off are sent now.)
-      if (!String(p.path || '').startsWith('/') || (NOT_FROM_PHONES.test(p.path) && !/^\/chat\b/.test(p.path))) throw new Error('not allowed from a phone')
+      if (!String(p.path || '').startsWith('/') || !allowedFrom(names.get(c.device_id), 'POST', String(p.path))) throw new Error('not allowed from a phone')
       let r
       const makesProfile = /^\/(profiles|new-profile\/with-passport)$/.test(String(p.path || ''))
       const phoneRef = makesProfile ? Number(p.body?.phone_ref ?? p.form?.phone_ref) || 0 : 0
@@ -739,6 +762,7 @@ export async function listDevices(db) {
 export async function setDeviceRevoked(db, userId, revoked = true) {
   const agency = await cloudAgencyId(db)
   await cloudCall(db, 'PATCH', `/rest/v1/keep_devices?agency_id=eq.${agency}&user_id=eq.${userId}`, { revoked: !!revoked }, { headers: { Prefer: 'return=minimal' } })
+  namesAt = 0   // the relay reads who is suspended again at its next call
 }
 
 // ------------------------------------------------------------ relay
@@ -753,7 +777,7 @@ export async function setDeviceRevoked(db, userId, revoked = true) {
 export const relayStatus = { on: false, lastCall: 0, answered: 0, error: null }
 const RELAY_FAST_MS = 600, RELAY_SLOW_MS = 6000, RELAY_LATE_MS = 30000, MAX_BIN = 8 * 1024 * 1024
 const working = new Set()
-let relayTimer = null, lastBeat = 0, lastClean = 0, deviceNames = new Map(), namesAt = 0
+let relayTimer = null, lastBeat = 0, lastClean = 0, deviceNames = new Map(), suspendedDevices = new Set(), namesAt = 0
 
 async function answerCall(db, agency, c) {
   let patch = { status: 'done', answered_at: new Date().toISOString() }
@@ -835,12 +859,16 @@ export async function runCall(db, agency, c) {
       patch.answer_type = 'application/json'
       return patch
     }
-    if (method !== 'GET' && NOT_FROM_PHONES.test(p) && !/^\/chat\b/.test(p)) throw Object.assign(new Error('Not from a phone: do this on the main PC.'), { code: 403 })
     if (Date.now() - namesAt > 60000) {
-      deviceNames = new Map(((await cloudCall(db, 'GET', `/rest/v1/keep_devices?agency_id=eq.${agency}&select=user_id,name`)) || []).map(d => [d.user_id, d.name]))
+      const rows = (await cloudCall(db, 'GET', `/rest/v1/keep_devices?agency_id=eq.${agency}&select=user_id,name,revoked`)) || []
+      deviceNames = new Map(rows.map(d => [d.user_id, d.name]))
+      suspendedDevices = new Set(rows.filter(d => d.revoked).map(d => d.user_id))
       namesAt = Date.now()
     }
-    const who = { 'X-Adal-Who': encodeURIComponent(deviceNames.has(c.device_id) ? `${deviceNames.get(c.device_id)} (phone)` : 'Adal support') }
+    // Suspended on this PC (Settings → Connected devices): a call it sent before is not answered either.
+    if (suspendedDevices.has(c.device_id)) throw Object.assign(new Error('This device was suspended by the main PC'), { code: 403 })
+    if (!allowedFrom(deviceNames.get(c.device_id), method, p)) throw Object.assign(new Error('Not from a phone: do this on the main PC.'), { code: 403 })
+    const who = whoHeaders(deviceNames, c.device_id)
     // An upload from a phone while the PC is on: done now, with the PC's real answer.
     const up = method === 'POST' && c.body?.__upload
     // A new profile carries the phone's own number for her: made once only, even

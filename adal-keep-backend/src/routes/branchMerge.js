@@ -11,7 +11,7 @@
 import express from 'express'
 import { exportAll, exportFilePath, exportPhotoPath, preview, startMerge, job } from '../services/branchMerge.js'
 import { normalizeURL, isFollower } from '../services/mainPC.js'
-import { onThisPC } from './trash.js'
+import { onThisPC, fromCompanion } from './trash.js'
 
 const router = express.Router()
 
@@ -28,7 +28,7 @@ router.get('/branch/export/photo/:id/:col', async (req, res) => {
 })
 
 function onMain(req, res) {
-  if (!onThisPC(req)) { res.status(403).json({ error: 'Merge branches on the main PC itself.' }); return false }
+  if (!onThisPC(req) && !fromCompanion(req)) { res.status(403).json({ error: 'Merge branches on the main PC itself.' }); return false }
   if (isFollower()) { res.status(403).json({ error: 'This PC follows another main PC. Merge on the main PC.' }); return false }
   return true
 }

@@ -1,6 +1,12 @@
 //go:build windows
 
-// connect.go — the "Looking for the main PC" page on an employee PC.
+// connect.go — the "Connect to the main PC" page on an employee PC.
+//
+// Since 2026-11-19 a Companion always joins by typing the main PC's number
+// (5 digits, in the main PC's Settings → Main PC, e.g. 47040): the first time
+// and after "Log out of this main PC". The network search only finds the
+// candidates; the main PC that says the number is its own is the one opened,
+// and the window comes in there with that same number (#adal_number).
 //
 // When the main PC cannot be found, AdalKeep.exe opens this small page
 // (served only to this PC, on 127.0.0.1) instead of an error box. It shows
@@ -12,6 +18,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -59,6 +66,94 @@ func isAdalKeep(u string) bool {
 	return resp.StatusCode == http.StatusOK && info.Service == "adal-keep"
 }
 
+// isMainWithNumber: the Adal Keep at u says the number is its own (it lets nothing in).
+func isMainWithNumber(u, number string) bool {
+	body, _ := json.Marshal(map[string]string{"number": number})
+	c := &http.Client{Timeout: 5 * time.Second}
+	resp, err := c.Post(strings.TrimRight(u, "/")+"/api/pc-access/check-number", "application/json", bytes.NewReader(body))
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	var r struct {
+		OK bool `json:"ok"`
+	}
+	_ = json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&r)
+	return resp.StatusCode == http.StatusOK && r.OK
+}
+
+// cleanNumber: the digits of a typed PC number ("" unless 5 or 6 of them).
+func cleanNumber(in string) string {
+	var b strings.Builder
+	for _, r := range in {
+		if r >= '0' && r <= '9' {
+			b.WriteRune(r)
+		}
+	}
+	if n := b.Len(); n < 5 || n > 6 {
+		return ""
+	}
+	return b.String()
+}
+
+// mainByNumber: the main PC whose number this is — the saved address, an
+// address typed with it (Tailscale, another branch), then the main PCs that
+// answer on this network. "" when none says it is theirs.
+func mainByNumber(root, number, typed string) string {
+	var list []string
+	seen := map[string]bool{}
+	add := func(u string) {
+		u = strings.TrimRight(u, "/")
+		if u != "" && !seen[u] {
+			seen[u] = true
+			list = append(list, u)
+		}
+	}
+	add(mainPCURL(root))
+	add(normalizeMainURL(typed))
+	for _, p := range foundPCs(2500 * time.Millisecond) {
+		add(p["url"])
+	}
+	got := make(chan string, len(list))
+	for _, u := range list {
+		go func(u string) {
+			if isMainWithNumber(u, number) {
+				got <- u
+			} else {
+				got <- ""
+			}
+		}(u)
+	}
+	for range list {
+		if u := <-got; u != "" {
+			return u
+		}
+	}
+	return ""
+}
+
+// joinByNumber: finds the main PC with this number, saves it and returns the
+// address the window opens (it comes in there with the same number).
+func joinByNumber(root, number, typed string) (string, string) {
+	if number == "" {
+		return "", "Type the main PC's number (5 digits, in its Settings → Main PC)."
+	}
+	u := mainByNumber(root, number, typed)
+	if u == "" {
+		return "", "No main PC with that number answers. Is it on, with Adal Keep open, and this PC on the same network? From another branch type its address too."
+	}
+	if err := saveTypedMainURL(root, u); err != nil {
+		return "", "Could not save it: " + err.Error()
+	}
+	logf("main PC with the typed number: %s", u)
+	chosenMainPC(root)
+	if !hasOnlinePages(root) {
+		return u + "/#adal_number=" + number, ""
+	}
+	// A fresh pairing: the main PC gives this PC a new online account.
+	return companionURL(root, u) + "&adal_repair=1#adal_number=" + number, ""
+}
+
 func saveTypedMainURL(root, u string) error {
 	body := "# Typed on this PC (Adal Keep could not find the main PC by itself).\r\n" +
 		"# Delete this file to let the Companion search the network again.\r\n" +
@@ -97,25 +192,11 @@ func startConnectPage(root string) bool {
 			http.Error(w, "no", http.StatusForbidden)
 			return
 		}
-		u := normalizeMainURL(r.FormValue("address"))
 		res := map[string]any{}
-		switch {
-		case u == "":
-			res["error"] = "Type the main PC's address."
-		case !isAdalKeep(u):
-			res["error"] = "No Adal Keep answers at " + u + ". Check the address, that the main PC is on, and (from outside the office) that Tailscale is connected on both PCs."
-		default:
-			if err := saveTypedMainURL(root, u); err != nil {
-				res["error"] = "Could not save it: " + err.Error()
-			} else {
-				logf("main PC address typed: %s", u)
-				chosenMainPC(root)
-				// A fresh pairing: the main PC gives this PC a new online account.
-				res["url"] = companionURL(root, u) + "&adal_repair=1"
-				if !hasOnlinePages(root) {
-					res["url"] = u
-				}
-			}
+		if u, msg := joinByNumber(root, cleanNumber(r.FormValue("number")), r.FormValue("address")); u != "" {
+			res["url"] = u
+		} else {
+			res["error"] = msg
 		}
 		json.NewEncoder(w).Encode(res)
 	})
@@ -144,37 +225,23 @@ const connectPage = `<!doctype html><html><head><meta charset="utf-8"><title>Ada
 body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,Segoe UI,sans-serif;display:grid;place-items:center;min-height:100vh}
 .c{background:var(--card);max-width:520px;margin:16px;padding:28px;border-radius:16px;box-shadow:0 4px 24px #0002}
 h1{font-size:22px;margin:0 0 8px}p{color:var(--mute);margin:8px 0}
-.dot{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--brand);margin-right:8px;animation:p 1.2s infinite}
-@keyframes p{50%{opacity:.25}}
-form{display:flex;gap:8px;margin-top:12px}input{flex:1;min-width:0;padding:10px 12px;border:1px solid var(--line);border-radius:10px;font:inherit;background:transparent;color:inherit}
+form{display:grid;gap:8px;margin-top:12px}input{min-width:0;padding:10px 12px;border:1px solid var(--line);border-radius:10px;font:inherit;background:transparent;color:inherit}
+#number{font:700 28px ui-monospace,monospace;letter-spacing:.4em;text-align:center}
 button{padding:10px 16px;border:0;border-radius:10px;background:var(--brand);color:#fff;font:inherit;font-weight:600;cursor:pointer}
-#err{color:var(--bad)}#left{color:var(--ok)}ol{color:var(--mute);padding-left:20px;margin:8px 0}
-#pcs{list-style:none;padding:0;margin:8px 0}#pcs li{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 12px;border:1px solid var(--line);border-radius:10px;margin-bottom:6px}
-#pcs small{color:var(--mute);display:block}
+#err{color:var(--bad)}#left{color:var(--ok)}details{color:var(--mute)}
 </style></head><body><div class="c">
 <p id="left" hidden></p>
-<h1 id="h"><span class="dot"></span>Looking for the main Adal Keep PC…</h1>
-<p id="intro">Adal Keep opens by itself as soon as the main PC answers. Is the main PC turned on, with Adal Keep running?</p>
-<div id="pick" hidden><p>Main PCs on this network:</p><ul id="pcs"></ul></div>
-<ol><li>Is this PC on the same Wi-Fi or cable as the main PC?</li>
-<li>Not in the list? On the <b>main PC</b> open Adal Keep → Settings → Main PC. Under “Addresses of this main PC” it shows an address like <b>192.168.1.20:4000</b> (in the office) or <b>100.x.x.x:4000</b> (Tailscale). Type it here:</li></ol>
-<form id="f"><input name="address" placeholder="e.g. 192.168.1.20 or 100.101.102.103" autofocus><button>Connect</button></form>
+<h1>Connect to the main Adal Keep PC</h1>
+<p>Type the main PC's number. It is on the main PC in Adal Keep → Settings → Main PC (5 digits, e.g. 47040).</p>
+<form id="f"><input id="number" name="number" inputmode="numeric" maxlength="6" placeholder="•••••" autofocus required>
+<details><summary>Main PC in another branch?</summary><input name="address" placeholder="Its address, e.g. 100.101.102.103"></details>
+<button>Connect</button></form>
 <p id="err"></p>
 </div><script>
-const go=u=>{location.href=u};
 const q=new URLSearchParams(location.search), err=document.getElementById('err');
 if(q.has('left')){const l=document.getElementById('left');l.hidden=false;l.textContent='Logged out of the main PC'+(q.get('left')?' at '+q.get('left'):'')+'.'+(q.get('revoked')==='1'?' Its online account for this PC is stopped.':' Its online account for this PC is stopped as soon as that PC answers.')}
-let out=false;
-async function poll(){try{const r=await (await fetch('/status')).json();if(r.url)return go(r.url);if(r.signed_out&&!out){out=true;document.getElementById('h').textContent='Connect to a main Adal Keep PC';document.getElementById('intro').textContent='Pick the main PC this PC works with, or type its address.'}}catch(e){}setTimeout(poll,3000)}
-poll();
-async function connect(address){err.textContent='Checking…';
-try{const r=await (await fetch('/set',{method:'POST',headers:{'X-Adal':'1'},body:new URLSearchParams({address})})).json();
-if(r.url){err.textContent='';go(r.url)}else err.textContent=r.error}catch(x){err.textContent=String(x)}}
-document.getElementById('f').onsubmit=e=>{e.preventDefault();connect(new FormData(e.target).get('address'))};
-async function found(){try{const r=await (await fetch('/found')).json();const ul=document.getElementById('pcs');ul.textContent='';
-for(const p of r.pcs||[]){const li=document.createElement('li'),t=document.createElement('span'),b=document.createElement('button');
-t.textContent=p.name;const s=document.createElement('small');s.textContent=p.url.replace('http://','');t.appendChild(s);
-b.textContent='Connect';b.onclick=()=>connect(p.url);li.append(t,b);ul.appendChild(li)}
-document.getElementById('pick').hidden=!(r.pcs||[]).length}catch(e){}setTimeout(found,15000)}
-found();
+const n=document.getElementById('number');n.oninput=()=>{n.value=n.value.replace(/\D/g,'').slice(0,6)};
+document.getElementById('f').onsubmit=async e=>{e.preventDefault();err.textContent='Looking for the main PC with that number…';
+try{const r=await (await fetch('/set',{method:'POST',headers:{'X-Adal':'1'},body:new URLSearchParams(new FormData(e.target))})).json();
+if(r.url){err.textContent='';location.href=r.url}else err.textContent=r.error}catch(x){err.textContent=String(x)}};
 </script></body></html>`

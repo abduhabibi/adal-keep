@@ -10,6 +10,7 @@ import api from '../services/api'
 import LmisAccountPicker from './LmisAccountPicker'
 import MusanedAccountPicker from './MusanedAccountPicker'
 import { usePlan, lockedFor, planName, wantFeature } from '../lib/plan'
+import { phoneCloud } from '../lib/phoneMode'
 
 // What a paused run is waiting for, in words.
 const PAUSE_TEXT = {
@@ -70,7 +71,7 @@ const isRetry = (run) => run?.status === 'pending' && String(run.pause_reason ||
 
 // On a phone a working task opens as its own screen: the website, fitted to
 // the phone, with what it waits for on top.
-const PHONE_VIEW = () => IN_PHONE_APP || !!window.__ADAL_CLOUD ||
+const PHONE_VIEW = () => IN_PHONE_APP || phoneCloud() ||
   (typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches && innerWidth < 900)
 
 function describeRun(run) {

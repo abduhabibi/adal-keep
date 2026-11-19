@@ -93,6 +93,7 @@ async function phoneBoot() {
   startCloudDocuments()
   startLive().catch(() => {})
   startMirror()        // the agency's text on the phone itself: pages open at once
+  import('./cloud/adapter.js').then(m => m.watchSuspended()).catch(() => {})   // suspended by the main PC: its screen
   // Downloads (CV PDFs, Excel lists…) go to the phone's Downloads and open (lib/phoneSave.js).
   import('./lib/phoneSave.js').then(m => m.catchDownloads()).catch(() => {})
   // Whether the office PC is live, and pairing: in Settings → This phone (no bar on the pages).

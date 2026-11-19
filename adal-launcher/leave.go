@@ -242,9 +242,15 @@ func forgetRoutes(root string, mux *http.ServeMux) {
 			var in struct{ From, Device string }
 			json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192)).Decode(&in)
 			revoked, main := forgetMainPC(root, in.From, in.Device)
-			ensureConnectPage(root)
+			// The same way in as the first time: the main PC's number
+			// (connect.html here; the small page on an install without these pages).
+			next := onlineURL + "connect.html"
+			if !hasOnlinePages(root) {
+				ensureConnectPage(root)
+				next = connectURL
+			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]any{"ok": true, "revoked": revoked, "main": main, "next": connectURL})
+			json.NewEncoder(w).Encode(map[string]any{"ok": true, "revoked": revoked, "main": main, "next": next})
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")

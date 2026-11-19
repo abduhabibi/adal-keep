@@ -65,6 +65,14 @@ export async function shareOnlineCopy() {
   if (['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)) return   // the main PC itself
   const q = new URLSearchParams(location.search)
   if (q.has('adal_companion')) set(IS, '1')
+  // Handed over by the Companion's own pages (#adal_number, #adal_device): the
+  // gate used the number if it was needed; the online account is tied to this
+  // PC's key, so suspending the Companion on the main PC stops both.
+  const h = new URLSearchParams(location.hash.slice(1))
+  if (h.has('adal_number') || h.has('adal_device')) {
+    if (h.get('adal_device')) api.post('/pc-access/link', { device: h.get('adal_device') }).catch(() => {})
+    history.replaceState(history.state, '', location.pathname + location.search)
+  }
   // Chosen again after a log out ("Connect to another PC"): a fresh pairing.
   if (q.has('adal_repair')) { try { localStorage.removeItem(DONE); localStorage.removeItem(TRIED) } catch {} }
   // Not kept there ("no": the Companion's own online pages are for another

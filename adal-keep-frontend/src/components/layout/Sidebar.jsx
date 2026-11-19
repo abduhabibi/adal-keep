@@ -2,7 +2,8 @@ import { NavLink } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import toast from 'react-hot-toast'
 import api from '../../services/api'
-import { onPhone } from '../../lib/phoneMode'
+import { onPhone, onCompanionOnline } from '../../lib/phoneMode'
+import { inCompanion } from '../../lib/companionOnline'
 
 export const links = [
   {
@@ -103,7 +104,9 @@ async function quitAdalKeep() {
   toast.success('Adal Keep is stopping. Open it again from its icon.')
 }
 
-export const onMainPC = () => ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname) && !onPhone() && !window.Capacitor?.isNativePlatform?.()
+export const onMainPC = () => ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname) && !onPhone() && !onCompanionOnline() && !window.Capacitor?.isNativePlatform?.()
+/** The Trash: on the main PC and on its Adal Companions (the same Adal Keep); never on a phone. */
+export const showTrash = () => onMainPC() || inCompanion()
 export const trashLink = {
   to: '/trash',
   label: 'መጣያ',
@@ -211,7 +214,7 @@ export default function Sidebar({ isOpen, onToggle, collapsed: narrowWanted, onT
           ))}
 
           <div className={`pt-3 mt-3 border-t ak-side-sep space-y-1 ${collapsed ? 'px-0' : ''}`}>
-            {onMainPC() && [trashLink].map(link => (
+            {showTrash() && [trashLink].map(link => (
               <NavLink key={link.to} to={link.to}
                 onClick={() => { if (window.innerWidth < 768) onToggle() }}
                 className={({ isActive }) => { const base = getLinkClass({ isActive }); return collapsed ? `${base} justify-center px-0` : base }}

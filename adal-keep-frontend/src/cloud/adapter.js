@@ -57,6 +57,26 @@ async function token() {
 
 export const getToken = () => token()
 
+/**
+ * This device suspended by the main PC (Settings → Connected devices): its own
+ * keep_devices row says revoked (a device always sees its own row). Checked
+ * every 20 s; then the pages give way to the "suspended" screen (App.jsx).
+ */
+export async function deviceSuspended() {
+  const c = cloudCreds()
+  if (!c?.device || window.__ADAL_CREDS) return false
+  try {
+    const r = await fetch(`${c.url}/rest/v1/keep_devices?user_id=eq.${c.device}&select=revoked`, { headers: { apikey: c.anon, Authorization: `Bearer ${await token()}` } })
+    return r.ok && (await r.json().catch(() => []))?.[0]?.revoked === true
+  } catch { return false }
+}
+export function watchSuspended() {
+  const look = async () => { if (await deviceSuspended()) window.dispatchEvent(new Event('adal-suspended')) }
+  look.__always = true
+  setTimeout(look, 1500)
+  setInterval(look, 20000)
+}
+
 /** A short-lived link to a file Adal published (adal-updates: the phone app). */
 export async function updateLink(file) {
   const c = cloudCreds()

@@ -76,8 +76,8 @@ func runEmployee(root string, background bool) {
 	if !firstCopy() {
 		// Already running for this user: just open the window again — the
 		// online copy at once (it never searches for the main PC).
-		if signedOut(root) { // logged out of its main PC: choose another (leave.go)
-			openAppWindow(root, connectURL)
+		if signedOut(root) { // logged out of its main PC: its number again (leave.go)
+			openAppWindow(root, joinURL(root))
 			return
 		}
 		if hasOnlinePages(root) {
@@ -113,9 +113,8 @@ func runEmployee(root string, background bool) {
 	// off, anywhere. Not paired yet, they ask for the main PC's number.
 	// Logged out of its main PC ("Connect to another PC"): the page to choose one.
 	if signedOut(root) {
-		logf("logged out of the main PC — showing the page to choose one")
-		ensureConnectPage(root)
-		openAppWindow(root, connectURL)
+		logf("logged out of the main PC — asking for the main PC's number")
+		openAppWindow(root, joinURL(root))
 		select {}
 	}
 	if online {
@@ -148,6 +147,16 @@ func runEmployee(root string, background bool) {
 	logf("main PC answers at %s", u)
 	openAppWindow(root, companionURL(root, u))
 	select {} // stay in the background: the Adal Keep logo on its window
+}
+
+// joinURL: where the main PC's number is typed — connect.html in the online
+// pages (on the network or, from anywhere, online), else the small page.
+func joinURL(root string) string {
+	if hasOnlinePages(root) {
+		return onlineURL + "connect.html?pair=1"
+	}
+	ensureConnectPage(root)
+	return connectURL
 }
 
 // companionURL: the main PC's page, marked as opened in a Companion that has

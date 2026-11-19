@@ -1,6 +1,8 @@
 /**
- * /api/trash — only on the main PC itself (a browser on this PC: localhost).
- * Other PCs and phones never see what was deleted.
+ * /api/trash — on the main PC itself (a browser on this PC: localhost) and on
+ * its Adal Companions (the same Adal Keep, asked on 2026-11-19): a Companion
+ * let in with the main PC's number, or one through the online link.
+ * Phones and other computers never see what was deleted.
  */
 import express from 'express'
 import { restore, purge } from '../services/trash.js'
@@ -21,8 +23,16 @@ export function onThisPC(req) {
   return local && !forwarded
 }
 
+/** An Adal Companion of this main PC: its key (req.pcAccess), or its call through the online link. */
+export function fromCompanion(req) {
+  if (req.pcAccess?.id) return true
+  const ip = String(req.socket?.remoteAddress || '')
+  const local = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1'
+  return local && req.headers?.['x-adal-cloud'] !== undefined && req.headers?.['x-adal-companion'] === '1'
+}
+
 router.use('/trash', (req, res, next) => {
-  if (!onThisPC(req)) return res.status(403).json({ error: 'The Trash opens only on the main PC itself.' })
+  if (!onThisPC(req) && !fromCompanion(req)) return res.status(403).json({ error: 'The Trash opens only on the main PC itself.' })
   if (isFollower()) return res.status(403).json({ error: 'This PC is not the main PC. The Trash is on the main PC.' })
   next()
 })

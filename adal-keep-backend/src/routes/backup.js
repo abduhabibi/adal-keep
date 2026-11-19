@@ -5,11 +5,11 @@
 import express from 'express'
 import multer from 'multer'
 import { getConfig, saveConfig, testConnection, findChats, botInfo, runBackup, progress, restoreFrom, newestBackup, backupSoon } from '../services/telegramBackup.js'
-import { onThisPC } from './trash.js'
+import { onThisPC, fromCompanion } from './trash.js'
 
 const router = express.Router()
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } })
-const here = (req, res, next) => (onThisPC(req) ? next() : res.status(403).json({ error: 'Backups are set up on the main PC itself.' }))
+const here = (req, res, next) => (onThisPC(req) || fromCompanion(req) ? next() : res.status(403).json({ error: 'Backups are set up on the main PC itself.' }))
 const fail = (res, e) => res.status(400).json({ error: e.message })
 
 router.get('/backup', here, (req, res) => res.json({ ...getConfig(), progress }))

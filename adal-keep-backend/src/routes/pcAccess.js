@@ -9,13 +9,17 @@
  *   DELETE /pc-access/:id           (this PC only) take one off the list
  *   POST /pc-access/online-copy      (a computer let in) its own online account
  *   POST /pc-access/leave {device}   (a computer let in) an Adal Companion signs out of this PC
+ *   POST /pc-access/link {device}    (a computer let in) the online account its Companion uses
+ *   GET  /pc-access/devices          (this PC only) every connected Companion and phone
+ *   POST /pc-access/devices/suspend {pc?, device?, suspended} (this PC only) suspend / allow again
  */
 import express from 'express'
 import bcrypt from 'bcryptjs'
-import { isLocal, admitSignedIn, statusOf, pending, answer, list, remove, setKeyCookie } from '../services/networkGate.js'
+import { isLocal, admitSignedIn, statusOf, pending, answer, list, remove, setKeyCookie, isSuspended, setSuspended, linkDevice } from '../services/networkGate.js'
 
 const router = express.Router()
-const here = (req, res, next) => isLocal(req) ? next() : res.status(403).json({ error: 'Only on the main PC itself' })
+// The main PC itself — not a call that came through the online link (a phone, a Companion: X-Adal-Cloud).
+const here = (req, res, next) => isLocal(req) && !req.headers['x-adal-cloud'] ? next() : res.status(403).json({ error: 'Only on the main PC itself' })
 
 // Asking for a "Yes" is gone: nobody at the main PC approves computers any more.
 // The other computer types the main PC's number instead (/pc-access/number).
@@ -47,11 +51,37 @@ router.post('/pc-access/signin', async (req, res) => {
 // The main PC's number (Settings, 5 digits — the one phones are added with): in at once.
 // At most 10 wrong numbers in 10 minutes per address (no guessing).
 const numberMisses = new Map()
+/** The main PC's number: the 6-digit licence one or the 5-digit one in Settings. */
+async function isOurNumber(number) {
+  const { pcNumber } = await import('../services/mainPC.js')
+  let licence = ''
+  try { licence = (await import('../services/subscription.js')).pcNumber() } catch {}
+  return !!number && (number === licence || number === pcNumber())
+}
+/**
+ * Is this the main PC with that number? AdalKeep.exe on a Companion asks the
+ * main PCs it finds on the network, to know which one to open (the window
+ * then comes in with the same number). Lets nothing in; the same limit on wrong numbers.
+ */
+router.post('/pc-access/check-number', async (req, res) => {
+  const ip = String(req.socket?.remoteAddress || '')
+  const now = Date.now()
+  const recent = (numberMisses.get(ip) || []).filter(t => now - t < 10 * 60000)
+  if (recent.length >= 10) return res.status(429).json({ error: 'Too many wrong numbers — wait 10 minutes' })
+  try {
+    const { isFollower } = await import('../services/mainPC.js')
+    const ok = !isFollower() && await isOurNumber(String(req.body?.number || '').replace(/\D/g, ''))
+    if (!ok) numberMisses.set(ip, [...recent, now])
+    res.json({ ok })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
 router.post('/pc-access/number', async (req, res) => {
   const ip = String(req.socket?.remoteAddress || '')
   const now = Date.now()
   const recent = (numberMisses.get(ip) || []).filter(t => now - t < 10 * 60000)
   if (recent.length >= 10) return res.status(429).json({ error: 'Too many wrong numbers — wait 10 minutes' })
+  // A suspended computer cannot come back in by typing the number again.
+  if (isSuspended(req)) return res.status(403).json({ error: 'This computer was suspended by the main PC', suspended: true })
   const number = String(req.body?.number || '').replace(/\D/g, '')
   if (!number) return res.status(400).json({ error: 'Type the main PC\'s number' })
   try {
@@ -66,6 +96,7 @@ router.post('/pc-access/number', async (req, res) => {
     }
     numberMisses.delete(ip)
     const r = admitSignedIn(req, req.body?.name || 'Adal Companion PC', 'PC number')
+    if (req.body?.device) await linkCompanionDevice(req.app.locals.db, r.id, req.body.device).catch(() => {})
     setKeyCookie(res, r.key)
     console.log(`[pc-access] ${String(req.body?.name || 'A Companion PC').slice(0, 60)} came in with the PC number`)
     res.json({ ok: true, id: r.id, key: r.key })
@@ -83,7 +114,9 @@ router.post('/pc-access/online-copy', async (req, res) => {
     if (!(await cloudOn(req.app.locals.db))) return res.status(409).json({ error: 'The online copy is off on the main PC' })
     const { pcNumber } = await import('../services/mainPC.js')
     const name = `Companion · ${String(req.pcAccess?.name || req.body?.name || 'PC').slice(0, 40)}`
-    res.json({ number: pcNumber(), cloud: await makeDevice(req.app.locals.db, name) })
+    const cloud = await makeDevice(req.app.locals.db, name)
+    if (req.pcAccess?.id) linkDevice(req.pcAccess.id, cloud.device)
+    res.json({ number: pcNumber(), cloud })
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 /**
@@ -97,7 +130,7 @@ router.post('/pc-access/leave', async (req, res) => {
   if (!req.pcAccess && !isLocal(req)) return res.status(403).json({ error: 'Only a computer that is let in' })
   const out = { key: false, device: false }
   try {
-    if (req.pcAccess?.id && req.pcAccess.id !== 'own-network') { remove(req.pcAccess.id); out.key = true }
+    if (req.pcAccess?.id) { remove(req.pcAccess.id); out.key = true }
     const device = String(req.body?.device || '')
     if (/^[0-9a-f-]{36}$/i.test(device)) {
       const { cloudOn, listDevices, setDeviceRevoked } = await import('../services/cloudSync.js')
@@ -112,6 +145,63 @@ router.post('/pc-access/leave', async (req, res) => {
     console.log(`[pc-access] an Adal Companion (${String(req.pcAccess?.name || 'this PC').slice(0, 60)}) signed out${out.key ? ' · key removed' : ''}${out.device ? ' · its online account stopped' : ''}`)
     res.json({ ok: true, ...out })
   } catch (e) { res.status(500).json({ error: e.message }) }
+})
+/** An online account (keep_devices) this PC made or let in for a Companion ("Companion · …"), never a phone's. */
+async function linkCompanionDevice(db, pcId, device) {
+  if (!/^[0-9a-f-]{36}$/i.test(String(device || ''))) return false
+  const { cloudOn, listDevices } = await import('../services/cloudSync.js')
+  if (!(await cloudOn(db))) return false
+  const d = ((await listDevices(db)) || []).find(x => x.user_id === device)
+  if (!d || !/^Companion ·/.test(d.name || '')) return false
+  linkDevice(pcId, device)
+  return true
+}
+router.post('/pc-access/link', async (req, res) => {
+  if (!req.pcAccess?.id) return res.status(403).json({ error: 'Only a computer that is let in' })
+  try { res.json({ ok: await linkCompanionDevice(req.app.locals.db, req.pcAccess.id, req.body?.device) }) } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+/**
+ * Settings → Connected devices (main PC only): the Companions (their key on
+ * this PC and the online account they use when this PC is off) and the phones
+ * (their online account). A Companion's two parts are shown, and suspended, as one.
+ */
+export async function connectedDevices(db) {
+  const pcs = list()
+  let cloud = [], cloudError = null
+  try {
+    const { cloudOn, listDevices } = await import('../services/cloudSync.js')
+    if (await cloudOn(db)) cloud = (await listDevices(db)) || []
+  } catch (e) { cloudError = e.message }
+  const linked = new Set(pcs.map(p => p.device).filter(Boolean))
+  const out = pcs.map(p => {
+    const d = cloud.find(x => x.user_id === p.device)
+    return { kind: 'companion', pc: p.id, device: p.device || null, name: p.name, ip: p.last_ip || p.ip, since: p.approved_at, last_seen: p.last_seen,
+      suspended: !!p.suspended, online_suspended: d ? !!d.revoked : null }
+  })
+  for (const d of cloud) {
+    if (linked.has(d.user_id)) continue
+    out.push({ kind: /^Companion ·/.test(d.name || '') ? 'companion' : 'phone', pc: null, device: d.user_id, name: d.name || 'Phone',
+      since: d.created_at, last_seen: d.last_seen, suspended: !!d.revoked })
+  }
+  return { devices: out, cloud_error: cloudError }
+}
+router.get('/pc-access/devices', here, async (req, res) => {
+  try { res.json(await connectedDevices(req.app.locals.db)) } catch (e) { res.status(500).json({ error: e.message }) }
+})
+router.post('/pc-access/devices/suspend', here, async (req, res) => {
+  const on = req.body?.suspended !== false
+  try {
+    let device = String(req.body?.device || '')
+    if (req.body?.pc) device = setSuspended(String(req.body.pc), on) || device
+    if (/^[0-9a-f-]{36}$/i.test(device)) {
+      const { cloudOn, setDeviceRevoked } = await import('../services/cloudSync.js')
+      if (await cloudOn(req.app.locals.db)) await setDeviceRevoked(req.app.locals.db, device, on)
+      else if (!req.body?.pc) return res.status(409).json({ error: 'The online copy is off on this PC' })
+    }
+    console.log(`[pc-access] a device was ${on ? 'suspended' : 'allowed again'} (${req.body?.pc ? 'computer ' + req.body.pc : 'online ' + device})`)
+    res.json({ ok: true })
+  } catch (e) { res.status(400).json({ error: e.message }) }
 })
 router.get('/pc-access/status', (req, res) => res.json(isLocal(req) ? { state: 'approved', here: true } : statusOf(req)))
 router.get('/pc-access/pending', here, (req, res) => res.json(pending()))

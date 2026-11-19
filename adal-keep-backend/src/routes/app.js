@@ -36,7 +36,7 @@ router.get('/changes', (req, res) => {
 // Double "C" in Adal Keep: Windows' own screen crop (as Win+Shift+S) on this
 // PC; the cropped picture comes back to the page (it goes into the tray).
 router.post('/app/screen-clip', async (req, res) => {
-  if (!isLocal(req) || process.platform !== 'win32') return res.status(403).json({ error: 'The screen crop works on the main PC itself: on this computer press Win+Shift+S, then Ctrl+V in Adal Keep.' })
+  if (!isLocal(req) || req.headers['x-adal-cloud'] || process.platform !== 'win32') return res.status(403).json({ error: 'The screen crop works on the main PC itself: on this computer press Win+Shift+S, then Ctrl+V in Adal Keep.' })
   const out = path.join(os.tmpdir(), `adal-clip-${Date.now()}.png`)
   const script = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'scripts', 'screen-clip.ps1')
   execFile('powershell.exe', ['-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-File', script, '-Out', out, '-WaitSeconds', '120'],
@@ -75,7 +75,7 @@ router.get('/app/clips/:id', async (req, res) => {
 
 // "Quit Adal Keep" (after a Yes in the page): stops everything on this PC.
 router.post('/app/quit', (req, res) => {
-  if (!isLocal(req)) return res.status(403).json({ error: 'Only on the main PC itself' })
+  if (!isLocal(req) || req.headers['x-adal-cloud']) return res.status(403).json({ error: 'Only on the main PC itself' })
   res.json({ ok: true })
   endEverything('Quit was pressed')
 })

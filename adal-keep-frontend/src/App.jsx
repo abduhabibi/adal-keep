@@ -22,7 +22,7 @@ const TasksPage = lazy(() => fresh(() => import('./pages/TasksPage')))
 // The lock screen and the first-start wizard are seen rarely: their code is
 // fetched only when one is shown (a smaller first download on every start).
 const LockScreen = lazy(() => fresh(() => import('./components/LockScreen')))
-import PcAccessGate from './components/PcAccessGate'
+import PcAccessGate, { SuspendedScreen } from './components/PcAccessGate'
 import api from './services/api'
 const IntroWizard = lazy(() => fresh(() => import('./pages/IntroWizard')))
 const CVsPage = lazy(() => fresh(() => import('./pages/CVsPage')))
@@ -90,13 +90,20 @@ const GATED = !(import.meta.env.VITE_PHONE === '1' || import.meta.env.VITE_ADMIN
 function Shell() {
   const { state, subscription, refresh } = useAuth()
   const [pcGate, setPcGate] = useState(false)
+  const [suspended, setSuspended] = useState(false)
+  useEffect(() => {
+    const on = () => setSuspended(true)
+    window.addEventListener('adal-suspended', on)
+    return () => window.removeEventListener('adal-suspended', on)
+  }, [])
   useEffect(() => {
     if (!GATED) return
-    api.get('/pc-access/status').then(r => { if (r.data?.state && r.data.state !== 'approved') setPcGate(true) }).catch(() => {})
+    api.get('/pc-access/status').then(r => { if (r.data?.state === 'suspended') setSuspended(true); else if (r.data?.state && r.data.state !== 'approved') setPcGate(true) }).catch(() => {})
     const on = () => setPcGate(true)
     window.addEventListener('adal-pc-access', on)
     return () => window.removeEventListener('adal-pc-access', on)
   }, [])
+  if (suspended) return <>{toaster}<SuspendedScreen /></>
   if (pcGate) return <>{toaster}<PcAccessGate /></>
 
   if (state === 'loading') {

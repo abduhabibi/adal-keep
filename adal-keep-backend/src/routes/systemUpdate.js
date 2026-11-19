@@ -6,7 +6,7 @@ import fs from 'fs'
 import os from 'os'
 import { Readable } from 'stream'
 import { fileURLToPath } from 'url'
-import { latestRelease, downloadRelease, setUpdateDb, lastEnvelope } from '../services/updateChannel.js'
+import { latestRelease, setUpdateDb, lastEnvelope, verifyManifest } from '../services/updateChannel.js'
 
 const execAsync = promisify(exec)
 const router = Router()
@@ -228,9 +228,14 @@ export async function checkForUpdate() {
 }
 
 async function checkSupabase(installed) {
-  // Supabase first (the source of truth); without it, a newer signed release
-  // another PC of this office has (services/lanRelease.js).
+  // The office FIRST (2026-11-19: the main PC's internet timed out while a
+  // Companion on the same Wi-Fi had the newer release), Supabase second. Both
+  // are signed by Adal; the newer of the two wins, never one older than this PC's.
   const L = await import('../services/lanRelease.js')
+  const mine = installedRelease(installed, L.current()?.manifest)
+  mineNow = mine
+  const known = L.orderKnown(mine)
+  const peer = known ? await L.newestFromPeers(mine).catch(() => null) : null
   let m = null, cloudError = null
   try {
     m = await latestRelease('release')
@@ -240,12 +245,7 @@ async function checkSupabase(installed) {
     m = null
     cloudError = e
   }
-  // Only forward: what this PC runs, with its order. A PC of the office that
-  // has a newer release than Supabase's (or this PC's) offers it.
-  const mine = installedRelease(installed, L.current()?.manifest)
-  const known = L.orderKnown(mine)
-  const peer = known ? await L.newestFromPeers(m && L.isNewer(m, mine) ? m : mine) : null
-  if (peer && (!m || L.isNewer(peer.manifest, m))) { lanEnvelope = peer; m = peer.manifest } else lanEnvelope = null
+  if (peer && (!m || L.isNewer(peer.manifest, m) || (peer.manifest.sha === m.sha && peer.complete))) { lanEnvelope = peer; m = peer.manifest } else lanEnvelope = null
   if (!m) throw cloudError || new Error('no release published yet')
   // Unknown order (an old marker with only a sha): Supabase's release is trusted, as before.
   const upToDate = !!installed.sha && (installed.sha === m.sha || (known && !L.isNewer(m, mine)))
@@ -263,8 +263,8 @@ async function checkSupabase(installed) {
     latest: { sha: m.sha, short: m.short, message: m.message, date: m.date },
     changes: upToDate ? [] : (m.changes || []).slice(0, 40),
     count: upToDate ? 0 : (m.changes || []).length || 1,
-    source: 'supabase', manifest: m,
-    note: null,
+    source: lanEnvelope?.manifest?.sha === m.sha ? 'lan' : 'supabase', manifest: m,
+    note: lanEnvelope?.manifest?.sha === m.sha ? `From ${lanEnvelope.base} on the office network` : (cloudError ? `Supabase not reachable: ${cloudError.message}` : null),
   }
 }
 
@@ -336,8 +336,10 @@ async function handleCheck(req, res) {
 
 let watcher = null
 let lastCheck = 0
-// The signed release a PC of this office offered while Supabase could not be reached.
+// The signed release a PC of this office offered (newer than Supabase's, or Supabase not reached).
 let lanEnvelope = null
+// What this PC runs, with its order (the last check's): offers are measured against it.
+let mineNow = null
 
 /**
  * Updates by itself: an installed PC (USB install, not a developer's git
@@ -348,7 +350,7 @@ let lanEnvelope = null
  */
 let updateDb = null
 const dbOf = () => updateDb
-const autoState = { failedSha: '', failedAt: 0, waitingSince: 0 }
+const autoState = { failedSha: '', failedAt: 0, failedSource: '', waitingSince: 0 }
 async function autoUpdateOn(db) {
   if (String(process.env.ADAL_AUTO_UPDATE || '').trim() === '0') return false
   try {
@@ -380,7 +382,8 @@ async function autoUpdate(db, result) {
     const { rolledBack } = await import('../../safeStart.js')
     if (sha && rolledBack(backendDirOf(config().projectRoot))?.from === sha) return
   } catch {}
-  if (sha && sha === autoState.failedSha && Date.now() - autoState.failedAt < 2 * 3600 * 1000) return
+  // A release that failed waits 2 hours (a cut download: 15 minutes, it goes on from where it stopped) — unless a PC of the office now offers it.
+  if (sha && sha === autoState.failedSha && Date.now() - autoState.failedAt < (autoState.failedDownload ? 15 * 60 * 1000 : 2 * 3600 * 1000) && !(result.source === 'lan' && autoState.failedSource !== 'lan')) return
   const b = await busyNow(db)
   if (b.busy) {
     if (!autoState.waitingSince) autoState.waitingSince = Date.now()
@@ -399,7 +402,7 @@ async function autoUpdate(db, result) {
     updateNotice.auto = false
   }
   if (res.code >= 400 || !res.body?.success) {
-    Object.assign(autoState, { failedSha: sha, failedAt: Date.now() })
+    Object.assign(autoState, { failedSha: sha, failedAt: Date.now(), failedSource: result.source || '', failedDownload: /download|fetch|timeout|abort|stalled|no answer|Supabase/i.test(String(res.body?.error || '')) })
     updateNotice.autoError = res.body?.error || 'the update did not install'
     console.error(`[update] automatic update failed: ${updateNotice.autoError}`)
   } else {
@@ -416,7 +419,10 @@ export function startUpdateWatcher(db = null) {
   if (watcher) return
   const every = Number(process.env.UPDATE_CHECK_MINUTES || 15) * 60 * 1000
   // A PC of this office has a newer release: looked at at the next minute, not in 15.
-  import('../services/lanRelease.js').then(L => L.startLan({ onNews: () => { lastCheck = 0 } })).catch(e => console.warn('[lan-update]', e.message))
+  import('../services/lanRelease.js').then(L => {
+    L.setInstalledOf(() => mineNow || L.current()?.manifest || null)
+    L.startLan({ onNews: () => { lastCheck = 0 } })
+  }).catch(e => console.warn('[lan-update]', e.message))
   const tick = async () => {
     if (updateNotice.applying) return
     try {
@@ -574,13 +580,13 @@ export async function brokenPackages(backendDir, names = CORE_PACKAGES) {
   return out
 }
 
-export async function installFromRelease(cfg, logs, manifest, localArchive = null) {
+export async function installFromRelease(cfg, logs, manifest, localArchive = null, pieceFrom = {}) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'adal-update-'))
   try {
     const archive = localArchive || path.join(tmp, 'release.tar.gz')
     const L = await import('../services/lanRelease.js')
     // From a PC of this office that has it, else Supabase; checked against the signed manifest either way.
-    if (!localArchive) await L.fetchPiece(manifest, { file: manifest.file, sha256: manifest.sha256 }, archive)
+    if (!localArchive) await L.fetchPiece(manifest, { file: manifest.file, sha256: manifest.sha256 }, archive, pieceFrom)
     logs.push(`Downloaded ${(fs.statSync(archive).size / 1048576).toFixed(1)} MB (signed by Adal, checked)`)
     await L.keepPiece(manifest.sha256, archive).catch(() => {})   // to hand on to the office's other PCs
     const extracted = path.join(tmp, 'src')
@@ -634,7 +640,7 @@ export async function installFromRelease(cfg, logs, manifest, localArchive = nul
         const { createHash } = await import('crypto')
         if (createHash('sha256').update(fs.readFileSync(dest)).digest('hex') === p.sha256) continue
         const got = path.join(tmp, p.name)
-        await L.fetchPiece(manifest, p, got)
+        await L.fetchPiece(manifest, p, got, pieceFrom)
         fs.rmSync(`${dest}.old`, { force: true })
         fs.renameSync(dest, `${dest}.old`)
         try { fs.copyFileSync(got, dest) } catch (e) { fs.renameSync(`${dest}.old`, dest); throw e }
@@ -690,6 +696,106 @@ async function handleApply(req, res) {
   }
 }
 
+/**
+ * Installs one signed release ({ manifest, signature }) on an installed PC:
+ * only forward, the app first fetched whole into the cache (the office first
+ * when `from.bases` names a PC, then Supabase, resumable), then put in place.
+ * When the download fails (a slow line, Supabase cut off), any PC of the
+ * office with a newer release is tried at once (`fallback`). Answers like a
+ * route ({ success, … } or { code, error }).
+ */
+async function installEnvelope(cfg, logs, installed, mine, env, from = {}, fallback = null) {
+  const L = await import('../services/lanRelease.js')
+  if (!env?.manifest || !verifyManifest(env.manifest, env.signature)) return { code: 400, error: 'The release is not signed by Adal — not installed' }
+  let manifest = env.manifest
+  if (installed.sha && (installed.sha === manifest.sha || (L.orderKnown(mine) && !L.isNewer(manifest, mine)))) {
+    return { success: true, alreadyUpToDate: true, branch: 'release', source: from.source || 'supabase', message: `Already up to date — this PC runs ${installed.short}, the release offered (${manifest.short}) is not newer.` }
+  }
+  const app = { file: manifest.file, sha256: manifest.sha256 }
+  try {
+    await L.fetchPiece(manifest, app, null, from)
+  } catch (e) {
+    logs.push(`Download of ${manifest.short} failed: ${e.message}`)
+    const peer = fallback ? await fallback(from.bases || []) : null
+    if (!peer) throw e
+    logs.push(`Trying the office network at once: ${peer.manifest.short} from ${peer.base}`)
+    env = peer; manifest = peer.manifest; from = { bases: [peer.base] }
+    await L.fetchPiece(manifest, { file: manifest.file, sha256: manifest.sha256 }, null, from)
+  }
+  await installFromRelease(cfg, logs, manifest, null, from)
+  lanEnvelope = null
+  await L.recordInstalled(env, cfg.projectRoot).catch(e => logs.push(`Not kept for the other PCs: ${e.message}`))
+  writeMarker(cfg.projectRoot, { sha: manifest.sha, branch: 'release', source: 'supabase', lock_hash: manifest.lock_hash, message: manifest.message, date: manifest.date || '', published_at: manifest.published_at || '', ...(manifest.seq ? { seq: manifest.seq } : {}) })
+  mineNow = manifest
+  const restarts = ['AdalKeep.exe', 'run-server.bat'].some(f => fs.existsSync(path.join(cfg.projectRoot, f)))
+  if (restarts) setTimeout(() => process.exit(0), 3000)
+  return {
+    success: true, branch: 'release', source: from.bases?.length ? 'lan' : 'supabase',
+    installed: { sha: manifest.sha, short: manifest.short },
+    message: restarts ? 'Update installed. The server restarts now — reload the page in about 20 seconds.' : 'Update installed. Please restart the app to apply changes.',
+  }
+}
+
+/** The update as the background check runs it (also for tests): { code, body }. */
+export async function applyNow() {
+  const res = { code: 200, body: null, status(c) { this.code = c; return this }, json(b) { this.body = b; return this } }
+  await applyUpdate(null, res)
+  return res
+}
+
+/**
+ * A signed release from a local folder or .zip / .tar.gz installed here (for a
+ * main PC whose internet is down: the release copied over the LAN by scp).
+ * Adal's signature and every piece's SHA-256 are checked; only forward unless
+ * `force` (never an unsigned one). Used by POST /update/apply-local and by
+ * scripts/apply-release.mjs (which runs this code from the release itself, so
+ * it works on a PC whose server is older than this route).
+ * Returns { code?, success?, error?, message, log }.
+ */
+export async function applyLocalRelease(src, { force = false } = {}) {
+  const cfg = config()
+  const logs = []
+  try {
+    const installed = await getInstalled()
+    if (installed.isRepo) return { code: 400, error: 'A developer\'s git checkout: use git, not a release file.' }
+    const L = await import('../services/lanRelease.js')
+    const env = await L.importRelease(src)
+    logs.push(`Release ${env.manifest.short} from ${src}: signed by Adal, ${env.pieces} of ${env.of} piece(s) here and checked`)
+    const mine = force ? null : installedRelease(installed, L.current()?.manifest)
+    const result = await installEnvelope(cfg, logs, force ? { ...installed, sha: '' } : installed, mine, { manifest: env.manifest, signature: env.signature }, { cloud: false, source: 'file' })
+    console.log(`[system/update/apply-local] ${result.error || result.message}`)
+    return { ...result, log: logs.join('\n').slice(-4000) }
+  } catch (err) {
+    console.error('[system/update/apply-local]', err.message)
+    return { code: 500, error: err.message, log: logs.join('\n').slice(-4000) }
+  }
+}
+
+/**
+ * POST /api/system/update/apply-local   (this PC only: 127.0.0.1)
+ *   { path } or ?path=   a folder or .zip / .tar.gz with a signed release
+ *   (another PC's data/lan-release or updates folder, or scripts/release-bundle.mjs)
+ *   force=1              also a release that is not newer (never an unsigned one)
+ */
+async function handleApplyLocal(req, res) {
+  const { isLocal } = await import('../services/networkGate.js')
+  if (!isLocal(req)) return res.status(403).json({ error: 'Only on this PC itself (127.0.0.1)' })
+  if (updateNotice.applying) return res.status(409).json({ error: 'An update is being installed already.' })
+  const src = String(req.body?.path || req.query?.path || '').trim()
+  if (!src) return res.status(400).json({ error: 'Give the path of the release folder or .zip: {"path": "C:/Users/hp/adal-release.zip"}' })
+  updateNotice.applying = true
+  updateNotice.applyingSince = new Date().toISOString()
+  try {
+    const force = ['1', 'true', 'yes'].includes(String(req.body?.force ?? req.query?.force ?? '').toLowerCase())
+    const r = await applyLocalRelease(src, { force })
+    res.status(r.code || 200).json({ ...r, code: undefined })
+  } finally {
+    updateNotice.applying = false
+    updateNotice.result = null
+  }
+}
+
+
 async function applyUpdate(req, res) {
   const cfg = config()
   const logs = []
@@ -697,41 +803,26 @@ async function applyUpdate(req, res) {
     const installed = await getInstalled()
     setUpdateDb(req?.app?.locals?.db)
 
-    // --- Installed PC: Adal's signed release from Supabase -----------------
+    // --- Installed PC: Adal's signed release, the office first, then Supabase ---
     if (!installed.isRepo) {
-      let manifest = null, env = null
-      try { manifest = await latestRelease('release'); env = lastEnvelope } catch (e) {
-        // No Supabase: a newer signed release from a PC of this office.
-        const L = await import('../services/lanRelease.js')
-        const mine = installedRelease(installed, L.current()?.manifest)
-        const peer = lanEnvelope || (L.orderKnown(mine) ? await L.newestFromPeers(mine) : null)
-        if (!peer) throw new Error(`Supabase updates: ${e.message}`)
-        manifest = peer.manifest; env = peer
-        logs.push(`Supabase not reachable — the signed release from ${peer.base}`)
-      }
-      if (!manifest) throw new Error('Supabase updates: no release published yet')
-      {
-        // Only forward (asked on 2026-11-19): a PC of the office with a newer
-        // release than Supabase's offers it; an older release is never installed.
-        const L = await import('../services/lanRelease.js')
-        const mine = installedRelease(installed, L.current()?.manifest)
-        if (lanEnvelope?.manifest && L.verifyIsNewer(lanEnvelope, manifest)) { manifest = lanEnvelope.manifest; env = lanEnvelope; logs.push(`The newer signed release from ${lanEnvelope.base}`) }
-        if (installed.sha && (installed.sha === manifest.sha || (L.orderKnown(mine) && !L.isNewer(manifest, mine)))) {
-          return res.json({ success: true, alreadyUpToDate: true, branch: 'release', source: 'supabase', message: `Already up to date — this PC runs ${installed.short}, the release offered (${manifest.short}) is not newer.`, log: logs.join('\n').slice(-4000) })
-        }
-        await installFromRelease(cfg, logs, manifest)
-        lanEnvelope = null
-        if (env?.manifest?.sha === manifest.sha) await (await import('../services/lanRelease.js')).recordInstalled(env, cfg.projectRoot).catch(e => logs.push(`Not kept for the other PCs: ${e.message}`))
-        writeMarker(cfg.projectRoot, { sha: manifest.sha, branch: 'release', source: 'supabase', lock_hash: manifest.lock_hash, message: manifest.message, date: manifest.date || '', published_at: manifest.published_at || '', ...(manifest.seq ? { seq: manifest.seq } : {}) })
-        const restarts = ['AdalKeep.exe', 'run-server.bat'].some(f => fs.existsSync(path.join(cfg.projectRoot, f)))
-        if (restarts) setTimeout(() => process.exit(0), 3000)
-        return res.json({
-          success: true, branch: 'release', source: 'supabase',
-          installed: { sha: manifest.sha, short: manifest.short },
-          message: restarts ? 'Update installed. The server restarts now — reload the page in about 20 seconds.' : 'Update installed. Please restart the app to apply changes.',
-          log: logs.join('\n').slice(-4000),
-        })
-      }
+      const L = await import('../services/lanRelease.js')
+      const mine = installedRelease(installed, L.current()?.manifest)
+      mineNow = mine
+      const fromOffice = async (skip = []) => (L.orderKnown(mine) ? await L.newestFromPeers(mine, { skip }).catch(() => null) : null)
+      // 1. A PC of this office (a Companion on the same Wi-Fi) that has a newer signed release.
+      let env = lanEnvelope && L.verifyIsNewer(lanEnvelope, mine) ? lanEnvelope : await fromOffice()
+      let source = env ? 'lan' : ''
+      // 2. Supabase: taken when it is newer still.
+      let cloudErr = null
+      try {
+        await latestRelease('release')
+        if (lastEnvelope && (!env || L.isNewer(lastEnvelope.manifest, env.manifest))) { env = lastEnvelope; source = 'supabase' }
+      } catch (e) { cloudErr = e }
+      if (!env) throw new Error(`Supabase updates: ${cloudErr?.message || 'no release published yet'}`)
+      if (cloudErr) logs.push(`Supabase not reachable (${cloudErr.message})`)
+      if (source === 'lan') logs.push(`The signed release ${env.manifest.short} from ${env.base} (office network)`)
+      const result = await installEnvelope(cfg, logs, installed, mine, env, source === 'lan' ? { bases: [env.base] } : {}, fromOffice)
+      return res.status(result.code || 200).json({ ...result, code: undefined, log: logs.join('\n').slice(-4000) })
     }
 
     // The revision GitHub currently publishes on the tracked branch — this is
@@ -834,6 +925,7 @@ import('../services/lanRelease.js').then(L => L.lanRoutes(lanRouter))
 router.use(lanRouter)
 router.get('/update/check', handleCheck)
 router.post('/update/apply', handleApply)
+router.post('/update/apply-local', handleApplyLocal)
 
 // Backwards-compatible aliases
 router.get('/check', handleCheck)

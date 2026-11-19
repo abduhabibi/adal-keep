@@ -10,6 +10,11 @@
 // What a Companion installs from a release: its programs (AdalKeep.exe,
 // adal-companion.exe — used from the next start) and its own online pages
 // (the "online" folder). The rest of Adal Keep comes from the main PC.
+// Since 2026-11-19 it also KEEPS every other piece of the release (the app,
+// the agent) so it can hand the whole release to a main PC whose internet is
+// too slow, and offers it to the main PC (POST <main>/api/system/update/lan/offer)
+// whenever its release is newer and complete. Downloads go in Range pieces
+// that resume after a cut (dl), never one timeout for the whole file.
 //
 // The office network helps (the same as the main PC, services/lanRelease.js):
 //
@@ -27,6 +32,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"crypto/x509"
@@ -284,11 +290,12 @@ type updater struct {
 	mu   sync.Mutex // one install at a time
 	pm   sync.Mutex
 	// peers heard on the network: base → what it has
-	peers  map[string]peerInfo
-	failed map[string]time.Time
-	conn   *net.UDPConn
-	client *http.Client
-	built  *releaseManifest // the release this program was built from (builtRelease)
+	peers    map[string]peerInfo
+	failed   map[string]time.Time
+	conn     *net.UDPConn
+	client   *http.Client     // small calls (sign-in, latest.json)
+	dlClient *http.Client     // downloads: each piece has its own timeout (dl)
+	built    *releaseManifest // the release this program was built from (builtRelease)
 }
 
 type peerInfo struct {
@@ -297,7 +304,7 @@ type peerInfo struct {
 }
 
 func newUpdater(root string) *updater {
-	return &updater{root: root, key: updatePublicKey, peers: map[string]peerInfo{}, failed: map[string]time.Time{}, built: builtRelease, client: &http.Client{Timeout: 10 * time.Minute}}
+	return &updater{root: root, key: updatePublicKey, peers: map[string]peerInfo{}, failed: map[string]time.Time{}, built: builtRelease, client: &http.Client{Timeout: time.Minute}, dlClient: &http.Client{}}
 }
 
 func (u *updater) dir() string         { return filepath.Join(u.root, "updates") }
@@ -366,36 +373,150 @@ func (u *updater) piecePath(sha string) string {
 
 // ── getting pieces ─────────────────────────────────────────────────────────
 
+// How a download goes on a slow line (2026-11-19: the main PC's update was cut
+// off by one timeout): in pieces (Range requests) into <dest>.part, which stays
+// between tries, so each try goes on where the last one stopped. Each piece
+// has its own timeout; a failed piece is tried again after a growing wait;
+// only many tries in a row with no progress give up. Replaced in tests.
+var dl = struct {
+	chunk          int64
+	timeout, stall time.Duration
+	tries          int
+	backoff        time.Duration
+}{chunk: 2 << 20, timeout: 3 * time.Minute, stall: time.Minute, tries: 6, backoff: 2 * time.Second}
+
+var contentRange = regexp.MustCompile(`bytes\s+(\d+)-\d+/(\d+|\*)`)
+
 func (u *updater) download(url string, hdr map[string]string, want, dest string) error {
-	req, _ := http.NewRequest(http.MethodGet, url, nil)
+	os.MkdirAll(filepath.Dir(dest), 0o755)
+	part := dest + ".part"
+	have := func() int64 {
+		if st, err := os.Stat(part); err == nil {
+			return st.Size()
+		}
+		return 0
+	}
+	var total int64
+	failures := 0
+	for {
+		before := have()
+		if total > 0 && before >= total {
+			break
+		}
+		done, err := u.downloadPiece(url, hdr, part, before, &total)
+		if done {
+			break
+		}
+		if total > 0 && have() > total { // nonsense: from the start again
+			os.Remove(part)
+			total = 0
+		}
+		if have() > before {
+			failures = 0
+			continue
+		}
+		var fe finalErr
+		if errors.As(err, &fe) {
+			return err
+		}
+		failures++
+		if failures >= dl.tries {
+			if err == nil {
+				err = errors.New("no data")
+			}
+			return fmt.Errorf("download stopped after %d tries with no progress: %w", failures, err)
+		}
+		if err != nil {
+			wait := dl.backoff << (failures - 1)
+			if wait > time.Minute {
+				wait = time.Minute
+			}
+			time.Sleep(wait)
+		}
+	}
+	if fileSHA(part) != want {
+		os.Remove(part)
+		return errors.New("does not match Adal's signed release")
+	}
+	return os.Rename(part, dest)
+}
+
+type finalErr struct{ error }
+
+// downloadPiece: one request from `from`; what arrives is added to part (kept on a cut).
+// done: the file is all here.
+func (u *updater) downloadPiece(url string, hdr map[string]string, part string, from int64, total *int64) (bool, error) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	timer := time.AfterFunc(dl.timeout, cancel)
+	defer timer.Stop()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	for k, v := range hdr {
 		req.Header.Set(k, v)
 	}
-	resp, err := u.client.Do(req)
+	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", from, from+dl.chunk-1))
+	resp, err := u.dlClient.Do(req)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("answered %d", resp.StatusCode)
+	flags := os.O_CREATE | os.O_WRONLY
+	switch resp.StatusCode {
+	case http.StatusRequestedRangeNotSatisfiable:
+		if *total == 0 {
+			*total = from
+		}
+		return true, nil
+	case http.StatusPartialContent:
+		m := contentRange.FindStringSubmatch(resp.Header.Get("Content-Range"))
+		if m == nil || m[1] != strconv.FormatInt(from, 10) {
+			return false, errors.New("the server sent another part than asked")
+		}
+		if n, err := strconv.ParseInt(m[2], 10, 64); err == nil {
+			*total = n
+		}
+		flags |= os.O_APPEND
+	case http.StatusOK:
+		// The whole file from the start (the server ignores Range): a stall ends it, not the total time.
+		*total = resp.ContentLength
+		flags |= os.O_TRUNC
+		timer.Reset(dl.stall)
+	default:
+		err := fmt.Errorf("answered %d", resp.StatusCode)
+		if resp.StatusCode >= 400 && resp.StatusCode < 500 && resp.StatusCode != 408 && resp.StatusCode != 425 && resp.StatusCode != 429 {
+			return false, finalErr{err}
+		}
+		return false, err
 	}
-	os.MkdirAll(filepath.Dir(dest), 0o755)
-	tmp := dest + ".part"
-	f, err := os.Create(tmp)
+	f, err := os.OpenFile(part, flags, 0o644)
 	if err != nil {
-		return err
+		return false, err
 	}
-	h := sha256.New()
-	_, err = io.Copy(io.MultiWriter(f, h), resp.Body)
-	f.Close()
-	if err == nil && hex.EncodeToString(h.Sum(nil)) != want {
-		err = errors.New("does not match Adal's signed release")
+	defer f.Close()
+	buf := make([]byte, 64<<10)
+	for {
+		n, rerr := resp.Body.Read(buf)
+		if n > 0 {
+			if _, werr := f.Write(buf[:n]); werr != nil {
+				return false, werr
+			}
+			if resp.StatusCode == http.StatusOK {
+				timer.Reset(dl.stall)
+			}
+		}
+		if rerr == io.EOF {
+			break
+		}
+		if rerr != nil {
+			return false, rerr
+		}
 	}
-	if err != nil {
-		os.Remove(tmp)
-		return err
+	if resp.StatusCode == http.StatusOK && *total <= 0 {
+		st, _ := f.Stat()
+		*total = st.Size()
+		return true, nil
 	}
-	return os.Rename(tmp, dest)
+	return false, nil
 }
 
 func (u *updater) peersWith(sha string) []string {
@@ -561,20 +682,136 @@ func (u *updater) install(m *releaseManifest, env *envelope, fromCloud bool) err
 	}
 	if es, err := os.ReadDir(u.files()); err == nil {
 		for _, e := range es {
-			if !want[e.Name()] {
+			if !want[strings.TrimSuffix(e.Name(), ".part")] { // a half-download of a wanted piece stays (it goes on)
 				os.Remove(filepath.Join(u.files(), e.Name()))
 			}
 		}
 	}
 	log.Printf("✅ update %s installed on this Companion (programs from the next start)", m.Short)
-	go func() {
-		// The app itself, to hand on to a main PC of the office (only from the network: no extra download from Supabase).
-		if m.SHA256 != "" {
-			u.getPiece(m, piece{File: m.File, SHA256: m.SHA256}, false)
-		}
-	}()
+	// The WHOLE release (the app, every program, the pages), so this Companion
+	// can hand it all to a main PC whose internet is slow (2026-11-19).
+	go u.completeSet(m, fromCloud)
 	u.announce()
+	go u.offerToMain()
 	return nil
+}
+
+// completeSet: every piece of the kept release fetched (the office first, then
+// Supabase when allowed), tried again every 10 minutes for a few hours.
+func (u *updater) completeSet(m *releaseManifest, fromCloud bool) bool {
+	for i := 0; i < completeTries; i++ {
+		if cur, _ := u.current(); cur == nil || cur.SHA != m.SHA {
+			return false // another release came meanwhile
+		}
+		missing := 0
+		for _, p := range piecesOf(m) {
+			if _, err := u.getPiece(m, p, fromCloud); err != nil {
+				missing++
+			}
+		}
+		if missing == 0 {
+			log.Printf("📦 the whole release %s is here to hand on", m.Short)
+			u.announce()
+			u.offerToMain()
+			return true
+		}
+		time.Sleep(completeEvery)
+	}
+	return false
+}
+
+var completeTries, completeEvery = 6, 10 * time.Minute
+
+// complete: every piece of the kept release is here.
+func (u *updater) have(m *releaseManifest) []string {
+	out := []string{}
+	for _, p := range piecesOf(m) {
+		if u.piecePath(p.SHA256) != "" {
+			out = append(out, p.SHA256)
+		}
+	}
+	return out
+}
+
+func (u *updater) complete(m *releaseManifest) bool {
+	return m != nil && len(u.have(m)) == len(piecesOf(m))
+}
+
+// ── pushing to the main PC (and hearing pushes) ────────────────────────────
+
+type offerMsg struct {
+	SHA         string `json:"sha"`
+	PublishedAt string `json:"published_at"`
+	Seq         int64  `json:"seq"`
+	Port        int    `json:"port"`
+	Path        string `json:"path"`
+	Tags        string `json:"tags"`
+}
+
+// mainBase: the main PC's LAN release address ("" when none is known). Replaced in tests.
+var mainBase = func() string {
+	if hostServer == "" {
+		return ""
+	}
+	return strings.TrimRight(hostServer, "/") + "/api/system/update/lan"
+}
+
+var offeredAt = struct {
+	sync.Mutex
+	m map[string]time.Time
+}{m: map[string]time.Time{}}
+
+// offerToMain: when this Companion holds a COMPLETE release newer than the
+// main PC's, it tells the main PC straight (POST /offer), so the main PC takes
+// it within a minute even when the Wi-Fi drops broadcasts. Once per release
+// per 5 minutes. Returns true when an offer was made.
+func (u *updater) offerToMain() bool {
+	base := mainBase()
+	m, _ := u.current()
+	tag := ownAgencyTag()
+	if base == "" || m == nil || tag == "" || !u.complete(m) {
+		return false
+	}
+	offeredAt.Lock()
+	last := offeredAt.m[base+m.SHA]
+	offeredAt.Unlock()
+	if time.Since(last) < 5*time.Minute {
+		return false
+	}
+	// What the main PC has: an offer only when ours is newer (it may have none kept yet).
+	hc := &http.Client{Timeout: 6 * time.Second}
+	if resp, err := hc.Get(base + "/latest"); err == nil {
+		var env envelope
+		ok := resp.StatusCode == http.StatusOK && json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&env) == nil
+		resp.Body.Close()
+		if ok {
+			if theirs, err := verifyRelease(env, u.key); err == nil && !isNewerRelease(m, theirs) {
+				return false
+			}
+		}
+	} else {
+		return false // the main PC does not answer
+	}
+	body, _ := json.Marshal(offerMsg{SHA: m.SHA, PublishedAt: m.PublishedAt, Seq: m.Seq, Port: lanHTTPPort, Path: "/lan", Tags: tag})
+	resp, err := hc.Post(base+"/offer", "application/json", bytes.NewReader(body))
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return false
+	}
+	offeredAt.Lock()
+	offeredAt.m[base+m.SHA] = time.Now()
+	offeredAt.Unlock()
+	log.Printf("📣 told the main PC: update %s is here for it", m.Short)
+	return true
+}
+
+// heardOffer: a PC of this agency (the main PC) says it has a newer release.
+func (u *updater) heardOffer(o offerMsg, from net.IP) (string, bool) {
+	line := strings.Join([]string{releaseMagic, o.SHA, o.PublishedAt, strconv.Itoa(o.Port), o.Path, o.Tags}, "|")
+	return u.heard(line, from)
 }
 
 func (u *updater) installPieces(m *releaseManifest, fromCloud bool) error {
@@ -878,17 +1115,42 @@ func (u *updater) fromCloud() error {
 	return u.install(m, env, true)
 }
 
-// serveLAN: the release kept here and its pieces (only those its signed manifest names).
+// serveLAN: the release kept here and its pieces (only those its signed manifest names), and offers.
 func (u *updater) handler() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/lan/latest", func(w http.ResponseWriter, r *http.Request) {
-		_, env := u.current()
+		m, env := u.current()
 		if env == nil {
 			http.NotFound(w, r)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(env)
+		// have: the pieces that are here (a main PC prefers a PC with all of them).
+		json.NewEncoder(w).Encode(map[string]any{"manifest": env.Manifest, "signature": env.Signature, "have": u.have(m)})
+	})
+	// A PC of this agency (the main PC) says it has a newer release.
+	mux.HandleFunc("/lan/offer", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "POST", http.StatusMethodNotAllowed)
+			return
+		}
+		var o offerMsg
+		if json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&o) != nil {
+			http.Error(w, "bad offer", http.StatusBadRequest)
+			return
+		}
+		host, _, _ := net.SplitHostPort(r.RemoteAddr)
+		base, newer := u.heardOffer(o, net.ParseIP(host))
+		if newer {
+			log.Printf("📣 %s offers update %.7s", base, o.SHA)
+			go func() {
+				if err := u.fromPeer(base); err != nil {
+					log.Printf("⚠️ update from %s: %v", base, err)
+				}
+			}()
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"ok": true, "newer": newer})
 	})
 	mux.HandleFunc("/lan/file/", func(w http.ResponseWriter, r *http.Request) {
 		sha := strings.TrimPrefix(r.URL.Path, "/lan/file/")
@@ -956,6 +1218,20 @@ func startSelfUpdate(root string) *updater {
 			}
 			u.announce()
 			time.Sleep(time.Duration(envInt("ADAL_UPDATE_MINUTES", 30)) * time.Minute)
+		}
+	}()
+	go func() {
+		// A release kept before this version (only its own pieces): made whole behind.
+		time.Sleep(time.Minute)
+		if m, _ := u.current(); m != nil && !u.complete(m) {
+			u.completeSet(m, true)
+		}
+	}()
+	go func() {
+		// Every minute: a newer, complete release here than the main PC's is offered to it.
+		for {
+			time.Sleep(time.Minute)
+			u.offerToMain()
 		}
 	}()
 	return u

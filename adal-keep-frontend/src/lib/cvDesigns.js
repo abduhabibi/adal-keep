@@ -1,10 +1,14 @@
 /**
- * Ready-made CV designs, coloured from two colours the person picks.
- * Each design is the same kind of CV as the agency templates (English and
- * Arabic side by side, photo, full-body photo, passport details, languages
- * Speak / Read / Write, skills, previous work, mobile) — only the header
- * image is uploaded. The passport page is added by the CV engine itself
- * (cvRender.mergeTemplate), with its own title colour.
+ * New CV templates, coloured from two colours the person picks.
+ *
+ * A new template is made exactly like the hand-made agency templates (TAMKIN,
+ * AL-WESAM, ASDAF, FURSTKUM, HADIYA, ABDAL, AL-SHAHD all share this page): the
+ * same .cv-page markup — header picture, name and salary beside the photo,
+ * the details table, the post and passport block above the full-body photo,
+ * footer — so it goes through the same CV engine path (cvRender.mergeTemplate:
+ * the same A4 fit, the same full-body framing, the same passport page 2, the
+ * same preview and PDF). A design only changes colours and lines (CSS), never
+ * the blocks or their sizes.
  *
  *   designHtml(id, primary, secondary) → { html, css }
  */
@@ -30,242 +34,165 @@ export function palette(p, s) {
   }
 }
 
-// ---------------------------------------------------------------- content
-const PERSONAL = [
-  ['Nationality', 'الجنسية', 'NATIONALITY'], ['Religion', 'الديانة', 'RELIGION'], ['Date of Birth', 'تاريخ الميلاد', 'DOB'],
-  ['Age', 'العمر', 'AGE'], ['Place of Birth', 'مكان الميلاد', 'PLACE_OF_BIRTH'], ['Marital Status', 'الحالة الاجتماعية', 'MARITAL_STATUS'],
-  ['No. of Children', 'عدد الأطفال', 'CHILDREN_COUNT'], ['Weight', 'الوزن', 'WEIGHT'], ['Height', 'الطول', 'HEIGHT'],
-  ['Complexion', 'لون البشرة', 'COMPLEXION'], ['Education', 'المؤهل العلمي', 'EDUCATION'],
-]
-const PASSPORT = [
-  ['Passport No.', 'رقم الجواز', 'PASSPORT_NO'], ['Date of Issue', 'تاريخ الإصدار', 'PASSPORT_ISSUE_DATE'],
-  ['Date of Expiry', 'تاريخ الانتهاء', 'PASSPORT_EXPIRY_DATE'], ['Place of Issue', 'مكان الإصدار', '_ETHIOPIA'],
-]
-const JOB = [
-  ['Post Applied', 'الوظيفة', 'POST_APPLIED'], ['Monthly Salary', 'الراتب الشهري', '_SALARY'],
-  ['Contract Period', 'مدة العقد', '_YEARS'], ['Ref. No.', 'الرقم المرجعي', 'REF_NO'],
-]
-const SKILLS = [
-  ['Cleaning', 'تنظيف', 'SKILL_CLEANING'], ['Washing', 'غسيل الملابس', 'SKILL_WASHING'], ['Ironing', 'كي الملابس', 'SKILL_IRONING'],
-  ['Baby Sitting', 'رعاية الأطفال', 'SKILL_BABY_SITTING'], ['Cooking', 'طبخ', 'SKILL_COOKING'],
-]
-const tok = (k) => (k === '_ETHIOPIA' ? 'ETHIOPIA' : k === '_SALARY' ? '{{SALARY}} {{CURRENCY}}' : k === '_YEARS' ? '{{CONTRACT_YEARS}} YEARS' : `{{${k}}}`)
+// ---------------------------------------------------------------- the page
+// The hand-made templates' page, as saved for TAMKIN (and six others), word for word.
+export const SKELETON = `<div class="cv-page">
+  <img class="cv-header" src="{{HEADER_IMAGE}}" alt="header" />
 
-const photo = (cls) => `<div class="${cls}"><img src="{{PHOTO_URL}}" alt="" onerror="this.style.display='none'"></div>`
-const body = (cls) => `<div class="${cls}"><img src="{{FULL_BODY_PHOTO_URL}}" alt="" onerror="this.style.display='none'"></div>`
-const rows3 = (list) => list.map(([en, ar, k]) => `<tr><th>${en}</th><td>${tok(k)}</td><th class="ar">${ar}</th></tr>`).join('')
-const langTable = () => `<table class="lang"><tr><th></th><th>Speak<span class="ar">محادثة</span></th><th>Read<span class="ar">قراءة</span></th><th>Write<span class="ar">كتابة</span></th></tr>
-  <tr><th>English <span class="ar">الإنجليزية</span></th><td>{{ENGLISH_SPEAK}}</td><td>{{ENGLISH_READ}}</td><td>{{ENGLISH_WRITE}}</td></tr>
-  <tr><th>Arabic <span class="ar">العربية</span></th><td>{{ARABIC_SPEAK}}</td><td>{{ARABIC_READ}}</td><td>{{ARABIC_WRITE}}</td></tr></table>`
-const skillTable = () => `<table class="skills">${SKILLS.map(([en, ar, k]) => `<tr><th>${en}</th><td class="tick">{{${k}}}</td><th class="ar">${ar}</th></tr>`).join('')}</table>`
-const prevTable = () => `<table class="kv"><tr><th>Country</th><td>{{PREV_COUNTRY}}</td><th class="ar">الدولة</th></tr><tr><th>Period</th><td>{{PREV_PERIOD}}</td><th class="ar">المدة</th></tr><tr><th>Position</th><td>{{PREV_POSITION}}</td><th class="ar">الوظيفة</th></tr></table>`
-const title = (en, ar) => `<div class="sec"><span>${en}</span><span class="ar">${ar}</span></div>`
+  <div class="cv-body">
+    <table class="top-block">
+      <tr>
+        <td class="name-panel">
+          <table class="inner">
+            <tr>
+              <td class="lbl">Full Name</td>
+              <td class="val highlight">{{FULL_NAME}}</td>
+              <td class="ar">الاسم الرباعي</td>
+            </tr>
+            <tr>
+              <td class="lbl">Monthly Salary</td>
+              <td class="val big">{{SALARY}} {{CURRENCY}}</td>
+              <td class="ar">الراتب الشهري</td>
+            </tr>
+          </table>
+        </td>
+        <td class="headshot-cell">
+          <img src="{{PHOTO_URL}}" alt="photo" />
+        </td>
+      </tr>
+    </table>
 
-const BASE = `
-*{box-sizing:border-box}
-:root{color-scheme:light}
-html,body{background:#fff!important;color:#1f2937}
-body{font-family:Arial,Helvetica,sans-serif;margin:0}
-.cv{width:210mm;padding:6mm 8mm 5mm;font-size:10.5px}
-table{width:100%;border-collapse:collapse}
-th,td{padding:3.6px 6px;text-align:left;vertical-align:middle;line-height:1.25}
-th{font-weight:700}
-.ar{direction:rtl;text-align:right;font-weight:600;font-family:'Arial',sans-serif}
-td.tick{text-align:center;font-size:13px;font-weight:700}
-.lang td{text-align:center;font-weight:700}
-.lang tr:first-child th span.ar{display:block;font-size:9px;font-weight:600;text-align:center}
-.lang tr+tr th span.ar{margin-left:5px;font-size:10px}
-.skills th.ar,.kv th.ar{white-space:nowrap}
-.ph img,.fb img{width:100%;height:100%;object-fit:cover;display:block}
-.name{font-size:17px;font-weight:800;letter-spacing:.4px}
+    <div class="main-grid">
+      <div class="left-col">
+        <table class="details">
+          <tr class="sec"><td colspan="3">Details of Applicant</td></tr>
+          <tr><td class="lbl">Nationality</td><td class="val">{{NATIONALITY}}</td><td class="ar">الجنسية</td></tr>
+          <tr><td class="lbl">Religion</td><td class="val">{{RELIGION}}</td><td class="ar">الديانة</td></tr>
+          <tr><td class="lbl">Date Of Birth</td><td class="val">{{DOB}}</td><td class="ar">تاريخ الميلاد</td></tr>
+          <tr><td class="lbl">Contact Number</td><td class="val">{{PHONE}}</td><td class="ar">رقم الاتصال</td></tr>
+          <tr><td class="lbl">Place Of Birth</td><td class="val">{{PLACE_OF_BIRTH}}</td><td class="ar">مكان الميلاد</td></tr>
+          <tr><td class="lbl">Living Town</td><td class="val">{{LIVING_TOWN}}</td><td class="ar">مكان السكن</td></tr>
+          <tr><td class="lbl">Marital Status</td><td class="val">{{MARITAL_STATUS}}</td><td class="ar">الحالة الاجتماعية</td></tr>
+          <tr><td class="lbl">No. of Children</td><td class="val">{{CHILDREN_COUNT}}</td><td class="ar">عدد الاطفال</td></tr>
+          <tr><td class="lbl">Weight</td><td class="val">{{WEIGHT}}</td><td class="ar">الوزن</td></tr>
+          <tr><td class="lbl">Height</td><td class="val">{{HEIGHT}}</td><td class="ar">الطول</td></tr>
+          <tr><td class="lbl">Age</td><td class="val">{{AGE}}</td><td class="ar">العمر</td></tr>
+
+          <tr class="sec"><td colspan="3">Skills &amp; Experience</td></tr>
+          <tr><td class="lbl">CLEANING</td><td class="val skill">{{SKILL_CLEANING}}</td><td></td></tr>
+          <tr><td class="lbl">IRONING</td><td class="val skill">{{SKILL_IRONING}}</td><td></td></tr>
+          <tr><td class="lbl">WASHING</td><td class="val skill">{{SKILL_WASHING}}</td><td></td></tr>
+          <tr><td class="lbl">BABY SITTING</td><td class="val skill">{{SKILL_BABY_SITTING}}</td><td></td></tr>
+          <tr><td class="lbl">COOKING</td><td class="val skill">{{SKILL_COOKING}}</td><td></td></tr>
+
+          <tr class="sec"><td colspan="3">Education &amp; Languages</td></tr>
+          <tr><td class="lbl">ENGLISH</td><td class="val">{{ENGLISH}}</td><td></td></tr>
+          <tr><td class="lbl">ARABIC</td><td class="val">{{ARABIC}}</td><td></td></tr>
+          <tr><td class="lbl">OTHER</td><td class="val">NO</td><td></td></tr>
+          <tr><td class="lbl">Education</td><td class="val">{{EDUCATION}}</td><td></td></tr>
+
+          <tr class="sec"><td colspan="3">Employment Previous</td></tr>
+          <tr><td class="lbl">Country</td><td class="val">{{PREV_COUNTRY}}</td><td class="ar">الخبرة خارج البلاد</td></tr>
+          <tr><td class="lbl">Period</td><td class="val">{{PREV_PERIOD}}</td><td></td></tr>
+        </table>
+      </div>
+
+      <div class="right-col">
+        <table class="post">
+          <tr><td class="lbl">Post Applied for</td><td class="val">{{POST_APPLIED}}</td></tr>
+          <tr><td class="lbl">Contract Period</td><td class="val">{{CONTRACT_YEARS}}yrs</td></tr>
+          <tr class="sec"><td colspan="2">Details Passport</td></tr>
+          <tr><td class="lbl">Passport No.</td><td class="val">{{PASSPORT_NO}}</td></tr>
+          <tr><td class="lbl">Date of Issue</td><td class="val">{{PASSPORT_ISSUE_DATE}}</td></tr>
+          <tr><td class="lbl">Date of Expiry</td><td class="val">{{PASSPORT_EXPIRY_DATE}}</td></tr>
+          <tr><td class="lbl">Place of Issue</td><td class="val">ETHIOPIA</td></tr>
+        </table>
+        <div class="body-photo">
+          <img src="{{FULL_BODY_PHOTO_URL}}" alt="full body" />
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <img class="cv-footer" src="{{FOOTER_IMAGE}}" alt="footer" />
+</div>`
+
+// Their CSS with the two colours in place of TAMKIN's blues.
+const baseCss = (c) => `
+.cv-page{font-family:Arial,Helvetica,sans-serif;font-size:10pt;color:#000;width:210mm;min-height:297mm;box-sizing:border-box;margin:0;padding:8px 16px;display:flex;flex-direction:column;background:#fff}
+.cv-header,.cv-footer{display:block;width:100%;height:auto;margin:0;padding:0}
+.cv-footer{margin-top:auto}
+.cv-body{flex:1 1 auto;display:flex;flex-direction:column;gap:0;padding:0;margin:0;min-height:0}
+.top-block{width:100%;border-collapse:collapse;margin:0 0 1.5mm 0;height:42mm}
+.top-block>tbody>tr{height:42mm}
+.top-block>tbody>tr>td{vertical-align:top;padding:0;border:0}
+.name-panel{height:42mm;vertical-align:top}
+.name-panel .inner{height:42mm;border-collapse:collapse;width:100%;table-layout:fixed}
+.inner tr{height:50%}
+.inner td{border:1px solid ${c.border};padding:4px 8px;vertical-align:middle;text-align:center}
+.headshot-cell{width:32mm;padding-left:2mm!important;vertical-align:top}
+.headshot-cell img{display:block;width:30mm;height:40mm;object-fit:cover;border:1px solid ${c.border}}
+.main-grid{display:flex;gap:2mm;flex:1 1 auto;align-items:stretch;min-height:0;margin:0}
+.left-col{flex:1 1 auto;display:flex;min-height:0}
+.left-col .details{flex:1 1 auto;height:100%;border-collapse:collapse;width:100%;table-layout:fixed}
+.right-col{width:62mm;flex:0 0 62mm;display:flex;flex-direction:column;gap:1.5mm;min-height:0}
+.right-col .post{flex:0 0 auto;border-collapse:collapse;width:100%;table-layout:fixed}
+.right-col .body-photo{flex:1 1 auto;min-height:120px;display:flex;border:1px solid ${c.border};overflow:hidden}
+.right-col .body-photo img{width:100%;height:100%;object-fit:cover;display:block}
+.details td,.post td,.inner td{border:1px solid ${c.border};padding:4px 7px;vertical-align:middle;font-size:9.5pt;text-align:center}
+.details .lbl{width:32%;font-weight:bold}
+.details .val{width:42%;font-size:10pt}
+.details .ar{width:26%;font-size:9pt;direction:rtl}
+.post .lbl{width:44%;font-weight:bold}
+.post .val{width:56%;font-size:10pt}
+.inner td:not(.val),.details td:not(.val),.post td:not(.val){background-color:${c.pTint}!important;color:${c.labelInk}}
+.inner .val,.details .val,.post .val{background-color:#fff!important}
+.details .sec>td,.post .sec>td{background-color:${c.secBg}!important;color:${c.secInk}!important;font-weight:bold;text-align:center!important;font-size:10pt}
+.val.big{font-weight:bold;font-size:11pt}
+.val.highlight{color:${c.accent}!important;font-weight:bold;font-size:12pt;text-transform:uppercase}
+.skill{text-align:center;color:${c.tick};font-weight:bold;font-size:14pt}
+.cv-header,.top-block{page-break-inside:avoid}
 `
 
 // ---------------------------------------------------------------- designs
+// Each design: its colours for the page above, and a few lines of its own (CSS only).
 const DESIGNS = {
-  // 1. Classic grid: the agency layout, coloured bands and tinted labels.
-  classic: (c) => ({
-    html: `<div class="cv">
-  <table class="top"><tr>
-    <td class="jobs"><div class="namebar"><span>Name in Full</span><span class="ar">الاسم الكامل</span></div><div class="name nm">{{FULL_NAME}}</div>
-      <table class="kv">${rows3(JOB)}</table></td>
-    <td class="phcell">${photo('ph')}</td></tr></table>
-  <table class="grid"><tr>
-    <td class="col">${title('Details of Application', 'بيانات الطلب')}<table class="kv">${rows3(PERSONAL)}</table>
-      ${title('Languages', 'إجادة اللغات')}${langTable()}</td>
-    <td class="col">${title('Passport Details', 'بيانات جواز السفر')}<table class="kv">${rows3(PASSPORT)}</table>
-      ${body('fb')}</td></tr></table>
-  <table class="grid"><tr>
-    <td class="col">${title('Skills & Experience', 'المهارات والخبرات')}${skillTable()}</td>
-    <td class="col">${title('Previous Employment Abroad', 'الخبرة السابقة')}${prevTable()}
-      <div class="mob">Mobile <b>{{PHONE}}</b> <span class="ar">رقم الجوال</span></div></td></tr></table>
-</div>`,
-    css: `${BASE}
-.top>tbody>tr>td{vertical-align:top;padding:0}.top .jobs{padding-right:3mm}.phcell{width:38mm}
-.ph{width:38mm;height:44mm;border:2px solid ${c.p};background:${c.soft}}
-.kv th,.kv td,.lang th,.lang td,.skills th,.skills td{border:1px solid ${c.line}}
-.kv th{background:${c.pTint};width:34%}.kv th.ar{width:26%;background:${c.sTint}}
-.namebar{display:flex;justify-content:space-between;align-items:center;background:${c.p};color:${c.pInk};padding:4px 8px;font-weight:700}
-.nm{border:1px solid ${c.line};border-top:0;padding:6px 8px;color:${c.deep};margin-bottom:1.5mm;text-align:center}
-.grid{margin-top:2mm}.grid td.col{width:50%;vertical-align:top;padding:0}.grid td.col:first-child{padding-right:2mm}.grid td.col:last-child{padding-left:2mm}
-.sec{display:flex;justify-content:space-between;background:${c.s};color:${c.sInk};padding:4px 8px;font-weight:700;margin-top:1.5mm}
-.lang th{background:${c.pTint}}
-.fb{height:66mm;margin-top:2mm;border:2px solid ${c.s};background:${c.soft}}
-.mob{margin-top:2mm;padding:6px 8px;background:${c.sTint};border-left:4px solid ${c.p};display:flex;justify-content:space-between}
-.mob b{color:${c.deep};font-size:12px}`,
-  }),
-
-  // 2. Sidebar: a coloured column with the photos, the details on the right.
+  // TAMKIN's look: tinted labels, soft section bands.
+  classic: (c) => ({ colors: {}, css: '' }),
+  // The photos on the left: the headshot and the post/passport/full-body column swap sides.
   sidebar: (c) => ({
-    html: `<div class="cv"><table class="wrap"><tr>
-  <td class="side">${photo('ph')}
-    <div class="sname">{{FULL_NAME}}</div><div class="post">{{POST_APPLIED}}</div>
-    <div class="facts"><div><span>Salary</span><b>{{SALARY}} {{CURRENCY}}</b></div><div><span>Contract</span><b>{{CONTRACT_YEARS}} years</b></div><div><span>Ref.</span><b>{{REF_NO}}</b></div><div><span>Mobile</span><b>{{PHONE}}</b></div></div>
-    ${body('fb')}</td>
-  <td class="main">
-    ${title('Personal Details', 'البيانات الشخصية')}<table class="kv">${rows3(PERSONAL)}</table>
-    ${title('Passport', 'جواز السفر')}<table class="kv">${rows3(PASSPORT)}</table>
-    ${title('Languages', 'اللغات')}${langTable()}
-    <table class="two"><tr><td>${title('Skills', 'المهارات')}${skillTable()}</td><td>${title('Experience Abroad', 'الخبرة السابقة')}${prevTable()}</td></tr></table>
-  </td></tr></table></div>`,
-    css: `${BASE}
-.cv{padding:5mm 7mm}
-.wrap>tbody>tr>td{vertical-align:top;padding:0}
-.side{width:58mm;background:linear-gradient(170deg,${c.p} 0%,${c.blend} 60%,${c.s} 100%);color:${c.pInk};padding:5mm 4mm!important;border-radius:4mm}
-.ph{width:44mm;height:50mm;margin:0 auto;border:3px solid rgba(255,255,255,.85);border-radius:3mm;overflow:hidden;background:rgba(255,255,255,.25)}
-.sname{text-align:center;font-weight:800;font-size:13.5px;margin-top:3mm;line-height:1.2}
-.post{text-align:center;font-size:10px;opacity:.9;letter-spacing:1.5px;text-transform:uppercase;margin-top:1mm}
-.facts{margin-top:3mm;border-top:1px solid rgba(255,255,255,.4)}
-.facts div{display:flex;justify-content:space-between;padding:4px 1mm;border-bottom:1px solid rgba(255,255,255,.25)}.facts span{opacity:.85}
-.fb{height:92mm;margin-top:4mm;border:3px solid rgba(255,255,255,.85);border-radius:3mm;overflow:hidden;background:rgba(255,255,255,.25)}
-.main{padding-left:5mm!important}
-.sec{display:flex;justify-content:space-between;color:${c.deep};border-bottom:2px solid ${c.s};padding:3px 1px;font-weight:800;font-size:11.5px;margin:2.2mm 0 1mm}
-.sec .ar{color:${c.s}}
-.kv tr:nth-child(odd){background:${c.soft}}.kv th{width:36%;color:${c.deep}}.kv th.ar{width:28%;color:#6b7280}
-.lang th,.lang td{border-bottom:1px solid ${c.line}}.lang tr:first-child th{color:${c.deep}}
-.skills tr:nth-child(odd){background:${c.soft}}.skills td.tick{color:${c.p}}
-.two>tbody>tr>td{width:50%;vertical-align:top;padding:0}.two>tbody>tr>td:first-child{padding-right:2mm}.two>tbody>tr>td:last-child{padding-left:2mm}`,
+    colors: { secBg: c.p, secInk: c.pInk },
+    css: `.top-block{direction:rtl}.top-block .inner,.top-block td{direction:ltr}.headshot-cell{padding-left:0!important;padding-right:2mm!important}
+.main-grid{flex-direction:row-reverse}`,
   }),
-
-  // 3. Ribbon: a bold name band and ribbon section titles.
+  // Bold bands: solid main-colour section rows, second-colour name.
   ribbon: (c) => ({
-    html: `<div class="cv">
-  <div class="band"><div><div class="name">{{FULL_NAME}}</div><div class="sub">{{POST_APPLIED}} · {{SALARY}} {{CURRENCY}} · {{CONTRACT_YEARS}} YEARS</div></div><div class="ref">REF<b>{{REF_NO}}</b></div></div>
-  <table class="wrap"><tr>
-    <td class="l">${title('Personal Details', 'البيانات الشخصية')}<table class="kv">${rows3(PERSONAL)}</table>
-      ${title('Languages', 'اللغات')}${langTable()}
-      ${title('Skills', 'المهارات')}${skillTable()}
-      ${title('Experience Abroad', 'الخبرة السابقة')}${prevTable()}</td>
-    <td class="r">${photo('ph')}
-      ${title('Passport', 'جواز السفر')}<table class="kv">${rows3(PASSPORT)}</table>
-      ${body('fb')}
-      <div class="mob">📞 {{PHONE}}</div></td></tr></table></div>`,
-    css: `${BASE}
-.band{display:flex;justify-content:space-between;align-items:center;background:linear-gradient(90deg,${c.p},${c.blend});color:${c.pInk};padding:4mm 6mm;border-radius:2mm;box-shadow:inset 0 -4px 0 ${c.s}}
-.band .name{font-size:19px}.band .sub{font-size:10.5px;opacity:.92;margin-top:1mm;letter-spacing:.6px}
-.ref{text-align:right;font-size:9px;letter-spacing:2px}.ref b{display:block;font-size:13px;letter-spacing:.5px}
-.wrap{margin-top:2mm}.wrap>tbody>tr>td{vertical-align:top;padding:0}.l{width:57%;padding-right:3mm!important}.r{width:43%}
-.sec{position:relative;display:flex;justify-content:space-between;background:${c.s};color:${c.sInk};padding:4px 9px 4px 11px;font-weight:800;margin:2.5mm 0 1.2mm;clip-path:polygon(0 0,100% 0,97% 50%,100% 100%,0 100%)}
-.sec:before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;background:${c.p}}
-.sec .ar{padding-right:5mm}
-.kv th,.kv td,.skills th,.skills td,.lang th,.lang td{border-bottom:1px dashed ${c.line}}
-.kv th{width:37%;color:${c.deep}}.kv th.ar{width:28%;color:${c.s}}
-.ph{width:42mm;height:48mm;margin:0 auto;border-radius:50% 50% 3mm 3mm;overflow:hidden;border:3px solid ${c.p};background:${c.soft}}
-.fb{height:96mm;margin-top:2.5mm;border:2px solid ${c.s};border-radius:2mm;overflow:hidden;background:${c.soft}}
-.mob{margin-top:2mm;text-align:center;font-weight:800;font-size:13px;color:${c.deep};background:${c.sTint};padding:5px;border-radius:2mm}
-.skills td.tick{color:${c.p}}`,
+    colors: { secBg: c.p, secInk: c.pInk, pTint: c.sTint, accent: c.p, tick: c.s },
+    css: `.details .sec>td,.post .sec>td{letter-spacing:1px;text-transform:uppercase}
+.inner td.val.highlight{border-bottom:3px solid ${c.s}}`,
   }),
-
-  // 4. Cards: soft rounded cards, chips for the job facts.
+  // Rounded corners on every block.
   cards: (c) => ({
-    html: `<div class="cv">
-  <table class="hero"><tr><td class="phc">${photo('ph')}</td>
-    <td><div class="name">{{FULL_NAME}}</div><div class="ar arname">الاسم الكامل</div>
-      <div class="chips"><span>{{POST_APPLIED}}</span><span>{{SALARY}} {{CURRENCY}}</span><span>{{CONTRACT_YEARS}} years</span><span>Ref {{REF_NO}}</span><span>📞 {{PHONE}}</span></div></td></tr></table>
-  <table class="grid"><tr>
-    <td><div class="card">${title('Personal Details', 'البيانات الشخصية')}<table class="kv">${rows3(PERSONAL)}</table></div>
-        <div class="card">${title('Languages', 'اللغات')}${langTable()}</div></td>
-    <td><div class="card">${title('Passport', 'جواز السفر')}<table class="kv">${rows3(PASSPORT)}</table></div>
-        <div class="card fbc">${body('fb')}</div></td></tr>
-  <tr><td><div class="card">${title('Skills', 'المهارات')}${skillTable()}</div></td>
-      <td><div class="card">${title('Experience Abroad', 'الخبرة السابقة')}${prevTable()}</div></td></tr></table></div>`,
-    css: `${BASE}
-.cv{background:${c.soft}}
-.hero{background:#fff;border-radius:4mm;box-shadow:0 1px 0 ${c.line}}.hero>tbody>tr>td{vertical-align:middle;padding:3mm}
-.phc{width:40mm}.ph{width:36mm;height:42mm;border-radius:3mm;overflow:hidden;background:${c.pTint};border:3px solid ${c.p}}
-.name{font-size:20px;color:${c.deep}}.arname{color:${c.s};font-size:10px;text-align:left}
-.chips{margin-top:2.5mm;display:flex;flex-wrap:wrap;gap:4px}.chips span{background:${c.p};color:${c.pInk};padding:3px 9px;border-radius:99px;font-weight:700;font-size:10px}
-.chips span:nth-child(even){background:${c.s};color:${c.sInk}}
-.grid{border-collapse:separate;border-spacing:2.5mm;margin:0 -2.5mm}.grid>tbody>tr>td{width:50%;vertical-align:top;padding:0}
-.card{background:#fff;border-radius:3mm;padding:2mm 3mm;margin-bottom:2.5mm;border-top:3px solid ${c.s}}
-.sec{display:flex;justify-content:space-between;color:${c.p};font-weight:800;font-size:11.5px;padding-bottom:1.5mm}.sec .ar{color:${c.s}}
-.kv th{width:38%;color:#374151}.kv th.ar{width:28%;color:#9ca3af}.kv tr+tr th,.kv tr+tr td{border-top:1px solid ${c.soft}}
-.lang tr:first-child th{color:${c.p}}.lang td{color:${c.deep}}
-.skills td.tick{color:${c.s}}
-.fbc{padding:2mm}.fb{height:66mm;border-radius:2mm;overflow:hidden;background:${c.pTint}}`,
+    colors: {},
+    css: `.inner,.details,.post{border-collapse:separate!important;border-spacing:0;border:1px solid ${c.border};border-radius:7px;overflow:hidden}
+.inner td,.details td,.post td{border-width:0 1px 1px 0!important}
+.right-col .body-photo,.headshot-cell img{border-radius:7px}`,
   }),
-
-  // 5. Elegant: white, fine coloured rules, small-caps headings.
+  // Fine lines: white labels with coloured words, thin rules.
   elegant: (c) => ({
-    html: `<div class="cv">
-  <div class="head"><div class="name">{{FULL_NAME}}</div><div class="rule"></div>
-    <div class="meta"><span>{{POST_APPLIED}}</span>•<span>{{SALARY}} {{CURRENCY}}</span>•<span>{{CONTRACT_YEARS}} YEARS</span>•<span>REF {{REF_NO}}</span>•<span>{{PHONE}}</span></div></div>
-  <table class="wrap"><tr>
-    <td class="l">${photo('ph')}${body('fb')}</td>
-    <td class="r">${title('Personal Details', 'البيانات الشخصية')}<table class="kv">${rows3(PERSONAL)}</table>
-      ${title('Passport', 'جواز السفر')}<table class="kv">${rows3(PASSPORT)}</table>
-      ${title('Languages', 'اللغات')}${langTable()}
-      <table class="two"><tr><td>${title('Skills', 'المهارات')}${skillTable()}</td><td>${title('Experience Abroad', 'الخبرة السابقة')}${prevTable()}</td></tr></table></td></tr></table></div>`,
-    css: `${BASE}
-.head{text-align:center}.name{font-size:21px;color:${c.deep};letter-spacing:2px}
-.rule{height:3px;width:60mm;margin:2mm auto;background:linear-gradient(90deg,transparent,${c.p},${c.s},transparent)}
-.meta{font-size:10px;color:#4b5563;letter-spacing:.8px}.meta span{margin:0 4px;font-weight:700;color:${c.p}}
-.wrap{margin-top:3mm}.wrap>tbody>tr>td{vertical-align:top;padding:0}.l{width:50mm;padding-right:5mm!important}
-.ph{height:54mm;border:1px solid ${c.p};padding:1.5mm;background:#fff}.ph img{border:1px solid ${c.line}}
-.fb{height:120mm;margin-top:3mm;border:1px solid ${c.s};padding:1.5mm;background:#fff}
-.sec{display:flex;justify-content:space-between;font-variant:small-caps;letter-spacing:1.5px;color:${c.p};font-weight:800;font-size:12px;border-bottom:1px solid ${c.s};padding:2px 0;margin:2.2mm 0 1mm}
-.sec .ar{color:${c.s};letter-spacing:0;font-variant:normal}
-.kv th{width:36%;font-weight:600;color:#6b7280}.kv td{font-weight:700}.kv th.ar{width:28%;color:#9ca3af}
-.kv tr+tr th,.kv tr+tr td{border-top:1px dotted ${c.line}}
-.lang th,.lang td{border-bottom:1px dotted ${c.line}}.lang td{color:${c.deep}}
-.skills td.tick{color:${c.s}}.skills tr+tr th,.skills tr+tr td{border-top:1px dotted ${c.line}}
-.two>tbody>tr>td{width:50%;vertical-align:top;padding:0}.two>tbody>tr>td:first-child{padding-right:2mm}.two>tbody>tr>td:last-child{padding-left:2mm}`,
+    colors: { pTint: '#ffffff', labelInk: c.deep, secBg: '#ffffff', secInk: c.p, border: c.line, tick: c.s },
+    css: `.details .sec>td,.post .sec>td{border-bottom:2px solid ${c.s}!important;letter-spacing:1.5px;font-variant:small-caps}`,
   }),
-
-  // 6. Diagonal: a split colour top with tiles, then two columns.
+  // A main-to-second colour gradient on the section rows.
   diagonal: (c) => ({
-    html: `<div class="cv">
-  <div class="top"><div class="t1">${photo('ph')}</div>
-    <div class="t2"><div class="name">{{FULL_NAME}}</div>
-      <div class="tiles"><div><span>Post</span><b>{{POST_APPLIED}}</b></div><div><span>Salary</span><b>{{SALARY}} {{CURRENCY}}</b></div><div><span>Contract</span><b>{{CONTRACT_YEARS}} yrs</b></div><div><span>Age</span><b>{{AGE}}</b></div><div><span>Religion</span><b>{{RELIGION}}</b></div><div><span>Mobile</span><b>{{PHONE}}</b></div></div></div></div>
-  <table class="wrap"><tr>
-    <td class="l">${title('Personal Details', 'البيانات الشخصية')}<table class="kv">${rows3(PERSONAL)}</table>
-      ${title('Skills', 'المهارات')}${skillTable()}</td>
-    <td class="r">${title('Passport', 'جواز السفر')}<table class="kv">${rows3(PASSPORT)}</table>
-      ${title('Languages', 'اللغات')}${langTable()}
-      ${title('Experience Abroad', 'الخبرة السابقة')}${prevTable()}
-      ${body('fb')}</td></tr></table>
-  <div class="foot">Ref. {{REF_NO}} <span class="ar">الرقم المرجعي</span></div></div>`,
-    css: `${BASE}
-.top{display:flex;align-items:stretch;border-radius:3mm;overflow:hidden;background:linear-gradient(115deg,${c.p} 0%,${c.p} 38%,${c.s} 38.2%,${c.blend} 100%)}
-.t1{padding:3mm 4mm}.ph{width:36mm;height:42mm;border:3px solid #fff;border-radius:2mm;overflow:hidden;background:rgba(255,255,255,.3)}
-.t2{flex:1;padding:3mm 5mm;color:${c.sInk}}.name{font-size:18px;text-shadow:0 1px 1px rgba(0,0,0,.15)}
-.tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:2mm;margin-top:2.5mm}
-.tiles div{background:rgba(255,255,255,.92);color:#1f2937;border-radius:2mm;padding:2mm;text-align:center}
-.tiles span{display:block;font-size:8.5px;color:${c.s};text-transform:uppercase;letter-spacing:1px}.tiles b{color:${c.deep};font-size:11px}
-.wrap{margin-top:2mm}.wrap>tbody>tr>td{vertical-align:top;padding:0;width:50%}.l{padding-right:2.5mm!important}.r{padding-left:2.5mm!important}
-.sec{display:flex;justify-content:space-between;color:${c.pInk};background:${c.p};border-radius:99px;padding:3px 10px;font-weight:800;margin:2.4mm 0 1.2mm}
-.sec .ar{opacity:.9}
-.kv th,.kv td,.skills th,.skills td,.lang th,.lang td{border-bottom:1px solid ${c.soft}}
-.kv th{width:37%;color:${c.deep}}.kv th.ar{width:28%;color:${c.s}}
-.lang tr:first-child th{color:${c.s}}.skills td.tick{color:${c.s}}
-.fb{height:58mm;margin-top:2.5mm;border-radius:3mm;overflow:hidden;border:2px solid ${c.s};background:${c.soft}}
-.foot{margin-top:2mm;display:flex;justify-content:space-between;font-size:9.5px;color:#6b7280;border-top:2px solid ${c.s};padding-top:1.5mm}`,
+    colors: { secInk: c.pInk, accent: c.s },
+    css: `.details .sec>td,.post .sec>td{background:linear-gradient(100deg,${c.p},${c.blend} 70%,${c.s})!important}`,
   }),
 }
 
 export const DESIGN_LIST = [
-  ['classic', 'Classic grid'], ['sidebar', 'Sidebar'], ['ribbon', 'Ribbon'],
-  ['cards', 'Soft cards'], ['elegant', 'Elegant'], ['diagonal', 'Diagonal'],
+  ['classic', 'Classic'], ['sidebar', 'Photos left'], ['ribbon', 'Bold bands'],
+  ['cards', 'Rounded'], ['elegant', 'Fine lines'], ['diagonal', 'Gradient'],
 ]
 
 /** Colour pairs that look good together (a start; any two colours work). */
@@ -274,17 +201,14 @@ export const COLOR_PAIRS = [
   ['#14532d', '#84cc16'], ['#111827', '#c9a227'], ['#9f1239', '#f97316'], ['#0c4a6e', '#14b8a6'],
 ]
 
-// Every design fills the A4 page (see DESIGN_FILL): the full-body photo's frame
-// takes the room left under the other blocks, so nothing runs past the page.
-const FILL = `.fb img{object-fit:cover!important;object-position:center top!important}`
-// The full-body frame's height in px per design, so the page is exactly A4 (measured).
-const DESIGN_FILL = { classic: 643, sidebar: 741, ribbon: 681, cards: 562, elegant: 824, diagonal: 529 }
-
 export function designHtml(id, primary, secondary) {
-  const make = DESIGNS[id] || DESIGNS.classic
-  const made = make(palette(primary, secondary))
-  const html = made.html
-  const css = made.css + FILL + (DESIGN_FILL[id] ? `.cv .fb{height:${DESIGN_FILL[id]}px!important}` : '')
-  // A whole page: the CV engine puts the header above it (inside <body>).
-  return { html: `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>${html}</body></html>`, css }
+  const pal = palette(primary, secondary)
+  const made = (DESIGNS[id] || DESIGNS.classic)(pal)
+  const c = {
+    ...pal, border: mix(pal.p, '#555555', 0.55), labelInk: '#000000',
+    secBg: mix(pal.p, '#ffffff', 0.7), secInk: '#000000', accent: mix(pal.s, '#000000', 0.15), tick: pal.p,
+    ...made.colors,
+  }
+  // The same page as the hand-made templates: the CV engine adds the passport page.
+  return { html: SKELETON, css: baseCss(c) + made.css }
 }

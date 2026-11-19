@@ -52,7 +52,8 @@ export async function joinAgency({ mainUrl, number, name, pcId, lan = [], port =
   progress({ step: 'key' })
   const k = await json(await f(`${main}/api/pc-access/number`, {
     method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(15000),
-    body: JSON.stringify({ number: String(number || '').replace(/\D/g, ''), name: `${name} (Adal Keep Companion)`, cid: pcId }),
+    // (cid: the same PC joining again keeps its one place on the main PC's list)
+    body: JSON.stringify({ number: String(number || '').replace(/\D/g, ''), name: `${name} (Adal Keep Companion)`, cid: `adal-sync-pc-${pcId}` }),
   }))
   if (!k.key) throw new Error('The main PC gave no key')
   const H = { 'x-adal-pc': k.key }

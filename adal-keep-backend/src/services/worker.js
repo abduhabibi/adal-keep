@@ -558,6 +558,10 @@ export async function runStatus(db, runId) {
 
 /** Start a run now if a slot is free, then report where it stands. */
 export async function dispatchRun(db, runId) {
+  // A Companion with its own copy: the run waits in the queue, which goes to the
+  // main PC with the rest of the data; the main PC's worker runs it (one PC runs robots).
+  const { notMainPC } = await import('./mainPC.js')
+  if (notMainPC()) return { ...(await runStatus(db, runId)), on_main: true }
   await drainQueue(db)
   return runStatus(db, runId)
 }

@@ -18,7 +18,8 @@ import crypto from 'crypto'
 import { plainReason } from './runOutcome.js'
 import { runsWorking } from './busy.js'
 import { me as joinAgency, chatConfigured, cloudCall, cloudAuth, cloudAgencyId, cloudConfig } from './chatCloud.js'
-import { isFollower, pcNumber as myPcNumber } from './mainPC.js'
+// ("isFollower" here: not the PC holding the main PC's role. Only that PC keeps the online copy.)
+import { notMainPC as isFollower, pcNumber as myPcNumber } from './mainPC.js'
 import { getLanAddresses } from './discovery.js'
 // The heartbeat also carries this PC's number: Adal Admin keeps the number on
 // the PC's current online account (an old account kept it before, so a phone or

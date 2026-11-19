@@ -24,7 +24,14 @@ const normalizePhone = (p) => {
 
 router.get('/setup/status', async (req, res) => {
   const company = await req.app.locals.db('companies').first().catch(() => null)
-  res.json({ state: company ? 'ready' : 'setup', companyName: company?.name || null, subscription: statusPayload() })
+  // A Companion install joins an agency (the main PC's number) instead of starting one of its own.
+  let state = company ? 'ready' : 'setup'
+  try {
+    const { isCompanionInstall } = await import('../services/mainPC.js')
+    const { joinedAgency } = await import('../services/sync/index.js')
+    if (isCompanionInstall() && !joinedAgency()) state = 'join'
+  } catch {}
+  res.json({ state, companyName: company?.name || null, subscription: statusPayload() })
 })
 
 router.post('/setup/company', async (req, res) => {

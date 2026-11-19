@@ -13,7 +13,7 @@
 import express from 'express'
 import { checkContracts, contractCheck } from '../services/musanedContracts.js'
 import { checkNow, cancelNow, checkInfo, hello, nextStep, answerStep } from '../services/selectionCheck.js'
-import { isFollower } from '../services/mainPC.js'
+import { notMainPC as isFollower } from '../services/mainPC.js'   // (the main PC's role only)
 
 const router = express.Router()
 

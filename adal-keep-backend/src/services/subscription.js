@@ -264,9 +264,35 @@ function touch(s) {
 // ---------------------------------------------------------------------------
 // Mode
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// A Companion with its own copy (docs/companion-full.md): the agency's licence
+// is the main PC's. The main PC writes its state for every PC (signed with
+// ADAL_LICENSE_KEY, services/sync/roles.js); a Companion opens while that is
+// paid or in its trial, and locks or shows "suspended" with it. Codes are
+// typed on the main PC (they are made for its PC number).
+// ---------------------------------------------------------------------------
+let follow = null
+export function followAgencyLicence(fn) { follow = fn; _cache.at = 0 }
+export const followsAgency = () => !!follow
+function followed() {
+  let f = null
+  try { f = follow?.() } catch {}
+  const l = f?.licence || null
+  const now = trustedNow()
+  const cut = f?.cutOff || null
+  let mode
+  if (cut || l?.suspended) mode = 'locked'
+  else if (!l) mode = 'trial'                       // (no word from the main PC yet: it let this PC in)
+  else if (l.forGood || (l.paidUntil && l.paidUntil > now)) mode = 'active'
+  else if (l.mode === 'trial' && l.trialEndsAt && l.trialEndsAt > now) mode = 'trial'
+  else mode = 'locked'
+  return { mode, l, now, cut }
+}
+
 /** 'active' (unlocked) · 'trial' · 'locked' */
 export function computeMode(s) {
   syncClock()
+  if (follow) return followed().mode
   if (suspension()) return 'locked'
   if (!s) return 'trial'
   const now = effectiveNow(s)
@@ -278,6 +304,18 @@ export function computeMode(s) {
 }
 
 export function statusPayload(s = state()) {
+  if (follow) {
+    const { mode, l, now, cut } = followed()
+    return {
+      mode, followsMain: true,
+      daysLeft: mode === 'trial' && l?.trialEndsAt ? Math.max(0, Math.ceil((l.trialEndsAt - now) / DAY)) : 0,
+      trialDays: TRIAL_DAYS, trialEndsAt: l?.trialEndsAt || null, pcNumber: l?.pcNumber || null, sellerPhone: SELLER_PHONE,
+      clockBack: false, unlockedAt: null, forGood: !!l?.forGood, paidUntil: l?.paidUntil || null,
+      paidDaysLeft: l?.paidUntil ? Math.max(0, Math.ceil((l.paidUntil - now) / DAY)) : 0, priceEtb: PRICE_ETB, paidMonths: 6, serverTime: now,
+      suspended: !!(cut === 'suspended' || l?.suspended), suspendedAt: l?.suspendedAt || null,
+      suspendNote: cut ? `This PC was ${cut} by the main PC.` : (l?.suspendNote || ''),
+    }
+  }
   const mode = computeMode(s)
   const now = effectiveNow(s)
   const trialEndsAt = s ? trialEnd(s) : null
@@ -323,6 +361,7 @@ function extend(s, pc, now, by) {
 
 /** Returns { ok: true } or { ok: false, error }. */
 export function applyCode(code) {
+  if (follow) return { ok: false, error: 'This PC follows the main PC\'s licence: type the code on the main PC.' }
   const s = state()
   const now = trustedNow()
   const tries = (s.tries || []).filter(t => now - t < TRY_WINDOW)
@@ -383,7 +422,7 @@ export function subscriptionGuard(req, res, next) {
   touch(s)
   if (computeMode(s) !== 'locked') return next()
   if (OPEN_WHEN_LOCKED.some(([m, q]) => req.method === m && p === q)) return next()
-  if (suspension()) return res.status(402).json({ error: 'locked', suspended: true, message: 'Adal Keep is suspended on this PC by Adal. Call Adal to have it allowed again.' })
+  if (follow ? statusPayload(s).suspended : suspension()) return res.status(402).json({ error: 'locked', suspended: true, message: 'Adal Keep is suspended on this PC by Adal. Call Adal to have it allowed again.' })
   return res.status(402).json({ error: 'locked', message: 'Adal Keep is locked. Unlock it to continue.' })
 }
 

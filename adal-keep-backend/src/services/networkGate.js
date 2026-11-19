@@ -27,6 +27,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import { syncNode } from './sync/index.js'
 
 const DATA = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'data')
 const FILE = process.env.ADAL_PC_ACCESS_FILE || path.join(DATA, 'pc-access.json')
@@ -93,7 +94,12 @@ export function approvedPC(req) {
   const pc = s.pcs.find(p => hasKey(p, h) && !p.revoked)
   if (pc?.suspended) return null
   if (pc && Date.now() - (pc.last_seen || 0) > 10 * 60000) { pc.last_seen = Date.now(); pc.last_ip = ipOf(req); write(s) }
-  return pc || null
+  if (pc) return pc
+  // Another PC of the agency (each has its own full copy): its key is on the
+  // agency's list every PC holds (sync_pcs), put there by the main PC when it
+  // came in with the number — so the PCs reach each other with the main PC off.
+  const peer = syncNode()?.peerByKey(k)
+  return peer ? { id: `sync:${peer.pc_id}`, name: peer.name, sync: true, pc_id: peer.pc_id } : null
 }
 
 // Calls another computer may make before it is approved.
@@ -204,7 +210,7 @@ export function isSuspended(req) {
   const k = keyOf(req)
   if (!k) return false
   const h = hash(k)
-  return read().pcs.some(p => hasKey(p, h) && !p.revoked && p.suspended)
+  return read().pcs.some(p => hasKey(p, h) && !p.revoked && p.suspended) || syncNode()?.peerKeyState(k) === 'suspended'
 }
 
 export function statusOf(req) {

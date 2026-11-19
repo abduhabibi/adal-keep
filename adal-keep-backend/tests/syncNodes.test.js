@@ -211,11 +211,13 @@ test('three PCs: edits anywhere, a CV made with Main off, documents fetched once
       await main.node.setCut(third.node.pcId, 'allow')
       await comp.node.round()
       assert.equal((await fetch(`${comp.url}/api/sync/hello`, { headers: { 'x-adal-pc': third.key } })).status, 200)
+      // It hears it is allowed again by itself (it still asks every round).
+      await third.node.round()
+      assert.equal(third.node.cutOff, null)
     })
 
     await t.test('every PC ends with the same data', async () => {
       for (let i = 0; i < 2; i++) for (const p of [main, comp]) await p.node.round()
-      third.node.cutOff = null
       await third.node.round()
       for (const table of ['profiles', 'profile_fields', 'generated_cvs']) {
         assert.deepEqual(await dump(comp.pc, table), await dump(main.pc, table), table)

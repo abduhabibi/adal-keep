@@ -46,6 +46,7 @@ const NAME = /^\w+$/
 const q = (n) => { if (!NAME.test(String(n))) throw new Error(`Bad name: ${n}`); return `"${n}"` }
 const NOW_MS = `CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)`
 const BATCH = 2000
+const MAX_BYTES = 8 * 1024 * 1024
 
 /** A value as it travels (JSON text; null stays SQL NULL; a BLOB as base64). */
 export const enc = (v) => (v == null ? null : Buffer.isBuffer(v) ? JSON.stringify({ $b: v.toString('base64') }) : JSON.stringify(v))
@@ -134,10 +135,11 @@ export class SyncEngine {
     await db.raw(`CREATE TABLE IF NOT EXISTS sync_pcs (pc_id TEXT PRIMARY KEY, name TEXT, slot INTEGER, key_hash TEXT, access_id TEXT, joined_at TEXT, seen_at TEXT, suspended_at TEXT, revoked_at TEXT, lan TEXT, port INTEGER, vector TEXT, version TEXT)`)
     await db.raw(`CREATE TABLE IF NOT EXISTS sync_role (k TEXT PRIMARY KEY, holder TEXT, data TEXT, at TEXT)`)
 
-    const meta = await this.meta()
+    let meta = await this.meta()
     if (meta.pc_id && meta.pc_id !== this.pcId) {
       if (!adopt) throw new Error(`This database belongs to PC ${meta.pc_id}`)
       await this.adopt(meta.pc_id)
+      meta = await this.meta()
     }
     await this.setMeta(db, 'pc_id', this.pcId)
     this.clock = new Clock(this.pcId, meta.hlc || '', this.now)
@@ -332,14 +334,24 @@ export class SyncEngine {
       const vec = await this.vector()
       const entries = [], complete = {}
       let left = Math.max(1, Math.min(Number(limit) || BATCH, 10000))
+      // (and at most ~8 MB: a CV's saved data is 1–2 MB, and a request is 15 MB at most)
+      let bytes = 0
       for (const origin of Object.keys(vec).sort()) {
         const from = Math.max(0, Number(their?.[origin]) || 0)
         const upto = vec[origin]
         if (upto <= from) continue
         if (left <= 0) break
         const rows = await this.db.raw(`SELECT origin, seq, tbl, rid, col, val, hlc FROM sync_log WHERE origin = ? AND seq > ? AND seq <= ? ORDER BY seq LIMIT ?`, [origin, from, upto, left])
-        for (const r of rows) entries.push({ ...r, seq: Number(r.seq) })
-        left -= rows.length
+        let taken = 0
+        for (const r of rows) {
+          const size = 80 + (r.val ? r.val.length : 0)
+          if (entries.length && bytes + size > MAX_BYTES) { left = 0; break }
+          bytes += size
+          entries.push({ ...r, seq: Number(r.seq) })
+          taken++
+        }
+        if (left === 0) break
+        left -= taken
         if (left > 0) complete[origin] = upto
       }
       return { entries, complete, vector: vec, more: left <= 0 }

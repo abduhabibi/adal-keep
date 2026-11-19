@@ -79,7 +79,8 @@ import { removeSecret } from './src/services/secretStore.js'
 import { startContractChecker } from './src/services/musanedContracts.js'
 import { startBackupSchedule, applyRestoredDatabase } from './src/services/telegramBackup.js'
 import { startWafidChecker } from './src/services/wafidStatus.js'
-import { isFollower, mainURL, instanceId } from './src/services/mainPC.js'
+import { isFollower, isCompanion, notMainPC, mainURL, instanceId } from './src/services/mainPC.js'
+import { startSync, syncRoutes, isMainRole } from './src/services/sync/index.js'
 import { moveToTrash } from './src/services/trash.js'
 import { startDiscoveryResponder } from './src/services/discovery.js'
 
@@ -139,7 +140,7 @@ app.use((req, res, next) => { if (req.body === null || typeof req.body !== 'obje
 // Any change (from the PC, a phone or Admin): what it touches goes online in
 // about a second and the phones refresh their own copy (services/cloudSync.js).
 app.use('/api', (req, res, next) => {
-  if (req.method !== 'GET' && req.method !== 'HEAD' && !/^\/api\/(chat|mobile|tutor|system|updates|employees\/device|app\/clip)/.test(req.originalUrl) && !/^\/api\/profiles\/\d+\/opened/.test(req.originalUrl)) {
+  if (req.method !== 'GET' && req.method !== 'HEAD' && !/^\/api\/(chat|mobile|tutor|system|updates|employees\/device|app\/clip|sync)/.test(req.originalUrl) && !/^\/api\/profiles\/\d+\/opened/.test(req.originalUrl)) {
     res.on('finish', () => {
       if (res.statusCode < 400) import('./src/services/cloudSync.js').then(c => c.pushSoon(req.app.locals.db, req.originalUrl)).catch(() => {})
     })
@@ -150,6 +151,9 @@ app.use('/api', (req, res, next) => {
 // every big list JSON twice and packed it on the main thread, freezing the PC
 // for a moment on each profiles list.)
 
+// The agency's PCs copying to each other (services/sync): before the lock, so
+// a locked Companion still hears that the main PC was paid for.
+app.use('/api', await syncRoutes())
 // Locked after the trial: every API call and stored document is refused.
 app.use(subscriptionGuard)
 // Serve uploaded SafeStorage files statically
@@ -194,6 +198,7 @@ app.use('/api/tasheer', accountsRouter('tasheer_accounts', 'tasheer_account'))
 app.use('/api/insurance', accountsRouter('insurance_accounts', 'insurance_account'))
 app.use('/api/cv', cvRouter)
 app.use('/api/settings', settingsRouter)
+app.use('/api', (await import('./src/routes/mainProxy.js')).default)   // a Companion: the robots' live calls go to the main PC
 app.use('/api', automationsRouter)
 // 3-green-tick verification gate + the LAN endpoints the Employee-PC Companion talks to
 app.use('/api', verificationRouter)
@@ -231,6 +236,7 @@ async function initSystem() {
       // issue date empty get them read from the passport picture.
       setTimeout(async () => {
         try {
+          if (notMainPC()) return   // (the main PC does it once for the agency)
           const KEY = 'passport_details_backfill_v1'
           if (await db('settings').where('key', KEY).first()) return
           const { backfillPassportDetails } = await import('./src/services/passportDetails.js')
@@ -239,7 +245,7 @@ async function initSystem() {
           console.log(`[passport details] checked ${n} profile(s) missing place of birth / issue date`)
         } catch (e) { console.warn('[passport details] backfill:', e.message) }
       }, 60000)
-      import('./src/services/whatsapp.js').then(w => w.startWhatsApp(db)).catch(e => console.warn('[whatsapp]', e.message))
+      if (!notMainPC()) import('./src/services/whatsapp.js').then(w => w.startWhatsApp(db)).catch(e => console.warn('[whatsapp]', e.message))
       import('./src/services/browser.js').then(b => b.startBrowserQuietly())
       import('./src/services/secretStore.js').then(s => s.moveSecretsToVault())
       import('./src/services/accountVault.js').then(v => {
@@ -299,6 +305,9 @@ async function initSystem() {
       const defaultDevHash = await bcrypt.hash(process.env.DEV_MASTER_PASSWORD || '759126348', 10)
       await db('license').insert({ fingerprint: '', dev_password_hash: defaultDevHash })
     }
+    // Every PC of the agency on its own full copy, kept the same (docs/companion-full.md).
+    try { await import('./src/services/verification.js').then(v => v.ensureVerificationSchema(db)) } catch {}
+    try { await startSync(db) } catch (e) { console.error('❌ The copying between PCs did not start:', e.message) }
   } catch (err) {
     console.error('❌ System initialization failed:', err)
     process.exit(1)
@@ -338,7 +347,7 @@ app.get('/api/system/automation-health', async (req, res) => {
 })
 app.get('/api/health', (req, res) => {
   // role/instance let another PC check it is choosing a real main PC.
-  res.json({ status: 'ok', role: isFollower() ? 'follower' : 'main', main_url: mainURL() || undefined, instance: instanceId() })
+  res.json({ status: 'ok', role: isCompanion() ? 'companion' : isFollower() ? 'follower' : 'main', main_url: mainURL() || undefined, instance: instanceId() })
 })
 
 app.get('/api/dashboard', async (req, res) => {
@@ -1255,13 +1264,7 @@ initSystem().then(() => {
   app.listen(PORT, () => {
     console.log(`🚀 Backend running on http://localhost:${PORT}`)
     startUpdateWatcher(app.locals.db) // a new version installs by itself when no run is working
-    startMedicalWatcher(app.locals.db) // the medical's battery: warnings as it runs out
-    import('./src/services/sessionKeeper.js').then(k => k.startSessionKeeper(app.locals.db)).catch(e => console.warn('[sessions]', e.message)) // signed in once, kept all day
     import('./src/services/screenClip.js').then(c => c.startClipWatcher(PORT)).catch(e => console.warn('[clip]', e.message)) // double C crops the screen anywhere on this PC
-    import('./src/services/plans.js').then(p => p.startLicenseWatch(app.locals.db)).catch(e => console.warn('[plans]', e.message)) // Adal's signed licence: plan, dates, features
-    startAppointmentWatcher(app.locals.db) // Tasheer / Wafid appointments: a reminder the day before
-    startCloudSync(app.locals.db)      // the online copy phones use when this PC is off
-    startLiveChannel(app.locals.db)    // phones ↔ this PC, instant (Supabase Realtime)
     // New selections on Musaned, every hour, on ONE PC of the agency (the main PC picks the strongest).
     import('./src/services/selectionCheck.js').then(s => s.startSelectionCheck(app.locals.db)).catch(e => console.warn('[selection-check]', e.message))
     if (isFollower()) {
@@ -1269,12 +1272,25 @@ initSystem().then(() => {
       console.log(`🔗 This PC follows the main PC at ${mainURL()} — no automations, no discovery here`)
       return
     }
+    // Every PC: its own scans, read here at once (the passport, the document's kind), on its own copy.
     startFolderWatcher(db, 1)     // watches the inbox for new files
+    if (notMainPC() || isMainRole() === false) {
+      // A Companion with its own copy: everything a person does happens here, at once;
+      // the main PC's jobs (robots, backups, the online copy, phones, reminders) stay there.
+      console.log(`🔁 A Companion of the main PC at ${mainURL() || '(not known yet)'} — its own copy; the robots, backups and online copy are the main PC's`)
+      return
+    }
+    startMedicalWatcher(app.locals.db) // the medical's battery: warnings as it runs out
+    import('./src/services/sessionKeeper.js').then(k => k.startSessionKeeper(app.locals.db)).catch(e => console.warn('[sessions]', e.message)) // signed in once, kept all day
+    import('./src/services/plans.js').then(p => p.startLicenseWatch(app.locals.db)).catch(e => console.warn('[plans]', e.message)) // Adal's signed licence: plan, dates, features
+    startAppointmentWatcher(app.locals.db) // Tasheer / Wafid appointments: a reminder the day before
+    startCloudSync(app.locals.db)      // the online copy phones use when this PC is off
+    startLiveChannel(app.locals.db)    // phones ↔ this PC, instant (Supabase Realtime)
     startWorker(db)               // runs queued jobs, each in its own tab
     import("./src/services/transition.js").then(m => m.resumeTransitions(db)).catch(() => {})            // a move cut off by a restart goes on
     startScanner(db)              // discovers new work every 2 min
     startWafidChecker(db)         // Medical · Applied → Fit / Rejected from wafid.com
-    import('./src/services/needsAction.js').then(n => n.startNeedsAction(db, { isFollower })).catch(e => console.warn('[needs-action]', e.message))   // "Needs action today": one notification a day
+    import('./src/services/needsAction.js').then(n => n.startNeedsAction(db, { isFollower: notMainPC })).catch(e => console.warn('[needs-action]', e.message))   // "Needs action today": one notification a day
     import('./src/services/portalHealth.js').then(p => p.startPortalHealth()).catch(() => {})
     setTimeout(() => import('./src/services/placement.js').then(p => p.sweepRecent(db)).catch(() => {}), 4 * 60 * 1000).unref?.()   // pictures put in the wrong box (last 7 days) set right
     import('./src/services/pcHealth.js').then(p => p.startPCHealth(db)).catch(() => {})   // disk space, database check, freezes (Admin sees it)   // is each portal answering? (Admin sees it)
@@ -1296,7 +1312,7 @@ initSystem().then(() => {
 // The old Brave agent (its own Brave, its own profile, the same control port
 // 9222 as Adal Keep's Brave): only when asked for. It fought services/browser.js
 // for the port, so runs landed in a Brave that closed on every restart.
-const AUTO_START_BRAVE = process.env.AUTO_START_BRAVE === 'true' && !isFollower()
+const AUTO_START_BRAVE = process.env.AUTO_START_BRAVE === 'true' && !notMainPC()
 if (AUTO_START_BRAVE) {
   setTimeout(async () => {
     try {

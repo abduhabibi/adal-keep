@@ -43,7 +43,7 @@ export function createSyncRouter({ getNode, here, admitted = (req) => req.pcAcce
   router.post('/sync/pull', agencyPC, async (req, res) => {
     try { res.json(await getNode().engine.changesSince(req.body?.vector || {}, req.body?.limit)) } catch (e) { fail(res, e) }
   })
-  router.post('/sync/push', express.json({ limit: '64mb' }), agencyPC, async (req, res) => {
+  router.post('/sync/push', agencyPC, async (req, res) => {
     try {
       const node = getNode()
       const entries = Array.isArray(req.body?.entries) ? req.body.entries : []

@@ -27,7 +27,8 @@
  */
 import os from 'os'
 import crypto from 'crypto'
-import { mainURL, mainKey, instanceId, isFollower } from './mainPC.js'
+// ("isFollower" here: not the PC holding the main PC's role, a follower or a Companion with its own copy.)
+import { mainURL, mainKey, instanceId, notMainPC as isFollower } from './mainPC.js'
 
 export const EVERY_MS = 60 * 60e3          // once an hour
 export const MANUAL_LIMIT_MS = 10 * 60e3   // Check now: at most 10 minutes

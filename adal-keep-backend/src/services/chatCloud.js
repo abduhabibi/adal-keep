@@ -8,7 +8,7 @@
  * backend/.adal_chat.json) and is named after the company. What an agency may
  * read or send is enforced by the database rules (adal-admin/supabase/schema.sql).
  */
-import { isFollower } from './mainPC.js'
+import { notMainPC as isFollower } from './mainPC.js'   // (a follower or a Companion: not the main PC)
 import crypto from 'crypto'
 import fs from 'fs'
 import path from 'path'
@@ -430,6 +430,8 @@ export async function unlockStatus(db) {
 
 // The same Supabase connection, for the agency's online copy (cloudSync.js).
 export const cloudCall = (db, method, pathAndQuery, body, opts) => call(db, method, pathAndQuery, body, opts)
+/** The agency's signed-in token (services/sync/relay.js puts its locked pieces online with it). */
+export const cloudToken = (db) => token(db)
 export const cloudAuth = (pathAndQuery, body) => auth(pathAndQuery, body)
 export async function cloudAgencyId(db) { await token(db); return sess?.user_id || null }
 export const cloudConfig = () => cfg()

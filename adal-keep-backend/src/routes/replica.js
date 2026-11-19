@@ -87,7 +87,7 @@ export async function safetyPayload() {
 }
 router.get('/safety', async (req, res) => {
   try {
-    const { isFollower, mainURL, mainKey } = await import('../services/mainPC.js')
+    const { notMainPC: isFollower, mainURL, mainKey } = await import('../services/mainPC.js')
     // A PC that follows a main PC: the main PC's backup and licence are the ones that count.
     if (isFollower()) {
       const r = await fetch(`${mainURL()}/api/safety`, { headers: { 'x-adal-pc': await mainKey() }, signal: AbortSignal.timeout(8000) })

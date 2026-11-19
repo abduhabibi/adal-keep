@@ -44,6 +44,13 @@ export class SyncNode {
     this.status = { last: null, error: null, rounds: 0 }
   }
   get pcId() { return this.engine.pcId }
+  /**
+   * Suspended or removed by the main PC: from its own row (copied), or because
+   * the other PCs refuse it (netCut). It still asks every round, so "allowed
+   * again" is heard; it serves nothing to the others meanwhile.
+   */
+  get cutOff() { return this.rowCut || this.netCut || null }
+  set cutOff(v) { this.netCut = v || null; if (!v) this.rowCut = null }
 
   async start({ timers = true, claim = true } = {}) {
     await this.selfRow()
@@ -61,7 +68,7 @@ export class SyncNode {
       every(PULL_EVERY, () => this.round())
       every(20 * 1000, () => this.engine.stampNow())   // changes made by another program on this database
       every(60 * 60 * 1000, () => this.engine.compact())
-      every(30 * 1000, () => this.docs.index())
+      every(60 * 1000, () => this.docs.index())
       setTimeout(() => this.round().catch(() => {}), 3000).unref?.()
     }
     return this
@@ -97,7 +104,7 @@ export class SyncNode {
     const rows = await this.engine.db.raw(`SELECT pc_id, name, key_hash, suspended_at, revoked_at FROM sync_pcs`)
     this.keys = new Map(rows.filter(r => r.key_hash).map(r => [r.key_hash, { pc_id: r.pc_id, name: r.name, suspended: !!r.suspended_at, revoked: !!r.revoked_at }]))
     const me = rows.find(r => r.pc_id === this.pcId)
-    this.cutOff = me?.revoked_at ? 'removed' : me?.suspended_at ? 'suspended' : null
+    this.rowCut = me?.revoked_at ? 'removed' : me?.suspended_at ? 'suspended' : null
     return this.keys
   }
   /** The agency PC a request's key belongs to (not suspended, not removed), or null. */
@@ -143,7 +150,7 @@ export class SyncNode {
       try {
         const h = await this.call(url, 'GET', '/hello', null, { timeout: 4000 })
         if (h.pc_id === pc.pc_id) { this.peerState.set(pc.pc_id, { url, ok: true, at: this.now() }); return url }
-      } catch (e) { if (e.suspended) { this.cutOff = 'suspended'; throw e } }
+      } catch (e) { if (e.suspended) { this.netCut = 'suspended'; throw e } }
     }
     this.peerState.set(pc.pc_id, { ...(this.peerState.get(pc.pc_id) || {}), ok: false, at: this.now(), error: 'not on the network' })
     return null
@@ -197,7 +204,6 @@ export class SyncNode {
   async round() {
     if (this.busy) return this.busy
     this.busy = (async () => {
-      if (this.cutOff) { this.status = { ...this.status, error: `This PC was ${this.cutOff} by the main PC` }; return this.status }
       const res = { at: new Date(this.now()).toISOString(), peers: [], relay: null }
       let unreachable = 0
       for (const pc of await this.others()) {
@@ -205,9 +211,10 @@ export class SyncNode {
           const url = await this.reach(pc)
           if (!url) { unreachable++; res.peers.push({ pc: pc.pc_id, name: pc.name, ok: false }); continue }
           const r = await this.syncWith(url)
+          this.netCut = null   // (a PC of the agency took it: allowed again, if it had been cut off)
           res.peers.push({ pc: pc.pc_id, name: pc.name, ok: true, url, ...r })
         } catch (e) {
-          if (e.suspended || e.status === 403) this.cutOff = e.suspended ? 'suspended' : this.cutOff
+          if (e.suspended) this.netCut = 'suspended'
           unreachable++
           this.peerState.set(pc.pc_id, { ...(this.peerState.get(pc.pc_id) || {}), ok: false, at: this.now(), error: e.message })
           res.peers.push({ pc: pc.pc_id, name: pc.name, ok: false, error: e.message })

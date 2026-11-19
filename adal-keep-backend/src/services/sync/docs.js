@@ -38,8 +38,15 @@ export class DocStore {
   pathOf(name) { if (!okName(name)) throw Object.assign(new Error('No such document'), { status: 404 }); return path.join(this.dir, name) }
 
   /** Fingerprint new and changed documents (a few seconds at a time); forget the gone ones. */
-  async index({ budgetMs = 4000 } = {}) {
+  async index({ budgetMs = 4000, force = false } = {}) {
+    // (Thousands of documents on a slow disk: looked through again only when the
+    // folder changed — a document added or removed — or every 10 minutes.)
     fs.mkdirSync(this.dir, { recursive: true })
+    let dirAt = 0
+    try { dirAt = fs.statSync(this.dir).mtimeMs } catch {}
+    if (!force && this.left === 0 && dirAt === this.dirAt && Date.now() - (this.lastIndex || 0) < 10 * 60 * 1000) return { added: 0, gone: 0, left: 0 }
+    this.lastIndex = Date.now()
+    this.dirAt = dirAt
     const start = this.now()
     let names = []
     try { names = fs.readdirSync(this.dir, { withFileTypes: true }).filter(d => d.isFile() && okName(d.name)).map(d => d.name) } catch {}
@@ -64,6 +71,7 @@ export class DocStore {
       await this.db.raw(`DELETE FROM sync_docs WHERE name IN (${part.map(() => '?').join(', ')})`, part)
     }
     if (added || gone.length) this.listCache = null
+    this.left = left
     return { added, gone: gone.length, left }
   }
 

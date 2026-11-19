@@ -58,7 +58,31 @@ export function instanceId() {
 export function mainURL() {
   return String(readFile().main_url || '').trim().replace(/\/+$/, '')
 }
-export const isFollower = () => !!mainURL()
+/**
+ * Since companion-full (docs/companion-full.md) a Companion runs the same
+ * Adal Keep on its own full copy: main-pc.json { "mode": "companion",
+ * "main_url": … }. It works on its own copy (CVs, readings, edits at once)
+ * and leaves the main PC's jobs (robots, backups, the online copy, phones)
+ * to the PC holding that role. A "follower" is the older kind: it opens the
+ * main PC's own pages and does nothing itself.
+ */
+export const isCompanion = () => readFile().mode === 'companion' && !!mainURL()
+export const isFollower = () => !!mainURL() && !isCompanion()
+/** Not the PC holding the main PC's role (a follower or a Companion): the main PC's jobs are not done here. */
+export const notMainPC = () => !!mainURL()
+/** Installed with the Companion installer (it joins an agency; it never starts one of its own). */
+export const isCompanionInstall = () => process.env.ADAL_COMPANION_INSTALL === '1' || fs.existsSync(path.join(INSTALL, 'companion-install'))
+/** The role as the copying decided it (services/sync/index.js reconcileRole). */
+export function setRole({ mode = '', main_url = '', pc_key } = {}) {
+  const f = readFile()
+  f.mode = mode || ''
+  f.main_url = main_url || ''
+  if (pc_key) { f.pc_key = pc_key; f.pc_key_for = main_url || '' }
+  f.changed_at = new Date().toISOString()
+  writeFile(f)
+  // Either way this PC has its own server now: its scans are read here.
+  try { pointCompanion('http://localhost:4000') } catch {}
+}
 
 /**
  * This PC's key for the main PC (services/networkGate.js): taken once with the
@@ -69,7 +93,7 @@ export const isFollower = () => !!mainURL()
 export async function mainKey({ number, username, password } = {}) {
   const f = readFile(), main = mainURL()
   if (!main) return ''
-  if (f.pc_key && f.pc_key_for === main && !number && !username) return f.pc_key
+  if (f.pc_key && (f.pc_key_for === main || f.mode === 'companion') && !number && !username) return f.pc_key
   const os = await import('os')
   const way = number ? ['number', { number: String(number).replace(/\D/g, '') }]
     : username && password ? ['signin', { username, password }] : null
@@ -110,7 +134,7 @@ export async function checkMainPC(input) {
   }
   if (info?.status !== 'ok') throw new Error(`${url} is not Adal Keep.`)
   if (info.instance && info.instance === instanceId()) throw new Error('That address is this PC itself.')
-  if (info.role === 'follower') throw new Error(`${url} itself follows another main PC (${info.main_url}). Use that address instead.`)
+  if (info.role === 'follower' || info.role === 'companion') throw new Error(`${url} itself follows another main PC (${info.main_url}). Use that address instead.`)
   return url
 }
 
@@ -201,8 +225,8 @@ export async function turnOnHttps(port = Number(process.env.PORT) || 4000) {
 export async function describe() {
   const port = Number(process.env.PORT) || 4000
   return {
-    role: isFollower() ? 'follower' : 'main',
-    pc_number: isFollower() ? null : pcNumber(),
+    role: isCompanion() ? 'companion' : isFollower() ? 'follower' : 'main',
+    pc_number: notMainPC() ? null : pcNumber(),
     main_url: mainURL(),
     instance: instanceId(),
     port,

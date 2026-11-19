@@ -55,3 +55,15 @@ export function stepMarks(steps = {}, p = {}, after = []) {
     done: after.filter(([, k]) => steps[k] === 'done').map(([, , label]) => label),
   }
 }
+
+/**
+ * After the EPRO: the steps in the agency's order (dragged on the Profiles page
+ * or a profile's AI Actions — Settings "journey_order", the step boxes' names).
+ * [title, key, label]
+ */
+export const AFTER = [['Tasheer', 'tasheer', 'Tasheer'], ['Insurance', 'insurance', 'Insurance'], ['Enjaz · Visa', 'embassy', 'Visa'], ['LMIS · Police clearance', 'police', 'Police']]
+export const READY = ['choices', 'Ready']
+export const afterInOrder = (order = []) => [...AFTER].sort((a, b) => {
+  const ia = order.indexOf(a[0]), ib = order.indexOf(b[0])
+  return (ia < 0 ? 99 + AFTER.indexOf(a) : ia) - (ib < 0 ? 99 + AFTER.indexOf(b) : ib)
+})

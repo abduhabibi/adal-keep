@@ -11,6 +11,7 @@ import LmisAccountPicker from './LmisAccountPicker'
 import MusanedAccountPicker from './MusanedAccountPicker'
 import { usePlan, lockedFor, planName, wantFeature } from '../lib/plan'
 import { phoneCloud } from '../lib/phoneMode'
+import { shows } from '../lib/stageActions'
 
 // What a paused run is waiting for, in words.
 const PAUSE_TEXT = {
@@ -118,7 +119,7 @@ const DONE_BY = {
 }
 const BOX_SHORT = { 'Wafid medical': 'Wafid', 'Enjaz · Visa': 'Visa', 'LMIS · Police clearance': 'Police' }
 
-export default function ProfileAutomations({ profileId }) {
+export default function ProfileAutomations({ profileId, phase = null, after }) {
   const [order, setOrder] = useState(() => journeyKept || [])
   useEffect(() => { let alive = true; askJourney().then(o => alive && setOrder(o)); return () => { alive = false } }, [])
   const [focus, setFocus] = useState(null)        // a box clicked in the steps row (else: the next one not done)
@@ -430,9 +431,12 @@ export default function ProfileAutomations({ profileId }) {
   ]
   const grouped = GROUPS.flatMap(g => g.ids)
   const otherFlows = workflows.filter(w => !grouped.includes(w.id))
-  // Step by step until the EPRO is approved (asked on 2026-11-17): only the step she is at.
-  // From the moment she is on Musaned, she can be deleted from it too; after the EPRO every robot shows.
-  const STEP_IDS = { musaned: ['musaned_add_candidate'], selected: ['musaned_check_chosen', 'musaned_delete'], wafid: ['wafid_book', 'wafid_check', 'musaned_delete'], epro: ['musaned_epro_approve', 'musaned_delete'] }
+  // Only her stage's robots (lib/stageActions.js — the one rule for every view):
+  // each on its own stage and the next one (a redo there is common). A robot
+  // with a run working, waiting or in line always shows.
+  const runLive = (id) => ['running', 'paused', 'pending'].includes(workflows.find(w => w.id === id)?.latest?.status)
+  const canRun = (id) => runLive(id) || shows(id, phase, after)
+  const forStage = (g) => ({ ...g, ids: g.ids.filter(canRun) })
   const STEP_NAMES = ['CV', 'Musaned', 'Chosen', 'Wafid FIT', 'EPRO']
   const stepping = step && step.key !== 'choices'
 
@@ -564,12 +568,16 @@ export default function ProfileAutomations({ profileId }) {
     titles.splice(Math.max(0, Math.min(titles.length, to)), 0, title)
     saveOrder(titles)
   }
+  // A box with none of her stage's robots is left out (its pill stays, for the order).
+  const forHer = (g) => forStage(g).ids.length > 0
   const journey = () => {
-    const next = ordered.find(g => !boxDone(g) && !boxLocked(g))
-    const current = (focus && ordered.find(g => g.title === focus)) || next
-    const openBoxes = ordered.filter(g => g === current || boxBusy(g))
-    const done = ordered.filter(g => boxDone(g) && !openBoxes.includes(g))
-    const later = ordered.filter(g => !boxDone(g) && !openBoxes.includes(g))
+    const mine = ordered.filter(forHer)
+    const next = mine.find(g => !boxDone(g) && !boxLocked(g))
+    const current = (focus && mine.find(g => g.title === focus)) || next
+    const openBoxes = mine.filter(g => g === current || boxBusy(g))
+    const done = mine.filter(g => boxDone(g) && !openBoxes.includes(g))
+    const later = mine.filter(g => !boxDone(g) && !openBoxes.includes(g))
+    const stageFlows = otherFlows.filter(w => canRun(w.id))
     const fold = (on, set, label) => (
       <button type="button" onClick={() => set(v => !v)} aria-expanded={on}
         className="mb-2 flex w-full items-center gap-2 rounded-lg px-2 py-1 text-left text-xs text-slate-400 hover:bg-slate-50 hover:text-slate-600 dark:hover:bg-slate-800/60">
@@ -592,8 +600,8 @@ export default function ProfileAutomations({ profileId }) {
                 onDrop={(e) => { e.preventDefault(); if (dragging && dragging !== g.title) move(dragging, i); setDragging(null) }}
                 className={`group flex items-center rounded-full border text-xs font-semibold ${dragging === g.title ? 'opacity-40' : ''} ${
                   isOn ? 'border-teal-500 bg-teal-600 text-white' : isDone ? 'border-emerald-300 bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300' : boxLocked(g) ? 'border-slate-200 text-slate-400 dark:border-slate-700' : 'border-slate-300 bg-white text-slate-700 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200'}`}>
-                <button type="button" onClick={() => setFocus(isOn && focus ? null : g.title)} title="Open this step — drag to change the order"
-                  className="cursor-grab px-2.5 py-1 active:cursor-grabbing">
+                <button type="button" onClick={() => forHer(g) && setFocus(isOn && focus ? null : g.title)} title={forHer(g) ? 'Open this step — drag to change the order' : 'Not at her stage — drag to change the order'}
+                  className={`cursor-grab px-2.5 py-1 active:cursor-grabbing ${forHer(g) ? '' : 'opacity-50'}`}>
                   <span className="mr-1 opacity-60">{i + 1}</span>{isDone ? '✓ ' : boxLocked(g) ? '🔒 ' : ''}{BOX_SHORT[g.title] || g.title}
                 </button>
                 {isOn && i > 0 && (
@@ -608,24 +616,24 @@ export default function ProfileAutomations({ profileId }) {
       </div>
 
       {done.length > 0 && fold(showDone, setShowDone, `${done.length} done: ${done.map(g => BOX_SHORT[g.title] || g.title).join(' · ')}`)}
-      {showDone && done.map(g => renderGroup(g))}
+      {showDone && done.map(g => renderGroup(forStage(g)))}
 
-      {openBoxes.map(g => renderGroup(g))}
+      {openBoxes.map(g => renderGroup(forStage(g)))}
       {!next && !focus && <p className="mb-2 rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300">✓ Every step is done.</p>}
 
-      {(later.length > 0 || otherFlows.length > 0) && fold(showLater, setShowLater, `next: ${[...later.map(g => BOX_SHORT[g.title] || g.title), ...(otherFlows.length ? ['more'] : [])].join(' · ')}`)}
+      {(later.length > 0 || stageFlows.length > 0) && fold(showLater, setShowLater, `next: ${[...later.map(g => BOX_SHORT[g.title] || g.title), ...(stageFlows.length ? ['more'] : [])].join(' · ')}`)}
       {showLater && <>
-        {later.map(g => renderGroup(g))}
-        {otherFlows.length > 0 && (
+        {later.map(g => renderGroup(forStage(g)))}
+        {stageFlows.length > 0 && (
           <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-            {otherFlows.map(w => renderCard(w))}
+            {stageFlows.map(w => renderCard(w))}
           </div>
         )}
       </>}
     </>)
   }
 
-  if (loading) return null
+  if (loading || !phase) return null
 
   const running = queue?.running || []
   const max = queue?.max || 3
@@ -685,13 +693,13 @@ export default function ProfileAutomations({ profileId }) {
           </div>
           <p className="mt-2 text-base font-bold text-slate-900 dark:text-white">{step.n}. {step.title}</p>
           {step.unfit && <p className="text-sm font-semibold text-red-600">Wafid says UNFIT — she cannot go on.</p>}
-          {step.key === 'cv' && (
+          {shows('make_cv', phase, after) && (
             <button type="button" onClick={() => navigate(`/cvs/new?profile=${profileId}`)}
               className="mt-2 rounded-lg bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-700">📄 Make her CV</button>
           )}
         </div>
       )}
-      {stepping && (STEP_IDS[step.key] ? GROUPS.filter(g => g.ids.some(id => STEP_IDS[step.key].includes(id))).map(g => ({ ...g, ids: g.ids.filter(id => STEP_IDS[step.key].includes(id)) })) : []).map(g => renderGroup(g))}
+      {stepping && GROUPS.map(forStage).filter(g => g.ids.length).map(g => renderGroup(g))}
 
       {!stepping && journey()}
 

@@ -18,6 +18,7 @@ import { dragProfiles } from '../lib/profileDrag'
 import WhatsAppSendPicked from './WhatsAppSendPicked'
 import { FORMATS, downloadTable } from '../lib/tableExport'
 import { onPhone } from '../lib/phoneMode'
+import { showsForAny } from '../lib/stageActions'
 
 const err = (e) => e?.response?.data?.error || e.message
 
@@ -60,7 +61,10 @@ function MissingSheet({ sheet, onClose }) {
 }
 
 // whatsappHere: on the Waiting tab (the only place CVs go to agents); waitingPicked: the ticked ones in Waiting.
-export default function SelectionBar({ picked, onRemove, onClear, onAllShown, onLacking, whatsappHere = false, waitingPicked = [] }) {
+// phases: the ticked girls' stages — a button shows when it is for the stage of
+// at least one of them (lib/stageActions.js); after: the agency's order after the EPRO.
+export default function SelectionBar({ picked, onRemove, onClear, onAllShown, onLacking, whatsappHere = false, waitingPicked = [], phases = [], after }) {
+  const can = (key) => showsForAny(key, phases, after)
   const { company } = useAuth()
   const [busy, setBusy] = useState('')
   const [open, setOpen] = useState(true)
@@ -189,20 +193,20 @@ export default function SelectionBar({ picked, onRemove, onClear, onAllShown, on
       <div className={`${open ? '' : 'hidden lg:flex'} flex min-h-0 flex-1 flex-col`}>
         <div className="grid grid-cols-2 gap-1.5 border-b border-slate-100 p-2 dark:border-slate-800 lg:grid-cols-1 lg:p-3">
           {/* (A phone reaches no website: Tasheer and insurance are the PC's; WhatsApp sends go through the PC.) */}
-          {!onPhone() && <button type="button" className={`${btn} bg-sky-50 text-sky-800 hover:bg-sky-100 dark:bg-sky-900/30 dark:text-sky-300`} disabled={!!busy}
+          {!onPhone() && can('tasheer_schedule') && <button type="button" className={`${btn} bg-sky-50 text-sky-800 hover:bg-sky-100 dark:bg-sky-900/30 dark:text-sky-300`} disabled={!!busy}
             onClick={() => startAll('tasheer_schedule', 'Tasheer')} title="One group appointment on Tasheer for all of them (only those whose visa is made)">🛂 {busy === 'tasheer_schedule' ? 'Checking and starting…' : 'Make Tasheer'} <span className="ml-auto hidden text-[10px] font-normal opacity-80 lg:inline">group</span></button>}
-          {!onPhone() && <button type="button" className={`${btn} bg-amber-50 text-amber-800 hover:bg-amber-100 dark:bg-amber-900/30 dark:text-amber-300`} disabled={!!busy}
+          {!onPhone() && can('insurance_certificate') && <button type="button" className={`${btn} bg-amber-50 text-amber-800 hover:bg-amber-100 dark:bg-amber-900/30 dark:text-amber-300`} disabled={!!busy}
             onClick={() => startAll('insurance_certificate', 'Insurance certificate')}>🛡️ {busy === 'insurance_certificate' ? 'Checking and starting…' : 'Make insurance'}</button>}
-          <button type="button" className={`${btn} bg-teal-600 text-white hover:bg-teal-700`} disabled={!!busy}
+          {can('print_embassy') && <button type="button" className={`${btn} bg-teal-600 text-white hover:bg-teal-700`} disabled={!!busy}
             onClick={print} title="2 pages a girl: the contract's first page and the embassy form with the visa and application numbers as barcodes">
-            🖨️ {busy === 'print' ? 'Checking…' : 'Print embassy'} <span className="ml-auto hidden text-[10px] font-normal opacity-80 lg:inline">{picked.length * 2} pages</span></button>
+            🖨️ {busy === 'print' ? 'Checking…' : 'Print embassy'} <span className="ml-auto hidden text-[10px] font-normal opacity-80 lg:inline">{picked.length * 2} pages</span></button>}
           <button type="button" className={`${btn} bg-indigo-50 text-indigo-800 hover:bg-indigo-100 dark:bg-indigo-900/30 dark:text-indigo-300`} disabled={!!busy}
             onClick={openLists}>📋 {busy === 'checklist' ? 'Saving…' : 'Checklist'} <span className="ml-auto hidden text-[10px] font-normal opacity-80 lg:inline">new or add</span></button>
           {/* CVs to agents only from the Waiting tab, and only the girls in Waiting (asked on 2026-11-19). */}
-          <button type="button" className={`${btn} bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:bg-emerald-900/30 dark:text-emerald-300`}
+          {can('whatsapp_send') && <button type="button" className={`${btn} bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:bg-emerald-900/30 dark:text-emerald-300`}
             disabled={!!busy || !whatsappHere || !waitingPicked.length}
             title={!whatsappHere ? 'CVs go to WhatsApp only from the Waiting tab' : !waitingPicked.length ? 'None of them is in Waiting' : waitingPicked.length < picked.length ? `Only the ${waitingPicked.length} in Waiting are sent` : undefined}
-            onClick={() => setMessaging(m => !m)}>💬 WhatsApp <span className="ml-auto hidden text-[10px] font-normal opacity-80 lg:inline">{whatsappHere ? `send ${waitingPicked.length} CV${waitingPicked.length === 1 ? '' : 's'}` : 'Waiting tab only'}</span></button>
+            onClick={() => setMessaging(m => !m)}>💬 WhatsApp <span className="ml-auto hidden text-[10px] font-normal opacity-80 lg:inline">{whatsappHere ? `send ${waitingPicked.length} CV${waitingPicked.length === 1 ? '' : 's'}` : 'Waiting tab only'}</span></button>}
           {messaging && whatsappHere && waitingPicked.length > 0 && <WhatsAppSendPicked picked={waitingPicked} onClose={() => setMessaging(false)} />}
           <button type="button" className={`${btn} bg-lime-50 text-lime-800 hover:bg-lime-100 dark:bg-lime-900/30 dark:text-lime-300`}
             onClick={() => { setExporting(true); download('xlsx') }} title="No. · Name · Labour ID · Passport of the selected">📥 Excel download <span className="ml-auto hidden text-[10px] font-normal opacity-80 lg:inline">no. · name · labour ID · passport</span></button>

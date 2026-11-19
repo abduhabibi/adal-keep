@@ -164,9 +164,9 @@ func joinURL(root string) string {
 // (lib/companionOnline.js), so the Companion works without the main PC.
 func companionURL(root, u string) string {
 	if !hasOnlinePages(root) {
-		return u
+		return withHand(root, u)
 	}
-	return strings.TrimRight(u, "/") + "/?adal_companion=1"
+	return withHand(root, strings.TrimRight(u, "/")+"/?adal_companion=1")
 }
 
 // openAppWindow: the main PC's Adal Keep as its own app-style window (no

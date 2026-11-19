@@ -33,8 +33,31 @@ const FILE = process.env.ADAL_PC_ACCESS_FILE || path.join(DATA, 'pc-access.json'
 const COOKIE = 'adal_pc'
 const hash = (t) => crypto.createHash('sha256').update(String(t)).digest('hex')
 
-function read() { try { return { pcs: [], pending: [], ...JSON.parse(fs.readFileSync(FILE, 'utf8')) } } catch { return { pcs: [], pending: [] } } }
-function write(s) { fs.mkdirSync(path.dirname(FILE), { recursive: true }); fs.writeFileSync(FILE, JSON.stringify(s, null, 1)) }
+// The list of computers let in. Asked on 2026-11-19 ("it is logging out
+// fast"): a list that could not be read (cut short by a power cut or by a
+// read in the middle of a write) used to count as empty, so every Companion
+// was out and had to type the number again — and the next write made that
+// for good. Now it is written whole or not at all (a new file, then renamed),
+// the one before is kept (.bak), and one that cannot be read falls back to
+// that copy or to the last good one in memory — never to an empty list.
+let lastGood = null
+function parse(f) { const j = JSON.parse(fs.readFileSync(f, 'utf8')); return j && typeof j === 'object' ? { pcs: [], pending: [], ...j } : null }
+function read() {
+  try { const s = parse(FILE); if (s) { lastGood = JSON.stringify(s); return s } } catch {}
+  if (lastGood) return JSON.parse(lastGood)
+  try { const s = parse(FILE + '.bak'); if (s) return s } catch {}
+  return { pcs: [], pending: [] }
+}
+const whole = (f, text) => { const tmp = `${f}.${process.pid}.tmp`; fs.writeFileSync(tmp, text); fs.renameSync(tmp, f) }
+function write(s) {
+  fs.mkdirSync(path.dirname(FILE), { recursive: true })
+  const text = JSON.stringify(s, null, 1)
+  whole(FILE, text)
+  try { whole(FILE + '.bak', text) } catch {}
+  lastGood = text
+}
+/** One of this computer's keys: the first one, or one it got later (another address of the main PC, a cleared window). */
+const hasKey = (p, h) => p.key === h || (Array.isArray(p.keys) && p.keys.includes(h))
 
 export const ipOf = (req) => String(req.socket?.remoteAddress || '').replace(/^::ffff:/, '')
 export const isLocal = (req) => ['127.0.0.1', '::1'].includes(ipOf(req))
@@ -59,7 +82,7 @@ function cookieOf(req, name) {
   const m = String(req.headers.cookie || '').split(/;\s*/).find(c => c.startsWith(name + '='))
   return m ? decodeURIComponent(m.slice(name.length + 1)) : ''
 }
-const keyOf = (req) => String(req.headers['x-adal-pc'] || cookieOf(req, COOKIE) || '')
+export const keyOf = (req) => String(req.headers['x-adal-pc'] || cookieOf(req, COOKIE) || '')
 
 /** The approved computer this request comes from, or null. */
 export function approvedPC(req) {
@@ -67,7 +90,7 @@ export function approvedPC(req) {
   if (!k) return null
   const h = hash(k)
   const s = read()
-  const pc = s.pcs.find(p => p.key === h && !p.revoked)
+  const pc = s.pcs.find(p => hasKey(p, h) && !p.revoked)
   if (pc?.suspended) return null
   if (pc && Date.now() - (pc.last_seen || 0) > 10 * 60000) { pc.last_seen = Date.now(); pc.last_ip = ipOf(req); write(s) }
   return pc || null
@@ -143,30 +166,54 @@ export function requestAccess(req, name) {
  * Signed in with an account of this PC (the owner's or an employee's, the same
  * username and password): let in at once — nobody here has to say Yes.
  */
-export function admitSignedIn(req, name, user) {
+export function admitSignedIn(req, name, user, { cid = '', device = '' } = {}) {
   const s = read()
   const key = crypto.randomBytes(32).toString('base64url')
+  // The same Companion coming back (its own id, kept by AdalKeep.exe, or its
+  // online account): the same place on the list, one more key — after a new
+  // address of the main PC (the router, Tailscale), a cleared window, a new
+  // browser profile. So it is one computer in Settings, suspended as one.
+  const same = companionOf(s, { cid, device })
+  if (same) {
+    if (same.suspended) return { suspended: true, id: same.id }
+    same.keys = [...(Array.isArray(same.keys) ? same.keys : []), hash(key)].slice(-20)
+    same.last_seen = Date.now(); same.last_ip = ipOf(req)
+    if (name) same.name = String(name).slice(0, 60)
+    if (cid && !same.cid) same.cid = hash('cid:' + cid)
+    write(s)
+    return { id: same.id, key, again: true }
+  }
   const id = crypto.randomBytes(6).toString('hex')
-  s.pcs.push({ id, key: hash(key), name: String(name || 'A computer').slice(0, 60), ip: ipOf(req), agent: String(req.headers['user-agent'] || '').slice(0, 120), approved_at: Date.now(), last_seen: Date.now(), by_account: String(user || '').slice(0, 60) })
+  s.pcs.push({ id, key: hash(key), name: String(name || 'A computer').slice(0, 60), ip: ipOf(req), agent: String(req.headers['user-agent'] || '').slice(0, 120), approved_at: Date.now(), last_seen: Date.now(), by_account: String(user || '').slice(0, 60), ...(cid ? { cid: hash('cid:' + cid) } : {}) })
   write(s)
   return { id, key }
 }
+
+/** The Companion on the list (not logged out) with this own id or online account. */
+function companionOf(s, { cid = '', device = '' } = {}) {
+  cid = String(cid || ''); device = String(device || '')
+  if (cid.length >= 16) { const h = hash('cid:' + cid); const p = s.pcs.find(x => !x.revoked && x.cid === h); if (p) return p }
+  if (/^[0-9a-f-]{36}$/i.test(device)) { const p = s.pcs.find(x => !x.revoked && x.device === device); if (p) return p }
+  return null
+}
+/** That Companion (by its own id or online account) is suspended on this PC. */
+export function companionSuspended(who) { return !!companionOf(read(), who)?.suspended }
 
 /** This request carries the key of a computer the main PC suspended. */
 export function isSuspended(req) {
   const k = keyOf(req)
   if (!k) return false
   const h = hash(k)
-  return read().pcs.some(p => p.key === h && !p.revoked && p.suspended)
+  return read().pcs.some(p => hasKey(p, h) && !p.revoked && p.suspended)
 }
 
 export function statusOf(req) {
   const k = keyOf(req)
   if (!k) return { state: 'none' }
   const h = hash(k), s = read()
-  if (s.pcs.some(p => p.key === h && !p.revoked && p.suspended)) return { state: 'suspended' }
-  if (s.pcs.some(p => p.key === h && !p.revoked)) return { state: 'approved' }
-  if (s.pcs.some(p => p.key === h && p.revoked)) return { state: 'removed' }
+  if (s.pcs.some(p => hasKey(p, h) && !p.revoked && p.suspended)) return { state: 'suspended' }
+  if (s.pcs.some(p => hasKey(p, h) && !p.revoked)) return { state: 'approved' }
+  if (s.pcs.some(p => hasKey(p, h) && p.revoked)) return { state: 'removed' }
   const q = s.pending.find(x => x.key === h)
   return q ? { state: q.denied ? 'denied' : 'waiting' } : { state: 'none' }
 }
@@ -184,7 +231,7 @@ export function answer(id, yes) {
   write(s)
 }
 
-export const list = () => read().pcs.filter(p => !p.revoked).map(({ key, ...p }) => p)
+export const list = () => read().pcs.filter(p => !p.revoked).map(({ key, keys, cid, ...p }) => p)
 
 /** Suspend a computer (it keeps its place on the list) or allow it again. Its online account id, if any. */
 export function setSuspended(id, on) {

@@ -15,7 +15,7 @@
  */
 import express from 'express'
 import bcrypt from 'bcryptjs'
-import { isLocal, admitSignedIn, statusOf, pending, answer, list, remove, setKeyCookie, isSuspended, setSuspended, linkDevice } from '../services/networkGate.js'
+import { isLocal, admitSignedIn, statusOf, pending, answer, list, remove, setKeyCookie, isSuspended, setSuspended, linkDevice, keyOf, companionSuspended } from '../services/networkGate.js'
 
 const router = express.Router()
 // The main PC itself — not a call that came through the online link (a phone, a Companion: X-Adal-Cloud).
@@ -95,7 +95,11 @@ router.post('/pc-access/number', async (req, res) => {
       return res.status(403).json({ error: 'That is not the main PC\'s number' })
     }
     numberMisses.delete(ip)
-    const r = admitSignedIn(req, req.body?.name || 'Adal Companion PC', 'PC number')
+    // The same Companion again (its own id from AdalKeep.exe, or its online account): its place on the list.
+    const who = { cid: String(req.body?.cid || '').slice(0, 128), device: String(req.body?.device || '') }
+    if (companionSuspended(who)) return res.status(403).json({ error: 'This computer was suspended by the main PC', suspended: true })
+    const r = admitSignedIn(req, req.body?.name || 'Adal Companion PC', 'PC number', who)
+    if (r.suspended) return res.status(403).json({ error: 'This computer was suspended by the main PC', suspended: true })
     if (req.body?.device) await linkCompanionDevice(req.app.locals.db, r.id, req.body.device).catch(() => {})
     setKeyCookie(res, r.key)
     console.log(`[pc-access] ${String(req.body?.name || 'A Companion PC').slice(0, 60)} came in with the PC number`)
@@ -202,6 +206,16 @@ router.post('/pc-access/devices/suspend', here, async (req, res) => {
     console.log(`[pc-access] a device was ${on ? 'suspended' : 'allowed again'} (${req.body?.pc ? 'computer ' + req.body.pc : 'online ' + device})`)
     res.json({ ok: true })
   } catch (e) { res.status(400).json({ error: e.message }) }
+})
+/**
+ * A computer let in that still has its key (kept in the window, sent as a
+ * header) but lost the cookie (a cleared browser): the cookie again, so its
+ * documents and pictures open too. Never a new key.
+ */
+router.post('/pc-access/resume', (req, res) => {
+  if (!req.pcAccess) return res.status(isLocal(req) ? 200 : 401).json(isLocal(req) ? { ok: true, here: true } : { error: 'Not let in', pc_access: true })
+  setKeyCookie(res, keyOf(req))
+  res.json({ ok: true })
 })
 router.get('/pc-access/status', (req, res) => res.json(isLocal(req) ? { state: 'approved', here: true } : statusOf(req)))
 router.get('/pc-access/pending', here, (req, res) => res.json(pending()))

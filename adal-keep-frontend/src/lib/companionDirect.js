@@ -19,8 +19,11 @@ async function look() {
   } catch {}
   const r = await fetch(`/main?try=${encodeURIComponent(tries)}`, { headers: { 'X-Adal': '1' } })
   if (!r.ok) return null           // an older AdalKeep.exe: it has no /main
-  return (await r.json().catch(() => ({})))?.url || null
+  const j = await r.json().catch(() => ({}))
+  if (j?.cid) cid = j.cid
+  return j?.url || null
 }
+let cid = ''   // this Companion's own id (AdalKeep.exe, hand.go): the main PC knows it again
 
 export function startCompanionDirect() {
   if (!ON_COMPANION) return
@@ -37,7 +40,7 @@ export function startCompanionDirect() {
       // With the main PC's number (and this PC's online account): in there at once, nothing typed again.
       let pc = null
       try { pc = JSON.parse(localStorage.getItem('adal-pc') || 'null') } catch {}
-      const hand = pc?.number ? `#adal_number=${encodeURIComponent(pc.number)}${pc.cloud?.device ? `&adal_device=${encodeURIComponent(pc.cloud.device)}` : ''}` : ''
+      const hand = pc?.number ? `#adal_number=${encodeURIComponent(pc.number)}${pc.cloud?.device ? `&adal_device=${encodeURIComponent(pc.cloud.device)}` : ''}${cid ? `&adal_cid=${encodeURIComponent(cid)}` : ''}` : ''
       location.replace(`${url.replace(/\/$/, '')}${here}?adal_companion=1&adal_online=ok${hand}`)
       return
     }

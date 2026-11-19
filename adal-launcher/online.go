@@ -130,7 +130,8 @@ func startOnlinePage(root string) bool {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
-		json.NewEncoder(w).Encode(map[string]string{"url": findMainPC(root, r.URL.Query().Get("try"))})
+		// With this Companion's own id (hand.go): the main PC's page knows it is this one again.
+		json.NewEncoder(w).Encode(map[string]string{"url": findMainPC(root, r.URL.Query().Get("try")), "cid": companionID(root)})
 	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-cache")

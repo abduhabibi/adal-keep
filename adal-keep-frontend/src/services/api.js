@@ -67,6 +67,43 @@ if (import.meta.env.VITE_DEMO !== '1') {
   api.interceptors.response.use((r) => { took(r.config); return r }, (e) => { took(e?.config); return Promise.reject(e) })
 }
 
+// An Adal Companion (or another computer) let in with the main PC's number
+// keeps, in this window, its key and what it joined with (the number, its own
+// id from AdalKeep.exe, its online account). Asked on 2026-11-19 ("it is
+// logging out fast"): the key lived only in a cookie of one address, so a new
+// address of the main PC (the router, Tailscale), a cleared cookie or a new
+// browser profile meant typing the number again. Now the key goes with every
+// call (X-Adal-PC) and, when even that is gone, the window comes back in by
+// itself with the number (PcAccessGate). Only "Log out of this main PC"
+// (lib/companionOnline.js) or a suspension on the main PC ends it.
+const JOIN = 'adal_pc_join', KEY = 'adal_pc_key'
+const isMainItself = () => typeof location !== 'undefined' && ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)
+export function joinInfo() {
+  let j = {}
+  try { j = JSON.parse(localStorage.getItem(JOIN) || '{}') || {} } catch {}
+  return j
+}
+export function rememberJoin(j, key) {
+  try {
+    const clean = {}
+    for (const k of ['number', 'cid', 'device']) if (j?.[k]) clean[k] = String(j[k]).slice(0, 128)
+    localStorage.setItem(JOIN, JSON.stringify(clean))
+    if (key) localStorage.setItem(KEY, key)
+  } catch {}
+}
+export function forgetJoin() { try { localStorage.removeItem(JOIN); localStorage.removeItem(KEY) } catch {} }
+// Handed over in the address (#adal_number, #adal_cid, #adal_device — never sent to a server): kept at once.
+if (typeof location !== 'undefined' && !isMainItself() && import.meta.env.VITE_PHONE !== '1' && import.meta.env.VITE_ADMIN !== '1') {
+  try {
+    const h = new URLSearchParams(location.hash.slice(1))
+    if (h.get('adal_number')) rememberJoin({ ...joinInfo(), number: h.get('adal_number'), ...(h.get('adal_cid') ? { cid: h.get('adal_cid') } : {}), ...(h.get('adal_device') ? { device: h.get('adal_device') } : {}) })
+  } catch {}
+}
+api.interceptors.request.use((config) => {
+  if (!isMainItself()) { try { const k = localStorage.getItem(KEY); if (k) config.headers['X-Adal-PC'] = k } catch {} }
+  return config
+})
+
 // Who is working (the employee chosen on this PC): the Trash shows who deleted what.
 api.interceptors.request.use((config) => {
   try {

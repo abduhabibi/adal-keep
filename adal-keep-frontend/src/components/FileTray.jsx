@@ -318,7 +318,6 @@ export default function FileTray() {
             {capturedFiles.length === 0 && trayProfiles.length ? null : capturedFiles.length === 0 ? (
               <div className="p-8 text-center">
                 <p className="text-sm text-slate-500 dark:text-slate-400 mb-1 font-medium">Tray is empty</p>
-                <p className="text-xs text-slate-400 dark:text-slate-500">Drop files anywhere or copy + Ctrl+V</p>
               </div>
             ) : (
               capturedFiles.map((file, index) => (

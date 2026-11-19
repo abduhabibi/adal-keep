@@ -67,7 +67,6 @@ export default function EmployeeSignIn({ emp, onSaved }) {
               <button type="button" disabled={busy || username.length !== 5 || pin.length !== 6} onClick={save} className="w-full rounded-lg bg-teal-600 py-2 font-semibold text-white disabled:opacity-50">
                 {busy ? 'Saving…' : 'Save sign-in'}
               </button>
-              <p className="text-xs text-slate-500">Only on the main PC. Changing it here makes the old PIN stop working.</p>
             </>
           )}
         </div>

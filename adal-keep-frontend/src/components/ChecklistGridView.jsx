@@ -377,7 +377,7 @@ export default function ChecklistGridView({ checklist, onClose }) {
             <div className="p-4 overflow-y-auto grid gap-5 md:grid-cols-2">
               <div className="space-y-4">
                 <section>
-                  <h4 className="text-xs font-bold uppercase text-slate-500 mb-2">➕ Your own column</h4>
+                  <h4 className="text-xs font-bold uppercase text-slate-500 mb-2">Your own column</h4>
                   <form onSubmit={addOwn} className="flex flex-wrap gap-2">
                     <input value={newCol.label} {...amharicProps(amharic, (v) => setNewCol(c => ({ ...c, label: v })))} onChange={(e) => setNewCol({ ...newCol, label: e.target.value })} placeholder="Name, e.g. Paid, Called, Note"
                       className="flex-1 min-w-[150px] rounded-lg border border-slate-300 dark:border-slate-700 bg-transparent px-3 py-2 text-sm" />
@@ -390,7 +390,7 @@ export default function ChecklistGridView({ checklist, onClose }) {
                   </form>
                 </section>
                 <section>
-                  <h4 className="text-xs font-bold uppercase text-slate-500 mb-2">🛤 Paths</h4>
+                  <h4 className="text-xs font-bold uppercase text-slate-500 mb-2">Paths</h4>
                   <div className="grid grid-cols-2 gap-1">
                     {PATHS.map(([k, t]) => (
                       <label key={k} className="flex items-center gap-2 p-1.5 rounded hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer text-sm">
@@ -401,7 +401,7 @@ export default function ChecklistGridView({ checklist, onClose }) {
                   </div>
                 </section>
                 <section>
-                  <h4 className="text-xs font-bold uppercase text-slate-500 mb-2">👤 Profile details</h4>
+                  <h4 className="text-xs font-bold uppercase text-slate-500 mb-2">Profile details</h4>
                   <div className="grid grid-cols-2 gap-1">
                     {Object.keys(INFO).map(k => (
                       <label key={k} className="flex items-center gap-2 p-1.5 rounded hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer text-sm">
@@ -412,7 +412,7 @@ export default function ChecklistGridView({ checklist, onClose }) {
                   </div>
                 </section>
                 <section>
-                  <h4 className="text-xs font-bold uppercase text-slate-500 mb-2">📄 Documents</h4>
+                  <h4 className="text-xs font-bold uppercase text-slate-500 mb-2">Documents</h4>
                   <div className="grid grid-cols-2 gap-1">
                     {docNames.map(n => (
                       <label key={n} className="flex items-center gap-2 p-1.5 rounded hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer text-sm">

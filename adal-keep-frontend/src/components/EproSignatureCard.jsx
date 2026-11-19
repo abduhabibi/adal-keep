@@ -34,8 +34,7 @@ export default function EproSignatureCard() {
   if (sig === undefined) return null
   return (
     <Card>
-      <h2 className="font-display text-lg font-bold mb-1 flex items-center gap-2"><span>✍️</span> EPRO signature</h2>
-      <p className="text-sm text-slate-500 mb-3">The signed contract for Musaned's Contract Upload. Uploaded once: after Wafid FIT, <b>EPRO approve</b> presses APPROVE and uploads it — you look it over and press SAVE yourself.</p>
+      <h2 className="font-display text-lg font-bold mb-3 flex items-center gap-2">EPRO signature</h2>
       <div className="flex flex-wrap items-center gap-2">
         {sig
           ? <span className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm dark:border-emerald-800 dark:bg-emerald-900/20">📄 <b>{sig.name}</b> <span className="text-xs text-slate-500">· {Math.round(sig.size / 1024)} KB</span></span>
@@ -44,7 +43,6 @@ export default function EproSignatureCard() {
         {sig && <button type="button" onClick={remove} className="text-xs text-red-600 hover:underline">Remove</button>}
         <input ref={input} type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" className="hidden" onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; send(f) }} />
       </div>
-      <p className="mt-2 text-xs text-slate-500">PDF, PNG or JPG, up to 5 MB (Musaned's limits).</p>
     </Card>
   )
 }

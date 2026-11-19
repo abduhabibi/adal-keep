@@ -45,7 +45,7 @@ function Keys() {
 
   return (
     <Card>
-      <h3 className="mb-2 font-display text-lg font-bold text-slate-900 dark:text-white">🪄 Photo refining keys (Google AI Studio)</h3>
+      <h3 className="mb-2 font-display text-lg font-bold text-slate-900 dark:text-white">Photo refining keys (Google AI Studio)</h3>
       <p className="text-xs text-slate-500 mb-3">
         Open <a className="text-teal-600 underline" href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">aistudio.google.com/apikey</a> with
         the agency's Google account, press <b>Create API key</b>, and paste it here. Refine uses these keys, the most capable picture model first.

@@ -740,7 +740,6 @@ export default function CVNewPage() {
             <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200 dark:border-slate-700 shrink-0 gap-3">
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-slate-800 dark:text-white">CV Preview</p>
-                <p className="text-[11px] text-slate-500 truncate">Switch template below — the preview updates instantly. Download to save as PDF.</p>
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 <button

@@ -15,7 +15,7 @@ export default function PortalsHealthCard() {
   const list = s?.portals || []
   return (
     <Card>
-      <h2 className="font-display text-lg font-bold mb-1 flex items-center gap-2" translate="no"><span>🌐</span> Portals now</h2>
+      <h2 className="font-display text-lg font-bold mb-3 flex items-center gap-2" translate="no">Portals now</h2>
       <p className="text-sm text-slate-500 mb-3" translate="no">
         {s?.at ? `Checked ${new Date(s.at).toLocaleString()}. ` : 'Not checked yet. '}A portal that does not answer is down on its side — the robots wait for it.
       </p>

@@ -132,8 +132,7 @@ export function MusanedCodesCard() {
   if (!accounts) return null
   return (
     <Card>
-      <h2 className="font-display text-lg font-bold mb-1 flex items-center gap-2" translate="no"><span>🔑</span> Musaned code</h2>
-      <p className="text-sm text-slate-500 mb-3" translate="no">The code for each Musaned account right now. It changes every 30 seconds.</p>
+      <h2 className="font-display text-lg font-bold mb-3 flex items-center gap-2" translate="no">Musaned code</h2>
       {accounts.length
         ? <ul className="space-y-2">{accounts.map(a => (
             <li key={a.id} className="rounded-xl border border-slate-200 p-3 dark:border-slate-700">
@@ -160,7 +159,7 @@ export default function MusanedAuthenticatorCard() {
   if (!accounts) return null
   return (
     <Card>
-      <h2 className="font-display text-lg font-bold mb-1 flex items-center gap-2" translate="no"><span>🔑</span> Musaned authenticator</h2>
+      <h2 className="font-display text-lg font-bold mb-3 flex items-center gap-2" translate="no">Musaned authenticator</h2>
       {onPhone() ? <p className="text-sm text-slate-500 mb-3" translate="no">
         Each Musaned account's 6-digit code right now (it changes every 30 seconds): tap it to copy. Adal Keep types it by itself when it signs in to Musaned.
       </p> : <p className="text-sm text-slate-500 mb-3" translate="no">

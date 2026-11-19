@@ -164,12 +164,9 @@ export default function MainPCCard() {
 
   return (
     <Card>
-      <h2 className="font-display text-lg font-bold mb-1 flex items-center gap-2" translate="no">
-        <span>🖥️</span> Main PC &amp; branches
+      <h2 className="font-display text-lg font-bold mb-3 flex items-center gap-2" translate="no">
+        Main PC &amp; branches
       </h2>
-      <p className="text-sm text-slate-500 mb-4" translate="no">
-        One PC holds all the agency's data. Every branch, laptop and phone opens that PC — in the office or, through the private link, from home.
-      </p>
 
       <div translate="no" className={`rounded-xl p-3 mb-4 text-sm ${follower ? 'bg-amber-50 text-amber-900 dark:bg-amber-900/20 dark:text-amber-200' : 'bg-teal-50 text-teal-900 dark:bg-teal-900/20 dark:text-teal-200'}`}>
         {follower
@@ -223,7 +220,7 @@ export default function MainPCCard() {
           {mode === 'follow' && (<>
             <input value={mainUrl} onChange={e => setMainUrl(e.target.value)} placeholder="Main PC address, e.g. 100.101.102.103 or http://nuzla-main:4000"
               className="mt-3 w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm font-mono" />
-            <p className="mt-3 text-xs text-slate-500">The main PC's number (5 digits, shown in its Settings): this PC opens all its data at once — nobody at the main PC approves anything.</p>
+            <p className="mt-3 text-xs font-semibold text-slate-500">Main PC number</p>
             <input value={num} onChange={e => setNum(e.target.value.replace(/\D/g, '').slice(0, 5))} inputMode="numeric" placeholder="•••••"
               className="mt-1.5 w-40 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-center font-mono text-lg tracking-[0.3em]" />
           </>)}
@@ -233,14 +230,11 @@ export default function MainPCCard() {
             </Button></div>
           )}
         </div>
-      ) : (
-        <p className="text-xs text-slate-500 mb-5" translate="no">The main PC can be chosen only on the PC itself.</p>
-      )}
+      ) : null}
 
       {here && !follower && (
         <div className="mb-5 border-t border-slate-200 dark:border-slate-700 pt-4" translate="no">
           <h3 className="font-semibold text-sm mb-1">Bring in another branch</h3>
-          <p className="text-xs text-slate-500 mb-2">A branch that had its own Adal Keep: its profiles, documents and brokers are added here. Nothing here is overwritten; matching profiles (same passport) only get what is still empty here.</p>
           <div className="flex flex-col sm:flex-row gap-2">
             <input value={source} onChange={e => { setSource(e.target.value); setPre(null) }} placeholder="Branch PC address, e.g. 100.88.1.2"
               className="flex-1 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm font-mono" />

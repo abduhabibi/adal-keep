@@ -171,7 +171,7 @@ export default function ChecklistPage() {
         {phone && <div className="panel flex flex-col overflow-hidden">
           <div className="p-4 border-b border-slate-200/60 dark:border-slate-800/60">
             <h2 className="font-display font-bold text-slate-800 dark:text-white mb-3 flex items-center gap-2">
-              <span className="text-lg">📥</span> ሁሉም ፕሮፋይሎች
+              ሁሉም ፕሮፋይሎች
             </h2>
             <Input 
               placeholder="ፕሮፋይሎችን ይፈል..." 
@@ -218,7 +218,7 @@ export default function ChecklistPage() {
           <div className="p-4 border-b border-slate-200/60 dark:border-slate-800/60">
             <div className="mb-3 flex items-center justify-between gap-2">
               <h2 className="font-display font-bold text-slate-800 dark:text-white flex items-center gap-2">
-                <span className="text-lg">📋</span> የኔ ቼክስቶች
+                የኔ ቼክስቶች
               </h2>
             </div>
             <div className="flex gap-2">

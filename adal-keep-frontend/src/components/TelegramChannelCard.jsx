@@ -70,7 +70,7 @@ function TelegramChannelCardHere() {
 
   return (
     <Card>
-      <h2 className="font-display text-lg font-bold mb-1 flex items-center gap-2" translate="no"><span>✈️</span> Telegram — this agency's backup channel</h2>
+      <h2 className="font-display text-lg font-bold mb-3 flex items-center gap-2" translate="no">Telegram — this agency's backup channel</h2>
       <p className="text-sm text-slate-500 mb-3" translate="no">
         {connected
           ? <>✓ Connected: backups go to <b>{c.own_channel ? "this agency's own channel" : 'the Telegram channel'}</b> (id {c.chat_id}){c.files_total ? ` — ${c.files_sent} of ${c.files_total} documents sent there so far` : ''}.</>
@@ -92,7 +92,6 @@ export default function TelegramChannelCard() {
   if (window.__ADAL_CLOUD) return (
     <div className="panel p-4 text-sm text-slate-600 dark:text-slate-300">
       <p className="font-semibold">📨 Telegram storage</p>
-      <p className="mt-1 text-xs text-slate-500">Set up on the main office PC itself. This phone keeps working with what the PC set.</p>
     </div>
   )
   return <TelegramChannelCardHere />

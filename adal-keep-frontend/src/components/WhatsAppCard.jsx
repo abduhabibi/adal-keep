@@ -157,10 +157,7 @@ export default function WhatsAppCard() {
 
   return (
     <Card>
-      <h2 className="font-display text-lg font-bold mb-1 flex items-center gap-2" translate="no"><span>💬</span> WhatsApp</h2>
-      <p className="text-sm text-slate-500 mb-4" translate="no">
-        Send CVs to your agents — many CVs to many agents at once (Profiles → tick → 💬 WhatsApp). When she is chosen, her CV is taken back from the others.
-      </p>
+      <h2 className="font-display text-lg font-bold mb-3 flex items-center gap-2" translate="no">WhatsApp</h2>
 
       {s.status === 'ready' ? (
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-teal-50 px-3 py-2 text-sm text-teal-800 dark:bg-teal-900/20 dark:text-teal-300">

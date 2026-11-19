@@ -464,7 +464,7 @@ function ContractCard({ profile: p }) {
   return (
     <section className="panel p-4">
       <div className="flex flex-wrap items-center gap-2 mb-3">
-        <h2 className="font-display text-base font-bold text-slate-900 dark:text-white">🤝 Chosen by an employer</h2>
+        <h2 className="font-display text-base font-bold text-slate-900 dark:text-white">Chosen by an employer</h2>
         {p.chosen_at && <span className="rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300 px-2.5 py-0.5 text-xs font-semibold">{new Date(p.chosen_at).toLocaleDateString()}</span>}
         {p.musaned_stage && <span className="rounded-full bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300 px-2.5 py-0.5 text-xs font-semibold">{p.musaned_stage}</span>}
         {p.musaned_payment && <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${/^paid$/i.test(p.musaned_payment) ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300' : 'bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300'}`}>{p.musaned_payment}</span>}

@@ -55,10 +55,9 @@ export default function AddFromMusaned({ onClose }) {
       <div className="flex max-h-[90vh] w-full max-w-xl flex-col rounded-t-2xl bg-white shadow-xl animate-fade-up dark:bg-slate-900 sm:rounded-2xl" onClick={e => e.stopPropagation()}>
         <div className="space-y-3 border-b border-slate-100 p-4 dark:border-slate-800">
           <div className="flex items-center justify-between">
-            <h2 className="font-display text-lg font-bold">📥 Add from Musaned</h2>
+            <h2 className="font-display text-lg font-bold">Add from Musaned</h2>
             <button type="button" onClick={onClose} className="rounded-lg px-2 py-1 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800">✕</button>
           </div>
-          <p className="text-xs text-slate-500">Her passport and photo are copied from Musaned's HR Pool, her profile is filled from the passport, and her CV is made.</p>
           <label className="flex items-center gap-2 text-sm">
             <span className="shrink-0 font-semibold">CV template</span>
             <select className="field flex-1" value={templateId} onChange={e => setTemplateId(Number(e.target.value))}>

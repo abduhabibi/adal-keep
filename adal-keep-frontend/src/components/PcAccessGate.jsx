@@ -95,8 +95,7 @@ export function PcAccessList() {
   if (list === false) return null   // opened from another computer: only the main PC manages this
   return (
     <section className="panel p-4 space-y-2">
-      <h3 className="font-bold">💻 Computers allowed to open Adal Keep</h3>
-      <p className="text-xs text-slate-500">Other computers (a branch, a laptop) ask once; this PC says Yes or No. This PC and the paired phones are always in.</p>
+      <h3 className="font-bold">Computers allowed to open Adal Keep</h3>
       {list === null ? <p className="text-sm text-slate-400">…</p>
         : !list.length ? <p className="text-sm text-slate-400">None yet.</p>
         : <ul className="divide-y divide-slate-100 dark:divide-slate-800">

@@ -44,10 +44,7 @@ export default function InsuranceCard() {
   )
   return (
     <Card>
-      <h2 className="font-display text-lg font-bold mb-1 flex items-center gap-2" translate="no"><span>🛡</span> Insurance (FetaP)</h2>
-      <p className="text-sm text-slate-500 mb-4" translate="no">
-        “Insurance certificate” signs in to agency.niscofetap.com, opens New Certificate and fills it (Region: Addis Ababa), then rings. You add the member and the beneficiary and finish it.
-      </p>
+      <h2 className="font-display text-lg font-bold mb-3 flex items-center gap-2" translate="no">Insurance (FetaP)</h2>
       <div className="grid gap-3 sm:grid-cols-3">
         {pick('Insurance Branch', 'insurance_branch', INSURANCE_BRANCHES)}
         {pick('Sub City', 'insurance_sub_city', SUB_CITIES, 'used when the profile has no sub city')}

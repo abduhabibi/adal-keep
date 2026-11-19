@@ -155,7 +155,6 @@ export function StartupCard() {
       <label className="flex items-center gap-2 text-sm font-semibold">
         <input type="checkbox" checked={on} onChange={e => set(e.target.checked)} /> Open Adal Keep when this PC starts
       </label>
-      <p className="text-xs text-slate-500">Off: the agents and WhatsApp still work in the background, and the window opens only from its icon.</p>
     </section>
   )
 }

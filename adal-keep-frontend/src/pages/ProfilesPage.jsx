@@ -209,7 +209,7 @@ export default function ProfilesPage() {
         </div>
         {phase === 'selected' && !searching && !onPhone() && (
           <Button variant="secondary" className="whitespace-nowrap !px-3 text-sm" onClick={scanMusaned} disabled={scanning}>
-            {scanning ? '🔎 …' : '🔎 Check now'}
+            {scanning ? 'Checking…' : 'Check now'}
           </Button>
         )}
         {/* On a phone: a round ＋ above the tab bar, always in reach. */}
@@ -265,7 +265,7 @@ export default function ProfilesPage() {
 
         <button type="button" onClick={() => setShowFilters(v => !v)}
           className={`field !w-auto whitespace-nowrap !px-3 text-sm font-semibold ${activeCount ? 'border-teal-400 text-teal-700 dark:text-teal-300' : ''}`}>
-          ⚙ Filters{activeCount ? ` · ${activeCount}` : ''} {showFilters ? '▴' : '▾'}
+          Filters{activeCount ? ` · ${activeCount}` : ''} {showFilters ? '▴' : '▾'}
         </button>
 
         {showFilters && <div className="col-span-2 border-t border-slate-100 dark:border-slate-700 pt-3">{filterBar}</div>}

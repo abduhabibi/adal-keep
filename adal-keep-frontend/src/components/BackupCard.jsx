@@ -54,11 +54,7 @@ function BackupCardHere() {
 
   return (
     <Card>
-      <h2 className="font-display text-lg font-bold mb-1 flex items-center gap-2" translate="no"><span>💾</span> Backup to Telegram</h2>
-      <p className="text-sm text-slate-500 mb-4" translate="no">
-        A locked copy of the database and every document goes to your private Telegram channel whenever the robots are free —
-        new documents within seconds of arriving, the database every 2 hours — so a stolen or broken PC loses nothing. Telegram only sees pieces it cannot open.
-      </p>
+      <h2 className="font-display text-lg font-bold mb-3 flex items-center gap-2" translate="no">Backup to Telegram</h2>
 
       {c.shared && (
         <p className="mb-4 rounded-lg bg-teal-50 dark:bg-teal-900/20 text-teal-800 dark:text-teal-300 px-3 py-2 text-sm" translate="no">
@@ -185,7 +181,6 @@ export default function BackupCard() {
   if (window.__ADAL_CLOUD) return (
     <div className="panel p-4 text-sm text-slate-600 dark:text-slate-300">
       <p className="font-semibold">💾 Backups</p>
-      <p className="mt-1 text-xs text-slate-500">Set up on the main office PC itself. This phone keeps working with what the PC set.</p>
     </div>
   )
   return <BackupCardHere />

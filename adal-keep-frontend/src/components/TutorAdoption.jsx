@@ -11,8 +11,7 @@ export default function TutorAdoption() {
 
   return (
     <section className="panel p-5">
-      <h2 className="font-bold text-slate-900 dark:text-white">🎓 የስርዓቱ አጠቃቀም · Feature use</h2>
-      <p className="text-xs text-slate-500 mt-0.5">ከአዳል ጉብኝት · from the Adal tour</p>
+      <h2 className="font-bold text-slate-900 dark:text-white">የስርዓቱ አጠቃቀም · Feature use</h2>
       <div className="mt-4 space-y-3">
         {rows.map(p => {
           const pct = Math.round(100 * p.used / p.total)

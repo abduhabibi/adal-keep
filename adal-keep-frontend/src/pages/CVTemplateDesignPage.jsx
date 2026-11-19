@@ -187,7 +187,6 @@ export default function CVTemplateDesignPage() {
               <input className="field flex-1" value={passportTitle} onChange={e => setPassportTitle(e.target.value)} placeholder="Title on the passport page" />
               <input type="color" value={passportColor} onChange={e => setPassportColor(e.target.value)} className="h-10 w-12 cursor-pointer rounded border-0 bg-transparent" title="The title's colour — kept for every new template" />
             </div>
-            <p className="text-xs text-slate-500">The title colour stays the same for every new template until you change it.</p>
           </div>
         </div>
 

@@ -19,7 +19,6 @@ function NoticesRow() {
   return (
     <div className={`mt-3 rounded-xl border p-3 ${ok ? 'border-emerald-200 dark:border-emerald-800' : 'border-amber-300 dark:border-amber-700'}`}>
       <p className="text-sm font-semibold">🔔 Notifications when the app is closed {ok ? <span className="text-emerald-600">— on</span> : <span className="text-amber-600">— not fully allowed</span>}</p>
-      <p className="mt-1 text-xs text-slate-500">They come also after Adal Keep is swiped away (about every minute; a sleeping phone may wait a few minutes).</p>
       <ul className="mt-2 space-y-1 text-xs">
         <li>{st?.allowed ? '✅' : '❌'} Notifications allowed</li>
         <li>{st?.background ? '✅' : '❌'} Runs in the background (no battery saving)</li>
@@ -52,7 +51,7 @@ export default function PhoneCard() {
   const check = async () => { setChecking(true); try { await window.__adalCheckUpdate?.() } finally { setChecking(false) } }
   return (
     <Card>
-      <h2 className="font-display text-lg font-bold mb-3 flex items-center gap-2"><span>📱</span> This phone</h2>
+      <h2 className="font-display text-lg font-bold mb-3 flex items-center gap-2">This phone</h2>
       <div className={`flex items-center gap-3 rounded-xl p-3 ${pc ? 'bg-indigo-50 dark:bg-indigo-900/20' : 'bg-teal-50 dark:bg-teal-900/20'}`}>
         <span className={`h-2.5 w-2.5 rounded-full ${pc ? 'bg-indigo-500 animate-pulse' : 'bg-teal-500'}`} />
         <div className="text-sm">

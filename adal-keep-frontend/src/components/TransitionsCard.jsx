@@ -76,10 +76,7 @@ export default function TransitionsCard() {
 
   return (
     <Card>
-      <h2 className="font-display text-lg font-bold mb-1 flex items-center gap-2" translate="no"><span>🚚</span> Move here from another system</h2>
-      <p className="text-sm text-slate-500 mb-4" translate="no">
-        Press a system once, sign in in the window that opens, and Adal Keep copies your people, their files and CV templates by itself. Profiles already here keep what you typed and only get their empty fields filled. Nothing on the other system is changed.
-      </p>
+      <h2 className="font-display text-lg font-bold mb-3 flex items-center gap-2" translate="no">Move here from another system</h2>
       <div className="space-y-3" translate="no">
         {SYSTEMS.map(([id, name, where]) => {
           const s = all[id]
@@ -112,7 +109,6 @@ export default function TransitionsCard() {
         <div className="fixed inset-0 z-[90] flex items-end justify-center bg-black/40 p-3 sm:items-center" onClick={() => setChoose(null)}>
           <div className="w-full max-w-sm rounded-2xl bg-white p-4 shadow-2xl dark:bg-slate-900" onClick={e => e.stopPropagation()}>
             <p className="font-bold">Move from which Musaned account?</p>
-            <p className="mb-3 text-xs text-slate-500">Adal Keep signs in with it (its saved password) and copies that account's people.</p>
             <div className="space-y-2">
               {choose.map(a => (
                 <button key={a.id} type="button" onClick={() => start('musaned', a.id)}

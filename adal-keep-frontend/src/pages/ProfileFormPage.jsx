@@ -739,7 +739,7 @@ export default function ProfileFormPage() {
         {isEdit && (
           <section className="rounded-xl border-2 border-indigo-200 dark:border-indigo-800 p-4 space-y-4">
             <div className="flex flex-wrap items-center gap-3">
-              <h3 className="font-display text-lg font-bold">🛂 Visa &amp; Contract</h3>
+              <h3 className="font-display text-lg font-bold">Visa &amp; Contract</h3>
               {contract.chosen_at
                 ? <span className="rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300 px-3 py-0.5 text-xs font-semibold">Chosen {new Date(contract.chosen_at).toLocaleDateString()}</span>
                 : <span className="rounded-full bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300 px-3 py-0.5 text-xs">Not chosen yet</span>}
@@ -749,7 +749,6 @@ export default function ProfileFormPage() {
                 {checkingContract ? 'Looking on Musaned…' : 'Check Musaned now'}
               </button>}
             </div>
-            <p className="text-xs text-slate-500">Filled by itself every 4 hours from Musaned (Employment Requests → passport → Details). The contract PDFs go into the Contract documents. You can correct anything here.</p>
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             <div>
               <label className={labelClass} htmlFor="contract_number">Contract number</label>

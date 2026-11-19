@@ -84,7 +84,7 @@ export default function VisaBarcodes({ profile }) {
   }
   return (
     <section className="panel p-4">
-      <h2 className="mb-2 text-sm font-bold text-slate-700 dark:text-slate-200">🛂 Visa</h2>
+      <h2 className="mb-2 text-sm font-bold text-slate-700 dark:text-slate-200">Visa</h2>
       <div className="grid grid-cols-2 gap-3">
         <Tile title="Application number" value={appCode(profile.visa_application_number)} hint="On the visa platform's list of applications"
           onClick={onPhone() ? undefined : find} action={onPhone() ? undefined : 'Find it on the visa platform'} again={onPhone() ? undefined : 'Check it again on the visa platform (paid or not)'}

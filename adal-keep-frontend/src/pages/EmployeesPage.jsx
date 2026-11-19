@@ -364,8 +364,7 @@ export default function EmployeesPage() {
           <>
             <section>
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-bold flex items-center gap-2">
-                  🤝 ደላሎች
+                <h2 className="text-lg font-bold flex items-center gap-2">ደላሎች
                   <span className="text-xs font-medium bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full">
                     {myBrokers.length}
                   </span>
@@ -435,8 +434,7 @@ export default function EmployeesPage() {
             </section>
 
             <section>
-              <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
-                📄 ፕሮፋይሎች
+              <h2 className="text-lg font-bold mb-4 flex items-center gap-2">ፕሮፋይሎች
                 <span className="text-xs font-medium bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full">
                   {myProfiles.length}
                 </span>

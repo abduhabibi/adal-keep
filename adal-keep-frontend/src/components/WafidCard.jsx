@@ -36,11 +36,7 @@ export default function WafidCard() {
 
   return (
     <Card>
-      <h2 className="font-display text-lg font-bold mb-1 flex items-center gap-2" translate="no"><span>🩺</span> Wafid medical</h2>
-      <p className="text-sm text-slate-500 mb-4" translate="no">
-        “Book Wafid medical” fills the whole Wafid form and ticks “I confirm…”, then rings. You check it, press Save And Continue, enter the SMS code and pay.
-        It starts only when you press Book Wafid medical on her page — never by itself.
-      </p>
+      <h2 className="font-display text-lg font-bold mb-3 flex items-center gap-2" translate="no">Wafid medical</h2>
       <div className="grid gap-3 sm:grid-cols-3" translate="no">
         <label className="text-sm">City of the medical
           <select className={field} value={s.city} onChange={e => save({ city: e.target.value })}>

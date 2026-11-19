@@ -71,7 +71,6 @@ export default function PlanCard() {
           </li>
         ))}
       </ul>
-      <p className="mt-3 text-xs text-slate-500">Profiles, documents, CVs, checklists, brokers, tasks, chat, the phone app and backups are in every plan.</p>
     </Card>
   )
 }

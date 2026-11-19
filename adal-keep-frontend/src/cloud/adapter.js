@@ -26,18 +26,25 @@ export const inCloudMode = () => typeof window !== 'undefined' && window.__ADAL_
 
 // ---------------------------------------------------------------- session
 let sess = null
+// One sign-in at a time: the pages ask for many things at once, and as many
+// sign-ins at once got this device refused for a while (Supabase limits them),
+// which looked like being logged out. A line that drops or a busy Supabase is
+// "no internet" (tried again), never "removed" — only a real refusal is.
+let signingIn = null
 async function token() {
   const c = cloudCreds()
   if (!c) throw httpError(401, 'This phone is not paired. Pair it on the office Wi-Fi first.')
   if (sess?.access_token && sess.expires_at > Date.now()) return sess.access_token
-  const grant = sess?.refresh_token
-    ? { path: 'refresh_token', body: { refresh_token: sess.refresh_token } }
-    : { path: 'password', body: { email: c.email, password: c.password } }
-  let r = await fetch(`${c.url}/auth/v1/token?grant_type=${grant.path}`, { method: 'POST', headers: { apikey: c.anon, 'Content-Type': 'application/json' }, body: JSON.stringify(grant.body) })
-  if (!r.ok && grant.path === 'refresh_token') {
-    r = await fetch(`${c.url}/auth/v1/token?grant_type=password`, { method: 'POST', headers: { apikey: c.anon, 'Content-Type': 'application/json' }, body: JSON.stringify({ email: c.email, password: c.password }) })
-  }
+  if (!signingIn) signingIn = signIn(c).finally(() => { signingIn = null })
+  return signingIn
+}
+async function signIn(c) {
+  const ask = (path, body) => fetch(`${c.url}/auth/v1/token?grant_type=${path}`, { method: 'POST', headers: { apikey: c.anon, 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: timeUp(25000) })
+    .catch(() => { throw httpError(503, 'No internet') })
+  let r = sess?.refresh_token ? await ask('refresh_token', { refresh_token: sess.refresh_token }) : null
+  if (!r?.ok) r = await ask('password', { email: c.email, password: c.password })
   const d = await r.json().catch(() => ({}))
+  if (r.status === 429 || r.status >= 500) throw httpError(503, 'The online copy is busy — trying again.')
   if (!r.ok || !d.access_token) throw httpError(401, 'This phone was removed from the agency, or cannot sign in online.')
   sess = { access_token: d.access_token, refresh_token: d.refresh_token, expires_at: Date.now() + (Number(d.expires_in || 3600) - 60) * 1000 }
   // The agency this device belongs to now (its PC may have a new online account):
@@ -95,7 +102,7 @@ const timeUp = (ms) => { try { return AbortSignal.timeout(ms) } catch { const c 
 /** A promise that gives up after ms (null instead of waiting for ever). */
 export const within = (p, ms) => Promise.race([p, new Promise(r => setTimeout(() => r(null), ms))])
 
-async function rest(method, p, body, headers = {}) {
+async function rest(method, p, body, headers = {}, again = false) {
   const c = cloudCreds()
   const r = await fetch(`${c.url}${p}`, {
     method,
@@ -104,6 +111,8 @@ async function rest(method, p, body, headers = {}) {
     // A bad line never leaves a page waiting for ever.
     signal: timeUp(body instanceof Blob ? 180000 : 25000),
   }).catch(e => { throw httpError(503, /abort|timeout/i.test(e?.name + e?.message) ? 'The internet is too slow right now — try again.' : 'No internet') })
+  // Its sign-in ran out early (the PC slept, its clock moved): signed in afresh and asked once more.
+  if (r.status === 401 && !again && !(body instanceof Blob)) { sess = sess && { ...sess, expires_at: 0 }; return rest(method, p, body, headers, true) }
   if (!r.ok) throw httpError(r.status, (await r.text()).slice(0, 200) || 'Online copy not reachable')
   const t = await r.text()
   return t ? JSON.parse(t) : null

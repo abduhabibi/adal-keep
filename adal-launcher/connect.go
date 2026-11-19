@@ -145,7 +145,8 @@ func joinByNumber(root, number, typed string) (string, string) {
 	// Found by its number: the number is saved with it (its identity), and the
 	// Companion may move the address when the router hands out new ones —
 	// unless the address was typed here (another branch, Tailscale).
-	save := saveTypedMainURL
+	// (The number is kept either way: the window comes back in with it by itself, hand.go.)
+	save := func(root, u string) error { return saveTypedMainURLWith(root, u, number) }
 	if strings.TrimRight(normalizeMainURL(typed), "/") != u {
 		save = func(root, u string) error { return saveFoundMainURL(root, u, number) }
 	}
@@ -154,11 +155,15 @@ func joinByNumber(root, number, typed string) (string, string) {
 	}
 	logf("main PC with the typed number: %s", u)
 	chosenMainPC(root)
+	hand := handFor(root, number)
+	if hand == "" {
+		hand = "adal_number=" + number
+	}
 	if !hasOnlinePages(root) {
-		return u + "/#adal_number=" + number, ""
+		return u + "/#" + hand, ""
 	}
 	// A fresh pairing: the main PC gives this PC a new online account.
-	return companionURL(root, u) + "&adal_repair=1#adal_number=" + number, ""
+	return strings.TrimRight(u, "/") + "/?adal_companion=1&adal_repair=1#" + hand, ""
 }
 
 // saveFoundMainURL: written the way the Companion writes it (so it may
@@ -173,10 +178,15 @@ func saveFoundMainURL(root, u, number string) error {
 	return os.WriteFile(filepath.Join(root, "companion.conf"), []byte(body), 0o644)
 }
 
-func saveTypedMainURL(root, u string) error {
+func saveTypedMainURL(root, u string) error { return saveTypedMainURLWith(root, u, "") }
+
+func saveTypedMainURLWith(root, u, number string) error {
 	body := "# Typed on this PC (Adal Keep could not find the main PC by itself).\r\n" +
 		"# Delete this file to let the Companion search the network again.\r\n" +
 		"ADAL_HOST_URL=" + u + "\r\n"
+	if number != "" {
+		body += "ADAL_PC_NUMBER=" + number + "\r\n"
+	}
 	return os.WriteFile(filepath.Join(root, "companion.conf"), []byte(body), 0o644)
 }
 

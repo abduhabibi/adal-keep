@@ -9,7 +9,7 @@
  * off — anywhere, with no waiting and no "Yes" on the main PC.
  * A browser that is not a Companion never does this.
  */
-import api from '../services/api'
+import api, { forgetJoin } from '../services/api'
 
 const ONLINE = 'http://127.0.0.1:47801'
 const IS = 'adal-is-companion'
@@ -50,6 +50,7 @@ export async function leaveMainPC() {
   if (location.host === '127.0.0.1:47801') { location.href = '/forget'; return }
   try { await api.post('/pc-access/leave', {}) } catch {}
   for (const k of [IS, DONE, TRIED]) { try { localStorage.removeItem(k) } catch {} }
+  forgetJoin()   // its key and number: it does not come back in by itself
   // With this page's address as the referrer (the server sends none by
   // default): that is how the Companion's page knows the main PC's window
   // sent it here, already asked — not another website.

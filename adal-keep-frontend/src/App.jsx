@@ -23,7 +23,7 @@ const TasksPage = lazy(() => fresh(() => import('./pages/TasksPage')))
 // fetched only when one is shown (a smaller first download on every start).
 const LockScreen = lazy(() => fresh(() => import('./components/LockScreen')))
 import PcAccessGate, { SuspendedScreen } from './components/PcAccessGate'
-import api from './services/api'
+import api, { joinInfo } from './services/api'
 const IntroWizard = lazy(() => fresh(() => import('./pages/IntroWizard')))
 const CVsPage = lazy(() => fresh(() => import('./pages/CVsPage')))
 const CVNewPage = lazy(() => fresh(() => import('./pages/CVNewPage')))
@@ -98,7 +98,12 @@ function Shell() {
   }, [])
   useEffect(() => {
     if (!GATED) return
-    api.get('/pc-access/status').then(r => { if (r.data?.state === 'suspended') setSuspended(true); else if (r.data?.state && r.data.state !== 'approved') setPcGate(true) }).catch(() => {})
+    api.get('/pc-access/status').then(r => {
+      if (r.data?.state === 'suspended') setSuspended(true)
+      else if (r.data?.state && r.data.state !== 'approved') setPcGate(true)
+      // Let in by the key this window keeps, the cookie gone (a cleared browser): the cookie again, for the documents.
+      else if (!r.data?.here && joinInfo().number) api.post('/pc-access/resume').catch(() => {})
+    }).catch(() => {})
     const on = () => setPcGate(true)
     window.addEventListener('adal-pc-access', on)
     return () => window.removeEventListener('adal-pc-access', on)

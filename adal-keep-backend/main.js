@@ -66,6 +66,7 @@ import contractsRouter from './src/routes/contracts.js'
 import embassyRouter from './src/routes/embassy.js'
 import pcAccessRouter from './src/routes/pcAccess.js'
 import { networkGate, originOk } from './src/services/networkGate.js'
+import { trackUserUploads } from './src/services/userUploads.js'
 import whatsappRouter from './src/routes/whatsapp.js'
 import transitionsRouter from './src/routes/transitions.js'
 import appRouter from './src/routes/app.js'
@@ -109,6 +110,8 @@ app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false,
 app.use(cors((req, cb) => cb(null, { origin: originOk(req) ? (req.headers.origin || false) : false, credentials: true })))
 // From another computer: only one this PC said "Yes" to (services/networkGate.js).
 app.use(networkGate)
+// The user's own uploads first: the online copy and the backup wait (services/userUploads.js).
+app.use(trackUserUploads)
 // Big answers go packed (gzip) — the profiles list is megabytes, and a phone
 // reads it over its own connection: packed it is about a tenth.
 app.use((req, res, next) => {

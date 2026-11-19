@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import api from '../services/api'
+import api, { joinInfo, rememberJoin, forgetJoin } from '../services/api'
 
 /**
  * Opened from another computer (an Adal Companion PC, a branch PC, a laptop):
@@ -11,27 +11,47 @@ export default function PcAccessGate() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [number, setNumber] = useState('')
+  // Coming back by itself (a Companion that joined before): no form, just a moment.
+  const [quiet, setQuiet] = useState(() => !!joinInfo().number)
 
-  // From the Companion's own online pages (paired there with this same
-  // number): it comes in the address after # (never sent to any server), so
-  // the number is typed only once.
-  const hand = (() => { try { return new URLSearchParams(location.hash.slice(1)) } catch { return new URLSearchParams() } })()
-  const send = async (n) => {
+  const send = async (n, { auto = false } = {}) => {
     setBusy(true); setError('')
     let name = ''
     try { name = localStorage.getItem('adal_pc_name') || '' } catch {}
+    const j = joinInfo()
     try {
-      await api.post('/pc-access/number', { number: n, name: name || 'Adal Companion PC', device: hand.get('adal_device') || undefined })
+      const { data } = await api.post('/pc-access/number', { number: n, name: name || 'Adal Companion PC', device: j.device || undefined, cid: j.cid || undefined })
+      rememberJoin({ ...j, number: n }, data?.key)
       if (location.hash) history.replaceState(history.state, '', location.pathname + location.search)
       location.reload()
-    } catch (er) { setError(er.response?.data?.error || er.message); setBusy(false) }
+    } catch (er) {
+      if (er.response?.data?.suspended) { window.dispatchEvent(new Event('adal-suspended')); return }
+      // The main PC not answering for a moment (restarting, an update): tried again, nothing typed.
+      if (auto && (!er.response || er.response.status >= 500)) { setTimeout(() => send(n, { auto: true }), 5000); return }
+      // A number that is not this main PC's any more: typed again.
+      if (er.response?.status === 403) forgetJoin()
+      setQuiet(false); setNumber(n); setError(er.response?.data?.error || er.message); setBusy(false)
+    }
   }
   useEffect(() => {
-    api.get('/pc-access/status').then(r => { if (r.data.state === 'approved') location.reload() }).catch(() => {})
-    const n = (hand.get('adal_number') || '').replace(/\D/g, '')
-    if (n.length >= 5) { setNumber(n); send(n) }
+    api.get('/pc-access/status').then(r => {
+      if (r.data.state === 'approved') return location.reload()
+      if (r.data.state === 'suspended') return window.dispatchEvent(new Event('adal-suspended'))
+      // Taken off the main PC's list there: typed again, never by itself.
+      const n = r.data.state === 'removed' ? '' : (joinInfo().number || '').replace(/\D/g, '')
+      if (n.length >= 5) send(n, { auto: true })
+      else setQuiet(false)
+    }).catch(() => {
+      const n = (joinInfo().number || '').replace(/\D/g, '')
+      if (n.length >= 5) send(n, { auto: true }); else setQuiet(false)
+    })
   }, [])
 
+  if (quiet) return (
+    <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900" data-reconnecting="">
+      <div className="w-14 h-14 rounded-2xl overflow-hidden shadow-lg animate-pulse"><img src="/adal-logo.png" alt="Adal" className="h-full w-full object-cover" draggable={false} /></div>
+    </div>
+  )
   const signIn = (e) => { e.preventDefault(); send(number) }
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900 p-4">

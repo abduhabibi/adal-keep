@@ -92,8 +92,33 @@ export async function recordInstalled(env, projectRoot = '') {
   return true
 }
 
-/** The newer of two manifests: published later, and another version. */
-export const isNewer = (m, than) => !!m?.sha && (!than || (m.sha !== than.sha && String(m.published_at || '') > String(than.published_at || '')))
+const ms = (v) => { const n = Date.parse(String(v || '')); return Number.isFinite(n) ? n : 0 }
+const sameSha = (a, b) => { const n = Math.min(String(a).length, String(b).length); return n >= 7 && String(a).slice(0, n) === String(b).slice(0, n) }
+
+/**
+ * True only when m is a LATER release than `than` (asked on 2026-11-19: "it
+ * is just downgrading"). The order: the signed manifest's publish sequence /
+ * publish time; the commit date (manifest.date) is the fallback, and an older
+ * commit is never taken unless Adal rolled back on purpose (rollback_of).
+ * Another sha alone is never "newer". When the order cannot be told: not newer.
+ */
+export function isNewer(m, than) {
+  if (!m?.sha) return false
+  if (!than?.sha) return true
+  if (sameSha(m.sha, than.sha)) return false
+  const mc = ms(m.date), tc = ms(than.date)
+  if (mc && tc && mc < tc && !m.rollback_of) return false
+  const mq = Number(m.seq) || 0, tq = Number(than.seq) || 0
+  if (mq && tq) return mq > tq
+  const mp = ms(m.published_at), tp = ms(than.published_at)
+  if (mp && tp) return mp > tp
+  if (mc && tc) return mc > tc
+  if (mp && tc) return mp > tc // published after the commit this PC runs
+  return false
+}
+
+/** Whether the order of `than` is known at all (else only Supabase is trusted). */
+export const orderKnown = (than) => !!(than?.sha && (ms(than.published_at) || ms(than.date) || Number(than.seq)))
 
 async function getJSON(url, ms = 5000) {
   const r = await fetch(url, { signal: AbortSignal.timeout(ms), cache: 'no-store' })
@@ -124,6 +149,9 @@ export async function fetchPiece(manifest, piece, dest) {
   await downloadRelease({ file: piece.file, sha256: piece.sha256 }, dest)
   return dest
 }
+
+/** A peer's envelope that is signed and newer than `than`. */
+export const verifyIsNewer = (env, than) => !!env?.manifest && verifyManifest(env.manifest, env.signature) && isNewer(env.manifest, than)
 
 /** The newest signed release a peer has that is newer than `than` ({ manifest, signature, base } or null). */
 export async function newestFromPeers(than) {

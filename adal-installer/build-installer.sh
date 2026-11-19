@@ -104,7 +104,8 @@ cp -f "$INST/files/finish-install.ps1" "$STAGE/main/"
 # GitHub's "release" branch, which is moved to this commit when the build goes
 # onto the USB — so a PC installed from the USB is "up to date".
 if [ -z "$(git -C "$BASE" status --porcelain -- . ':!.claude' ':!Adal Keep USB' ':!notes-from-old-pc')" ]; then
-  printf '{\n  "sha": "%s",\n  "branch": "release",\n  "lock_hash": "%s",\n  "message": %s\n}\n' "$(git -C "$BASE" rev-parse HEAD)" \
+  # "date": the commit's date, so this PC never takes an older release (systemUpdate.js installedRelease).
+  printf '{\n  "sha": "%s",\n  "date": "%s",\n  "branch": "release",\n  "lock_hash": "%s",\n  "message": %s\n}\n' "$(git -C "$BASE" rev-parse HEAD)" "$(git -C "$BASE" log -1 --pretty=%cI)" \
     "$(sha256sum "$BACK/package-lock.json" | cut -d' ' -f1)" \
     "$(git -C "$BASE" log -1 --pretty=%s | node -e 'process.stdin.on("data",d=>process.stdout.write(JSON.stringify(String(d).trim())))')" \
     > "$STAGE/main/.adal-version.json"

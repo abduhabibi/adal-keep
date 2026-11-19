@@ -95,6 +95,7 @@ func companionPC(t *testing.T, pub ed25519.PublicKey) *updater {
 	os.WriteFile(filepath.Join(root, "online", "config.js"), []byte("window.ADAL_CLOUD_CONFIG={}"), 0o644)
 	u := newUpdater(root)
 	u.key = pub
+	u.built = nil
 	return u
 }
 
@@ -221,10 +222,105 @@ func TestStagedReleaseWaitsItsTurn(t *testing.T) {
 	if itsTurn(m, "agency-2", time.Now()) || !itsTurn(m, "agency-1", time.Now()) {
 		t.Fatal("staging")
 	}
-	if !isNewerRelease("b", "2026-11-19T12:00:00.000Z", &releaseManifest{SHA: "a", PublishedAt: "2026-11-19T11:00:00.000Z"}) {
+}
+
+func rel(sha, published, date string) *releaseManifest {
+	return &releaseManifest{SHA: strings.Repeat(sha, 40)[:40], PublishedAt: published, Date: date}
+}
+
+// "It is just downgrading" (2026-11-19): only ever forward.
+func TestReleaseOrderOnlyForward(t *testing.T) {
+	a := rel("a", "2026-11-19T11:00:00.000Z", "2026-11-19T13:00:00+03:00")
+	if !isNewerRelease(rel("b", "2026-11-19T12:00:00.000Z", "2026-11-19T14:00:00+03:00"), a) {
 		t.Fatal("newer")
 	}
-	if isNewerRelease("b", "2026-11-19T10:00:00.000Z", &releaseManifest{SHA: "a", PublishedAt: "2026-11-19T11:00:00.000Z"}) {
+	if isNewerRelease(rel("b", "2026-11-19T10:00:00.000Z", "2026-11-19T12:00:00+03:00"), a) {
 		t.Fatal("older counted as newer")
 	}
+	// Published later but older code: not taken (unless a deliberate rollback).
+	old := rel("b", "2026-11-19T12:00:00.000Z", "2026-11-18T09:00:00Z")
+	if isNewerRelease(old, a) {
+		t.Fatal("older commit taken")
+	}
+	old.RollbackOf = a.SHA
+	if !isNewerRelease(old, a) {
+		t.Fatal("Adal's rollback refused")
+	}
+	// The sequence wins over the clock.
+	x, y := rel("c", "2026-11-19T09:00:00Z", ""), rel("d", "2026-11-19T10:00:00Z", "")
+	x.Seq, y.Seq = 5, 4
+	if !isNewerRelease(x, y) || isNewerRelease(y, x) {
+		t.Fatal("seq")
+	}
+	// A USB install: only the build's commit date is known.
+	built := &releaseManifest{SHA: strings.Repeat("e", 40), Date: "2026-11-19T10:00:00Z"}
+	if isNewerRelease(rel("f", "2026-11-19T09:00:00Z", "2026-11-18T10:00:00Z"), built) {
+		t.Fatal("older than the build taken")
+	}
+	if isNewerRelease(&releaseManifest{SHA: strings.Repeat("f", 40), PublishedAt: "2026-11-19T09:00:00Z"}, built) {
+		t.Fatal("news of an older publish counted as newer")
+	}
+	if !isNewerRelease(rel("f", "2026-11-19T11:00:00Z", "2026-11-19T10:30:00Z"), built) {
+		t.Fatal("newer than the build refused")
+	}
+	// The same release, short or long: never again. Unknown order: never.
+	if isNewerRelease(&releaseManifest{SHA: a.SHA[:7]}, a) || isNewerRelease(&releaseManifest{SHA: strings.Repeat("9", 40)}, a) {
+		t.Fatal("same / unknown")
+	}
+}
+
+// A Companion installed from a newer USB build than the main PC's release
+// never takes the main PC's older one; it does take a newer one.
+func TestCompanionNeverTakesMainsOlderRelease(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	prog := []byte("main's older companion")
+	pages := tgz(t, map[string]string{"index.html": "older pages"})
+	env, pieces := sign2(t, priv, strings.Repeat("7", 40), "2026-11-18T10:00:00.000Z", "2026-11-18T09:00:00Z", prog, pages)
+	_, base := holder(t, pub, env, pieces)
+	b := companionPC(t, pub)
+	b.built = &releaseManifest{SHA: strings.Repeat("c", 40), Date: "2026-11-19T08:00:00Z"}
+	if _, newer := b.heard(releaseMagic+"|"+strings.Repeat("7", 40)+"|2026-11-18T10:00:00.000Z|47810|/lan", net.IPv4(10, 0, 0, 9)); newer {
+		t.Fatal("heard an older release as newer")
+	}
+	if err := b.fromPeer(base); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(b.root, "adal-companion.exe")); string(got) != "old companion" {
+		t.Fatalf("downgraded: %q", got)
+	}
+	// Even install() itself refuses it (every path goes through it).
+	m, _ := verifyRelease(env, pub)
+	if err := b.install(m, &env, false); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(b.root, "adal-companion.exe")); string(got) != "old companion" {
+		t.Fatal("install() downgraded")
+	}
+	// A newer one is taken.
+	prog2 := []byte("newer companion")
+	env2, pieces2 := sign2(t, priv, strings.Repeat("8", 40), "2026-11-19T12:00:00.000Z", "2026-11-19T11:00:00Z", prog2, pages)
+	_, base2 := holder(t, pub, env2, pieces2)
+	if err := b.fromPeer(base2); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(b.root, "adal-companion.exe")); string(got) != string(prog2) {
+		t.Fatalf("newer not taken: %q", got)
+	}
+	// Then the older one again (main PC still on it): refused.
+	if err := b.fromPeer(base); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(b.root, "adal-companion.exe")); string(got) != string(prog2) {
+		t.Fatal("went back")
+	}
+}
+
+func sign2(t *testing.T, priv ed25519.PrivateKey, sha, at, date string, prog, pages []byte) (envelope, map[string][]byte) {
+	app := []byte("the app " + sha)
+	env := sign(t, priv, map[string]any{
+		"sha": sha, "short": sha[:7], "date": date, "file": "release/" + sha + ".tar.gz", "sha256": sum(app), "published_at": at, "everyone_at": at, "early": []string{},
+		"programs": []map[string]any{{"name": "adal-companion.exe", "file": "programs/c", "sha256": sum(prog), "size": len(prog)}},
+		"online":   map[string]any{"file": "online/x.tar.gz", "sha256": sum(pages), "size": len(pages)},
+	})
+	return env, map[string][]byte{sum(app): app, sum(prog): prog, sum(pages): pages}
 }

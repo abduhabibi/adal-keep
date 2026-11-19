@@ -43,6 +43,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
@@ -99,6 +100,9 @@ type releaseManifest struct {
 	File        string   `json:"file"`
 	SHA256      string   `json:"sha256"`
 	PublishedAt string   `json:"published_at"`
+	Date        string   `json:"date"`        // the commit's date (%cI)
+	Seq         int64    `json:"seq"`         // publish order (a newer release has a higher one)
+	RollbackOf  string   `json:"rollback_of"` // a deliberate "back to the version before"
 	EveryoneAt  string   `json:"everyone_at"`
 	Early       []string `json:"early"`
 	Programs    []piece  `json:"programs"`
@@ -209,13 +213,79 @@ func verifyRelease(env envelope, key ed25519.PublicKey) (*releaseManifest, error
 	return &m, nil
 }
 
-// isNewerRelease: published later, and another version (the same sha is never taken twice).
-func isNewerRelease(sha, publishedAt string, than *releaseManifest) bool {
-	if sha == "" {
+// isNewerRelease: true only when cand is a LATER release than `than`
+// (asked on 2026-11-19: "it is just downgrading"). The order is the signed
+// manifest's publish sequence / publish time; the commit date is the fallback
+// (and an older commit is never taken, except a deliberate rollback). Never by
+// "another sha": a Companion with a newer release than the main PC's never
+// takes the main PC's older one. When the order cannot be told: not newer.
+func isNewerRelease(cand, than *releaseManifest) bool {
+	if cand == nil || cand.SHA == "" {
 		return false
 	}
-	return than == nil || (sha != than.SHA && publishedAt > than.PublishedAt)
+	if than == nil || than.SHA == "" {
+		return true
+	}
+	if sameSHA(cand.SHA, than.SHA) {
+		return false
+	}
+	cc, tc := releaseTime(cand.Date), releaseTime(than.Date)
+	if !cc.IsZero() && !tc.IsZero() && cc.Before(tc) && cand.RollbackOf == "" {
+		return false // older code
+	}
+	if cand.Seq > 0 && than.Seq > 0 {
+		return cand.Seq > than.Seq
+	}
+	cp, tp := releaseTime(cand.PublishedAt), releaseTime(than.PublishedAt)
+	switch {
+	case !cp.IsZero() && !tp.IsZero():
+		return cp.After(tp)
+	case !cc.IsZero() && !tc.IsZero():
+		return cc.After(tc)
+	case !cp.IsZero() && !tc.IsZero():
+		return cp.After(tc) // published after this build's commit
+	}
+	return false
 }
+
+func sameSHA(a, b string) bool {
+	n := len(a)
+	if len(b) < n {
+		n = len(b)
+	}
+	return n >= 7 && a[:n] == b[:n]
+}
+
+func releaseTime(s string) time.Time {
+	t, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(s))
+	if err != nil {
+		return time.Time{}
+	}
+	return t
+}
+
+// builtRelease: the release this program was built from (go build stamps the
+// commit and its date), for a Companion installed from the USB that has no
+// updates/current.json yet.
+var builtRelease = func() *releaseManifest {
+	bi, ok := debug.ReadBuildInfo()
+	if !ok {
+		return nil
+	}
+	m := &releaseManifest{}
+	for _, s := range bi.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			m.SHA = s.Value
+		case "vcs.time":
+			m.Date = s.Value
+		}
+	}
+	if m.SHA == "" || m.Date == "" {
+		return nil
+	}
+	return m
+}()
 
 // ── what this Companion has ────────────────────────────────────────────────
 
@@ -229,6 +299,7 @@ type updater struct {
 	failed map[string]time.Time
 	conn   *net.UDPConn
 	client *http.Client
+	built  *releaseManifest // the release this program was built from (builtRelease)
 }
 
 type peerInfo struct {
@@ -237,7 +308,7 @@ type peerInfo struct {
 }
 
 func newUpdater(root string) *updater {
-	return &updater{root: root, key: updatePublicKey, peers: map[string]peerInfo{}, failed: map[string]time.Time{}, client: &http.Client{Timeout: 10 * time.Minute}}
+	return &updater{root: root, key: updatePublicKey, peers: map[string]peerInfo{}, failed: map[string]time.Time{}, built: builtRelease, client: &http.Client{Timeout: 10 * time.Minute}}
 }
 
 func (u *updater) dir() string         { return filepath.Join(u.root, "updates") }
@@ -258,6 +329,16 @@ func (u *updater) current() (*releaseManifest, *envelope) {
 		return nil, nil
 	}
 	return m, &env
+}
+
+// baseline: what this Companion runs now — the newer of its kept release and
+// the release its program was built from. Nothing older than it is installed.
+func (u *updater) baseline() *releaseManifest {
+	cur, _ := u.current()
+	if b := u.built; b != nil && (cur == nil || isNewerRelease(b, cur)) {
+		return b
+	}
+	return cur
 }
 
 func piecesOf(m *releaseManifest) []piece {
@@ -467,7 +548,8 @@ func itsTurn(m *releaseManifest, agency string, now time.Time) bool {
 func (u *updater) install(m *releaseManifest, env *envelope, fromCloud bool) error {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	if cur, _ := u.current(); cur != nil && cur.SHA == m.SHA {
+	// Only forward, on every path (Supabase, a PC of the office, the main PC).
+	if !isNewerRelease(m, u.baseline()) {
 		return nil
 	}
 	if t, ok := u.failed[m.SHA]; ok && time.Since(t) < 10*time.Minute {
@@ -702,8 +784,7 @@ func (u *updater) heard(text string, from net.IP) (string, bool) {
 	u.pm.Lock()
 	u.peers[base] = peerInfo{SHA: parts[1], PublishedAt: parts[2], At: time.Now()}
 	u.pm.Unlock()
-	cur, _ := u.current()
-	return base, isNewerRelease(parts[1], parts[2], cur)
+	return base, isNewerRelease(&releaseManifest{SHA: parts[1], PublishedAt: parts[2]}, u.baseline())
 }
 
 func isOwnIP(ip net.IP) bool {
@@ -737,9 +818,8 @@ func (u *updater) fromPeer(base string) error {
 	if err != nil {
 		return fmt.Errorf("%s: %w — not installed", base, err)
 	}
-	cur, _ := u.current()
-	if !isNewerRelease(m.SHA, m.PublishedAt, cur) {
-		return nil
+	if !isNewerRelease(m, u.baseline()) {
+		return nil // older or the same: never taken (it may take ours instead)
 	}
 	u.pm.Lock()
 	u.peers[base] = peerInfo{SHA: m.SHA, PublishedAt: m.PublishedAt, At: time.Now()}
@@ -762,8 +842,7 @@ func (u *updater) fromCloud() error {
 	if err != nil {
 		return err
 	}
-	cur, _ := u.current()
-	if !isNewerRelease(m.SHA, m.PublishedAt, cur) {
+	if !isNewerRelease(m, u.baseline()) {
 		return nil
 	}
 	if c := readCloud(u.root); !itsTurn(m, c.Agency, time.Now()) {

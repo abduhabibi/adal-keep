@@ -59,7 +59,7 @@ if (args.has('--rollback')) {
   }
   if (!back) { console.error('No earlier version is kept in Storage to go back to.'); process.exit(1) }
   const now = new Date().toISOString()
-  const manifest = { ...back, published_at: now, everyone_at: now, early: [], rollback_of: cur.manifest.sha,
+  const manifest = { ...back, published_at: now, seq: Date.parse(now), everyone_at: now, early: [], rollback_of: cur.manifest.sha,
     changes: [{ short: back.short, date: now, message: `Back to the version before (${cur.manifest.short} had a problem)` }] }
   console.log(`== everyone goes back from ${cur.manifest.short} to ${back.short}`)
   if (DRY) { console.log('dry run — nothing uploaded'); process.exit(0) }
@@ -194,6 +194,8 @@ try {
     message: sh('git', ['log', '-1', '--pretty=%s', sha]).slice(0, 300),
     date: sh('git', ['log', '-1', '--pretty=%cI', sha]),
     published_at: new Date().toISOString(),
+    // The release order (never install an older one): publish time in ms, only ever goes up.
+    seq: Math.max(Date.now(), (Number(previous?.seq) || Date.parse(previous?.published_at || '') || 0) + 1),
     file: `release/${sha}.tar.gz`, size: buf.length,
     sha256: crypto.createHash('sha256').update(buf).digest('hex'),
     // The Windows programs (AdalKeep.exe, the Companion, the agent): each PC

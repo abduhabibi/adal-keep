@@ -141,6 +141,17 @@ async function github(pathname) {
   return res.json()
 }
 
+/**
+ * The release this PC runs, with its order (publish time, commit date): the
+ * kept signed release when it is the same sha, else what the marker says.
+ */
+export function installedRelease(installed, kept) {
+  if (!installed?.sha) return null
+  if (kept?.sha && kept.sha === installed.sha) return kept
+  const marker = readMarker(config().projectRoot) || {}
+  return { sha: installed.sha, date: installed.date || (marker.sha === installed.sha ? marker.date : '') || '', published_at: (marker.sha === installed.sha ? marker.published_at : '') || '', seq: marker.sha === installed.sha ? marker.seq : undefined }
+}
+
 function readMarker(root) {
   try { return JSON.parse(fs.readFileSync(path.join(root, MARKER), 'utf8')) } catch { return null }
 }
@@ -220,18 +231,24 @@ async function checkSupabase(installed) {
   // Supabase first (the source of truth); without it, a newer signed release
   // another PC of this office has (services/lanRelease.js).
   const L = await import('../services/lanRelease.js')
-  let m
+  let m = null, cloudError = null
   try {
     m = await latestRelease('release')
     // Up to date already (installed before this PC kept its release): kept now to hand on.
     if (installed.sha === m.sha && L.current()?.manifest?.sha !== m.sha && lastEnvelope?.manifest?.sha === m.sha) L.recordInstalled(lastEnvelope, config().projectRoot).catch(() => {})
   } catch (e) {
-    const peer = await L.newestFromPeers(L.current()?.manifest || (installed.sha ? { sha: installed.sha, published_at: '' } : null))
-    if (!peer) throw e
-    lanEnvelope = peer
-    m = peer.manifest
+    m = null
+    cloudError = e
   }
-  const upToDate = !!installed.sha && installed.sha === m.sha
+  // Only forward: what this PC runs, with its order. A PC of the office that
+  // has a newer release than Supabase's (or this PC's) offers it.
+  const mine = installedRelease(installed, L.current()?.manifest)
+  const known = L.orderKnown(mine)
+  const peer = known ? await L.newestFromPeers(m && L.isNewer(m, mine) ? m : mine) : null
+  if (peer && (!m || L.isNewer(peer.manifest, m))) { lanEnvelope = peer; m = peer.manifest } else lanEnvelope = null
+  if (!m) throw cloudError || new Error('no release published yet')
+  // Unknown order (an old marker with only a sha): Supabase's release is trusted, as before.
+  const upToDate = !!installed.sha && (installed.sha === m.sha || (known && !L.isNewer(m, mine)))
   // Staged: the agencies marked "updates first" get it at once, everyone else
   // at manifest.everyone_at (a bad version reaches one agency, not all of them).
   let waitUntil = null
@@ -686,17 +703,26 @@ async function applyUpdate(req, res) {
       try { manifest = await latestRelease('release'); env = lastEnvelope } catch (e) {
         // No Supabase: a newer signed release from a PC of this office.
         const L = await import('../services/lanRelease.js')
-        const peer = lanEnvelope || await L.newestFromPeers(L.current()?.manifest || null)
+        const mine = installedRelease(installed, L.current()?.manifest)
+        const peer = lanEnvelope || (L.orderKnown(mine) ? await L.newestFromPeers(mine) : null)
         if (!peer) throw new Error(`Supabase updates: ${e.message}`)
         manifest = peer.manifest; env = peer
         logs.push(`Supabase not reachable — the signed release from ${peer.base}`)
       }
       if (!manifest) throw new Error('Supabase updates: no release published yet')
       {
+        // Only forward (asked on 2026-11-19): a PC of the office with a newer
+        // release than Supabase's offers it; an older release is never installed.
+        const L = await import('../services/lanRelease.js')
+        const mine = installedRelease(installed, L.current()?.manifest)
+        if (lanEnvelope?.manifest && L.verifyIsNewer(lanEnvelope, manifest)) { manifest = lanEnvelope.manifest; env = lanEnvelope; logs.push(`The newer signed release from ${lanEnvelope.base}`) }
+        if (installed.sha && (installed.sha === manifest.sha || (L.orderKnown(mine) && !L.isNewer(manifest, mine)))) {
+          return res.json({ success: true, alreadyUpToDate: true, branch: 'release', source: 'supabase', message: `Already up to date — this PC runs ${installed.short}, the release offered (${manifest.short}) is not newer.`, log: logs.join('\n').slice(-4000) })
+        }
         await installFromRelease(cfg, logs, manifest)
         lanEnvelope = null
         if (env?.manifest?.sha === manifest.sha) await (await import('../services/lanRelease.js')).recordInstalled(env, cfg.projectRoot).catch(e => logs.push(`Not kept for the other PCs: ${e.message}`))
-        writeMarker(cfg.projectRoot, { sha: manifest.sha, branch: 'release', source: 'supabase', lock_hash: manifest.lock_hash, message: manifest.message })
+        writeMarker(cfg.projectRoot, { sha: manifest.sha, branch: 'release', source: 'supabase', lock_hash: manifest.lock_hash, message: manifest.message, date: manifest.date || '', published_at: manifest.published_at || '', ...(manifest.seq ? { seq: manifest.seq } : {}) })
         const restarts = ['AdalKeep.exe', 'run-server.bat'].some(f => fs.existsSync(path.join(cfg.projectRoot, f)))
         if (restarts) setTimeout(() => process.exit(0), 3000)
         return res.json({

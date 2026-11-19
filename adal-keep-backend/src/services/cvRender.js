@@ -141,6 +141,16 @@ async function renderPdfFirstPageToDataUri(pdfPath, maxPx = 1600, quality = 85) 
   }
 }
 
+/**
+ * Is her picture really on this PC (a file there, not only its record)? A
+ * photo taken on the phone can be listed before its file arrives: the CV would
+ * show "No photo", so the CV page asks for it instead (asked on 2026-11-19).
+ */
+export async function hasProfilePicture(db, profileId, fieldName) {
+  const f = await findProfileFile(db, profileId, fieldName)
+  return !!(f && resolveStoredPath(f.path))
+}
+
 async function findProfileFile(db, profileId, fieldName) {
   const rows = await db('files')
     .join('profile_fields', 'files.profile_field_id', 'profile_fields.id')

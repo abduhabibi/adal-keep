@@ -166,6 +166,11 @@ export async function runLmisContract(page, ctx) {
   const p = ctx.profile || {}
   const laborId = String(p.labor_id || '').trim().toUpperCase()
   if (!laborId) return { ok: false, step: 'preflight', error: 'The profile has no Labor ID', seconds: 0 }
+  const missing = missingForLmisContract(p)
+  if (missing.length) {
+    await ctx.notify?.(`🖐 ${ctx.profileName}: LMIS contract not started`, `Her profile is missing: ${missing.join(', ')}. Nothing was opened on LMIS.`)
+    return { ok: false, step: 'preflight', error: `Profile is missing for the LMIS contract: ${missing.join(', ')}`, seconds: 0 }
+  }
 
   await stepLogin(page, ctx)
   await openContracts(page, ctx)
@@ -627,13 +632,24 @@ async function fillContractWindow(page, ctx, p) {
     ['Employer Phone number', p.employer_phone || c['Mobile Number']],
     // House Number and Alternative Phone Number are left empty (the agency, 2026-11-19).
   ]
+  // A wrong value costs money (2026-11-19): what LMIS already shows must be ours,
+  // or the window is left for a person; what Adal Keep types is read back.
+  const same = (a, b) => String(a || '').replace(/[\s-]/g, '').toUpperCase() === String(b || '').replace(/[\s-]/g, '').toUpperCase()
   for (const [label, value] of values) {
     const mark = label.toLowerCase().replace(/\W+/g, '-')
     if (!(await markByLabel(page, label, mark))) continue // this window does not ask it
     const sel = `[data-adal="${mark}"]`
-    if (await page.$eval(sel, e => e.value).catch(() => '')) { log(ctx, `${label} already filled — kept`); continue }
     const v = String(value || '').trim()
-    if (v && await setInput(page, sel, v)) log(ctx, `✓ ${label}: ${v}`)
+    const shown = await page.$eval(sel, e => e.value).catch(() => '')
+    if (shown) {
+      if (!v || same(shown, v)) { log(ctx, `${label} already filled — kept (${shown})`); continue }
+      if (/passport|visa/i.test(label)) {
+        log(ctx, `${label}: LMIS shows ${shown} but her profile says ${v} — stopped, a person checks`, 'error')
+        left.push(`${label} (LMIS shows ${shown}, her profile ${v})`)
+        continue
+      }
+    }
+    if (v && await setInput(page, sel, v) && same(await page.$eval(sel, e => e.value).catch(() => ''), v)) log(ctx, `✓ ${label}: ${v}`)
     else left.push(label)
   }
 
@@ -646,6 +662,28 @@ async function fillContractWindow(page, ctx, p) {
   }
 
   return left
+}
+
+/**
+ * What the LMIS contract window needs and her profile does not have (asked on
+ * 2026-11-19: "make sure you have each and every thing … getting it wrong costs
+ * money"). Nothing is started on LMIS while one is missing.
+ */
+export function missingForLmisContract(p = {}) {
+  let c = {}
+  try { c = JSON.parse(p.contract_data || '{}') } catch {}
+  const has = (...v) => v.some(x => String(x || '').trim())
+  const address = String(p.employer_address || c.Location || '')
+  return [
+    !has(p.labor_id) && 'Labor ID',
+    !has(p.passport_number, c['Passport Number']) && 'Passport number',
+    !has(p.visa_number, c['Visa Number'], c['Candidate · Visa Number']) && 'Visa number (from her contract)',
+    !has(p.employer_name) && 'Employer full name (from her contract)',
+    !has(p.employer_phone, c['Mobile Number']) && 'Employer phone (from her contract)',
+    !has(p.work_city, c['City of Work'], citiesIn(address)[0]) && 'Employer city (from her contract)',
+    !has(p.musaned_pro) && 'Her Musaned recruitment office (for the job order)',
+    /saudi/i.test(p.destination_country || '') && !has(p.emergency_labor_id) && 'Emergency contact Labor ID',
+  ].filter(Boolean)
 }
 
 /** A job order with fewer than this many places left: the agency is told once. */

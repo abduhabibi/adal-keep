@@ -122,6 +122,11 @@ router.post('/files/tray', upload.single('file'), async (req, res) => {
 // A picture put into Passport, Photo or Full Body Photo is looked at by JEV
 // afterwards (services/placement.js): in the wrong box it moves to the right one.
 function checkLater(db, profileId, field, fileRow) {
+  // Her emergency contact's ID card: read at once, her emergency details filled (emergencyId.js).
+  if (fileRow && field?.name === 'Emergency Contact ID') {
+    import('../services/emergencyId.js').then(m => m.readEmergencyId(db, Number(profileId), fileRow)).catch(e => console.warn('[emergency-id]', e.message))
+    return
+  }
   if (!fileRow || !/^image\//.test(fileRow.mimetype || '')) return
   import('../services/placement.js')
     .then(p => p.watched(field.name) && p.checkPlacement(db, Number(profileId), field.name, fileRow))

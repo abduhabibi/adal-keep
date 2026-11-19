@@ -254,9 +254,9 @@ router.post('/profiles/:profileId/automations/:workflowId/start', async (req, re
       if (!(await db('visa_accounts').first())) return res.status(400).json({ error: 'No visa platform account yet — add one under "Visa platform login account"', missing: ['Visa platform account'] })
     } else if (workflowId === 'lmis_contract') {
       const prof = await db('profiles').where('id', profileId).first()
-      if (!prof?.labor_id || !String(prof.labor_id).trim()) {
-        return res.status(400).json({ error: 'Profile is missing the Labor ID', missing: ['Labor ID'] })
-      }
+      const { missingForLmisContract } = await import('../services/lmisContract.js')
+      const missing = missingForLmisContract(prof || {})
+      if (missing.length) return res.status(400).json({ error: 'Profile is missing for the LMIS contract: ' + missing.join(', '), missing })
     } else if (workflowId === 'contract_import_labour') {
       const prof = await db('profiles').where('id', profileId).first()
       const missing = []

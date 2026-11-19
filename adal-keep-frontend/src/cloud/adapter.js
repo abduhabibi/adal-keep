@@ -522,6 +522,13 @@ async function change(method, path, body) {
   // "Back up now" with the PC off: kept online once; the PC backs up as soon as it is on
   // (and it backs up by itself every 2 hours anyway). Never a second request waiting.
   if (method === 'post' && path === '/backup/run') {
+    // In an Adal Keep Companion's window (2026-11-19): the locked copy kept on
+    // this PC goes to the agency's Telegram now (adal-companion /backup/now).
+    if (/^(127\.0\.0\.1|localhost)$/.test(location.hostname)) {
+      const here = await fetch('http://127.0.0.1:47810/backup/now', { method: 'POST', signal: AbortSignal.timeout(4000) })
+        .then(r => (r.ok ? r.json() : null)).catch(() => null)
+      if (here?.started || here?.done) return { queued: !here.done, message: here.message }
+    }
     const c = cloudCreds()
     const waiting = await rest('GET', `/rest/v1/keep_changes?agency_id=eq.${c.agency}&applied_at=is.null&kind=eq.api&payload->>path=eq./backup/run&select=id&limit=1`).catch(() => [])
     if (!waiting?.length) await request('api', { method: 'POST', path: '/backup/run', body: null }, null)

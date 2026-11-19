@@ -92,7 +92,14 @@ const CHOICES = {
   speaks_english: ['Does the worker speak English (according to the document)?', { yes: 'Yes (fair, good, fluent, little)', no: 'No / poor / none', none: 'Not written' }],
   cooking_skill: ['Can the worker cook (according to the document)?', { Cooking: 'Yes, cooking', 'Cooking Helper': 'A little / helper', None: 'No', none: 'Not written' }],
 }
-const CHOICES_FOR = { CV: Object.keys(CHOICES), Visa: ['gender'], Contract: ['gender', 'religion'] }
+const CHOICES_FOR = { CV: Object.keys(CHOICES), Visa: ['gender'], Contract: ['gender', 'religion'], 'Emergency ID': ['gender'] }
+
+// Her emergency contact's own ID card (Kebele / Fayda) in "Emergency Contact ID" (asked on 2026-11-19):
+// the person's name and phone fill her emergency details; the sex is the person's (gender → emergency_gender).
+FIELDS['Emergency ID'] = {
+  emergency_name: ['name', 'The full name of the person this ID card belongs to', ['full name', 'name', 'ሙሉ ስም', 'ስም']],
+  emergency_phone: ['phone', 'The phone number on this ID card', ['phone number', 'phone', 'mobile', 'tel', 'ስልክ ቁጥር', 'ስልክ']],
+}
 
 export const DETAIL_TYPES = new Set(Object.keys(FIELDS))
 

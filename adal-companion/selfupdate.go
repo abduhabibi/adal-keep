@@ -907,7 +907,49 @@ func (u *updater) handler() *http.ServeMux {
 		w.Header().Set("Content-Type", "application/octet-stream")
 		http.ServeFile(w, r, file)
 	})
+	// "Back up now" in this PC's own Adal Keep window while the main PC is off
+	// (asked on 2026-11-19): the locked copy kept here goes to the agency's
+	// Telegram at once. Only from this PC itself, never from the network.
+	mux.HandleFunc("/backup/now", func(w http.ResponseWriter, r *http.Request) {
+		host, _, _ := net.SplitHostPort(r.RemoteAddr)
+		if ip := net.ParseIP(host); ip == nil || !ip.IsLoopback() {
+			http.Error(w, "only from this PC", http.StatusForbidden)
+			return
+		}
+		if o := r.Header.Get("Origin"); strings.HasPrefix(o, "http://127.0.0.1:") || strings.HasPrefix(o, "http://localhost:") {
+			w.Header().Set("Access-Control-Allow-Origin", o)
+			w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+		}
+		if r.Method == http.MethodOptions {
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Error(w, "POST only", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(backupNowAnswer())
+	})
 	return mux
+}
+
+// backupNowAnswer starts a backup from the copy here when there is something new to send.
+func backupNowAnswer() map[string]any {
+	st, keys := loadState(), loadKeys()
+	switch {
+	case st.Made == "":
+		return map[string]any{"started": false, "message": "This PC has no copy of the agency yet: it is made while the main PC is on."}
+	case keys.Password == "" || keys.BotToken == "" || keys.ChatID == "":
+		return map[string]any{"started": false, "message": "This PC has no backup key yet: it gets it from the main PC while the main PC is on."}
+	case st.OwnBackupCopy == st.Made && st.OwnBackupAt != "":
+		return map[string]any{"started": false, "done": true, "message": "Already backed up from this PC's copy (" + st.OwnBackupAt + "). Nothing new to send until the main PC is on."}
+	}
+	go func() {
+		if err := backupFromCopy(); err != nil {
+			log.Printf("💾 Back up now failed: %v", err)
+		}
+	}()
+	return map[string]any{"started": true, "message": "Backing up now from the copy on this PC (made " + st.Made + ") to the agency's Telegram."}
 }
 
 // startSelfUpdate: runs for ever in the background (an employee PC only).

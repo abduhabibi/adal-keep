@@ -171,8 +171,39 @@ export function startSessionKeeper(database) {
   db = database
   if (timer) return
   setTimeout(() => keepAlive().catch(() => {}), 60000)
-  timer = setInterval(() => keepAlive().catch(e => console.warn('[sessions]', e.message)), EVERY_MS)
+  timer = setInterval(() => {
+    keepAlive().catch(e => console.warn('[sessions]', e.message))
+    insuranceMorning().catch(e => console.warn('[sessions] insurance morning:', e.message))
+  }, EVERY_MS)
   timer.unref?.()
+}
+
+/** From this hour the insurance (FetaP) sign-in is done by itself, once a day. */
+export const MORNING_HOUR = 7
+
+/** Is the morning insurance sign-in due? (after MORNING_HOUR, not done today, not signed in already) */
+export function insuranceMorningDue(now, lastDay, signedIn) {
+  const day = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+  return { due: now.getHours() >= MORNING_HOUR && lastDay !== day && !signedIn, day }
+}
+
+/**
+ * The insurance sign-in in the morning, by itself (asked on 2026-11-19: FetaP
+ * needs nobody — no "I am not a robot", no approval): the robots and the
+ * certificate fetch then find it signed in. Once a day; a follower PC never.
+ */
+async function insuranceMorning() {
+  if (!db) return
+  const { isFollower } = await import('./mainPC.js')
+  if (isFollower?.()) return
+  const row = await db('settings').where('key', 'insurance_morning_signin').first().catch(() => null)
+  const { due, day } = insuranceMorningDue(new Date(), row?.value, !!kept.insurance?.signedIn)
+  if (!due) return
+  if (!(await db('insurance_accounts').first().catch(() => null))) return
+  if (row) await db('settings').where('key', 'insurance_morning_signin').update({ value: day })
+  else await db('settings').insert({ key: 'insurance_morning_signin', value: day })
+  console.log('[sessions] morning: signing in to the insurance (FetaP) by itself')
+  await openSite('insurance', db)
 }
 
 /** Each site, for the "Morning sign-in" list. */

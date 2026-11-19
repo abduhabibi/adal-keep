@@ -181,7 +181,9 @@ export default function CVNewPage() {
   // AUTO_GENERATE_EFFECT — when arriving with ?auto=1 and everything is ready, open preview
   useEffect(() => {
     if (params.get('auto') !== '1') return
-    if (!readiness) return
+    // Her form is filled a moment after readiness (the broker is fetched first):
+    // the preview waits for it, or it says "Religion is required" with a religion set.
+    if (!readiness || !formReady) return
     if (showPreview || genResult) return
     if (!readiness.can_generate) {
       toast.error('CV is not ready yet. Fill the missing fields on the profile.')
@@ -194,7 +196,7 @@ export default function CVNewPage() {
     const t = setTimeout(() => openPreview(), 250)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [readiness, templates])
+  }, [readiness, templates, formReady])
 
   useEffect(() => { if (!templateId && templates.length) setTemplateId(String(templates[0].id)) }, [templates, templateId])
 
@@ -327,7 +329,14 @@ export default function CVNewPage() {
       setShowPreview(true)
       preparePdf(body)
     } catch (e) {
-      toast.error(e.response?.data?.error || 'Preview failed')
+      const msg = e.response?.data?.error || e.message || 'Preview failed'
+      // Her pictures are listed but not on this device yet: the upload box shows instead of a CV without them.
+      if (/not on this device yet/i.test(msg)) {
+        const lostPhoto = /\bPhoto\b(?! )|^Photo/.test(msg.replace('Full Body Photo', ''))
+        const lostBody = /Full Body Photo/.test(msg)
+        setReadiness(r => r && ({ ...r, has_photo: r.has_photo && !lostPhoto, has_full_body_photo: r.has_full_body_photo && !lostBody }))
+      }
+      toast.error(msg)
     } finally { setBusy(false) }
   }
 

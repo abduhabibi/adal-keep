@@ -681,6 +681,14 @@ export default function ProfileFormPage() {
               <option value="Other">Other</option>
             </GlassSelect>
           </div>
+          {/* Saudi Arabia: LMIS adds the emergency contact person by their own Labor ID (the LMIS contract robot). */}
+          {/saudi/i.test(form.destination_country || '') && (
+            <div>
+              <label className={labelClass} htmlFor="emergency_labor_id">Emergency contact Labor ID (LMIS)</label>
+              <input id="emergency_labor_id" className={inputClass + ' font-mono'} placeholder="EF…" value={form.emergency_labor_id}
+                onChange={e => setForm(f => ({ ...f, emergency_labor_id: e.target.value.toUpperCase() }))} />
+            </div>
+          )}
         </div>
 
         {/* ---- Appointment slips: Tasheer (visa biometrics) and the Wafid medical — a reminder the day before ---- */}

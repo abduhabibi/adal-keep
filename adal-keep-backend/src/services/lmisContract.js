@@ -244,8 +244,7 @@ export async function runLmisContract(page, ctx) {
   const left = await fillContractWindow(page, ctx, p)
 
   // Something needed is still empty: a person finishes the window.
-  const blocking = left.filter(x => !/^Alternative Phone/i.test(x))
-  if (blocking.length) {
+  if (left.length) {
     await ctx.notify(`🔔 ${ctx.profileName}: LMIS contract — please finish the window`,
       `Filled on her LMIS contract window (${laborId}). Please fill by hand: ${left.join(', ')}. Then press Create Contract.`)
     log(ctx, `✅ stopped — WAITING for a person (left: ${left.join(', ')})`)
@@ -261,14 +260,29 @@ export async function runLmisContract(page, ctx) {
   })
   if (!pressed) throw new Error('The window\'s Create Contract button was not found (or is disabled)')
   log(ctx, '✓ pressed Create Contract in the window — waiting for the contract page')
-  const opened = await until(async () => /Emergency Contact/i.test(await text(page)) && /Documents/i.test(await text(page)) && !/Select A Job Order/i.test(await text(page)), 120000, ctx)
+
+  // The page reloads and LMIS asks its Contract Survey Form first (her page only).
+  const survey = await answerSurvey(page, ctx, laborId)
+  if (survey === 'other-profile') {
+    await ctx.notify(`🖐 ${ctx.profileName}: LMIS contract — wrong profile`, `After Create Contract the LMIS tab is not on ${laborId}. Nothing more was filled; check the LMIS tab.`, 'error')
+    return { ok: false, step: 'survey', error: `The page after Create Contract is not ${laborId}`, seconds: secs() }
+  }
+  if (survey === 'stuck') {
+    await ctx.notify(`🔔 ${ctx.profileName}: LMIS contract — finish the survey`, `Her LMIS contract (${laborId}) is created. Answer the Contract Survey Form in the LMIS tab and press Submit.`)
+    return { ok: true, note: 'contract created — the survey is left for the person', seconds: secs() }
+  }
+  const opened = await until(async () => /Emergency Contact/i.test(await text(page)) && /Documents/i.test(await text(page)) && !/Select A Job Order|Contract Survey Form/i.test(await text(page)), 120000, ctx)
   if (!opened) {
     const t = await text(page)
     const why = (t.match(/[^\n]*(required|invalid|error|failed|already)[^\n]*/i) || [])[0]
     throw new Error(`LMIS did not open the contract page after Create Contract${why ? `: ${why.trim().slice(0, 140)}` : ''}`)
   }
   await settle(page)
-  log(ctx, '✓ contract created — the contract page is open')
+  if (!(await text(page)).toUpperCase().includes(laborId)) {
+    await ctx.notify(`🖐 ${ctx.profileName}: LMIS contract — wrong profile`, `The contract page that opened is not ${laborId}. Nothing more was filled; check the LMIS tab.`, 'error')
+    return { ok: false, step: 'contract-page', error: `The contract page is not ${laborId}`, seconds: secs() }
+  }
+  log(ctx, `✓ contract created — her contract page is open (${laborId})`)
 
   // 8. Emergency Contact tab: the emergency contact person (by Labor ID).
   const todo = []
@@ -299,6 +313,15 @@ async function addEmergencyContact(page, ctx, em) {
   }
   if (await added()) { log(ctx, `✓ emergency contact ${em} is already added`); return true }
 
+  // "Is the emergency contact person an LMIS user?" — ticked, the search by Labor ID shows.
+  await page.evaluate(() => {
+    const lab = [...document.querySelectorAll('label, span, p, div')].find(e => e.children.length <= 2 && /emergency contact person an LMIS user/i.test(e.textContent || ''))
+    let box = lab, cb = null
+    for (let i = 0; i < 4 && box && !cb; i++, box = box.parentElement) cb = box.querySelector('input[type="checkbox"]')
+    if (cb && !cb.checked) cb.click()
+  })
+  await sleep(1200)
+
   // Search their Labor ID.
   const box = await page.evaluateHandle(() => [...document.querySelectorAll('input')]
     .find(i => { const r = i.getBoundingClientRect(); return r.width > 40 && !i.disabled && /^(text|search|)$/i.test(i.type) }) || null)
@@ -320,7 +343,10 @@ async function addEmergencyContact(page, ctx, em) {
   }, em), 45000, ctx)
   if (!found) { log(ctx, `emergency contact ${em} was not found on LMIS — left for the person`, 'warn'); return false }
   await page.click('[data-adal-add="1"]')
-  if (await until(added, 30000, ctx)) { log(ctx, `✓ emergency contact ${em} added`); return true }
+  await sleep(1200)
+  // Then Save (when the tab has one).
+  await page.evaluate(() => [...document.querySelectorAll('button')].find(b => /^\s*Save\s*$/i.test(b.innerText || '') && !b.disabled && b.getBoundingClientRect().width > 0)?.click())
+  if (await until(added, 30000, ctx)) { log(ctx, `✓ emergency contact ${em} added and saved`); return true }
   log(ctx, `pressed Add for ${em} but LMIS does not show the person yet — left for the person`, 'warn')
   return false
 }
@@ -578,6 +604,7 @@ async function fillContractWindow(page, ctx, p) {
   }
   const remaining = (await text(page)).match(/Remaining:\s*(\d+)/i)
   if (remaining && Number(remaining[1]) === 0) { log(ctx, 'this job order has 0 remaining', 'warn'); left.push('a job order with places left (Remaining is 0)') }
+  else if (remaining && picked) await warnLowRemaining(ctx, chosen, Number(remaining[1]))
   await sleep(600)
 
   // Beginning of Contract: today; Ending of Contract: 2 years later (this PC's date).
@@ -598,7 +625,7 @@ async function fillContractWindow(page, ctx, p) {
     ['Visa Number', p.visa_number || c['Visa Number'] || c['Candidate · Visa Number']],
     ['Employer Full Name', p.employer_name],
     ['Employer Phone number', p.employer_phone || c['Mobile Number']],
-    ['House Number', (address.match(/^\s*(\d{1,6})\b/) || [])[1]],
+    // House Number and Alternative Phone Number are left empty (the agency, 2026-11-19).
   ]
   for (const [label, value] of values) {
     const mark = label.toLowerCase().replace(/\W+/g, '-')
@@ -618,7 +645,77 @@ async function fillContractWindow(page, ctx, p) {
     else left.push(`Employer city${wanted.length ? ` (contract: ${wanted[0]})` : ''}`)
   }
 
-  // The employer's second phone is not on the Musaned contract.
-  if (await hasLabel(page, 'Alternative Phone Number')) left.push('Alternative Phone Number (if LMIS needs it)')
   return left
+}
+
+/** A job order with fewer than this many places left: the agency is told once. */
+export const LOW_REMAINING = 50
+
+/** Tell the agency once per job order when its places left drop under LOW_REMAINING. */
+export async function warnLowRemaining(ctx, jobOrder, remaining) {
+  if (!(remaining < LOW_REMAINING) || !jobOrder) return false
+  const key = `lmis_low_remaining_${String(jobOrder).split(/\s+-\s+/)[0].trim()}`
+  try {
+    if (ctx.db) {
+      if (await ctx.db('settings').where('key', key).first()) return false
+      await ctx.db('settings').insert({ key, value: String(remaining) })
+    }
+  } catch { /* a failed note never stops the run */ }
+  await ctx.notify?.(`⚠️ LMIS job order almost full: ${remaining} left`,
+    `${jobOrder} has only ${remaining} places left on LMIS. Ask for a new job order soon.`)
+  log(ctx, `⚠️ job order ${jobOrder}: only ${remaining} left — the agency was told`, 'warn')
+  return true
+}
+
+/**
+ * The Contract Survey Form LMIS shows after Create Contract: every question
+ * gets its first answer, then Submit. Only on her own page (her Labor ID).
+ */
+async function answerSurvey(page, ctx, laborId) {
+  const isSurvey = async () => /Contract Survey Form/i.test(await text(page))
+  if (!(await until(isSurvey, 20000, ctx).catch(() => false))) return 'none'
+  if (!(await text(page)).toUpperCase().includes(laborId)) {
+    log(ctx, `the survey opened but the page is not ${laborId} — stopped`, 'error')
+    return 'other-profile'
+  }
+  log(ctx, 'Contract Survey Form — choosing the first answer of every question')
+  for (let i = 0; i < 12; i++) {
+    // The next question without an answer (its box still says "choose one").
+    const opened = await page.evaluate(() => {
+      const form = [...document.querySelectorAll('[role="dialog"], .modal, [class*="modal"], form, div')].find(d => /Contract Survey Form/i.test(d.innerText || '') && d.querySelector('[class*="control"], select'))
+      if (!form) return 'no-form'
+      const sel = [...form.querySelectorAll('select')].find(s => !s.value)
+      if (sel) {
+        const o = [...sel.options].find(o => o.value)
+        if (!o) return 'no-option'
+        sel.value = o.value; sel.dispatchEvent(new Event('change', { bubbles: true })); return 'select'
+      }
+      const ctl = [...form.querySelectorAll('[class*="control"]')].find(c => /አንዱን ይምረጡ|select|choose/i.test(c.innerText || '') && c.getBoundingClientRect().width > 0)
+      if (!ctl) return 'done'
+      ctl.scrollIntoView({ block: 'center' })
+      ctl.setAttribute('data-adal-q', '1')
+      return 'react'
+    })
+    if (opened === 'done' || opened === 'no-form') break
+    if (opened === 'react') {
+      await page.click('[data-adal-q="1"]').catch(() => {})
+      await page.evaluate(() => document.querySelector('[data-adal-q="1"]')?.removeAttribute('data-adal-q'))
+      const picked = await until(() => page.evaluate(() => {
+        const o = [...document.querySelectorAll('[role="option"], [class*="option"]')].find(x => x.getBoundingClientRect().height > 0 && (x.innerText || '').trim())
+        if (!o) return false
+        o.click(); return true
+      }), 8000, ctx)
+      if (!picked) { log(ctx, 'a survey question has no answers listed — left for the person', 'warn'); return 'stuck' }
+    }
+    await sleep(500)
+  }
+  const submitted = await page.evaluate(() => {
+    const b = [...document.querySelectorAll('button')].find(x => /^\s*Submit\s*$/i.test(x.innerText || '') && !x.disabled && x.getBoundingClientRect().width > 0)
+    if (!b) return false
+    b.scrollIntoView({ block: 'center' }); b.click(); return true
+  })
+  if (!submitted) { log(ctx, 'the survey Submit button was not found — left for the person', 'warn'); return 'stuck' }
+  const gone = await until(async () => !(await isSurvey()), 60000, ctx)
+  log(ctx, gone ? '✓ survey submitted' : 'pressed Submit but the survey is still open — check it', gone ? 'info' : 'warn')
+  return gone ? 'submitted' : 'stuck'
 }

@@ -8,6 +8,15 @@
  */
 
 export const WORKFLOWS = {
+  lmis_contract: {
+    id: 'lmis_contract',
+    name: 'Create LMIS contract',
+    description: 'LMIS sign-in (the SMS code from the phone) → Contract → her Labor ID → Open → Create Contract → the window (job order, dates, passport, visa, employer) → the survey (first answers) → emergency contact by Labor ID → Documents → a person pays',
+    target: 'https://lmis.gov.et/new-agency/contract-process/placed-labors',
+    consts: {},
+    stepCount: 6,
+  },
+
   police_certificate: {
     id: 'police_certificate',
     name: 'Make Police Certificate',

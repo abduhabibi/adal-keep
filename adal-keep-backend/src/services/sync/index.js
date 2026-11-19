@@ -41,6 +41,8 @@ function version() {
 
 export async function startSync(appDb, { timers = true } = {}) {
   if (process.env.ADAL_SYNC === '0') return null
+  // An older follower PC opens the main PC's own pages: its database here is not the agency's.
+  if ((await import('../mainPC.js')).isFollower()) return null
   const id = readIdentity()
   setSlot(id.slot)
   const db = knex({

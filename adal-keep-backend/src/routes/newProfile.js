@@ -35,14 +35,46 @@ const tmpPath = (name) => {
   return base && fs.existsSync(path.join(TMP, base)) ? path.join(TMP, base) : null
 }
 
+// The place of birth, region and date of issue of a passport just read: they
+// come a few seconds after its bottom lines (one small Gemini question), so the
+// form is filled at once and these three follow (GET /new-profile/place/:upload).
+const PLACES = new Map()   // upload name -> { at, fields: Promise }
+const placeFields = (f = {}) => ({
+  place_of_birth: f.place_of_birth || '',
+  region: f.region || '',
+  passport_issue_date: f.date_of_issue || f.passport_issue_date || '',
+})
+
+/** The reader is started before the passport comes (the new-profile page opens). */
+router.post('/new-profile/warm', async (req, res) => {
+  const { warmMrzReader } = await import('../services/quickMrz.js')
+  warmMrzReader().catch(() => {})
+  res.json({ ok: true })
+})
+
+router.get('/new-profile/place/:upload', async (req, res) => {
+  const hit = PLACES.get(path.basename(String(req.params.upload || '')))
+  if (!hit) return res.json({ fields: null })
+  const got = await Promise.race([hit.fields, new Promise(r => setTimeout(() => r(null), 9000))])
+  res.json({ fields: got ? placeFields(got) : null })
+})
+
 router.post('/new-profile/read', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file' })
   sweep()
+  for (const [k, v] of PLACES) if (Date.now() - v.at > 120000) PLACES.delete(k)
   const db = req.app.locals.db
   const t0 = Date.now()
   try {
-    const r = await analyzeWithMineru(req.file.path, { db })
-    const f = r.fields || {}
+    const r = await analyzeWithMineru(req.file.path, { db, placeLater: true })
+    let f = r.fields || {}
+    // Already known (nothing to ask): in this answer. Else it follows.
+    let placePending = false
+    if (r.placeLater) {
+      const now = await Promise.race([r.placeLater, new Promise(res2 => setImmediate(() => res2(null)))])
+      if (now) f = { ...f, ...now }
+      else { placePending = true; PLACES.set(path.basename(req.file.path), { at: Date.now(), fields: r.placeLater }) }
+    }
     const verified = r.doc_type === 'Passport' && (r.confidence || 0) >= 0.9
     // Already a profile with this passport number? The page offers to open it.
     const existing = f.passport_number
@@ -56,6 +88,7 @@ router.post('/new-profile/read', upload.single('file'), async (req, res) => {
       verified,
       source: r.source || null,
       ms: Date.now() - t0,
+      place_pending: placePending,
       fields: {
         full_name: f.full_name || [f.given_names, f.surname].filter(Boolean).join(' ') || '',
         first_name: f.first_name || (f.given_names || '').split(' ')[0] || '',

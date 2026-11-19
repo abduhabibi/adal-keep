@@ -321,7 +321,10 @@ router.get('/files/:fileId/thumbnail', async (req, res) => {
 
     // Prefer a real thumbnail if one exists; else send the file itself
     const thumb = resolveThumbPath(fullPath)
-    res.sendFile(thumb || fullPath)
+    // Kept by the browser for an hour (a file id's picture does not change; a new
+    // upload is a new id): reopening a profile shows her pictures with no request.
+    res.set('Cache-Control', 'private, max-age=3600')
+    res.sendFile(thumb || fullPath, { cacheControl: false })
   } catch (err) {
     console.error('Thumbnail error:', err)
     res.status(500).json({ error: 'Failed to load thumbnail' })

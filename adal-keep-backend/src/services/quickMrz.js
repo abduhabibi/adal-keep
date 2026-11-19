@@ -10,7 +10,6 @@
  * on to the usual readers as before.
  */
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import sharp from 'sharp'
 import { fileURLToPath } from 'url'
@@ -21,7 +20,9 @@ const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const MODEL = path.join(ROOT, 'ocrb.traineddata')
 const ONLY = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789<'
 
-// One reader kept warm for 2 minutes after its last page (starting it costs ~0.5 s).
+// One reader kept warm for 10 minutes after its last page (starting it costs
+// ~0.5 s): the "new profile" page warms it when it opens (warmMrzReader).
+const IDLE_MS = 10 * 60000
 let worker = null, idle = null, chain = Promise.resolve()
 function reader() {
   if (!worker) {
@@ -30,11 +31,23 @@ function reader() {
     worker.catch(() => { worker = null })
   }
   clearTimeout(idle)
-  idle = setTimeout(() => { const w = worker; worker = null; w?.then(x => x.terminate()).catch(() => {}) }, 120000)
+  idle = setTimeout(() => { const w = worker; worker = null; w?.then(x => x.terminate()).catch(() => {}) }, IDLE_MS)
   idle.unref?.()
   return worker
 }
-const read = (file) => { const next = chain.then(async () => (await (await reader()).recognize(file)).data.text || ''); chain = next.catch(() => {}); return next }
+/** Start the reader now (a passport is about to come): the first read skips its start. */
+export function warmMrzReader() {
+  if (!fs.existsSync(MODEL)) return Promise.resolve(false)
+  return reader().then(() => true, () => false)
+}
+/** Let the reader go now (tests, a closing app). */
+export async function stopMrzReader() {
+  clearTimeout(idle)
+  const w = worker; worker = null
+  await w?.then(x => x.terminate()).catch(() => {})
+}
+// A picture (a PNG buffer) or a file read; one at a time on the one reader.
+const read = (img) => { const next = chain.then(async () => (await (await reader()).recognize(img)).data.text || ''); chain = next.catch(() => {}); return next }
 
 /** The verified MRZ in an OCR text, or null. */
 export function verifiedIn(text) {
@@ -49,15 +62,21 @@ export function verifiedIn(text) {
   return null
 }
 
-/** The strip at the bottom of the page (after turning it `angle`), ready to read. */
+/**
+ * The strip at the bottom of the page (after turning it `angle`), ready to read:
+ * a PNG buffer, cut in the same pass that decodes the picture (no turned copy of
+ * the whole page, nothing written to the disk).
+ */
 async function strip(file, angle, from) {
-  const turned = await sharp(file).rotate().rotate(angle).toBuffer()
-  const meta = await sharp(turned).metadata()
-  const top = Math.floor(meta.height * from)
-  const out = path.join(os.tmpdir(), `adal_qmrz_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.png`)
-  await sharp(turned).extract({ left: 0, top, width: meta.width, height: meta.height - top })
-    .resize({ width: 2000, kernel: 'lanczos3' }).grayscale().normalise().png().toFile(out)
-  return out
+  // Turned pages (rare) are turned whole first, as before; upright ones are cut at once.
+  const turned = angle ? await sharp(file).rotate().rotate(angle).toBuffer() : null
+  const meta = await sharp(turned || file).metadata()
+  let w = meta.width, h = meta.height
+  // An upright page's size as it stands (EXIF orientation 5-8 swap the sides).
+  if (!turned && (meta.orientation || 1) >= 5) [w, h] = [h, w]
+  const top = Math.floor(h * from)
+  return (turned ? sharp(turned) : sharp(file).rotate()).extract({ left: 0, top, width: w, height: h - top })
+    .resize({ width: 2000, kernel: 'lanczos3' }).grayscale().normalise().png({ compressionLevel: 1 }).toBuffer()
 }
 
 // Upright first (most pages), a taller strip, then upside down and sideways.
@@ -71,11 +90,16 @@ const TRIES = [[0, 0.78], [0, 0.66], [180, 0.78], [90, 0.78], [270, 0.78]]
 export async function quickMrz(file, { tries = TRIES.length, skip = 0 } = {}) {
   // An upload may have no extension: sharp decides whether it is a picture (a PDF is not read here).
   if (!fs.existsSync(MODEL) || /\.pdf$/i.test(file)) return null
-  for (const [angle, from] of TRIES.slice(skip, tries)) {
-    let s = null
+  const list = TRIES.slice(skip, tries)
+  // The next crop is cut while this one is read (the cutting and the reading overlap).
+  const cut = (i) => (i < list.length ? strip(file, ...list[i]).catch(() => null) : null)
+  let next = cut(0)
+  for (let i = 0; i < list.length; i++) {
+    const mine = await next
+    next = cut(i + 1)
+    if (!mine) continue
     try {
-      s = await strip(file, angle, from)
-      const m = verifiedIn(await read(s))
+      const m = verifiedIn(await read(mine))
       if (m) {
         return {
           doc_type: 'Passport', confidence: 0.98, source: 'mrz-ocrb',
@@ -87,7 +111,7 @@ export async function quickMrz(file, { tries = TRIES.length, skip = 0 } = {}) {
           },
         }
       }
-    } catch {} finally { if (s) fs.rm(s, { force: true }, () => {}) }
+    } catch {}
   }
   return null
 }
@@ -95,9 +119,7 @@ export async function quickMrz(file, { tries = TRIES.length, skip = 0 } = {}) {
 /** OCR-B readings of a strip already cut out (JEV's box): texts for the caller to verify. */
 export async function readStripOcrb(stripFile) {
   if (!fs.existsSync(MODEL)) return []
-  const out = path.join(os.tmpdir(), `adal_qmrzs_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.png`)
   try {
-    await sharp(stripFile).resize({ width: 2000, kernel: 'lanczos3' }).grayscale().normalise().png().toFile(out)
-    return [await read(out)]
-  } catch { return [] } finally { fs.rm(out, { force: true }, () => {}) }
+    return [await read(await sharp(stripFile).resize({ width: 2000, kernel: 'lanczos3' }).grayscale().normalise().png({ compressionLevel: 1 }).toBuffer())]
+  } catch { return [] }
 }

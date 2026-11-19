@@ -2,6 +2,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import { createHash } from 'crypto'
 
 // Her father's name as the emergency contact: his name and his father's (her surname),
 // e.g. "ABAGOLE KEDIR". A saved name that was only his first name gets the surname too.
@@ -194,24 +195,25 @@ export async function buildTemplateData(db, profile, template, overrides = {}, {
   const photoAbs    = photoFile    ? resolveStoredPath(photoFile.path)    : null
   const fullBodyAbs = fullBodyFile ? resolveStoredPath(fullBodyFile.path) : null
   const passportAbs = passportFile ? resolveStoredPath(passportFile.path) : null
-  const photoUrl    = photoAbs    ? await imageDataUri(photoAbs, photoFile.mimetype, px(600, L), pic) : PHOTO_PH
-  const fullBodyUrl = fullBodyAbs ? await imageDataUri(fullBodyAbs, fullBodyFile.mimetype, px(1000, L), { ...pic, trim: true }) : BODY_PH
-  let passportUrl = ''
-  if (passportAbs) {
-    if ((passportFile.mimetype || '').startsWith('image/')) {
-      passportUrl = await imageDataUri(passportAbs, passportFile.mimetype, px(1300, L), pic)
-    } else if (passportFile.mimetype === 'application/pdf' || passportAbs.toLowerCase().endsWith('.pdf')) {
-      passportUrl = await renderPdfFirstPageToDataUri(passportAbs, px(1300, L), L.q)
-    } else {
-      passportUrl = fileToDataUri(passportAbs, passportFile.mimetype)
-    }
-  }
-
   const headerFile = template.header_path || null
   const footerFile = template.footer_path || null
-  // Header/footer banners span the page width: 2000 px is sharp at A4.
-  const headerUrl = headerFile ? await imageDataUri(resolveStoredPath(headerFile), null, px(1600, L), pic) : ''
-  const footerUrl = footerFile ? await imageDataUri(resolveStoredPath(footerFile), null, px(1600, L), pic) : ''
+  // The five pictures are made side by side (each is shrunk once and kept: imageDataUri).
+  const passportP = !passportAbs ? '' : (passportFile.mimetype || '').startsWith('image/')
+    ? imageDataUri(passportAbs, passportFile.mimetype, px(1300, L), pic)
+    : (passportFile.mimetype === 'application/pdf' || passportAbs.toLowerCase().endsWith('.pdf'))
+      ? renderPdfFirstPageToDataUri(passportAbs, px(1300, L), L.q)
+      : fileToDataUri(passportAbs, passportFile.mimetype)
+  const [photoUrl, fullBodyUrl, passportUrl, headerUrl, footerUrl] = await Promise.all([
+    photoAbs    ? imageDataUri(photoAbs, photoFile.mimetype, px(600, L), pic) : PHOTO_PH,
+    fullBodyAbs ? imageDataUri(fullBodyAbs, fullBodyFile.mimetype, px(1000, L), { ...pic, trim: true }) : BODY_PH,
+    passportP,
+    // Header/footer banners span the page width: 1600 px is sharp at A4.
+    headerFile ? imageDataUri(resolveStoredPath(headerFile), null, px(1600, L), pic) : '',
+    footerFile ? imageDataUri(resolveStoredPath(footerFile), null, px(1600, L), pic) : '',
+  ])
+  // Where she stands in her full-body photo: found once here and kept, so the
+  // page frames her at once (frameBody) instead of looking for her each time.
+  const fullBodyBox = fullBodyAbs && fullBodyUrl !== BODY_PH ? await bodyBoxOf(fullBodyUrl) : ''
 
   const { fieldsFromContract } = await import('./contractFields.js')
   const merged = { ...profile, ...fieldsFromContract(profile), ...Object.fromEntries(Object.entries(overrides).filter(([, v]) => v !== '' && v != null)) }
@@ -313,6 +315,7 @@ export async function buildTemplateData(db, profile, template, overrides = {}, {
     PREV_POSITION:    prev0.position || '-',
     PHOTO_URL:        photoUrl,
     FULL_BODY_PHOTO_URL: fullBodyUrl,
+    FULL_BODY_BOX:    fullBodyBox,
     PASSPORT_URL:     passportUrl,
     HEADER_IMAGE:     headerUrl,
     FOOTER_IMAGE:     footerUrl,
@@ -418,6 +421,10 @@ const WIDE_PHOTOS_CSS = `
 // left alone.
 const FIT_SCRIPT = `<script>(function(){
 function personBox(img){
+  // Found already on the PC (data-adal-box: x0,y0,x1,y1,w,h of this very picture, or none).
+  var a=img.getAttribute('data-adal-box');
+  if(a==='none')return null;
+  if(a){var v=a.split(',').map(Number);if(v.length===6&&v.every(isFinite)&&v[4]===img.naturalWidth&&v[5]===img.naturalHeight)return {x0:v[0],y0:v[1],x1:v[2],y1:v[3],w:v[4],h:v[5]}}
   // Where she stands in the picture (natural px): the pixels that differ from the
   // background, which is read row by row from the left and right edges (a wall and
   // a floor of different colours both work). null when it cannot tell.
@@ -425,6 +432,9 @@ function personBox(img){
   var k=Math.min(1,160/Math.max(nw,nh)),w=Math.max(8,Math.round(nw*k)),h=Math.max(8,Math.round(nh*k));
   var c=document.createElement('canvas');c.width=w;c.height=h;var x=c.getContext('2d',{willReadFrequently:true});
   try{x.drawImage(img,0,0,w,h);var d=x.getImageData(0,0,w,h).data}catch(e){return null}
+  return adalBoxOf(d,w,h,k,nw,nh);
+}
+function adalBoxOf(d,w,h,k,nw,nh){
   var s=Math.max(2,Math.round(w*0.04)),L=[],R=[],y,i,o,j;
   for(y=0;y<h;y++){var l=[0,0,0],r=[0,0,0],n=0;
     for(j=Math.max(0,y-2);j<=Math.min(h-1,y+2);j++)for(i=0;i<s;i++){o=(j*w+i)*4;l[0]+=d[o];l[1]+=d[o+1];l[2]+=d[o+2];o=(j*w+w-1-i)*4;r[0]+=d[o];r[1]+=d[o+1];r[2]+=d[o+2];n++}
@@ -470,7 +480,7 @@ function frameBody(img){
     st.setProperty('object-view-box','inset('+pc(y0,nh)+' '+pc(nw-x1,nw)+' '+pc(nh-y1,nh)+' '+pc(x0,nw)+')','important');
   }else if(!img._adalCut){
     var c=document.createElement('canvas');c.width=Math.round(x1-x0);c.height=Math.round(y1-y0);
-    try{c.getContext('2d').drawImage(img,x0,y0,x1-x0,y1-y0,0,0,c.width,c.height);img._adalCut=1;img._adalBox=null;img.src=c.toDataURL('image/jpeg',0.88)}catch(e){}
+    try{c.getContext('2d').drawImage(img,x0,y0,x1-x0,y1-y0,0,0,c.width,c.height);img._adalCut=1;img._adalBox=null;img.removeAttribute('data-adal-box');img.src=c.toDataURL('image/jpeg',0.88)}catch(e){}
   }
   st.setProperty('object-fit','contain','important');st.setProperty('object-position','center','important');
 }
@@ -509,6 +519,30 @@ window.adalFit=fit;
 if(document.readyState==='complete')fit();else addEventListener('load',fit);
 })()</script>`
 
+// The same search for her as the page's (adalBoxOf in FIT_SCRIPT), run here on
+// the picture the CV shows: its answer goes into the page (data-adal-box).
+const adalBoxOf = new Function(FIT_SCRIPT.slice(FIT_SCRIPT.indexOf('function adalBoxOf('), FIT_SCRIPT.indexOf('function frameBody(')) + 'return adalBoxOf')()
+const _boxes = new Map()
+export async function bodyBoxOf(uri) {
+  const m = /^data:image\/[a-z+]+;base64,(.+)$/.exec(uri || '')
+  if (!m) return ''
+  const key = createHash('sha1').update(m[1]).digest('hex')
+  if (_boxes.has(key)) return _boxes.get(key)
+  let out = ''
+  try {
+    const sharp = (await import('sharp')).default
+    const buf = Buffer.from(m[1], 'base64')
+    const { width: nw, height: nh } = await sharp(buf).metadata()
+    const k = Math.min(1, 160 / Math.max(nw, nh)), w = Math.max(8, Math.round(nw * k)), h = Math.max(8, Math.round(nh * k))
+    const d = await sharp(buf).resize(w, h, { fit: 'fill', kernel: 'linear' }).ensureAlpha().raw().toBuffer()
+    const b = adalBoxOf(d, w, h, k, nw, nh)
+    out = b ? [b.x0, b.y0, b.x1, b.y1, b.w, b.h].map(v => Math.round(v * 100) / 100).join(',') : 'none'
+  } catch { out = '' }
+  if (_boxes.size > 200) _boxes.delete(_boxes.keys().next().value)
+  _boxes.set(key, out)
+  return out
+}
+
 export function mergeTemplate(html, css, data) {
   let out = splitLanguageCells(html || '')
 
@@ -534,7 +568,8 @@ export function mergeTemplate(html, css, data) {
   }
 
   // Her full-body photo is framed on her by the page itself (frameBody in FIT_SCRIPT).
-  out = out.replace(/<img\b(?=[^>]*\{\{FULL_BODY_PHOTO_URL\}\})/gi, '<img data-adal-body="1"')
+  const box = /^[0-9.,]+$|^none$/.test(data.FULL_BODY_BOX || '') ? ` data-adal-box="${data.FULL_BODY_BOX}"` : ''
+  out = out.replace(/<img\b(?=[^>]*\{\{FULL_BODY_PHOTO_URL\}\})/gi, `<img data-adal-body="1"${box}`)
 
   // Replace tokens
   out = out.replace(/\{\{([A-Z_]+)\}\}/g, (_, k) => {
@@ -595,13 +630,26 @@ export function mergeTemplate(html, css, data) {
 // ~3 s. It closes itself after 5 idle minutes.
 let _pdfBrowser = null
 let _idle = null
+let _launching = null
 async function pdfBrowser() {
   if (_pdfBrowser?.connected) return _pdfBrowser
-  const exec = findBrowser()
-  if (!exec) throw new Error('No Chrome/Edge/Chromium found for PDF rendering')
-  const puppeteer = (await import('puppeteer-core')).default
-  _pdfBrowser = await puppeteer.launch({ executablePath: exec, headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage'] })
-  return _pdfBrowser
+  // Two PDFs asked at once share one start.
+  return _launching ||= (async () => {
+    const exec = findBrowser()
+    if (!exec) throw new Error('No Chrome/Edge/Chromium found for PDF rendering')
+    const puppeteer = (await import('puppeteer-core')).default
+    _pdfBrowser = await puppeteer.launch({ executablePath: exec, headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage'] })
+    return _pdfBrowser
+  })().finally(() => { _launching = null })
+}
+/** The CV page opened: the PDF browser starts now (~1-3 s), not when Download is pressed. */
+export function warmPdfBrowser() {
+  clearTimeout(_idle)
+  return pdfBrowser().then(() => {
+    _idle = setTimeout(() => { _pdfBrowser?.close().catch(() => {}); _pdfBrowser = null }, 5 * 60000)
+    _idle.unref?.()
+    return true
+  }, () => false)
 }
 
 export async function htmlToPdf(html, outPath) {
@@ -646,11 +694,24 @@ export async function htmlToPdf(html, outPath) {
  * A CV PDF under CV_MAX_BYTES: build(level) gives the CV's { html, data } with
  * its pictures at that level; the smallest level that fits is kept (the last
  * one is kept whatever its size). Returns the data of the PDF that was kept.
+ *
+ * The same CV made ready before (preparePdf: the preview opened) is not made
+ * again: its PDF is copied (or waited for, while it is still being made).
  */
-export async function htmlToSmallPdf(build, outPath) {
+const _ready = new Map()   // sha1 of the CV's page -> { at, made: Promise<{ file, data }> }
+const READY_MS = 10 * 60000
+const READY_DIR = path.join(os.tmpdir(), 'adal-cv-ready')
+function forgetOld() {
+  for (const [k, v] of _ready) {
+    if (Date.now() - v.at < READY_MS) continue
+    _ready.delete(k)
+    v.made.then(r => fs.promises.rm(r.file, { force: true })).catch(() => {})
+  }
+}
+async function renderSmall(build, first, outPath) {
   let data = null
   for (let level = 0; level < LEVELS.length; level++) {
-    const made = await build(level)
+    const made = level === 0 ? first : await build(level)
     data = made.data
     await htmlToPdf(made.html, outPath)
     const size = fs.statSync(outPath).size
@@ -658,6 +719,37 @@ export async function htmlToSmallPdf(build, outPath) {
     if (level < LEVELS.length - 1) console.log(`[cv] ${Math.round(size / 1024)} KB is over ${CV_MAX_BYTES / 1024} KB - smaller pictures`)
   }
   return data
+}
+const keyOf = (html) => createHash('sha1').update(html).digest('hex')
+
+export async function htmlToSmallPdf(build, outPath) {
+  const first = await build(0)
+  const hit = _ready.get(keyOf(first.html))
+  if (hit) {
+    try {
+      const r = await hit.made
+      await fs.promises.copyFile(r.file, outPath)
+      return r.data
+    } catch { /* not made after all: made here */ }
+  }
+  return renderSmall(build, first, outPath)
+}
+
+/**
+ * Makes the PDF of this CV now, behind (the person is looking at the preview):
+ * Download / Save as then only copy it. Nothing is saved on her profile here.
+ */
+export async function preparePdf(build) {
+  forgetOld()
+  const first = await build(0)
+  const key = keyOf(first.html)
+  if (_ready.has(key)) return key
+  fs.mkdirSync(READY_DIR, { recursive: true })
+  const file = path.join(READY_DIR, `${key}.pdf`)
+  const made = renderSmall(build, first, file).then(data => ({ file, data }))
+  made.catch(() => _ready.delete(key))
+  _ready.set(key, { at: Date.now(), made })
+  return key
 }
 
 export async function isGeneratedCV(db, filename) {

@@ -263,6 +263,61 @@ export async function generateCvFile(db, fresh, template, overrides = {}, create
   return { generated_cv_id: cvsId, file_id: fileId, filename, original_name, path: outPath }
 }
 
+/** What the CV form changed on her profile (saved with the CV). */
+function cvUpdatesOf(overrides = {}) {
+  const cvUpd = {}
+  const stringKeys = [
+    'religion','marital_status','weight','height','complexion','living_town',
+    'mother_name','father_name','spouse_name','education_level',
+    'region','zone_subcity','labor_id','personal_number',
+    'emergency_name','emergency_phone','emergency_gender','emergency_relationship',
+    'cooking_skill',
+  ]
+  for (const k of stringKeys) if (overrides[k] !== undefined) cvUpd[k] = overrides[k]
+  if (overrides.children_count !== undefined) cvUpd.children_count = parseInt(overrides.children_count, 10) || 0
+  if (overrides.speaks_english !== undefined) cvUpd.speaks_english = !!overrides.speaks_english
+  if (overrides.speaks_arabic !== undefined) cvUpd.speaks_arabic = !!overrides.speaks_arabic
+  for (const k of ['english_read', 'english_write', 'arabic_read', 'arabic_write']) if (overrides[k] !== undefined) cvUpd[k] = !!overrides[k]
+  if (overrides.skills !== undefined) cvUpd.skills = JSON.stringify(overrides.skills)
+  if (overrides.previous_employment !== undefined) cvUpd.previous_employment = JSON.stringify(overrides.previous_employment)
+  return cvUpd
+}
+
+// The CV page opened with her and a template: the PDF browser starts and her
+// pictures are shrunk now (both are kept), so the preview and the PDF are quick.
+router.post('/warm', async (req, res) => {
+  res.json({ ok: true })
+  const db = req.app.locals.db
+  const { warmPdfBrowser } = await import('../services/cvRender.js')
+  warmPdfBrowser().catch(() => {})
+  try {
+    const { profile_id, template_id } = req.body || {}
+    const profile = profile_id && await db('profiles').where('id', profile_id).first()
+    const template = template_id && await db('cv_templates').where('id', template_id).first()
+    if (profile && template) await buildTemplateData(db, profile, template, {})
+  } catch {}
+})
+
+// The preview is open: its PDF is made behind, exactly as Download would make it
+// (nothing saved on her yet). Download / Save as then only copy it.
+router.post('/prepare', async (req, res) => {
+  res.json({ ok: true })
+  try {
+    const db = req.app.locals.db
+    const { profile_id, template_id, overrides = {} } = req.body || {}
+    const profile = profile_id && await db('profiles').where('id', profile_id).first()
+    const template = template_id && await db('cv_templates').where('id', template_id).first()
+    if (!profile || !template) return
+    const fresh = { ...profile, ...cvUpdatesOf(overrides) }
+    if (!String(fresh.religion || '').trim()) return
+    const { preparePdf } = await import('../services/cvRender.js')
+    await preparePdf(async (level) => {
+      const d = await buildTemplateData(db, fresh, template, overrides, { level })
+      return { data: d, html: withEdits(mergeTemplate(template.html_content, template.css_content, d), overrides.__edits) }
+    })
+  } catch (e) { console.warn('[CV] prepare:', e.message) }
+})
+
 router.post('/generate', async (req, res) => {
   const db = req.app.locals.db
   try {
@@ -273,21 +328,7 @@ router.post('/generate', async (req, res) => {
     const template = await db('cv_templates').where('id', template_id).first()
     if (!template) return res.status(404).json({ error: 'Template not found' })
 
-    const cvUpd = {}
-    const stringKeys = [
-      'religion','marital_status','weight','height','complexion','living_town',
-      'mother_name','father_name','spouse_name','education_level',
-      'region','zone_subcity','labor_id','personal_number',
-      'emergency_name','emergency_phone','emergency_gender','emergency_relationship',
-      'cooking_skill',
-    ]
-    for (const k of stringKeys) if (overrides[k] !== undefined) cvUpd[k] = overrides[k]
-    if (overrides.children_count !== undefined) cvUpd.children_count = parseInt(overrides.children_count, 10) || 0
-    if (overrides.speaks_english !== undefined) cvUpd.speaks_english = !!overrides.speaks_english
-    if (overrides.speaks_arabic !== undefined) cvUpd.speaks_arabic = !!overrides.speaks_arabic
-    for (const k of ['english_read', 'english_write', 'arabic_read', 'arabic_write']) if (overrides[k] !== undefined) cvUpd[k] = !!overrides[k]
-    if (overrides.skills !== undefined) cvUpd.skills = JSON.stringify(overrides.skills)
-    if (overrides.previous_employment !== undefined) cvUpd.previous_employment = JSON.stringify(overrides.previous_employment)
+    const cvUpd = cvUpdatesOf(overrides)
     if (Object.keys(cvUpd).length) { cvUpd.updated_at = new Date().toISOString(); await db('profiles').where('id', profile.id).update(cvUpd) }
     const fresh = await db('profiles').where('id', profile.id).first()
     let made

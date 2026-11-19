@@ -193,6 +193,7 @@ export async function cvData(profile, template, overrides = {}, imgs = {}, broke
     PREV_POSITION:    prev0.position || '-',
     PHOTO_URL:        photoUrl,
     FULL_BODY_PHOTO_URL: fullBodyUrl,
+    FULL_BODY_BOX:    '',   // the PC finds her box itself (cvRender bodyBoxOf); here the page does
     PASSPORT_URL:     passportUrl,
     HEADER_IMAGE:     headerUrl,
     FOOTER_IMAGE:     footerUrl,
@@ -300,6 +301,10 @@ const WIDE_PHOTOS_CSS = `
 // left alone.
 const FIT_SCRIPT = `<script>(function(){
 function personBox(img){
+  // Found already on the PC (data-adal-box: x0,y0,x1,y1,w,h of this very picture, or none).
+  var a=img.getAttribute('data-adal-box');
+  if(a==='none')return null;
+  if(a){var v=a.split(',').map(Number);if(v.length===6&&v.every(isFinite)&&v[4]===img.naturalWidth&&v[5]===img.naturalHeight)return {x0:v[0],y0:v[1],x1:v[2],y1:v[3],w:v[4],h:v[5]}}
   // Where she stands in the picture (natural px): the pixels that differ from the
   // background, which is read row by row from the left and right edges (a wall and
   // a floor of different colours both work). null when it cannot tell.
@@ -307,6 +312,9 @@ function personBox(img){
   var k=Math.min(1,160/Math.max(nw,nh)),w=Math.max(8,Math.round(nw*k)),h=Math.max(8,Math.round(nh*k));
   var c=document.createElement('canvas');c.width=w;c.height=h;var x=c.getContext('2d',{willReadFrequently:true});
   try{x.drawImage(img,0,0,w,h);var d=x.getImageData(0,0,w,h).data}catch(e){return null}
+  return adalBoxOf(d,w,h,k,nw,nh);
+}
+function adalBoxOf(d,w,h,k,nw,nh){
   var s=Math.max(2,Math.round(w*0.04)),L=[],R=[],y,i,o,j;
   for(y=0;y<h;y++){var l=[0,0,0],r=[0,0,0],n=0;
     for(j=Math.max(0,y-2);j<=Math.min(h-1,y+2);j++)for(i=0;i<s;i++){o=(j*w+i)*4;l[0]+=d[o];l[1]+=d[o+1];l[2]+=d[o+2];o=(j*w+w-1-i)*4;r[0]+=d[o];r[1]+=d[o+1];r[2]+=d[o+2];n++}
@@ -352,7 +360,7 @@ function frameBody(img){
     st.setProperty('object-view-box','inset('+pc(y0,nh)+' '+pc(nw-x1,nw)+' '+pc(nh-y1,nh)+' '+pc(x0,nw)+')','important');
   }else if(!img._adalCut){
     var c=document.createElement('canvas');c.width=Math.round(x1-x0);c.height=Math.round(y1-y0);
-    try{c.getContext('2d').drawImage(img,x0,y0,x1-x0,y1-y0,0,0,c.width,c.height);img._adalCut=1;img._adalBox=null;img.src=c.toDataURL('image/jpeg',0.88)}catch(e){}
+    try{c.getContext('2d').drawImage(img,x0,y0,x1-x0,y1-y0,0,0,c.width,c.height);img._adalCut=1;img._adalBox=null;img.removeAttribute('data-adal-box');img.src=c.toDataURL('image/jpeg',0.88)}catch(e){}
   }
   st.setProperty('object-fit','contain','important');st.setProperty('object-position','center','important');
 }
@@ -416,7 +424,8 @@ export function mergeTemplate(html, css, data) {
   }
 
   // Her full-body photo is framed on her by the page itself (frameBody in FIT_SCRIPT).
-  out = out.replace(/<img\b(?=[^>]*\{\{FULL_BODY_PHOTO_URL\}\})/gi, '<img data-adal-body="1"')
+  const box = /^[0-9.,]+$|^none$/.test(data.FULL_BODY_BOX || '') ? ` data-adal-box="${data.FULL_BODY_BOX}"` : ''
+  out = out.replace(/<img\b(?=[^>]*\{\{FULL_BODY_PHOTO_URL\}\})/gi, `<img data-adal-body="1"${box}`)
 
   // Replace tokens
   out = out.replace(/\{\{([A-Z_]+)\}\}/g, (_, k) => {

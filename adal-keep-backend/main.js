@@ -422,7 +422,7 @@ app.get('/api/profiles/brief', async (req, res) => {
     res.json(await db('profiles')
       .leftJoin('brokers', 'profiles.broker_id', 'brokers.id')
       .select('profiles.id', 'profiles.full_name', 'profiles.passport_number', 'profiles.labor_id', 'profiles.phone_number',
-        'profiles.order_id', 'profiles.updated_at', 'profiles.broker_id', 'brokers.name as broker_name')
+        'profiles.order_id', 'profiles.updated_at', 'profiles.broker_id', 'profiles.destination_country', 'brokers.name as broker_name')
       .orderBy('profiles.created_at', 'desc'))
   } catch (err) {
     console.error(err)

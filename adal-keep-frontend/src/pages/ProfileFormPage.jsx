@@ -471,7 +471,7 @@ export default function ProfileFormPage() {
               <label className={labelClass} htmlFor="destination_country_q">Destination country *</label>
               <GlassSelect id="destination_country_q" required className={inputClass} value={form.destination_country} onChange={setField('destination_country')}>
                 <option value="">— Select —</option>
-                {['Kuwait', 'Saudi Arabia', 'Jordan', 'UAE', 'Qatar', 'Bahrain', 'Oman'].map(c => <option key={c} value={c}>{c}</option>)}
+                {['Kuwait', 'Saudi Arabia', 'Jordan', 'UAE', 'Qatar', 'Bahrain', 'Oman', 'Lebanon'].map(c => <option key={c} value={c}>{c}</option>)}
               </GlassSelect>
             </div>
             <div>
@@ -569,6 +569,7 @@ export default function ProfileFormPage() {
               <option value="Qatar">Qatar</option>
               <option value="Bahrain">Bahrain</option>
               <option value="Oman">Oman</option>
+              <option value="Lebanon">Lebanon</option>
             </GlassSelect>
           </div>
           <div>

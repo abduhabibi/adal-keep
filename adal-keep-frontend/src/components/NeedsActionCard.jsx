@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import api from '../services/api'
 import { onDataChange } from '../lib/changes'
+import { useDestination, goesTo } from '../lib/destination'
 
 // "Needs action today" (backend services/needsAction.js): the girls with
 // something due or overdue today — missing documents, medical dates, stuck
@@ -15,6 +16,8 @@ const ICON = { docs: '📄', medical: '🔋', appt: '📅', stuck: '⚠️', cho
 export default function NeedsActionCard() {
   const [data, setData] = useState(readLast)
   const [all, setAll] = useState(false)
+  // The destination country picked in the top bar.
+  const [dest] = useDestination()
 
   useEffect(() => {
     let live = true
@@ -33,14 +36,15 @@ export default function NeedsActionCard() {
       <span className="ak-skel h-4 w-40" /><span className="ak-skel h-4 w-64" />
     </div>
   )
-  if (!data.profiles.length) return null
-  const shown = all ? data.profiles : data.profiles.slice(0, 8)
-  const late = data.profiles.filter(p => p.overdue).length
+  const list = data.profiles.filter(p => goesTo(dest, p))
+  if (!list.length) return null
+  const shown = all ? list : list.slice(0, 8)
+  const late = list.filter(p => p.overdue).length
 
   return (
     <section className="ak-stat flex-col gap-3">
       <div className="flex items-baseline gap-3">
-        <span className="ak-stat-value tabular-nums">{data.count}</span>
+        <span className="ak-stat-value tabular-nums">{list.length}</span>
         <span className="ak-stat-label flex-1">ዛሬ መደረግ ያለባቸው</span>
         {late > 0 && <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700 dark:bg-red-900/30 dark:text-red-300">{late} overdue</span>}
       </div>
@@ -60,9 +64,9 @@ export default function NeedsActionCard() {
           </li>
         ))}
       </ul>
-      {data.profiles.length > 8 && (
+      {list.length > 8 && (
         <button type="button" onClick={() => setAll(a => !a)} className="self-start text-xs font-semibold text-indigo-600 dark:text-indigo-400">
-          {all ? 'Show fewer' : `Show all ${data.profiles.length}`}
+          {all ? 'Show fewer' : `Show all ${list.length}`}
         </button>
       )}
     </section>

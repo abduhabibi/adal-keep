@@ -21,6 +21,7 @@ import { useAuth } from '../../context/AuthContext'
 import { links, settingsLink, trashLink, showTrash } from './Sidebar'
 import { swipeBack } from '../../lib/phoneApp'
 import Icon from '../shared/Icon'
+import { CountryPicker } from './Navbar'
 
 const icon = (name) => <Icon name={name} size={26} strokeWidth={1.6} />
 const TABS = [
@@ -133,7 +134,9 @@ export function PhoneTopBar({ scroller }) {
   const inner = isInner(pathname)
   return (
     <header className={`phone-topbar flex h-11 shrink-0 items-center px-2 ${scrolled ? 'is-scrolled' : ''}`} style={{ paddingTop: 0 }}>
-      <div className="flex w-24 items-center">
+      <div className={`flex items-center ${inner ? 'w-24' : 'min-w-24'}`}>
+        {/* The destination country (the top bar's on a PC): on the main pages. */}
+        {!inner && <CountryPicker />}
         {inner && (
           <button type="button" onClick={() => { if (!swipeBack()) navigate(-1) }} className="phone-press flex items-center gap-0.5 rounded-lg py-1 pl-1 pr-2 text-[17px] font-medium text-teal-600 dark:text-teal-400" aria-label="ተመለስ">
             <Icon name="chevronLeft" size={24} strokeWidth={2.2} />

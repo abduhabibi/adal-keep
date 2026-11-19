@@ -21,6 +21,7 @@ import { cachedGet } from '../lib/deviceCache'
 import { onPhone } from '../lib/phoneMode'
 import { FIRST, AFTER, READY, afterInOrder, phaseOf as phaseFrom, inWaitingPhase, stepMarks } from '../lib/phase'
 import { shows } from '../lib/stageActions'
+import { useDestination, goesTo } from '../lib/destination'
 
 const STATUS_OPTIONS_AM = [
   { value: 'pending', label: 'በመጠባበቅ ላይ' },
@@ -81,8 +82,10 @@ export default function ProfilesPage() {
       setLoading(false)
     }
   }, [])
-  const byStatusBroker = useMemo(() => profiles.filter(p =>
-    (status === 'all' || (p.status || 'pending') === status) && (!brokerId || String(p.broker_id ?? '') === String(brokerId))), [profiles, status, brokerId])
+  // The destination country picked in the top bar (lib/destination.js): the list, the step counts and the search.
+  const [dest] = useDestination()
+  const byStatusBroker = useMemo(() => profiles.filter(p => goesTo(dest, p) &&
+    (status === 'all' || (p.status || 'pending') === status) && (!brokerId || String(p.broker_id ?? '') === String(brokerId))), [profiles, status, brokerId, dest])
   // A profile changed anywhere (a person, a robot, a phone): the list follows at once.
   useEffect(() => onDataChange(['profiles', 'brokers'], () => load(true), 3000), [load])
   // A move running: its new girls show as they come (every 5 s), even if a change notice is missed.
@@ -118,7 +121,9 @@ export default function ProfilesPage() {
       .then(() => toast.success('Order saved — every girl follows it', { id: 'journey-order' }))
       .catch(() => toast.error('Could not save the order', { id: 'journey-order' }))
   }
-  const PHASES = [...FIRST, ...after.map(([title, k, label]) => [k, label, title]), READY]
+  // The steps in order (Unfit apart, at the end: an exception, not a step).
+  const PHASES = [...FIRST.filter(([k]) => k !== 'unfit'), ...after.map(([title, k, label]) => [k, label, title]), READY]
+  const UNFIT = FIRST.find(([k]) => k === 'unfit')
   const phaseOfP = (p) => phaseOf(journey.steps[p.id], p, after)
   // The tabs' counts: every profile (the search does not change them — greyed while searching).
   const phaseCounts = {}
@@ -132,7 +137,7 @@ export default function ProfilesPage() {
   const [page, setPage] = useState(1)
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE))
   // Back to page 1 only when the tab, the search or a filter changes (not on the 5-second refresh).
-  useEffect(() => { setPage(1) }, [step, phase, term, status, brokerId, filterKey])
+  useEffect(() => { setPage(1) }, [step, phase, term, status, brokerId, filterKey, dest])
   // Only the Waiting tab sends CVs to agents on WhatsApp.
   const waitingHere = !searching && phase === 'waiting'
   const rows = filtered.slice((Math.min(page, pages) - 1) * PAGE, Math.min(page, pages) * PAGE)
@@ -214,24 +219,10 @@ export default function ProfilesPage() {
 
   return (
     <div>
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <div className="ak-status-tabs grid w-full grid-cols-5 gap-1 md:flex md:flex-wrap md:w-auto md:min-w-0 md:flex-1 md:gap-1.5" role="tablist">
-          {PHASES.map(([k, label, title]) => (
-            <button key={k} type="button" role="tab" aria-selected={!searching && phase === k} onClick={() => { setPhase(k); setStep(null) }}
-              title={searching ? 'All profiles in this tab (not the search)' : undefined}
-              {...(title ? {
-                draggable: true, title: 'Drag to change the order',
-                onDragStart: (e) => { setDragging(title); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', title) },
-                onDragEnd: () => setDragging(null),
-                onDragOver: (e) => { if (dragging && dragging !== title) { e.preventDefault(); e.dataTransfer.dropEffect = 'move' } },
-                onDrop: (e) => { e.preventDefault(); dropOn(title); setDragging(null) },
-              } : {})}
-              className={`flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-xl px-1 py-1.5 text-[11px] leading-tight font-bold transition-colors md:shrink-0 md:flex-row md:gap-2 md:px-3.5 md:py-2 md:text-sm ${title ? 'cursor-grab active:cursor-grabbing' : ''} ${dragging === title && title ? 'opacity-40' : ''} ${!searching && phase === k ? 'is-on' : ''}`}>
-              <span className="max-w-full truncate">{label}</span>
-              <span className={`rounded-full px-1.5 text-[10px] md:text-xs tabular-nums ak-seg-badge ${searching ? 'opacity-40' : ''}`}>{phaseCounts[k] || 0}</span>
-            </button>
-          ))}
-        </div>
+      <div className="mb-4 space-y-2">
+        <StageSteps phases={PHASES} unfit={UNFIT} counts={phaseCounts} phase={phase} searching={searching}
+          onPick={(k) => { setPhase(k); setStep(null) }} dragging={dragging} setDragging={setDragging} dropOn={dropOn} />
+        <div className="flex flex-wrap items-center gap-2">
         {shows('musaned_scan', phase, after) && !searching && !onPhone() && (<>
           <Button variant="secondary" className="whitespace-nowrap !px-3 text-sm" onClick={scanMusaned} disabled={scanning || checkInfo?.running}
             title={`Check for new selections on Musaned (by itself every ${checkInfo?.every_min || 60} minutes; Check now stops after ${checkInfo?.manual_limit_min || 10} minutes)`}>
@@ -248,10 +239,11 @@ export default function ProfilesPage() {
           )}
         </>)}
         {/* On a phone: a round ＋ above the tab bar, always in reach. */}
-        <Button data-tour="new-profile" className="whitespace-nowrap hidden md:inline-flex" onClick={() => navigate('/profiles/new')}>+ ፕሮፋይል አክል</Button>
+        <Button data-tour="new-profile" className="whitespace-nowrap hidden md:inline-flex md:ml-auto" onClick={() => navigate('/profiles/new')}>+ ፕሮፋይል አክል</Button>
         {createPortal(<button type="button" aria-label="ፕሮፋይል አክል" onClick={() => navigate('/profiles/new')}
           className="md:hidden fixed right-4 z-40 h-14 w-14 rounded-full bg-gradient-to-br from-teal-600 to-indigo-600 text-3xl font-light text-white shadow-xl active:scale-95"
           style={{ bottom: 'calc(5.5rem + env(safe-area-inset-bottom))' }}>＋</button>, document.body)}
+        </div>
       </div>
 
       <div className="panel mb-4 sm:mb-5 grid grid-cols-[minmax(0,1fr)_auto] gap-2 p-2 sm:p-3 sm:grid-cols-[minmax(0,1fr)_auto] items-center">
@@ -386,6 +378,60 @@ export default function ProfilesPage() {
     </div>
   )
 }
+// Short names for the steps when the bar is narrow (the full name on hover).
+const SHORT = { musaned: 'Mus.', waiting: 'Wait', selected: 'Sel.', wafid: 'Waf.', tasheer: 'Tas.', insurance: 'Ins.', police: 'Pol.', choices: 'Rdy' }
+
+/**
+ * The status tabs as one progress bar (asked on 2026-11-19): the stages in
+ * order, CV → … → Ready, each with its count; click one to show its girls.
+ * The steps before the one open are tinted as passed. Unfit sits apart at the
+ * end as an exception. The steps after the EPRO can be dragged into the
+ * agency's order. Fits 1100 px and wider without sideways scrolling (short
+ * names when narrow); on a phone (≤640 px) one dropdown with the counts.
+ */
+function StageSteps({ phases, unfit, counts, phase, searching, onPick, dragging, setDragging, dropOn }) {
+  const on = searching ? -1 : phases.findIndex(([k]) => k === phase)
+  const unfitOn = !searching && unfit && phase === unfit[0]
+  const dragProps = (title) => title ? {
+    draggable: true,
+    onDragStart: (e) => { setDragging(title); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', title) },
+    onDragEnd: () => setDragging(null),
+    onDragOver: (e) => { if (dragging && dragging !== title) { e.preventDefault(); e.dataTransfer.dropEffect = 'move' } },
+    onDrop: (e) => { e.preventDefault(); dropOn(title); setDragging(null) },
+  } : {}
+  const all = unfit ? [...phases, unfit] : phases
+  return (
+    <>
+      <div className="ak-steps-pick">
+        <GlassSelect aria-label="Stage" className="w-full" value={phase} onChange={(e) => onPick(e.target.value)}>
+          {all.map(([k, label]) => <option key={k} value={k}>{`${label} · ${counts[k] || 0}`}</option>)}
+        </GlassSelect>
+      </div>
+      <div className="ak-steps-wrap">
+        <div className={`ak-steps ${searching ? 'is-searching' : ''}`} role="tablist" aria-label="Stages">
+          {phases.map(([k, label, title], i) => (
+            <button key={k} type="button" role="tab" aria-selected={i === on} onClick={() => onPick(k)}
+              title={`${label}: ${counts[k] || 0}${searching ? ' (all profiles in this stage, not the search)' : ''}${title ? ' — drag to change the order' : ''}`}
+              {...dragProps(title)}
+              className={`ak-step ${i === on ? 'is-on' : i < on ? 'is-passed' : ''} ${title ? 'is-drag' : ''} ${dragging && dragging === title ? 'opacity-40' : ''}`}>
+              <span className="ak-step-label"><span className="ak-step-full">{label}</span><span className="ak-step-short" aria-hidden="true">{SHORT[k] || label}</span></span>
+              <span className="ak-step-count tabular-nums">{counts[k] || 0}</span>
+            </button>
+          ))}
+        </div>
+        {unfit && (
+          <button type="button" role="tab" aria-selected={unfitOn} onClick={() => onPick(unfit[0])}
+            title={`${unfit[1]}: ${counts[unfit[0]] || 0} — medical rejected, apart from the steps`}
+            className={`ak-step-unfit ${unfitOn ? 'is-on' : ''} ${searching ? 'is-searching' : ''}`}>
+            <span className="ak-step-label">{unfit[1]}</span>
+            <span className="ak-step-count tabular-nums">{counts[unfit[0]] || 0}</span>
+          </button>
+        )}
+      </div>
+    </>
+  )
+}
+
 /**
  * On each card: a step skipped up to the EPRO ("skipped"), and each stage
  * done after it (those can come in any order, so they are never "skipped").

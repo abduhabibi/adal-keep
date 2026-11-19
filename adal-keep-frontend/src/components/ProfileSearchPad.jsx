@@ -4,6 +4,7 @@ import api from '../services/api'
 import { dragProfiles } from '../lib/profileDrag'
 import { prefetchProfile } from '../lib/profileCache'
 import Segmented from './shared/Segmented'
+import { useDestination, goesTo } from '../lib/destination'
 
 /**
  * Search pad: a searchable list of profiles. Type a name, passport number,
@@ -29,6 +30,8 @@ export default function ProfileSearchPad({
   // All / running (a browser run working or waiting) / not running
   const [run, setRun] = useState('')
   const [runs, setRuns] = useState({})
+  // The destination country picked in the top bar.
+  const [dest] = useDestination()
   const inputRef = useRef(null)
 
   useEffect(() => {
@@ -95,12 +98,13 @@ export default function ProfileSearchPad({
     const out = []
     for (const [hay, p] of sorted) {
       if (run && (run === 'on') !== !!runs[p.id]) continue
+      if (!goesTo(dest, p)) continue
       if (words.length && !words.every(w => hay.includes(w))) continue
       out.push(p)
       if (out.length === 200) break
     }
     return out
-  }, [sorted, q, run, runs])
+  }, [sorted, q, run, runs, dest])
 
   return (
     <section data-tour={autoFocusKey ? 'search-pad' : undefined} className={`panel p-3 flex flex-col min-h-0 ${className}`}>

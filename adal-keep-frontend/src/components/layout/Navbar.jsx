@@ -6,6 +6,9 @@ import toast from 'react-hot-toast'
 import { beep } from '../AttentionBar'
 import Icon from '../shared/Icon'
 import { onDataChange } from '../../lib/changes'
+import GlassSelect from '../shared/GlassSelect'
+import { cachedGet } from '../../lib/deviceCache'
+import { useDestination, countryChoices } from '../../lib/destination'
 
 export default function Navbar({ onMenuClick, capturedFiles, setCapturedFiles }) {
   const location = useLocation()
@@ -160,6 +163,8 @@ export default function Navbar({ onMenuClick, capturedFiles, setCapturedFiles })
             </button>
             <BackupButton />
           </div>
+          {/* Right beside the Backup button: the destination country (lib/destination.js). */}
+          <CountryPicker />
 
           <InboxButton />
 
@@ -205,6 +210,30 @@ export default function Navbar({ onMenuClick, capturedFiles, setCapturedFiles })
         </div>
       )}
     </>
+  )
+}
+
+/**
+ * The destination country: the Profiles page, its step counts, "Needs action
+ * today" and the search show only the girls going there. Per user and device.
+ */
+export function CountryPicker() {
+  const [dest, setDest] = useDestination()
+  const [rows, setRows] = useState([])
+  useEffect(() => {
+    const load = () => cachedGet('/profiles/brief', { onSaved: d => Array.isArray(d) && setRows(d) })
+      .then(d => { if (Array.isArray(d)) setRows(d) }).catch(() => {})
+    load()
+    return onDataChange(['profiles'], load, 10000)
+  }, [])
+  const choices = countryChoices(rows)
+  if (dest && !choices.includes(dest)) choices.push(dest)
+  return (
+    <GlassSelect aria-label="Destination country" title="Destination country: the profiles, their counts, Needs action today and the search show only this country"
+      className="ak-country-pick" value={dest || 'all'} onChange={e => setDest(e.target.value === 'all' ? '' : e.target.value)}>
+      <option value="all">All countries</option>
+      {choices.map(c => <option key={c} value={c}>{c}</option>)}
+    </GlassSelect>
   )
 }
 

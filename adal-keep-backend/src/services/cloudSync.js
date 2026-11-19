@@ -56,7 +56,9 @@ const GLOBAL = ['/setup/status', '/subscription/status', '/settings', '/profiles
   // What needs a person now: a phone with Adal Keep closed shows it (AdalNoticeJob).
   '/automations/attention',
   // The newest good backup and the licence's end: every screen warns (SafetyAlerts).
-  '/safety']
+  '/safety',
+  // The agency's order of the steps after the EPRO: the Profiles tabs count the same everywhere.
+  '/settings/journey-order']
 const PER_PROFILE = (id) => [`/profiles/${id}`, `/profiles/${id}/fields`, `/profiles/${id}/automations`,
   `/profiles/${id}/journey`, `/profiles/${id}/fill-plan`, `/cv/profile-readiness/${id}`, `/cv/generated?profile_id=${id}`,
   `/profiles/${id}/whatsapp`, `/profiles/${id}/days`]
@@ -386,6 +388,10 @@ async function pushKeys(db) {
     cloudStatus.pushed += group.length
     const big = group.filter(x => x.n >= 60000).map(x => x.r.key)
     if (big.length) broadcast({ t: 'changed', keys: big })
+    // A new "needs you" is online: Firebase wakes the phones at once (the
+    // phones' own look every minute stays as the fallback).
+    const calls = group.find(x => x.r.key === '/automations/attention')
+    if (calls && !isFollower()) import('./fcmPush.js').then(f => f.attentionOnline(db, calls.r.data)).catch(e => console.warn('[push]', e.message))
   }
 }
 

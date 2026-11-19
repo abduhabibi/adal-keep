@@ -40,7 +40,7 @@ test('one notification a day, opening the dashboard', async () => {
   const { default: knex } = await import('knex')
   const db = knex({ client: 'sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true })
   await db.schema.createTable('profiles', t => { t.increments('id'); t.string('full_name'); t.string('status'); t.string('chosen_at'); t.string('medical_valid_until'); t.string('musaned_stage')
-    for (const c of ['visa_stage', 'visa_application_number', 'musaned_pro', 'employer_name', 'work_city', 'contract_number', 'labor_id', 'visa_number', 'musaned_payment']) t.string(c)
+    for (const c of ['visa_stage', 'visa_application_number', 'musaned_pro', 'employer_name', 'work_city', 'contract_number', 'labor_id', 'visa_number', 'musaned_payment', 'tasheer_ref', 'tasheer_date']) t.string(c)
   })
   await db.schema.createTable('automation_queue', t => { t.increments('id'); t.integer('profile_id'); t.string('workflow_id'); t.string('status'); t.string('pause_reason'); t.string('finished_at') })
   await db.schema.createTable('settings', t => { t.string('key'); t.text('value'); t.string('created_at'); t.string('updated_at') })

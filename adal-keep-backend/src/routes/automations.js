@@ -661,6 +661,17 @@ export function journeyOf(p, runs = {}, hasCv = false, docs = null, agents = [])
     past(4) ? 'sent to the Saudi Embassy' : visa[1], 'mofa_visa')
   const visaStep = step('visa', 'Visa issued', past(5) || /printed/i.test(p.visa_stage || '') ? 'done' : at === 4 ? 'active' : 'todo',
     past(5) ? (p.visa_number ? `visa ${p.visa_number}` : 'issued') : /printed/i.test(p.visa_stage || '') ? 'printed' : at === 4 ? 'at the embassy' : '')
+  // Tasheer is behind her when its robot made the appointment, when she has a
+  // Tasheer appointment (slip read, or typed), or when Musaned has her at the
+  // Saudi Embassy or later — not only after a robot run (every girl past the
+  // EPRO stayed on the Tasheer tab, even those already in Saudi Arabia).
+  const tasheerState = () => {
+    const r = fromRun(runs.tasheer_schedule, 'scheduled')
+    if (r[0] === 'done' || r[0] === 'active') return r
+    if (String(p.tasheer_ref || '').trim() || String(p.tasheer_date || '').trim()) return ['done', 'appointment made']
+    if (past(4)) return ['done', 'behind her (Musaned: at the embassy or later)']
+    return r
+  }
   const arrived = step('arrived', 'Arrived KSA', past(6) ? 'done' : 'todo', past(6) ? 'arrived' : '')
   // Who each step is with, and its documents (have / missing).
   const employer = [p.employer_name, p.work_city].filter(Boolean).join(' · ')
@@ -689,7 +700,7 @@ export function journeyOf(p, runs = {}, hasCv = false, docs = null, agents = [])
     // The wakala is not a step on the line: the list's Paid / Unpaid buttons.
     // Tasheer and the police clearance: the Profiles page's tabs after the EPRO.
     extra: [wakala,
-      step('tasheer', 'Tasheer', ...fromRun(runs.tasheer_schedule, 'scheduled'), 'tasheer_schedule'),
+      step('tasheer', 'Tasheer', ...tasheerState(), 'tasheer_schedule'),
       step('police', 'Police', ...fromRun(runs.police_certificate, 'certificate done'), 'police_certificate')],
   }
 }
@@ -865,7 +876,8 @@ router.get('/automations/stages', async (req, res) => {
 export async function allStages(db) {
   {
     const profiles = await db('profiles').select('id', 'status', 'musaned_stage', 'chosen_at', 'visa_stage', 'visa_application_number',
-      'musaned_pro', 'employer_name', 'work_city', 'contract_number', 'labor_id', 'visa_number', 'medical_valid_until', 'musaned_payment')
+      'musaned_pro', 'employer_name', 'work_city', 'contract_number', 'labor_id', 'visa_number', 'medical_valid_until', 'musaned_payment',
+      'tasheer_ref', 'tasheer_date')
     const rows = await db('automation_queue').select('id', 'profile_id', 'workflow_id', 'status', 'pause_reason', 'finished_at').orderBy('id', 'asc')
     const latest = new Map()
     for (const r of rows) {

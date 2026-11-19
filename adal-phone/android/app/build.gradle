@@ -7,8 +7,8 @@ android {
         applicationId "com.adalkeep.phone"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 92
-        versionName "1.91"
+        versionCode 93
+        versionName "1.92"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -59,6 +59,8 @@ dependencies {
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     implementation project(':capacitor-cordova-android-plugins')
+    // Instant "needs you" (AdalPushService); works once app/google-services.json is in place.
+    implementation "com.google.firebase:firebase-messaging:24.1.0"
 }
 
 apply from: 'capacitor.build.gradle'

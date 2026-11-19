@@ -50,6 +50,12 @@
             </intent-filter>
         </receiver>
 
+        <!-- Instant "needs you" from the main PC (Firebase Cloud Messaging). -->
+        <service android:name=".AdalPushService" android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
         <service
             android:name=".AdalNoticeJob"
             android:exported="false"

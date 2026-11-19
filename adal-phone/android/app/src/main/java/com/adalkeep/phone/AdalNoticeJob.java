@@ -48,7 +48,9 @@ public class AdalNoticeJob extends JobService {
         SharedPreferences p = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         SharedPreferences.Editor e = p.edit().putBoolean("on", on);
         if (on) {
-            if (!url.equals(p.getString("url", "")) || !agency.equals(p.getString("agency", ""))) e.remove("last").remove("token").remove("shown");
+            if (!url.equals(p.getString("url", "")) || !agency.equals(p.getString("agency", ""))) e.remove("last").remove("shown");
+            // Paired again (a new online account): never the old account's sign-in.
+            if (!email.equals(p.getString("email", "")) || !url.equals(p.getString("url", ""))) e.remove("token").remove("token_until");
             e.putString("url", url).putString("anon", anon).putString("email", email).putString("password", password).putString("agency", agency);
         } else {
             for (String k : new String[] { "url", "anon", "email", "password", "agency", "token", "shown" }) e.remove(k);
@@ -176,7 +178,10 @@ public class AdalNoticeJob extends JobService {
             if ("/automations/attention".equals(r.optString("key"))) list = r.optJSONArray("data");
             else beat = r.optString("updated_at", "");
         }
-        if (list == null) return;
+        // Nothing at all (not even the PC's heartbeat): this sign-in sees nothing — signed in
+        // as an old account of this phone. The next look signs in afresh.
+        if (rows.length() == 0) { p.edit().remove("token").remove("token_until").apply(); android.util.Log.i("AdalNotice", "calls: nothing readable, signing in again"); return; }
+        if (list == null) { android.util.Log.i("AdalNotice", "calls: no list online yet"); return; }
         // The PC's heartbeat (every 15 s) is older than 3 minutes: the PC is off — nothing is calling now.
         if (beat.length() > 0 && ageMs(beat) > 3 * 60_000L) list = new JSONArray();
         boolean first = !p.getBoolean("calls_seen", false);

@@ -131,6 +131,9 @@ cp -f "$INST/usb/4 - Copy logs to this USB.bat" "$USB/"
 cp -f "$INST/usb/Adal Connect - Main.bat" "$INST/usb/Adal Connect - Companion.bat" "$INST/usb/Adal Disconnect.bat" "$USB/"
 cp -f "$INST/usb/deps/adal-connect.ps1" "$INST/usb/deps/adal-disconnect.ps1" "$USB/deps/"
 cp -f "$INST/usb/deps/prepare-deps.ps1" "$USB/deps/"
+# Per-agency support keys (scripts/support-key.sh <pcnumber> writes them into
+# $USB/deps/support-keys, which this build keeps): public halves only.
+mkdir -p "$USB/deps/support-keys"
 # Tailscale (the private link) for both installers: fetched here when this PC
 # has internet, so an already prepared USB need not run PREPARE again.
 TS="$USB/deps/tailscale/tailscale-setup.msi"

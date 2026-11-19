@@ -1,7 +1,7 @@
 # adal-connect.ps1 - lets Adal (remote support) reach this PC, and opens the
 # Adal Keep ports. Run by "Adal Connect - Main.bat" / "Adal Connect - Companion.bat".
 # Needs admin (the .bat asks once). Never asks for or stores a password.
-param([string]$Role = 'Main', [string]$UsbRoot = '', [string]$User = $env:USERNAME)
+param([string]$Role = 'Main', [string]$UsbRoot = '', [string]$User = $env:USERNAME, [string]$PcNumber = '')
 
 $ErrorActionPreference = 'Continue'
 $KEY = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIE3VWqypYFwdgku7EMt6KQQKG0sHGsOPHmoKJIAY+KxY adal-remote-support'
@@ -49,17 +49,58 @@ try {
   Say "      sshd: $((Get-Service sshd).Status), starts with Windows, shell = PowerShell"
 } catch { Say "      sshd problem: $($_.Exception.Message)" }
 
-# 2. Adal's key (administrators_authorized_keys: Administrators + SYSTEM only)
+# 2. Adal's key for THIS agency (administrators_authorized_keys: Administrators + SYSTEM only).
+# Each agency has its own key, named by its Main PC's 5-digit number; the USB
+# carries the public halves in deps\support-keys\<number>.pub. Only that one is
+# installed, and every other Adal key (the old shared adal-remote-support one,
+# other agencies') is removed. Without a file for the number, the old shared key
+# stays as it was, so nothing breaks until the agency's key is on the USB.
 Say "[2/4] Adal support key..."
+$sshDir = "$env:ProgramData\ssh"
+$logDir = Join-Path $sshDir 'logs'
+while ($PcNumber -notmatch '^\d{5}$') {
+  $PcNumber = (Read-Host "      The agency's 5-digit PC number (Main PC: Adal Keep -> Settings -> Main PC)").Trim()
+}
+$keyFile = Join-Path $PSScriptRoot "support-keys\$PcNumber.pub"
+$agencyKey = $null
+if (Test-Path $keyFile) {
+  $agencyKey = (Get-Content $keyFile -ErrorAction SilentlyContinue | Where-Object { $_ -match '^ssh-ed25519 \S+' } | Select-Object -First 1)
+  if ($agencyKey) { $agencyKey = (($agencyKey.Trim() -split '\s+')[0..1] -join ' ') + " adal-support-$PcNumber" }
+}
 try {
-  $dir = "$env:ProgramData\ssh"
-  New-Item -ItemType Directory -Path $dir -Force | Out-Null
-  $f = Join-Path $dir 'administrators_authorized_keys'
-  $have = if (Test-Path $f) { Get-Content $f -ErrorAction SilentlyContinue } else { @() }
-  if (-not ($have -contains $KEY)) { Add-Content -Path $f -Value $KEY -Encoding ascii }
+  New-Item -ItemType Directory -Path $sshDir -Force | Out-Null
+  $f = Join-Path $sshDir 'administrators_authorized_keys'
+  $have = @(if (Test-Path $f) { Get-Content $f -ErrorAction SilentlyContinue })
+  if ($agencyKey) {
+    $keep = @($have | Where-Object { $_ -and $_ -notmatch 'adal-remote-support|adal-support-\d{5}' })
+    Set-Content -Path $f -Value (@($keep) + $agencyKey) -Encoding ascii
+    Say "      key for PC $PcNumber in place (old shared key removed)"
+  } else {
+    if (-not ($have -contains $KEY)) { Add-Content -Path $f -Value $KEY -Encoding ascii }
+    Say "      WARNING: no key for PC $PcNumber on this USB (deps\support-keys\$PcNumber.pub)"
+    Say "      the old shared key stays; Adal: run scripts/support-key.sh $PcNumber, then Connect again"
+  }
   icacls.exe $f /inheritance:r /grant '*S-1-5-32-544:F' /grant '*S-1-5-18:F' | Out-Null
-  Say "      key in place"
 } catch { Say "      key problem: $($_.Exception.Message)" }
+
+# Every SSH login is written down on this PC: sshd logs at VERBOSE (the key's
+# fingerprint, user and address of each login) into $logDir\sshd.log
+# (SyslogFacility LOCAL0 = log file on Windows OpenSSH). The settings go at the
+# top of sshd_config: below its "Match" block SyslogFacility would stop sshd.
+try {
+  $cfg = Join-Path $sshDir 'sshd_config'
+  if (-not (Test-Path $cfg) -and (Test-Path "$env:ProgramFiles\OpenSSH\sshd_config_default")) {
+    Copy-Item "$env:ProgramFiles\OpenSSH\sshd_config_default" $cfg
+  }
+  if (Test-Path $cfg) {
+    $lines = @(Get-Content $cfg | Where-Object { $_ -notmatch '^\s*#?\s*(LogLevel|SyslogFacility)\b' -and $_ -notmatch '^# Adal: every login is logged' })
+    Set-Content -Path $cfg -Value (@('# Adal: every login is logged', 'SyslogFacility LOCAL0', 'LogLevel VERBOSE') + $lines) -Encoding ascii
+  }
+  New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+  Add-Content -Path (Join-Path $logDir 'adal-support.log') -Encoding ascii -Value "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') CONNECT $Role PC=$PcNumber key=$(if ($agencyKey) { "adal-support-$PcNumber" } else { 'adal-remote-support (old shared)' }) by $User"
+  Restart-Service sshd -ErrorAction Stop
+  Say "      every SSH login is logged in $logDir\sshd.log"
+} catch { Say "      log setup problem: $($_.Exception.Message)" }
 
 # 3. Firewall: every network type (Public too - the usual blocker)
 Say "[3/4] Firewall (all network types)..."
@@ -104,6 +145,8 @@ $summary = @"
   PC name:       $env:COMPUTERNAME
   Windows user:  $User
   LAN IPs:       $lan
+  Agency PC no.: $PcNumber $(if ($agencyKey) { '(own key)' } else { '(OLD shared key - no key file on USB)' })
+  Login log:     $logDir\sshd.log
 
   Tell Claude: $Role ready
 ==============================================

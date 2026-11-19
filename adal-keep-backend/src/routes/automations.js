@@ -859,7 +859,7 @@ router.get('/automations/:id/login', async (req, res) => {
  */
 export async function runTab(db, runId) {
   // A site's sign-in tab, not a run's ("site-tasheer"): the same live view.
-  if (/^site-/.test(String(runId))) return (await import('../services/tasheerSession.js')).siteTab(String(runId))
+  if (/^site-/.test(String(runId))) return (await import('../services/sessionKeeper.js')).siteTab(String(runId)) || (await import('../services/tasheerSession.js')).siteTab(String(runId))
   const run = await db('automation_queue').where('id', runId).first('id', 'workflow_id', 'status').catch(() => null)
   if (!run) return null
   // Looking at a finished run's tab does not make it that run's again (the site's next run uses it).

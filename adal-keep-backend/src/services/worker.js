@@ -25,7 +25,7 @@ import { decideAgencyActions } from './jev/agencyManager.js'
 import { getActiveEmployee } from './activeEmployee.js'
 import { isAppLocked } from './subscription.js'
 import { plainReason, workflowName, withInternetCheck } from './runOutcome.js'
-import { openRunTab, forgetRunTab, tabOfRun, handTabToPerson, findRunTab, activeRunIds, keepingRunIds, tidySiteTabs, hostOf, codeBoxUp, spaceForRun } from './tabManager.js'
+import { openRunTab, forgetRunTab, tabOfRun, handTabToPerson, findRunTab, activeRunIds, keepingRunIds, tidySiteTabs, hostOf, codeBoxUp, spaceForRun, peerOf } from './tabManager.js'
 import { registerTab, unregisterTab, noteLink } from './bandwidth.js'
 import { createRunQueue } from './runQueue.js'
 import { reportRuns } from './busy.js'
@@ -444,6 +444,14 @@ async function runJob(db, job) {
     // A portal account other than the main one works in its own browser space (its own sign-in).
     const space = await spaceForRun(db, browser, job).catch(e => { console.warn(`[worker] run #${job.id}: no space of its own (${e.message})`); return null })
     const page = await openRunTab(browser, job.id, { workflowId: job.workflow_id, busyRuns: await activeRunIds(db), keepRuns: await keepingRunIds(db), space })
+    // Which account the tab is: its title starts with the account's name.
+    try {
+      const { labelTab, accountLabel } = await import('./robotCheck.js')
+      let acct = job.account_id
+      if (!acct) { try { acct = JSON.parse(job.context || '{}').account_id } catch {} }
+      const peer = peerOf(job.workflow_id)
+      if (peer) await labelTab(page, await accountLabel(db, peer, acct))
+    } catch {}
     await executeRun(db, page, job)
   } catch (e) {
     // Could not start at all: no browser, profile deleted, ...

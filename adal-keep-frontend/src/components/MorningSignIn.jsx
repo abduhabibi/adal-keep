@@ -36,10 +36,13 @@ export default function MorningSignIn() {
     setChoose(null)
     try {
       const { data } = await api.post(`/sessions/${s.key}/open`, accountId ? { account_id: accountId } : {})
-      if (data?.live) {
+      if (data?.already) toast.success(`${s.name} is signed in already — its tab is used, nothing more to do`, { duration: 6000 })
+      else if (data?.live) {
         setLive(data.live)
-        toast.success(`${s.name}: the name and password are filled — type the captcha and sign in, here`, { duration: 7000 })
-      } else toast.success(data?.auto ? `Adal Keep fills in ${s.name} by itself (account + code) — if it shows a picture code, type it in the window and press Log in` : `Sign in to ${s.name} in the window that opened — it then stays signed in all day`, { duration: 7000 })
+        const what = s.key === 'musaned' ? 'tick "I\'m not a robot" here — Adal Keep presses Sign in, types the code and goes on'
+          : s.key === 'lmis' ? 'type the SMS code here' : s.key === 'mofa' ? 'type the picture\'s numbers here and press Login' : 'type the captcha and sign in, here'
+        toast.success(`${s.name}: the name and password are filled — ${what}`, { duration: 8000 })
+      } else toast.success(`Sign in to ${s.name} in the window that opened — it then stays signed in all day`, { duration: 7000 })
     } catch (e) { toast.error(err(e)) }
     setTimeout(load, 8000)
   }

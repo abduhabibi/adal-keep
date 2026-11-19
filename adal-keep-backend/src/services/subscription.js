@@ -14,6 +14,9 @@
  *               (50,000 ETB) stay open.
  *   Locked      every /api call and every stored document is refused, and
  *               the background work stops. Nothing is encrypted or deleted.
+ *   Suspended   Adal suspended the PC in Adal Keep Admin (signed licence,
+ *               plans.js): locked the same way, with a "suspended" screen,
+ *               until Admin allows it again. Codes still add paid months.
  *
  * The seller makes the Authenticator entry with the private seller page
  * (seller/make-seller-page.mjs). ADAL_LICENSE_KEY must be the same in every
@@ -34,6 +37,8 @@ import { licenseNow } from './plans.js'
 
 // Adal's signed licence (plans.js): paid until / a longer trial, given in the admin panel.
 const licPaid = () => Number(licenseNow()?.paid_until) || 0
+// Adal suspended this PC (Admin → Suspend): locked until Admin allows it again, whatever is paid.
+const suspension = () => licenseNow()?.suspended || null
 const trialEnd = (s) => Math.max((s?.installation_date || trustedNow()) + TRIAL_DAYS * DAY, Number(licenseNow()?.trial_until) || 0)
 
 dotenv.config()
@@ -262,6 +267,7 @@ function touch(s) {
 /** 'active' (unlocked) · 'trial' · 'locked' */
 export function computeMode(s) {
   syncClock()
+  if (suspension()) return 'locked'
   if (!s) return 'trial'
   const now = effectiveNow(s)
   const pc = pcNumber()
@@ -290,10 +296,15 @@ export function statusPayload(s = state()) {
     priceEtb: PRICE_ETB,
     paidMonths: 6,
     serverTime: now,
+    suspended: !!suspension(),
+    suspendedAt: suspension()?.at || null,
+    suspendNote: suspension()?.note || '',
   }
 }
 
 let _cache = { at: 0, locked: false }
+/** A new licence from Adal (plans.js): background work sees it at once, not in 30 s. */
+export function licenseChanged() { _cache.at = 0 }
 /** For background work: true while the trial is over and the PC is not unlocked. */
 export function isAppLocked() {
   if (Date.now() - _cache.at > 30000) _cache = { at: Date.now(), locked: computeMode(readSide()) === 'locked' }
@@ -343,6 +354,8 @@ export function applyCode(code) {
 export function unlockApproved() {
   const s = state()
   const pc = pcNumber()
+  // Suspended: an approval adds nothing now (it would add 6 months at every check).
+  if (suspension()) return { ok: false, suspended: true }
   if (computeMode(s) === 'active') return { ok: true }
   writeSide({ ...extend(s, pc, trustedNow(), 'approval'), tries: [] })
   _cache.at = 0
@@ -370,6 +383,7 @@ export function subscriptionGuard(req, res, next) {
   touch(s)
   if (computeMode(s) !== 'locked') return next()
   if (OPEN_WHEN_LOCKED.some(([m, q]) => req.method === m && p === q)) return next()
+  if (suspension()) return res.status(402).json({ error: 'locked', suspended: true, message: 'Adal Keep is suspended on this PC by Adal. Call Adal to have it allowed again.' })
   return res.status(402).json({ error: 'locked', message: 'Adal Keep is locked. Unlock it to continue.' })
 }
 

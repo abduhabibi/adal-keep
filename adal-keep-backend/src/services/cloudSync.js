@@ -26,7 +26,10 @@ import { getLanAddresses } from './discovery.js'
 // The PC's office addresses too: a Companion that joined with the PC number
 // opens this PC directly from them (instant) instead of through the cloud.
 const lanNow = () => { try { return getLanAddresses().map(a => a.address).slice(0, 6) } catch { return [] } }
-const beatData = () => ({ at: new Date().toISOString(), ...(isFollower() ? {} : { pc: myPcNumber(), lan: lanNow(), port: PORT() }) })
+// The beat also says which licence this PC uses and whether it is suspended (Admin shows it).
+let licBeat = null
+import('./plans.js').then(P => { licBeat = () => { const l = P.licenseNow(); return l ? { lic_at: l.at || null, suspended: !!l.suspended } : {} } }).catch(() => {})
+const beatData = () => ({ at: new Date().toISOString(), ...(isFollower() ? {} : { pc: myPcNumber(), lan: lanNow(), port: PORT(), ...(licBeat?.() || {}) }) })
 import { tgReady, tgPut, tgDelete, TG_MAX_DOWNLOAD, findStorageChat } from './tgStore.js'
 import { viewCopy } from './viewCopy.js'
 import fs from 'fs'
@@ -808,6 +811,15 @@ async function fromAdal(db, id) {
 // newest backup here (its own, or another agency PC's — a replaced PC).
 export const adalJob = { kind: null, running: false, result: null, error: null, at: null }
 async function adalCommand(db, method, p, body) {
+  // Admin saved this PC's licence (paid days, allowed, suspended): read it now.
+  // The command only says "look"; the licence counts only if Adal signed it.
+  if (p === '/_adal/license') {
+    const P = await import('./plans.js')
+    await P.licenseNudge()
+    const S = await import('./subscription.js')
+    const st = S.statusPayload()
+    return { mode: st.mode, suspended: st.suspended, paidUntil: st.paidUntil, at: P.licenseNow()?.at || null }
+  }
   // Before the backup's "busy": neither of these waits for a backup.
   if (p === '/_adal/company') {
     await db('companies').update({ owner_name: String(body.name || '').trim() || null, phone2: String(body.phone || '').trim() || null })

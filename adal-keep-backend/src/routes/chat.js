@@ -93,7 +93,7 @@ router.post('/chat/unlock-request', upload.single('image'), wrap(async (req, db)
 router.get('/chat/unlock-status', wrap(async (req, db) => {
   if (!chat.chatConfigured()) return { configured: false }
   const r = await chat.unlockStatus(db)
-  if (r?.status === 'approved') { unlockApproved(); return { ...r, unlocked: true } }
+  if (r?.status === 'approved') { const u = unlockApproved(); return { ...r, unlocked: !!u.ok } }
   return r || { status: 'none' }
 }))
 

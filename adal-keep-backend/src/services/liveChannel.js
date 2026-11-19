@@ -159,6 +159,9 @@ function startStream(db, ch, run, view) {
 // ------------------------------------------------------------ messages
 async function onMessage(db, agency, ch, m) {
   if (m.t === 'pc' || m.t === 'answer' || m.t === 'frame' || m.t === 'mirror' || m.t === 'inputError' || m.t === 'changed' || m.t === 'ring') return
+  // Adal Keep Admin saved this PC's licence: read it again now. Anyone on the
+  // channel could send this, so it carries nothing: only Adal's signed licence counts.
+  if (m.t === 'adal') { (await import('./plans.js')).licenseNudge().catch(() => {}); return }
   liveStatus.seen++
   const phone = await phoneOf(db, agency, m.jwt)
   if (!phone) { liveStatus.refused++; liveStatus.refusedWhy = m.jwt ? 'not a phone of this agency (or its sign-in could not be checked)' : 'no sign-in on the message'; return }

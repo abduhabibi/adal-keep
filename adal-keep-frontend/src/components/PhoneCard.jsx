@@ -65,7 +65,7 @@ export default function PhoneCard() {
         <span className="text-slate-500">App {up.mine ? `version ${up.mine}` : ''}</span>
         {up.newer
           ? <button type="button" onClick={() => window.__adalInstallUpdate?.()} disabled={up.busy}
-              className="rounded-full bg-red-600 px-3 py-1.5 text-xs font-bold text-white">{up.busy ? '⬇ Downloading…' : `⬆ Update to ${up.latest}`}</button>
+              className="rounded-full bg-red-600 px-3 py-1.5 text-xs font-bold text-white">{up.busy ? '⬇ Downloading…' : `⬆ Update available (${up.latest}) — install`}</button>
           : <button type="button" onClick={check} disabled={checking}
               className="rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold dark:border-slate-700">{checking ? 'Looking…' : up.checkedAt ? '✓ Newest — look again' : 'Look for an update'}</button>}
         <button type="button" onClick={() => { if (confirm('Pair this phone with another agency (its PC number)?')) window.__adalPair?.() }}

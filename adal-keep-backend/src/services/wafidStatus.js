@@ -6,12 +6,12 @@
  *   checkAll(db)                      every "Medical · Applied" profile is
  *                                     looked up on wafid.com: FIT → Medical ·
  *                                     Fit, UNFIT → Medical · Rejected
- *   startWafidChecker()               nothing runs by itself now; a person presses Check, in a
- *                                     background tab of the agency's Brave
+ *   startWafidChecker()               nothing: the daily check of the Wafid tab (working
+ *                                     hours, one PC of the agency) is in selectionCheck.js
  */
 import { getBrowser, openBrowserIfAny } from './browser.js'
 import { setupTab, borrowTab, doneWithTab, activeRunIds } from './tabManager.js'
-import { checkMedicalStatus } from './wafidWorkflow.js'
+import { checkMedicalStatus, downloadResultPdf } from './wafidWorkflow.js'
 
 export const WAFID_BOOK = 'wafid_book'
 const BETWEEN_MS = 20000 // one look-up every 20 s: gentle on wafid.com
@@ -83,44 +83,96 @@ async function note(db, profileId, title, body) {
   } catch {}
 }
 
-/** Look every applied profile up once. Returns what changed. */
-export async function checkAll(db, { onlyId = null, auto = false } = {}) {
+/**
+ * What Wafid shows for her, saved: FIT → Medical · Fit (her next step; the
+ * Book card shows ✓, her slip is fetched when missing), UNFIT → Medical ·
+ * Rejected (the Unfit tab). The result's PDF goes into her Medical Report.
+ */
+export async function saveResult(db, p, r, pdf = null) {
+  const status = STATE_TO_STATUS[r?.state]
+  if (!status) return false
+  await db('profiles').where('id', p.id).update({ status, updated_at: new Date().toISOString() })
+  await note(db, p.id, `Wafid medical: ${r.state === 'fit' ? 'FIT ✅' : 'UNFIT ❌'} — ${p.full_name}`,
+    `wafid.com shows ${r.text} for passport ${p.passport_number}. Status set to Medical · ${r.state === 'fit' ? 'Fit' : 'Rejected'}.`)
+  if (pdf?.length) {
+    try {
+      const { savePdf } = await import('./musanedContracts.js')
+      await savePdf(db, p.id, 'Medical Report', pdf, `wafid-medical-${String(p.passport_number).trim().toUpperCase()}.pdf`)
+      const { applyMedicalRecord } = await import('./medicalValidity.js')
+      await applyMedicalRecord(db, p.id, pdf).catch(() => null)
+    } catch (e) { console.warn(`[wafid] ${p.full_name}: the result PDF was not saved: ${e.message}`) }
+  }
+  if (r.state === 'fit') {
+    await markBookingDone(db, p.id).catch(() => false)
+    const slip = await db('files').join('profile_fields', 'files.profile_field_id', 'profile_fields.id')
+      .where({ 'profile_fields.profile_id': p.id, 'profile_fields.name': 'Appointment Slip' }).first('files.id').catch(() => null)
+    if (!slip) await queueWafidSlip(db, p.id, 'missing').catch(() => {})
+  }
+  return true
+}
+
+/**
+ * Look profiles up once, one after the other. Returns what changed.
+ *   onlyId      one profile (the button on her page)
+ *   list        these profiles (the daily check: the Wafid tab)
+ *   look        (passport) => { state, text, pdf? } — another PC reads Wafid
+ *               (the daily check on a Companion); without it, this PC's tab
+ *   shouldStop  () => reason — the daily check ends early (its PC went away)
+ * Without onlyId / list: every "Medical · Applied" profile.
+ */
+export async function checkAll(db, { onlyId = null, auto = false, list = null, look = null, by = '', shouldStop = null, gapMs = BETWEEN_MS } = {}) {
   if (checker.running) return { busy: true }
   // The timed check never opens Brave itself: only when Brave is open.
-  if (auto && !(await openBrowserIfAny())) { console.log('[wafid] Brave is closed — checking when it is open'); return { skipped: true } }
+  if (auto && !look && !(await openBrowserIfAny())) { console.log('[wafid] Brave is closed — checking when it is open'); return { skipped: true } }
   checker.running = true
   checker.results = []
-  let page = null
+  checker.by = by
+  checker.auto = !!auto
+  let page = null, stopped = ''
   try {
-    let q = db('profiles').whereNotNull('passport_number').whereNot('passport_number', '')
-    q = onlyId ? q.where('id', onlyId) : q.where('status', 'medical_applied')
-    const list = await q.select('id', 'full_name', 'passport_number', 'nationality')
+    if (!list) {
+      let q = db('profiles').whereNotNull('passport_number').whereNot('passport_number', '')
+      q = onlyId ? q.where('id', onlyId) : q.where('status', 'medical_applied')
+      list = await q.select('id', 'full_name', 'passport_number', 'nationality')
+    }
     if (!list.length) return { checked: 0, results: [] }
 
-    const browser = await getBrowser()
-    page = await borrowTab(browser, 'wafid_check', await activeRunIds(db))
-    await setupTab(page, { runId: 'wafid-status' })
-    page.__adalAllowImages = true // reCAPTCHA
+    if (!look) {
+      const browser = await getBrowser()
+      page = await borrowTab(browser, 'wafid_check', await activeRunIds(db))
+      await setupTab(page, { runId: 'wafid-status' })
+      page.__adalAllowImages = true // reCAPTCHA
+    }
+    const { runsWorking } = await import('./busy.js')
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 
     for (const [i, p] of list.entries()) {
-      if (i) await new Promise(r => setTimeout(r, BETWEEN_MS))
-      let r
-      try { r = await checkMedicalStatus(page, String(p.passport_number).trim().toUpperCase()) } catch (e) { r = { state: 'unknown', text: e.message } }
-      const row = { id: p.id, name: p.full_name, passport: p.passport_number, ...r }
-      checker.results.push(row)
-      console.log(`[wafid] ${p.full_name} (${p.passport_number}): ${r.state} — ${r.text}`)
-      const status = STATE_TO_STATUS[r.state]
-      if (status) {
-        await db('profiles').where('id', p.id).update({ status, updated_at: new Date().toISOString() })
-        await note(db, p.id, `Wafid medical: ${r.state === 'fit' ? 'FIT ✅' : 'UNFIT ❌'} — ${p.full_name}`,
-          `wafid.com shows ${r.text} for passport ${p.passport_number}. Status set to Medical · ${r.state === 'fit' ? 'Fit' : 'Rejected'}.`)
-      }
+      if (i && gapMs) await sleep(gapMs)
+      // One agent at a time: a robot that started meanwhile goes first.
+      while (auto && runsWorking() > 0 && !(stopped = shouldStop?.() || '')) await sleep(30000)
+      if ((stopped = stopped || shouldStop?.() || '')) break
+      const passport = String(p.passport_number).trim().toUpperCase()
+      let r, pdf = null
+      try {
+        if (look) {
+          const got = await look(passport)
+          if (got?.pdf) pdf = Buffer.from(String(got.pdf), 'base64')
+          r = { state: got?.state || 'unknown', text: got?.text || '' }
+        } else {
+          r = await checkMedicalStatus(page, passport)
+          if (STATE_TO_STATUS[r.state]) pdf = await downloadResultPdf(page).catch(() => null)
+        }
+      } catch (e) { r = { state: 'unknown', text: e.message } }
+      checker.results.push({ id: p.id, name: p.full_name, passport: p.passport_number, state: r.state, text: r.text })
+      console.log(`[wafid] ${p.full_name} (${p.passport_number}): ${r.state} — ${r.text}${by ? ` (on ${by})` : ''}`)
+      await saveResult(db, p, r, pdf)
       if (r.state === 'challenge') {
         await note(db, p.id, 'Wafid asks "I am not a robot"', 'The medical check stopped. Open wafid.com/en/medical-status-search once in Adal Browser, answer it, then press "Check medical results now".')
+        stopped = 'Wafid asked "I am not a robot"'
         break
       }
     }
-    return { checked: checker.results.length, results: checker.results }
+    return { checked: checker.results.length, results: checker.results, ...(stopped ? { stopped } : {}) }
   } finally {
     await doneWithTab(page).catch(() => {})
     checker.running = false
@@ -128,5 +180,5 @@ export async function checkAll(db, { onlyId = null, auto = false } = {}) {
   }
 }
 
-// No check runs by itself: it opened tabs in people's way. A person presses the button.
+// The daily check of the Wafid tab runs from selectionCheck.js (one PC of the agency, one at a time).
 export function startWafidChecker() {}

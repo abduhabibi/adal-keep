@@ -65,7 +65,7 @@ test('skipped up to the EPRO; after it, only "done" marks', () => {
 test('a Companion holding the lease reads Musaned step by step; another PC gets nothing', async () => {
   Object.assign(lease, { holder: 'pc-b', name: 'PC B', token: 'tok', until: Date.now() + 60000 })
   const src = _remoteSourceForTest('tok', 'PC B', cancelable)
-  assert.deepEqual(hello({ instance: 'pc-b', name: 'PC B', cores: 8, free_mb: 4000, musaned: true }), { run: 'tok' })
+  assert.deepEqual(hello({ instance: 'pc-b', name: 'PC B', cores: 8, free_mb: 4000, musaned: true }), { run: 'tok', kind: 'musaned' })
   assert.equal(hello({ instance: 'pc-c', name: 'PC C', cores: 2, free_mb: 1000, musaned: true }).run, undefined)
   assert.deepEqual(await nextStep('wrong'), { done: true })
   const asked = src.api('/api/search/employment?page=0')

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import api from '../services/api'
 import { onDataChange } from '../lib/changes'
 import MorningSignIn from '../components/MorningSignIn'
+import NeedsActionCard from '../components/NeedsActionCard'
 import { onPhone } from '../lib/phoneMode'
 import { useAuth } from '../context/AuthContext'
 import { greeting } from '../lib/ethiopic'
@@ -59,6 +60,8 @@ export default function DashboardPage() {
       </section>
 
       {!onPhone() && <MorningSignIn />}
+
+      <NeedsActionCard />
 
       {todo == null ? (
         <div className="ak-stat flex-row items-center gap-4" aria-hidden="true">

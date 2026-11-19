@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../services/api'
 import { dragProfiles } from '../lib/profileDrag'
+import { prefetchProfile } from '../lib/profileCache'
 import Segmented from './shared/Segmented'
 
 /**
@@ -134,6 +135,7 @@ export default function ProfileSearchPad({
               onDragStart={(e) => dragProfiles(e, p)}
               title="Open — or drag onto a checklist or the tray"
               onClick={() => navigate(`/profiles/${p.id}`)}
+              onMouseEnter={() => prefetchProfile(p.id)}
               className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-teal-50 dark:hover:bg-teal-900/30 transition-colors cursor-grab active:cursor-grabbing"
             >
               <span className="flex items-center gap-1.5 text-sm font-medium text-slate-800 dark:text-slate-100">

@@ -16,6 +16,7 @@ import SelectionBar from '../components/SelectionBar'
 import ReadingBar from '../components/ReadingBar'
 import { onDataChange } from '../lib/changes'
 import { profilesList } from '../lib/profilesCache'
+import { prefetchProfile, prefetchRecent } from '../lib/profileCache'
 import { cachedGet } from '../lib/deviceCache'
 import { onPhone } from '../lib/phoneMode'
 import { FIRST, phaseOf as phaseFrom, inWaitingPhase, stepMarks } from '../lib/phase'
@@ -94,6 +95,8 @@ export default function ProfilesPage() {
   useEffect(() => { if (!waitingFiles.size) return; const t = setInterval(() => load(true), 5000); return () => clearInterval(t) }, [waitingFiles.size > 0, load]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { load() }, [load])
+  // The girls opened last are fetched ahead: opening one again shows at once.
+  useEffect(() => { prefetchRecent() }, [])
 
   // Date range, experience, age, married, country, skill, religion + sort.
   const { rows: allRows, filterBar, sortBar, active: filtering, clear, step, setStep, stepCounts, activeCount, journey, filterKey } = useProfileFilters(byStatusBroker)
@@ -347,6 +350,7 @@ export default function ProfilesPage() {
               key={p.id}
               className={`panel group relative cursor-pointer px-3 py-2.5 sm:p-4 transition hover:shadow-soft ${picked.has(p.id) ? 'ring-2 ring-teal-500' : ''}`}
               onClick={() => navigate(`/profiles/${p.id}`)}
+              onMouseEnter={() => prefetchProfile(p.id)} onTouchStart={() => prefetchProfile(p.id)}
             >
               <label onClick={(e) => e.stopPropagation()} title="Select"
                 className="absolute right-1.5 top-1.5 z-10 flex h-7 w-7 cursor-pointer items-center justify-center rounded-md">

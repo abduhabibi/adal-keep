@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import api from '../services/api'
 import { useFileCapture } from '../context/FileCaptureContext'
 import { CameraShot, ON_PHONE } from './shared/PickFile'
-import { onPhone } from '../lib/phoneMode'
+import { onPhone, onCompanionOnline } from '../lib/phoneMode'
 import { readPassportHere, warmPassportReader } from '../lib/passportHere'
 
 /**
@@ -14,7 +14,12 @@ import { readPassportHere, warmPassportReader } from '../lib/passportHere'
  */
 const ACCEPT = /^(image\/(jpeg|png|webp|bmp)|application\/pdf)$/
 
-export default function PassportFirst({ onRead, onSkip }) {
+// Read here, in this window, before anything is sent: a phone, and an Adal
+// Companion on its online pages (the passport is not uploaded to the internet
+// just to be read; 127.0.0.1:47801 has the reader in /tess like the phone app).
+const readsHere = () => (onPhone() || onCompanionOnline()) && !import.meta.env.VITE_ADMIN
+
+export default function PassportFirst({ onRead, onSkip, onLater }) {
   const { capturedFiles } = useFileCapture()
   const [over, setOver] = useState(false)
   const [busy, setBusy] = useState(null)        // { name, preview, t0 }
@@ -30,7 +35,15 @@ export default function PassportFirst({ onRead, onSkip }) {
   // On a phone the camera opens by itself (Gallery / Files are on it).
   useEffect(() => { if (ON_PHONE) { const t = setTimeout(() => openCamera(), 250); return () => clearTimeout(t) } }, [])
   // The phone's own passport reader starts while the camera is open: the read is then quick.
-  useEffect(() => { if (onPhone() && !import.meta.env.VITE_ADMIN) warmPassportReader() }, [])
+  useEffect(() => { if (readsHere()) warmPassportReader() }, [])
+  // The PC's reader starts now too (it is ~0.5 s quicker on the first passport).
+  useEffect(() => { if (!window.__ADAL_CLOUD && !readsHere()) api.post('/new-profile/warm').catch(() => {}) }, [])
+  // The place of birth, region and date of issue follow the bottom lines (the form is filled at once).
+  const placeBehind = (data) => {
+    if (!data?.place_pending || !data.upload || !onLater) return
+    api.get(`/new-profile/place/${encodeURIComponent(data.upload)}`, { adalNoCache: true, timeout: 15000 })
+      .then(r => { const f = r.data?.fields; if (f && Object.values(f).some(Boolean)) onLater(f) }).catch(() => {})
+  }
   const openCamera = () => {
     if (navigator.mediaDevices?.getUserMedia && window.isSecureContext) setCamera(true)
     else cameraRef.current?.click()
@@ -53,7 +66,7 @@ export default function PassportFirst({ onRead, onSkip }) {
       // A phone reads the passport itself first (lib/passportHere.js: its bottom
       // lines, check digits verified, and the place of birth by its position) —
       // no upload, no PC (asked on 2026-11-17).
-      if (onPhone() && !import.meta.env.VITE_ADMIN) {
+      if (readsHere()) {
         // Read on the phone; never more than 25 s (then typed in or read by the PC).
         const here = await Promise.race([readPassportHere(file), new Promise(r => setTimeout(() => r(null), 25000))]).catch(() => null)
         if (here) {
@@ -88,8 +101,8 @@ export default function PassportFirst({ onRead, onSkip }) {
       if (data.queued || (!data.doc_type && !data.error && !data.fields)) setProblem({ text: 'The office PC did not answer, and a passport is read there. Open Adal Keep on the office PC (or check its internet), then try again.', result: data })
       else if (data.error) setProblem({ text: `The passport could not be read (${data.error}). Try a sharper picture, or fill the form by hand.`, result: data })
       else if (data.doc_type !== 'Passport') setProblem({ text: `This looks like ${!data.doc_type || data.doc_type === 'other' ? 'something other than a passport' : `a ${data.doc_type}`}, not a passport data page.`, result: data })
-      else if (data.existing) setProblem({ text: 'This passport already has a profile:', result: data })
-      else onRead(data)
+      else if (data.existing) { setProblem({ text: 'This passport already has a profile:', result: data }); placeBehind(data) }
+      else { onRead(data); placeBehind(data) }
     } catch (e) {
       setProblem({ text: `Reading failed: ${e.response?.data?.error || e.message}. Try again.` })
     } finally {
@@ -152,7 +165,7 @@ export default function PassportFirst({ onRead, onSkip }) {
               Reading the passport… {secs}s
             </div>
             {!ON_PHONE && <p className="text-xs text-slate-500">
-              {secs < 4 ? 'Asking JEV…' : 'JEV, this PC and Gemini are reading it — the first sure answer fills the form.'}
+              {secs < 3 ? 'Reading its bottom lines on this PC…' : 'JEV, this PC and Gemini are reading it — the first sure answer fills the form.'}
             </p>}
           </>
         ) : (

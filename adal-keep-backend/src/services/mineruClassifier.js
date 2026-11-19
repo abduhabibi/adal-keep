@@ -449,8 +449,19 @@ async function withPlace(r, originalPath) {
   return r
 }
 
-export async function analyzeWithMineru(originalPath, { db = null } = {}) {
+export async function analyzeWithMineru(originalPath, { db = null, placeLater = false } = {}) {
   const filename = path.basename(originalPath)
+  // placeLater (the new-profile page): a verified passport is answered at once;
+  // its place of birth, region and date of issue come behind it in r.placeLater
+  // (a promise of those fields) instead of holding the answer up to 8 s.
+  const finish = (r) => {
+    if (!placeLater) return withPlace(r, originalPath)
+    if (r?.doc_type === 'Passport') {
+      const copy = { ...r, fields: { ...(r.fields || {}) } }
+      r.placeLater = withPlace(copy, originalPath).then(x => x?.fields || {}, () => ({}))
+    }
+    return r
+  }
 
   // 0. The passport's bottom lines, read here with the OCR-B model in about a
   // second: when every check digit verifies, nobody else is asked (free, fast).
@@ -458,7 +469,7 @@ export async function analyzeWithMineru(originalPath, { db = null } = {}) {
   const tq = Date.now()
   setStage('reading the passport lines on this PC')
   const quick = await quickMrz(originalPath, { tries: 1 }).catch(() => null)
-  if (quick) { console.log(`[classify] MRZ (OCR-B) ${Date.now() - tq}ms: Passport, every check digit verified`); return withPlace(quick, originalPath) }
+  if (quick) { console.log(`[classify] MRZ (OCR-B) ${Date.now() - tq}ms: Passport, every check digit verified`); return finish(quick) }
 
   // This PC starts reading at once (free). Gemini (paid) waits until JEV is
   // unsure, down or slower than JEV_HEADSTART_MS; when JEV settles the file,
@@ -481,7 +492,7 @@ export async function analyzeWithMineru(originalPath, { db = null } = {}) {
     clearTimeout(timer)
     gate.cancelled = true
     gate.go(false)
-    return withPlace(first.jev || first.quick || first.usual, originalPath)
+    return finish(first.jev || first.quick || first.usual)
   }
   const jev = await jevP
   const usual = await usualP

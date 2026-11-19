@@ -311,6 +311,23 @@ export default function ProfileFormPage() {
     setPassport(r)
     setStep('form')
   }
+  // The place of birth, region and date of issue, a few seconds after the rest
+  // (PassportFirst): only what is still empty is filled — never what she typed.
+  const laterFromPassport = (f = {}) => {
+    const place = String(f.place_of_birth || '').trim()
+    const low = place.toLowerCase()
+    const named = String(f.region || '').trim().toLowerCase()
+    const region = (low && REGIONS.find(x => x.name.toLowerCase() === low || x.areas.some(a => a.toLowerCase() === low)))
+      || (named && REGIONS.find(x => x.name.toLowerCase() === named))
+    const zone = region && region.areas.find(a => a.toLowerCase() === low)
+    setForm(prev => ({
+      ...prev,
+      ...(!prev.place_of_birth && place ? { place_of_birth: place } : {}),
+      ...(!prev.passport_issue_date && f.passport_issue_date ? { passport_issue_date: f.passport_issue_date } : {}),
+      ...(!prev.region && region ? { region: region.name, zone_subcity: prev.zone_subcity || zone || '' } : {}),
+    }))
+    setPassport(p => (p ? { ...p, fields: { ...(p.fields || {}), ...Object.fromEntries(Object.entries(f).filter(([, v]) => v)) } } : p))
+  }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -373,7 +390,7 @@ export default function ProfileFormPage() {
     return (
       <div className="mx-auto max-w-2xl animate-fade-up">
         <PageHeader title="አዲስ ፕሮፋይል" subtitle="Start with the passport — the form fills itself" />
-        <PassportFirst onRead={fromPassport} onSkip={() => { setShowAll(true); setStep('form') }} />
+        <PassportFirst onRead={fromPassport} onLater={laterFromPassport} onSkip={() => { setShowAll(true); setStep('form') }} />
       </div>
     )
   }

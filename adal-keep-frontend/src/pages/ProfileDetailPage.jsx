@@ -1,6 +1,7 @@
 import { Children, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
+import { parts, kept, keptNow, keep, noteOpened } from '../lib/profileCache'
 import api from '../services/api'
 import PageHeader from '../components/shared/PageHeader'
 import Spinner from '../components/shared/Spinner'
@@ -79,7 +80,24 @@ export default function ProfileDetailPage() {
 
   useEffect(() => {
     let alive = true
-    setLoading(true)
+    // Opened before: what this device kept shows at once (lib/profileCache.js),
+    // and the PC's fresh answers replace it as they come.
+    const P = parts(id)
+    const nowProfile = keptNow(P.profile), nowFields = keptNow(P.fields)
+    setProfile(nowProfile ?? null)
+    setFields(nowFields ?? [])
+    setCvs(keptNow(P.cvs) ?? [])
+    setCvReadiness(keptNow(P.readiness) ?? null)
+    setLoading(nowProfile === undefined)
+    let fresh = false
+    if (nowProfile === undefined) {
+      Promise.all([kept(P.profile), kept(P.fields), kept(P.cvs), kept(P.readiness)]).then(([pr, fl, cv, rd]) => {
+        if (!alive || fresh || pr === undefined) return
+        setProfile(pr); if (fl !== undefined) setFields(fl); if (cv !== undefined) setCvs(cv); if (rd !== undefined) setCvReadiness(rd)
+        setLoading(false)
+      }).catch(() => {})
+    }
+    noteOpened(id)
     // The profile and its documents first (on a phone: from its own copy, at
     // once); the CVs and the CV check fill in when they come.
     Promise.all([
@@ -87,6 +105,8 @@ export default function ProfileDetailPage() {
       api.get(`/profiles/${id}/fields`),
     ])
       .then(([profileRes, fieldsRes]) => {
+        fresh = true
+        keep(P.profile, profileRes.data); keep(P.fields, fieldsRes.data)
         if (alive) {
           setProfile(profileRes.data)
           setFields(fieldsRes.data)
@@ -98,20 +118,20 @@ export default function ProfileDetailPage() {
       })
       .finally(() => { if (alive) setLoading(false) })
     api.post(`/profiles/${id}/opened`).catch(() => {})   // the most recent on the list now
-    api.get(`/cv/generated`, { params: { profile_id: id } }).then(r => { if (alive) setCvs(r.data || []) }).catch(() => {})
-    api.get(`/cv/profile-readiness/${id}`).then(r => { if (alive) setCvReadiness(r.data || null) }).catch(() => {})
+    api.get(`/cv/generated`, { params: { profile_id: id } }).then(r => { keep(P.cvs, r.data || []); if (alive) setCvs(r.data || []) }).catch(() => {})
+    api.get(`/cv/profile-readiness/${id}`).then(r => { keep(P.readiness, r.data || null); if (alive) setCvReadiness(r.data || null) }).catch(() => {})
     return () => { alive = false }
   }, [id, navigate])
 
   // A run changed state or a person pressed a run's button: her notes and
   // fields are fresh again (the runs write into them).
   useEffect(() => {
-    const again = () => api.get(`/profiles/${id}`).then(r => setProfile(r.data)).catch(() => {})
+    const again = () => api.get(`/profiles/${id}`).then(r => { keep(parts(id).profile, r.data); setProfile(r.data) }).catch(() => {})
     window.addEventListener('adal-profile-changed', again)
     // Changed anywhere else too: her details, notes, documents and status follow at once.
     const off = onDataChange(['profiles', 'profile_fields', 'files', 'automation_queue', 'profile_automations', 'notes'], (t) => {
       again()
-      if (t.some(x => x === 'profile_fields' || x === 'files' || x === '*')) api.get(`/profiles/${id}/fields`).then(r => setFields(r.data)).catch(() => {})
+      if (t.some(x => x === 'profile_fields' || x === 'files' || x === '*')) api.get(`/profiles/${id}/fields`).then(r => { keep(parts(id).fields, r.data); setFields(r.data) }).catch(() => {})
     })
     return () => { window.removeEventListener('adal-profile-changed', again); off() }
   }, [id])

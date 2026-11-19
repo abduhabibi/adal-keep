@@ -267,28 +267,65 @@ export default function CVNewPage() {
     return null
   }
 
+  // What the PC is asked for this CV (preview, PDF): the same body for both.
+  const cvBody = (tid) => {
+    const primary = form.countries_applying[0] || {}
+    return {
+      profile_id: Number(profileId),
+      template_id: Number(tid),
+      overrides: { __edits: editList(), ...form, country: primary.country || '', salary: primary.salary || 0, currency: primary.currency || 'SAR' },
+    }
+  }
+  // Previews already drawn (by their body): opening one again, or the one made
+  // ready behind the form, shows at once. The PDF of an open preview is made
+  // behind it (/cv/prepare), so Download / Save as only copy it.
+  const previews = useRef(new Map())
+  const previewOf = (body) => {
+    const key = JSON.stringify(body)
+    const hit = previews.current.get(key)
+    if (hit) return hit
+    const p = api.post('/cv/preview', body, { responseType: 'text' }).then(r => r.data)
+    p.catch(() => previews.current.delete(key))
+    previews.current.set(key, p)
+    if (previews.current.size > 12) previews.current.delete(previews.current.keys().next().value)
+    return p
+  }
+  const onThePC = !window.__ADAL_CLOUD
+  const prepared = useRef(new Set())
+  const preparePdf = (body) => {
+    if (!onThePC) return
+    const key = JSON.stringify(body)
+    if (prepared.current.has(key)) return
+    prepared.current.add(key)
+    api.post('/cv/prepare', body).catch(() => prepared.current.delete(key))
+  }
+  // The page opened with her: the PC starts its PDF browser and shrinks her pictures now.
+  useEffect(() => {
+    if (!onThePC || step !== 2 || !profileId || !templateId) return
+    api.post('/cv/warm', { profile_id: Number(profileId), template_id: Number(templateId) }).catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, profileId, templateId])
+  // The preview is drawn behind the form, a moment after the last change.
+  useEffect(() => {
+    if (!formReady || step !== 2 || showPreview || validate()) return
+    const t = setTimeout(() => { previewOf(cvBody(templateId)).catch(() => {}) }, 700)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form, templateId, readiness, formReady, step, showPreview, textEdits])
+
   const openPreview = async (templateIdOverride) => {
     const err = validate()
     if (err) return toast.error(err)
     const tid = templateIdOverride || templateId
     setBusy(true)
     try {
-      const primary = form.countries_applying[0] || {}
-      const r = await api.post('/cv/preview', {
-        profile_id: Number(profileId),
-        template_id: Number(tid),
-        overrides: {
-          __edits: editList(),
-          ...form,
-          country: primary.country || '',
-          salary: primary.salary || 0,
-          currency: primary.currency || 'SAR',
-        },
-      }, { responseType: 'text' })
-      setPreviewHtml(r.data)
+      const body = cvBody(tid)
+      const html = await previewOf(body)
+      setPreviewHtml(html)
       setPreviewTemplateId(String(tid))
       setTemplateId(String(tid))
       setShowPreview(true)
+      preparePdf(body)
     } catch (e) {
       toast.error(e.response?.data?.error || 'Preview failed')
     } finally { setBusy(false) }
@@ -306,12 +343,7 @@ export default function CVNewPage() {
     const suggested = `${who}${tname ? ' - ' + tname : ''}.pdf`
     let handle = null, name = suggested
     // The PDF starts being made now, while the name is being chosen (it does not depend on the name).
-    const primary = form.countries_applying[0] || {}
-    const job = api.post('/cv/generate', {
-      profile_id: Number(profileId),
-      template_id: Number(tid),
-      overrides: { __edits: editList(), ...form, country: primary.country || '', salary: primary.salary || 0, currency: primary.currency || 'SAR' },
-    })
+    const job = api.post('/cv/generate', cvBody(tid))
     job.catch(() => {}) // a cancelled save must not leave an unhandled error
     if (window.showSaveFilePicker) {
       try { handle = await window.showSaveFilePicker({ suggestedName: suggested, types: [{ description: 'PDF', accept: { 'application/pdf': ['.pdf'] } }] }) }
@@ -363,18 +395,7 @@ export default function CVNewPage() {
     setSaving(true)
     const t = toast.loading('Making the PDF…')
     try {
-      const primary = form.countries_applying[0] || {}
-      const res = await api.post('/cv/generate', {
-        profile_id: Number(profileId),
-        template_id: Number(tid),
-        overrides: {
-          __edits: editList(),
-          ...form,
-          country: primary.country || '',
-          salary: primary.salary || 0,
-          currency: primary.currency || 'SAR',
-        },
-      })
+      const res = await api.post('/cv/generate', cvBody(tid))
       // A phone with the office PC off: this phone makes the PDF itself (the PC files the same CV when it is on).
       if (res.data?.local_html) {
         const how = await pdfHere(res.data.local_html, res.data.filename || 'CV.pdf')
@@ -816,6 +837,8 @@ export default function CVNewPage() {
                       editsRef.current = { ...editsRef.current, [first]: now }
                       if (now === first) { const { [first]: _, ...rest } = editsRef.current; editsRef.current = rest }
                       setTextEdits(editsRef.current)
+                      // The PDF behind follows the words changed here.
+                      preparePdf(cvBody(previewTemplateId || templateId))
                     }
                     el.addEventListener('blur', done, { once: true })
                     el.addEventListener('keydown', (k) => { if (k.key === 'Enter' && !k.shiftKey) { k.preventDefault(); el.blur() } if (k.key === 'Escape') { el.textContent = before; el.blur() } })

@@ -54,7 +54,7 @@ if (import.meta.env.VITE_DEMO !== '1') {
   }
   // A change sent to the PC: what is asked next comes from the PC.
   // (Not the messages that change nothing: "still here", typing, opened, a check.)
-  const QUIET = /(ping|typing|device-resume|opened|plan\/refresh|alive|heartbeat|seen|read)\b/
+  const QUIET = /(ping|warm|cv\/(preview|prepare)|typing|device-resume|opened|plan\/refresh|alive|heartbeat|seen|read)\b/
   api.interceptors.request.use((c) => { if (c.method && c.method.toLowerCase() !== 'get' && !QUIET.test(String(c.url))) dirtyUntil = Date.now() + 8000; return c })
 }
 

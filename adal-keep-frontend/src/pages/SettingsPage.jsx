@@ -14,6 +14,7 @@ import { getLang, setLang } from '../lib/i18n'
 import { whoAmI } from '../lib/tutor'
 import TutorCard from '../components/TutorCard'
 import MainPCCard from '../components/MainPCCard'
+import AgencyPCsCard from '../components/AgencyPCsCard'
 import { CompanionSwitchCard } from '../components/CompanionSwitchPC'
 import WafidCard from '../components/WafidCard'
 import PortalsHealthCard from '../components/PortalsHealthCard'
@@ -283,6 +284,7 @@ export default function SettingsPage() {
           </form>
         </div>
       </Card>
+      {import.meta.env.VITE_DEMO !== '1' && !isPhoneView() && <ErrorBoundary small name="The agency's PCs"><AgencyPCsCard /></ErrorBoundary>}
       {import.meta.env.VITE_DEMO !== '1' && !isPhoneView() && <ErrorBoundary small name="Main PC & phones"><MainPCCard /></ErrorBoundary>}
       {/* An Adal Companion only: log out of its main PC, connect to another. */}
       <CompanionSwitchCard />

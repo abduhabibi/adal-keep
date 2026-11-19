@@ -25,6 +25,7 @@ const LockScreen = lazy(() => fresh(() => import('./components/LockScreen')))
 import PcAccessGate, { SuspendedScreen } from './components/PcAccessGate'
 import api, { joinInfo } from './services/api'
 const IntroWizard = lazy(() => fresh(() => import('./pages/IntroWizard')))
+const JoinAgency = lazy(() => fresh(() => import('./pages/JoinAgency')))
 const CVsPage = lazy(() => fresh(() => import('./pages/CVsPage')))
 const CVNewPage = lazy(() => fresh(() => import('./pages/CVNewPage')))
 const CVTemplatesPage = lazy(() => fresh(() => import('./pages/CVTemplatesPage')))
@@ -153,6 +154,8 @@ function Shell() {
 
   // After the free trial nothing else is shown until this PC is unlocked.
   if (subscription?.mode === 'locked') return <>{toaster}<Suspense fallback={null}><LockScreen /></Suspense></>
+  // A Companion install joins an agency (its own full copy) instead of starting one.
+  if (state === 'join') return <>{toaster}<Suspense fallback={null}><JoinAgency /></Suspense></>
   if (state === 'setup') return <>{toaster}<Suspense fallback={null}><IntroWizard /></Suspense></>
 
   return (

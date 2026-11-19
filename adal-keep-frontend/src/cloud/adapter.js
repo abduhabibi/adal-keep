@@ -380,7 +380,12 @@ async function get(path, query) {
   // What runs are doing (only the PC knows): with the PC off, none — at once, no error.
   if (data === undefined && /^\/(automations\/(active|ready-for-submit)|tasks\/reading)$/.test(path)) return []
   if (data === undefined && path === '/automations/stages') return {}
-  if (data === undefined && path === '/settings/journey-order') return { order: [] }
+  // (A PC that does not copy it yet: the order is in its settings too.)
+  if (data === undefined && path === '/settings/journey-order') {
+    let order = []
+    try { order = JSON.parse((await answer('/settings'))?.journey_order || '[]') } catch {}
+    return { order: Array.isArray(order) ? order : [] }
+  }
   if (data === undefined) throw httpError(503, 'This needs the PC — it is not in the online copy.')
   return data
 }

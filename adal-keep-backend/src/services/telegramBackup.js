@@ -75,6 +75,10 @@ export function getConfig() {
     last_run: s.last_run || null,
     last_ok: s.last_ok || null,
     last_error: s.last_error || null,
+    last_error_at: s.last_error_at || null,
+    // The newest failure, kept after a later success (Settings → Health).
+    last_fail: s.last_fail || null,
+    last_fail_at: s.last_fail_at || null,
     verify: s.verify || null,
     ...documentCounts(s),
   }
@@ -530,7 +534,7 @@ export async function runBackup(db, { force = false, docsOnly = false, light = f
     }
     return { ok: true, documents_left: left, route: route.online ? `online storage (${route.online} piece(s); Telegram did not answer)` : 'telegram' }
   } catch (e) {
-    const st = readState(); st.last_error = e.message; st.last_error_at = new Date().toISOString(); writeState(st)
+    const st = readState(); st.last_error = st.last_fail = e.message; st.last_error_at = st.last_fail_at = new Date().toISOString(); writeState(st)
     progress.error = e.message
     publishBackup(db, { error: e.message, error_at: new Date().toISOString() }).catch(() => {})
     throw e

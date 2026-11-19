@@ -21,6 +21,7 @@
  *
  * Without the password nobody — not Telegram, not Adal — can read a backup.
  */
+import { waitForQuiet } from './userUploads.js'
 import { runsWorking } from './busy.js'
 import { vaultKey, stageVaultKey, applyStagedVaultKey } from './accountVault.js'
 import fs from 'fs'
@@ -221,6 +222,10 @@ async function sendOnline(buf, filename) {
   return `sb:${object}`
 }
 async function sendPiece(token, chat_id, buf, filename, caption) {
+  // Someone is uploading files into Adal Keep: this piece waits until about
+  // 30 s after the last upload (services/userUploads.js) — delayed, never skipped.
+  await waitForQuiet({ onWait: () => { progress.waitingForUploads = true; console.log('[backup] the user is uploading — the backup waits') } })
+  progress.waitingForUploads = false
   let tgErr = null
   if (token && chat_id && !route.tgDown) {
     try { return await sendToTelegram(token, chat_id, buf, filename, caption) }

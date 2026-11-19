@@ -30,6 +30,7 @@ const lanNow = () => { try { return getLanAddresses().map(a => a.address).slice(
 let licBeat = null
 import('./plans.js').then(P => { licBeat = () => { const l = P.licenseNow(); return l ? { lic_at: l.at || null, suspended: !!l.suspended } : {} } }).catch(() => {})
 const beatData = () => ({ at: new Date().toISOString(), ...(isFollower() ? {} : { pc: myPcNumber(), lan: lanNow(), port: PORT(), ...(licBeat?.() || {}) }) })
+import { waitForQuiet } from './userUploads.js'
 import { tgReady, tgPut, tgDelete, TG_MAX_DOWNLOAD, findStorageChat } from './tgStore.js'
 import { viewCopy } from './viewCopy.js'
 import fs from 'fs'
@@ -549,6 +550,11 @@ let moreFilesSoon = false   // documents were left at the end of a round: the ne
 function pushFiles(db, agency, state) {
   return (filesRun ||= pushFilesNow(db, agency, state).finally(() => { filesRun = null }))
 }
+/** Waits while the user uploads (services/userUploads.js); shown in the status meanwhile. */
+async function waitForUploads() {
+  await waitForQuiet({ onWait: () => { cloudStatus.waitingForUploads = true; console.log('[cloud] the user is uploading — the online copy waits') } })
+  cloudStatus.waitingForUploads = false
+}
 async function pushFilesNow(db, agency, state) {
   // The text first: no document goes before every page went online once.
   if (!state.get(TEXT_DONE)) { cloudStatus.filesLeft = -1; return }
@@ -628,7 +634,10 @@ async function pushFilesNow(db, agency, state) {
   let next = 0
   // (One at a time while a robot works: it needs the line for its own uploads.)
   await Promise.all(Array.from({ length: runsWorking() > 0 ? 1 : FILES_AT_ONCE }, async () => {
-    while (!stop && next < todo.length && Date.now() < until) await one(todo[next++])
+    while (!stop && next < todo.length && Date.now() < until) {
+      await waitForUploads()   // the user's own upload first; this document goes right after
+      if (next < todo.length) await one(todo[next++])
+    }
   }))
   if (todo.length && next >= todo.length) console.log(`[cloud] every document is online (${Math.round(cloudStatus.bytesSaved / 1048576)} MB saved by light copies)`)
   else if (todo.length) moreFilesSoon = true
@@ -670,6 +679,8 @@ async function syncOnce(db, { light = false } = {}) {
     await publishPC(db).catch(e => console.warn('[cloud] PC number:', e.message))
     const applied = await applyChanges(db, agency)
     const state = await stateOf(db)
+    // Someone is uploading files into Adal Keep: the copy waits until about 30 s after the last one (nothing skipped).
+    await waitForUploads()
     await pushAnswers(db, agency, state, { light })
     // Documents too, every round (also while a robot works): every one is kept
     // in Telegram as well as on this PC as soon as it can be.

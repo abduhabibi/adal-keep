@@ -43,6 +43,9 @@ async function cloud() {
   return c
 }
 
+/** The signed release last read from Supabase ({ manifest, signature }): kept to hand on to the office's other PCs. */
+export let lastEnvelope = null
+
 /** The newest signed release, or an error that says why not. */
 export async function latestRelease(channel = 'release') {
   const { cloudCall } = await cloud()
@@ -50,6 +53,7 @@ export async function latestRelease(channel = 'release') {
   if (!res.ok) throw new Error(`Supabase updates answered ${res.status}${res.status === 400 || res.status === 404 ? ' (nothing published yet, or updates.sql not run)' : ''}`)
   const { manifest, signature } = await res.json()
   if (!manifest?.sha || !verifyManifest(manifest, signature)) throw new Error('The published update is not signed by Adal — not installed')
+  lastEnvelope = { manifest, signature }
   return manifest
 }
 

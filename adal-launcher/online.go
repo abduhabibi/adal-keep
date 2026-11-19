@@ -100,6 +100,28 @@ func startOnlinePage(root string) bool {
 		chosenMainPC(root)
 		w.WriteHeader(http.StatusNoContent)
 	})
+	// The online account the window keeps: adal-companion.exe reads Adal's
+	// signed updates from Supabase with it (adal-companion/selfupdate.go).
+	mux.HandleFunc("/cloud-creds", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.Header.Get("X-Adal") != "1" {
+			http.Error(w, "no", http.StatusForbidden)
+			return
+		}
+		var c struct {
+			URL      string `json:"url"`
+			Anon     string `json:"anon"`
+			Email    string `json:"email"`
+			Password string `json:"password"`
+			Agency   string `json:"agency"`
+		}
+		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192)).Decode(&c) != nil || c.URL == "" || c.Email == "" {
+			http.Error(w, "bad", http.StatusBadRequest)
+			return
+		}
+		b, _ := json.Marshal(c)
+		os.WriteFile(filepath.Join(root, "companion-cloud.json"), b, 0o600)
+		w.WriteHeader(http.StatusNoContent)
+	})
 	mux.HandleFunc("/main", func(w http.ResponseWriter, r *http.Request) {
 		// Only the online pages ask (a header another website cannot send unasked).
 		if r.Header.Get("X-Adal") != "1" {

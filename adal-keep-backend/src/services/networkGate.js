@@ -89,6 +89,8 @@ const OPEN = [
   ['POST', /^\/api\/pc-access\/number$/],
   ['POST', /^\/api\/pc-access\/check-number$/],
   ['GET', /^\/api\/pc-access\/status$/],
+  // Adal's signed release, which every PC of the office hands on (services/lanRelease.js).
+  ['GET', /^\/api\/system\/update\/lan\/(latest|file\/[0-9a-f]{64})$/],
 ]
 
 /** Only Adal Keep's own pages may call it: the same address, or its own app windows. */

@@ -139,6 +139,7 @@ func forgetMainPC(root, from, device string) (revoked bool, main string) {
 		}
 	}
 	os.Remove(filepath.Join(root, "companion.conf"))
+	os.Remove(filepath.Join(root, "companion-cloud.json")) // its online account goes too
 	os.WriteFile(filepath.Join(root, signedOutName), []byte("Logged out of "+main+" on "+time.Now().Format(time.RFC3339)+".\r\nChoose a main PC in Adal Keep's window (or delete this file to let the Companion search the network again).\r\n"), 0o644)
 	logf("logged out of the main PC %s (its online account stopped: %v) — choosing another", main, revoked)
 	return

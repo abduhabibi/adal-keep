@@ -632,6 +632,12 @@ async function cvFor(db, p, tid) {
   return generateCvFile(db, p, t, {}, 'whatsapp')
 }
 
+/** Of these profiles, the ones in the Profiles page's Waiting tab (routes/automations.js). */
+export async function waitingOnly(db, ids) {
+  const { waitingIds } = await import('../routes/automations.js')
+  return waitingIds(db, ids)
+}
+
 /**
  * Sends her CV to this person's chosen agents (none chosen → all of them),
  * each with its own template(s). Returns one line per agent and template.
@@ -643,6 +649,8 @@ export async function sendCV(db, key, profileId, agentIds, by = '') {
   const p = await db('profiles').where('id', profileId).first()
   if (!p) throw new Error('Profile not found')
   if (p.chosen_at) throw new Error(`${p.full_name} is already chosen on Musaned`)
+  // Only from the Waiting tab: on Musaned, nobody chose her yet (asked on 2026-11-19).
+  if (!(await waitingOnly(db, [p.id])).has(p.id)) throw new Error(`${p.full_name} is not in Waiting (added to Musaned, not chosen yet): only those CVs go to agents on WhatsApp`)
   let q = agentsOf(db, key).andWhere('active', 1)
   if (agentIds?.length) q = q.whereIn('id', agentIds)
   const agents = (await q).map(agentRow)
@@ -818,17 +826,20 @@ export async function sendsOf(db, profileId) {
 }
 
 /**
- * CVs → WhatsApp: everyone not chosen yet who has a CV, with where her CV is
- * out now. A chosen one leaves the list.
+ * CVs → WhatsApp: everyone in Waiting (on Musaned, not chosen yet) who has a
+ * CV, with where her CV is out now. A chosen one leaves the list.
  */
 export async function available(db, key) {
   const hasDeleted = await db.schema.hasColumn('profiles', 'deleted_at')
   let q = db('profiles').whereNull('chosen_at')
   if (hasDeleted) q = q.whereNull('deleted_at')
-  const rows = await q.whereExists(function () {
+  let rows = await q.whereExists(function () {
     this.select(db.raw(1)).from('profile_fields').join('files', 'files.profile_field_id', 'profile_fields.id')
       .whereRaw('profile_fields.profile_id = profiles.id').andWhere('profile_fields.name', 'CV')
   }).select('id', 'full_name', 'passport_number', 'updated_at').orderBy('id', 'desc')
+  // Only the Waiting tab's girls (on Musaned, not chosen yet) may be sent.
+  const waiting = await waitingOnly(db, rows.map(r => r.id))
+  rows = rows.filter(r => waiting.has(r.id))
   const sends = await db('whatsapp_sends').leftJoin('whatsapp_agents', 'whatsapp_agents.id', 'whatsapp_sends.agent_id')
     .whereIn('whatsapp_sends.profile_id', rows.map(r => r.id)).whereIn('whatsapp_sends.status', ['sent', 'failed'])
     .select('whatsapp_sends.profile_id', 'whatsapp_sends.status', 'whatsapp_sends.sent_at', 'whatsapp_sends.user_key', 'whatsapp_agents.name as agent_name')

@@ -41,7 +41,25 @@ const PDF_FIELDS = [
   [/EPRO\s*and\s*CANDIDATE/i, 'Contract (EPRO + Candidate signed)'],
 ]
 
-export const contractCheck = { running: false, last: null, results: [], signedOut: false }
+export const contractCheck = { running: false, last: null, results: [], signedOut: false, cancel: '' }
+
+// Cancel (the Waiting page's button) and the time limit: the check stops at
+// its next step, and a step still waiting on Musaned is let go at once.
+let cancelWaiters = []
+export function cancelCheck(why = 'Cancelled') {
+  if (!contractCheck.running) return false
+  contractCheck.cancel = why
+  for (const r of cancelWaiters.splice(0)) r(new Error(why))
+  return true
+}
+export function stopIfCancelled() { if (contractCheck.cancel) throw Object.assign(new Error(contractCheck.cancel), { cancelled: true }) }
+/** p, or the cancel when it comes first. */
+export function cancelable(p) {
+  return Promise.race([p, new Promise((_, rej) => {
+    if (contractCheck.cancel) rej(Object.assign(new Error(contractCheck.cancel), { cancelled: true }))
+    else cancelWaiters.push((e) => rej(Object.assign(e, { cancelled: true })))
+  })])
+}
 
 /** Profiles worth looking up. */
 async function candidates(db, onlyId) {
@@ -147,8 +165,11 @@ export function matchCard(card, profiles) {
 const cardIsNew = (p, c) => (!p.chosen_at && !/CANCEL|REJECT/i.test(c.stage || '')) ||
   (c.stage && (p.musaned_stage || '') !== c.stage) || (c.contract_number && p.contract_number !== c.contract_number)
 
-export async function scanContracts(db, { auto = false } = {}) {
+// remote: Musaned is read in another PC's tab (services/selectionCheck.js), this PC saves.
+// limitMs: the time limit (Check now: 10 minutes). by: the PC that reads Musaned.
+export async function scanContracts(db, { auto = false, remote = null, limitMs = 0, by = '' } = {}) {
   if (contractCheck.running) return { busy: true }
+  if (remote) return scanRemote(db, remote, { limitMs, by })
   // The check every 4 hours never opens Brave itself: it waits until Brave is
   // open (a person closed it, or quit Adal Keep — it must not come back).
   if (auto && !(await openBrowserIfAny())) { console.log('[contracts] Brave is closed — checking when it is open'); return { skipped: true } }
@@ -161,7 +182,8 @@ export async function scanContracts(db, { auto = false } = {}) {
     if (/\/(login|auth)\b|sso\.|wahid\.sa|\/realms\//i.test(page.url())) { await doneWithTab(page).catch(() => {}); return { skipped: true, why: 'Musaned is signed out' } }
     backTo = page.url()
   }
-  Object.assign(contractCheck, { running: true, results: [], signedOut: false, mode: 'list', unknown: [], auto })
+  Object.assign(contractCheck, { running: true, results: [], signedOut: false, mode: 'list', unknown: [], auto, cancel: '', by, started: new Date().toISOString(), limit_ms: limitMs })
+  const limit = limitMs ? setTimeout(() => cancelCheck(`Stopped: the ${Math.round(limitMs / 60000)}-minute time limit`), limitMs) : null
   try {
     const profiles = await db('profiles').select('*')
     const browser = await getBrowser()
@@ -169,7 +191,8 @@ export async function scanContracts(db, { auto = false } = {}) {
     await setupTab(page, { runId: 'musaned-contracts' })
     page.__adalAllowImages = true
     // Musaned's own list data first (no passport searched, every detail at once).
-    const viaApi = await scanListByApi(db, page, { log: (m) => console.log('[contracts] ' + m) }).catch(e => ({ ok: false, why: e.message }))
+    const viaApi = await scanListByApi(db, page, { log: (m) => console.log('[contracts] ' + m) }).catch(e => ({ ok: false, why: e.message, cancelled: e.cancelled }))
+    if (viaApi.cancelled || contractCheck.cancel) return { cancelled: true, why: contractCheck.cancel || viaApi.why, results: contractCheck.results }
     if (viaApi.ok) {
       contractCheck.results = viaApi.results
       contractCheck.added = viaApi.added
@@ -193,6 +216,7 @@ export async function scanContracts(db, { auto = false } = {}) {
     }
     const cards = []
     for (let n = 0; n < 10; n++) {
+      stopIfCancelled()
       if (n) await open(LIST_URL.replace('size=10', 'size=50').replace('page=0', `page=${n}`))
       await page.waitForFunction(() => /CONTRACT NUMBER|No (data|records|results)/i.test(document.body.innerText || ''), { timeout: 20000 }).catch(() => {})
       await sleep(1200)
@@ -218,6 +242,7 @@ export async function scanContracts(db, { auto = false } = {}) {
       if (!p) { contractCheck.unknown.push({ candidate: c.candidate || c.passport, contract: c.contract_number, stage: c.stage, card: c }); continue }
       if (seen.has(p.id)) continue
       seen.add(p.id)
+      stopIfCancelled()
       if (!cardIsNew(p, c)) { contractCheck.results.push({ id: p.id, name: p.full_name, state: 'chosen', stage: c.stage, unchanged: true }); continue }
       if (!p.passport_number) { contractCheck.results.push({ id: p.id, name: p.full_name, state: 'error', error: 'no passport number on the profile' }); continue }
       await sleep(BETWEEN_MS / 2)
@@ -237,6 +262,7 @@ export async function scanContracts(db, { auto = false } = {}) {
       done.add(c.contract_number)
       const alike = nameLookalikes(c, profiles)
       if (alike.length) { u.note = `not added — looks like ${alike.slice(0, 2).map(p => p.full_name).join(' / ')}`; continue }
+      if (contractCheck.cancel) break
       try {
         await sleep(BETWEEN_MS / 2)
         await page.goto(c.url, { waitUntil: 'networkidle2', timeout: 60000 })
@@ -254,7 +280,12 @@ export async function scanContracts(db, { auto = false } = {}) {
     const fresh = contractCheck.results.filter(r => r.first)
     import('./profileDays.js').then(d => d.snapshotDays(db)).catch(() => {})
     return { checked: cards.length, newlyChosen: fresh.map(r => r.name), results: contractCheck.results, unknown: contractCheck.unknown }
+  } catch (e) {
+    if (e.cancelled || contractCheck.cancel) return { cancelled: true, why: contractCheck.cancel || e.message, results: contractCheck.results }
+    throw e
   } finally {
+    if (limit) clearTimeout(limit)
+    cancelWaiters = []
     // The tab goes back to the page it was on (the person's place there).
     if (backTo && page && !page.isClosed?.()) await page.goto(backTo, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {})
     await doneWithTab(page).catch(() => {})
@@ -264,6 +295,36 @@ export async function scanContracts(db, { auto = false } = {}) {
 }
 
 /** The card: "SENT TO SAUDI EMBASSY … 2005575571 1908448891 … Paid 2026-09-21 11:40". */
+/**
+ * The list read in another PC's Musaned tab (that PC was the strongest one
+ * free — services/selectionCheck.js): this PC saves everything, as above.
+ * src: { headers(), api(), contract(), pdf(), end() }.
+ */
+async function scanRemote(db, src, { limitMs = 0, by = '' } = {}) {
+  Object.assign(contractCheck, { running: true, results: [], signedOut: false, mode: 'list', unknown: [], added: [], auto: true, cancel: '', by, started: new Date().toISOString(), limit_ms: limitMs })
+  const limit = limitMs ? setTimeout(() => cancelCheck(`Stopped: the ${Math.round(limitMs / 60000)}-minute time limit`), limitMs) : null
+  try {
+    if (!(await src.headers())) return { skipped: true, why: `Musaned is not signed in on ${by || 'the checking PC'}` }
+    const viaApi = await scanRows(db, src, { log: (m) => console.log(`[contracts ${by}] ${m}`) })
+    if (!viaApi.ok) return { skipped: true, why: viaApi.why }
+    contractCheck.results = viaApi.results
+    contractCheck.added = viaApi.added
+    await doneSignInTasks(db)
+    import('./profileDays.js').then(d => d.snapshotDays(db)).catch(() => {})
+    console.log(`[contracts] Musaned list (read on ${by}): ${viaApi.checked} requests read, ${viaApi.added.length} added, ${viaApi.results.filter(r => !r.unchanged).length} updated`)
+    return { checked: viaApi.checked, newlyChosen: viaApi.results.filter(r => r.first).map(r => r.name), results: viaApi.results, added: viaApi.added }
+  } catch (e) {
+    if (e.cancelled || contractCheck.cancel) return { cancelled: true, why: contractCheck.cancel || e.message, results: contractCheck.results }
+    return { error: e.message }
+  } finally {
+    if (limit) clearTimeout(limit)
+    cancelWaiters = []
+    try { src.end?.() } catch {}
+    contractCheck.running = false
+    contractCheck.last = new Date().toISOString()
+  }
+}
+
 export function parseCard(text) {
   const t = String(text || '')
   const lines = t.split('\n').map(x => x.trim()).filter(Boolean)
@@ -405,7 +466,7 @@ async function pdfWithoutViewer(page, name) {
   }
 }
 
-async function downloadPdf(browser, page, name) {
+export async function downloadPdf(browser, page, name) {
   // Read in the page itself first: no viewer tab at all.
   const here = await pdfWithoutViewer(page, name).catch(e => { if (/not found/.test(e.message)) throw e; return null })
   if (here && here.subarray(0, 4).toString() === '%PDF') return here
@@ -613,7 +674,7 @@ async function checkOne(db, browser, page, p) {
   const card = parseCard(s.cards[0])
   if (pending && !card.stage) card.stage = 'EPRO APPROVAL'
   const d = await openDetails(page)
-  return saveDetails(db, browser, page, p, card, s.cards[0], d)
+  return saveDetails(db, (n) => downloadPdf(browser, page, n), p, card, s.cards[0], d)
 }
 
 /** DETAILS (of the card holding `contract`, else the first) → the contract page, read. */
@@ -665,12 +726,12 @@ export async function addFromMusaned(db, browser, page, card, d) {
     p = await db('profiles').where('id', id).first()
     await task(db, id, `On Musaned, added to Adal Keep: ${name}`, `She was on the Musaned list (${card.stage || 'request'}, contract ${card.contract_number}) but not in Adal Keep. Her profile was made from Musaned — check it and add her documents.`)
   }
-  const result = await saveDetails(db, browser, page, p, card, card.text, d)
+  const result = await saveDetails(db, (n) => downloadPdf(browser, page, n), p, card, card.text, d)
   return { id: p.id, name: p.full_name, existing, result }
 }
 
 /** What the contract page says goes into her profile, with its PDFs; tasks for news. */
-async function saveDetails(db, browser, page, p, card, cardText, d) {
+async function saveDetails(db, pdfOf, p, card, cardText, d) {
 
   const now = new Date().toISOString()
   // A cancelled or rejected request: the employer did not keep her — not chosen.
@@ -709,7 +770,8 @@ async function saveDetails(db, browser, page, p, card, cardText, d) {
     const fieldName = /template/i.test(pdf.name) ? 'Contract'
       : (PDF_FIELDS.find(([re]) => re.test(pdf.label) || re.test(pdf.name)) || [null, 'Contract'])[1]
     try {
-      const buf = await downloadPdf(browser, page, pdf.name)
+      stopIfCancelled()
+      const buf = await pdfOf(pdf.name)
       if (fieldName === 'Contract') template = buf
       else if (!signed) signed = buf
       if (await savePdf(db, p.id, fieldName, buf, pdf.name)) saved.push(pdf.name)
@@ -956,28 +1018,14 @@ export async function checkContracts(db, { onlyId = null } = {}) {
   }
 }
 
-// By itself every 2 hours (7:00–21:00), in the Musaned tab already open and
-// signed in — never a new tab, never a sign-in prompt, never while a robot
-// works (asked on 2026-11-11: the tabs are open all day now, Morning sign-in).
-// New selections, and each girl's stage (EPRO → FMOL approved → embassy …).
-const AUTO_MS = 2 * 3600 * 1000
-let timer = null, lastAuto = 0
+// The check by itself, every hour, on ONE PC of the agency (the strongest one
+// with a signed-in Musaned tab): services/selectionCheck.js (started in
+// main.js on every PC). Here: the saved contract templates, read once.
+let started = false
 export function startContractChecker(db) {
-  if (timer) return
+  if (started) return
+  started = true
   setTimeout(() => readSavedTemplates(db).catch(e => console.warn('[contracts] templates:', e.message)), 20000)
-  const tick = async () => {
-    const h = new Date().getHours()
-    if (h < 7 || h >= 21 || contractCheck.running || Date.now() - lastAuto < AUTO_MS) return
-    const working = await db('automation_queue').where('status', 'running').first('id').catch(() => null)
-    if (working) return
-    lastAuto = Date.now()
-    const r = await scanContracts(db, { auto: true }).catch(e => ({ error: e.message }))
-    if (r?.skipped) { lastAuto = Date.now() - AUTO_MS + 15 * 60000; console.log(`[contracts] automatic check waits: ${r.why}`) }  // again in 15 minutes
-    else console.log(`[contracts] automatic check: ${r?.checked ?? 0} requests${r?.newlyChosen?.length ? `, newly chosen: ${r.newlyChosen.join(', ')}` : ''}${r?.error ? ` — ${r.error}` : ''}`)
-  }
-  setTimeout(() => tick().catch(() => {}), 5 * 60000)
-  timer = setInterval(() => tick().catch(() => {}), 5 * 60000)
-  timer.unref?.()
 }
 
 // ---------------------------------------------------------------------------
@@ -1020,7 +1068,7 @@ export function cardOfRow(r) {
 }
 
 /** The headers Musaned's own page sends (its sign-in, role, organization): seen once the list loads. */
-async function apiHeadersOf(page) {
+export async function apiHeadersOf(page) {
   let H = null
   const on = (r) => { const h = r.headers(); if (r.url().startsWith(API) && h.authorization && h['app-organization']) H = Object.fromEntries(Object.entries(h).filter(([k]) => /^(authorization|app-|accept-language)/.test(k))) }
   page.on('request', on)
@@ -1032,7 +1080,7 @@ async function apiHeadersOf(page) {
 }
 
 /** GET from Musaned's data address inside the page (its own sign-in): JSON, or { b64, type } for a picture. */
-function apiGet(page, H, url, { binary = false } = {}) {
+export function apiGet(page, H, url, { binary = false } = {}) {
   return page.evaluate(async (A, H, url, binary) => {
     const r = await fetch(A + url, { headers: { ...H, Accept: binary ? '*/*' : 'application/json' } })
     if (!r.ok) return { status: r.status }
@@ -1044,7 +1092,7 @@ function apiGet(page, H, url, { binary = false } = {}) {
 }
 
 /** Her photo and passport scan from her HR-pool record, each into its own document (only what she lacks). */
-async function savePictures(db, page, H, profileId, candidateId, passport) {
+async function savePictures(db, src, profileId, candidateId, passport) {
   if (!candidateId) return []
   const { saveOnProfile } = await import('./musanedImport.js')
   const os = await import('os')
@@ -1056,7 +1104,7 @@ async function savePictures(db, page, H, profileId, candidateId, passport) {
       .where({ 'profile_fields.profile_id': profileId, 'profile_fields.name': field }).first('files.id').catch(() => null)
     if (has) continue
     // Full size (without it Musaned gives a small copy).
-    const r = await apiGet(page, H, `/api/hrpool/${candidateId}/photo/${kind}?size=ORIGINAL`, { binary: true }).catch(() => null)
+    const r = await src.api(`/api/hrpool/${candidateId}/photo/${kind}?size=ORIGINAL`, { binary: true }).catch(e => { if (e.cancelled) throw e; return null })
     if (r?.status !== 200 || !r.b64) continue
     const buf = Buffer.from(r.b64, 'base64')
     const hash = crypto.createHash('sha1').update(buf).digest('hex')
@@ -1074,11 +1122,11 @@ async function savePictures(db, page, H, profileId, candidateId, passport) {
 }
 
 /** A girl on the list who is not in Adal Keep: her profile from the contract's candidate (every detail). */
-async function profileFromRequest(db, page, H, card) {
+async function profileFromRequest(db, src, card) {
   const { fieldsFromMusaned } = await import('./musanedImport.js')
-  const det = (await apiGet(page, H, `/api/employment/${card.id}`).catch(() => null))?.json || {}
+  const det = (await src.api(`/api/employment/${card.id}`).catch(e => { if (e.cancelled) throw e; return null }))?.json || {}
   const c = det.candidate || {}
-  const hr = card.candidateId ? (await apiGet(page, H, `/api/hrpool/${card.candidateId}`).catch(() => null))?.json || {} : {}
+  const hr = card.candidateId ? (await src.api(`/api/hrpool/${card.candidateId}`).catch(e => { if (e.cancelled) throw e; return null }))?.json || {} : {}
   const f = Object.fromEntries(Object.entries(fieldsFromMusaned({ ...hr, ...c })).filter(([, v]) => v))
   const now = new Date().toISOString()
   const company = await db('companies').first('id').catch(() => null)
@@ -1103,7 +1151,7 @@ async function profileFromRequest(db, page, H, card) {
 }
 
 /** Her contract page, opened straight (no search) and read. */
-async function openContract(page, card) {
+export async function openContract(page, card) {
   await page.goto(`https://tawtheeq.musaned.com.sa/employment-requests/contract/${card.id}`, { waitUntil: 'networkidle2', timeout: 60000 }).catch(() => {})
   await page.waitForFunction(() => /Contract\s*#\s*\d+/i.test(document.body.innerText || ''), { timeout: 30000 }).catch(() => {})
   await page.evaluate(() => [...document.querySelectorAll('button, a, span, div')].filter(e => /^\s*Expand\s*$/i.test(e.textContent || '') && e.children.length <= 2).forEach(e => e.click())).catch(() => {})
@@ -1120,22 +1168,41 @@ async function openContract(page, card) {
 // onlyId: one girl's check (her row only; nothing else is opened or added).
 // addLimit: at most this many girls added per round (the next round goes on),
 // so a first check of a long list never takes hours in one go.
-export async function scanListByApi(db, page, { log = () => {}, maxPages = 10, onlyId = null, addLimit = 40 } = {}) {
-  const H = await apiHeadersOf(page)
+export async function scanListByApi(db, page, opts = {}) {
+  const H = await cancelable(apiHeadersOf(page))
   if (!H) return { ok: false, why: 'Musaned did not answer as signed in' }
-  const browser = page.browser()
+  return scanRows(db, tabSource(page, H), opts)
+}
+
+/** What Musaned answers, read in this signed-in tab (every step can be cancelled). */
+export function tabSource(page, H) {
+  return {
+    api: (url, o) => cancelable(apiGet(page, H, url, o)),
+    contract: (card) => cancelable(openContract(page, card)),
+    pdf: (name) => cancelable(downloadPdf(page.browser(), page, name)),
+  }
+}
+
+/**
+ * The list's rows, wherever Musaned is read: src.api(url, {binary}),
+ * src.contract(card) (its contract page, read), src.pdf(name) (a PDF of that page).
+ */
+export async function scanRows(db, src, { log = () => {}, maxPages = 10, onlyId = null, addLimit = 40 } = {}) {
+  stopIfCancelled()
   let profiles = await db('profiles').select('*')
   const results = [], added = []
   let checked = 0, more = false
   const only = onlyId ? profiles.find(x => x.id === Number(onlyId)) : null
   const onlyPassport = only ? String(only.passport_number || '').toUpperCase().replace(/\s+/g, '') : ''
   for (let n = 0; n < maxPages; n++) {
-    const r = await apiGet(page, H, `/api/search/employment?sort=createdAt,DESC&page=${n}&size=200`)
+    stopIfCancelled()
+    const r = await src.api(`/api/search/employment?sort=createdAt,DESC&page=${n}&size=200`)
     if (r.status !== 200) return n ? { ok: true, checked, results, added } : { ok: false, why: `Musaned answered ${r.status}` }
     const rows = r.json?.content || []
     if (!rows.length) break
     let anyNew = false
     for (const row of rows) {
+      stopIfCancelled()
       checked++
       const card = cardOfRow(row)
       let p = matchCard(card, profiles)
@@ -1156,16 +1223,17 @@ export async function scanListByApi(db, page, { log = () => {}, maxPages = 10, o
         let made = false
         if (!p) {
           if (added.length >= addLimit) { more = true; continue }
-          p = await profileFromRequest(db, page, H, card); made = true; profiles.push(p); added.push({ id: p.id, name: p.full_name, stage: card.stage })
+          p = await profileFromRequest(db, src, card); made = true; profiles.push(p); added.push({ id: p.id, name: p.full_name, stage: card.stage })
         }
-        const pics = await savePictures(db, page, H, p.id, card.candidateId, card.passport)
-        await sleep(BETWEEN_MS / 2)
-        const d = await openContract(page, card)
-        const res = await saveDetails(db, browser, page, p, card, JSON.stringify(row), d)
+        const pics = await savePictures(db, src, p.id, card.candidateId, card.passport)
+        await cancelable(sleep(BETWEEN_MS / 2))
+        const d = await src.contract(card)
+        const res = await saveDetails(db, src.pdf, p, card, JSON.stringify(row), d)
         results.push({ id: p.id, name: p.full_name, passport: p.passport_number, ...res, added: made, pictures: pics })
         log(`${p.full_name}: ${made ? 'added from Musaned' : res.first ? 'newly chosen' : 'updated'} · ${card.stage}${pics.length ? ` · ${pics.join(' and ')} saved` : ''}`)
         profiles = profiles.map(x => x.id === p.id ? { ...x, musaned_stage: card.stage, contract_number: x.contract_number || card.contract_number, chosen_at: x.chosen_at || new Date().toISOString() } : x)
       } catch (e) {
+        if (e.cancelled) throw e
         results.push({ id: p?.id, name: p?.full_name || card.candidate, state: 'error', error: e.message })
         log(`${p?.full_name || card.candidate}: ${e.message}`)
       }

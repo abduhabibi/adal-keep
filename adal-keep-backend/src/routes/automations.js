@@ -790,6 +790,36 @@ export async function waitingIds(db, ids) {
   return out
 }
 
+/**
+ * The Wafid tab: chosen, Wafid booked or being booked (or its booking failed),
+ * no result yet (FIT moves her on, UNFIT to the Unfit tab), EPRO not done —
+ * the page's phaseOf() === 'wafid' (frontend lib/phase.js).
+ */
+export function inWafidPhase(steps = {}, p = {}) {
+  return steps.selected === 'done' && p.status !== 'medical_fit' && p.status !== 'medical_rejected'
+    && steps.wafid !== 'done' && steps.epro !== 'done'
+    && (p.status === 'medical_applied' || ['active', 'failed'].includes(steps.wafid))
+}
+
+/** The girls in the Wafid tab (with a passport number), for the daily result check. */
+export async function wafidTabProfiles(db) {
+  const profiles = await db('profiles').whereNotNull('passport_number').whereNot('passport_number', '')
+    .whereNotIn('status', ['medical_fit', 'medical_rejected']).select('*')
+  if (!profiles.length) return []
+  const runs = new Map()
+  const ids = profiles.map(p => p.id)
+  for (let i = 0; i < ids.length; i += 500) {
+    for (const r of await db('automation_queue').whereIn('profile_id', ids.slice(i, i + 500)).select('profile_id', 'workflow_id', 'status', 'pause_reason').orderBy('id', 'asc')) {
+      if (!runs.has(r.profile_id)) runs.set(r.profile_id, {})
+      runs.get(r.profile_id)[r.workflow_id] = r
+    }
+  }
+  return profiles.filter(p => {
+    const steps = Object.fromEntries(journeyOf(p, runs.get(p.id) || {}, true).embassy.map(s => [s.key, s.state]))
+    return inWafidPhase(steps, p)
+  })
+}
+
 // The robots each step may start ("Check if chosen" always may: it keeps her stage up to date).
 export const STEP_ROBOTS = {
   cv: ['musaned_check_chosen'],
@@ -818,6 +848,14 @@ export function cvMissing(p, docs = new Set(), hasCv = false) {
     !docs.has('Passport') && 'passport scan',
   ].filter(Boolean)
 }
+
+// The dashboard's "Needs action today" (services/needsAction.js).
+router.get('/needs-action', async (req, res) => {
+  try {
+    const { needsActionToday } = await import('../services/needsAction.js')
+    res.json(await needsActionToday(req.app.locals.db))
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
 
 router.get('/automations/stages', async (req, res) => {
   try { res.json(await allStages(req.app.locals.db)) } catch (e) { res.status(500).json({ error: e.message }) }

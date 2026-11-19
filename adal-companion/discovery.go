@@ -219,7 +219,10 @@ func resolveHostURL() string {
 	}
 
 	// companion.conf next to the exe lets IT pin a server without env vars.
-	if url := pinnedHostURL(); url != "" {
+	if url := pinnedHostURL(); url != "" && refusedServer(url) {
+		// The address typed or saved here now belongs to another agency's PC.
+		log.Printf("🚫 %s is another main PC (not ours) — searching for ours instead", url)
+	} else if url != "" {
 		log.Printf("🌐 Server from companion.conf: %s", url)
 		os.Setenv("ADAL_HOST_URL", url)
 		return url
@@ -424,6 +427,9 @@ func keepFindingServer() {
 			if hostServer != "" && !answersAt(pinned) && pingServer() {
 				continue
 			}
+			if refusedServer(pinned) {
+				continue // another agency's PC at that address: never taken
+			}
 			log.Printf("👉 Main PC chosen: %s", pinned)
 			hostServer = pinned
 			os.Setenv("ADAL_HOST_URL", pinned)
@@ -434,7 +440,7 @@ func keepFindingServer() {
 			continue
 		}
 		// An address typed on this PC (the "cannot find the main PC" page).
-		if pinned := pinnedHostURL(); pinned != "" && pinned != strings.TrimRight(hostServer, "/") {
+		if pinned := pinnedHostURL(); pinned != "" && pinned != strings.TrimRight(hostServer, "/") && !refusedServer(pinned) {
 			log.Printf("👉 Using the saved address %s", pinned)
 			hostServer = pinned
 			os.Setenv("ADAL_HOST_URL", pinned)

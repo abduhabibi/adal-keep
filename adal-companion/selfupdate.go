@@ -713,6 +713,26 @@ func untarGz(archive, dest string) error {
 
 // ── telling and hearing ────────────────────────────────────────────────────
 
+// agencyTag: a hash of the agency's main PC number (the number itself is never
+// broadcast); the same as services/lanRelease.js agencyTag.
+func agencyTag(number string) string {
+	var d strings.Builder
+	for _, r := range number {
+		if r >= '0' && r <= '9' {
+			d.WriteRune(r)
+		}
+	}
+	if d.Len() == 0 {
+		return ""
+	}
+	h := sha256.Sum256([]byte("adal-agency|" + d.String()))
+	return hex.EncodeToString(h[:])[:16]
+}
+
+// ownAgencyTag: this Companion's agency (the number it joined with); "" when
+// it has none. Replaced in tests.
+var ownAgencyTag = func() string { return agencyTag(confNumber()) }
+
 func releaseTargets() []*net.UDPAddr {
 	out := []*net.UDPAddr{{IP: net.IPv4bcast, Port: releaseUDPPort}}
 	if ifs, err := net.Interfaces(); err == nil {
@@ -745,10 +765,11 @@ func releaseTargets() []*net.UDPAddr {
 
 func (u *updater) announce() {
 	m, _ := u.current()
-	if m == nil || u.conn == nil {
+	tag := ownAgencyTag()
+	if m == nil || u.conn == nil || tag == "" { // no agency known: nothing is offered
 		return
 	}
-	msg := []byte(strings.Join([]string{releaseMagic, m.SHA, m.PublishedAt, strconv.Itoa(lanHTTPPort), "/lan"}, "|"))
+	msg := []byte(strings.Join([]string{releaseMagic, m.SHA, m.PublishedAt, strconv.Itoa(lanHTTPPort), "/lan", tag}, "|"))
 	for _, t := range releaseTargets() {
 		u.conn.WriteToUDP(msg, t)
 	}
@@ -764,6 +785,22 @@ func (u *updater) heard(text string, from net.IP) (string, bool) {
 	}
 	port, err := strconv.Atoi(parts[3])
 	if err != nil || port < 1 || port > 65535 {
+		return "", false
+	}
+	// Another agency's PC (or an old one that does not say whose it is): never listened to.
+	own := ownAgencyTag()
+	theirs := ""
+	if len(parts) > 5 {
+		theirs = parts[5]
+	}
+	if own == "" {
+		return "", false
+	}
+	same := false
+	for _, t := range strings.Split(theirs, ",") {
+		same = same || t == own
+	}
+	if !same {
 		return "", false
 	}
 	if port == lanHTTPPort && isOwnIP(from) {

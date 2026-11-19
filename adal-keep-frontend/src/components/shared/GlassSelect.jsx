@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import Icon from './Icon'
 
 /**
- * A dropdown on frosted glass, open menu included (2026-11-19). A drop-in for
+ * A dropdown: glassy button, solid opaque open menu (2026-11-19). A drop-in for
  * <select>: same value / onChange(event) API and the same <option> and
  * <optgroup> children, so `<select ...>` becomes `<GlassSelect ...>`.
  * onChange gets { target: { value, name, id }, currentTarget: same }.

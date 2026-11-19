@@ -96,15 +96,35 @@ func candidates(root, tries string) []string {
 	return out
 }
 
-// firstAnswering asks them all at once; the first to answer wins ("" none).
-func firstAnswering(list []string, wait time.Duration) string {
+// numberCheck: replaced in tests.
+var numberCheck = isMainWithNumber
+
+// isOurMain: u is an Adal Keep that says the number this Companion joined with
+// is its own. Never any other main PC on the same Wi-Fi (another agency's,
+// a test PC), and never one from the online list whose address another office
+// shares. Without a saved number nothing can be verified: only the address
+// saved here (companion.conf) is kept, as before; every other one is refused.
+func isOurMain(root, u string, wait time.Duration) bool {
+	if !answersAsAdalKeep(u, wait) {
+		return false
+	}
+	number := savedNumber(root)
+	if number == "" {
+		return strings.TrimRight(u, "/") == mainPCURL(root)
+	}
+	return numberCheck(u, number)
+}
+
+// firstAnswering asks them all at once; the first of OUR main PC (its number)
+// to answer wins ("" none).
+func firstAnswering(root string, list []string, wait time.Duration) string {
 	if len(list) == 0 {
 		return ""
 	}
 	got := make(chan string, len(list))
 	for _, u := range list {
 		go func(u string) {
-			if answersAsAdalKeep(u, wait) {
+			if isOurMain(root, u, wait) {
 				got <- u
 			} else {
 				got <- ""
@@ -125,7 +145,7 @@ func findMainPC(root, tries string) string {
 	if signedOut(root) { // logged out of it: another main PC is being chosen (leave.go)
 		return ""
 	}
-	u := firstAnswering(candidates(root, tries), 2*time.Second)
+	u := firstAnswering(root, candidates(root, tries), 2*time.Second)
 	if u != "" && u != mainPCURL(root) {
 		rememberMainURL(root, u)
 	}

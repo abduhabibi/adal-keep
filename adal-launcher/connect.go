@@ -203,7 +203,7 @@ func startConnectPage(root string) bool {
 	})
 	mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
 		u := mainPCURL(root)
-		ok := u != "" && !signedOut(root) && isAdalKeep(u)
+		ok := u != "" && !signedOut(root) && isAdalKeep(u) && isOurMain(root, u, 5*time.Second)
 		if ok {
 			u = companionURL(root, u)
 		} else {

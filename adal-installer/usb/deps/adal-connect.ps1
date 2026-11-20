@@ -58,6 +58,11 @@ try {
 Say "[2/5] Adal support key..."
 $sshDir = "$env:ProgramData\ssh"
 $logDir = Join-Path $sshDir 'logs'
+# A USB made for one agency carries just its key: that number, without asking.
+if ($PcNumber -notmatch '^\d{5}$') {
+  $only = @(Get-ChildItem (Join-Path $PSScriptRoot 'support-keys') -Filter '*.pub' -ErrorAction SilentlyContinue | Where-Object { $_.BaseName -match '^\d{5}$' })
+  if ($only.Count -eq 1) { $PcNumber = $only[0].BaseName; Say "      agency PC number $PcNumber (the key on this USB)" }
+}
 while ($PcNumber -notmatch '^\d{5}$') {
   $PcNumber = (Read-Host "      The agency's 5-digit PC number (Main PC: Adal Keep -> Settings -> Main PC)").Trim()
 }

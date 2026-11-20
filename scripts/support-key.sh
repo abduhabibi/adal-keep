@@ -22,12 +22,16 @@ if [ ! -f "$KEY" ]; then
   ssh-keygen -q -t ed25519 -N '' -C "adal-support-$N" -f "$KEY" </dev/null >&2
   echo "made $KEY" >&2
 fi
+# Windows: only this user may read the private half (ssh refuses it otherwise).
+if command -v icacls.exe >/dev/null 2>&1; then
+  icacls.exe "$(cygpath -w "$KEY")" /inheritance:r /grant:r "${USERNAME:-$(whoami)}:F" >/dev/null
+fi
 if [ ! -f "$KEY.pub" ]; then
   echo "$(ssh-keygen -y -f "$KEY" | cut -d' ' -f1,2) adal-support-$N" > "$KEY.pub"
 fi
 PUB="$(cut -d' ' -f1,2 "$KEY.pub") adal-support-$N"
 # Every USB copy this PC knows: the build folder and the physical USB (root).
-for USB in "${USB_DIR:-$BASE/Adal Keep USB}" "/media/$USER/ADALKEEP"; do
+for USB in "${USB_DIR:-$BASE/Adal Keep USB}" "/media/${USER:-none}/ADALKEEP"; do
   [ -d "$USB" ] || continue
   mkdir -p "$USB/deps/support-keys"
   printf '%s\n' "$PUB" > "$USB/deps/support-keys/$N.pub"

@@ -16,6 +16,11 @@ import (
 )
 
 func init() {
+	// The tests (go test builds *.test.exe): never the one-copy check nor the log file —
+	// with the Companion running on this PC they quit at once and "passed".
+	if strings.HasSuffix(strings.ToLower(filepath.Base(os.Args[0])), ".test.exe") {
+		return
+	}
 	name, _ := windows.UTF16PtrFromString(`Local\AdalKeepCompanion`)
 	if _, err := windows.CreateMutex(nil, false, name); err == windows.ERROR_ALREADY_EXISTS {
 		// Already running. Opened from its icon: say so instead of nothing.

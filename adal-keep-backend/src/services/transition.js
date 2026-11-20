@@ -447,7 +447,7 @@ async function run(db, id, source, url, deps) {
   let byProfileEarly = (pid, pn) => { earlyMade.set(pid, pn) }
   const check = () => { if (stateOf(id).stop) { const e = new Error('Stopped'); e.stopped = true; throw e } }
   const browser = deps.browser || await getBrowser()
-  const page = deps.page || await openForPerson()
+  const page = deps.page || deps.personPage || await (deps.openForPerson || openForPerson)()
   const folder = path.join(deps.dir || DIR, `${id}-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}`)
   fs.mkdirSync(folder, { recursive: true })
   set(id, { folder })

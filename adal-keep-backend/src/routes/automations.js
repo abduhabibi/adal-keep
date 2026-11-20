@@ -107,6 +107,18 @@ router.get('/profiles/:profileId/automations', async (req, res) => {
 })
 
 // Enqueue a workflow
+// An Adal Companion's robot browser (services/remoteBrowsers.js): it says every minute where it is.
+router.post('/companion/robot-browser', async (req, res) => {
+  if (!req.pcAccess) return res.status(403).json({ error: 'Only an approved Adal Companion' })
+  const { registerDevice } = await import('../services/remoteBrowsers.js')
+  const { ipOf } = await import('../services/networkGate.js')
+  res.json(registerDevice(req.pcAccess, ipOf(req), req.body || {}))
+})
+router.get('/companion/robot-browsers', async (req, res) => {
+  const { liveDevices } = await import('../services/remoteBrowsers.js')
+  res.json(liveDevices())
+})
+
 router.post('/profiles/:profileId/automations/:workflowId/start', async (req, res) => {
   try {
     const db = req.app.locals.db
@@ -398,6 +410,15 @@ router.post('/profiles/:profileId/automations/:workflowId/start', async (req, re
     // Add from Musaned: the CV template the person chose.
     if (workflowId === 'musaned_cv_import' && req.body?.template_id) accountContext.cv_template_id = Number(req.body.template_id)
 
+    // Started on an Adal Companion whose robot browser is on the office network:
+    // the robot works there, on that PC's screen (services/remoteBrowsers.js).
+    if (req.pcAccess && !req.body?.on_main) {
+      const { deviceForRequest } = await import('../services/remoteBrowsers.js')
+      const { ipOf } = await import('../services/networkGate.js')
+      const dev = deviceForRequest(req.pcAccess, ipOf(req))
+      if (dev) accountContext.on_device = dev
+    }
+
     const [runId] = await db('automation_queue').insert({
       profile_id: profileId,
       workflow_id: workflowId,
@@ -424,7 +445,7 @@ router.post('/profiles/:profileId/automations/:workflowId/start', async (req, re
     // Start it now if a slot is free; otherwise it waits in line and starts by
     // itself. Either way the answer says which, before the browser does anything.
     const s = await dispatchRun(db, runId)
-    res.json({ ok: true, runId, resumed: false, ...s, members: 1 + group.length, skipped, message: runMessage(runId, s, s.state === 'running' ? 'started' : 'queued') + (group.length ? (workflowId === 'tasheer_schedule' ? ` One Tasheer group appointment for ${1 + group.length}.` : ` One certificate for ${1 + group.length}.`) : '') })
+    res.json({ ok: true, runId, resumed: false, ...s, members: 1 + group.length, skipped, message: runMessage(runId, s, s.state === 'running' ? 'started' : 'queued') + (group.length ? (workflowId === 'tasheer_schedule' ? ` One Tasheer group appointment for ${1 + group.length}.` : ` One certificate for ${1 + group.length}.`) : '') + (accountContext.on_device ? ' It works in Adal Browser on this PC.' : ''), on_device: !!accountContext.on_device })
   } catch (e) { res.status(e.status || 500).json({ error: e.message, ...(e.feature ? { feature: e.feature, plan: e.plan } : {}) }) }
 })
 

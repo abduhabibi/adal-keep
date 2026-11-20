@@ -421,6 +421,41 @@ async function executeRun(db, page, job) {
  *   cancelled                    → closed
  * Never throws: whatever happens is written to the run's row.
  */
+/** The Adal Companion this run was started on (its robot works there), or ''. */
+function onDevice(job) {
+  try { return String(JSON.parse(job.context || '{}').on_device || '') } catch { return '' }
+}
+
+/**
+ * The browser this run works in: the Companion's it was started on when that
+ * PC is on the office network (services/remoteBrowsers.js), else this PC's.
+ */
+async function browserForJob(db, job, { quiet = false } = {}) {
+  const dev = onDevice(job)
+  if (dev) {
+    const rb = await import('./remoteBrowsers.js')
+    try {
+      const b = await rb.browserForDevice(dev)
+      if (!quiet) await appendLog(db, job.id, `Working in ${rb.deviceOf(b)?.name || 'the Companion'}'s Adal Browser (on that PC's screen)`)
+      return b
+    } catch (e) {
+      if (!quiet) await appendLog(db, job.id, `The Companion's browser could not be reached (${e.message}) — working on the main PC instead`, 'warn')
+    }
+  }
+  return getBrowser()
+}
+
+async function appendLog(db, id, msg, level = 'info') {
+  try {
+    const row = await db('automation_queue').where('id', id).first('log')
+    let log = []
+    try { log = JSON.parse(row?.log || '[]') } catch {}
+    if (!Array.isArray(log)) log = []
+    log.push({ ts: Date.now(), level, msg })
+    await db('automation_queue').where('id', id).update({ log: JSON.stringify(log) })
+  } catch {}
+}
+
 async function runJob(db, job) {
   try {
     // A run the scanner queued (nobody pressed a button now):
@@ -428,7 +463,7 @@ async function runJob(db, job) {
     // on once Brave is open again. Brave that a person closed (or quit Adal
     // Keep) stays closed.
     const nobodyAsked = /^(Retry |Waiting for Adal Browser)/.test(job.pause_reason || '') || /Auto-discovered by scanner/.test(String(job.log || ''))
-    if (nobodyAsked && !(await openBrowserIfAny())) {
+    if (nobodyAsked && !onDevice(job) && !(await openBrowserIfAny())) {
       const at = new Date(Date.now() + 2 * 60000).toISOString()
       await db('automation_queue').where('id', job.id).update({
         status: 'pending',
@@ -437,7 +472,7 @@ async function runJob(db, job) {
       })
       return
     }
-    const browser = await getBrowser()
+    const browser = await browserForJob(db, job)
     // After a server restart the run finds the tab it worked in again.
     await findRunTab(browser, job.id, job.workflow_id, { bySite: false }).catch(() => null)
     // Otherwise a free tab already on the site (signed in), else a new one.
@@ -465,7 +500,7 @@ async function runJob(db, job) {
       if (['cancelled', 'failed', 'done'].includes(row?.status)) {
         forgetRunTab(job.id)
         // One tab for the site: the extra ones runs opened there close.
-        const b = await openBrowserIfAny().catch(() => null)
+        const b = onDevice(job) ? await browserForJob(db, job, { quiet: true }).catch(() => null) : await openBrowserIfAny().catch(() => null)
         if (b) await tidySiteTabs(b, job.workflow_id, await keepingRunIds(db)).catch(() => {})
       }
       // paused / pending (retry): the tab stays with the run; while a

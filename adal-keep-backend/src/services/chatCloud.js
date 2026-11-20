@@ -113,13 +113,14 @@ function netError(e) {
 }
 
 async function call(db, method, pathAndQuery, body, opts = {}, again = false) {
-  const { headers = {}, raw = false, timeout } = opts
+  const { headers = {}, raw = false, timeout, signal } = opts
   const { url, anon } = cfg()
   const t = await token(db)
   // Never waits for ever: on a line that drops, a dead connection used to hold the
   // PC's answers to Admin and the phones, and the update check, until a restart.
+  const limit = AbortSignal.timeout(timeout || (raw || Buffer.isBuffer(body) ? 10 * 60_000 : 60_000))
   const send = () => fetch(`${url}${pathAndQuery}`, {
-    signal: AbortSignal.timeout(timeout || (raw || Buffer.isBuffer(body) ? 10 * 60_000 : 60_000)),
+    signal: signal ? AbortSignal.any([limit, signal]) : limit,
     method,
     headers: {
       apikey: anon,

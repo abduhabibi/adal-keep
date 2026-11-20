@@ -12,12 +12,16 @@
  */
 import crypto from 'crypto'
 import fs from 'fs'
+import path from 'path'
 import { Readable } from 'stream'
 
 export const BUCKET = 'adal-updates'
 export const PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----
 MCowBQYDK2VwAyEAimpnKnJzVGiLNH27Lkf4b2aCJoLOpL1fQuqF/gM1HTo=
 -----END PUBLIC KEY-----`
+// Tests only (in-process: never from the network, a file or the environment): a throw-away key.
+let verifyKey = PUBLIC_KEY
+export const _setVerifyKeyForTests = (pem) => { verifyKey = pem || PUBLIC_KEY }
 
 /** The same text on every PC for the same manifest (sorted keys). */
 export function canonical(v) {
@@ -31,7 +35,7 @@ export function signManifest(manifest, privateKeyPem) {
 }
 
 export function verifyManifest(manifest, signature) {
-  try { return crypto.verify(null, Buffer.from(canonical(manifest)), PUBLIC_KEY, Buffer.from(String(signature || ''), 'base64')) } catch { return false }
+  try { return crypto.verify(null, Buffer.from(canonical(manifest)), verifyKey, Buffer.from(String(signature || ''), 'base64')) } catch { return false }
 }
 
 let dbRef = null
@@ -46,10 +50,17 @@ async function cloud() {
 /** The signed release last read from Supabase ({ manifest, signature }): kept to hand on to the office's other PCs. */
 export let lastEnvelope = null
 
-/** The newest signed release, or an error that says why not. */
+const wait = (ms) => new Promise(r => setTimeout(r, ms))
+
+/** The newest signed release, or an error that says why not (a slow line gets 3 tries). */
 export async function latestRelease(channel = 'release') {
   const { cloudCall } = await cloud()
-  const res = await cloudCall(dbRef, 'GET', `/storage/v1/object/authenticated/${BUCKET}/${channel}/latest.json`, undefined, { raw: true, headers: { 'Cache-Control': 'no-cache' } })
+  let res = null, lastErr = null
+  for (let i = 0; i < 3 && !res; i++) {
+    try { res = await cloudCall(dbRef, 'GET', `/storage/v1/object/authenticated/${BUCKET}/${channel}/latest.json`, undefined, { raw: true, timeout: 45_000, headers: { 'Cache-Control': 'no-cache' } }) }
+    catch (e) { lastErr = e; if (i < 2) await wait(2000 * (i + 1)) }
+  }
+  if (!res) throw lastErr
   if (!res.ok) throw new Error(`Supabase updates answered ${res.status}${res.status === 400 || res.status === 404 ? ' (nothing published yet, or updates.sql not run)' : ''}`)
   const { manifest, signature } = await res.json()
   if (!manifest?.sha || !verifyManifest(manifest, signature)) throw new Error('The published update is not signed by Adal — not installed')
@@ -57,20 +68,90 @@ export async function latestRelease(channel = 'release') {
   return manifest
 }
 
-/** Downloads the release's bundle to `dest` and checks its SHA-256. */
-export async function downloadRelease(manifest, dest) {
-  const { cloudCall } = await cloud()
-  const res = await cloudCall(dbRef, 'GET', `/storage/v1/object/authenticated/${BUCKET}/${manifest.file}`, undefined, { raw: true })
-  if (!res.ok) throw new Error(`Download failed: Supabase answered ${res.status}`)
-  const hash = crypto.createHash('sha256')
-  await new Promise((resolve, reject) => {
-    const ws = fs.createWriteStream(dest)
-    const rs = Readable.fromWeb(res.body)
-    rs.on('data', (c) => hash.update(c))
-    rs.pipe(ws).on('finish', resolve).on('error', reject)
-    rs.on('error', reject)
-  })
-  const got = hash.digest('hex')
-  if (got !== manifest.sha256) throw new Error('The download does not match Adal\'s signed release (damaged or changed) — not installed')
+export const sha256File = (file) => new Promise((ok, no) => {
+  const h = crypto.createHash('sha256')
+  fs.createReadStream(file).on('data', c => h.update(c)).on('end', () => ok(h.digest('hex'))).on('error', no)
+})
+
+/**
+ * A download that survives a slow or dropping line (2026-11-19: the main PC's
+ * update was cut off by one timeout). It goes in pieces (Range requests) into
+ * `<dest>.part`, which stays between tries and between updates, so every try
+ * goes on from where the last one stopped. Each piece has its own timeout, a
+ * failed piece is tried again after a growing wait, and only many tries in a
+ * row with no progress at all give up. A server that ignores Range sends the
+ * whole file: read while it keeps sending (a stall, not the total time, ends it).
+ * The finished file must match `want` (SHA-256), else it is thrown away.
+ *
+ *   open(start, end, signal) → a fetch Response (206 for the range, or 200 for all)
+ */
+const defaults = { chunk: 2 * 1048576, timeout: 180_000, stall: 60_000, tries: 6, backoff: 2000 }
+/** Tests only: shorter waits. */
+export const _setDownloadDefaultsForTests = (o) => Object.assign(defaults, o)
+
+export async function rangedDownload(open, dest, want, opts = {}) {
+  const { chunk, timeout, stall, tries, backoff } = { ...defaults, ...Object.fromEntries(Object.entries(opts).filter(([, v]) => v !== undefined)) }
+  const part = `${dest}.part`
+  fs.mkdirSync(path.dirname(dest), { recursive: true })
+  const have = () => { try { return fs.statSync(part).size } catch { return 0 } }
+  let total = 0, failures = 0
+  for (;;) {
+    const before = have()
+    if (total && before >= total) break
+    let lastErr = null
+    const ac = new AbortController()
+    let timer = setTimeout(() => ac.abort(new Error(`no answer in ${timeout / 1000}s`)), timeout)
+    const restartStall = () => { clearTimeout(timer); timer = setTimeout(() => ac.abort(new Error('stalled')), stall) }
+    try {
+      const res = await open(before, before + chunk - 1, ac.signal)
+      if (res.status === 416) { // asked past the end: all of it is here
+        if (!total) total = before
+        break
+      }
+      if (res.status !== 206 && res.status !== 200) {
+        // Not there / not allowed: no use asking again (a busy or broken server is asked again).
+        if (res.status >= 400 && res.status < 500 && ![408, 425, 429].includes(res.status)) throw Object.assign(new Error(`answered ${res.status}`), { final: true })
+        throw new Error(`answered ${res.status}`)
+      }
+      const ranged = res.status === 206
+      if (ranged) {
+        const m = /bytes\s+(\d+)-\d+\/(\d+|\*)/.exec(res.headers.get('content-range') || '')
+        if (!m || Number(m[1]) !== before) throw new Error('the server sent another part than asked')
+        if (m[2] !== '*') total = Number(m[2])
+      } else {
+        // The whole file from the start: what was here is replaced; a stall ends it, not the total time.
+        total = Number(res.headers.get('content-length')) || 0
+        restartStall()
+      }
+      const ws = fs.createWriteStream(part, { flags: ranged ? 'a' : 'w' })
+      try {
+        for await (const c of Readable.fromWeb(res.body)) {
+          if (!ranged) restartStall()
+          if (!ws.write(c)) await new Promise(r => ws.once('drain', r))
+        }
+      } finally {
+        await new Promise(r => ws.end(r))
+      }
+      if (!ranged && !total) total = have() // no length given: what came is all of it
+      if (!ranged && have() < total) throw new Error('cut off')
+    } catch (e) { lastErr = e } finally { clearTimeout(timer) }
+    if (total && have() > total) { fs.rmSync(part, { force: true }); total = 0 } // nonsense: from the start again
+    if (have() > before) failures = 0 // progress: the count starts again
+    else if (lastErr) {
+      if (lastErr.final) throw new Error(`download failed: ${lastErr.message}`)
+      if (++failures >= tries) throw new Error(`download stopped after ${failures} tries with no progress: ${lastErr.message}`)
+      await wait(Math.min(60_000, backoff * 2 ** (failures - 1)))
+    } else if (++failures >= tries) throw new Error('download stopped: no data')
+  }
+  const got = await sha256File(part)
+  if (got !== want) { fs.rmSync(part, { force: true }); throw new Error('The download does not match Adal\'s signed release (damaged or changed) — not installed') }
+  fs.renameSync(part, dest)
   return dest
+}
+
+/** Downloads one piece of the release from Supabase to `dest` (in pieces, resumable) and checks its SHA-256. */
+export async function downloadRelease(manifest, dest, opts = {}) {
+  const { cloudCall } = await cloud()
+  const url = `/storage/v1/object/authenticated/${BUCKET}/${manifest.file}`
+  return rangedDownload((start, end, signal) => cloudCall(dbRef, 'GET', url, undefined, { raw: true, timeout: opts.timeout || 180_000, signal, headers: { Range: `bytes=${start}-${end}` } }), dest, manifest.sha256, opts)
 }

@@ -59,6 +59,7 @@ import trashRouter from './src/routes/trash.js'
 import mainPCRouter from './src/routes/mainPC.js'
 import mobileRouter from './src/routes/mobile.js'
 import branchMergeRouter from './src/routes/branchMerge.js'
+import standbyRouter from './src/routes/standby.js'
 import wafidRouter from './src/routes/wafid.js'
 import backupRouter from './src/routes/backup.js'
 import replicaRouter from './src/routes/replica.js'
@@ -103,7 +104,7 @@ import('./src/services/bodySize.js').then(b => import('./src/services/changes.js
 
 app.use(diagMiddleware)
 app.use(featureUseMiddleware)   // how much each feature is used (Adal Keep Admin → Usage)
-startFeatureUse(db)
+if (process.env.ADAL_ISOLATED !== '1') startFeatureUse(db)
 // Security headers first, for every answer.
 app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false, crossOriginResourcePolicy: { policy: "cross-origin" }, frameguard: false }))
 // Only Adal Keep's own pages may call it from a browser (no other website).
@@ -203,6 +204,7 @@ app.use('/api', trashRouter)
 app.use('/api', mainPCRouter)
 app.use('/api', mobileRouter)   // the phone app pairs with this PC
 app.use('/api', branchMergeRouter)
+app.use('/api', standbyRouter)   // every Companion: the server in waiting, and its merge back
 app.use('/api', wafidRouter)
 app.use('/api', backupRouter)
 app.use('/api', replicaRouter)   // Companions keep a locked copy; /safety (backup age, licence end)
@@ -306,7 +308,7 @@ async function initSystem() {
 }
 
 app.locals.runInit = initSystem
-setInterval(async () => { try { await maybeNotify(app.locals.db, statusPayload()) } catch {} }, 3600000)
+if (process.env.ADAL_ISOLATED !== '1') setInterval(async () => { try { await maybeNotify(app.locals.db, statusPayload()) } catch {} }, 3600000)
 
 // Helper function to filter object keys
 function pick(obj, keys) {
@@ -338,7 +340,8 @@ app.get('/api/system/automation-health', async (req, res) => {
 })
 app.get('/api/health', (req, res) => {
   // role/instance let another PC check it is choosing a real main PC.
-  res.json({ status: 'ok', role: isFollower() ? 'follower' : 'main', main_url: mainURL() || undefined, instance: instanceId() })
+  // acting: an Adal Companion standing in for the main PC while it is away (services/standby).
+  res.json({ status: 'ok', role: isFollower() ? 'follower' : 'main', main_url: mainURL() || undefined, instance: instanceId(), ...(process.env.ADAL_ACTING_MAIN === '1' ? { acting: true, acting_since: process.env.ADAL_ACTING_SINCE || null } : {}) })
 })
 
 app.get('/api/dashboard', async (req, res) => {
@@ -1253,8 +1256,13 @@ cron.schedule('0 2 * * *', async () => {
 
 // 5. Start Server
 initSystem().then(() => {
-  app.listen(PORT, () => {
+  // A Companion standing in for the main PC listens on this PC only (127.0.0.1): the
+  // office comes through adal-companion.exe (services/standby, ADAL_LISTEN_HOST).
+  app.listen(PORT, process.env.ADAL_LISTEN_HOST || undefined, () => {
     console.log(`🚀 Backend running on http://localhost:${PORT}`)
+    // ADAL_ISOLATED=1: pages and data only — no robots, no scanner, no online copy, no
+    // backups, no discovery, no updates (checking a copy of an agency on another PC).
+    if (process.env.ADAL_ISOLATED === '1') { console.log('🔒 Isolated: no background work'); return }
     startUpdateWatcher(app.locals.db) // a new version installs by itself when no run is working
     startMedicalWatcher(app.locals.db) // the medical's battery: warnings as it runs out
     import('./src/services/sessionKeeper.js').then(k => k.startSessionKeeper(app.locals.db)).catch(e => console.warn('[sessions]', e.message)) // signed in once, kept all day
@@ -1289,7 +1297,8 @@ initSystem().then(() => {
     startDiscoveryResponder({
       port: Number(process.env.DISCOVERY_PORT) || undefined,
       name: 'Adal Keep',
-      getInfo: () => ({ port: Number(PORT) }),
+      // A Companion standing in for the main PC: the office reaches it on its Companion's port (4000).
+      getInfo: () => ({ port: Number(process.env.ADAL_ADVERTISE_PORT) || Number(PORT) }),
     })
   })
 })

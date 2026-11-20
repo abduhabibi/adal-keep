@@ -29,7 +29,8 @@ const lanNow = () => { try { return getLanAddresses().map(a => a.address).slice(
 // The beat also says which licence this PC uses and whether it is suspended (Admin shows it).
 let licBeat = null
 import('./plans.js').then(P => { licBeat = () => { const l = P.licenseNow(); return l ? { lic_at: l.at || null, suspended: !!l.suspended } : {} } }).catch(() => {})
-const beatData = () => ({ at: new Date().toISOString(), ...(isFollower() ? {} : { pc: myPcNumber(), lan: lanNow(), port: PORT(), ...(licBeat?.() || {}) }) })
+// acting: an Adal Companion standing in for the main PC (services/standby) — the Companions tell it from the real one.
+const beatData = () => ({ at: new Date().toISOString(), ...(isFollower() ? {} : { pc: myPcNumber(), lan: lanNow(), port: Number(process.env.ADAL_ADVERTISE_PORT) || PORT(), ...(process.env.ADAL_ACTING_MAIN === '1' ? { acting: true } : {}), ...(licBeat?.() || {}) }) })
 import { waitForQuiet } from './userUploads.js'
 import { tgReady, tgPut, tgDelete, TG_MAX_DOWNLOAD, findStorageChat } from './tgStore.js'
 import { viewCopy } from './viewCopy.js'

@@ -33,6 +33,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -265,7 +266,7 @@ func announceRobot() {
 	for {
 		keys := loadKeys()
 		if keys.AccessKey != "" && hostServer != "" {
-			body := map[string]any{"token": robotToken, "port": lanHTTPPort, "name": clientName}
+			body := map[string]any{"token": robotToken, "port": lanHTTPPort, "name": clientName, "cores": runtime.NumCPU()}
 			if _, err := mainJSON(http.MethodPost, "/api/companion/robot-browser", body, keys.AccessKey, nil); err != nil {
 				log.Printf("🤖 robot browser not announced: %v", err)
 			}

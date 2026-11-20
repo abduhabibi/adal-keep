@@ -37,7 +37,8 @@ export function registerDevice(pc, ip, body = {}) {
   if (!/^[A-Za-z0-9_-]{16,128}$/.test(token) || !ip) return { ok: false, error: 'bad token' }
   const old = devices.get(pc.id)
   if (old && (old.token !== token || old.ip !== ip || old.port !== port)) dropConnection(pc.id)
-  devices.set(pc.id, { id: pc.id, name: String(body.name || pc.name || 'Companion').slice(0, 60), ip: String(ip).replace(/^::ffff:/, ''), port, token, at: Date.now() })
+  const cores = Math.max(1, Math.min(256, Number(body.cores) || 1))
+  devices.set(pc.id, { id: pc.id, name: String(body.name || pc.name || 'Companion').slice(0, 60), ip: String(ip).replace(/^::ffff:/, ''), port, token, cores, at: Date.now() })
   return { ok: true }
 }
 
@@ -66,6 +67,17 @@ export async function tabForPerson(id) {
   const page = await b.newPage()
   await page.bringToFront().catch(() => {})
   return { browser: b, page }
+}
+
+/**
+ * A run nobody pressed (the scanner queued it) while this PC's Adal Browser is
+ * closed: the strongest Companion that is there, and not busy with a run of its
+ * own already, does it ("the fast PCs do the most work"). '' when none.
+ */
+export function freeStrongDevice(busyIds = new Set(), now = Date.now()) {
+  const list = [...devices.values()].filter(d => now - d.at < SEEN_MS && !busyIds.has(d.id))
+  list.sort((a, b) => (b.cores || 1) - (a.cores || 1) || String(a.id).localeCompare(String(b.id)))
+  return list[0]?.id || ''
 }
 
 export function liveDevices(now = Date.now()) {

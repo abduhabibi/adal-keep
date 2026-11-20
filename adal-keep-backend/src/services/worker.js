@@ -421,6 +421,26 @@ async function executeRun(db, page, job) {
  *   cancelled                    → closed
  * Never throws: whatever happens is written to the run's row.
  */
+/** A run nobody pressed goes to a free, strong Companion (its context says so from now on). */
+async function sendToFreeCompanion(db, job) {
+  try {
+    const rb = await import('./remoteBrowsers.js')
+    const busy = new Set()
+    for (const r of await db('automation_queue').where('status', 'running').whereNot('id', job.id).select('context')) {
+      try { const d = JSON.parse(r.context || '{}').on_device; if (d) busy.add(d) } catch {}
+    }
+    const dev = rb.freeStrongDevice(busy)
+    if (!dev) return
+    let ctx = {}
+    try { ctx = JSON.parse(job.context || '{}') } catch {}
+    ctx.on_device = dev
+    job.context = JSON.stringify(ctx)
+    const { seal } = await import('./accountVault.js')
+    await db('automation_queue').where('id', job.id).update({ context: seal(job.context) })
+    console.log(`[worker] run #${job.id}: this PC's browser is closed — a free Companion does it`)
+  } catch (e) { console.warn('[worker] no Companion for it:', e.message) }
+}
+
 /** The Adal Companion this run was started on (its robot works there), or ''. */
 function onDevice(job) {
   try { return String(JSON.parse(job.context || '{}').on_device || '') } catch { return '' }
@@ -463,6 +483,8 @@ async function runJob(db, job) {
     // on once Brave is open again. Brave that a person closed (or quit Adal
     // Keep) stays closed.
     const nobodyAsked = /^(Retry |Waiting for Adal Browser)/.test(job.pause_reason || '') || /Auto-discovered by scanner/.test(String(job.log || ''))
+    // Nobody pressed it and this PC's browser is closed: a free, strong Companion does it.
+    if (nobodyAsked && !onDevice(job) && !(await openBrowserIfAny())) await sendToFreeCompanion(db, job)
     if (nobodyAsked && !onDevice(job) && !(await openBrowserIfAny())) {
       const at = new Date(Date.now() + 2 * 60000).toISOString()
       await db('automation_queue').where('id', job.id).update({

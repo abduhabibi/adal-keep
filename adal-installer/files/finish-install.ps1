@@ -9,7 +9,8 @@
 # =====================================================================
 param(
     [Parameter(Mandatory = $true)][string]$InstDir,
-    [Parameter(Mandatory = $true)][string]$Deps
+    [Parameter(Mandatory = $true)][string]$Deps,
+    [switch]$NoBrowser   # an Adal Companion's server in waiting: its browser is beside it already
 )
 $ErrorActionPreference = 'Stop'
 $log = Join-Path $InstDir 'install.log'
@@ -45,7 +46,7 @@ try {
     # --- Adal Browser: ready at the first start, nothing to download. If it is
     # missing or locked the launcher fetches it, so this never stops the install.
     $browserZip = Join-Path $Deps 'adal-browser.zip'
-    if (Test-Path $browserZip) {
+    if ((Test-Path $browserZip) -and -not $NoBrowser) {
         tar.exe -xf $browserZip -C $InstDir
         if ($LASTEXITCODE -eq 0) { Write-Host 'OK  Adal Browser' } else { Write-Host 'WARN Adal Browser not unpacked: it is fetched at the first start' }
     }

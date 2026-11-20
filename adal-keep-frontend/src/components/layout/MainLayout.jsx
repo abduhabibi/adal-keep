@@ -13,6 +13,7 @@ import useReadyChime from '../../hooks/useReadyChime'
 import useNewVersion from '../../hooks/useNewVersion'
 import api from '../../services/api'
 import UpdateBanner from '../UpdateBanner'
+import StandbyBanner from '../StandbyBanner'
 import SafetyAlerts from '../SafetyAlerts'
 import { swipeBack } from '../../lib/phoneApp'
 import { PhoneTabBar, PhoneTopBar, usePageMotion, prefetchTabs } from './PhoneChrome'
@@ -159,6 +160,7 @@ export default function MainLayout() {
         {DEMO && <Suspense fallback={null}><DemoBanner /></Suspense>}
         {!DEMO && <FollowerBanner />}
         {!DEMO && <UpdateBanner />}
+        {!DEMO && <StandbyBanner />}
         {!DEMO && <SafetyAlerts />}
         {wide && (
           <div className="shrink-0">

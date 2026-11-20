@@ -85,7 +85,8 @@ export function findBrowserExecutable() {
 // profile, so the page and every run are tabs of ONE window.
 // Adal Browser has a profile of its own: Chromium refuses a profile a newer
 // browser wrote, and Brave's may be newer.
-const OWN_BROWSER = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'browser', 'AdalBrowser.exe')
+// (A Companion standing in for the main PC: its own Adal Browser, ADAL_BROWSER_EXE.)
+const OWN_BROWSER = process.env.ADAL_BROWSER_EXE || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'browser', 'AdalBrowser.exe')
 export const PROFILE_DIR = process.env.ADAL_BROWSER_PROFILE ||
   path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'data', fs.existsSync(OWN_BROWSER) ? 'adal-browser' : 'browser-profile')
 // Out of sight needs today's AdalKeep.exe: an older one opens Adal Keep's page

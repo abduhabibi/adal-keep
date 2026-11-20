@@ -11,6 +11,7 @@
 package main
 
 import (
+	"encoding/json"
 	"io"
 	"net"
 	"net/http"
@@ -66,6 +67,15 @@ var proxyAsk = []string{"Content-Type", "Accept", "Accept-Encoding", "Range", "I
 var proxyAnswer = []string{"Content-Type", "Content-Length", "Content-Encoding", "Content-Disposition", "Content-Range", "Accept-Ranges", "Cache-Control", "ETag", "Last-Modified", "Vary"}
 
 func addMainProxy(mux *http.ServeMux) {
+	// What this PC does as a main PC in waiting (standby.go), for its window.
+	mux.HandleFunc("/local/standby", func(w http.ResponseWriter, r *http.Request) {
+		if !fromThisPC(r) {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(standbyStatus())
+	})
 	// Where this program finds the main PC now (by its network card, discovery):
 	// AdalKeep.exe tries it too, so the window stays on the office network.
 	mux.HandleFunc("/local/host", func(w http.ResponseWriter, r *http.Request) {

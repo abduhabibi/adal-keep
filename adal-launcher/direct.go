@@ -15,6 +15,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -159,6 +160,10 @@ func rememberMainURL(root, u string) {
 	if signedOut(root) {
 		return
 	}
+	// This PC standing in for the main PC (adal-companion standby.go): never saved as the main PC.
+	if pu, err := neturl.Parse(u); err == nil && (pu.Hostname() == "127.0.0.1" || pu.Hostname() == "localhost") && pu.Port() == actingPortText() {
+		return
+	}
 	if old, err := os.ReadFile(p); err == nil && !strings.HasPrefix(string(old), "# Written by the Adal Keep Companion.") {
 		return
 	}
@@ -176,4 +181,13 @@ func rememberMainURL(root, u string) {
 	if err := os.WriteFile(p, []byte(body), 0o644); err == nil {
 		logf("main PC found at %s (from its own list)", u)
 	}
+}
+
+// actingPortText: where this PC's own Adal Keep runs when it stands in for the main PC
+// (adal-companion standby.go, ADAL_ACTING_PORT, 4140).
+func actingPortText() string {
+	if v := strings.TrimSpace(os.Getenv("ADAL_ACTING_PORT")); v != "" {
+		return v
+	}
+	return "4140"
 }

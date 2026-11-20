@@ -57,6 +57,8 @@ func main() {
 			startSelfUpdate(root)
 			// A locked copy of the agency's data, backed up from here when the main PC is off (replica.go).
 			watchReplica()
+			// A full Adal Keep in waiting: it stands in when the main PC is away (standby.go).
+			startStandby(root)
 		}
 	}
 

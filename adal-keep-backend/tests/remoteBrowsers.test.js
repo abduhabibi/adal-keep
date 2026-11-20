@@ -64,3 +64,14 @@ test('an upload in a Companion\'s browser sends the file there first; the main P
   assert.equal(got[0].body, 'JPEG')
   srv.close()
 })
+
+test('a run nobody pressed goes to the strongest free Companion', async () => {
+  const { freeStrongDevice } = await import('../src/services/remoteBrowsers.js')
+  _resetForTest()
+  assert.equal(freeStrongDevice(), '')
+  registerDevice({ id: 'weak' }, '192.168.1.21', { token: TOKEN, cores: 4 })
+  registerDevice({ id: 'strong' }, '192.168.1.22', { token: TOKEN, cores: 16 })
+  assert.equal(freeStrongDevice(), 'strong')
+  assert.equal(freeStrongDevice(new Set(['strong'])), 'weak')                 // busy with a run: the next one
+  assert.equal(freeStrongDevice(new Set(), Date.now() + 4 * 60e3), '')        // gone quiet: none
+})

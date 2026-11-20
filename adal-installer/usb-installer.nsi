@@ -119,6 +119,19 @@ Section "Install"
   ; ============================ EMPLOYEE PC ============================
   DetailPrint "Copying the Companion..."
   File /r "stage\companion\*"
+  ; A full Adal Keep in waiting (adal-companion standby.go): the server, never
+  ; started while the main PC answers; it stands in when the main PC is away.
+  DetailPrint "Copying Adal Keep's server (it stands in when the main PC is away)..."
+  SetOutPath "$INSTDIR\server"
+  File /r "stage\main\backend"
+  File /r "stage\main\frontend"
+  File "stage\main\finish-install.ps1"
+  CreateDirectory "$INSTDIR\server\backend\data"
+  nsExec::Exec '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\server\finish-install.ps1" -InstDir "$INSTDIR\server" -Deps "$EXEDIR\deps" -NoBrowser'
+  Pop $0
+  DetailPrint "Server in waiting: $0 (0 = ready; otherwise it comes from the main PC later)"
+  Delete "$INSTDIR\server\finish-install.ps1"
+  SetOutPath "$INSTDIR"
   ; Adal Browser ready at the first start; missing here, it is fetched then
   nsExec::Exec 'tar.exe -xf "$EXEDIR\deps\adal-browser.zip" -C "$INSTDIR"'
   Pop $0

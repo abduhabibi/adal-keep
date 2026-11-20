@@ -284,6 +284,9 @@ const autoConfHeader = "# Written by the Adal Keep Companion."
 // Companion wrote itself is updated when the main PC moves (new address from
 // the router); a file someone wrote by hand is never overwritten.
 func rememberHostURL(url string) {
+	if isActingURL(url) { // this PC standing in for the main PC: never saved as the main PC
+		return
+	}
 	path, err := companionConfPath()
 	if err != nil || signedOut() {
 		return
@@ -411,6 +414,9 @@ func itoa(n int) string {
 func keepFindingServer() {
 	for tick := 1; ; tick++ {
 		time.Sleep(5 * time.Second)
+		if standbyActing() { // this PC is the office's Adal Keep now (standby.go)
+			continue
+		}
 		pinned := pinnedHostURL()
 		if signedOut() && pinned == "" {
 			if hostServer != "" {

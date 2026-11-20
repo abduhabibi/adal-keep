@@ -259,6 +259,9 @@ func uploadToIngest(filePath, filename string) {
 // rediscover looks for the main PC on the LAN again (a DHCP lease change is
 // the usual reason a known address stops answering). True when it moved.
 func rediscover() bool {
+	if standbyActing() {
+		return false
+	}
 	log.Println("🔁 Re-scanning the LAN for the Adal Keep server...")
 	if info := discoverServer(2500 * time.Millisecond); info != nil && strings.TrimRight(info.URL, "/") != strings.TrimRight(hostServer, "/") {
 		log.Printf("👉 Server found at %s", info.URL)

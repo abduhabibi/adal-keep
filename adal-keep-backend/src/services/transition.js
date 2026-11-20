@@ -23,7 +23,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { fileURLToPath } from 'url'
-import { getBrowser, openForPerson, sendAway } from './browser.js'
+import { getBrowser, openForPerson, sendAway, newRunTab } from './browser.js'
 import { saveOnProfile } from './musanedImport.js'
 import { copyEasyEnjaz, signedInToken } from './easyEnjazCopy.js'
 import { copyEnjazPlus, signedInEnjazPlus } from './enjazPlusCopy.js'
@@ -91,7 +91,10 @@ export async function showTransition(id) {
 export const transitionRunning = () => [...states.values()].some(s => ['signing-in', 'copying'].includes(s.status))
 
 export function stopTransition(id) {
-  if (['signing-in', 'copying'].includes(stateOf(id).status)) set(id, { stop: true, step: 'Stopping…' })
+  const st = stateOf(id).status
+  if (['signing-in', 'copying'].includes(st)) set(id, { stop: true, step: 'Stopping…' })
+  // Waiting to go on by itself after a restart: it does not start.
+  else if (st === 'waiting') { forgetRunning(id); set(id, { status: 'stopped', step: '' }) }
 }
 
 /** A Pextran address: only https on pextran.com, reduced to the site itself. */
@@ -267,6 +270,32 @@ export function filesOf(raw, origin) {
 }
 
 /** The address of the next page of a list, or null. */
+/**
+ * Every other page of a list at once, when its first answer says how many
+ * there are and its address numbers its pages: [{ url, at }], else null (it is
+ * then read one page after the other, as nextPage says).
+ */
+export function everyPage(url, json, count) {
+  if (!count) return null
+  const d = json?.data && !Array.isArray(json.data) ? json.data : {}
+  const total = Number([json?.total, json?.totalCount, json?.totalElements, json?.meta?.total, json?.pagination?.total, d.total, d.totalCount, d.totalElements]
+    .find(v => Number(v) > 0) || 0)
+  if (!total) return null
+  const u = new URL(url), q = u.searchParams
+  const key = [...q.keys()].find(k => /^(page|pagenumber|pageno|pageindex|p)$/i.test(k))
+  if (!key) return null
+  const from = Number(q.get(key) || 0)
+  if (!Number.isFinite(from)) return null
+  // Its page size as asked (some rows may have had no passport), else the rows that came.
+  const sizeKey = [...q.keys()].find(k => /^(pagesize|size|limit|per_?page|take|pagelength)$/i.test(k))
+  const size = Number(sizeKey && q.get(sizeKey)) || Number(d.pageSize ?? json?.pageSize ?? json?.size) || count
+  const pages = Math.min(Math.ceil(total / Math.max(size, 1)), 2000)
+  if (pages < 2) return null
+  const out = []
+  for (let i = 1; i < pages; i++) { q.set(key, String(from + i)); out.push({ url: u.href, at: i }) }
+  return out
+}
+
 export function nextPage(url, json, count) {
   if (typeof json?.next === 'string' && json.next) return new URL(json.next, url).href // Django style
   const u = new URL(url), q = u.searchParams
@@ -322,6 +351,46 @@ const readTables = (page) => page.evaluate(() => [...document.querySelectorAll('
   if (!heads.length) return []
   return [...t.querySelectorAll('tbody tr')].map(r => Object.fromEntries([...r.cells].map((c, i) => { const img = c.querySelector('img'); return [heads[i] || `c${i}`, c.innerText.trim() || (img && (img.currentSrc || img.src)) || ''] })))
 })).catch(() => [])
+
+/**
+ * A page of the site, as soon as it can be read: its HTML (not its pictures),
+ * then its own calls for a moment — a site that keeps a line open (live
+ * notifications) never goes quiet, so this never waits more than a few seconds.
+ */
+async function openPage(page, url, { idle = 500, most = 6000 } = {}) {
+  const quiet = watchQuiet(page)
+  await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {})
+  await quiet.wait({ idle, most })
+}
+/** After a click: its calls for a moment. */
+const settle = (page, { idle = 400, most = 5000 } = {}) => watchQuiet(page).wait({ idle, most })
+
+/**
+ * The tab's own calls, from now on: wait() ends once at most two are open
+ * (a line kept open for live news never closes) for `idle` ms, or after `most`.
+ * (The browser's own network idle never came on a tab whose pictures were
+ * stopped mid-way: every page waited its 6 s.)
+ */
+function watchQuiet(page) {
+  if (!page.waitForNetworkIdle || !page.off) return { wait: ({ idle }) => sleep(Math.min(idle, 200)) }
+  const live = new Set()
+  const onReq = (r) => live.add(r), onEnd = (r) => live.delete(r)
+  page.on('request', onReq); page.on('requestfinished', onEnd); page.on('requestfailed', onEnd)
+  return {
+    wait: ({ idle, most }) => new Promise((resolve) => {
+      const t0 = Date.now()
+      let calm = 0
+      const tick = setInterval(() => {
+        calm = live.size <= 2 ? calm + 100 : 0
+        if (calm >= idle || Date.now() - t0 >= most) {
+          clearInterval(tick)
+          page.off('request', onReq); page.off('requestfinished', onEnd); page.off('requestfailed', onEnd)
+          resolve()
+        }
+      }, 100)
+    }),
+  }
+}
 
 const links = (page) => page.evaluate(() => [...new Set([...document.querySelectorAll('a[href]')].map(a => a.href))]).catch(() => [])
 const AVOID = /log.?out|sign.?out|delete|remove|destroy|edit|create|\/new|\/add|settings|billing|payment/i
@@ -411,7 +480,7 @@ export function resumeTransitions(db, { delayMs = 90000 } = {}) {
     if ((m.tries || 0) >= 5) { console.warn(`[transition ${id}] stopped 5 times in a row: not started again by itself`); forgetRunning(id); continue }
     set(id, { ...blank(), status: 'waiting', step: `Going on from where it stopped (in ${Math.round(delayMs / 1000)} s)…`, site: m.url })
     setTimeout(() => {
-      if (['signing-in', 'copying'].includes(stateOf(id).status)) return
+      if (stateOf(id).status !== 'waiting') return   // started by a person meanwhile, or stopped
       console.log(`[transition ${id}] going on from where it stopped`)
       try { startTransition(db, id, m.url, { resumed: true }) } catch (e) { console.warn(`[transition ${id}] could not go on:`, e.message) }
     }, delayMs).unref?.()
@@ -425,7 +494,7 @@ export function startTransition(db, id, link, deps = {}) {
   if (['signing-in', 'copying'].includes(stateOf(id).status)) return stateOf(id)
   const url = link || source.url
   if (!url) throw new Error('Paste the address first')
-  set(id, { ...blank(), status: 'signing-in', step: deps.resumed ? `Going on from where it stopped: sign in to ${source.name} if the window asks` : `Sign in to ${source.name} in the window that opened`, site: url })
+  set(id, { ...blank(), status: 'signing-in', step: `Opening ${source.name}…`, site: url })
   if (!deps.limit && !deps.page) noteRunning(id, url, deps.resumed)   // (tests and trial moves are not noted)
   // A move takes hours on a slow line: the PC must not sleep in the middle.
   const letSleep = (deps.keepAwake || keepAwake)(`moving from ${source.name}`)
@@ -441,13 +510,100 @@ export function startTransition(db, id, link, deps = {}) {
   return stateOf(id)
 }
 
+const within = (p, ms) => Promise.race([p, sleep(ms).then(() => null)])
+
+/** The browser holds a sign-in for this site (a cookie of its own). */
+async function hasCookies(browser, origin) {
+  try {
+    const host = new URL(origin).hostname
+    const cdp = await browser.target().createCDPSession()
+    try {
+      const { cookies } = await cdp.send('Storage.getCookies')
+      return cookies.some(c => { const d = String(c.domain || '').replace(/^\./, ''); return host === d || host.endsWith('.' + d) })
+    } finally { cdp.detach().catch(() => {}) }
+  } catch { return false }
+}
+
+/**
+ * The tab a move works in (asked on 2026-11-20: "it opens Chrome, and going to
+ * another website is really slow"). Always in Adal Browser:
+ *   1. a free tab already on the site and signed in: taken, nothing shows;
+ *   2. the browser holds the site's sign-in: a tab out of sight goes there;
+ *   3. else a window for a person to sign in.
+ */
+async function workTab(db, browser, id, source, url, deps, check) {
+  if (deps.page || deps.personPage) return { page: deps.page || deps.personPage, quiet: false }
+  if (deps.openForPerson) return { page: await deps.openForPerson(), quiet: false }
+  const origin = new URL(url).origin
+  const signedIn = async (tab) => {
+    if (source.token) return !!(await source.token(tab).catch(() => null))
+    let home = false
+    try { home = new URL(tab.url()).origin === origin } catch {}
+    return home && !(await onSignIn(tab))
+  }
+  // Musaned: only its main account signs in in the browser's own space.
+  let mine = true
+  if (id === 'musaned' && deps.accountId) {
+    const main = await db('musaned_accounts').orderBy('is_default', 'desc').orderBy('id').first('id').catch(() => null)
+    mine = !main || Number(main.id) === Number(deps.accountId)
+  }
+  if (mine && browser?.pages && browser?.target) {
+    const tm = await import('./tabManager.js')
+    const free = await tm.borrowOpenTab(browser, id, await tm.activeRunIds(db)).catch(() => null)
+    if (free) {
+      let same = false
+      try { same = new URL(free.url()).origin === origin } catch {}
+      if (id === 'musaned') listenMusaned(free)
+      if (same && await within(signedIn(free), 10000)) {
+        await tm.setupTab(free)
+        console.log(`[transition ${id}] signed in already: the tab on ${origin} is used`)
+        return { page: free, quiet: true, borrowed: true }
+      }
+      await tm.doneWithTab(free)
+    }
+    if (await hasCookies(browser, origin)) {
+      const tab = await newRunTab(browser).catch(() => null)
+      if (tab) {
+        tab.__adalBorrowed = true   // no run takes it while it is looked at
+        if (id === 'musaned') listenMusaned(tab)
+        await tm.setupTab(tab)
+        await tab.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {})
+        for (let t0 = Date.now(), ok = 0; Date.now() - t0 < (id === 'musaned' ? 20000 : 8000);) {
+          check()
+          ok = (await within(signedIn(tab), 8000)) ? ok + 1 : 0
+          if (ok >= (source.token ? 1 : 2)) {
+            console.log(`[transition ${id}] signed in already: copying in a tab out of sight`)
+            return { page: tab, quiet: true }
+          }
+          await sleep(1000)
+        }
+        await tab.close().catch(() => {})
+      }
+    }
+  }
+  return { page: await openForPerson(), quiet: false }
+}
+
 async function run(db, id, source, url, deps) {
   let stopUrgent = () => {}
   const earlyMade = new Map()   // her profile id → her passport (made while the pages were read)
   let byProfileEarly = (pid, pn) => { earlyMade.set(pid, pn) }
   const check = () => { if (stateOf(id).stop) { const e = new Error('Stopped'); e.stopped = true; throw e } }
   const browser = deps.browser || await getBrowser()
-  const page = deps.page || deps.personPage || await (deps.openForPerson || openForPerson)()
+  const { page, quiet, borrowed } = await workTab(db, browser, id, source, url, deps, check)
+  if (!deps.page) page.__adalBorrowed = true   // the move's tab: no run takes it meanwhile
+  set(id, { step: quiet ? `Signed in to ${source.name} already: copying` : deps.resumed ? `Going on from where it stopped: sign in to ${source.name} if the window asks` : `Sign in to ${source.name} in the window that opened` })
+  // Done with the tab: kept, out of sight, signed in for the next move (never closed under a person).
+  let gone = false
+  const letGo = async () => {
+    if (gone || deps.page) return
+    gone = true
+    if (deps.personPage || deps.openForPerson) { await page.close().catch(() => {}); return }   // a Companion's window
+    page.off?.('response', onResponse)
+    if (borrowed) { await (await import('./tabManager.js')).doneWithTab(page).catch(() => {}); return }
+    page.__adalBorrowed = false
+    if (!quiet) await (deps.sendAway || sendAway)(page).catch(() => {})
+  }
   const folder = path.join(deps.dir || DIR, `${id}-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}`)
   fs.mkdirSync(folder, { recursive: true })
   set(id, { folder })
@@ -455,6 +611,7 @@ async function run(db, id, source, url, deps) {
   // What the site's pages ask for, read as it goes by.
   const origin = new URL(url).origin
   const people = new Map()      // passport → { person, raw }
+  const listRank = new Map()    // passport → where her list page put her (pages read side by side)
   const lists = new Map()       // address → how to read it again
   const htmlTemplates = []
   const brokersFound = new Map() // the site's brokers, by its own id
@@ -548,19 +705,21 @@ async function run(db, id, source, url, deps) {
   }
 
   try {
-    windows.set(id, page)
-    // Musaned: its window's own calls heard from the start (the HR pool's list comes as the page opens).
-    if (id === 'musaned') listenMusaned(page)
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 120000 }).catch(() => {})
-    await page.bringToFront().catch(() => {})
-    if (id === 'musaned' && deps.accountId) await (deps.musanedSignIn || musanedSignIn)(db, page, deps.accountId, (step) => set(id, { step }), check)
+    if (!quiet) {
+      windows.set(id, page)
+      // Musaned: its window's own calls heard from the start (the HR pool's list comes as the page opens).
+      if (id === 'musaned') listenMusaned(page)
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 120000 }).catch(() => {})
+      await page.bringToFront().catch(() => {})
+      if (id === 'musaned' && deps.accountId) await (deps.musanedSignIn || musanedSignIn)(db, page, deps.accountId, (step) => set(id, { step }), check)
+    }
     // Signed in: the site says so, or else off the sign-in page and staying off it.
     const waitSignIn = async (tab) => {
-      for (let t0 = Date.now(), calm = 0; ;) {
+      for (let t0 = Date.now(), calm = 0, first = true; ; first = false) {
         check()
         if (tab.isClosed?.()) throw new Error('The sign-in window was closed before signing in. Press the button again.')
         if (Date.now() - t0 > SIGN_IN_WAIT) throw new Error('Nobody signed in within 15 minutes. Press the button again: it goes on from where it stopped.')
-        await sleep(1500)
+        if (!first) await sleep(1000)
         if (source.token) { const t = await source.token(tab); if (t) return t; continue }
         let home = false
         try { home = new URL(tab.url()).origin === origin } catch {}
@@ -570,7 +729,9 @@ async function run(db, id, source, url, deps) {
     }
     const signedIn = await waitSignIn(page)
     windows.delete(id)
-    if (!source.deep) await (deps.sendAway || sendAway)(page).catch(() => {})
+    if (!source.deep && !quiet) await (deps.sendAway || sendAway)(page).catch(() => {})
+    // Reading lists: no pictures, videos or trackers come down (the files are fetched apart).
+    if (!source.deep && page.setRequestInterception) await (await import('./tabManager.js')).setupTab(page).catch(() => {})
     // Prioritize works from the first girl made, whatever the move is doing
     // (reading the pages, making brokers, making the profiles, records or
     // files): her record and files come within a second or two (2026-11-14:
@@ -634,8 +795,10 @@ async function run(db, id, source, url, deps) {
     const fetchFile = async (g, f) => {
       // (Her one photo, full body photo and passport: a girl can have several other documents of one kind.)
       if (/^(Photo|Full Body Photo|Passport)$/.test(f.field) && await broughtBefore(g, f)) return true
-      let got = await ask(page, f.url, headers, true).catch(() => null)
-      for (let i = 0; i < 3 && !got?.base64 && /^https:/.test(f.url); i++) {
+      let here = false
+      try { here = new URL(f.url).origin === origin } catch {}
+      let got = here ? await ask(page, f.url, headers, true).catch(() => null) : null
+      for (let i = 0; i < 3 && !got?.base64 && /^https?:/.test(f.url); i++) {
         try {
           const r = await fetch(f.url, { signal: AbortSignal.timeout(90000) })
           if (r.ok) got = { base64: Buffer.from(await r.arrayBuffer()).toString('base64'), type: r.headers.get('content-type') || '' }
@@ -643,6 +806,8 @@ async function run(db, id, source, url, deps) {
         } catch {}
         if (!got?.base64 && i < 2) await sleep(i ? 6000 : 2000)
       }
+      // Another site's file only the page may read (its sign-in): once, without the site's headers.
+      if (!got?.base64 && !here) got = await askOnce(page, f.url, {}, true).catch(() => null)
       if (got?.base64 && /octet/i.test(got.type)) got.type = /\.pdf(\?|$)/i.test(f.url) ? 'application/pdf' : /\.png(\?|$)/i.test(f.url) ? 'image/png' : 'image/jpeg'
       if (!got?.base64 || !/image|pdf|octet/i.test(got.type)) return false
       const ext = /pdf/i.test(got.type) ? '.pdf' : /png/i.test(got.type) ? '.png' : /webp/i.test(got.type) ? '.webp' : '.jpg'
@@ -692,7 +857,7 @@ async function run(db, id, source, url, deps) {
     if (source.deep) {
       // The window has done its work: from here on the browser is not needed.
       clearInterval(tableTimer)
-      if (!deps.page && !source.keepTab) await page.close().catch(() => {})
+      if (!source.keepTab) await letGo()
       await source.deep({
         progressName: `${id}-progress${deps.accountId ? '-' + deps.accountId : ''}.json`,
         db, token: signedIn, folder, check, readPerson, limit: deps.limit, download: deps.download,
@@ -740,7 +905,7 @@ async function run(db, id, source, url, deps) {
       const at = pick()
       seen.add(at)
       set(id, { step: `Reading ${new URL(at).pathname}` })
-      await page.goto(at, { waitUntil: 'networkidle2', timeout: 45000 }).catch(() => {})
+      await openPage(page, at)
       if (await page.evaluate(() => /\b404\b|could not be found|page not found/i.test(document.title + ' ' + (document.body?.innerText || '').slice(0, 600))).catch(() => false)) notFound.push(new URL(at).pathname)
       if (await onSignIn(page)) throw new Error('The site signed out. Press the button again')
       add(findPeople(await readTables(page)))
@@ -750,19 +915,42 @@ async function run(db, id, source, url, deps) {
         before = people.size
         check()
         if (!(await pressNext(page))) break
-        await sleep(1500)
+        await sleep(150)
+        await settle(page)
         add(findPeople(await readTables(page)))
       }
     }
 
     // Each list to its last page.
     let requests = 0
+    // (A page asked for here is heard as it goes by, and joins the lists: never read again.)
+    const asked = new Set()
     for (const [first, l] of lists) {
+      if (asked.has(first)) continue
+      asked.add(first)
+      const all = l.method === 'POST' ? null : everyPage(first, l.json, l.count)
+      if (all) {
+        for (const p of all) asked.add(p.url)
+        let i = 0, n = 0
+        await pool(4, () => (requests < MAX_REQUESTS ? all[i++] : undefined), async ({ url: u, at: rank }) => {
+          check()
+          requests++
+          const got = await ask(page, u, l.headers)
+          let json = null
+          try { json = JSON.parse(got?.text) } catch {}
+          const found = json ? findPeople(json) : []
+          found.forEach((f, k) => { if (!listRank.has(f.person.passport_number)) listRank.set(f.person.passport_number, rank * 100000 + k) })
+          add(found)
+          set(id, { step: `Reading every page: ${++n + 1} of ${all.length + 1} — ${people.size} so far` })
+        })
+        continue
+      }
       let at = first, json = l.json, count = l.count
       for (;;) {
         check()
         const next = nextPage(at, json, count)
         if (!next || next === at || ++requests > MAX_REQUESTS) break
+        asked.add(next)
         set(id, { step: `Reading every page: ${people.size} so far` })
         const got = await ask(page, next, l.headers, false, l.method === 'POST' ? { method: 'POST', body: l.body } : {})
         try { json = JSON.parse(got?.text) } catch { break }
@@ -816,7 +1004,9 @@ async function run(db, id, source, url, deps) {
     //   3. her files — simple ones first — several at a time.
     // A girl a person presses Prioritize on gets 2 and 3 at once, then the rest go on.
     await making   // the profiles made while reading are all in
-    const order = newestFirst([...people.values()]).slice(0, deps.limit || Infinity)
+    // (As the list showed them, page by page, when the site gives no dates.)
+    const rank = (pn) => listRank.get(pn) ?? -1
+    const order = newestFirst([...people.entries()].sort((a, b) => rank(a[0]) - rank(b[0])).map(([, g]) => g)).slice(0, deps.limit || Infinity)
     try {
       // 1. Text.
       let n = 0
@@ -845,7 +1035,7 @@ async function run(db, id, source, url, deps) {
       // Everyone's personal and full body photos first, then everyone's passport, then the rest.
       for (const t of [0, 1, 2]) {
         let k = 0
-        await pool(4, jobsOf(order.map(g => ({ g, t }))), async (j) => {
+        await pool(6, jobsOf(order.map(g => ({ g, t }))), async (j) => {
           check()
           if (j.urgent) return urgent()
           set(id, { step: `Files (${['personal and full body photos', 'passports', 'other documents'][t]}): ${Math.min(++k, order.length)} of ${order.length} girls` })
@@ -871,9 +1061,10 @@ async function run(db, id, source, url, deps) {
     set(id, { status: 'done', step: '' })
   } finally {
     stopUrgent()
+    clearInterval(tableTimer)   // (it went on reading the tab after the move, every 3 s)
     page.off('response', onResponse)
     windows.delete(id)
-    if (!deps.page) await page.close().catch(() => {})
+    await letGo()
   }
 }
 
@@ -944,7 +1135,7 @@ async function copyTemplates(db, id, source, page, { htmlTemplates, cvPages, cvF
   // A CV page counts only when it really shows a person's CV.
   for (const [i, url] of cvPages.entries()) {
     check()
-    await page.goto(url, { waitUntil: 'networkidle2', timeout: 45000 }).catch(() => {})
+    await openPage(page, url)
     const text = await page.evaluate(() => document.body?.innerText || '').catch(() => '')
     if (!passports.some(p => text.toUpperCase().includes(p))) continue
     const file = path.join(tmp, `cv-page-${i}.png`)

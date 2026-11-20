@@ -31,38 +31,29 @@
 
 import fs from 'fs'
 import path from 'path'
-import { spawn, execFileSync } from 'child_process'
+import { spawn, execFile, execFileSync } from 'child_process'
 import { fileURLToPath } from 'url'
 
 let _browser = null
 
 /**
- * Find a Chromium-based browser executable on this machine.
- * Returns the first one that exists, or null.
+ * Adal Browser's executable, or null.
+ *
+ * Windows: only Adal Keep's own browser (<install>\\browser\\AdalBrowser.exe,
+ * or ADAL_BROWSER_EXE on a Companion). Never Brave, Chrome or Edge of the PC
+ * (asked on 2026-11-20: Transitions opened the PC's Chrome — "Brave not
+ * found → using chrome.exe" — slow, on the screen, and signed in nowhere).
+ * Linux / macOS (developers' PCs): the Chromium that is there.
  */
 export function findBrowserExecutable() {
-  const candidates = [OWN_BROWSER]
-
   if (process.platform === 'win32') {
-    const pf   = process.env['ProgramFiles']      || 'C:\\Program Files'
-    const pf86 = process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)'
-    const la   = process.env['LOCALAPPDATA']
-              || path.join(process.env.USERPROFILE || 'C:\\Users\\Public', 'AppData', 'Local')
-    candidates.push(
-      path.join(pf,   'BraveSoftware', 'Brave-Browser', 'Application', 'brave.exe'),
-      path.join(pf86, 'BraveSoftware', 'Brave-Browser', 'Application', 'brave.exe'),
-      path.join(la,   'BraveSoftware', 'Brave-Browser', 'Application', 'brave.exe'),
-      path.join(pf,   'Google', 'Chrome', 'Application', 'chrome.exe'),
-      path.join(pf86, 'Google', 'Chrome', 'Application', 'chrome.exe'),
-      path.join(la,   'Google', 'Chrome', 'Application', 'chrome.exe'),
-      path.join(pf,   'Microsoft', 'Edge', 'Application', 'msedge.exe'),
-      path.join(pf86, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
-    )
-  } else if (process.platform === 'darwin') {
+    try { return fs.existsSync(OWN_BROWSER) ? OWN_BROWSER : null } catch { return null }
+  }
+  const candidates = [OWN_BROWSER]
+  if (process.platform === 'darwin') {
     candidates.push(
       '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
       '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-      '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
     )
   } else {
     candidates.push(
@@ -73,7 +64,6 @@ export function findBrowserExecutable() {
       '/snap/bin/chromium',
     )
   }
-
   for (const c of candidates) {
     try { if (fs.existsSync(c)) return c } catch {}
   }
@@ -87,8 +77,9 @@ export function findBrowserExecutable() {
 // browser wrote, and Brave's may be newer.
 // (A Companion standing in for the main PC: its own Adal Browser, ADAL_BROWSER_EXE.)
 const OWN_BROWSER = process.env.ADAL_BROWSER_EXE || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'browser', 'AdalBrowser.exe')
+// (Windows: always Adal Browser's profile — no other browser is used there.)
 export const PROFILE_DIR = process.env.ADAL_BROWSER_PROFILE ||
-  path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'data', fs.existsSync(OWN_BROWSER) ? 'adal-browser' : 'browser-profile')
+  path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'data', process.platform === 'win32' || fs.existsSync(OWN_BROWSER) ? 'adal-browser' : 'browser-profile')
 // Out of sight needs today's AdalKeep.exe: an older one opens Adal Keep's page
 // inside this browser, and that page must stay on the screen.
 const HIDDEN = process.platform !== 'win32' || process.env.ADAL_HIDDEN_AGENTS === '1'
@@ -184,6 +175,48 @@ function freeProfile() {
 }
 
 /**
+ * The command line of the program that holds the control port (Windows), or
+ * null when it cannot be told. A PC that once had no Adal Browser started the
+ * PC's Chrome or Brave on this port, and that Chrome kept answering for good:
+ * every run and every Transition went on in it.
+ */
+function portOwner() {
+  if (process.platform !== 'win32') return Promise.resolve(null)
+  const ps = `$c = Get-NetTCPConnection -LocalPort ${DEBUG_PORT} -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1; if ($c) { (Get-CimInstance Win32_Process -Filter "ProcessId=$($c.OwningProcess)").CommandLine }`
+  return new Promise((resolve) => execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], { timeout: 10000, windowsHide: true, encoding: 'utf8' },
+    (err, out) => resolve(err ? null : (String(out || '').trim() || null))))
+}
+const lower = (p) => String(p || '').toLowerCase().replace(/\//g, '\\')
+/** 'ours' (Adal Browser), 'old' (another browser Adal Keep started on its profile), 'foreign', or 'unknown'. */
+export function whoseBrowser(cmd, own = OWN_BROWSER, dataDir = path.dirname(PROFILE_DIR)) {
+  if (!cmd) return 'unknown'
+  const c = lower(cmd)
+  if (c.includes(lower(own)) || /(^|[\\"\s])adalbrowser\.exe/.test(c)) return 'ours'
+  if (c.includes(lower(dataDir))) return 'old'
+  return 'foreign'
+}
+// Checked once for each connection.
+const _checked = new WeakSet()
+async function onlyOurs(b, { closeOld = false } = {}) {
+  if (process.platform !== 'win32' || process.env.BRAVE_CDP_URL || _checked.has(b)) return b
+  const who = whoseBrowser(await portOwner())
+  if (who === 'ours' || who === 'unknown') { _checked.add(b); return b }
+  if (who === 'old' && closeOld) {
+    // Adal Keep's own agents' window, in the PC's Chrome or Brave: closed, and Adal Browser starts instead.
+    console.warn('[browser] the control port is held by the PC\'s Chrome/Brave on Adal Keep\'s profile: it is closed, Adal Browser starts instead')
+    await b.close().catch(() => b.disconnect().catch(() => {}))
+    await new Promise(r => setTimeout(r, 1500))
+    freeProfile()
+    return null
+  }
+  b.disconnect().catch(() => {})
+  if (who === 'old') return null
+  const e = new Error('Another browser (not Adal Browser) holds Adal Keep\'s browser port 9222. Close that browser, then press the button again: Adal Keep starts Adal Browser itself.')
+  e.foreignBrowser = true
+  throw e
+}
+
+/**
  * Get the shared browser. Connects to the Adal Keep browser when it is
  * already open (the launcher may have opened it); otherwise starts it, with
  * the Adal Keep page as its first tab. Runs then open tabs in that window —
@@ -196,12 +229,12 @@ export async function getBrowser(fresh = false) {
 
   const puppeteer = (await import('puppeteer-core')).default
   const cdpUrl = process.env.BRAVE_CDP_URL || `http://localhost:${DEBUG_PORT}`
-  try {
-    _browser = await connectTo(puppeteer, cdpUrl)
-    console.log('[browser] connected to the open browser at', cdpUrl)
-    return _browser
-  } catch {
-    // not open yet — start it
+  let open = null
+  try { open = await connectTo(puppeteer, cdpUrl) } catch { /* not open yet — start it */ }
+  if (open) {
+    // Only Adal Browser: the PC's Chrome or Brave on this port is never used.
+    _browser = await onlyOurs(open, { closeOld: true })
+    if (_browser) { console.log('[browser] connected to the open browser at', cdpUrl); return _browser }
   }
 
   // (Tests: only their own browser, never one started here.)
@@ -253,7 +286,8 @@ export async function openBrowserIfAny() {
   if (_browser && _browser.isConnected && _browser.isConnected()) return _browser
   try {
     const puppeteer = (await import('puppeteer-core')).default
-    _browser = await connectTo(puppeteer, process.env.BRAVE_CDP_URL || `http://localhost:${DEBUG_PORT}`)
+    const b = await connectTo(puppeteer, process.env.BRAVE_CDP_URL || `http://localhost:${DEBUG_PORT}`)
+    _browser = await onlyOurs(b).catch(() => null)
     return _browser
   } catch { return null }
 }

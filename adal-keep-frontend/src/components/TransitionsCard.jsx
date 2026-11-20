@@ -17,9 +17,11 @@ const SYSTEMS = [
 ]
 const err = (e) => e?.response?.data?.error || e.message
 const busy = (s) => s?.status === 'signing-in' || s?.status === 'copying'
+// Also a move waiting to go on by itself after a restart: it can be stopped too.
+const active = (s) => busy(s) || s?.status === 'waiting'
 
 function Result({ s }) {
-  if (s.status === 'failed') return <p className="text-sm text-red-600">{s.error}</p>
+  if (s.status === 'failed') return <p className="rounded-lg bg-red-50 px-2 py-1.5 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-400">Not finished: {s.error || 'it stopped'}. What was saved stays; pressing Move again goes on from there.</p>
   if (s.status === 'stopped') return <p className="text-sm text-slate-500">Stopped. What was saved stays; pressing again goes over the rest.</p>
   if (s.status === 'idle') return null
   return (
@@ -46,7 +48,7 @@ export default function TransitionsCard() {
   const [starting, setStarting] = useState(null)
   const load = () => api.get('/transitions').then(r => { setAll(r.data); if (r.data?.pextran?.link) setLinkNow(l => l || r.data.pextran.link) }).catch(() => {})
   useEffect(() => { load() }, [])
-  const running = Object.values(all).some(busy)
+  const running = Object.values(all).some(active)
   useEffect(() => {
     if (!running) return
     const t = setInterval(load, 1500)
@@ -95,7 +97,7 @@ export default function TransitionsCard() {
                 <Input value={link} onChange={e => setLink(e.target.value)} placeholder="https://zadulmead.agency.pextran.com/" inputMode="url" autoComplete="off" />
               )}
               {s && <Result s={s} />}
-              {busy(s) && (
+              {active(s) && (
                 <div className="flex flex-wrap items-center gap-3 text-xs">
                   {s.status === 'signing-in' && <button type="button" onClick={() => show(id)} className="font-semibold text-teal-700 hover:underline dark:text-teal-400">Show the sign-in window</button>}
                   <button type="button" onClick={() => stop(id, name)} className="text-slate-400 hover:text-red-600 hover:underline">Stop the copy</button>

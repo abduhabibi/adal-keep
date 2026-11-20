@@ -213,3 +213,28 @@ func TestOfficeDoorOnlyTheMainPCWhileHandingBack(t *testing.T) {
 		t.Fatal("not open again")
 	}
 }
+
+// A program renamed by the last update still running (its file locked): the
+// next update still goes in, the old one aside under a name of its own.
+func TestSetAsideWhenTheLastOneStillRuns(t *testing.T) {
+	dir := t.TempDir()
+	dest := dir + `\AdalKeep.exe`
+	os.WriteFile(dest, []byte("new"), 0o644)
+	os.WriteFile(dest+".old", []byte("running"), 0o644)
+	f, _ := os.Open(dest + ".old") // held open: Windows refuses to remove it
+	defer f.Close()
+	aside := setAside(dest)
+	if aside == dest+".old" {
+		t.Fatal("aside onto the file still in use")
+	}
+	if err := os.Rename(dest, aside); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	if got := setAside(dest); got != dest+".old" {
+		t.Fatalf("not back to .old once free: %s", got)
+	}
+	if _, err := os.Stat(aside); !os.IsNotExist(err) {
+		t.Fatal("a free leftover was not removed")
+	}
+}

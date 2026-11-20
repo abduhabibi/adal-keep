@@ -301,7 +301,13 @@ func addPeerRoutes(mux *http.ServeMux, root string) {
 		}
 		w.Header().Set("Content-Type", "application/gzip")
 		w.Header().Set("X-Adal-Version", ver)
-		cmd := exec.Command(windowsTar(), "-czf", "-", "-C", serverDir(root), "--exclude", "backend/data", "--exclude", "backend/*.sqlite*", "--exclude", "*.log", ".")
+		// Its settings (licence and AI keys) only locked with the agency's backup key.
+		args := []string{"-czf", "-", "-C", serverDir(root), "--exclude", "./backend/data", "--exclude", "./backend/.env", "--exclude", "./backend/*.sqlite*", "--exclude", "*.log", "."}
+		if tmp := lockedSettingsDir(root); tmp != "" {
+			defer os.RemoveAll(tmp)
+			args = append(args, "-C", tmp, "backend/.env.locked")
+		}
+		cmd := exec.Command(windowsTar(), args...)
 		hideWindow(cmd)
 		cmd.Stdout = w
 		if err := cmd.Run(); err != nil {
@@ -338,4 +344,60 @@ func peerIP(a *net.UDPAddr) string {
 		return ""
 	}
 	return strings.TrimSpace(a.IP.String())
+}
+
+// openSettings: the server's settings, locked with the agency's backup key as
+// they came, opened with this PC's key (kept locked by Windows for this user).
+// Without the key they stay locked (the server in waiting works without them
+// until the key comes from the main PC).
+func openSettings(serverRoot string) {
+	locked := filepath.Join(serverRoot, "backend", ".env.locked")
+	b, err := os.ReadFile(locked)
+	if err != nil {
+		return
+	}
+	pw := loadKeys().Password
+	if pw == "" {
+		return
+	}
+	plain, err := unlockPiece(b, pw)
+	if err != nil {
+		log.Printf("🏢 the server's settings did not open with this PC's key: %v", err)
+		return
+	}
+	if err := os.WriteFile(filepath.Join(serverRoot, "backend", ".env"), plain, 0o600); err == nil {
+		os.Remove(locked)
+	}
+}
+
+// lockedSettingsDir: a folder holding backend/.env.locked (this server's
+// settings locked with the backup key), or "" when there is nothing to send.
+func lockedSettingsDir(root string) string {
+	b, err := os.ReadFile(filepath.Join(serverBackend(root), ".env"))
+	pw := loadKeys().Password
+	if err != nil || pw == "" {
+		// Still locked here (no key yet): passed on locked, as it came.
+		if lb, err := os.ReadFile(filepath.Join(serverBackend(root), ".env.locked")); err == nil {
+			return writeLocked(lb)
+		}
+		return ""
+	}
+	lb, err := lockPiece(b, pw)
+	if err != nil {
+		return ""
+	}
+	return writeLocked(lb)
+}
+
+func writeLocked(lb []byte) string {
+	dir, err := os.MkdirTemp("", "adal-env-")
+	if err != nil {
+		return ""
+	}
+	os.MkdirAll(filepath.Join(dir, "backend"), 0o700)
+	if os.WriteFile(filepath.Join(dir, "backend", ".env.locked"), lb, 0o600) != nil {
+		os.RemoveAll(dir)
+		return ""
+	}
+	return dir
 }

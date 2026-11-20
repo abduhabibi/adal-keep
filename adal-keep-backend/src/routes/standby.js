@@ -24,6 +24,9 @@ import { spawn } from 'child_process'
 import { fileURLToPath } from 'url'
 import { ipOf } from '../services/networkGate.js'
 import { startMerge, job } from '../services/branchMerge.js'
+import os from 'os'
+import { lock } from '../services/telegramBackup.js'
+import { getSecret as getSecretSync } from '../services/secretStore.js'
 
 const router = express.Router()
 const BACKEND = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
@@ -36,7 +39,7 @@ const companionOnly = (req, res, next) => {
 
 /** What the bundle holds, and leaves out (the data stays on each PC). */
 export const BUNDLE_EXCLUDES = [
-  'backend/data', 'backend/uploads', 'backend/logs', 'backend/tests', 'backend/.env.local',
+  'backend/data', 'backend/uploads', 'backend/.env', 'backend/logs', 'backend/tests', 'backend/.env.local',
   'backend/node_modules.before-*', 'backend/before-*', 'backend/*.sqlite*', 'backend/data.sqlite*',
   '*.log', '.previous-version',
 ]
@@ -46,6 +49,19 @@ export const TAR = process.platform === 'win32' ? path.join(process.env.SystemRo
 
 export function versionOf(root = INSTALL) {
   try { return JSON.parse(fs.readFileSync(path.join(root, '.adal-version.json'), 'utf8'))?.sha || '' } catch { return '' }
+}
+
+/** A folder holding backend/.env.locked (the settings locked with the backup key), or null. */
+export function lockedSettingsDir({ envFile = path.join(BACKEND, '.env'), password = null } = {}) {
+  try {
+    if (!fs.existsSync(envFile)) return null
+    const pw = password || getSecretSync('backup_password')
+    if (!pw) return null
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'adal-env-'))
+    fs.mkdirSync(path.join(dir, 'backend'))
+    fs.writeFileSync(path.join(dir, 'backend', '.env.locked'), lock(fs.readFileSync(envFile), pw))
+    return dir
+  } catch (e) { console.warn('[standby] settings not locked:', e.message); return null }
 }
 
 router.get('/companion/server-bundle', companionOnly, (req, res) => {
@@ -63,7 +79,12 @@ router.get('/companion/server-bundle', companionOnly, (req, res) => {
   // Its pages too (the updater's place, or an older install's).
   for (const p of ['adal-keep-frontend/dist', 'frontend']) if (fs.existsSync(path.join(INSTALL, p, 'index.html'))) args.push(p)
   if (fs.existsSync(path.join(INSTALL, '.adal-version.json'))) args.push('.adal-version.json')
+  // The server's settings (the licence key, the AI keys) never travel readable:
+  // locked with the agency's backup key (only a PC that has it opens them).
+  const tmp = lockedSettingsDir()
+  if (tmp) args.push('-C', tmp, 'backend/.env.locked')
   const tar = spawn(TAR, args, { windowsHide: true })
+  tar.on('close', () => { if (tmp) fs.rmSync(tmp, { recursive: true, force: true }) })
   tar.stdout.pipe(res)
   tar.stderr.on('data', () => {})
   tar.on('error', (e) => { if (!res.headersSent) res.status(500).json({ error: e.message }); else res.destroy() })

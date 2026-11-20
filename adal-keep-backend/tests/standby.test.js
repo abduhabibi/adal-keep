@@ -84,3 +84,18 @@ test('the server a Companion keeps never carries the agency\'s data', async () =
   for (const never of ['backend/data.sqlite', 'backend/data/SafeStorage/passport.jpg', 'backend/data/pc-access.json', 'backend/uploads/u.jpg', 'backend/node_modules.before-fix/x.js', 'backend/logs/server.log'])
     assert.ok(!list.some(x => x === never || x.startsWith(never + '/')), never)
 })
+
+test('the server\'s settings travel only locked with the agency\'s key', async () => {
+  const fs = await import('fs'), os = await import('os'), path = await import('path')
+  const { lockedSettingsDir, BUNDLE_EXCLUDES } = await import('../src/routes/standby.js')
+  const { unlock } = await import('../src/services/telegramBackup.js')
+  assert.ok(BUNDLE_EXCLUDES.includes('backend/.env'))            // never readable in the package
+  const env = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'env-')), '.env')
+  fs.writeFileSync(env, 'ADAL_LICENSE_KEY=secret-licence-123\n')
+  const dir = lockedSettingsDir({ envFile: env, password: 'agency-backup-key' })
+  const locked = fs.readFileSync(path.join(dir, 'backend', '.env.locked'))
+  assert.ok(!locked.includes('secret-licence'))
+  assert.match(unlock(locked, 'agency-backup-key').toString(), /secret-licence-123/)
+  assert.throws(() => unlock(locked, 'another key'))
+  assert.equal(lockedSettingsDir({ envFile: env + '.none', password: 'x' }), null)
+})

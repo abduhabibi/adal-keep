@@ -567,6 +567,14 @@ func (u *updater) install(m *releaseManifest, env *envelope, fromCloud bool) err
 		}
 	}
 	log.Printf("✅ update %s installed on this Companion (programs from the next start)", m.Short)
+	// Its server in waiting follows the new version at once (standby.go).
+	kickBundle()
+	// This program itself: the new one runs within seconds (never while this PC
+	// stands in for the main PC, and never the window — it takes it when opened again).
+	if selfReplaced && !standbyActing() {
+		selfReplaced = false
+		go restartSelfSoon()
+	}
 	go func() {
 		// The app itself, to hand on to a main PC of the office (only from the network: no extra download from Supabase).
 		if m.SHA256 != "" {
@@ -603,6 +611,9 @@ func (u *updater) installPieces(m *releaseManifest, fromCloud bool) error {
 			return err
 		}
 		log.Printf("⬆️ %s updated (used from the next start)", p.Name)
+		if p.Name == "adal-companion.exe" {
+			selfReplaced = true
+		}
 	}
 	if m.Online != nil && m.Online.SHA256 != "" {
 		online := filepath.Join(u.root, "online")

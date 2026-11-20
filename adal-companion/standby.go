@@ -52,7 +52,7 @@ var (
 	actingPort     = envInt("ADAL_ACTING_PORT", 4140) // the server standing in, on 127.0.0.1 only
 	officePort     = envInt("ADAL_OFFICE_PORT", 4000) // what the office reaches (this program)
 	standbyUDPPort = envInt("ADAL_STANDBY_UDP", 45456)
-	bundleEvery    = 6 * time.Hour
+	bundleEvery    = 30 * time.Minute // a 304 when nothing changed: cheap
 )
 
 const standbyMagic = "ADAL_STANDBY_V1"
@@ -176,6 +176,16 @@ func startStandby(root string) {
 
 // ── The server, kept from the main PC ───────────────────────────────────────
 
+// kickBundle: a new version came — the server in waiting is looked at now.
+var bundleKick = make(chan struct{}, 1)
+
+func kickBundle() {
+	select {
+	case bundleKick <- struct{}{}:
+	default:
+	}
+}
+
 func (s *standbyRunner) bundleLoop() {
 	time.Sleep(2 * time.Minute)
 	for {
@@ -191,10 +201,14 @@ func (s *standbyRunner) bundleLoop() {
 				log.Printf("🏢 server copy: %v", err)
 			}
 		}
-		if hasServer(s.root) {
-			time.Sleep(bundleEvery)
-		} else {
-			time.Sleep(15 * time.Minute) // none yet: soon again
+		wait := bundleEvery
+		if !hasServer(s.root) {
+			wait = 15 * time.Minute // none yet: soon again
+		}
+		select {
+		case <-bundleKick:
+			time.Sleep(90 * time.Second) // the main PC installs it too, then has the same version
+		case <-time.After(wait):
 		}
 	}
 }

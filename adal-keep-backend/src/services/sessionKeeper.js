@@ -208,7 +208,10 @@ async function insuranceMorning() {
 
 /** Each site, for the "Morning sign-in" list. */
 export async function sessionsNow() {
-  await keepAlive().catch(() => {})
+  // At once (asked on 2026-11-19): what is known now; the browser's tabs are
+  // looked at behind it (the first time at most 1.5 s), the page asks again soon.
+  const looking = keepAlive().catch(() => {})
+  if (!Object.keys(kept).length) await Promise.race([looking, new Promise(r => setTimeout(r, 1500))])
   const { holderOf } = await import('./tasheerSession.js')
   const holder = db ? await holderOf(db).catch(() => null) : null
   // Insurance is not in the morning sign-in: its robot signs in by itself (FetaP's reCAPTCHA needs nobody).

@@ -119,6 +119,13 @@ router.get('/companion/robot-browsers', async (req, res) => {
   res.json(liveDevices())
 })
 
+// What a robot still needs, nothing started (the profile page's pop-up): the start's own checks, with { check: true }.
+router.get('/profiles/:profileId/automations/:workflowId/needs', (req, res, next) => {
+  req.body = { ...(req.body || {}), check: true }
+  req.method = 'POST'
+  req.url = req.url.replace(/\/needs(\?.*)?$/, '/start')
+  next()
+})
 router.post('/profiles/:profileId/automations/:workflowId/start', async (req, res) => {
   try {
     const db = req.app.locals.db
@@ -159,7 +166,7 @@ router.post('/profiles/:profileId/automations/:workflowId/start', async (req, re
       const prof = await db('profiles').where('id', profileId).first()
       const { musanedMissing, photoOnFile } = await import('../services/musanedPreflight.js')
       // Marital status and religion are asked in the notification during the run.
-      const missing = musanedMissing(prof, await photoOnFile(db, profileId)).filter(m => !/^(marital status|religion)$/.test(m))
+      const missing = musanedMissing(prof, await photoOnFile(db, profileId)).filter(m => req.body?.check || !/^(marital status|religion)$/.test(m))
       if (missing.length) {
         return res.status(400).json({
           error: 'Musaned not started. Profile is missing: ' + missing.join(', '),
@@ -281,6 +288,9 @@ router.post('/profiles/:profileId/automations/:workflowId/start', async (req, re
         })
       }
     }
+
+    // Only a check (the profile page's next-step pop-up, asked on 2026-11-20): nothing is missing; nothing is started.
+    if (req.body?.check) return res.json({ ok: true, missing: [] })
 
     // One run per profile + workflow at a time. A second click never starts a
     // second copy (that is what put two runs in one tab): it reports on the

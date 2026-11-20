@@ -11,7 +11,7 @@ The files are numbered in the order you use them.
 
 1. PREPARE  (once per USB, on any Windows PC with internet)
    Double-click it and wait for DONE in green (about 5 minutes).
-   It downloads Node.js, the server packages and Tailscale into deps\.
+   It downloads Node.js and the server packages into deps\.
    A USB made by the build already has all of this, Adal Browser too. Running it again later is quick: what is already on
    the USB is kept.
 
@@ -31,28 +31,10 @@ The files are numbered in the order you use them.
 
 
 4. PHONES (optional)
-   Turn on https first (see TAILSCALE, step 3). On the phone open the
-   main PC's https address in Chrome (Android) or Safari (iPhone),
-   then menu > "Add to Home screen". The Adal Keep icon is the app.
+   Install the Adal Keep app from "5 - Phone app" and type the main
+   PC's number (Settings > Main PC). It works on any internet.
 
 
-TAILSCALE - another branch, home, phones  (free)
-   A private link between the agency's devices, from anywhere.
-   Nothing is opened to the internet.
-   1. Both installers (2 and 3) install Tailscale from the USB. On
-      each PC click the Tailscale icon (bottom right, near the clock)
-      > Log in, and sign in with the agency's Google account.
-   2. Laptops at home and phones: install Tailscale (tailscale.com,
-      App Store / Play Store) and sign in with the SAME account.
-   3. Phones only: login.tailscale.com > DNS > MagicDNS on and
-      HTTPS Certificates > Enable. Then on the main PC: Settings >
-      Main PC > "Turn on https for phones".
-   4. Main PC: Settings > Main PC shows its Tailscale address
-      (100.x.x.x:4000). Type it on the other device:
-        - employee PC: the "Looking for the main PC" page
-        - full install in a branch: Settings > Main PC >
-          "Another PC is the main PC"
-        - laptop / phone: open it in the browser.
 
 
 SIGN-IN CODES
@@ -79,8 +61,8 @@ IF SOMETHING GOES WRONG
       - type the main PC's address on the "Looking for the main
         PC" page (see step 3).
       - still nothing from the same Wi-Fi: the router keeps Wi-Fi
-        PCs apart ("guest network" / "AP isolation"). Use a cable,
-        the normal (not guest) Wi-Fi, or Tailscale.
+        PCs apart ("guest network" / "AP isolation"). Use a cable or
+        the normal (not guest) Wi-Fi.
 
 NEEDS
    Windows 10 (1803+) or 11, 64-bit, admin password, all PCs on the

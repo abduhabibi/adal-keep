@@ -101,14 +101,7 @@ func discoverServer(timeout time.Duration) *serverInfo {
 	if os.Getenv("ADAL_NO_DISCOVERY") == "1" {
 		return nil
 	}
-	if info := scanForServer(4000); info != nil {
-		return info
-	}
-	// Nobody on the office network: the main PC over Tailscale (tailscale.go).
-	if u := findOnTailscale(4000); u != "" {
-		return infoFromURL(u)
-	}
-	return nil
+	return scanForServer(4000)
 }
 
 // askByBroadcast: the UDP question to the whole network (see the top).
@@ -448,22 +441,6 @@ func keepFindingServer() {
 			os.Setenv("ADAL_HOST_URL", pinned)
 			pingServer()
 			continue
-		}
-		// On Tailscale while the office network may have the main PC again: back to the office network (faster).
-		if tick%6 == 0 && onTailscale(hostServer) {
-			var info *serverInfo
-			if u := findByMAC(); u != "" {
-				info = infoFromURL(u)
-			} else {
-				info = askByBroadcast(2 * time.Second)
-			}
-			if info != nil && !onTailscale(info.URL) && answersAt(info.URL) {
-				log.Printf("🏢 Main PC on the office network again at %s — leaving Tailscale", info.URL)
-				hostServer = info.URL
-				os.Setenv("ADAL_HOST_URL", info.URL)
-				rememberHostURL(info.URL)
-				continue
-			}
 		}
 		if tick%6 != 0 || pingServer() {
 			continue

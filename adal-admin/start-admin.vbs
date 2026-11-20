@@ -8,7 +8,7 @@
 '                             (a restart of Adal Keep, a crash, a PC restart).
 ' What it did is written to launcher.log beside it.
 Option Explicit
-Dim sh, fso, here, i, edge, onlyServer, keep, logFile, ok, waitNote
+Dim sh, fso, here, i, edge, onlyServer, keep, logFile, ok, waitNote, nodeExe, cand
 Set sh = CreateObject("WScript.Shell")
 Set fso = CreateObject("Scripting.FileSystemObject")
 here = fso.GetParentFolderName(WScript.ScriptFullName)
@@ -35,13 +35,18 @@ Function StartPanel(quiet)
   If PanelUp() Then
     Note "already running"
   Else
-    If Not fso.FileExists("C:\AdalKeep\runtime\node.exe") Then
-      Note "C:\AdalKeep\runtime\node.exe is missing"
-      If Not quiet Then MsgBox "Adal Keep Admin cannot start: Adal Keep is not installed on this PC (C:\AdalKeep\runtime\node.exe is missing).", 16, "Adal Keep Admin"
+    ' Adal Keep's own Node, else the build tools' Node (a PC that is now a Companion has no C:\AdalKeep\runtime).
+    nodeExe = ""
+    For Each cand In Array("C:\AdalKeep\runtime\node.exe", "C:\AdalTools\node\node.exe", "C:\Program Files\nodejs\node.exe")
+      If nodeExe = "" And fso.FileExists(cand) Then nodeExe = cand
+    Next
+    If nodeExe = "" Then
+      Note "no node.exe found (C:\AdalKeep\runtime, C:\AdalTools\node, Program Files\nodejs)"
+      If Not quiet Then MsgBox "Adal Keep Admin cannot start: no Node found on this PC.", 16, "Adal Keep Admin"
       StartPanel = False: Exit Function
     End If
-    Note "starting the panel"
-    sh.Run "cmd /c ""C:\AdalKeep\runtime\node.exe"" server.mjs >> admin.log 2>&1", 0, False
+    Note "starting the panel with " & nodeExe
+    sh.Run "cmd /c """ & nodeExe & """ server.mjs >> admin.log 2>&1", 0, False
     ok = False
     For i = 1 To 60
       WScript.Sleep 500

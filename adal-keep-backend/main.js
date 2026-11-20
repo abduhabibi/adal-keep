@@ -244,8 +244,11 @@ async function initSystem() {
       import('./src/services/whatsapp.js').then(w => w.startWhatsApp(db)).catch(e => console.warn('[whatsapp]', e.message))
       import('./src/services/browser.js').then(b => b.startBrowserQuietly())
       import('./src/services/secretStore.js').then(s => s.moveSecretsToVault())
-      import('./src/services/accountVault.js').then(v => {
+      import('./src/services/accountVault.js').then(async v => {
         const lock = () => v.sealStored(db).catch(e => console.warn('[vault]', e.message))
+        // First: the key really opens this database's passwords (else the kept copy
+        // that does is put back) — nothing is locked with a wrong key meanwhile.
+        await import('./src/services/keySafe.js').then(k => k.guardVaultKey(db)).catch(e => console.warn('[keys]', e.message))
         lock()
         setInterval(lock, 60_000).unref()
       })
@@ -332,6 +335,11 @@ app.get('/api/system/diag', (req, res) => res.json(diagReport(app.locals.db)))
 app.get('/api/system/portals', async (req, res) => {
   const p = await import('./src/services/portalHealth.js')
   res.json(req.query.now ? await p.checkPortals({ retryMs: 5000 }) : p.portalStatus())
+})
+// The office's PCs sharing their power: how strong each is now, what it does (services/sharePower.js).
+app.get('/api/system/share-power', async (req, res) => {
+  try { res.json(await (await import('./src/services/sharePower.js')).shareReport(app.locals.db)) }
+  catch (e) { res.status(500).json({ error: e.message }) }
 })
 // Settings → Health: each robot's last success and failure (read-only, starts nothing).
 app.get('/api/system/automation-health', async (req, res) => {

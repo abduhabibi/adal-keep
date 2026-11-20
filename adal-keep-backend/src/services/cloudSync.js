@@ -165,6 +165,24 @@ async function pushVault(db, agency, state) {
   await setState(db, '/vault', hash)
 }
 
+/**
+ * The key that opens the portal passwords in the database (data/account-vault.key)
+ * online too, locked with the documents' key ("we shouldn't lose any data in
+ * any way", 2026-11-20). It is also in every Telegram backup and on every
+ * Companion; services/keySafe.js brings it back from here when a PC lost it.
+ */
+async function pushVaultKey(db, agency, state) {
+  if (isFollower()) return
+  const { vaultKey } = await import('./accountVault.js')
+  const k = vaultKey()
+  const hash = sha(`vk:${k}`)
+  if (state.get('/_keys') === hash) return
+  const { encrypt } = await import('./tgStore.js')
+  const { file_key } = await agencySecrets(db, agency)
+  await upsert(db, 'keep_meta', [{ agency_id: agency, key: '/_keys', data: { v: encrypt(Buffer.from(JSON.stringify({ vault_key: k, at: new Date().toISOString() })), file_key).toString('base64') }, updated_at: new Date().toISOString() }], 'agency_id,key')
+  await setState(db, '/_keys', hash)
+}
+
 // ------------------------------------------------------------ 1. requests
 // A phone's form with files: the files wait in Supabase storage, the rest is text.
 async function formOf(db, p) {
@@ -450,6 +468,7 @@ async function pushAnswers(db, agency, state, { light = false } = {}) {
     : [...GLOBAL, ...ids.flatMap(PER_PROFILE), ...brokers.flatMap(PER_BROKER), ...templates]
   if (first) console.log(`[cloud] first copy of the text: ${keys.length} pages (${ids.length} profiles) before any document`)
   await pushVault(db, agency, state).catch(e => console.warn('[cloud] vault:', e.message))
+  await pushVaultKey(db, agency, state).catch(e => console.warn('[cloud] vault key:', e.message))
   const wanted = new Set(keys)
   let batch = []
   const flush = async () => {
@@ -534,10 +553,18 @@ export async function agencySecrets(db, agency) {
   if (secretsCache?.agency_id === agency && secretsCache.bot === (process.env.TELEGRAM_BOT_TOKEN || null)) return secretsCache
   let [row] = await cloudCall(db, 'GET', `/rest/v1/keep_secrets?agency_id=eq.${agency}&select=agency_id,file_key,live,bot`)
   const bot = process.env.TELEGRAM_BOT_TOKEN || null
+  // The documents' key is kept on this PC too (locked, with the agency's other
+  // secrets): so it is in every Telegram backup and on every Companion as well.
+  // Never a new one while a kept one exists — every document online is locked with it.
+  const { keptFileKey, keepFileKey } = await import('./keySafe.js')
+  const kept = keptFileKey(agency)
   if (!row) {
-    row = { agency_id: agency, file_key: crypto.randomBytes(32).toString('base64'), live: crypto.randomBytes(18).toString('base64url'), bot }
+    row = { agency_id: agency, file_key: kept || crypto.randomBytes(32).toString('base64'), live: crypto.randomBytes(18).toString('base64url'), bot }
+    if (kept) console.log('[cloud] the documents key was missing online — put back from this PC\'s copy')
     await cloudCall(db, 'POST', '/rest/v1/keep_secrets', row, { headers: { Prefer: 'return=minimal' } })
-  } else if (row.bot !== bot) {
+  }
+  if (row.file_key) keepFileKey(agency, row.file_key)
+  if (row.bot !== bot) {
     await cloudCall(db, 'PATCH', `/rest/v1/keep_secrets?agency_id=eq.${agency}`, { bot }, { headers: { Prefer: 'return=minimal' } })
     row.bot = bot
   }

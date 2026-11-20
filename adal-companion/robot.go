@@ -96,7 +96,9 @@ func robotVersion() (map[string]any, error) {
 }
 
 // ensureRobotBrowser: the robot browser open on this PC (opened when it is not).
-func ensureRobotBrowser(root string) (map[string]any, error) {
+// ensureRobotBrowser: quiet — opened for another PC's work (this PC helps):
+// it starts minimized, never over what the person here is doing.
+func ensureRobotBrowser(root string, quiet bool) (map[string]any, error) {
 	if v, err := robotVersion(); err == nil {
 		return v, nil
 	}
@@ -116,7 +118,10 @@ func ensureRobotBrowser(root string) (map[string]any, error) {
 		"--remote-debugging-address=127.0.0.1",
 		"--user-data-dir="+profile,
 		"--no-first-run", "--no-default-browser-check", "--hide-crash-restore-bubble",
-		"--start-maximized", "about:blank")
+		// Work in a window out of sight or behind goes on at full speed.
+		"--disable-background-timer-throttling", "--disable-renderer-backgrounding",
+		"--disable-backgrounding-occluded-windows",
+		map[bool]string{true: "--start-minimized", false: "--start-maximized"}[quiet], "about:blank")
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("Adal Browser did not start: %v", err)
 	}
@@ -159,7 +164,7 @@ func addRobotRoutes(mux *http.ServeMux, root string) {
 			http.NotFound(w, r)
 			return
 		}
-		v, err := ensureRobotBrowser(root)
+		v, err := ensureRobotBrowser(root, r.URL.Query().Get("quiet") == "1")
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusServiceUnavailable)
@@ -261,16 +266,20 @@ func bufReader(rw *bufio.ReadWriter) io.Reader {
 	return strings.NewReader(string(b))
 }
 
-// announceRobot: every minute, while joined to a main PC on the network.
+// announceRobot: every 20 seconds, while joined to a main PC on the network.
 func announceRobot() {
 	for {
 		keys := loadKeys()
 		if keys.AccessKey != "" && hostServer != "" {
 			body := map[string]any{"token": robotToken, "port": lanHTTPPort, "name": clientName, "cores": runtime.NumCPU()}
+			// How strong it is right now: the main PC gives the heavy work to the strongest.
+			for k, v := range powerNow() {
+				body[k] = v
+			}
 			if _, err := mainJSON(http.MethodPost, "/api/companion/robot-browser", body, keys.AccessKey, nil); err != nil {
 				log.Printf("🤖 robot browser not announced: %v", err)
 			}
 		}
-		time.Sleep(time.Minute)
+		time.Sleep(20 * time.Second)
 	}
 }

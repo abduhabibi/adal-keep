@@ -38,7 +38,10 @@ export function registerDevice(pc, ip, body = {}) {
   const old = devices.get(pc.id)
   if (old && (old.token !== token || old.ip !== ip || old.port !== port)) dropConnection(pc.id)
   const cores = Math.max(1, Math.min(256, Number(body.cores) || 1))
-  devices.set(pc.id, { id: pc.id, name: String(body.name || pc.name || 'Companion').slice(0, 60), ip: String(ip).replace(/^::ffff:/, ''), port, token, cores, at: Date.now() })
+  // How strong it is now (services/sharePower.js picks who does the heavy work).
+  const num = (v, lo, hi) => (v == null || v === '' || !Number.isFinite(Number(v))) ? null : Math.max(lo, Math.min(hi, Number(v)))
+  const power = { mem_gb: num(body.mem_gb, 0, 4096), free_gb: num(body.free_gb, 0, 4096), load: num(body.load, 0, 100), battery: body.battery === true }
+  devices.set(pc.id, { id: pc.id, name: String(body.name || pc.name || 'Companion').slice(0, 60), ip: String(ip).replace(/^::ffff:/, ''), port, token, cores, ...power, at: Date.now() })
   return { ok: true }
 }
 
@@ -96,7 +99,7 @@ function dropConnection(id) {
 }
 
 /** The Companion's browser (connected once, kept while it stays connected). */
-export async function browserForDevice(id) {
+export async function browserForDevice(id, { quiet = false } = {}) {
   const d = devices.get(id)
   if (!d || !deviceLive(id)) throw new Error('That Adal Companion is not on the office network now')
   const have = conns.get(id)
@@ -106,7 +109,8 @@ export async function browserForDevice(id) {
     conns.delete(id)
   }
   const p = (async () => {
-    const r = await fetch(`${base(d)}/robot/json/version`, { headers: { 'x-adal-robot': d.token }, signal: AbortSignal.timeout(45000) })
+    // quiet: opened for another PC's work — it starts minimized there, never over the person's work.
+    const r = await fetch(`${base(d)}/robot/json/version${quiet ? '?quiet=1' : ''}`, { headers: { 'x-adal-robot': d.token }, signal: AbortSignal.timeout(45000) })
     if (!r.ok) throw new Error(`the Companion's browser did not open (${r.status})`)
     const v = await r.json()
     if (!v.webSocketDebuggerUrl) throw new Error('the Companion gave no browser address')

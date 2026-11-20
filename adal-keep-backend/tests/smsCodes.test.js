@@ -6,7 +6,8 @@ import assert from 'node:assert/strict'
 
 const fresh = async (tabs = []) => {
   const s = await import(`../src/services/smsCodes.js?t=${Math.random()}`)
-  s._setBrowsersForTest(async () => tabs)
+  // Each fake page says its own LMIS account (page.acct).
+  s._setBrowsersForTest(async () => tabs, async (db, page) => page.acct || null)
   return s
 }
 
@@ -44,7 +45,8 @@ test('the phone named no account: the robot waiting longest gets it', async () =
   const s = await fresh()
   const first = s.waitForSmsCode({ run: 1, account: { phone: '0911000000' } })
   s.waitForSmsCode({ run: 2, account: { phone: '0922000000' } })
-  assert.equal(s.addSmsCode({ code: '3333', account: '' }).run, 1)
+  s.addSmsCode({ code: '3333', account: '' })
+  await s.settled()
   assert.equal(s.takeSmsCode(0, first), '3333')
 })
 
@@ -106,4 +108,46 @@ test('a robot waiting still gets its own code (no tab is touched)', async () => 
   await s.settled()
   assert.equal(lmis.typed, null)
   assert.equal(s.takeSmsCode(0, w), '1212')
+})
+
+const nuzla = { name: 'nuzla', phone: '0911000000' }
+const zad = { name: 'ZAD', phone: '0922000000' }
+
+test('two PCs waiting at once (two accounts): each code goes into its own account tab', async () => {
+  const a = Object.assign(fakePage('https://lmis.gov.et/auth/x'), { acct: nuzla })
+  const b = Object.assign(fakePage('https://lmis.gov.et/auth/y'), { acct: zad })
+  const s = await fresh([
+    { name: 'this PC', browser: { pages: async () => [a] } },
+    { name: 'Reception PC', browser: { pages: async () => [b] } },
+  ])
+  s.addSmsCode({ code: '2020', account: 'ZAD · 0922000000' })
+  await s.settled()
+  assert.equal(b.typed, '2020'); assert.equal(a.typed, null)
+  s.addSmsCode({ code: '1010', account: 'nuzla · 0911000000' })
+  await s.settled()
+  assert.equal(a.typed, '1010'); assert.equal(b.typed, '2020')
+})
+
+test('a robot waits for one account, a person for another: the person gets the code of theirs', async () => {
+  const b = Object.assign(fakePage('https://lmis.gov.et/auth/y'), { acct: zad })
+  const s = await fresh([{ name: 'Reception PC', browser: { pages: async () => [b] } }])
+  const w = s.waitForSmsCode({ run: 4, account: nuzla })
+  s.addSmsCode({ code: '3030', account: 'ZAD · 0922000000' })
+  await s.settled()
+  assert.equal(b.typed, '3030')
+  assert.equal(s.takeSmsCode(0, w), null)       // not the robot's
+  s.addSmsCode({ code: '4040', account: 'nuzla · 0911000000' })
+  assert.equal(s.takeSmsCode(0, w), '4040')
+})
+
+test('two SIMs in one phone: the SIM that got the SMS says which account', async () => {
+  const s = await fresh()
+  const one = s.waitForSmsCode({ run: 1, account: nuzla })
+  const two = s.waitForSmsCode({ run: 2, account: zad })
+  const both = '1:nuzla · 0911000000 | 2:ZAD · 0922000000'
+  assert.equal(s.addSmsCode({ code: '5050', account: both, sim: 2 }).run, 2)
+  assert.equal(s.addSmsCode({ code: '6060', account: both, sim: 1 }).run, 1)
+  assert.equal(s.takeSmsCode(0, two), '5050')
+  assert.equal(s.takeSmsCode(0, one), '6060')
+  assert.deepEqual(s.parseAccounts(both), [{ sim: 1, name: 'nuzla', phone: '0911000000' }, { sim: 2, name: 'ZAD', phone: '0922000000' }])
 })

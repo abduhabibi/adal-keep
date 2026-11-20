@@ -509,6 +509,25 @@ async function runJob(db, job) {
       const line = await placeRun(db, job, { mainAllowed: !nobodyAsked || !!(await openBrowserIfAny()) })
       if (line) { await appendLog(db, job.id, line); console.log(`[share] run #${job.id}: ${line}`) }
     } catch (e) { console.warn(`[share] run #${job.id} stays where it is:`, e.message) }
+    // One LMIS per account (services/lmisOne.js): where this account's LMIS is
+    // open already, the run works there — never a second sign-in on another PC.
+    if (peerOf(job.workflow_id) === 'lmis') {
+      try {
+        let acct = job.account_id
+        let ctx = {}
+        try { ctx = JSON.parse(job.context || '{}') } catch {}
+        if (!acct) acct = ctx.account_id
+        const home = await (await import('./lmisOne.js')).lmisHome(db, acct)
+        if (home && home.device !== onDevice(job)) {
+          if (home.device) ctx.on_device = home.device
+          else { delete ctx.on_device; delete ctx.quiet }
+          job.context = JSON.stringify(ctx)
+          const { seal } = await import('./accountVault.js')
+          await db('automation_queue').where('id', job.id).update({ context: seal(job.context) })
+          await appendLog(db, job.id, `LMIS for this account is open on ${home.name} — working there (one LMIS per account)`)
+        }
+      } catch (e) { console.warn(`[worker] run #${job.id}: where LMIS is open could not be checked (${e.message})`) }
+    }
     const browser = await browserForJob(db, job)
     // After a server restart the run finds the tab it worked in again.
     await findRunTab(browser, job.id, job.workflow_id, { bySite: false }).catch(() => null)

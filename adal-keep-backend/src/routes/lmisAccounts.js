@@ -11,7 +11,7 @@ router.get('/accounts', async (req, res) => {
 
 // An LMIS code from the agency's phone (its SMS, sent through the online link).
 router.post('/sms-code', async (req, res) => {
-  try { const { addSmsCode } = await import('../services/smsCodes.js'); res.json(addSmsCode(req.body || {})) }
+  try { const { addSmsCode } = await import('../services/smsCodes.js'); res.json(addSmsCode(req.body || {}, { db: req.app.locals.db })) }
   catch (e) { res.status(e.status || 500).json({ error: e.message }) }
 })
 // The codes of the last 10 minutes: every PC's document tray shows them to copy.

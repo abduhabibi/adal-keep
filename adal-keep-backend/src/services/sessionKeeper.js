@@ -304,6 +304,13 @@ export async function openSite(key, database = null, { accountId = null, browser
   }
   const site = SITES.find(s => s.key === key)
   if (!site) throw new Error('Unknown site')
+  // LMIS already open for this account on a Companion: its tab there is used (one LMIS per account, lmisOne.js).
+  if (key === 'lmis' && db && !browser) {
+    try {
+      const home = await (await import('./lmisOne.js')).lmisHome(db, accountId)
+      if (home?.device) browser = await (await import('./remoteBrowsers.js')).browserForDevice(home.device)
+    } catch (e) { console.warn('[sessions] where LMIS is open:', e.message) }
+  }
   browser = browser || await getBrowser()
   // The chosen account in its own browser space when it is not the site's main
   // one: signing in as it never signs the other account out (asked on 2026-11-15).

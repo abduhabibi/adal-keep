@@ -162,7 +162,7 @@ router.get('/profile-readiness/:profileId', async (req, res) => {
     const profile = await db('profiles').where('id', profileId).first()
     if (!profile) return res.status(404).json({ error: 'Profile not found' })
 
-    const required = ['full_name','first_name','last_name','passport_number','date_of_birth','place_of_birth','nationality','gender','religion','marital_status','children_count','weight','height','living_town','phone_number']
+    const required = ['full_name','first_name','last_name','passport_number','date_of_birth','place_of_birth','nationality','gender','religion','marital_status','children_count','weight','height','phone_number']  // living town: not asked (the CV uses her place of birth)
     const missing = required.filter(k => {
       const v = profile[k]
       return v === null || v === undefined || v === ''

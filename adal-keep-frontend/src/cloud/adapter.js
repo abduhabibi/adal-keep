@@ -237,7 +237,7 @@ function withFiles(pid, fields, updatedAt) {
 /** What the CV page needs to know of her (the PC's /cv/profile-readiness, made here). */
 function readinessOf(profile, fields) {
   const count = (name) => (fields || []).filter(f => f.name === name).reduce((n, f) => n + (f.files || []).length, 0)
-  const required = ['full_name','first_name','last_name','passport_number','date_of_birth','place_of_birth','nationality','gender','religion','marital_status','children_count','weight','height','living_town','phone_number']
+  const required = ['full_name','first_name','last_name','passport_number','date_of_birth','place_of_birth','nationality','gender','religion','marital_status','children_count','weight','height','phone_number']  // living town: not asked (the CV uses her place of birth)
   const has_photo = count('Photo') > 0 || !!profile.photo_path
   const has_full_body_photo = count('Full Body Photo') > 0
   const cv_blockers = [!profile.broker_id && 'Broker not assigned', !has_photo && 'Photo missing', !has_full_body_photo && 'Full body photo missing', !profile.religion && 'Religion missing', !profile.marital_status && 'Marital status missing'].filter(Boolean)

@@ -11,6 +11,7 @@
  * cards, which change. A backup carries it inside its locked index.
  */
 import fs from 'fs'
+import os from 'os'
 import path from 'path'
 import crypto from 'crypto'
 import { fileURLToPath } from 'url'
@@ -23,6 +24,23 @@ let key = null
 function keyOf() {
   if (key) return key
   try { key = Buffer.from(fs.readFileSync(KEY_FILE, 'utf8').trim(), 'base64') } catch {}
+  // Gone from the install folder (an uninstall, a bad copy): the newest copy kept
+  // outside it comes back before a new key is ever made (services/keySafe.js
+  // checks after the start that it really opens the passwords).
+  if (key?.length !== 32 && !fs.existsSync(KEY_FILE) && (!process.env.ACCOUNT_VAULT_KEY || process.env.ADAL_KEYS_OUTSIDE)) {
+    try {
+      const dir = process.env.ADAL_KEYS_OUTSIDE || path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'AdalKeep', 'keys')
+      const newest = fs.readdirSync(dir).filter(f => /^account-vault\.[0-9a-f]{12}\.key$/.test(f))
+        .map(f => path.join(dir, f)).sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)[0]
+      const k = newest ? Buffer.from(fs.readFileSync(newest, 'utf8').trim(), 'base64') : null
+      if (k?.length === 32) {
+        fs.mkdirSync(path.dirname(KEY_FILE), { recursive: true })
+        fs.writeFileSync(KEY_FILE, k.toString('base64'), { mode: 0o600, flag: 'wx' })
+        key = k
+        console.log('[vault] account-vault.key was missing — put back from the copy outside the install folder')
+      }
+    } catch {}
+  }
   if (key?.length !== 32) {
     key = crypto.randomBytes(32)
     fs.mkdirSync(path.dirname(KEY_FILE), { recursive: true })

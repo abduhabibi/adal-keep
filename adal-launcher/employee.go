@@ -57,7 +57,7 @@ func waitForMainPC(root string, budget time.Duration) string {
 	for end := time.Now().Add(budget); ; {
 		if u := mainPCURL(root); u != "" {
 			uiURL = u
-			if serverReady(3 * time.Second) {
+			if isOurMain(root, u, 3*time.Second) && serverReady(3*time.Second) {
 				return u
 			}
 		}
@@ -81,7 +81,7 @@ func runEmployee(root string, background bool) {
 			return
 		}
 		if hasOnlinePages(root) {
-			if u := firstAnswering(candidates(root, ""), 2*time.Second); u != "" {
+			if u := firstAnswering(root, candidates(root, ""), 2*time.Second); u != "" {
 				openAppWindow(root, companionURL(root, u))
 			} else {
 				openAppWindow(root, offlineURL(root))
@@ -99,6 +99,7 @@ func runEmployee(root string, background bool) {
 
 	logf("Adal Keep (employee PC) starting")
 	go ensureBrowser(root)
+	go ensureSharing(root) // the office network may share updates, data and the server (sharing.go)
 	startHidden(filepath.Join(root, "adal-companion.exe"))
 	go brandWindows(root)
 	online := startOnlinePage(root)
@@ -121,7 +122,7 @@ func runEmployee(root string, background bool) {
 		// The main PC answering at its saved address: opened directly (fast).
 		// Otherwise the online copy at once; it opens the main PC itself as
 		// soon as it can be reached (direct.go, lib/companionDirect.js).
-		if u := firstAnswering(candidates(root, ""), 2*time.Second); u != "" {
+		if u := firstAnswering(root, candidates(root, ""), 2*time.Second); u != "" {
 			logf("main PC answers at %s — opening it directly", u)
 			openAppWindow(root, companionURL(root, u))
 			select {}

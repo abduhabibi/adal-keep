@@ -47,9 +47,10 @@ async function fieldOf(db, profileId, name) {
 
 /**
  * Checks one uploaded picture (a files row) in the background. Returns what
- * was done: { act: 'stay' | 'move' | 'split', to?, parts? }.
+ * was done: { act: 'stay' | 'move' | 'split' | 'review', to?, parts?, id? }.
+ * review: the cut-outs go nowhere yet — a person sees them first.
  */
-export async function checkPlacement(db, profileId, fieldName, file, { choose = null, split = null, log = console.log } = {}) {
+export async function checkPlacement(db, profileId, fieldName, file, { choose = null, split = null, review = false, log = console.log } = {}) {
   if (!watched(fieldName) || !/^image\//.test(file?.mimetype || '')) return { act: 'stay' }
   const abs = resolveStoredPath(file.path)
   if (!abs) return { act: 'stay' }
@@ -69,38 +70,99 @@ export async function checkPlacement(db, profileId, fieldName, file, { choose = 
     const cut = split || (await import('./composite.js')).splitComposite
     const parts = await cut(abs, { anyShape: true })
     if (!parts) return { act: 'stay' }
-    const done = []
-    try {
-      const fs = (await import('fs')).default, path = (await import('path')).default, crypto = (await import('crypto')).default
-      const { SAFE_STORAGE_DIR } = await import('./docPipeline.js')
-      for (const k of ['photo', 'fullbody']) {
-        if (!parts[k] || BOXES[k] === fieldName) continue
-        const to = await fieldOf(db, profileId, BOXES[k])
-        const hash = crypto.createHash('sha256').update(fs.readFileSync(parts[k])).digest('hex')
-        if (await db('files').where({ profile_field_id: to.id, content_hash: hash }).first()) continue
-        const name = `${Date.now()}_${k}-${String(file.original_name || 'picture').replace(/\.[^.]+$/, '')}.jpg`
-        fs.copyFileSync(parts[k], path.join(SAFE_STORAGE_DIR, name))
-        const now = new Date().toISOString()
-        await db('files').insert({ profile_field_id: to.id, original_name: name.replace(/^\d+_/, ''), path: name, mimetype: 'image/jpeg', size: fs.statSync(parts[k]).size, content_hash: hash, created_at: now, updated_at: now })
-        done.push(BOXES[k])
-      }
-      // In Passport: the passport part takes the combined picture's place (it
-      // reads better too); the picture itself stays on the disk.
-      if (fieldName === 'Passport' && parts.passport && file.profile_field_id) {
-        const name = `${Date.now()}_passport-${String(file.original_name || 'picture').replace(/\.[^.]+$/, '')}.jpg`
-        fs.copyFileSync(parts.passport, path.join(SAFE_STORAGE_DIR, name))
-        const now = new Date().toISOString()
-        await db('files').insert({ profile_field_id: file.profile_field_id, original_name: name.replace(/^\d+_/, ''), path: name, mimetype: 'image/jpeg', size: fs.statSync(parts.passport).size, content_hash: crypto.createHash('sha256').update(fs.readFileSync(parts.passport)).digest('hex'), created_at: now, updated_at: now })
-        await db('files').where('id', file.id).del()   // its row only: the picture stays on the disk (path noted below)
-        noteMove({ file: file.id, profile: profileId, from: 'Passport', from_field: file.profile_field_id, to: 'replaced by its passport part', kept: file.path, original_name: file.original_name, at: now })
-        done.push('Passport')
-        import('./verification.js').then(v => v.runPassportVerification(Number(profileId), { handle: db })).catch(() => {})
-      }
-    } finally { (await import('fs')).default.rmSync(parts.dir, { recursive: true, force: true }) }
+    const fs = (await import('fs')).default
+    // A picture a person put in: the cut-outs wait for their OK (answerReview below).
+    if (review) {
+      try { return { act: 'review', id: await saveForReview(db, profileId, fieldName, file, parts) } }
+      finally { fs.rmSync(parts.dir, { recursive: true, force: true }) }
+    }
+    let done = []
+    try { done = await applyParts(db, profileId, fieldName, file, parts) }
+    finally { fs.rmSync(parts.dir, { recursive: true, force: true }) }
     if (done.length) log(`[placement] profile #${profileId}: one picture with several things — ${done.join(' and ')} cut out of it`)
     return { act: 'split', parts: done }
   }
   return d
+}
+
+/** Which parts of a cut picture go where (the passport part only when it was put in Passport). */
+export function partsToUse(fieldName, parts) {
+  const out = []
+  for (const k of ['photo', 'fullbody']) if (parts[k] && BOXES[k] !== fieldName) out.push(k)
+  if (fieldName === 'Passport' && parts.passport) out.push('passport')
+  return out
+}
+
+/**
+ * Puts the cut-outs into their boxes: Photo and Full Body Photo get theirs;
+ * in Passport the passport part takes the combined picture's place (it reads
+ * better too; the picture itself stays on the disk). parts: { kind: path }.
+ */
+export async function applyParts(db, profileId, fieldName, file, parts) {
+  const fs = (await import('fs')).default, path = (await import('path')).default, crypto = (await import('crypto')).default
+  const { SAFE_STORAGE_DIR } = await import('./docPipeline.js')
+  const done = []
+  const base = String(file.original_name || 'picture').replace(/\.[^.]+$/, '')
+  for (const k of ['photo', 'fullbody']) {
+    if (!parts[k] || BOXES[k] === fieldName) continue
+    const to = await fieldOf(db, profileId, BOXES[k])
+    const hash = crypto.createHash('sha256').update(fs.readFileSync(parts[k])).digest('hex')
+    if (await db('files').where({ profile_field_id: to.id, content_hash: hash }).first()) continue
+    const name = `${Date.now()}_${k}-${base}.jpg`
+    fs.copyFileSync(parts[k], path.join(SAFE_STORAGE_DIR, name))
+    const now = new Date().toISOString()
+    await db('files').insert({ profile_field_id: to.id, original_name: name.replace(/^\d+_/, ''), path: name, mimetype: 'image/jpeg', size: fs.statSync(parts[k]).size, content_hash: hash, created_at: now, updated_at: now })
+    done.push(BOXES[k])
+  }
+  const still = file.id ? await db('files').where('id', file.id).first() : null
+  if (fieldName === 'Passport' && parts.passport && still?.profile_field_id) {
+    const name = `${Date.now()}_passport-${base}.jpg`
+    fs.copyFileSync(parts.passport, path.join(SAFE_STORAGE_DIR, name))
+    const now = new Date().toISOString()
+    await db('files').insert({ profile_field_id: still.profile_field_id, original_name: name.replace(/^\d+_/, ''), path: name, mimetype: 'image/jpeg', size: fs.statSync(parts.passport).size, content_hash: crypto.createHash('sha256').update(fs.readFileSync(parts.passport)).digest('hex'), created_at: now, updated_at: now })
+    await db('files').where('id', file.id).del()   // its row only: the picture stays on the disk (path noted below)
+    noteMove({ file: file.id, profile: profileId, from: 'Passport', from_field: still.profile_field_id, to: 'replaced by its passport part', kept: still.path, original_name: still.original_name, at: now })
+    done.push('Passport')
+    import('./verification.js').then(v => v.runPassportVerification(Number(profileId), { handle: db })).catch(() => {})
+  }
+  return done
+}
+
+/** Keeps the cut-outs (data/SafeStorage/crop-review/<n>) and a crop_reviews row; its id. */
+export async function saveForReview(db, profileId, fieldName, file, parts) {
+  const fs = (await import('fs')).default, path = (await import('path')).default
+  const { SAFE_STORAGE_DIR } = await import('./docPipeline.js')
+  const kinds = partsToUse(fieldName, parts)
+  if (!kinds.length) return null
+  const dir = path.join(SAFE_STORAGE_DIR, 'crop-review', `${Date.now()}-${file.id || 0}`)
+  fs.mkdirSync(dir, { recursive: true })
+  const list = kinds.map(k => { const to = path.join(dir, `${k}.jpg`); fs.copyFileSync(parts[k], to); return { kind: k, box: BOXES[k], path: to } })
+  const now = new Date().toISOString()
+  // A new look at the same picture: the older question goes.
+  if (file.id) await db('crop_reviews').where({ file_id: file.id, status: 'waiting' }).update({ status: 'replaced', updated_at: now })
+  const [id] = await db('crop_reviews').insert({ profile_id: Number(profileId), file_id: file.id || null, field_name: fieldName, parts: JSON.stringify(list), dir, status: 'waiting', created_at: now, updated_at: now })
+  console.log(`[placement] profile #${profileId}: ${list.map(x => x.box).join(' and ')} cut out of one picture, waiting for a person's OK`)
+  return typeof id === 'object' ? id.id : id
+}
+
+/**
+ * A person answered: the parts in use go into their boxes (a part they framed
+ * again by hand comes as replaced[kind], a file path); the rest are dropped.
+ * use = [] keeps the picture as it was.
+ */
+export async function answerReview(db, id, { use = [], replaced = {} } = {}) {
+  const fs = (await import('fs')).default
+  const row = await db('crop_reviews').where({ id }).first()
+  if (!row) throw Object.assign(new Error('Not found'), { status: 404 })
+  if (row.status !== 'waiting') return { ok: true, already: row.status, done: [] }
+  const list = JSON.parse(row.parts || '[]')
+  const parts = {}
+  for (const x of list) if (use.includes(x.kind)) parts[x.kind] = replaced[x.kind] || x.path
+  const file = row.file_id ? (await db('files').where('id', row.file_id).first()) || { id: row.file_id } : {}
+  const done = Object.keys(parts).length ? await applyParts(db, row.profile_id, row.field_name, file, parts) : []
+  await db('crop_reviews').where({ id }).update({ status: done.length ? 'done' : 'kept', updated_at: new Date().toISOString() })
+  try { fs.rmSync(row.dir, { recursive: true, force: true }) } catch {}
+  return { ok: true, done }
 }
 
 /**
@@ -121,7 +183,7 @@ export async function sweepRecent(db, { days = 7, limit = 60, log = console.log 
   let moved = 0
   for (const r of rows) {
     if (seen.has(r.id)) continue
-    try { const d = await checkPlacement(db, r.profile_id, r.field_name, r, { log }); if (d.act !== 'stay') moved++ } catch (e) { log('[placement]', e.message); break }
+    try { const d = await checkPlacement(db, r.profile_id, r.field_name, r, { log, review: true }); if (d.act !== 'stay') moved++ } catch (e) { log('[placement]', e.message); break }
     seen.add(r.id)
     try { fs.writeFileSync(seenFile, JSON.stringify([...seen].slice(-5000))) } catch {}
   }

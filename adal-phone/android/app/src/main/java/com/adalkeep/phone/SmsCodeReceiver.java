@@ -43,9 +43,12 @@ public class SmsCodeReceiver extends BroadcastReceiver {
         final String code = codeOf(from, body.toString());
         if (code == null) return;   // not LMIS (or no code in it): left alone
         final String sender = from;
+        // Which SIM got it (two LMIS numbers in one phone): 1 or 2, 0 when Android does not say.
+        int slot = intent.getIntExtra("android.telephony.extra.SLOT_INDEX", intent.getIntExtra("slot", intent.getIntExtra("simSlot", intent.getIntExtra("slot_id", -1))));
+        final int sim = slot >= 0 && slot <= 1 ? slot + 1 : 0;
         final PendingResult done = goAsync();
         new Thread(() -> {
-            try { send(p, code, sender); } catch (Exception ignored) { } finally { done.finish(); }
+            try { send(p, code, sender, sim); } catch (Exception ignored) { } finally { done.finish(); }
         }).start();
     }
 
@@ -59,7 +62,7 @@ public class SmsCodeReceiver extends BroadcastReceiver {
     }
 
     /** The code to the main PC: this phone's online account, then a call the PC answers. */
-    static void send(SharedPreferences p, String code, String from) throws Exception {
+    static void send(SharedPreferences p, String code, String from, int sim) throws Exception {
         String url = p.getString("url", ""), anon = p.getString("anon", ""), agency = p.getString("agency", "");
         String email = p.getString("email", ""), password = p.getString("password", "");
         if (url.isEmpty() || anon.isEmpty() || agency.isEmpty() || email.isEmpty() || password.isEmpty()) return;
@@ -73,6 +76,7 @@ public class SmsCodeReceiver extends BroadcastReceiver {
         body.put("code", code);
         body.put("from", from == null ? "" : from);
         body.put("account", p.getString("account", ""));
+        body.put("sim", sim);
         body.put("at", System.currentTimeMillis());
         JSONObject call = new JSONObject();
         call.put("agency_id", agency);

@@ -4,7 +4,8 @@
  * page is not the one in front).
  *
  * bin/adal-clip.exe (source: adal-clip/) watches the keyboard: "C" pressed
- * twice quickly opens Windows' own crop at once and sends the picture here.
+ * twice quickly freezes the screen and opens its own crop over it (0.1 s;
+ * Windows' own crop took 1–3 s to start) and sends the picture here.
  * It starts with this server and ends with it. The pictures go to every open
  * Adal Keep page of this PC (GET /api/app/clips, a stream): into its tray.
  */
@@ -13,7 +14,7 @@ import path from 'path'
 import { spawn } from 'child_process'
 import { fileURLToPath } from 'url'
 
-// Each version of the watcher has its own name (adal-clip-2.exe, -3 …): an update
+// Each version of the watcher has its own name (adal-clip-2.exe, -3 …; the newest one runs): an update
 // never has to overwrite the running one — Windows refuses that, and the
 // whole update stopped ("Access is denied … adal-clip.exe", 2026-11-16).
 const BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'bin')

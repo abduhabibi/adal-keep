@@ -16,7 +16,8 @@ import { onThisPC, fromCompanion } from './trash.js'
 const router = express.Router()
 
 router.get('/branch/export', async (req, res) => {
-  try { res.json(await exportAll(req.app.locals.db)) } catch (e) { res.status(500).json({ error: e.message }) }
+  const since = req.query.since && !Number.isNaN(Date.parse(req.query.since)) ? String(req.query.since) : null
+  try { res.json(await exportAll(req.app.locals.db, { since })) } catch (e) { res.status(500).json({ error: e.message }) }
 })
 router.get('/branch/export/file/:id', async (req, res) => {
   const abs = await exportFilePath(req.app.locals.db, req.params.id).catch(() => null)

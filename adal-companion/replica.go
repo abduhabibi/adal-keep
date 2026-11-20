@@ -2,7 +2,7 @@ package main
 
 // replica.go — this Companion keeps a locked copy of the agency's data.
 //
-// While the main PC answers, every 15 minutes the Companion asks it for a
+// While the main PC answers, every minute the Companion asks it for a
 // manifest (backend services/replica.js): the database cut in 1 MB chunks,
 // each with a fingerprint, and the documents by name, size and time. Only the
 // chunks and documents it does not have yet are fetched — after the first
@@ -47,7 +47,7 @@ var (
 	telegramAPI    = strings.TrimRight(envStr("ADAL_TELEGRAM_API", "https://api.telegram.org"), "/")
 	replicaMu      sync.Mutex // one sync or backup at a time
 	replicaClient  = &http.Client{Timeout: 3 * time.Minute}
-	syncEvery      = time.Duration(envInt("ADAL_REPLICA_MINUTES", 15)) * time.Minute
+	syncEvery      = time.Duration(envInt("ADAL_REPLICA_MINUTES", 1)) * time.Minute // every minute (asked on 2026-11-20): only the changed pieces travel
 	piecePattern   = regexp.MustCompile(`^[df]-[0-9a-f]{1,40}-[0-9a-f]{1,40}(-[0-9]{1,6})?\.bin$`)
 	errNoNumber    = errors.New("the main PC's number is not known yet (it is saved when this PC joins with it)")
 	errNotOurMain  = errors.New("that main PC does not have our number")
@@ -324,13 +324,16 @@ func syncReplica() error {
 		return nil
 	}
 	defer replicaMu.Unlock()
-	id := loadIdentity()
-	if id.Number == "" {
+	number := mainNumber()
+	if number == "" {
+		number = learnNumberOnline(exeRoot())
+	}
+	if number == "" {
 		return errNoNumber
 	}
 	keys := loadKeys()
 	if keys.AccessKey == "" {
-		k, err := joinWithNumber(id.Number)
+		k, err := joinWithNumber(number)
 		if err != nil {
 			return err
 		}
@@ -374,9 +377,16 @@ func syncReplica() error {
 		os.RemoveAll(piecesDir())
 	}
 	var got, bytesGot int64
+	bases := peerBases() // the other Companions: a piece they have is not asked of the main PC
+	fromPeers := 0
 	for i, sum := range m.DB.Chunks {
 		name := dbPieceName(i, sum)
 		if pieceExists(name) {
+			continue
+		}
+		if pieceFromPeers(name, bases) {
+			got++
+			fromPeers++
 			continue
 		}
 		n, err := fetchPiece(fmt.Sprintf("/api/replica/db/%s/%d", url.PathEscape(m.Snap), i), keys.AccessKey, name)
@@ -390,6 +400,11 @@ func syncReplica() error {
 		for k := 0; k < d.Parts; k++ {
 			name := docPieceName(d, k)
 			if pieceExists(name) {
+				continue
+			}
+			if pieceFromPeers(name, bases) {
+				got++
+				fromPeers++
 				continue
 			}
 			n, err := fetchPiece(fmt.Sprintf("/api/replica/doc/%d?name=%s", k, url.QueryEscape(d.Name)), keys.AccessKey, name)
@@ -425,7 +440,7 @@ func syncReplica() error {
 		return err
 	}
 	if got > 0 {
-		log.Printf("🗄 Copy of the main PC brought up to date: %d new piece(s), %d KB (%d documents)", got, bytesGot/1024, len(docs))
+		log.Printf("🗄 Copy of the main PC brought up to date: %d new piece(s) (%d from other Companions), %d KB from the main PC (%d documents)", got, fromPeers, bytesGot/1024, len(docs))
 	}
 	reportToMain(st, keys)
 	return nil
@@ -726,7 +741,7 @@ func watchReplica() {
 		return
 	}
 	go func() {
-		time.Sleep(90 * time.Second) // let the PC finish starting first
+		time.Sleep(30 * time.Second) // let the PC finish starting first
 		var lastSync time.Time
 		var mainOffSince time.Time
 		saidNoNumber := false
@@ -734,6 +749,10 @@ func watchReplica() {
 			switch {
 			case signedOut():
 			case hostServer != "" && pingServer() && !serverLocked():
+				// The main PC back (or found for the first time): the copy is brought up to date at once.
+				if !mainOffSince.IsZero() {
+					lastSync = time.Time{}
+				}
 				mainOffSince = time.Time{}
 				if time.Since(lastSync) >= syncEvery {
 					lastSync = time.Now()
@@ -751,6 +770,13 @@ func watchReplica() {
 			default:
 				if mainOffSince.IsZero() {
 					mainOffSince = time.Now()
+				}
+				// The main PC away: a newer copy another Companion has (peers.go).
+				if time.Since(lastSync) >= syncEvery {
+					lastSync = time.Now()
+					if err := syncFromPeers(); err != nil && err != errNoNumber {
+						log.Printf("⚠️ Copy from another Companion: %v", err)
+					}
 				}
 				if companionBackupDue(loadState(), loadKeys(), time.Now(), mainOffSince, replicaJitter()) {
 					if err := backupFromCopy(); err != nil {

@@ -5,7 +5,11 @@ import path from 'path'
 
 // `vite build --mode demo` builds the public demo (see src/demo/): the same
 // app, answering its API in the browser with made-up data, into dist-demo/.
-export default defineConfig(({ mode }) => ({
+export default defineConfig(({ mode }) => {
+  // The phone / Companion pages: VITE_PHONE=1 set here, so the build is the same
+  // on Windows (where "VITE_PHONE=1 vite build" is not a command) and Linux.
+  if (mode === 'phone') process.env.VITE_PHONE = '1'
+  return {
   plugins: [
     react(),
     mode === 'demo' && {
@@ -55,4 +59,5 @@ export default defineConfig(({ mode }) => ({
       }
     }
   }
-}))
+}
+})

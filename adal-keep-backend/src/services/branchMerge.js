@@ -30,13 +30,29 @@ const SKIP_COLS = new Set(['id', 'broker_id', 'created_at', 'updated_at', 'editi
 
 // ── Branch side: what this PC has ────────────────────────────────────────────
 
-export async function exportAll(db) {
+/**
+ * since (an ISO time, optional): only what changed after it — the profiles
+ * changed then, or with a detail or document added then, and only those
+ * documents (a Companion that stood in for the main PC sends back only its
+ * own work, not the whole agency again).
+ */
+export async function exportAll(db, { since = null } = {}) {
+  const after = (t) => !since || Date.parse(t || 0) > Date.parse(since)
   const brokers = await db('brokers').select('id', 'name', 'address', 'contact1', 'contact2', 'notes')
-  const profiles = await db('profiles').select('*')
+  let profiles = await db('profiles').select('*')
   const fields = await db('profile_fields').select('*')
-  const files = await db('files').select('id', 'profile_field_id', 'original_name', 'mimetype', 'size', 'path')
+  const files = await db('files').select('id', 'profile_field_id', 'original_name', 'mimetype', 'size', 'path', 'created_at')
+  if (since) {
+    const fieldProfile = new Map(fields.map(f => [f.id, f.profile_id]))
+    const touched = new Set([
+      ...fields.filter(f => after(f.updated_at) || after(f.created_at)).map(f => f.profile_id),
+      ...files.filter(f => after(f.created_at)).map(f => fieldProfile.get(f.profile_field_id)),
+    ])
+    profiles = profiles.filter(p => after(p.updated_at) || after(p.created_at) || touched.has(p.id))
+  }
   const filesBy = new Map()
   for (const f of files) {
+    if (!after(f.created_at)) continue        // (since: only the documents added then)
     if (!storedPath(f.path)) continue // the file is missing on disk: nothing to send
     const list = filesBy.get(f.profile_field_id) || []
     list.push({ id: f.id, original_name: f.original_name, mimetype: f.mimetype, size: f.size })
@@ -45,7 +61,7 @@ export async function exportAll(db) {
   const fieldsBy = new Map()
   for (const fl of fields) {
     const list = fieldsBy.get(fl.profile_id) || []
-    list.push({ name: fl.name, data_type: fl.data_type, is_permanent: fl.is_permanent, value_text: fl.value_text, files: filesBy.get(fl.id) || [] })
+    list.push({ name: fl.name, data_type: fl.data_type, is_permanent: fl.is_permanent, value_text: fl.value_text, updated_at: fl.updated_at, files: filesBy.get(fl.id) || [] })
     fieldsBy.set(fl.profile_id, list)
   }
   return {
@@ -79,20 +95,22 @@ const passportKey = (p) => String(p.passport_number || '').trim().toUpperCase().
 const namePhoneKey = (p) => (norm(p.full_name) && String(p.phone_number || '').trim()) ? `${norm(p.full_name)}|${String(p.phone_number).replace(/\D/g, '')}` : ''
 const sha = (buf) => crypto.createHash('sha256').update(buf).digest('hex')
 
+// Headers for the PC read from (an acting main's merge token: services/standby).
+let pullHeaders = {}
 async function getJSON(url) {
-  const r = await fetch(url, { signal: AbortSignal.timeout(60000) })
+  const r = await fetch(url, { headers: pullHeaders, signal: AbortSignal.timeout(60000) })
   if (!r.ok) throw new Error(`${url} answered ${r.status}`)
   return r.json()
 }
 async function getBytes(url) {
-  const r = await fetch(url, { signal: AbortSignal.timeout(120000) })
+  const r = await fetch(url, { headers: pullHeaders, signal: AbortSignal.timeout(120000) })
   if (!r.ok) throw new Error(`${r.status}`)
   return Buffer.from(await r.arrayBuffer())
 }
 
-export async function fetchExport(source) {
+export async function fetchExport(source, { since = null } = {}) {
   let data
-  try { data = await getJSON(`${source}/api/branch/export`) } catch (e) {
+  try { data = await getJSON(`${source}/api/branch/export${since ? `?since=${encodeURIComponent(since)}` : ''}`) } catch (e) {
     throw new Error(`Could not read the branch PC at ${source}: ${e.message}. Is it on, with Adal Keep open and Tailscale connected?`)
   }
   if (!data?.adal_branch_export) throw new Error(`${source} is not an Adal Keep that can share its data (update it first).`)
@@ -129,11 +147,28 @@ export async function preview(db, source) {
 /** Progress of the merge running now (one at a time). */
 export const job = { running: false }
 
-export function startMerge(db, source) {
+/**
+ * opts.headers: sent to the PC read from. opts.since (an ISO time): a Companion
+ * stood in for this main PC from then (it was off) — a profile changed there
+ * after it, and later than here, takes its changes (the newest change wins);
+ * nothing is ever deleted, and documents are always both kept.
+ */
+export function startMerge(db, source, opts = {}) {
   if (job.running) throw new Error('A merge is already running.')
-  Object.assign(job, { running: true, source, started_at: new Date().toISOString(), done: 0, total: 0, added: 0, filled: 0, docs_added: 0, docs_same: 0, brokers_added: 0, errors: [], finished_at: null, error: null })
-  merge(db, source).catch(e => { job.error = e.message }).finally(() => { job.running = false; job.finished_at = new Date().toISOString() })
+  Object.assign(job, { running: true, source, since: opts.since || null, started_at: new Date().toISOString(), done: 0, total: 0, added: 0, filled: 0, newer: 0, docs_added: 0, docs_same: 0, brokers_added: 0, errors: [], finished_at: null, error: null })
+  pullHeaders = opts.headers || {}
+  merge(db, source, opts).catch(e => { job.error = e.message }).finally(() => { job.running = false; job.finished_at = new Date().toISOString(); pullHeaders = {} })
   return job
+}
+
+/** The columns the PC read from changed later than here (newest change wins), after since. */
+export function newerValues(theirs, here, values, since) {
+  if (!since) return {}
+  const t = Date.parse(theirs.updated_at || 0), h = Date.parse(here.updated_at || 0), s = Date.parse(since)
+  if (!(t > s) || !(t > h)) return {}
+  const out = {}
+  for (const [k, v] of Object.entries(values)) if (String(here[k] ?? '') !== String(v ?? '')) out[k] = v
+  return out
 }
 
 async function saveBytes(buf, name) {
@@ -156,8 +191,8 @@ async function hashesOf(db, profileId) {
   return set
 }
 
-async function merge(db, source) {
-  const data = await fetchExport(source)
+async function merge(db, source, opts = {}) {
+  const data = await fetchExport(source, { since: opts.since })
   const idx = await indexHere(db)
   const now = () => new Date().toISOString()
   const templates = new Map((await db('field_templates').select('id', 'name').catch(() => [])).map(t => [norm(t.name), t.id]))
@@ -193,11 +228,13 @@ async function merge(db, source) {
         if (namePhoneKey(p)) idx.byNamePhone.set(namePhoneKey(p), hereId)
         job.added++
       } else {
-        // Only fill what is still empty here.
+        // Only fill what is still empty here — or, after a Companion stood in, its newer changes.
         const here = await db('profiles').where('id', hereId).first()
         const fill = {}
         for (const [k, v] of Object.entries(values)) if (here[k] === null || here[k] === '' || here[k] === undefined) fill[k] = v
         if (!here.broker_id && broker) fill.broker_id = broker
+        const newer = newerValues(p, here, values, opts.since)
+        if (Object.keys(newer).length) { Object.assign(fill, newer); if (broker && broker !== here.broker_id) fill.broker_id = broker; job.newer++ }
         if (Object.keys(fill).length) {
           await db('profiles').where('id', hereId).update({ ...fill, updated_at: now() })
           job.filled++
@@ -226,7 +263,7 @@ async function merge(db, source) {
           })
           field = { id: fid, value_text: f.value_text }
           hereFields.push({ ...field, name: f.name })
-        } else if (!field.value_text && f.value_text) {
+        } else if ((!field.value_text && f.value_text) || (opts.since && f.value_text !== field.value_text && Date.parse(f.updated_at || 0) > Math.max(Date.parse(opts.since), Date.parse(field.updated_at || 0)))) {
           await db('profile_fields').where('id', field.id).update({ value_text: f.value_text, updated_at: now() })
         }
         for (const doc of f.files) {

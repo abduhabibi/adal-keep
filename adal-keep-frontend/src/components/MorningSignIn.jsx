@@ -26,8 +26,9 @@ export default function MorningSignIn() {
   const setSites = (v) => { setSitesNow(v); try { if (v.length) localStorage.setItem(CACHE, JSON.stringify(v)) } catch {} }
   const [live, setLive] = useState(null)
   const [choose, setChoose] = useState(null)   // { site, accounts } while the person picks the account
-  const load = () => api.get('/sessions').then(r => setSites(Array.isArray(r.data) ? r.data : [])).catch(() => setSites([]))
-  useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t) }, [])
+  const load = () => api.get('/sessions').then(r => setSites(Array.isArray(r.data) ? r.data : [])).catch(() => setSitesNow(s => s || []))
+  // Asked again after 3 s (the PC looks at its tabs behind its first answer), then every 15 s.
+  useEffect(() => { load(); const s = setTimeout(load, 3000); const t = setInterval(load, 15000); return () => { clearTimeout(s); clearInterval(t) } }, [])
   if (sites == null) return (
     <div className="panel p-4" aria-hidden="true">
       <span className="ak-skel mb-3 block h-5 w-40" />

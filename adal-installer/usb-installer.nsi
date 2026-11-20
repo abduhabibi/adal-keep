@@ -89,6 +89,20 @@ Function .onInit
 FunctionEnd
 
 
+; The PCs of an office share updates, the copy of the agency, the server in waiting and
+; which Companion stands in (adal-companion standby.go, peers.go): only from the office
+; network itself (localsubnet), never from anywhere else.
+!macro SharingRules
+  nsExec::Exec 'netsh advfirewall firewall delete rule name="Adal Keep Sharing (LAN)"'
+  Pop $0
+  nsExec::Exec 'netsh advfirewall firewall add rule name="Adal Keep Sharing (LAN)" dir=in action=allow protocol=UDP localport=45455,45456 remoteip=localsubnet profile=any'
+  Pop $0
+  nsExec::Exec 'netsh advfirewall firewall delete rule name="Adal Keep Sharing (LAN) TCP"'
+  Pop $0
+  nsExec::Exec 'netsh advfirewall firewall add rule name="Adal Keep Sharing (LAN) TCP" dir=in action=allow protocol=TCP localport=47810 remoteip=localsubnet profile=any'
+  Pop $0
+!macroend
+
 Section "Install"
   SetShellVarContext all
 
@@ -104,18 +118,6 @@ Section "Install"
 
   SetOutPath "$INSTDIR"
   SetOverwrite on
-
-  ; Tailscale — the private link to the main PC from another branch, from home
-  ; and from the SMS phone — from the USB when it is missing. It keeps running
-  ; while nobody is signed in to Windows (TS_UNATTENDEDMODE). Signing in to it
-  ; (the agency's Google account) is done once in its tray icon.
-  ${IfNot} ${FileExists} "$PROGRAMFILES64\Tailscale\tailscale-ipn.exe"
-  ${AndIf} ${FileExists} "$EXEDIR\deps\tailscale\tailscale-setup.msi"
-    DetailPrint "Installing Tailscale (the private link)..."
-    nsExec::Exec 'msiexec /i "$EXEDIR\deps\tailscale\tailscale-setup.msi" /quiet /norestart TS_UNATTENDEDMODE=always'
-    Pop $0
-    DetailPrint "Tailscale: $0 (0 = installed)"
-  ${EndIf}
 
 !ifdef COMPANION
   ; ============================ EMPLOYEE PC ============================
@@ -168,6 +170,7 @@ Section "Install"
   Pop $0
   nsExec::Exec 'netsh advfirewall firewall add rule name="Adal Keep Discovery" dir=in action=allow protocol=UDP localport=${DISCO_PORT} profile=any'
   Pop $0
+  !insertmacro SharingRules
   ; The first time node.exe listens, Windows may ask "Allow access?" on the
   ; screen (or, with nobody there, add a BLOCK rule for it by itself). A block
   ; rule beats every allow rule, and employee PCs then never find this PC:
@@ -272,6 +275,10 @@ Section "Uninstall"
   nsExec::Exec 'netsh advfirewall firewall delete rule name="Adal Keep Discovery"'
   Pop $0
   nsExec::Exec 'netsh advfirewall firewall delete rule name="Adal Keep Server"'
+  Pop $0
+  nsExec::Exec 'netsh advfirewall firewall delete rule name="Adal Keep Sharing (LAN)"'
+  Pop $0
+  nsExec::Exec 'netsh advfirewall firewall delete rule name="Adal Keep Sharing (LAN) TCP"'
   Pop $0
   ; Program files go; the database and uploaded documents STAY
   ; (backend\data.sqlite, backend\data\, backend\uploads\), so a reinstall

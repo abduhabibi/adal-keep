@@ -85,9 +85,55 @@ async function getDefaultAccount(db) {
   return await db('lmis_accounts').orderBy('is_default', 'desc').first()
 }
 
+/**
+ * Insurance certificate back from FetaP (asked on 2026-11-19): a day after her
+ * insurance was requested and while no certificate is on her profile, "Get
+ * insurance certificate" is queued — at most every 6 hours, for 10 days.
+ */
+export async function queueInsuranceFetch(db, now = Date.now()) {
+  const dayAgo = new Date(now - 24 * 3600 * 1000).toISOString()
+  const tenDays = new Date(now - 10 * 24 * 3600 * 1000).toISOString()
+  const sixHours = new Date(now - 6 * 3600 * 1000).toISOString()
+  const asked = await db('automation_queue').where('workflow_id', 'insurance_certificate')
+    .where(function () { this.where('status', 'done').orWhere('status', 'paused') })
+    .where('created_at', '<=', dayAgo).where('created_at', '>=', tenDays)
+    .distinct('profile_id').pluck('profile_id').catch(() => [])
+  if (!asked.length) return 0
+  const acct = await db('insurance_accounts').orderBy('is_default', 'desc').first().catch(() => null)
+  if (!acct) return 0
+  let queued = 0
+  for (const profileId of asked) {
+    const hasCert = await db('profile_fields').join('files', 'files.profile_field_id', 'profile_fields.id')
+      .where({ 'profile_fields.profile_id': profileId, 'profile_fields.name': 'Insurance' }).first('files.id').catch(() => null)
+    if (hasCert) continue
+    const recent = await db('automation_queue').where({ profile_id: profileId, workflow_id: 'insurance_fetch' })
+      .where(function () { this.whereIn('status', ['pending', 'running', 'paused']).orWhere('updated_at', '>', sixHours) })
+      .first().catch(() => null)
+    if (recent) continue
+    const ts = new Date(now).toISOString()
+    await db('automation_queue').insert({
+      profile_id: profileId, workflow_id: 'insurance_fetch', account_id: acct.id, status: 'pending', current_step: 0,
+      context: seal(JSON.stringify({ insurance_username: acct.username, insurance_password: acct.password, insurance_name: acct.name, account_id: acct.id })),
+      log: JSON.stringify([{ ts: now, level: 'info', msg: 'Auto: her insurance was requested a day ago — fetching the certificate from FetaP' }]),
+      created_at: ts, updated_at: ts,
+    })
+    queued++
+  }
+  return queued
+}
+
 async function scanOnce(db) {
   if (isAppLocked()) return
   try {
+    if (await queueInsuranceFetch(db).catch(e => { console.warn('[scanner] insurance fetch:', e.message); return 0 })) {
+      import('./worker.js').then(({ drainQueue }) => drainQueue(db).catch(() => {}))
+    }
+    // The first stage moves by itself: her CV, then Musaned (firstStage.js).
+    try {
+      const { pushFirstStage } = await import('./firstStage.js')
+      const moved = await pushFirstStage(db)
+      if (moved.musaned) import('./worker.js').then(({ drainQueue }) => drainQueue(db).catch(() => {}))
+    } catch (e) { console.warn('[scanner] first stage:', e.message) }
     const ready = (await findReadyProfiles(db)).map(p => ({ ...p, wf: WORKFLOW_ID, why: 'Kuwait + labor_id + order_id + all 4 files present' }))
     if (ready.length === 0) return
 

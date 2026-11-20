@@ -421,6 +421,69 @@ async function executeRun(db, page, job) {
  *   cancelled                    → closed
  * Never throws: whatever happens is written to the run's row.
  */
+/** A run nobody pressed goes to a free, strong Companion (its context says so from now on). */
+async function sendToFreeCompanion(db, job) {
+  try {
+    const rb = await import('./remoteBrowsers.js')
+    const busy = new Set()
+    for (const r of await db('automation_queue').where('status', 'running').whereNot('id', job.id).select('context')) {
+      try { const d = JSON.parse(r.context || '{}').on_device; if (d) busy.add(d) } catch {}
+    }
+    const dev = rb.freeStrongDevice(busy)
+    if (!dev) return
+    let ctx = {}
+    try { ctx = JSON.parse(job.context || '{}') } catch {}
+    ctx.on_device = dev
+    job.context = JSON.stringify(ctx)
+    const { seal } = await import('./accountVault.js')
+    await db('automation_queue').where('id', job.id).update({ context: seal(job.context) })
+    console.log(`[worker] run #${job.id}: this PC's browser is closed — a free Companion does it`)
+  } catch (e) { console.warn('[worker] no Companion for it:', e.message) }
+}
+
+/** A run another PC does for the one it came from (sharePower.js): out of sight there. */
+function helpedRun(job) {
+  try { return !!JSON.parse(job.context || '{}').quiet } catch { return false }
+}
+
+/** The Adal Companion this run was started on (its robot works there), or ''. */
+function onDevice(job) {
+  try { return String(JSON.parse(job.context || '{}').on_device || '') } catch { return '' }
+}
+
+/**
+ * The browser this run works in: the Companion's it was started on when that
+ * PC is on the office network (services/remoteBrowsers.js), else this PC's.
+ */
+async function browserForJob(db, job, { quiet = false } = {}) {
+  const dev = onDevice(job)
+  if (dev) {
+    const rb = await import('./remoteBrowsers.js')
+    try {
+      const helping = helpedRun(job)
+      const b = await rb.browserForDevice(dev, { quiet: helping })
+      if (!quiet) await appendLog(db, job.id, helping
+        ? `Working in ${rb.deviceOf(b)?.name || 'the Companion'}'s Adal Browser for this PC (out of sight there)`
+        : `Working in ${rb.deviceOf(b)?.name || 'the Companion'}'s Adal Browser (on that PC's screen)`)
+      return b
+    } catch (e) {
+      if (!quiet) await appendLog(db, job.id, `The Companion's browser could not be reached (${e.message}) — working on the main PC instead`, 'warn')
+    }
+  }
+  return getBrowser()
+}
+
+async function appendLog(db, id, msg, level = 'info') {
+  try {
+    const row = await db('automation_queue').where('id', id).first('log')
+    let log = []
+    try { log = JSON.parse(row?.log || '[]') } catch {}
+    if (!Array.isArray(log)) log = []
+    log.push({ ts: Date.now(), level, msg })
+    await db('automation_queue').where('id', id).update({ log: JSON.stringify(log) })
+  } catch {}
+}
+
 async function runJob(db, job) {
   try {
     // A run the scanner queued (nobody pressed a button now):
@@ -428,7 +491,9 @@ async function runJob(db, job) {
     // on once Brave is open again. Brave that a person closed (or quit Adal
     // Keep) stays closed.
     const nobodyAsked = /^(Retry |Waiting for Adal Browser)/.test(job.pause_reason || '') || /Auto-discovered by scanner/.test(String(job.log || ''))
-    if (nobodyAsked && !(await openBrowserIfAny())) {
+    // Nobody pressed it and this PC's browser is closed: a free, strong Companion does it.
+    if (nobodyAsked && !onDevice(job) && !(await openBrowserIfAny())) await sendToFreeCompanion(db, job)
+    if (nobodyAsked && !onDevice(job) && !(await openBrowserIfAny())) {
       const at = new Date(Date.now() + 2 * 60000).toISOString()
       await db('automation_queue').where('id', job.id).update({
         status: 'pending',
@@ -437,13 +502,39 @@ async function runJob(db, job) {
       })
       return
     }
-    const browser = await getBrowser()
+    // A weak or busy PC's run (once): the strongest PC in the office does it,
+    // out of sight there, watched here (services/sharePower.js).
+    try {
+      const { placeRun } = await import('./sharePower.js')
+      const line = await placeRun(db, job, { mainAllowed: !nobodyAsked || !!(await openBrowserIfAny()) })
+      if (line) { await appendLog(db, job.id, line); console.log(`[share] run #${job.id}: ${line}`) }
+    } catch (e) { console.warn(`[share] run #${job.id} stays where it is:`, e.message) }
+    // One LMIS per account (services/lmisOne.js): where this account's LMIS is
+    // open already, the run works there — never a second sign-in on another PC.
+    if (peerOf(job.workflow_id) === 'lmis') {
+      try {
+        let acct = job.account_id
+        let ctx = {}
+        try { ctx = JSON.parse(job.context || '{}') } catch {}
+        if (!acct) acct = ctx.account_id
+        const home = await (await import('./lmisOne.js')).lmisHome(db, acct)
+        if (home && home.device !== onDevice(job)) {
+          if (home.device) ctx.on_device = home.device
+          else { delete ctx.on_device; delete ctx.quiet }
+          job.context = JSON.stringify(ctx)
+          const { seal } = await import('./accountVault.js')
+          await db('automation_queue').where('id', job.id).update({ context: seal(job.context) })
+          await appendLog(db, job.id, `LMIS for this account is open on ${home.name} — working there (one LMIS per account)`)
+        }
+      } catch (e) { console.warn(`[worker] run #${job.id}: where LMIS is open could not be checked (${e.message})`) }
+    }
+    const browser = await browserForJob(db, job)
     // After a server restart the run finds the tab it worked in again.
     await findRunTab(browser, job.id, job.workflow_id, { bySite: false }).catch(() => null)
     // Otherwise a free tab already on the site (signed in), else a new one.
     // A portal account other than the main one works in its own browser space (its own sign-in).
     const space = await spaceForRun(db, browser, job).catch(e => { console.warn(`[worker] run #${job.id}: no space of its own (${e.message})`); return null })
-    const page = await openRunTab(browser, job.id, { workflowId: job.workflow_id, busyRuns: await activeRunIds(db), keepRuns: await keepingRunIds(db), space })
+    const page = await openRunTab(browser, job.id, { workflowId: job.workflow_id, busyRuns: await activeRunIds(db), keepRuns: await keepingRunIds(db), space, quiet: helpedRun(job) })
     // Which account the tab is: its title starts with the account's name.
     try {
       const { labelTab, accountLabel } = await import('./robotCheck.js')
@@ -465,7 +556,7 @@ async function runJob(db, job) {
       if (['cancelled', 'failed', 'done'].includes(row?.status)) {
         forgetRunTab(job.id)
         // One tab for the site: the extra ones runs opened there close.
-        const b = await openBrowserIfAny().catch(() => null)
+        const b = onDevice(job) ? await browserForJob(db, job, { quiet: true }).catch(() => null) : await openBrowserIfAny().catch(() => null)
         if (b) await tidySiteTabs(b, job.workflow_id, await keepingRunIds(db)).catch(() => {})
       }
       // paused / pending (retry): the tab stays with the run; while a

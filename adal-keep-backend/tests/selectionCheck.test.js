@@ -40,7 +40,7 @@ test('Waiting: on Musaned, not chosen, nothing later done, not UNFIT — backend
   }
 })
 
-test('the tabs: Waiting after Musaned, Unfit apart from Wafid', () => {
+test('the tabs: Waiting after Musaned, UNFIT stays on Wafid, LMIS after FIT', () => {
   const after = [['Tasheer', 'tasheer', 'Tasheer'], ['Insurance', 'insurance', 'Insurance']]
   const of = (steps, p = {}) => phase.phaseOf(steps, p, after)
   assert.equal(of({}), 'cv')
@@ -49,8 +49,9 @@ test('the tabs: Waiting after Musaned, Unfit apart from Wafid', () => {
   assert.equal(of({ cv: 'done', musaned: 'done', selected: 'done' }), 'selected')
   assert.equal(of({ cv: 'done', musaned: 'done', selected: 'done', wafid: 'active' }), 'wafid')
   assert.equal(of({ cv: 'done', musaned: 'done', selected: 'done' }, { status: 'medical_applied' }), 'wafid')
-  assert.equal(of({ cv: 'done', musaned: 'done', selected: 'done', wafid: 'failed' }, { status: 'medical_rejected' }), 'unfit')
-  assert.equal(of({ cv: 'done', musaned: 'done', selected: 'done' }, { status: 'medical_fit' }), 'epro')
+  assert.equal(of({ cv: 'done', musaned: 'done', selected: 'done', wafid: 'failed' }, { status: 'medical_rejected' }), 'wafid')
+  assert.equal(of({ cv: 'done', musaned: 'done', selected: 'done' }, { status: 'medical_fit' }), 'lmis')
+  assert.equal(of({ cv: 'done', musaned: 'done', selected: 'done', fmol: 'done' }, { status: 'medical_fit' }), 'epro')
   assert.equal(of({ cv: 'done', musaned: 'done', selected: 'done', epro: 'done' }, { status: 'medical_fit' }), 'tasheer')
   assert.equal(of({ cv: 'done', musaned: 'done', selected: 'done', epro: 'done', tasheer: 'done', insurance: 'done' }, { status: 'medical_fit' }), 'choices')
 })

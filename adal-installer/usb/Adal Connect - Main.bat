@@ -1,6 +1,7 @@
 @echo off
 REM Adal Connect - Main: lets Adal support reach this PC (SSH)
-REM and opens the Adal Keep ports on every network type. Asks once for admin.
+REM opens the Adal Keep ports on every network type, lets the office PCs share
+REM updates, data and the server, and installs the newest Adal Keep. Asks once for admin.
 title Adal Connect
 set "USBROOT=%~dp0"
 if "%USBROOT:~-1%"=="\" set "USBROOT=%USBROOT:~0,-1%"

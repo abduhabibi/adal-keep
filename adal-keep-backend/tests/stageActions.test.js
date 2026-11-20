@@ -14,26 +14,30 @@ test('each robot: its own stage and the next one', () => {
   assert.deepEqual(stagesOf('musaned_add_candidate'), ['musaned', 'waiting'])
   assert.deepEqual(stagesOf('musaned_check_chosen'), ['waiting', 'selected'])
   assert.deepEqual(stagesOf('wafid_book'), ['selected', 'wafid'])
-  assert.deepEqual(stagesOf('wafid_check'), ['wafid', 'epro', 'unfit'])
+  assert.deepEqual(stagesOf('wafid_check'), ['wafid', 'lmis'])
   assert.deepEqual(stagesOf('musaned_epro_approve'), ['epro', 'tasheer'])
   assert.deepEqual(stagesOf('tasheer_schedule'), ['tasheer', 'insurance'])
   assert.deepEqual(stagesOf('police_certificate'), ['police', 'choices'])
   assert.deepEqual(stagesOf('print_embassy'), ['embassy', 'police', 'choices'])
   assert.deepEqual(stagesOf('whatsapp_send'), ['waiting'])
-  assert.deepEqual(stagesOf('day_by_day'), ['waiting', 'selected', 'wafid', 'epro', 'tasheer', 'insurance', 'embassy', 'police', 'choices'])
+  assert.deepEqual(stagesOf('day_by_day'), ['waiting', 'selected', 'wafid', 'lmis', 'epro', 'tasheer', 'insurance', 'embassy', 'police', 'choices'])
 })
 
 test('after the EPRO "next" follows the agency\'s order', () => {
   const after = afterInOrder(['Enjaz · Visa', 'Tasheer', 'Insurance', 'LMIS · Police clearance'])
-  assert.deepEqual(stageOrder(after).slice(6), ['embassy', 'tasheer', 'insurance', 'police', 'choices'])
+  assert.deepEqual(stageOrder(after).slice(7), ['embassy', 'tasheer', 'insurance', 'police', 'choices'])
   assert.deepEqual(stagesOf('musaned_epro_approve', after), ['epro', 'embassy'])
   assert.deepEqual(stagesOf('mofa_visa', after), ['embassy', 'tasheer'])
   assert.deepEqual(stagesOf('police_certificate', after), ['police', 'choices'])
 })
 
-test('unfit: only the Wafid re-check and deleting from Musaned (plus the universal ones)', () => {
-  const robots = Object.keys(ACTIONS).filter(k => !ACTIONS[k].all && shows(k, 'unfit'))
-  assert.deepEqual(robots.sort(), ['musaned_delete', 'wafid_check'])
+// No Unfit stage any more (asked on 2026-11-19): an UNFIT girl stays on Wafid, where the re-check is.
+test('no Unfit stage: Wafid has the re-check, LMIS the contract', () => {
+  assert.ok(!stageOrder(AFTER).includes('unfit'))
+  assert.ok(shows('wafid_check', 'wafid'))
+  assert.ok(shows('musaned_delete', 'wafid'))
+  assert.deepEqual(stagesOf('lmis_contract'), ['lmis', 'epro'])
+  assert.ok(Object.keys(ACTIONS).length > 0)
 })
 
 test('every phase the Profiles page can give has buttons, and unknown ones hide nothing', () => {

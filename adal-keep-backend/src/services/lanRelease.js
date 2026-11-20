@@ -6,7 +6,7 @@
  * installed tells the others on the office network, and serves its signed
  * pieces to them:
  *
- *   UDP 45455 (broadcast)   ADAL_KEEP_RELEASE_V1|<sha>|<published_at>|<port>|<path>
+ *   UDP 45455 (broadcast)   ADAL_KEEP_RELEASE_V1|<sha>|<published_at>|<port>|<path>|<agency tags>
  *   GET <base>/latest       { manifest, signature } — the release this PC has
  *   GET <base>/file/<sha256> one piece of it (the app, a program, the Companion's pages)
  *
@@ -170,6 +170,24 @@ export async function newestFromPeers(than) {
 let sock = null
 let ownPort = 4000
 
+/**
+ * Whose offer it is (2026-11-19: another agency's PC on the same Wi-Fi must
+ * never be offered anything or listened to). Every offer carries the agency's
+ * tag(s): a hash of its main PC's number(s) (the number itself is never
+ * broadcast). An offer is heard only when one of its tags is this agency's.
+ */
+export const agencyTag = (number) => crypto.createHash('sha256').update('adal-agency|' + String(number).replace(/\D/g, '')).digest('hex').slice(0, 16)
+let ownTags = []
+/** The numbers of this agency's main PC (the licence one and the older one). */
+export function setAgencyNumbers(list) { ownTags = [...new Set((list || []).filter(Boolean).map(agencyTag))] }
+export const agencyTags = () => ownTags
+async function loadAgencyNumbers() {
+  const list = []
+  try { list.push((await import('./subscription.js')).pcNumber()) } catch {}
+  try { list.push((await import('./mainPC.js')).pcNumber()) } catch {}
+  setAgencyNumbers(list)
+}
+
 function broadcastAddrs() {
   const out = new Set(['255.255.255.255'])
   for (const list of Object.values(os.networkInterfaces())) for (const a of list || []) {
@@ -184,8 +202,8 @@ function broadcastAddrs() {
 /** "I have release X": to every PC of this network. */
 export function announce() {
   const env = current()
-  if (!sock || !env) return
-  const msg = Buffer.from([MAGIC, env.manifest.sha, env.manifest.published_at || '', ownPort, '/api/system/update/lan'].join('|'))
+  if (!sock || !env || !ownTags.length) return // no agency known: nothing is offered
+  const msg = Buffer.from([MAGIC, env.manifest.sha, env.manifest.published_at || '', ownPort, '/api/system/update/lan', ownTags.join(',')].join('|'))
   for (const addr of broadcastAddrs()) {
     const [host, port] = addr.includes(':') ? addr.split(':') : [addr, UDP_PORT]
     sock.send(msg, Number(port), host, () => {})
@@ -194,8 +212,10 @@ export function announce() {
 
 /** A message heard: a peer's release. True when it is newer than this PC's (and worth a look). */
 export function heard(text, fromIp) {
-  const [magic, sha, published_at, port, p] = String(text).trim().split('|')
+  const [magic, sha, published_at, port, p, tags] = String(text).trim().split('|')
   if (magic !== MAGIC || !/^[0-9a-f]{7,64}$/.test(sha || '') || !/^\d+$/.test(port || '') || !/^\/[\w/-]*$/.test(p || '')) return false
+  // Another agency's PC (or an old one that does not say whose it is): never listened to.
+  if (!ownTags.length || !String(tags || '').split(',').some(t => ownTags.includes(t))) return false
   const host = fromIp.includes(':') ? `[${fromIp}]` : fromIp
   const base = `http://${host}:${port}${p.replace(/\/$/, '')}`
   peers.set(base, { sha, published_at, at: Date.now() })
@@ -207,6 +227,7 @@ export function heard(text, fromIp) {
 export function startLan({ port = 4000, onNews } = {}) {
   if (sock || process.env.ADAL_LAN_UPDATES === '0') return
   ownPort = Number(process.env.PORT || port)
+  loadAgencyNumbers().then(() => setTimeout(announce, 1000))
   if (onNews) afterNews = onNews
   sock = dgram.createSocket({ type: 'udp4', reuseAddr: true })
   sock.on('error', (e) => { console.warn('[lan-update]', e.message); try { sock.close() } catch {} sock = null })

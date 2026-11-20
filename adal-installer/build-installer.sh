@@ -137,17 +137,8 @@ cp -f "$INST/usb/deps/prepare-deps.ps1" "$USB/deps/"
 # Per-agency support keys (scripts/support-key.sh <pcnumber> writes them into
 # $USB/deps/support-keys, which this build keeps): public halves only.
 mkdir -p "$USB/deps/support-keys"
-# Tailscale (the private link) for both installers: fetched here when this PC
-# has internet, so an already prepared USB need not run PREPARE again.
-TS="$USB/deps/tailscale/tailscale-setup.msi"
-if [ ! -s "$TS" ]; then
-  mkdir -p "$USB/deps/tailscale"
-  if curl -fsSL --retry 2 -o "$TS.part" https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi; then
-    mv "$TS.part" "$TS"; echo "   Tailscale: $(du -h "$TS" | cut -f1)"
-  else
-    rm -f "$TS.part"; echo "   WARN Tailscale not downloaded (PREPARE fetches it on Windows)"
-  fi
-fi
+# No Tailscale (asked on 2026-11-20): Companions use the office network only.
+rm -rf "$USB/deps/tailscale"
 # The phone app: adal-phone/build-apk.sh puts the newest signed APK in
 # backend/src/phone-app (PCs hand it to phones, which update themselves);
 # the USB gets the same file, with adb for Windows for a phone on a cable.

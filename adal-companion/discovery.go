@@ -219,7 +219,10 @@ func resolveHostURL() string {
 	}
 
 	// companion.conf next to the exe lets IT pin a server without env vars.
-	if url := pinnedHostURL(); url != "" {
+	if url := pinnedHostURL(); url != "" && refusedServer(url) {
+		// The address typed or saved here now belongs to another agency's PC.
+		log.Printf("🚫 %s is another main PC (not ours) — searching for ours instead", url)
+	} else if url != "" {
 		log.Printf("🌐 Server from companion.conf: %s", url)
 		os.Setenv("ADAL_HOST_URL", url)
 		return url
@@ -281,6 +284,9 @@ const autoConfHeader = "# Written by the Adal Keep Companion."
 // Companion wrote itself is updated when the main PC moves (new address from
 // the router); a file someone wrote by hand is never overwritten.
 func rememberHostURL(url string) {
+	if isActingURL(url) { // this PC standing in for the main PC: never saved as the main PC
+		return
+	}
 	path, err := companionConfPath()
 	if err != nil || signedOut() {
 		return
@@ -408,6 +414,9 @@ func itoa(n int) string {
 func keepFindingServer() {
 	for tick := 1; ; tick++ {
 		time.Sleep(5 * time.Second)
+		if standbyActing() { // this PC is the office's Adal Keep now (standby.go)
+			continue
+		}
 		pinned := pinnedHostURL()
 		if signedOut() && pinned == "" {
 			if hostServer != "" {
@@ -424,6 +433,9 @@ func keepFindingServer() {
 			if hostServer != "" && !answersAt(pinned) && pingServer() {
 				continue
 			}
+			if refusedServer(pinned) {
+				continue // another agency's PC at that address: never taken
+			}
 			log.Printf("👉 Main PC chosen: %s", pinned)
 			hostServer = pinned
 			os.Setenv("ADAL_HOST_URL", pinned)
@@ -434,7 +446,7 @@ func keepFindingServer() {
 			continue
 		}
 		// An address typed on this PC (the "cannot find the main PC" page).
-		if pinned := pinnedHostURL(); pinned != "" && pinned != strings.TrimRight(hostServer, "/") {
+		if pinned := pinnedHostURL(); pinned != "" && pinned != strings.TrimRight(hostServer, "/") && !refusedServer(pinned) {
 			log.Printf("👉 Using the saved address %s", pinned)
 			hostServer = pinned
 			os.Setenv("ADAL_HOST_URL", pinned)

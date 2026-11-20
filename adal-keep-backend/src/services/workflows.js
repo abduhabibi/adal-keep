@@ -8,6 +8,24 @@
  */
 
 export const WORKFLOWS = {
+  insurance_fetch: {
+    id: 'insurance_fetch',
+    name: 'Get insurance certificate',
+    description: 'FetaP sign-in → Issued Certificates → the batches of the day her insurance was requested → her row (passport number) → View Certificate → saved to Documents → Insurance',
+    target: 'https://agency.niscofetap.com/certificate/approved',
+    consts: {},
+    stepCount: 4,
+  },
+
+  lmis_contract: {
+    id: 'lmis_contract',
+    name: 'Create LMIS contract',
+    description: 'LMIS sign-in (the SMS code from the phone) → Contract → her Labor ID → Open → Create Contract → the window (job order, dates, passport, visa, employer) → the survey (first answers) → emergency contact by Labor ID → Documents → a person pays',
+    target: 'https://lmis.gov.et/new-agency/contract-process/placed-labors',
+    consts: {},
+    stepCount: 6,
+  },
+
   police_certificate: {
     id: 'police_certificate',
     name: 'Make Police Certificate',

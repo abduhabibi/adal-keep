@@ -2119,6 +2119,20 @@ export async function runFullWorkflow(page, ctx) {
     }
   }
 
+  // Insurance certificate from FetaP's Issued Certificates → her Documents.
+  if (workflowId === 'insurance_fetch') {
+    try {
+      const { runInsuranceFetch } = await import('./insuranceFetch.js')
+      return await runInsuranceFetch(page, ctx)
+    } catch (e) {
+      if (e?.cancelled) throw e
+      const secs = Math.round((Date.now() - t0) / 1000)
+      log(ctx, `insurance fetch failed after ${secs}s: ${e.message}`, 'error')
+      await dumpPageState(page, ctx, 'insurance-fetch')
+      return { ok: false, step: 'insurance-fetch', error: e.message, seconds: secs }
+    }
+  }
+
   // LMIS contract: Contract → her Labor ID → Open → Create Contract.
   if (workflowId === 'lmis_contract') {
     try {

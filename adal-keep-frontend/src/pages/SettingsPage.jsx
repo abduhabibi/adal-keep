@@ -18,6 +18,7 @@ import AgencyPCsCard from '../components/AgencyPCsCard'
 import { CompanionSwitchCard } from '../components/CompanionSwitchPC'
 import WafidCard from '../components/WafidCard'
 import PortalsHealthCard from '../components/PortalsHealthCard'
+import SharePowerCard from '../components/SharePowerCard'
 import AutomationHealthCard from '../components/AutomationHealthCard'
 import InsuranceCard from '../components/InsuranceCard'
 import BackupCard from '../components/BackupCard'
@@ -286,6 +287,7 @@ export default function SettingsPage() {
       </Card>
       {import.meta.env.VITE_DEMO !== '1' && !isPhoneView() && <ErrorBoundary small name="The agency's PCs"><AgencyPCsCard /></ErrorBoundary>}
       {import.meta.env.VITE_DEMO !== '1' && !isPhoneView() && <ErrorBoundary small name="Main PC & phones"><MainPCCard /></ErrorBoundary>}
+      {import.meta.env.VITE_DEMO !== '1' && !isPhoneView() && <ErrorBoundary small name="PCs working together"><SharePowerCard /></ErrorBoundary>}
       {/* An Adal Companion only: log out of its main PC, connect to another. */}
       <CompanionSwitchCard />
       </>}

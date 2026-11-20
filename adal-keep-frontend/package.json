@@ -8,7 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "build:demo": "vite build --mode demo",
-    "build:phone": "VITE_PHONE=1 vite build --mode phone",
+    "build:phone": "vite build --mode phone",
     "build:admin": "VITE_ADMIN=1 vite build --mode admin"
   },
   "dependencies": {

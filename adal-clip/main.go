@@ -8,10 +8,11 @@
 // server. It watches the keyboard (a low-level hook: it only looks, every key
 // still goes where it was going). "C" pressed twice quickly, alone — no Ctrl,
 // Alt, Shift or Windows key, and no other key just before (so typing "cc" in
-// a word does nothing) — opens Windows' own screen crop at once
-// (ms-screenclip:, as Win+Shift+S). The cropped picture is read from the
-// clipboard and sent to the server, which puts it in the tray of every open
-// Adal Keep page.
+// a word does nothing) — freezes the screen at once and opens Adal Keep's own
+// crop over it (overlay.go, ~0.1 s; Windows' own crop, ms-screenclip:, took
+// 1–3 s to start and is only used when this one cannot open). The cropped
+// picture is sent to the server, which puts it in the tray of every open
+// Adal Keep page, and onto the clipboard.
 //
 //	adal-clip.exe --server http://127.0.0.1:4000 --parent <pid>
 package main
@@ -93,6 +94,13 @@ func hook(code int, wparam uintptr, lparam uintptr) uintptr {
 	if code >= 0 {
 		k := (*kbdHook)(unsafe.Pointer(lparam))
 		now := time.Now()
+		// The crop screen is open: Esc closes it (it may not have the keyboard).
+		if k.VkCode == vkEscape && overlayHwnd.Load() != 0 {
+			if wparam == wmKeyDown || wparam == wmSysKeyDown {
+				postMessage.Call(overlayHwnd.Load(), wmClose, 0, 0)
+			}
+			return 1
+		}
 		if k.Flags&llkhInjected == 0 {
 			switch wparam {
 			case wmKeyDown, wmSysKeyDown:
@@ -233,8 +241,33 @@ func tell(state string) {
 	}
 }
 
-// One crop: Windows' crop opens at once; the picture goes to the server.
+func sendPNG(p []byte) {
+	c := &http.Client{Timeout: 60 * time.Second}
+	if r, err := c.Post(server+"/api/app/clip", "image/png", bytes.NewReader(p)); err == nil {
+		r.Body.Close()
+	}
+}
+
+// One crop: Adal Keep's own crop screen, at once (overlay.go); the picture
+// goes to the server and onto the clipboard (Ctrl+V works as before).
 func crop() {
+	p, err := cropHere()
+	// C pressed again while it was open: not a new crop.
+	for len(presses) > 0 {
+		<-presses
+	}
+	if err == nil {
+		if p != nil {
+			sendPNG(p)
+			putOnClipboard(p)
+		}
+		return
+	}
+	windowsCrop()
+}
+
+// Windows' own crop (when the crop screen could not open).
+func windowsCrop() {
 	before := seq()
 	verb, _ := windows.UTF16PtrFromString("open")
 	what, _ := windows.UTF16PtrFromString("ms-screenclip:")
@@ -245,16 +278,13 @@ func crop() {
 		time.Sleep(100 * time.Millisecond)
 		select { // pressed again: a new crop starts over
 		case <-presses:
-			go crop()
+			go windowsCrop()
 			return
 		default:
 		}
 		if s := seq(); s != before {
 			if p := clipboardPNG(); p != nil {
-				c := &http.Client{Timeout: 60 * time.Second}
-				if r, err := c.Post(server+"/api/app/clip", "image/png", bytes.NewReader(p)); err == nil {
-					r.Body.Close()
-				}
+				sendPNG(p)
 				return
 			}
 			before = s
@@ -266,7 +296,21 @@ func crop() {
 func main() {
 	flag.StringVar(&server, "server", "http://127.0.0.1:4000", "the Adal Keep server")
 	parent := flag.Int("parent", 0, "ends when this process ends")
+	once := flag.Int("once", 0, "this many crops now, then end (a test)")
 	flag.Parse()
+	dpiOnce()
+	if *once > 0 {
+		go watchKeyboard() // (Esc closes it, as in use)
+		runtime.LockOSThread()
+		prepare(false)
+		for i := 0; i < *once; i++ {
+			t0 := time.Now()
+			onShown = func() { os.Stderr.WriteString("shown after " + time.Since(t0).String() + "\n") }
+			crop()
+			os.Stderr.WriteString("done after " + time.Since(t0).String() + "\n")
+		}
+		return
+	}
 	// One watcher per PC.
 	name, _ := windows.UTF16PtrFromString(`Local\AdalKeepClip`)
 	if _, err := windows.CreateMutex(nil, false, name); err == windows.ERROR_ALREADY_EXISTS {
@@ -283,6 +327,9 @@ func main() {
 		}()
 	}
 	go func() {
+		// The crop screen is made now and lives in this thread (overlay.go).
+		runtime.LockOSThread()
+		prepare(false)
 		for range presses {
 			crop()
 		}

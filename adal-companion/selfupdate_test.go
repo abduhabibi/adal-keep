@@ -89,6 +89,9 @@ func holder(t *testing.T, pub ed25519.PublicKey, env envelope, pieces map[string
 
 func companionPC(t *testing.T, pub ed25519.PublicKey) *updater {
 	root := t.TempDir()
+	oldTag := ownAgencyTag
+	ownAgencyTag = func() string { return agencyTag("47040") } // joined to one agency
+	t.Cleanup(func() { ownAgencyTag = oldTag })
 	os.WriteFile(filepath.Join(root, "adal-companion.exe"), []byte("old companion"), 0o755)
 	os.MkdirAll(filepath.Join(root, "online"), 0o755)
 	os.WriteFile(filepath.Join(root, "online", "index.html"), []byte("old pages"), 0o644)
@@ -279,7 +282,7 @@ func TestCompanionNeverTakesMainsOlderRelease(t *testing.T) {
 	_, base := holder(t, pub, env, pieces)
 	b := companionPC(t, pub)
 	b.built = &releaseManifest{SHA: strings.Repeat("c", 40), Date: "2026-11-19T08:00:00Z"}
-	if _, newer := b.heard(releaseMagic+"|"+strings.Repeat("7", 40)+"|2026-11-18T10:00:00.000Z|47810|/lan", net.IPv4(10, 0, 0, 9)); newer {
+	if _, newer := b.heard(releaseMagic+"|"+strings.Repeat("7", 40)+"|2026-11-18T10:00:00.000Z|47810|/lan|"+ownAgencyTag(), net.IPv4(10, 0, 0, 9)); newer {
 		t.Fatal("heard an older release as newer")
 	}
 	if err := b.fromPeer(base); err != nil {

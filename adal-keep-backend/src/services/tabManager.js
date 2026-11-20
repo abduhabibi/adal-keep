@@ -297,6 +297,8 @@ export async function keepingRunIds(db) {
 }
 
 const ownerOf = (p) => { for (const [id, t] of _tabs) if (t === p) return id; return null }
+/** Does a run work in this tab? */
+export const isRunTab = (p) => ownerOf(p) !== null
 
 /** A person is using this tab now (clicked or typed in the last minute, or typed a form). */
 async function personIn(p) {
@@ -407,7 +409,7 @@ export function runsWithTabs() {
  * Submit) gets the same tab back when it resumes; otherwise a free tab on its
  * site, else a new tab. The run then goes to the page it needs by itself.
  */
-export async function openRunTab(browser, runId, { workflowId = '', busyRuns = new Set(), keepRuns = null, space = null } = {}) {
+export async function openRunTab(browser, runId, { workflowId = '', busyRuns = new Set(), keepRuns = null, space = null, quiet = false } = {}) {
   const id = Number(runId)
   const own = tabOfRun(id)
   if (own) {
@@ -416,6 +418,29 @@ export async function openRunTab(browser, runId, { workflowId = '', busyRuns = n
     return own
   }
   if (!browser || typeof browser.newPage !== 'function') throw new Error('No browser to open a tab in')
+  // Work for another PC (sharePower.js): its own tab in the window out of sight
+  // there — never a tab the person at that PC may be looking at.
+  if (quiet) {
+    // LMIS: the tab already there is taken (never a second LMIS of the same account).
+    const there = peerOf(workflowId) === 'lmis' ? await oneAtATime(async () => {
+      const p = await findFreeTab(browser, workflowId, busyRuns, space)
+      if (p) _tabs.set(id, p)
+      return p
+    }) : null
+    if (there) {
+      await letPageGo(there)
+      await setupTab(there, { runId: id })
+      console.log(`[tabManager] run #${id} took the LMIS tab already there (helping another PC)`)
+      return there
+    }
+    const page = await newRunTab(browser, space, { quiet: true })
+    _tabs.set(id, page)
+    await setupTab(page, { runId: id })
+    const peer = peerOf(workflowId)
+    const lent = peer ? await borrowSignIn(page, peer).catch(() => null) : null
+    console.log(`[tabManager] run #${id} opened its own tab out of sight (helping another PC)${lent ? ', signed in from another tab' : ''}`)
+    return page
+  }
   const free = await oneAtATime(async () => {
     const p = await findFreeTab(browser, workflowId, busyRuns, space) || (keepRuns && await siteTab(browser, workflowId, keepRuns, space))
     if (p) _tabs.set(id, p)

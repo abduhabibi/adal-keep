@@ -43,3 +43,27 @@ func TestDibToPNG(t *testing.T) {
 		t.Fatal("a broken DIB gave a picture")
 	}
 }
+
+// The part dragged over is cut out of the screen's picture (BGRA) with its colours right.
+func TestCutPNG(t *testing.T) {
+	w, h := 4, 3
+	px := make([]byte, w*h*4)
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			o := (y*w + x) * 4
+			px[o], px[o+1], px[o+2] = byte(x*10), byte(y*10), 200 // B, G, R
+		}
+	}
+	out := cutPNG(px, w, rect{Left: 1, Top: 1, Right: 3, Bottom: 3})
+	img, err := png.Decode(bytes.NewReader(out))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b := img.Bounds(); b.Dx() != 2 || b.Dy() != 2 {
+		t.Fatalf("size %v", b)
+	}
+	r, g, bl, _ := img.At(1, 0).RGBA() // the screen's (2, 1)
+	if r>>8 != 200 || g>>8 != 10 || bl>>8 != 20 {
+		t.Fatalf("colours %v %v %v", r>>8, g>>8, bl>>8)
+	}
+}

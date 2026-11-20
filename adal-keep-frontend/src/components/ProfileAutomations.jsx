@@ -290,7 +290,12 @@ export default function ProfileAutomations({ profileId, phase = null, after }) {
       }
       load({ quiet: true })
     } catch (e) {
-      toast.error(`${name}: ${e.response?.data?.error || 'could not start'}`, { id: t, duration: 8000 })
+      const missing = e.response?.data?.missing
+      // Something missing: her page opens a pop-up to fill it in, and the robot starts once it is all there.
+      const detail = { profileId, workflowId, name, body: { account_id: accountFor(workflowId) }, handled: false }
+      if (Array.isArray(missing) && missing.length) window.dispatchEvent(new CustomEvent('adal-fill-missing', { detail }))
+      if (detail.handled) toast.dismiss(t)
+      else toast.error(`${name}: ${e.response?.data?.error || 'could not start'}`, { id: t, duration: 8000 })
     } finally {
       setSending(s => { const n = { ...s }; delete n[workflowId]; return n })
     }
@@ -425,8 +430,9 @@ export default function ProfileAutomations({ profileId, phase = null, after }) {
     { title: 'Musaned', ids: ['musaned_add_candidate', 'musaned_check_chosen', 'musaned_cv_import', 'musaned_delete', 'musaned_epro_approve'], box: 'border-indigo-200 dark:border-indigo-800', head: 'text-indigo-700 dark:text-indigo-300' },
     { title: 'Wafid medical', ids: ['wafid_book', 'wafid_slip', 'wafid_check'], box: 'border-emerald-200 dark:border-emerald-800', head: 'text-emerald-700 dark:text-emerald-300' },
     { title: 'Tasheer', ids: ['tasheer_schedule'], box: 'border-amber-200 dark:border-amber-800', head: 'text-amber-700 dark:text-amber-300' },
-    { title: 'Insurance', ids: ['insurance_certificate'], box: 'border-rose-200 dark:border-rose-800', head: 'text-rose-700 dark:text-rose-300' },
+    { title: 'Insurance', ids: ['insurance_certificate', 'insurance_fetch'], box: 'border-rose-200 dark:border-rose-800', head: 'text-rose-700 dark:text-rose-300' },
     { title: 'Enjaz · Visa', ids: ['mofa_visa', 'mofa_find_app', 'mofa_pay'], box: 'border-sky-200 dark:border-sky-800', head: 'text-sky-700 dark:text-sky-300' },
+    { title: 'LMIS · Contract', ids: ['lmis_contract'], box: 'border-teal-200 dark:border-teal-800', head: 'text-teal-700 dark:text-teal-300' },
     { title: 'LMIS · Police clearance', ids: ['police_certificate'], box: 'border-slate-200 dark:border-slate-700', head: 'text-slate-600 dark:text-slate-300' },
   ]
   const grouped = GROUPS.flatMap(g => g.ids)

@@ -11,6 +11,17 @@ import { assertPoliceReady, getProfileVerification, runPassportVerification } fr
 
 const router = express.Router()
 
+/** Why a new insurance for her would be a second one, or null (her certificate on file, or already requested). */
+export async function insuranceAlreadyDone(db, profileId) {
+  const cert = await db('profile_fields').join('files', 'files.profile_field_id', 'profile_fields.id')
+    .where({ 'profile_fields.profile_id': profileId, 'profile_fields.name': 'Insurance' }).first('files.id').catch(() => null)
+  if (cert) return 'Her insurance is already done: the certificate is on her profile (Documents → Insurance).'
+  const { insuranceHistory, dayOf } = await import('../services/insuranceFetch.js')
+  const h = await insuranceHistory(db, profileId)
+  if (!h.count) return null
+  return `Her insurance was already requested on ${dayOf(h.last)} (${h.count} time${h.count === 1 ? '' : 's'}). FetaP issues it about a day later: use "Get insurance certificate" instead.`
+}
+
 /** Run rows go to the browser: never send login passwords back with them. */
 function publicRun(row) {
   if (!row) return row
@@ -96,6 +107,25 @@ router.get('/profiles/:profileId/automations', async (req, res) => {
 })
 
 // Enqueue a workflow
+// An Adal Companion's robot browser (services/remoteBrowsers.js): it says every minute where it is.
+router.post('/companion/robot-browser', async (req, res) => {
+  if (!req.pcAccess) return res.status(403).json({ error: 'Only an approved Adal Companion' })
+  const { registerDevice } = await import('../services/remoteBrowsers.js')
+  const { ipOf } = await import('../services/networkGate.js')
+  res.json(registerDevice(req.pcAccess, ipOf(req), req.body || {}))
+})
+router.get('/companion/robot-browsers', async (req, res) => {
+  const { liveDevices } = await import('../services/remoteBrowsers.js')
+  res.json(liveDevices())
+})
+
+// What a robot still needs, nothing started (the profile page's pop-up): the start's own checks, with { check: true }.
+router.get('/profiles/:profileId/automations/:workflowId/needs', (req, res, next) => {
+  req.body = { ...(req.body || {}), check: true }
+  req.method = 'POST'
+  req.url = req.url.replace(/\/needs(\?.*)?$/, '/start')
+  next()
+})
 router.post('/profiles/:profileId/automations/:workflowId/start', async (req, res) => {
   try {
     const db = req.app.locals.db
@@ -136,7 +166,7 @@ router.post('/profiles/:profileId/automations/:workflowId/start', async (req, re
       const prof = await db('profiles').where('id', profileId).first()
       const { musanedMissing, photoOnFile } = await import('../services/musanedPreflight.js')
       // Marital status and religion are asked in the notification during the run.
-      const missing = musanedMissing(prof, await photoOnFile(db, profileId)).filter(m => !/^(marital status|religion)$/.test(m))
+      const missing = musanedMissing(prof, await photoOnFile(db, profileId)).filter(m => req.body?.check || !/^(marital status|religion)$/.test(m))
       if (missing.length) {
         return res.status(400).json({
           error: 'Musaned not started. Profile is missing: ' + missing.join(', '),
@@ -211,6 +241,15 @@ router.post('/profiles/:profileId/automations/:workflowId/start', async (req, re
       const missing = missingForInsurance(insuranceValues(prof || {}))
       if (missing.length) return res.status(400).json({ error: 'Profile is missing for the insurance: ' + missing.join(', '), missing })
       if (!(await db('insurance_accounts').first())) return res.status(400).json({ error: 'No insurance account yet — add one under "Insurance login account"', missing: ['Insurance account'] })
+      // Her insurance already done (asked on 2026-11-19): the agency is told; force only on purpose.
+      if (!req.body?.force) {
+        const done = await insuranceAlreadyDone(db, profileId)
+        if (done) return res.status(409).json({ error: done, alreadyDone: true })
+      }
+    } else if (workflowId === 'insurance_fetch') {
+      const prof = await db('profiles').where('id', profileId).first()
+      if (!String(prof?.passport_number || '').trim()) return res.status(400).json({ error: 'Profile is missing the passport number', missing: ['Passport number'] })
+      if (!(await db('insurance_accounts').first())) return res.status(400).json({ error: 'No insurance account yet — add one under "Insurance login account"', missing: ['Insurance account'] })
     } else if (workflowId === 'mofa_visa') {
       const prof = await db('profiles').where('id', profileId).first()
       const { visaValues, missingForVisa } = await import('../services/mofaVisa.js')
@@ -234,9 +273,9 @@ router.post('/profiles/:profileId/automations/:workflowId/start', async (req, re
       if (!(await db('visa_accounts').first())) return res.status(400).json({ error: 'No visa platform account yet — add one under "Visa platform login account"', missing: ['Visa platform account'] })
     } else if (workflowId === 'lmis_contract') {
       const prof = await db('profiles').where('id', profileId).first()
-      if (!prof?.labor_id || !String(prof.labor_id).trim()) {
-        return res.status(400).json({ error: 'Profile is missing the Labor ID', missing: ['Labor ID'] })
-      }
+      const { missingForLmisContract } = await import('../services/lmisContract.js')
+      const missing = missingForLmisContract(prof || {})
+      if (missing.length) return res.status(400).json({ error: 'Profile is missing for the LMIS contract: ' + missing.join(', '), missing })
     } else if (workflowId === 'contract_import_labour') {
       const prof = await db('profiles').where('id', profileId).first()
       const missing = []
@@ -249,6 +288,9 @@ router.post('/profiles/:profileId/automations/:workflowId/start', async (req, re
         })
       }
     }
+
+    // Only a check (the profile page's next-step pop-up, asked on 2026-11-20): nothing is missing; nothing is started.
+    if (req.body?.check) return res.json({ ok: true, missing: [] })
 
     // One run per profile + workflow at a time. A second click never starts a
     // second copy (that is what put two runs in one tab): it reports on the
@@ -378,6 +420,15 @@ router.post('/profiles/:profileId/automations/:workflowId/start', async (req, re
     // Add from Musaned: the CV template the person chose.
     if (workflowId === 'musaned_cv_import' && req.body?.template_id) accountContext.cv_template_id = Number(req.body.template_id)
 
+    // Started on an Adal Companion whose robot browser is on the office network:
+    // the robot works there, on that PC's screen (services/remoteBrowsers.js).
+    if (req.pcAccess && !req.body?.on_main) {
+      const { deviceForRequest } = await import('../services/remoteBrowsers.js')
+      const { ipOf } = await import('../services/networkGate.js')
+      const dev = deviceForRequest(req.pcAccess, ipOf(req))
+      if (dev) accountContext.on_device = dev
+    }
+
     const [runId] = await db('automation_queue').insert({
       profile_id: profileId,
       workflow_id: workflowId,
@@ -404,7 +455,7 @@ router.post('/profiles/:profileId/automations/:workflowId/start', async (req, re
     // Start it now if a slot is free; otherwise it waits in line and starts by
     // itself. Either way the answer says which, before the browser does anything.
     const s = await dispatchRun(db, runId)
-    res.json({ ok: true, runId, resumed: false, ...s, members: 1 + group.length, skipped, message: runMessage(runId, s, s.state === 'running' ? 'started' : 'queued') + (group.length ? (workflowId === 'tasheer_schedule' ? ` One Tasheer group appointment for ${1 + group.length}.` : ` One certificate for ${1 + group.length}.`) : '') })
+    res.json({ ok: true, runId, resumed: false, ...s, members: 1 + group.length, skipped, message: runMessage(runId, s, s.state === 'running' ? 'started' : 'queued') + (group.length ? (workflowId === 'tasheer_schedule' ? ` One Tasheer group appointment for ${1 + group.length}.` : ` One certificate for ${1 + group.length}.`) : '') + (accountContext.on_device ? ' It works in Adal Browser on this PC.' : ''), on_device: !!accountContext.on_device })
   } catch (e) { res.status(e.status || 500).json({ error: e.message, ...(e.feature ? { feature: e.feature, plan: e.plan } : {}) }) }
 })
 
@@ -803,10 +854,15 @@ export async function waitingIds(db, ids) {
 
 /**
  * The Wafid tab: chosen, Wafid booked or being booked (or its booking failed),
- * no result yet (FIT moves her on, UNFIT to the Unfit tab), EPRO not done —
+ * no result yet (FIT moves her on), EPRO not done — or UNFIT before the EPRO
+ * (no Unfit tab since 2026-11-19: she stays on Wafid, marked UNFIT) —
  * the page's phaseOf() === 'wafid' (frontend lib/phase.js).
  */
 export function inWafidPhase(steps = {}, p = {}) {
+  if (p.status === 'medical_rejected') {
+    return steps.wafid !== 'done' && steps.epro !== 'done'
+      && (steps.cv === 'done' || ['done', 'waiting'].includes(steps.musaned) || steps.selected === 'done')
+  }
   return steps.selected === 'done' && p.status !== 'medical_fit' && p.status !== 'medical_rejected'
     && steps.wafid !== 'done' && steps.epro !== 'done'
     && (p.status === 'medical_applied' || ['active', 'failed'].includes(steps.wafid))

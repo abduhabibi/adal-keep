@@ -60,7 +60,28 @@ function write(s) {
 /** One of this computer's keys: the first one, or one it got later (another address of the main PC, a cleared window). */
 const hasKey = (p, h) => p.key === h || (Array.isArray(p.keys) && p.keys.includes(h))
 
-export const ipOf = (req) => String(req.socket?.remoteAddress || '').replace(/^::ffff:/, '')
+// A Companion standing in for the main PC (services/standby: ADAL_BEHIND_COMPANION=1):
+// the office reaches this server through adal-companion.exe (port 4000, allowed in
+// the firewall), which connects from a loopback address of its own per computer
+// (127.168.1.20 for 192.168.1.20) — never 127.0.0.1, so every check here sees
+// "another computer" — and says who it is (x-adal-real-ip, always its own value).
+const BEHIND = process.env.ADAL_BEHIND_COMPANION === '1'
+export const ipOf = (req) => {
+  const sock = String(req.socket?.remoteAddress || '').replace(/^::ffff:/, '')
+  if (BEHIND && /^127\./.test(sock) && sock !== '127.0.0.1') {
+    const real = String(req.headers['x-adal-real-ip'] || '')
+    if (/^[\d.]+$|^[0-9a-f:]+$/i.test(real)) return real
+  }
+  return sock
+}
+
+/** The returning main PC reads a standing-in Companion's work with its token (services/standby). */
+export function mergeTokenOk(req) {
+  const t = process.env.ADAL_MERGE_TOKEN || ''
+  const got = String(req.headers['x-adal-merge'] || '')
+  if (t.length < 24 || got.length !== t.length) return false
+  return crypto.timingSafeEqual(Buffer.from(got), Buffer.from(t))
+}
 export const isLocal = (req) => ['127.0.0.1', '::1'].includes(ipOf(req))
 /**
  * A computer on the agency's own network: the office Wi-Fi or cable, this
@@ -148,6 +169,7 @@ export function networkGate(req, res, next) {
   if (!originOk(req)) return res.status(403).json({ error: 'Only Adal Keep\'s own pages may do this' })
   if (isLocal(req)) return next()
   if (OPEN.some(([m, re]) => (req.method === m || (m === 'GET' && req.method === 'HEAD')) && re.test(p))) return next()
+  if (req.method === 'GET' && /^\/api\/branch\/export(\/|$)/.test(p) && mergeTokenOk(req)) return next()
   const pc = approvedPC(req)
   if (pc) { req.pcAccess = pc; return next() }
   // Suspended on the main PC (Settings → Connected devices): cut off at once.

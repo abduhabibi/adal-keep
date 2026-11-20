@@ -130,8 +130,11 @@ const emptyForm = {
   visa_application_number: '',
 }
 
-export default function ProfileFormPage() {
-  const { id } = useParams()
+// embeddedId / onDone: the form inside the profile page's Edit pop-up (asked on 2026-11-19);
+// onDone(saved) closes it instead of moving to another page.
+export default function ProfileFormPage({ embeddedId = null, onDone = null } = {}) {
+  const { id: routeId } = useParams()
+  const id = embeddedId ? String(embeddedId) : routeId
   const isEdit = Boolean(id)
   const navigate = useNavigate()
   const { activeEmployee, user } = useAuth()
@@ -256,7 +259,7 @@ export default function ProfileFormPage() {
         }
       } catch {
         toast.error(isEdit ? 'ፕሮፋይሉን መጫን አልተቻለም' : 'የፎርም መረጃዎችን መጫን አልተቻለም')
-        if (isEdit) navigate('/profiles')
+        if (isEdit) { if (onDone) onDone(false); else navigate('/profiles') }
       } finally {
         if (alive) { setLoading(false); setHydrated(true) }
       }
@@ -351,7 +354,8 @@ export default function ProfileFormPage() {
       if (isEdit) {
         await api.put(`/profiles/${id}`, payload)
         toast.success('ፕሮፋይሉ በስኬት ተዘምኗል')
-        navigate(`/profiles/${id}`)
+        if (onDone) onDone(true)
+        else navigate(`/profiles/${id}`)
       } else if (passport?.offline && passport.file) {
         // Read by Adal Admin while the office PC did not answer: the profile and
         // her passport go together and wait online; the PC makes them when it is back.
@@ -360,7 +364,7 @@ export default function ProfileFormPage() {
         fd.append('profile', JSON.stringify(payload))
         const res = await api.post('/new-profile/with-passport', fd, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 120000 })
         // (Made on a phone with the PC off: her number is below 0 until the PC makes her.)
-        if (Number(res.data?.id)) { toast.success(res.data.queued ? 'Saved on this phone — the PC adds her when it is on' : 'አዲስ ፕሮፋይል ተፈጥሯል'); navigate(`/profiles/${res.data.id}`) }
+        if (Number(res.data?.id)) { toast.success(res.data.queued ? 'Saved on this phone — the PC adds her when it is on' : 'አዲስ ፕሮፋይል ተፈጥሯል'); navigate(`/profiles/${res.data.id}?next=photos`) }
         else { toast.success('Saved — the office PC makes the profile with her passport as soon as it answers', { duration: 7000 }); navigate('/profiles') }
       } else {
         const res = await api.post('/profiles', payload)
@@ -370,7 +374,8 @@ export default function ProfileFormPage() {
           } catch { toast.error('The profile was made, but the passport file could not be added — drop it on the Passport field.') }
         }
         toast.success('አዲስ ፕሮፋይል ተፈጥሯል')
-        navigate(`/profiles/${res.data.id}`)
+        // Next: her photos, then her CV, then Musaned (the pop-ups on her page).
+        navigate(`/profiles/${res.data.id}?next=photos`)
       }
     } catch (err) {
       toast.error(err.response?.data?.error || 'ፕሮፋይሉን ማስቀመጥ አልተቻለም')
@@ -471,7 +476,7 @@ export default function ProfileFormPage() {
               <label className={labelClass} htmlFor="destination_country_q">Destination country *</label>
               <GlassSelect id="destination_country_q" required className={inputClass} value={form.destination_country} onChange={setField('destination_country')}>
                 <option value="">— Select —</option>
-                {['Kuwait', 'Saudi Arabia', 'Jordan', 'UAE', 'Qatar', 'Bahrain', 'Oman'].map(c => <option key={c} value={c}>{c}</option>)}
+                {['Kuwait', 'Saudi Arabia', 'Jordan', 'UAE', 'Qatar', 'Bahrain', 'Oman', 'Lebanon'].map(c => <option key={c} value={c}>{c}</option>)}
               </GlassSelect>
             </div>
             <div>
@@ -508,29 +513,8 @@ export default function ProfileFormPage() {
             <input id="full_name" required className={inputClass} value={form.full_name} onChange={setField('full_name')} />
           </div>
           <div>
-            <label className={labelClass} htmlFor="order_id">Order ID</label>
-            <input id="order_id" className={inputClass} value={form.order_id} onChange={setField('order_id')} />
-          </div>
-          <div>
             <label className={labelClass} htmlFor="phone_number">ስልክ ቁጥር *</label>
             <input id="phone_number" required type="tel" className={inputClass} placeholder="251 9XX XXX XXX" value={form.phone_number} onChange={setField('phone_number')} />
-          </div>
-          <div>
-            <label className={labelClass} htmlFor="phone_number_2">Second phone</label>
-            <input id="phone_number_2" type="tel" className={inputClass} value={form.phone_number_2} onChange={setField('phone_number_2')} />
-          </div>
-          <div>
-            <label className={labelClass} htmlFor="status">ሁኔታ</label>
-            <GlassSelect id="status" className={inputClass} value={form.status} onChange={setField('status')}>
-              {STATUS_OPTIONS_AM.filter(s => !s.group).map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-              <optgroup label="ሕክምና · Medical (Wafid)">
-                {STATUS_OPTIONS_AM.filter(s => s.group === 'medical').map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-              </optgroup>
-            </GlassSelect>
-          </div>
-          <div>
-            <label className={labelClass} htmlFor="national_id">ብሔራዊ መታወቂያ</label>
-            <input id="national_id" className={inputClass} value={form.national_id} onChange={setField('national_id')} />
           </div>
           <div>
             <label className={labelClass} htmlFor="passport_number">ፓስፖርት ቁጥር</label>
@@ -569,6 +553,7 @@ export default function ProfileFormPage() {
               <option value="Qatar">Qatar</option>
               <option value="Bahrain">Bahrain</option>
               <option value="Oman">Oman</option>
+              <option value="Lebanon">Lebanon</option>
             </GlassSelect>
           </div>
           <div>
@@ -586,14 +571,6 @@ export default function ProfileFormPage() {
               <option value="">— Select —</option>
               <option value="SINGLE">Single</option>
               <option value="MARRIED">Married</option>
-            </GlassSelect>
-          </div>
-          <div>
-            <label className={labelClass} htmlFor="gender">Gender</label>
-            <GlassSelect id="gender" className={inputClass} value={form.gender} onChange={setField('gender')}>
-              <option value="">— Select —</option>
-              <option value="M">Male</option>
-              <option value="F">Female</option>
             </GlassSelect>
           </div>
           <div>
@@ -654,54 +631,11 @@ export default function ProfileFormPage() {
               <option value="yes">Yes</option>
             </GlassSelect>
           </div>
-          <div>
-            <label className={labelClass} htmlFor="emergency_name">Emergency name (her father — from the middle name)</label>
-            <input id="emergency_name" className={inputClass} value={form.emergency_name} onChange={setField('emergency_name')} />
-          </div>
-          <div>
-            <label className={labelClass} htmlFor="emergency_phone">Emergency phone (auto from broker)</label>
-            <input id="emergency_phone" className={inputClass} value={form.emergency_phone} onChange={setField('emergency_phone')} />
-          </div>
-          <div>
-            <label className={labelClass} htmlFor="emergency_gender">Emergency gender</label>
-            <GlassSelect id="emergency_gender" className={inputClass} value={form.emergency_gender} onChange={setField('emergency_gender')}>
-              <option value="Male">Male</option>
-              <option value="Female">Female</option>
-            </GlassSelect>
-          </div>
-          <div>
-            <label className={labelClass} htmlFor="emergency_relationship">Emergency relationship</label>
-            <GlassSelect id="emergency_relationship" className={inputClass} value={form.emergency_relationship} onChange={setField('emergency_relationship')}>
-              <option value="Father">Father</option>
-              <option value="Mother">Mother</option>
-              <option value="Brother">Brother</option>
-              <option value="Sister">Sister</option>
-              <option value="Spouse">Spouse</option>
-              <option value="Other">Other</option>
-            </GlassSelect>
-          </div>
-        </div>
-
-        {/* ---- Appointment slips: Tasheer (visa biometrics) and the Wafid medical — a reminder the day before ---- */}
-        <div className="rounded-xl border border-slate-200 p-4 dark:border-slate-700">
-          <p className="mb-3 text-sm font-semibold text-slate-700 dark:text-slate-200">📅 Appointments <span className="font-normal text-xs text-slate-500">— a reminder comes the day before; the slips go in Documents (Tasheer Slip; the Wafid one in Appointment Slip)</span></p>
-          {[['tasheer', 'Tasheer (visa biometrics)', ['tasheer_date', 'tasheer_time', 'tasheer_center', 'tasheer_ref'], 'Reference number'],
-            ['wafid', 'Wafid medical', ['wafid_appt_date', 'wafid_appt_time', 'wafid_center', 'wafid_slip_number'], 'Slip number']].map(([k, title, [d, t, c, r], refLabel]) => (
-            <div key={k} className="mb-3 last:mb-0">
-              <p className="mb-1 text-xs font-bold uppercase tracking-wide text-teal-700 dark:text-teal-300">{title}</p>
-              <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
-                <div><label className={smallLabel} htmlFor={d}>Date</label><input id={d} type="date" className={smallInput} value={form[d]} onChange={setField(d)} /></div>
-                <div><label className={smallLabel} htmlFor={t}>Time</label><input id={t} type="time" className={smallInput} value={form[t]} onChange={setField(t)} /></div>
-                <div><label className={smallLabel} htmlFor={c}>{k === 'tasheer' ? 'Centre' : 'Medical centre'}</label><input id={c} className={smallInput} value={form[c]} onChange={setField(c)} placeholder={k === 'tasheer' ? 'Addis Ababa' : ''} /></div>
-                <div><label className={smallLabel} htmlFor={r}>{refLabel}</label><input id={r} className={smallInput} value={form[r]} onChange={setField(r)} /></div>
-              </div>
-            </div>
-          ))}
         </div>
 
         {/* ---- Rarely used: kept, editable, folded away ---- */}
         <details className="rounded-xl border border-slate-200 dark:border-slate-700 p-4 group">
-          <summary className="cursor-pointer text-sm font-semibold text-slate-600 dark:text-slate-300 select-none">More details (optional) — second phone, height, weight, region, education …</summary>
+          <summary className="cursor-pointer text-sm font-semibold text-slate-600 dark:text-slate-300 select-none">More details — order ID, status, national ID, emergency contact, appointments, visa & contract, second phone, height, weight …</summary>
           <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <div>
               <label className={smallLabel} htmlFor="phone_number_2">Second phone</label>
@@ -751,8 +685,80 @@ export default function ProfileFormPage() {
             <input id="previous_employment" className={smallInput} value={form.previous_employment} onChange={setField('previous_employment')} />
           </div>
           </div>
-        </details>
+          <p className="mt-5 mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">Order, status, ID and her emergency contact</p>
+          <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <label className={labelClass} htmlFor="order_id">Order ID</label>
+            <input id="order_id" className={inputClass} value={form.order_id} onChange={setField('order_id')} />
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="status">ሁኔታ</label>
+            <GlassSelect id="status" className={inputClass} value={form.status} onChange={setField('status')}>
+              {STATUS_OPTIONS_AM.filter(s => !s.group).map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+              <optgroup label="ሕክምና · Medical (Wafid)">
+                {STATUS_OPTIONS_AM.filter(s => s.group === 'medical').map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+              </optgroup>
+            </GlassSelect>
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="national_id">ብሔራዊ መታወቂያ</label>
+            <input id="national_id" className={inputClass} value={form.national_id} onChange={setField('national_id')} />
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="emergency_name">Emergency name (her father — from the middle name)</label>
+            <input id="emergency_name" className={inputClass} value={form.emergency_name} onChange={setField('emergency_name')} />
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="emergency_phone">Emergency phone (auto from broker)</label>
+            <input id="emergency_phone" className={inputClass} value={form.emergency_phone} onChange={setField('emergency_phone')} />
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="emergency_gender">Emergency gender</label>
+            <GlassSelect id="emergency_gender" className={inputClass} value={form.emergency_gender} onChange={setField('emergency_gender')}>
+              <option value="Male">Male</option>
+              <option value="Female">Female</option>
+            </GlassSelect>
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="emergency_relationship">Emergency relationship</label>
+            <GlassSelect id="emergency_relationship" className={inputClass} value={form.emergency_relationship} onChange={setField('emergency_relationship')}>
+              <option value="Father">Father</option>
+              <option value="Mother">Mother</option>
+              <option value="Brother">Brother</option>
+              <option value="Sister">Sister</option>
+              <option value="Spouse">Spouse</option>
+              <option value="Other">Other</option>
+            </GlassSelect>
+          </div>
+          {/* Saudi Arabia: LMIS adds the emergency contact person by their own Labor ID (the LMIS contract robot). */}
+          {/saudi/i.test(form.destination_country || '') && (
+            <div>
+              <label className={labelClass} htmlFor="emergency_labor_id">Emergency contact Labor ID (LMIS)</label>
+              <input id="emergency_labor_id" className={inputClass + ' font-mono'} placeholder="EF…" value={form.emergency_labor_id}
+                onChange={e => setForm(f => ({ ...f, emergency_labor_id: e.target.value.toUpperCase() }))} />
+            </div>
+          )}
+          </div>
+          <div className="mt-5">
+        {/* ---- Appointment slips: Tasheer (visa biometrics) and the Wafid medical — a reminder the day before ---- */}
+        <div className="rounded-xl border border-slate-200 p-4 dark:border-slate-700">
+          <p className="mb-3 text-sm font-semibold text-slate-700 dark:text-slate-200">📅 Appointments <span className="font-normal text-xs text-slate-500">— a reminder comes the day before; the slips go in Documents (Tasheer Slip; the Wafid one in Appointment Slip)</span></p>
+          {[['tasheer', 'Tasheer (visa biometrics)', ['tasheer_date', 'tasheer_time', 'tasheer_center', 'tasheer_ref'], 'Reference number'],
+            ['wafid', 'Wafid medical', ['wafid_appt_date', 'wafid_appt_time', 'wafid_center', 'wafid_slip_number'], 'Slip number']].map(([k, title, [d, t, c, r], refLabel]) => (
+            <div key={k} className="mb-3 last:mb-0">
+              <p className="mb-1 text-xs font-bold uppercase tracking-wide text-teal-700 dark:text-teal-300">{title}</p>
+              <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
+                <div><label className={smallLabel} htmlFor={d}>Date</label><input id={d} type="date" className={smallInput} value={form[d]} onChange={setField(d)} /></div>
+                <div><label className={smallLabel} htmlFor={t}>Time</label><input id={t} type="time" className={smallInput} value={form[t]} onChange={setField(t)} /></div>
+                <div><label className={smallLabel} htmlFor={c}>{k === 'tasheer' ? 'Centre' : 'Medical centre'}</label><input id={c} className={smallInput} value={form[c]} onChange={setField(c)} placeholder={k === 'tasheer' ? 'Addis Ababa' : ''} /></div>
+                <div><label className={smallLabel} htmlFor={r}>{refLabel}</label><input id={r} className={smallInput} value={form[r]} onChange={setField(r)} /></div>
+              </div>
+            </div>
+          ))}
+        </div>
 
+          </div>
+          <div className="mt-5">
         {/* ---- Visa & Contract: from the Musaned employment request ---- */}
         {isEdit && (
           <section className="rounded-xl border-2 border-indigo-200 dark:border-indigo-800 p-4 space-y-4">
@@ -849,6 +855,9 @@ export default function ProfileFormPage() {
           </section>
         )}
 
+          </div>
+        </details>
+
         </>}
 
         {!quick && <div>
@@ -860,7 +869,7 @@ export default function ProfileFormPage() {
           <button type="submit" className="px-5 py-2.5 rounded-lg bg-teal-600 hover:bg-teal-700 text-white font-medium text-sm transition-colors disabled:opacity-50" disabled={saving}>
             {saving ? 'በማስቀመጥ ላይ…' : isEdit ? 'ለወጦችን አስቀምጥ' : 'ፕሮፋይል ፍጠር'}
           </button>
-          <button type="button" className="px-5 py-2.5 rounded-lg border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 font-medium text-sm transition-colors" onClick={() => navigate(isEdit ? `/profiles/${id}` : '/profiles')}>
+          <button type="button" className="px-5 py-2.5 rounded-lg border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 font-medium text-sm transition-colors" onClick={() => (onDone ? onDone(false) : navigate(isEdit ? `/profiles/${id}` : '/profiles'))}>
             ሰርዝ
           </button>
         </div>

@@ -237,7 +237,7 @@ function withFiles(pid, fields, updatedAt) {
 /** What the CV page needs to know of her (the PC's /cv/profile-readiness, made here). */
 function readinessOf(profile, fields) {
   const count = (name) => (fields || []).filter(f => f.name === name).reduce((n, f) => n + (f.files || []).length, 0)
-  const required = ['full_name','first_name','last_name','passport_number','date_of_birth','place_of_birth','nationality','gender','religion','marital_status','children_count','weight','height','living_town','phone_number']
+  const required = ['full_name','first_name','last_name','passport_number','date_of_birth','place_of_birth','nationality','gender','religion','marital_status','children_count','weight','height','phone_number']  // living town: not asked (the CV uses her place of birth)
   const has_photo = count('Photo') > 0 || !!profile.photo_path
   const has_full_body_photo = count('Full Body Photo') > 0
   const cv_blockers = [!profile.broker_id && 'Broker not assigned', !has_photo && 'Photo missing', !has_full_body_photo && 'Full body photo missing', !profile.religion && 'Religion missing', !profile.marital_status && 'Marital status missing'].filter(Boolean)
@@ -519,9 +519,30 @@ async function change(method, path, body) {
   if (one && ['put', 'patch'].includes(method) && madeHere(one[1]) && body && typeof body === 'object') {
     const n = madeHere(one[1]); n.body = { ...n.body, ...body }; save(NEWP, newProfiles)
   }
+  // Check for updates / Install in an Adal Keep Companion's window: this PC updates
+  // itself (adal-companion /update/check and /update/apply), not the main PC.
+  if (/^(127\.0\.0\.1|localhost)$/.test(location.hostname) && path === '/system/update/check' && method === 'get') {
+    const r = await fetch('http://127.0.0.1:47810/update/check', { signal: AbortSignal.timeout(20000) }).then(x => x.json()).catch(() => null)
+    if (!r) throw httpError(503, 'The Adal Keep Companion on this PC did not answer — open Adal Keep again.')
+    if (r.error) throw httpError(503, r.error)
+    return { ...r, installed: { short: r.current }, latest: { short: r.latest } }
+  }
+  if (/^(127\.0\.0\.1|localhost)$/.test(location.hostname) && path === '/system/update/apply' && method === 'post') {
+    const r = await fetch('http://127.0.0.1:47810/update/apply', { method: 'POST', signal: AbortSignal.timeout(15 * 60000) }).then(x => x.json()).catch(() => null)
+    if (!r) throw httpError(503, 'The Adal Keep Companion on this PC did not answer — open Adal Keep again.')
+    if (!r.ok) throw httpError(503, r.error || 'The update did not install.')
+    return { message: r.message }
+  }
   // "Back up now" with the PC off: kept online once; the PC backs up as soon as it is on
   // (and it backs up by itself every 2 hours anyway). Never a second request waiting.
   if (method === 'post' && path === '/backup/run') {
+    // In an Adal Keep Companion's window (2026-11-19): the locked copy kept on
+    // this PC goes to the agency's Telegram now (adal-companion /backup/now).
+    if (/^(127\.0\.0\.1|localhost)$/.test(location.hostname)) {
+      const here = await fetch('http://127.0.0.1:47810/backup/now', { method: 'POST', signal: AbortSignal.timeout(4000) })
+        .then(r => (r.ok ? r.json() : null)).catch(() => null)
+      if (here?.started || here?.done) return { queued: !here.done, message: here.message }
+    }
     const c = cloudCreds()
     const waiting = await rest('GET', `/rest/v1/keep_changes?agency_id=eq.${c.agency}&applied_at=is.null&kind=eq.api&payload->>path=eq./backup/run&select=id&limit=1`).catch(() => [])
     if (!waiting?.length) await request('api', { method: 'POST', path: '/backup/run', body: null }, null)

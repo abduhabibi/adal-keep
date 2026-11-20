@@ -567,6 +567,14 @@ func (u *updater) install(m *releaseManifest, env *envelope, fromCloud bool) err
 		}
 	}
 	log.Printf("✅ update %s installed on this Companion (programs from the next start)", m.Short)
+	// Its server in waiting follows the new version at once (standby.go).
+	kickBundle()
+	// This program itself: the new one runs within seconds (never while this PC
+	// stands in for the main PC, and never the window — it takes it when opened again).
+	if selfReplaced && !standbyActing() {
+		selfReplaced = false
+		go restartSelfSoon()
+	}
 	go func() {
 		// The app itself, to hand on to a main PC of the office (only from the network: no extra download from Supabase).
 		if m.SHA256 != "" {
@@ -593,16 +601,21 @@ func (u *updater) installPieces(m *releaseManifest, fromCloud bool) error {
 		if fileSHA(dest) == p.SHA256 {
 			continue
 		}
-		// A running program cannot be overwritten, but it can be renamed.
-		os.Remove(dest + ".old")
-		if err := os.Rename(dest, dest+".old"); err != nil {
+		// A running program cannot be overwritten, but it can be renamed. The one
+		// renamed last time may still run (a window open through two updates):
+		// then this one goes aside under a name of its own.
+		aside := setAside(dest)
+		if err := os.Rename(dest, aside); err != nil {
 			return err
 		}
 		if err := copyFile(got, dest); err != nil {
-			os.Rename(dest+".old", dest)
+			os.Rename(aside, dest)
 			return err
 		}
 		log.Printf("⬆️ %s updated (used from the next start)", p.Name)
+		if p.Name == "adal-companion.exe" {
+			selfReplaced = true
+		}
 	}
 	if m.Online != nil && m.Online.SHA256 != "" {
 		online := filepath.Join(u.root, "online")
@@ -713,6 +726,26 @@ func untarGz(archive, dest string) error {
 
 // ── telling and hearing ────────────────────────────────────────────────────
 
+// agencyTag: a hash of the agency's main PC number (the number itself is never
+// broadcast); the same as services/lanRelease.js agencyTag.
+func agencyTag(number string) string {
+	var d strings.Builder
+	for _, r := range number {
+		if r >= '0' && r <= '9' {
+			d.WriteRune(r)
+		}
+	}
+	if d.Len() == 0 {
+		return ""
+	}
+	h := sha256.Sum256([]byte("adal-agency|" + d.String()))
+	return hex.EncodeToString(h[:])[:16]
+}
+
+// ownAgencyTag: this Companion's agency (the number it joined with); "" when
+// it has none. Replaced in tests.
+var ownAgencyTag = func() string { return agencyTag(confNumber()) }
+
 func releaseTargets() []*net.UDPAddr {
 	out := []*net.UDPAddr{{IP: net.IPv4bcast, Port: releaseUDPPort}}
 	if ifs, err := net.Interfaces(); err == nil {
@@ -745,10 +778,11 @@ func releaseTargets() []*net.UDPAddr {
 
 func (u *updater) announce() {
 	m, _ := u.current()
-	if m == nil || u.conn == nil {
+	tag := ownAgencyTag()
+	if m == nil || u.conn == nil || tag == "" { // no agency known: nothing is offered
 		return
 	}
-	msg := []byte(strings.Join([]string{releaseMagic, m.SHA, m.PublishedAt, strconv.Itoa(lanHTTPPort), "/lan"}, "|"))
+	msg := []byte(strings.Join([]string{releaseMagic, m.SHA, m.PublishedAt, strconv.Itoa(lanHTTPPort), "/lan", tag}, "|"))
 	for _, t := range releaseTargets() {
 		u.conn.WriteToUDP(msg, t)
 	}
@@ -764,6 +798,22 @@ func (u *updater) heard(text string, from net.IP) (string, bool) {
 	}
 	port, err := strconv.Atoi(parts[3])
 	if err != nil || port < 1 || port > 65535 {
+		return "", false
+	}
+	// Another agency's PC (or an old one that does not say whose it is): never listened to.
+	own := ownAgencyTag()
+	theirs := ""
+	if len(parts) > 5 {
+		theirs = parts[5]
+	}
+	if own == "" {
+		return "", false
+	}
+	same := false
+	for _, t := range strings.Split(theirs, ",") {
+		same = same || t == own
+	}
+	if !same {
 		return "", false
 	}
 	if port == lanHTTPPort && isOwnIP(from) {
@@ -870,7 +920,106 @@ func (u *updater) handler() *http.ServeMux {
 		w.Header().Set("Content-Type", "application/octet-stream")
 		http.ServeFile(w, r, file)
 	})
+	// "Back up now" in this PC's own Adal Keep window while the main PC is off
+	// (asked on 2026-11-19): the locked copy kept here goes to the agency's
+	// Telegram at once. Only from this PC itself, never from the network.
+	mux.HandleFunc("/backup/now", func(w http.ResponseWriter, r *http.Request) {
+		host, _, _ := net.SplitHostPort(r.RemoteAddr)
+		if ip := net.ParseIP(host); ip == nil || !ip.IsLoopback() {
+			http.Error(w, "only from this PC", http.StatusForbidden)
+			return
+		}
+		if o := r.Header.Get("Origin"); strings.HasPrefix(o, "http://127.0.0.1:") || strings.HasPrefix(o, "http://localhost:") {
+			w.Header().Set("Access-Control-Allow-Origin", o)
+			w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+		}
+		if r.Method == http.MethodOptions {
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Error(w, "POST only", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(backupNowAnswer())
+	})
+	mux.HandleFunc("/update/check", func(w http.ResponseWriter, r *http.Request) { localOnly(w, r, u.updateCheck) })
+	mux.HandleFunc("/update/apply", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost && r.Method != http.MethodOptions {
+			http.Error(w, "POST only", http.StatusMethodNotAllowed)
+			return
+		}
+		localOnly(w, r, u.updateApply)
+	})
 	return mux
+}
+
+// localOnly answers a request from this PC itself (the Companion's own Adal Keep
+// window) with JSON; anything from the network is refused.
+func localOnly(w http.ResponseWriter, r *http.Request, answer func() map[string]any) {
+	host, _, _ := net.SplitHostPort(r.RemoteAddr)
+	if ip := net.ParseIP(host); ip == nil || !ip.IsLoopback() {
+		http.Error(w, "only from this PC", http.StatusForbidden)
+		return
+	}
+	if o := r.Header.Get("Origin"); strings.HasPrefix(o, "http://127.0.0.1:") || strings.HasPrefix(o, "http://localhost:") {
+		w.Header().Set("Access-Control-Allow-Origin", o)
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	}
+	if r.Method == http.MethodOptions {
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(answer())
+}
+
+// updateCheck: is a newer Adal Keep published than the one on this PC? (Settings → Check for updates)
+func (u *updater) updateCheck() map[string]any {
+	cur := u.baseline()
+	short := ""
+	if cur != nil {
+		short = cur.Short
+	}
+	m, _, err := u.cloudLatest()
+	if err != nil {
+		return map[string]any{"hasUpdate": false, "error": "Could not reach the updates: " + err.Error(), "current": short}
+	}
+	return map[string]any{"hasUpdate": isNewerRelease(m, cur), "current": short, "latest": m.Short, "companion": true}
+}
+
+// updateApply: installs the newest Adal Keep on this PC now (asked on 2026-11-19: the Companion updates itself too).
+func (u *updater) updateApply() map[string]any {
+	m, env, err := u.cloudLatest()
+	if err != nil {
+		return map[string]any{"ok": false, "error": "Could not reach the updates: " + err.Error()}
+	}
+	if !isNewerRelease(m, u.baseline()) {
+		return map[string]any{"ok": true, "message": "Adal Keep is up to date (" + m.Short + ")."}
+	}
+	log.Printf("🆕 update %s now (pressed on this PC)", m.Short)
+	if err := u.install(m, env, true); err != nil {
+		return map[string]any{"ok": false, "error": "The update did not install: " + err.Error()}
+	}
+	return map[string]any{"ok": true, "message": "Updated to " + m.Short + ". Close Adal Keep and open it again to use it."}
+}
+
+// backupNowAnswer starts a backup from the copy here when there is something new to send.
+func backupNowAnswer() map[string]any {
+	st, keys := loadState(), loadKeys()
+	switch {
+	case st.Made == "":
+		return map[string]any{"started": false, "message": "This PC has no copy of the agency yet: it is made while the main PC is on."}
+	case keys.Password == "" || keys.BotToken == "" || keys.ChatID == "":
+		return map[string]any{"started": false, "message": "This PC has no backup key yet: it gets it from the main PC while the main PC is on."}
+	case st.OwnBackupCopy == st.Made && st.OwnBackupAt != "":
+		return map[string]any{"started": false, "done": true, "message": "Already backed up from this PC's copy (" + st.OwnBackupAt + "). Nothing new to send until the main PC is on."}
+	}
+	go func() {
+		if err := backupFromCopy(); err != nil {
+			log.Printf("💾 Back up now failed: %v", err)
+		}
+	}()
+	return map[string]any{"started": true, "message": "Backing up now from the copy on this PC (made " + st.Made + ") to the agency's Telegram."}
 }
 
 // startSelfUpdate: runs for ever in the background (an employee PC only).
@@ -880,7 +1029,10 @@ func startSelfUpdate(root string) *updater {
 		mux := u.handler()
 		addReplicaRoutes(mux) // the copy, for a restore on a new main PC (replica.go)
 		addMainProxy(mux)     // the online pages reach the main PC over the network (mainproxy.go)
+		addRobotRoutes(mux, root) // the main PC's robots in this PC's Adal Browser (robot.go)
+		addPeerRoutes(mux, root)  // its copy and server for the other Companions (peers.go)
 		go http.Serve(ln, mux)
+		go announceRobot()
 	} else {
 		log.Printf("⚠️ update sharing: %v", err)
 	}
@@ -922,4 +1074,18 @@ func startSelfUpdate(root string) *updater {
 		}
 	}()
 	return u
+}
+
+// setAside: where a program being replaced goes — dest.old, or (that one still
+// in use) dest.old-<time>; leftovers no longer in use are removed.
+func setAside(dest string) string {
+	if olds, _ := filepath.Glob(dest + ".old-*"); len(olds) > 0 {
+		for _, o := range olds {
+			os.Remove(o) // fails while it runs: kept until next time
+		}
+	}
+	if err := os.Remove(dest + ".old"); err == nil || os.IsNotExist(err) {
+		return dest + ".old"
+	}
+	return fmt.Sprintf("%s.old-%d", dest, time.Now().UnixNano())
 }

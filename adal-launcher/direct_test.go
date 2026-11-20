@@ -49,6 +49,8 @@ func TestFindMainPCFromTheMainPCsList(t *testing.T) {
 	defer other.Close()
 	a := strings.TrimPrefix(keep.URL, "http://")
 	b := strings.TrimPrefix(other.URL, "http://")
+	saveFoundMainURL(root, "http://192.168.50.1:4000", "47040")
+	only(t, "47040", keep.URL)
 	start := time.Now()
 	got := findMainPC(root, "10.255.255.1:4000,"+b+","+a)
 	if got != keep.URL {
@@ -67,7 +69,8 @@ func TestTypedAddressIsKept(t *testing.T) {
 	os.Unsetenv("ADAL_HOST_URL")
 	keep := fakeKeep("adal-keep")
 	defer keep.Close()
-	saveTypedMainURL(root, "http://192.168.50.50:4000")
+	saveTypedMainURLWith(root, "http://192.168.50.50:4000", "47040")
+	only(t, "47040", keep.URL)
 	if got := findMainPC(root, strings.TrimPrefix(keep.URL, "http://")); got != keep.URL {
 		t.Fatalf("got %q", got)
 	}
@@ -82,5 +85,52 @@ func TestNothingAnswers(t *testing.T) {
 	os.Unsetenv("ADAL_HOST_URL")
 	if got := findMainPC(root, "8.8.8.8:4000,10.255.255.1:4000"); got != "" {
 		t.Fatalf("got %q", got)
+	}
+}
+
+// only: numberCheck says "yes" for these addresses and the number, nothing else.
+func only(t *testing.T, number string, urls ...string) {
+	old := numberCheck
+	t.Cleanup(func() { numberCheck = old })
+	numberCheck = func(u, n string) bool {
+		for _, w := range urls {
+			if u == w && n == number {
+				return true
+			}
+		}
+		return false
+	}
+}
+
+// Bug of 2026-11-19: a Companion of one agency opened another agency's test PC
+// on the same Wi-Fi, because any Adal Keep that answered was taken.
+func TestAnotherAgencysMainPCIsNeverOpened(t *testing.T) {
+	root := t.TempDir()
+	os.Unsetenv("ADAL_HOST_URL")
+	ours, theirs := fakeKeep("adal-keep"), fakeKeep("adal-keep")
+	defer ours.Close()
+	defer theirs.Close()
+	saveFoundMainURL(root, theirs.URL, "47040") // saved address went stale to the other PC
+	only(t, "47040", ours.URL)
+	got := findMainPC(root, strings.TrimPrefix(theirs.URL, "http://")+","+strings.TrimPrefix(ours.URL, "http://"))
+	if got != ours.URL {
+		t.Fatalf("got %q want ours %q", got, ours.URL)
+	}
+	only(t, "47040") // now nothing is ours
+	if got := findMainPC(root, strings.TrimPrefix(theirs.URL, "http://")); got != "" {
+		t.Fatalf("another agency's PC opened: %q", got)
+	}
+	if isOurMain(root, theirs.URL, time.Second) {
+		t.Fatal("isOurMain accepted another agency's PC")
+	}
+}
+
+func TestListedAddressRefusedWithoutANumber(t *testing.T) {
+	root := t.TempDir()
+	os.Unsetenv("ADAL_HOST_URL")
+	k := fakeKeep("adal-keep")
+	defer k.Close()
+	if got := findMainPC(root, strings.TrimPrefix(k.URL, "http://")); got != "" {
+		t.Fatalf("an unverifiable address was taken: %q", got)
 	}
 }

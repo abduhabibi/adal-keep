@@ -19,7 +19,7 @@
  */
 import { AFTER } from './phase.js'
 
-export const BEFORE_EPRO = ['cv', 'musaned', 'waiting', 'selected', 'wafid', 'epro']
+export const BEFORE_EPRO = ['cv', 'musaned', 'waiting', 'selected', 'wafid', 'lmis', 'epro']
 
 /** Every stage in order (after: [[title, key, label]…] the steps after the EPRO, in the agency's order). */
 export const stageOrder = (after = AFTER) => [...BEFORE_EPRO, ...after.map(([, k]) => k), 'choices']
@@ -50,12 +50,12 @@ export const ACTIONS = {
   whatsapp_send:         { label: '💬 Send CV to agents on WhatsApp', where: 'Profile, selection bar', at: ['waiting'] },
   // The daily check-up: Musaned looks at her every 2 hours, kept day by day (and FMOL).
   day_by_day:            { label: 'Day by day / FMOL (the daily check-up)', where: 'Profile', from: 'waiting' },
-  musaned_delete:        { label: 'Musaned: Delete from Musaned', where: 'AI Actions', at: ['waiting', 'selected', 'wafid', 'epro'], also: ['unfit'] },
+  musaned_delete:        { label: 'Musaned: Delete from Musaned', where: 'AI Actions', at: ['waiting', 'selected', 'wafid', 'lmis', 'epro'] },
 
   // ── Wafid ─────────────────────────────────────────────────────────────────
   wafid_book:      { label: 'Wafid: Book medical', where: 'AI Actions', at: ['selected'], next: true },
   wafid_slip:      { label: 'Wafid: Appointment slip', where: 'AI Actions', at: ['selected', 'wafid'] },
-  wafid_check:     { label: 'Wafid: Check result', where: 'AI Actions', at: ['wafid'], next: true, also: ['unfit'] },
+  wafid_check:     { label: 'Wafid: Check result', where: 'AI Actions', at: ['wafid'], next: true },
   medical_battery: { label: 'Medical battery (set the date)', where: 'Profile header', from: 'selected' },
 
   // ── EPRO ──────────────────────────────────────────────────────────────────
@@ -70,20 +70,24 @@ export const ACTIONS = {
   visa_barcodes:         { label: 'Visa barcodes: find / type the application number', where: 'Profile', at: ['embassy'], next: true, also: ['choices'] },
   print_embassy:         { label: '🖨 Print for embassy / Print embassy', where: 'Profile, selection bar', at: ['embassy'], next: true, also: ['choices'] },
   police_certificate:    { label: 'LMIS: Police certificate', where: 'AI Actions', at: ['police'], next: true },
+  // FetaP issues the certificate about a day after the request: it comes back to her Documents.
+  insurance_fetch:       { label: '🛡️ Get insurance certificate', where: 'AI Actions', at: ['insurance'], next: true },
+  // Chosen on Musaned and Wafid FIT: the LMIS contract (it also starts by itself then).
+  lmis_contract:         { label: 'LMIS: Create contract', where: 'AI Actions', at: ['lmis'], next: true },
 }
 
 /** The stages an action shows on, in order (unfit last when it is one of them). */
 export function stagesOf(key, after = AFTER) {
   const a = ACTIONS[key]
   const order = stageOrder(after)
-  if (!a || a.all) return [...order, 'unfit']
+  if (!a || a.all) return order
   const out = new Set([...(a.at || []), ...(a.also || [])])
   if (a.from) order.slice(Math.max(0, order.indexOf(a.from))).forEach(s => out.add(s))
   if (a.next) {
     const last = Math.max(...(a.at || []).map(s => order.indexOf(s)))
     if (last >= 0 && order[last + 1]) out.add(order[last + 1])
   }
-  return [...order, 'unfit'].filter(s => out.has(s))
+  return order.filter(s => out.has(s))
 }
 
 /** Does this action show for a girl at this phase? An unknown phase or action: yes. */

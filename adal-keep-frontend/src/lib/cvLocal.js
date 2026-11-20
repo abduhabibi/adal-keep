@@ -558,6 +558,14 @@ export async function cvHtml(src, profileId, templateId, overrides = {}) {
     profile.broker_id ? src.broker(profile.broker_id).catch(() => null) : null,
   ])
   const [photo, fullBody, passport] = await Promise.all([one(pick('Photo'), 800), one(pick('Full Body Photo'), 1400, { trim: true }), one(pick('Passport'), 1600)])
+  // No CV without her pictures (asked on 2026-11-19): listed but not here yet
+  // (taken on another PC or phone) is asked for, never drawn as "No photo".
+  const lost = [!photo && 'Photo', !fullBody && 'Full Body Photo'].filter(Boolean)
+  if (lost.length) {
+    const e = new Error(`${lost.join(' and ')} not on this device yet — upload ${lost.length > 1 ? 'them' : 'it'} here (or open Adal Keep with the PC on)`)
+    e.missingPictures = lost
+    throw e
+  }
   const data = await cvData(profile, template, overrides, { photo, fullBody, passport, header: banners?.header || '', footer: banners?.footer || '' }, broker?.contact1 || '')
   return withEdits(mergeTemplate(template.html_content, template.css_content, data), overrides.__edits)
 }

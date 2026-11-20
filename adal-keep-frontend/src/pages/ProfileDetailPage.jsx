@@ -1,5 +1,7 @@
 import { Children, useEffect, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { createPortal } from 'react-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import ProfileFormPage from './ProfileFormPage'
 import toast from 'react-hot-toast'
 import { parts, kept, keptNow, keep, noteOpened } from '../lib/profileCache'
 import api from '../services/api'
@@ -9,6 +11,8 @@ import StatusBadge from '../components/shared/StatusBadge'
 import Button from '../components/shared/Button'
 import { formatDate } from '../lib/utils'
 import FieldCard from '../components/fields/FieldCard'
+import NeedsFill from '../components/NeedsFill'
+import CropReview from '../components/CropReview'
 import PrioritizeButton from '../components/PrioritizeButton'
 import ProfileAutomations from '../components/ProfileAutomations'
 import ProfileJourney from '../components/ProfileJourney'
@@ -44,8 +48,8 @@ const STEP_FILES = {
   cv: ['Passport', 'Photo', 'Full Body Photo'],
   musaned: ['Photo', 'Passport'],
   selected: ['Passport'],
-  wafid: ['Passport', 'Medical Report', 'Appointment Slip'],
-  epro: ['Contract', 'Medical Report'],
+  wafid: ['Passport', 'Appointment Slip'],
+  epro: ['Contract'],
 }
 const STEP_DETAILS = {
   cv: ['Full name', 'Passport', 'Date of birth (GE)', 'Phone'],
@@ -66,11 +70,56 @@ export default function ProfileDetailPage() {
   const [step, setStep] = useState(null)        // the step she is at (backend stepNow)
   const [everything, setEverything] = useState(false)
   const { phase, after } = useProfilePhase(profile)
+  // Edit opens as a pop-up over her page (asked on 2026-11-19).
+  const [editOpen, setEditOpen] = useState(false)
+  // A new profile: her photos → her CV → Musaned, one pop-up after the other.
+  const [search, setSearch] = useSearchParams()
+  // Every profile still in the first stage (photos, CV, Musaned) shows what to do next each
+  // time her page is opened; ✕ and Later only hide it until she is opened again (asked on 2026-11-20).
+  const [nextOpen, setNextOpen] = useState(false)
+  const [hidden, setHidden] = useState(null)   // the profile whose pop-up was hidden on this visit
+  useEffect(() => {
+    setHidden(null)
+    if (search.get('next') === 'photos') { setNextOpen(true); search.delete('next'); setSearch(search, { replace: true }) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id])
+  useEffect(() => { if (['cv', 'musaned'].includes(phase) && hidden !== id) setNextOpen(true) }, [id, phase]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Past the Musaned step: nothing left for the pop-up.
+  useEffect(() => { if (phase && !['cv', 'musaned'].includes(phase)) setNextOpen(false) }, [phase])
+  const closeNext = () => { setHidden(id); setNextOpen(false) }
+  const doneNext = closeNext
+  // Any robot on her page that is missing something: a pop-up to fill it, then that robot starts (asked on 2026-11-20).
+  const [fill, setFill] = useState(null)   // { workflowId, name, body }
+  useEffect(() => {
+    const on = (e) => { if (String(e.detail?.profileId) === String(id)) { e.detail.handled = true; setFill(e.detail) } }
+    window.addEventListener('adal-fill-missing', on)
+    return () => window.removeEventListener('adal-fill-missing', on)
+  }, [id])
+  const startFilled = async () => {
+    const f = fill
+    if (!f) return
+    const t = toast.loading(`${f.name}: starting…`)
+    try {
+      const r = await api.post(`/profiles/${id}/automations/${f.workflowId}/start`, f.body || {})
+      toast.success(`${f.name}: ${r.data?.message || 'started'}`, { id: t })
+      setFill(null)
+      window.dispatchEvent(new Event('adal-profile-changed'))
+    } catch (e) { toast.error(`${f.name}: ${e.response?.data?.error || 'could not start'}`, { id: t, duration: 8000 }) }
+  }
+  const refreshAll = () => {
+    window.dispatchEvent(new Event('adal-profile-changed'))
+    api.get(`/profiles/${id}/fields`).then(r => { keep(parts(id).fields, r.data); setFields(r.data) }).catch(() => {})
+    api.get(`/cv/generated`, { params: { profile_id: id } }).then(r => setCvs(r.data || [])).catch(() => {})
+  }
   useEffect(() => {
     const look = () => api.get(`/profiles/${id}/step`).then(r => setStep(r.data)).catch(() => {})
     look()
     setEverything(false)
-    return onDataChange(['profiles', 'automation_queue', 'files', 'profile_fields'], look)
+    // A CV made by itself shows at once (8f5d12b).
+    const cvsAgain = () => api.get(`/cv/generated`, { params: { profile_id: id } }).then(r => setCvs(r.data || [])).catch(() => {})
+    const offCvs = onDataChange(['generated_cvs', 'files', 'profile_fields'], cvsAgain)
+    const off = onDataChange(['profiles', 'automation_queue', 'files', 'profile_fields'], look)
+    return () => { off?.(); offCvs?.() }
   }, [id])
   // Only the step's files still missing: an uploaded one leaves the page; all there → the part folds away.
   const stepFiles = !everything && STEP_FILES[step?.key]
@@ -200,6 +249,26 @@ export default function ProfileDetailPage() {
 
   return (
     <div className="animate-fade-up space-y-6">
+      {/* A picture JEV cut into parts: a person checks the crop before it goes in. */}
+      <CropReview profileId={id} onSaved={refreshAll} />
+      {editOpen && (
+        <GlassPopup onClose={() => setEditOpen(false)} wide>
+          <ProfileFormPage embeddedId={id} onDone={(saved) => { setEditOpen(false); if (saved) refreshAll() }} />
+        </GlassPopup>
+      )}
+      {fill && !editOpen && (
+        <GlassPopup onClose={() => setFill(null)} title={`${fill.name}: what she still needs`}>
+          <NeedsFill profileId={id} workflowId={fill.workflowId} fields={fields} onFileUpdate={handleFileUpdate} onReady={startFilled} />
+          <div className="mt-5 flex flex-wrap gap-3">
+            <button type="button" onClick={startFilled} className="rounded-xl bg-teal-600 px-5 py-3 font-semibold text-white hover:bg-teal-700">Start {fill.name}</button>
+            <button type="button" onClick={() => setFill(null)} className="rounded-xl border border-slate-300 px-5 py-3 font-semibold text-slate-700 dark:border-slate-600 dark:text-slate-200">Later</button>
+          </div>
+        </GlassPopup>
+      )}
+      {nextOpen && !editOpen && !fill && (
+        <NextSteps profileId={id} fields={fields} cvs={cvs} onFileUpdate={handleFileUpdate} onClose={closeNext} onDone={doneNext}
+          onCv={() => navigate(`/cvs/new?profile=${id}&auto=1`)} />
+      )}
       <PageHeader
         title={amharicName || profile.full_name}
         subtitle={amharicName ? profile.full_name : (profile.phone_number || 'No phone on file')}
@@ -218,7 +287,7 @@ export default function ProfileDetailPage() {
             </Button>
             <Button
               className="bg-teal-600 hover:bg-teal-700 text-white"
-              onClick={() => navigate(`/profiles/${id}/edit`)}
+              onClick={() => setEditOpen(true)}
             >
               ✏️ Edit
             </Button>
@@ -422,7 +491,7 @@ export default function ProfileDetailPage() {
         </div>
         <Button
           className="mt-6 px-5 py-2.5 rounded-lg bg-teal-600 hover:bg-teal-700 text-white font-medium text-sm"
-          onClick={() => navigate(`/profiles/${id}/edit`)}
+          onClick={() => setEditOpen(true)}
         >
           Update profile
         </Button>
@@ -541,13 +610,26 @@ function LaborIdEdit({ profile, onSaved }) {
       toast.error(e.response?.data?.error || 'Could not save the Labor ID')
     } finally { setSaving(false) }
   }
+  // A click on the Labor ID copies it (asked on 2026-11-19); "edit" changes it.
+  const copy = async () => {
+    const v = String(profile.labor_id || '').trim()
+    if (!v) { setValue(''); setEditing(true); return }
+    try { await navigator.clipboard.writeText(v); toast.success(`Copied: ${v}`) }
+    catch {
+      const t = document.createElement('textarea'); t.value = v; document.body.appendChild(t); t.select()
+      try { document.execCommand('copy'); toast.success(`Copied: ${v}`) } catch { toast.error('Could not copy') } finally { t.remove() }
+    }
+  }
   if (!editing) {
     return (
-      <button type="button" title="Click to change the Labor ID" onClick={() => { setValue(profile.labor_id || ''); setEditing(true) }}
-        className="flex items-center gap-2 group">
-        <span className={big}>{profile.labor_id || '— not set —'}</span>
-        <span className="text-xs text-slate-400 group-hover:text-teal-600">✏️ edit</span>
-      </button>
+      <div className="flex items-center gap-2">
+        <button type="button" title="Click to copy the Labor ID" onClick={copy} className="flex items-center gap-2 group">
+          <span className={big}>{profile.labor_id || '— not set —'}</span>
+          {profile.labor_id && <span className="text-xs text-slate-400 group-hover:text-teal-600">📋 copy</span>}
+        </button>
+        <button type="button" title="Change the Labor ID" onClick={() => { setValue(profile.labor_id || ''); setEditing(true) }}
+          className="text-xs text-slate-400 hover:text-teal-600">✏️ edit</button>
+      </div>
     )
   }
   return (
@@ -561,3 +643,107 @@ function LaborIdEdit({ profile, onSaved }) {
   )
 }
 
+/** A glassy, luxurious pop-up over the page (Edit, and the new profile's next steps). */
+function GlassPopup({ children, onClose, wide = false, title = null }) {
+  useEffect(() => {
+    const esc = (e) => { if (e.key === 'Escape') onClose?.() }
+    window.addEventListener('keydown', esc)
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { window.removeEventListener('keydown', esc); document.body.style.overflow = prev }
+  }, [onClose])
+  return createPortal(
+    <div className="fixed inset-0 z-[70] flex items-start justify-center overflow-y-auto bg-slate-950/45 p-3 backdrop-blur-md sm:items-center sm:p-6"
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose?.() }}>
+      <div className={`relative w-full ${wide ? 'max-w-5xl' : 'max-w-xl'} max-h-[92vh] overflow-y-auto rounded-3xl border border-slate-200 bg-white p-4 shadow-[0_30px_80px_-20px_rgba(15,23,42,0.55)] ring-1 ring-black/5 dark:border-slate-700 dark:bg-slate-900 sm:p-6`}>
+        <div className="pointer-events-none absolute inset-x-10 top-0 h-px bg-gradient-to-r from-transparent via-white/90 to-transparent dark:via-white/30" />
+        <button type="button" onClick={onClose} aria-label="Close"
+          className="absolute right-4 top-4 z-10 grid h-9 w-9 place-items-center rounded-full border border-slate-200/70 bg-white/70 text-slate-500 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-800/70 dark:hover:text-white">✕</button>
+        {title && <h2 className="mb-4 pr-10 font-display text-xl font-bold text-slate-900 dark:text-white">{title}</h2>}
+        {children}
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
+/**
+ * A new profile's next steps, one pop-up after the other (asked on 2026-11-19):
+ * 1. her Photo and Full Body Photo, 2. her CV (a "Created" box too), 3. Musaned.
+ */
+function NextSteps({ profileId, fields, cvs, onFileUpdate, onClose, onDone, onCv }) {
+  const [madeByHand, setMadeByHand] = useState(() => { try { return sessionStorage.getItem(`next-cv-${profileId}`) === '1' } catch { return false } })
+  const [sending, setSending] = useState(false)
+  const [needs, setNeeds] = useState({ ready: false })
+  const photo = fields.find(f => f.name === 'Photo')
+  const body = fields.find(f => f.name === 'Full Body Photo')
+  const photosOk = hasFiles(photo) && hasFiles(body)
+  const cvOk = (cvs || []).length > 0 || madeByHand
+  const mark = (v) => { setMadeByHand(v); try { v ? sessionStorage.setItem(`next-cv-${profileId}`, '1') : sessionStorage.removeItem(`next-cv-${profileId}`) } catch {} }
+  const musaned = async () => {
+    setSending(true)
+    const t = toast.loading('Musaned: checking her profile…')
+    try {
+      const r = await api.post(`/profiles/${profileId}/automations/musaned_add_candidate/start`, {})
+      toast.success(`Musaned: ${r.data?.message || 'started'}`, { id: t })
+      try { sessionStorage.removeItem(`next-cv-${profileId}`) } catch {}
+      onDone()
+    } catch (e) {
+      toast.error(`Musaned: ${e.response?.data?.error || 'could not start'}`, { id: t, duration: 8000 })
+    } finally { setSending(false) }
+  }
+  const Step = ({ n, on, done, children }) => (
+    <div className={`flex items-center gap-2 text-xs font-semibold ${on ? 'text-teal-700 dark:text-teal-300' : done ? 'text-emerald-600' : 'text-slate-400'}`}>
+      <span className={`grid h-6 w-6 place-items-center rounded-full ${on ? 'bg-teal-600 text-white' : done ? 'bg-emerald-500 text-white' : 'bg-slate-200 dark:bg-slate-700'}`}>{done ? '✓' : n}</span>{children}
+    </div>
+  )
+  return (
+    <GlassPopup onClose={onClose} wide={!photosOk}>
+      <div className="mb-5 flex flex-wrap items-center gap-4 pr-10">
+        <Step n={1} on={!photosOk} done={photosOk}>Photos</Step>
+        <span className="h-px w-6 bg-slate-300 dark:bg-slate-600" />
+        <Step n={2} on={photosOk && !cvOk} done={cvOk}>CV</Step>
+        <span className="h-px w-6 bg-slate-300 dark:bg-slate-600" />
+        <Step n={3} on={photosOk && cvOk} done={false}>Musaned</Step>
+      </div>
+      {!photosOk ? (
+        <>
+          <h2 className="mb-1 font-display text-xl font-bold text-slate-900 dark:text-white">Her photos</h2>
+          <p className="mb-4 text-sm text-slate-500">Add her Photo and her Full Body Photo. The next step opens by itself.</p>
+          <div className="grid gap-4 sm:grid-cols-2">
+            {[photo, body].filter(Boolean).map(f => (
+              <FieldCard key={f.id} id={`next-${f.name.replace(/\s+/g, '-')}`} field={f} profileId={profileId} onFileUpdate={onFileUpdate} />
+            ))}
+          </div>
+        </>
+      ) : !cvOk ? (
+        <>
+          <h2 className="mb-1 font-display text-xl font-bold text-slate-900 dark:text-white">Her CV</h2>
+          <p className="mb-4 text-sm text-slate-500">Both photos are in. Make her CV now.</p>
+          <div className="mb-4"><NeedsFill profileId={profileId} cv fields={fields} onFileUpdate={onFileUpdate} /></div>
+          <div className="flex flex-wrap items-center gap-4">
+            <button type="button" onClick={onCv} className="rounded-xl bg-purple-600 px-5 py-3 font-semibold text-white shadow-lg shadow-purple-600/30 hover:bg-purple-700">📄 Create CV</button>
+            <label className="flex cursor-pointer items-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-200">
+              <input type="checkbox" className="h-5 w-5 accent-teal-600" checked={madeByHand} onChange={e => mark(e.target.checked)} />
+              Created
+            </label>
+          </div>
+        </>
+      ) : (
+        <>
+          <h2 className="mb-1 font-display text-xl font-bold text-slate-900 dark:text-white">Musaned</h2>
+          <p className="mb-4 text-sm text-slate-500">Her CV is made. Add her to Musaned; when she waits there, send her CV to agents on WhatsApp.</p>
+          {/* What Musaned still needs, filled here; once it is all in, Musaned starts by itself. */}
+          <div className="mb-4"><NeedsFill profileId={profileId} workflowId="musaned_add_candidate" fields={fields} onFileUpdate={onFileUpdate} onReady={musaned} onState={setNeeds} /></div>
+          <div className="flex flex-wrap gap-3">
+            <button type="button" disabled={sending || !needs.ready} onClick={musaned}
+              className="rounded-xl bg-indigo-600 px-5 py-3 font-semibold text-white shadow-lg shadow-indigo-600/30 hover:bg-indigo-700 disabled:opacity-50">
+              {sending ? '…' : '🇸🇦 Make Musaned'}
+            </button>
+            <button type="button" onClick={onClose} className="rounded-xl border border-slate-300 px-5 py-3 font-semibold text-slate-700 dark:border-slate-600 dark:text-slate-200">Later</button>
+          </div>
+        </>
+      )}
+    </GlassPopup>
+  )
+}

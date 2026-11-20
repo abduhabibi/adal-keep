@@ -180,9 +180,56 @@ func isMainWithNumber(u, number string) bool {
 func serverIsOurs(u string) bool {
 	id := loadIdentity()
 	if id.Number == "" {
-		return true
+		// No number to check (an old install): at least the network card it had.
+		if len(id.Macs) == 0 {
+			return true
+		}
+		return sameCard(id.Macs, macsAt(u))
 	}
 	return numberCheck(u, id.Number)
+}
+
+// macsAt: the network cards the Adal Keep at u says it has.
+func macsAt(u string) []string {
+	resp, err := (&http.Client{Timeout: 2 * time.Second}).Get(strings.TrimRight(u, "/") + "/api/companion/info")
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	var info struct {
+		Macs []string `json:"macs"`
+	}
+	_ = json.NewDecoder(io.LimitReader(resp.Body, 8192)).Decode(&info)
+	return normMACs(info.Macs)
+}
+
+// refusedServer: an Adal Keep answers at u and it is NOT our main PC (another
+// agency's, a test PC). An address that does not answer is not "refused".
+func refusedServer(u string) bool {
+	return answersAdalKeep(u) && !acceptServer(u)
+}
+
+var (
+	oursMu sync.Mutex
+	oursAt = map[string]time.Time{}
+)
+
+// confirmedOurs: u is our main PC — asked again at most every 5 minutes.
+func confirmedOurs(u string) bool {
+	u = strings.TrimRight(u, "/")
+	oursMu.Lock()
+	t, ok := oursAt[u]
+	oursMu.Unlock()
+	if ok && time.Since(t) < 5*time.Minute {
+		return true
+	}
+	if !acceptServer(u) {
+		return false
+	}
+	oursMu.Lock()
+	oursAt[u] = time.Now()
+	oursMu.Unlock()
+	return true
 }
 
 // acceptServer: what discovery and the scan accept (replaced in tests).

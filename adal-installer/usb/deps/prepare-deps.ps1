@@ -20,7 +20,7 @@ $ProgressPreference    = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 $NodeVersion = '24.14.1'          # keep in step with the Node used for development
-$TailscaleUrl = 'https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi'
+$OpenSshUrl = 'https://github.com/PowerShell/Win32-OpenSSH/releases/latest/download/OpenSSH-Win64.zip'
 $Deps   = $PSScriptRoot
 $Work   = Join-Path $env:TEMP ('adal-deps-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
 $Ready  = Join-Path $Deps 'READY.txt'
@@ -28,7 +28,7 @@ $Log    = Join-Path $Deps 'prepare.log'
 $Curl   = (Get-Command curl.exe -ErrorAction SilentlyContinue).Source
 $Start  = Get-Date
 
-function Step($n, $msg) { Write-Host ''; Write-Host " [$n/4] $msg" -ForegroundColor Cyan }
+function Step($n, $msg) { Write-Host ''; Write-Host " [$n/3] $msg" -ForegroundColor Cyan }
 function Ok($msg)       { Write-Host "       OK  $msg" -ForegroundColor Green }
 function Note($msg)     { Write-Host "       $msg" -ForegroundColor DarkGray }
 function Fail($msg) {
@@ -142,27 +142,25 @@ try {
 
     # ------------------------------------------------------------------
     # ------------------------------------------------------------------
-    Step 3 'Tailscale (the private link between branches, home and phones)'
-    $tsDir = Join-Path $Deps 'tailscale'
-    $tsMsi = Join-Path $tsDir 'tailscale-setup.msi'
-    New-Item -ItemType Directory -Force -Path $tsDir | Out-Null
-    $gotTs = (Test-Path $tsMsi) -and ((Get-Item $tsMsi).Length -gt 10MB)
-    if ($gotTs) { Note 'already on the USB - kept' }
-    else {
-        $tsTmp = Join-Path $Work 'tailscale-setup.msi'
-        $gotTs = Download $TailscaleUrl $tsTmp
-        if ($gotTs) { Copy-Item $tsTmp $tsMsi -Force }
+    # Microsoft's OpenSSH Server, for "Adal Connect" (support reaches a PC by its
+    # agency key; no internet or Windows Update needed on that PC).
+    $sshZip = Join-Path $Deps 'OpenSSH-Win64.zip'
+    $gotSsh = (Test-Path $sshZip) -and ((Get-Item $sshZip).Length -gt 3MB)
+    if (-not $gotSsh) {
+        $sshTmp = Join-Path $Work 'OpenSSH-Win64.zip'
+        $gotSsh = Download $OpenSshUrl $sshTmp
+        if ($gotSsh) { Copy-Item $sshTmp $sshZip -Force }
     }
-    if ($gotTs) { Ok ("tailscale-setup.msi  ($(MB $tsMsi) MB)") }
-    else { Write-Host '       WARN  Tailscale could not be downloaded. Install it from tailscale.com by hand.' -ForegroundColor Yellow }
+    if ($gotSsh) { Ok ("OpenSSH-Win64.zip  ($(MB $sshZip) MB)") }
+    else { Write-Host '       WARN  OpenSSH could not be downloaded; Adal Connect will use Windows Update.' -ForegroundColor Yellow }
 
     # ------------------------------------------------------------------
-    Step 4 'Marking the USB ready'
+    Step 3 'Marking the USB ready'
     Set-Content -Path $Ready -Encoding ASCII -Value @(
         'Adal Keep USB dependencies - ready',
         "prepared:  $(Get-Date -Format 'yyyy-MM-dd HH:mm') on $env:COMPUTERNAME",
         "node:      $NodeVersion",
-        "tailscale: $(if ($gotTs) { 'included' } else { 'missing' })"
+        "openssh:   $(if ($gotSsh) { 'included' } else { 'missing' })"
     )
     Ok 'ready'
 }

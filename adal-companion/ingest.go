@@ -90,8 +90,12 @@ func pingServer() bool {
 	}
 	// The router gave this address to another PC, which also runs Adal Keep:
 	// not ours unless it says our number is its own (mainid.go).
-	if known := loadIdentity(); len(known.Macs) > 0 && len(info.Macs) > 0 && !sameCard(known.Macs, normMACs(info.Macs)) && !serverIsOurs(hostServer) {
-		log.Printf("⚠️ %s is another main PC now (not number %s) — looking for ours", hostServer, known.Number)
+	// Checked every time (not only when the card changed): the address may
+	// always have gone to another agency's PC. Nothing is sent to it.
+	if !confirmedOurs(hostServer) {
+		log.Printf("⚠️ %s is another main PC (not ours) — nothing is sent there, looking for ours", hostServer)
+		hostServer = ""
+		os.Setenv("ADAL_HOST_URL", "")
 		return false
 	}
 	// Its network card: found by it next time the router moves it (mainid.go).
@@ -255,6 +259,9 @@ func uploadToIngest(filePath, filename string) {
 // rediscover looks for the main PC on the LAN again (a DHCP lease change is
 // the usual reason a known address stops answering). True when it moved.
 func rediscover() bool {
+	if standbyActing() {
+		return false
+	}
 	log.Println("🔁 Re-scanning the LAN for the Adal Keep server...")
 	if info := discoverServer(2500 * time.Millisecond); info != nil && strings.TrimRight(info.URL, "/") != strings.TrimRight(hostServer, "/") {
 		log.Printf("👉 Server found at %s", info.URL)

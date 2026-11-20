@@ -24,7 +24,19 @@ router.post('/transitions/:source/start', async (req, res) => {
     }
     const accountId = Number(req.body?.account_id) || null
     const limit = Math.max(0, Math.min(1000, Number(req.body?.limit) || 0)) || undefined
-    res.json(startTransition(req.app.locals.db, req.params.source, link, { ...(accountId ? { accountId } : {}), ...(limit ? { limit } : {}) }))
+    // Started on an Adal Companion: the sign-in window and the copy work in its browser, on its screen.
+    let here = {}
+    if (req.pcAccess) {
+      const rb = await import('../services/remoteBrowsers.js')
+      const { ipOf } = await import('../services/networkGate.js')
+      const dev = rb.deviceForRequest(req.pcAccess, ipOf(req))
+      if (dev) {
+        const t = await rb.tabForPerson(dev).catch(e => { console.warn('[transition] Companion browser:', e.message); return null })
+        // Its sign-in window, and a new one if the site signs out later: on the Companion.
+        if (t) here = { browser: t.browser, personPage: t.page, openForPerson: async () => (await rb.tabForPerson(dev)).page }
+      }
+    }
+    res.json(startTransition(req.app.locals.db, req.params.source, link, { ...(accountId ? { accountId } : {}), ...(limit ? { limit } : {}), ...here }))
   } catch (e) { res.status(e.status || 400).json({ error: e.message, ...(e.feature ? { feature: e.feature, plan: e.plan } : {}) }) }
 })
 

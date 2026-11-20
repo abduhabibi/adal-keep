@@ -84,7 +84,7 @@ export async function needsActionToday(db, now = new Date()) {
   const { allStages } = await import('../routes/automations.js')
   const { profiles: stages } = await allStages(db)
   const byId = new Map(stages.map(s => [s.profile_id, s]))
-  const cols = ['id', 'full_name', 'status', 'chosen_at', 'medical_valid_until', 'wafid_appt_date', 'wafid_appt_time', 'tasheer_date', 'tasheer_time']
+  const cols = ['id', 'full_name', 'destination_country', 'status', 'chosen_at', 'medical_valid_until', 'wafid_appt_date', 'wafid_appt_time', 'tasheer_date', 'tasheer_time']
   const have = await db('profiles').columnInfo().catch(() => ({}))
   const profiles = await db('profiles').select(cols.filter(c => c in have))
   const runs = new Map()
@@ -95,7 +95,8 @@ export async function needsActionToday(db, now = new Date()) {
   const list = []
   for (const p of profiles) {
     const items = itemsFor(p, byId.get(p.id) || {}, runs.get(p.id) || {}, now)
-    if (items.length) list.push({ profile_id: p.id, name: p.full_name || `#${p.id}`, items, overdue: items.some(i => i.overdue) })
+    // country: her destination, for the top bar's country filter (empty: Saudi Arabia there).
+    if (items.length) list.push({ profile_id: p.id, name: p.full_name || `#${p.id}`, country: p.destination_country || '', items, overdue: items.some(i => i.overdue) })
   }
   list.sort((a, b) => (b.overdue - a.overdue) || (b.items.length - a.items.length) || String(a.name).localeCompare(String(b.name)))
   return { day: dayOf(now), count: list.length, profiles: list }

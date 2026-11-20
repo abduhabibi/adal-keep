@@ -171,13 +171,47 @@ export function startSessionKeeper(database) {
   db = database
   if (timer) return
   setTimeout(() => keepAlive().catch(() => {}), 60000)
-  timer = setInterval(() => keepAlive().catch(e => console.warn('[sessions]', e.message)), EVERY_MS)
+  timer = setInterval(() => {
+    keepAlive().catch(e => console.warn('[sessions]', e.message))
+    insuranceMorning().catch(e => console.warn('[sessions] insurance morning:', e.message))
+  }, EVERY_MS)
   timer.unref?.()
+}
+
+/** From this hour the insurance (FetaP) sign-in is done by itself, once a day. */
+export const MORNING_HOUR = 7
+
+/** Is the morning insurance sign-in due? (after MORNING_HOUR, not done today, not signed in already) */
+export function insuranceMorningDue(now, lastDay, signedIn) {
+  const day = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+  return { due: now.getHours() >= MORNING_HOUR && lastDay !== day && !signedIn, day }
+}
+
+/**
+ * The insurance sign-in in the morning, by itself (asked on 2026-11-19: FetaP
+ * needs nobody — no "I am not a robot", no approval): the robots and the
+ * certificate fetch then find it signed in. Once a day; a follower PC never.
+ */
+async function insuranceMorning() {
+  if (!db) return
+  const { isFollower } = await import('./mainPC.js')
+  if (isFollower?.()) return
+  const row = await db('settings').where('key', 'insurance_morning_signin').first().catch(() => null)
+  const { due, day } = insuranceMorningDue(new Date(), row?.value, !!kept.insurance?.signedIn)
+  if (!due) return
+  if (!(await db('insurance_accounts').first().catch(() => null))) return
+  if (row) await db('settings').where('key', 'insurance_morning_signin').update({ value: day })
+  else await db('settings').insert({ key: 'insurance_morning_signin', value: day })
+  console.log('[sessions] morning: signing in to the insurance (FetaP) by itself')
+  await openSite('insurance', db)
 }
 
 /** Each site, for the "Morning sign-in" list. */
 export async function sessionsNow() {
-  await keepAlive().catch(() => {})
+  // At once (asked on 2026-11-19): what is known now; the browser's tabs are
+  // looked at behind it (the first time at most 1.5 s), the page asks again soon.
+  const looking = keepAlive().catch(() => {})
+  if (!Object.keys(kept).length) await Promise.race([looking, new Promise(r => setTimeout(r, 1500))])
   const { holderOf } = await import('./tasheerSession.js')
   const holder = db ? await holderOf(db).catch(() => null) : null
   // Insurance is not in the morning sign-in: its robot signs in by itself (FetaP's reCAPTCHA needs nobody).
@@ -270,6 +304,13 @@ export async function openSite(key, database = null, { accountId = null, browser
   }
   const site = SITES.find(s => s.key === key)
   if (!site) throw new Error('Unknown site')
+  // LMIS already open for this account on a Companion: its tab there is used (one LMIS per account, lmisOne.js).
+  if (key === 'lmis' && db && !browser) {
+    try {
+      const home = await (await import('./lmisOne.js')).lmisHome(db, accountId)
+      if (home?.device) browser = await (await import('./remoteBrowsers.js')).browserForDevice(home.device)
+    } catch (e) { console.warn('[sessions] where LMIS is open:', e.message) }
+  }
   browser = browser || await getBrowser()
   // The chosen account in its own browser space when it is not the site's main
   // one: signing in as it never signs the other account out (asked on 2026-11-15).

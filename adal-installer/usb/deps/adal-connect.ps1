@@ -14,7 +14,7 @@ function Say($m) { Write-Host $m; $log.Add($m) }
 Say "=== Adal Connect ($Role) on $env:COMPUTERNAME - $(Get-Date -Format 'yyyy-MM-dd HH:mm') ==="
 
 # 1. OpenSSH Server
-Say "[1/4] OpenSSH Server..."
+Say "[1/5] OpenSSH Server..."
 $zip = Join-Path $PSScriptRoot 'OpenSSH-Win64.zip'
 $dest = "$env:ProgramFiles\OpenSSH"
 if (Get-Service sshd -ErrorAction SilentlyContinue) {
@@ -55,9 +55,14 @@ try {
 # installed, and every other Adal key (the old shared adal-remote-support one,
 # other agencies') is removed. Without a file for the number, the old shared key
 # stays as it was, so nothing breaks until the agency's key is on the USB.
-Say "[2/4] Adal support key..."
+Say "[2/5] Adal support key..."
 $sshDir = "$env:ProgramData\ssh"
 $logDir = Join-Path $sshDir 'logs'
+# A USB made for one agency carries just its key: that number, without asking.
+if ($PcNumber -notmatch '^\d{5}$') {
+  $only = @(Get-ChildItem (Join-Path $PSScriptRoot 'support-keys') -Filter '*.pub' -ErrorAction SilentlyContinue | Where-Object { $_.BaseName -match '^\d{5}$' })
+  if ($only.Count -eq 1) { $PcNumber = $only[0].BaseName; Say "      agency PC number $PcNumber (the key on this USB)" }
+}
 while ($PcNumber -notmatch '^\d{5}$') {
   $PcNumber = (Read-Host "      The agency's 5-digit PC number (Main PC: Adal Keep -> Settings -> Main PC)").Trim()
 }
@@ -103,7 +108,7 @@ try {
 } catch { Say "      log setup problem: $($_.Exception.Message)" }
 
 # 3. Firewall: every network type (Public too - the usual blocker)
-Say "[3/4] Firewall (all network types)..."
+Say "[3/5] Firewall (all network types)..."
 function Rule($name, $proto, $port) {
   netsh advfirewall firewall delete rule name="$name" | Out-Null
   netsh advfirewall firewall add rule name="$name" dir=in action=allow protocol=$proto localport=$port profile=any | Out-Null
@@ -132,11 +137,55 @@ try {
 } catch {}
 
 # 4. Adal Keep itself
-Say "[4/4] Adal Keep..."
+Say "[4/5] Adal Keep..."
 $listen = netstat -ano | Select-String ":$MAIN_PORT\s" | Select-Object -First 3 | ForEach-Object { $_.Line.Trim() }
 Say "      port ${MAIN_PORT}: $(if ($listen) { $listen -join ' | ' } else { 'nothing listening' })"
 $conf = "$COMPDIR\companion.conf"
 if (Test-Path $conf) { Say "      companion.conf: $((Get-Content $conf | Where-Object { $_ -match '^ADAL_HOST_URL' }) -join ' ')" }
+
+# 5. Updates now, and the office network the PCs share on
+Say "[5/5] Updates and sharing on the office network..."
+# What the PCs of an office share with each other: the newest version (UDP 45455 +
+# a Companion's port 47810), the copy of the agency and the server in waiting
+# (47810), which Companion stands in for the main PC (UDP 45456), the stand-in
+# itself (4000, already open above).
+Rule 'Adal Keep Updates (LAN)' UDP 45455
+Rule 'Adal Keep Stand-in (LAN)' UDP 45456
+Rule 'Adal Keep Companion (LAN)' TCP 47810
+Say "      the office network may share updates, the copy, the server and robots"
+$ver = { param($dir) try { ((Get-Content (Join-Path $dir '.adal-version.json') -Raw | ConvertFrom-Json).sha).Substring(0,7) } catch { '?' } }
+$updated = $false
+if ($Role -eq 'Main' -and (Test-Path "$MAINDIR\backend")) {
+  Say "      version now: $(& $ver $MAINDIR)"
+  try {
+    # The newest signed version from Supabase, or from a PC of the office that has it.
+    $r = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:$MAIN_PORT/api/system/update/apply" -ContentType 'application/json' -Body '{"force":true}' -TimeoutSec 900
+    Say "      $(if ($r.message) { $r.message } elseif ($r.ok) { 'updated' } else { ($r | ConvertTo-Json -Compress) })"
+    $updated = $true
+  } catch { Say "      the running Adal Keep could not update itself now: $($_.Exception.Message)" }
+} elseif ($Role -eq 'Companion' -and (Test-Path "$COMPDIR\adal-companion.exe")) {
+  try {
+    $r = Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:47810/update/apply' -Headers @{ 'X-Adal' = '1' } -TimeoutSec 900
+    Say "      $(if ($r.message) { $r.message } else { ($r | ConvertTo-Json -Compress) })"
+    $updated = $true
+  } catch { Say "      the Companion could not update itself now: $($_.Exception.Message)" }
+}
+if (-not $updated) {
+  # No internet, or it is not running: the installer on this USB (the database,
+  # documents and sign-ins are kept; only the program is put in again).
+  $inst = if ($Role -eq 'Main') { Join-Path $UsbRoot '2 - Install Adal Main.exe' } else { Join-Path $UsbRoot '3 - Install Adal Companion.exe' }
+  if (Test-Path $inst) {
+    $wasOn = @(Get-Process -Name 'AdalKeep', 'adal-companion' -ErrorAction SilentlyContinue).Count -gt 0
+    Say "      installing the version on this USB (data kept)..."
+    $p = Start-Process -FilePath $inst -ArgumentList '/S' -Wait -PassThru
+    Say "      installer finished ($($p.ExitCode), 0 = done)"
+    if ($wasOn) {
+      # It was running: its background part again (never a window nobody asked for).
+      if ($Role -eq 'Main') { Start-Process "$MAINDIR\AdalKeep.exe" -ArgumentList '--background' -ErrorAction SilentlyContinue }
+      else { Start-Process "$COMPDIR\adal-companion.exe" -ErrorAction SilentlyContinue }
+    }
+  } else { Say "      no installer on this USB for a $Role PC" }
+}
 
 $lan = (Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -notmatch '^(127\.|169\.254\.)' } | ForEach-Object { $_.IPAddress }) -join ', '
 $summary = @"

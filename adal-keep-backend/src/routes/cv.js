@@ -5,7 +5,7 @@ import { fileURLToPath } from 'url'
 import multer from 'multer'
 import { v4 as uuid } from 'uuid'
 import { ingestTemplate } from '../services/cvTemplateIngest.js'
-import { buildTemplateData, mergeTemplate, htmlToPdf, htmlToSmallPdf } from '../services/cvRender.js'
+import { buildTemplateData, mergeTemplate, htmlToPdf, htmlToSmallPdf, hasProfilePicture, resolveStoredPath } from '../services/cvRender.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SAFE_STORAGE_DIR = path.join(__dirname, '../../data/SafeStorage')
@@ -162,7 +162,7 @@ router.get('/profile-readiness/:profileId', async (req, res) => {
     const profile = await db('profiles').where('id', profileId).first()
     if (!profile) return res.status(404).json({ error: 'Profile not found' })
 
-    const required = ['full_name','first_name','last_name','passport_number','date_of_birth','place_of_birth','nationality','gender','religion','marital_status','children_count','weight','height','living_town','phone_number']
+    const required = ['full_name','first_name','last_name','passport_number','date_of_birth','place_of_birth','nationality','gender','religion','marital_status','children_count','weight','height','phone_number']  // living town: not asked (the CV uses her place of birth)
     const missing = required.filter(k => {
       const v = profile[k]
       return v === null || v === undefined || v === ''
@@ -178,8 +178,10 @@ router.get('/profile-readiness/:profileId', async (req, res) => {
     const fileMap = {}
     for (const row of counts) fileMap[row.name] = Number(row.file_count || 0)
 
-    const has_photo = (fileMap['Photo'] || 0) > 0 || !!profile.photo_path
-    const has_full_body_photo = (fileMap['Full Body Photo'] || 0) > 0
+    // Listed is not enough: the picture's file must be on this PC (a phone's photo can arrive later),
+    // or the CV shows "No photo" — the CV page then asks for the picture instead.
+    const has_photo = ((fileMap['Photo'] || 0) > 0 && await hasProfilePicture(db, profileId, 'Photo')) || (!!profile.photo_path && !!resolveStoredPath(profile.photo_path))
+    const has_full_body_photo = (fileMap['Full Body Photo'] || 0) > 0 && await hasProfilePicture(db, profileId, 'Full Body Photo')
 
     // ---- CV-generation blockers ----
     const cv_blockers = []

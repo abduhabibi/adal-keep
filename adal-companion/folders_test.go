@@ -59,7 +59,11 @@ func TestMissedFilesSecondSweep(t *testing.T) {
 	os.WriteFile(old, []byte("x"), 0o644)
 	long := time.Now().Add(-time.Hour)
 	os.Chtimes(old, long, long)
-	since := time.Now().Add(-time.Minute)
+	// On Windows a file counts from when it arrived (its creation time), not its
+	// change time: the sweep starts after the old file came, before the fresh one.
+	time.Sleep(30 * time.Millisecond)
+	since := time.Now()
+	time.Sleep(30 * time.Millisecond)
 	missedFiles([]string{dir}, since, map[string]time.Time{})
 	fresh := filepath.Join(dir, "fresh.pdf")
 	os.WriteFile(fresh, []byte("x"), 0o644)

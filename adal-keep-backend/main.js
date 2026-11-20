@@ -54,11 +54,13 @@ import { startWorker } from './src/services/worker.js'
 import { startScanner } from './src/services/autoScanner.js'
 import verificationRouter from './src/routes/verification.js'
 import newProfileRouter from './src/routes/newProfile.js'
+import cropReviewsRouter from './src/routes/cropReviews.js'
 import chatRouter, { watchPaid } from './src/routes/chat.js'
 import trashRouter from './src/routes/trash.js'
 import mainPCRouter from './src/routes/mainPC.js'
 import mobileRouter from './src/routes/mobile.js'
 import branchMergeRouter from './src/routes/branchMerge.js'
+import standbyRouter from './src/routes/standby.js'
 import wafidRouter from './src/routes/wafid.js'
 import backupRouter from './src/routes/backup.js'
 import replicaRouter from './src/routes/replica.js'
@@ -104,7 +106,7 @@ import('./src/services/bodySize.js').then(b => import('./src/services/changes.js
 
 app.use(diagMiddleware)
 app.use(featureUseMiddleware)   // how much each feature is used (Adal Keep Admin → Usage)
-startFeatureUse(db)
+if (process.env.ADAL_ISOLATED !== '1') startFeatureUse(db)
 // Security headers first, for every answer.
 app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false, crossOriginResourcePolicy: { policy: "cross-origin" }, frameguard: false }))
 // Only Adal Keep's own pages may call it from a browser (no other website).
@@ -203,11 +205,13 @@ app.use('/api', automationsRouter)
 // 3-green-tick verification gate + the LAN endpoints the Employee-PC Companion talks to
 app.use('/api', verificationRouter)
 app.use('/api', newProfileRouter)
+app.use('/api', cropReviewsRouter)   // crops a person checks before they go into her boxes
 app.use('/api', chatRouter)
 app.use('/api', trashRouter)
 app.use('/api', mainPCRouter)
 app.use('/api', mobileRouter)   // the phone app pairs with this PC
 app.use('/api', branchMergeRouter)
+app.use('/api', standbyRouter)   // every Companion: the server in waiting, and its merge back
 app.use('/api', wafidRouter)
 app.use('/api', backupRouter)
 app.use('/api', replicaRouter)   // Companions keep a locked copy; /safety (backup age, licence end)
@@ -248,8 +252,11 @@ async function initSystem() {
       if (!notMainPC()) import('./src/services/whatsapp.js').then(w => w.startWhatsApp(db)).catch(e => console.warn('[whatsapp]', e.message))
       import('./src/services/browser.js').then(b => b.startBrowserQuietly())
       import('./src/services/secretStore.js').then(s => s.moveSecretsToVault())
-      import('./src/services/accountVault.js').then(v => {
+      import('./src/services/accountVault.js').then(async v => {
         const lock = () => v.sealStored(db).catch(e => console.warn('[vault]', e.message))
+        // First: the key really opens this database's passwords (else the kept copy
+        // that does is put back) — nothing is locked with a wrong key meanwhile.
+        await import('./src/services/keySafe.js').then(k => k.guardVaultKey(db)).catch(e => console.warn('[keys]', e.message))
         lock()
         setInterval(lock, 60_000).unref()
       })
@@ -315,7 +322,7 @@ async function initSystem() {
 }
 
 app.locals.runInit = initSystem
-setInterval(async () => { try { await maybeNotify(app.locals.db, statusPayload()) } catch {} }, 3600000)
+if (process.env.ADAL_ISOLATED !== '1') setInterval(async () => { try { await maybeNotify(app.locals.db, statusPayload()) } catch {} }, 3600000)
 
 // Helper function to filter object keys
 function pick(obj, keys) {
@@ -340,6 +347,11 @@ app.get('/api/system/portals', async (req, res) => {
   const p = await import('./src/services/portalHealth.js')
   res.json(req.query.now ? await p.checkPortals({ retryMs: 5000 }) : p.portalStatus())
 })
+// The office's PCs sharing their power: how strong each is now, what it does (services/sharePower.js).
+app.get('/api/system/share-power', async (req, res) => {
+  try { res.json(await (await import('./src/services/sharePower.js')).shareReport(app.locals.db)) }
+  catch (e) { res.status(500).json({ error: e.message }) }
+})
 // Settings → Health: each robot's last success and failure (read-only, starts nothing).
 app.get('/api/system/automation-health', async (req, res) => {
   try { res.json(await (await import('./src/services/automationHealth.js')).automationHealth(app.locals.db)) }
@@ -347,7 +359,8 @@ app.get('/api/system/automation-health', async (req, res) => {
 })
 app.get('/api/health', (req, res) => {
   // role/instance let another PC check it is choosing a real main PC.
-  res.json({ status: 'ok', role: isCompanion() ? 'companion' : isFollower() ? 'follower' : 'main', main_url: mainURL() || undefined, instance: instanceId() })
+  // acting: an Adal Companion (the older Go kind) standing in for the main PC while it is away (services/standby).
+  res.json({ status: 'ok', role: isCompanion() ? 'companion' : isFollower() ? 'follower' : 'main', main_url: mainURL() || undefined, instance: instanceId(), ...(process.env.ADAL_ACTING_MAIN === '1' ? { acting: true, acting_since: process.env.ADAL_ACTING_SINCE || null } : {}) })
 })
 
 app.get('/api/dashboard', async (req, res) => {
@@ -431,7 +444,7 @@ app.get('/api/profiles/brief', async (req, res) => {
     res.json(await db('profiles')
       .leftJoin('brokers', 'profiles.broker_id', 'brokers.id')
       .select('profiles.id', 'profiles.full_name', 'profiles.passport_number', 'profiles.labor_id', 'profiles.phone_number',
-        'profiles.order_id', 'profiles.updated_at', 'profiles.broker_id', 'brokers.name as broker_name')
+        'profiles.order_id', 'profiles.updated_at', 'profiles.broker_id', 'profiles.destination_country', 'brokers.name as broker_name')
       .orderBy('profiles.created_at', 'desc'))
   } catch (err) {
     console.error(err)
@@ -831,7 +844,8 @@ app.delete('/api/brokers/:id', async (req, res) => {
 })
 
 // The document fields not used for now: kept (with any file in them), not offered.
-const HIDDEN_FIELDS = new Set(['COC', 'Saudi-letter', 'Musaned', 'Broker ID', 'Ticket-ongoing', 'Ticket-deported', 'Experience Form', 'Employee ID', 'Client ID'])
+// Medical Report and Labour ID too (asked on 2026-11-19): Wafid's result and the Labor ID live on the profile itself.
+const HIDDEN_FIELDS = new Set(['COC', 'Saudi-letter', 'Musaned', 'Broker ID', 'Ticket-ongoing', 'Ticket-deported', 'Experience Form', 'Employee ID', 'Client ID', 'Medical Report', 'Labour ID'])
 
 // Fetch & auto-create permanent profile fields
 app.get('/api/profiles/:id/fields', async (req, res) => {
@@ -1261,8 +1275,13 @@ cron.schedule('0 2 * * *', async () => {
 
 // 5. Start Server
 initSystem().then(() => {
-  app.listen(PORT, () => {
+  // A Companion standing in for the main PC listens on this PC only (127.0.0.1): the
+  // office comes through adal-companion.exe (services/standby, ADAL_LISTEN_HOST).
+  app.listen(PORT, process.env.ADAL_LISTEN_HOST || undefined, () => {
     console.log(`🚀 Backend running on http://localhost:${PORT}`)
+    // ADAL_ISOLATED=1: pages and data only — no robots, no scanner, no online copy, no
+    // backups, no discovery, no updates (checking a copy of an agency on another PC).
+    if (process.env.ADAL_ISOLATED === '1') { console.log('🔒 Isolated: no background work'); return }
     startUpdateWatcher(app.locals.db) // a new version installs by itself when no run is working
     import('./src/services/screenClip.js').then(c => c.startClipWatcher(PORT)).catch(e => console.warn('[clip]', e.message)) // double C crops the screen anywhere on this PC
     // New selections on Musaned, every hour, on ONE PC of the agency (the main PC picks the strongest).
@@ -1304,7 +1323,8 @@ initSystem().then(() => {
     startDiscoveryResponder({
       port: Number(process.env.DISCOVERY_PORT) || undefined,
       name: 'Adal Keep',
-      getInfo: () => ({ port: Number(PORT) }),
+      // A Companion standing in for the main PC: the office reaches it on its Companion's port (4000).
+      getInfo: () => ({ port: Number(process.env.ADAL_ADVERTISE_PORT) || Number(PORT) }),
     })
   })
 })

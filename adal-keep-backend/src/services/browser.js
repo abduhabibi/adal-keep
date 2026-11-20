@@ -325,15 +325,23 @@ async function newWindow(browser, bounds, background) {
  * A run's new tab, in the agents' window: no new window ever shows. A plain new
  * tab would go to the last used window, a person's.
  */
-export async function newRunTab(browser, space = null) {
+export async function newRunTab(browser, space = null, { quiet = false } = {}) {
   // An account's own space: a tab there (its window), signed in as that account.
   // (Out of sight too: a space's first tab is a window of its own, and a run is never seen working.)
   if (space && space !== browser.defaultBrowserContext?.()) {
     const page = await backgroundTab(browser, space.id).catch(() => space.newPage())
-    if (HIDDEN) await hide(page).catch(() => {})
+    if (HIDDEN || quiet) await hide(page).catch(() => {})
+    if (quiet) keepBehind(page)
     return page
   }
   if (!browser.target) return browser.newPage()
+  // Work for another PC (services/sharePower.js): in the agents' window out of
+  // sight on that PC, and it never comes to the front there.
+  if (quiet) {
+    const made = _opening.then(() => tabInAgentsWindow(browser))
+    _opening = made.catch(() => {})
+    return keepBehind(await made)
+  }
   // On the person's screen: the run's tab opens behind, the person stays on the tab they are on.
   if (!HIDDEN) return backgroundTab(browser).catch(() => browser.newPage())
   // One at a time: the new tab is told apart by being the only new one.
@@ -342,6 +350,15 @@ export async function newRunTab(browser, space = null) {
   return made
 }
 let _opening = Promise.resolve()
+
+/** A tab working for another PC never jumps in front of the person at this one. */
+function keepBehind(page) {
+  if (page && !page.__adalBehind) {
+    page.__adalBehind = true
+    page.bringToFront = async () => {}
+  }
+  return page
+}
 
 /** A new tab that opens behind the one the person is on (it is not brought forward). */
 async function backgroundTab(browser, browserContextId = undefined) {

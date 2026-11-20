@@ -441,6 +441,11 @@ async function sendToFreeCompanion(db, job) {
   } catch (e) { console.warn('[worker] no Companion for it:', e.message) }
 }
 
+/** A run another PC does for the one it came from (sharePower.js): out of sight there. */
+function helpedRun(job) {
+  try { return !!JSON.parse(job.context || '{}').quiet } catch { return false }
+}
+
 /** The Adal Companion this run was started on (its robot works there), or ''. */
 function onDevice(job) {
   try { return String(JSON.parse(job.context || '{}').on_device || '') } catch { return '' }
@@ -455,8 +460,11 @@ async function browserForJob(db, job, { quiet = false } = {}) {
   if (dev) {
     const rb = await import('./remoteBrowsers.js')
     try {
-      const b = await rb.browserForDevice(dev)
-      if (!quiet) await appendLog(db, job.id, `Working in ${rb.deviceOf(b)?.name || 'the Companion'}'s Adal Browser (on that PC's screen)`)
+      const helping = helpedRun(job)
+      const b = await rb.browserForDevice(dev, { quiet: helping })
+      if (!quiet) await appendLog(db, job.id, helping
+        ? `Working in ${rb.deviceOf(b)?.name || 'the Companion'}'s Adal Browser for this PC (out of sight there)`
+        : `Working in ${rb.deviceOf(b)?.name || 'the Companion'}'s Adal Browser (on that PC's screen)`)
       return b
     } catch (e) {
       if (!quiet) await appendLog(db, job.id, `The Companion's browser could not be reached (${e.message}) — working on the main PC instead`, 'warn')
@@ -494,13 +502,20 @@ async function runJob(db, job) {
       })
       return
     }
+    // A weak or busy PC's run (once): the strongest PC in the office does it,
+    // out of sight there, watched here (services/sharePower.js).
+    try {
+      const { placeRun } = await import('./sharePower.js')
+      const line = await placeRun(db, job, { mainAllowed: !nobodyAsked || !!(await openBrowserIfAny()) })
+      if (line) { await appendLog(db, job.id, line); console.log(`[share] run #${job.id}: ${line}`) }
+    } catch (e) { console.warn(`[share] run #${job.id} stays where it is:`, e.message) }
     const browser = await browserForJob(db, job)
     // After a server restart the run finds the tab it worked in again.
     await findRunTab(browser, job.id, job.workflow_id, { bySite: false }).catch(() => null)
     // Otherwise a free tab already on the site (signed in), else a new one.
     // A portal account other than the main one works in its own browser space (its own sign-in).
     const space = await spaceForRun(db, browser, job).catch(e => { console.warn(`[worker] run #${job.id}: no space of its own (${e.message})`); return null })
-    const page = await openRunTab(browser, job.id, { workflowId: job.workflow_id, busyRuns: await activeRunIds(db), keepRuns: await keepingRunIds(db), space })
+    const page = await openRunTab(browser, job.id, { workflowId: job.workflow_id, busyRuns: await activeRunIds(db), keepRuns: await keepingRunIds(db), space, quiet: helpedRun(job) })
     // Which account the tab is: its title starts with the account's name.
     try {
       const { labelTab, accountLabel } = await import('./robotCheck.js')

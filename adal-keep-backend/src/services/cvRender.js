@@ -662,11 +662,48 @@ export function warmPdfBrowser() {
   }, () => false)
 }
 
+/**
+ * A weak or busy PC: the CV is drawn in the strongest PC's browser on the
+ * office network (out of sight there) and the PDF comes back here
+ * (services/sharePower.js). Anything wrong there: drawn here, as before.
+ */
+async function pdfElsewhere(html, outPath) {
+  let page = null
+  try {
+    const { helperForPdf } = await import('./sharePower.js')
+    const id = await helperForPdf()
+    if (!id) return false
+    const rb = await import('./remoteBrowsers.js')
+    const browser = await rb.browserForDevice(id, { quiet: true })
+    const { newRunTab } = await import('./browser.js')
+    page = await newRunTab(browser, null, { quiet: true })
+    const pdf = await drawPdf(page, html, null)
+    fs.writeFileSync(outPath, Buffer.from(pdf))
+    console.log(`[cv] PDF drawn by ${rb.deviceOf(browser)?.name || 'another PC'} for this PC`)
+    return true
+  } catch (e) {
+    console.warn('[cv] the other PC could not draw it — drawn here:', e.message)
+    return false
+  } finally { if (page) await page.close().catch(() => {}) }
+}
+
 export async function htmlToPdf(html, outPath) {
+  if (await pdfElsewhere(html, outPath)) return
   clearTimeout(_idle)
   const browser = await pdfBrowser()
   const page = await browser.newPage()
   try {
+    await drawPdf(page, html, outPath)
+  } finally {
+    await page.close().catch(() => {})
+    _idle = setTimeout(() => { _pdfBrowser?.close().catch(() => {}); _pdfBrowser = null }, 5 * 60000)
+    _idle.unref?.()
+  }
+}
+
+/** The CV in that tab, as an A4 PDF (to outPath, or its bytes). */
+async function drawPdf(page, html, outPath) {
+  {
     // Everything is inline (data: images), so "load" is enough.
     await page.setContent(html, { waitUntil: 'load', timeout: 60000 })
     await page.evaluate(() => window.adalFit?.())
@@ -686,17 +723,13 @@ export async function htmlToPdf(html, outPath) {
       const breaks = [...document.querySelectorAll('body *')].filter(e => /always|page/.test(getComputedStyle(e).breakBefore) || getComputedStyle(e).pageBreakBefore === 'always').length
       return first ? 1 + breaks : 0
     }).catch(() => 0)
-    await page.pdf({
-      path: outPath,
+    return page.pdf({
+      ...(outPath ? { path: outPath } : {}),
       format: 'A4',
       printBackground: true,
       margin: { top: '0', right: '0', bottom: '0', left: '0' },
       ...(pages > 0 ? { pageRanges: `1-${pages}` } : {}),
     })
-  } finally {
-    await page.close().catch(() => {})
-    _idle = setTimeout(() => { _pdfBrowser?.close().catch(() => {}); _pdfBrowser = null }, 5 * 60000)
-    _idle.unref?.()
   }
 }
 

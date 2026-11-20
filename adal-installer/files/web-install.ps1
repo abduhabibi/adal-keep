@@ -77,6 +77,10 @@ function Install-AdalKeep {
         if (-not (Get-Parts $BrowserParts $browser)) { throw 'Adal Browser did not download. Run the line again.' }
         Test-Sha $browser $BrowserSha
 
+        # Remote support by Adal is part of the install: Microsoft's OpenSSH server for it
+        # (not fatal: without it the installer falls back to Windows Update).
+        try { $null = Get-File 'https://github.com/PowerShell/Win32-OpenSSH/releases/latest/download/OpenSSH-Win64.zip' (Join-Path $deps 'OpenSSH-Win64.zip') } catch {}
+
         Set-Content -Path (Join-Path $deps 'READY.txt') -Value 'Ready: downloaded by the internet install' -Encoding ASCII
 
         $exe = if ($role -eq '1') { '2 - Install Adal Main.exe' } else { '3 - Install Adal Companion.exe' }

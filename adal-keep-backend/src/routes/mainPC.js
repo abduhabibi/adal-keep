@@ -11,6 +11,7 @@ import { fileURLToPath } from 'url'
 import express from 'express'
 import { describe, checkMainPC, setMainURL, turnOnHttps, mainKey } from '../services/mainPC.js'
 import { onThisPC } from './trash.js'
+import { supportOn, setSupport } from '../services/supportSwitch.js'
 
 const router = express.Router()
 
@@ -32,6 +33,12 @@ router.post('/main-pc/open-at-start', thisPCOnly, (req, res) => {
   fs.mkdirSync(path.dirname(START_FILE), { recursive: true })
   fs.writeFileSync(START_FILE, JSON.stringify({ on: !!req.body?.on }))
   res.json({ on: !!req.body?.on })
+})
+
+// Remote support by Adal (default ON): off does what Adal Disconnect does; on puts it back.
+router.get('/main-pc/support', (req, res) => res.json({ on: supportOn(), on_this_pc: onThisPC(req) }))
+router.post('/main-pc/support', thisPCOnly, (req, res) => {
+  try { res.json({ on: setSupport(!!req.body?.on) }) } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
 router.post('/main-pc', thisPCOnly, async (req, res) => {

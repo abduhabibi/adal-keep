@@ -117,6 +117,7 @@ else
   echo "   version: none — there are uncommitted changes, so Check for updates will offer the GitHub version"
 fi
 cp -f "$INST/files/stop-adal.ps1" "$STAGE/"
+cp -f "$INST/files/support-setup.ps1" "$STAGE/"
 cp -f "$INST/files/clean-main.ps1" "$STAGE/"
 file "$STAGE/main/"*.exe | sed 's/^/   /'
 

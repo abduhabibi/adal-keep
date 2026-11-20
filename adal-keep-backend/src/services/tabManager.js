@@ -297,6 +297,8 @@ export async function keepingRunIds(db) {
 }
 
 const ownerOf = (p) => { for (const [id, t] of _tabs) if (t === p) return id; return null }
+/** Does a run work in this tab? */
+export const isRunTab = (p) => ownerOf(p) !== null
 
 /** A person is using this tab now (clicked or typed in the last minute, or typed a form). */
 async function personIn(p) {
@@ -419,6 +421,18 @@ export async function openRunTab(browser, runId, { workflowId = '', busyRuns = n
   // Work for another PC (sharePower.js): its own tab in the window out of sight
   // there — never a tab the person at that PC may be looking at.
   if (quiet) {
+    // LMIS: the tab already there is taken (never a second LMIS of the same account).
+    const there = peerOf(workflowId) === 'lmis' ? await oneAtATime(async () => {
+      const p = await findFreeTab(browser, workflowId, busyRuns, space)
+      if (p) _tabs.set(id, p)
+      return p
+    }) : null
+    if (there) {
+      await letPageGo(there)
+      await setupTab(there, { runId: id })
+      console.log(`[tabManager] run #${id} took the LMIS tab already there (helping another PC)`)
+      return there
+    }
     const page = await newRunTab(browser, space, { quiet: true })
     _tabs.set(id, page)
     await setupTab(page, { runId: id })

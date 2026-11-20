@@ -25,7 +25,10 @@ export default function SmsCodesSwitch() {
     api.get('/lmis/accounts').then(r => setAccounts(Array.isArray(r.data) ? r.data : [])).catch(() => {})
   }, [])
   if (!plugin()?.smsForward) return null
-  const chosen = String(st?.account || '').split(' | ').filter(Boolean)
+  // Ticked accounts, each with the SIM its number is in (0 = not said): "1:nuzla · 0911… | 2:ZAD · …".
+  const chosen = String(st?.account || '').split(' | ').filter(Boolean).map(x => { const m = /^([12]):(.*)$/.exec(x); return { sim: m ? Number(m[1]) : 0, n: m ? m[2] : x } })
+  const has = (n) => chosen.find(c => c.n === n)
+  const text = (list) => list.map(c => (c.sim ? `${c.sim}:` : '') + c.n).join(' | ')
   const send = async (account) => {
     // The online-copy code (60 kB) only when this is switched: Settings on a PC never needs it.
     const { cloudCreds } = await import('../cloud/adapter.js')
@@ -37,18 +40,17 @@ export default function SmsCodesSwitch() {
     try {
       if (st?.on) { setSt(await plugin().smsForward({ on: false })); return toast.success('LMIS codes are not sent any more') }
       // One LMIS account: it is this phone's number.
-      const r = await send(chosen.length ? chosen.join(' | ') : accounts.length === 1 ? nameOf(accounts[0]) : '')
+      const r = await send(chosen.length ? text(chosen) : accounts.length === 1 ? nameOf(accounts[0]) : '')
       if (!r) return
       setSt(r)
       toast.success(r.allowed ? 'LMIS codes now go to Adal Keep by themselves' : 'Allow "SMS" when Android asks — then LMIS codes go to Adal Keep', { duration: 7000 })
       setTimeout(load, 4000)
     } catch (e) { toast.error(e.message) }
   }
-  const pick = async (a) => {
-    const n = nameOf(a)
-    const next = chosen.includes(n) ? chosen.filter(x => x !== n) : [...chosen, n]
-    try { const r = await send(next.join(' | ')); if (r) setSt(r) } catch (e) { toast.error(e.message) }
-  }
+  const save = async (next) => { try { const r = await send(text(next)); if (r) setSt(r) } catch (e) { toast.error(e.message) } }
+  const pick = (a) => { const n = nameOf(a); save(has(n) ? chosen.filter(c => c.n !== n) : [...chosen, { sim: 0, n }]) }
+  // Two LMIS numbers in one phone (two SIMs): which SIM each is, so each code goes to its own account.
+  const simOf = (a, sim) => { const n = nameOf(a); save(chosen.map(c => c.n === n ? { ...c, sim } : c)) }
   return (
     <div className="mt-3 rounded-xl border border-slate-200 p-3 dark:border-slate-700">
       <label className="flex cursor-pointer items-center gap-3">
@@ -63,10 +65,16 @@ export default function SmsCodesSwitch() {
         <div className="mt-3 border-t border-slate-200 pt-2 dark:border-slate-700">
           <p className="mb-1 text-xs font-semibold text-slate-500">The LMIS account whose number is in this phone:</p>
           {accounts.map(a => (
-            <label key={a.id} className="flex cursor-pointer items-center gap-2 py-1 text-sm">
-              <input type="checkbox" className="h-4 w-4 accent-teal-600" checked={chosen.includes(nameOf(a))} onChange={() => pick(a)} />
-              <span className="truncate">{nameOf(a)}</span>
-            </label>
+            <div key={a.id} className="flex items-center gap-2 py-1 text-sm">
+              <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2">
+                <input type="checkbox" className="h-4 w-4 accent-teal-600" checked={!!has(nameOf(a))} onChange={() => pick(a)} />
+                <span className="truncate">{nameOf(a)}</span>
+              </label>
+              {chosen.length > 1 && has(nameOf(a)) && [1, 2].map(n => (
+                <button key={n} type="button" onClick={() => simOf(a, has(nameOf(a)).sim === n ? 0 : n)}
+                  className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${has(nameOf(a)).sim === n ? 'bg-teal-600 text-white' : 'border border-slate-300 text-slate-500 dark:border-slate-600'}`}>SIM {n}</button>
+              ))}
+            </div>
           ))}
         </div>
       )}

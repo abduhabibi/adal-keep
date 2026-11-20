@@ -47,7 +47,7 @@ var (
 	telegramAPI    = strings.TrimRight(envStr("ADAL_TELEGRAM_API", "https://api.telegram.org"), "/")
 	replicaMu      sync.Mutex // one sync or backup at a time
 	replicaClient  = &http.Client{Timeout: 3 * time.Minute}
-	syncEvery      = time.Duration(envInt("ADAL_REPLICA_MINUTES", 15)) * time.Minute
+	syncEvery      = time.Duration(envInt("ADAL_REPLICA_MINUTES", 5)) * time.Minute // only the changed pieces travel
 	piecePattern   = regexp.MustCompile(`^[df]-[0-9a-f]{1,40}-[0-9a-f]{1,40}(-[0-9]{1,6})?\.bin$`)
 	errNoNumber    = errors.New("the main PC's number is not known yet (it is saved when this PC joins with it)")
 	errNotOurMain  = errors.New("that main PC does not have our number")
@@ -741,7 +741,7 @@ func watchReplica() {
 		return
 	}
 	go func() {
-		time.Sleep(90 * time.Second) // let the PC finish starting first
+		time.Sleep(30 * time.Second) // let the PC finish starting first
 		var lastSync time.Time
 		var mainOffSince time.Time
 		saidNoNumber := false
@@ -749,6 +749,10 @@ func watchReplica() {
 			switch {
 			case signedOut():
 			case hostServer != "" && pingServer() && !serverLocked():
+				// The main PC back (or found for the first time): the copy is brought up to date at once.
+				if !mainOffSince.IsZero() {
+					lastSync = time.Time{}
+				}
 				mainOffSince = time.Time{}
 				if time.Since(lastSync) >= syncEvery {
 					lastSync = time.Now()

@@ -12,6 +12,7 @@ import Button from '../components/shared/Button'
 import { formatDate } from '../lib/utils'
 import FieldCard from '../components/fields/FieldCard'
 import NeedsFill from '../components/NeedsFill'
+import CropReview from '../components/CropReview'
 import PrioritizeButton from '../components/PrioritizeButton'
 import ProfileAutomations from '../components/ProfileAutomations'
 import ProfileJourney from '../components/ProfileJourney'
@@ -248,6 +249,8 @@ export default function ProfileDetailPage() {
 
   return (
     <div className="animate-fade-up space-y-6">
+      {/* A picture JEV cut into parts: a person checks the crop before it goes in. */}
+      <CropReview profileId={id} onSaved={refreshAll} />
       {editOpen && (
         <GlassPopup onClose={() => setEditOpen(false)} wide>
           <ProfileFormPage embeddedId={id} onDone={(saved) => { setEditOpen(false); if (saved) refreshAll() }} />

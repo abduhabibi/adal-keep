@@ -54,6 +54,7 @@ import { startWorker } from './src/services/worker.js'
 import { startScanner } from './src/services/autoScanner.js'
 import verificationRouter from './src/routes/verification.js'
 import newProfileRouter from './src/routes/newProfile.js'
+import cropReviewsRouter from './src/routes/cropReviews.js'
 import chatRouter, { watchPaid } from './src/routes/chat.js'
 import trashRouter from './src/routes/trash.js'
 import mainPCRouter from './src/routes/mainPC.js'
@@ -199,6 +200,7 @@ app.use('/api', automationsRouter)
 // 3-green-tick verification gate + the LAN endpoints the Employee-PC Companion talks to
 app.use('/api', verificationRouter)
 app.use('/api', newProfileRouter)
+app.use('/api', cropReviewsRouter)   // crops a person checks before they go into her boxes
 app.use('/api', chatRouter)
 app.use('/api', trashRouter)
 app.use('/api', mainPCRouter)

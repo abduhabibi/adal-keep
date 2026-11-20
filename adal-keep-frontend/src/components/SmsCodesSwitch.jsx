@@ -55,7 +55,7 @@ export default function SmsCodesSwitch() {
         <input type="checkbox" checked={!!st?.on} onChange={flip} className="h-5 w-5 accent-teal-600" />
         <span className="min-w-0 flex-1">
           <span className="block text-sm font-semibold">📩 Send LMIS codes to Adal Keep</span>
-          <span className="block text-xs text-slate-500">LMIS's sign-in code (its SMS) goes to Adal Keep by itself. When Adal Keep's robot pressed Sign In, the code goes to it alone: it types it, signs in and carries on. When a person signed in by hand, every PC's tray shows the code to copy. Only LMIS messages are looked at.</span>
+          <span className="block text-xs text-slate-500">LMIS's code is typed in by itself, on the PC that pressed Sign In. Only LMIS messages are read.</span>
         </span>
       </label>
       {st?.on && !st.allowed && <p className="mt-2 text-xs font-semibold text-amber-700">Android has not allowed SMS yet: turn this off and on again and press Allow. No Allow shows? Android → Settings → Apps → Adal Keep → ⋮ (top right) → Allow restricted settings, then Permissions → SMS → Allow.</p>}

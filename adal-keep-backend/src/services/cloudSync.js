@@ -25,7 +25,9 @@ import { getLanAddresses } from './discovery.js'
 // a Companion typing it found an empty copy).
 // The PC's office addresses too: a Companion that joined with the PC number
 // opens this PC directly from them (instant) instead of through the cloud.
-const lanNow = () => { try { return getLanAddresses().map(a => a.address).slice(0, 6) } catch { return [] } }
+// (getLanAddresses gives the addresses themselves: '.address' of each was undefined, so the
+// heartbeat said lan: [null, null] and no Companion could find the main PC from it.)
+export const lanNow = () => { try { return getLanAddresses().map(a => typeof a === 'string' ? a : a?.address).filter(Boolean).slice(0, 6) } catch { return [] } }
 // The beat also says which licence this PC uses and whether it is suspended (Admin shows it).
 let licBeat = null
 import('./plans.js').then(P => { licBeat = () => { const l = P.licenseNow(); return l ? { lic_at: l.at || null, suspended: !!l.suspended } : {} } }).catch(() => {})

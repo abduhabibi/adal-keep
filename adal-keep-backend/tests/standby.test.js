@@ -99,3 +99,10 @@ test('the server\'s settings travel only locked with the agency\'s key', async (
   assert.throws(() => unlock(locked, 'another key'))
   assert.equal(lockedSettingsDir({ envFile: env + '.none', password: 'x' }), null)
 })
+
+test("the main PC's heartbeat says its office addresses (Companions find it by them)", async () => {
+  const { lanNow } = await import('../src/services/cloudSync.js')
+  const lan = lanNow()
+  assert.ok(Array.isArray(lan))
+  assert.ok(lan.every(a => typeof a === 'string' && /^\d+\.\d+\.\d+\.\d+$/.test(a)), JSON.stringify(lan))
+})

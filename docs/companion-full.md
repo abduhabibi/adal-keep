@@ -188,6 +188,42 @@ happen in practice.)
   online account the main PC made for it at join (`/pc-access/online-copy`).
   With every PC on the office network nothing goes online.
 
+### 7b. The PCs find each other, with or without the main PC (`peers.js`, 2026-11-20)
+
+"Companions must see each other": every PC of the agency (Main and every
+Companion) answers and asks on the office network, and copies with **any**
+PC it reaches — there is no hub.
+
+* **UDP.** Every PC's discovery socket (UDP 45454, `discovery.js`, now started
+  on every PC; "where is Adal Keep?" is still answered by the main role only)
+  answers `ADAL_KEEP_PEERS_V1|<tags>|<pc_id>|<port>|<ips>|<macs>|<name>` with
+  `ADAL_KEEP_PEER_V1|…`. A round asks this broadcast first whenever some PC was
+  not reached last time. Hearing the ask of a PC not reached lately starts a
+  round with it at once (a PC just switched on is caught up in seconds).
+* **Same agency only.** `<tags>` = a hash of the agency's first PC (the slot-1
+  row of `sync_pcs`, the same on every PC) and a hash of the main PC's number
+  (from the signed licence record; the scheme the update sharing uses). A
+  message is taken only when a tag is ours **and** its `pc_id` is on our
+  `sync_pcs` list (not removed / suspended). Another agency's PC on the same
+  Wi-Fi is never listened to, and could not sync anyway (every `/sync` call
+  carries the PC's key, checked against `sync_pcs`).
+* **ARP.** Each PC writes its network cards in its own row (`sync_pcs.macs`).
+  A PC the addresses and the broadcast do not reach is looked for in the
+  neighbour table (Linux `/proc/net/arp`, elsewhere `arp -a`, hidden).
+* **Relay.** `/sync/pull` answers the entries of every origin, and a PC passes
+  on what it received (`pushSoon` after an apply too), so A ↔ B ↔ Main works
+  with A never meeting Main.
+* **Main off the LAN.** The Companions keep working and copying with each
+  other; Main is caught up when it is back (at its start it first has a word
+  with the other PCs, ≤ 6 s, before deciding it holds the role).
+* **Settings → The agency's PCs** lists every PC: name, IP, last seen, on the
+  network or not, **in sync** or **behind (n changes)** / **n new for this PC**
+  (by the vectors last heard).
+* **The main role with Main off:** "Make this PC the main PC…" on a Companion —
+  without asking twice once Main has not been seen for 15 minutes; earlier only
+  with a **second confirmation** (and `force`), so two PCs never run the robots
+  at once.
+
 ### 8. The main role (`roles.js`)
 
 * `sync_role 'main'` names the holder. Each PC's `sync_pcs.seen_at` is its
@@ -233,6 +269,19 @@ happen in practice.)
   must still hear it was paid for) and after the network gate.
 
 ## Tests (all on scratch folders; Supabase and Telegram off)
+
+* `tests/syncPeers.test.js` — the agency's tags; another agency's PC and a PC not
+  on the list ignored; the broadcast over real UDP; Main off, the Companions
+  copy with each other at an address only the broadcast knew; found by the
+  network card (ARP); a PC in the middle passes changes on; in sync / behind.
+* Four real `main.js` (2026-11-20, scratch copies, no `.env`, own `HOME`,
+  updates and browser off, the LAN broadcast on a spare UDP port): Main + two
+  Companions joined by number + another agency's Main. Main off: each
+  Companion saw the other's new profile in ≤ 3.4 s, an edit in 2.6 s; Main
+  back had everything at its start; a Companion moved to another port was
+  found again (4.5 s); taking the role while Main was seen refused without
+  `force`; the other agency's PC answered nothing and heard nothing of ours;
+  "Log out of this main PC" removed it on Main and stopped its copying.
 
 * `tests/syncEngine.test.js` — ids never collide and stay ordered; the same girl
   edited on two PCs while apart (every field kept, the same everywhere,
@@ -304,16 +353,21 @@ happen in practice.)
   (proxied); with Main off a run simply waits in the queue.
 * **Removal does not rotate keys.** A removed PC's key is refused everywhere,
   but the agency backup key it once had is not changed.
-* **Logout on a Companion** stops its copying (refused as removed) but leaves its
-  local copy on disk until it joins again (the new copy replaces it, the old one
-  is kept beside).
+* **Logout on a Companion** ("Log out of this main PC", Settings → The agency's
+  PCs, `POST /sync/leave-agency`): its own row says removed (pushed to the PCs it
+  reaches), the main PC is asked `/pc-access/leave` with its key (key and online
+  account stopped; asked again every 2 min for 30 days when Main is off), the
+  copying stops, and the PC shows "Join your agency" again. Its local copy stays
+  on disk until it joins again (the new copy replaces it, the old one is kept
+  beside); a PC out of its agency never runs the main PC's jobs (`notMainPC`).
+* **On a Companion the robots' pages** (live view, Morning sign-in, sessions)
+  go to the main PC while it answers (checked every 20 s); when it does not,
+  they are answered on this PC's own copy and browser.
 * **The chat** on a Companion still goes through the main PC (as before).
 
 ## Still to do
 
 * Windows end-to-end on two real PCs (USB build, join, restart, documents).
 * A UI list of merges and documents kept beside (`/sync/conflicts` exists).
-* The Companion's "Log out" button (old launcher flow) should call the main PC's
-  `/pc-access/leave` from the backend for a full install.
 * Rebase onto `no-downgrade` / `stay-signed-in` / `speed` / `stage-buttons` when
   they land (they touch `cloudSync.js`, `pcAccess.js`, `mainPC.js`).

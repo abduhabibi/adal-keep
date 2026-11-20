@@ -69,7 +69,7 @@ export class Roles {
   }
 
   async pcs() {
-    return (await this.db.raw(`SELECT * FROM sync_pcs ORDER BY slot`)).map(p => ({ ...p, lan: safeJSON(p.lan, []), vector: safeJSON(p.vector, {}) }))
+    return (await this.db.raw(`SELECT * FROM sync_pcs ORDER BY slot`)).map(p => ({ ...p, lan: safeJSON(p.lan, []), vector: safeJSON(p.vector, {}), macs: safeJSON(p.macs, []) }))
   }
 
   /** Is the holder's lease still running (seen within LEASE, as far as this PC knows)? */

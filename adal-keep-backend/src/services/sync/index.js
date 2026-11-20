@@ -32,7 +32,9 @@ const DB_FILE = process.env.SQLITE_PATH ? path.resolve(process.env.SQLITE_PATH) 
 
 let node = null
 export const syncNode = () => node
-export const isMainRole = () => (node ? node.roles.isMain() : null)
+/** This PC logged out of its agency and has not joined one again (no main PC's jobs here then). */
+export const leftAgency = () => { const id = readIdentity(); return !!id.left_at && !id.joined_main }
+export const isMainRole = () => (node ? node.roles.isMain() : leftAgency() ? false : null)
 
 /** This PC's version (the release it runs), for the list of PCs. */
 function version() {
@@ -44,6 +46,8 @@ export async function startSync(appDb, { timers = true } = {}) {
   // An older follower PC opens the main PC's own pages: its database here is not the agency's.
   if ((await import('../mainPC.js')).isFollower()) return null
   const id = readIdentity()
+  // Logged out of its agency ("Log out of this main PC") and not joined again: no copying.
+  if (id.left_at && !id.joined_main) { startLeaveRetry(); return null }
   setSlot(id.slot)
   const db = knex({
     client: 'sqlite3', connection: { filename: DB_FILE }, useNullAsDefault: true,
@@ -51,12 +55,26 @@ export async function startSync(appDb, { timers = true } = {}) {
   })
   const engine = new SyncEngine(db, { pcId: id.pc_id, slot: id.slot, log: console })
   await engine.init()
-  const { getLanAddresses } = await import('../discovery.js')
+  const disco = await import('../discovery.js')
+  const { getLanAddresses } = disco
   const mp = await import('../mainPC.js')
   node = new SyncNode({
-    engine, safeDir: SAFE, key: id.key, port: Number(process.env.PORT) || 4000, name: os.hostname(), version: version(),
-    addresses: () => getLanAddresses(), mainURL: () => mp.mainURL(), log: console,
+    engine, safeDir: SAFE, key: id.key, port: Number(process.env.ADAL_ADVERTISE_PORT) || Number(process.env.PORT) || 4000, name: process.env.ADAL_PC_NAME || os.hostname(), version: version(),
+    addresses: () => getLanAddresses(), macs: () => disco.macsOf(), mainURL: () => mp.mainURL(), log: console,
   })
+  // The agency's PCs find each other on the office network, with or without the main PC (peers.js).
+  const { PeerFinder } = await import('./peers.js')
+  node.finder = new PeerFinder(node, { port: Number(process.env.DISCOVERY_PORT) || disco.DISCOVERY_PORT, macs: () => disco.macsOf(), log: console })
+  let soonRound = null
+  disco.onPeerMessage((text, rinfo) => {
+    const answer = node?.finder?.heard(text, rinfo)
+    // A PC of the agency asking that this one has not reached lately (just switched on,
+    // back on the network): a round with it now, not at the next minute.
+    const m = /^ADAL_KEEP_PEERS_V1\|[^|]*\|([0-9a-f]{12})\|/.exec(text)
+    if (answer && m && !node.peerState.get(m[1])?.ok && !soonRound) soonRound = setTimeout(() => { soonRound = null; node?.round().catch(() => {}) }, 1500)
+    return answer
+  })
+  if (process.env.ADAL_ISOLATED !== '1' && !mp.isFollower()) disco.startDiscoveryResponder({ port: Number(process.env.DISCOVERY_PORT) || undefined, name: 'Adal Keep', answerServer: () => !mp.notMainPC() && isMainRole() !== false, getInfo: () => ({ port: Number(process.env.ADAL_ADVERTISE_PORT) || Number(process.env.PORT) || 4000 }) })
   node.relay = await makeRelay(appDb, id).catch(() => null)
   // An agency's existing Adal Keep takes the role at once; a Companion install waits until it joins.
   await node.start({ timers, claim: !mp.isCompanionInstall() && !id.joined_main })
@@ -68,6 +86,13 @@ export async function startSync(appDb, { timers = true } = {}) {
   onChanged(() => { if (!soon) soon = setTimeout(() => { soon = null; engine.stampNow().catch(() => {}) }, 400) })
   // A table made after the start (a lazy one) is copied from the next check on.
   const t = setInterval(() => engine.refreshTables().catch(() => {}), 10 * 60 * 1000); t.unref?.()
+  // Holding the main role here: first a quick word with the other PCs (a few seconds at
+  // most), so a role another PC took meanwhile (this PC was off) is heard BEFORE this
+  // PC starts the robots — two PCs never run them at once.
+  if (timers && node.roles.isMain() && (await node.others()).length) {
+    await Promise.race([node.round().catch(() => {}), new Promise(r => setTimeout(r, Number(process.env.ADAL_START_ROUND_MS) || 6000).unref?.())])
+    await node.roles.refresh()
+  }
   await reconcileRole()
   node.roles.onRole(() => reconcileRole({ restart: true }).catch(e => console.warn('[sync] role:', e.message)))
   if (node.roles.isMain()) startLicencePublisher()
@@ -167,10 +192,15 @@ export async function syncRoutes() {
     if (!onThisPC(req)) return res.status(403).json({ error: 'Only on this PC itself' })
     try {
       const { discoverServer } = await import('../discovery.js')
-      const found = await discoverServer({ timeoutMs: 2500 })
+      const found = await discoverServer({ timeoutMs: 2500, port: Number(process.env.DISCOVERY_PORT) || undefined })
       const mp = await import('../mainPC.js')
       res.json({ found: found ? [found] : [], joined: !!readIdentity().joined_main, companion_install: mp.isCompanionInstall(), main_url: mp.mainURL() || null })
     } catch (e) { res.status(500).json({ error: e.message }) }
+  })
+  /** "Log out of this main PC" (a Companion with its own copy): leaves the agency, stops the copying. */
+  router.post('/sync/leave-agency', async (req, res) => {
+    if (!onThisPC(req)) return res.status(403).json({ error: 'Only on this PC itself' })
+    try { res.json({ ok: true, ...(await leaveAgency({ device: req.body?.device })) }) } catch (e) { res.status(e.status || 500).json({ error: e.message }) }
   })
   router.post('/sync/join-agency', async (req, res) => {
     if (!onThisPC(req)) return res.status(403).json({ error: 'Only on this PC itself' })
@@ -180,7 +210,7 @@ export async function syncRoutes() {
       const id = readIdentity()
       const got = await joinAgency({ mainUrl: req.body?.main_url, number: req.body?.number, name: os.hostname(), pcId: id.pc_id, lan: getLanAddresses(), port: Number(process.env.PORT) || 4000, dbFile: DB_FILE })
       await stageJoin(got, { dbFile: DB_FILE })
-      updateIdentity({ slot: got.slot, key: got.key, joined_main: got.main_pc, joined_at: new Date().toISOString(), ...(got.online ? { online: got.online } : {}) })
+      updateIdentity({ slot: got.slot, key: got.key, joined_main: got.main_pc, joined_at: new Date().toISOString(), left_at: null, leave_pending: null, ...(got.online ? { online: got.online } : {}) })
       const mp = await import('../mainPC.js')
       mp.setRole({ mode: 'companion', main_url: got.main, pc_key: got.key })
       res.json({ ok: true, restart: true, slot: got.slot, main: got.main_name || got.main })
@@ -188,6 +218,75 @@ export async function syncRoutes() {
     } catch (e) { res.status(e.status || 400).json({ error: e.message, ...(e.suspended ? { suspended: true } : {}) }) }
   })
   return router
+}
+
+// ── "Log out of this main PC" on a Companion with its own copy ─────────────
+
+/**
+ * This PC leaves its agency: its own row says removed (every PC refuses it from
+ * then on), the PCs it reaches hear it now, the main PC lets go of its key and
+ * its online account (/pc-access/leave), and the copying stops here. The copy
+ * of the data stays on this PC (it is replaced, and kept beside, when it joins
+ * an agency again). The main PC not reachable now: asked again every 2 minutes
+ * (30 days).
+ */
+export async function leaveAgency({ device = '' } = {}) {
+  const n = node
+  const id = readIdentity()
+  const mp = await import('../mainPC.js')
+  if (!n && !id.joined_main) throw Object.assign(new Error('This PC is not in an agency'), { status: 409 })
+  if (n?.roles.isMain()) throw Object.assign(new Error('This PC is the main PC: hand the role to another PC first'), { status: 409 })
+  const out = { told_peers: 0, main: false }
+  const mains = []
+  if (n) {
+    const holder = n.roles.holder()
+    const h = n.peerState.get(holder)
+    if (h?.url) mains.push(h.url)
+    await n.setCut(n.pcId, 'remove').catch(() => {})
+    // The others hear it now (one push each): they refuse this PC from now on.
+    for (const [, st] of n.peerState) {
+      if (!st.ok || !st.url) continue
+      try {
+        const theirs = (await n.call(st.url, 'GET', '/hello', null, { timeout: 4000 })).vector || {}
+        const o = await n.engine.changesSince(theirs, 2000)
+        if (o.entries.length) await n.call(st.url, 'POST', '/push', { entries: o.entries, complete: o.complete }, { timeout: 30000 })
+        out.told_peers++
+      } catch {}
+    }
+    n.stop()
+    node = null
+  }
+  if (mp.mainURL() && !mains.includes(mp.mainURL())) mains.push(mp.mainURL())
+  const pending = { mains, key: id.key, device: String(device || id.online?.device || ''), at: Date.now() }
+  out.main = await tellMainWeLeft(pending)
+  updateIdentity({ joined_main: null, left_at: new Date().toISOString(), left_from: id.joined_main || null, leave_pending: out.main ? null : pending })
+  mp.setRole({ mode: '', main_url: '' })
+  if (!out.main) startLeaveRetry()
+  console.log(`[sync] this PC logged out of its agency${out.main ? '' : ' (the main PC is told when it answers)'}; ${out.told_peers} PC(s) heard it`)
+  return out
+}
+
+async function tellMainWeLeft(p) {
+  for (const u of p?.mains || []) {
+    try {
+      const r = await fetch(`${u}/api/pc-access/leave`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-adal-pc': p.key }, body: JSON.stringify(p.device ? { device: p.device } : {}), signal: AbortSignal.timeout(8000) })
+      // (401/403: that PC does not know this key any more — nothing left to stop there.)
+      if (r.ok || r.status === 401 || r.status === 403) return true
+    } catch {}
+  }
+  return false
+}
+
+let leaveTimer = null
+function startLeaveRetry() {
+  if (leaveTimer) return
+  leaveTimer = setInterval(async () => {
+    const id = readIdentity()
+    const p = id.leave_pending
+    if (!p || id.joined_main || Date.now() - (p.at || 0) > 30 * 24 * 3600 * 1000) { clearInterval(leaveTimer); leaveTimer = null; if (p && !id.joined_main) updateIdentity({ leave_pending: null }); return }
+    if (await tellMainWeLeft(p)) { updateIdentity({ leave_pending: null }); clearInterval(leaveTimer); leaveTimer = null; console.log('[sync] the main PC let go of this PC (logged out earlier)') }
+  }, Number(process.env.ADAL_LEAVE_RETRY_MS) || 2 * 60 * 1000)
+  leaveTimer.unref?.()
 }
 
 export { currentSlot }

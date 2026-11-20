@@ -14,6 +14,7 @@
  *   { "main_url": "http://100.101.102.103:4000" } → that PC is
  */
 import fs from 'fs'
+import { readIdentity } from './sync/identity.js'
 import path from 'path'
 import crypto from 'crypto'
 import { execFile } from 'child_process'
@@ -69,7 +70,15 @@ export function mainURL() {
 export const isCompanion = () => readFile().mode === 'companion' && !!mainURL()
 export const isFollower = () => !!mainURL() && !isCompanion()
 /** Not the PC holding the main PC's role (a follower or a Companion): the main PC's jobs are not done here. */
-export const notMainPC = () => !!mainURL()
+export const notMainPC = () => !!mainURL() || outOfAgency()
+/**
+ * A Companion install not joined yet, or a PC that logged out of its agency:
+ * none of the main PC's jobs here (the robots, WhatsApp, backups …) — its copy
+ * of the data (if any) is the agency's, and that agency's main PC does them.
+ */
+function outOfAgency() {
+  try { const id = readIdentity(); return !id.joined_main && (!!id.left_at || isCompanionInstall()) } catch { return false }
+}
 /** Installed with the Companion installer (it joins an agency; it never starts one of its own). */
 export const isCompanionInstall = () => process.env.ADAL_COMPANION_INSTALL === '1' || fs.existsSync(path.join(INSTALL, 'companion-install'))
 /** The role as the copying decided it (services/sync/index.js reconcileRole). */

@@ -34,8 +34,9 @@ export class SyncNode {
    * addresses(): this PC's office-network addresses. mainURL(): the main PC's
    * address as this PC knows it (main-pc.json), if any.
    */
-  constructor({ engine, safeDir, key, port = 4000, name = os.hostname(), version = '', addresses = () => [], mainURL = () => '', relay = null, fetch: f = fetch, log = console, now = () => Date.now(), licenceKey = process.env.ADAL_LICENSE_KEY || '' }) {
-    Object.assign(this, { engine, key, port, name, version, addresses, mainURL, relay, f, log, now, licenceKey })
+  constructor({ engine, safeDir, key, port = 4000, name = os.hostname(), version = '', addresses = () => [], macs = () => [], mainURL = () => '', relay = null, fetch: f = fetch, log = console, now = () => Date.now(), licenceKey = process.env.ADAL_LICENSE_KEY || '' }) {
+    Object.assign(this, { engine, key, port, name, version, addresses, macs, mainURL, relay, f, log, now, licenceKey })
+    this.finder = null           // peers.js: the agency's PCs found on the office network (UDP, ARP)
     this.docs = new DocStore(engine.db, safeDir, { log, now })
     this.roles = new Roles(this)
     this.peerState = new Map()   // pc_id → { url, ok, at, error }
@@ -57,10 +58,13 @@ export class SyncNode {
     if (claim) await this.roles.claimIfNone({ name: this.name })
     await this.roles.refresh()
     await this.refreshKeys()
+    await this.finder?.refresh().catch(() => {})
     this.engine.onChange((w) => {
-      if (w.applied?.some(t => t === 'sync_role' || t === 'sync_pcs')) { this.roles.refresh().catch(() => {}); this.refreshKeys().catch(() => {}) }
-      if (w.stamped?.some(t => t === 'sync_role' || t === 'sync_pcs')) { this.refreshKeys().catch(() => {}) }
-      if (w.stamped) this.pushSoon()
+      if (w.applied?.some(t => t === 'sync_role' || t === 'sync_pcs')) { this.roles.refresh().then(() => this.finder?.refresh()).catch(() => {}); this.refreshKeys().catch(() => {}) }
+      if (w.stamped?.some(t => t === 'sync_role' || t === 'sync_pcs')) { this.refreshKeys().catch(() => {}); this.finder?.refresh().catch(() => {}) }
+      // Changes made here, and those that came from another PC: on to every other PC
+      // this one reaches (so a change goes round the office with no hub).
+      if (w.stamped || w.applied?.length) this.pushSoon()
     })
     if (timers) {
       const every = (ms, fn) => { const t = setInterval(() => fn().catch(e => this.log.warn?.(`[sync] ${e.message}`)), ms); t.unref?.(); this.timers.push(t) }
@@ -79,15 +83,17 @@ export class SyncNode {
   async selfRow() {
     const db = this.engine.db
     const lan = JSON.stringify(this.addresses())
+    const macs = JSON.stringify((this.macs() || []).slice(0, 8))
     const at = new Date(this.now()).toISOString()
     const vec = JSON.stringify(await this.engine.vector())
     const row = (await db.raw(`SELECT * FROM sync_pcs WHERE pc_id = ?`, [this.pcId]))[0]
     if (!row) {
-      await db.raw(`INSERT INTO sync_pcs (pc_id, name, slot, key_hash, joined_at, seen_at, lan, port, vector, version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [this.pcId, this.name, this.engine.slot, keyHash(this.key), at, at, lan, this.port, vec, this.version])
+      await db.raw(`INSERT INTO sync_pcs (pc_id, name, slot, key_hash, joined_at, seen_at, lan, port, vector, version, macs) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [this.pcId, this.name, this.engine.slot, keyHash(this.key), at, at, lan, this.port, vec, this.version, macs])
     } else {
       const set = { seen_at: at, vector: vec }
       if (row.lan !== lan) set.lan = lan
+      if ((row.macs || '[]') !== macs) set.macs = macs
       if (Number(row.port) !== Number(this.port)) set.port = this.port
       if (row.name !== this.name) set.name = this.name
       if (row.version !== this.version) set.version = this.version
@@ -138,20 +144,38 @@ export class SyncNode {
       const urls = new Set()
       const last = this.peerState.get(p.pc_id)?.url
       if (last) urls.add(last)
+      // Where it answered the office network's broadcast lately (peers.js).
+      for (const u of this.finder?.urlsOf(p.pc_id) || []) urls.add(u)
       if (p.pc_id === holder && this.mainURL()) urls.add(this.mainURL())
       for (const a of p.lan || []) if (/^[\w.:[\]-]+$/.test(a)) urls.add(`http://${a.includes(':') && !a.startsWith('[') ? `[${a}]` : a}:${p.port || 4000}`)
       return { ...p, urls: [...urls] }
     })
   }
 
-  /** Find a PC on the network: the first address that answers as that PC. */
+  /**
+   * Find a PC on the network: the first address that answers as that PC —
+   * the addresses it wrote in its row, where it answered the broadcast, and
+   * last the addresses whose network card is its own (ARP, peers.js).
+   */
   async reach(pc) {
-    for (const url of pc.urls) {
-      try {
-        const h = await this.call(url, 'GET', '/hello', null, { timeout: 4000 })
-        if (h.pc_id === pc.pc_id) { this.peerState.set(pc.pc_id, { url, ok: true, at: this.now() }); return url }
-      } catch (e) { if (e.suspended) { this.netCut = 'suspended'; throw e } }
+    const tried = new Set()
+    const tryAll = async (urls) => {
+      for (const url of urls) {
+        if (tried.has(url)) continue
+        tried.add(url)
+        try {
+          const h = await this.call(url, 'GET', '/hello', null, { timeout: 4000 })
+          if (h.pc_id === pc.pc_id) {
+            this.peerState.set(pc.pc_id, { url, ok: true, at: this.now(), seen: this.now(), vector: h.vector || {}, main: !!h.main })
+            return url
+          }
+        } catch (e) { if (e.suspended) { this.netCut = 'suspended'; throw e } }
+      }
+      return null
     }
+    let url = await tryAll(pc.urls)
+    if (!url && this.finder) url = await tryAll(this.finder.urlsOf(pc.pc_id)) || await tryAll(await this.finder.byCard(pc).catch(() => []))
+    if (url) return url
     this.peerState.set(pc.pc_id, { ...(this.peerState.get(pc.pc_id) || {}), ok: false, at: this.now(), error: 'not on the network' })
     return null
   }
@@ -175,6 +199,7 @@ export class SyncNode {
       theirs = r.vector || theirs
       if (!out.more) break
     }
+    for (const [id, st] of this.peerState) if (st.url === url) this.peerState.set(id, { ...st, seen: this.now(), vector: theirs || st.vector })
     let fetched = 0
     if (docs) fetched = await this.docsFrom(url)
     return { pulled, pushed, docs: fetched }
@@ -206,6 +231,9 @@ export class SyncNode {
     this.busy = (async () => {
       const res = { at: new Date(this.now()).toISOString(), peers: [], relay: null }
       let unreachable = 0
+      // Some PC not reached last time (or never): ask the office network first (peers.js).
+      const list0 = await this.others()
+      if (this.finder && list0.some(p => !this.peerState.get(p.pc_id)?.ok)) await this.finder.search().catch(() => 0)
       for (const pc of await this.others()) {
         try {
           const url = await this.reach(pc)
@@ -254,9 +282,14 @@ export class SyncNode {
       for (const [pcId, st] of this.peerState) {
         if (!st.ok || !st.url) continue
         try {
-          const theirs = (await this.call(st.url, 'GET', '/hello', null, { timeout: 4000 })).vector || {}
-          const out = await this.engine.changesSince(theirs, LIMIT)
-          if (out.entries.length) await this.call(st.url, 'POST', '/push', { entries: out.entries, complete: out.complete }, { timeout: 60000 })
+          let theirs = (await this.call(st.url, 'GET', '/hello', null, { timeout: 4000 })).vector || {}
+          for (let i = 0; i < 50; i++) {
+            const out = await this.engine.changesSince(theirs, LIMIT)
+            if (!out.entries.length) break
+            theirs = (await this.call(st.url, 'POST', '/push', { entries: out.entries, complete: out.complete }, { timeout: 60000 })).vector || theirs
+            if (!out.more) break
+          }
+          this.peerState.set(pcId, { ...this.peerState.get(pcId), seen: this.now(), vector: theirs })
         } catch (e) { this.peerState.set(pcId, { ...st, ok: false, error: e.message }) }
       }
     }, PUSH_DELAY)

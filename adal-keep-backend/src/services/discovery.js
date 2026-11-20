@@ -36,6 +36,10 @@ export const DISCOVERY_REQUEST = 'ADAL_KEEP_DISCOVER_V1'
 export const DISCOVERY_RESPONSE = 'ADAL_KEEP_SERVER_V1'
 
 let responder = null
+// The agency's PCs asking for each other (services/sync/peers.js): every PC answers those.
+let peerHandler = null
+/** fn(text, rinfo) → the answer to send back, or null. */
+export function onPeerMessage(fn) { peerHandler = typeof fn === 'function' ? fn : null }
 
 /**
  * Every non-internal IPv4 address this machine can be reached on.
@@ -135,7 +139,17 @@ export function startDiscoveryResponder(opts = {}) {
 
   sock.on('message', (msg, rinfo) => {
     const text = msg.toString('utf8').trim()
+    if (text.startsWith('ADAL_KEEP_PEER')) {
+      try {
+        const answer = peerHandler?.(text, rinfo)
+        if (answer) sock.send(Buffer.from(answer, 'utf8'), rinfo.port, rinfo.address, () => {})
+      } catch {}
+      return
+    }
     if (!text.startsWith(DISCOVERY_REQUEST)) return
+    // Only the PC holding the main PC's role answers "where is Adal Keep?" (a
+    // Companion with its own copy answers its agency's PCs only, above).
+    if (opts.answerServer && !opts.answerServer()) return
     try {
       const extra = (opts.getInfo && opts.getInfo()) || {}
       if (extra.company_name) companyName = extra.company_name

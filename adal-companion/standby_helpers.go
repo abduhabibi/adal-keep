@@ -40,7 +40,7 @@ var selfReplaced bool
 // restartSelfSoon: the new adal-companion.exe takes over — started by a small
 // waiting command once this one has ended (its ports and its one-copy lock free).
 func restartSelfSoon() {
-	if strings.HasSuffix(strings.ToLower(filepath.Base(os.Args[0])), ".test.exe") {
+	if b := strings.ToLower(filepath.Base(os.Args[0])); strings.HasSuffix(b, ".test.exe") || strings.HasSuffix(b, ".test") {
 		return // the tests: never ended
 	}
 	time.Sleep(3 * time.Second)

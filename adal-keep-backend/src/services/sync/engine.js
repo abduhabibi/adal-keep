@@ -134,6 +134,8 @@ export class SyncEngine {
     // Shared by every PC (copied like any table): the PCs, and who holds the main PC's role.
     await db.raw(`CREATE TABLE IF NOT EXISTS sync_pcs (pc_id TEXT PRIMARY KEY, name TEXT, slot INTEGER, key_hash TEXT, access_id TEXT, joined_at TEXT, seen_at TEXT, suspended_at TEXT, revoked_at TEXT, lan TEXT, port INTEGER, vector TEXT, version TEXT)`)
     await db.raw(`CREATE TABLE IF NOT EXISTS sync_role (k TEXT PRIMARY KEY, holder TEXT, data TEXT, at TEXT)`)
+    // Each PC's network cards (peers.js finds a PC by them when its address changed).
+    if (!(await db.raw(`SELECT name FROM pragma_table_info('sync_pcs')`)).some(c => c.name === 'macs')) await db.raw(`ALTER TABLE sync_pcs ADD COLUMN macs TEXT`)
 
     let meta = await this.meta()
     if (meta.pc_id && meta.pc_id !== this.pcId) {

@@ -1293,6 +1293,16 @@ initSystem().then(() => {
     }
     // Every PC: its own scans, read here at once (the passport, the document's kind), on its own copy.
     startFolderWatcher(db, 1)     // watches the inbox for new files
+    // Every PC of the agency answers on the LAN: its agency's PCs asking for each other
+    // (services/sync/peers.js), and — the PC holding the main PC's role only —
+    // Employee PCs asking "where is Adal Keep?". A busy UDP port never stops the server.
+    startDiscoveryResponder({
+      port: Number(process.env.DISCOVERY_PORT) || undefined,
+      name: 'Adal Keep',
+      answerServer: () => !notMainPC() && isMainRole() !== false,
+      // A Companion standing in for the main PC: the office reaches it on its Companion's port (4000).
+      getInfo: () => ({ port: Number(process.env.ADAL_ADVERTISE_PORT) || Number(PORT) }),
+    })
     if (notMainPC() || isMainRole() === false) {
       // A Companion with its own copy: everything a person does happens here, at once;
       // the main PC's jobs (robots, backups, the online copy, phones, reminders) stay there.
@@ -1318,14 +1328,6 @@ initSystem().then(() => {
     import('./src/services/profileDays.js').then(d => d.startProfileDays(db)).catch(e => console.warn('[days]', e.message)) // each profile's status, per day
     console.log('🤖 Automation: worker + scanner running')
 
-    // Answer Employee PCs that broadcast "where is Adal Keep?" on the LAN.
-    // Best-effort: a busy UDP port or a missing NIC never stops the server.
-    startDiscoveryResponder({
-      port: Number(process.env.DISCOVERY_PORT) || undefined,
-      name: 'Adal Keep',
-      // A Companion standing in for the main PC: the office reaches it on its Companion's port (4000).
-      getInfo: () => ({ port: Number(process.env.ADAL_ADVERTISE_PORT) || Number(PORT) }),
-    })
   })
 })
 

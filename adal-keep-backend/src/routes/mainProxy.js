@@ -22,9 +22,24 @@ const MAIN_ONLY = [
   /^\/browser\/open$/,
 ]
 
+// The main PC answering (checked at most every 20 s): when it does not — off, or
+// away from the office — these calls are answered here, on this PC's own copy
+// (the Morning sign-in opens in this PC's Adal Browser, the runs' lists are this
+// PC's), instead of waiting for it.
+let up = { url: '', ok: false, at: 0 }
+async function mainAnswers(main) {
+  if (up.url === main && Date.now() - up.at < 20000) return up.ok
+  let ok = false
+  try { ok = (await fetch(`${main}/api/health`, { signal: AbortSignal.timeout(3000) })).status < 500 } catch {}
+  up = { url: main, ok, at: Date.now() }
+  return ok
+}
+export const _resetMainCheck = () => { up = { url: '', ok: false, at: 0 } }
+
 router.use(async (req, res, next) => {
   if (!isCompanion() || !MAIN_ONLY.some(re => re.test(req.path))) return next()
   const main = mainURL()
+  if (!(await mainAnswers(main))) return next()
   try {
     const headers = { 'x-adal-pc': await mainKey() }
     for (const h of ['content-type', 'x-adal-who', 'accept']) if (req.headers[h]) headers[h] = req.headers[h]
@@ -39,6 +54,8 @@ router.use(async (req, res, next) => {
     if (!r.body) return res.end()
     Readable.fromWeb(r.body).on('error', () => res.end()).pipe(res)
   } catch (e) {
+    up = { url: main, ok: false, at: Date.now() }
+    if (!res.headersSent && !/\/stream$/.test(req.path)) return next()   // (gone meanwhile: answered here)
     if (!res.headersSent) res.status(503).json({ error: `The robots run on the main PC (${main}), which did not answer: ${e.message}`, on_main: true })
   }
 })

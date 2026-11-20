@@ -19,6 +19,17 @@
  */
 import express from 'express'
 
+/** How far apart two PCs are: entries this PC has that the other has not (they_lack), and the other way. */
+export function compareVectors(mine = {}, theirs = {}) {
+  let they = 0, we = 0
+  for (const o of new Set([...Object.keys(mine), ...Object.keys(theirs)])) {
+    const a = Number(mine[o]) || 0, b = Number(theirs[o]) || 0
+    if (a > b) they += a - b
+    else if (b > a) we += b - a
+  }
+  return { they_lack: they, we_lack: we }
+}
+
 export function createSyncRouter({ getNode, here, admitted = (req) => req.pcAccess || null, keyOf = (req) => String(req.headers['x-adal-pc'] || ''), onJoined = null, onRole = null }) {
   const router = express.Router()
   const fail = (res, e) => res.status(e.status && e.status < 600 ? e.status : 500).json({ error: e.message, ...(e.suspended ? { suspended: true } : {}) })
@@ -89,11 +100,22 @@ export function createSyncRouter({ getNode, here, admitted = (req) => req.pcAcce
       const node = getNode()
       if (!node) return res.json({ running: false })
       const lease = await node.roles.leaseOf()
+      const mine = await node.engine.vector()
       res.json({
         running: true, me: node.pcId, name: node.name, main: node.roles.isMain(), lease, cut_off: node.cutOff || null,
         status: node.status, engine: await node.engine.stats(),
-        pcs: (await node.roles.pcs()).map(({ key_hash, vector, ...p }) => ({ ...p, reach: node.peerState.get(p.pc_id) || null })),
+        pcs: (await node.roles.pcs()).map(({ key_hash, vector, ...p }) => {
+          const st = node.peerState.get(p.pc_id) || null
+          const { vector: seenVec, ...reach } = st || {}
+          const ip = (st?.url && /^https?:\/\/\[?([^\]/]+?)\]?:\d+/.exec(st.url)?.[1]) || p.lan?.[0] || null
+          if (p.pc_id === node.pcId) return { ...p, ip, reach: null, me: true }
+          const theirs = seenVec || vector || {}
+          const gap = compareVectors(mine, theirs)
+          const heard = node.finder?.found.get(p.pc_id)
+          return { ...p, ip, reach: st ? reach : null, heard_at: heard?.at || null, ...gap, in_sync: !gap.they_lack && !gap.we_lack, vector_at: seenVec ? (st.seen || st.at) : p.seen_at }
+        }),
         licence: node.roles.licence(),
+        ignored: node.finder?.ignored || 0,
       })
     } catch (e) { fail(res, e) }
   })

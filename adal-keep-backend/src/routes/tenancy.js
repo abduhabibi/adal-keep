@@ -28,8 +28,8 @@ router.get('/setup/status', async (req, res) => {
   let state = company ? 'ready' : 'setup'
   try {
     const { isCompanionInstall } = await import('../services/mainPC.js')
-    const { joinedAgency } = await import('../services/sync/index.js')
-    if (isCompanionInstall() && !joinedAgency()) state = 'join'
+    const { joinedAgency, leftAgency } = await import('../services/sync/index.js')
+    if ((isCompanionInstall() || leftAgency()) && !joinedAgency()) state = 'join'
   } catch {}
   res.json({ state, companyName: company?.name || null, subscription: statusPayload() })
 })

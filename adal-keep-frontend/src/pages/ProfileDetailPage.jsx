@@ -80,7 +80,20 @@ export default function ProfileDetailPage() {
     search.delete('next'); setSearch(search, { replace: true })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
-  const closeNext = () => { try { sessionStorage.removeItem(`next-steps-${id}`) } catch {} ; setNextOpen(false) }
+  // Every profile still in the first stage (no photos, no CV, not on Musaned yet) shows
+  // what to do next when it opens (asked on 2026-11-20) — "Later" hides it until she is opened again.
+  useEffect(() => {
+    if (!['cv', 'musaned'].includes(phase)) return
+    let later = false
+    try { later = sessionStorage.getItem(`next-later-${id}`) === '1' } catch {}
+    if (!later) setNextOpen(true)
+  }, [id, phase])
+  // On Musaned (or further): nothing left for the pop-up.
+  useEffect(() => { if (phase && !['cv', 'musaned'].includes(phase)) setNextOpen(false) }, [phase])
+  const closeNext = () => {
+    try { sessionStorage.removeItem(`next-steps-${id}`); sessionStorage.setItem(`next-later-${id}`, '1') } catch {}
+    setNextOpen(false)
+  }
   const refreshAll = () => {
     window.dispatchEvent(new Event('adal-profile-changed'))
     api.get(`/profiles/${id}/fields`).then(r => { keep(parts(id).fields, r.data); setFields(r.data) }).catch(() => {})
@@ -90,7 +103,10 @@ export default function ProfileDetailPage() {
     const look = () => api.get(`/profiles/${id}/step`).then(r => setStep(r.data)).catch(() => {})
     look()
     setEverything(false)
-    return onDataChange(['profiles', 'automation_queue', 'files', 'profile_fields'], look)
+    const cvsAgain = () => api.get(`/cv/generated`, { params: { profile_id: id } }).then(r => setCvs(r.data || [])).catch(() => {})
+    const offCvs = onDataChange(['generated_cvs', 'files', 'profile_fields'], cvsAgain)
+    const off = onDataChange(['profiles', 'automation_queue', 'files', 'profile_fields'], look)
+    return () => { off?.(); offCvs?.() }
   }, [id])
   // Only the step's files still missing: an uploaded one leaves the page; all there → the part folds away.
   const stepFiles = !everything && STEP_FILES[step?.key]

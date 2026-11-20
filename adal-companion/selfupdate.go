@@ -601,13 +601,15 @@ func (u *updater) installPieces(m *releaseManifest, fromCloud bool) error {
 		if fileSHA(dest) == p.SHA256 {
 			continue
 		}
-		// A running program cannot be overwritten, but it can be renamed.
-		os.Remove(dest + ".old")
-		if err := os.Rename(dest, dest+".old"); err != nil {
+		// A running program cannot be overwritten, but it can be renamed. The one
+		// renamed last time may still run (a window open through two updates):
+		// then this one goes aside under a name of its own.
+		aside := setAside(dest)
+		if err := os.Rename(dest, aside); err != nil {
 			return err
 		}
 		if err := copyFile(got, dest); err != nil {
-			os.Rename(dest+".old", dest)
+			os.Rename(aside, dest)
 			return err
 		}
 		log.Printf("⬆️ %s updated (used from the next start)", p.Name)
@@ -1072,4 +1074,18 @@ func startSelfUpdate(root string) *updater {
 		}
 	}()
 	return u
+}
+
+// setAside: where a program being replaced goes — dest.old, or (that one still
+// in use) dest.old-<time>; leftovers no longer in use are removed.
+func setAside(dest string) string {
+	if olds, _ := filepath.Glob(dest + ".old-*"); len(olds) > 0 {
+		for _, o := range olds {
+			os.Remove(o) // fails while it runs: kept until next time
+		}
+	}
+	if err := os.Remove(dest + ".old"); err == nil || os.IsNotExist(err) {
+		return dest + ".old"
+	}
+	return fmt.Sprintf("%s.old-%d", dest, time.Now().UnixNano())
 }

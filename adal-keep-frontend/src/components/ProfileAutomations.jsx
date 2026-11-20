@@ -290,7 +290,12 @@ export default function ProfileAutomations({ profileId, phase = null, after }) {
       }
       load({ quiet: true })
     } catch (e) {
-      toast.error(`${name}: ${e.response?.data?.error || 'could not start'}`, { id: t, duration: 8000 })
+      const missing = e.response?.data?.missing
+      // Something missing: her page opens a pop-up to fill it in, and the robot starts once it is all there.
+      const detail = { profileId, workflowId, name, body: { account_id: accountFor(workflowId) }, handled: false }
+      if (Array.isArray(missing) && missing.length) window.dispatchEvent(new CustomEvent('adal-fill-missing', { detail }))
+      if (detail.handled) toast.dismiss(t)
+      else toast.error(`${name}: ${e.response?.data?.error || 'could not start'}`, { id: t, duration: 8000 })
     } finally {
       setSending(s => { const n = { ...s }; delete n[workflowId]; return n })
     }

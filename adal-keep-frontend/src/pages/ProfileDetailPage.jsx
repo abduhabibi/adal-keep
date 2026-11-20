@@ -11,6 +11,7 @@ import StatusBadge from '../components/shared/StatusBadge'
 import Button from '../components/shared/Button'
 import { formatDate } from '../lib/utils'
 import FieldCard from '../components/fields/FieldCard'
+import NeedsFill from '../components/NeedsFill'
 import PrioritizeButton from '../components/PrioritizeButton'
 import ProfileAutomations from '../components/ProfileAutomations'
 import ProfileJourney from '../components/ProfileJourney'
@@ -72,21 +73,38 @@ export default function ProfileDetailPage() {
   const [editOpen, setEditOpen] = useState(false)
   // A new profile: her photos → her CV → Musaned, one pop-up after the other.
   const [search, setSearch] = useSearchParams()
-  // ✕ and Later only hide it: it opens again each time her page is opened (kept on
-  // this device), until Musaned is started or she is past the Musaned step (asked on 2026-11-20).
-  const NEXT_KEY = `next-steps-${id}`
-  const [nextOpen, setNextOpen] = useState(() => { try { return localStorage.getItem(NEXT_KEY) === '1' || sessionStorage.getItem(NEXT_KEY) === '1' } catch { return false } })
+  // Every profile still in the first stage (photos, CV, Musaned) shows what to do next each
+  // time her page is opened; ✕ and Later only hide it until she is opened again (asked on 2026-11-20).
+  const [nextOpen, setNextOpen] = useState(false)
+  const [hidden, setHidden] = useState(null)   // the profile whose pop-up was hidden on this visit
   useEffect(() => {
-    try { setNextOpen(localStorage.getItem(NEXT_KEY) === '1' || sessionStorage.getItem(NEXT_KEY) === '1') } catch {}
-    if (search.get('next') !== 'photos') return
-    try { localStorage.setItem(NEXT_KEY, '1') } catch {}
-    setNextOpen(true)
-    search.delete('next'); setSearch(search, { replace: true })
+    setHidden(null)
+    if (search.get('next') === 'photos') { setNextOpen(true); search.delete('next'); setSearch(search, { replace: true }) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
-  const closeNext = () => setNextOpen(false)
-  const doneNext = () => { try { localStorage.removeItem(NEXT_KEY); sessionStorage.removeItem(NEXT_KEY) } catch {} ; setNextOpen(false) }
-  useEffect(() => { if (phase && !['cv', 'musaned'].includes(phase)) doneNext() }, [phase]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (['cv', 'musaned'].includes(phase) && hidden !== id) setNextOpen(true) }, [id, phase]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Past the Musaned step: nothing left for the pop-up.
+  useEffect(() => { if (phase && !['cv', 'musaned'].includes(phase)) setNextOpen(false) }, [phase])
+  const closeNext = () => { setHidden(id); setNextOpen(false) }
+  const doneNext = closeNext
+  // Any robot on her page that is missing something: a pop-up to fill it, then that robot starts (asked on 2026-11-20).
+  const [fill, setFill] = useState(null)   // { workflowId, name, body }
+  useEffect(() => {
+    const on = (e) => { if (String(e.detail?.profileId) === String(id)) { e.detail.handled = true; setFill(e.detail) } }
+    window.addEventListener('adal-fill-missing', on)
+    return () => window.removeEventListener('adal-fill-missing', on)
+  }, [id])
+  const startFilled = async () => {
+    const f = fill
+    if (!f) return
+    const t = toast.loading(`${f.name}: starting…`)
+    try {
+      const r = await api.post(`/profiles/${id}/automations/${f.workflowId}/start`, f.body || {})
+      toast.success(`${f.name}: ${r.data?.message || 'started'}`, { id: t })
+      setFill(null)
+      window.dispatchEvent(new Event('adal-profile-changed'))
+    } catch (e) { toast.error(`${f.name}: ${e.response?.data?.error || 'could not start'}`, { id: t, duration: 8000 }) }
+  }
   const refreshAll = () => {
     window.dispatchEvent(new Event('adal-profile-changed'))
     api.get(`/profiles/${id}/fields`).then(r => { keep(parts(id).fields, r.data); setFields(r.data) }).catch(() => {})
@@ -96,7 +114,11 @@ export default function ProfileDetailPage() {
     const look = () => api.get(`/profiles/${id}/step`).then(r => setStep(r.data)).catch(() => {})
     look()
     setEverything(false)
-    return onDataChange(['profiles', 'automation_queue', 'files', 'profile_fields'], look)
+    // A CV made by itself shows at once (8f5d12b).
+    const cvsAgain = () => api.get(`/cv/generated`, { params: { profile_id: id } }).then(r => setCvs(r.data || [])).catch(() => {})
+    const offCvs = onDataChange(['generated_cvs', 'files', 'profile_fields'], cvsAgain)
+    const off = onDataChange(['profiles', 'automation_queue', 'files', 'profile_fields'], look)
+    return () => { off?.(); offCvs?.() }
   }, [id])
   // Only the step's files still missing: an uploaded one leaves the page; all there → the part folds away.
   const stepFiles = !everything && STEP_FILES[step?.key]
@@ -231,7 +253,16 @@ export default function ProfileDetailPage() {
           <ProfileFormPage embeddedId={id} onDone={(saved) => { setEditOpen(false); if (saved) refreshAll() }} />
         </GlassPopup>
       )}
-      {nextOpen && !editOpen && (
+      {fill && !editOpen && (
+        <GlassPopup onClose={() => setFill(null)} title={`${fill.name}: what she still needs`}>
+          <NeedsFill profileId={id} workflowId={fill.workflowId} fields={fields} onFileUpdate={handleFileUpdate} onReady={startFilled} />
+          <div className="mt-5 flex flex-wrap gap-3">
+            <button type="button" onClick={startFilled} className="rounded-xl bg-teal-600 px-5 py-3 font-semibold text-white hover:bg-teal-700">Start {fill.name}</button>
+            <button type="button" onClick={() => setFill(null)} className="rounded-xl border border-slate-300 px-5 py-3 font-semibold text-slate-700 dark:border-slate-600 dark:text-slate-200">Later</button>
+          </div>
+        </GlassPopup>
+      )}
+      {nextOpen && !editOpen && !fill && (
         <NextSteps profileId={id} fields={fields} cvs={cvs} onFileUpdate={handleFileUpdate} onClose={closeNext} onDone={doneNext}
           onCv={() => navigate(`/cvs/new?profile=${id}&auto=1`)} />
       )}
@@ -640,6 +671,7 @@ function GlassPopup({ children, onClose, wide = false, title = null }) {
 function NextSteps({ profileId, fields, cvs, onFileUpdate, onClose, onDone, onCv }) {
   const [madeByHand, setMadeByHand] = useState(() => { try { return sessionStorage.getItem(`next-cv-${profileId}`) === '1' } catch { return false } })
   const [sending, setSending] = useState(false)
+  const [needs, setNeeds] = useState({ ready: false })
   const photo = fields.find(f => f.name === 'Photo')
   const body = fields.find(f => f.name === 'Full Body Photo')
   const photosOk = hasFiles(photo) && hasFiles(body)
@@ -684,7 +716,8 @@ function NextSteps({ profileId, fields, cvs, onFileUpdate, onClose, onDone, onCv
       ) : !cvOk ? (
         <>
           <h2 className="mb-1 font-display text-xl font-bold text-slate-900 dark:text-white">Her CV</h2>
-          <p className="mb-5 text-sm text-slate-500">Both photos are in. Make her CV now.</p>
+          <p className="mb-4 text-sm text-slate-500">Both photos are in. Make her CV now.</p>
+          <div className="mb-4"><NeedsFill profileId={profileId} cv fields={fields} onFileUpdate={onFileUpdate} /></div>
           <div className="flex flex-wrap items-center gap-4">
             <button type="button" onClick={onCv} className="rounded-xl bg-purple-600 px-5 py-3 font-semibold text-white shadow-lg shadow-purple-600/30 hover:bg-purple-700">📄 Create CV</button>
             <label className="flex cursor-pointer items-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-200">
@@ -696,9 +729,11 @@ function NextSteps({ profileId, fields, cvs, onFileUpdate, onClose, onDone, onCv
       ) : (
         <>
           <h2 className="mb-1 font-display text-xl font-bold text-slate-900 dark:text-white">Musaned</h2>
-          <p className="mb-5 text-sm text-slate-500">Her CV is made. Add her to Musaned; when she waits there, send her CV to agents on WhatsApp.</p>
+          <p className="mb-4 text-sm text-slate-500">Her CV is made. Add her to Musaned; when she waits there, send her CV to agents on WhatsApp.</p>
+          {/* What Musaned still needs, filled here; once it is all in, Musaned starts by itself. */}
+          <div className="mb-4"><NeedsFill profileId={profileId} workflowId="musaned_add_candidate" fields={fields} onFileUpdate={onFileUpdate} onReady={musaned} onState={setNeeds} /></div>
           <div className="flex flex-wrap gap-3">
-            <button type="button" disabled={sending} onClick={musaned}
+            <button type="button" disabled={sending || !needs.ready} onClick={musaned}
               className="rounded-xl bg-indigo-600 px-5 py-3 font-semibold text-white shadow-lg shadow-indigo-600/30 hover:bg-indigo-700 disabled:opacity-50">
               {sending ? '…' : '🇸🇦 Make Musaned'}
             </button>

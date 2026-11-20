@@ -81,9 +81,21 @@ function listDocs() {
 }
 
 /** The manifest: a fresh snapshot of the database and the list of documents. */
+// Companions ask every minute (asked on 2026-11-20): the last snapshot is used
+// again while the database has not changed (its file and its -wal untouched) or
+// it is under 45 s old — one snapshot for every Companion, not one per question.
+let lastManifest = null   // { m, at, mark }
+const DB_PATH = process.env.SQLITE_PATH ? path.resolve(process.env.SQLITE_PATH) : path.join(BACKEND, 'data.sqlite')
+const dbMark = () => ['', '-wal'].map(x => { try { const s = fs.statSync(DB_PATH + x); return `${s.size}:${s.mtimeMs}` } catch { return '-' } }).join('|')
+
 export async function manifest({ snapshot = rawSnapshot } = {}) {
   if (!getSecret('backup_password')) throw new Error('No backup key on the main PC yet')
   dropOldSnaps()
+  const mark = dbMark()
+  if (snapshot === rawSnapshot && lastManifest && snaps.has(lastManifest.m.snap) && Date.now() - lastManifest.at < SNAP_TTL / 2 &&
+      (Date.now() - lastManifest.at < 45000 || lastManifest.mark === mark)) {
+    return { ...lastManifest.m, docs: listDocs(), backup: backupHealth() }
+  }
   const raw = await snapshot()
   const ps = pageSizeOf(raw)
   const id = crypto.randomBytes(8).toString('hex')
@@ -93,7 +105,7 @@ export async function manifest({ snapshot = rawSnapshot } = {}) {
   snaps.set(id, { file, at: Date.now(), length: raw.length, ps })
   let number = null
   try { number = (await import('./mainPC.js')).pcNumber() } catch {}
-  return {
+  const m = {
     v: 1,
     pc_number: number,
     made: new Date().toISOString(),
@@ -102,6 +114,8 @@ export async function manifest({ snapshot = rawSnapshot } = {}) {
     docs: listDocs(),
     backup: backupHealth(),
   }
+  if (snapshot === rawSnapshot) lastManifest = { m, at: Date.now(), mark }
+  return m
 }
 
 /** One database chunk of a snapshot, compressed and locked. */

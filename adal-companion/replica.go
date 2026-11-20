@@ -2,7 +2,7 @@ package main
 
 // replica.go — this Companion keeps a locked copy of the agency's data.
 //
-// While the main PC answers, every 15 minutes the Companion asks it for a
+// While the main PC answers, every minute the Companion asks it for a
 // manifest (backend services/replica.js): the database cut in 1 MB chunks,
 // each with a fingerprint, and the documents by name, size and time. Only the
 // chunks and documents it does not have yet are fetched — after the first
@@ -47,7 +47,7 @@ var (
 	telegramAPI    = strings.TrimRight(envStr("ADAL_TELEGRAM_API", "https://api.telegram.org"), "/")
 	replicaMu      sync.Mutex // one sync or backup at a time
 	replicaClient  = &http.Client{Timeout: 3 * time.Minute}
-	syncEvery      = time.Duration(envInt("ADAL_REPLICA_MINUTES", 5)) * time.Minute // only the changed pieces travel
+	syncEvery      = time.Duration(envInt("ADAL_REPLICA_MINUTES", 1)) * time.Minute // every minute (asked on 2026-11-20): only the changed pieces travel
 	piecePattern   = regexp.MustCompile(`^[df]-[0-9a-f]{1,40}-[0-9a-f]{1,40}(-[0-9]{1,6})?\.bin$`)
 	errNoNumber    = errors.New("the main PC's number is not known yet (it is saved when this PC joins with it)")
 	errNotOurMain  = errors.New("that main PC does not have our number")

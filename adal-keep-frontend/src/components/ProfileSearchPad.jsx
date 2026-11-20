@@ -137,7 +137,8 @@ export default function ProfileSearchPad({
               type="button"
               draggable
               onDragStart={(e) => dragProfiles(e, p)}
-              title="Open — or drag onto a checklist or the tray"
+              data-profile-drop={p.id} data-profile-name={p.full_name || ''}
+              title="Open — or drag onto a checklist or the tray (drop tray files here to put them on her)"
               onClick={() => navigate(`/profiles/${p.id}`)}
               onMouseEnter={() => prefetchProfile(p.id)}
               className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-teal-50 dark:hover:bg-teal-900/30 transition-colors cursor-grab active:cursor-grabbing"

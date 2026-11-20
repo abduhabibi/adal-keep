@@ -335,6 +335,7 @@ export default function ProfilesPage() {
           {rows.map((p, i) => (
             <article
               key={p.id}
+              data-profile-drop={p.id} data-profile-name={p.full_name || ''}
               className={`panel group relative cursor-pointer px-3 py-2.5 sm:p-4 transition hover:shadow-soft ${picked.has(p.id) ? 'ring-2 ring-teal-500' : ''}`}
               onClick={() => navigate(`/profiles/${p.id}`)}
               onMouseEnter={() => prefetchProfile(p.id)} onTouchStart={() => prefetchProfile(p.id)}

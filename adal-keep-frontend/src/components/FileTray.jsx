@@ -6,9 +6,27 @@ import { useFileCapture } from '../context/FileCaptureContext'
 import { dragProfiles, isProfileDrag, profileCardsDropped } from '../lib/profileDrag'
 import api from '../services/api'
 import { useSmsCodes, SmsCodesRows } from './SmsCodesTray'
+import Icon from './shared/Icon'
+import TrayArrival, { FileThumb, whenAdded } from './TrayArrival'
+import TrayPutOn from './TrayPutOn'
+import { dragTrayFiles, endTrayDrag, isTrayDrag, trayFilesDropped, clipText, typingIn, tapMode } from '../lib/trayDrag'
 
-export default function FileTray() {
-  const { capturedFiles, addFiles, removeFile, clearAll, trayProfiles, addProfiles, removeProfile, clearProfiles } = useFileCapture()
+// The tray's size (dragged at its corner) and whether it is the tall drawer: kept on this device.
+const SIZE_KEY = 'adal-tray-size'
+const readSize = () => { try { const s = JSON.parse(localStorage.getItem(SIZE_KEY) || 'null'); if (s?.w && s?.h) return s } catch {} return { w: 640, h: 560, tall: false } }
+const saveSize = (s) => { try { localStorage.setItem(SIZE_KEY, JSON.stringify(s)) } catch {} }
+
+export default function FileTray({ phone = false }) {
+  const { capturedFiles, addFiles, removeFilesById, clearAll, trayProfiles, addProfiles, removeProfile, clearProfiles } = useFileCapture()
+  const [size, setSizeState] = useState(readSize)
+  const setSize = (s) => { setSizeState(s); saveSize(s) }
+  const [picked, setPicked] = useState(() => new Set())   // tray files ticked
+  const lastPick = useRef(null)
+  const [putOn, setPutOn] = useState(null)                // { files, profile? } "Put on…" open
+  const [dragOut, setDragOut] = useState(false)           // a drag from the tray is going on
+  const [vw, setVw] = useState(() => window.innerWidth)
+  useEffect(() => { const r = () => setVw(window.innerWidth); window.addEventListener('resize', r); return () => window.removeEventListener('resize', r) }, [])
+  const tap = phone || tapMode()
   const navigate = useNavigate()
   const smsCodes = useSmsCodes()   // LMIS's SMS codes from the agency's phone
   const [hot, setHot] = useState(false) // a profile is dragged over the tray
@@ -50,8 +68,7 @@ export default function FileTray() {
       const files = extractFiles(e)
       if (files.length > 0) {
         e.preventDefault()
-        const count = addFiles(files)
-        if (count) toast.success(`${count} file(s) captured to tray`)
+        addFiles(files, { source: 'Pasted' })
       }
     }
     document.addEventListener('paste', handlePaste)
@@ -66,8 +83,7 @@ export default function FileTray() {
     // The PC's own watcher (adal-clip, lib/clipWatch.js) crops at once from any
     // program and sends the picture here: then it does it, not this page.
     const fromWatcher = (e) => {
-      const n = addFiles(e.detail || [])
-      if (n) toast.success('Cropped picture is in the tray — drag it onto a field')
+      addFiles(e.detail || [], { source: 'Screen crop' })
     }
     window.addEventListener('adal-tray-files', fromWatcher)
     const onKey = async (e) => {
@@ -86,7 +102,7 @@ export default function FileTray() {
         toast.dismiss(wait)
         if (r.status === 204 || !r.data?.size) { toast('Nothing was cropped'); return }
         const file = new File([r.data], `Screenshot ${new Date().toLocaleString().replace(/[/:]/g, '-')}.png`, { type: 'image/png' })
-        if (addFiles([file])) toast.success('Cropped picture is in the tray — drag it onto a field')
+        addFiles([file], { source: 'Screen crop' })
       } catch (err) {
         toast.dismiss(wait)
         let msg = err.message
@@ -131,10 +147,7 @@ export default function FileTray() {
       setShowGlobalOverlay(false)
       if (alreadyHandled) return
       const files = extractFiles(e)
-      if (files.length > 0) {
-        const count = addFiles(files)
-        if (count) toast.success(`${count} file(s) captured to tray`)
-      }
+      if (files.length > 0) addFiles(files, { source: 'Dropped' })
     }
 
     document.addEventListener('dragenter', handleDragEnter)
@@ -183,31 +196,96 @@ export default function FileTray() {
     }
     if (e.dataTransfer?.getData('application/x-tray-file-id')) return
     const files = extractFiles(e)
-    if (files.length > 0) {
-      const count = addFiles(files)
-      if (count) toast.success(`${count} file(s) captured to tray`)
-    }
+    if (files.length > 0) addFiles(files, { source: 'Dropped' })
   }
 
-  // Dragging OUT of tray into a FieldCard
-  const handleDragStart = (e, file, index) => {
-    e.dataTransfer.setData('application/x-tray-file-id', file.id)
-    e.dataTransfer.setData('application/x-tray-file-index', String(index))
-    e.dataTransfer.setData('text/plain', file.name)
-    e.dataTransfer.effectAllowed = 'copyMove'
-    window.__DRAGGED_TRAY_FILE__ = file
+  // Dragging OUT of the tray (onto a FieldCard, a profile card, the passport
+  // drop): the ticked files go together when the one dragged is ticked. The
+  // tray fades and lets the mouse through while the drag goes on.
+  const handleDragStart = (e, file) => {
+    const list = picked.has(file.id) ? capturedFiles.filter(f => picked.has(f.id)) : [file]
+    dragTrayFiles(e, list)
+    setTimeout(() => setDragOut(true), 0)
   }
-  const handleDragEnd = () => { delete window.__DRAGGED_TRAY_FILE__ }
+  const handleDragEnd = () => { endTrayDrag(); setDragOut(false) }
+
+  const pickedFiles = capturedFiles.filter(f => picked.has(f.id))
+  const togglePick = (file, e) => {
+    setPicked(prev => {
+      const next = new Set(prev)
+      if (e?.shiftKey && lastPick.current) {
+        const a = capturedFiles.findIndex(f => f.id === lastPick.current), b = capturedFiles.findIndex(f => f.id === file.id)
+        if (a >= 0 && b >= 0) { for (let i = Math.min(a, b); i <= Math.max(a, b); i++) next.add(capturedFiles[i].id); return next }
+      }
+      next.has(file.id) ? next.delete(file.id) : next.add(file.id)
+      return next
+    })
+    lastPick.current = file.id
+  }
+  // Files that left the tray are no longer ticked.
+  useEffect(() => {
+    setPicked(prev => { const ids = new Set(capturedFiles.map(f => f.id)); const next = new Set([...prev].filter(id => ids.has(id))); return next.size === prev.size ? prev : next })
+  }, [capturedFiles])
+
+  // The pop-up's "Tray" button opens it.
+  useEffect(() => {
+    const on = () => openDropdown()
+    window.addEventListener('adal-open-tray', on)
+    return () => window.removeEventListener('adal-open-tray', on)
+  })
+
+  // Ctrl+C with tray files ticked: they are copied, for Ctrl+V over a field (FieldCard).
+  useEffect(() => {
+    if (!isOpen || !picked.size) return
+    const onCopy = (e) => {
+      if (typingIn(document.activeElement) || String(window.getSelection?.() || '').trim()) return
+      e.preventDefault()
+      e.clipboardData.setData('text/plain', clipText(pickedFiles))
+      window.__adalTrayClip = pickedFiles
+      toast.success(`${pickedFiles.length === 1 ? pickedFiles[0].name : pickedFiles.length + ' files'} copied — point at a field and press Ctrl+V`)
+    }
+    document.addEventListener('copy', onCopy)
+    return () => document.removeEventListener('copy', onCopy)
+  }, [isOpen, picked, capturedFiles])
+
+  // Tray files dropped on a profile card (anything with data-profile-drop):
+  // "Put on…" opens for her, to pick the field.
+  useEffect(() => {
+    const target = (e) => e.target?.closest?.('[data-profile-drop]')
+    const over = (e) => { if (isTrayDrag(e) && target(e)) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy' } }
+    const drop = (e) => {
+      const el = target(e)
+      if (!el || !isTrayDrag(e) || e.defaultPrevented) return
+      e.preventDefault()
+      const files = trayFilesDropped(e, capturedFiles)
+      if (!files.length) return
+      setPutOn({ files, profile: { id: Number(el.dataset.profileDrop), full_name: el.dataset.profileName || '' } })
+    }
+    document.addEventListener('dragover', over)
+    document.addEventListener('drop', drop)
+    return () => { document.removeEventListener('dragover', over); document.removeEventListener('drop', drop) }
+  }, [capturedFiles])
+
+  // The corner grip: drag it to make the tray bigger or smaller (kept).
+  const startResize = (e) => {
+    e.preventDefault()
+    const x0 = e.clientX, y0 = e.clientY, w0 = size.w, h0 = size.h
+    const move = (ev) => setSizeState(s => ({ ...s, w: Math.max(420, Math.min(window.innerWidth - 24, w0 + (x0 - ev.clientX))), h: Math.max(320, Math.min(window.innerHeight - 80, h0 + (ev.clientY - y0))) }))
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); setSizeState(s => { saveSize(s); return s }) }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
 
   // Outside click & Escape
   useEffect(() => {
     const handleClickOutside = (e) => {
+      if (e.target?.closest?.('[data-tray-keep]')) return
       if (
         dropdownRef.current && !dropdownRef.current.contains(e.target) &&
         buttonRef.current && !buttonRef.current.contains(e.target)
       ) setIsOpen(false)
     }
-    const handleEscape = (e) => { if (e.key === 'Escape') setIsOpen(false) }
+    const handleEscape = (e) => { if (e.key === 'Escape' && !e.defaultPrevented) setIsOpen(false) }
     document.addEventListener('mousedown', handleClickOutside)
     document.addEventListener('keydown', handleEscape)
     return () => {
@@ -271,82 +349,159 @@ export default function FileTray() {
         )}
       </button>
 
-      {/* Tray dropdown */}
+      {/* The tray: a roomy panel of big pictures (a drawer when made tall; a sheet on a phone) */}
       {isOpen && createPortal(
         <div
           ref={dropdownRef}
           onDragOver={handleTrayDragOver}
           onDrop={handleTrayDrop}
-          className="fixed w-80 bg-white/95 dark:bg-slate-900/95 border border-slate-200/60 dark:border-slate-800/60 rounded-2xl shadow-2xl overflow-hidden"
-          style={{ top: dropdownPos.top, right: dropdownPos.right, zIndex: 99999 }}
+          role="dialog" aria-label="Tray"
+          className={`solid-sheet fixed flex flex-col overflow-hidden border border-[var(--border-strong)] text-[var(--text)] shadow-[var(--shadow-xl)] transition-opacity ${tap ? 'rounded-t-[var(--radius-lg)]' : 'rounded-[var(--radius-lg)]'} ${dragOut ? 'pointer-events-none opacity-25' : ''}`}
+          style={tap
+            ? { left: 0, right: 0, bottom: 0, height: size.tall ? 'calc(var(--app-h,100vh) - 12px)' : 'min(85vh, calc(var(--app-h,100vh) - 48px))', zIndex: 99999 }
+            : size.tall
+              ? { top: dropdownPos.top, right: 12, bottom: 12, width: Math.min(Math.max(size.w, 640), vw - 24), zIndex: 99999 }
+              : { top: dropdownPos.top, right: Math.max(12, dropdownPos.right), width: Math.min(size.w, vw - 24), height: `min(${size.h}px, calc(100vh - ${dropdownPos.top + 12}px))`, zIndex: 99999 }}
         >
-          <div className="p-4 border-b border-slate-200/60 dark:border-slate-800/60 flex justify-between items-center">
-            <div>
-              <h3 className="font-semibold text-sm text-slate-800 dark:text-white">Tray</h3>
-              <p className="text-[10px] text-slate-400 dark:text-slate-500">Files: drag anywhere or Ctrl+V · Profiles: drag here</p>
+          {/* Header */}
+          <div className="relative flex shrink-0 items-center gap-2 border-b border-[var(--border)] px-4 py-3">
+            {tap && <span className="absolute left-1/2 top-1.5 h-1 w-10 -translate-x-1/2 rounded-full bg-[var(--border-strong)]" />}
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--primary-glow)] text-[var(--primary)]"><Icon name="inbox" size={18} /></span>
+            <div className="min-w-0 flex-1">
+              <h3 className="ak-card-title leading-tight">Tray <span className="text-sm font-medium ak-muted">· {capturedFiles.length} file{capturedFiles.length === 1 ? '' : 's'}</span></h3>
+              <p className="truncate text-xs ak-muted">{tap ? 'Tap pictures to tick them, then Put on…' : 'Drag onto a field, a profile card or the passport drop · Ctrl+C, then Ctrl+V over a field'}</p>
             </div>
-            {capturedFiles.length > 0 && (
-              <button onClick={() => { clearAll(); toast.success('Tray cleared') }} className="text-xs text-red-500 hover:text-red-600 dark:text-red-400 dark:hover:text-red-300 transition-colors font-medium">Clear all</button>
+            <button type="button" onClick={() => setSize({ ...size, tall: !size.tall })} className="ak-icon-btn !h-9 !min-w-9 !p-0" title={size.tall ? 'Smaller' : 'Full height'} aria-label={size.tall ? 'Smaller' : 'Full height'}>
+              <Icon name="chevronDown" size={18} className={size.tall ? 'rotate-180' : ''} />
+            </button>
+            <button type="button" onClick={() => setIsOpen(false)} className="ak-icon-btn !h-9 !min-w-9 !p-0" aria-label="Close"><Icon name="close" size={18} /></button>
+          </div>
+
+          {/* Ticked files: what to do with them */}
+          {capturedFiles.length > 0 && (
+            <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-[var(--border)] px-4 py-2 text-sm">
+              <label className="flex cursor-pointer items-center gap-2 font-medium">
+                <input type="checkbox" className="h-4 w-4" checked={picked.size > 0 && picked.size === capturedFiles.length}
+                  ref={el => { if (el) el.indeterminate = picked.size > 0 && picked.size < capturedFiles.length }}
+                  onChange={() => setPicked(picked.size === capturedFiles.length ? new Set() : new Set(capturedFiles.map(f => f.id)))} />
+                {picked.size ? `${picked.size} ticked` : 'Tick all'}
+              </label>
+              <span className="flex-1" />
+              {picked.size > 0 && (<>
+                {!tap && <span draggable onDragStart={(e) => { dragTrayFiles(e, pickedFiles); setTimeout(() => setDragOut(true), 0) }} onDragEnd={handleDragEnd}
+                  className="ak-icon-btn cursor-grab border border-[var(--border)] !h-8 !text-sm active:cursor-grabbing" title="Drag all ticked files onto a field">
+                  <Icon name="transfer" size={15} /> Drag {picked.size}
+                </span>}
+                <button type="button" onClick={() => setPutOn({ files: pickedFiles })} className="ak-pill-btn !min-h-[32px] !px-3 !text-sm"><Icon name="user" size={15} /> Put on…</button>
+                <button type="button" onClick={() => { removeFilesById([...picked]); toast.success('Taken out of the tray') }} className="ak-icon-btn !h-8 !text-sm !text-[var(--danger)]"><Icon name="trash" size={15} /> Remove</button>
+              </>)}
+              {!picked.size && <button type="button" onClick={() => { clearAll(); toast.success('Tray cleared') }} className="text-xs font-medium text-[var(--danger)]">Clear all</button>}
+            </div>
+          )}
+
+          <div className="min-h-0 flex-1 overflow-y-auto custom-scrollbar">
+            <SmsCodesRows codes={smsCodes} />
+            {trayProfiles.length > 0 && (
+              <div className="border-b border-[var(--border)] p-2">
+                <div className="flex items-center justify-between px-1 pb-1">
+                  <span className="ak-eyebrow">Profiles · {trayProfiles.length}</span>
+                  <span className="flex gap-3 text-xs">
+                    <button type="button" draggable onDragStart={(e) => { dragProfiles(e, trayProfiles); e.dataTransfer.setData('application/x-adal-from-tray', '1') }}
+                      className="cursor-grab font-medium text-[var(--primary)]" title="Drag all onto a checklist">⠿ Drag all</button>
+                    <button type="button" onClick={() => { clearProfiles(); toast.success('Profiles taken out of the tray') }} className="font-medium text-[var(--danger)]">Clear</button>
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {trayProfiles.map(p => (
+                    <div key={p.id} draggable onDragStart={(e) => { dragProfiles(e, p); e.dataTransfer.setData('application/x-adal-from-tray', '1') }}
+                      className="group flex max-w-[16rem] cursor-grab items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--surface)] py-1 pl-2.5 pr-1">
+                      <button type="button" onClick={() => { setIsOpen(false); navigate(`/profiles/${p.id}`) }} className="min-w-0 truncate text-sm font-medium" title={p.phone_number || ''}>{p.full_name || `Profile #${p.id}`}</button>
+                      <button type="button" onClick={() => removeProfile(p.id)} className="rounded-full p-0.5 ak-muted hover:text-[var(--danger)]" aria-label="Take out"><Icon name="close" size={13} /></button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {capturedFiles.length === 0 ? (trayProfiles.length ? null : (
+              <div className="flex flex-col items-center justify-center gap-2 p-10 text-center">
+                <span className="flex h-12 w-12 items-center justify-center rounded-full bg-[var(--band)] text-[var(--primary)]"><Icon name="inbox" size={24} /></span>
+                <p className="text-sm font-semibold">The tray is empty</p>
+                <p className="max-w-xs text-xs ak-muted">{tap ? 'Pictures you share or scan come here.' : 'Paste (Ctrl+V), drop files on the window, or press C twice to crop the screen.'}</p>
+              </div>
+            )) : (
+              <div className="grid content-start items-start gap-3 p-3" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${tap ? 140 : 172}px, 1fr))` }}>
+                {[...capturedFiles].reverse().map((file) => {
+                  const on = picked.has(file.id)
+                  return (
+                    <div
+                      key={file.id}
+                      draggable={!tap}
+                      onDragStart={(e) => handleDragStart(e, file)}
+                      onDragEnd={handleDragEnd}
+                      onClick={(e) => togglePick(file, e)}
+                      title={file.name}
+                      className={`group relative flex select-none flex-col overflow-hidden rounded-[var(--radius-md)] border bg-[var(--surface)] transition-shadow ${on ? 'border-[var(--primary)] ring-2 ring-[var(--primary-glow)]' : 'border-[var(--border)] hover:shadow-[var(--shadow-md)]'} ${tap ? '' : 'cursor-grab active:cursor-grabbing'}`}
+                    >
+                      <div className="relative aspect-[4/3] overflow-hidden bg-[var(--band)]">
+                        <FileThumb file={file} className="absolute inset-0" />
+                        <span className={`absolute left-2 top-2 flex h-6 w-6 items-center justify-center rounded-full border-2 shadow ${on ? 'border-[var(--primary)] bg-[var(--primary)] text-white dark:text-[#140e38]' : 'border-white/90 bg-black/25 text-transparent'}`}>
+                          <Icon name="check" size={14} strokeWidth={2.6} />
+                        </span>
+                        <button type="button" onClick={(e) => { e.stopPropagation(); removeFilesById([file.id]) }}
+                          className={`absolute right-1.5 top-1.5 flex h-7 w-7 items-center justify-center rounded-full bg-black/50 text-white transition-opacity ${tap ? '' : 'opacity-0 group-hover:opacity-100'}`} aria-label="Remove">
+                          <Icon name="close" size={14} />
+                        </button>
+                        {tap && (
+                          <button type="button" onClick={(e) => { e.stopPropagation(); setPutOn({ files: [file] }) }}
+                            className="absolute bottom-1.5 right-1.5 rounded-full bg-[var(--primary)] px-2.5 py-1 text-xs font-semibold text-white dark:text-[#140e38]">Put on…</button>
+                        )}
+                      </div>
+                      <div className="px-2.5 py-2">
+                        <p className="truncate text-[13px] font-semibold">{file.name}</p>
+                        <p className="truncate text-[11px] ak-muted">{file.device || 'This PC'} · {file.source || 'Added'} · {whenAdded(file.addedAt)}</p>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
             )}
           </div>
-          <SmsCodesRows codes={smsCodes} />
-          {trayProfiles.length > 0 && (
-            <div className="border-b border-slate-200/60 dark:border-slate-800/60 p-2">
-              <div className="flex items-center justify-between px-1 pb-1">
-                <span className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Profiles · {trayProfiles.length}</span>
-                <span className="flex gap-3 text-xs">
-                  <button type="button" draggable onDragStart={(e) => { dragProfiles(e, trayProfiles); e.dataTransfer.setData('application/x-adal-from-tray', '1') }}
-                    className="cursor-grab font-medium text-teal-600 dark:text-teal-400" title="Drag all onto a checklist">⠿ Drag all</button>
-                  <button type="button" onClick={() => { clearProfiles(); toast.success('Profiles taken out of the tray') }} className="font-medium text-red-500">Clear</button>
-                </span>
-              </div>
-              <div className="max-h-48 overflow-y-auto custom-scrollbar">
-                {trayProfiles.map(p => (
-                  <div key={p.id} draggable onDragStart={(e) => { dragProfiles(e, p); e.dataTransfer.setData('application/x-adal-from-tray', '1') }}
-                    className="group flex items-center gap-2 rounded-lg px-2 py-1.5 cursor-grab hover:bg-slate-100/80 dark:hover:bg-white/10">
-                    <button type="button" onClick={() => { setIsOpen(false); navigate(`/profiles/${p.id}`) }} className="min-w-0 flex-1 text-left">
-                      <span className="block truncate text-sm font-medium text-slate-700 dark:text-slate-200">{p.full_name || `Profile #${p.id}`}</span>
-                      <span className="block text-[11px] text-slate-400">{p.phone_number || 'Drag onto a checklist'}</span>
-                    </button>
-                    <button type="button" onClick={() => removeProfile(p.id)} className="rounded-md p-1 text-slate-400 opacity-0 group-hover:opacity-100 hover:text-red-500" aria-label="Take out">✕</button>
-                  </div>
-                ))}
+
+          {/* The corner grip (bottom left: the tray hangs from the top right) */}
+          {!tap && !size.tall && (
+            <div onPointerDown={startResize} title="Drag to make the tray bigger or smaller"
+              className="absolute bottom-0 left-0 z-[5] h-5 w-5 cursor-nesw-resize" style={{ background: 'linear-gradient(225deg, transparent 50%, var(--border-strong) 50% 60%, transparent 60% 70%, var(--border-strong) 70% 80%, transparent 80%)' }} />
+          )}
+
+          {/* "Put on…" over the tray */}
+          {putOn && (
+            <div className="absolute inset-0 z-10 flex items-start justify-center bg-black/30 p-3">
+              <div className="solid-sheet flex max-h-full w-full max-w-md flex-col gap-3 rounded-[var(--radius-lg)] border border-[var(--border-strong)] p-3 shadow-[var(--shadow-xl)]">
+                <div className="flex gap-1.5 overflow-x-auto">
+                  {putOn.files.slice(0, 8).map(f => <div key={f.id} className="h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--band)]"><FileThumb file={f} /></div>)}
+                </div>
+                <TrayPutOn files={putOn.files} profile={putOn.profile || null} onCancel={() => setPutOn(null)} onDone={() => { setPutOn(null); setPicked(new Set()) }} />
               </div>
             </div>
           )}
-          <div className="max-h-72 overflow-y-auto custom-scrollbar p-2">
-            {capturedFiles.length === 0 && trayProfiles.length ? null : capturedFiles.length === 0 ? (
-              <div className="p-8 text-center">
-                <p className="text-sm text-slate-500 dark:text-slate-400 mb-1 font-medium">Tray is empty</p>
-              </div>
-            ) : (
-              capturedFiles.map((file, index) => (
-                <div
-                  key={file.id || `${file.name}-${index}`}
-                  draggable
-                  onDragStart={(e) => handleDragStart(e, file, index)}
-                  onDragEnd={handleDragEnd}
-                  className="p-2.5 rounded-lg hover:bg-slate-100/80 dark:hover:bg-white/10 cursor-grab active:cursor-grabbing flex items-center gap-3 transition-all group"
-                >
-                  <div className="w-10 h-10 rounded-lg bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-500 dark:text-slate-400 group-hover:bg-teal-100/50 dark:group-hover:bg-teal-500/20 group-hover:text-teal-600 dark:group-hover:text-teal-400 transition-colors shrink-0 overflow-hidden">
-                    {file.preview ? <img src={file.preview} alt="" className="w-full h-full object-cover" /> : (
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>
-                    )}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-slate-700 dark:text-slate-200 truncate">{file.name}</p>
-                    <p className="text-xs text-slate-400 dark:text-slate-500">{file.size ? `${(file.size / 1024).toFixed(1)} KB` : 'File'} • Drag to field</p>
-                  </div>
-                  <button onClick={() => { removeFile(index); toast.success('File removed') }} className="p-1.5 text-slate-400 hover:text-red-500 dark:hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all hover:bg-red-50/50 dark:hover:bg-red-500/10 rounded-md" aria-label="Remove">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
-                  </button>
-                </div>
-              ))
-            )}
+        </div>,
+        document.body
+      )}
+
+      {/* "Put on…" for files dropped on a profile card while the tray is shut */}
+      {putOn && !isOpen && createPortal(
+        <div data-tray-keep="" className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/40 p-4" onMouseDown={(e) => e.target === e.currentTarget && setPutOn(null)}>
+          <div className="solid-sheet flex max-h-[85vh] w-full max-w-md flex-col gap-3 rounded-[var(--radius-lg)] border border-[var(--border-strong)] p-4 text-[var(--text)] shadow-[var(--shadow-xl)]">
+            <div className="flex gap-1.5 overflow-x-auto">
+              {putOn.files.slice(0, 8).map(f => <div key={f.id || f.name} className="h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--band)]"><FileThumb file={f} /></div>)}
+            </div>
+            <TrayPutOn files={putOn.files} profile={putOn.profile || null} onCancel={() => setPutOn(null)} onDone={() => setPutOn(null)} />
           </div>
         </div>,
         document.body
       )}
+
+      <TrayArrival />
     </>
   )
 }

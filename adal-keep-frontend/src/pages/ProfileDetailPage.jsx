@@ -180,12 +180,15 @@ export default function ProfileDetailPage() {
   useEffect(() => {
     const again = () => api.get(`/profiles/${id}`).then(r => { keep(parts(id).profile, r.data); setProfile(r.data) }).catch(() => {})
     window.addEventListener('adal-profile-changed', again)
+    // Tray files were put on one of her fields (TrayPutOn.jsx).
+    const fieldsAgain = (e) => { if (!e.detail?.id || String(e.detail.id) === String(id)) api.get(`/profiles/${id}/fields`).then(r => { keep(parts(id).fields, r.data); setFields(r.data) }).catch(() => {}) }
+    window.addEventListener('adal-fields-changed', fieldsAgain)
     // Changed anywhere else too: her details, notes, documents and status follow at once.
     const off = onDataChange(['profiles', 'profile_fields', 'files', 'automation_queue', 'profile_automations', 'notes'], (t) => {
       again()
       if (t.some(x => x === 'profile_fields' || x === 'files' || x === '*')) api.get(`/profiles/${id}/fields`).then(r => { keep(parts(id).fields, r.data); setFields(r.data) }).catch(() => {})
     })
-    return () => { window.removeEventListener('adal-profile-changed', again); off() }
+    return () => { window.removeEventListener('adal-profile-changed', again); window.removeEventListener('adal-fields-changed', fieldsAgain); off() }
   }, [id])
 
   // Photo and Full Body Photo first; a missing one sits outside the fold, always in view.

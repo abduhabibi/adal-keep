@@ -22,6 +22,7 @@ import { links, settingsLink, trashLink, showTrash } from './Sidebar'
 import { swipeBack } from '../../lib/phoneApp'
 import Icon from '../shared/Icon'
 import { CountryPicker } from './Navbar'
+import FileTray from '../FileTray'
 
 const icon = (name) => <Icon name={name} size={26} strokeWidth={1.6} />
 const TABS = [
@@ -145,13 +146,15 @@ export function PhoneTopBar({ scroller }) {
         )}
       </div>
       <div className={`min-w-0 flex-1 truncate text-center text-[17px] font-semibold transition-opacity duration-200 ${scrolled || inner ? 'opacity-100' : 'opacity-0'}`}>{nameOf(pathname)}</div>
-      <div className="flex w-24 items-center justify-end gap-1">
+      <div className="flex min-w-24 items-center justify-end gap-0.5">
+        {/* The tray (files shared, scanned or cropped): tap to put them on a profile. */}
+        <FileTray phone />
         <NavLink to="/tasks" className="phone-press relative rounded-full p-2 text-slate-600 dark:text-slate-300" aria-label="ተግባሮች">
-          {icon('M9 11l3 3 8-8M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9')}
+          {icon('tasks')}
           {tasks > 0 && <span className="absolute right-0.5 top-0.5 min-w-[18px] rounded-full bg-red-500 px-1 text-center text-[11px] font-bold leading-[18px] text-white">{tasks > 99 ? '99+' : tasks}</span>}
         </NavLink>
         <NavLink to="/notifications" className="phone-press rounded-full p-2 text-slate-600 dark:text-slate-300" aria-label="ማሳወቂያዎች">
-          {icon('M15 17h5l-1.4-1.4A2 2 0 0 1 18 14.2V11a6 6 0 0 0-4-5.7V5a2 2 0 1 0-4 0v.3A6 6 0 0 0 6 11v3.2a2 2 0 0 1-.6 1.4L4 17h5m6 0v1a3 3 0 1 1-6 0v-1m6 0H9')}
+          {icon('bell')}
         </NavLink>
       </div>
     </header>

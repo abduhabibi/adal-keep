@@ -67,6 +67,7 @@ type standbyState struct {
 }
 
 type standbyPeer struct {
+	addr   string // where it is (its copy and server: port 47810, peers.go)
 	id     string
 	score  int
 	acting bool
@@ -178,12 +179,23 @@ func startStandby(root string) {
 func (s *standbyRunner) bundleLoop() {
 	time.Sleep(2 * time.Minute)
 	for {
-		if !standbyActing() && hostServer != "" {
-			if err := s.fetchBundle(); err != nil {
+		learnNumberOnline(s.root)
+		if !standbyActing() {
+			var err error
+			if hostServer != "" && pingServer() {
+				err = s.fetchBundle()
+			} else if !hasServer(s.root) {
+				err = s.bundleFromPeers() // the main PC away: another Companion's
+			}
+			if err != nil {
 				log.Printf("🏢 server copy: %v", err)
 			}
 		}
-		time.Sleep(bundleEvery)
+		if hasServer(s.root) {
+			time.Sleep(bundleEvery)
+		} else {
+			time.Sleep(15 * time.Minute) // none yet: soon again
+		}
 	}
 }
 
@@ -216,18 +228,23 @@ func (s *standbyRunner) fetchBundle() error {
 	default:
 		return fmt.Errorf("the main PC answered %d", resp.StatusCode)
 	}
+	return s.installBundle(resp.Body, resp.Header.Get("X-Adal-Version"))
+}
+
+// installBundle: a server (as tar.gz) unpacked beside the one here and put in
+// place (when this PC does not stand in now), this PC's data folder kept.
+func (s *standbyRunner) installBundle(body io.Reader, ver string) error {
 	part := filepath.Join(s.root, "server-bundle.tgz.part")
 	f, err := os.Create(part)
 	if err != nil {
 		return err
 	}
-	n, err := io.Copy(f, resp.Body)
+	n, err := io.Copy(f, body)
 	f.Close()
 	if err != nil {
 		os.Remove(part)
 		return err
 	}
-	ver := resp.Header.Get("X-Adal-Version")
 	newDir := serverDir(s.root) + ".new"
 	os.RemoveAll(newDir)
 	if err := os.MkdirAll(newDir, 0o755); err != nil {
@@ -318,23 +335,27 @@ func (s *standbyRunner) listen() {
 	}
 	buf := make([]byte, 512)
 	for {
-		n, _, err := c.ReadFromUDP(buf)
+		n, from, err := c.ReadFromUDP(buf)
 		if err != nil {
 			return
 		}
-		s.heard(string(buf[:n]), time.Now())
+		s.heard(string(buf[:n]), time.Now(), peerIP(from))
 	}
 }
 
 // heard: another Companion of this agency (the same main PC's number) says how it is.
-func (s *standbyRunner) heard(msg string, now time.Time) {
+func (s *standbyRunner) heard(msg string, now time.Time, addr ...string) {
 	p := strings.Split(strings.TrimSpace(msg), "|")
 	if len(p) != 6 || p[0] != standbyMagic || p[1] != numberTag(mainNumber()) || p[2] == s.myID {
 		return
 	}
 	score, _ := strconv.Atoi(p[3])
 	s.mu.Lock()
-	s.peers[p[2]] = standbyPeer{id: p[2], score: score, acting: p[4] == "1", ready: p[5] == "1", at: now}
+	a := ""
+	if len(addr) > 0 {
+		a = addr[0]
+	}
+	s.peers[p[2]] = standbyPeer{addr: a, id: p[2], score: score, acting: p[4] == "1", ready: p[5] == "1", at: now}
 	s.mu.Unlock()
 }
 
@@ -544,6 +565,7 @@ func (s *standbyRunner) watch() {
 			s.mainSeen = now
 			continue
 		}
+		learnNumberOnline(s.root)
 		if !s.ready() || !s.myTurn(now) || s.mainAliveOnline() {
 			continue
 		}

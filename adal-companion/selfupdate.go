@@ -1017,6 +1017,7 @@ func startSelfUpdate(root string) *updater {
 		addReplicaRoutes(mux) // the copy, for a restore on a new main PC (replica.go)
 		addMainProxy(mux)     // the online pages reach the main PC over the network (mainproxy.go)
 		addRobotRoutes(mux, root) // the main PC's robots in this PC's Adal Browser (robot.go)
+		addPeerRoutes(mux, root)  // its copy and server for the other Companions (peers.go)
 		go http.Serve(ln, mux)
 		go announceRobot()
 	} else {

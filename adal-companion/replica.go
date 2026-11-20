@@ -324,13 +324,16 @@ func syncReplica() error {
 		return nil
 	}
 	defer replicaMu.Unlock()
-	id := loadIdentity()
-	if id.Number == "" {
+	number := mainNumber()
+	if number == "" {
+		number = learnNumberOnline(exeRoot())
+	}
+	if number == "" {
 		return errNoNumber
 	}
 	keys := loadKeys()
 	if keys.AccessKey == "" {
-		k, err := joinWithNumber(id.Number)
+		k, err := joinWithNumber(number)
 		if err != nil {
 			return err
 		}
@@ -374,9 +377,16 @@ func syncReplica() error {
 		os.RemoveAll(piecesDir())
 	}
 	var got, bytesGot int64
+	bases := peerBases() // the other Companions: a piece they have is not asked of the main PC
+	fromPeers := 0
 	for i, sum := range m.DB.Chunks {
 		name := dbPieceName(i, sum)
 		if pieceExists(name) {
+			continue
+		}
+		if pieceFromPeers(name, bases) {
+			got++
+			fromPeers++
 			continue
 		}
 		n, err := fetchPiece(fmt.Sprintf("/api/replica/db/%s/%d", url.PathEscape(m.Snap), i), keys.AccessKey, name)
@@ -390,6 +400,11 @@ func syncReplica() error {
 		for k := 0; k < d.Parts; k++ {
 			name := docPieceName(d, k)
 			if pieceExists(name) {
+				continue
+			}
+			if pieceFromPeers(name, bases) {
+				got++
+				fromPeers++
 				continue
 			}
 			n, err := fetchPiece(fmt.Sprintf("/api/replica/doc/%d?name=%s", k, url.QueryEscape(d.Name)), keys.AccessKey, name)
@@ -425,7 +440,7 @@ func syncReplica() error {
 		return err
 	}
 	if got > 0 {
-		log.Printf("🗄 Copy of the main PC brought up to date: %d new piece(s), %d KB (%d documents)", got, bytesGot/1024, len(docs))
+		log.Printf("🗄 Copy of the main PC brought up to date: %d new piece(s) (%d from other Companions), %d KB from the main PC (%d documents)", got, fromPeers, bytesGot/1024, len(docs))
 	}
 	reportToMain(st, keys)
 	return nil
@@ -751,6 +766,13 @@ func watchReplica() {
 			default:
 				if mainOffSince.IsZero() {
 					mainOffSince = time.Now()
+				}
+				// The main PC away: a newer copy another Companion has (peers.go).
+				if time.Since(lastSync) >= syncEvery {
+					lastSync = time.Now()
+					if err := syncFromPeers(); err != nil && err != errNoNumber {
+						log.Printf("⚠️ Copy from another Companion: %v", err)
+					}
 				}
 				if companionBackupDue(loadState(), loadKeys(), time.Now(), mainOffSince, replicaJitter()) {
 					if err := backupFromCopy(); err != nil {

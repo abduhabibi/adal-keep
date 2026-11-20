@@ -118,7 +118,7 @@ export const WORKFLOWS = {
   tasheer_schedule: {
     id: 'tasheer_schedule',
     name: 'Tasheer appointment',
-    description: 'Tasheer (agents.tasheer.com) sign-in filled → GROUP SCHEDULING → Work, Addis Ababa, how many → a person picks the day and time and Submits → the Excel uploaded, consent ticked → a person presses Save',
+    description: 'Tasheer (agents.tasheer.com) sign-in filled → GROUP SCHEDULING → Work, Addis Ababa, how many → a person picks the day and time and Submits → the Excel uploaded (Upload Sheet, its answer checked), consent ticked, Save pressed',
     target: 'https://agents.tasheer.com/AgentTasheer/',
     consts: {},
     stepCount: 4,

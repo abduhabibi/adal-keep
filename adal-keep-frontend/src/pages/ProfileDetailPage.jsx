@@ -72,15 +72,21 @@ export default function ProfileDetailPage() {
   const [editOpen, setEditOpen] = useState(false)
   // A new profile: her photos → her CV → Musaned, one pop-up after the other.
   const [search, setSearch] = useSearchParams()
-  const [nextOpen, setNextOpen] = useState(() => { try { return sessionStorage.getItem(`next-steps-${id}`) === '1' } catch { return false } })
+  // ✕ and Later only hide it: it opens again each time her page is opened (kept on
+  // this device), until Musaned is started or she is past the Musaned step (asked on 2026-11-20).
+  const NEXT_KEY = `next-steps-${id}`
+  const [nextOpen, setNextOpen] = useState(() => { try { return localStorage.getItem(NEXT_KEY) === '1' || sessionStorage.getItem(NEXT_KEY) === '1' } catch { return false } })
   useEffect(() => {
+    try { setNextOpen(localStorage.getItem(NEXT_KEY) === '1' || sessionStorage.getItem(NEXT_KEY) === '1') } catch {}
     if (search.get('next') !== 'photos') return
-    try { sessionStorage.setItem(`next-steps-${id}`, '1') } catch {}
+    try { localStorage.setItem(NEXT_KEY, '1') } catch {}
     setNextOpen(true)
     search.delete('next'); setSearch(search, { replace: true })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
-  const closeNext = () => { try { sessionStorage.removeItem(`next-steps-${id}`) } catch {} ; setNextOpen(false) }
+  const closeNext = () => setNextOpen(false)
+  const doneNext = () => { try { localStorage.removeItem(NEXT_KEY); sessionStorage.removeItem(NEXT_KEY) } catch {} ; setNextOpen(false) }
+  useEffect(() => { if (phase && !['cv', 'musaned'].includes(phase)) doneNext() }, [phase]) // eslint-disable-line react-hooks/exhaustive-deps
   const refreshAll = () => {
     window.dispatchEvent(new Event('adal-profile-changed'))
     api.get(`/profiles/${id}/fields`).then(r => { keep(parts(id).fields, r.data); setFields(r.data) }).catch(() => {})
@@ -226,7 +232,7 @@ export default function ProfileDetailPage() {
         </GlassPopup>
       )}
       {nextOpen && !editOpen && (
-        <NextSteps profileId={id} fields={fields} cvs={cvs} onFileUpdate={handleFileUpdate} onClose={closeNext}
+        <NextSteps profileId={id} fields={fields} cvs={cvs} onFileUpdate={handleFileUpdate} onClose={closeNext} onDone={doneNext}
           onCv={() => navigate(`/cvs/new?profile=${id}&auto=1`)} />
       )}
       <PageHeader
@@ -615,7 +621,7 @@ function GlassPopup({ children, onClose, wide = false, title = null }) {
   return createPortal(
     <div className="fixed inset-0 z-[70] flex items-start justify-center overflow-y-auto bg-slate-950/45 p-3 backdrop-blur-md sm:items-center sm:p-6"
       onMouseDown={(e) => { if (e.target === e.currentTarget) onClose?.() }}>
-      <div className={`relative w-full ${wide ? 'max-w-5xl' : 'max-w-xl'} max-h-[92vh] overflow-y-auto rounded-3xl border border-white/40 bg-white/75 p-4 shadow-[0_30px_80px_-20px_rgba(15,23,42,0.55)] ring-1 ring-black/5 backdrop-blur-2xl dark:border-white/10 dark:bg-slate-900/75 sm:p-6`}>
+      <div className={`relative w-full ${wide ? 'max-w-5xl' : 'max-w-xl'} max-h-[92vh] overflow-y-auto rounded-3xl border border-slate-200 bg-white p-4 shadow-[0_30px_80px_-20px_rgba(15,23,42,0.55)] ring-1 ring-black/5 dark:border-slate-700 dark:bg-slate-900 sm:p-6`}>
         <div className="pointer-events-none absolute inset-x-10 top-0 h-px bg-gradient-to-r from-transparent via-white/90 to-transparent dark:via-white/30" />
         <button type="button" onClick={onClose} aria-label="Close"
           className="absolute right-4 top-4 z-10 grid h-9 w-9 place-items-center rounded-full border border-slate-200/70 bg-white/70 text-slate-500 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-800/70 dark:hover:text-white">✕</button>
@@ -631,7 +637,7 @@ function GlassPopup({ children, onClose, wide = false, title = null }) {
  * A new profile's next steps, one pop-up after the other (asked on 2026-11-19):
  * 1. her Photo and Full Body Photo, 2. her CV (a "Created" box too), 3. Musaned.
  */
-function NextSteps({ profileId, fields, cvs, onFileUpdate, onClose, onCv }) {
+function NextSteps({ profileId, fields, cvs, onFileUpdate, onClose, onDone, onCv }) {
   const [madeByHand, setMadeByHand] = useState(() => { try { return sessionStorage.getItem(`next-cv-${profileId}`) === '1' } catch { return false } })
   const [sending, setSending] = useState(false)
   const photo = fields.find(f => f.name === 'Photo')
@@ -646,7 +652,7 @@ function NextSteps({ profileId, fields, cvs, onFileUpdate, onClose, onCv }) {
       const r = await api.post(`/profiles/${profileId}/automations/musaned_add_candidate/start`, {})
       toast.success(`Musaned: ${r.data?.message || 'started'}`, { id: t })
       try { sessionStorage.removeItem(`next-cv-${profileId}`) } catch {}
-      onClose()
+      onDone()
     } catch (e) {
       toast.error(`Musaned: ${e.response?.data?.error || 'could not start'}`, { id: t, duration: 8000 })
     } finally { setSending(false) }

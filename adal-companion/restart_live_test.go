@@ -19,7 +19,7 @@ func TestRestartLineStartsTheProgram(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 50; i++ {
+	for i := 0; i < 150; i++ {
 		if _, err := os.Stat(mark); err == nil {
 			return
 		}

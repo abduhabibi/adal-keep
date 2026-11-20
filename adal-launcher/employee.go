@@ -99,6 +99,7 @@ func runEmployee(root string, background bool) {
 
 	logf("Adal Keep (employee PC) starting")
 	go ensureBrowser(root)
+	go ensureSharing(root) // the office network may share updates, data and the server (sharing.go)
 	startHidden(filepath.Join(root, "adal-companion.exe"))
 	go brandWindows(root)
 	online := startOnlinePage(root)

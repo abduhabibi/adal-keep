@@ -272,6 +272,7 @@ func (s *standbyRunner) installBundle(body io.Reader, ver string) error {
 		return fmt.Errorf("unpacking the server: %v %s", err, strings.TrimSpace(string(out)))
 	}
 	os.Remove(part)
+	openSettings(newDir)
 	log.Printf("🏢 The main PC's server is kept here (%d MB, version %.7s)", n>>20, ver)
 	s.mu.Lock()
 	s.st.BundleVersion, s.st.BundleAt = ver, time.Now().UTC().Format(time.RFC3339)
@@ -547,6 +548,7 @@ func (s *standbyRunner) watch() {
 	for {
 		time.Sleep(20 * time.Second)
 		now := time.Now()
+		openSettings(serverDir(s.root)) // settings that came locked before the key: opened once the key is here
 		if standbyActing() {
 			if u := s.realMainAt(s.mainCandidates()); u != "" {
 				log.Printf("🏢 The main PC is back at %s: handing over what was done here", u)

@@ -87,6 +87,20 @@ Function .onInit
 FunctionEnd
 
 
+; The PCs of an office share updates, the copy of the agency, the server in waiting and
+; which Companion stands in (adal-companion standby.go, peers.go): only from the office
+; network itself (localsubnet), never from anywhere else.
+!macro SharingRules
+  nsExec::Exec 'netsh advfirewall firewall delete rule name="Adal Keep Sharing (LAN)"'
+  Pop $0
+  nsExec::Exec 'netsh advfirewall firewall add rule name="Adal Keep Sharing (LAN)" dir=in action=allow protocol=UDP localport=45455,45456 remoteip=localsubnet profile=any'
+  Pop $0
+  nsExec::Exec 'netsh advfirewall firewall delete rule name="Adal Keep Sharing (LAN) TCP"'
+  Pop $0
+  nsExec::Exec 'netsh advfirewall firewall add rule name="Adal Keep Sharing (LAN) TCP" dir=in action=allow protocol=TCP localport=47810 remoteip=localsubnet profile=any'
+  Pop $0
+!macroend
+
 Section "Install"
   SetShellVarContext all
 
@@ -144,6 +158,7 @@ Section "Install"
   Pop $0
   nsExec::Exec 'netsh advfirewall firewall add rule name="Adal Keep Companion" dir=in action=allow program="$INSTDIR\adal-companion.exe" profile=any'
   Pop $0
+  !insertmacro SharingRules
 
   ; Employees use Adal Keep through this PC: AdalKeep.exe opens the main PC's
   ; Adal Keep in an app-style window with the Adal Keep logo, and runs the
@@ -205,6 +220,7 @@ Section "Install"
   Pop $0
   nsExec::Exec 'netsh advfirewall firewall add rule name="Adal Keep Discovery" dir=in action=allow protocol=UDP localport=${DISCO_PORT} profile=any'
   Pop $0
+  !insertmacro SharingRules
   ; The first time node.exe listens, Windows may ask "Allow access?" on the
   ; screen (or, with nobody there, add a BLOCK rule for it by itself). A block
   ; rule beats every allow rule, and employee PCs then never find this PC:
@@ -294,6 +310,10 @@ Section "Uninstall"
   nsExec::Exec 'netsh advfirewall firewall delete rule name="Adal Keep Discovery"'
   Pop $0
   nsExec::Exec 'netsh advfirewall firewall delete rule name="Adal Keep Server"'
+  Pop $0
+  nsExec::Exec 'netsh advfirewall firewall delete rule name="Adal Keep Sharing (LAN)"'
+  Pop $0
+  nsExec::Exec 'netsh advfirewall firewall delete rule name="Adal Keep Sharing (LAN) TCP"'
   Pop $0
   ; Program files go; the database and uploaded documents STAY
   ; (backend\data.sqlite, backend\data\, backend\uploads\), so a reinstall

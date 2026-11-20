@@ -8,7 +8,9 @@
  * The furthest step she reached counts: a step skipped before it is behind her
  * (shown as "skipped" on her card).
  */
-export const FIRST = [['cv', 'CV'], ['musaned', 'Musaned'], ['waiting', 'Waiting'], ['selected', 'Selected'], ['wafid', 'Wafid'], ['unfit', 'Unfit'], ['epro', 'EPRO']]
+// Asked on 2026-11-19: "Waiting" is the WhatsApp stage (the only one whose CVs go to agents on
+// WhatsApp); no Unfit tab (an UNFIT girl stays on Wafid, marked); LMIS (the contract) after Wafid FIT.
+export const FIRST = [['cv', 'CV'], ['musaned', 'Musaned'], ['waiting', 'WhatsApp'], ['selected', 'Selected'], ['wafid', 'Wafid'], ['lmis', 'LMIS'], ['epro', 'EPRO']]
 // The steps up to the EPRO, in order (the "skipped" badges).
 export const STEPS_TO_EPRO = [['cv', 'CV'], ['musaned', 'Musaned'], ['selected', 'Selected'], ['wafid', 'Wafid'], ['epro', 'EPRO']]
 
@@ -32,12 +34,13 @@ export function inWaitingPhase(steps = {}, p = {}) {
 export function phaseOf(steps = {}, p = {}, after = []) {
   const reached = furthest(ticksToEpro(steps, p))
   if (reached < 0) return 'cv'
-  // Before the EPRO a rejected medical is its own tab.
-  if (reached < 3 && p.status === 'medical_rejected') return 'unfit'
+  // A rejected medical before the EPRO stays on Wafid (marked UNFIT on her card): no tab of its own.
+  if (reached < 3 && p.status === 'medical_rejected') return 'wafid'
   if (reached === 0) return 'musaned'
   if (reached === 1) return 'waiting'
   if (reached === 2) return p.status === 'medical_applied' || ['active', 'failed'].includes(steps.wafid) ? 'wafid' : 'selected'
-  if (reached === 3) return 'epro'
+  // Wafid FIT: the LMIS contract until it is done (FMOL in her journey), then the EPRO.
+  if (reached === 3) return steps.fmol === 'done' ? 'epro' : 'lmis'
   // Past the EPRO: the first step (in the agency's order) not done yet.
   return after.find(([, k]) => steps[k] !== 'done')?.[1] || 'choices'
 }

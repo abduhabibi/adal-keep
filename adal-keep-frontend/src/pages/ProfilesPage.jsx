@@ -38,7 +38,7 @@ const STATUS_OPTIONS_AM = [
 // After the EPRO: the steps in the agency's order (dragged here or on a
 // profile's AI Actions — Settings "journey_order", the step boxes' names).
 export const phaseOf = (steps = {}, p = {}, after = AFTER) => phaseFrom(steps, p, after)
-const NOW_TEXT = { cv: 'CV next', musaned: 'Musaned next', waiting: 'Waiting to be chosen', selected: 'Chosen — book Wafid', wafid: 'Wafid medical', unfit: 'Medical UNFIT', epro: 'EPRO approval',
+const NOW_TEXT = { cv: 'CV next', musaned: 'Musaned next', waiting: 'WhatsApp — send her CV to agents', selected: 'Chosen — book Wafid', wafid: 'Wafid medical', lmis: 'LMIS contract next', epro: 'EPRO approval',
   tasheer: 'Tasheer next', insurance: 'Insurance next', embassy: 'Visa next', police: 'Police clearance next', choices: 'All steps done' }
 
 export default function ProfilesPage() {
@@ -123,7 +123,7 @@ export default function ProfilesPage() {
   }
   // The steps in order (Unfit apart, at the end: an exception, not a step).
   const PHASES = [...FIRST.filter(([k]) => k !== 'unfit'), ...after.map(([title, k, label]) => [k, label, title]), READY]
-  const UNFIT = FIRST.find(([k]) => k === 'unfit')
+  const UNFIT = null // no Unfit tab (2026-11-19): an UNFIT girl stays on Wafid, marked on her card
   const phaseOfP = (p) => phaseOf(journey.steps[p.id], p, after)
   // The tabs' counts: every profile (the search does not change them — greyed while searching).
   const phaseCounts = {}
@@ -356,7 +356,7 @@ export default function ProfilesPage() {
               </div>
 
               <PrioritizeButton profileId={p.id} className="mt-2" />
-              <p className="mt-1.5 truncate text-xs font-semibold text-teal-700 dark:text-teal-300">{NOW_TEXT[phaseOfP(p)]}{p.status === 'medical_rejected' && phaseOfP(p) !== 'unfit' ? ' · UNFIT' : ''}</p>
+              <p className="mt-1.5 truncate text-xs font-semibold text-teal-700 dark:text-teal-300">{NOW_TEXT[phaseOfP(p)]}{p.status === 'medical_rejected' ? ' · UNFIT' : ''}</p>
               <StepMarks {...stepMarks(journey.steps[p.id], p, after)} />
               {lacking[p.id]?.length > 0 && (
                 <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-2 py-1.5 text-[11px] text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">

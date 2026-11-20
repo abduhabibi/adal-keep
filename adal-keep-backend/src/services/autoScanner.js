@@ -128,6 +128,12 @@ async function scanOnce(db) {
     if (await queueInsuranceFetch(db).catch(e => { console.warn('[scanner] insurance fetch:', e.message); return 0 })) {
       import('./worker.js').then(({ drainQueue }) => drainQueue(db).catch(() => {}))
     }
+    // The first stage moves by itself: her CV, then Musaned (firstStage.js).
+    try {
+      const { pushFirstStage } = await import('./firstStage.js')
+      const moved = await pushFirstStage(db)
+      if (moved.musaned) import('./worker.js').then(({ drainQueue }) => drainQueue(db).catch(() => {}))
+    } catch (e) { console.warn('[scanner] first stage:', e.message) }
     const ready = (await findReadyProfiles(db)).map(p => ({ ...p, wf: WORKFLOW_ID, why: 'Kuwait + labor_id + order_id + all 4 files present' }))
     if (ready.length === 0) return
 

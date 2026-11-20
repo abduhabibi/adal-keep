@@ -930,7 +930,64 @@ func (u *updater) handler() *http.ServeMux {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(backupNowAnswer())
 	})
+	mux.HandleFunc("/update/check", func(w http.ResponseWriter, r *http.Request) { localOnly(w, r, u.updateCheck) })
+	mux.HandleFunc("/update/apply", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost && r.Method != http.MethodOptions {
+			http.Error(w, "POST only", http.StatusMethodNotAllowed)
+			return
+		}
+		localOnly(w, r, u.updateApply)
+	})
 	return mux
+}
+
+// localOnly answers a request from this PC itself (the Companion's own Adal Keep
+// window) with JSON; anything from the network is refused.
+func localOnly(w http.ResponseWriter, r *http.Request, answer func() map[string]any) {
+	host, _, _ := net.SplitHostPort(r.RemoteAddr)
+	if ip := net.ParseIP(host); ip == nil || !ip.IsLoopback() {
+		http.Error(w, "only from this PC", http.StatusForbidden)
+		return
+	}
+	if o := r.Header.Get("Origin"); strings.HasPrefix(o, "http://127.0.0.1:") || strings.HasPrefix(o, "http://localhost:") {
+		w.Header().Set("Access-Control-Allow-Origin", o)
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	}
+	if r.Method == http.MethodOptions {
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(answer())
+}
+
+// updateCheck: is a newer Adal Keep published than the one on this PC? (Settings → Check for updates)
+func (u *updater) updateCheck() map[string]any {
+	cur := u.baseline()
+	short := ""
+	if cur != nil {
+		short = cur.Short
+	}
+	m, _, err := u.cloudLatest()
+	if err != nil {
+		return map[string]any{"hasUpdate": false, "error": "Could not reach the updates: " + err.Error(), "current": short}
+	}
+	return map[string]any{"hasUpdate": isNewerRelease(m, cur), "current": short, "latest": m.Short, "companion": true}
+}
+
+// updateApply: installs the newest Adal Keep on this PC now (asked on 2026-11-19: the Companion updates itself too).
+func (u *updater) updateApply() map[string]any {
+	m, env, err := u.cloudLatest()
+	if err != nil {
+		return map[string]any{"ok": false, "error": "Could not reach the updates: " + err.Error()}
+	}
+	if !isNewerRelease(m, u.baseline()) {
+		return map[string]any{"ok": true, "message": "Adal Keep is up to date (" + m.Short + ")."}
+	}
+	log.Printf("🆕 update %s now (pressed on this PC)", m.Short)
+	if err := u.install(m, env, true); err != nil {
+		return map[string]any{"ok": false, "error": "The update did not install: " + err.Error()}
+	}
+	return map[string]any{"ok": true, "message": "Updated to " + m.Short + ". Close Adal Keep and open it again to use it."}
 }
 
 // backupNowAnswer starts a backup from the copy here when there is something new to send.

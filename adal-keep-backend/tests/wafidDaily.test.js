@@ -12,7 +12,7 @@ test('the Wafid tab: backend and page agree', () => {
     [{ cv: 'done', musaned: 'done', selected: 'done', wafid: 'failed' }, {}],
     [{ cv: 'done', musaned: 'done', selected: 'done' }, {}],                                     // Selected, not booked
     [{ cv: 'done', musaned: 'done', selected: 'done', wafid: 'done' }, { status: 'medical_fit' }], // FIT: moved on
-    [{ cv: 'done', musaned: 'done', selected: 'done', wafid: 'failed' }, { status: 'medical_rejected' }], // Unfit tab
+    [{ cv: 'done', musaned: 'done', selected: 'done', wafid: 'failed' }, { status: 'medical_rejected' }], // UNFIT: stays on Wafid
     [{ cv: 'done', musaned: 'waiting' }, { status: 'medical_applied' }],                         // not chosen
     [{ cv: 'done', musaned: 'done', selected: 'done', epro: 'done', wafid: 'active' }, {}],
   ]
@@ -84,7 +84,7 @@ test('once a day, on the Companion with Adal Browser open: FIT moves her on, the
   await db.destroy()
 })
 
-test('UNFIT goes to the Unfit tab; an unclear answer changes nothing', async () => {
+test('UNFIT stays on the Wafid tab, marked; an unclear answer changes nothing', async () => {
   const db = await memDb()
   const [id] = await db('profiles').insert({ full_name: 'Hana', passport_number: 'EP1', status: 'medical_applied' })
   const p = await db('profiles').where('id', id).first()
@@ -93,6 +93,6 @@ test('UNFIT goes to the Unfit tab; an unclear answer changes nothing', async () 
   assert.equal(await saveResult(db, p, { state: 'unfit', text: 'UNFIT' }), true)
   const after = await db('profiles').where('id', id).first()
   assert.equal(after.status, 'medical_rejected')
-  assert.equal(phase.phaseOf({ cv: 'done', musaned: 'done', selected: 'done', wafid: 'failed' }, after, []), 'unfit')
+  assert.equal(phase.phaseOf({ cv: 'done', musaned: 'done', selected: 'done', wafid: 'failed' }, after, []), 'wafid')
   await db.destroy()
 })

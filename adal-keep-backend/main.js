@@ -822,7 +822,8 @@ app.delete('/api/brokers/:id', async (req, res) => {
 })
 
 // The document fields not used for now: kept (with any file in them), not offered.
-const HIDDEN_FIELDS = new Set(['COC', 'Saudi-letter', 'Musaned', 'Broker ID', 'Ticket-ongoing', 'Ticket-deported', 'Experience Form', 'Employee ID', 'Client ID'])
+// Medical Report and Labour ID too (asked on 2026-11-19): Wafid's result and the Labor ID live on the profile itself.
+const HIDDEN_FIELDS = new Set(['COC', 'Saudi-letter', 'Musaned', 'Broker ID', 'Ticket-ongoing', 'Ticket-deported', 'Experience Form', 'Employee ID', 'Client ID', 'Medical Report', 'Labour ID'])
 
 // Fetch & auto-create permanent profile fields
 app.get('/api/profiles/:id/fields', async (req, res) => {

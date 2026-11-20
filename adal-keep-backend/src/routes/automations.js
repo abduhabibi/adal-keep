@@ -823,10 +823,15 @@ export async function waitingIds(db, ids) {
 
 /**
  * The Wafid tab: chosen, Wafid booked or being booked (or its booking failed),
- * no result yet (FIT moves her on, UNFIT to the Unfit tab), EPRO not done —
+ * no result yet (FIT moves her on), EPRO not done — or UNFIT before the EPRO
+ * (no Unfit tab since 2026-11-19: she stays on Wafid, marked UNFIT) —
  * the page's phaseOf() === 'wafid' (frontend lib/phase.js).
  */
 export function inWafidPhase(steps = {}, p = {}) {
+  if (p.status === 'medical_rejected') {
+    return steps.wafid !== 'done' && steps.epro !== 'done'
+      && (steps.cv === 'done' || ['done', 'waiting'].includes(steps.musaned) || steps.selected === 'done')
+  }
   return steps.selected === 'done' && p.status !== 'medical_fit' && p.status !== 'medical_rejected'
     && steps.wafid !== 'done' && steps.epro !== 'done'
     && (p.status === 'medical_applied' || ['active', 'failed'].includes(steps.wafid))

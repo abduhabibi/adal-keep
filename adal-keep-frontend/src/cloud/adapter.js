@@ -519,6 +519,20 @@ async function change(method, path, body) {
   if (one && ['put', 'patch'].includes(method) && madeHere(one[1]) && body && typeof body === 'object') {
     const n = madeHere(one[1]); n.body = { ...n.body, ...body }; save(NEWP, newProfiles)
   }
+  // Check for updates / Install in an Adal Keep Companion's window: this PC updates
+  // itself (adal-companion /update/check and /update/apply), not the main PC.
+  if (/^(127\.0\.0\.1|localhost)$/.test(location.hostname) && path === '/system/update/check' && method === 'get') {
+    const r = await fetch('http://127.0.0.1:47810/update/check', { signal: AbortSignal.timeout(20000) }).then(x => x.json()).catch(() => null)
+    if (!r) throw httpError(503, 'The Adal Keep Companion on this PC did not answer — open Adal Keep again.')
+    if (r.error) throw httpError(503, r.error)
+    return { ...r, installed: { short: r.current }, latest: { short: r.latest } }
+  }
+  if (/^(127\.0\.0\.1|localhost)$/.test(location.hostname) && path === '/system/update/apply' && method === 'post') {
+    const r = await fetch('http://127.0.0.1:47810/update/apply', { method: 'POST', signal: AbortSignal.timeout(15 * 60000) }).then(x => x.json()).catch(() => null)
+    if (!r) throw httpError(503, 'The Adal Keep Companion on this PC did not answer — open Adal Keep again.')
+    if (!r.ok) throw httpError(503, r.error || 'The update did not install.')
+    return { message: r.message }
+  }
   // "Back up now" with the PC off: kept online once; the PC backs up as soon as it is on
   // (and it backs up by itself every 2 hours anyway). Never a second request waiting.
   if (method === 'post' && path === '/backup/run') {

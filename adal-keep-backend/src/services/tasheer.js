@@ -8,9 +8,14 @@
  *   2. GROUP SCHEDULING → VISA Type Work, VSC Center Addis Ababa, Number of
  *      Applicants = how many → rings: a person picks the day and the time,
  *      types the captcha and presses Submit.
- *   3. The upload page (Option 1): the Excel made here (Tasheer's own
- *      template: Bio_Applicant_Details) is chosen and Upload Sheet pressed,
- *      the consent box ticked → rings. Save is a person's.
+ *   3. The upload page (Option 1): Tasheer's own template is read (Step 1)
+ *      and the Excel made to match it, chosen, Upload Sheet pressed and the
+ *      site's answer awaited (rows filled / Save enabled / its error, which
+ *      is reported). Option 2 (the grid typed) only when Option 1 cannot be.
+ *      The consent box ticked, Save pressed, its confirmation answered; a
+ *      time-slot step, if one comes, is the person's.
+ *   After the first sign-in Tasheer says "Concurrent Login": SUBMIT, the same
+ *   name and password again, the person types only the new captcha, LOGIN.
  *
  * Only for girls whose visa is made: the E.No column is her visa
  * application number.
@@ -47,7 +52,7 @@ async function until(test, ms, ctx) {
 const COUNTRIES = ["Afghanistan","Albania","Algeria","American Samoa","Andorra","Angola","Anguilla","Antarctic","Antigua","Argentina","Armenia","Aruba","Australia","Austria","Azerbaijan","Bahamas","Bahrain","Bangladesh","Barbados","Belarus","Belgium","Belize","Benin","Bermuda","Bhutan","Bolivia","Bosnia","Botswana","Bouvet Island","Brazil","British Indian Ocean Territory","Brunei","Bulgaria","Burkina Faso","Burundi","Cambodia","Cameroon","Canada","Cape Verde","Cayman Island","Central African Republic","Chad","Chile","China","Christmas Island","Cocos Island","Colombia","Comoros","Congo","Cook Island","Costa Rica","Cote Divoire","Croatia","Cuba","Cyprus","Czech Republic","Denmark","Djibouti","Dominica","Dominican Republic","East Timor","Ecuador","Egypt","El Salvador","Equatorial Guinea","Eritrea","Estonia","Ethiopia","Falkland Islands","Faroe Islands","Fiji","Finland","France","France Metropolitan","French Guiana","French Polynesia","French Southern and Antarctic","Gabon","Gambia","Georgia","Germany","Ghana","Gibraltar","Greece","Greenland","Grenada","Guadeloupe","Guam","Guatemala","Guinea","Guinea Bissau","Guyana","Haiti","Heard Island and McDonald Island","Honduras","Hungary","Iceland","India","Indonesia","Iran","Iraq","Ireland","Italy","Jamaica","Japan","Jordan","Kazakhstan","Kenya","Kiribati","Korea, North","Korea, South","Kosovo","Kyrgyzstan","Laos","Latvia","Lebanon","Lesotho","Liberia","Libya","Liechtenstein","Lithuania","Luxembourg","Macau","Macedonia, The Former Yugoslav Republic of","Madagascar","Malawi","Malaysia","Maldives","Mali","Malta","Marshall Island","Martinique","Mauritania","Mauritius","Mayotte","Mexico","Micronesia, Federated Stat","Monaco","Mongolia","Montenegro","Montserrat","Morocco","Mozambique","Myanmar","Namibia","Nauru","Nepal","Netherlands","Netherlands Antilles","New Caledonia","New Zealand","Nicaragua","Niger","Nigeria","Niue","Non Bahraini","Non Emirati","Non Kuwaiti","Non Omani","Non Qatari","Norfolk Island","Northern Mariana Islands","Norway","Pakistan","Palau","Palestinian Territory Occupied","Panama","Papua New Guinea","Paraguay","Peru","Philippines","Pitcairn Islands","Poland","Portugal","Puerto Rico","Republic of Moldova","Reunion","Romania","Russian Federation","Rwanda","Saint Kitts and Nevis","Saint Lucia","Saint Pierre and Miquelon","Saint Vincent and the Grenadines","Samoa","San Marino","Sao Tome And Principe","Senegal","Serbia","Serbia and Montenegro","Seychelles","Sierra Leone","Singapore","Slovak Republic","Slovenia","Solomon Islands","Somalia","South Africa","South Georgia and The South","Spain","Sri Lanka","St Helena","Sudan","Suriname","Svalbard","Swaziland","Sweden","Switzerland","Syria","Taiwan","Tajikistan","Thailand","Togo","Tokelau","Tonga","Trinidad and Tobago","Tunisia","Turkey","Turkmenistan","Turks and Caicos Islands","Tuvalu","Uganda","Ukraine","United Kingdom","United States","United States Minor Outlying Islands","UR Tanzania","Uruguay","Uzbekistan","Vanuatu","Vatican City State","Venezuela","Vietnam","Virgin Islands","Virgin Islands US","Wallis and Futuna","Yemen","Yugoslavia","Zaire","Zambia","Zimbabwe"]
 
 const HEAD = ['E.No', 'First Name*', 'Second Name', 'Last Name*', 'Passport Number*', 'Date of Birth*', 'Nationality*', 'Date of Issue*', 'Gender*', 'Place of Issue*', 'Expiry Date*', 'Applicant Mobile No.*', 'Email ID*']
-const WIDTHS = [11.6, 12.1, 13, 11.2, 17.4, 13.3, 11.8, 13.4, 9.1, 15.1, 12, 20.8, 22.8]
+const WIDTHS0 = [11.6, 12.1, 13, 11.2, 17.4, 13.3, 11.8, 13.4, 9.1, 15.1, 12, 20.8, 22.8]
 
 const isoDate = (v) => {
   const s = String(v || '').trim()
@@ -104,23 +109,59 @@ function zip(files) {
   return Buffer.concat([...parts, cd, e])
 }
 
-export function tasheerXlsx(profiles, settings = {}) {
+// Each column of Tasheer's sheet (and of its Option 2 grid) by its heading.
+const DATES = new Set(['dob', 'issued', 'expiry'])
+export function columnKey(h) {
+  const t = String(h || '').toLowerCase().replace(/[*:.]/g, ' ').replace(/\s+/g, ' ').trim()
+  if (!t) return ''
+  if (/^e ?no\b|^e ?number|application ?n(o|umber)/.test(t)) return 'eno'
+  if (/first/.test(t)) return 'first'
+  if (/second|middle|father/.test(t)) return 'second'
+  if (/last|family|surname/.test(t)) return 'last'
+  if (/passport/.test(t)) return 'passport'
+  if (/birth/.test(t)) return 'dob'
+  if (/national/.test(t)) return 'nationality'
+  if (/place/.test(t)) return 'place'
+  if (/issue/.test(t)) return 'issued'
+  if (/expir/.test(t)) return 'expiry'
+  if (/gender|sex/.test(t)) return 'gender'
+  if (/mobile|phone/.test(t)) return 'phone'
+  if (/mail/.test(t)) return 'email'
+  return ''
+}
+/** A value as the template's own list spells it (MALE / Male / M; Ethiopia). */
+export function asListed(key, v, lists) {
+  const list = lists?.[key]
+  if (!v || !list?.length) return v
+  const low = String(v).toLowerCase()
+  return list.find(o => o.toLowerCase() === low) || (key === 'gender' ? list.find(o => o[0]?.toLowerCase() === low[0]) : null) || v
+}
+const col = (i) => (i >= 26 ? String.fromCharCode(64 + Math.floor(i / 26)) : '') + String.fromCharCode(65 + (i % 26))
+
+/**
+ * The Excel. `layout` is what the template downloaded from Tasheer says
+ * (readTemplate): its headings in its order, and its dropdown lists. Without
+ * it, the template as it was on 2026-11-10.
+ */
+export function tasheerXlsx(profiles, settings = {}, layout = null) {
   const strings = [], index = new Map()
   const si = (s) => { s = String(s ?? ''); if (!index.has(s)) { index.set(s, strings.length); strings.push(s) } return index.get(s) }
   const str = (ref, v, st = 0) => `<c r="${ref}" s="${st}" t="s"><v>${si(v)}</v></c>`
   const num = (ref, v, st = 0) => v === '' || v == null ? str(ref, '', st) : `<c r="${ref}" s="${st}"><v>${v}</v></c>`
-  const L = 'ABCDEFGHIJKLM'
-  const rows = [`<row r="1">${HEAD.map((h, i) => str(`${L[i]}1`, h, 1)).join('')}</row>`]
+  const head = layout?.head?.length ? layout.head : HEAD
+  const keys = head.map(columnKey)
+  const rows = [`<row r="1">${head.map((h, i) => str(`${col(i)}1`, h, 1)).join('')}</row>`]
   profiles.forEach((p, k) => {
     const r = tasheerRow(p, settings), n = k + 2
-    const date = (i, iso) => iso ? num(`${L[i]}${n}`, serial(iso), 2) : str(`${L[i]}${n}`, '')
-    rows.push(`<row r="${n}">` + [
-      str(`A${n}`, r.eno), str(`B${n}`, r.first), str(`C${n}`, r.second), str(`D${n}`, r.last), str(`E${n}`, r.passport),
-      date(5, r.dob), str(`G${n}`, r.nationality), date(7, r.issued), str(`I${n}`, r.gender), str(`J${n}`, r.place),
-      date(10, r.expiry), /^\d+$/.test(r.phone) ? num(`L${n}`, r.phone) : str(`L${n}`, r.phone), str(`M${n}`, r.email),
-    ].join('') + '</row>')
+    rows.push(`<row r="${n}">` + keys.map((key, i) => {
+      const ref = `${col(i)}${n}`, v = key ? asListed(key, r[key], layout?.lists) : ''
+      if (DATES.has(key)) return v ? num(ref, serial(v), 2) : str(ref, '')
+      if (key === 'phone' && /^\d+$/.test(v)) return num(ref, v)
+      return str(ref, v)
+    }).join('') + '</row>')
   })
-  const sheet1 = `<?xml version="1.0" encoding="utf-8"?><worksheet xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><dimension ref="A1:M${profiles.length + 1}" /><sheetViews><sheetView workbookViewId="0" /></sheetViews><sheetFormatPr defaultRowHeight="15" /><cols>${WIDTHS.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join('')}</cols><sheetData>${rows.join('')}</sheetData><headerFooter /></worksheet>`
+  const WIDTHS = head === HEAD ? WIDTHS0 : head.map(h => Math.max(10, String(h).length + 2))
+  const sheet1 = `<?xml version="1.0" encoding="utf-8"?><worksheet xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><dimension ref="A1:${col(head.length - 1)}${profiles.length + 1}" /><sheetViews><sheetView workbookViewId="0" /></sheetViews><sheetFormatPr defaultRowHeight="15" /><cols>${WIDTHS.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join('')}</cols><sheetData>${rows.join('')}</sheetData><headerFooter /></worksheet>`
   const sheet2 = `<?xml version="1.0" encoding="utf-8"?><worksheet xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><dimension ref="A1:A${COUNTRIES.length}" /><sheetViews><sheetView workbookViewId="0" /></sheetViews><sheetFormatPr defaultRowHeight="15" /><sheetData>${COUNTRIES.map((c, i) => `<row r="${i + 1}">${str(`A${i + 1}`, c)}</row>`).join('')}</sheetData></worksheet>`
   const sst = `<?xml version="1.0" encoding="UTF-8" standalone="yes" ?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="${strings.length}" uniqueCount="${strings.length}">${strings.map(s => `<si><t>${x(s)}</t></si>`).join('')}</sst>`
   return zip([
@@ -163,6 +204,95 @@ function fillLogin(page, user, pass) {
   }, user, pass)
 }
 
+// ── "Concurrent Login" (asked on 2026-11-19) ────────────────────────────────
+// After the first name, password and captcha Tasheer always says "You are
+// already logged in from another location or device … Click 'Submit' to
+// continue" (green SUBMIT, blue CLOSE; behind it "Login failure. User is
+// already logged in"). The person already pressed LOGIN, so Adal Keep presses
+// SUBMIT itself if the person has not within a moment; then the form comes
+// back empty: the same name and password go in again, the person types only a
+// new captcha (if one shows), and LOGIN is pressed as soon as it is typed.
+const onTasheerSite = (page) => { try { return /(^|\.)tasheer\.com$/i.test(new URL(page.url()).hostname) || !!page.__adalTasheerMock } catch { return false } }
+/** The Concurrent Login dialog's SUBMIT, marked data-adal-concurrent; false when it is not up. */
+export function concurrentShown(page) {
+  return page.evaluate(() => {
+    const seen = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(e).visibility !== 'hidden' }
+    const re = /concurrent\s*login|already\s*logged\s*in\s*from|previous\s*session\s*must\s*be\s*terminated/i
+    const btn = [...document.querySelectorAll('button, input[type="button"], input[type="submit"], a, [role="button"]')]
+      .filter(b => seen(b) && /^\s*submit\s*$/i.test(b.innerText || b.value || ''))
+      .find(b => { for (let e = b.parentElement, i = 0; e && i < 8; e = e.parentElement, i++) if (re.test(e.innerText || '')) return e !== document.body; return false })
+    document.querySelectorAll('[data-adal-concurrent]').forEach(e => e.removeAttribute('data-adal-concurrent'))
+    if (!btn) return false
+    btn.setAttribute('data-adal-concurrent', '1')
+    return true
+  }).catch(() => false)
+}
+/** What captcha the sign-in shows: none, a box the person types into, or a widget. */
+function captchaState(page) {
+  return page.evaluate(() => {
+    const seen = (e) => e.offsetParent !== null
+    const token = document.querySelector('textarea[name="g-recaptcha-response"], input[name="cf-turnstile-response"]')
+    if (token && document.querySelector('iframe[src*="recaptcha"], iframe[src*="turnstile"], .g-recaptcha, .cf-turnstile')) return { kind: 'widget', value: token.value || '' }
+    const box = [...document.querySelectorAll('input')].find(i => seen(i) && !/^(hidden|password|checkbox|radio|submit|button)$/i.test(i.type) &&
+      /captcha|security\s*code|verification\s*code|image\s*code/i.test([i.name, i.id, i.placeholder, i.getAttribute('aria-label'), i.className].join(' ')))
+    return box ? { kind: 'text', value: box.value || '' } : { kind: 'none', value: '' }
+  }).catch(() => ({ kind: 'none', value: '' }))
+}
+const pressLogin = (page) => page.evaluate(() => {
+  const seen = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 }
+  const b = [...document.querySelectorAll('button, input[type="submit"], input[type="button"], a, [role="button"]')]
+    .find(b => seen(b) && /^\s*(log\s*-?\s*in|sign\s*in)\s*$/i.test(b.innerText || b.value || ''))
+  if (!b) return false
+  b.click()
+  return true
+}).catch(() => false)
+
+/**
+ * The dialog is up: SUBMIT (the person's, or ours after `graceMs`), the same
+ * name and password again, the captcha left to the person, LOGIN. Returns
+ * 'logged-in-pressed' | 'no-form' | 'no-captcha-typed' | 'not-shown'.
+ */
+export async function afterConcurrentLogin(page, user, pass, { say = () => {}, graceMs = 2500, captchaMs = 15 * 60000, check = () => {} } = {}) {
+  if (!(await concurrentShown(page))) return 'not-shown'
+  say('Tasheer says the account is already signed in elsewhere (Concurrent Login) — pressing SUBMIT to end the old session')
+  for (const end = Date.now() + graceMs; Date.now() < end && await concurrentShown(page);) { check(); await sleep(500) }
+  if (await concurrentShown(page)) {
+    await page.evaluate(() => document.querySelector('[data-adal-concurrent]')?.click()).catch(() => {})
+  }
+  // The sign-in form comes back (its password box empty).
+  const back = async () => !(await concurrentShown(page)) && await hasPassword(page)
+  let ok = false
+  for (const end = Date.now() + 30000; Date.now() < end && !(ok = await back());) { check(); await sleep(500) }
+  if (!ok) { say('the sign-in form did not come back after SUBMIT', 'warn'); return 'no-form' }
+  await sleep(600)
+  // Only Tasheer's own password box gets the password.
+  if (!onTasheerSite(page)) { say('the page is not Tasheer — the password is not typed', 'warn'); return 'no-form' }
+  const filled = await fillLogin(page, user, pass)
+  say(filled ? '🔐 name and password filled again' : 'the sign-in boxes were not all found again', filled ? 'info' : 'warn')
+  let c = await captchaState(page)
+  if (c.kind !== 'none') {
+    say('⏳ waiting for the person to type the new captcha — LOGIN is pressed as soon as it is typed')
+    // Typed = the widget gave its token, or the box has 4+ characters that stayed the same for 2 s.
+    let last = '', since = Date.now()
+    const end = Date.now() + captchaMs
+    for (;;) {
+      check()
+      if (Date.now() > end) { say('nobody typed the captcha', 'warn'); return 'no-captcha-typed' }
+      if (!(await hasPassword(page))) return 'logged-in-pressed'        // the person pressed LOGIN themselves
+      c = await captchaState(page)
+      if (c.value !== last) { last = c.value; since = Date.now() }
+      if (c.kind === 'widget' ? !!c.value : (c.value.length >= 4 && Date.now() - since >= 2000)) break
+      await sleep(400)
+    }
+  }
+  // The password box must still hold it (a page that reset the form gets it again).
+  const empty = await page.evaluate(() => ![...document.querySelectorAll('input[type="password"]')].some(i => i.offsetParent !== null && i.value)).catch(() => false)
+  if (empty) await fillLogin(page, user, pass)
+  if (await pressLogin(page)) say('✓ LOGIN pressed')
+  else say('the LOGIN button was not found — press it', 'warn')
+  return 'logged-in-pressed'
+}
+
 // Cloudflare's "Just a moment…" / "Verify you are human" before the site.
 const challenged = (page) => page.evaluate(() => /just a moment|verify you are human|attention required|checking your browser/i.test(document.title + ' ' + (document.body?.innerText || '').slice(0, 400))).catch(() => false)
 const notAllowed = (page) => page.evaluate(() => /method\s+'?get'?\s+is not supported/i.test(document.body?.innerText || '')).catch(() => false)
@@ -199,7 +329,14 @@ async function signIn(page, ctx) {
     log(ctx, ok ? `🔐 name and password filled (${ctx.tasheer_name || ctx.tasheer_username})` : 'the sign-in boxes were not all found', ok ? 'info' : 'warn')
     await page.bringToFront().catch(() => {})
     await ctx.notify(`🛂 ${ctx.groupTitle}: sign in to Tasheer`, 'The Tasheer tab is in front with the name and password filled. Type its captcha and sign in; Adal Keep goes on by itself (GROUP SCHEDULING).', 'warn', { login: page })
-    if (!(await until(async () => !(await hasPassword(page)) && (await home()), LOGIN_WAIT_MS, ctx))) throw new Error('Nobody signed in to Tasheer within 30 minutes')
+    const signedInNow = async () => {
+      if (await concurrentShown(page)) {
+        await afterConcurrentLogin(page, ctx.tasheer_username, ctx.tasheer_password, { say: (m, l) => log(ctx, m, l), check: () => stop(ctx) })
+        return false
+      }
+      return !(await hasPassword(page)) && (await home())
+    }
+    if (!(await until(signedInNow, LOGIN_WAIT_MS, ctx))) throw new Error('Nobody signed in to Tasheer within 30 minutes')
     log(ctx, '✓ signed in to Tasheer')
     // The agency's one Tasheer sign-in is now this one (every PC sees it).
     if (ctx.db) await import('./tasheerSession.js').then(s => s.robotSignedIn(ctx.db, ctx.by || '', 'the main PC')).catch(() => {})
@@ -313,47 +450,431 @@ export async function runTasheer(page, ctx) {
   log(ctx, '✓ the upload page is open')
   await sleep(1500)
   const frame = (await uploadFrame(page)) || page.mainFrame()
+  return uploadAndSave(page, frame, people, settings, ctx, secs)
+}
 
-  // The Excel: made here, chosen, Upload Sheet.
-  const file = path.join(os.tmpdir(), `Tasheer_${new Date().toISOString().slice(0, 10)}_${ctx.runId || Date.now()}.xlsx`)
-  fs.writeFileSync(file, tasheerXlsx(people, settings))
-  const input = await frame.evaluateHandle(() => [...document.querySelectorAll('input[type="file"]')].find(i => i.offsetParent !== null || i.getBoundingClientRect().width > 0) || document.querySelector('input[type="file"]'))
-  const el = input.asElement()
-  if (!el) throw new Error('The Choose File box was not found on the upload page')
-  await el.uploadFile(file)
-  await el.evaluate(i => { i.dispatchEvent(new Event('input', { bubbles: true })); i.dispatchEvent(new Event('change', { bubbles: true })) }).catch(() => {})
-  log(ctx, `✓ Excel chosen (${people.length} applicant${people.length === 1 ? '' : 's'})`)
-  await sleep(1000)
-  if (await clickText(frame, /^\s*upload\s*sheet\s*$/)) log(ctx, '✓ Upload Sheet pressed')
-  else left.push('Upload Sheet (press it)')
-  await sleep(4000)
-  // A message the site gave after the upload (an error in a row), if any.
-  const said = await frame.evaluate(() => [...document.querySelectorAll('.error, .alert, .ui-messages, .ui-growl, [role="alert"], .text-danger, .msg')]
-    .map(e => (e.innerText || '').trim()).filter(Boolean).slice(0, 3).join(' · ')).catch(() => '')
+// ── The template (Step 1 "Download Excel Template"), read here ─────────────
+/** The files of an .xlsx (a zip): name → Buffer. */
+export function unzip(buf) {
+  const out = new Map()
+  let e = buf.length - 22
+  while (e >= 0 && buf.readUInt32LE(e) !== 0x06054b50) e--
+  if (e < 0) return out
+  let p = buf.readUInt32LE(e + 16)
+  for (let i = 0, n = buf.readUInt16LE(e + 10); i < n; i++) {
+    const method = buf.readUInt16LE(p + 10), size = buf.readUInt32LE(p + 20)
+    const nl = buf.readUInt16LE(p + 28), xl = buf.readUInt16LE(p + 30), cl = buf.readUInt16LE(p + 32), off = buf.readUInt32LE(p + 42)
+    const name = buf.subarray(p + 46, p + 46 + nl).toString('utf8')
+    const start = off + 30 + buf.readUInt16LE(off + 26) + buf.readUInt16LE(off + 28)
+    const data = buf.subarray(start, start + size)
+    try { out.set(name, method === 8 ? zlib.inflateRawSync(data) : Buffer.from(data)) } catch {}
+    p += 46 + nl + xl + cl
+  }
+  return out
+}
+const unx = (s) => String(s).replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&')
+/** A sheet's cells: { A1: 'E.No', … } (shared strings and inline strings read). */
+function cells(xml, sst) {
+  const out = {}
+  for (const m of xml.matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
+    const ref = /\br="([A-Z]+\d+)"/.exec(m[1])?.[1]
+    if (!ref || !m[2]) continue
+    const t = /\bt="(\w+)"/.exec(m[1])?.[1]
+    const v = /<v>([\s\S]*?)<\/v>/.exec(m[2])?.[1]
+    if (t === 's') out[ref] = sst[Number(v)] ?? ''
+    else if (t === 'inlineStr') out[ref] = unx([...m[2].matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map(x => x[1]).join(''))
+    else if (v != null) out[ref] = unx(v)
+  }
+  return out
+}
+/**
+ * What a Tasheer template says: { head: [the headings in order], lists:
+ * { gender: [...], nationality: [...] }, sheet }. Its dropdowns are data
+ * validations: an inline list ("MALE,FEMALE") or a range of its hidden sheet.
+ */
+export function readTemplate(buf) {
+  const files = unzip(buf)
+  const text = (n) => files.get(n)?.toString('utf8') || ''
+  const sst = [...text('xl/sharedStrings.xml').matchAll(/<si>([\s\S]*?)<\/si>/g)].map(m => unx([...m[1].matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map(x => x[1]).join('')))
+  const wb = text('xl/workbook.xml'), rels = text('xl/_rels/workbook.xml.rels')
+  const sheets = [...wb.matchAll(/<sheet\b[^>]*?name="([^"]+)"[^>]*?r:id="([^"]+)"/g)].map(m => {
+    const target = new RegExp(`Id="${m[2]}"[^>]*Target="([^"]+)"|Target="([^"]+)"[^>]*Id="${m[2]}"`).exec(rels)
+    const t = (target?.[1] || target?.[2] || '').replace(/^\/?xl\//, '').replace(/^\//, '')
+    return { name: unx(m[1]), path: `xl/${t}` }
+  })
+  if (!sheets.length) return null
+  const first = text(sheets[0].path)
+  const c = cells(first, sst)
+  const head = []
+  for (let i = 0; i < 60; i++) { const v = c[`${col(i)}1`]; if (v == null || v === '') { if (i > 0 && head.length === i) break; else continue } head[i] = String(v).trim() }
+  const lists = {}
+  for (const m of first.matchAll(/<dataValidation\b([^>]*)>([\s\S]*?)<\/dataValidation>/g)) {
+    const sq = /sqref="([A-Z]+)\d+/.exec(m[1])?.[1]
+    const f = unx(/<formula1>([\s\S]*?)<\/formula1>/.exec(m[2])?.[1] || '')
+    if (!sq) continue
+    const idx = [...Array(head.length).keys()].find(i => col(i) === sq)
+    const key = idx == null ? '' : columnKey(head[idx])
+    if (!key) continue
+    let vals = []
+    if (/^".*"$/.test(f)) vals = f.slice(1, -1).split(',').map(s => s.trim()).filter(Boolean)
+    else {
+      const r = /^'?([^'!]+)'?!\$?([A-Z]+)\$?(\d+):\$?([A-Z]+)\$?(\d+)$/.exec(f)
+      const sh = r && sheets.find(s => s.name === r[1])
+      if (sh) { const sc = cells(text(sh.path), sst); for (let n = Number(r[3]); n <= Number(r[5]); n++) if (sc[`${r[2]}${n}`]) vals.push(String(sc[`${r[2]}${n}`]).trim()) }
+    }
+    if (vals.length) lists[key] = vals
+  }
+  return { head: head.map(h => h || ''), lists, sheet: sheets[0].name }
+}
+/** The template against what Adal Keep makes: same headings in the same order? */
+export function compareTemplate(tpl) {
+  const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z]/g, '')
+  const same = tpl.head.length === HEAD.length && tpl.head.every((h, i) => norm(h) === norm(HEAD[i]))
+  const unknown = tpl.head.filter(h => h && !columnKey(h))
+  const keys = tpl.head.map(columnKey)
+  const lacking = ['eno', 'first', 'last', 'passport', 'dob', 'nationality', 'issued', 'gender', 'expiry'].filter(k => !keys.includes(k))
+  const values = []
+  if (tpl.lists.nationality && !tpl.lists.nationality.some(v => /^ethiopia$/i.test(v))) values.push('Ethiopia is not in its nationality list')
+  if (tpl.lists.gender && !tpl.lists.gender.some(v => /^f/i.test(v))) values.push(`its gender list is ${tpl.lists.gender.join('/')}`)
+  return { same, unknown, lacking, values }
+}
 
-  // The consent box ("By clicking here I indicate that, I have the permission …").
-  const ticked = await frame.evaluate(() => {
+/** Step 1's template, fetched inside the signed-in page (its link), or null. */
+async function downloadTemplate(frame) {
+  const got = await frame.evaluate(async () => {
+    const a = [...document.querySelectorAll('a[href]')].find(a => /download\s*(excel\s*)?template|template/i.test((a.innerText || a.title || '') + ' ' + a.getAttribute('href')) && /^https?:/i.test(a.href))
+    if (!a) return { why: 'its link is not a plain address' }
+    const r = await fetch(a.href, { credentials: 'include' })
+    if (!r.ok) return { why: `the site answered ${r.status}` }
+    const b = new Uint8Array(await r.arrayBuffer())
+    let s = ''
+    for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000))
+    return { b64: btoa(s) }
+  }).catch(e => ({ why: e.message }))
+  if (!got?.b64) return { why: got?.why || 'not found' }
+  const buf = Buffer.from(got.b64, 'base64')
+  if (buf.readUInt32LE(0) !== 0x04034b50) return { why: 'what came back is not an Excel file' }
+  return { tpl: readTemplate(buf) }
+}
+
+// ── The upload page: Upload Sheet, the grid, the site's words, Save ────────
+/** What the dialog shows now (read in the frame). */
+function uploadState(frame, passports) {
+  return frame.evaluate((passports) => {
+    const seen = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(e).visibility !== 'hidden' && getComputedStyle(e).display !== 'none' }
+    const words = (e) => (e.innerText || e.value || '').replace(/\s+/g, ' ').trim()
+    const off = (b) => !!(b.disabled || b.getAttribute('aria-disabled') === 'true' || b.classList.contains('disabled') || getComputedStyle(b).pointerEvents === 'none' || b.closest('fieldset[disabled]'))
+    // The site's own words: alerts, toasts, sweetalerts, red text under a box.
+    const msgs = [...document.querySelectorAll('.error, .alert, .ui-messages, .ui-growl, [role="alert"], .text-danger, .msg, .swal2-popup, .swal-modal, .sweet-alert, .toast, .toast-message, .noty_body, .bootbox, .jconfirm-box, .invalid-feedback, label.error, .help-block, .errorMsg, .error-message, .validation-summary-errors, .field-validation-error')]
+      .filter(e => seen(e) && words(e) && !e.closest('[data-adal-skip]')).map(words)
+    const uniq = [...new Set(msgs)].filter((m, i, a) => !a.some((o, j) => j !== i && o.length > m.length && o.includes(m)))
+    const bad = uniq.filter(m => /error|invalid|wrong|not\s+valid|incorrect|fail|mismatch|format|required|must|duplicate|exceed|not\s+allowed|not\s+match|please|unable|cannot|can't|empty/i.test(m))
+    const good = uniq.filter(m => !bad.includes(m) && /success|uploaded|saved|booked|confirmed|reference|thank/i.test(m))
+    // The grid (Option 2): the table whose heading has Passport Number.
+    const table = [...document.querySelectorAll('table')].find(t => /passport/i.test(t.querySelector('thead, tr')?.innerText || ''))
+    let rows = 0, found = []
+    if (table) {
+      const body = [...table.querySelectorAll('tbody tr')].filter(tr => tr.querySelector('td'))
+      for (const tr of body) {
+        const vals = [...tr.querySelectorAll('td')].map(td => [td.innerText, ...[...td.querySelectorAll('input, select, textarea')].map(i => i.tagName === 'SELECT' ? i.options[i.selectedIndex]?.text : i.value)].join(' ')).join(' ').toUpperCase()
+        if (vals.replace(/[^A-Z0-9]/g, '').length > 3) rows++
+        for (const p of passports) if (vals.includes(p)) found.push(p)
+      }
+    }
+    const save = [...document.querySelectorAll('button, input[type="button"], input[type="submit"], a, [role="button"]')].filter(b => seen(b) && /^\s*save\s*$/i.test(words(b)))
+    save.forEach(b => b.setAttribute('data-adal-save', '1'))
+    const saveOn = save.some(b => !off(b))
+    const text = document.body?.innerText || ''
+    return { bad, good, rows, found: [...new Set(found)], grid: !!table, save: save.length > 0, saveOn,
+      slot: /select\s+(a\s+)?(time\s*)?slot|available\s+slots?|choose\s+(a\s+)?(time\s*)?slot/i.test(text) }
+  }, passports).catch(() => ({ bad: [], good: [], rows: 0, found: [], grid: false, save: false, saveOn: false, slot: false }))
+}
+const ERRORISH = /error|invalid|wrong|not\s+valid|incorrect|fail|mismatch|format|required|must|duplicate|exceed|not\s+allowed|not\s+match|unable|cannot|can't|empty/i
+
+/** The "Upload Sheet" control, marked data-adal-upload (the one nearest after the file box). */
+function markUploadButton(frame) {
+  return frame.evaluate(() => {
+    const seen = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(e).visibility !== 'hidden' }
+    const own = (e) => (e.value || e.innerText || e.title || '').replace(/\s+/g, ' ').trim()
+    const all = [...document.querySelectorAll('button, input[type="button"], input[type="submit"], a, [role="button"], label, span, div[onclick], i[onclick]')]
+      .filter(e => seen(e) && /^\s*(\S+\s*)?upload\s*sheet\s*$/i.test(own(e)))
+      .map(e => e.closest('button, a, [role="button"], [onclick]') || e)
+    document.querySelectorAll('[data-adal-upload]').forEach(e => e.removeAttribute('data-adal-upload'))
+    if (!all.length) return { found: false }
+    const file = document.querySelector('input[type="file"]')
+    const after = file ? all.filter(e => file.compareDocumentPosition(e) & Node.DOCUMENT_POSITION_FOLLOWING) : []
+    const b = after[0] || all[0]
+    b.setAttribute('data-adal-upload', '1')
+    return { found: true, disabled: !!(b.disabled || b.classList.contains('disabled') || b.getAttribute('aria-disabled') === 'true') }
+  }).catch(() => ({ found: false }))
+}
+
+/** Option 2: the grid's boxes filled from her profile (only when Option 1 cannot be). */
+function fillGrid(frame, rows) {
+  return frame.evaluate((rows) => {
+    const key = (h) => {
+      const t = String(h || '').toLowerCase().replace(/[*:.]/g, ' ').replace(/\s+/g, ' ').trim()
+      return /^e ?no\b|^e ?number/.test(t) ? 'eno' : /first/.test(t) ? 'first' : /second|middle|father/.test(t) ? 'second' : /last|family/.test(t) ? 'last'
+        : /passport/.test(t) ? 'passport' : /birth/.test(t) ? 'dob' : /national/.test(t) ? 'nationality' : /place/.test(t) ? 'place' : /issue/.test(t) ? 'issued'
+        : /expir/.test(t) ? 'expiry' : /gender|sex/.test(t) ? 'gender' : /mobile|phone/.test(t) ? 'phone' : /mail/.test(t) ? 'email' : ''
+    }
+    const table = [...document.querySelectorAll('table')].find(t => /passport/i.test(t.querySelector('thead, tr')?.innerText || ''))
+    if (!table) return { ok: false, why: 'the grid was not found' }
+    const heads = [...(table.querySelector('thead tr') || table.querySelector('tr')).querySelectorAll('th, td')].map(th => key(th.innerText))
+    const body = [...table.querySelectorAll('tbody tr')].filter(tr => tr.querySelector('input, select'))
+    if (body.length < rows.length) return { ok: false, why: `the grid has ${body.length} row(s) for ${rows.length} applicant(s)` }
+    const setVal = (el, v) => {
+      el.focus()
+      if (el.tagName === 'SELECT') {
+        const low = String(v).toLowerCase()
+        const o = [...el.options].find(o => o.text.trim().toLowerCase() === low || o.value.toLowerCase() === low) || [...el.options].find(o => low && o.text.trim().toLowerCase()[0] === low[0] && /gender|sex/i.test(el.name + el.id))
+        if (!o) return false
+        el.value = o.value
+      } else {
+        const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
+        Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, v)
+      }
+      for (const t of ['input', 'change', 'keyup', 'blur']) el.dispatchEvent(new Event(t, { bubbles: true }))
+      return true
+    }
+    const date = (el, iso) => {
+      if (!iso || el.type === 'date') return iso
+      const [y, m, d] = iso.split('-')
+      const ph = (el.placeholder || el.getAttribute('data-date-format') || '').toLowerCase()
+      return /^dd[/-]mm[/-]yyyy/.test(ph) ? `${d}${ph[2]}${m}${ph[2]}${y}` : /^mm[/-]dd[/-]yyyy/.test(ph) ? `${m}${ph[2]}${d}${ph[2]}${y}` : iso
+    }
+    const missed = []
+    rows.forEach((r, k) => {
+      const tds = [...body[k].querySelectorAll('td')]
+      heads.forEach((h, i) => {
+        if (!h || !r[h] || !tds[i]) return
+        const el = tds[i].querySelector('input:not([type="hidden"]):not([type="checkbox"]), select, textarea')
+        if (!el) return
+        const v = ['dob', 'issued', 'expiry'].includes(h) ? date(el, r[h]) : r[h]
+        if (!setVal(el, v)) missed.push(`${h} of row ${k + 1}`)
+      })
+    })
+    return { ok: !missed.length, why: missed.length ? `could not set ${missed.join(', ')}` : '' }
+  }, rows).catch(e => ({ ok: false, why: e.message }))
+}
+
+/** The consent box ("By clicking here I indicate that, I have the permission …") ticked. */
+function tickConsent(frame) {
+  return frame.evaluate(() => {
     const boxes = [...document.querySelectorAll('input[type="checkbox"]')]
-    const box = boxes.find(b => /permission|consent|privacy/i.test((b.closest('div, td, tr, label, p') || b.parentElement)?.innerText || '')) || boxes[boxes.length - 1]
+    const box = boxes.find(b => /permission|consent|privacy|i\s+indicate|agree/i.test((b.closest('label, p, div, td, tr') || b.parentElement)?.innerText || '')) || boxes[boxes.length - 1]
     if (!box) return false
     box.scrollIntoView({ block: 'center' })
     if (!box.checked) box.click()
     if (!box.checked) { box.checked = true; box.dispatchEvent(new Event('change', { bubbles: true })) }
     return box.checked
   }).catch(() => false)
-  if (ticked) log(ctx, '✓ consent box ticked'); else left.push('the consent box (tick it)')
+}
 
-  for (const p of people) {
-    const line = `[${new Date().toISOString().slice(0, 10)}] Tasheer: group appointment (${people.length}) — the Excel uploaded, waiting for a person to press Save`
-    if (ctx.db) {
+const UPLOAD_WAIT_MS = 90 * 1000
+const SAVE_WAIT_MS = 90 * 1000
+
+/**
+ * After Submit: the Excel (checked against the site's own template) chosen,
+ * Upload Sheet pressed and its answer awaited (rows filled / Save enabled /
+ * the site's error), the consent ticked, Save pressed, its confirmation
+ * answered, and a time-slot step (if it comes) handed to the person.
+ * One try: no step is done twice except pressing Upload Sheet once more
+ * when the first press drew no answer at all.
+ */
+export async function uploadAndSave(page, frame, people, settings, ctx, secs = () => 0) {
+  const passports = people.map(p => tasheerRow(p, settings).passport)
+  const siteSaid = []                      // every word the site gave, for the report
+  const dialogs = []
+  const onDialog = (d) => {
+    if (d.type() === 'beforeunload') return
+    if (d.type() !== 'confirm') dialogs.push(d.message())     // "Are you sure?" is a question, not an answer
+    log(ctx, `Tasheer says (pop-up): ${d.message()}`, /error|invalid|wrong|fail|not/i.test(d.message()) ? 'warn' : 'info')
+    d.accept().catch(() => {})
+  }
+  page.on('dialog', onDialog)
+  const rang = async (title, body) => { await ctx.notify(`🛂 ${ctx.groupTitle}: ${title}`, body, 'warn', { login: page }) }
+  const pause = async (title, body) => {
+    await rang(title, body)
+    return { ok: true, pauseReason: 'awaiting-tasheer-save', seconds: secs() }
+  }
+  const note = async (line) => {
+    if (!ctx.db) return
+    for (const p of people) {
       const row = await ctx.db('profiles').where('id', p.id).first('notes').catch(() => null)
-      await ctx.db('profiles').where('id', p.id).update({ notes: [row?.notes, line].filter(Boolean).join('\n'), updated_at: new Date().toISOString() }).catch(() => {})
+      await ctx.db('profiles').where('id', p.id).update({ notes: [row?.notes, `[${new Date().toISOString().slice(0, 10)}] ${line}`].filter(Boolean).join('\n'), updated_at: new Date().toISOString() }).catch(() => {})
     }
   }
-  await page.bringToFront().catch(() => {})
-  await ctx.notify(`🛂 ${ctx.groupTitle}: Tasheer — look it over and press Save`,
-    `${said ? `Tasheer says: ${said}. ` : ''}${left.length ? `Still to do: ${left.join('; ')}. ` : 'The Excel is uploaded and the consent box ticked. '}Look the applicants over and press Save (Adal Keep never presses it). Then press "✔️ Tasheer saved" on the run.`, 'warn')
-  log(ctx, `✅ Excel uploaded${said ? ` — Tasheer says: ${said}` : ''}`)
-  return { ok: true, pauseReason: 'awaiting-tasheer-save', seconds: secs() }
+  // Words on the page before a press (help text, a red "*") are not its answer.
+  let seenBefore = new Set()
+  const fresh = (s) => {
+    const pop = dialogs.splice(0)
+    return {
+      ...s,
+      bad: [...s.bad.filter(m => !seenBefore.has(m)), ...pop.filter(m => ERRORISH.test(m))],
+      good: [...s.good.filter(m => !seenBefore.has(m)), ...pop.filter(m => !ERRORISH.test(m))],
+    }
+  }
+  const baseline = async (f) => { const b = await uploadState(f, passports); seenBefore = new Set([...b.bad, ...b.good]) }
+  try {
+    // 1. The template: the site's own, read, compared with ours.
+    let layout = null
+    const dl = await downloadTemplate(frame)
+    if (dl.tpl?.head?.some(Boolean)) {
+      const cmp = compareTemplate(dl.tpl)
+      if (cmp.lacking.length) log(ctx, `⚠ Tasheer's template has no ${cmp.lacking.join(', ')} column — its headings: ${dl.tpl.head.join(' | ')}`, 'warn')
+      if (cmp.same) log(ctx, '✓ the Excel matches Tasheer\'s template (same columns, same order)')
+      else { layout = dl.tpl; log(ctx, `⚠ Tasheer's template changed — the Excel follows it: ${dl.tpl.head.join(' | ')}${cmp.unknown.length ? ` (left empty: ${cmp.unknown.join(', ')})` : ''}`, 'warn') }
+      if (Object.keys(dl.tpl.lists).length) layout = { head: layout?.head || HEAD, lists: dl.tpl.lists }
+      for (const v of cmp.values) log(ctx, `⚠ Tasheer's template: ${v}`, 'warn')
+    } else log(ctx, `the template was not read (${dl.why}) — the Excel uses Tasheer's template as of 2026-11-10`)
+
+    // 2. The Excel chosen in Step 3 "Select File".
+    const file = path.join(os.tmpdir(), `Tasheer_${new Date().toISOString().slice(0, 10)}_${ctx.runId || Date.now()}.xlsx`)
+    fs.writeFileSync(file, tasheerXlsx(people, settings, layout))
+    const input = await frame.evaluateHandle(() => [...document.querySelectorAll('input[type="file"]')].find(i => i.offsetParent !== null || i.getBoundingClientRect().width > 0) || document.querySelector('input[type="file"]'))
+    const el = input.asElement()
+    let s = await uploadState(frame, passports)
+    let option1 = !!el
+    let why1 = el ? '' : 'the Select File box was not found'
+    if (el) {
+      await el.uploadFile(file)
+      await el.evaluate(i => { i.dispatchEvent(new Event('input', { bubbles: true })); i.dispatchEvent(new Event('change', { bubbles: true })) }).catch(() => {})
+      log(ctx, `✓ Excel chosen: ${path.basename(file)} (${people.length} applicant${people.length === 1 ? '' : 's'})`)
+    }
+
+    // 3. Upload Sheet, and the site's answer.
+    if (option1) {
+      let b = { found: false }
+      for (let i = 0; i < 10 && !(b = await markUploadButton(frame)).found; i++) await sleep(1000)
+      if (!b.found) { option1 = false; why1 = 'the Upload Sheet button was not found' }
+      else {
+        for (let i = 0; i < 10 && b.disabled; i++) { await sleep(1000); b = await markUploadButton(frame) }
+        const press = async (real) => {
+          const h = await frame.$('[data-adal-upload]')
+          if (!h) return false
+          await h.evaluate(e => e.scrollIntoView({ block: 'center' })).catch(() => {})
+          if (real) await h.click().catch(() => h.evaluate(e => e.click()))
+          else await h.evaluate(e => e.click())
+          return true
+        }
+        await baseline(frame)
+        await press(false)
+        log(ctx, '✓ Upload Sheet pressed — waiting for Tasheer to read the Excel')
+        const answered = (s) => s.bad.length || s.good.length || s.found.length >= people.length || s.saveOn
+        let pressedAgain = false
+        const t1 = Date.now()
+        for (;;) {
+          stop(ctx)
+          s = fresh(await uploadState(frame, passports))
+          if (answered(s) || Date.now() - t1 > UPLOAD_WAIT_MS) break
+          // No answer at all after 20 s: the press may not have reached the page; once more, with the mouse.
+          if (!pressedAgain && Date.now() - t1 > 20000) {
+            pressedAgain = true
+            if (await markUploadButton(frame).then(r => r.found) && await press(true)) log(ctx, 'no answer from Tasheer yet — Upload Sheet pressed once more')
+          }
+          await sleep(1000)
+        }
+        if (s.bad.length) siteSaid.push(...s.bad)
+        if (s.good.length) log(ctx, `Tasheer says: ${s.good.join(' · ')}`)
+        if (s.bad.length) {
+          option1 = false; why1 = `Tasheer refused the Excel: ${s.bad.join(' · ')}`
+          log(ctx, `✗ ${why1}`, 'warn')
+        } else if (s.found.length >= people.length || s.saveOn) {
+          log(ctx, `✓ Tasheer read the Excel: ${s.found.length || s.rows} of ${people.length} applicant${people.length === 1 ? '' : 's'} in the grid${s.saveOn ? ', Save enabled' : ''}`)
+        } else if (!s.good.length) {
+          option1 = false; why1 = `Tasheer gave no answer to Upload Sheet within ${UPLOAD_WAIT_MS / 1000} s (the grid stayed empty, Save stayed off)`
+          log(ctx, `✗ ${why1}`, 'warn')
+        }
+      }
+    }
+
+    // 4. Option 2 (the grid) only when Option 1 could not be done.
+    if (!option1) {
+      log(ctx, `Option 1 could not be done (${why1}) — filling the grid (Option 2)`, 'warn')
+      const g = await fillGrid(frame, people.map(p => {
+        const r = tasheerRow(p, settings)
+        return { ...r, gender: r.gender, nationality: r.nationality }
+      }))
+      await sleep(1500)
+      s = await uploadState(frame, passports)
+      if (!g.ok || s.found.length < people.length) {
+        return await pause('Tasheer — the applicants could not be put in',
+          `${why1}. The grid (Option 2) could not be filled either (${g.why || `${s.found.length} of ${people.length} in it`}). ${siteSaid.length ? `Tasheer says: ${siteSaid.join(' · ')}. ` : ''}Fill the applicants in the Tasheer tab and press Save, then "✔️ Tasheer saved" on the run.`)
+      }
+      log(ctx, `✓ the grid filled (${s.found.length} applicant${s.found.length === 1 ? '' : 's'})`)
+    }
+
+    // 5. The consent box, then Save (enabled once the rows are in).
+    if (await tickConsent(frame)) log(ctx, '✓ consent box ticked')
+    else log(ctx, 'the consent box was not found', 'warn')
+    for (let i = 0; i < 15; i++) { s = await uploadState(frame, passports); if (s.saveOn) break; await sleep(1000) }
+    if (s.grid && s.found.length < people.length) {
+      log(ctx, `✗ only ${s.found.length} of ${people.length} applicants are in Tasheer's grid — Save not pressed`, 'warn')
+      return await pause('Tasheer — look the applicants over',
+        `Only ${s.found.length} of ${people.length} applicants are in Tasheer's grid${siteSaid.length ? ` (Tasheer says: ${siteSaid.join(' · ')})` : ''}. Put them right and press Save, then "✔️ Tasheer saved" on the run.`)
+    }
+    if (!s.saveOn) {
+      s = fresh(s)
+      const said = [...siteSaid, ...s.bad].join(' · ')
+      log(ctx, `✗ Save stayed off${said ? ` — Tasheer says: ${said}` : ''}`, 'warn')
+      return await pause('Tasheer — Save is off', `The applicants are in, but Tasheer kept Save off${said ? ` (Tasheer says: ${said})` : ''}. Look it over in the Tasheer tab and press Save, then "✔️ Tasheer saved" on the run.`)
+    }
+    await baseline(frame)
+    const slotBefore = s.slot
+    await frame.evaluate(() => { const b = document.querySelector('[data-adal-save]'); b?.scrollIntoView({ block: 'center' }); b?.click() })
+    log(ctx, '✓ Save pressed')
+
+    // 6. Its confirmation ("Are you sure?"), then success / an error / a time slot.
+    const answerIn = async () => {
+      const frames = [...new Set([page.frames().includes(frame) ? frame : null, page.mainFrame(), ...page.frames()].filter(Boolean))]
+      const all = { bad: [], good: [], slot: false }
+      for (const f of frames) { const x = await uploadState(f, passports); all.bad.push(...x.bad); all.good.push(...x.good); all.slot ||= x.slot }
+      return fresh(all)
+    }
+    const confirmUp = (f) => f.evaluate(() => /are\s+you\s+sure|do\s+you\s+want|please\s+confirm|confirmation/i.test([...document.querySelectorAll('.modal, [role="dialog"], .swal2-popup, .swal-modal, .sweet-alert, .bootbox, .jconfirm-box')].filter(e => e.getBoundingClientRect().width > 0).map(e => e.innerText).join(' '))).catch(() => false)
+    let out = null
+    for (const end = Date.now() + SAVE_WAIT_MS; Date.now() < end && !out;) {
+      stop(ctx)
+      await sleep(1000)
+      const a = await answerIn()
+      if (a.bad.length) { out = { kind: 'error', said: a.bad.join(' · ') }; break }
+      if (await confirmUp(frame) || await confirmUp(page.mainFrame())) {
+        const f = await confirmUp(frame) ? frame : page.mainFrame()
+        if (await clickText(f, /^\s*(yes|ok|okay|confirm|proceed|continue|submit|yes,?\s*(save|confirm))\s*$/).catch(() => false)) { log(ctx, `✓ the confirmation answered${a.good.length ? ` (${a.good.join(' · ')})` : ''}`); await sleep(1500); continue }
+      }
+      if (a.good.length) out = { kind: 'ok', said: a.good.join(' · ') }
+      else if (a.slot && !slotBefore) out = { kind: 'slot' }
+    }
+    if (out?.kind === 'slot') {
+      log(ctx, '⏳ Tasheer asks for a time slot — the person chooses it')
+      await rang('choose the time slot on Tasheer', 'Tasheer saved the applicants and asks for a time slot: choose it in the Tasheer tab and confirm. Adal Keep goes on by itself.')
+      out = null
+      for (const end = Date.now() + PICK_WAIT_MS; Date.now() < end && !out;) {
+        stop(ctx)
+        await sleep(2000)
+        const a = await answerIn()
+        if (a.bad.length) out = { kind: 'error', said: a.bad.join(' · ') }
+        else if (a.good.length) out = { kind: 'ok', said: a.good.join(' · ') }
+      }
+    }
+    if (out?.kind === 'ok') {
+      const ref = /(?:reference|booking|appointment)\s*(?:no\.?|number|id|#)?\s*[:#-]?\s*([A-Z]*\d[A-Z0-9-]{3,})/i.exec(out.said)?.[1] || ''
+      log(ctx, `✅ Tasheer saved the group appointment${ref ? ` (reference ${ref})` : ''} — Tasheer says: ${out.said}`)
+      await note(`Tasheer: group appointment (${people.length}) saved by Adal Keep${ref ? ` — reference ${ref}` : ''}. Tasheer said: ${out.said}`)
+      if (ctx.db && ctx.runId) await import('./insuranceCertificate.js').then(m => m.settleMembers(ctx.db, ctx.runId, 'done')).catch(() => {})
+      await Promise.resolve(ctx.notify?.(`🛂 ${ctx.groupTitle}: Tasheer appointment saved`, `Tasheer says: ${out.said}`, 'info')).catch(() => {})
+      return { ok: true, done: true, seconds: secs() }
+    }
+    if (out?.kind === 'error') {
+      log(ctx, `✗ Tasheer did not save — it says: ${out.said}`, 'warn')
+      return await pause('Tasheer did not save', `After Save, Tasheer says: ${out.said}. Put it right in the Tasheer tab and press Save, then "✔️ Tasheer saved" on the run.`)
+    }
+    log(ctx, `Save was pressed but Tasheer showed no answer within ${SAVE_WAIT_MS / 1000} s`, 'warn')
+    return await pause('Tasheer — check that it saved', 'Save was pressed, but Tasheer showed neither a success nor an error. Look at the Tasheer tab: if it saved, press "✔️ Tasheer saved" on the run; if not, press Save there.')
+  } finally {
+    page.off('dialog', onDialog)
+  }
 }
-export { uploadFrame, START, hasPassword, fillLogin }
+
+export { uploadFrame, START, hasPassword, fillLogin, zip as _zip, HEAD as TEMPLATE_HEAD }

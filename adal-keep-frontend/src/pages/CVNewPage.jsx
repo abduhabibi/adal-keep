@@ -432,17 +432,6 @@ export default function CVNewPage() {
 
   const generate = () => openPreview()
 
-  const reformat = async (newTemplateId) => {
-    if (!genResult?.generated_cv_id) return
-    setBusy(true)
-    try {
-      const res = await api.post(`/cv/generated/${genResult.generated_cv_id}/reformat`, { template_id: Number(newTemplateId) })
-      setGenResult(res.data); setTemplateId(String(newTemplateId))
-      toast.success('Reformatted')
-    } catch (e) { toast.error(e.response?.data?.error || 'Reformat failed') }
-    finally { setBusy(false) }
-  }
-
   // ===== STEP 1 =====
   if (step === 1) {
     return (
@@ -474,292 +463,191 @@ export default function CVNewPage() {
   const blocker = validate()
 
   // ===== STEP 2 =====
+  // One clean form (asked on 2026-11-20: "make creating CV clean"): what the
+  // passport gave sits under her name, each thing is asked once, and one bar
+  // at the bottom holds Preview and PDF (Save as… is in the preview).
+  const known = [p.passport_number, p.date_of_birth, p.nationality, p.place_of_birth].filter(Boolean).join(' · ')
+
   return (
-    <div className="animate-fade-up space-y-5 pb-24 max-w-5xl mx-auto">
+    <div className="animate-fade-up space-y-4 pb-28 max-w-4xl mx-auto">
       <PageHeader
-        title={`CV — ${p.full_name || '—'}`}
-        subtitle={broker?.name ? `Broker: ${broker.name}` : 'Broker not assigned'}
-        action={
-          <div className="flex flex-wrap items-center gap-2">
-            <Button variant="secondary" onClick={() => { setStep(1); setGenResult(null) }}>← Back</Button>
-            <button
-              onClick={clearDraft}
-              className="px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
-              title="Reset the form to the last saved profile values"
-            >Reset</button>
-            <Button variant="secondary" onClick={generate} isLoading={busy} disabled={!!blocker}>Preview</Button>
-            <Button onClick={downloadCurrent} isLoading={saving} disabled={!!blocker}>⬇ Download PDF</Button>
-            <Button variant="secondary" onClick={saveAs} disabled={saving || !!blocker}>💾 Save as…</Button>
-          </div>
-        }
+        title={p.full_name || 'CV'}
+        subtitle={known || undefined}
+        action={<span className="hidden md:inline-flex"><Button variant="secondary" onClick={() => { setStep(1); setGenResult(null) }}>← Back</Button></span>}
       />
 
-      {/* Blocker card — one consolidated message */}
+      {/* What still stops the CV: fixed right here (a phone has no other page open). */}
       {blocker && (
-        <div className="panel p-4 border-l-4 border-l-red-500">
-          <p className="text-sm font-semibold text-red-700 dark:text-red-400">⚠ {blocker}</p>
-          {/* Each thing it lacks is fixed right here (a phone has no other page open). */}
+        <div className="panel p-4 border-l-4 border-l-amber-500">
+          <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">{blocker}</p>
           {!readiness?.profile?.broker_id ? (
             <PickBrokerHere profileId={profileId} onDone={reloadReadiness} />
-          ) : !readiness?.has_photo || !readiness?.has_full_body_photo ? (
+          ) : (!readiness?.has_photo || !readiness?.has_full_body_photo) && (
             <UploadPhotoHere profileId={profileId} field={!readiness?.has_photo ? 'Photo' : 'Full Body Photo'}
               onDone={(f) => { fixedHere.current[f === 'Photo' ? 'has_photo' : 'has_full_body_photo'] = true; reloadReadiness() }} />
-          ) : (
-            <p className="text-xs text-slate-500 mt-1">
-              Fill it in below. Your form input is being saved automatically.
-            </p>
           )}
         </div>
       )}
 
-      {/* Generated result */}
       {genResult && (
-        <div className="panel p-4 border-l-4 border-l-purple-500 bg-purple-50/30 dark:bg-purple-900/10">
-          <div className="flex items-center justify-between gap-3 mb-3">
-            <div>
-              <p className="text-sm font-semibold text-purple-700 dark:text-purple-400">✅ CV Generated</p>
-              <p className="text-xs text-slate-500 mt-1">{genResult.filename}</p>
+        <div className="panel flex items-center justify-between gap-3 p-3 border-l-4 border-l-teal-500">
+          <p className="min-w-0 truncate text-sm font-semibold text-teal-700 dark:text-teal-300">✓ {genResult.filename}</p>
+          <div className="flex shrink-0 gap-2">
+            <a href={genResult.download_url} target="_blank" rel="noopener noreferrer" className="rounded-lg bg-teal-600 px-3 py-1.5 text-xs font-semibold text-white">Open</a>
+            <button onClick={() => setGenResult(null)} className="rounded-lg px-2 py-1.5 text-xs text-slate-500">✕</button>
+          </div>
+        </div>
+      )}
+
+      <Section title="Her details">
+        {readiness?.profile?.broker_id && (
+          <div className="mb-3">
+            <span className="text-xs font-medium text-slate-600 dark:text-slate-300">Broker</span>
+            <PickBrokerHere profileId={profileId} current={readiness.profile.broker_id} onDone={reloadReadiness} />
+          </div>
+        )}
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Pick label="Religion" value={form.religion} onChange={e => upd('religion', e.target.value)}>
+            <option value="">—</option>
+            <option>Muslim</option><option>Christian</option>
+            {form.religion && !RELIGIONS.includes(form.religion) && <option>{form.religion}</option>}
+          </Pick>
+          <Pick label="Marital status" value={form.marital_status} onChange={e => upd('marital_status', e.target.value)}>
+            <option value="">—</option>
+            <option value="SINGLE">Single</option><option value="MARRIED">Married</option>
+          </Pick>
+          <Input label="Children" value={form.children_count} onChange={e => upd('children_count', e.target.value)} />
+          <Input label="Education" value={form.education_level} onChange={e => upd('education_level', e.target.value)} />
+          <Input label="Weight" value={form.weight} onChange={e => upd('weight', e.target.value)} />
+          <Input label="Height" value={form.height} onChange={e => upd('height', e.target.value)} />
+          <Input label="Mother's name" value={form.mother_name} onChange={e => upd('mother_name', e.target.value)} />
+          <Input label="Father's name" value={form.father_name} onChange={e => upd('father_name', e.target.value)} />
+          <Input label="Phone" value={form.personal_number} onChange={e => upd('personal_number', e.target.value)} placeholder={broker?.contact1 || ''} />
+          <Input label="Labor ID" value={form.labor_id} onChange={e => upd('labor_id', e.target.value)} />
+          <Pick label="Region" value={form.region} onChange={e => { upd('region', e.target.value); upd('zone_subcity', '') }}>
+            <option value="">—</option>
+            {REGIONS.map(r => <option key={r.name} value={r.name}>{r.name}</option>)}
+          </Pick>
+          <Pick label={regionObj?.label || 'Zone / Sub City'} value={form.zone_subcity} onChange={e => upd('zone_subcity', e.target.value)} disabled={!regionObj}>
+            <option value="">—</option>
+            {regionObj?.areas.map(a => <option key={a} value={a}>{a}</option>)}
+          </Pick>
+        </div>
+      </Section>
+
+      <Section title="Languages and skills">
+        {/* A ticked language speaks it; read and write only when ticked. */}
+        <div className="flex flex-wrap gap-x-8 gap-y-2">
+          {[['english', 'English', 'speaks_english'], ['arabic', 'Arabic', 'speaks_arabic']].map(([k, label, speak]) => (
+            <div key={k} className="flex items-center gap-3 text-sm">
+              <span className="w-14 font-medium">{label}</span>
+              {[[speak, 'Speak'], [`${k}_read`, 'Read'], [`${k}_write`, 'Write']].map(([f, word]) => (
+                <label key={f} className="inline-flex items-center gap-1">
+                  <input type="checkbox" checked={f === speak ? !!(form[speak] || form[`${k}_read`] || form[`${k}_write`]) : !!form[f]}
+                    onChange={e => { const v = e.target.checked; upd(f, v); if (f === speak && !v) { upd(`${k}_read`, false); upd(`${k}_write`, false) } }} /> {word}
+                </label>
+              ))}
             </div>
-            <div className="flex gap-2">
-              <a href={genResult.download_url} target="_blank" rel="noopener noreferrer"
-                className="px-3 py-1.5 rounded-lg bg-teal-600 text-white text-xs">Download</a>
-              <button onClick={() => setGenResult(null)} className="px-3 py-1.5 rounded-lg bg-slate-200 dark:bg-slate-700 text-xs">Close</button>
+          ))}
+        </div>
+        <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2">
+          {Object.keys(DEFAULT_SKILLS).map(k => (
+            <label key={k} className="inline-flex items-center gap-2 text-sm capitalize">
+              <input type="checkbox" checked={!!skills[k]} onChange={e => upd('skills', { ...skills, [k]: e.target.checked })} />
+              {k.replace('_', ' ')}
+            </label>
+          ))}
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
+          <span className="text-xs text-slate-500">Cooking</span>
+          {['Cooking', 'Cooking Helper', 'None'].map(v => (
+            <label key={v} className="inline-flex items-center gap-2">
+              <input type="radio" checked={form.cooking_skill === v} onChange={() => upd('cooking_skill', v)} /> {v === 'Cooking' ? 'Cook' : v === 'Cooking Helper' ? 'Helper' : 'None'}
+            </label>
+          ))}
+        </div>
+      </Section>
+
+      <Section title="Emergency contact">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Input label="Name" value={form.emergency_name} onChange={e => upd('emergency_name', e.target.value)} placeholder={fatherFull({ ...p, ...form }) || ''} />
+          <Input label="Phone" value={form.emergency_phone} onChange={e => upd('emergency_phone', e.target.value)} placeholder={broker?.contact1 || ''} />
+          <Pick label="Gender" value={form.emergency_gender} onChange={e => upd('emergency_gender', e.target.value)}>
+            <option>Male</option><option>Female</option>
+          </Pick>
+          <Input label="Relationship" value={form.emergency_relationship} onChange={e => upd('emergency_relationship', e.target.value)} />
+        </div>
+      </Section>
+
+      <Section title="Worked abroad" action={<button onClick={addExperience} className="text-xs font-semibold text-teal-600 hover:underline">+ Add</button>}>
+        {form.previous_employment.length === 0 && <p className="text-xs text-slate-400">None</p>}
+        {form.previous_employment.map((exp, i) => (
+          <div key={i} className="mt-2 grid gap-2 rounded-lg border border-slate-200 p-3 dark:border-slate-700 sm:grid-cols-3">
+            <Pick label="Country" value={exp.country} onChange={e => updExperience(i, 'country', e.target.value)}>
+              <option value="">—</option>
+              {WORK_COUNTRIES.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+            </Pick>
+            <Input label="From" type="date" value={exp.from || ''} onChange={e => updExperience(i, 'from', e.target.value)} />
+            <Input label="To" type="date" value={exp.to || ''} onChange={e => updExperience(i, 'to', e.target.value)} />
+            <Input label="Position" value={exp.position || ''} onChange={e => updExperience(i, 'position', e.target.value)} />
+            <Input label="Salary" type="number" value={exp.salary || ''} onChange={e => updExperience(i, 'salary', e.target.value)} />
+            <div className="flex items-end gap-2">
+              <div className="flex-1"><Input label="Currency" value={exp.currency || ''} onChange={e => updExperience(i, 'currency', e.target.value)} /></div>
+              <button onClick={() => removeExperience(i)} className="mb-2 text-xs text-red-500" aria-label="Remove">✕</button>
             </div>
           </div>
-          <p className="text-xs text-slate-500 mb-2">Change format without re-entering:</p>
+        ))}
+      </Section>
+
+      <Section title="Going to" action={<button onClick={addCountry} className="text-xs font-semibold text-teal-600 hover:underline">+ Add</button>}>
+        {form.countries_applying.map((c, i) => (
+          <div key={i} className="mt-2 grid gap-2 sm:grid-cols-3">
+            <Pick label="Country" value={c.country} onChange={e => updCountry(i, 'country', e.target.value)}>
+              <option value="">—</option>
+              {COUNTRIES_APPLY.map(x => <option key={x.name} value={x.name}>{x.name}</option>)}
+            </Pick>
+            <Input label="Salary" type="number" value={c.salary || ''} onChange={e => updCountry(i, 'salary', e.target.value)} />
+            <div className="flex items-end gap-2">
+              <div className="flex-1"><Input label="Currency" value={c.currency || ''} onChange={e => updCountry(i, 'currency', e.target.value)} /></div>
+              {form.countries_applying.length > 1 && <button onClick={() => removeCountry(i)} className="mb-2 text-xs text-red-500" aria-label="Remove">✕</button>}
+            </div>
+          </div>
+        ))}
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <Input label="Contract years" type="number" value={form.contract_years} onChange={e => upd('contract_years', e.target.value)} />
+          <Input label="Ref. No." value={form.ref_no} onChange={e => upd('ref_no', e.target.value)} />
+        </div>
+      </Section>
+
+      <Section title="Template">
+        {templates.length === 0 ? (
+          <button className="text-sm text-teal-600 underline" onClick={() => navigate('/cvs/templates')}>Upload a template</button>
+        ) : (
           <div className="flex flex-wrap gap-2">
-            {templates.filter(t => String(t.id) !== String(templateId)).map(t => (
-              <button key={t.id} onClick={() => reformat(t.id)} disabled={busy}
-                className="px-3 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 hover:border-purple-400 transition">
+            {templates.map(t => (
+              <button key={t.id} type="button" onClick={() => setTemplateId(String(t.id))}
+                className={`rounded-xl border px-3 py-2 text-sm font-semibold transition ${String(templateId) === String(t.id)
+                  ? 'border-teal-500 bg-teal-50 text-teal-800 dark:bg-teal-900/30 dark:text-teal-200'
+                  : 'border-slate-200 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800/40'}`}>
                 {t.name}
               </button>
             ))}
           </div>
-        </div>
-      )}
+        )}
+      </Section>
 
-      {/* Auto-filled summary */}
-      <section className="panel p-4">
-        <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Auto-filled from passport</h3>
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
-          <div><div className="text-slate-400">Full name</div><div className="font-medium truncate">{p.full_name || '—'}</div></div>
-          <div><div className="text-slate-400">Passport</div><div className="font-medium">{p.passport_number || '—'}</div></div>
-          <div><div className="text-slate-400">Date of birth</div><div className="font-medium">{p.date_of_birth || '—'}</div></div>
-          <div><div className="text-slate-400">Nationality</div><div className="font-medium">{p.nationality || '—'}</div></div>
-          <div><div className="text-slate-400">Place of birth</div><div className="font-medium truncate">{p.place_of_birth || '—'}</div></div>
-          <div><div className="text-slate-400">Broker phone</div><div className="font-medium">{broker?.contact1 || '—'}</div></div>
-        </div>
-      </section>
+      <div className="text-center">
+        <button onClick={clearDraft} className="text-xs text-slate-400 hover:underline" title="Back to the values saved in her profile">Start again</button>
+      </div>
 
-      {/* Fill in details */}
-      <section className="panel p-5 space-y-5">
-        <h3 className="font-display text-lg font-bold text-slate-900 dark:text-white border-b border-slate-100 dark:border-slate-700 pb-3">Fill in details</h3>
-
-        {/* Her broker: seen and changed right here. */}
-        <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3">
-          <div className="flex flex-wrap items-baseline justify-between gap-2 text-sm">
-            <span className="text-xs font-medium text-slate-600 dark:text-slate-300">Broker</span>
-            <span className="font-semibold">{broker?.name || 'Not assigned'}{broker?.contact1 ? ` · ${broker.contact1}` : ''}</span>
-          </div>
-          <PickBrokerHere profileId={profileId} current={readiness?.profile?.broker_id || ''} onDone={reloadReadiness} />
-        </div>
-
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div>
-            <label className="text-xs font-medium text-slate-600 dark:text-slate-300 mb-1 block">Religion</label>
-            <GlassSelect className="field w-full" value={form.religion} onChange={e => upd('religion', e.target.value)}>
-              <option value="">— Select —</option>
-              <option>Muslim</option><option>Christian</option>
-              {form.religion && !RELIGIONS.includes(form.religion) && <option>{form.religion}</option>}
-            </GlassSelect>
-          </div>
-          <div>
-            <label className="text-xs font-medium text-slate-600 dark:text-slate-300 mb-1 block">Marital status</label>
-            <GlassSelect className="field w-full" value={form.marital_status} onChange={e => upd('marital_status', e.target.value)}>
-              <option value="SINGLE">Single</option><option value="MARRIED">Married</option>
-            </GlassSelect>
-          </div>
-          <Input label="Children count" value={form.children_count} onChange={e => upd('children_count', e.target.value)} />
-          <Input label="Weight" value={form.weight} onChange={e => upd('weight', e.target.value)} />
-          <Input label="Height" value={form.height} onChange={e => upd('height', e.target.value)} />
-          <Input label="Education" value={form.education_level} onChange={e => upd('education_level', e.target.value)} />
-          <Input label="Mother's name" value={form.mother_name} onChange={e => upd('mother_name', e.target.value)} />
-          <Input label="Father's name" value={form.father_name} onChange={e => upd('father_name', e.target.value)} />
-          <Input label="Personal number" value={form.personal_number} onChange={e => upd('personal_number', e.target.value)} placeholder={broker?.contact1 || ''} />
-          <Input label="Labor ID (optional)" value={form.labor_id} onChange={e => upd('labor_id', e.target.value)} />
-        </div>
-
-        <div className="grid gap-3 sm:grid-cols-2 pt-2 border-t border-slate-100 dark:border-slate-700">
-          <div>
-            <label className="text-xs font-medium text-slate-600 dark:text-slate-300 mb-1 block">Region</label>
-            <GlassSelect className="field w-full" value={form.region} onChange={e => { upd('region', e.target.value); upd('zone_subcity', '') }}>
-              <option value="">— Select —</option>
-              {REGIONS.map(r => <option key={r.name} value={r.name}>{r.name}</option>)}
-            </GlassSelect>
-          </div>
-          <div>
-            <label className="text-xs font-medium text-slate-600 dark:text-slate-300 mb-1 block">{regionObj?.label || 'Zone / Sub City'}</label>
-            <GlassSelect className="field w-full" value={form.zone_subcity} onChange={e => upd('zone_subcity', e.target.value)} disabled={!regionObj}>
-              <option value="">— Select —</option>
-              {regionObj?.areas.map(a => <option key={a} value={a}>{a}</option>)}
-            </GlassSelect>
-          </div>
-        </div>
-
-        {/* Languages: a ticked language speaks it; read and write only when ticked. */}
-        <div className="pt-2">
-          <p className="text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">Languages</p>
-          <table className="text-sm">
-            <thead><tr className="text-xs text-slate-500"><th></th><th className="px-3 font-medium">Speak</th><th className="px-3 font-medium">Read</th><th className="px-3 font-medium">Write</th></tr></thead>
-            <tbody>
-              {[['english', 'English', 'speaks_english'], ['arabic', 'Arabic', 'speaks_arabic']].map(([k, label, speak]) => (
-                <tr key={k}>
-                  <td className="pr-3 py-1">
-                    <label className="inline-flex items-center gap-2">
-                      <input type="checkbox" checked={form[speak] || form[`${k}_read`] || form[`${k}_write`]}
-                        onChange={e => { const v = e.target.checked; upd(speak, v); if (!v) { upd(`${k}_read`, false); upd(`${k}_write`, false) } }} /> {label}
-                    </label>
-                  </td>
-                  {[speak, `${k}_read`, `${k}_write`].map(f => (
-                    <td key={f} className="px-3 text-center">
-                      <input type="checkbox" aria-label={`${label} ${f.includes('read') ? 'read' : f.includes('write') ? 'write' : 'speak'}`}
-                        checked={!!form[f]} onChange={e => upd(f, e.target.checked)} />
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="pt-3 border-t border-slate-100 dark:border-slate-700">
-          <p className="text-xs font-semibold text-slate-500 mb-2 uppercase tracking-wide">Emergency contact</p>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Input label="Name" value={form.emergency_name} onChange={e => upd('emergency_name', e.target.value)} placeholder={fatherFull({ ...p, ...form }) || 'Father name and surname'} />
-            <Input label="Phone" value={form.emergency_phone} onChange={e => upd('emergency_phone', e.target.value)} placeholder={broker?.contact1 || 'Broker phone'} />
-            <div>
-              <label className="text-xs font-medium text-slate-600 dark:text-slate-300 mb-1 block">Gender</label>
-              <GlassSelect className="field w-full" value={form.emergency_gender} onChange={e => upd('emergency_gender', e.target.value)}>
-                <option>Male</option><option>Female</option>
-              </GlassSelect>
-            </div>
-            <Input label="Relationship" value={form.emergency_relationship} onChange={e => upd('emergency_relationship', e.target.value)} />
-          </div>
-        </div>
-
-        <div className="pt-3 border-t border-slate-100 dark:border-slate-700">
-          <p className="text-xs font-semibold text-slate-500 mb-2 uppercase tracking-wide">Skills</p>
-          <div className="flex flex-wrap gap-4">
-            {Object.keys(DEFAULT_SKILLS).map(k => (
-              <label key={k} className="inline-flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={!!skills[k]} onChange={e => upd('skills', { ...skills, [k]: e.target.checked })} />
-                {k.replace('_', ' ')}
-              </label>
-            ))}
-          </div>
-          <div className="mt-3">
-            <p className="text-xs font-semibold text-slate-500 mb-2 uppercase tracking-wide">Cooking skills</p>
-            <div className="flex flex-wrap gap-4">
-              {['Cooking', 'Cooking Helper', 'None'].map(v => (
-                <label key={v} className="inline-flex items-center gap-2 text-sm">
-                  <input type="radio" checked={form.cooking_skill === v} onChange={() => upd('cooking_skill', v)} /> {v}
-                </label>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        <div className="pt-3 border-t border-slate-100 dark:border-slate-700">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Work experience abroad</p>
-            <button onClick={addExperience} className="text-xs text-teal-600 hover:underline">+ Add experience</button>
-          </div>
-          {form.previous_employment.length === 0 && <p className="text-xs text-slate-400 italic">No previous employment</p>}
-          {form.previous_employment.map((exp, i) => (
-            <div key={i} className="mt-2 p-3 rounded-lg border border-slate-200 dark:border-slate-700 grid gap-2 sm:grid-cols-3">
-              <div className="sm:col-span-3 flex items-center justify-between">
-                <span className="text-xs font-medium text-slate-500">Experience #{i+1}</span>
-                <button onClick={() => removeExperience(i)} className="text-xs text-red-500">Remove</button>
-              </div>
-              <div>
-                <label className="text-[11px] text-slate-500 block mb-1">Country</label>
-                <GlassSelect className="field w-full" value={exp.country} onChange={e => updExperience(i, 'country', e.target.value)}>
-                  <option value="">— Select —</option>
-                  {WORK_COUNTRIES.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
-                </GlassSelect>
-              </div>
-              <Input label="From" type="date" value={exp.from || ''} onChange={e => updExperience(i, 'from', e.target.value)} />
-              <Input label="To" type="date" value={exp.to || ''} onChange={e => updExperience(i, 'to', e.target.value)} />
-              <Input label="Position" value={exp.position || ''} onChange={e => updExperience(i, 'position', e.target.value)} />
-              <Input label="Salary" type="number" value={exp.salary || ''} onChange={e => updExperience(i, 'salary', e.target.value)} />
-              <Input label="Currency" value={exp.currency || ''} onChange={e => updExperience(i, 'currency', e.target.value)} />
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* Country + template */}
-      <section className="panel p-5 space-y-5">
-        <h3 className="font-display text-lg font-bold text-slate-900 dark:text-white border-b border-slate-100 dark:border-slate-700 pb-3">Country & template</h3>
-
-        <div>
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Country applying to</p>
-            <button onClick={addCountry} className="text-xs text-teal-600 hover:underline">+ Add country</button>
-          </div>
-          {form.countries_applying.map((c, i) => (
-            <div key={i} className="mt-2 p-3 rounded-lg border border-slate-200 dark:border-slate-700 grid gap-2 sm:grid-cols-3">
-              <div className="sm:col-span-3 flex items-center justify-between">
-                <span className="text-xs font-medium text-slate-500">Country #{i+1}</span>
-                {form.countries_applying.length > 1 && <button onClick={() => removeCountry(i)} className="text-xs text-red-500">Remove</button>}
-              </div>
-              <div>
-                <label className="text-[11px] text-slate-500 block mb-1">Country</label>
-                <GlassSelect className="field w-full" value={c.country} onChange={e => updCountry(i, 'country', e.target.value)}>
-                  <option value="">— Select —</option>
-                  {COUNTRIES_APPLY.map(x => <option key={x.name} value={x.name}>{x.name}</option>)}
-                </GlassSelect>
-              </div>
-              <Input label="Salary" type="number" value={c.salary || ''} onChange={e => updCountry(i, 'salary', e.target.value)} />
-              <Input label="Currency" value={c.currency || ''} onChange={e => updCountry(i, 'currency', e.target.value)} />
-            </div>
-          ))}
-          <div className="grid gap-3 sm:grid-cols-2 mt-3">
-            <Input label="Contract years" type="number" value={form.contract_years} onChange={e => upd('contract_years', e.target.value)} />
-            <Input label="Ref. No." value={form.ref_no} onChange={e => upd('ref_no', e.target.value)} />
-          </div>
-        </div>
-
-        <div className="pt-3 border-t border-slate-100 dark:border-slate-700">
-          <p className="text-xs font-semibold text-slate-500 mb-2 uppercase tracking-wide">Template</p>
-          {templates.length === 0 ? (
-            <div className="text-sm text-slate-500 text-center py-4">
-              No templates yet.
-              <button className="block mt-2 text-teal-600 underline mx-auto" onClick={() => navigate('/cvs/templates')}>Upload templates</button>
-            </div>
-          ) : (
-            <div className="grid gap-2 sm:grid-cols-2">
-              {templates.map(t => (
-                <button key={t.id} type="button" onClick={() => setTemplateId(String(t.id))}
-                  className={`text-left p-3 rounded-xl border transition ${
-                    String(templateId) === String(t.id)
-                      ? 'border-teal-500 bg-teal-50/60 dark:bg-teal-900/20'
-                      : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/40'
-                  }`}>
-                  <div className="font-semibold text-sm text-slate-900 dark:text-white truncate">{t.name}</div>
-                  <div className="text-[11px] text-slate-500 truncate">{t.agency_name || '—'}</div>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className="pt-3 border-t border-slate-100 dark:border-slate-700 flex justify-end gap-2">
+      {/* One bar for what is done with the CV. */}
+      {/* (Under 768 px the phone's tab bar is at the very bottom: this bar sits on it.) */}
+      <div className="fixed inset-x-0 bottom-0 max-md:bottom-[calc(51px+env(safe-area-inset-bottom))] z-30 border-t border-slate-200 bg-white/95 px-4 py-3 backdrop-blur dark:border-slate-700 dark:bg-slate-900/95">
+        <div className="mx-auto flex max-w-4xl items-center justify-center gap-3">
           <Button variant="secondary" onClick={generate} isLoading={busy} disabled={!!blocker}>Preview</Button>
-          <Button onClick={downloadCurrent} isLoading={saving} disabled={!!blocker}>⬇ Download PDF</Button>
-            <Button variant="secondary" onClick={saveAs} disabled={saving || !!blocker}>💾 Save as…</Button>
+          <Button onClick={downloadCurrent} isLoading={saving} disabled={!!blocker}>⬇ PDF</Button>
         </div>
-      </section>
+      </div>
           {/* Preview modal */}
       {showPreview && previewUrl && createPortal(
 <div className="fixed inset-0 z-[9999] bg-black/80 flex items-center justify-center p-2 sm:p-4"
@@ -868,5 +756,26 @@ export default function CVNewPage() {
 
       </div>
 
+  )
+}
+
+// The CV form's pieces (outside the page: inside it every key typed would rebuild them and lose the box).
+function Section({ title, action, children }) {
+  return (
+  <section className="panel p-4 sm:p-5">
+    <div className="mb-3 flex items-center justify-between gap-2">
+      <h3 className="text-sm font-bold text-slate-900 dark:text-white">{title}</h3>
+      {action}
+    </div>
+    {children}
+  </section>
+  )
+}
+function Pick({ label, value, onChange, children, disabled }) {
+  return (
+  <div>
+    <label className="text-xs font-medium text-slate-600 dark:text-slate-300 mb-1 block">{label}</label>
+    <GlassSelect className="field w-full" value={value} onChange={onChange} disabled={disabled}>{children}</GlassSelect>
+  </div>
   )
 }

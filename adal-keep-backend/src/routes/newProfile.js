@@ -124,7 +124,7 @@ router.post('/new-profile/read', upload.single('file'), async (req, res) => {
 // and the passport part stays in Passport (services/placement.js).
 function splitLater(db, profileId, fileId) {
   if (!fileId) return
-  db('files').where('id', fileId).first().then(row => row && import('../services/placement.js').then(p => p.checkPlacement(db, profileId, 'Passport', row)))
+  db('files').where('id', fileId).first().then(row => row && import('../services/placement.js').then(p => p.checkPlacement(db, profileId, 'Passport', row, { review: true })))
     .catch(e => console.warn('[placement]', e.message))
 }
 

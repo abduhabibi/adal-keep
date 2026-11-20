@@ -129,7 +129,7 @@ function checkLater(db, profileId, field, fileRow) {
   }
   if (!fileRow || !/^image\//.test(fileRow.mimetype || '')) return
   import('../services/placement.js')
-    .then(p => p.watched(field.name) && p.checkPlacement(db, Number(profileId), field.name, fileRow))
+    .then(p => p.watched(field.name) && p.checkPlacement(db, Number(profileId), field.name, fileRow, { review: true }))
     .catch(e => console.warn('[placement]', e.message))
 }
 

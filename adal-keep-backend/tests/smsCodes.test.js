@@ -4,11 +4,17 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-const fresh = async () => import(`../src/services/smsCodes.js?t=${Math.random()}`)
+const fresh = async (tabs = []) => {
+  const s = await import(`../src/services/smsCodes.js?t=${Math.random()}`)
+  s._setBrowsersForTest(async () => tabs)
+  return s
+}
 
-test('nobody asked: the code goes to every tray', async () => {
+test('nobody asked and no LMIS tab waits: the code goes to every tray', async () => {
   const s = await fresh()
-  assert.equal(s.addSmsCode({ code: '123456', account: 'nuzla · 0911000000' }).to, 'trays')
+  s.addSmsCode({ code: '123456', account: 'nuzla · 0911000000' })
+  assert.equal(s.listSmsCodes().length, 0)   // not while its PC is looked for
+  await s.settled()
   assert.deepEqual(s.listSmsCodes().map(c => c.code), ['123456'])
   assert.equal(s.takeSmsCode(0), '123456')   // a robot that comes later may still use it
 })
@@ -55,6 +61,49 @@ test('the same SMS sent twice counts once; a non-code is refused', async () => {
   const s = await fresh()
   s.addSmsCode({ code: '5555' })
   assert.equal(s.addSmsCode({ code: '5555' }).twice, true)
+  await s.settled()
   assert.equal(s.listSmsCodes().length, 1)
   assert.throws(() => s.addSmsCode({ code: '12' }))
+})
+
+// A page that looks like LMIS's code page, enough for tabManager's helpers.
+const fakePage = (url, { box = true } = {}) => {
+  const page = { typed: null, pressed: false, url: () => url }
+  page.evaluate = async (fn) => {
+
+    if (typeof fn !== 'string') { page.pressed = true; return }   // pressCodeButton
+    if (fn.endsWith('.length > 0')) return box                     // codeBoxUp
+    if (!box) return ''                                            // typeCodeInto
+    page.typed = JSON.parse(fn.slice(fn.lastIndexOf(', ') + 2, -1))
+    return 'box'
+  }
+  return page
+}
+
+test('a person pressed Sign In on a Companion: the code is typed into that PC LMIS tab, no tray', async () => {
+  const other = fakePage('https://musaned.com.sa/x')
+  const lmisNoBox = fakePage('https://lmis.gov.et/home', { box: false })
+  const lmis = fakePage('https://lmis.gov.et/auth/realms/x/login-actions')
+  const s = await fresh([
+    { name: 'this PC', browser: { pages: async () => [other, lmisNoBox] } },
+    { name: 'Reception PC', browser: { pages: async () => [lmis] } },
+  ])
+  assert.equal(s.addSmsCode({ code: '778899', account: 'nuzla · 0911000000' }).to, 'looking')
+  await s.settled()
+  assert.equal(lmis.typed, '778899')
+  assert.equal(lmis.pressed, true)
+  assert.equal(lmisNoBox.typed, null)
+  assert.equal(other.typed, null)
+  assert.equal(s.listSmsCodes().length, 0)
+  assert.equal(s.takeSmsCode(0), null)       // used
+})
+
+test('a robot waiting still gets its own code (no tab is touched)', async () => {
+  const lmis = fakePage('https://lmis.gov.et/auth')
+  const s = await fresh([{ name: 'Reception PC', browser: { pages: async () => [lmis] } }])
+  const w = s.waitForSmsCode({ run: 3, account: { phone: '0911000000' } })
+  assert.equal(s.addSmsCode({ code: '1212', account: 'x · 0911000000' }).to, 'robot')
+  await s.settled()
+  assert.equal(lmis.typed, null)
+  assert.equal(s.takeSmsCode(0, w), '1212')
 })

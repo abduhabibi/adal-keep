@@ -9,8 +9,13 @@
  *     the one for the same LMIS account (its phone number or name), else the
  *     robot that has waited longest. The robot types it, presses the button
  *     and carries on; the code is not shown in anyone's tray.
- *   - nobody in Adal Keep asked for it (a person signed in to LMIS by hand,
- *     somewhere): every PC's document tray shows it with a Copy button.
+ *   - nobody in Adal Keep asked for it (a person signed in to LMIS by hand):
+ *     the PC whose Adal Browser has LMIS open on its code box is the one that
+ *     pressed Sign In (asked on 2026-11-20: "identify the PC that sent the LMIS
+ *     code, and send specifically for him"). The main PC looks at its own
+ *     Adal Browser and every Companion's it is connected to, types the code
+ *     into that tab and presses the button — nobody copies anything. Only when
+ *     no such tab is found does every PC's tray show it with a Copy button.
  */
 const codes = []    // { code, from, account, at, got, used, forRun }
 const waiters = []  // { id, run, account, since }
@@ -59,9 +64,56 @@ export function addSmsCode({ code, from = '', account = '', at = Date.now() } = 
     console.log(`[sms] an LMIS code came from the phone → the robot signing in${w.run ? ` (run #${w.run})` : ''}`)
     return { ok: true, to: 'robot', run: w.run || null }
   }
-  console.log('[sms] an LMIS code came from the phone → every PC\'s tray (no robot asked for it)')
-  import('./liveChannel.js').then(L => L.broadcast({ t: 'sms-code', at: now })).catch(() => {})
-  return { ok: true, to: 'trays' }
+  const entry = codes[codes.length - 1]
+  entry.forRun = 'looking'   // in no tray while the PC that asked for it is looked for
+  const toTrays = () => {
+    entry.forRun = null
+    console.log('[sms] an LMIS code came from the phone → every PC\'s tray (no LMIS tab waits for it)')
+    import('./liveChannel.js').then(L => L.broadcast({ t: 'sms-code', at: now })).catch(() => {})
+  }
+  pending = typeIntoWaitingTab(c).then(pc => {
+    if (!pc) return toTrays()
+    entry.used = true
+    entry.forRun = 'pc'
+    entry.pc = pc
+    console.log(`[sms] an LMIS code came from the phone → typed into LMIS on ${pc} (the PC that pressed Sign In)`)
+  }).catch(toTrays)
+  return { ok: true, to: 'looking' }
+}
+
+let pending = Promise.resolve()
+/** Tests: wait until the last code found its PC (or the trays). */
+export const settled = () => pending
+
+// Where to look: this PC's Adal Browser (when open) and the Companions' it is connected to.
+let browsersOf = async () => {
+  const out = []
+  try { const b = await (await import('./browser.js')).openBrowserIfAny(); if (b) out.push({ name: 'this PC', browser: b }) } catch {}
+  try { out.push(...await (await import('./remoteBrowsers.js')).connectedBrowsers()) } catch {}
+  return out
+}
+export function _setBrowsersForTest(fn) { browsersOf = fn }
+
+/**
+ * The LMIS tab whose code box shows, on whichever PC: the code is typed there
+ * and its button pressed. Answers that PC's name, or '' when there is none.
+ */
+export async function typeIntoWaitingTab(code) {
+  const { codeBoxUp, typeCodeInto, pressCodeButton } = await import('./tabManager.js')
+  const within = (p, ms, dflt) => Promise.race([p, new Promise(r => setTimeout(() => r(dflt), ms))]).catch(() => dflt)
+  for (const { name, browser } of await within(browsersOf(), 8000, [])) {
+    for (const page of await within(browser.pages(), 4000, [])) {
+      let url = ''
+      try { url = page.url() } catch {}
+      if (!/lmis/i.test(url)) continue
+      if (!(await within(codeBoxUp(page), 3000, false))) continue
+      if (!(await within(typeCodeInto(page, code), 3000, false))) continue
+      await new Promise(r => setTimeout(r, 400))
+      await within(pressCodeButton(page), 3000)
+      return name || 'a PC'
+    }
+  }
+  return ''
 }
 
 /**

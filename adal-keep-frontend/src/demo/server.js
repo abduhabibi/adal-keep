@@ -223,6 +223,9 @@ on('delete', '/checklists/:id', ({ id }) => { db.checklists = db.checklists.filt
 on('post', '/checklists/:id/profiles', () => ({ ok: true }))
 on('delete', '/checklists/:id/profiles/:pid', () => ({ ok: true }))
 
+// Crops a person checks before they go into her boxes (components/CropReview.jsx).
+on('get', '/profiles/:id/crop-reviews', ({ id }) => (db.cropReviews || []).filter(r => r.profile_id === int(id)))
+on('post', '/crop-reviews/:id', ({ id }) => { db.cropReviews = (db.cropReviews || []).filter(r => r.id !== int(id)); save(); return { ok: true, done: [] } })
 on('get', '/cv/templates', () => db.cvTemplates)
 on('get', '/cv/templates/:id', ({ id }) => db.cvTemplates.find(t => t.id === int(id)) || notFound())
 on('get', '/cv/generated', () => db.generated)

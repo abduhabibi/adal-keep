@@ -83,6 +83,18 @@ export function freeStrongDevice(busyIds = new Set(), now = Date.now()) {
   return list[0]?.id || ''
 }
 
+/** The Companions' browsers this PC is connected to now (never opens one). */
+export async function connectedBrowsers(now = Date.now()) {
+  const out = []
+  for (const [id, p] of conns) {
+    const d = devices.get(id)
+    if (!d || now - d.at >= SEEN_MS) continue
+    const b = await Promise.race([p, new Promise(r => setTimeout(() => r(null), 3000))]).catch(() => null)
+    if (b?.connected) out.push({ id, name: d.name, browser: b })
+  }
+  return out
+}
+
 export function liveDevices(now = Date.now()) {
   return [...devices.values()].filter(d => now - d.at < SEEN_MS).map(({ token, ...d }) => d)
 }

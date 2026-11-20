@@ -7,11 +7,8 @@ import { createPortal } from 'react-dom'
  * wheel to zoom; zooming out past the edges fills with white, so a head or
  * feet never have to be cut off. onDone(file) gets a 600 × 1800 JPEG.
  */
-const RATIO = 1 / 3
-const OUT_W = 600
-const OUT_H = 1800
-
-export default function FullBodyCropper({ file, onDone, onCancel }) {
+// Other shapes (the crop check, 2026-11-20): ratio, outW/outH, title, guides, keepLabel.
+export default function FullBodyCropper({ file, onDone, onCancel, ratio: RATIO = 1 / 3, outW: OUT_W = 600, outH: OUT_H = 1800, title = 'Crop the full body photo', guides = true, keepLabel = 'Keep the photo as it is' }) {
   const [img, setImg] = useState(null)
   const [frame, setFrame] = useState({ w: 200, h: 600 })
   const [view, setView] = useState({ s: 1, x: 0, y: 0 })   // scale and image top-left inside the frame
@@ -25,8 +22,9 @@ export default function FullBodyCropper({ file, onDone, onCancel }) {
     const im = new Image()
     im.onload = () => {
       // (A phone: the controls sit under the frame — it leaves them room, 2026-11-16.)
-      const h = Math.min(window.innerHeight * (window.innerWidth < 640 ? 0.48 : 0.72), 720)
-      const w = h * RATIO
+      let h = Math.min(window.innerHeight * (window.innerWidth < 640 ? 0.48 : 0.72), 720)
+      const w = Math.min(h * RATIO, window.innerWidth - 80)
+      h = w / RATIO
       const cover = Math.max(w / im.naturalWidth, h / im.naturalHeight)
       const contain = Math.min(w / im.naturalWidth, h / im.naturalHeight)
       setFrame({ w, h })
@@ -109,18 +107,19 @@ export default function FullBodyCropper({ file, onDone, onCancel }) {
               style={{ left: view.x, top: view.y, width: img.naturalWidth * view.s, height: img.naturalHeight * view.s }} />
           )}
           {/* where the head and the feet go */}
+          {guides && <>
           <div className="pointer-events-none absolute inset-x-0 top-[4%] border-t-2 border-dashed border-teal-400/80" />
           <div className="pointer-events-none absolute inset-x-0 top-[96%] border-t-2 border-dashed border-teal-400/80" />
           <span className="pointer-events-none absolute left-1 top-[4%] mt-0.5 rounded bg-teal-600/80 px-1 text-[10px] text-white">head</span>
           <span className="pointer-events-none absolute left-1 top-[96%] -mt-4 rounded bg-teal-600/80 px-1 text-[10px] text-white">feet</span>
+          </>}
         </div>
 
         <div className="flex w-64 flex-col gap-4">
           <div>
-            <h2 className="text-lg font-bold text-slate-900 dark:text-white">Crop the full body photo</h2>
+            <h2 className="text-lg font-bold text-slate-900 dark:text-white">{title}</h2>
             <p className="mt-1 text-sm text-slate-500">
-              This is exactly the shape the CV shows. Drag the photo to move it and zoom so the
-              <b> head is at the top line</b> and the <b>feet at the bottom line</b>.
+              {guides ? <>Drag and zoom: <b>head at the top line</b>, <b>feet at the bottom line</b>.</> : 'Drag and zoom until it fits the frame.'}
             </p>
           </div>
           <label className="text-xs font-medium text-slate-500">
@@ -139,9 +138,9 @@ export default function FullBodyCropper({ file, onDone, onCancel }) {
               className="rounded-lg bg-teal-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-teal-700 disabled:opacity-50">
               Use this crop
             </button>
-            <button type="button" onClick={() => onDone(file)} className="text-xs text-slate-500 hover:underline">
-              Keep the photo as it is
-            </button>
+            {keepLabel && <button type="button" onClick={() => onDone(file)} className="text-xs text-slate-500 hover:underline">
+              {keepLabel}
+            </button>}
             <button type="button" onClick={onCancel} className="text-xs text-red-600 hover:underline">Cancel</button>
           </div>
         </div>

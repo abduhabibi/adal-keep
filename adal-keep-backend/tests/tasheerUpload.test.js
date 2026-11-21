@@ -13,6 +13,9 @@
  *  4. "Concurrent Login": SUBMIT, the same name and password again, the
  *     person types only the captcha, LOGIN pressed; no captcha → LOGIN at once;
  *     never typed on a page that is not Tasheer.
+ *  5. The captcha by notification (asked on 2026-11-21): its picture goes to
+ *     the call with a code box, the code typed there goes in and LOGIN is
+ *     pressed (sign-in and Concurrent Login); no answer in time: the call goes.
  * Skipped when this PC has no Chrome.
  */
 import test from 'node:test'
@@ -126,13 +129,13 @@ document.getElementById('save').onclick = () => {
 </script></body></html>`
 }
 
-function loginPage(withCaptcha) {
+function loginPage(withCaptcha, pic = false) {
   return `<!doctype html><html><head><title>Tasheer</title></head><body>
 <div id="home" style="display:none">GROUP SCHEDULING</div>
 <form id="login" onsubmit="return false">
  <div id="fail" style="color:red"></div>
  <input type="text" id="user" name="username"> <input type="password" id="pw" name="password">
- ${withCaptcha ? '<img alt="captcha"> <input type="text" id="cap" name="captcha" placeholder="Enter Captcha">' : ''}
+ ${withCaptcha ? (pic ? '<img id="capimg" src="/captcha.svg" width="120" height="40">' : '<img alt="captcha">') + ' <input type="text" id="cap" name="captcha" placeholder="Enter Captcha">' : ''}
  <button id="login-btn" type="button">LOGIN</button>
 </form>
 <div id="concurrent" class="modal" role="dialog" style="display:none">
@@ -161,7 +164,8 @@ test('Tasheer upload page and Concurrent Login on a mock', { skip: !CHROME && 'n
     const u = new URL(req.url, 'http://x')
     if (u.pathname === '/template.xlsx') { res.writeHead(200, { 'content-type': 'application/octet-stream' }); return res.end(template()) }
     if (u.pathname === '/upload') { res.writeHead(200, { 'content-type': 'text/html' }); return res.end(uploadPage(u.searchParams.get('v'), Number(u.searchParams.get('n') || 1), rows)) }
-    if (u.pathname === '/login') { res.writeHead(200, { 'content-type': 'text/html' }); return res.end(loginPage(u.searchParams.get('captcha') === '1')) }
+    if (u.pathname === '/login') { res.writeHead(200, { 'content-type': 'text/html' }); return res.end(loginPage(u.searchParams.get('captcha') === '1', u.searchParams.get('pic') === '1')) }
+    if (u.pathname === '/captcha.svg') { res.writeHead(200, { 'content-type': 'image/svg+xml' }); return res.end('<svg xmlns="http://www.w3.org/2000/svg" width="120" height="40"><rect width="120" height="40" fill="#eee"/><text x="10" y="28" font-size="22">QW34</text></svg>') }
     res.writeHead(404); res.end()
   })
   await new Promise(r => server.listen(0, '127.0.0.1', r))
@@ -257,5 +261,62 @@ test('Tasheer upload page and Concurrent Login on a mock', { skip: !CHROME && 'n
   await t.test('not Tasheer: the password is never typed', async () => {
     const { out, st } = await login(false, { tasheer: false })
     assert.equal(out, 'no-form'); assert.equal(st.logins.length, 1)
+  })
+
+  // The captcha by notification: a ctx whose askCaptcha is the PC's bar / the phones.
+  const asker = () => {
+    const calls = []
+    let forgot = 0
+    const ctx = { runId: 'cap', onLog: async () => {}, forgetCaptcha: () => { forgot++ },
+      askCaptcha: (image, answer, opts) => calls.push({ image, answer, opts }) }
+    return { ctx, calls, forgot: () => forgot }
+  }
+  const waitFor = async (fn, ms = 15000) => { for (const end = Date.now() + ms; Date.now() < end; await sleep(100)) if (await fn()) return true; return false }
+
+  await t.test('sign-in captcha by notification: picture sent, code typed, LOGIN pressed', async () => {
+    const page = await browser.newPage()
+    page.__adalTasheerMock = true
+    await page.goto(`${base}/login?captcha=1&pic=1`)
+    assert.equal(await T.loginCodeWanted(page), true)
+    const { ctx, calls } = asker()
+    const p = T.captchaByNotice(page, ctx, { title: 'Tasheer sign-in: type the code', press: 'login', creds: { user: 'agent1', pass: 'S3cret!' } })
+    assert.ok(await waitFor(() => calls.length === 1), 'asked once')
+    assert.match(calls[0].image, /^data:image\/png;base64,/)
+    assert.equal(calls[0].opts.label, 'Letters in the picture')
+    await calls[0].answer('AB12')
+    assert.equal(await p, 'typed')
+    const logins = await page.evaluate(() => window.__logins)
+    // The vault's name and password were filled (the form was empty), then LOGIN.
+    assert.deepEqual({ ...logins[0], at: 0 }, { user: 'agent1', pw: 'S3cret!', cap: 'AB12', at: 0 })
+    assert.equal(await T.concurrentShown(page), true)
+
+    // Concurrent Login: SUBMIT, the same name and password, the NEW code by notification, LOGIN.
+    const said = []
+    const out = T.afterConcurrentLogin(page, 'agent1', 'S3cret!', { say: (m) => said.push(m), graceMs: 300,
+      ask: (title) => T.captchaByNotice(page, ctx, { title, press: 'login', creds: { user: 'agent1', pass: 'S3cret!' } }) })
+    assert.ok(await waitFor(() => calls.length === 2), said.join('\n'))
+    assert.match(calls[1].opts.title, /Concurrent Login/)
+    assert.equal((await page.evaluate(() => window.__logins)).length, 1, 'LOGIN waits for the code')
+    await calls[1].answer('QW34')
+    assert.equal(await out, 'logged-in-pressed')
+    const st = await page.evaluate(() => ({ logins: window.__logins, home: document.getElementById('home').style.display, submitted: window.__submitted }))
+    assert.ok(st.submitted, 'SUBMIT pressed by Adal Keep')
+    assert.deepEqual({ ...st.logins[1], at: 0 }, { user: 'agent1', pw: 'S3cret!', cap: 'QW34', at: 0 })
+    assert.equal(st.home, 'block')
+    await page.close()
+  })
+
+  await t.test('nobody types the code: the call expires and goes', async () => {
+    const page = await browser.newPage()
+    page.__adalTasheerMock = true
+    await page.goto(`${base}/login?captcha=1&pic=1`)
+    const { ctx, calls, forgot } = asker()
+    const r = await T.captchaByNotice(page, ctx, { press: 'login', waitMs: 1500 })
+    assert.equal(r, 'expired'); assert.equal(calls.length, 1); assert.equal(forgot(), 1)
+    assert.equal((await page.evaluate(() => window.__logins)).length, 0, 'nothing pressed')
+    // No picture on the page: not asked (the person types it in the tab).
+    await page.goto(`${base}/login?captcha=1`)
+    assert.equal(await T.captchaByNotice(page, ctx, { waitMs: 1500 }), 'no-picture')
+    await page.close()
   })
 })

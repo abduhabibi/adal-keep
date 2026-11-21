@@ -486,6 +486,7 @@ const PLAIN_WAIT = {
   'awaiting-musaned-precheck': 'Musaned: put her passport in the pre-check and press Continue',
   'awaiting-human-save': 'Look it over and press Save',
   'awaiting-human-submit': 'Look it over and press Submit',
+  'awaiting-tasheer-code': 'Tasheer: nobody typed the code in 5 minutes — press Continue',
 }
 // The notification bar: what needs a person now.
 router.get('/automations/attention', async (req, res) => {
@@ -497,14 +498,16 @@ router.get('/automations/attention', async (req, res) => {
     const since = new Date(Date.now() - 12 * 3600000).toISOString()
     const paused = await db('automation_queue').where('status', 'paused').where('updated_at', '>', since)
       .where('pause_reason', 'not like', 'Interrupted%').where('pause_reason', 'not like', 'with-run-%').orderBy('id', 'desc').limit(10).select('id', 'pause_reason', 'updated_at')
-    for (const r of paused) if (!calls.some(c => c.run_id === r.id)) calls.push({ run_id: r.id, title: PLAIN_WAIT[r.pause_reason] || 'Waiting for you', body: '', at: new Date(r.updated_at).getTime(), image: null })
+    for (const r of paused) if (!calls.some(c => c.run_id === r.id)) calls.push({ run_id: r.id, title: PLAIN_WAIT[r.pause_reason] || 'Waiting for you', body: '', at: new Date(r.updated_at).getTime(), image: null, reason: r.pause_reason })
     const runs = await db('automation_queue as q').leftJoin('profiles as p', 'p.id', 'q.profile_id')
-      .whereIn('q.id', calls.map(c => c.run_id)).select('q.id', 'q.profile_id', 'q.workflow_id', 'p.full_name')
+      .whereIn('q.id', calls.map(c => c.run_id)).select('q.id', 'q.profile_id', 'q.workflow_id', 'p.full_name', 'q.status as run_status', 'q.pause_reason as reason')
     const of = new Map(runs.map(r => [r.id, r]))
     // The PC's own dangers (disk almost full, database damaged) — services/pcHealth.js.
     let pc = []
     try { pc = (await import('../services/pcHealth.js')).pcCalls() } catch {}
-    res.json([...pc, ...calls.filter(c => of.has(c.run_id)).map(c => ({ ...c, ...of.get(c.run_id), id: undefined }))].sort((a, b) => b.at - a.at))
+    // The agency's Tasheer sign-in (no run): its code call (services/tasheerSession.js SIGNIN_CALL).
+    const site = { [-1]: { full_name: 'Tasheer sign-in', workflow_id: 'tasheer_signin', profile_id: null } }
+    res.json([...pc, ...calls.filter(c => of.has(c.run_id) || site[c.run_id]).map(c => ({ ...c, ...(of.get(c.run_id) || site[c.run_id]), id: undefined }))].sort((a, b) => b.at - a.at))
   } catch (e) { res.status(e.status || 500).json({ error: e.message, ...(e.feature ? { feature: e.feature, plan: e.plan } : {}) }) }
 })
 router.post('/automations/:id/captcha', async (req, res) => {
@@ -1274,73 +1277,17 @@ router.post('/automations/:id/cancel', async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message, ...(e.feature ? { feature: e.feature, plan: e.plan } : {}) }) }
 })
 
-// Mark a paused run as fully complete (the person pressed Submit / SAVE in its
-// tab): sets status=done. Its tab stays open.
+// "Mark as done" moves her to the next stage (services/markDone.js — one
+// function for every "✔️ … saved" / "done" control; its answer carries an
+// undo token for the 5 s Undo).
+// A paused run's "✔️ … saved" (the person pressed Submit / SAVE in its tab): the run is done. Its tab stays open.
 router.post('/automations/:id/complete', async (req, res) => {
   try {
-    const db = req.app.locals.db
-    const runId = Number(req.params.id)
-
-    const row = await db('automation_queue').where('id', runId).first()
-    if (!row) return res.status(404).json({ error: 'Run not found' })
-    if (row.status !== 'paused') {
-      return res.status(409).json({ error: `Run #${runId} is ${row.status} — only a run waiting for you can be marked complete.` })
-    }
-
-    // The tab stays open (the person may still need it); no run uses it again.
-    const tabClosed = false
-    try { forgetRunTab(runId) } catch {}
-
-    await db('automation_queue').where('id', runId).update({
-      status: 'done',
-      pause_reason: null,
-      finished_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
-
-    await noteRun(db, row, 'done — marked by a person')
-    if (['insurance_certificate', 'tasheer_schedule'].includes(row.workflow_id)) await (await import('../services/insuranceCertificate.js')).settleMembers(db, runId, 'done')
-
-    // What finishing this run starts next.
-    const next = await whatDoneStarts(db, row)
-
-
-    res.json({
-      ok: true,
-      tabClosed,
-      message: `Run #${runId} marked complete${tabClosed ? ' — its tab was closed' : ''}.${next}`,
-    })
-  } catch (e) {
-    res.status(500).json({ error: e.message })
-  }
+    const { markStepDone } = await import('../services/markDone.js')
+    const r = await markStepDone(req.app.locals.db, { runId: Number(req.params.id) })
+    res.json({ ...r, tabClosed: false, message: `Run #${r.run_id} marked complete.${r.message.replace(/^Marked done\./, '')}` })
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }) }
 })
-
-/** What a run being done (by the robot and a person, or ticked by hand) starts next. */
-async function whatDoneStarts(db, row) {
-  let next = ''
-  try {
-      if (row.workflow_id === 'wafid_book') {
-        // Booked and paid on Wafid: the result checker now watches it.
-        await db('profiles').where('id', row.profile_id).update({ status: 'medical_applied', updated_at: new Date().toISOString() })
-        next = ' Status: Medical · Applied — Adal Keep checks the result on Wafid by itself.'
-        // The appointment slip comes into her profile by itself (to print).
-        try { const { queueWafidSlip } = await import('../services/wafidStatus.js'); await queueWafidSlip(db, row.profile_id, 'booked') } catch {}
-      } else if (row.workflow_id === 'mofa_visa') {
-        // The person pressed Save on the visa platform.
-        const { VISA_STAGES } = await import('../services/mofaVisa.js')
-        await db('profiles').where('id', row.profile_id).update({ visa_stage: VISA_STAGES.applied, visa_applied_at: new Date().toISOString(), updated_at: new Date().toISOString() })
-        next = ' Visa stage: Visa applied.'
-      } else if (row.workflow_id === 'mofa_pay') {
-        // The person paid the visa fees on the visa platform.
-        await db('profiles').where('id', row.profile_id).update({ visa_stage: 'Visa paid', updated_at: new Date().toISOString() })
-        next = ' Visa stage: Visa paid.'
-      } else if (row.workflow_id === 'musaned_add_candidate') {
-        // She is on Musaned now: the 4-hourly contract check watches for an employer.
-        next = ' Adal Keep now checks every 4 hours whether a Saudi employer chooses her.'
-      }
-  } catch (e) { console.warn('[complete] next step:', e.message) }
-  return next
-}
 
 /**
  * A step done by hand (the checkbox on its card): the step counts as done —
@@ -1353,31 +1300,32 @@ router.post('/profiles/:id/automations/:workflowId/mark-done', async (req, res) 
     const db = req.app.locals.db
     const profileId = Number(req.params.id)
     const { workflowId } = req.params
-    const now = new Date().toISOString()
     if (req.body?.done === false) {
+      const now = new Date().toISOString()
       const last = await db('automation_queue').where({ profile_id: profileId, workflow_id: workflowId, status: 'done', pause_reason: 'Done by hand' }).orderBy('id', 'desc').first()
       if (!last) return res.status(409).json({ error: 'Only a step ticked by hand can be unticked' })
       await db('automation_queue').where('id', last.id).update({ status: 'cancelled', pause_reason: 'Tick taken back', updated_at: now })
       return res.json({ ok: true, message: 'Not done any more' })
     }
-    const open = await db('automation_queue').where({ profile_id: profileId, workflow_id: workflowId }).whereIn('status', ['pending', 'paused', 'running']).orderBy('id', 'desc').first()
-    if (open?.status === 'running') return res.status(409).json({ error: `Run #${open.id} is working in its tab now — wait for it, or Cancel it first.` })
-    let row = open
-    if (open) {
-      try { forgetRunTab(open.id) } catch {}
-      await db('automation_queue').where('id', open.id).update({ status: 'done', pause_reason: 'Done by hand', finished_at: now, updated_at: now })
-      if (['insurance_certificate', 'tasheer_schedule'].includes(workflowId)) await (await import('../services/insuranceCertificate.js')).settleMembers(db, open.id, 'done')
-    } else {
-      const [id] = await db('automation_queue').insert({
-        profile_id: profileId, workflow_id: workflowId, status: 'done', pause_reason: 'Done by hand', current_step: 0,
-        context: seal('{}'), log: JSON.stringify([{ at: now, level: 'info', msg: 'Marked done by hand' }]), created_at: now, updated_at: now, finished_at: now,
-      })
-      row = { id: Number(id?.id ?? id), profile_id: profileId, workflow_id: workflowId }
-    }
-    await noteRun(db, row, 'done — ticked by hand')
-    const next = await whatDoneStarts(db, row)
-    res.json({ ok: true, message: `Marked done.${next}` })
-  } catch (e) { res.status(500).json({ error: e.message }) }
+    const { markStepDone } = await import('../services/markDone.js')
+    res.json(await markStepDone(db, { profileId, workflowId, note: 'done — ticked by hand' }))
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }) }
+})
+
+// A journey step marked done (wafid = Medical done, epro, visa = Visa issued, …).
+router.post('/profiles/:id/steps/:step/done', async (req, res) => {
+  try {
+    const { markStepDone } = await import('../services/markDone.js')
+    res.json(await markStepDone(req.app.locals.db, { profileId: Number(req.params.id), step: req.params.step, note: 'marked done by a person' }))
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }) }
+})
+
+// The Undo of a "mark as done" (its token).
+router.post('/automations/undo-done', async (req, res) => {
+  try {
+    const { undoMarkDone } = await import('../services/markDone.js')
+    res.json(await undoMarkDone(req.app.locals.db, req.body?.undo))
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }) }
 })
 
 export default router

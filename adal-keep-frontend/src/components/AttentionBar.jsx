@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import api from '../services/api'
 import { phoneCloud } from '../lib/phoneMode'
+import { markDone, DONE_LABEL } from '../lib/markDone'
 // The live view's code (30 kB) only when a notification is opened: not part of every start.
 // (After an update its old file is gone: the page reloads with the new files.)
 const LiveTab = lazy(() => import('./LiveTab').catch(() => { location.reload(); return new Promise(() => {}) }))
@@ -49,8 +50,18 @@ function Call({ c, onDone, onHide }) {
     catch (er) { toast.error(err(er)) }
     setBusy(false)
   }
+  // Numbers only, except a code in letters (Tasheer's captcha: "Letters in the picture").
+  const digitsOnly = /number|code|captcha|^$/i.test(c.label || '') && !/letter/i.test(c.label || '')
+  // A run waiting for its "✔️ … saved": the step is done and she moves on (lib/markDone, 5 s Undo).
+  const doneWord = c.run_id > 0 && c.run_status === 'paused' && DONE_LABEL[c.reason]
+  const done = async () => {
+    setBusy(true)
+    const r = await markDone({ runId: c.run_id, profileId: c.profile_id, label: doneWord })
+    if (r) { api.post(`/automations/${c.run_id}/attention/done`).catch(() => {}); onDone() }
+    setBusy(false)
+  }
   const [live, setLive] = useState(false)
-  const open = () => window.__ADAL_CLOUD ? navigate(`/profiles/${c.profile_id}?run=${c.run_id}&t=${Date.now()}`) : setLive(true)
+  const open = () => c.run_id < 0 ? null : window.__ADAL_CLOUD ? navigate(`/profiles/${c.profile_id}?run=${c.run_id}&t=${Date.now()}`) : setLive(true)
   return (
     <li className="relative space-y-2 rounded-2xl border border-slate-200 bg-white p-3 pr-8 shadow-xl dark:border-slate-700 dark:bg-slate-900">
       <button type="button" aria-label="Hide" onClick={onHide} className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800">✕</button>
@@ -66,14 +77,15 @@ function Call({ c, onDone, onHide }) {
       {c.asks && !c.choices && (
         <form onSubmit={(e) => { e.preventDefault(); answer(text) }} className="flex items-stretch gap-1.5">
           {c.image && <img src={c.image} alt="Captcha" className="h-10 rounded border border-slate-200 bg-white" />}
-          <input autoFocus value={text} onChange={e => setText(/number|code|captcha|^$/i.test(c.label || "") ? e.target.value.replace(/[^0-9]/g, "") : e.target.value)} placeholder={c.label || 'Numbers'} inputMode="numeric" autoComplete="off"
+          <input autoFocus value={text} onChange={e => setText(digitsOnly ? e.target.value.replace(/[^0-9]/g, "") : e.target.value)} placeholder={c.label || 'Numbers'} inputMode={digitsOnly ? 'numeric' : 'text'} autoComplete="off"
             className="w-24 min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-2 text-sm dark:border-slate-600 dark:bg-slate-800" />
           <button disabled={busy || !text.trim()} className="rounded-lg bg-teal-600 px-2.5 text-xs font-bold text-white disabled:opacity-50">{busy ? '…' : 'Send'}</button>
         </form>
       )}
       <span className="flex gap-3">
         <button type="button" onClick={open} className="text-xs font-semibold text-teal-700 hover:underline dark:text-teal-400">Open →</button>
-        {c.confirm && <button type="button" onClick={() => api.post(`/automations/${c.run_id}/attention/done`).then(onDone).catch(e => toast.error(err(e)))} className="text-xs font-semibold text-slate-500 hover:underline">Done ✓</button>}
+        {doneWord && <button type="button" disabled={busy} onClick={done} className="rounded-lg bg-emerald-600 px-2 py-0.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">{doneWord}</button>}
+        {c.confirm && !doneWord && <button type="button" onClick={() => api.post(`/automations/${c.run_id}/attention/done`).then(onDone).catch(e => toast.error(err(e)))} className="text-xs font-semibold text-slate-500 hover:underline">Done ✓</button>}
       </span>
       {live && createPortal(<Suspense fallback={null}><LiveTab runId={c.run_id} startFull onClose={() => setLive(false)} /></Suspense>, document.body)}
     </li>

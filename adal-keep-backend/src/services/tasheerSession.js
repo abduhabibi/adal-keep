@@ -7,9 +7,27 @@
  * name and password filled, and the person on that PC types the captcha in
  * the live view of the tab (LiveTab "site-tasheer") — the captcha is always a
  * person's. Never while a Tasheer robot is working (it would be cut off).
+ * Since 2026-11-21 the captcha comes by notification (its picture and a code
+ * box on the PC and the phones, call SIGNIN_CALL): the code typed there goes in
+ * and LOGIN is pressed — the live view is only needed when no picture is found.
  */
 import { getBrowser, openForPerson, openBrowserIfAny, sendAway } from './browser.js'
-import { START, hasPassword, fillLogin, concurrentShown, afterConcurrentLogin } from './tasheer.js'
+import { START, hasPassword, fillLogin, concurrentShown, afterConcurrentLogin, captchaByNotice, loginCodeWanted } from './tasheer.js'
+import { askCaptcha as askCall, doneWith } from './attention.js'
+
+/** The notification bar's call for this sign-in (it has no run: a number no run has). */
+export const SIGNIN_CALL = -1
+// What tasheer.js's captchaByNotice needs to ask here.
+const codeCtx = {
+  runId: SIGNIN_CALL,
+  onLog: async (level, msg) => console.log(`[tasheer] sign-in: ${msg}`),
+  askCaptcha: (image, answer, opts) => {
+    askCall(SIGNIN_CALL, image, answer, { ...opts, title: opts?.title || 'Tasheer sign-in: type the code' })
+    import('./liveChannel.js').then(L => L.broadcast({ t: 'ring', id: Date.now(), title: opts?.title || 'Tasheer sign-in: type the code', run: SIGNIN_CALL, at: Date.now() })).catch(() => {})
+    import('./worker.js').then(w => w.beep?.()).catch(() => {})
+  },
+  forgetCaptcha: () => doneWith(SIGNIN_CALL, { force: true }),
+}
 
 const KEY = 'tasheer_holder'
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
@@ -85,6 +103,7 @@ function watch(db, page, who) {
   if (watching) return
   watching = true
   ;(async () => {
+    let asks = 0
     try {
       for (const end = Date.now() + 30 * 60000; Date.now() < end;) {
         await sleep(3000)
@@ -94,9 +113,26 @@ function watch(db, page, who) {
         if (await concurrentShown(page)) {
           const acct = await (chosen ? db('tasheer_accounts').where('id', chosen) : db('tasheer_accounts').orderBy('is_default', 'desc')).first().catch(() => null)
           if (acct?.username && acct?.password) {
-            await afterConcurrentLogin(page, acct.username, acct.password, { say: (m) => console.log(`[tasheer] sign-in: ${m}`), captchaMs: Math.max(60000, end - Date.now()) }).catch(() => {})
+            const creds = { user: acct.username, pass: acct.password }
+            const out = await afterConcurrentLogin(page, acct.username, acct.password, {
+              say: (m) => console.log(`[tasheer] sign-in: ${m}`), captchaMs: Math.max(60000, end - Date.now()),
+              ask: asks < 6 ? (title) => { asks++; return captchaByNotice(page, codeCtx, { title, press: 'login', creds, gone: async () => !(await hasPassword(page)) }) } : null,
+            }).catch(() => '')
+            if (out === 'no-captcha-typed') asks = 6        // nobody answered in 5 minutes: the live view is theirs
             continue
           }
+        }
+        // The sign-in waits for its captcha: asked by notification (5 minutes; up to 6 times for wrong codes).
+        if (asks < 6 && await loginCodeWanted(page)) {
+          const acct = await (chosen ? db('tasheer_accounts').where('id', chosen) : db('tasheer_accounts').orderBy('is_default', 'desc')).first().catch(() => null)
+          asks++
+          const r = await captchaByNotice(page, codeCtx, {
+            title: asks > 1 ? 'Not accepted: type the new Tasheer code' : 'Tasheer sign-in: type the code', press: 'login',
+            creds: acct ? { user: acct.username, pass: acct.password } : null, gone: async () => !(await hasPassword(page)),
+          }).catch(() => 'gone')
+          if (r === 'expired') { asks = 6; console.log('[tasheer] sign-in: nobody typed the code within 5 minutes — left to the live view') }
+          if (r === 'typed') await sleep(5000)
+          continue
         }
         // The form came back empty (a wrong captcha, Cloudflare): filled again.
         if (await hasPassword(page)) {
@@ -112,7 +148,7 @@ function watch(db, page, who) {
           break
         }
       }
-    } finally { watching = false }
+    } finally { watching = false; doneWith(SIGNIN_CALL, { force: true }) }
   })()
 }
 

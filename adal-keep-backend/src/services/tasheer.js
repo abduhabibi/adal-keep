@@ -15,7 +15,11 @@
  *      The consent box ticked, Save pressed, its confirmation answered; a
  *      time-slot step, if one comes, is the person's.
  *   After the first sign-in Tasheer says "Concurrent Login": SUBMIT, the same
- *   name and password again, the person types only the new captcha, LOGIN.
+ *   name and password again, the new captcha, LOGIN.
+ *   Every captcha (sign-in, Concurrent Login, the scheduling page) comes by
+ *   notification with its picture (PC and phones): the code typed there goes
+ *   in by itself — nobody opens the Tasheer tab for it (captchaByNotice). No
+ *   answer in 5 minutes: the run pauses ('awaiting-tasheer-code').
  *
  * Only for girls whose visa is made: the E.No column is her visa
  * application number.
@@ -26,6 +30,7 @@ import path from 'path'
 import zlib from 'zlib'
 import { signInTurn } from './tabManager.js'
 import { visaNames, clickText } from './mofaVisa.js'
+import { doneWith } from './attention.js'
 
 export const TASHEER = 'tasheer_schedule'
 // Tasheer's own front page (its sign-in). Its inner pages (/auth/cnav,
@@ -247,12 +252,119 @@ const pressLogin = (page) => page.evaluate(() => {
   return true
 }).catch(() => false)
 
+// ── The captcha by notification (asked on 2026-11-21, like the visa's) ──────
+// Tasheer's captcha picture goes into a notification and a task (the PC's bar
+// and the phones) with a code box; what is typed there goes into Tasheer's
+// box here and LOGIN (or Confirm) is pressed. Nobody opens the Tasheer tab for
+// a code. No answer in 5 minutes: the call goes and the caller pauses.
+export const CODE_WAIT_MS = 5 * 60000
+
+/** Marks Tasheer's captcha box (data-adal-tcap) and its picture (data-adal-tcap-img); the picture's src when it is a data: one. */
+function markCaptcha(page) {
+  return page.evaluate(() => {
+    const seen = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(e).visibility !== 'hidden' }
+    document.querySelectorAll('[data-adal-tcap], [data-adal-tcap-img]').forEach(e => { e.removeAttribute('data-adal-tcap'); e.removeAttribute('data-adal-tcap-img') })
+    const box = [...document.querySelectorAll('input')].find(i => seen(i) && !/^(hidden|password|checkbox|radio|submit|button)$/i.test(i.type) &&
+      /captcha|security\s*code|verification\s*code|image\s*code/i.test([i.name, i.id, i.placeholder, i.getAttribute('aria-label'), i.className].join(' ')))
+    if (!box) return { box: false }
+    box.setAttribute('data-adal-tcap', '1')
+    // A picture that drew (a broken one is no use in a notification).
+    const pics = [...document.querySelectorAll('img, canvas')].filter(i => seen(i) && (i.tagName !== 'IMG' || (i.complete && i.naturalWidth > 0)))
+    const named = pics.find(i => /captcha|kaptcha|securimage|verif/i.test([i.src, i.id, i.className, i.alt, i.getAttribute('name')].join(' ')))
+    // Else the picture nearest the box (a captcha sits beside its box).
+    const b = box.getBoundingClientRect()
+    const near = pics.map(i => { const r = i.getBoundingClientRect(); return [Math.hypot(r.x + r.width / 2 - (b.x + b.width / 2), r.y + r.height / 2 - (b.y + b.height / 2)), i, r] })
+      .filter(([d, , r]) => d < 300 && r.width >= 40 && r.width <= 400 && r.height >= 15 && r.height <= 150).sort((x, y) => x[0] - y[0])[0]?.[1]
+    const pic = named || near
+    if (!pic) return { box: true, pic: false }
+    pic.setAttribute('data-adal-tcap-img', '1')
+    return { box: true, pic: true, value: box.value || '', src: pic.tagName === 'IMG' && /^data:image\//.test(pic.src) ? pic.src : '' }
+  }).catch(() => ({ box: false }))
+}
+
+/** The captcha picture, as a data: address for the notification, or null. */
+export async function captchaImage(page) {
+  const m = await markCaptcha(page)
+  if (!m.pic) return null
+  if (m.src) return m.src
+  const el = await page.$('[data-adal-tcap-img]').catch(() => null)
+  if (!el) return null
+  const b64 = await el.screenshot({ encoding: 'base64' }).catch(() => null)
+  return b64 ? `data:image/png;base64,${b64}` : null
+}
+
+/** The code into Tasheer's captcha box (as typed keys, so the site's own checks see it). */
+async function typeCode(page, text) {
+  await markCaptcha(page)
+  const box = await page.$('[data-adal-tcap]').catch(() => null)
+  if (!box) return false
+  await page.evaluate(() => { const i = document.querySelector('[data-adal-tcap]'); if (i) { i.focus(); i.value = '' } }).catch(() => {})
+  await box.type(String(text), { delay: 40 }).catch(() => {})
+  await page.evaluate(() => { const i = document.querySelector('[data-adal-tcap]'); for (const t of ['input', 'change']) i?.dispatchEvent(new Event(t, { bubbles: true })) }).catch(() => {})
+  return page.evaluate((t) => document.querySelector('[data-adal-tcap]')?.value === t, String(text)).catch(() => false)
+}
+const pressConfirm = (page) => page.evaluate(() => {
+  const seen = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 }
+  const b = [...document.querySelectorAll('button, input[type="submit"], input[type="button"], a, [role="button"]')]
+    .find(b => seen(b) && /^\s*(confirm|verify|submit)\s*$/i.test(b.innerText || b.value || ''))
+  if (!b) return false
+  b.click()
+  return true
+}).catch(() => false)
+
+/**
+ * Ask Tasheer's captcha by notification and type the answer. press: 'login'
+ * (the sign-in: name and password refilled from the vault when the site
+ * emptied them, LOGIN pressed) | 'confirm' | 'none'. creds: { user, pass }.
+ * Returns 'typed' | 'expired' | 'gone' | 'no-picture' | 'no-asker'.
+ */
+export async function captchaByNotice(page, ctx, { title = 'Tasheer: type the code', press = 'login', creds = null, waitMs = CODE_WAIT_MS, gone = async () => false } = {}) {
+  if (typeof ctx?.askCaptcha !== 'function') return 'no-asker'
+  const pic = await captchaImage(page)
+  if (!pic) return 'no-picture'
+  const forget = () => { try { ctx.forgetCaptcha ? ctx.forgetCaptcha() : (ctx.runId != null && doneWith(ctx.runId, { force: true })) } catch {} }
+  log(ctx, `🔔 the captcha picture is in the notification — waiting for its code (${Math.round(waitMs / 60000)} min)`)
+  return new Promise((resolve) => {
+    let over = false
+    const finish = (v) => { if (over) return; over = true; clearTimeout(timer); clearInterval(watch); resolve(v) }
+    const timer = setTimeout(() => { forget(); finish('expired') }, waitMs)
+    const watch = setInterval(async () => {
+      if (over) return
+      if (cancelled(ctx) || page.isClosed?.() || await gone().catch(() => false)) { forget(); finish('gone') }
+    }, 1500)
+    ctx.askCaptcha(pic, async (text) => {
+      try {
+        if (!onTasheerSite(page)) { log(ctx, 'the page is not Tasheer any more — the code is not typed', 'warn'); return }
+        if (press === 'login' && creds?.user && creds?.pass) {
+          const empty = await page.evaluate(() => ![...document.querySelectorAll('input[type="password"]')].some(i => i.offsetParent !== null && i.value)).catch(() => false)
+          if (empty) await fillLogin(page, creds.user, creds.pass)
+        }
+        const ok = await typeCode(page, text)
+        log(ctx, ok ? `code typed (${String(text).length} characters)` : 'the code did not stay in its box', ok ? 'info' : 'warn')
+        if (press === 'login') log(ctx, (await pressLogin(page)) ? '✓ LOGIN pressed' : 'the LOGIN button was not found', 'info')
+        else if (press === 'confirm') { if (await pressConfirm(page)) log(ctx, '✓ Confirm pressed') }
+      } catch (e) { log(ctx, `typing the code: ${e.message}`, 'warn') } finally { finish('typed') }
+    }, { title, label: 'Letters in the picture' })
+  })
+}
+
+/** The sign-in form waits for a captcha code (its box empty, no Concurrent Login over it). */
+async function loginCodeWanted(page) {
+  if (!(await hasPassword(page)) || await concurrentShown(page)) return false
+  const m = await markCaptcha(page)
+  return !!(m.box && m.pic && !m.value)
+}
+/** A run's pause for a code nobody typed (runTasheer turns it into a clean pause). */
+const codePause = () => Object.assign(new Error('Nobody typed the Tasheer code within 5 minutes'), { pauseReason: 'awaiting-tasheer-code' })
+
 /**
  * The dialog is up: SUBMIT (the person's, or ours after `graceMs`), the same
- * name and password again, the captcha left to the person, LOGIN. Returns
+ * name and password again, the new captcha asked by notification (`ask`, see
+ * captchaByNotice: the robot types the code and presses LOGIN) — or, with no
+ * `ask` or no picture, left to the person in the tab — LOGIN. Returns
  * 'logged-in-pressed' | 'no-form' | 'no-captcha-typed' | 'not-shown'.
  */
-export async function afterConcurrentLogin(page, user, pass, { say = () => {}, graceMs = 2500, captchaMs = 15 * 60000, check = () => {} } = {}) {
+export async function afterConcurrentLogin(page, user, pass, { say = () => {}, graceMs = 2500, captchaMs = 15 * 60000, check = () => {}, ask = null } = {}) {
   if (!(await concurrentShown(page))) return 'not-shown'
   say('Tasheer says the account is already signed in elsewhere (Concurrent Login) — pressing SUBMIT to end the old session')
   for (const end = Date.now() + graceMs; Date.now() < end && await concurrentShown(page);) { check(); await sleep(500) }
@@ -270,6 +382,13 @@ export async function afterConcurrentLogin(page, user, pass, { say = () => {}, g
   const filled = await fillLogin(page, user, pass)
   say(filled ? '🔐 name and password filled again' : 'the sign-in boxes were not all found again', filled ? 'info' : 'warn')
   let c = await captchaState(page)
+  // The new captcha by notification: the code typed there goes in, LOGIN pressed.
+  if (c.kind === 'text' && ask) {
+    const r = await ask('Tasheer (Concurrent Login): type the new code')
+    if (r === 'typed') return 'logged-in-pressed'
+    if (r === 'expired' || r === 'gone') { say(r === 'expired' ? 'nobody typed the code within 5 minutes' : 'the sign-in page went away', 'warn'); return 'no-captcha-typed' }
+    // 'no-picture' / 'no-asker': the person types it in the tab, as before.
+  }
   if (c.kind !== 'none') {
     say('⏳ waiting for the person to type the new captcha — LOGIN is pressed as soon as it is typed')
     // Typed = the widget gave its token, or the box has 4+ characters that stayed the same for 2 s.
@@ -327,16 +446,52 @@ async function signIn(page, ctx) {
     if (!ctx.tasheer_username || !ctx.tasheer_password) throw new Error('No Tasheer account — add one under AI Actions → Tasheer → Login')
     const ok = await fillLogin(page, ctx.tasheer_username, ctx.tasheer_password)
     log(ctx, ok ? `🔐 name and password filled (${ctx.tasheer_name || ctx.tasheer_username})` : 'the sign-in boxes were not all found', ok ? 'info' : 'warn')
-    await page.bringToFront().catch(() => {})
-    await ctx.notify(`🛂 ${ctx.groupTitle}: sign in to Tasheer`, 'The Tasheer tab is in front with the name and password filled. Type its captcha and sign in; Adal Keep goes on by itself (GROUP SCHEDULING).', 'warn', { login: page })
+    const creds = { user: ctx.tasheer_username, pass: ctx.tasheer_password }
+    // The captcha by notification: its picture and a code box on the PC and the
+    // phones; the code typed there goes in and LOGIN is pressed here.
+    const ask = (title) => captchaByNotice(page, ctx, { title, press: 'login', creds, gone: async () => !(await hasPassword(page)) })
+    let asked = 0, askedAt = 0
+    const askLogin = async (title) => {
+      asked++
+      const r = await ask(title)
+      askedAt = Date.now()
+      if (r === 'expired') throw codePause()
+      return r
+    }
+    const byNotice = await loginCodeWanted(page)
+    if (byNotice) {
+      await ctx.notify(`🛂 ${ctx.groupTitle}: Tasheer sign-in code`, 'Type the code from the picture in the notification; Adal Keep signs in to Tasheer and goes on by itself. The call goes after 5 minutes without an answer.', 'warn')
+      const r = await askLogin('Tasheer sign-in: type the code')
+      if (r !== 'typed') {
+        await page.bringToFront().catch(() => {})
+        await ctx.notify(`🛂 ${ctx.groupTitle}: sign in to Tasheer`, 'Type Tasheer\'s captcha in its tab and sign in; Adal Keep goes on by itself (GROUP SCHEDULING).', 'warn', { login: page })
+      }
+    } else {
+      await page.bringToFront().catch(() => {})
+      await ctx.notify(`🛂 ${ctx.groupTitle}: sign in to Tasheer`, 'The Tasheer tab is in front with the name and password filled. Type its captcha and sign in; Adal Keep goes on by itself (GROUP SCHEDULING).', 'warn', { login: page })
+    }
     const signedInNow = async () => {
       if (await concurrentShown(page)) {
-        await afterConcurrentLogin(page, ctx.tasheer_username, ctx.tasheer_password, { say: (m, l) => log(ctx, m, l), check: () => stop(ctx) })
+        const out = await afterConcurrentLogin(page, creds.user, creds.pass, {
+          say: (m, l) => log(ctx, m, l), check: () => stop(ctx),
+          ask: async (title) => { const r = await ask(title); askedAt = Date.now(); return r },
+        })
+        if (out === 'no-captcha-typed') throw codePause()
+        return false
+      }
+      // A wrong code: the form comes back with a new picture and an empty box — asked again.
+      if (asked && asked < 6 && Date.now() - askedAt > 6000 && await loginCodeWanted(page)) {
+        log(ctx, 'Tasheer did not take the code — asking for the new one', 'warn')
+        await askLogin('Not accepted: type the new Tasheer code')
         return false
       }
       return !(await hasPassword(page)) && (await home())
     }
-    if (!(await until(signedInNow, LOGIN_WAIT_MS, ctx))) throw new Error('Nobody signed in to Tasheer within 30 minutes')
+    // until() swallows a test's errors: a code nobody typed is kept and thrown here.
+    let paused = null
+    const test = () => signedInNow().catch(e => { if (e.pauseReason) { paused = e; return true } throw e })
+    if (!(await until(test, LOGIN_WAIT_MS, ctx))) throw new Error('Nobody signed in to Tasheer within 30 minutes')
+    if (paused) throw paused
     log(ctx, '✓ signed in to Tasheer')
     // The agency's one Tasheer sign-in is now this one (every PC sees it).
     if (ctx.db) await import('./tasheerSession.js').then(s => s.robotSignedIn(ctx.db, ctx.by || '', 'the main PC')).catch(() => {})
@@ -400,7 +555,12 @@ export async function runTasheer(page, ctx) {
   ctx.groupTitle = people.length > 1 ? `Tasheer for ${people.length}` : ctx.profileName
   page.__adalAllowImages = true
   log(ctx, `🛂 Tasheer group scheduling for ${people.length}: ${people.map(p => p.full_name).join(', ')}`)
-  await signIn(page, ctx)
+  try { await signIn(page, ctx) } catch (e) {
+    // Nobody typed the code: the run pauses cleanly (Continue signs in again).
+    if (!e.pauseReason) throw e
+    log(ctx, `${e.message} — the run pauses; press Continue when someone is there`, 'warn')
+    return { ok: true, pauseReason: e.pauseReason, seconds: secs() }
+  }
 
   // GROUP SCHEDULING
   let clicked = true
@@ -446,7 +606,23 @@ export async function runTasheer(page, ctx) {
 
   // The person presses Submit: the upload page (Option 1) comes.
   log(ctx, '⏳ waiting for the day, the time and Submit')
-  if (!(await until(() => uploadShown(page), PICK_WAIT_MS, ctx))) throw new Error('Nobody pressed Submit on Tasheer within an hour')
+  // A captcha on the scheduling page (before Confirm) comes by notification
+  // too: typed here and Confirm pressed. Not answered in 5 minutes: it is left
+  // to the person, who is in the tab for the day and the time anyway.
+  let pickAsks = 0
+  const pickWatch = async () => {
+    if (await uploadShown(page)) return true
+    if (pickAsks < 3 && !(await hasPassword(page))) {
+      const m = await markCaptcha(page)
+      if (m.box && m.pic && !m.value) {
+        pickAsks++
+        const r = await captchaByNotice(page, ctx, { title: 'Tasheer appointment: type the code', press: 'confirm', gone: async () => uploadShown(page) })
+        if (r === 'expired') { pickAsks = 3; log(ctx, 'nobody typed the code within 5 minutes — type it in the Tasheer tab', 'warn') }
+      }
+    }
+    return false
+  }
+  if (!(await until(pickWatch, PICK_WAIT_MS, ctx))) throw new Error('Nobody pressed Submit on Tasheer within an hour')
   log(ctx, '✓ the upload page is open')
   await sleep(1500)
   const frame = (await uploadFrame(page)) || page.mainFrame()
@@ -877,4 +1053,4 @@ export async function uploadAndSave(page, frame, people, settings, ctx, secs = (
   }
 }
 
-export { uploadFrame, START, hasPassword, fillLogin, zip as _zip, HEAD as TEMPLATE_HEAD }
+export { uploadFrame, START, hasPassword, fillLogin, loginCodeWanted, zip as _zip, HEAD as TEMPLATE_HEAD }

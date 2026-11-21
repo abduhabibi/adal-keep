@@ -92,6 +92,7 @@ func main() {
 	registerSignInStart(root)
 	go ensureBrowser(root)
 	go ensureSharing(root) // the office network may share updates, data and the server (sharing.go)
+	go ensureSupport(root) // remote support by Adal: key, sshd, firewall checked and repaired (support.go)
 	startHidden(filepath.Join(root, "adal-agent.exe"))
 	startHidden(filepath.Join(root, "adal-companion.exe"))
 	go keepServerRunning(root)

@@ -943,6 +943,7 @@ func (u *updater) handler() *http.ServeMux {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(backupNowAnswer())
 	})
+	mux.HandleFunc("/support", supportHandler) // Settings → Remote support by Adal, this PC (support.go)
 	mux.HandleFunc("/update/check", func(w http.ResponseWriter, r *http.Request) { localOnly(w, r, u.updateCheck) })
 	mux.HandleFunc("/update/apply", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost && r.Method != http.MethodOptions {

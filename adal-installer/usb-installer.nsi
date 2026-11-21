@@ -101,6 +101,34 @@ FunctionEnd
   Pop $0
 !macroend
 
+; Remote support by Adal, part of Adal Keep (no more "Adal Connect" double-click):
+; OpenSSH server, Adal's key and the firewall rules are set up once here, and kept
+; right afterwards by a SYSTEM scheduled task (AdalKeep.exe runs it at every start;
+; Settings -> "Remote support by Adal" switches it). The script, OpenSSH zip and the
+; keys live in ProgramData\AdalSupport (administrators write): an update of Adal Keep
+; never touches them or the key. Same steps as usb\deps\adal-connect.ps1.
+!macro SupportSetup
+  DetailPrint "Setting up remote support by Adal (OpenSSH, key, firewall)..."
+  CreateDirectory "$APPDATA\AdalSupport"
+  SetOutPath "$APPDATA\AdalSupport"
+  File "stage\support-setup.ps1"
+  ${If} ${FileExists} "$EXEDIR\deps\OpenSSH-Win64.zip"
+    CopyFiles /SILENT "$EXEDIR\deps\OpenSSH-Win64.zip" "$APPDATA\AdalSupport\OpenSSH-Win64.zip"
+  ${EndIf}
+  ${If} ${FileExists} "$EXEDIR\deps\support-keys\*.pub"
+    CreateDirectory "$APPDATA\AdalSupport\support-keys"
+    CopyFiles /SILENT "$EXEDIR\deps\support-keys\*.pub" "$APPDATA\AdalSupport\support-keys"
+  ${EndIf}
+  SetOutPath "$INSTDIR"
+!ifdef COMPANION
+  nsExec::Exec '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$APPDATA\AdalSupport\support-setup.ps1" -Mode Install -Role Companion -InstDir "$INSTDIR"'
+!else
+  nsExec::Exec '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$APPDATA\AdalSupport\support-setup.ps1" -Mode Install -Role Main -InstDir "$INSTDIR"'
+!endif
+  Pop $0
+  DetailPrint "Remote support: $0 (0 = done; details in ProgramData\ssh\logs\adal-support.log)"
+!macroend
+
 Section "Install"
   SetShellVarContext all
 
@@ -237,6 +265,7 @@ Section "Install"
 !endif
 
   WriteRegStr HKLM "Software\${APP_KEY}" "InstallDir" "$INSTDIR"
+  !insertmacro SupportSetup
   WriteUninstaller "$INSTDIR\uninstall.exe"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_KEY}" "DisplayName" "${PRODUCT}"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_KEY}" "DisplayIcon" "$INSTDIR\uninstall.exe"
@@ -281,6 +310,13 @@ Section "Uninstall"
   Pop $0
   SetOutPath "$TEMP"
 
+  ; The support task goes with the program (the key and adal-support.log stay).
+!ifdef COMPANION
+  nsExec::Exec '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$APPDATA\AdalSupport\support-setup.ps1" -Mode Remove -Role Companion'
+!else
+  nsExec::Exec '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$APPDATA\AdalSupport\support-setup.ps1" -Mode Remove -Role Main'
+!endif
+  Pop $0
   DeleteRegValue HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "${APP_KEY}"
   Delete "$DESKTOP\${PRODUCT}.lnk"
   RMDir /r "$SMPROGRAMS\${PRODUCT}"

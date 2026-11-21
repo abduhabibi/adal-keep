@@ -198,3 +198,49 @@ export function StartupCard() {
     </section>
   )
 }
+
+/**
+ * Settings: "Remote support by Adal" (default ON). Off does what Adal Disconnect
+ * did: Adal can no longer reach this PC and Adal Keep stops repairing it. On
+ * puts it back. Main: this PC's server. Companion window: the Companion on this
+ * PC (127.0.0.1:47810). Any other device (phone, other browser): not shown.
+ * Every change is written to adal-support.log on the PC.
+ */
+const COMPANION_SUPPORT = 'http://127.0.0.1:47810/support'
+export function SupportCard() {
+  const [state, setState] = useState(null) // { on, where: 'main' | 'companion' }
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    let live = true
+    ;(async () => {
+      const m = await api.get('/main-pc/support').then(r => r.data).catch(() => null)
+      if (m?.on_this_pc) { if (live) setState({ on: !!m.on, where: 'main' }); return }
+      const c = await fetch(COMPANION_SUPPORT, { signal: AbortSignal.timeout(4000) }).then(r => (r.ok ? r.json() : null)).catch(() => null)
+      if (c && live) setState({ on: !!c.on, where: 'companion' })
+    })()
+    return () => { live = false }
+  }, [])
+  if (!state) return null
+  const set = async (v) => {
+    setBusy(true)
+    try {
+      if (state.where === 'main') setState({ ...state, on: !!(await api.post('/main-pc/support', { on: v })).data.on })
+      else {
+        const r = await fetch(COMPANION_SUPPORT, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Adal': '1' }, body: JSON.stringify({ on: v }), signal: AbortSignal.timeout(8000) })
+        if (!r.ok) throw new Error('The Adal Keep Companion on this PC did not answer')
+        setState({ ...state, on: !!(await r.json()).on })
+      }
+    } catch (e) { toast.error(err(e)) }
+    setBusy(false)
+  }
+  return (
+    <section className="panel space-y-1 p-4">
+      <label className="flex items-center gap-2 text-sm font-semibold">
+        <input type="checkbox" checked={state.on} disabled={busy} onChange={e => set(e.target.checked)} /> Remote support by Adal
+      </label>
+      <p className="text-xs text-slate-500">
+        {state.on ? 'Adal can reach this PC to help (key only; every login is written down on this PC).' : 'Off: Adal cannot reach this PC.'}
+      </p>
+    </section>
+  )
+}

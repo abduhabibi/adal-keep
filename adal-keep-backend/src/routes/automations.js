@@ -1196,7 +1196,13 @@ router.get('/automations/:id/mirror', async (req, res) => {
 router.post('/automations/:id/input', async (req, res) => {
   const page = await liveTab(req)
   if (!page) return res.status(404).json({ error: 'This run has no open tab.' })
-  try { res.json({ ok: true, code: await personInput(req.app.locals.db, req.params.id, page, req.body || {}) }) }
+  const b = req.body || {}
+  // Mouse moves and the wheel: answered at once, done in order behind (a drag stays smooth).
+  if ((b.kind === 'mouse' && b.type === 'move') || b.kind === 'wheel') {
+    page.__adalInputChain = (page.__adalInputChain || Promise.resolve()).then(() => liveInput(page, b)).catch(() => {})
+    return res.json({ ok: true })
+  }
+  try { await page.__adalInputChain; res.json({ ok: true, code: await personInput(req.app.locals.db, req.params.id, page, b) }) }
   catch (e) { res.status(e.status || 500).json({ error: e.message }) }
 })
 

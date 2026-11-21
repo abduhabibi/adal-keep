@@ -3,6 +3,7 @@ import os from 'os'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { createHash } from 'crypto'
+import { findBrowserExecutable } from './browser.js'
 
 // Her father's name as the emergency contact: his name and his father's (her surname),
 // e.g. "ABAGOLE KEDIR". A saved name that was only his first name gets the surname too.
@@ -33,7 +34,8 @@ const HEADER_PH = placeholderSvg('No header image', 800, 100)
 const FOOTER_PH = placeholderSvg('No footer image', 800, 60)
 
 function findBrowser() {
-  const c = []
+  // Adal Browser first (the PC's Chrome only when it is missing: PDFs are drawn out of sight).
+  const c = [findBrowserExecutable()].filter(Boolean)
   if (process.platform === 'win32') {
     const pf   = process.env['ProgramFiles'] || 'C:\\Program Files'
     const pf86 = process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)'

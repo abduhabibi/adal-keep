@@ -260,3 +260,22 @@ test('a move: newest girls first, simple files first, made-here papers skipped, 
   assert.deepEqual(files.filter(f => !madeHere(f)).map(f => f.field), ['Passport'])
   assert.equal(readPerson({ passportNumber: 'EP1234567', fullName: 'A B', applicationNumber: 'E123' }).visa_application_number, 'E123')
 })
+
+test('every page of a list at once, when its first answer says how many', async () => {
+  const { everyPage } = await import('../src/services/transition.js')
+  const pages = everyPage('https://a.test/api/registration?page=1&pageSize=20', { data: { data: [], total: 45, page: 1, pageSize: 20 } }, 18)
+  assert.deepEqual(pages.map(p => p.url), ['https://a.test/api/registration?page=2&pageSize=20', 'https://a.test/api/registration?page=3&pageSize=20'])
+  assert.equal(everyPage('https://a.test/l?page=0&size=10', { totalElements: 25 }, 10).at(-1).url, 'https://a.test/l?page=2&size=10')
+  assert.equal(everyPage('https://a.test/l?page=1', { total: 5 }, 5), null)        // one page only
+  assert.equal(everyPage('https://a.test/l?cursor=x', { total: 50 }, 10), null)    // no page number: one after the other
+  assert.equal(everyPage('https://a.test/l?page=1', {}, 10), null)                 // no total
+})
+
+test('only Adal Browser is used: the PC\'s Chrome or Brave on the control port is told apart', async () => {
+  const { whoseBrowser } = await import('../src/services/browser.js')
+  const own = 'C:\\Adal Keep\\browser\\AdalBrowser.exe', data = 'C:\\Adal Keep\\backend\\data'
+  assert.equal(whoseBrowser(`"${own}" --remote-debugging-port=9222 --user-data-dir=${data}\\adal-browser`, own, data), 'ours')
+  assert.equal(whoseBrowser('"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --remote-debugging-port=9222 --user-data-dir=c:/adal keep/backend/data/browser-profile', own, data), 'old')
+  assert.equal(whoseBrowser('"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --remote-debugging-port=9222', own, data), 'foreign')
+  assert.equal(whoseBrowser(null, own, data), 'unknown')
+})

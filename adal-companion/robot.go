@@ -60,16 +60,12 @@ func robotAllowed(r *http.Request) bool {
 	return t != "" && len(t) == len(robotToken) && t == robotToken
 }
 
-// robotBrowserExe: Adal Browser of this install, else Chrome or Edge.
+// robotBrowserExe: Adal Browser of this install only, never the PC's own
+// Chrome or Edge (asked on 2026-11-20: runs and Transitions went to Chrome).
 func robotBrowserExe(root string) string {
 	for _, p := range []string{
 		filepath.Join(root, "browser", "AdalBrowser.exe"),
-		filepath.Join(root, "browser", "chrome.exe"),
-		filepath.Join(os.Getenv("ProgramFiles"), "Google", "Chrome", "Application", "chrome.exe"),
-		filepath.Join(os.Getenv("ProgramFiles(x86)"), "Google", "Chrome", "Application", "chrome.exe"),
-		filepath.Join(os.Getenv("LOCALAPPDATA"), "Google", "Chrome", "Application", "chrome.exe"),
-		filepath.Join(os.Getenv("ProgramFiles(x86)"), "Microsoft", "Edge", "Application", "msedge.exe"),
-		filepath.Join(os.Getenv("ProgramFiles"), "Microsoft", "Edge", "Application", "msedge.exe"),
+		filepath.Join(root, "browser", "chrome.exe"), // Adal Browser's own folder, not yet renamed
 	} {
 		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
 			return p

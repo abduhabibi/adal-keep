@@ -94,12 +94,20 @@ export function personOf(e, readPerson) {
 
 export async function copyEnjazPlus({ db, token, folder, set, state, check, readPerson, save, signIn, ask = fetch, download = fetch, limit = Infinity, wait = sleep }) {
   let cred = token
+  // One sign-in for all the pages asked for side by side.
+  let signing = null
+  const renew = async (used) => {
+    if (cred !== used) return cred   // another page signed in again already
+    signing ||= Promise.resolve(signIn()).then(c => { cred = c; return c }).finally(() => { signing = null })
+    return signing
+  }
   const call = async (query, variables) => {
     for (let tries = 0, signIns = 0; ;) {
       check()
-      const r = await gql(cred, query, variables, ask)
+      const used = cred
+      const r = await gql(used, query, variables, ask)
       if (r.data) return r.data
-      if (signedOut(r) && signIns++ < 2) { cred = await signIn(); continue }
+      if (signedOut(r) && signIns++ < 2) { await renew(used); continue }
       if (tries++ < 4 && (r.status === 0 || r.status === 429 || r.status >= 500)) { await wait(4000 * tries); continue }
       throw new Error(`EnjazPlus did not answer: ${r.error || 'no data'}. Check the internet and press the button again — it goes on from where it stopped.`)
     }
@@ -107,15 +115,29 @@ export async function copyEnjazPlus({ db, token, folder, set, state, check, read
 
   // Everyone, in every tab.
   set({ status: 'copying', step: 'Reading the list of employees' })
-  const all = []
-  for (let skip = 0; ;) {
-    const d = await call(LIST, { skip, take: PAGE })
-    const got = d.employees?.employees || []
-    all.push(...got)
-    skip += PAGE
-    set({ step: `Reading the list of employees: ${all.length} of ${d.employees?.totalCount ?? '?'}` })
-    if (!got.length || skip >= Number(d.employees?.totalCount || 0)) break
+  // The first page says how many there are; the other pages are then asked
+  // for 4 at a time (one after the other took a minute for 1,000 people).
+  const first = await call(LIST, { skip: 0, take: PAGE })
+  const total = Number(first.employees?.totalCount || 0)
+  const pages = [first.employees?.employees || []]
+  let have = pages[0].length
+  set({ step: `Reading the list of employees: ${have} of ${total || '?'}` })
+  if (pages[0].length) {
+    const skips = []
+    for (let skip = PAGE; skip < total; skip += PAGE) skips.push(skip)
+    let i = 0
+    await Promise.all(Array.from({ length: 4 }, async () => {
+      for (let k; (k = i++) < skips.length;) {
+        const got = (await call(LIST, { skip: skips[k], take: PAGE })).employees?.employees || []
+        pages[k + 1] = got
+        have += got.length
+        set({ step: `Reading the list of employees: ${have} of ${total}` })
+      }
+    }))
   }
+  // In the list's own order; one person on two pages (the list moved meanwhile) counts once.
+  const all = [], ids = new Set()
+  for (const e of pages.flat()) { const k = String(e?._id ?? ''); if (k && ids.has(k)) continue; ids.add(k); all.push(e) }
   if (!all.length) throw new Error('EnjazPlus gave no employees. Are you signed in with the agency\'s account?')
 
   const records = path.join(folder, 'records')
@@ -149,7 +171,7 @@ export async function copyEnjazPlus({ db, token, folder, set, state, check, read
     }
     keep(true)
     // 2. Her files: everyone's face and full body photos, then everyone's
-    // passport, then the rest — 4 at a time, each tried 3 times on a slow line.
+    // passport, then the rest — 6 at a time, each tried 3 times on a slow line.
     // The visa is made in Adal Keep: not copied.
     const TIERS = [['facePhoto', 'standPhoto'], ['passportScan'], Object.keys(FILES).filter(k => !['facePhoto', 'standPhoto', 'passportScan', 'workingVisaScan'].includes(k))]
     const fetchOne = async (e, key) => {
@@ -176,7 +198,7 @@ export async function copyEnjazPlus({ db, token, folder, set, state, check, read
     for (const [t, keys] of TIERS.entries()) {
       let i = 0, k = 0
       const next = () => order[i++]
-      await Promise.all(Array.from({ length: 4 }, async () => {
+      await Promise.all(Array.from({ length: 6 }, async () => {
         for (let e; (e = next());) {
           for (const key of keys) await fetchOne(e, key)
           set({ step: `Files (${['face and full body photos', 'passports', 'other documents'][t]}): ${++k} of ${order.length}` })

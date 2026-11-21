@@ -211,6 +211,8 @@ export function tabOfRun(runId) {
 const RUN_HOSTS = [
   [/^musaned/, /musaned\.com\.sa|wahid\.sa/], [/^mofa|^visa/, /visa\.mofa\.gov\.sa/], [/^wafid/, /wafid\.com/],
   [/^insurance/, /niscofetap\.com/], [/^tasheer/, /tasheer\.com/], [/^(police|lmis|contract_import|delete_labour)/, /lmis\.gov\.et/],
+  // Settings → Transitions: the tab already signed in on the system an agency moves from.
+  [/^enjazplus/, /^https:\/\/([a-z0-9-]+\.)*enjazplus\.com\//], [/^pextran/, /^https:\/\/[a-z0-9-]+\.agency\.pextran\.com\//],
 ]
 const RUN_PEERS = [[/^musaned/, 'musaned'], [/^mofa|^visa/, 'mofa'], [/^insurance/, 'insurance'], [/^tasheer/, 'tasheer'], [/^(police|lmis|contract_import|delete_labour)/, 'lmis']]
 export const peerOf = (workflowId) => RUN_PEERS.find(([w]) => w.test(String(workflowId || '')))?.[1] || null

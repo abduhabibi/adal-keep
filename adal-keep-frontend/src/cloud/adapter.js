@@ -10,7 +10,7 @@
  * Documents open from online storage (/api/files/<id>/… links are rewritten).
  */
 import { connectLive, liveCall, liveReady, pcLive, onLive } from './live.js'
-import { mirrorReady, mirrorHas, mirrorGet, mirrorAt, mirrorAge, mirrorPut, mirrorSync, mirrorFetch, mirrorPrune, mirrorTake, mirrorLoad } from './mirror.js'
+import { mirrorForgetTasks, mirrorReady, mirrorHas, mirrorGet, mirrorAt, mirrorAge, mirrorPut, mirrorSync, mirrorFetch, mirrorPrune, mirrorTake, mirrorLoad } from './mirror.js'
 
 const SAVED = 'adal-pc'
 // Adal Keep Admin opens one agency per window (window.__ADAL_CREDS): its own copies.
@@ -459,7 +459,9 @@ function optimistic(method, path, body) {
 function dropTasks(method, path, body) {
   const one = method === 'delete' && path.match(/^\/tasks\/(\d+)$/)?.[1]
   const ids = one ? [Number(one)] : path === '/tasks/clear' ? (body?.ids || []).map(Number) : null
-  if (!ids || !Array.isArray(cache['/tasks'])) return
+  if (!ids) return
+  mirrorForgetTasks(ids)
+  if (!Array.isArray(cache['/tasks'])) return
   remember('/tasks', cache['/tasks'].filter(t => !ids.includes(Number(t.id))))
 }
 
@@ -955,7 +957,14 @@ async function signedUrl(fileId) {
     }
     if (!blob) {
       const rows = await rest('GET', `/rest/v1/keep_files?id=eq.${fileId}&select=object,mimetype`)
-      if (!rows?.[0]?.object) return null
+      // Not online yet (just added: the PC sends documents to the online copy a
+      // little later) — with the PC on, it is asked for the file itself, so a
+      // picture taken a moment ago shows at once instead of a broken image.
+      if (!rows?.[0]?.object) {
+        blob = Number(fileId) > 0 ? await fromPC(fileId) : null
+        if (blob) keepFile(fileId, blob)
+        return blob ? URL.createObjectURL(blob) : null
+      }
       if (rows[0].object.startsWith('tg:')) blob = await telegramFile(rows[0].object, rows[0].mimetype)
       else {
         const c = cloudCreds()
@@ -973,6 +982,20 @@ async function signedUrl(fileId) {
   })().catch(() => null).then(u => { if (!u) signed.delete(fileId); return u })
   signed.set(fileId, p)
   return p
+}
+
+/** A document straight from the PC (it is on), through the live link or keep_calls; null when it does not answer. */
+async function fromPC(fileId) {
+  try {
+    if (!(await pcOnline())) return null
+    const path = `/files/${Number(fileId)}/download`
+    const m = liveReady() ? await liveCall('get', path, undefined, 30000) : null
+    const a = m ? (m.row ? (await rest('GET', `/rest/v1/keep_calls?id=eq.${m.row}&select=status,answer,answer_bin,answer_type,answer_head,answer_code`))?.[0] : { answer_code: m.code, answer_type: m.type, answer_head: m.head, answer_bin: m.bin, answer: m.data })
+      : await relay('get', path, undefined, 30000)
+    if (!a || a.answer_code >= 300) return null
+    const d = relayed(a, { responseType: 'blob' }).data
+    return d instanceof Blob && d.size ? d : null
+  } catch { return null }
 }
 
 /** A document of Adal Keep as a Blob (from this phone's copy, else downloaded). */

@@ -110,7 +110,29 @@ export function mirrorPut(key, data) {
   if (dbP) store([{ key, data, updated_at: at }]).catch(() => {})
 }
 
+// Tasks the person removed here: a copy older than the PC's reply (the PC has
+// not applied "remove all" yet) must not bring them back. A tombstone ends once
+// a copy no longer lists the task (or after a day).
+const GONE = 'adal.goneTasks'
+const goneLoad = () => { try { return JSON.parse(localStorage.getItem(GONE) || '{}') || {} } catch { return {} } }
+export function mirrorForgetTasks(ids) {
+  const g = goneLoad(), now = Date.now()
+  for (const id of ids) g[String(id)] = now
+  try { localStorage.setItem(GONE, JSON.stringify(g)) } catch {}
+}
+export function withoutGoneTasks(list) {
+  if (!Array.isArray(list)) return list
+  const g = goneLoad(); const ids = Object.keys(g)
+  if (!ids.length) return list
+  const now = Date.now(), seen = new Set(list.map(t => String(t.id)))
+  let changed = false
+  for (const id of ids) if (!seen.has(id) || now - g[id] > 86400000) { delete g[id]; changed = true }
+  if (changed) try { localStorage.setItem(GONE, JSON.stringify(g)) } catch {}
+  return list.filter(t => !(String(t.id) in g))
+}
+
 function take(rows, agency, move = true) {
+  rows = rows.map(r => r.key === '/tasks' ? { ...r, data: withoutGoneTasks(r.data) } : r)
   const keep = rows.filter(r => !String(r.key).startsWith('/_'))
   for (const r of keep) { mem.set(r.key, { data: r.data, at: r.updated_at }); ats.set(r.key, r.updated_at) }
   if (keep.length) { store(keep).catch(() => {}); listeners.forEach(fn => { try { fn(keep.map(r => r.key)) } catch {} }) }

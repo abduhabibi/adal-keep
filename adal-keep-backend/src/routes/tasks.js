@@ -109,8 +109,12 @@ router.post('/clear', async (req, res) => {
   try {
     const ids = (Array.isArray(req.body?.ids) ? req.body.ids : []).map(Number).filter(Boolean).slice(0, 2000)
     const { moveToTrash } = await import('../services/trash.js')
-    let removed = 0
-    for (const id of ids) { try { await moveToTrash(req.app.locals.db, 'task', id, req); removed++ } catch {} }
+    let removed = 0, failed = 0
+    for (const id of ids) {
+      try { await moveToTrash(req.app.locals.db, 'task', id, req); removed++ } catch (e) { failed++; console.error('[tasks/clear]', id, e.message) }
+    }
+    // Never "success" while tasks are still there: the page reloads and says so.
+    if (failed) return res.status(500).json({ success: false, removed, failed, error: `${failed} task(s) could not be removed` })
     res.json({ success: true, removed })
   } catch (err) {
     res.status(500).json({ error: err.message })

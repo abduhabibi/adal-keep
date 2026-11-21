@@ -9,7 +9,7 @@
  * person's. Never while a Tasheer robot is working (it would be cut off).
  */
 import { getBrowser, openForPerson, openBrowserIfAny, sendAway } from './browser.js'
-import { START, hasPassword, fillLogin } from './tasheer.js'
+import { START, hasPassword, fillLogin, concurrentShown, afterConcurrentLogin } from './tasheer.js'
 
 const KEY = 'tasheer_holder'
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
@@ -89,6 +89,15 @@ function watch(db, page, who) {
       for (const end = Date.now() + 30 * 60000; Date.now() < end;) {
         await sleep(3000)
         if (page.isClosed?.()) break
+        // "Concurrent Login": SUBMIT, the same name and password again, the
+        // person types only the new captcha, LOGIN pressed for them.
+        if (await concurrentShown(page)) {
+          const acct = await (chosen ? db('tasheer_accounts').where('id', chosen) : db('tasheer_accounts').orderBy('is_default', 'desc')).first().catch(() => null)
+          if (acct?.username && acct?.password) {
+            await afterConcurrentLogin(page, acct.username, acct.password, { say: (m) => console.log(`[tasheer] sign-in: ${m}`), captchaMs: Math.max(60000, end - Date.now()) }).catch(() => {})
+            continue
+          }
+        }
         // The form came back empty (a wrong captcha, Cloudflare): filled again.
         if (await hasPassword(page)) {
           const acct = await (chosen ? db('tasheer_accounts').where('id', chosen) : db('tasheer_accounts').orderBy('is_default', 'desc')).first().catch(() => null)

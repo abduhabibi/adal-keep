@@ -10,7 +10,7 @@
  * Documents open from online storage (/api/files/<id>/… links are rewritten).
  */
 import { connectLive, liveCall, liveReady, pcLive, onLive } from './live.js'
-import { mirrorReady, mirrorHas, mirrorGet, mirrorAt, mirrorAge, mirrorPut, mirrorSync, mirrorFetch, mirrorPrune, mirrorTake, mirrorLoad } from './mirror.js'
+import { mirrorForgetTasks, mirrorReady, mirrorHas, mirrorGet, mirrorAt, mirrorAge, mirrorPut, mirrorSync, mirrorFetch, mirrorPrune, mirrorTake, mirrorLoad } from './mirror.js'
 
 const SAVED = 'adal-pc'
 // Adal Keep Admin opens one agency per window (window.__ADAL_CREDS): its own copies.
@@ -459,7 +459,9 @@ function optimistic(method, path, body) {
 function dropTasks(method, path, body) {
   const one = method === 'delete' && path.match(/^\/tasks\/(\d+)$/)?.[1]
   const ids = one ? [Number(one)] : path === '/tasks/clear' ? (body?.ids || []).map(Number) : null
-  if (!ids || !Array.isArray(cache['/tasks'])) return
+  if (!ids) return
+  mirrorForgetTasks(ids)
+  if (!Array.isArray(cache['/tasks'])) return
   remember('/tasks', cache['/tasks'].filter(t => !ids.includes(Number(t.id))))
 }
 

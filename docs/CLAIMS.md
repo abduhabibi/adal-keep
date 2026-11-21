@@ -2,17 +2,13 @@
 
 Sessions write here what they are working on, so two sessions never change the same files.
 
-## office-compute
+## Released 2026-11-21 (release-5, from candidate-1)
 
-office-compute: robots on the best PC, remote browser view, sidebar browsers, human-step tasks. Claimed by CEO session, 2026-11-21 08:49 +03:00 (last update 2026-11-21 09:40 +03:00: done on branch office-compute, c222b23, not merged or published).
-Files: adal-keep-backend/src/services/{sharePower,placement,humanTasks,remoteBrowsers,liveFrames,attention}.js, adal-keep-frontend/src/components/{Sidebar,BrowsersSection,HumanTasks}*.
-Other sessions: don't change these files; if this claim shows no progress for 5 minutes past its last update, you may take over.
+These are on main and published; their claims are free:
 
-## done-and-tasheer
-
-done-and-tasheer: mark-as-done advances stage; Tasheer captcha by notification. Claimed by CEO session, 2026-11-21 08:49 +03:00. Free after 5 minutes without updates.
-
-## phone-buttons
-
-phone-buttons: every phone button tested on the emulator; clearing tasks. CEO session, 2026-11-21 08:52 +03:00. Branch phone-buttons.
-Files: adal-phone/**, task clear/remove routes and the phone task views.
+- office-compute: robots on the best PC, remote browser view, sidebar browsers, human-step tasks. Released.
+- done-and-tasheer: mark-as-done advances stage; Tasheer captcha by notification. Released.
+- phone-buttons: every phone button tested on the emulator; clearing tasks (phone APK 1.96). Released.
+- tray-pull: arrival pop-up, roomy tray, drag and paste onto fields. Released.
+- transitions-fix: transitions in Adal Browser only. Released.
+- Also in this release: runs waiting for Adal Browser are held back until their wait time (no more "started" loop).

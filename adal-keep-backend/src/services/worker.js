@@ -615,6 +615,9 @@ async function runJob(db, job) {
 // --------------------------------------------------------------------------
 // Run queue — which waiting run starts next
 // --------------------------------------------------------------------------
+/** pause_reason patterns of pending runs that wait until `updated_at`. */
+export const WAIT_REASONS = ['Retry %', 'Waiting for %']
+
 /**
  * Pending runs that may start now. A retry is only handed out after its
  * backoff deadline (stored in `updated_at` by recordFailure). Without this
@@ -626,14 +629,17 @@ export function readyJobsQuery(db) {
   return db('automation_queue')
     .where('status', 'pending')
     .where(function () {
-      // Non-retry jobs → always ready.
+      // Runs with no wait → always ready.
       this.where(function () {
         this.whereNull('pause_reason')
-          .orWhere('pause_reason', 'not like', 'Retry %')
+          .orWhere(function () { for (const p of WAIT_REASONS) this.andWhere('pause_reason', 'not like', p) })
       })
-      // Retry jobs → ready only after the backoff window has elapsed.
+      // Retries and runs sent back to wait (e.g. "Waiting for Adal Browser
+      // to be open") → ready only once their wait time (`updated_at`) is
+      // reached. Without this a waiting run was claimed again at once and
+      // logged "started" over a thousand times.
       .orWhere(function () {
-        this.where('pause_reason', 'like', 'Retry %')
+        this.where(function () { for (const p of WAIT_REASONS) this.orWhere('pause_reason', 'like', p) })
           .andWhere('updated_at', '<=', now)
       })
     })

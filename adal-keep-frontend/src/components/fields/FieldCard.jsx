@@ -404,7 +404,7 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
                   <span className="text-xs text-slate-600 dark:text-slate-300 truncate font-medium" title={f.original_name}>{f.original_name}</span>
                 </div>
                 <div className="flex gap-1 shrink-0 ml-2">
-                  <a href={`/api/files/${f.id}/download`} target="_blank" rel="noopener noreferrer" className="p-1.5 text-slate-400 hover:text-teal-600 hover:bg-teal-50 dark:hover:bg-teal-900/30 rounded-md transition-colors" title="Download">
+                  <a href={`/api/files/${f.id}/download`} data-name={f.original_name || undefined} target="_blank" rel="noopener noreferrer" className="p-1.5 text-slate-400 hover:text-teal-600 hover:bg-teal-50 dark:hover:bg-teal-900/30 rounded-md transition-colors" title="Download">
                     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
                   </a>
                   <button type="button" onClick={() => handleDelete(f.id)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-md transition-colors" title="Delete">
@@ -530,6 +530,7 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
             <div className="flex items-center gap-2">
               <a
                 href={`/api/files/${previewFile.id}/download`}
+                data-name={previewFile.original_name || undefined}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors"

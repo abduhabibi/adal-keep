@@ -243,8 +243,11 @@ async function initSystem() {
           console.log(`[passport details] checked ${n} profile(s) missing place of birth / issue date`)
         } catch (e) { console.warn('[passport details] backfill:', e.message) }
       }, 60000)
-      import('./src/services/whatsapp.js').then(w => w.startWhatsApp(db)).catch(e => console.warn('[whatsapp]', e.message))
-      import('./src/services/browser.js').then(b => b.startBrowserQuietly())
+      // (ADAL_ISOLATED=1, a scratch copy for tests: no WhatsApp, no browser — they would reach this PC's real ones.)
+      if (process.env.ADAL_ISOLATED !== '1') {
+        import('./src/services/whatsapp.js').then(w => w.startWhatsApp(db)).catch(e => console.warn('[whatsapp]', e.message))
+        import('./src/services/browser.js').then(b => b.startBrowserQuietly())
+      }
       import('./src/services/secretStore.js').then(s => s.moveSecretsToVault())
       import('./src/services/accountVault.js').then(async v => {
         const lock = () => v.sealStored(db).catch(e => console.warn('[vault]', e.message))

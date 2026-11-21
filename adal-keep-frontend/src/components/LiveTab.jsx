@@ -213,13 +213,48 @@ export default function LiveTab({ runId, fill = false, startFull = false, onClos
     await send({ kind: 'key', key: 'Enter' })
     setText('')
   }
-  // Expanded on a PC it is a browser: click the page, then the keyboard works on it.
-  const keyboard = (e) => {
-    if (e.ctrlKey || e.metaKey || e.altKey) return
-    e.preventDefault()
-    if (e.key.length === 1) send({ kind: 'type', text: e.key })
-    else if (KEYS.includes(e.key)) send({ kind: 'key', key: e.key })
+  // On a PC it is a browser (2026-11-21): the mouse (hover, press, drag, select,
+  // right/middle button, double click), the wheel where the pointer is, every
+  // key with Ctrl/Shift/Alt, and paste — sent in order, one after the other;
+  // mouse moves waiting to go are merged into the newest.
+  const queue = useRef([])
+  const pumping = useRef(false)
+  const pump = async () => {
+    if (pumping.current) return
+    pumping.current = true
+    try {
+      while (queue.current.length) {
+        const b = queue.current.shift()
+        if (live.current) { live.current.sendLive({ t: 'input', run: runId, ack: true, ...b }); continue }
+        try {
+          const r = await api.post(`/automations/${runId}/input`, b)
+          if (r.data?.code) copyCode(r.data.code)
+        } catch (e) { setErr(e.response?.data?.error || 'The PC did not do it.') }
+      }
+    } finally { pumping.current = false }
   }
+  const put = (b) => {
+    const q = queue.current
+    if (b.kind === 'mouse' && b.type === 'move' && q.length && q[q.length - 1].kind === 'mouse' && q[q.length - 1].type === 'move') q[q.length - 1] = b
+    else q.push(b)
+    pump()
+  }
+  const mods = (e) => ({ ctrl: e.ctrlKey || undefined, shift: e.shiftKey || undefined, alt: e.altKey || undefined, meta: e.metaKey || undefined })
+  const at = (e) => { const r = e.currentTarget.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height } }
+  const lastMove = useRef(0)
+  const mouse = (type) => (e) => {
+    if (type === 'move') { const now = performance.now(); if (now - lastMove.current < 30) return; lastMove.current = now }
+    if (type === 'down') { e.preventDefault(); e.currentTarget.parentElement?.focus() }
+    put({ kind: 'mouse', type, ...at(e), button: e.button, buttons: e.buttons, clickCount: e.detail || 1, ...mods(e) })
+  }
+  const wheelAt = (e) => { if (zoom === 1) put({ kind: 'wheel', ...at(e), dx: Math.round(e.deltaX), dy: Math.round(e.deltaY), ...mods(e) }) }
+  const keyboard = (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') return   // the paste event brings the text
+    e.preventDefault()
+    if (e.key.length !== 1 && !KEYS.includes(e.key) && !/^F\d{1,2}$/.test(e.key)) return
+    put({ kind: 'key', key: e.key === ' ' ? 'Space' : e.key, ...mods(e) })
+  }
+  const paste = (e) => { const t = e.clipboardData?.getData('text'); if (t) { e.preventDefault(); put({ kind: 'paste', text: t }) } }
   const go = (e) => { e.preventDefault(); setEditing(false); if (address.trim()) send({ kind: 'nav', url: address.trim() }) }
 
   const btn = 'shrink-0 rounded-lg border border-slate-300 dark:border-slate-600 px-2 py-1.5 text-xs font-semibold active:bg-slate-100 dark:active:bg-slate-800'
@@ -276,14 +311,16 @@ export default function LiveTab({ runId, fill = false, startFull = false, onClos
       {view === 'picture' && <>
         {src && (
           <div className={`${full || fill ? 'flex-1 min-h-0' : 'max-h-[50vh]'} overflow-auto rounded-lg border border-slate-200 outline-none focus:border-indigo-400 dark:border-slate-800`}
-            tabIndex={PHONE ? undefined : 0} onKeyDown={PHONE ? undefined : keyboard}
+            tabIndex={PHONE ? undefined : 0} onKeyDown={PHONE ? undefined : keyboard} onPaste={PHONE ? undefined : paste}
             style={{ touchAction: zoom > 1 ? 'pan-x pan-y' : 'none' }}>
             <img src={src} alt="The run's tab on the PC" draggable={false}
               onError={() => { if (!String(src).startsWith('blob:')) { streamFailed.current = true; setSrc(null); poke.current?.() } }}
-              onMouseDown={down} onMouseMove={(e) => e.buttons && move(e)} onMouseUp={up}
-              onTouchStart={down} onTouchMove={move} onTouchEnd={up} onWheel={wheel}
+              {...(PHONE
+                ? { onMouseDown: down, onMouseMove: (e) => e.buttons && move(e), onMouseUp: up, onWheel: wheel }
+                : { onMouseDown: mouse('down'), onMouseMove: mouse('move'), onMouseUp: mouse('up'), onWheel: wheelAt, onContextMenu: (e) => e.preventDefault() })}
+              onTouchStart={down} onTouchMove={move} onTouchEnd={up}
               style={{ width: `${zoom * 100}%`, maxWidth: 'none' }}
-              className="block cursor-crosshair select-none" />
+              className={`block select-none ${PHONE ? 'cursor-crosshair' : 'cursor-default'}`} />
           </div>
         )}
         {!src && !err && <div className="h-40 rounded-lg bg-slate-100 dark:bg-slate-900 animate-pulse" />}

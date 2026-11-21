@@ -1,14 +1,18 @@
 /**
  * Settings → Transitions: an agency brings everything from the system it used
- * before. The site opens in its own window, a person signs in there, and the
- * copy goes on out of sight. Nothing on that site is changed.
+ * before. The site opens out of sight on the PC of the office that does it
+ * fastest; a person signs in through its live view (here or in the sidebar's
+ * Browsers), and the copy goes on. Nothing on that site is changed.
  */
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import toast from 'react-hot-toast'
 import api from '../services/api'
 import Card from './shared/Card'
 import Button from './shared/Button'
 import Input from './shared/Input'
+
+const LiveTab = lazy(() => import('./LiveTab'))
 
 const SYSTEMS = [
   ['enjazplus', 'EnjazPlus', 'v2.enjazplus.com'],
@@ -72,7 +76,8 @@ export default function TransitionsCard() {
     if (!confirm(`Stop copying from ${name}? What is saved stays, and pressing Move again goes on from there.`)) return
     api.post(`/transitions/${id}/stop`).then(load).catch(e => toast.error(err(e)))
   }
-  const show = (id) => api.post(`/transitions/${id}/show`).catch(e => toast.error(err(e)))
+  const [live, setLive] = useState(null)
+  const show = (id) => setLive(id)
 
   return (
     <Card>
@@ -97,7 +102,7 @@ export default function TransitionsCard() {
               {s && <Result s={s} />}
               {busy(s) && (
                 <div className="flex flex-wrap items-center gap-3 text-xs">
-                  {s.status === 'signing-in' && <button type="button" onClick={() => show(id)} className="font-semibold text-teal-700 hover:underline dark:text-teal-400">Show the sign-in window</button>}
+                  {s.status === 'signing-in' && <button type="button" onClick={() => show(id)} className="font-semibold text-teal-700 hover:underline dark:text-teal-400">Open it to sign in</button>}
                   <button type="button" onClick={() => stop(id, name)} className="text-slate-400 hover:text-red-600 hover:underline">Stop the copy</button>
                 </div>
               )}
@@ -122,6 +127,7 @@ export default function TransitionsCard() {
           </div>
         </div>
       )}
+      {live && createPortal(<Suspense fallback={null}><LiveTab runId={`tr-${live}`} startFull onClose={() => setLive(null)} /></Suspense>, document.body)}
     </Card>
   )
 }

@@ -214,6 +214,8 @@ const RUN_HOSTS = [
 ]
 const RUN_PEERS = [[/^musaned/, 'musaned'], [/^mofa|^visa/, 'mofa'], [/^insurance/, 'insurance'], [/^tasheer/, 'tasheer'], [/^(police|lmis|contract_import|delete_labour)/, 'lmis']]
 export const peerOf = (workflowId) => RUN_PEERS.find(([w]) => w.test(String(workflowId || '')))?.[1] || null
+/** The site a kind of run works on (a host pattern), or null. */
+export const siteOfWorkflow = (workflowId) => RUN_HOSTS.find(([w]) => w.test(String(workflowId || '')))?.[1] || null
 
 // The accounts of each portal. Its main account (the default, else the first)
 // works in the browser's own space; every other account in a space of its own
@@ -228,6 +230,13 @@ export async function spaceForAccount(db, browser, peer, accountId) {
   if (!main || Number(main.id) === Number(accountId)) return null
   const { accountSpace } = await import('./browser.js')
   return accountSpace(browser, `${peer}:${Number(accountId)}`)
+}
+/** The space key (browser.js accountSpace) an account's tabs are in: '' = the browser's own (the main account). */
+export async function spaceKeyForAccount(db, peer, accountId) {
+  const table = ACCOUNT_TABLES[peer]
+  if (!table || !accountId || !db) return ''
+  const main = await db(table).orderBy('is_default', 'desc').orderBy('id').first('id').catch(() => null)
+  return !main || Number(main.id) === Number(accountId) ? '' : `${peer}:${Number(accountId)}`
 }
 /** A run's space, from its account (the run's row, else what it saved). */
 export async function spaceForRun(db, browser, job) {
@@ -421,16 +430,19 @@ export async function openRunTab(browser, runId, { workflowId = '', busyRuns = n
   // Work for another PC (sharePower.js): its own tab in the window out of sight
   // there — never a tab the person at that PC may be looking at.
   if (quiet) {
-    // LMIS: the tab already there is taken (never a second LMIS of the same account).
-    const there = peerOf(workflowId) === 'lmis' ? await oneAtATime(async () => {
+    // A free tab already on the site is taken (tab reuse, 2026-11-21; LMIS: never
+    // a second LMIS of the same account). findFreeTab never takes the front tab
+    // nor one a person typed in.
+    const there = await oneAtATime(async () => {
       const p = await findFreeTab(browser, workflowId, busyRuns, space)
       if (p) _tabs.set(id, p)
       return p
-    }) : null
+    })
     if (there) {
       await letPageGo(there)
+      there.__adalReused = there.url()
       await setupTab(there, { runId: id })
-      console.log(`[tabManager] run #${id} took the LMIS tab already there (helping another PC)`)
+      console.log(`[tabManager] run #${id} took the free tab already on ${there.url().slice(0, 60)} (out of sight)`)
       return there
     }
     const page = await newRunTab(browser, space, { quiet: true })

@@ -41,7 +41,14 @@ export function registerDevice(pc, ip, body = {}) {
   // How strong it is now (services/sharePower.js picks who does the heavy work).
   const num = (v, lo, hi) => (v == null || v === '' || !Number.isFinite(Number(v))) ? null : Math.max(lo, Math.min(hi, Number(v)))
   const power = { mem_gb: num(body.mem_gb, 0, 4096), free_gb: num(body.free_gb, 0, 4096), load: num(body.load, 0, 100), battery: body.battery === true }
-  devices.set(pc.id, { id: pc.id, name: String(body.name || pc.name || 'Companion').slice(0, 60), ip: String(ip).replace(/^::ffff:/, ''), port, token, cores, ...power, at: Date.now() })
+  // Its internet (adal-companion netprobe.go): how fast and how reliably it reaches the portals.
+  const rtt = num(body.net_rtt_ms, 0, 60000)
+  const net = rtt == null ? null : { rtt_ms: rtt, mbps: num(body.net_mbps, 0, 10000), ok: num(body.net_ok, 0, 1) }
+  // Robots and files go over the office network only, never over the internet.
+  const at = String(ip).replace(/^::ffff:/, '')
+  const lan = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.|127\.|::1$|f[cd][0-9a-f]{2}:|fe80:)/i.test(at)
+  if (!lan) return { ok: false, error: 'not on the office network' }
+  devices.set(pc.id, { id: pc.id, name: String(body.name || pc.name || 'Companion').slice(0, 60), ip: at, port, token, cores, ...power, net, lan, at: Date.now() })
   return { ok: true }
 }
 

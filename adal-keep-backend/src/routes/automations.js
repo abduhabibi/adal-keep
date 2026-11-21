@@ -4,7 +4,7 @@ import { dispatchRun, runStatus, queueSnapshot } from '../services/worker.js'
 import { markCancelled, isCancelled } from '../services/cancellation.js'
 import { forgetRunTab, findRunTab, hostOf, codeBoxUp, typeCodeInto, pressCodeButton } from '../services/tabManager.js'
 import { openBrowserIfAny, openForPerson } from '../services/browser.js'
-import { waiting, answerCaptcha, doneWith } from '../services/attention.js'
+import { waiting, answerCaptcha, doneWith, TASK_MS } from '../services/attention.js'
 import { seal } from '../services/accountVault.js'
 import { plainReason, problemOf, goneFromMusaned } from '../services/runOutcome.js'
 import { assertPoliceReady, getProfileVerification, runPassportVerification } from '../services/verification.js'
@@ -113,6 +113,11 @@ router.post('/companion/robot-browser', async (req, res) => {
   const { registerDevice } = await import('../services/remoteBrowsers.js')
   const { ipOf } = await import('../services/networkGate.js')
   res.json(registerDevice(req.pcAccess, ipOf(req), req.body || {}))
+})
+// The sidebar's Browsers: every robot browser working now, on any PC (services/robotBrowsers.js).
+router.get('/browsers', async (req, res) => {
+  try { res.set('Cache-Control', 'no-store').json(await (await import('../services/robotBrowsers.js')).listBrowsers(req.app.locals.db)) }
+  catch (e) { res.status(500).json({ error: e.message }) }
 })
 router.get('/companion/robot-browsers', async (req, res) => {
   const { liveDevices } = await import('../services/remoteBrowsers.js')
@@ -495,10 +500,12 @@ router.get('/automations/attention', async (req, res) => {
     const calls = waiting()
     // Paused for a person today, in plain words. Older ones and runs a restart
     // interrupted stay on their profiles: nobody is being called for them now.
-    const since = new Date(Date.now() - 12 * 3600000).toISOString()
+    // A task lasts 5 minutes (attention.js TASK_MS); a run paused for no answer is not called again.
+    const since = new Date(Date.now() - TASK_MS).toISOString()
     const paused = await db('automation_queue').where('status', 'paused').where('updated_at', '>', since)
+      .where('pause_reason', 'not like', 'No answer for 5 minutes%')
       .where('pause_reason', 'not like', 'Interrupted%').where('pause_reason', 'not like', 'with-run-%').orderBy('id', 'desc').limit(10).select('id', 'pause_reason', 'updated_at')
-    for (const r of paused) if (!calls.some(c => c.run_id === r.id)) calls.push({ run_id: r.id, title: PLAIN_WAIT[r.pause_reason] || 'Waiting for you', body: '', at: new Date(r.updated_at).getTime(), image: null, reason: r.pause_reason })
+    for (const r of paused) if (!calls.some(c => c.run_id === r.id)) calls.push({ run_id: r.id, title: PLAIN_WAIT[r.pause_reason] || 'Waiting for you', body: '', at: new Date(r.updated_at).getTime(), expires_in_ms: Math.max(0, new Date(r.updated_at).getTime() + TASK_MS - Date.now()), task_id: `${r.id}:p`, step: 1, kind: 'look', image: null, reason: r.pause_reason })
     const runs = await db('automation_queue as q').leftJoin('profiles as p', 'p.id', 'q.profile_id')
       .whereIn('q.id', calls.map(c => c.run_id)).select('q.id', 'q.profile_id', 'q.workflow_id', 'p.full_name', 'q.status as run_status', 'q.pause_reason as reason')
     const of = new Map(runs.map(r => [r.id, r]))
@@ -1001,6 +1008,8 @@ router.get('/automations/:id/login', async (req, res) => {
  */
 export async function runTab(db, runId) {
   // A site's sign-in tab, not a run's ("site-tasheer"): the same live view.
+  // A move's browser (Transitions, "tr-pextran"): the same live view.
+  if (/^tr-/.test(String(runId))) return (await import('../services/robotBrowsers.js')).liveTabOf(String(runId))
   if (/^site-/.test(String(runId))) return (await import('../services/sessionKeeper.js')).siteTab(String(runId)) || (await import('../services/tasheerSession.js')).siteTab(String(runId))
   const run = await db('automation_queue').where('id', runId).first('id', 'workflow_id', 'status').catch(() => null)
   if (!run) return null
@@ -1067,8 +1076,48 @@ function scrollPage(dx, dy) {
   target.scrollBy({ left: dx, top: dy, behavior: 'instant' })
 }
 
+// The live view as a real browser (2026-11-21): the person's own mouse (move,
+// press, release: hover, drag, select), wheel, keys with Ctrl/Shift/Alt, and
+// paste, straight into the tab over CDP — one message each, no page script.
+const MODS = { alt: 1, ctrl: 2, meta: 4, shift: 8 }
+const modsOf = (b) => Object.entries(MODS).reduce((m, [k, v]) => m | (b[k] ? v : 0), 0)
+const BUTTONS = ['left', 'middle', 'right']
+const cdpOf = (page) => page.__adalInputCdp || (page.__adalInputCdp = page.createCDPSession().catch(e => { page.__adalInputCdp = null; throw e }))
+async function viewSize(page) {
+  if (page.__adalSize && Date.now() - page.__adalSize.at < 2000) return page.__adalSize
+  const [w, h] = await page.evaluate(() => [window.innerWidth, window.innerHeight])
+  return (page.__adalSize = { w, h, at: Date.now() })
+}
+const NAMED_KEY = /^(F\d{1,2}|Insert|Shift|Control|Alt|Meta|CapsLock|ContextMenu)$/
+async function rawInput(page, b) {
+  const cdp = await cdpOf(page)
+  const { w, h } = await viewSize(page)
+  const x = Math.max(0, Math.min(1, Number(b.x) || 0)) * w, y = Math.max(0, Math.min(1, Number(b.y) || 0)) * h
+  const modifiers = modsOf(b)
+  if (b.kind === 'mouse') {
+    const type = { move: 'mouseMoved', down: 'mousePressed', up: 'mouseReleased' }[b.type]
+    if (!type) throw Object.assign(new Error('Unknown mouse input'), { status: 400 })
+    const button = type === 'mouseMoved' ? (b.buttons ? 'left' : 'none') : (BUTTONS[Number(b.button) || 0] || 'left')
+    await cdp.send('Input.dispatchMouseEvent', { type, x, y, button, buttons: Number(b.buttons) || 0, clickCount: type === 'mouseMoved' ? 0 : Math.max(1, Math.min(3, Number(b.clickCount) || 1)), modifiers })
+  } else if (b.kind === 'wheel') {
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x, y, deltaX: Math.max(-3000, Math.min(3000, Number(b.dx) || 0)), deltaY: Math.max(-3000, Math.min(3000, Number(b.dy) || 0)), modifiers })
+  } else if (b.kind === 'paste') {
+    await cdp.send('Input.insertText', { text: String(b.text || '').slice(0, 20000) })
+  }
+}
+
 /** One tap, key, scroll or move in a run's tab (the phone's / Admin's live view). */
 export async function liveInput(page, b = {}) {
+  if (['mouse', 'wheel', 'paste'].includes(b.kind)) return rawInput(page, b)
+  if (b.kind === 'key' && (modsOf(b) || (String(b.key || '').length === 1) || NAMED_KEY.test(String(b.key || '')))) {
+    // A key with Ctrl/Alt/Shift (Ctrl+A, Ctrl+C, Shift+Tab …), any character, F1–F12.
+    const key = String(b.key || '')
+    if (!key || key.length > 12) throw Object.assign(new Error('Unknown key'), { status: 400 })
+    const held = ['Control', 'Shift', 'Alt', 'Meta'].filter(m => b[{ Control: 'ctrl', Shift: 'shift', Alt: 'alt', Meta: 'meta' }[m]])
+    for (const m of held) await page.keyboard.down(m)
+    try { await page.keyboard.press(key === 'Space' ? ' ' : key) } finally { for (const m of held.reverse()) await page.keyboard.up(m).catch(() => {}) }
+    return
+  }
   if (b.kind === 'click') {
     const [w, h] = await page.evaluate(() => [window.innerWidth, window.innerHeight])
     const x = Math.max(0, Math.min(1, Number(b.x))) * w, y = Math.max(0, Math.min(1, Number(b.y))) * h
@@ -1109,7 +1158,7 @@ function isSignIn(el) {
 /** A person's tap or Enter that signs in to Musaned, seen before it happens (the page goes after). */
 export async function pressesSignIn(page, b = {}) {
   if (!/(^|\.)(wahid\.sa|musaned\.com\.sa)$/.test(hostOf(page.url()))) return false
-  if (b.kind === 'click') return page.evaluate(`(${isSignIn})(document.elementFromPoint(${Number(b.x)} * innerWidth, ${Number(b.y)} * innerHeight))`)
+  if (b.kind === 'click' || (b.kind === 'mouse' && b.type === 'up')) return page.evaluate(`(${isSignIn})(document.elementFromPoint(${Number(b.x)} * innerWidth, ${Number(b.y)} * innerHeight))`)
   if (b.kind === 'key' && b.key === 'Enter') return page.evaluate(() => document.activeElement?.type === 'password')
   if (b.kind === 'tap' || b.kind === 'tapAt') {
     const el = await (await import('../services/pageMirror.js')).handleOf(page, b.id)
@@ -1150,7 +1199,13 @@ router.get('/automations/:id/mirror', async (req, res) => {
 router.post('/automations/:id/input', async (req, res) => {
   const page = await liveTab(req)
   if (!page) return res.status(404).json({ error: 'This run has no open tab.' })
-  try { res.json({ ok: true, code: await personInput(req.app.locals.db, req.params.id, page, req.body || {}) }) }
+  const b = req.body || {}
+  // Mouse moves and the wheel: answered at once, done in order behind (a drag stays smooth).
+  if ((b.kind === 'mouse' && b.type === 'move') || b.kind === 'wheel') {
+    page.__adalInputChain = (page.__adalInputChain || Promise.resolve()).then(() => liveInput(page, b)).catch(() => {})
+    return res.json({ ok: true })
+  }
+  try { await page.__adalInputChain; res.json({ ok: true, code: await personInput(req.app.locals.db, req.params.id, page, b) }) }
   catch (e) { res.status(e.status || 500).json({ error: e.message }) }
 })
 

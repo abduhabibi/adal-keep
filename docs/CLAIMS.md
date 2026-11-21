@@ -11,3 +11,8 @@ Other sessions: don't change these files; if this claim shows no progress for 5 
 ## done-and-tasheer
 
 done-and-tasheer: mark-as-done advances stage; Tasheer captcha by notification. Claimed by CEO session, 2026-11-21 08:49 +03:00. Free after 5 minutes without updates.
+
+## phone-buttons
+
+phone-buttons: every phone button tested on the emulator; clearing tasks. CEO session, 2026-11-21 08:52 +03:00. Branch phone-buttons.
+Files: adal-phone/**, task clear/remove routes and the phone task views.

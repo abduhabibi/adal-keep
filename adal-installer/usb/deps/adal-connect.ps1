@@ -58,13 +58,37 @@ try {
 Say "[2/5] Adal support key..."
 $sshDir = "$env:ProgramData\ssh"
 $logDir = Join-Path $sshDir 'logs'
+# The number is read from this PC itself; asking is the last resort.
+function InstDirEarly($k, $d) { try { (Get-ItemProperty "HKLM:\Software\$k" -ErrorAction Stop).InstallDir } catch { $d } }
+function NumFromJson($f) {
+  try { if (Test-Path $f) { $n = [string]((Get-Content $f -Raw | ConvertFrom-Json).pc_number); if ($n -match '^\d{5}$') { return $n } } } catch {}
+  return $null
+}
+function NumFromConf($f) {
+  try { if (Test-Path $f) { $l = Get-Content $f | Where-Object { $_ -match '^\s*ADAL_PC_NUMBER\s*=\s*"?(\d{5})"?\s*$' } | Select-Object -First 1; if ($l -match '(\d{5})') { return $Matches[1] } } } catch {}
+  return $null
+}
+if ($PcNumber -notmatch '^\d{5}$') {
+  $mDir = InstDirEarly 'AdalKeep' 'C:\AdalKeep'
+  $cDir = InstDirEarly 'AdalKeepCompanion' 'C:\AdalKeepCompanion'
+  $mj = { NumFromJson (Join-Path $mDir 'backend\data\main-pc.json') }
+  $cc = { NumFromConf (Join-Path $cDir 'companion.conf') }
+  $cj = { $r = $null; foreach ($f in @((Join-Path $cDir 'main-pc.json'), (Join-Path $cDir 'backend\data\main-pc.json'), (Join-Path $cDir 'data\main-pc.json'))) { $r = NumFromJson $f; if ($r) { break } }; $r }
+  if ($Role -eq 'Main') { $cands = @(@($mj, "main-pc.json of this Main PC"), @($cc, "companion.conf"), @($cj, "main-pc.json in the Companion folder")) }
+  else { $cands = @(@($cc, "companion.conf of this Companion"), @($cj, "main-pc.json in the Companion folder"), @($mj, "main-pc.json of the Main install")) }
+  foreach ($c in $cands) {
+    $n = & $c[0]
+    if ($n) { $PcNumber = $n; Say "      agency PC number $PcNumber (read from $($c[1]))"; break }
+  }
+}
 # A USB made for one agency carries just its key: that number, without asking.
 if ($PcNumber -notmatch '^\d{5}$') {
   $only = @(Get-ChildItem (Join-Path $PSScriptRoot 'support-keys') -Filter '*.pub' -ErrorAction SilentlyContinue | Where-Object { $_.BaseName -match '^\d{5}$' })
-  if ($only.Count -eq 1) { $PcNumber = $only[0].BaseName; Say "      agency PC number $PcNumber (the key on this USB)" }
+  if ($only.Count -eq 1) { $PcNumber = $only[0].BaseName; Say "      agency PC number $PcNumber (the only key file on this USB)" }
 }
 while ($PcNumber -notmatch '^\d{5}$') {
-  $PcNumber = (Read-Host "      The agency's 5-digit PC number (Main PC: Adal Keep -> Settings -> Main PC)").Trim()
+  Say "      Could not find this PC's number by itself."
+  $PcNumber = (Read-Host "      The agency's 5-digit PC number (Main PC: Adal Keep -> Settings -> Main PC; or the number in C:\AdalKeep\backend\data\main-pc.json)").Trim()
 }
 $keyFile = Join-Path $PSScriptRoot "support-keys\$PcNumber.pub"
 $agencyKey = $null

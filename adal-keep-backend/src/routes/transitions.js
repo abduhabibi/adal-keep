@@ -5,6 +5,38 @@ import { needFeature } from '../services/plans.js'
 
 const router = express.Router()
 
+/** The browser and out-of-sight tab a move works in, on the best PC; shown in Browsers as "tr-<source>". */
+export async function robotTabForMove(req, sourceId, link, deps = {}) {
+  const { SOURCES } = await import('../services/transition.js')
+  const source = SOURCES[sourceId]
+  const url = link || source?.url
+  if (!source || !url) return {}
+  const rb = deps.rb || await import('../services/remoteBrowsers.js')
+  const { ipOf } = await import('../services/networkGate.js')
+  const from = req.pcAccess ? rb.deviceForRequest(req.pcAccess, ipOf(req)) : ''
+  const { placeTransition } = await import('../services/sharePower.js')
+  const c = await placeTransition(url, { from }).catch(() => ({ to: from }))
+  const dev = c.to || ''
+  const B = await import('../services/browser.js')
+  const browser = dev ? await rb.browserForDevice(dev, { quiet: true }).catch(() => null) : null
+  const b = browser || await B.getBrowser()
+  const pcId = browser ? dev : ''
+  const { isRunTab } = await import('../services/tabManager.js')
+  const { registerLiveTab, updateLiveTab } = await import('../services/robotBrowsers.js')
+  const key = `tr-${sourceId}`
+  let host = ''
+  try { host = new URL(url).hostname } catch {}
+  const tab = async (reuse) => {
+    let page = null
+    if (reuse && host) for (const p of await b.pages().catch(() => [])) { try { if (new URL(p.url()).hostname === host && !isRunTab(p)) { page = p; break } } catch {} }
+    page = page || await B.newRunTab(b, null, { quiet: true })
+    registerLiveTab(key, page, { site: source.name, girl: 'Transition', pc_id: pcId, status: 'Sign in', needs_you: true, task: `Sign in to ${source.name}` })
+    return page
+  }
+  const page = await tab(true)
+  return { browser: b, personPage: page, openForPerson: () => tab(false), sendAway: async () => updateLiveTab(key, { status: 'Copying', needs_you: false, task: null }) }
+}
+
 // The Pextran address used last time, kept on this PC: the box shows it again (any device).
 const LINK_KEY = 'transition_pextran_link'
 router.get('/transitions', async (req, res) => {
@@ -24,18 +56,10 @@ router.post('/transitions/:source/start', async (req, res) => {
     }
     const accountId = Number(req.body?.account_id) || null
     const limit = Math.max(0, Math.min(1000, Number(req.body?.limit) || 0)) || undefined
-    // Started on an Adal Companion: the sign-in window and the copy work in its browser, on its screen.
-    let here = {}
-    if (req.pcAccess) {
-      const rb = await import('../services/remoteBrowsers.js')
-      const { ipOf } = await import('../services/networkGate.js')
-      const dev = rb.deviceForRequest(req.pcAccess, ipOf(req))
-      if (dev) {
-        const t = await rb.tabForPerson(dev).catch(e => { console.warn('[transition] Companion browser:', e.message); return null })
-        // Its sign-in window, and a new one if the site signs out later: on the Companion.
-        if (t) here = { browser: t.browser, personPage: t.page, openForPerson: async () => (await rb.tabForPerson(dev)).page }
-      }
-    }
+    // The move works like the robots (2026-11-21): on the PC of the office that
+    // finishes it first, in a tab out of sight there (a free tab already on the
+    // site first), signed in through the live view in Browsers.
+    const here = await robotTabForMove(req, req.params.source, link).catch(e => { console.warn('[transition] browser:', e.message); return {} })
     res.json(startTransition(req.app.locals.db, req.params.source, link, { ...(accountId ? { accountId } : {}), ...(limit ? { limit } : {}), ...here }))
   } catch (e) { res.status(e.status || 400).json({ error: e.message, ...(e.feature ? { feature: e.feature, plan: e.plan } : {}) }) }
 })

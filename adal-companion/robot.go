@@ -276,6 +276,10 @@ func announceRobot() {
 			for k, v := range powerNow() {
 				body[k] = v
 			}
+			// Its internet: the run goes to the PC that finishes first (netprobe.go).
+			for k, v := range netNow() {
+				body[k] = v
+			}
 			if _, err := mainJSON(http.MethodPost, "/api/companion/robot-browser", body, keys.AccessKey, nil); err != nil {
 				log.Printf("🤖 robot browser not announced: %v", err)
 			}

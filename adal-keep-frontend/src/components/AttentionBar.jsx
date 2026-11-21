@@ -38,8 +38,12 @@ const phone = () => window.Capacitor?.Plugins?.AdalDiscovery
 const keyOf = (c) => `${c.run_id}:${c.at}`
 const send = (run, text) => api.post(`/automations/${run}/captcha`, { text })
 
-function Call({ c, onDone, onHide }) {
-  const navigate = useNavigate()
+// Short words for each kind of step (backend attention.js kindOf).
+const KIND = { captcha: 'Captcha', tick: 'Tick the box', slot: 'Pick a time', code: 'Code', choice: 'Choose', signin: 'Sign in', confirm: 'Check and save', answer: 'Answer', look: 'Look' }
+const left = (ms) => { const s = Math.max(0, Math.round(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` }
+
+/** One human step of a run: a task, answered here or in its live browser (one click). */
+function Task({ c, onDone, onOpen }) {
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const answer = async (value) => {
@@ -49,14 +53,12 @@ function Call({ c, onDone, onHide }) {
     catch (er) { toast.error(err(er)) }
     setBusy(false)
   }
-  const [live, setLive] = useState(false)
-  const open = () => window.__ADAL_CLOUD ? navigate(`/profiles/${c.profile_id}?run=${c.run_id}&t=${Date.now()}`) : setLive(true)
   return (
-    <li className="relative space-y-2 rounded-2xl border border-slate-200 bg-white p-3 pr-8 shadow-xl dark:border-slate-700 dark:bg-slate-900">
-      <button type="button" aria-label="Hide" onClick={onHide} className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800">✕</button>
-      <button type="button" onClick={open} className="block w-full text-left">
-        <p className="truncate text-xs font-bold">{c.full_name || `Run #${c.run_id}`}</p>
-        <p className="text-xs text-slate-600 dark:text-slate-300">{c.title}</p>
+    <li className="space-y-1.5 border-t border-slate-100 pt-2 first:border-0 first:pt-0 dark:border-slate-800">
+      <button type="button" onClick={onOpen} className="flex w-full items-baseline gap-2 text-left">
+        <span className="shrink-0 rounded bg-amber-100 px-1.5 text-[10px] font-bold text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">{KIND[c.kind] || 'Task'}</span>
+        <span className="min-w-0 flex-1 truncate text-xs text-slate-700 dark:text-slate-200">{c.title}</span>
+        {c.expires_in_ms > 0 && <span className="shrink-0 text-[10px] tabular-nums text-slate-400" title="Then the run waits, paused">{left(c.expires_in_ms)}</span>}
       </button>
       {c.asks && c.choices && (
         <div className="flex flex-wrap gap-1.5">
@@ -72,10 +74,25 @@ function Call({ c, onDone, onHide }) {
         </form>
       )}
       <span className="flex gap-3">
-        <button type="button" onClick={open} className="text-xs font-semibold text-teal-700 hover:underline dark:text-teal-400">Open →</button>
+        {c.run_id > 0 && <button type="button" onClick={onOpen} className="text-xs font-semibold text-teal-700 hover:underline dark:text-teal-400">Open browser →</button>}
         {c.confirm && <button type="button" onClick={() => api.post(`/automations/${c.run_id}/attention/done`).then(onDone).catch(e => toast.error(err(e)))} className="text-xs font-semibold text-slate-500 hover:underline">Done ✓</button>}
       </span>
-      {live && createPortal(<Suspense fallback={null}><LiveTab runId={c.run_id} startFull onClose={() => setLive(false)} /></Suspense>, document.body)}
+    </li>
+  )
+}
+
+/** A run's human steps together: who it is for, then one task per step. */
+function RunTasks({ run, tasks, onDone, onHide }) {
+  const navigate = useNavigate()
+  const [live, setLive] = useState(false)
+  const first = tasks[0]
+  const open = () => run <= 0 ? null : window.__ADAL_CLOUD ? navigate(`/profiles/${first.profile_id}?run=${run}&t=${Date.now()}`) : setLive(true)
+  return (
+    <li className="relative space-y-2 rounded-2xl border border-slate-200 bg-white p-3 pr-8 shadow-xl dark:border-slate-700 dark:bg-slate-900">
+      <button type="button" aria-label="Hide" onClick={onHide} className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800">✕</button>
+      <p className="truncate text-xs font-bold">{first.full_name || `Run #${run}`}{tasks.length > 1 ? ` · ${tasks.length} steps` : ''}</p>
+      <ul className="space-y-2">{tasks.map(c => <Task key={keyOf(c)} c={c} onDone={onDone} onOpen={open} />)}</ul>
+      {live && createPortal(<Suspense fallback={null}><LiveTab runId={run} startFull onClose={() => setLive(false)} /></Suspense>, document.body)}
     </li>
   )
 }
@@ -86,31 +103,33 @@ export default function AttentionBar() {
   const [hidden, setHidden] = useState(() => { try { return new Set(JSON.parse(localStorage.getItem('adal-calls-removed') || '[]')) } catch { return new Set() } })
   useEffect(() => { try { localStorage.setItem('adal-calls-removed', JSON.stringify([...hidden].slice(-300))) } catch {} }, [hidden])
   const seen = useRef(null)
+  const runsHeard = useRef(new Set())   // one sound and one notice per run, not per step
   const load = () => api.get('/automations/attention').then(r => {
     // A phone does not get what goes to the PC first (an Enjaz captcha: 30 s) until then.
     const onPhone = !!phone() || phoneCloud()
     const list = (r.data || []).filter(c => !onPhone || !(c.phone_wait_ms > 0))
     const fresh = seen.current ? list.filter(c => !seen.current.has(keyOf(c))) : []
-    // Every new notification rings (asked on 2026-11-10), on this PC too.
-    if (fresh.length) beep()
+    const newRuns = fresh.filter(c => !runsHeard.current.has(c.run_id))
+    if (newRuns.length) beep()
     for (const c of fresh) {
+      const firstOfRun = !runsHeard.current.has(c.run_id)
+      runsHeard.current.add(c.run_id)
       const title = c.full_name || 'Adal Keep'
-      // On the PC a captcha picture is always a Windows notification (even with Adal Keep in front).
-      if (!onPhone && c.asks && c.image && window.Notification?.permission === 'granted') {
-        const n = new Notification(`${title}: ${c.title}`, { body: 'Type these numbers in Adal Keep (the bar at the top).', image: c.image, icon: c.image, tag: `captcha-${c.run_id}`, requireInteraction: true })
+      // The phone app: each step is its own Android notification, answered from there.
+      if (phone() && document.hidden) { phone().notifyCall?.({ run: c.run_id, at: c.at || 0, profile: c.profile_id || 0, title, body: c.title, image: c.image || undefined, asks: !!c.asks, label: c.label, choices: c.choices || undefined }); continue }
+      if (!firstOfRun || onPhone || window.Notification?.permission !== 'granted') continue
+      // On the PC: one desktop notice for a run (with the captcha's picture when it starts with one).
+      if (c.asks && c.image) {
+        const n = new Notification(`${title}: ${c.title}`, { body: 'Type it in Adal Keep (Tasks, top right).', image: c.image, icon: c.image, tag: `run-${c.run_id}`, requireInteraction: true })
         n.onclick = () => { window.focus(); n.close() }
-        continue
-      }
-      // Out of sight: the phone's or the PC's own notification.
-      if (!document.hidden) continue
-      if (phone()) phone().notifyCall?.({ run: c.run_id, at: c.at || 0, profile: c.profile_id || 0, title, body: c.title, image: c.image || undefined, asks: !!c.asks, label: c.label, choices: c.choices || undefined })
-      else if (window.Notification?.permission === 'granted') {
-        const n = new Notification(title, { body: c.title, tag: String(c.run_id), silent: true })
+      } else if (document.hidden) {
+        const n = new Notification(title, { body: c.title, tag: `run-${c.run_id}`, silent: true })
         n.onclick = () => { window.focus(); n.close() }
       }
     }
+    const now = new Set(list.map(c => c.run_id))
+    for (const run of runsHeard.current) if (!now.has(run)) runsHeard.current.delete(run)
     if (seen.current) {
-      const now = new Set(list.map(c => c.run_id))
       for (const k of seen.current) { const run = Number(k.split(':')[0]); if (!now.has(run)) phone()?.cancelCall?.({ run }) }
     }
     if (list.length && window.Notification?.permission === 'default' && !phone()) Notification.requestPermission().catch(() => {})
@@ -132,19 +151,23 @@ export default function AttentionBar() {
   }, [])
   const shown = calls.filter(c => !hidden.has(keyOf(c)))
   if (!shown.length) return null
-  const hide = (c) => { setHidden(h => new Set(h).add(keyOf(c))); phone()?.cancelCall?.({ run: c.run_id }) }
+  const groups = new Map()
+  for (const c of shown) groups.set(c.run_id, [...(groups.get(c.run_id) || []), c])
+  const hide = (tasks) => { setHidden(h => { const n = new Set(h); for (const c of tasks) n.add(keyOf(c)); return n }); phone()?.cancelCall?.({ run: tasks[0].run_id }) }
   return (
-    <>
-      {shown.length > 0 && (
-        <ul className="fixed right-3 top-3 z-[70] max-h-[calc(100vh-1.5rem)] w-80 max-w-[calc(100vw-1.5rem)] space-y-2 overflow-y-auto">
-          {shown.map(c => <Call key={keyOf(c)} c={c} onDone={load} onHide={() => hide(c)} />)}
-        </ul>
-      )}
-    </>
+    <ul className="fixed right-3 top-3 z-[70] max-h-[calc(100vh-1.5rem)] w-80 max-w-[calc(100vw-1.5rem)] space-y-2 overflow-y-auto">
+      {[...groups.entries()].map(([run, tasks]) => <RunTasks key={run} run={run} tasks={tasks.sort((a, b) => (a.step || 0) - (b.step || 0))} onDone={load} onHide={() => hide(tasks)} />)}
+    </ul>
   )
 }
 
-/** Settings: opening with the PC needs a yes here; the browser for a person's own use. */
+/** Quit Adal Keep on the main PC: the server, the agents, WhatsApp, the Companions' connection. */
+async function quit() {
+  if (!window.confirm('Quit Adal Keep?\n\nThe server, the robots and WhatsApp stop on this PC, and the Companions and phones cannot connect until Adal Keep is opened again from its icon.')) return
+  try { await api.post('/app/quit') } catch {}
+  toast.success('Adal Keep is stopping. Open it again from its icon.')
+}
+
 export function StartupCard() {
   const [on, setOn] = useState(false)
   useEffect(() => { api.get('/main-pc/open-at-start').then(r => setOn(!!r.data.on)).catch(() => {}) }, [])
@@ -156,6 +179,10 @@ export function StartupCard() {
       <label className="flex items-center gap-2 text-sm font-semibold">
         <input type="checkbox" checked={on} onChange={e => set(e.target.checked)} /> Open Adal Keep when this PC starts
       </label>
+      {/* Quit: out of the sidebar (2026-11-21, Browsers took its place); here, quiet, after a Yes. */}
+      {here() && /Windows/i.test(navigator.userAgent) && import.meta.env.VITE_ADMIN !== '1' && (
+        <button type="button" onClick={quit} className="text-xs font-semibold text-slate-500 hover:text-rose-600 hover:underline">Quit Adal Keep on this PC…</button>
+      )}
     </section>
   )
 }

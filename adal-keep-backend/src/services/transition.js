@@ -368,7 +368,7 @@ export async function musanedSignIn(db, page, accountId, say, check) {
       // Musaned's "Access Denied" (/403): a page opened before the agency was chosen.
       // Back to its front page, where the agency's own card is chosen again.
       if (at && at.host === 'tawtheeq.musaned.com.sa' && /^\/403\b/.test(at.pathname)) {
-        if (++denied > 3) { say('Musaned keeps saying "Access Denied": choose the agency on the first Musaned page in that window'); return }
+        if (++denied > 3) { say('Musaned keeps saying "Access Denied": choose the agency on the first Musaned page (open it in Browsers)'); return }
         say('Musaned said "Access Denied" — choosing the agency again')
         await page.goto('https://tawtheeq.musaned.com.sa/', { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {})
         await sleep(3000)
@@ -385,7 +385,7 @@ export async function musanedSignIn(db, page, accountId, say, check) {
   } catch (e) {
     if (e.stopped) throw e
     console.warn('[transition musaned] sign-in with the saved account:', e.message)
-    say('Sign in to Musaned in the window that opened')
+    say('Sign in to Musaned: open it in Browsers')
   }
 }
 
@@ -425,7 +425,7 @@ export function startTransition(db, id, link, deps = {}) {
   if (['signing-in', 'copying'].includes(stateOf(id).status)) return stateOf(id)
   const url = link || source.url
   if (!url) throw new Error('Paste the address first')
-  set(id, { ...blank(), status: 'signing-in', step: deps.resumed ? `Going on from where it stopped: sign in to ${source.name} if the window asks` : `Sign in to ${source.name} in the window that opened`, site: url })
+  set(id, { ...blank(), status: 'signing-in', step: deps.resumed ? `Going on from where it stopped: sign in to ${source.name} in Browsers if it asks` : `Sign in to ${source.name}: open it in Browsers`, site: url })
   if (!deps.limit && !deps.page) noteRunning(id, url, deps.resumed)   // (tests and trial moves are not noted)
   // A move takes hours on a slow line: the PC must not sleep in the middle.
   const letSleep = (deps.keepAwake || keepAwake)(`moving from ${source.name}`)
@@ -699,7 +699,7 @@ async function run(db, id, source, url, deps) {
         set: (patch) => set(id, patch), state: () => stateOf(id), save: (person) => saveProfile(db, id, source, person),
         // The sign-in ran out: a window for a person, then back out of sight.
         signIn: async () => {
-          set(id, { status: 'signing-in', step: `${source.name} signed out. Sign in again in the window that opened: the copy goes on by itself` })
+          set(id, { status: 'signing-in', step: `${source.name} signed out. Sign in again in Browsers: the copy goes on by itself` })
           const again = await (deps.openForPerson || openForPerson)()
           windows.set(id, again)
           try {

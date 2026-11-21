@@ -19,7 +19,7 @@ import path from 'path'
 import { spawn } from 'child_process'
 import { fileURLToPath } from 'url'
 import { getBrowser, openBrowserIfAny } from './browser.js'
-import { needPerson, askCaptcha, doneWith, waiting, isWaiting, onWait } from './attention.js'
+import { needPerson, askCaptcha, doneWith, waiting, isWaiting, onWait, onTaskExpired, forgetRun } from './attention.js'
 import { runFullWorkflow } from './lmisWorkflow.js'
 import { decideAgencyActions } from './jev/agencyManager.js'
 import { getActiveEmployee } from './activeEmployee.js'
@@ -56,11 +56,12 @@ let _agencyRunning = false
 // --------------------------------------------------------------------------
 let _lastBeep = 0
 export function beep() {
-  if (Date.now() - _lastBeep < 3000) return     // several calls at once: one beep
+  if (Date.now() - _lastBeep < 3000 || process.env.ADAL_NO_SOUND === '1') return     // several calls at once: one beep
   _lastBeep = Date.now()
   try {
     let cmd, args
-    if (process.platform === 'win32') { cmd = 'powershell'; args = ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', '[console]::beep(1000,180)'] }
+    // Windows' own soft notification sound; the plain beep only where it is missing.
+    if (process.platform === 'win32') { cmd = 'powershell'; args = ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', "$f=\"$env:WINDIR\\Media\\Windows Notify System Generic.wav\"; if (Test-Path $f) { (New-Object Media.SoundPlayer $f).PlaySync() } else { [console]::beep(880,120) }"] }
     else if (process.platform === 'darwin') { cmd = 'afplay'; args = ['/System/Library/Sounds/Tink.aiff'] }
     else { cmd = 'paplay'; args = ['/usr/share/sounds/freedesktop/stereo/message.oga'] }
     const child = spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: true })
@@ -68,6 +69,38 @@ export function beep() {
     child.unref()
   } catch {}
 }
+
+/** One gentle sound per run, not per step (asked on 2026-11-21): its next human steps are quiet tasks. */
+const _beeped = new Set()
+export function beepFor(runId) {
+  const id = Number(runId)
+  if (_beeped.has(id)) return false
+  _beeped.add(id)
+  beep()
+  return true
+}
+export const _forgetBeep = (runId) => _beeped.delete(Number(runId))
+
+// A human step nobody answered in 5 minutes (attention.js): the run stops
+// before its next step — nothing half-sent — and waits, paused, for a person
+// to press Continue. Its tab stays as it is.
+const _expired = new Set()
+export const pausedForNoAnswer = (runId) => _expired.has(Number(runId))
+export const NO_ANSWER = 'No answer for 5 minutes: paused before anything was sent. Press Continue when someone is there.'
+let _expiryHooked = false
+function hookTaskExpiry(db) {
+  if (_expiryHooked) return
+  _expiryHooked = true
+  onTaskExpired(async (runId, task) => {
+    const row = await db('automation_queue').where('id', runId).first('status').catch(() => null)
+    if (row?.status !== 'running') return          // paused already: only its task goes
+    _expired.add(Number(runId))
+    markCancelled(runId)
+    console.log(`[worker] run #${runId}: "${task?.title}" had no answer for 5 minutes — pausing`)
+  })
+}
+
+export const _hookTaskExpiryForTest = (db) => { _expiryHooked = false; hookTaskExpiry(db) }
 
 // --------------------------------------------------------------------------
 // File resolution
@@ -175,6 +208,14 @@ async function executeRun(db, page, job) {
   }
 
   const handleCancelled = async () => {
+    // Stopped because a human step had no answer for 5 minutes: paused, not cancelled.
+    if (_expired.delete(Number(runId))) {
+      try {
+        await db('automation_queue').where('id', runId).update({ status: 'paused', pause_reason: NO_ANSWER, updated_at: new Date().toISOString() })
+        await onLog('warn', `⏸ ${NO_ANSWER}`)
+      } catch {}
+      return true
+    }
     try {
       await db('automation_queue').where('id', runId).update({
         status: 'cancelled',
@@ -220,7 +261,10 @@ async function executeRun(db, page, job) {
 
   const notify = async (title, body, level = 'info', opts = {}) => {
     try {
-      const [taskId] = await db('tasks').insert({
+      // A human step (sign-in, code, captcha, Save) is a task of the run (attention.js),
+      // gone when answered or after 5 minutes: no lasting notice for it.
+      const human = !!(opts.login || opts.confirm)
+      const [taskId] = human ? [Date.now()] : await db('tasks').insert({
         type: 'automation', title, description: body || '',
         status: 'pending', profile_id: job.profile_id, assigned_to: 1,
         is_ai_created: true, created_at: new Date().toISOString(), payload: JSON.stringify({ run: runId }),
@@ -232,8 +276,8 @@ async function executeRun(db, page, job) {
       if (onLog) await onLog(level, `🔔 ${title}`)
       // A sign-in, code or reCAPTCHA waits for a person: it stays in the bar
       // until the run goes on (its next "✓"). Paused runs show from the queue.
-      if (opts.login || opts.confirm) needPerson(runId, title, body, { confirm: !!opts.confirm })
-      beep()
+      if (human) needPerson(runId, title, body, { confirm: !!opts.confirm })
+      beepFor(runId)
     } catch (e) {
       console.error('[notify] failed:', e.message)
     }
@@ -304,39 +348,30 @@ async function executeRun(db, page, job) {
   }
   ctx.isCancelled = () => isCancelled(runId)
   // Enjaz (the visa platform): the captcha goes to this PC first (a Windows
-  // notification with its picture); nobody in 30 s → to the phones; nobody in
-  // 2 minutes → the run is cancelled (forgotten), not left waiting.
+  // notification with its picture); nobody in 30 s → to the phones. Nobody in
+  // 5 minutes → its task goes and the run is paused (attention.js, hookTaskExpiry).
   const enjaz = /^mofa/.test(String(job.workflow_id || ''))
   const ringPhones = (opts) => import('./liveChannel.js').then(L => L.broadcast({ t: 'ring', id: Date.now(), title: opts?.title || 'Type the captcha', profile_id: job.profile_id, run: runId, at: Date.now() })).catch(() => {})
   const stillAsked = () => waiting().some(w => w.run_id === Number(runId) && w.asks)
   ctx.askCaptcha = (image, answer, opts) => {
     askCaptcha(runId, image, answer, enjaz ? { ...opts, phoneAfterMs: 30_000 } : opts)
-    beep()
-    if (!enjaz) { ringPhones(opts); return }
-    clearTimeout(ctx._toPhones); clearTimeout(ctx._forgotten)
+    const first = beepFor(runId)
+    if (!enjaz) { if (first) ringPhones(opts); return }
+    clearTimeout(ctx._toPhones)
     ctx._toPhones = setTimeout(() => {
       if (!stillAsked()) return
       console.log(`[worker] run #${runId}: the captcha was not typed on the PC in 30 s — to the phones`)
       ringPhones(opts)
     }, 30_000)
-    ctx._forgotten = setTimeout(async () => {
-      if (!stillAsked()) return
-      console.log(`[worker] run #${runId}: nobody typed the captcha in 2 minutes — cancelled`)
-      markCancelled(runId)
-      doneWith(runId, { force: true })
-      const now = new Date().toISOString()
-      await db('automation_queue').where('id', runId).whereNotIn('status', ['done', 'failed', 'cancelled'])
-        .update({ status: 'cancelled', pause_reason: 'Nobody typed the captcha within 2 minutes', finished_at: now, updated_at: now }).catch(() => {})
-      onLog?.('warn', 'Nobody typed the captcha within 2 minutes — the run is cancelled. Start it again when someone is there.')?.catch?.(() => {})
-    }, 120_000)
   }
-  // A field the run cannot do without: asked in the notification, kept on the
-  // profile, and the run goes on. Null when nobody answers in 30 minutes.
-  ctx.askField = (column, title, choices) => new Promise((resolve) => {
-    const giveUp = setTimeout(() => { doneWith(runId); resolve(null) }, 30 * 60_000)
+  // A field the run cannot do without: asked as a task, kept on the profile,
+  // and the run goes on. No answer in 5 minutes: the run is paused (it stops here).
+  ctx.askField = (column, title, choices) => new Promise((resolve, reject) => {
+    const watch = setInterval(() => { if (isCancelled(runId)) { clearInterval(watch); reject(Object.assign(new Error('Stopped'), { cancelled: true })) } }, 1000)
+    watch.unref?.()
     needPerson(runId, title)
     ctx.askCaptcha(null, async (text) => {
-      clearTimeout(giveUp)
+      clearInterval(watch)
       await db('profiles').where('id', job.profile_id).update({ [column]: text, updated_at: new Date().toISOString() })
       ctx.profile = { ...ctx.profile, [column]: text }
       doneWith(runId)
@@ -461,10 +496,10 @@ async function browserForJob(db, job, { quiet = false } = {}) {
     const rb = await import('./remoteBrowsers.js')
     try {
       const helping = helpedRun(job)
-      const b = await rb.browserForDevice(dev, { quiet: helping })
+      const b = await rb.browserForDevice(dev, { quiet: true })
       if (!quiet) await appendLog(db, job.id, helping
         ? `Working in ${rb.deviceOf(b)?.name || 'the Companion'}'s Adal Browser for this PC (out of sight there)`
-        : `Working in ${rb.deviceOf(b)?.name || 'the Companion'}'s Adal Browser (on that PC's screen)`)
+        : `Working in ${rb.deviceOf(b)?.name || 'the Companion'}'s Adal Browser (out of sight there)`)
       return b
     } catch (e) {
       if (!quiet) await appendLog(db, job.id, `The Companion's browser could not be reached (${e.message}) — working on the main PC instead`, 'warn')
@@ -565,6 +600,8 @@ async function runJob(db, job) {
     } catch {}
     try { await unregisterTab(job.id) } catch {}
     clearCancelled(job.id)
+    _expired.delete(Number(job.id))
+    if (row?.status !== "paused") { forgetRun(job.id); _forgetBeep(job.id) }
   }
 }
 
@@ -624,6 +661,9 @@ function runs(db) {
     })
     reportRuns(() => _runs.snapshot().running.length)
     onWait(() => setTimeout(() => _runs?.drain(), 50))
+    hookTaskExpiry(db)
+    // This PC's internet, measured while no robot works (services/sharePower.js picks the PC by it).
+    import('./netQuality.js').then(n => n.startNetProbe({ busy: () => (_runs?.snapshot().running.length || 0) > 0 })).catch(() => {})
   }
   return _runs
 }

@@ -1,7 +1,6 @@
 import { NavLink } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
-import toast from 'react-hot-toast'
-import api from '../../services/api'
+import BrowsersSection from '../BrowsersSection'
 import { onPhone, onCompanionOnline } from '../../lib/phoneMode'
 import { inCompanion } from '../../lib/companionOnline'
 import Icon from '../shared/Icon'
@@ -54,15 +53,6 @@ export const links = [
     icon: <Icon name="bell" />,
   },
 ]
-
-// The Trash: only in the menu on the main PC itself (it opens only there).
-// The phone app is served from http://localhost too: it is never the main PC.
-/** Quit Adal Keep on the main PC: the server, the agents, WhatsApp, the Companions' connection. */
-async function quitAdalKeep() {
-  if (!window.confirm('Quit Adal Keep?\n\nThe server, the agents and WhatsApp stop on this PC, and the Companions and phones cannot connect until Adal Keep is opened again from its icon.')) return
-  try { await api.post('/app/quit') } catch {}
-  toast.success('Adal Keep is stopping. Open it again from its icon.')
-}
 
 export const onMainPC = () => ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname) && !onPhone() && !onCompanionOnline() && !window.Capacitor?.isNativePlatform?.()
 /** The Trash: on the main PC and on its Adal Companions (the same Adal Keep); never on a phone. */
@@ -181,20 +171,10 @@ export default function Sidebar({ isOpen, onToggle, collapsed: narrowWanted, onT
               <span className="shrink-0">{settingsLink.icon}</span>
               {!collapsed && <span className="truncate">{settingsLink.label}</span>}
             </NavLink>
-            {/* The main PC (Windows): closing the window keeps Adal Keep working in
-                the background; this stops it all, after a Yes. */}
-            {onMainPC() && /Windows/i.test(navigator.userAgent) && import.meta.env.VITE_DEMO !== '1' && import.meta.env.VITE_ADMIN !== '1' && (
-              <button type="button" onClick={quitAdalKeep}
-                className={`${getLinkClass({ isActive: false })} w-full ${collapsed ? 'justify-center px-0' : ''}`}
-                title={collapsed ? 'Quit Adal Keep' : ''}>
-                <span className="shrink-0">
-                  <Icon name="power" />
-                </span>
-                {!collapsed && <span className="truncate">Quit Adal Keep</span>}
-              </button>
-            )}
             {/* Daily tutor: hover to open (public demo has none) */}
           </div>
+          {/* Browsers (2026-11-21): every robot browser of the office, opened live here. It took the place of "Quit Adal Keep" (now in Settings). */}
+          {!onPhone() && import.meta.env.VITE_DEMO !== '1' && import.meta.env.VITE_ADMIN !== '1' && <BrowsersSection collapsed={collapsed} />}
         </nav>
 
       </aside>

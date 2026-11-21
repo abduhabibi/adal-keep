@@ -1033,6 +1033,7 @@ func startSelfUpdate(root string) *updater {
 		addPeerRoutes(mux, root)  // its copy and server for the other Companions (peers.go)
 		go http.Serve(ln, mux)
 		go announceRobot()
+		go probeNetwork()
 	} else {
 		log.Printf("⚠️ update sharing: %v", err)
 	}

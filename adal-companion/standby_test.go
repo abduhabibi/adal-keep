@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -217,6 +218,9 @@ func TestOfficeDoorOnlyTheMainPCWhileHandingBack(t *testing.T) {
 // A program renamed by the last update still running (its file locked): the
 // next update still goes in, the old one aside under a name of its own.
 func TestSetAsideWhenTheLastOneStillRuns(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("only Windows refuses to remove a file held open")
+	}
 	dir := t.TempDir()
 	dest := dir + `\AdalKeep.exe`
 	os.WriteFile(dest, []byte("new"), 0o644)

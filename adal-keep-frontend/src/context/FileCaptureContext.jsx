@@ -5,6 +5,17 @@ import { createContext, useContext, useState, useCallback, useEffect } from 'rea
 const PROFILES_KEY = 'adal-tray-profiles'
 const readTray = () => { try { return JSON.parse(localStorage.getItem(PROFILES_KEY) || '[]') } catch { return [] } }
 
+// This device, as each tray card names it.
+const DEVICE = (() => {
+  try {
+    if (import.meta.env.VITE_DEMO === '1') return 'Main PC'
+    if (import.meta.env.VITE_PHONE === '1' || /AdalKeepPhone/.test(navigator.userAgent || '')) return 'Phone'
+    if (location.host === '127.0.0.1:47801') return 'Companion PC'
+    if (!/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) return 'Companion PC'
+  } catch {}
+  return 'Main PC'
+})()
+
 const FileCaptureContext = createContext()
 
 export function FileCaptureProvider({ children }) {
@@ -20,7 +31,9 @@ export function FileCaptureProvider({ children }) {
   const removeProfile = useCallback((id) => setTrayProfiles(prev => prev.filter(p => p.id !== id)), [])
   const clearProfiles = useCallback(() => setTrayProfiles([]), [])
 
-  const addFiles = useCallback((fileList) => {
+  // The last files that came in: the arrival pop-up (TrayArrival.jsx) shows them.
+  const [arrival, setArrival] = useState(null) // { files, at }
+  const addFiles = useCallback((fileList, { source = 'Added', pop = true } = {}) => {
     const filesArray = Array.from(fileList).filter(f => f instanceof File)
     if (filesArray.length === 0) return 0
 
@@ -33,10 +46,18 @@ export function FileCaptureProvider({ children }) {
       if (!file.preview && file.type?.startsWith('image/')) {
         file.preview = URL.createObjectURL(file)
       }
+      // Where it came from and when (shown on its tray card).
+      if (!file.source) file.source = source
+      if (!file.device) file.device = DEVICE
+      if (!file.addedAt) file.addedAt = Date.now()
       return file
     })
 
     setCapturedFiles(prev => [...prev, ...newFiles])
+    // Files coming one after the other (a scan of several pages): one pop-up.
+    if (pop) setArrival(prev => prev && Date.now() - prev.at < 8000
+      ? { files: [...prev.files, ...newFiles], at: Date.now() }
+      : { files: newFiles, at: Date.now() })
     return newFiles.length
   }, [])
 
@@ -48,6 +69,16 @@ export function FileCaptureProvider({ children }) {
     })
   }, [])
 
+  /** Takes these files (ids) out of the tray: they were put on a profile. */
+  const removeFilesById = useCallback((ids) => {
+    const out = new Set(ids)
+    setCapturedFiles(prev => prev.filter(f => {
+      if (!out.has(f.id)) return true
+      if (f.preview) setTimeout(() => URL.revokeObjectURL(f.preview), 60000) // the pop-up may still show it
+      return false
+    }))
+  }, [])
+
   const clearAll = useCallback(() => {
     setCapturedFiles(prev => {
       prev.forEach(f => { if (f.preview) URL.revokeObjectURL(f.preview) })
@@ -56,7 +87,7 @@ export function FileCaptureProvider({ children }) {
   }, [])
 
   return (
-    <FileCaptureContext.Provider value={{ capturedFiles, setCapturedFiles, addFiles, removeFile, clearAll, trayProfiles, addProfiles, removeProfile, clearProfiles }}>
+    <FileCaptureContext.Provider value={{ capturedFiles, setCapturedFiles, addFiles, removeFile, removeFilesById, clearAll, arrival, setArrival, trayProfiles, addProfiles, removeProfile, clearProfiles }}>
       {children}
     </FileCaptureContext.Provider>
   )

@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { usePickFile, ON_PHONE } from '../shared/PickFile'
 import { useNavigate } from 'react-router-dom'
 import { createPortal } from 'react-dom'
@@ -8,6 +8,9 @@ import { useFileCapture } from '../../context/FileCaptureContext'
 import FullBodyCropper from '../FullBodyCropper'
 import { printFileOnPhone } from '../../lib/phoneApp'
 import { onPhone } from '../../lib/phoneMode'
+import { trayFilesDropped, trayFilesFromClip, typingIn, tapMode } from '../../lib/trayDrag'
+
+const MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '')
 
 /** Print a stored file (the slip's PDF) straight from the page. */
 async function printFile(f) {
@@ -187,14 +190,11 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       fileToUpload = e.dataTransfer.files[0]
     }
-    // 2. Check for Internal Tray File (via ID)
-    else if (e.dataTransfer.getData('application/x-tray-file-id')) {
-      const fileId = e.dataTransfer.getData('application/x-tray-file-id')
-      fileToUpload = capturedFiles.find(f => f.id === fileId)
-    }
-    // 3. Fallback to Global Window Reference (set by FileTray)
-    else if (window.__DRAGGED_TRAY_FILE__) {
-      fileToUpload = window.__DRAGGED_TRAY_FILE__
+    // 2. Tray files (one or several, from the tray or its arrival pop-up)
+    else if (e.dataTransfer.getData('application/x-tray-file-id') || window.__DRAGGED_TRAY_FILE__) {
+      const list = trayFilesDropped(e, capturedFiles)
+      if (list.length > 1) { handleMultiUpload(list); return }
+      fileToUpload = list[0] || null
     }
 
     if (fileToUpload) {
@@ -206,6 +206,31 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
       }
     }
   }
+
+  // Ctrl+V (Cmd+V) with the mouse over this box: the clipboard's picture or
+  // file — or tray files copied with Ctrl+C in the tray — goes into THIS box,
+  // the same way as a drop (a full body photo is cropped first). Not while
+  // typing in a text box.
+  const [hovered, setHovered] = useState(false)
+  const showPasteHint = hovered && !tapMode() && !uploading
+  useEffect(() => {
+    if (!hovered) return
+    const onPaste = (e) => {
+      if (typingIn(document.activeElement) || typingIn(e.target)) return
+      let files = Array.from(e.clipboardData?.files || [])
+      if (!files.length) {
+        for (const item of e.clipboardData?.items || []) if (item.kind === 'file') { const f = item.getAsFile(); if (f) files.push(f) }
+      }
+      if (!files.length) files = trayFilesFromClip(e.clipboardData?.getData('text/plain') || '', capturedFiles)
+      if (!files.length) return
+      e.preventDefault()
+      e.stopImmediatePropagation() // not into the tray as well
+      if (files.length > 1) handleMultiUpload(files)
+      else handleFileSelect(files[0])
+    }
+    document.addEventListener('paste', onPaste, true)
+    return () => document.removeEventListener('paste', onPaste, true)
+  }, [hovered, capturedFiles, field])
 
   // --- OTHER HANDLERS ---
 
@@ -251,7 +276,15 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
       onDragLeave={handleDragLeave}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
     >
+      {showPasteHint && !isDragOver && (
+        <>
+          <span aria-hidden="true" className="pointer-events-none absolute inset-0 z-[1] rounded-xl ring-2 ring-[var(--primary)] ring-offset-0" />
+          <span className="pointer-events-none absolute -top-2.5 right-3 z-[2] rounded-full bg-[var(--primary)] px-2 py-0.5 text-[10px] font-semibold text-white shadow dark:text-[#140e38]">{MAC ? '⌘V' : 'Ctrl+V'} to paste here</span>
+        </>
+      )}
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-1">
         <h3 className="font-display text-[13px] sm:text-sm font-bold leading-tight text-slate-800 dark:text-slate-100 flex items-center gap-2 min-w-0">

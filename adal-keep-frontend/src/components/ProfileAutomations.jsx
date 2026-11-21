@@ -12,6 +12,7 @@ import MusanedAccountPicker from './MusanedAccountPicker'
 import { usePlan, lockedFor, planName, wantFeature } from '../lib/plan'
 import { phoneCloud } from '../lib/phoneMode'
 import { shows } from '../lib/stageActions'
+import { markDone as markStepDone, DONE_LABEL } from '../lib/markDone'
 
 // What a paused run is waiting for, in words.
 const PAUSE_TEXT = {
@@ -21,6 +22,7 @@ const PAUSE_TEXT = {
   'awaiting-insurance-save':  'waiting for you to finish the insurance certificate on FetaP',
   'awaiting-epro-save':       'waiting for you to tick the pledge and press SAVE on Musaned (Contract Upload)',
   'awaiting-tasheer-save':    'waiting for you to look the applicants over and press Save on Tasheer',
+  'awaiting-tasheer-code':    'paused: nobody typed the Tasheer code within 5 minutes — press Continue to sign in again',
   'with-run':  'in a group run (one certificate / one Tasheer appointment) — it finishes with that run',
   'Done by hand': 'marked done by hand',
   'awaiting-visa-pay':        'waiting for you to pay the visa fees on the visa platform',
@@ -37,18 +39,11 @@ const CONTINUE_LABEL = {
   'awaiting-musaned-otp':     '✔ I entered the OTP — continue',
   'awaiting-human-submit':    '↻ Retry uploads',
   'awaiting-visa-pay':        '↻ Search again',
+  'awaiting-tasheer-code':    '▶ Continue (a new code comes by notification)',
 }
 
-// The person finished the last step in the run's tab: mark the run done.
-const COMPLETE_LABEL = {
-  'awaiting-human-submit': '✔️ Submit done',
-  'awaiting-human-save':   '✔️ SAVE done',
-  'awaiting-visa-save':    '✔️ Visa saved',
-  'awaiting-insurance-save': '✔️ Insurance done',
-  'awaiting-epro-save':      '✔️ EPRO saved',
-  'awaiting-tasheer-save':   '✔️ Tasheer saved',
-  'awaiting-visa-pay':       '✔️ Visa paid',
-}
+// The person finished the last step in the run's tab: the step is done and she moves on (lib/markDone).
+const COMPLETE_LABEL = DONE_LABEL
 
 // Each card's name inside its portal's box: the box already says Musaned, Wafid…
 const SHORT = {
@@ -315,10 +310,12 @@ export default function ProfileAutomations({ profileId, phase = null, after }) {
   }
 
   // A step done by hand: its tick on the card.
+  // Ticked: the shared "mark as done" (she moves to the next stage, 5 s Undo).
   const markDone = async (w, done) => {
+    if (done) { await markStepDone({ profileId, workflowId: w.id, label: w.name }); load({ quiet: true }); return }
     try {
       const r = await api.post(`/profiles/${profileId}/automations/${w.id}/mark-done`, { done })
-      toast.success(`${w.name}: ${r.data?.message || (done ? 'marked done' : 'not done')}`, { duration: 5000 })
+      toast.success(`${w.name}: ${r.data?.message || 'not done'}`, { duration: 5000 })
       load({ quiet: true })
       setTimeout(() => window.dispatchEvent(new Event('adal-profile-changed')), 300)
     } catch (e) { toast.error(`${w.name}: ${e.response?.data?.error || e.message}`, { duration: 7000 }) }
@@ -326,7 +323,13 @@ export default function ProfileAutomations({ profileId, phase = null, after }) {
 
   const resume = () => act('resume', 'Continued')
   const pause = () => act('pause', 'Paused')
-  const complete = () => act('complete', 'Marked complete', () => { setOpen(null); setDetail(null) })
+  // "✔️ … saved": the shared "mark as done" (she moves to the next stage, 5 s Undo).
+  const complete = async () => {
+    if (!detail) return
+    const r = await markStepDone({ runId: detail.id, profileId, label: COMPLETE_LABEL[detail.pause_reason] })
+    if (r) { setOpen(null); setDetail(null) }
+    load({ quiet: true })
+  }
 
   // Two clicks instead of window.confirm(): desktop webviews suppress native dialogs.
   const [cancelArmed, setCancelArmed] = useState(false)

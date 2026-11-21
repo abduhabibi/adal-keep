@@ -330,6 +330,13 @@ async function executeRun(db, page, job) {
       onLog?.('warn', 'Nobody typed the captcha within 2 minutes — the run is cancelled. Start it again when someone is there.')?.catch?.(() => {})
     }, 120_000)
   }
+  // A code asked by notification and not answered in time (Tasheer, 5 minutes):
+  // the call goes from the bar and the phones, and its task is closed.
+  ctx.forgetCaptcha = () => {
+    doneWith(runId, { force: true })
+    db('tasks').where({ status: 'pending', payload: JSON.stringify({ run: runId }) }).where('title', 'like', '%code%')
+      .update({ status: 'done', updated_at: new Date().toISOString() }).catch(() => {})
+  }
   // A field the run cannot do without: asked in the notification, kept on the
   // profile, and the run goes on. Null when nobody answers in 30 minutes.
   ctx.askField = (column, title, choices) => new Promise((resolve) => {

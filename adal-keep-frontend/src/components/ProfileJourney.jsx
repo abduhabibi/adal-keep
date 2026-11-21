@@ -13,6 +13,7 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import api from '../services/api'
+import { markDone, STEP_DONE_LABEL } from '../lib/markDone'
 
 export const SHARED = [['cv', 'CV'], ['musaned', 'Musaned'], ['selected', 'Selected'], ['wafid', 'Wafid']]
 export const BRANCHES = [
@@ -240,9 +241,10 @@ const STATE_CHIP = {
   soon: 'bg-slate-50 text-slate-400 dark:bg-slate-900 dark:text-slate-500',
 }
 
-/** One step under the fork: its state, who it is with, its documents. */
-function StepCard({ s }) {
+/** One step under the fork: its state, who it is with, its documents; "✔️ … done" when it is not. */
+function StepCard({ s, profileId, onDone }) {
   const missing = (s.docs || []).filter(d => !d.have).length
+  const can = profileId && STEP_DONE_LABEL[s.key] && s.state !== 'done' && s.state !== 'soon'
   return (
     <div className={`min-w-0 rounded-xl border p-2.5 text-xs ${s.state === 'active' ? 'border-amber-300 dark:border-amber-700' : 'border-slate-200 dark:border-slate-700'}`}>
       <div className="flex items-center justify-between gap-1">
@@ -259,6 +261,12 @@ function StepCard({ s }) {
             </span>
           ))}
         </div>
+      )}
+      {can && (
+        <button type="button" onClick={async () => { await markDone({ profileId, step: s.key, label: STEP_DONE_LABEL[s.key] }); onDone?.() }}
+          className="mt-1.5 rounded-lg border border-emerald-300 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 hover:bg-emerald-50 dark:border-emerald-700 dark:text-emerald-300 dark:hover:bg-emerald-900/20">
+          {STEP_DONE_LABEL[s.key]}
+        </button>
       )}
     </div>
   )
@@ -292,7 +300,9 @@ export default function ProfileJourney({ profileId }) {
     const load = () => api.get(`/profiles/${profileId}/journey`).then(r => alive && setJ(r.data)).catch(() => {})
     load()
     const t = setInterval(load, 15000)
-    return () => { alive = false; clearInterval(t) }
+    // A step marked done (here, in a pop-up or on another PC): at once.
+    window.addEventListener('adal-profile-changed', load)
+    return () => { alive = false; clearInterval(t); window.removeEventListener('adal-profile-changed', load) }
   }, [profileId])
   if (!j) return null
   const all = j.embassy
@@ -308,6 +318,12 @@ export default function ProfileJourney({ profileId }) {
         <span className="min-w-0 flex-1 text-sm"><b className={look.text}>{now.step.title}</b> <span className="text-slate-500">— {shortDate(now.text)}</span></span>
         <span className="shrink-0 text-xs text-slate-400">{open ? '▾' : '▸'}</span>
       </button>
+      {STEP_DONE_LABEL[now.step.key] && now.step.state !== 'done' && now.step.state !== 'soon' && (
+        <button type="button" onClick={() => markDone({ profileId, step: now.step.key, label: STEP_DONE_LABEL[now.step.key] })}
+          className="ml-10 mt-1 rounded-lg border border-emerald-300 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-50 dark:border-emerald-700 dark:text-emerald-300 dark:hover:bg-emerald-900/20">
+          {STEP_DONE_LABEL[now.step.key]}
+        </button>
+      )}
       {open && <>
         <div className="mt-3" onClick={(e) => { if (e.target.closest('button')) document.getElementById('ai-actions')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }}>
           <JourneyFork states={states} notes={notes} compact={narrowScreen()} />
@@ -317,7 +333,7 @@ export default function ProfileJourney({ profileId }) {
         </button>
         {details && (
           <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-5">
-            {all.map(s => <StepCard key={s.key} s={s} />)}
+            {all.map(s => <StepCard key={s.key} s={s} profileId={profileId} onDone={() => window.dispatchEvent(new Event('adal-profile-changed'))} />)}
           </div>
         )}
       </>}

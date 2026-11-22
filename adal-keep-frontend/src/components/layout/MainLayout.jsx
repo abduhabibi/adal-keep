@@ -15,6 +15,7 @@ import api from '../../services/api'
 import UpdateBanner from '../UpdateBanner'
 import StandbyBanner from '../StandbyBanner'
 import SafetyAlerts from '../SafetyAlerts'
+import { PresencePing } from '../OfficeCards'
 import { swipeBack } from '../../lib/phoneApp'
 import { PhoneTabBar, PhoneTopBar, usePageMotion, prefetchTabs } from './PhoneChrome'
 
@@ -162,6 +163,7 @@ export default function MainLayout() {
         {!DEMO && <UpdateBanner />}
         {!DEMO && <StandbyBanner />}
         {!DEMO && <SafetyAlerts />}
+        {!DEMO && <PresencePing />}
         {wide && (
           <div className="shrink-0">
             <Navbar onMenuClick={() => setSidebarOpen(!sidebarOpen)} />

@@ -48,7 +48,16 @@ export function registerDevice(pc, ip, body = {}) {
   const at = String(ip).replace(/^::ffff:/, '')
   const lan = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.|127\.|::1$|f[cd][0-9a-f]{2}:|fe80:)/i.test(at)
   if (!lan) return { ok: false, error: 'not on the office network' }
-  devices.set(pc.id, { id: pc.id, name: String(body.name || pc.name || 'Companion').slice(0, 60), ip: at, port, token, cores, ...power, net, lan, at: Date.now() })
+  // For the office health page (services/officeHealth.js): its version, Wi-Fi and whether it reaches the other PCs.
+  const peersTotal = num(body.peers_total, 0, 500)
+  const health = {
+    version: body.version ? String(body.version).slice(0, 20) : null,
+    wifi: num(body.wifi, 0, 100),
+    peers_total: peersTotal,
+    peers_ok: peersTotal == null ? null : num(body.peers_ok, 0, peersTotal),
+    peers_down: Array.isArray(body.peers_down) ? body.peers_down.slice(0, 20).map(x => String(x).slice(0, 60)) : [],
+  }
+  devices.set(pc.id, { id: pc.id, name: String(body.name || pc.name || 'Companion').slice(0, 60), ip: at, port, token, cores, ...power, net, ...health, lan, at: Date.now() })
   return { ok: true }
 }
 

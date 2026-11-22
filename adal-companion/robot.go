@@ -276,8 +276,17 @@ func announceRobot() {
 			for k, v := range netNow() {
 				body[k] = v
 			}
-			if _, err := mainJSON(http.MethodPost, "/api/companion/robot-browser", body, keys.AccessKey, nil); err != nil {
+			// The office health page: its version, Wi-Fi and whether it reaches the other PCs (office.go).
+			for k, v := range officeNow() {
+				body[k] = v
+			}
+			var answer struct {
+				Peers []officePeer `json:"peers"`
+			}
+			if _, err := mainJSON(http.MethodPost, "/api/companion/robot-browser", body, keys.AccessKey, &answer); err != nil {
 				log.Printf("🤖 robot browser not announced: %v", err)
+			} else {
+				rememberPeers(answer.Peers)
 			}
 		}
 		time.Sleep(20 * time.Second)

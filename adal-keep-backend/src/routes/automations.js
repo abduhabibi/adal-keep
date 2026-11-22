@@ -112,7 +112,10 @@ router.post('/companion/robot-browser', async (req, res) => {
   if (!req.pcAccess) return res.status(403).json({ error: 'Only an approved Adal Companion' })
   const { registerDevice } = await import('../services/remoteBrowsers.js')
   const { ipOf } = await import('../services/networkGate.js')
-  res.json(registerDevice(req.pcAccess, ipOf(req), req.body || {}))
+  const r = registerDevice(req.pcAccess, ipOf(req), req.body || {})
+  // The other Companions it should reach over the office network (it says how many it did).
+  const { liveDevices } = await import('../services/remoteBrowsers.js')
+  res.json({ ...r, peers: liveDevices().filter(d => d.id !== req.pcAccess.id).map(d => ({ name: d.name, ip: d.ip, port: d.port })) })
 })
 // The sidebar's Browsers: every robot browser working now, on any PC (services/robotBrowsers.js).
 router.get('/browsers', async (req, res) => {
@@ -514,6 +517,8 @@ router.get('/automations/attention', async (req, res) => {
     try { pc = (await import('../services/pcHealth.js')).pcCalls() } catch {}
     // The agency's Tasheer sign-in (no run): its code call (services/tasheerSession.js SIGNIN_CALL).
     const site = { [-1]: { full_name: 'Tasheer sign-in', workflow_id: 'tasheer_signin', profile_id: null } }
+    // The end-of-day summary, for the hour after its phone push (services/officeHealth.js).
+    try { const d = (await import('../services/officeHealth.js')).dayCall(); if (d) pc.push(d) } catch {}
     res.json([...pc, ...calls.filter(c => of.has(c.run_id) || site[c.run_id]).map(c => ({ ...c, ...(of.get(c.run_id) || site[c.run_id]), id: undefined }))].sort((a, b) => b.at - a.at))
   } catch (e) { res.status(e.status || 500).json({ error: e.message, ...(e.feature ? { feature: e.feature, plan: e.plan } : {}) }) }
 })

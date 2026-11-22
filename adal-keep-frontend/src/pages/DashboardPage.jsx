@@ -9,6 +9,7 @@ import { useAuth } from '../context/AuthContext'
 import { greeting } from '../lib/ethiopic'
 import { lastPlace } from '../lib/lastPlace'
 import Icon from '../components/shared/Icon'
+import { BackupLine, DaySummaryCard } from '../components/OfficeCards'
 
 // The page everyone lands on (written in Amharic; English from lib/i18n.js).
 // One thing at a time: the greeting with "Continue where you left off", the
@@ -60,6 +61,9 @@ export default function DashboardPage() {
       </section>
 
       {!onPhone() && <MorningSignIn />}
+
+      {!onPhone() && <BackupLine />}
+      <DaySummaryCard />
 
       <NeedsActionCard />
 

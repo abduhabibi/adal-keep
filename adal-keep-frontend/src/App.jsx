@@ -14,6 +14,7 @@ const EmployeesPage = lazy(() => fresh(() => import('./pages/EmployeesPage')))
 const BrokersPage = lazy(() => fresh(() => import('./pages/BrokersPage')))
 const BrokerDetailPage = lazy(() => fresh(() => import('./pages/BrokerDetailPage')))
 const ChecklistPage = lazy(() => fresh(() => import('./pages/ChecklistPage')))
+const OfficePage = lazy(() => fresh(() => import('./pages/OfficePage')))
 const SettingsPage = lazy(() => fresh(() => import('./pages/SettingsPage')))
 const NotificationsPage = lazy(() => fresh(() => import('./pages/NotificationsPage')))
 import { FileCaptureProvider } from './context/FileCaptureContext'
@@ -182,6 +183,7 @@ function Shell() {
             <Route path="cvs/templates/new" element={<Navigate to="/cvs/templates/design" replace />} />
             <Route path="cvs/templates/design" element={page(CVTemplateDesignPage)} />
             <Route path="cvs/templates/:id/edit" element={page(CVTemplateEditPage)} />
+            <Route path="office" element={page(OfficePage)} />
             <Route path="settings" element={page(SettingsPage)} />
             {/* The phone's More tab: every other page as one list (layout/PhoneChrome.jsx). */}
             <Route path="more" element={<Guarded><MorePage /></Guarded>} />

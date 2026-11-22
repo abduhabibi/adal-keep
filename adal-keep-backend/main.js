@@ -64,6 +64,7 @@ import standbyRouter from './src/routes/standby.js'
 import wafidRouter from './src/routes/wafid.js'
 import backupRouter from './src/routes/backup.js'
 import replicaRouter from './src/routes/replica.js'
+import officeRouter from './src/routes/office.js'
 import contractsRouter from './src/routes/contracts.js'
 import embassyRouter from './src/routes/embassy.js'
 import pcAccessRouter from './src/routes/pcAccess.js'
@@ -209,6 +210,7 @@ app.use('/api', branchMergeRouter)
 app.use('/api', standbyRouter)   // every Companion: the server in waiting, and its merge back
 app.use('/api', wafidRouter)
 app.use('/api', backupRouter)
+app.use('/api', officeRouter)    // office health, morning backup line, end-of-day card
 app.use('/api', replicaRouter)   // Companions keep a locked copy; /safety (backup age, licence end)
 app.use('/api', contractsRouter)
 app.use('/api', embassyRouter)   // the embassy print (3 pages a girl)
@@ -1300,6 +1302,7 @@ initSystem().then(() => {
     import('./src/services/portalHealth.js').then(p => p.startPortalHealth()).catch(() => {})
     setTimeout(() => import('./src/services/placement.js').then(p => p.sweepRecent(db)).catch(() => {}), 4 * 60 * 1000).unref?.()   // pictures put in the wrong box (last 7 days) set right
     import('./src/services/pcHealth.js').then(p => p.startPCHealth(db)).catch(() => {})   // disk space, database check, freezes (Admin sees it)   // is each portal answering? (Admin sees it)
+    import('./src/services/officeHealth.js').then(o => o.startOfficeDay(db)).catch(e => console.warn('[office-day]', e.message))   // 17:30: one push with the day's summary
     startBackupSchedule(db)       // locked copy to Telegram: within minutes of switching on, then every 2 h
     startContractChecker(db)      // chosen by a Saudi employer? contract + PDFs from Musaned
     import('./src/services/profileDays.js').then(d => d.startProfileDays(db)).catch(e => console.warn('[days]', e.message)) // each profile's status, per day

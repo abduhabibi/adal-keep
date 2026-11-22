@@ -207,6 +207,20 @@ export function tabOfRun(runId) {
   return page
 }
 
+/** Forgets a run's tab (it stopped answering): the next look finds it again or says there is none. */
+export function dropTab(runId) { _tabs.delete(Number(runId)) }
+
+/** Does this tab answer? A closed or unattached tab never does, and its calls would hang. */
+export async function tabAnswers(page, ms = 2500) {
+  if (!page || isClosed(page)) return false
+  if (page.__adalAnswered && Date.now() - page.__adalAnswered < 3000) return true
+  let t
+  const ok = await Promise.race([page.evaluate(() => 1).then(() => true, () => false), new Promise(r => { t = setTimeout(() => r(false), ms) })])
+  clearTimeout(t)
+  if (ok) page.__adalAnswered = Date.now()
+  return ok
+}
+
 // Which site each kind of run works on (to find its tab when nothing else does).
 const RUN_HOSTS = [
   [/^musaned/, /musaned\.com\.sa|wahid\.sa/], [/^mofa|^visa/, /visa\.mofa\.gov\.sa/], [/^wafid/, /wafid\.com/],
@@ -382,6 +396,16 @@ let _claims = Promise.resolve()
 const oneAtATime = (fn) => { const p = _claims.then(fn, fn); _claims = p.catch(() => {}); return p }
 
 /**
+ * The browser's tabs, each given a moment: browser.pages() waits for every tab
+ * to attach, and one that never does (a tab just opening, a blank one) held
+ * the live view blank for good.
+ */
+export async function pagesOf(browser, ms = 3000) {
+  const got = await Promise.all(browser.targets().filter(t => t.type() === 'page').map(t => Promise.race([t.page().catch(() => null), new Promise(r => setTimeout(() => r(null), ms))])))
+  return got.filter(Boolean)
+}
+
+/**
  * The run's tab even after a server restart (when the registry above is
  * empty): the tab named after the run, or the only tab on the run's site.
  * Found tabs are adopted, so the run also resumes in them.
@@ -390,12 +414,11 @@ export async function findRunTab(browser, runId, workflowId = '', { bySite = tru
   const known = tabOfRun(runId)
   if (known) return known
   if (!browser) return null
-  const pages = await browser.pages().catch(() => [])
+  const pages = await pagesOf(browser)
   let found = null
-  for (const p of pages) {
-    const name = await p.evaluate(() => window.name).catch(() => '')
-    if (name === `adal-run-${runId}`) { found = p; break }
-  }
+  // A tab that never answers (a blank or discarded one) must not hold everything behind it.
+  const names = await Promise.all(pages.map(p => Promise.race([p.evaluate(() => window.name).catch(() => ''), new Promise(r => setTimeout(() => r(''), 2000))])))
+  found = pages.find((p, i) => names[i] === `adal-run-${runId}`) || null
   if (!found && bySite) {
     const host = RUN_HOSTS.find(([w]) => w.test(String(workflowId)))?.[1]
     const onSite = host ? pages.filter(p => host.test(p.url())) : []

@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import api from '../services/api'
 import Icon from './shared/Icon'
 
-const LiveTab = lazy(() => import('./LiveTab').catch(() => { location.reload(); return new Promise(() => {}) }))
+const BrowserView = lazy(() => import('./BrowserView').catch(() => { location.reload(); return new Promise(() => {}) }))
 
 /**
  * The sidebar's Browsers ("Adal Browser", asked on 2026-11-21): every robot
@@ -47,7 +47,7 @@ export default function BrowsersSection({ collapsed = false }) {
           </li>
         ))}
       </ul>
-      {open && createPortal(<Suspense fallback={null}><LiveTab runId={open} startFull onClose={() => setOpen(null)} /></Suspense>, document.body)}
+      {open && createPortal(<Suspense fallback={null}><BrowserView runId={open} title={list.find(b => b.key === open)?.site} onClose={() => setOpen(null)} /></Suspense>, document.body)}
     </div>
   )
 }

@@ -2,7 +2,7 @@ import express from 'express'
 import { listWorkflows } from '../services/workflows.js'
 import { dispatchRun, runStatus, queueSnapshot } from '../services/worker.js'
 import { markCancelled, isCancelled } from '../services/cancellation.js'
-import { forgetRunTab, findRunTab, hostOf, codeBoxUp, typeCodeInto, pressCodeButton } from '../services/tabManager.js'
+import { forgetRunTab, dropTab, tabAnswers, findRunTab, hostOf, codeBoxUp, typeCodeInto, pressCodeButton } from '../services/tabManager.js'
 import { openBrowserIfAny, openForPerson } from '../services/browser.js'
 import { waiting, answerCaptcha, doneWith, TASK_MS } from '../services/attention.js'
 import { seal } from '../services/accountVault.js'
@@ -1021,7 +1021,12 @@ export async function runTab(db, runId) {
   const run = await db('automation_queue').where('id', runId).first('id', 'workflow_id', 'status').catch(() => null)
   if (!run) return null
   // Looking at a finished run's tab does not make it that run's again (the site's next run uses it).
-  return findRunTab(await openBrowserIfAny(), run.id, run.workflow_id, { adopt: ['pending', 'running', 'paused'].includes(run.status) })
+  const browser = await openBrowserIfAny()
+  const look = () => findRunTab(browser, run.id, run.workflow_id, { adopt: ['pending', 'running', 'paused'].includes(run.status) })
+  let page = await look()
+  // A tab that no longer answers (closed under it, discarded): forget it and look again.
+  if (page && !(await tabAnswers(page))) { dropTab(run.id); page = await look(); if (page && !(await tabAnswers(page))) return null }
+  return page
 }
 const liveTab = (req) => runTab(req.app.locals.db, req.params.id)
 
@@ -1045,21 +1050,29 @@ router.get('/automations/:id/stream', async (req, res) => {
   const page = await liveTab(req)
   if (!page) return res.status(404).json({ error: 'This run has no open tab.' })
   const { watchFrames } = await import('../services/liveFrames.js')
-  res.writeHead(200, { 'Content-Type': 'multipart/x-mixed-replace; boundary=adalframe', 'Cache-Control': 'no-store', Connection: 'close' })
-  const stop = await watchFrames(page, (img) => {
-    if (res.writableNeedDrain) return
-    res.write(`--adalframe\r\nContent-Type: image/jpeg\r\nContent-Length: ${img.length}\r\n\r\n`)
-    res.write(img)
-    res.write('\r\n')
-  })
-  req.on('close', stop)
+  let stop = () => {}
+  let closed = false
+  req.on('close', () => { closed = true; stop() })
+  try {
+    res.socket?.setNoDelay(true)
+    res.writeHead(200, { 'Content-Type': 'multipart/x-mixed-replace; boundary=adalframe', 'Cache-Control': 'no-store', Connection: 'close', 'X-Accel-Buffering': 'no' })
+    stop = await watchFrames(page, (img) => {
+      if (res.writableNeedDrain || closed) return
+      res.write(`--adalframe\r\nContent-Type: image/jpeg\r\nContent-Length: ${img.length}\r\n\r\n`)
+      res.write(img)
+      res.write('\r\n')
+    }, () => res.end())
+    if (closed) stop()
+  } catch { res.end() }
 })
 
 // What goes with the pictures: the address, and whether the page asks for a code.
 router.get('/automations/:id/tab', async (req, res) => {
   const page = await liveTab(req)
   if (!page) return res.status(404).json({ error: 'This run has no open tab.' })
-  res.set('Cache-Control', 'no-store').json({ url: page.url(), title: await page.title().catch(() => ''), codeBox: await codeBoxUp(page) })
+  const slow = (p, d) => Promise.race([p, new Promise(r => setTimeout(() => r(d), 2500))])
+  const size = await slow(page.evaluate(() => [innerWidth, innerHeight]).catch(() => null), null)
+  res.set('Cache-Control', 'no-store').json({ url: page.url(), title: await slow(page.title().catch(() => ''), ''), codeBox: await slow(codeBoxUp(page), false), size })
 })
 
 export const LIVE_KEYS = ['Enter', 'Backspace', 'Tab', 'Escape', 'ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Delete', 'PageDown', 'PageUp', 'Home', 'End', 'Space']
@@ -1207,6 +1220,14 @@ router.post('/automations/:id/input', async (req, res) => {
   const page = await liveTab(req)
   if (!page) return res.status(404).json({ error: 'This run has no open tab.' })
   const b = req.body || {}
+  // A burst of mouse moves, wheel turns and keys from the browser view: done in order, answered at once.
+  if (Array.isArray(b.batch)) {
+    let code = null
+    const run = async () => { for (const x of b.batch.slice(0, 200)) { try { code = (await personInput(req.app.locals.db, req.params.id, page, x)) || code } catch {} } }
+    page.__adalInputChain = (page.__adalInputChain || Promise.resolve()).then(run, run)
+    await page.__adalInputChain
+    return res.json({ ok: true, code })
+  }
   // Mouse moves and the wheel: answered at once, done in order behind (a drag stays smooth).
   if ((b.kind === 'mouse' && b.type === 'move') || b.kind === 'wheel') {
     page.__adalInputChain = (page.__adalInputChain || Promise.resolve()).then(() => liveInput(page, b)).catch(() => {})

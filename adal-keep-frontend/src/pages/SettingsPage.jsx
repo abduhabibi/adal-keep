@@ -29,6 +29,7 @@ import MusanedAuthenticatorCard, { MusanedCodesCard } from '../components/Musane
 import ErrorBoundary from '../components/shared/ErrorBoundary'
 import { useCan } from '../lib/staffPerms'
 import PhoneCard from '../components/PhoneCard'
+import UsbCard from '../components/UsbCard'
 import WhatsAppCard from '../components/WhatsAppCard'
 import AiKeysCard from '../components/AiKeysCard'
 import TransitionsCard from '../components/TransitionsCard'
@@ -447,6 +448,7 @@ export default function SettingsPage() {
           <RollbackCard />
         </div>
       </Card>
+      <UsbCard />
       </>}
       {tab === 'look' && <>
       <Card>

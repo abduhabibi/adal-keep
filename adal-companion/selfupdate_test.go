@@ -327,3 +327,49 @@ func sign2(t *testing.T, priv ed25519.PrivateKey, sha, at, date string, prog, pa
 	})
 	return env, map[string][]byte{sum(app): app, sum(prog): prog, sum(pages): pages}
 }
+
+// "Go back to previous version" (2026-11-22): release X carries, inside its
+// signed manifest, a signed way back to Y (rollback_of X, seq just after X).
+// The Companion verifies both, takes the way back from X (even when it only
+// knows X by its USB build), never takes X again, and takes the next release.
+func TestSignedWayBackFromTheMainPC(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	y := strings.Repeat("1", 40)
+	x := strings.Repeat("2", 40)
+	back := map[string]any{"sha": y, "short": y[:7], "file": "release/" + y + ".tar.gz", "sha256": sum([]byte("y")), "date": "2026-11-20T10:00:00+03:00",
+		"published_at": "2026-11-21T10:00:00.001Z", "seq": 1763719200001, "rollback_of": x, "early": []string{},
+		"migrations": []string{"001_a.js"}, "notes": []string{"Went back — “quotes”, ኣማርኛ & more"}}
+	wb := sign(t, priv, back)
+	var wbm any
+	json.Unmarshal(wb.Manifest, &wbm)
+	xenv := sign(t, priv, map[string]any{"sha": x, "short": x[:7], "date": "2026-11-21T09:00:00+03:00", "published_at": "2026-11-21T10:00:00.000Z", "seq": 1763719200000,
+		"notes": []string{"New: one", "two", "three"}, "rollback": map[string]any{"manifest": wbm, "signature": wb.Signature}})
+	xm, err := verifyRelease(xenv, pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var outer struct {
+		Rollback envelope `json:"rollback"`
+	}
+	json.Unmarshal(xenv.Manifest, &outer)
+	rm, err := verifyRelease(outer.Rollback, pub)
+	if err != nil {
+		t.Fatal("the nested way back does not verify:", err)
+	}
+	if !isNewerRelease(rm, xm) || isNewerRelease(xm, rm) {
+		t.Fatal("the way back must win over X, and X must not come back")
+	}
+	if !isNewerRelease(rm, &releaseManifest{SHA: x, Date: "2026-11-21T09:00:00+03:00"}) {
+		t.Fatal("a Companion knowing X only by its build refused the way back")
+	}
+	z := &releaseManifest{SHA: strings.Repeat("3", 40), Date: "2026-11-22T09:00:00+03:00", PublishedAt: "2026-11-22T10:00:00Z", Seq: 1763805600000}
+	if !isNewerRelease(z, rm) || isNewerRelease(rm, z) {
+		t.Fatal("the next release must move it forward")
+	}
+	// Another release's way back (not X's) is just an older commit.
+	other := *rm
+	other.RollbackOf = strings.Repeat("4", 40)
+	if isNewerRelease(&other, z) {
+		t.Fatal("a way back from another release went back")
+	}
+}

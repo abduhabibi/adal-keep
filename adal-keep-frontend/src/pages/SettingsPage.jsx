@@ -21,6 +21,7 @@ import SharePowerCard from '../components/SharePowerCard'
 import AutomationHealthCard from '../components/AutomationHealthCard'
 import InsuranceCard from '../components/InsuranceCard'
 import BackupCard from '../components/BackupCard'
+import RollbackCard from '../components/RollbackCard'
 import TelegramChannelCard from '../components/TelegramChannelCard'
 import { ConnectedDevices } from '../components/PcAccessGate'
 import { StartupCard, SupportCard } from '../components/AttentionBar'
@@ -436,6 +437,7 @@ export default function SettingsPage() {
               {updateInfo.note && <p className="text-xs text-amber-600">{updateInfo.note}</p>}
             </div>
           )}
+          <RollbackCard />
         </div>
       </Card>
       </>}

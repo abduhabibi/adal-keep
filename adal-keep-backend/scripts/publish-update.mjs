@@ -6,6 +6,14 @@
  *   node adal-keep-backend/scripts/publish-update.mjs [--skip-frontend] [--dry-run] [--now] [--skip-tests]
  *   node adal-keep-backend/scripts/publish-update.mjs --rollback      (everyone back to the version before)
  *
+ * What's new (3–5 short plain-English bullets, shown once on each PC after it updates):
+ *   --note "Passport photos crop by themselves" --note "…"     (or --notes-file notes.txt, one per line,
+ *   or ADAL_WHATS_NEW="first|second|third" for the pre-push hook)
+ *
+ * Each release also carries a signed way back to the release before it
+ * (manifest.rollback, services/rollback.js): an admin on an agency's main PC
+ * presses "Go back to previous version" and the office follows, no key needed.
+ *
  * The tests run first: when one fails, nothing is published (--skip-tests only
  * for an emergency). Staged: the agencies marked "updates first" in Adal Keep
  * Admin (adal-updates/release/early.json) get it at once, every other PC
@@ -29,12 +37,25 @@ import { execFileSync } from 'child_process'
 import { fileURLToPath } from 'url'
 import dotenv from 'dotenv'
 import { signManifest, verifyManifest, BUCKET } from '../src/services/updateChannel.js'
+import { rollbackManifest } from '../src/services/rollback.js'
+import { cleanNotes } from '../src/services/whatsNew.js'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const BACK = path.join(HERE, '..')
 const ROOT = path.join(BACK, '..')
 const FRONT = path.join(ROOT, 'adal-keep-frontend')
-const args = new Set(process.argv.slice(2))
+const argv = process.argv.slice(2)
+const args = new Set(argv)
+// What's new: every --note "…", or --notes-file, or ADAL_WHATS_NEW (| or new line between bullets).
+const rawNotes = []
+for (let i = 0; i < argv.length; i++) {
+  if (argv[i] === '--note' && argv[i + 1]) rawNotes.push(argv[++i])
+  else if (argv[i].startsWith('--note=')) rawNotes.push(argv[i].slice(7))
+  else if (argv[i] === '--notes-file' && argv[i + 1]) rawNotes.push(...fs.readFileSync(argv[++i], 'utf8').split(/\r?\n/))
+}
+if (!rawNotes.length && process.env.ADAL_WHATS_NEW) rawNotes.push(...process.env.ADAL_WHATS_NEW.split(/\||\r?\n/))
+const NOTES = cleanNotes(rawNotes)
+if (NOTES.length && NOTES.length < 3) console.log(`   (What's new has ${NOTES.length} bullet(s); 3–5 read best)`)
 const DRY = args.has('--dry-run')
 const STAGE_HOURS = Number(process.env.STAGE_HOURS || 2)
 const sh = (cmd, a, opts = {}) => execFileSync(cmd, a, { cwd: ROOT, encoding: 'utf8', ...opts }).trim()
@@ -43,6 +64,17 @@ const admin = dotenv.parse(fs.readFileSync(path.join(ROOT, 'adal-admin/.env')))
 const URL = admin.SUPABASE_URL, KEY = admin.SUPABASE_SERVICE_KEY
 if (!URL || !KEY) throw new Error('adal-admin/.env needs SUPABASE_URL and SUPABASE_SERVICE_KEY')
 const PRIV = fs.readFileSync(path.join(os.homedir(), '.adal-keep/update-signing.pem'), 'utf8')
+const storage = async (method, p, body, headers = {}) => {
+  const r = await fetch(`${URL}/storage/v1/${p}`, { method, headers: { apikey: KEY, Authorization: `Bearer ${KEY}`, ...headers }, body })
+  if (!r.ok && !(method === 'GET' && r.status === 400)) throw new Error(`Supabase storage ${method} ${p}: ${r.status} ${(await r.text()).slice(0, 200)}`)
+  return r
+}
+const put = (p, buf, type) => storage('POST', `object/${BUCKET}/${p}`, buf, { 'Content-Type': type, 'x-upsert': 'true', 'Cache-Control': 'no-cache' })
+
+/** The migration files a commit has (a PC refuses to go back to it when its database has others). Null: unknown. */
+const migrationsAt = (rev) => {
+  try { return sh('git', ['ls-tree', '--name-only', rev, 'adal-keep-backend/src/migrations/']).split('\n').filter(f => /\.(c|m)?js$/.test(f)).map(f => path.basename(f)) } catch { return null }
+}
 
 // Everyone back to the version before the newest (it must still be in Storage).
 if (args.has('--rollback')) {
@@ -59,8 +91,9 @@ if (args.has('--rollback')) {
   }
   if (!back) { console.error('No earlier version is kept in Storage to go back to.'); process.exit(1) }
   const now = new Date().toISOString()
-  const manifest = { ...back, published_at: now, seq: Date.parse(now), everyone_at: now, early: [], rollback_of: cur.manifest.sha,
-    changes: [{ short: back.short, date: now, message: `Back to the version before (${cur.manifest.short} had a problem)` }] }
+  // One step only (its own way back dropped); the PCs check its database changes against theirs.
+  const { rollback: _r, ...b } = back
+  const manifest = { ...rollbackManifest({ ...cur.manifest, published_at: now, seq: Date.parse(now) - 1 }, b, { migrations: back.migrations || migrationsAt(back.sha) }), published_at: now, seq: Math.max(Date.parse(now), (Number(cur.manifest.seq) || 0) + 1), everyone_at: now }
   console.log(`== everyone goes back from ${cur.manifest.short} to ${back.short}`)
   if (DRY) { console.log('dry run — nothing uploaded'); process.exit(0) }
   await storage('POST', `object/${BUCKET}/release/latest.json`, Buffer.from(JSON.stringify({ manifest, signature: signManifest(manifest, PRIV) })), { 'Content-Type': 'application/json', 'x-upsert': 'true', 'Cache-Control': 'no-cache' })
@@ -72,12 +105,6 @@ const dirty = sh('git', ['status', '--porcelain', '--untracked-files=no', '--', 
 if (dirty) { console.error('Commit first — these are not committed:\n' + dirty); process.exit(1) }
 const sha = sh('git', ['rev-parse', 'HEAD'])
 
-const storage = async (method, p, body, headers = {}) => {
-  const r = await fetch(`${URL}/storage/v1/${p}`, { method, headers: { apikey: KEY, Authorization: `Bearer ${KEY}`, ...headers }, body })
-  if (!r.ok && !(method === 'GET' && r.status === 400)) throw new Error(`Supabase storage ${method} ${p}: ${r.status} ${(await r.text()).slice(0, 200)}`)
-  return r
-}
-const put = (p, buf, type) => storage('POST', `object/${BUCKET}/${p}`, buf, { 'Content-Type': type, 'x-upsert': 'true', 'Cache-Control': 'no-cache' })
 
 // What is published now (for "what changed").
 let previous = null
@@ -205,10 +232,25 @@ try {
     online: await buildOnlinePages(),
     lock_hash: crypto.createHash('sha256').update(fs.readFileSync(path.join(BACK, 'package-lock.json'))).digest('hex'),
     changes,
+    // What's new (shown once on each PC after it updates) and this version's database changes.
+    ...(NOTES.length ? { notes: NOTES } : {}),
+    migrations: migrationsAt(sha),
     // Staged: these agencies at once, everyone else later.
     early: await (async () => { try { const r = await storage('GET', `object/${BUCKET}/release/early.json`); return r.ok ? ((await r.json()).agencies || []) : [] } catch { return [] } })(),
     everyone_at: new Date(Date.now() + (args.has('--now') ? 0 : STAGE_HOURS * 3600 * 1000)).toISOString(),
   }
+  // The way back, signed now (only this PC has the key): the release before,
+  // re-issued just after this one. Only when its app is still in Storage.
+  if (previous?.sha && previous.sha !== sha) {
+    const kept = DRY ? true : await storage('GET', `object/info/${BUCKET}/${previous.file || `release/${previous.sha}.tar.gz`}`).then(r => r.ok).catch(() => false)
+    const migrations = previous.migrations || migrationsAt(previous.sha)
+    if (kept && migrations) {
+      const back = rollbackManifest(manifest, previous, { migrations })
+      manifest.rollback = { manifest: back, signature: signManifest(back, PRIV) }
+      console.log(`   way back: ${previous.short} (${migrations.length} database change(s) known to it)`)
+    } else console.log(`   (no way back: ${kept ? 'the commit of ' + previous.short + ' is not in this checkout' : previous.short + ' is no longer in Storage'})`)
+  }
+  if (NOTES.length) console.log(`   What's new:\n${NOTES.map(n => `     • ${n}`).join('\n')}`)
   const signature = signManifest(manifest, PRIV)
   console.log(`== release ${manifest.short}: ${(buf.length / 1048576).toFixed(1)} MB, ${files.length} files, ${changes.length} change(s)`)
   if (DRY) { console.log('dry run — nothing uploaded'); process.exit(0) }

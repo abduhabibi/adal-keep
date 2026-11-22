@@ -7,6 +7,8 @@ import os from 'os'
 import { Readable } from 'stream'
 import { fileURLToPath } from 'url'
 import { latestRelease, setUpdateDb, lastEnvelope, verifyManifest } from '../services/updateChannel.js'
+import { rollbackOf, databaseRefusal } from '../services/rollback.js'
+import * as WhatsNew from '../services/whatsNew.js'
 
 const execAsync = promisify(exec)
 const router = Router()
@@ -711,6 +713,9 @@ async function installEnvelope(cfg, logs, installed, mine, env, from = {}, fallb
   if (installed.sha && (installed.sha === manifest.sha || (L.orderKnown(mine) && !L.isNewer(manifest, mine)))) {
     return { success: true, alreadyUpToDate: true, branch: 'release', source: from.source || 'supabase', message: `Already up to date — this PC runs ${installed.short}, the release offered (${manifest.short}) is not newer.` }
   }
+  // An older version (a rollback) must be able to read this PC's database.
+  const refused = await databaseRefusal(dbOf(), manifest)
+  if (refused) return { code: 409, error: refused, databaseAhead: true }
   const app = { file: manifest.file, sha256: manifest.sha256 }
   try {
     await L.fetchPiece(manifest, app, null, from)
@@ -720,9 +725,12 @@ async function installEnvelope(cfg, logs, installed, mine, env, from = {}, fallb
     if (!peer) throw e
     logs.push(`Trying the office network at once: ${peer.manifest.short} from ${peer.base}`)
     env = peer; manifest = peer.manifest; from = { bases: [peer.base] }
+    const again = await databaseRefusal(dbOf(), manifest)
+    if (again) return { code: 409, error: again, databaseAhead: true }
     await L.fetchPiece(manifest, { file: manifest.file, sha256: manifest.sha256 }, null, from)
   }
   await installFromRelease(cfg, logs, manifest, null, from)
+  WhatsNew.rememberInstalled(manifest)
   lanEnvelope = null
   await L.recordInstalled(env, cfg.projectRoot).catch(e => logs.push(`Not kept for the other PCs: ${e.message}`))
   writeMarker(cfg.projectRoot, { sha: manifest.sha, branch: 'release', source: 'supabase', lock_hash: manifest.lock_hash, message: manifest.message, date: manifest.date || '', published_at: manifest.published_at || '', ...(manifest.seq ? { seq: manifest.seq } : {}) })
@@ -733,6 +741,55 @@ async function installEnvelope(cfg, logs, installed, mine, env, from = {}, fallb
     success: true, branch: 'release', source: from.bases?.length ? 'lan' : 'supabase',
     installed: { sha: manifest.sha, short: manifest.short },
     message: restarts ? 'Update installed. The server restarts now — reload the page in about 20 seconds.' : 'Update installed. Please restart the app to apply changes.',
+  }
+}
+
+/**
+ * "Go back to previous version" on this PC: { available, from, to, refused, reason }.
+ * Only the way back signed into the release this PC runs (never a bare downgrade).
+ */
+export async function rollbackPlan(db = dbOf()) {
+  const installed = await getInstalled()
+  if (installed.isRepo) return { available: false, reason: 'A developer\'s git checkout: use git.' }
+  const L = await import('../services/lanRelease.js')
+  const kept = L.current()?.manifest
+  if (!kept || kept.sha !== installed.sha) return { available: false, reason: 'This PC does not keep the signed release it runs yet — try again after the next update check.' }
+  const back = rollbackOf(kept)
+  if (!back) return { available: false, from: kept.short, reason: kept.rollback_of ? 'This PC already went back once. The next version from Adal moves it forward again.' : 'This version has no way back signed by Adal (it was published before this button existed).' }
+  const refused = await databaseRefusal(db, back.manifest)
+  return { available: !refused, from: kept.short, to: back.manifest.short, refused: refused || '', reason: refused || '' }
+}
+
+const ROLLBACK_ROLES = new Set(['owner', 'admin'])
+async function handleRollback(req, res) {
+  if (req.auth && !ROLLBACK_ROLES.has(req.auth.role)) return res.status(403).json({ error: 'Only an admin can go back to the previous version.' })
+  if (updateNotice.applying) return res.status(409).json({ error: 'An update is being installed already — wait for the page to reload by itself.', applying: true })
+  if (req.app?.locals?.db) updateDb = req.app.locals.db
+  const logs = []
+  updateNotice.applying = true
+  updateNotice.applyingSince = new Date().toISOString()
+  try {
+    const plan = await rollbackPlan()
+    if (!plan.available) return res.status(plan.refused ? 409 : 400).json({ error: plan.reason, databaseAhead: !!plan.refused })
+    if (!req.body?.force) {
+      const b = await busyNow(dbOf())
+      if (b.busy) return res.status(409).json({ error: `${b.running} run(s) working and ${b.waiting} waiting: going back restarts the server. Wait until they finish, or press again to go back anyway.`, busy: true })
+    }
+    const L = await import('../services/lanRelease.js')
+    const installed = await getInstalled()
+    const mine = installedRelease(installed, L.current()?.manifest)
+    const back = rollbackOf(L.current().manifest)
+    logs.push(`Going back from ${plan.from} to ${plan.to} (signed by Adal) — this PC's kept pieces first, the office next, Supabase last`)
+    console.log(`↩️ Going back from ${plan.from} to ${plan.to}`)
+    const result = await installEnvelope(config(), logs, installed, mine, back, {}, null)
+    if (result.success && !result.alreadyUpToDate) result.message = `Went back to ${plan.to}. The other PCs of this office follow within a few minutes. ${result.message.replace(/^Update installed\.\s*/, '')}`
+    res.status(result.code || 200).json({ ...result, code: undefined, log: logs.join('\n').slice(-4000) })
+  } catch (err) {
+    console.error('[system/update/rollback]', err.message)
+    res.status(500).json({ error: err.message, log: logs.join('\n').slice(-4000) })
+  } finally {
+    updateNotice.applying = false
+    updateNotice.result = null
   }
 }
 
@@ -802,6 +859,7 @@ async function applyUpdate(req, res) {
   try {
     const installed = await getInstalled()
     setUpdateDb(req?.app?.locals?.db)
+    if (req?.app?.locals?.db) updateDb = req.app.locals.db
 
     // --- Installed PC: Adal's signed release, the office first, then Supabase ---
     if (!installed.isRepo) {
@@ -926,6 +984,18 @@ router.use(lanRouter)
 router.get('/update/check', handleCheck)
 router.post('/update/apply', handleApply)
 router.post('/update/apply-local', handleApplyLocal)
+
+// "Go back to previous version" (services/rollback.js): what it would do, and doing it.
+router.get('/update/rollback', async (req, res) => {
+  try { res.json(await rollbackPlan(req.app.locals.db)) } catch (e) { res.status(500).json({ error: e.message }) }
+})
+router.post('/update/rollback', handleRollback)
+// The "What's new" card: once per PC, after an update.
+router.get('/update/whats-new', async (req, res) => {
+  const installed = await getInstalled().catch(() => null)
+  res.json({ whatsNew: WhatsNew.pending(installed?.sha) })
+})
+router.post('/update/whats-new/seen', (req, res) => res.json({ ok: WhatsNew.dismiss(String(req.body?.sha || '')) }))
 
 // Backwards-compatible aliases
 router.get('/check', handleCheck)

@@ -13,6 +13,7 @@ import useReadyChime from '../../hooks/useReadyChime'
 import useNewVersion from '../../hooks/useNewVersion'
 import api from '../../services/api'
 import UpdateBanner from '../UpdateBanner'
+import WhatsNewCard from '../WhatsNewCard'
 import StandbyBanner from '../StandbyBanner'
 import SafetyAlerts from '../SafetyAlerts'
 import { PresencePing } from '../OfficeCards'
@@ -149,6 +150,7 @@ export default function MainLayout() {
       {!DEMO && <PcAccessRequests />}
       {!DEMO && <AttentionBar />}
       {!DEMO && <PhoneCalls />}
+      {!DEMO && <WhatsNewCard />}
       {/* (A phone has the More tab instead of the side menu.) */}
       {wide && <Sidebar
         isOpen={sidebarOpen}

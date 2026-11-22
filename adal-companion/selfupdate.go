@@ -234,6 +234,10 @@ func isNewerRelease(cand, than *releaseManifest) bool {
 	if sameSHA(cand.SHA, than.SHA) {
 		return false
 	}
+	// Adal's signed way back from exactly the release this PC runs ("Go back to previous version").
+	if cand.RollbackOf != "" && sameSHA(cand.RollbackOf, than.SHA) {
+		return true
+	}
 	cc, tc := releaseTime(cand.Date), releaseTime(than.Date)
 	if !cc.IsZero() && !tc.IsZero() && cc.Before(tc) && cand.RollbackOf == "" {
 		return false // older code

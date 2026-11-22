@@ -92,7 +92,8 @@ export async function recordInstalled(env, projectRoot = '') {
   for (const p of env.manifest.programs || []) {
     if (projectRoot && p.name && !piecePath(p.sha256)) await keepPiece(p.sha256, path.join(projectRoot, p.name)).catch(() => {})
   }
-  const wanted = new Set(piecesOf(env.manifest).map(p => p.sha256))
+  // The pieces of the release before stay too: "Go back to previous version" then needs no internet (services/rollback.js).
+  const wanted = new Set([...piecesOf(env.manifest), ...piecesOf(env.manifest.rollback?.manifest)].map(p => p.sha256))
   for (const f of fs.readdirSync(FILES)) {
     const base = f.replace(/\.part$/, '')
     // A half-download of a piece still wanted (or of a newer release, for a day) stays: the next try goes on from it.
@@ -141,6 +142,8 @@ export function isNewer(m, than) {
   if (!m?.sha) return false
   if (!than?.sha) return true
   if (sameSha(m.sha, than.sha)) return false
+  // Adal's signed way back from exactly the release this PC runs ("Go back to previous version", services/rollback.js).
+  if (m.rollback_of && sameSha(m.rollback_of, than.sha)) return true
   const mc = ms(m.date), tc = ms(than.date)
   if (mc && tc && mc < tc && !m.rollback_of) return false
   const mq = Number(m.seq) || 0, tq = Number(than.seq) || 0

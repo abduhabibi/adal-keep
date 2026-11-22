@@ -146,7 +146,7 @@ if (previous?.sha === sha) { console.log(`Already published: ${sha.slice(0, 7)}`
 // 0. The tests: a version that fails one is never published.
 if (!args.has('--skip-tests')) {
   console.log('== tests')
-  try { execFileSync(process.execPath, ['--test', '--test-reporter=dot', 'tests/**/*.test.js'], { cwd: BACK, stdio: 'inherit', timeout: 15 * 60 * 1000 }) }
+  try { execFileSync(process.execPath, ['scripts/run-tests.mjs', '--reporter=dot'], { cwd: BACK, stdio: 'inherit', timeout: 40 * 60 * 1000 }) }
   catch { console.error('✗ A test failed — nothing published. Fix it first (or --skip-tests in an emergency).'); process.exit(1) }
 }
 

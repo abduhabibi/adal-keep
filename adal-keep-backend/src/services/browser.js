@@ -503,3 +503,16 @@ export async function closeBrowser() {
     console.log('[browser] released')
   }
 }
+
+/**
+ * Adal Browser is quit (not just let go): nothing needs it, and an idle one with only blank tabs burned a weak
+ * PC's processor for an hour (2026-11-22). Its sign-ins stay in its profile on disk; the next run starts it again.
+ */
+export async function quitBrowser() {
+  const b = _browser || await openBrowserIfAny().catch(() => null)
+  if (!b) return false
+  _browser = null
+  try { await b.close() } catch { try { await b.disconnect() } catch {} }
+  console.log('[browser] idle with nothing to keep — quit')
+  return true
+}

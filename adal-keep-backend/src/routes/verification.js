@@ -22,13 +22,15 @@ import { getLanAddresses, getPrimaryLanAddress, macsOf, DISCOVERY_PORT } from '.
 const router = express.Router()
 
 /** Which company is this machine running? Used for the tray tooltip. */
+// The Companion asks /companion/info while it looks for its main PC: it must answer at once, even when this PC
+// is swamped and the database is slow (2026-11-22: ~13 s, and the Companion took the slow answer for "another
+// main PC"). The name is kept in memory; the database gets 300 ms, else the last name known answers.
+let lastName = 'Adal Keep'
 async function companyName(handle) {
-  try {
-    const c = await handle('companies').first()
-    return c?.name || 'Adal Keep'
-  } catch {
-    return 'Adal Keep'
-  }
+  const { withTimeout } = await import('../services/runLimit.js')
+  const c = await withTimeout(Promise.resolve(handle('companies').first()), 300, null)
+  if (c?.name) lastName = c.name
+  return lastName
 }
 
 /** GET /api/profiles/:profileId/verification — cached ticks, never runs OCR. */
@@ -222,3 +224,4 @@ router.post('/companion/ingest', upload.single('file'), async (req, res) => {
 })
 
 export default router
+export { companyName as _companyName }

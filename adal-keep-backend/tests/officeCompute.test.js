@@ -45,13 +45,13 @@ test('placement: a signed-in tab for that site and account counts (tab reuse)', 
   const twin = { ...strong, id: 'T', name: 'Twin' }
   assert.equal(chooseBest({ from: '', pcs: [main, strong, twin], tabs: { T: { signedIn: true } } }).to, 'T')
   // Signed in here already and the other PC only slightly stronger: it stays here.
-  const near = { ...main, id: 'N', cores: 6 }
-  assert.equal(chooseBest({ from: '', pcs: [main, near], tabs: { '': { signedIn: true } } }).help, false)
+  const near = { ...main, id: 'N', cores: 7 }
+  assert.equal(chooseBest({ from: '', pcs: [{ ...main, cores: 6 }, near], tabs: { '': { signedIn: true } } }).help, false)
 })
 
 test('placement: what a PC does already counts; no hopping for a small gain', () => {
   assert.equal(chooseBest({ from: '', pcs: [main, strong], running: { S: 3 } }).to, '')
-  assert.equal(chooseBest({ from: '', pcs: [main, { ...main, id: 'M2', cores: 5 }] }).help, false)
+  assert.equal(chooseBest({ from: '', pcs: [{ ...main, cores: 6 }, { ...main, id: 'M2', cores: 7 }] }).help, false)
 })
 
 test('placement: office network only, and an older Companion that says nothing is never given work', () => {
@@ -179,4 +179,18 @@ test('Browsers lists every robot browser, the other PCs\' too', async () => {
   assert.equal(by['tr-pextran'].pc, 'Manager PC')
   _resetForTest()
   await db.destroy()
+})
+
+test('placement: a weak PC (4 cores or fewer) gives its robots to a stronger PC of the office, however small the gain', () => {
+  const weak = { ...main, cores: 4 }
+  const near = { ...main, id: 'N', name: 'Near', cores: 4, load: 55, free_gb: 6, mem_gb: 8 }
+  const c = chooseBest({ from: '', pcs: [weak, near] })
+  assert.equal(c.to, 'N'); assert.equal(c.help, true); assert.match(c.why, /weak/)
+  // a normal PC (more than 4 cores) keeps its own for a small gain
+  assert.equal(chooseBest({ from: '', pcs: [{ ...main, cores: 6 }, { ...near, cores: 7 }] }).help, false)
+  // a weak PC alone, or with only weak neighbours, does its own work
+  assert.equal(chooseBest({ from: '', pcs: [weak] }).help, false)
+  assert.equal(chooseBest({ from: '', pcs: [weak, { ...weakSlow, id: 'W2' }] }).help, false)
+  // never to a PC that is itself weak or busy
+  assert.equal(chooseBest({ from: '', pcs: [weak, { ...near, load: 95 }] }).help, false)
 })

@@ -13,7 +13,7 @@
  * GET  /api/sessions             each site: signed in or not, its tabs, last kept
  * POST /api/sessions/:key/open   a window on that site to sign in
  */
-import { getBrowser, newRunTab, spaceOf } from './browser.js'
+import { getBrowser, openBrowserIfAny, quitBrowser, newRunTab, spaceOf } from './browser.js'
 import { hostOf, handTabToPerson } from './tabManager.js'
 
 export const SITES = [
@@ -98,15 +98,38 @@ export async function tabSignedIn(site, p) {
   return inNow
 }
 
+export const IDLE_BROWSER_MS = Number(process.env.ADAL_IDLE_BROWSER_MS) || 10 * 60 * 1000
+let blankSince = 0
+const BLANK = /^(|about:blank|chrome:\/\/new-?tab(-page)?\/?.*|chrome-untrusted:.*|data:,)$/i
+/**
+ * An open browser with only blank tabs and no run: how long it has been so, and whether to quit it.
+ * since: when it was first seen so (0 = not so). Pure (tested).
+ */
+export function idleBrowser(urls, runs, since, now = Date.now(), limit = IDLE_BROWSER_MS) {
+  if (runs > 0 || urls.some(u => !BLANK.test(String(u)))) return { quit: false, since: 0 }
+  const from = since || now
+  return { quit: now - from >= limit, since: from }
+}
+/** A window a person opened to sign in (kept even when blank for a moment): never quit under them. */
+async function hasPersonWindow(browser) {
+  try { return (await browser.pages()).some(p => p.__adalBorrowed || p.__adalPerson) } catch { return true }
+}
+
 /** One round: every site tab that is signed in gets its sign of life. */
 export async function keepAlive() {
   if (busy) return kept
   busy = true
   try {
-    const browser = await getBrowser().catch(() => null)
-    if (!browser) return kept
+    // Never starts the browser (2026-11-22: this look every 4 minutes brought Adal Browser back on a swamped PC
+    // each time it was closed): no browser open = nothing to keep signed in.
+    const browser = await openBrowserIfAny().catch(() => null)
+    if (!browser) { blankSince = 0; return kept }
     const running = await runningTabs()
     const pages = await browser.pages().catch(() => [])
+    // Open with nothing in it (blank tabs only), nothing running, for IDLE_BROWSER_MS: quit.
+    const idle = idleBrowser(pages.filter(p => !p.isClosed?.()).map(p => { try { return p.url() } catch { return '' } }), running.size, blankSince)
+    blankSince = idle.since
+    if (idle.quit && !(await hasPersonWindow(browser))) { blankSince = 0; await quitBrowser().catch(() => {}); return kept }
     const seen = Object.fromEntries(SITES.map(s => [s.key, { tabs: 0, signedIn: false, spaces: {} }]))
     for (const p of pages) {
       if (p.isClosed?.()) continue

@@ -159,19 +159,58 @@ func parseTime(s string) time.Time {
 // numberCheck: replaced in tests.
 var numberCheck = isMainWithNumber
 
+// A main PC that answers slowly (a swamped PC: 13 s for one answer) is "not known yet", never "not ours"
+// (2026-11-22: a 2–3 s timeout made the Companion drop its own main PC as "another main PC"). Every
+// timeout, transport error or 5xx/429 marks the address unknown for a while; only a definite answer
+// ("ok": false) is a refusal.
+var (
+	unknownMu sync.Mutex
+	unknownAt = map[string]time.Time{}
+	// askTimeout: how long the main PC gets to answer who it is.
+	askTimeout = 20 * time.Second
+)
+
+func markUnknown(u string, unknown bool) {
+	u = strings.TrimRight(u, "/")
+	unknownMu.Lock()
+	defer unknownMu.Unlock()
+	if unknown {
+		unknownAt[u] = time.Now()
+	} else {
+		delete(unknownAt, u)
+	}
+}
+
+// wasUnknown: the last answer of u was no answer (a slow or busy PC), not a refusal.
+func wasUnknown(u string) bool {
+	unknownMu.Lock()
+	defer unknownMu.Unlock()
+	t, ok := unknownAt[strings.TrimRight(u, "/")]
+	return ok && time.Since(t) < 2*time.Minute
+}
+
 // isMainWithNumber: the Adal Keep at u says this number is its own.
 func isMainWithNumber(u, number string) bool {
 	body, _ := json.Marshal(map[string]string{"number": number})
-	c := &http.Client{Timeout: 3 * time.Second}
+	c := &http.Client{Timeout: askTimeout}
 	resp, err := c.Post(strings.TrimRight(u, "/")+"/api/pc-access/check-number", "application/json", bytes.NewReader(body))
 	if err != nil {
+		markUnknown(u, true)
 		return false
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests {
+		markUnknown(u, true)
+		return false
+	}
 	var r struct {
 		OK bool `json:"ok"`
 	}
-	_ = json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&r)
+	if json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&r) != nil {
+		markUnknown(u, true)
+		return false
+	}
+	markUnknown(u, false)
 	return r.OK
 }
 
@@ -184,14 +223,20 @@ func serverIsOurs(u string) bool {
 		if len(id.Macs) == 0 {
 			return true
 		}
-		return sameCard(id.Macs, macsAt(u))
+		macs := macsAt(u)
+		if macs == nil {
+			markUnknown(u, true) // no answer is not "another card"
+			return false
+		}
+		markUnknown(u, false)
+		return sameCard(id.Macs, macs)
 	}
 	return numberCheck(u, id.Number)
 }
 
 // macsAt: the network cards the Adal Keep at u says it has.
 func macsAt(u string) []string {
-	resp, err := (&http.Client{Timeout: 2 * time.Second}).Get(strings.TrimRight(u, "/") + "/api/companion/info")
+	resp, err := (&http.Client{Timeout: askTimeout}).Get(strings.TrimRight(u, "/") + "/api/companion/info")
 	if err != nil {
 		return nil
 	}
@@ -206,7 +251,7 @@ func macsAt(u string) []string {
 // refusedServer: an Adal Keep answers at u and it is NOT our main PC (another
 // agency's, a test PC). An address that does not answer is not "refused".
 func refusedServer(u string) bool {
-	return answersAdalKeep(u) && !acceptServer(u)
+	return answersAdalKeep(u) && !acceptServer(u) && !wasUnknown(u)
 }
 
 var (
@@ -224,7 +269,8 @@ func confirmedOurs(u string) bool {
 		return true
 	}
 	if !acceptServer(u) {
-		return false
+		// A main PC too busy to answer who it is keeps its place: asked again at the next look.
+		return wasUnknown(u)
 	}
 	oursMu.Lock()
 	oursAt[u] = time.Now()

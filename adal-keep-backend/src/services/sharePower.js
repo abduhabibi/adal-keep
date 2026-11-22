@@ -154,9 +154,15 @@ export function chooseBest({ from = '', pcs = [], running = {}, tabs = {}, mainA
   }
   const mine = secs[from]
   const best = Object.entries(secs).sort((a, b) => a[1] - b[1] || a[0].localeCompare(b[0]))[0]
-  if (!best || best[0] === from || !(best[1] <= mine * 0.85 && mine - best[1] >= 15)) return { to: from, help: false, secs, why: '' }
+  // A weak PC (4 cores or fewer) does not carry a whole website when another PC of the office can do it
+  // better, however small the gain (2026-11-22: a 2-core main PC went to 100% under its own robots).
+  const weakOrigin = (Number(origin.cores) || 1) <= 4
+  const target = best && pcs.find(p => p.id === best[0])
+  const prefer = weakOrigin && !!best && best[0] !== from && best[1] < mine && !isWeak(target, running[best[0]] || 0)
+  if (!best || best[0] === from || !((best[1] <= mine * 0.85 && mine - best[1] >= 15) || prefer)) return { to: from, help: false, secs, why: '' }
   const to = best[0], b = pcs.find(p => p.id === to)
-  const why = tabs[to]?.signedIn && !tabs[from]?.signedIn ? 'its tab is signed in already'
+  const why = weakOrigin && !(best[1] <= mine * 0.85 && mine - best[1] >= 15) ? 'this PC is weak (4 cores or fewer): a stronger PC of the office does it'
+    : tabs[to]?.signedIn && !tabs[from]?.signedIn ? 'its tab is signed in already'
     : (b.net?.rtt_ms != null && origin.net?.rtt_ms != null && b.net.rtt_ms * 1.5 < origin.net.rtt_ms) ? 'its internet is faster'
     : 'it is stronger and less busy now'
   return { to, help: true, secs, why }

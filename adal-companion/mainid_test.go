@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // A fake Adal Keep that says whose it is by its number (as /api/pc-access/check-number does).
@@ -132,5 +133,53 @@ func TestReleaseOfferFromAnotherAgencyIsIgnored(t *testing.T) {
 	}
 	if agencyTag("470 40") != agencyTag("47040") || strings.Contains(agencyTag("47040"), "47040") {
 		t.Fatal("tag must be a stable hash of the digits")
+	}
+}
+
+// 2026-11-22: the main PC was swamped (answers took seconds); the Companion read the timeout as
+// "another main PC (not ours)" and dropped it. A slow or failing answer is "unknown": the saved
+// address is kept; only a definite "ok": false refuses.
+func TestASlowMainPCIsNeverRefused(t *testing.T) {
+	t.Setenv("ADAL_PC_NUMBER", "47040")
+	old, oldT := identityPath, askTimeout
+	idp := filepath.Join(t.TempDir(), "main-pc.json")
+	identityPath = func() string { return idp }
+	askTimeout = 150 * time.Millisecond
+	defer func() { identityPath, askTimeout = old, oldT }()
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/companion/info" {
+			w.Write([]byte(`{"service":"adal-keep"}`))
+			return
+		}
+		time.Sleep(600 * time.Millisecond) // check-number answers late
+		w.Write([]byte(`{"ok":true}`))
+	}))
+	defer slow.Close()
+	if serverIsOurs(slow.URL) {
+		t.Fatal("a PC that did not answer in time was taken as verified")
+	}
+	if refusedServer(slow.URL) {
+		t.Fatal("a slow main PC was refused as another agency's")
+	}
+	if !confirmedOurs(slow.URL) {
+		t.Fatal("a slow main PC lost its place (confirmedOurs)")
+	}
+	// A busy main PC (503) is the same.
+	busy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/companion/info" {
+			w.Write([]byte(`{"service":"adal-keep"}`))
+			return
+		}
+		http.Error(w, "busy", http.StatusServiceUnavailable)
+	}))
+	defer busy.Close()
+	if refusedServer(busy.URL) || !confirmedOurs(busy.URL) {
+		t.Fatal("a busy (5xx) main PC was refused")
+	}
+	// A definite "not ours" is still refused, and forgets nothing about slowness elsewhere.
+	other := fakeNumberedMain("99999")
+	defer other.Close()
+	if !refusedServer(other.URL) || confirmedOurs(other.URL) {
+		t.Fatal("another agency's PC must still be refused")
 	}
 }

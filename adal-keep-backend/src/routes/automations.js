@@ -753,6 +753,8 @@ export function journeyOf(p, runs = {}, hasCv = false, docs = null, agents = [])
     embassy: p.visa_application_number ? `Application ${p.visa_application_number}` : '',
     visa: [p.visa_number && `Visa ${p.visa_number}`, p.visa_application_number && `Application ${p.visa_application_number}`].filter(Boolean).join(' · '),
   }
+  // Once she is Selected, the steps before it are behind her: done, never open or red.
+  if (selected.state === 'done') for (const st of [cv, musaned]) if (st.state !== 'done') { st.state = 'done'; st.note = st.key === 'cv' && !hasCv ? 'passed' : (st.note || 'passed') }
   for (const st of [cv, musaned, selected, wafid, wakala, epro, insurance, fmol, embassy, visaStep, arrived]) {
     st.who = who[st.key] || ''
     if (docs) {

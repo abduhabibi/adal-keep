@@ -37,3 +37,12 @@ test('counts equal the lists, and WhatsApp agrees with the backend', () => {
   assert.equal(counts.selected, 2)
   for (const [s, p] of girls) assert.equal(phaseOf(s, p) === 'waiting', backendWaiting(s, p))
 })
+
+test('the status track: before Selected is done, never open or red', async () => {
+  const { journeyOf } = await import('../src/routes/automations.js')
+  const j = journeyOf({ chosen_at: '2026-11-01', musaned_stage: 'EPRO APPROVAL' }, {}, false)
+  const st = Object.fromEntries(j.embassy.map(s => [s.key, s.state]))
+  assert.equal(st.cv, 'done'); assert.equal(st.musaned, 'done'); assert.equal(st.selected, 'done')
+  const w = journeyOf({}, {}, false)
+  assert.equal(w.embassy.find(s => s.key === 'cv').state, 'todo')
+})

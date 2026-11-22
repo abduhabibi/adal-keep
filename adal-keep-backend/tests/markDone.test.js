@@ -4,7 +4,7 @@
  * a journey step; her stage (journeyOf → phaseOf) moves at once; Undo puts
  * everything back.
  */
-import test from 'node:test'
+import test, { after } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'fs'
 import os from 'os'
@@ -20,6 +20,8 @@ const { markStepDone, undoMarkDone, markStepUndone } = await import('../src/serv
 const { journeyOf } = await import('../src/routes/automations.js')
 const { phaseOf, AFTER } = await import('../../adal-keep-frontend/src/lib/phase.js')
 
+const dbs = []
+after(async () => { for (const d of dbs) await d.destroy().catch(() => {}) })
 async function setup() {
   const db = knex({ client: 'sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true, pool: { min: 1, max: 1 } })
   await db.schema.createTable('profiles', t => {
@@ -30,6 +32,7 @@ async function setup() {
     t.increments('id'); t.integer('profile_id'); t.string('workflow_id'); t.string('status'); t.string('pause_reason')
     t.integer('current_step'); t.text('context'); t.text('log'); t.string('created_at'); t.string('updated_at'); t.string('finished_at')
   })
+  dbs.push(db)
   return db
 }
 const phase = async (db, id) => {

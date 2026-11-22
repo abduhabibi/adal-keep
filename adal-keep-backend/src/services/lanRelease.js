@@ -59,9 +59,9 @@ export function current() {
 /** The pieces of a manifest, by SHA-256: the app, the programs, the Companion's pages. */
 export function piecesOf(m) {
   const out = []
-  if (m?.sha256 && m.file) out.push({ file: m.file, sha256: m.sha256 })
-  for (const p of m?.programs || []) if (p?.sha256) out.push({ file: p.file, sha256: p.sha256, name: p.name })
-  if (m?.online?.sha256) out.push({ file: m.online.file, sha256: m.online.sha256 })
+  if (m?.sha256 && m.file) out.push({ file: m.file, sha256: m.sha256, size: m.size })
+  for (const p of m?.programs || []) if (p?.sha256) out.push({ file: p.file, sha256: p.sha256, name: p.name, size: p.size })
+  if (m?.online?.sha256) out.push({ file: m.online.file, sha256: m.online.sha256, size: m.online.size })
   return out
 }
 
@@ -165,9 +165,9 @@ async function getJSON(url, timeout = 5000) {
 }
 
 /** One piece from a peer on the network (resumable), checked against the signed manifest's SHA-256. */
-export async function pieceFromPeer(base, sha256, dest) {
+export async function pieceFromPeer(base, sha256, dest, size) {
   return rangedDownload((start, end, signal) => fetch(`${base}/file/${sha256}`, { signal, headers: { Range: `bytes=${start}-${end}` } }),
-    dest, sha256, { chunk: 16 * 1048576, timeout: 120_000, tries: 3, backoff: 500 })
+    dest, sha256, { chunk: 16 * 1048576, timeout: 120_000, tries: 3, backoff: 500, size })
 }
 
 /** The peers that have this release (same sha). */
@@ -189,10 +189,10 @@ export async function fetchPiece(manifest, piece, dest, { bases = [], cloud = tr
   const label = path.basename(piece.file || piece.sha256)
   let lastErr = null
   for (const base of [...new Set([...bases, ...peersWith(manifest.sha)])]) {
-    try { await pieceFromPeer(base, piece.sha256, cache); console.log(`[lan-update] ${label} from ${base}`); return out() } catch (e) { lastErr = e }
+    try { await pieceFromPeer(base, piece.sha256, cache, piece.size); console.log(`[lan-update] ${label} from ${base}`); return out() } catch (e) { lastErr = e }
   }
   if (!cloud) throw lastErr || new Error('no PC of the office has it')
-  try { await downloadRelease({ file: piece.file, sha256: piece.sha256 }, cache) } catch (e) {
+  try { await downloadRelease({ file: piece.file, sha256: piece.sha256, size: piece.size }, cache) } catch (e) {
     throw lastErr ? new Error(`${e.message} (the office: ${lastErr.message})`) : e
   }
   return out()

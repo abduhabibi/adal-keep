@@ -106,11 +106,17 @@ const defaults = { chunk: 2 * 1048576, timeout: 180_000, stall: 60_000, tries: 6
 export const _setDownloadDefaultsForTests = (o) => Object.assign(defaults, o)
 
 export async function rangedDownload(open, dest, want, opts = {}) {
-  const { chunk, timeout, stall, tries, backoff } = { ...defaults, ...Object.fromEntries(Object.entries(opts).filter(([, v]) => v !== undefined)) }
+  const { chunk, timeout, stall, tries, backoff, size } = { ...defaults, ...Object.fromEntries(Object.entries(opts).filter(([, v]) => v !== undefined)) }
   const part = `${dest}.part`
   fs.mkdirSync(path.dirname(dest), { recursive: true })
   const have = () => { try { return fs.statSync(part).size } catch { return 0 } }
-  let total = 0, failures = 0
+  // A .part that is already the whole piece (a download that was cut or hung just after its last byte,
+  // 2026-11-22): finished here, with no request at all, when its SHA-256 is the signed one.
+  if (have() > 0 && (!size || have() === size) && (await sha256File(part).catch(() => '')) === want) {
+    fs.renameSync(part, dest)
+    return dest
+  }
+  let total = Number(size) > 0 ? Number(size) : 0, failures = 0
   for (;;) {
     const before = have()
     if (total && before >= total) break
@@ -130,6 +136,7 @@ export async function rangedDownload(open, dest, want, opts = {}) {
         throw new Error(`answered ${res.status}`)
       }
       const ranged = res.status === 206
+      restartStall() // from here on a body that stops sending for `stall` ms is cut (no CLOSE_WAIT socket waits for ever)
       if (ranged) {
         const m = /bytes\s+(\d+)-\d+\/(\d+|\*)/.exec(res.headers.get('content-range') || '')
         if (!m || Number(m[1]) !== before) throw new Error('the server sent another part than asked')
@@ -137,12 +144,11 @@ export async function rangedDownload(open, dest, want, opts = {}) {
       } else {
         // The whole file from the start: what was here is replaced; a stall ends it, not the total time.
         total = Number(res.headers.get('content-length')) || 0
-        restartStall()
       }
       const ws = fs.createWriteStream(part, { flags: ranged ? 'a' : 'w' })
       try {
         for await (const c of Readable.fromWeb(res.body)) {
-          if (!ranged) restartStall()
+          restartStall()
           if (!ws.write(c)) await new Promise(r => ws.once('drain', r))
         }
       } finally {
@@ -169,5 +175,5 @@ export async function rangedDownload(open, dest, want, opts = {}) {
 export async function downloadRelease(manifest, dest, opts = {}) {
   const { cloudCall } = await cloud()
   const url = `/storage/v1/object/authenticated/${BUCKET}/${manifest.file}`
-  return rangedDownload((start, end, signal) => cloudCall(dbRef, 'GET', url, undefined, { raw: true, timeout: opts.timeout || 180_000, signal, headers: { Range: `bytes=${start}-${end}` } }), dest, manifest.sha256, opts)
+  return rangedDownload((start, end, signal) => cloudCall(dbRef, 'GET', url, undefined, { raw: true, timeout: opts.timeout || 180_000, signal, headers: { Range: `bytes=${start}-${end}` } }), dest, manifest.sha256, { size: manifest.size, ...opts })
 }

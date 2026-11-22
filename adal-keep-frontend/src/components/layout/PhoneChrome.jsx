@@ -173,7 +173,8 @@ export function MorePage() {
   const rest = links.filter(l => !shown.includes(l.to))
   const groups = [
     { title: 'ሥራ', items: rest },
-    { title: 'Adal Keep', items: [settingsLink, ...(showTrash() ? [trashLink] : [])] },
+    // WhatsApp: its state and the one-tap link (the PC is its linked device).
+    { title: 'Adal Keep', items: [{ to: '/whatsapp', label: 'WhatsApp', icon: <Icon name="chat" /> }, settingsLink, ...(showTrash() ? [trashLink] : [])] },
   ]
   return (
     <div className="phone-more mx-auto max-w-xl pb-6">

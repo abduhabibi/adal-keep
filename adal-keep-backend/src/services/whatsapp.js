@@ -150,7 +150,9 @@ export async function connect(db, key = 'owner', { phone = '' } = {}, tries = 2)
   // Always today's WhatsApp Web (a saved old copy of its page cannot link new devices).
   opts.webVersionCache = { type: 'none' }
   const digits = String(phone || '').replace(/\D/g, '')
-  if (digits) opts.pairWithPhoneNumber = { phoneNumber: digits, showNotification: true }
+  // This client's own copy: linkByCode sets the number on it, so the library
+  // stops refreshing the QR (which would cancel the code) while a code is shown.
+  opts.pairWithPhoneNumber = { phoneNumber: digits, showNotification: true, intervalMs: 180000 }
   // WhatsApp open elsewhere ("Use here?"): this one stays the connected one.
   opts.takeoverOnConflict = true
   opts.takeoverTimeoutMs = 10000
@@ -163,11 +165,13 @@ export async function connect(db, key = 'owner', { phone = '' } = {}, tries = 2)
   async function startFailed(e) {
     if (failed) return
     failed = true
+    // Replaced by a newer start (or stopped on purpose): that one's state stays.
+    if (s.client !== c && (s.client || /^Stopped/.test(String(e?.message || '')))) { await release(c); return }
     if (s.client === c) s.client = null
     await release(c)
     const why = String(e?.message || e)
     if (tries > 1 && (/Target closed|detached|Session closed|Failed to launch/i.test(why) || PASSING.test(why))) {
-      console.warn(`[whatsapp ${key}] tab closed while starting — trying again`)
+      console.warn(`[whatsapp ${key}] tab closed while starting — trying again:`, why.slice(0, 160))
       setState(key, { status: 'off' }); s.startingAt = 0
       await new Promise(r => setTimeout(r, 2000))
       return connect(db, key, { phone }, tries - 1)
@@ -197,7 +201,14 @@ export async function connect(db, key = 'owner', { phone = '' } = {}, tries = 2)
   const inject = c.inject.bind(c)
   c.inject = async (...a) => {
     let last = null
-    for (const end = Date.now() + 10 * 60_000; Date.now() < end;) {
+    // Not linked yet: the page stays open (warm) so a code comes in a second or
+    // two; every 10 minutes it is reloaded (a fresh QR), never a new browser.
+    for (let end = Date.now() + 10 * 60_000; ; ) {
+      if (Date.now() > end) {
+        end = Date.now() + 10 * 60_000
+        if (!s.pairing && c.pupPage && !c.pupPage.isClosed()) { last = null; await c.pupPage.reload({ waitUntil: 'domcontentloaded', timeout: 90_000 }).catch(() => {}) }
+      }
+      if (!c.pupPage || c.pupPage.isClosed() || s.client !== c) throw new Error('Stopped while waiting for the sign-in')
       const st = await c.pupPage?.evaluate(() => {
         let up = false
         try { up = !!window.require?.('WAWebSocketModel')?.Socket } catch {}
@@ -216,7 +227,7 @@ export async function connect(db, key = 'owner', { phone = '' } = {}, tries = 2)
         }
       }
       const shown = st?.ref || st?.picture
-      if (st?.login && shown && shown !== last) {
+      if (st?.login && shown && shown !== last && !s.pairing) {
         last = shown
         const { default: QR } = await import('qrcode')
         const text = !st.ref || /^https?:/.test(st.ref) ? st.ref : `https://wa.me/settings/linked_devices#${st.ref}`
@@ -224,10 +235,9 @@ export async function connect(db, key = 'owner', { phone = '' } = {}, tries = 2)
       }
       await new Promise(r => setTimeout(r, 1000))
     }
-    throw new Error('Nobody scanned the QR within 10 minutes')
   }
   c.on('qr', async (qr) => {
-    if (digits) return
+    if (digits || s.pairing) return
     // WhatsApp's own QR now holds a link: https://wa.me/settings/linked_devices#<code>
     // (a phone no longer takes the bare code) — show exactly what its page shows.
     let text = qr
@@ -240,11 +250,17 @@ export async function connect(db, key = 'owner', { phone = '' } = {}, tries = 2)
     catch (e) { setState(key, { status: 'qr', qr: null, error: e.message }) }
   })
   c.on('code', (code) => setState(key, { status: 'code', code: String(code).replace(/^(.{4})(.{4})$/, '$1-$2') }))
-  c.on('authenticated', () => { if (s.state.status !== 'ready') setState(key, { status: 'signing-in', qr: null, code: null }) })
+  c.on('authenticated', () => {
+    if (s.link && !s.link.linkedAt) s.link.linkedAt = Date.now()
+    if (s.state.status !== 'ready') setState(key, { status: 'signing-in', qr: null, code: null })
+  })
   c.on('ready', async () => {
     s.startingAt = 0
     await shim(c)
-    setState(key, { status: 'ready', qr: null, code: null, error: null, me: { name: c.info?.pushname || '', number: c.info?.wid?.user || '' } })
+    s.pairing = false
+    const timing = linkTiming(s)
+    if (timing) console.log(`[whatsapp ${key}] linked by code: code in ${timing.code_s}s, linked ${timing.linked_s}s, ready ${timing.ready_s}s after the button`)
+    setState(key, { status: 'ready', qr: null, code: null, error: null, ...(timing ? { timing } : {}), me: { name: c.info?.pushname || '', number: c.info?.wid?.user || '' } })
     noteOn(key, true)
     rememberNumber(key, c.info?.wid?.user)
     // Its browser died (closed, crashed): connect again now, not at the next look.
@@ -261,11 +277,163 @@ export async function connect(db, key = 'owner', { phone = '' } = {}, tries = 2)
     s.startingAt = 0
     if (s.client === c) s.client = null
     setState(key, { status: 'off', me: null, error: why === 'LOGOUT' ? 'Signed out from the phone' : `Disconnected (${why})` })
-    if (why === 'LOGOUT') { noteOn(key, false); signedOutNotice(key) }
+    if (why === 'LOGOUT') {
+      noteOn(key, false); signedOutNotice(key)
+      // Ready for the one-tap relink: a fresh page waits, so the code comes at once.
+      release(c).then(() => setTimeout(() => prepare(dbRef, key), 3000))
+      return
+    }
     release(c)
   })
   c.initialize().catch(startFailed)
   return s.state
+}
+
+/**
+ * The hidden browser opened ahead (the phone's WhatsApp page, a relink after a
+ * sign-out): its page is loaded by the time a person asks for a code, so the
+ * code comes in a second or two instead of the page's 30–60 s. Not linked
+ * within WARM_MS it is closed again (keepConnected).
+ */
+const WARM_MS = 30 * 60_000
+export function prepare(db, key = 'owner') {
+  if (db) dbRef = db
+  const s = session(key)
+  s.warmUntil = Date.now() + WARM_MS
+  if (s.client || ['ready', 'web'].includes(s.state.status)) return s.state
+  connect(dbRef, key).catch(e => console.warn('[whatsapp]', e.message))
+  return s.state
+}
+
+const secs = (a, b) => a && b ? Math.round((b - a) / 100) / 10 : null
+/** How long the last link by code took, from the button (null: not linked by code). */
+function linkTiming(s) {
+  const l = s.link
+  if (!l?.pressedAt || !l.codeAt) return null
+  if (!l.readyAt) l.readyAt = Date.now()
+  if (!l.linkedAt) l.linkedAt = l.readyAt
+  return { code_s: secs(l.pressedAt, l.codeAt), linked_s: secs(l.pressedAt, l.linkedAt), ready_s: secs(l.pressedAt, l.readyAt), typed_s: secs(l.codeAt, l.linkedAt) }
+}
+
+/**
+ * WhatsApp's own "Link with phone number" (asked on 2026-11-22): the hidden
+ * browser that holds this account asks WhatsApp for the 8-character code —
+ * the same code web.whatsapp.com shows — and WhatsApp on the phone shows
+ * "Enter code to link new device". No new browser when one is open (that cost
+ * the page's whole load every time before). Answers within ~15 s with the code
+ * when it can; else the code follows in the state (status 'code').
+ */
+export async function linkByCode(db, key = 'owner', phone = '') {
+  if (db) dbRef = db
+  const digits = String(phone || '').replace(/\D/g, '').replace(/^00/, '')
+  if (digits.length < 9 || digits.length > 15) throw new Error('Type the WhatsApp number with its country code, e.g. 2519…')
+  const s = session(key)
+  if (s.state.status === 'ready' && s.client) return s.state
+  if (s.state.status === 'web') throw new Error('WhatsApp\'s own window is open on the PC: finish there, or close it first')
+  rememberNumber(key, digits)
+  const link = s.link = { phone: digits, pressedAt: Date.now(), codeAt: 0, linkedAt: 0, readyAt: 0 }
+  s.pairing = true
+  s.warmUntil = Date.now() + WARM_MS
+  if (!s.client || s.state.status === 'failed') {
+    if (s.state.status === 'failed') { const old = s.client; s.client = null; s.startingAt = 0; await release(old) }
+    connect(dbRef, key).catch(e => console.warn('[whatsapp]', e.message))
+  }
+  setState(key, { status: 'starting', qr: null, code: null, error: null, phone: digits, timing: null })
+  codeLoop(key, link).catch(e => console.warn(`[whatsapp ${key}] code:`, e.message))
+  for (const until = Date.now() + 15_000; !link.codeAt && s.state.status !== 'failed' && Date.now() < until;) await sleep(250)
+  return stateOf(key)
+}
+
+const sleep = (ms) => new Promise(r => setTimeout(r, ms))
+
+/** Asks WhatsApp's page for the code (its own linking part, else its buttons), then watches for the link. */
+async function codeLoop(key, link) {
+  const s = session(key)
+  const mine = () => s.link === link && s.state.status !== 'ready'
+  let noModuleSince = 0, codeTries = 0
+  const end = link.pressedAt + 3 * 60_000
+  while (mine() && !link.codeAt) {
+    if (Date.now() > end) { setState(key, { status: 'failed', error: 'WhatsApp did not give a code: check the PC\'s internet and press again.' }); s.pairing = false; return }
+    const page = s.client?.pupPage
+    if (page && !page.isClosed()) {
+      const r = await page.evaluate(askCode, link.phone).catch(e => ({ error: String(e?.message || e) }))
+      if (r?.code) { gotCode(key, link, r.code); break }
+      if (r?.error && /code|ref|hello/i.test(r.error) && ++codeTries < 4) console.warn(`[whatsapp ${key}] code not given yet:`, r.error.slice(0, 120))
+      // A page without WhatsApp's linking part (its /login page): its own buttons.
+      noModuleSince = r && !r.module && r.qr ? (noModuleSince || Date.now()) : 0
+      if (noModuleSince && Date.now() - noModuleSince > 5000) {
+        const code = await codeFromPage(page, link.phone).catch(e => { console.warn(`[whatsapp ${key}] the page's own buttons:`, e.message); return '' })
+        if (code) { gotCode(key, link, code); break }
+        noModuleSince = 0
+      }
+    }
+    await sleep(700)
+  }
+  // Watch for the link: WhatsApp leaves "unpaired" the moment the code is entered.
+  let refreshAt = link.codeAt + 160_000
+  while (mine() && !link.linkedAt && Date.now() - link.pressedAt < 15 * 60_000) {
+    const page = s.client?.pupPage
+    const r = page && !page.isClosed() ? await page.evaluate(() => {
+      let sock = null; try { sock = window.require('WAWebSocketModel').Socket.state } catch {}
+      return { sock, qr: !!document.querySelector('[data-ref]'), path: location.pathname }
+    }).catch(() => null) : null
+    if (r && r.sock && !/^UNPAIRED|^UNLAUNCHED/.test(r.sock) && s.state.status === 'code') {
+      link.linkedAt = Date.now()
+      setState(key, { status: 'signing-in', code: null })
+      console.log(`[whatsapp ${key}] the code was entered (${secs(link.pressedAt, link.linkedAt)}s after the button)`)
+      break
+    }
+    // WhatsApp's code lasts a few minutes: a new one in its place while nobody typed it.
+    if (Date.now() > refreshAt && r && /^UNPAIRED/.test(r.sock || '')) {
+      refreshAt = Date.now() + 160_000
+      const n = await page.evaluate(askCode, link.phone).catch(() => null)
+      if (n?.code && mine()) setState(key, { status: 'code', code: fmtCode(n.code) })
+    }
+    await sleep(1000)
+  }
+}
+const fmtCode = (code) => String(code).replace(/[^A-Z0-9]/gi, '').toUpperCase().replace(/^(.{4})(.{4})$/, '$1-$2')
+function gotCode(key, link, code) {
+  link.codeAt = Date.now()
+  // The library leaves the QR alone from now on (a QR refresh would cancel the code).
+  const o = session(key).client?.options?.pairWithPhoneNumber
+  if (o) o.phoneNumber = link.phone
+  setState(key, { status: 'code', code: fmtCode(code), qr: null, error: null })
+  console.log(`[whatsapp ${key}] code ready ${secs(link.pressedAt, link.codeAt)}s after the button`)
+}
+
+/** In WhatsApp's page: its linking part gives the code (null: the page is not ready for it yet). */
+async function askCode(num) {
+  let A = null, sock = null
+  try { A = window.require('WAWebAltDeviceLinkingApi') } catch {}
+  try { sock = window.require('WAWebSocketModel').Socket.state } catch {}
+  const qr = !!document.querySelector('[data-ref]')
+  if (!A || !/^UNPAIRED/.test(sock || '')) return { module: !!A, sock, qr }
+  A.setPairingType('ALT_DEVICE_LINKING')
+  await A.initializeAltDeviceLinking()
+  return { module: true, sock, code: await A.startAltLinkingFlow(num, true) }
+}
+
+/** The person's way on WhatsApp's page: "Link with phone number instead" → the number → Next → its code. */
+async function codeFromPage(page, digits) {
+  await page.evaluate(() => [...document.querySelectorAll('button,[role=button],a,span,div')]
+    .find(e => !e.children.length && /link with phone number|log in with phone number/i.test(e.textContent || ''))?.click())
+  const box = await page.waitForSelector('input[aria-label*="phone number" i], input[type="tel"]', { timeout: 15000 })
+  await box.click({ clickCount: 3 })
+  await page.keyboard.press('Backspace')
+  await box.type(`+${digits}`, { delay: 25 })
+  await page.evaluate(() => [...document.querySelectorAll('button,[role=button]')].find(e => /^next$/i.test((e.innerText || '').trim()))?.click())
+  for (let i = 0; i < 30; i++) {
+    await sleep(700)
+    const code = await page.evaluate(() => {
+      const el = document.querySelector('[data-link-code]')
+      if (el) return el.getAttribute('data-link-code').replace(/[^A-Z0-9]/gi, '')
+      const t = (document.body.innerText || '').match(/\b([A-Z0-9]{4})\s*-?\s*([A-Z0-9]{4})\b/)
+      return t && /[A-Z]/.test(t[1] + t[2]) && /code/i.test(document.body.innerText) ? t[1] + t[2] : ''
+    }).catch(() => '')
+    if (code && code.length === 8) return code
+  }
+  return ''
 }
 
 /**
@@ -331,10 +499,12 @@ async function signedOutNotice(key) {
   if (!dbRef) return
   const who = key === 'owner' ? '' : await dbRef('users').where('id', Number(key.slice(1))).first('name').then(u => u?.name ? ` (${u.name})` : '').catch(() => '')
   await dbRef('notifications').insert({
-    type: 'whatsapp', title: `💬 WhatsApp${who} was signed out from the phone`,
-    body: 'Sign in again: Settings → Integrations → WhatsApp → Sign in through web.whatsapp.com, and scan the QR with the phone.',
+    type: 'whatsapp', title: `💬 WhatsApp${who} is no longer linked to the PC`,
+    body: 'Tap to link it again: one code, typed in WhatsApp on the phone.',
     created_day: new Date().toISOString().slice(0, 10),
   }).catch(() => {})
+  // The phones hear it now (also with Adal Keep swiped away), not at their next look.
+  import('./fcmPush.js').then(f => f.pushToPhones(dbRef, { type: 'attention' })).catch(() => {})
 }
 
 /** Signs this person's WhatsApp out (their phone's "Linked devices" loses it). */
@@ -399,7 +569,28 @@ function oneAccount() {
   return [keep, ...on.filter(k => k !== keep && busy(k))]
 }
 
-function keepConnected() {
+/** The PC can reach WhatsApp: without internet nothing is restarted (WhatsApp reconnects by itself when it is back). */
+async function online() {
+  const { lookup } = await import('dns/promises')
+  return Promise.race([lookup('web.whatsapp.com').then(() => true, () => false), new Promise(r => setTimeout(() => r(false), 8000))])
+}
+
+async function keepConnected() {
+  // A page opened ahead for a link nobody made: closed again after WARM_MS.
+  const on = readNote().on || []
+  for (const [key, s] of sessions) {
+    if (on.includes(key) || !s.client || s.state.status === 'ready' || s.state.status === 'web') continue
+    if ((s.warmUntil || 0) < Date.now() && !(s.link && Date.now() - s.link.pressedAt < WARM_MS)) {
+      console.log(`[whatsapp ${key}] not linked within ${WARM_MS / 60000} minutes — its page is closed`)
+      const old = s.client; s.client = null; s.startingAt = 0; s.pairing = false
+      setState(key, { status: 'off', qr: null, code: null })
+      release(old).catch(() => {})
+    }
+  }
+  if (!(await online())) {
+    for (const key of on) if (stateOf(key).status !== 'ready') setState(key, { error: 'No internet on this PC — WhatsApp connects by itself when it is back.' })
+    return
+  }
   oneAccount().forEach((key, i) => setTimeout(async () => {
     const s = session(key), st = stateOf(key).status
     const today = new Date().toLocaleDateString('en-CA')
@@ -420,10 +611,15 @@ function keepConnected() {
       connect(dbRef, key).catch(e => console.warn('[whatsapp]', e.message))
     }
     if (st === 'off' || st === 'failed') return connect(dbRef, key).catch(e => console.warn('[whatsapp]', e.message))
-    if (['starting', 'signing-in'].includes(st) && Date.now() - new Date(s.state.since).getTime() > 3 * 60_000) return restart('stuck starting')
+    // A code just entered: WhatsApp brings the chats (minutes on a slow line) — never cut that short.
+    const linking = s.link?.linkedAt && Date.now() - s.link.linkedAt < 10 * 60_000
+    if (['starting', 'signing-in'].includes(st) && !linking && Date.now() - new Date(s.state.since).getTime() > 4 * 60_000) return restart('stuck starting')
     if (st !== 'ready' || !s.client) return
     const now = await Promise.race([s.client.getState().catch(() => null), new Promise(r => setTimeout(() => r(null), 20_000))])
-    s.bad = now === 'CONNECTED' ? 0 : (s.bad || 0) + 1
+    // WhatsApp reconnecting by itself (the line dropped, the PC woke up): given
+    // 5 minutes before its browser is started again; a page not answering, 90 s.
+    const own = ['TIMEOUT', 'OPENING', 'PAIRING', 'RESUMING', 'SYNCING', 'CONNECTING'].includes(now)
+    s.bad = now === 'CONNECTED' ? 0 : (s.bad || 0) + (own ? 1 / 3.3 : 1)
     if (s.bad >= 3) return restart(`not answering (${now})`)
   }, i * 5_000))
 }
@@ -434,8 +630,8 @@ export function startWhatsApp(db) {
   const n = readNote()
   // Before accounts.json: the one account in Adal Keep's Brave.
   if (!n.on?.length && fs.existsSync(path.join(BACKEND, 'data', 'whatsapp-on'))) { n.brave ||= 'owner'; n.on = ['owner']; writeNote(n) }
-  setTimeout(keepConnected, 10_000)
-  setInterval(keepConnected, 30_000).unref?.()
+  setTimeout(() => keepConnected().catch(e => console.warn('[whatsapp]', e.message)), 10_000)
+  setInterval(() => keepConnected().catch(e => console.warn('[whatsapp]', e.message)), 30_000).unref?.()
   setInterval(() => closeChosenSends().catch(() => {}), 30 * 60_000).unref?.()
 }
 

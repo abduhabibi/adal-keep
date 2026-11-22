@@ -3,7 +3,7 @@
  * then the agents in Saudi Arabia that get CVs — each with its CV template(s)
  * and its office name on Musaned (so the one who chose her keeps the CV).
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 import api from '../services/api'
 import { wa } from '../lib/whatsapp'
@@ -111,6 +111,9 @@ export default function WhatsAppCard() {
 
   // Not answering (the server restarting): the card stays and asks again.
   const load = () => wa.get('/whatsapp').then(r => setS(r.data)).catch(e => e.response ? setS(false) : setTimeout(load, 3000))
+  // Not linked: the PC opens WhatsApp's page now, so "Integrate" gets its code in a second or two.
+  const prepared = useRef(false)
+  useEffect(() => { if (s && s.status !== 'ready' && !prepared.current) { prepared.current = true; wa.post('/whatsapp/prepare').catch(() => {}) } }, [s?.status])
   const loadAgents = () => wa.get('/whatsapp/agents').then(r => setAgents(r.data)).catch(() => {})
   useEffect(() => {
     load(); loadAgents()
@@ -161,7 +164,7 @@ export default function WhatsAppCard() {
 
       {s.status === 'ready' ? (
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-teal-50 px-3 py-2 text-sm text-teal-800 dark:bg-teal-900/20 dark:text-teal-300">
-          <span>✓ WhatsApp is integrated{s.me?.name ? ` — ${s.me.name}` : ''}{s.me?.number ? ` · +${s.me.number}` : ''}</span>
+          <span>✓ WhatsApp is integrated{s.me?.name ? ` — ${s.me.name}` : ''}{s.me?.number ? ` · +${s.me.number}` : ''}{s.timing?.ready_s != null ? ` · linked in ${s.timing.linked_s}s` : ''}</span>
           <button type="button" onClick={logout} className="text-xs underline">Sign out</button>
         </div>
       ) : s.status === 'code' ? (

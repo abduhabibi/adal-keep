@@ -5,12 +5,12 @@
  * copy, which passes no headers).
  */
 import express from 'express'
-import { lastNumber, keyOf, stateOf, allStates, connect, openWeb, logout, listChats, chatForNumber, agentRow, agentsOf, sendCV, sendMany, bulk, notifyMany, notices, sendsOf, onChosen, available, agentLimit, roomForAgent, waitingOnly } from '../services/whatsapp.js'
+import { lastNumber, keyOf, stateOf, allStates, connect, linkByCode, prepare, openWeb, logout, listChats, chatForNumber, agentRow, agentsOf, sendCV, sendMany, bulk, notifyMany, notices, sendsOf, onChosen, available, agentLimit, roomForAgent, waitingOnly } from '../services/whatsapp.js'
 
 const router = express.Router()
 // WhatsApp is in the Standard plan (plans.js): connecting and sending need it; looking does not.
 router.use(async (req, res, next) => {
-  if (req.method !== 'POST' || !/^\/(whatsapp\/(connect|open-web|bulk|notify)|profiles\/\d+\/whatsapp\/send)/.test(req.path)) return next()
+  if (req.method !== 'POST' || !/^\/(whatsapp\/(connect|link|prepare|open-web|bulk|notify)|profiles\/\d+\/whatsapp\/send)/.test(req.path)) return next()
   const { requireFeature } = await import('../services/plans.js')
   requireFeature('whatsapp')(req, res, next)
 })
@@ -21,7 +21,11 @@ const by = (req) => { try { return decodeURIComponent(req.get('x-adal-who') || '
 
 router.get('/whatsapp', async (req, res) => res.json({ agent_limit: await agentLimit(req.app.locals.db), ...stateOf(who(req)), key: who(req), last_number: lastNumber(who(req)), others: allStates().filter(s => s.key !== who(req) && s.status === 'ready') }))
 router.post('/whatsapp/open-web', async (req, res) => { try { res.json(await openWeb(req.app.locals.db, who(req))) } catch (e) { fail(res, e) } })
-router.post('/whatsapp/connect', async (req, res) => { try { res.json(await connect(req.app.locals.db, who(req), { phone: req.body?.phone })) } catch (e) { fail(res, e) } })
+// With a number: WhatsApp's 8-character code from the browser already open (linkByCode), never a new one.
+router.post('/whatsapp/connect', async (req, res) => { try { res.json(req.body?.phone ? await linkByCode(req.app.locals.db, who(req), req.body.phone) : await connect(req.app.locals.db, who(req))) } catch (e) { fail(res, e) } })
+router.post('/whatsapp/link', async (req, res) => { try { res.json(await linkByCode(req.app.locals.db, who(req), req.body?.phone || lastNumber(who(req)))) } catch (e) { fail(res, e) } })
+// The phone's WhatsApp page opened: the PC loads WhatsApp's page now, so the code is there at once.
+router.post('/whatsapp/prepare', (req, res) => { try { res.json(prepare(req.app.locals.db, who(req))) } catch (e) { fail(res, e) } })
 router.post('/whatsapp/logout', async (req, res) => { try { await logout(who(req)); res.json(stateOf(who(req))) } catch (e) { fail(res, e) } })
 router.get('/whatsapp/chats', async (req, res) => { try { res.json(await listChats(who(req))) } catch (e) { fail(res, e) } })
 

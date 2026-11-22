@@ -110,9 +110,34 @@ type releaseManifest struct {
 	RollbackOf  string   `json:"rollback_of"` // a deliberate "back to the version before"
 	EveryoneAt  string   `json:"everyone_at"`
 	Early       []string `json:"early"`
+	Audience    *audience `json:"audience"` // only these PCs take it from Supabase (the others get it from them over the office network)
 	Programs    []piece  `json:"programs"`
 	Online      *piece   `json:"online"`
 }
+
+// audience: PC names (os.Hostname, lower case) that may take a release from Supabase.
+// Adal seeds one Companion with it; the rest get it from that PC over the office network.
+type audience struct {
+	PCs []string `json:"pcs"`
+}
+
+// audienceAllows: no audience = everyone; else this PC's name must be in it. Only Supabase is held back.
+func audienceAllows(m *releaseManifest, host string) bool {
+	if m == nil || m.Audience == nil || len(m.Audience.PCs) == 0 {
+		return true
+	}
+	for _, n := range m.Audience.PCs {
+		if strings.EqualFold(strings.TrimSpace(n), strings.TrimSpace(host)) {
+			return true
+		}
+	}
+	return false
+}
+
+var errAudience = errors.New("the newest release is being tried on other PCs first")
+
+// ownHost: this PC's name, as the release's audience writes it.
+var ownHost = func() string { h, _ := os.Hostname(); return h }
 
 type envelope struct {
 	Manifest  json.RawMessage `json:"manifest"`
@@ -636,6 +661,9 @@ func (u *updater) cloudLatest() (*releaseManifest, *envelope, error) {
 		return nil, nil, err
 	}
 	m, err := verifyRelease(env, u.key)
+	if err == nil && !audienceAllows(m, ownHost()) {
+		return m, &env, errAudience
+	}
 	return m, &env, err
 }
 
@@ -705,6 +733,7 @@ func (u *updater) install(m *releaseManifest, env *envelope, fromCloud bool) err
 	go u.completeSet(m, fromCloud)
 	u.announce()
 	go u.offerToMain()
+	go u.offerToPeers()
 	return nil
 }
 
@@ -725,6 +754,7 @@ func (u *updater) completeSet(m *releaseManifest, fromCloud bool) bool {
 			log.Printf("📦 the whole release %s is here to hand on", m.Short)
 			u.announce()
 			u.offerToMain()
+			u.offerToPeers()
 			return true
 		}
 		time.Sleep(completeEvery)
@@ -818,6 +848,98 @@ func (u *updater) offerToMain() bool {
 	offeredAt.Unlock()
 	log.Printf("📣 told the main PC: update %s is here for it", m.Short)
 	return true
+}
+
+// otherCompanions: the LAN release addresses of the other Companions (the main PC's list of them, and the ones heard).
+func otherCompanions() []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(b string) {
+		if !seen[b] {
+			seen[b] = true
+			out = append(out, b)
+		}
+	}
+	officeMu.Lock()
+	ps := append([]officePeer(nil), officePeers...)
+	officeMu.Unlock()
+	for _, p := range ps {
+		ip := net.ParseIP(p.IP)
+		if ip == nil || isOwnIP(ip) {
+			continue
+		}
+		port := p.Port
+		if port <= 0 {
+			port = lanHTTPPort
+		}
+		add("http://" + net.JoinHostPort(p.IP, strconv.Itoa(port)) + "/lan")
+	}
+	for _, b := range peerBases() {
+		add(b + "/lan")
+	}
+	return out
+}
+
+var peerOfferedAt = struct {
+	sync.Mutex
+	m map[string]time.Time
+}{m: map[string]time.Time{}}
+
+// offerToPeers: a COMPLETE release here is offered to the other Companions (POST /lan/offer) that
+// have an older one, so a seeded Companion does not wait for the main PC to pass it on.
+// Returns how many were told.
+func (u *updater) offerToPeers() int {
+	m, _ := u.current()
+	tag := ownAgencyTag()
+	if m == nil || tag == "" || !u.complete(m) {
+		return 0
+	}
+	hc := &http.Client{Timeout: 6 * time.Second}
+	told := 0
+	for _, base := range otherCompanions() {
+		peerOfferedAt.Lock()
+		last := peerOfferedAt.m[base+m.SHA]
+		peerOfferedAt.Unlock()
+		if time.Since(last) < 5*time.Minute {
+			continue
+		}
+		resp, err := hc.Get(base + "/latest")
+		if err != nil {
+			continue
+		}
+		var env envelope
+		ok := resp.StatusCode == http.StatusOK && json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&env) == nil
+		resp.Body.Close()
+		if ok {
+			if theirs, err := verifyRelease(env, u.key); err == nil && !isNewerRelease(m, theirs) {
+				continue // it has this one (or a newer)
+			}
+		}
+		body, _ := json.Marshal(offerMsg{SHA: m.SHA, PublishedAt: m.PublishedAt, Seq: m.Seq, Port: lanHTTPPort, Path: "/lan", Tags: tag})
+		r2, err := hc.Post(base+"/offer", "application/json", bytes.NewReader(body))
+		if err != nil {
+			continue
+		}
+		r2.Body.Close()
+		if r2.StatusCode == http.StatusOK {
+			peerOfferedAt.Lock()
+			peerOfferedAt.m[base+m.SHA] = time.Now()
+			peerOfferedAt.Unlock()
+			told++
+			log.Printf("📣 told %s: update %s is here for it", base, m.Short)
+		}
+	}
+	return told
+}
+
+// pollPeers: the other Companions are asked what they have; a newer signed release is taken from them
+// (a Wi-Fi that drops broadcasts must not leave a Companion behind).
+func (u *updater) pollPeers() {
+	for _, base := range otherCompanions() {
+		if err := u.fromPeer(base); err != nil {
+			log.Printf("update from %s: %v", base, err)
+		}
+	}
 }
 
 // heardOffer: a PC of this agency (the main PC) says it has a newer release.
@@ -1119,6 +1241,9 @@ func (u *updater) fromPeer(base string) error {
 // fromCloud: Supabase's newest signed release, when it is newer and its turn has come.
 func (u *updater) fromCloud() error {
 	m, env, err := u.cloudLatest()
+	if errors.Is(err, errAudience) {
+		return nil // not for this PC from Supabase: it comes from the PCs it was seeded on, over the office network
+	}
 	if err != nil {
 		return err
 	}
@@ -1350,9 +1475,13 @@ func startSelfUpdate(root string) *updater {
 	}()
 	go func() {
 		// Every minute: a newer, complete release here than the main PC's is offered to it.
-		for {
+		for i := 0; ; i++ {
 			time.Sleep(time.Minute)
 			u.offerToMain()
+			u.offerToPeers()
+			if i%2 == 1 {
+				u.pollPeers()
+			}
 		}
 	}()
 	return u

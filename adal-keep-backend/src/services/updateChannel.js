@@ -12,6 +12,7 @@
  */
 import crypto from 'crypto'
 import fs from 'fs'
+import os from 'os'
 import path from 'path'
 import { Readable } from 'stream'
 
@@ -36,6 +37,20 @@ export function signManifest(manifest, privateKeyPem) {
 
 export function verifyManifest(manifest, signature) {
   try { return crypto.verify(null, Buffer.from(canonical(manifest)), verifyKey, Buffer.from(String(signature || ''), 'base64')) } catch { return false }
+}
+
+/**
+ * A signed release can name the PCs that may take it from Supabase
+ * (manifest.audience.pcs = PC names, as os.hostname()): Adal seeds one
+ * Companion with it and the others get it from that Companion over the office
+ * network (services/lanRelease.js). Only Supabase is held back: a signed
+ * release offered by a PC of the office is taken by anyone (checked as ever).
+ */
+export const myHost = () => os.hostname().toLowerCase()
+export function audienceAllows(manifest, host = myHost()) {
+  const pcs = manifest?.audience?.pcs
+  if (!Array.isArray(pcs) || !pcs.length) return true
+  return pcs.some(n => String(n).toLowerCase() === String(host).toLowerCase())
 }
 
 let dbRef = null
@@ -64,6 +79,7 @@ export async function latestRelease(channel = 'release') {
   if (!res.ok) throw new Error(`Supabase updates answered ${res.status}${res.status === 400 || res.status === 404 ? ' (nothing published yet, or updates.sql not run)' : ''}`)
   const { manifest, signature } = await res.json()
   if (!manifest?.sha || !verifyManifest(manifest, signature)) throw new Error('The published update is not signed by Adal — not installed')
+  if (!audienceAllows(manifest)) throw Object.assign(new Error('The newest release is being tried on other PCs first'), { audience: true })
   lastEnvelope = { manifest, signature }
   return manifest
 }

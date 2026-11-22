@@ -4,6 +4,8 @@
  * every phone) through Supabase — the GitHub repository can be private.
  *
  *   node adal-keep-backend/scripts/publish-update.mjs [--skip-frontend] [--dry-run] [--now] [--skip-tests]
+ *   node adal-keep-backend/scripts/publish-update.mjs --only-pcs PC1[,PC2]   (seed: only these PCs take it from Supabase)
+ *   node adal-keep-backend/scripts/publish-update.mjs --open                 (lift the audience: every PC)
  *   node adal-keep-backend/scripts/publish-update.mjs --rollback      (everyone back to the version before)
  *
  * What's new (3–5 short plain-English bullets, shown once on each PC after it updates):
@@ -56,6 +58,16 @@ for (let i = 0; i < argv.length; i++) {
 if (!rawNotes.length && process.env.ADAL_WHATS_NEW) rawNotes.push(...process.env.ADAL_WHATS_NEW.split(/\||\r?\n/))
 const NOTES = cleanNotes(rawNotes)
 if (NOTES.length && NOTES.length < 3) console.log(`   (What's new has ${NOTES.length} bullet(s); 3–5 read best)`)
+// --only-pcs NAME,NAME: a signed audience — only these PCs (os.hostname()) take the release from Supabase;
+// the others get it from them over the office network. --open then lifts it for everyone.
+const ONLY = (() => {
+  for (let i = 0; i < argv.length; i++) {
+    const v = argv[i] === '--only-pcs' ? argv[i + 1] : argv[i].startsWith('--only-pcs=') ? argv[i].slice(11) : null
+    if (v != null) return v.split(',').map(x => x.trim().toLowerCase()).filter(Boolean)
+  }
+  return null
+})()
+if (ONLY && !ONLY.length) throw new Error('--only-pcs needs at least one PC name')
 const DRY = args.has('--dry-run')
 const STAGE_HOURS = Number(process.env.STAGE_HOURS || 2)
 const sh = (cmd, a, opts = {}) => execFileSync(cmd, a, { cwd: ROOT, encoding: 'utf8', ...opts }).trim()
@@ -74,6 +86,23 @@ const put = (p, buf, type) => storage('POST', `object/${BUCKET}/${p}`, buf, { 'C
 /** The migration files a commit has (a PC refuses to go back to it when its database has others). Null: unknown. */
 const migrationsAt = (rev) => {
   try { return sh('git', ['ls-tree', '--name-only', rev, 'adal-keep-backend/src/migrations/']).split('\n').filter(f => /\.(c|m)?js$/.test(f)).map(f => path.basename(f)) } catch { return null }
+}
+
+// The seeded release is opened to everyone: the same release, the audience lifted, signed again (a later seq).
+if (args.has('--open')) {
+  const cur = await (await storage('GET', `object/${BUCKET}/release/latest.json`)).json()
+  if (!verifyManifest(cur.manifest, cur.signature)) throw new Error('latest.json is not signed')
+  if (!cur.manifest.audience) { console.log(`${cur.manifest.short} is open to everyone already`); process.exit(0) }
+  const now = new Date().toISOString()
+  const { audience: _a, ...rest } = cur.manifest
+  const manifest = { ...rest, published_at: now, seq: Math.max(Date.parse(now), (Number(cur.manifest.seq) || 0) + 1), everyone_at: now }
+  console.log(`== ${manifest.short} (was only for ${cur.manifest.audience.pcs.join(', ')}) is opened to every PC`)
+  if (DRY) { console.log('dry run — nothing uploaded'); process.exit(0) }
+  const body = Buffer.from(JSON.stringify({ manifest, signature: signManifest(manifest, PRIV) }))
+  await storage('POST', `object/${BUCKET}/release/${manifest.sha}.json`, body, { 'Content-Type': 'application/json', 'x-upsert': 'true', 'Cache-Control': 'no-cache' })
+  await storage('POST', `object/${BUCKET}/release/latest.json`, body, { 'Content-Type': 'application/json', 'x-upsert': 'true', 'Cache-Control': 'no-cache' })
+  console.log('✓ every PC takes it at its next check')
+  process.exit(0)
 }
 
 // Everyone back to the version before the newest (it must still be in Storage).
@@ -237,7 +266,8 @@ try {
     migrations: migrationsAt(sha),
     // Staged: these agencies at once, everyone else later.
     early: await (async () => { try { const r = await storage('GET', `object/${BUCKET}/release/early.json`); return r.ok ? ((await r.json()).agencies || []) : [] } catch { return [] } })(),
-    everyone_at: new Date(Date.now() + (args.has('--now') ? 0 : STAGE_HOURS * 3600 * 1000)).toISOString(),
+    everyone_at: new Date(Date.now() + (args.has('--now') || ONLY ? 0 : STAGE_HOURS * 3600 * 1000)).toISOString(),
+    ...(ONLY ? { audience: { pcs: ONLY } } : {}),
   }
   // The way back, signed now (only this PC has the key): the release before,
   // re-issued just after this one. Only when its app is still in Storage.
@@ -260,7 +290,7 @@ try {
   // Each version's note is kept too (--rollback goes back to one).
   await put(`release/${sha}.json`, Buffer.from(JSON.stringify({ manifest, signature })), 'application/json')
   await put('release/latest.json', Buffer.from(JSON.stringify({ manifest, signature })), 'application/json')
-  console.log(args.has('--now') ? '✓ published for every agency PC' : `✓ published: ${manifest.early.length} agenc${manifest.early.length === 1 ? 'y' : 'ies'} marked "updates first" now, every other PC at ${new Date(manifest.everyone_at).toLocaleString()}`)
+  console.log(ONLY ? `✓ published for ${ONLY.join(', ')} only (the others get it from them over the office network; --open lifts it)` : args.has('--now') ? '✓ published for every agency PC' : `✓ published: ${manifest.early.length} agenc${manifest.early.length === 1 ? 'y' : 'ies'} marked "updates first" now, every other PC at ${new Date(manifest.everyone_at).toLocaleString()}`)
 
   // The phone app, when it is newer than the published one.
   const ver = JSON.parse(fs.readFileSync(path.join(BACK, 'src/phone-app/version.json'), 'utf8'))

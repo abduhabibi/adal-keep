@@ -238,16 +238,26 @@ async function checkSupabase(installed) {
   mineNow = mine
   const known = L.orderKnown(mine)
   const peer = known ? await L.newestFromPeers(mine).catch(() => null) : null
-  let m = null, cloudError = null
+  let m = null, cloudError = null, notForMe = false
   try {
     m = await latestRelease('release')
     // Up to date already (installed before this PC kept its release): kept now to hand on.
     if (installed.sha === m.sha && L.current()?.manifest?.sha !== m.sha && lastEnvelope?.manifest?.sha === m.sha) L.recordInstalled(lastEnvelope, config().projectRoot).catch(() => {})
   } catch (e) {
     m = null
-    cloudError = e
+    // Adal is trying this release on other PCs first: this PC gets it from them over the office network.
+    if (e?.audience) notForMe = true
+    else cloudError = e
   }
   if (peer && (!m || L.isNewer(peer.manifest, m) || (peer.manifest.sha === m.sha && peer.complete))) { lanEnvelope = peer; m = peer.manifest } else lanEnvelope = null
+  if (!m && notForMe) {
+    return {
+      waitUntil: null, hasUpdate: false, upToDate: true, installed,
+      latest: { sha: installed.sha, short: installed.short, message: installed.message, date: installed.date },
+      changes: [], count: 0, source: 'supabase', manifest: null,
+      note: 'A newer release is being tried on other PCs first; it comes from them over the office network.',
+    }
+  }
   if (!m) throw cloudError || new Error('no release published yet')
   // Unknown order (an old marker with only a sha): Supabase's release is trusted, as before.
   const upToDate = !!installed.sha && (installed.sha === m.sha || (known && !L.isNewer(m, mine)))

@@ -105,6 +105,8 @@ export async function healthReport(db, version = null) {
     browser: await browserInUse(),
     slowest,
     errors: errors.slice(-25),
+    // Which version each PC of the office runs and since when (services/updateTrail.js).
+    pcs: await import('./updateTrail.js').then(t => t.pcsNow({ version })).catch(() => null),
     pc_health: await import('./pcHealth.js').then(p => p.pcStatus()).catch(() => null),
     portals: await import('./portalHealth.js').then(p => p.portalStatus().portals.map(({ key, name, ok, why }) => ({ key, name, ok, why }))).catch(() => []),
   }

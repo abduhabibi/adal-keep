@@ -1,9 +1,15 @@
 import express from 'express'
 import bcrypt from 'bcryptjs'
-import crypto from 'crypto'
 import { signToken } from '../services/tenancy.js'
 import { setActiveEmployee, clearActiveEmployee } from '../services/activeEmployee.js'
-import { ensureStaffRoles, listRoles, roleOf, rolesInUse, staffToken } from '../services/staffRoles.js'
+import { ensureStaffRoles, listRoles, roleOf, staffToken, setPcStaff, permsFor } from '../services/staffRoles.js'
+import { seal, open as openSealed } from '../services/accountVault.js'
+
+// Signed in or out in this PC's own window: the phones work as that employee.
+const onPC = async (req) => { try { return (await import('./trash.js')).onThisPC(req) } catch { return false } }
+// Her password: checked (bcrypt) and kept for the admin to read again (sealed).
+const MIN_PASSWORD = 4
+const passwordCols = async (password) => ({ password: await bcrypt.hash(password, 10), password_seen: seal(password), pin_set: true })
 
 const router = express.Router()
 
@@ -38,7 +44,8 @@ router.get('/', async (req, res) => {
     const admin = roles.find(r => r.preset === 'admin')
     res.json((await query).map(u => {
       const r = roles.find(x => x.id === u.role_id) || admin
-      return { ...u, role_id: r?.id ?? null, role_name: r?.name || 'Admin', pin_set: !!u.pin_set }
+      const { pin_set, ...rest } = u
+      return { ...rest, role_id: r?.id ?? null, role_name: r?.name || 'Admin', has_password: !!pin_set }
     }))
   } catch (err) {
     console.error('[employees GET]', err.message)
@@ -49,7 +56,9 @@ router.get('/', async (req, res) => {
 /** name + username only — no password */
 router.post('/', async (req, res) => {
   const { name, username, phone_work } = req.body
+  const password = String(req.body.password || '')
   if (!name?.trim()) return res.status(400).json({ error: 'ስም ያስፈልጋል' })
+  if (password.length < MIN_PASSWORD) return res.status(400).json({ error: `Give her a password (${MIN_PASSWORD} characters or more) to share with her` })
   if (!username?.trim() || /\s/.test(username)) {
     return res.status(400).json({ error: 'ትክክለኛ መለያ ስም ያስገቡ (ያለ ክፍተት)' })
   }
@@ -82,7 +91,7 @@ router.post('/', async (req, res) => {
       name: name.trim(),
       username: username.trim(),
       phone_work: normalizePhone(phone_work),
-      password: await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 10),
+      ...(await passwordCols(password)),
       role: 'employee',
       role_id: role?.id ?? null,
       company_id: companyId,
@@ -107,14 +116,13 @@ router.post('/device-login', async (req, res) => {
     }
     const user = await db('users').where({ id: employeeId }).first()
     if (!user) return res.status(404).json({ error: 'ሰራተኛ አልተገኘም' })
-    // Staff roles in use: signing in as someone who manages staff asks for
-    // their PIN (when they have one), so a Data entry employee cannot just
-    // click the admin's card.
+    // Signing in (after signing out, or as someone else) asks for her password.
+    // (Employees from before passwords, none set yet: one click until the admin sets one.)
     const role = await roleOf(db, user)
-    if (role?.perms.manage_staff && user.pin_set && (await rolesInUse(db))) {
-      const pin = String(req.body.pin || '').trim()
-      if (!pin) return res.status(401).json({ error: `${user.name}'s PIN`, needs_pin: true })
-      if (!(await bcrypt.compare(pin, user.password || ''))) return res.status(401).json({ error: 'Wrong PIN', needs_pin: true })
+    if (user.pin_set) {
+      const password = String(req.body.password || '')
+      if (!password) return res.status(401).json({ error: `${user.name}'s password`, needs_password: true })
+      if (!(await bcrypt.compare(password, user.password || ''))) return res.status(401).json({ error: 'Wrong password', needs_password: true })
     }
 
     const other = await db('users')
@@ -133,6 +141,7 @@ router.post('/device-login', async (req, res) => {
       updated_at: new Date().toISOString(),
     })
     await setActiveEmployee(db, user)
+    if (await onPC(req)) await setPcStaff(db, user.id)
     setTokenCookie(
       res,
       signToken({
@@ -169,6 +178,7 @@ router.post('/device-resume', async (req, res) => {
     const user = await db('users').where({ device_serial: deviceSerial }).first()
     if (!user) return res.json({ user: null })
     await setActiveEmployee(db, user)
+    if (await onPC(req)) await setPcStaff(db, user.id)
     setTokenCookie(
       res,
       signToken({
@@ -204,6 +214,7 @@ router.post('/device-logout', async (req, res) => {
       await db('users').where({ device_serial: deviceSerial }).update({ device_serial: null })
     }
     await clearActiveEmployee(db)
+    if (await onPC(req)) await setPcStaff(db, null)
     res.setHeader('Set-Cookie', 'adal_token=; Path=/; HttpOnly; Max-Age=0')
     res.json({ success: true })
   } catch (err) {
@@ -254,8 +265,39 @@ router.put('/:id/sign-in', async (req, res) => {
     const taken = await db('users').whereRaw('LOWER(username) = ?', [username]).whereNot({ id: user.id }).first()
     if (taken) return res.status(400).json({ error: `"${username}" is someone else's username — pick another` })
     await ensureStaffRoles(db)
-    await db('users').where({ id: user.id }).update({ username, password: await bcrypt.hash(pin, 10), pin_set: true, updated_at: new Date().toISOString() })
+    await db('users').where({ id: user.id }).update({ username, ...(await passwordCols(pin)), updated_at: new Date().toISOString() })
     res.json({ success: true, username })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+/** Her password, readable again by the admin (from any PC or phone). */
+router.get('/:id/password', async (req, res) => {
+  try {
+    const db = req.app.locals.db
+    await ensureStaffRoles(db)
+    const user = await db('users').where({ id: Number(req.params.id) }).first('id', 'password_seen', 'pin_set')
+    if (!user) return res.status(404).json({ error: 'Employee not found' })
+    const password = user.password_seen ? openSealed(user.password_seen) : null
+    res.json({ password: password || null, set: !!user.pin_set })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+/** A new password: the admin's for anyone, or her own. */
+router.put('/:id/password', async (req, res) => {
+  try {
+    const db = req.app.locals.db
+    const id = Number(req.params.id)
+    const { perms, user: asker } = await permsFor(db, req)
+    if (!perms.manage_staff && asker?.id !== id) return res.status(403).json({ error: 'Only the admin changes someone else\'s password', forbidden: 'manage_staff' })
+    const password = String(req.body?.password || '')
+    if (password.length < MIN_PASSWORD) return res.status(400).json({ error: `The password is ${MIN_PASSWORD} characters or more` })
+    if (!(await db('users').where({ id }).first('id'))) return res.status(404).json({ error: 'Employee not found' })
+    await db('users').where({ id }).update({ ...(await passwordCols(password)), updated_at: new Date().toISOString() })
+    res.json({ success: true })
   } catch (err) {
     res.status(500).json({ error: err.message })
   }

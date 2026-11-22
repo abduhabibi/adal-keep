@@ -11,7 +11,7 @@ import Spinner from '../components/shared/Spinner'
 import Input from '../components/shared/Input'
 import Button from '../components/shared/Button'
 import Modal from '../components/shared/Modal'
-import EmployeeSignIn from '../components/EmployeeSignIn'
+import EmployeePassword from '../components/EmployeePassword'
 import { onPhone } from '../lib/phoneMode'
 import StaffRoles from '../components/StaffRoles'
 import { usePerms } from '../lib/staffPerms'
@@ -68,6 +68,7 @@ const emptyEmp = {
   work_cc: '+251',
   work_num: '',
   role_id: '',
+  password: '',
 }
 
 export default function EmployeesPage() {
@@ -79,6 +80,12 @@ export default function EmployeesPage() {
   const [roles, setRoles] = useState([])
   const [permLabels, setPermLabels] = useState({})
   const canManage = usePerms().manage_staff
+  const [pw, setPw] = useState(null)              // { emp, mode: 'ask' | 'admin' | 'self' }
+  const [showStaff, setShowStaff] = useState(false) // signed in: the staff list instead of her workspace
+  // On a phone: no sign-in of its own — it works as whoever is signed in on its PC.
+  const phone = onPhone()
+  const [pcPerson, setPcPerson] = useState(null)
+  useEffect(() => { if (phone) api.get('/staff-roles/me', { adalNoCache: true }).then(r => setPcPerson(r.data?.employee ? { ...r.data.employee, role: r.data.role?.name } : false)).catch(() => {}) }, [phone])
   const loadRoles = () => api.get('/staff-roles').then(r => { setRoles(r.data?.roles || []); setPermLabels(r.data?.perms || {}) }).catch(() => {})
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -149,6 +156,7 @@ export default function EmployeesPage() {
   useEffect(() => {
     loadEmployees()
     loadRoles()
+    if (phone) return
     if (activeEmployee?.id) {
       setActive(activeEmployee)
       loadWorkspace(activeEmployee)
@@ -172,14 +180,17 @@ export default function EmployeesPage() {
   }, [])
 
   /** One click — bind this PC, no password */
-  const openGate = async (emp, pin) => {
+  const openGate = async (emp, password) => {
+    if (phone) return toast('On the phone you work as the person signed in on the PC', { icon: 'ℹ️' })
     setGateLoading(true)
     try {
       const res = await api.post('/employees/device-login', {
         employeeId: emp.id,
         deviceSerial: getDeviceSerial(),
-        ...(pin ? { pin } : {}),
+        ...(password ? { password } : {}),
       })
+      setPw(null)
+      setShowStaff(false)
       const u = { ...emp, ...(res.data?.user || {}) }
       setCurrentUser(u)
       setActiveEmployee(u)
@@ -187,12 +198,10 @@ export default function EmployeesPage() {
       toast.success(`እንኳን ደህና መጡ፣ ${emp.name}`)
       loadWorkspace(u)
     } catch (err) {
-      // Roles in use: an admin's card asks for their PIN (the one set for other computers).
-      if (err.response?.data?.needs_pin) {
-        setGateLoading(false)
-        if (pin) toast.error('Wrong PIN')
-        const p = prompt(`${emp.name}'s 6-digit PIN`)
-        if (p) return openGate(emp, p.trim())
+      // Signing in asks for her password (the one the admin gave her).
+      if (err.response?.data?.needs_password) {
+        if (password) toast.error('Wrong password')
+        setPw({ emp, mode: 'ask' })
         return
       }
       toast.error(err.response?.data?.error || 'መግባት አልተቻለም')
@@ -221,6 +230,7 @@ export default function EmployeesPage() {
     setActiveEmployee(null)
     setCurrentUser(null)
     setActive(null)
+    setShowStaff(false)
     setMyBrokers([])
     setMyProfiles([])
   }
@@ -267,7 +277,8 @@ export default function EmployeesPage() {
         }
         toast.success('ሰራተኛ ተዘምኗል')
       } else {
-        await api.post('/employees', { ...payload, ...(empForm.role_id ? { role_id: Number(empForm.role_id) } : {}) })
+        if (empForm.password.length < 4) { setEmpSaving(false); return toast.error('Give them a password (4 characters or more) to share with them') }
+        await api.post('/employees', { ...payload, password: empForm.password, ...(empForm.role_id ? { role_id: Number(empForm.role_id) } : {}) })
         loadRoles()
         toast.success('ሰራተኛ ተፈጥሯል')
       }
@@ -364,16 +375,22 @@ export default function EmployeesPage() {
     )
   }
 
+  const passwordBox = pw && (
+    <EmployeePassword emp={pw.emp} mode={pw.mode} onClose={() => { setPw(null); loadEmployees() }} onSignIn={(p) => openGate(pw.emp, p)} />
+  )
+
   // ===== WORKSPACE =====
-  if (active) {
+  if (active && !showStaff) {
     return (
       <div className="animate-fade-up space-y-8">
         <PageHeader
           title={`${active.name}`}
           subtitle={`የስራ ቦታ · ደላሎች እና ፕሮፋይሎች${active.role_name ? ` · ${active.role_name}` : ''}`}
           action={
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Button data-tour="new-broker" onClick={openCreateBroker}>+ ደላላ አክል</Button>
+              {canManage && <Button variant="secondary" onClick={() => setShowStaff(true)}>Staff & roles</Button>}
+              {!phone && <Button variant="secondary" onClick={() => setPw({ emp: active, mode: 'self' })}>Change my password</Button>}
               <Button variant="secondary" onClick={exitWorkspace} disabled={gateLoading}>
                 ውጣ
               </Button>
@@ -529,6 +546,7 @@ export default function EmployeesPage() {
             </div>
           </form>
         </Modal>
+        {passwordBox}
       </div>
     )
   }
@@ -538,9 +556,12 @@ export default function EmployeesPage() {
     <div className="animate-fade-up space-y-6">
       <PageHeader
         title="ሰራተኞች"
-        subtitle="ካርዱን ጠቅ በማድረግ ይግቡ — የይለፍ ቃል አያስፈልግም"
+        subtitle={phone
+          ? (pcPerson ? `This phone works as ${pcPerson.name} (${pcPerson.role}), signed in on the PC` : pcPerson === false ? 'No one is signed in on the PC: this phone can look, not change' : '')
+          : active ? `Signed in as ${active.name}` : 'Signed out: you can look, not change. Click your card and type your password to sign in.'}
         action={
           <div className="flex gap-3 items-center">
+            {active && <Button variant="secondary" onClick={() => setShowStaff(false)}>← My workspace</Button>}
             <div className="w-52">
               <Input
                 placeholder="ፈልግ..."
@@ -578,7 +599,12 @@ export default function EmployeesPage() {
                   📞 {emp.phone_work || '—'}
                 </div>
                 {/* Her username + PIN for another computer's Adal Companion (main PC only). */}
-                {canManage && !onPhone() && !import.meta.env.VITE_ADMIN && <EmployeeSignIn emp={emp} onSaved={loadEmployees} />}
+                {canManage && (
+                  <button type="button" onClick={(e) => { e.stopPropagation(); setPw({ emp, mode: 'admin' }) }}
+                    className={`mt-2 text-xs font-medium hover:underline ${emp.has_password ? 'text-teal-700 dark:text-teal-400' : 'text-amber-700 dark:text-amber-400'}`}>
+                    🔑 {emp.has_password ? 'Password' : 'No password yet — set one'}
+                  </button>
+                )}
                 <div className="mt-4 text-xs text-teal-600 opacity-0 group-hover:opacity-100 transition-opacity">
                   ለመግባት ጠቅ ያድርጉ →
                 </div>
@@ -641,6 +667,15 @@ export default function EmployeesPage() {
             num={empForm.work_num}
             onChange={(p) => setEmpForm({ ...empForm, work_cc: p.cc, work_num: p.num })}
           />
+          {!editingEmp && (
+            <Input
+              label="Password * (share it with them; they can change it)"
+              value={empForm.password}
+              onChange={(e) => setEmpForm({ ...empForm, password: e.target.value })}
+              autoComplete="off"
+              required
+            />
+          )}
           {roles.length > 0 && (
             <div>
               <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Role</label>
@@ -663,6 +698,7 @@ export default function EmployeesPage() {
           </div>
         </form>
       </Modal>
+      {passwordBox}
     </div>
   )
 }

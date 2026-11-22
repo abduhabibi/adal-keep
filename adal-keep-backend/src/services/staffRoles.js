@@ -5,12 +5,13 @@
  * and staff) and Data entry (adding and editing profiles and uploading files
  * only — none of the toggles).
  *
- * Who is asking: the signed-in employee's key (X-Adal-Staff, given at
- * device-login, signed so it cannot name someone else), else the cookie of
- * the same sign-in. No employee signed in (this PC's own robots, a phone's
- * call replayed, Adal Admin, the owner) keeps everything, as before.
- * An employee with no role yet is an Admin: nothing changes until the admin
- * gives someone a smaller role.
+ * Who is asking (whoIsAsking): the signed-in employee's key (X-Adal-Staff,
+ * given at device-login, signed so it cannot name someone else), else the
+ * cookie of the same sign-in. A window with no one signed in may look but not
+ * change (asked on 2026-11-22), unless no employee can manage staff yet (a new
+ * agency). Phones, and calls through the online copy, work as whoever is
+ * signed in on this PC. This PC's own robots, other PCs' servers and Adal
+ * support keep everything. An employee with no role yet is an Admin.
  *
  * The guard below is checked on the server for every change, so a hidden
  * button is never the only thing in the way. The roles live in this PC's
@@ -62,6 +63,10 @@ export function ensureStaffRoles(db) {
       if ((await db.schema.hasTable('users')) && !(await db.schema.hasColumn('users', 'pin_set'))) {
         await db.schema.table('users', t => t.boolean('pin_set').nullable())
       }
+      // Her password as the admin can read it again (locked with the account vault's key).
+      if ((await db.schema.hasTable('users')) && !(await db.schema.hasColumn('users', 'password_seen'))) {
+        await db.schema.table('users', t => t.text('password_seen').nullable())
+      }
       // No users table yet (a new install before its setup): looked at again next time.
       if (!(await db.schema.hasTable('users'))) ready.delete(db)
     })().catch((e) => { ready.delete(db); throw e }))
@@ -86,37 +91,84 @@ export async function roleOf(db, user) {
 
 export const staffToken = (user) => signToken({ staff: user.id })
 
-/** The employee asking: { user } for one signed in, null for no one. */
+// The employee signed in on this PC itself (its own window, not another computer's):
+// the phones work as them (asked on 2026-11-22: "the phones have the authority of the PC").
+const PC_STAFF = 'pc_staff_id'
+export async function setPcStaff(db, id) {
+  const now = new Date().toISOString()
+  const value = id ? String(id) : null
+  try {
+    if (await db('settings').where({ key: PC_STAFF }).first()) await db('settings').where({ key: PC_STAFF }).update({ value, updated_at: now })
+    else await db('settings').insert({ key: PC_STAFF, value, created_at: now, updated_at: now })
+  } catch (e) { console.warn('[staffRoles] pc staff:', e.message) }
+}
+const pcStaffId = async (db) => Number((await db('settings').where({ key: PC_STAFF }).first().catch(() => null))?.value) || null
+
+const header = (req, h) => req.get?.(h) ?? req.headers?.[h]
+const fromBrowser = (req) => /Mozilla\//.test(String(header(req, 'user-agent') || ''))
+const decode = (v) => { try { return decodeURIComponent(String(v || '')) } catch { return String(v || '') } }
+
+/**
+ * Who is asking:
+ *   { kind: 'staff', user }   an employee signed in (their key, or the sign-in cookie)
+ *   { kind: 'phone', user }   a phone, or a call through the online copy: whoever is
+ *                             signed in on this PC (user null: no one)
+ *   { kind: 'signed-out' }    a window with no one signed in: it may look, not change
+ *   { kind: 'unknown' }       a key that is not ours, or an employee deleted since
+ *   { kind: 'pc' }            this PC's own robots and other PCs' servers; Adal support
+ */
 export async function whoIsAsking(db, req) {
-  let id = null
-  const head = req.get?.('x-adal-staff') || req.headers?.['x-adal-staff']
-  if (head) {
-    const d = verifyToken(String(head))
-    if (d?.staff) id = Number(d.staff)
-    // A key that is not ours: nobody (but not the owner either).
-    else return { user: null, unknown: true }
-  } else if (req.auth?.uid) id = Number(req.auth.uid)
-  if (!id) return null
-  const user = await db('users').where({ id }).first().catch(() => null)
-  // Signed in as an employee who was deleted since: nothing allowed.
-  return user ? { user } : { user: null, unknown: true }
+  const byId = async (id, kind) => {
+    const user = await db('users').where({ id }).first().catch(() => null)
+    return user ? { kind, user } : { kind: 'unknown' }
+  }
+  const relayed = !!header(req, 'x-adal-cloud') && !fromBrowser(req)
+  // (The phone app names itself in its user agent: phones from before X-Adal-Phone too.)
+  const phone = !!header(req, 'x-adal-phone') || /AdalKeepPhone/.test(String(header(req, 'user-agent') || '')) || (relayed && decode(header(req, 'x-adal-who')) !== 'Adal support')
+  const key = header(req, 'x-adal-staff')
+  if (key && !phone) {
+    const d = verifyToken(String(key))
+    return d?.staff ? byId(Number(d.staff), 'staff') : { kind: 'unknown' }
+  }
+  if (phone) {
+    const id = await pcStaffId(db)
+    return id ? byId(id, 'phone').then(w => w.user ? w : { kind: 'phone', user: null }) : { kind: 'phone', user: null }
+  }
+  if (!fromBrowser(req)) return { kind: 'pc' }
+  if (req.auth?.uid) return byId(Number(req.auth.uid), 'staff')
+  return { kind: 'signed-out' }
 }
 
-/** What the asker may do: { perms, role, user } (everything for no one signed in). */
+/** No employee can manage staff yet (a new agency): a window with no one signed in may do everything. */
+async function noStaffManager(db) {
+  const roles = await listRoles(db)
+  return !roles.some(r => r.members > 0 && r.perms.manage_staff)
+}
+
+/** What the asker may do: { perms, role, user, readOnly }. */
 export async function permsFor(db, req) {
   await ensureStaffRoles(db)
   const who = await whoIsAsking(db, req)
-  if (!who) return { perms: { ...ALL }, role: null, user: null }
-  if (!who.user) return { perms: { ...NONE }, role: null, user: null }
-  const role = await roleOf(db, who.user)
-  return { perms: role.perms, role, user: who.user }
+  if (who.kind === 'pc') return { perms: { ...ALL }, role: null, user: null, readOnly: false, kind: who.kind }
+  if (who.user) {
+    const role = await roleOf(db, who.user)
+    return { perms: role.perms, role, user: who.user, readOnly: false, kind: who.kind }
+  }
+  if (who.kind === 'signed-out' && (await noStaffManager(db))) return { perms: { ...ALL }, role: null, user: null, readOnly: false, kind: who.kind }
+  return { perms: { ...NONE }, role: null, user: null, readOnly: true, kind: who.kind }
 }
+
+// Changes anyone may send, signed in or not: signing in, the window itself, "still here" calls.
+const FREE = /^\/(employees\/device-(login|resume|logout)$|auth\/|setup\/|subscription\/|pc-access\/|mobile\/(pair|push-token)$|app\/|tutor|chat\/ping|plan\/refresh|profiles\/-?\d+\/opened$|cv\/(preview|prepare|warm|templates\/preview-html)$)|(ping|warm|typing|alive|heartbeat|seen|read)$/
 
 // Which toggle each change needs (method, path under /api). The first match wins.
 const W = '(POST|PUT|PATCH|DELETE)'
 const RULES = [
   // Signing in, out and back in on a device is never stopped.
   [/^(GET|POST|PUT|PATCH|DELETE) \/employees\/device-(login|resume|logout)$/, null],
+  // Her own password: she changes it herself (the route lets the admin too).
+  [/^PUT \/employees\/\d+\/password$/, null],
+  [/^GET \/employees\/\d+\/password$/, 'manage_staff'],
   [/^DELETE \/profiles\/\d+$/, 'delete_profiles'],
   [/^POST \/trash\/(\d+\/purge|empty)$/, 'delete_profiles'],
   [/^POST \/cv\/templates\/preview-html$/, null],
@@ -146,22 +198,30 @@ export function permNeeded(method, path) {
   return null
 }
 
-/** Express guard for /api: refuses what the asker's role does not allow (403). */
+const CHANGE = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
+
+/**
+ * Express guard for /api: refuses what the asker may not do (403) — a toggle
+ * their role lacks ({ forbidden }), or any change from a window where no one
+ * is signed in ({ signed_out }).
+ */
 export function staffGuard(req, res, next) {
   const perm = permNeeded(req.method, req.path)
-  if (!perm) return next()
+  const change = CHANGE.has(String(req.method).toUpperCase()) && !FREE.test(req.path)
+  if (!perm && !change) return next()
   const db = req.app.locals.db
-  permsFor(db, req).then(({ perms, role }) => {
-    if (perms[perm]) return next()
+  permsFor(db, req).then(({ perms, role, readOnly, kind }) => {
+    if (perm ? perms[perm] : !readOnly) return next()
+    if (readOnly) {
+      return res.status(403).json({
+        error: kind === 'phone' ? 'No one is signed in on the PC: sign in there (Employees) to make changes from the phone.'
+          : 'Signed out: you can look, not change. Sign in (Employees) first.',
+        signed_out: true, ...(perm ? { forbidden: perm } : {}),
+      })
+    }
     res.status(403).json({
       error: `Your role${role ? ` (${role.name})` : ''} cannot ${PERMS[perm]}. Ask the admin.`,
       forbidden: perm,
     })
   }).catch((e) => res.status(500).json({ error: 'Could not check your role: ' + e.message }))
-}
-
-/** Some employee has a role that cannot manage staff: the admins' sign-in asks for their PIN. */
-export async function rolesInUse(db) {
-  const roles = await listRoles(db)
-  return roles.some(r => r.members > 0 && !r.perms.manage_staff)
 }

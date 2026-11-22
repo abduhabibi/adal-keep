@@ -1,11 +1,16 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import bcrypt from 'bcryptjs'
+import fs from 'fs'
+import os from 'os'
+import path from 'path'
+
+process.env.ACCOUNT_VAULT_KEY = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'vault-')), 'k')
 
 const { default: express } = await import('express')
 const { default: knex } = await import('knex')
 const { ensureTenancySchema } = await import('../src/services/tenancy.js')
-const { staffGuard, permNeeded, listRoles, staffToken, ensureStaffRoles } = await import('../src/services/staffRoles.js')
+const { staffGuard, permNeeded, listRoles, staffToken, ensureStaffRoles, setPcStaff } = await import('../src/services/staffRoles.js')
 const { default: staffRolesRouter } = await import('../src/routes/staffRoles.js')
 const { default: employeesRouter } = await import('../src/routes/employees.js')
 
@@ -36,15 +41,18 @@ async function office() {
   app.post('/api/trash/empty', ok)
   const server = app.listen(0)
   const base = `http://127.0.0.1:${server.address().port}/api`
-  const call = async (method, path, { as, body, token } = {}) => {
-    const headers = { 'content-type': 'application/json' }
+  // A window (a browser) unless { pc: true } (this PC's robots, another PC's server).
+  const call = async (method, path, { as, body, token, pc, phone, relayed, who } = {}) => {
+    const headers = { 'content-type': 'application/json', 'user-agent': pc || relayed ? 'node' : 'Mozilla/5.0 Chrome' }
+    if (phone) headers['x-adal-phone'] = '1'
+    if (relayed) { headers['x-adal-cloud'] = '1'; headers['x-adal-who'] = encodeURIComponent(who || 'Hana (phone)') }
     if (as) headers['x-adal-staff'] = staffToken(await db('users').where({ name: as }).first())
     if (token) headers['x-adal-staff'] = token
     const r = await fetch(base + path, { method, headers, body: body ? JSON.stringify(body) : undefined })
     return { status: r.status, data: await r.json().catch(() => null) }
   }
   const roleId = async (preset) => (await listRoles(db)).find(r => r.preset === preset).id
-  return { db, call, roleId, close: async () => { server.close(); await db.destroy() } }
+  return { db, base, call, roleId, close: async () => { server.close(); await db.destroy() } }
 }
 
 test('which toggle each change needs', () => {
@@ -103,8 +111,8 @@ test('Data entry: profiles and uploads only — the server refuses the rest', as
   }
   // Her own key cannot be changed to someone else's: a made-up key gets nothing.
   assert.equal((await o.call('DELETE', '/profiles/1', { token: 'eyJzdGFmZiI6MX0.bad' })).status, 403)
-  // No employee signed in (this PC's robots, a phone's call replayed): as before.
-  assert.equal((await o.call('DELETE', '/profiles/1')).status, 200)
+  // This PC's own robots, other PCs' servers: as before.
+  assert.equal((await o.call('DELETE', '/profiles/1', { pc: true })).status, 200)
   await o.close()
 })
 
@@ -139,29 +147,85 @@ test('the admin makes a role with its own toggles; Admin stays everything; a rol
   assert.equal((await o.call('DELETE', `/staff-roles/${role.id}`, { as: 'Abebe' })).status, 400)
   assert.equal((await o.call('DELETE', `/staff-roles/${await o.roleId('office')}`, { as: 'Abebe' })).status, 400)
   // A new employee gets the role picked for her (none picked: Admin).
-  await o.call('POST', '/employees', { as: 'Abebe', body: { name: 'Hana', username: 'hana', role_id: await o.roleId('data_entry') } })
-  await o.call('POST', '/employees', { as: 'Abebe', body: { name: 'Lily', username: 'lily' } })
+  await o.call('POST', '/employees', { as: 'Abebe', body: { name: 'Hana', username: 'hana', password: 'pass1', role_id: await o.roleId('data_entry') } })
+  await o.call('POST', '/employees', { as: 'Abebe', body: { name: 'Lily', username: 'lily', password: 'pass2' } })
   const emps = (await o.call('GET', '/employees')).data
   assert.equal(emps.find(e => e.name === 'Hana').role_name, 'Data entry')
   assert.equal(emps.find(e => e.name === 'Lily').role_name, 'Admin')
   await o.close()
 })
 
-test('with roles in use, signing in as an admin who has a PIN asks for it', async () => {
+test('signing in asks for the password; a device still signed in is not asked', async () => {
   const o = await office()
   await o.db('users').where({ name: 'Abebe' }).update({ password: await bcrypt.hash('123456', 4), pin_set: true })
   const login = (body) => o.call('POST', '/employees/device-login', { body: { employeeId: 1, deviceSerial: 'pc-1', ...body } })
-  // Everyone still an Admin: one click, as before.
-  const first = await login({})
-  assert.equal(first.status, 200)
-  assert.ok(first.data.user.staff_token)
-  await o.db('users').where({ name: 'Sara' }).update({ role_id: await o.roleId('data_entry') })
-  assert.equal((await login({})).data.needs_pin, true)
-  assert.equal((await login({ pin: '000000' })).status, 401)
-  const ok = await login({ pin: '123456' })
+  assert.equal((await login({})).data.needs_password, true)
+  assert.equal((await login({ password: '000000' })).status, 401)
+  const ok = await login({ password: '123456' })
   assert.equal(ok.status, 200)
+  assert.ok(ok.data.user.staff_token)
   assert.equal(ok.data.user.role_name, 'Admin')
-  // Sara (no staff managing) still signs in with one click.
+  // Still signed in on that device (device-resume): not asked again.
+  assert.equal((await o.call('POST', '/employees/device-resume', { body: { deviceSerial: 'pc-1' } })).data.user.name, 'Abebe')
+  // Sara, from before passwords (none set yet): one click until the admin sets one.
   assert.equal((await o.call('POST', '/employees/device-login', { body: { employeeId: 2, deviceSerial: 'pc-2' } })).status, 200)
+  await o.close()
+})
+
+test('signed out: looking only; a new agency with no admin yet may do everything', async () => {
+  const o = await office()
+  for (const [m, p] of [['POST', '/profiles'], ['PUT', '/profiles/1'], ['POST', '/profiles/1/fields/2/upload'], ['POST', '/employees']]) {
+    const r = await o.call(m, p, { body: { name: 'X', username: 'x', password: 'abcd' } })
+    assert.equal(r.status, 403, `${m} ${p}`)
+    assert.equal(r.data.signed_out, true)
+  }
+  assert.equal((await o.call('GET', '/employees')).status, 200)
+  assert.equal((await o.call('POST', '/employees/device-login', { body: { employeeId: 2, deviceSerial: 'pc-9' } })).status, 200)
+  const me = (await o.call('GET', '/staff-roles/me')).data
+  assert.ok(Object.values(me.perms).every(v => v === false))
+  // No employee who can manage staff (a new agency): everything, to make the first one.
+  const entry = await o.roleId('data_entry')
+  await o.db('users').update({ role_id: entry })
+  assert.equal((await o.call('POST', '/employees', { body: { name: 'Admin', username: 'boss', password: 'boss1234' } })).status, 201)
+  assert.equal((await o.call('POST', '/profiles')).status, 403)   // now there is an admin
+  await o.close()
+})
+
+test('the admin sets a password, can read it and change it; she changes her own', async () => {
+  const o = await office()
+  assert.equal((await o.call('POST', '/employees', { as: 'Abebe', body: { name: 'Hana', username: 'hana' } })).status, 400)
+  assert.equal((await o.call('POST', '/employees', { as: 'Abebe', body: { name: 'Hana', username: 'hana', password: 'hana2026', role_id: await o.roleId('data_entry') } })).status, 201)
+  assert.equal((await o.call('GET', '/employees/3/password', { as: 'Abebe' })).data.password, 'hana2026')
+  assert.equal((await o.call('GET', '/employees/3/password', { as: 'Hana' })).status, 403)
+  assert.equal((await o.call('POST', '/employees/device-login', { body: { employeeId: 3, deviceSerial: 'd', password: 'hana2026' } })).status, 200)
+  // Her own: yes. Someone else's: no.
+  assert.equal((await o.call('PUT', '/employees/3/password', { as: 'Hana', body: { password: 'mine-now' } })).status, 200)
+  assert.equal((await o.call('PUT', '/employees/1/password', { as: 'Hana', body: { password: 'taken' } })).status, 403)
+  assert.equal((await o.call('GET', '/employees/3/password', { as: 'Abebe' })).data.password, 'mine-now')
+  assert.equal((await o.call('PUT', '/employees/3/password', { as: 'Abebe', body: { password: 'reset-1' } })).status, 200)
+  assert.equal((await o.call('POST', '/employees/device-login', { body: { employeeId: 3, deviceSerial: 'd', password: 'mine-now' } })).status, 401)
+  assert.equal((await o.call('POST', '/employees/device-login', { body: { employeeId: 3, deviceSerial: 'd', password: 'reset-1' } })).status, 200)
+  assert.ok(!(await o.call('GET', '/employees')).data.some(e => 'password' in e || 'password_seen' in e))
+  await o.close()
+})
+
+test('phones and the online copy work as whoever is signed in on the PC', async () => {
+  const o = await office()
+  await o.db('users').where({ name: 'Sara' }).update({ role_id: await o.roleId('data_entry') })
+  // No one signed in on the PC: the phone only looks.
+  assert.equal((await o.call('POST', '/profiles', { phone: true })).data.signed_out, true)
+  assert.equal((await o.call('POST', '/profiles', { relayed: true })).status, 403)
+  await setPcStaff(o.db, 2)   // Sara signs in on the PC
+  assert.equal((await o.call('POST', '/profiles', { phone: true })).status, 200)
+  assert.equal((await o.call('DELETE', '/profiles/1', { phone: true })).data.forbidden, 'delete_profiles')
+  // A key of its own on the phone does not count: the PC decides.
+  assert.equal((await o.call('DELETE', '/profiles/1', { phone: true, as: 'Abebe' })).status, 403)
+  // The phone app as installed (its user agent says so).
+  assert.equal((await fetch(o.base + '/profiles', { method: 'POST', headers: { 'user-agent': 'Mozilla/5.0 (Linux; Android 14; wv) AdalKeepPhone' } })).status, 200)
+  await setPcStaff(o.db, 1)   // the admin signs in on the PC
+  assert.equal((await o.call('DELETE', '/profiles/1', { relayed: true })).status, 200)
+  // Adal support (Adal Keep Admin) through the online copy: as before.
+  await setPcStaff(o.db, null)
+  assert.equal((await o.call('DELETE', '/profiles/1', { relayed: true, who: 'Adal support' })).status, 200)
   await o.close()
 })

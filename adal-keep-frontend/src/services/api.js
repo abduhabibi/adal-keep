@@ -111,7 +111,9 @@ api.interceptors.request.use((config) => {
     const who = e?.name || e?.full_name || e?.username
     if (who) config.headers['X-Adal-Who'] = encodeURIComponent(String(who).slice(0, 80))
     // Her key (given when she signed in): the PC checks her staff role with it.
-    if (e?.staff_token) config.headers['X-Adal-Staff'] = e.staff_token
+    // A phone has none: it works as whoever is signed in on its PC (X-Adal-Phone).
+    if (import.meta.env.VITE_PHONE === '1' || window.Capacitor?.isNativePlatform?.()) config.headers['X-Adal-Phone'] = '1'
+    else if (e?.staff_token) config.headers['X-Adal-Staff'] = e.staff_token
   } catch {}
   return config
 })

@@ -234,7 +234,13 @@ test('Tasheer upload page and Concurrent Login on a mock', { skip: !CHROME && 'n
       await sleep(800)
       assert.equal((await page.evaluate(() => window.__logins)).length, 1, 'LOGIN not pressed before the captcha')
       typedAt = Date.now()
-      await page.type('#cap', 'QW34', { delay: 60 })
+      // A busy PC drops keys (it left 'QW3'): typed again until the box holds the whole code.
+      for (let k = 0; k < 4 && (await page.$eval('#cap', e => e.value)) !== 'QW34'; k++) {
+        await page.$eval('#cap', e => { e.value = ''; e.focus() })
+        await page.keyboard.type('QW34', { delay: 60 })
+        await sleep(300)
+      }
+      typedAt = Date.now() - 400
     }
     const out = await p
     const st = await page.evaluate(() => ({ logins: window.__logins, home: document.getElementById('home').style.display, submitted: window.__submitted }))

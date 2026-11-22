@@ -15,6 +15,7 @@
  *                a tap opens them at once.
  */
 import { useEffect, useRef, useState } from 'react'
+import { aliveTasks, isOpen } from '../../lib/aliveTasks'
 import { NavLink, useLocation, useNavigate, useNavigationType } from 'react-router-dom'
 import api from '../../services/api'
 import { useAuth } from '../../context/AuthContext'
@@ -126,8 +127,11 @@ export function PhoneTopBar({ scroller }) {
     return () => el.removeEventListener('scroll', on)
   }, [scroller, pathname])
   useEffect(() => {
-    const look = () => api.get('/tasks/count').then(r => { if (typeof r.data?.undone !== 'number') throw new Error('no count'); setTasks(r.data.undone) })
-      .catch(() => api.get('/tasks').then(r => setTasks((r.data || []).filter(t => ['pending', 'todo', 'in_progress', 'ongoing'].includes(t.status)).length)).catch(() => {}))
+    // Tasks still to do + the calls waiting for a person right now (those expire after 5 minutes on the PC).
+    const calls = () => api.get('/automations/attention').then(r => (Array.isArray(r.data) ? r.data.filter(c => c.run_id > 0).length : 0)).catch(() => 0)
+    const look = () => Promise.all([listed(), calls()]).then(([n, c]) => setTasks(n + c))
+    const listed = () => api.get('/tasks/count').then(r => { if (typeof r.data?.undone !== 'number') throw new Error('no count'); return r.data.undone })
+      .catch(() => api.get('/tasks').then(r => aliveTasks(r.data).filter(isOpen).length).catch(() => 0))
     look()
     const t = setInterval(look, 20000)
     return () => clearInterval(t)

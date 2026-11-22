@@ -1,10 +1,20 @@
 import { Router } from 'express'
 const router = Router()
 
+const OPEN = ['pending', 'todo', 'in_progress', 'ongoing']
+// What a person can still act on: notices (reminders, medicals, Wafid, WhatsApp) go
+// stale after a day, finished tasks after a week. The list and the top bar's number
+// use the same rule, so what the badge says is what the page shows.
+const DAY = 24 * 3600e3
+const alive = (t, now = Date.now()) => {
+  const at = Date.parse(t.created_at) || now
+  return OPEN.includes(t.status) ? (t.type !== 'automation' || now - at < DAY) : now - at < 7 * DAY
+}
+
 router.get('/', async (req, res) => {
   try {
     const db = req.app.locals.db
-    const rows = await db('tasks').orderBy('created_at', 'desc')
+    const rows = (await db('tasks').orderBy('created_at', 'desc')).filter(t => alive(t)).slice(0, 500)
     res.json(rows)
   } catch (err) {
     console.error(err)
@@ -17,10 +27,11 @@ router.get('/', async (req, res) => {
 router.get('/count', async (req, res) => {
   try {
     const db = req.app.locals.db
-    const rows = await db('tasks').select('status').count({ n: '*' }).groupBy('status')
-    const by_status = Object.fromEntries(rows.map(r => [r.status || '', Number(r.n || 0)]))
-    const undone = ['pending', 'todo', 'in_progress', 'ongoing'].reduce((t, s) => t + (by_status[s] || 0), 0)
-    res.json({ undone, by_status, total: rows.reduce((t, r) => t + Number(r.n || 0), 0) })
+    const rows = (await db('tasks').select('status', 'type', 'created_at')).filter(t => alive(t))
+    const by_status = {}
+    for (const r of rows) by_status[r.status || ''] = (by_status[r.status || ''] || 0) + 1
+    const undone = OPEN.reduce((t, s) => t + (by_status[s] || 0), 0)
+    res.json({ undone, by_status, total: rows.length })
   } catch (err) {
     res.status(500).json({ error: 'Failed to count tasks' })
   }

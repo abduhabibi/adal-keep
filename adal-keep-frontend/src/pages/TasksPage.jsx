@@ -9,6 +9,7 @@ import Spinner from '../components/shared/Spinner'
 import DocumentActivity from '../components/DocumentActivity'
 import { Bar } from '../lib/progress'
 import { onPhone, phoneCloud } from '../lib/phoneMode'
+import { aliveTasks } from '../lib/aliveTasks'
 
 const COLUMNS = [
   { key: 'pending', label: 'ለመሰራት', color: 'amber' },
@@ -30,11 +31,13 @@ export default function TasksPage() {
   const [busyId, setBusyId] = useState(null)
   const [dragId, setDragId] = useState(null)
   const [overCol, setOverCol] = useState(null)
+  const [calls, setCalls] = useState([])   // runs waiting for a person right now (they expire after 5 minutes)
 
   const load = async () => {
     try {
       const res = await api.get('/tasks')
-      setTasks(Array.isArray(res.data) ? res.data : [])
+      setTasks(aliveTasks(res.data))
+      api.get('/automations/attention').then(r => setCalls((Array.isArray(r.data) ? r.data : []).filter(c => c.run_id > 0))).catch(() => setCalls([]))
     } catch {
       toast.error('ተግባሮችን መጫን አልተቻለም')
       setTasks([])
@@ -175,6 +178,24 @@ export default function TasksPage() {
       {/* The PC's Downloads watch: shown on the PC only — a phone never takes its downloads in. */}
       {!phoneCloud() && !onPhone() && <BackupNow />}
       {!phoneCloud() && !onPhone() && <DocumentActivity />}
+
+      {calls.length > 0 && (
+        <div className="space-y-2 rounded-2xl border border-red-200 bg-red-50/70 p-3 dark:border-red-900/50 dark:bg-red-900/10">
+          <h3 className="text-sm font-semibold text-red-700 dark:text-red-300">Needs you now · {calls.length}</h3>
+          {calls.map(c => (
+            <div key={c.task_id} className="flex items-center justify-between gap-3 rounded-xl bg-white p-3 text-sm shadow-sm dark:bg-slate-800">
+              <div className="min-w-0">
+                <p className="truncate font-medium text-slate-900 dark:text-white">{c.full_name || c.title}</p>
+                <p className="truncate text-xs text-slate-500">{c.title}</p>
+              </div>
+              {c.profile_id && (
+                <button type="button" onClick={() => navigate(`/profiles/${c.profile_id}?attention=1`)}
+                  className="shrink-0 rounded-lg bg-teal-600 px-3 py-1 text-xs font-semibold text-white hover:bg-teal-700">Open →</button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {COLUMNS.map(col => {

@@ -23,7 +23,8 @@ import NotesTimeline from '../components/NotesTimeline'
 import VisaBarcodes from '../components/VisaBarcodes'
 import MedicalBattery from '../components/MedicalBattery'
 import { onDataChange } from '../lib/changes'
-import { onPhone } from '../lib/phoneMode'
+import { onPhone, phoneCloud } from '../lib/phoneMode'
+import { pcOnline } from '../cloud/adapter'
 import { photosFirst, missingPhotos, hasFiles } from '../lib/photosFirst'
 import { missingNow } from '../lib/missingNow'
 import { ACTIONS, shows } from '../lib/stageActions'
@@ -732,6 +733,19 @@ function GlassPopup({ children, onClose, wide = false, title = null }) {
  * 1. her Photo and Full Body Photo, 2. her CV (a "Created" box too), 3. Musaned.
  */
 function NextSteps({ profileId, fields, cvs, onFileUpdate, onClose, onDone, onCv }) {
+  // The phone on the online copy: Musaned runs on an office PC, so with none reachable the step is not offered at all.
+  const viaPhone = phoneCloud()
+  const [pcOk, setPcOk] = useState(!viaPhone)
+  useEffect(() => {
+    if (!viaPhone) return
+    let live = true
+    const ask = () => pcOnline().then(on => { if (live) setPcOk(!!on) }).catch(() => {})
+    ask()
+    const on = (e) => setPcOk(!!e.detail)
+    window.addEventListener('adal-pc-online', on)
+    const t = setInterval(ask, 15000)
+    return () => { live = false; clearInterval(t); window.removeEventListener('adal-pc-online', on) }
+  }, [viaPhone])
   const [madeByHand, setMadeByHand] = useState(() => { try { return sessionStorage.getItem(`next-cv-${profileId}`) === '1' } catch { return false } })
   const [sending, setSending] = useState(false)
   const [needs, setNeeds] = useState({ ready: false })
@@ -745,7 +759,7 @@ function NextSteps({ profileId, fields, cvs, onFileUpdate, onClose, onDone, onCv
     const t = toast.loading('Musaned: checking her profile…')
     try {
       const r = await api.post(`/profiles/${profileId}/automations/musaned_add_candidate/start`, {})
-      toast.success(`Musaned: ${r.data?.message || 'started'}`, { id: t })
+      toast.success(viaPhone ? 'Sent to the office PC' : `Musaned: ${r.data?.message || 'started'}`, { id: t })
       try { sessionStorage.removeItem(`next-cv-${profileId}`) } catch {}
       onDone()
     } catch (e) {
@@ -757,6 +771,7 @@ function NextSteps({ profileId, fields, cvs, onFileUpdate, onClose, onDone, onCv
       <span className={`grid h-6 w-6 place-items-center rounded-full ${on ? 'bg-teal-600 text-white' : done ? 'bg-emerald-500 text-white' : 'bg-slate-200 dark:bg-slate-700'}`}>{done ? '✓' : n}</span>{children}
     </div>
   )
+  if (photosOk && cvOk && !pcOk) return null
   return (
     <GlassPopup onClose={onClose} wide={!photosOk}>
       <div className="mb-5 flex flex-wrap items-center gap-4 pr-10">

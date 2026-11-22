@@ -107,7 +107,7 @@ export default function WhatsAppLinkPage() {
               {busy || s.status === 'starting' ? `Asking WhatsApp for the code…${since != null && busy ? ` ${since}s` : ''}` : '💬 Connect WhatsApp'}
             </Button>
           </form>
-          {(error || (s.error && !linking)) && <p className="mt-2 text-sm text-red-600">{error || s.error}</p>}
+          {(error || s.error) && <p className="mt-2 text-sm text-red-600">{error || s.error}</p>}
         </Card>
       )}
 

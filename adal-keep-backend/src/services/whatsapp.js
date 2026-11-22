@@ -89,6 +89,20 @@ function realUserAgent(exe, fromBrowser = '') {
   const osPart = process.platform === 'win32' ? 'Windows NT 10.0; Win64; x64' : process.platform === 'darwin' ? 'Macintosh; Intel Mac OS X 10_15_7' : 'X11; Linux x86_64'
   return `Mozilla/5.0 (${osPart}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeMajor}.0.0.0 Safari/537.36`
 }
+/**
+ * The same browser in every place WhatsApp looks: the user-agent text alone
+ * left the browser's "brands" empty (navigator.userAgentData), which no real
+ * Chrome does — now both say the same Chrome.
+ */
+async function realBrowser(page, ua) {
+  const major = String(ua.match(/Chrome\/(\d+)/)?.[1] || chromeMajor || 142)
+  const platform = process.platform === 'win32' ? 'Windows' : process.platform === 'darwin' ? 'macOS' : 'Linux'
+  const brands = [{ brand: 'Chromium', version: major }, { brand: 'Google Chrome', version: major }, { brand: 'Not_A Brand', version: '24' }]
+  await page.setUserAgent(ua, {
+    brands, fullVersionList: brands.map(b => ({ ...b, version: b.brand === 'Not_A Brand' ? '24.0.0.0' : `${major}.0.0.0` })),
+    fullVersion: `${major}.0.0.0`, platform, platformVersion: platform === 'Windows' ? '10.0.0' : '6.8.0', architecture: 'x86', model: '', mobile: false, bitness: '64', wow64: false,
+  }).catch(e => console.warn('[whatsapp] browser brands:', e.message))
+}
 const setState = (key, s) => Object.assign(session(key).state, s, { since: new Date().toISOString() })
 
 /** Let go of WhatsApp: its hidden browser closes. */
@@ -141,6 +155,9 @@ export async function connect(db, key = 'owner', { phone = '' } = {}, tries = 2)
   if (!exe) { setState(key, { status: 'failed', error: 'Adal Browser is not on this PC yet' }); return s.state }
   opts.authStrategy = new wweb.LocalAuth({ clientId: key, dataPath: DIR })
   opts.userAgent = realUserAgent(exe)
+  // Right after the library's own user-agent, before WhatsApp's page opens.
+  const afterLaunch = opts.authStrategy.afterBrowserInitialized.bind(opts.authStrategy)
+  opts.authStrategy.afterBrowserInitialized = async (...a) => { if (s.client?.pupPage) await realBrowser(s.client.pupPage, opts.userAgent); return afterLaunch(...a) }
   // A page busy loading the chats answers late: find out in 90s, not WhatsApp's 3 minutes.
   opts.puppeteer = { executablePath: exe, headless: true, protocolTimeout: 90_000, args: ['--no-first-run', '--no-default-browser-check', '--disable-gpu', '--disable-dev-shm-usage', '--mute-audio', '--disable-extensions',
     // Light: nothing the hidden WhatsApp does not need (updates, sync, translate, spell check…).
@@ -260,8 +277,11 @@ export async function connect(db, key = 'owner', { phone = '' } = {}, tries = 2)
     s.pairing = false
     const timing = linkTiming(s)
     if (timing) console.log(`[whatsapp ${key}] linked by code: code in ${timing.code_s}s, linked ${timing.linked_s}s, ready ${timing.ready_s}s after the button`)
+    if (s.link?.helloAt) console.log(`[whatsapp ${key}] linking steps:`, JSON.stringify(await readTrace(c.pupPage)).slice(0, 3000))
     setState(key, { status: 'ready', qr: null, code: null, error: null, ...(timing ? { timing } : {}), me: { name: c.info?.pushname || '', number: c.info?.wid?.user || '' } })
     noteOn(key, true)
+    // Just signed in: this is today's fresh sign-in (it used to restart a link made a second ago).
+    { const n = readNote(); writeNote({ ...n, daily: { ...(n.daily || {}), [key]: new Date().toLocaleDateString('en-CA') } }) }
     rememberNumber(key, c.info?.wid?.user)
     // Its browser died (closed, crashed): connect again now, not at the next look.
     c.pupBrowser?.once('disconnected', () => {
@@ -356,6 +376,7 @@ async function codeLoop(key, link) {
     if (Date.now() > end) { setState(key, { status: 'failed', error: 'WhatsApp did not give a code: check the PC\'s internet and press again.' }); s.pairing = false; return }
     const page = s.client?.pupPage
     if (page && !page.isClosed()) {
+      await page.evaluate(traceLinking).catch(() => {})
       const r = await page.evaluate(askCode, link.phone).catch(e => ({ error: String(e?.message || e) }))
       if (r?.code) { gotCode(key, link, r.code); break }
       if (r?.error && /code|ref|hello/i.test(r.error) && ++codeTries < 4) console.warn(`[whatsapp ${key}] code not given yet:`, r.error.slice(0, 120))
@@ -371,20 +392,30 @@ async function codeLoop(key, link) {
   }
   // Watch for the link: WhatsApp leaves "unpaired" the moment the code is entered.
   let refreshAt = link.codeAt + 160_000
-  while (mine() && !link.linkedAt && Date.now() - link.pressedAt < 15 * 60_000) {
+  while (mine() && Date.now() - link.pressedAt < 15 * 60_000) {
     const page = s.client?.pupPage
     const r = page && !page.isClosed() ? await page.evaluate(() => {
       let sock = null; try { sock = window.require('WAWebSocketModel').Socket.state } catch {}
-      return { sock, qr: !!document.querySelector('[data-ref]'), path: location.pathname }
+      const t = window.__adalTrace || []
+      return { sock, hello: t.some(x => /handlePrimaryHello$/.test(x.what)), bad: t.find(x => / failed$| threw$|logoutAfterValidationFail|^unhandled/.test(x.what)) || null }
     }).catch(() => null) : null
-    if (r && r.sock && !/^UNPAIRED|^UNLAUNCHED/.test(r.sock) && s.state.status === 'code') {
-      link.linkedAt = Date.now()
+    // The phone's hello reached the PC: the code was typed in WhatsApp.
+    if (r?.hello && !link.helloAt) {
+      link.helloAt = link.linkedAt = Date.now()
       setState(key, { status: 'signing-in', code: null })
       console.log(`[whatsapp ${key}] the code was entered (${secs(link.pressedAt, link.linkedAt)}s after the button)`)
-      break
+    }
+    // Back to "not linked" after the hello: WhatsApp said no (the phone shows "Couldn't link device").
+    const back = link.helloAt && Date.now() - link.helloAt > 8000 && /^UNPAIRED/.test(r?.sock || '')
+    if (r?.bad || back) {
+      console.warn(`[whatsapp ${key}] linking failed in WhatsApp's page:`, JSON.stringify(await readTrace(page)).slice(0, 3000))
+      // The page itself is fine (not linked, ready for a new code): no restart.
+      setState(key, { status: 'qr', code: null, error: 'WhatsApp refused the link — press Connect for a new code.' })
+      s.pairing = false
+      return
     }
     // WhatsApp's code lasts a few minutes: a new one in its place while nobody typed it.
-    if (Date.now() > refreshAt && r && /^UNPAIRED/.test(r.sock || '')) {
+    if (!link.helloAt && Date.now() > refreshAt && r && /^UNPAIRED/.test(r.sock || '')) {
       refreshAt = Date.now() + 160_000
       const n = await page.evaluate(askCode, link.phone).catch(() => null)
       if (n?.code && mine()) setState(key, { status: 'code', code: fmtCode(n.code) })
@@ -401,6 +432,45 @@ function gotCode(key, link, code) {
   setState(key, { status: 'code', code: fmtCode(code), qr: null, error: null })
   console.log(`[whatsapp ${key}] code ready ${secs(link.pressedAt, link.codeAt)}s after the button`)
 }
+
+/**
+ * In WhatsApp's page: a note of each linking step (the phone's hello, the
+ * companion's answers, a sign-in or a log-out after a failed check) with its
+ * error, so a "Couldn't link device" on the phone says where it broke.
+ */
+function traceLinking() {
+  if (window.__adalTrace) return true
+  const t = window.__adalTrace = []
+  const note = (what, extra) => { t.push({ at: Date.now(), what, ...(extra || {}) }); if (t.length > 200) t.shift() }
+  const wrap = (mod, names) => {
+    let m = null; try { m = window.require(mod) } catch { return }
+    for (const n of names) {
+      const f = m?.[n]
+      if (typeof f !== 'function' || f.__adal) continue
+      const w = function (...a) {
+        note(`${mod}.${n}`)
+        try {
+          const r = f.apply(this, a)
+          if (r && typeof r.then === 'function') r.then(() => note(`${mod}.${n} ok`), e => note(`${mod}.${n} failed`, { error: String(e?.message || e).slice(0, 300), name: e?.name }))
+          return r
+        } catch (e) { note(`${mod}.${n} threw`, { error: String(e?.message || e).slice(0, 300), name: e?.name }); throw e }
+      }
+      w.__adal = true
+      try { m[n] = w } catch {}
+    }
+  }
+  wrap('WAWebAltDeviceLinkingApi', ['handlePrimaryHello', 'handlePrimaryHelloInternal', 'startAltLinkingFlow'])
+  wrap('WAWebAltDeviceLinkingIq', ['sendCompanionHello', 'sendCompanionFinish'])
+  wrap('WAWebHandlePairDevice', ['handlePairDevice'])
+  wrap('WAWebCompanionRegUtils', ['startLogin', 'startLogout', 'logoutAfterValidationFail', 'resetCompanionReg'])
+  try {
+    const S = window.require('WAWebSocketModel').Socket
+    S.on('change:state', (_m, v) => note('state ' + v))
+  } catch {}
+  window.addEventListener('unhandledrejection', (e) => note('unhandled', { error: String(e.reason?.message || e.reason).slice(0, 300) }))
+  return true
+}
+const readTrace = (page) => page.evaluate(() => (window.__adalTrace || []).map(x => ({ ...x, at: new Date(x.at).toISOString().slice(11, 23) }))).catch(() => [])
 
 /** In WhatsApp's page: its linking part gives the code (null: the page is not ready for it yet). */
 async function askCode(num) {

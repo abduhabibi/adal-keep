@@ -36,12 +36,19 @@ export function noteVersions(pcs, now = Date.now()) {
   return out
 }
 
+/** A version as a short text: the updater's marker ({ sha, short, … }) or a text already. */
+export const versionText = (v) => {
+  if (!v) return null
+  if (typeof v === 'object') return String(v.short || String(v.sha || '').slice(0, 7) || '') || null
+  return String(v).slice(0, 20)
+}
+
 /** This main PC and the Companions it hears: name, version, since when, last heard. */
 export async function pcsNow(own = {}, devices = null, now = Date.now()) {
   let list = devices
   if (!list) { try { list = (await import('./remoteBrowsers.js')).liveDevices(now) } catch { list = [] } }
   return noteVersions([
-    { name: os.hostname(), main: true, version: own.version || null, seen: new Date(now).toISOString() },
-    ...list.map(d => ({ name: d.name, version: d.version || null, seen: new Date(d.at || now).toISOString() })),
+    { name: os.hostname(), main: true, version: versionText(own.version), seen: new Date(now).toISOString() },
+    ...list.map(d => ({ name: d.name, version: versionText(d.version), seen: new Date(d.at || now).toISOString() })),
   ], now)
 }

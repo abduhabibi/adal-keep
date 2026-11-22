@@ -73,3 +73,13 @@ test('the trail: a PC is first seen on a version once; the list names each PC, i
   const c = await TR.pcsNow({ version: 'aaaaaaa' }, [{ name: 'DESK-2', version: 'ddddddd', at: t1 + 60000 }], t1 + 60000)
   assert.equal(c.find(p => p.name === 'DESK-2').since, new Date(t1).toISOString())
 })
+
+test('the trail takes the updater\'s marker as the version (a short text), not the object', async () => {
+  assert.equal(TR.versionText({ sha: '4ee32a7aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', short: '4ee32a7' }), '4ee32a7')
+  assert.equal(TR.versionText({ sha: '4ee32a7aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }), '4ee32a7')
+  assert.equal(TR.versionText('c1e43d0'), 'c1e43d0'); assert.equal(TR.versionText(null), null)
+  const t0 = Date.parse('2026-11-22T12:00:00Z')
+  const a = await TR.pcsNow({ version: { sha: '4ee32a7' + 'a'.repeat(33), short: '4ee32a7' } }, [], t0)
+  const b = await TR.pcsNow({ version: { sha: '4ee32a7' + 'a'.repeat(33), short: '4ee32a7' } }, [], t0 + 600000)
+  assert.equal(a[0].version, '4ee32a7'); assert.equal(b[0].since, a[0].since, 'the same version keeps its first-seen time')
+})

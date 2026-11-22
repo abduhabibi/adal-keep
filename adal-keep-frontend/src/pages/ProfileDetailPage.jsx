@@ -25,6 +25,7 @@ import MedicalBattery from '../components/MedicalBattery'
 import { onDataChange } from '../lib/changes'
 import { onPhone } from '../lib/phoneMode'
 import { photosFirst, missingPhotos, hasFiles } from '../lib/photosFirst'
+import { missingNow } from '../lib/missingNow'
 import { ACTIONS, shows } from '../lib/stageActions'
 import useProfilePhase from '../hooks/useProfilePhase'
 import { useCan } from '../lib/staffPerms'
@@ -196,8 +197,9 @@ export default function ProfileDetailPage() {
   // Photo and Full Body Photo first; a missing one sits outside the fold, always in view.
   const orderedFields = photosFirst(fields)
   const gapNames = missingPhotos(fields)
-  const photoGaps = orderedFields.filter(f => gapNames.includes(f.name))
-  const restFiles = orderedFields.filter(f => !gapNames.includes(f.name) && (!needFiles || needFiles.includes(f.name)))
+  const miss = missingNow(profile, fields, step?.key)
+  const missFields = orderedFields.filter(f => miss.files.includes(f.name) || gapNames.includes(f.name))
+  const restFiles = orderedFields.filter(f => !miss.files.includes(f.name) && !gapNames.includes(f.name) && (!needFiles || needFiles.includes(f.name)))
   const fieldCard = (field) => (
     <FieldCard
       id={`field-${field.name.replace(/\s+/g, '-')}`}
@@ -343,6 +345,9 @@ export default function ProfileDetailPage() {
         </div>
       )}
 
+      <MissingCard miss={miss} fields={missFields} profileId={id} fieldCard={fieldCard}
+        onSaved={(patch) => { setProfile(p => ({ ...p, ...patch })); window.dispatchEvent(new Event('adal-profile-changed')) }} />
+
       <ProfileJourney profileId={id} />
       {can('day_by_day') && <ProfileDays profileId={id} />}
 
@@ -356,7 +361,7 @@ export default function ProfileDetailPage() {
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* Left: client details */}
-        <Fold id="details" title="Client details" className="panel p-4 sm:p-6 lg:col-span-1">
+        <Fold id="details" title="Client details" lessLabel="See less ▲" className="panel p-4 sm:p-6 lg:col-span-1">
           <dl className="mt-4 grid grid-cols-1 gap-3">{onlyNeeded(needDetails, <>
             <Field label="Full name" value={profile.full_name} />
             <Field label="Order ID" value={profile.order_id} />
@@ -386,6 +391,7 @@ export default function ProfileDetailPage() {
             />
             <Field label="Speaks English" value={profile.speaks_english ? 'Yes' : 'No'} />
             <Field label="Speaks Arabic" value={profile.speaks_arabic ? 'Yes' : 'No'} />
+            <Field label="Living town" value={profile.living_town} />
             <Field label="Region" value={profile.region} />
             <Field label="Zone / Sub-city" value={profile.zone_subcity} />
             <Field label="Personal number" value={profile.personal_number} />
@@ -406,13 +412,8 @@ export default function ProfileDetailPage() {
         {/* Right: documents */}
         <section className="panel p-4 sm:p-6 lg:col-span-2 space-y-6">
           {/* Her missing Photo / Full Body Photo: empty slots right at the front, never folded away. */}
-          {photoGaps.length > 0 && (
-            <div className="grid grid-cols-2 gap-2 sm:gap-4 lg:grid-cols-3">
-              {photoGaps.map(field => fieldCard(field))}
-            </div>
-          )}
           {restFiles.length === 0 ? (
-            needFiles && photoGaps.length === 0 && <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">✓ Documents for this step are all here</p>
+            needFiles && !miss.files.length && <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">✓ Documents for this step are all here</p>
           ) : <Fold id="documents" title="Documents & Fields">
             <div className="mt-4 grid grid-cols-2 gap-2 sm:gap-4 lg:grid-cols-3">
               {restFiles.map(field => fieldCard(field))}
@@ -523,6 +524,55 @@ export default function ProfileDetailPage() {
   )
 }
 
+/** What her step still lacks, at the top: type it or upload it here and it leaves the card; nothing missing, no card. */
+function MissingCard({ miss, fields, profileId, fieldCard, onSaved }) {
+  const [vals, setVals] = useState({})
+  const [busy, setBusy] = useState(null)
+  const save = async (t) => {
+    const v = String(vals[t.key] ?? '').trim()
+    if (!v || busy) return
+    setBusy(t.key)
+    try {
+      await api.put(`/profiles/${profileId}`, { [t.key]: v })
+      onSaved({ [t.key]: v })
+      setVals(x => { const n = { ...x }; delete n[t.key]; return n })
+    } catch (e) { toast.error(e.response?.data?.error || 'Could not save') }
+    finally { setBusy(null) }
+  }
+  if (!miss.texts.length && !fields.length) return null
+  const cls = 'w-full rounded-lg border border-amber-300 bg-white/80 px-2.5 py-1.5 text-sm dark:border-amber-700 dark:bg-slate-900/60 dark:text-white'
+  return (
+    <section className="panel p-4 border-l-4 border-l-amber-500" data-testid="missing-card">
+      <h2 className="font-display text-base font-bold text-amber-800 dark:text-amber-300">Missing</h2>
+      {miss.texts.length > 0 && (
+        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {miss.texts.map(t => (
+            <label key={t.key} className="block text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              {t.label}
+              {t.type === 'select' ? (
+                <select className={`${cls} mt-1 normal-case`} value={vals[t.key] ?? ''} disabled={busy === t.key}
+                  onChange={e => { const v = e.target.value; setVals(x => ({ ...x, [t.key]: v })); if (v) { setBusy(t.key); api.put(`/profiles/${profileId}`, { [t.key]: v }).then(() => onSaved({ [t.key]: v })).catch(() => toast.error('Could not save')).finally(() => setBusy(null)) } }}>
+                  <option value="">—</option>
+                  {t.options.map(o => <option key={o} value={o}>{o}</option>)}
+                </select>
+              ) : (
+                <input className={`${cls} mt-1 normal-case`} type={t.type} placeholder={t.hint || ''} value={vals[t.key] ?? ''} disabled={busy === t.key}
+                  onChange={e => setVals(x => ({ ...x, [t.key]: e.target.value }))}
+                  onBlur={() => save(t)} onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }} />
+              )}
+            </label>
+          ))}
+        </div>
+      )}
+      {fields.length > 0 && (
+        <div className="mt-3 grid grid-cols-2 gap-2 sm:gap-4 lg:grid-cols-3">
+          {fields.map(f => fieldCard(f))}
+        </div>
+      )}
+    </section>
+  )
+}
+
 /** A section folded to its title until opened; opening it is remembered on this device. */
 /** Only the details whose label the step needs (all of them when `labels` is empty). */
 function onlyNeeded(labels, fragment) {
@@ -530,7 +580,7 @@ function onlyNeeded(labels, fragment) {
   return labels ? kids.filter(k => labels.includes(k?.props?.label)) : kids
 }
 
-function Fold({ id, title, className = '', children }) {
+function Fold({ id, title, className = '', lessLabel, children }) {
   const key = `adal-folded-${id}`
   const [open, setOpen] = useState(() => { try { return localStorage.getItem(key) === '1' } catch { return false } })
   const toggle = () => setOpen(o => { try { localStorage.setItem(key, o ? '0' : '1') } catch {} return !o })
@@ -542,6 +592,9 @@ function Fold({ id, title, className = '', children }) {
         <span className={`text-slate-400 text-sm transition-transform ${open ? '' : '-rotate-90'}`}>▼</span>
       </button>
       {open && children}
+      {open && lessLabel && (
+        <button type="button" onClick={toggle} className="mt-4 w-full rounded-lg py-2 text-sm font-semibold text-teal-700 hover:bg-teal-50 dark:text-teal-400 dark:hover:bg-slate-800/40">{lessLabel}</button>
+      )}
     </section>
   )
 }

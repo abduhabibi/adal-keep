@@ -625,7 +625,7 @@ export default function CVNewPage() {
         ) : (
           <div className="flex flex-wrap gap-2">
             {templates.map(t => (
-              <button key={t.id} type="button" onClick={() => setTemplateId(String(t.id))}
+              <button key={t.id} type="button" onClick={() => { setTemplateId(String(t.id)); openPreview(String(t.id)) }}
                 className={`rounded-xl border px-3 py-2 text-sm font-semibold transition ${String(templateId) === String(t.id)
                   ? 'border-teal-500 bg-teal-50 text-teal-800 dark:bg-teal-900/30 dark:text-teal-200'
                   : 'border-slate-200 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800/40'}`}>

@@ -7,6 +7,7 @@ import os from 'os'
 import { Readable } from 'stream'
 import { fileURLToPath } from 'url'
 import { latestRelease, setUpdateDb, lastEnvelope, verifyManifest } from '../services/updateChannel.js'
+import { withTimeout, RUN_LIMIT_MS } from '../services/runLimit.js'
 import { rollbackOf, databaseRefusal } from '../services/rollback.js'
 import * as WhatsNew from '../services/whatsNew.js'
 
@@ -266,7 +267,7 @@ async function checkSupabase(installed) {
   let waitUntil = null
   if (!upToDate && m.everyone_at && Date.parse(m.everyone_at) > Date.now()) {
     let me = null
-    try { me = await (await import('../services/chatCloud.js')).cloudAgencyId(dbOf()) } catch {}
+    try { me = await withTimeout((await import('../services/chatCloud.js')).cloudAgencyId(dbOf()), 5000, null) } catch {}
     if (!me || !(m.early || []).includes(me)) waitUntil = m.everyone_at
   }
   return {
@@ -366,7 +367,8 @@ const autoState = { failedSha: '', failedAt: 0, failedSource: '', waitingSince: 
 async function autoUpdateOn(db) {
   if (String(process.env.ADAL_AUTO_UPDATE || '').trim() === '0') return false
   try {
-    const row = db ? await db('settings').where('key', 'auto_update').first() : null
+    // A busy database must not hold the update back: no answer in 5 s = the default (on).
+    const row = db ? await withTimeout(db('settings').where('key', 'auto_update').first(), 5000, null) : null
     if (row && String(row.value).toLowerCase() === 'off') return false
   } catch {}
   return true
@@ -375,10 +377,22 @@ async function autoUpdateOn(db) {
 async function busyNow(db) {
   let running = 0, waiting = 0
   try { const { runsWorking } = await import('../services/busy.js'); running = runsWorking() } catch {}
-  try { if (db) waiting = Number((await db('automation_queue').where('status', 'pending').count({ c: '*' }).first())?.c || 0) } catch {}
+  try { if (db) waiting = Number((await withTimeout(db('automation_queue').where('status', 'pending').count({ c: '*' }).first(), 5000, null))?.c || 0) } catch {}
   // A move from another system (Transitions) is lost by a restart: the update waits for it too.
   try { if ((await import('../services/transition.js')).transitionRunning()) running++ } catch {}
   return { running, waiting, busy: running > 0 || waiting > 0 }
+}
+
+/**
+ * Never longer than 10 minutes for the runs (owner's rule, 2026-11-22): every run is stopped at 10 minutes
+ * anyway (services/runLimit.js), so what still works after that is stuck; the update goes on.
+ * since: when the wait began (0 = not waiting). Returns { wait, since, waited }.
+ */
+export function holdForRuns(busy, since, now = Date.now(), limit = RUN_LIMIT_MS) {
+  if (!busy) return { wait: false, since: 0, waited: 0 }
+  const from = since || now
+  const waited = now - from
+  return { wait: waited < limit, since: from, waited }
 }
 
 async function autoUpdate(db, result) {
@@ -397,11 +411,14 @@ async function autoUpdate(db, result) {
   // A release that failed waits 2 hours (a cut download: 15 minutes, it goes on from where it stopped) — unless a PC of the office now offers it.
   if (sha && sha === autoState.failedSha && Date.now() - autoState.failedAt < (autoState.failedDownload ? 15 * 60 * 1000 : 2 * 3600 * 1000) && !(result.source === 'lan' && autoState.failedSource !== 'lan')) return
   const b = await busyNow(db)
-  if (b.busy) {
-    if (!autoState.waitingSince) autoState.waitingSince = Date.now()
+  const hold = holdForRuns(b.busy, autoState.waitingSince)
+  autoState.waitingSince = hold.since
+  const waited = hold.waited
+  if (hold.wait) {
     console.log(`🆕 Update ${result.latest?.short} waits: ${b.running} run(s) working, ${b.waiting} in line`)
     return
   }
+  if (b.busy) console.log(`🆕 Update ${result.latest?.short} waited ${Math.round(waited / 60000)} min for ${b.running} run(s) working, ${b.waiting} in line — installing now`)
   autoState.waitingSince = 0
   console.log(`🆕 Installing update ${result.latest?.short} by itself (${result.count} change(s))`)
   updateNotice.auto = true

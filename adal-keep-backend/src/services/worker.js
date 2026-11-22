@@ -31,6 +31,7 @@ import { createRunQueue } from './runQueue.js'
 import { reportRuns } from './busy.js'
 import { isCancelled, clearCancelled, markCancelled } from './cancellation.js'
 import { assertPoliceReady } from './verification.js'
+import { startRunClock, LIMIT_NOTE, RUN_LIMIT_MS } from './runLimit.js'
 import { begin as beginHistory, finishRun as finishHistory, prune as pruneHistory, closeStale as closeStaleHistory } from './runHistory.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -220,11 +221,11 @@ async function executeRun(db, page, job) {
     try {
       await db('automation_queue').where('id', runId).update({
         status: 'cancelled',
-        pause_reason: 'Cancelled by user',
+        pause_reason: _limited.has(runId) ? LIMIT_NOTE : 'Cancelled by user',
         finished_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })
-      await onLog('warn', '⛔ Cancelled by user — run stopped')
+      await onLog('warn', _limited.has(runId) ? `⛔ ${LIMIT_NOTE[0].toUpperCase()}${LIMIT_NOTE.slice(1)} — run stopped` : '⛔ Cancelled by user — run stopped')
     } catch {}
   }
 
@@ -527,6 +528,21 @@ async function appendLog(db, id, msg, level = 'info') {
   } catch {}
 }
 
+export const _limited = new Set()   // runs stopped by the 10-minute limit
+/** The run is stopped: cooperatively first (its next step ends it), and for good here when it is stuck. */
+export async function stopAtLimit(db, job, page) {
+  _limited.add(job.id)
+  markCancelled(job.id)
+  console.log(`[worker] run #${job.id} (${job.workflow_id}) ${LIMIT_NOTE} — stopped, its tab released`)
+  const now = new Date().toISOString()
+  try {
+    await db('automation_queue').where('id', job.id).whereIn('status', ['running', 'pending', 'paused']).update({ status: 'cancelled', pause_reason: LIMIT_NOTE, finished_at: now, updated_at: now })
+    await appendLog(db, job.id, `⛔ ${LIMIT_NOTE[0].toUpperCase()}${LIMIT_NOTE.slice(1)} (${Math.round(RUN_LIMIT_MS / 60000)} min is the most a robot works at one task) — the tab is released`, 'warn')
+  } catch (e) { console.warn(`[worker] run #${job.id}: could not write the stop: ${e.message}`) }
+  try { await page?.close?.() } catch {}
+  setTimeout(() => _limited.delete(job.id), 60000).unref?.()
+}
+
 async function runJob(db, job) {
   let page = null, historyId = null
   try {
@@ -601,7 +617,15 @@ async function runJob(db, job) {
         if (historyId && label) await db('run_history').where('id', historyId).update({ account: label.slice(0, 80) }).catch(() => {})
       }
     } catch {}
-    await executeRun(db, page, job)
+    // Never longer than 10 minutes of the robot's own work (services/runLimit.js): past it the run is stopped
+    // for good, its tab released, and the queue goes on — even when the workflow itself is stuck.
+    const clock = startRunClock({ waiting: () => isWaiting(job.id) })
+    const work = executeRun(db, page, job).then(() => 'done', (e) => { if (!_limited.has(job.id)) throw e; return 'limit' })
+    work.catch(() => {})
+    try {
+      const first = await Promise.race([work, clock.hit.then(() => 'limit')])
+      if (first === 'limit') await stopAtLimit(db, job, page)
+    } finally { clock.stop() }
   } catch (e) {
     // Could not start at all: no browser, profile deleted, ...
     console.error(`[worker] run #${job.id} could not start: ${e.message}`)

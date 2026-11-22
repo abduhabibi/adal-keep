@@ -134,6 +134,24 @@ export function dbChunk(snap, i) {
   } finally { fs.closeSync(fd) }
 }
 
+/** dbChunk without blocking the event loop (reading and compressing in the thread pool): the one the routes use. */
+export async function dbChunkAsync(snap, i) {
+  const s = snaps.get(String(snap))
+  if (!s) throw Object.assign(new Error('That snapshot is gone: ask for a new manifest'), { status: 410 })
+  const n = Number(i)
+  if (!Number.isInteger(n) || n < 0 || n * CHUNK >= s.length) throw Object.assign(new Error('No such chunk'), { status: 404 })
+  const fh = await fs.promises.open(s.file, 'r')
+  try {
+    const len = Math.min(CHUNK, s.length - n * CHUNK)
+    const buf = Buffer.alloc(len)
+    await fh.read(buf, 0, len, n * CHUNK)
+    const z = HAS_ZSTD
+      ? await new Promise((ok, no) => zlib.zstdCompress(buf, { params: { [ZL.ZSTD_c_compressionLevel]: 3 } }, (e, r) => e ? no(e) : ok(r)))
+      : await new Promise((ok, no) => zlib.gzip(buf, { level: 6 }, (e, r) => e ? no(e) : ok(r)))
+    return lockFast(z, getSecret('backup_password'))
+  } finally { await fh.close() }
+}
+
 /** One piece of a document, locked. */
 export function docPiece(name, part) {
   const base = path.basename(String(name || ''))

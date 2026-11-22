@@ -263,6 +263,9 @@ export function setSuspended(id, on) {
   if (!pc) throw new Error('No such computer')
   if (on) pc.suspended = Date.now(); else delete pc.suspended
   write(s)
+  // Written down every time (2026-11-22: "the main PC suspended the Companion" had no trace): only a person's
+  // click on this PC (POST /pc-access/devices/suspend, this PC only) calls this — nothing suspends a PC by itself.
+  console.log(`[pc-access] ${on ? 'SUSPENDED' : 'allowed again'}: ${pc.name || id} (${pc.last_ip || '?'}) — by a person on the main PC`)
   return pc.device || null
 }
 

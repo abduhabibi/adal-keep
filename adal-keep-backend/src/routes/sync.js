@@ -18,6 +18,7 @@
  *   GET  /sync/conflicts      merges and documents kept beside
  */
 import express from 'express'
+import { withSlot } from '../services/replicaThrottle.js'
 
 /** How far apart two PCs are: entries this PC has that the other has not (they_lack), and the other way. */
 export function compareVectors(mine = {}, theirs = {}) {
@@ -42,7 +43,12 @@ export function createSyncRouter({ getNode, here, admitted = (req) => req.pcAcce
     if (node.cutOff) return res.status(403).json({ error: `This PC was ${node.cutOff} by the main PC` })
     const key = keyOf(req)
     const p = node.peerByKey(key)
-    if (p) { req.syncPeer = p; return next() }
+    if (p) {
+      req.syncPeer = p
+      // A PC this one could not reach (it was restarting, its address changed): it is there — a round with it now.
+      if (!node.peerState.get(p.pc_id)?.ok) node.roundSoon?.(1000)
+      return next()
+    }
     const st = node.peerKeyState(key)
     if (st === 'suspended') return res.status(403).json({ error: 'This computer was suspended by the main PC', suspended: true })
     if (st === 'removed') return res.status(403).json({ error: 'This computer was removed from the agency' })
@@ -52,7 +58,8 @@ export function createSyncRouter({ getNode, here, admitted = (req) => req.pcAcce
 
   router.get('/sync/hello', agencyPC, async (req, res) => { try { res.json(await getNode().hello()) } catch (e) { fail(res, e) } })
   router.post('/sync/pull', agencyPC, async (req, res) => {
-    try { res.json(await getNode().engine.changesSince(req.body?.vector || {}, req.body?.limit)) } catch (e) { fail(res, e) }
+    // Paced like the replica copy (replicaThrottle): one transfer at a time, waiting while this PC is busy.
+    try { res.json(await withSlot(() => getNode().engine.changesSince(req.body?.vector || {}, req.body?.limit))) } catch (e) { if (e.retryAfter) res.set('Retry-After', String(e.retryAfter)); fail(res, e) }
   })
   router.post('/sync/push', agencyPC, async (req, res) => {
     try {
@@ -78,7 +85,9 @@ export function createSyncRouter({ getNode, here, admitted = (req) => req.pcAcce
       const name = String(req.params.name)
       if (!node.docs.has(name)) return res.status(404).json({ error: 'No such document' })
       res.set('Cache-Control', 'no-store')
-      res.sendFile(node.docs.pathOf(name), { dotfiles: 'deny' })
+      // One document at a time on this PC, after the robots and people (replicaThrottle).
+      withSlot(() => new Promise(resolve => res.sendFile(node.docs.pathOf(name), { dotfiles: 'deny' }, () => resolve())))
+        .catch(e => { if (res.headersSent) return; if (e.retryAfter) res.set('Retry-After', String(e.retryAfter)); fail(res, e) })
     } catch (e) { fail(res, e) }
   })
 

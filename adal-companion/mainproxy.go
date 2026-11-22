@@ -84,7 +84,7 @@ func addMainProxy(mux *http.ServeMux) {
 			return
 		}
 		w.Header().Set("Content-Type", "text/plain")
-		w.Write([]byte(strings.TrimRight(hostServer, "/")))
+		w.Write([]byte(windowHost())) // the main PC, or this PC's own copy while it is off (full.go)
 	})
 	mux.HandleFunc("/local/main/", func(w http.ResponseWriter, r *http.Request) {
 		if !fromThisPC(r) {

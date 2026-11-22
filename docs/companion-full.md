@@ -1,6 +1,8 @@
 # Companion with its own full copy ("main is only a name")
 
-Branch `companion-full`. Status: built and tested on scratch data, **not published**.
+Merged into `main` on 2026-11-22 (the owner's go-ahead: "when main is off, the
+adal companion should still work"). Status: tested on scratch data and in a
+two-PC simulation on Linux, **release pending** (not yet run on Windows).
 
 ## What the user asked
 
@@ -270,6 +272,25 @@ PC it reaches — there is no hub.
 
 ## Tests (all on scratch folders; Supabase and Telegram off)
 
+* `tests/syncCompanionFull.test.js` (2026-11-22) — the main role moves by itself:
+  nothing while Main is seen or reached on the network; after the lease only the
+  smallest slot alive takes it; Main back → it steps down, then gets it back;
+  the hand-back waits for a run; a role a person moved never moves back by
+  itself. A Companion program joins with its key (no number). `uploads/` copied
+  both ways; names leaving the folder refused (404).
+* Two real `server.js` on this Linux PC (2026-11-22, scratch copies, `ADAL_ISOLATED`,
+  each calling from its own loopback address as through adal-companion's door;
+  lease 60 s, heartbeat 15 s): B joined by itself with only its key in 6.4 s
+  (start, snapshot, restart). Both on: A→B new profile 0.5 s, B→A edit 2.4 s, B→A
+  document 5.9 s. A killed: B saved 20 profiles, an edit and 5 documents at once;
+  B took the main role by itself after 54 s. A then started alone (no network)
+  and edited the same profile (other fields + the same one). A back: answering
+  after 4.6 s with everything B did; documents, A's own work on B, the same profile
+  equal on both (newest per field), role back on A — all within 7.7 s of A's start.
+  Heavier: 1,000 profiles + 500 edits + 50 documents (5 MB) made on B with A off
+  → A had all rows after 75 s and all documents after 78 s (≈70,000 field
+  entries at ≈1,000/s on this PC; expect several times slower on the A4 Main).
+
 * `tests/syncPeers.test.js` — the agency's tags; another agency's PC and a PC not
   on the list ignored; the broadcast over real UDP; Main off, the Companions
   copy with each other at an address only the broadcast knew; found by the
@@ -305,17 +326,66 @@ PC it reaches — there is no hub.
   the copy, edits both ways within ~4 s, the document copied, the licence
   followed, suspension locks the Companion.
 
-## Migration (existing agencies)
+## Migration (existing agencies, Windows) — nothing typed, nothing lost
 
-1. Update Main first (release). At its first start it creates the sync tables
-   and triggers, takes the main role (slot 1), and writes its licence record. Its
-   data and ids are untouched; new rows get time ids.
-2. Install the new Companion installer on each employee PC (a Companion program
-   update cannot add the Node runtime: it needs the USB). The PC shows "Join your
-   agency": the main PC's address (found on the network) and its number.
-3. Older Companions (Go only) keep working against the updated Main as before
-   (they open the main PC's page). Follower PCs (`main_url` without `mode`) are
-   unchanged.
+What is installed today: **Main** `C:\AdalKeep` (AdalKeep.exe, `runtime\node.exe`,
+`backend\`, the data in `backend\data.sqlite` + `backend\data\`), and on each
+employee PC the **Go Companion** `C:\AdalKeepCompanion` (adal-companion.exe,
+AdalKeep.exe in employee mode, `companion.conf` with the main PC's number,
+`replica\` the locked copy if it ever finished, and since standby.go
+`server\` = Main's own Node + backend, fetched over the office network).
+Both kinds update themselves from the signed releases (the release carries
+adal-companion.exe too), so no USB and no installer is needed.
+
+1. **Main updates first** (the normal staged release). At its first start the
+   migrations add the sync tables and triggers (`sync_*`), it takes the main
+   role (slot 1) and writes the signed licence record. Rows keep their ids; new
+   rows get time ids (`ids.js`). Nothing is copied anywhere yet. Rollback:
+   the previous release ignores the extra `sync_*` tables (they are only read
+   by this version); rows made meanwhile have big ids, which the old version
+   reads as plain integers.
+2. **Each Go Companion updates** (adal-companion.exe from the same release, LAN
+   first). Its bundle loop already keeps Main's server in `server\` (GET
+   `/api/companion/server-bundle`, re-fetched when Main's version changes), so it
+   now has the new backend too. Then `full.go`:
+   * starts that server on `127.0.0.1:4140` with its data in
+     `server\backend\data\` (`SQLITE_PATH` there, so a newer server bundle is
+     put in place around it — `swapServer` keeps `backend\data`), behind the
+     office door on port 4000 (adal-companion.exe's firewall rule);
+   * the server **joins by itself** with the key Main already gave this
+     Companion (`ADAL_SYNC_JOIN_MAIN` + `ADAL_SYNC_JOIN_KEY`, `/sync/join`, no
+     number typed; `services/sync/index.js autoJoin`), takes one snapshot of
+     Main's database through `/replica/manifest` + `/replica/db` (paced on Main,
+     `replicaThrottle`), restarts on it, and from then on copies both ways
+     with every PC it reaches. Documents follow, smallest first; on Main
+     `/sync/pull` and `/sync/doc` go through the same one-at-a-time queue.
+   * The locked copy (`replica.go`) stops once the full copy has joined (one copy
+     less on Main's weak processor); `replica\` stays on disk, unused.
+   * The old "stand in" (standby.go: open the locked copy, merge back) is not
+     used while the full copy runs; it stays for a Companion without one.
+3. **Using it.** While Main answers, the window opens Main exactly as today.
+   When Main has not answered for 45 s, `/local/host` names the own copy and
+   AdalKeep.exe (direct.go) opens it — it answers the agency's number to its own
+   window only (`ADAL_AGENCY_NUMBER`, `pc-access/check-number` from 127.0.0.1).
+   Profiles, CVs, uploads work there at once. After Main's lease (15 min) one
+   PC — the smallest slot alive — takes the main role by itself (`roles.autoStep`,
+   marked `auto`) and runs the robots, backups and the phones' online copy.
+4. **Main back.** It first has a word with the others (≤ 6 s), hears the role
+   moved, starts as a Companion and catches up (both ways, newest stamp per
+   field, tombstones, merges); the PC that stood in hands the role back as soon
+   as it reaches Main and no run is going (at most 10 min), and every window
+   goes back to Main.
+5. **Before / if anything goes wrong.** A Companion that was standing in the old
+   way at the update (`standby.json` acting) finishes its merge back first; the
+   full copy starts only after (`fullWanted` needs `!Acting`). `ADAL_FULL_COPY=0`
+   in adal-companion's environment switches the full copy off (back to the
+   locked copy and the old standing in); `ADAL_AUTO_MAIN=0` on a server stops the
+   role moving by itself. Main's own database is never replaced by anything a
+   Companion sends: only field changes are applied.
+
+New full Companion installs (`3 - Install Adal Companion.exe`, the full Adal
+Keep with a `companion-install` marker) still join from the "Join your agency"
+screen as before. Follower PCs (`main_url` without `mode`) are unchanged.
 
 ## Risks and open points
 
@@ -367,7 +437,14 @@ PC it reaches — there is no hub.
 
 ## Still to do
 
-* Windows end-to-end on two real PCs (USB build, join, restart, documents).
+* **Windows, on the agency's two PCs** (nothing of 2026-11-22 ran there yet):
+  adal-companion.exe starting `server\runtime\node.exe` on `server\backend\data`;
+  the office door on :4000 for the other PCs' copying (the loopback-per-computer
+  trick, firewall rule); UDP 45454 replies to node.exe (no firewall rule for it:
+  the PCs still find each other by the addresses in `sync_pcs` and ARP); the
+  window flipping to 127.0.0.1:4140 and back (direct.go + check-number);
+  Main (C:\AdalKeep) restarting as a Companion while the role is away and
+  getting it back; a bundle swap while the copy runs (the server is killed first);
+  the first snapshot and documents on the A4 Main with replicaThrottle.
+* Faster catch-up of big backlogs (an insert is one log entry per column).
 * A UI list of merges and documents kept beside (`/sync/conflicts` exists).
-* Rebase onto `no-downgrade` / `stay-signed-in` / `speed` / `stage-buttons` when
-  they land (they touch `cloudSync.js`, `pcAccess.js`, `mainPC.js`).

@@ -18,7 +18,7 @@
 import zlib from 'zlib'
 import crypto from 'crypto'
 import { DOC_COLUMNS } from './tables.js'
-import { okName } from './docs.js'
+import { okName, docNameOf } from './docs.js'
 import { dec } from './engine.js'
 
 const MAGIC = Buffer.from('ADALSY1')
@@ -135,8 +135,8 @@ export class Relay {
       const named = {}
       for (const x of entries) {
         if (!DOC_COLUMNS[x.tbl]?.includes(x.col) || x.val == null) continue
-        const name = String(dec(x.val) || '')
-        if (!okName(name) || !this.node.docs.has(name)) continue
+        const name = docNameOf(dec(x.val))
+        if (!name || !this.node.docs.has(name)) continue
         const r = await e.db.raw(`SELECT hash FROM sync_docs WHERE name = ?`, [name])
         if (r[0]?.hash) named[name] = r[0].hash
       }
@@ -178,7 +178,7 @@ export class Relay {
         got += (body.entries || []).length
         have = p.to
         for (const [name, hash] of Object.entries(body.docs || {})) {
-          if (!okName(name) || this.node.docs.has(name)) continue
+          if (!okName(name) || this.node.docs.has(name) || (name.startsWith('uploads/') && !this.node.docs.uploadsDir)) continue
           const local = await this.node.docs.byHash(hash)
           if (local) { await this.node.docs.copyLocal(local, name, hash); continue }
           const d = await this.store.get(`sync-docs/${hash}`)

@@ -70,7 +70,12 @@ router.post('/pc-access/check-number', async (req, res) => {
   if (recent.length >= 10) return res.status(429).json({ error: 'Too many wrong numbers — wait 10 minutes' })
   try {
     const { notMainPC: isFollower } = await import('../services/mainPC.js')
-    const ok = !isFollower() && await isOurNumber(String(req.body?.number || '').replace(/\D/g, ''))
+    const asked = String(req.body?.number || '').replace(/\D/g, '')
+    // A Companion's own full copy (adal-companion runs it, standby.go): to this PC's own
+    // window only, it says yes to the agency's number, so the window opens it while the
+    // main PC is off. Never to another computer (they come through the office door, not 127.0.0.1).
+    const ownCopy = !!process.env.ADAL_AGENCY_NUMBER && asked === process.env.ADAL_AGENCY_NUMBER.replace(/\D/g, '') && (await import('./trash.js')).onThisPC(req)
+    const ok = ownCopy || (!isFollower() && await isOurNumber(asked))
     if (!ok) numberMisses.set(ip, [...recent, now])
     res.json({ ok })
   } catch (e) { res.status(500).json({ error: e.message }) }

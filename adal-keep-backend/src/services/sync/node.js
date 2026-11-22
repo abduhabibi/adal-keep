@@ -19,11 +19,14 @@
  */
 import os from 'os'
 import { DocStore } from './docs.js'
+import { DOC_COLUMNS } from './tables.js'
 import { Roles, HEARTBEAT } from './roles.js'
 import { keyHash } from './identity.js'
 
 export const PULL_EVERY = 60 * 1000
 const PUSH_DELAY = 2500
+// Rows that ARE a document (an upload, a CV): when one comes, its file is fetched within seconds.
+const DOC_TABLES = new Set(['files', 'generated_cvs', 'cv_templates', 'cv_headers'])
 const LIMIT = 2000
 const RELAY_EVERY = 3 * 60 * 1000
 
@@ -34,10 +37,10 @@ export class SyncNode {
    * addresses(): this PC's office-network addresses. mainURL(): the main PC's
    * address as this PC knows it (main-pc.json), if any.
    */
-  constructor({ engine, safeDir, key, port = 4000, name = os.hostname(), version = '', addresses = () => [], macs = () => [], mainURL = () => '', relay = null, fetch: f = fetch, log = console, now = () => Date.now(), licenceKey = process.env.ADAL_LICENSE_KEY || '' }) {
+  constructor({ engine, safeDir, uploadsDir = null, key, port = 4000, name = os.hostname(), version = '', addresses = () => [], macs = () => [], mainURL = () => '', relay = null, fetch: f = fetch, log = console, now = () => Date.now(), licenceKey = process.env.ADAL_LICENSE_KEY || '' }) {
     Object.assign(this, { engine, key, port, name, version, addresses, macs, mainURL, relay, f, log, now, licenceKey })
     this.finder = null           // peers.js: the agency's PCs found on the office network (UDP, ARP)
-    this.docs = new DocStore(engine.db, safeDir, { log, now })
+    this.docs = new DocStore(engine.db, safeDir, { log, now, uploadsDir })
     this.roles = new Roles(this)
     this.peerState = new Map()   // pc_id → { url, ok, at, error }
     this.timers = []
@@ -65,6 +68,9 @@ export class SyncNode {
       // Changes made here, and those that came from another PC: on to every other PC
       // this one reaches (so a change goes round the office with no hub).
       if (w.stamped || w.applied?.length) this.pushSoon()
+      // A document's row came (an upload, a CV on another PC): its file now, not at the next minute.
+      if (w.applied?.some(t => DOC_TABLES.has(t))) this.roundSoon()
+      if (w.stamped?.some(t => DOC_COLUMNS[t])) this.docs.touch()   // an upload here: counted at the next look
     })
     if (timers) {
       const every = (ms, fn) => { const t = setInterval(() => fn().catch(e => this.log.warn?.(`[sync] ${e.message}`)), ms); t.unref?.(); this.timers.push(t) }
@@ -77,7 +83,12 @@ export class SyncNode {
     }
     return this
   }
-  stop() { for (const t of this.timers) clearInterval(t); this.timers = []; clearTimeout(this.pushTimer) }
+  roundSoon(ms = 3000) {
+    if (this.soonTimer || !this.timers.length) return
+    this.soonTimer = setTimeout(() => { this.soonTimer = null; this.round().catch(() => {}) }, ms)
+    this.soonTimer.unref?.()
+  }
+  stop() { clearTimeout(this.soonTimer); for (const t of this.timers) clearInterval(t); this.timers = []; clearTimeout(this.pushTimer) }
 
   /** This PC's own row: where it is, that it is alive, what it has. */
   async selfRow() {
@@ -219,7 +230,10 @@ export class SyncNode {
         if (d.copyOf) await this.docs.copyLocal(d.copyOf, d.name, d.hash)
         else await this.docs.put(d.name, await this.call(url, 'GET', `/doc/${encodeURIComponent(d.name)}`, null, { timeout: 300000, raw: true }), d.hash)
         n++
-      } catch (e) { this.log.warn?.(`[sync] ${d.name}: ${e.message}`) }
+      } catch (e) {
+        if (e.status === 503) break   // that PC is busy: the rest at the next round
+        this.log.warn?.(`[sync] ${d.name}: ${e.message}`)
+      }
     }
     if (n) this.docs.listCache = null
     return n

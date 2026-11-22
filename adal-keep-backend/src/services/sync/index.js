@@ -48,6 +48,9 @@ export async function startSync(appDb, { timers = true } = {}) {
   const id = readIdentity()
   // Logged out of its agency ("Log out of this main PC") and not joined again: no copying.
   if (id.left_at && !id.joined_main) { startLeaveRetry(); return null }
+  // Started by adal-companion (its full copy, standby.go) and not joined yet: it joins by
+  // itself with the key the main PC gave that program — nobody types anything.
+  if (!id.joined_main && process.env.ADAL_SYNC_JOIN_MAIN && process.env.ADAL_SYNC_JOIN_KEY) { startAutoJoin(); return null }
   setSlot(id.slot)
   const db = knex({
     client: 'sqlite3', connection: { filename: DB_FILE }, useNullAsDefault: true,
@@ -59,7 +62,7 @@ export async function startSync(appDb, { timers = true } = {}) {
   const { getLanAddresses } = disco
   const mp = await import('../mainPC.js')
   node = new SyncNode({
-    engine, safeDir: SAFE, key: id.key, port: Number(process.env.ADAL_ADVERTISE_PORT) || Number(process.env.PORT) || 4000, name: process.env.ADAL_PC_NAME || os.hostname(), version: version(),
+    engine, safeDir: SAFE, uploadsDir: path.join(BACKEND, 'uploads'), key: id.key, port: Number(process.env.ADAL_ADVERTISE_PORT) || Number(process.env.PORT) || 4000, name: process.env.ADAL_PC_NAME || os.hostname(), version: version(),
     addresses: () => getLanAddresses(), macs: () => disco.macsOf(), mainURL: () => mp.mainURL(), log: console,
   })
   // The agency's PCs find each other on the office network, with or without the main PC (peers.js).
@@ -95,10 +98,66 @@ export async function startSync(appDb, { timers = true } = {}) {
   }
   await reconcileRole()
   node.roles.onRole(() => reconcileRole({ restart: true }).catch(e => console.warn('[sync] role:', e.message)))
+  if (timers && process.env.ADAL_AUTO_MAIN !== '0') startAutoRole()
   if (node.roles.isMain()) startLicencePublisher()
   else followLicence()
   console.log(`🔁 Copying between the agency's PCs: this PC ${id.pc_id} (slot ${id.slot})${node.roles.isMain() ? ', the main PC' : `, main PC ${node.roles.holder() || '(none yet)'}`}`)
   return node
+}
+
+// ── Joining by itself (a Companion program's full copy) ────────────────────
+
+let joinTimer = null
+/** One try now, then every 2 minutes until the main PC answers. A join that worked restarts the server. */
+function startAutoJoin() {
+  if (joinTimer) return
+  const go = async () => {
+    try {
+      const r = await autoJoin()
+      if (r) { clearInterval(joinTimer); joinTimer = null; setTimeout(() => process.exit(0), 1200) }
+    } catch (e) { console.warn(`[sync] joining the agency: ${e.message} (again in 2 minutes)`) }
+  }
+  setTimeout(go, Number(process.env.ADAL_JOIN_FIRST_MS) || 3000).unref?.()
+  joinTimer = setInterval(go, Number(process.env.ADAL_JOIN_RETRY_MS) || 2 * 60 * 1000)
+  joinTimer.unref?.()
+}
+export async function autoJoin({ mainUrl = process.env.ADAL_SYNC_JOIN_MAIN, key = process.env.ADAL_SYNC_JOIN_KEY } = {}) {
+  if (readIdentity().joined_main) return null
+  const { joinAgency, stageJoin } = await import('./bootstrap.js')
+  const { getLanAddresses } = await import('../discovery.js')
+  const id = readIdentity()
+  console.log(`[sync] joining the agency at ${mainUrl} with this Companion's key`)
+  const got = await joinAgency({ mainUrl, key, name: process.env.ADAL_PC_NAME || os.hostname(), pcId: id.pc_id, lan: getLanAddresses(), port: Number(process.env.ADAL_ADVERTISE_PORT) || Number(process.env.PORT) || 4000, dbFile: DB_FILE })
+  await stageJoin(got, { dbFile: DB_FILE })
+  updateIdentity({ slot: got.slot, key: got.key, joined_main: got.main_pc, joined_at: new Date().toISOString(), left_at: null, leave_pending: null, ...(got.online ? { online: got.online } : {}) })
+  const mp = await import('../mainPC.js')
+  mp.setRole({ mode: 'companion', main_url: got.main, pc_key: got.key })
+  console.log(`[sync] joined (slot ${got.slot}): the copy goes in at the restart`)
+  return got
+}
+
+// ── The main role moves by itself (roles.autoStep) ─────────────────────────
+
+let roleBusySince = 0
+function startAutoRole() {
+  const step = async () => {
+    if (!node || node.cutOff) return
+    const r = await node.roles.autoStep({
+      // Handing back waits for the robots' runs going here, at most 10 minutes (the run limit).
+      canHandBack: async () => {
+        const { busyNow } = await import('../appLife.js')
+        const b = await busyNow().catch(() => ({ busy: false }))
+        if (!b.busy) { roleBusySince = 0; return true }
+        roleBusySince = roleBusySince || Date.now()
+        return Date.now() - roleBusySince > 10 * 60 * 1000
+      },
+    })
+    if (!r) return
+    console.log(r === 'taken' ? '[sync] the main PC is gone longer than its lease: this PC takes the main role by itself' : '[sync] the main PC is back: its role is handed back to it')
+    await node.round().catch(() => {})   // the others hear it now
+  }
+  const t = setInterval(() => step().catch(e => console.warn('[sync] role step:', e.message)), Number(process.env.ADAL_AUTO_MAIN_MS) || 60 * 1000)
+  t.unref?.()
 }
 
 /** The online copy for the relay: the agency's own account on the main PC; the Companion's on a Companion. */

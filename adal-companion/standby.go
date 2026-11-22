@@ -168,6 +168,7 @@ func startStandby(root string) {
 	go s.announce()
 	go s.bundleLoop()
 	go s.watch()
+	go s.fullLoop()  // its own full copy, run all the time (full.go)
 	if s.st.Acting { // it stood in when this program stopped (a restart): it goes on
 		log.Printf("🏢 Standing in for the main PC again (since %s)", s.st.Since)
 		go s.run()
@@ -280,6 +281,10 @@ func (s *standbyRunner) installBundle(body io.Reader, ver string) error {
 	acting := s.st.Acting
 	s.mu.Unlock()
 	if !acting {
+		// Its own copy's server runs from that folder: stopped for the swap, started again by fullLoop.
+		swapMu.Lock()
+		defer swapMu.Unlock()
+		s.stopFull()
 		return s.swapServer()
 	}
 	return nil
@@ -291,10 +296,13 @@ func (s *standbyRunner) swapServer() error {
 	if _, err := os.Stat(nw); err != nil {
 		return nil
 	}
-	if data := filepath.Join(cur, "backend", "data"); dirExists(data) {
-		os.RemoveAll(filepath.Join(nw, "backend", "data"))
-		if err := os.Rename(data, filepath.Join(nw, "backend", "data")); err != nil {
-			return err
+	// (uploads: what people uploaded on this PC's own copy, full.go — kept like the data)
+	for _, keep := range []string{"data", "uploads"} {
+		if d := filepath.Join(cur, "backend", keep); dirExists(d) {
+			os.RemoveAll(filepath.Join(nw, "backend", keep))
+			if err := os.Rename(d, filepath.Join(nw, "backend", keep)); err != nil {
+				return err
+			}
 		}
 	}
 	os.RemoveAll(old)
@@ -564,7 +572,7 @@ func (s *standbyRunner) watch() {
 			}
 			continue
 		}
-		if signedOut() {
+		if signedOut() || fullCopyRunning() { // (its own full copy: nothing to stand in for, full.go)
 			continue
 		}
 		if u := s.realMainAt([]string{hostServer}); u != "" {
@@ -935,6 +943,9 @@ func standbyStatus() map[string]any {
 	out["server_version"] = s.st.BundleVersion
 	out["server_at"] = s.st.BundleAt
 	out["main_seen"] = s.mainSeen.UTC().Format(time.RFC3339)
+	fullMu.Lock()
+	out["full_copy"], out["using_own"] = fullServer != nil, usingOwn
+	fullMu.Unlock()
+	out["full_joined"] = fullJoined(s.root)
 	return out
 }
-

@@ -748,6 +748,8 @@ func watchReplica() {
 		for {
 			switch {
 			case signedOut():
+			case fullCopyJoined():
+				// Its own full copy is kept by the copying (full.go): no locked copy from the main PC.
 			case hostServer != "" && pingServer() && !serverLocked():
 				// The main PC back (or found for the first time): the copy is brought up to date at once.
 				if !mainOffSince.IsZero() {

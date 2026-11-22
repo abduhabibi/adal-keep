@@ -46,11 +46,13 @@ export function normalizeMain(input) {
   return p.origin
 }
 
-export async function joinAgency({ mainUrl, number, name, pcId, lan = [], port = 4000, dbFile, f = fetch, progress = () => {}, onlineCopy = true }) {
+export async function joinAgency({ mainUrl, number, key = '', name, pcId, lan = [], port = 4000, dbFile, f = fetch, progress = () => {}, onlineCopy = true }) {
   const main = normalizeMain(mainUrl)
   const json = async (r) => { const j = await r.json().catch(() => ({})); if (!r.ok) throw Object.assign(new Error(j.error || `The main PC answered ${r.status}`), { status: r.status, suspended: j.suspended }); return j }
   progress({ step: 'key' })
-  const k = await json(await f(`${main}/api/pc-access/number`, {
+  // A Companion program already let in by the main PC (adal-companion, its own key):
+  // the same key, no number typed again (the automatic join, standby.go full copy).
+  const k = key ? { key } : await json(await f(`${main}/api/pc-access/number`, {
     method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(15000),
     // (cid: the same PC joining again keeps its one place on the main PC's list)
     body: JSON.stringify({ number: String(number || '').replace(/\D/g, ''), name: `${name} (Adal Keep Companion)`, cid: `adal-sync-pc-${pcId}` }),

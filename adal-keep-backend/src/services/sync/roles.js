@@ -15,6 +15,12 @@
  *   • Two PCs apart from each other could both take it: when they meet, the
  *     newer take wins (the newest stamp, as for every field) and the other
  *     stops its main-PC jobs at once (onRole).
+ *   • By itself (autoStep, 2026-11-22: "when main is off, the adal companion
+ *     should still work"): the lease run out, ONE of the PCs still alive takes
+ *     the role — the one with the smallest slot — marked 'auto' with the PC
+ *     it stood in for. That PC back (its heartbeat newer than the take, and
+ *     reached on the office network now), the role is handed back to it.
+ *     A role taken or handed by a person is never moved by itself.
  *   • The licence lives with the role: the holder writes its licence state
  *     (sync_role 'licence', signed with the licence key every build has), and
  *     the other PCs follow it — they open while it is paid or in its trial,
@@ -22,8 +28,8 @@
  */
 import crypto from 'crypto'
 
-export const HEARTBEAT = 3 * 60 * 1000
-export const LEASE = 15 * 60 * 1000
+export const HEARTBEAT = Number(process.env.ADAL_SYNC_HEARTBEAT_MS) || 3 * 60 * 1000
+export const LEASE = Number(process.env.ADAL_SYNC_LEASE_MS) || 15 * 60 * 1000
 
 export class Roles {
   constructor(node) {
@@ -80,7 +86,10 @@ export class Roles {
     const pc = (await this.pcs()).find(p => p.pc_id === h)
     const seen = pc?.seen_at ? Date.parse(pc.seen_at) : 0
     const gone = !pc || pc.revoked_at || pc.suspended_at
-    return { holder: h, name: pc?.name || h, seen_at: pc?.seen_at || null, alive: !gone && this.node.now() - seen < LEASE }
+    // Reached on the office network lately counts too: its heartbeat may not have come yet.
+    const st = this.node.peerState?.get(h)
+    const reached = st?.ok && this.node.now() - (st.seen || st.at || 0) < LEASE
+    return { holder: h, name: pc?.name || h, seen_at: pc?.seen_at || null, alive: !gone && (this.node.now() - seen < LEASE || !!reached) }
   }
 
   /**
@@ -95,6 +104,42 @@ export class Roles {
     if (me?.suspended_at || me?.revoked_at) throw Object.assign(new Error('This PC was suspended or removed'), { status: 403 })
     await this.write('main', this.me, { since: new Date(this.node.now()).toISOString(), by: by || this.me, how: force ? 'taken (forced)' : 'taken', from: l.holder })
     return { ok: true, from: l.holder }
+  }
+
+  /**
+   * The role moves by itself (see the top): taken when the holder's lease ran
+   * out and this PC is the first of the PCs alive; handed back to the PC it
+   * was taken from once that PC is back. → 'taken' | 'handed-back' | null.
+   * canHandBack(): false while this PC must keep the role a little longer (a run going).
+   */
+  async autoStep({ canHandBack = () => true } = {}) {
+    const l = await this.leaseOf()
+    if (!l.holder) return null
+    const now = this.node.now()
+    const d = this.cache?.main?.data || {}
+    const pcs = await this.pcs()
+    if (l.holder === this.me) {
+      if (d.how !== 'auto' || !d.from || d.from === this.me) return null
+      const home = pcs.find(p => p.pc_id === d.from)
+      if (!home || home.revoked_at || home.suspended_at) return null
+      const seen = home.seen_at ? Date.parse(home.seen_at) : 0
+      if (seen <= Date.parse(d.since || 0) || now - seen > LEASE || !this.node.peerState.get(d.from)?.ok) return null
+      if (!(await canHandBack())) return null
+      await this.write('main', d.from, { since: new Date(now).toISOString(), by: 'auto', how: 'handed back', from: this.me })
+      return 'handed-back'
+    }
+    if (l.alive) return null
+    const me = pcs.find(p => p.pc_id === this.me)
+    if (!me || me.suspended_at || me.revoked_at) return null
+    const alive = pcs.filter(p => p.pc_id !== l.holder && !p.revoked_at && !p.suspended_at && (p.pc_id === this.me || (p.seen_at && now - Date.parse(p.seen_at) < LEASE)))
+    alive.sort((a, b) => (a.slot || 0) - (b.slot || 0))
+    if (alive[0]?.pc_id !== this.me) return null
+    // Stood in for again (a chain): the role still goes back to the PC it first came from.
+    const home = d.how === 'auto' && d.from ? d.from : l.holder
+    await this.write('main', this.me, home === this.me
+      ? { since: new Date(now).toISOString(), by: 'auto', how: 'back', from: l.holder }
+      : { since: new Date(now).toISOString(), by: 'auto', how: 'auto', from: home, stood_in_for: l.holder })
+    return 'taken'
   }
 
   /** The holder gives the role to another PC of the agency. */

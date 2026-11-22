@@ -11,13 +11,27 @@
  *     linked in under its name only if that name is still free. Another
  *     content under a name this PC has already → kept as "<name>.sync-<hash>"
  *     and noted in sync_conflicts; this PC's own stays as it is.
+ *
+ * Two folders (2026-11-22): data/SafeStorage (flat: the name is the file's
+ * name) and backend/uploads (what people upload in the app, in folders per
+ * profile and field: the name is "uploads/<its path>", the same as the
+ * files.path column).
  */
 import fs from 'fs'
 import path from 'path'
 import crypto from 'crypto'
 
-export const okName = (n) => typeof n === 'string' && n.length > 0 && n.length < 250 && n === path.basename(n)
+const okPart = (n) => typeof n === 'string' && n.length > 0 && n.length < 250 && n === path.basename(n)
   && !n.startsWith('.') && !/[\0\\/]/.test(n) && !/\.sync-tmp-/.test(n)
+/** A document's name: a file of SafeStorage, or "uploads/a/b/c" (every part a plain name: no "..", no "/x"). */
+export const okName = (n) => okPart(n) || (typeof n === 'string' && n.length < 400 && /^uploads\//.test(n) && n.split('/').length <= 8 && n.split('/').slice(1).every(okPart))
+/** The document a column names (files.path "uploads/…", "data/SafeStorage/x.pdf", or just "x.pdf"), or null. */
+export function docNameOf(v) {
+  const s = String(v || '').replace(/\\/g, '/').replace(/^\.\//, '')
+  if (/^uploads\//.test(s)) return okName(s) ? s : null
+  const b = s.replace(/^data\/SafeStorage\//, '')
+  return okPart(b) ? b : null
+}
 export const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex')
 
 function hashFile(file) {
@@ -28,14 +42,34 @@ function hashFile(file) {
 }
 
 export class DocStore {
-  constructor(db, dir, { log = console, now = () => Date.now() } = {}) {
+  constructor(db, dir, { log = console, now = () => Date.now(), uploadsDir = null } = {}) {
     this.db = db
     this.dir = dir
+    this.uploadsDir = uploadsDir
     this.log = log
     this.now = now
     this.listCache = null
   }
-  pathOf(name) { if (!okName(name)) throw Object.assign(new Error('No such document'), { status: 404 }); return path.join(this.dir, name) }
+  pathOf(name) {
+    if (!okName(name) || (name.startsWith('uploads/') && !this.uploadsDir)) throw Object.assign(new Error('No such document'), { status: 404 })
+    return name.startsWith('uploads/') ? path.join(this.uploadsDir, ...name.split('/').slice(1)) : path.join(this.dir, name)
+  }
+  /** Changed rows that name documents: the uploads folder is looked through at the next index. */
+  touch() { this.uploadsDirty = true }
+  uploadNames() {
+    const out = []
+    const walk = (dir, rel, depth) => {
+      let es = []
+      try { es = fs.readdirSync(dir, { withFileTypes: true }) } catch { return }
+      for (const e of es) {
+        if (!okPart(e.name)) continue
+        if (e.isDirectory() && depth < 6) walk(path.join(dir, e.name), `${rel}/${e.name}`, depth + 1)
+        else if (e.isFile()) out.push(`${rel}/${e.name}`)
+      }
+    }
+    if (this.uploadsDir) walk(this.uploadsDir, 'uploads', 0)
+    return out
+  }
 
   /** Fingerprint new and changed documents (a few seconds at a time); forget the gone ones. */
   async index({ budgetMs = 4000, force = false } = {}) {
@@ -44,23 +78,25 @@ export class DocStore {
     fs.mkdirSync(this.dir, { recursive: true })
     let dirAt = 0
     try { dirAt = fs.statSync(this.dir).mtimeMs } catch {}
-    if (!force && this.left === 0 && dirAt === this.dirAt && Date.now() - (this.lastIndex || 0) < 10 * 60 * 1000) return { added: 0, gone: 0, left: 0 }
+    if (!force && !this.uploadsDirty && this.left === 0 && dirAt === this.dirAt && Date.now() - (this.lastIndex || 0) < 10 * 60 * 1000) return { added: 0, gone: 0, left: 0 }
     this.lastIndex = Date.now()
     this.dirAt = dirAt
+    this.uploadsDirty = false
     const start = this.now()
     let names = []
-    try { names = fs.readdirSync(this.dir, { withFileTypes: true }).filter(d => d.isFile() && okName(d.name)).map(d => d.name) } catch {}
+    try { names = fs.readdirSync(this.dir, { withFileTypes: true }).filter(d => d.isFile() && okPart(d.name)).map(d => d.name) } catch {}
+    names.push(...this.uploadNames())
     const known = new Map((await this.db.raw(`SELECT name, size, mtime, hash FROM sync_docs`)).map(r => [r.name, r]))
     let added = 0, left = 0
     const here = new Set(names)
     for (const name of names) {
       let st
-      try { st = fs.statSync(path.join(this.dir, name)) } catch { continue }
+      try { st = fs.statSync(this.pathOf(name)) } catch { continue }
       const k = known.get(name)
       if (k && Number(k.size) === st.size && Number(k.mtime) === Math.round(st.mtimeMs) && k.hash) continue
       if (this.now() - start > budgetMs) { left++; continue }
       try {
-        const hash = await hashFile(path.join(this.dir, name))
+        const hash = await hashFile(this.pathOf(name))
         await this.db.raw(`INSERT INTO sync_docs (name, size, mtime, hash) VALUES (?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET size = excluded.size, mtime = excluded.mtime, hash = excluded.hash`, [name, st.size, Math.round(st.mtimeMs), hash])
         added++
       } catch {}
@@ -86,9 +122,12 @@ export class DocStore {
   }
   async byHash(hash) {
     const r = await this.db.raw(`SELECT name FROM sync_docs WHERE hash = ? LIMIT 1`, [hash])
-    return r[0] && fs.existsSync(path.join(this.dir, r[0].name)) ? r[0].name : null
+    return r[0] && this.has(r[0].name) ? r[0].name : null
   }
-  has(name) { return okName(name) && fs.existsSync(path.join(this.dir, name)) }
+  has(name) { try { return okName(name) && fs.existsSync(this.pathOf(name)) } catch { return false } }
+  /** A file written beside the place it goes (the same folder: a hard link works). */
+  tmpFor(name) { const p = this.pathOf(name); fs.mkdirSync(path.dirname(p), { recursive: true }); return path.join(path.dirname(p), `.sync-tmp-${crypto.randomBytes(6).toString('hex')}`) }
+  besideOf(name, hash) { const ext = path.extname(name); return `${name.slice(0, name.length - ext.length)}.sync-${hash.slice(0, 12)}${ext}` }
 
   /**
    * Keep a document that came from another PC (or the online copy): checked,
@@ -98,8 +137,7 @@ export class DocStore {
     if (!okName(name)) throw new Error(`Bad document name: ${name}`)
     const got = sha256(buf)
     if (hash && got !== hash) throw new Error(`${name}: damaged on the way (its fingerprint does not match)`)
-    fs.mkdirSync(this.dir, { recursive: true })
-    const tmp = path.join(this.dir, `.sync-tmp-${crypto.randomBytes(6).toString('hex')}`)
+    const tmp = this.tmpFor(name)
     fs.writeFileSync(tmp, buf)
     try {
       const r = await this.linkIn(tmp, name, got)
@@ -109,13 +147,12 @@ export class DocStore {
   }
 
   async linkIn(tmp, name, hash) {
-    const dest = path.join(this.dir, name)
+    const dest = this.pathOf(name)
     if (await place(tmp, dest)) return 'kept'
     // The name is taken: the same content → nothing to do; another → beside it.
     if (await hashFile(dest) === hash) return 'same'
-    const ext = path.extname(name)
-    const other = `${name.slice(0, name.length - ext.length)}.sync-${hash.slice(0, 12)}${ext}`
-    if (!fs.existsSync(path.join(this.dir, other))) await place(tmp, path.join(this.dir, other))
+    const other = this.besideOf(name, hash)
+    if (!fs.existsSync(this.pathOf(other))) await place(tmp, this.pathOf(other))
     try {
       await this.db.raw(`INSERT INTO sync_conflicts (at, tbl, rid, other, kind, data) VALUES (?, 'document', ?, ?, 'document', ?)`,
         [new Date(this.now()).toISOString(), name, other, JSON.stringify({ kept: name, theirs: other, hash })])
@@ -126,7 +163,7 @@ export class DocStore {
 
   async note(name, size, hash) {
     let st = null
-    try { st = fs.statSync(path.join(this.dir, name)) } catch {}
+    try { st = fs.statSync(this.pathOf(name)) } catch {}
     await this.db.raw(`INSERT INTO sync_docs (name, size, mtime, hash) VALUES (?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET size = excluded.size, mtime = excluded.mtime, hash = excluded.hash`,
       [name, size, st ? Math.round(st.mtimeMs) : 0, hash])
     this.listCache = null
@@ -134,11 +171,11 @@ export class DocStore {
 
   /** The same content is here under another name: a copy, no download. */
   async copyLocal(from, name, hash) {
-    const tmp = path.join(this.dir, `.sync-tmp-${crypto.randomBytes(6).toString('hex')}`)
-    fs.copyFileSync(path.join(this.dir, from), tmp)
+    const tmp = this.tmpFor(name)
+    fs.copyFileSync(this.pathOf(from), tmp)
     try {
       const r = await this.linkIn(tmp, name, hash)
-      if (r !== 'same') await this.note(r === 'kept' ? name : r, fs.statSync(path.join(this.dir, r === 'kept' ? name : r)).size, hash)
+      if (r !== 'same') await this.note(r === 'kept' ? name : r, fs.statSync(this.pathOf(r === 'kept' ? name : r)).size, hash)
       return r === 'kept' || r === 'same' ? r : 'conflict'
     } finally { fs.rmSync(tmp, { force: true }) }
   }
@@ -150,14 +187,13 @@ export class DocStore {
   async missing(theirs = []) {
     const out = []
     const mine = new Map((await this.db.raw(`SELECT name, hash FROM sync_docs`)).map(r => [r.name, r.hash]))
-    const beside = new Set(fs.existsSync(this.dir) ? fs.readdirSync(this.dir).filter(n => /\.sync-[0-9a-f]{12}/.test(n)) : [])
     for (const d of theirs) {
       if (!okName(d?.name) || !/^[0-9a-f]{64}$/.test(String(d.hash || ''))) continue
+      if (d.name.startsWith('uploads/') && !this.uploadsDir) continue
       if (this.has(d.name)) {
         // The same name with another content: theirs is kept beside (once).
         const h = mine.get(d.name)
-        const ext = path.extname(d.name)
-        if (!h || h === d.hash || beside.has(`${d.name.slice(0, d.name.length - ext.length)}.sync-${d.hash.slice(0, 12)}${ext}`)) continue
+        if (!h || h === d.hash || this.has(this.besideOf(d.name, d.hash))) continue
       }
       out.push({ ...d, copyOf: await this.byHash(d.hash) })
     }

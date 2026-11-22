@@ -228,6 +228,12 @@ $summary = @"
 $log.Add($summary)
 try { $log | Set-Content -Path "$UsbRoot\Adal-Connect-$env:COMPUTERNAME.txt" -Encoding utf8 } catch {}
 Write-Host $summary -ForegroundColor Green
+# Replace an older support task script that removed Adal's key (2026-11-22).
+try {
+  $newSetup = Join-Path $PSScriptRoot 'support-setup.ps1'
+  $oldSetup = "$env:ProgramData\AdalSupport\support-setup.ps1"
+  if ((Test-Path $newSetup) -and (Test-Path (Split-Path $oldSetup))) { Copy-Item $newSetup $oldSetup -Force; Say '      support task script updated' }
+} catch {}
 try {
   Add-Type -AssemblyName PresentationFramework
   [System.Windows.MessageBox]::Show($summary, "Adal Connect - $Role", 'OK', 'Information') | Out-Null

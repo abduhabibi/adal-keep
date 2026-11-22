@@ -134,6 +134,8 @@ cp -f "$INST/usb/1 - PREPARE (once, needs internet).bat" "$USB/"
 cp -f "$INST/usb/4 - Copy logs to this USB.bat" "$USB/"
 cp -f "$INST/usb/Adal Connect - Main.bat" "$INST/usb/Adal Connect - Companion.bat" "$INST/usb/Adal Disconnect.bat" "$USB/"
 cp -f "$INST/usb/deps/adal-connect.ps1" "$INST/usb/deps/adal-disconnect.ps1" "$USB/deps/"
+# Adal Connect replaces an older support task script with this one (2026-11-22).
+cp -f "$INST/files/support-setup.ps1" "$USB/deps/"
 cp -f "$INST/usb/deps/prepare-deps.ps1" "$USB/deps/"
 # Per-agency support keys (scripts/support-key.sh <pcnumber> writes them into
 # $USB/deps/support-keys, which this build keeps): public halves only.

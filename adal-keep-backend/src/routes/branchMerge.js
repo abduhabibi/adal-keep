@@ -10,7 +10,7 @@
  */
 import express from 'express'
 import { exportAll, exportFilePath, exportPhotoPath, preview, startMerge, job } from '../services/branchMerge.js'
-import { normalizeURL, isFollower } from '../services/mainPC.js'
+import { normalizeURL, notMainPC as isFollower } from '../services/mainPC.js'
 import { onThisPC, fromCompanion } from './trash.js'
 
 const router = express.Router()

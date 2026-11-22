@@ -222,11 +222,22 @@ func followedMainURL(root string) string {
 	}
 	var f struct {
 		MainURL string `json:"main_url"`
+		Mode    string `json:"mode"`
 	}
 	if json.Unmarshal(b, &f) != nil {
 		return ""
 	}
+	// A Companion with its own copy (companion-full): its own server, its own page.
+	if f.Mode == "companion" {
+		return ""
+	}
 	return strings.TrimRight(strings.TrimSpace(f.MainURL), "/")
+}
+
+// companionInstall: installed with the Companion installer since companion-full
+// (the same full Adal Keep, marked so it joins an agency instead of starting one).
+func companionInstall(root string) bool {
+	return fileExists(filepath.Join(root, "companion-install"))
 }
 
 // openMainOrFollowed opens this PC's Adal Keep, or — when this PC follows

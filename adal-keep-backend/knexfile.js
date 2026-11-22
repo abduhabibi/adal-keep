@@ -2,6 +2,8 @@ import dotenv from 'dotenv'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { openRows } from './src/services/accountVault.js'
+// New rows get ids no other PC of the agency can make (services/sync/ids.js).
+import { SyncClient } from './src/services/sync/ids.js'
 dotenv.config()
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SQLITE_FILE = process.env.SQLITE_PATH
@@ -10,7 +12,7 @@ const SQLITE_FILE = process.env.SQLITE_PATH
 const connection = { filename: SQLITE_FILE }
 export default {
   development: {
-    client: 'sqlite3',
+    client: SyncClient,
     connection,
     useNullAsDefault: true,
     postProcessResponse: openRows,
@@ -33,7 +35,7 @@ export default {
     seeds: { directory: './src/seeds' },
   },
   production: {
-    client: 'sqlite3',
+    client: SyncClient,
     connection,
     useNullAsDefault: true,
     postProcessResponse: openRows,

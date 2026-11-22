@@ -9,7 +9,7 @@ import express from 'express'
 import multer from 'multer'
 import { getConfig, saveConfig, testConnection, findChats, botInfo, runBackup, progress, restoreFrom, newestBackup, backupSoon } from '../services/telegramBackup.js'
 import { onThisPC, fromCompanion } from './trash.js'
-import { isFollower, mainURL, mainKey } from '../services/mainPC.js'
+import { notMainPC as isFollower, mainURL, mainKey } from '../services/mainPC.js'   // (backups: the main PC's role)
 
 const router = express.Router()
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } })

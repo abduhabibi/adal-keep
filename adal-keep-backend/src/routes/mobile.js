@@ -13,7 +13,7 @@ import express from 'express'
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
-import { pcNumber, isFollower, tailscaleInfo } from '../services/mainPC.js'
+import { pcNumber, notMainPC as isFollower, tailscaleInfo } from '../services/mainPC.js'   // (phones pair with the main PC's role)
 import { getLanAddresses } from '../services/discovery.js'
 import { liveStatus } from '../services/liveChannel.js'
 import { joinRequests, joinPresence, answerJoin, setPhonePassword, phonePasswordSet, relayStatus, cloudOn, cloudStatus, makeDevice, listDevices, setDeviceRevoked, syncNow } from '../services/cloudSync.js'

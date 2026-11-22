@@ -39,7 +39,7 @@ need makensis; need go; need node
 [ "$WINDOWS" = 1 ] || need rsync
 
 rm -rf "$STAGE"
-mkdir -p "$STAGE/main/backend" "$STAGE/main/frontend" "$STAGE/companion"
+mkdir -p "$STAGE/main/backend" "$STAGE/main/frontend"
 
 echo "== [1/6] Frontend =="
 if [ "${SKIP_FRONTEND:-0}" = "1" ]; then
@@ -94,13 +94,13 @@ for exe in AdalKeep.exe adal-companion.exe; do
 done
 cp -f "$BASE/adal.ico" "$STAGE/main/adal.ico"
 ( cd "$BASE/adal-agent"     && GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o "$STAGE/main/adal-agent.exe" ./cmd/agent )
-cp -f "$STAGE/main/adal-companion.exe" "$STAGE/companion/adal-companion.exe"
-# Employee PCs open the main PC's Adal Keep through AdalKeep.exe (employee mode).
-cp -f "$STAGE/main/AdalKeep.exe" "$STAGE/main/adal.ico" "$STAGE/companion/"
-# The online copy's pages, for when the main PC is off (adal-launcher/online.go).
+# (companion-full) Employee PCs install the same full Adal Keep as Main — the
+# server, its database and documents on their own disk — and join an agency
+# with the main PC's number (usb-installer.nsi marks them "companion-install").
+# The online copy's pages stay beside it, for an older Companion's window.
 ( cd "$BASE/adal-keep-frontend" && VITE_PHONE=1 node node_modules/vite/bin/vite.js build --mode phone --logLevel warn )
-rsync -a --delete "$BASE/adal-phone/www/" "$STAGE/companion/online/"
-rm -f "$STAGE/main/run-server.bat" "$STAGE/main/start-companion.bat" "$STAGE/companion/start-companion.bat"
+rsync -a --delete "$BASE/adal-phone/www/" "$STAGE/main/online/"
+rm -f "$STAGE/main/run-server.bat" "$STAGE/main/start-companion.bat"
 cp -f "$INST/files/finish-install.ps1" "$STAGE/main/"
 # The version this build is: Settings → "Check for updates" compares it with
 # GitHub's "release" branch, which is moved to this commit when the build goes

@@ -7,8 +7,11 @@
 //	                               its window opens too only if allowed in Settings
 //	AdalKeep.exe --set-shortcut-ids <.lnk>...   installer: tag the shortcuts (see brand.go)
 //
-// On an employee PC (Companion install, no server) it opens the main PC's
-// Adal Keep instead: see employee.go.
+// On an older employee PC (Companion program only, no server) it opens the
+// main PC's Adal Keep instead: see employee.go. A Companion installed since
+// companion-full has the same full Adal Keep as Main (its own server, its own
+// copy of the data): it runs like Main, on 127.0.0.1, and never starts with
+// Windows (it opens only from its icon).
 //
 // One copy per signed-in user stays in the background: it keeps the server
 // running (and starts it again when it stops — after an update, for example),
@@ -65,7 +68,7 @@ func main() {
 	// Companion: a start by Windows at sign-in does nothing, unless someone
 	// switched on "open Adal Keep when the PC starts". Main: the server always
 	// starts at sign-in (no window); that setting only decides the window.
-	if employeePC(root) && background && !openAtStart(filepath.Join(root, "backend", "data")) {
+	if (employeePC(root) || companionInstall(root)) && background && !openAtStart(filepath.Join(root, "backend", "data")) {
 		logf("started by Windows at sign-in: Adal Keep opens only from its icon — nothing started")
 		return
 	}
@@ -89,7 +92,9 @@ func main() {
 	}
 
 	logf("Adal Keep starting (background=%v)", background)
-	registerSignInStart(root)
+	if !companionInstall(root) {
+		registerSignInStart(root)
+	}
 	go ensureBrowser(root)
 	go ensureSharing(root) // the office network may share updates, data and the server (sharing.go)
 	go ensureSupport(root) // remote support by Adal: key, sshd, firewall checked and repaired (support.go)

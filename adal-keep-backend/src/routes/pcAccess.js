@@ -69,7 +69,7 @@ router.post('/pc-access/check-number', async (req, res) => {
   const recent = (numberMisses.get(ip) || []).filter(t => now - t < 10 * 60000)
   if (recent.length >= 10) return res.status(429).json({ error: 'Too many wrong numbers — wait 10 minutes' })
   try {
-    const { isFollower } = await import('../services/mainPC.js')
+    const { notMainPC: isFollower } = await import('../services/mainPC.js')
     const ok = !isFollower() && await isOurNumber(String(req.body?.number || '').replace(/\D/g, ''))
     if (!ok) numberMisses.set(ip, [...recent, now])
     res.json({ ok })
@@ -85,7 +85,7 @@ router.post('/pc-access/number', async (req, res) => {
   const number = String(req.body?.number || '').replace(/\D/g, '')
   if (!number) return res.status(400).json({ error: 'Type the main PC\'s number' })
   try {
-    const { pcNumber, isFollower } = await import('../services/mainPC.js')
+    const { pcNumber, notMainPC: isFollower } = await import('../services/mainPC.js')
     if (isFollower()) return res.status(409).json({ error: 'This PC follows another main PC. Use the main PC\'s address.' })
     // The PC number (6 digits, the licence one shown on the main PC) — or the older 5-digit one.
     let licence = ''
@@ -134,7 +134,7 @@ router.post('/pc-access/leave', async (req, res) => {
   if (!req.pcAccess && !isLocal(req)) return res.status(403).json({ error: 'Only a computer that is let in' })
   const out = { key: false, device: false }
   try {
-    if (req.pcAccess?.id) { remove(req.pcAccess.id); out.key = true }
+    if (req.pcAccess?.id) { remove(req.pcAccess.id); await cutOnEveryPC(req.pcAccess.id, 'remove'); out.key = true }
     const device = String(req.body?.device || '')
     if (/^[0-9a-f-]{36}$/i.test(device)) {
       const { cloudOn, listDevices, setDeviceRevoked } = await import('../services/cloudSync.js')
@@ -198,6 +198,8 @@ router.post('/pc-access/devices/suspend', here, async (req, res) => {
   try {
     let device = String(req.body?.device || '')
     if (req.body?.pc) device = setSuspended(String(req.body.pc), on) || device
+    // Every PC of the agency refuses it too (its key on the agency's list, services/sync).
+    if (req.body?.pc) await cutOnEveryPC(String(req.body.pc), on ? 'suspend' : 'allow')
     if (/^[0-9a-f-]{36}$/i.test(device)) {
       const { cloudOn, setDeviceRevoked } = await import('../services/cloudSync.js')
       if (await cloudOn(req.app.locals.db)) await setDeviceRevoked(req.app.locals.db, device, on)
@@ -221,6 +223,14 @@ router.get('/pc-access/status', (req, res) => res.json(isLocal(req) ? { state: '
 router.get('/pc-access/pending', here, (req, res) => res.json(pending()))
 router.post('/pc-access/answer', here, (req, res) => { try { answer(String(req.body?.id || ''), !!req.body?.yes); res.json({ ok: true }) } catch (e) { res.status(404).json({ error: e.message }) } })
 router.get('/pc-access/list', here, (req, res) => res.json(list()))
-router.delete('/pc-access/:id', here, (req, res) => { remove(req.params.id); res.json({ ok: true }) })
+router.delete('/pc-access/:id', here, async (req, res) => { remove(req.params.id); await cutOnEveryPC(req.params.id, 'remove'); res.json({ ok: true }) })
+
+/** A Companion with its own copy: suspended, allowed or removed on every PC (sync_pcs). */
+async function cutOnEveryPC(accessId, what) {
+  try {
+    const { syncNode } = await import('../services/sync/index.js')
+    await syncNode()?.setCut(accessId, what)
+  } catch (e) { console.warn('[pc-access] the other PCs:', e.message) }
+}
 
 export default router

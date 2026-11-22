@@ -7,7 +7,11 @@
 ;  Main (server PC): app files are inside the .exe; the Windows Node runtime,
 ;  the server packages and Adal Browser come from the USB's deps\ folder, which
 ;  "1 - PREPARE (once, needs internet).bat" fills once.
-;  Companion (employee PC): fully self-contained, needs nothing else.
+;  Companion (employee PC): since companion-full the same full Adal Keep as
+;  Main (server, database, documents on its own disk, the same deps\ from the
+;  USB), marked "companion-install": it joins an agency with the main PC's
+;  number and gets its own copy, instead of starting an agency of its own.
+;  "Main" is only a role (docs/companion-full.md).
 ;
 ;  Built by build-installer.sh from the stage\ folder it assembles.
 ;  Silent use (IT): add /S.
@@ -55,7 +59,7 @@ VIAddVersionKey /LANG=1033 "LegalCopyright"  "${APP_PUBLISH} 2026"
 ; No questions: a progress bar with plain steps, then "installed".
 !define MUI_FINISHPAGE_TITLE "${PRODUCT} is installed"
 !ifdef COMPANION
-  !define MUI_FINISHPAGE_TEXT "The Companion is running. It starts by itself with Windows and finds the main Adal Keep PC on the network.$\r$\n$\r$\nYou can remove the USB."
+  !define MUI_FINISHPAGE_TEXT "Adal Keep Companion is installed. Open it and type the main PC's number: this PC gets its own copy of the agency's data and works on it by itself.$\r$\n$\r$\nYou can remove the USB."
 !else
   !define MUI_FINISHPAGE_TEXT "Adal Keep is running and starts by itself with Windows.$\r$\n$\r$\nOn this PC:  http://localhost:${SERVER_PORT}$\r$\n$\r$\nYou can remove the USB."
   !define MUI_FINISHPAGE_RUN
@@ -76,14 +80,12 @@ Function .onInit
     SetErrorLevel 4
     Abort
   ${EndIf}
-!ifndef COMPANION
-  ; The server needs the dependencies PREPARE downloaded onto the USB.
+  ; The server (Main and Companion alike) needs the dependencies PREPARE downloaded onto the USB.
   ${IfNot} ${FileExists} "$EXEDIR\deps\READY.txt"
     MessageBox MB_ICONSTOP|MB_OK "This USB is not prepared yet.$\r$\n$\r$\nOn a Windows PC with internet, double-click$\r$\n   1 - PREPARE (once, needs internet).bat$\r$\nat the top of the USB, wait for DONE, then run this installer again." /SD IDOK
     SetErrorLevel 2
     Abort
   ${EndIf}
-!endif
 FunctionEnd
 
 
@@ -147,53 +149,13 @@ Section "Install"
 
 !ifdef COMPANION
   ; ============================ EMPLOYEE PC ============================
-  DetailPrint "Copying the Companion..."
-  File /r "stage\companion\*"
-  ; A full Adal Keep in waiting (adal-companion standby.go): the server, never
-  ; started while the main PC answers; it stands in when the main PC is away.
-  DetailPrint "Copying Adal Keep's server (it stands in when the main PC is away)..."
-  SetOutPath "$INSTDIR\server"
-  File /r "stage\main\backend"
-  File /r "stage\main\frontend"
-  File "stage\main\finish-install.ps1"
-  CreateDirectory "$INSTDIR\server\backend\data"
-  nsExec::Exec '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\server\finish-install.ps1" -InstDir "$INSTDIR\server" -Deps "$EXEDIR\deps" -NoBrowser'
-  Pop $0
-  DetailPrint "Server in waiting: $0 (0 = ready; otherwise it comes from the main PC later)"
-  Delete "$INSTDIR\server\finish-install.ps1"
-  SetOutPath "$INSTDIR"
-  ; Adal Browser ready at the first start; missing here, it is fetched then
-  nsExec::Exec 'tar.exe -xf "$EXEDIR\deps\adal-browser.zip" -C "$INSTDIR"'
-  Pop $0
-  ; the Companion saves the discovered server into companion.conf here
-  nsExec::Exec 'icacls "$INSTDIR" /grant *S-1-5-32-545:(OI)(CI)M /C /Q'
-  Pop $0
-
-  DetailPrint "Allowing it through the Windows firewall..."
-  nsExec::Exec 'netsh advfirewall firewall delete rule name="Adal Keep Companion"'
-  Pop $0
-  nsExec::Exec 'netsh advfirewall firewall add rule name="Adal Keep Companion" dir=in action=allow program="$INSTDIR\adal-companion.exe" profile=any'
-  Pop $0
-  !insertmacro SharingRules
-
-  ; Employees use Adal Keep through this PC: AdalKeep.exe opens the main PC's
-  ; Adal Keep in an app-style window with the Adal Keep logo, and runs the
-  ; Companion (sends new scans) in the background. Never opens with Windows.
-
-  CreateDirectory "$SMPROGRAMS\${APP_NAME}"
-  Delete "$INSTDIR\start-companion.bat"
-  Delete "$SMPROGRAMS\${PRODUCT}\${PRODUCT}.lnk"
-  Delete "$DESKTOP\${PRODUCT}.lnk"
-  CreateShortcut "$DESKTOP\${APP_NAME}.lnk" "$INSTDIR\AdalKeep.exe" "" "$INSTDIR\AdalKeep.exe" 0
-  CreateShortcut "$SMPROGRAMS\${APP_NAME}\${APP_NAME}.lnk" "$INSTDIR\AdalKeep.exe" "" "$INSTDIR\AdalKeep.exe" 0
-  CreateShortcut "$SMPROGRAMS\${APP_NAME}\Uninstall ${PRODUCT}.lnk" "$INSTDIR\uninstall.exe"
-  ; The taskbar shows the Adal Keep window as Adal Keep (its logo).
-  nsExec::Exec '"$INSTDIR\AdalKeep.exe" --set-shortcut-ids "$DESKTOP\${APP_NAME}.lnk" "$SMPROGRAMS\${APP_NAME}\${APP_NAME}.lnk"'
-  Pop $0
-  ; Never with Windows (2026-11-14): Adal Keep opens only from its icon; an older install's entry goes.
-  DeleteRegValue HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "${APP_KEY}"
+  ; The same full Adal Keep as the main PC (below), in its own folder. An
+  ; older Companion here (the Companion program only) keeps its files; the
+  ; full program goes beside them.
+  DetailPrint "Copying Adal Keep (Companion with its own copy)..."
 !else
   ; ============================= SERVER PC =============================
+!endif
   ; A clean start: the old program, browser caches and left-over files go;
   ; the database (company info, profiles ...), documents and sign-ins stay.
   ${If} ${FileExists} "$INSTDIR\backend\*.*"
@@ -259,6 +221,20 @@ Section "Install"
   Pop $0
   Delete "$INSTDIR\run-server.bat"
   Delete "$INSTDIR\start-companion.bat"
+!ifdef COMPANION
+  ; It joins an agency (the main PC's number) instead of starting one.
+  FileOpen $1 "$INSTDIR\companion-install" w
+  FileWrite $1 "This PC is an Adal Keep Companion: it joins an agency with the main PC's number.$\r$\n"
+  FileClose $1
+  ; Never with Windows (2026-11-14): Adal Keep opens only from its icon; an older install's entry goes.
+  DeleteRegValue HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "${APP_KEY}"
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "AdalKeep"
+  ; The older Companion's own firewall rule (the Companion program) stays useful.
+  nsExec::Exec 'netsh advfirewall firewall delete rule name="Adal Keep Companion"'
+  Pop $0
+  nsExec::Exec 'netsh advfirewall firewall add rule name="Adal Keep Companion" dir=in action=allow program="$INSTDIR\adal-companion.exe" profile=any'
+  Pop $0
+!else
   ; Main starts its server at sign-in, with no window (the launcher reads "open when the PC starts" for the window).
   DeleteRegValue HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "${APP_KEY}"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "AdalKeep" '"$INSTDIR\AdalKeep.exe" --background'
@@ -322,13 +298,14 @@ Section "Uninstall"
   RMDir /r "$SMPROGRAMS\${PRODUCT}"
 
 !ifdef COMPANION
-  ; the employee PC's "Adal Keep" shortcuts (they open the main PC's Adal Keep)
+  ; the employee PC's "Adal Keep" shortcuts
   Delete "$DESKTOP\${APP_NAME}.lnk"
   RMDir /r "$SMPROGRAMS\${APP_NAME}"
   nsExec::Exec 'netsh advfirewall firewall delete rule name="Adal Keep Companion"'
   Pop $0
-  RMDir /r "$INSTDIR"
-!else
+  ; Its own copy of the agency's data stays, as on Main (changes made here
+  ; while the other PCs were away may not be on them yet).
+!endif
   nsExec::Exec 'netsh advfirewall firewall delete rule name="Adal Keep"'
   Pop $0
   nsExec::Exec 'netsh advfirewall firewall delete rule name="Adal Keep Discovery"'
@@ -358,7 +335,6 @@ Section "Uninstall"
   Delete "$INSTDIR\backend\.adal-version.json"
   Delete "$INSTDIR\backend\*.traineddata"
   Delete "$INSTDIR\backend\.env"
-!endif
 
   DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_KEY}"
   DeleteRegKey HKLM "Software\${APP_KEY}"

@@ -13,7 +13,7 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import api from '../services/api'
-import { markDone, STEP_DONE_LABEL } from '../lib/markDone'
+import { markDone, markUndone, STEP_DONE_LABEL, STEP_UNDONE } from '../lib/markDone'
 
 export const SHARED = [['cv', 'CV'], ['musaned', 'Musaned'], ['selected', 'Selected'], ['wafid', 'Wafid']]
 export const BRANCHES = [
@@ -261,6 +261,13 @@ function StepCard({ s, profileId, onDone }) {
             </span>
           ))}
         </div>
+      )}
+      {profileId && s.state === 'done' && STEP_UNDONE.includes(s.key) && (
+        <button type="button" title="Not done after all: she goes back to this step; later steps open again, nothing is deleted"
+          onClick={async () => { await markUndone({ profileId, step: s.key, label: s.title }); onDone?.() }}
+          className="mt-1.5 rounded-lg border border-slate-300 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800">
+          ↩ Uncheck
+        </button>
       )}
       {can && (
         <button type="button" onClick={async () => { await markDone({ profileId, step: s.key, label: STEP_DONE_LABEL[s.key] }); onDone?.() }}

@@ -16,7 +16,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'markdone-'))
 process.env.ACCOUNT_VAULT_KEY = path.join(tmp, 'k')
 process.env.ADAL_KEYS_OUTSIDE = path.join(tmp, 'outside')
 
-const { markStepDone, undoMarkDone } = await import('../src/services/markDone.js')
+const { markStepDone, undoMarkDone, markStepUndone } = await import('../src/services/markDone.js')
 const { journeyOf } = await import('../src/routes/automations.js')
 const { phaseOf, AFTER } = await import('../../adal-keep-frontend/src/lib/phase.js')
 
@@ -88,4 +88,31 @@ test('mark as done moves her on, and Undo puts her back', async () => {
   await db('automation_queue').insert({ profile_id: id, workflow_id: 'insurance_certificate', status: 'running' })
   await assert.rejects(markStepDone(db, { profileId: id, step: 'insurance' }), /working in its tab/)
   await db.destroy()
+})
+
+test('uncheck a done step: she goes back to it, later steps open, data kept, Undo restores', async () => {
+  const db = await setup()
+  const [id] = await db('profiles').insert({ full_name: 'Asuab', musaned_stage: 'EPRO APPROVAL', chosen_at: '2026-11-01', status: 'medical_fit', notes: 'keep me' })
+  await db('automation_queue').insert({ profile_id: id, workflow_id: 'musaned_add_candidate', status: 'done' })
+  assert.equal(await phase(db, id), 'lmis')
+
+  // Uncheck Wafid: back to Wafid; EPRO and later open again; chosen_at and notes stay.
+  const r = await markStepUndone(db, { profileId: id, step: 'wafid', employee: { name: 'Selam' } })
+  const p = await db('profiles').where('id', id).first()
+  assert.equal(p.status, null)
+  assert.equal(p.chosen_at, '2026-11-01')
+  assert.match(p.notes, /keep me/)
+  assert.match(p.notes, /wafid: unchecked by Selam/)
+  assert.equal(await phase(db, id), 'selected')
+
+  await undoMarkDone(db, r.undo)
+  assert.equal((await db('profiles').where('id', id).first()).status, 'medical_fit')
+  assert.equal(await phase(db, id), 'lmis')
+
+  // Uncheck Selected: back to Musaned/WhatsApp; the CV step cannot be unchecked.
+  await markStepUndone(db, { profileId: id, step: 'selected' })
+  const q = await db('profiles').where('id', id).first()
+  assert.equal(q.chosen_at, null); assert.equal(q.musaned_stage, null); assert.equal(q.status, null)
+  assert.equal(await phase(db, id), 'waiting')
+  await assert.rejects(markStepUndone(db, { profileId: id, step: 'cv' }), /Generated CVs/)
 })

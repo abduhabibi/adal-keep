@@ -34,6 +34,35 @@ const reload = () => {
   window.dispatchEvent(new Event('adal-profile-changed'))
 }
 
+/** Steps a person may uncheck (not the CV: a document). */
+export const STEP_UNDONE = ['musaned', 'selected', 'wafid', 'epro', 'insurance', 'fmol', 'embassy', 'visa', 'arrived', 'tasheer', 'police']
+
+/** A done step goes back to open (and every later one): the 5 s Undo puts it back as it was. */
+export async function markUndone({ profileId, step, label = '' } = {}) {
+  try {
+    const r = await api.post(`/profiles/${profileId}/steps/${step}/undone`, {})
+    reload()
+    const undo = r.data?.undo
+    toast((tt) => (
+      <span className="flex items-center gap-3 text-sm">
+        <span>↩ {label ? `${label}: ` : ''}{r.data?.message || 'Unchecked'}</span>
+        {undo && (
+          <button type="button" className="shrink-0 rounded-lg border border-slate-300 px-2 py-0.5 text-xs font-semibold hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-800"
+            onClick={async () => {
+              toast.dismiss(tt.id)
+              try { const u = await api.post('/automations/undo-done', { undo }); reload(); toast.success(u.data?.message || 'Undone') }
+              catch (e) { toast.error(e.response?.data?.error || 'Could not undo') }
+            }}>Undo</button>
+        )}
+      </span>
+    ), { duration: 5000, id: `undone-${step}-${profileId}` })
+    return r.data
+  } catch (e) {
+    toast.error(`${label ? `${label}: ` : ''}${e.response?.data?.error || e.message}`, { duration: 7000 })
+    return null
+  }
+}
+
 export async function markDone({ profileId, workflowId, runId, step, label = '' } = {}) {
   const url = runId ? `/automations/${runId}/complete`
     : step ? `/profiles/${profileId}/steps/${step}/done`

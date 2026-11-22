@@ -23,7 +23,7 @@ export const STEP_WORKFLOW = {
 // Steps read from Musaned's contract stage: the stage that makes them done.
 const STEP_STAGE = { epro: 'EPRO APPROVED', visa: 'VISA ISSUED', arrived: 'ARRIVED KSA' }
 const GROUP = new Set(['insurance_certificate', 'tasheer_schedule'])
-const FIELDS = ['status', 'visa_stage', 'visa_applied_at', 'musaned_stage', 'chosen_at']
+const FIELDS = ['status', 'visa_stage', 'visa_applied_at', 'musaned_stage', 'chosen_at', 'tasheer_ref', 'tasheer_date']
 
 const undos = new Map()         // token → { at, snap }
 const KEEP_MS = 10 * 60000
@@ -117,6 +117,62 @@ export async function markStepDone(db, { profileId = null, workflowId = null, ru
   undos.set(undo, { at: Date.now(), snap })
   for (const [k, v] of undos) if (Date.now() - v.at > KEEP_MS) undos.delete(k)
   return { ok: true, undo, profile_id: profileId, workflow_id: workflowId, run_id: run?.id || null, message: `Marked done.${next}` }
+}
+
+
+// ── Unchecking: a done step goes back to open, and so does everything after it ──
+// The line Musaned-driven steps follow (musaned_stage); a step reopened caps it here (-1 = none).
+const STAGE_NAMES = ['EPRO APPROVAL', 'EPRO APPROVED', 'FMOL APPROVAL', 'FMOL APPROVED', 'SENT TO THE SAUDI EMBASSY', 'VISA ISSUED', 'ARRIVED KSA']
+const LINE = ['musaned', 'selected', 'wafid', 'epro', 'insurance', 'fmol', 'embassy', 'visa', 'arrived']
+const CAP = { musaned: -1, selected: -1, wafid: 0, epro: 0, insurance: 1, fmol: 2, embassy: 3, visa: 4, arrived: 5 }
+// The runs that made each step done (cancelled when it is unchecked; nothing is deleted).
+const STEP_RUNS = { musaned: ['musaned_add_candidate'], selected: ['musaned_check_chosen'], wafid: ['wafid_book', 'wafid_check'], epro: ['musaned_epro_approve'],
+  insurance: ['insurance_certificate'], fmol: ['lmis_contract'], embassy: ['mofa_visa', 'mofa_pay'], tasheer: ['tasheer_schedule'], police: ['police_certificate'] }
+export const UNDONE_STEPS = [...LINE, 'tasheer', 'police']
+
+/**
+ * Uncheck a done step: she goes back to that stage and every later step is open again.
+ * Only the fields her stage is read from change (the old values go in her notes and the
+ * undo token); documents, photos, numbers and every run's log stay. By: the employee's name.
+ */
+export async function markStepUndone(db, { profileId, step, employee = null } = {}) {
+  if (step === 'cv') throw Object.assign(new Error('Her CV is a document: delete it from her Generated CVs if it is wrong'), { status: 400 })
+  if (!UNDONE_STEPS.includes(step)) throw Object.assign(new Error(`"${step}" cannot be unchecked here`), { status: 400 })
+  profileId = Number(profileId)
+  const p = await db('profiles').where('id', profileId).first()
+  if (!p) throw Object.assign(new Error('Profile not found'), { status: 404 })
+  const now = new Date().toISOString()
+  const snap = { profiles: [], runs: [], maxRun: Number((await db('automation_queue').max('id as m').first())?.m || 0), profileIds: [profileId] }
+  const steps = step === 'tasheer' || step === 'police' ? [step] : LINE.slice(LINE.indexOf(step))
+  const set = {}
+  let cap = 99
+  for (const k of steps) {
+    cap = Math.min(cap, CAP[k] ?? 99)
+    if (k === 'selected' || k === 'musaned') set.chosen_at = null
+    if (k === 'wafid' && ['medical_fit', 'medical_applied', 'medical_rejected'].includes(p.status)) set.status = null
+    if (k === 'embassy' || k === 'visa' || k === 'arrived') { if (p.visa_stage) set.visa_stage = null; if (p.visa_applied_at) set.visa_applied_at = null }
+    if (k === 'tasheer') { if (p.tasheer_ref) set.tasheer_ref = null; if (p.tasheer_date) set.tasheer_date = null }
+  }
+  if (cap < 99 && musanedStep(p.musaned_stage) > cap) set.musaned_stage = cap < 0 ? null : STAGE_NAMES[cap]
+  if (cap < 0 && p.musaned_stage && musanedStep(p.musaned_stage) < 0 && !/CANCEL|REJECT/i.test(p.musaned_stage)) set.musaned_stage = null
+  for (const k of steps) {
+    const ids = STEP_RUNS[k] || []
+    if (!ids.length) continue
+    for (const r of await db('automation_queue').where({ profile_id: profileId, status: 'done' }).whereIn('workflow_id', ids).select('id', 'status', 'pause_reason', 'finished_at')) {
+      snap.runs.push({ id: r.id, before: { status: r.status, pause_reason: r.pause_reason, finished_at: r.finished_at } })
+      await db('automation_queue').where('id', r.id).update({ status: 'cancelled', pause_reason: 'Tick taken back', updated_at: now })
+    }
+  }
+  const before = Object.fromEntries(FIELDS.map(k => [k, p[k] ?? null]))
+  snap.profiles.push({ id: profileId, before })
+  const had = Object.keys(set).filter(k => before[k] != null && before[k] !== '').map(k => `${k}=${before[k]}`).join(', ')
+  if (Object.keys(set).length) await db('profiles').where('id', profileId).update({ ...set, updated_at: now })
+  const who = employee?.name || 'someone'
+  await noteLine(db, profileId, `${step}: unchecked by ${who} — back at this stage; later steps open again${had ? ` (was ${had})` : ''}`)
+  const undo = randomBytes(9).toString('base64url')
+  undos.set(undo, { at: Date.now(), snap })
+  for (const [k, v] of undos) if (Date.now() - v.at > KEEP_MS) undos.delete(k)
+  return { ok: true, undo, profile_id: profileId, step, message: 'Unchecked — she is back at this step. Her documents and data are kept.' }
 }
 
 /** Takes a "mark as done" back (its token, within 10 minutes). */

@@ -1403,6 +1403,17 @@ router.post('/profiles/:id/steps/:step/done', async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }) }
 })
 
+// A done step unchecked: she goes back to it, later steps open again (services/markDone.js markStepUndone; same 5 s Undo).
+router.post('/profiles/:id/steps/:step/undone', async (req, res) => {
+  try {
+    const db = req.app.locals.db
+    const { markStepUndone } = await import('../services/markDone.js')
+    let employee = null
+    try { employee = await (await import('../services/activeEmployee.js')).getActiveEmployee(db) } catch {}
+    res.json(await markStepUndone(db, { profileId: Number(req.params.id), step: req.params.step, employee }))
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }) }
+})
+
 // The Undo of a "mark as done" (its token).
 router.post('/automations/undo-done', async (req, res) => {
   try {

@@ -19,7 +19,7 @@ import { profilesList } from '../lib/profilesCache'
 import { prefetchProfile, prefetchRecent } from '../lib/profileCache'
 import { cachedGet } from '../lib/deviceCache'
 import { onPhone } from '../lib/phoneMode'
-import { FIRST, AFTER, READY, afterInOrder, phaseOf as phaseFrom, inWaitingPhase, stepMarks } from '../lib/phase'
+import { FIRST, AFTER, READY, afterInOrder, phaseOf as phaseFrom, inWaitingPhase, stepMarks, needsCvFirst } from '../lib/phase'
 import { shows } from '../lib/stageActions'
 import { useDestination, goesTo } from '../lib/destination'
 
@@ -357,8 +357,12 @@ export default function ProfilesPage() {
               </div>
 
               <PrioritizeButton profileId={p.id} className="mt-2" />
-              <p className="mt-1.5 truncate text-xs font-semibold text-teal-700 dark:text-teal-300">{NOW_TEXT[phaseOfP(p)]}{p.status === 'medical_rejected' ? ' · UNFIT' : ''}</p>
+              <p className="mt-1.5 truncate text-xs font-semibold text-teal-700 dark:text-teal-300">{needsCvFirst(journey.steps[p.id], p) ? 'Make her CV first — nothing to send yet' : NOW_TEXT[phaseOfP(p)]}{p.status === 'medical_rejected' ? ' · UNFIT' : ''}</p>
               <StepMarks {...stepMarks(journey.steps[p.id], p, after)} />
+              {needsCvFirst(journey.steps[p.id], p) && (
+                <button type="button" onClick={(e) => { e.stopPropagation(); navigate(`/cvs/new?profile=${p.id}&auto=1`) }}
+                  className="mt-2 rounded-lg bg-purple-600 px-3 py-1 text-xs font-semibold text-white hover:bg-purple-700">📄 Make CV</button>
+              )}
               {lacking[p.id]?.length > 0 && (
                 <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-2 py-1.5 text-[11px] text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
                   <b>Missing:</b> {lacking[p.id].join(' · ')}

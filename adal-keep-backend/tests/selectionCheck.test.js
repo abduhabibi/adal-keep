@@ -58,8 +58,8 @@ test('the tabs: Waiting after Musaned, UNFIT stays on Wafid, LMIS after FIT', ()
 
 test('skipped up to the EPRO; after it, only "done" marks', () => {
   const after = [['Tasheer', 'tasheer', 'Tasheer'], ['Insurance', 'insurance', 'Insurance']]
-  assert.deepEqual(phase.stepMarks({ musaned: 'waiting', selected: 'done' }, {}, after), { skipped: ['CV'], done: [] })
-  assert.deepEqual(phase.stepMarks({ cv: 'done', epro: 'done', insurance: 'done' }, {}, after), { skipped: ['Musaned', 'Selected', 'Wafid'], done: ['Insurance'] })
+  assert.deepEqual(phase.stepMarks({ musaned: 'waiting', selected: 'done' }, {}, after), { skipped: [], done: [] })
+  assert.deepEqual(phase.stepMarks({ cv: 'done', epro: 'done', insurance: 'done' }, {}, after), { skipped: ['Selected', 'Wafid'], done: ['Insurance'] })
   assert.deepEqual(phase.stepMarks({ cv: 'done', musaned: 'done', selected: 'done', epro: 'done' }, { status: 'medical_fit' }, after), { skipped: [], done: [] })
 })
 

@@ -54,7 +54,8 @@ export function stepMarks(steps = {}, p = {}, after = []) {
   const ok = ticksToEpro(steps, p)
   const reached = furthest(ok)
   return {
-    skipped: STEPS_TO_EPRO.filter((_, i) => i < reached && !ok[i]).map(([, label]) => label),
+    // Once she is Selected, what came before it (CV, Musaned) no longer matters: no badge.
+    skipped: STEPS_TO_EPRO.filter((_, i) => i < reached && !ok[i] && (reached < 2 || i >= 2)).map(([, label]) => label),
     done: after.filter(([, k]) => steps[k] === 'done').map(([, , label]) => label),
   }
 }
@@ -70,3 +71,8 @@ export const afterInOrder = (order = []) => [...AFTER].sort((a, b) => {
   const ia = order.indexOf(a[0]), ib = order.indexOf(b[0])
   return (ia < 0 ? 99 + AFTER.indexOf(a) : ia) - (ib < 0 ? 99 + AFTER.indexOf(b) : ib)
 })
+
+/** On the WhatsApp stage with no CV made: there is nothing to send, so the card says "Make CV". */
+export function needsCvFirst(steps = {}, p = {}) {
+  return inWaitingPhase(steps, p) && steps.cv !== 'done'
+}

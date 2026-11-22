@@ -3,7 +3,8 @@
 #  double-clicking "Adal Connect"). Same steps as usb\deps\adal-connect.ps1:
 #    - the OpenSSH server (from OpenSSH-Win64.zip beside this script), Automatic
 #    - Adal's support key in administrators_authorized_keys (right ACLs)
-#    - the firewall rules: TCP 22, TCP 4000, UDP 45454 and the programs, all profiles
+#    - Adal's key (adal-remote-support) and the agency's key, side by side
+#    - the firewall rules: TCP 22 (office network only), TCP 4000, UDP 45454 and the programs, all profiles
 #
 #  Lives in C:\ProgramData\AdalSupport (administrators write, everyone reads):
 #  it runs as SYSTEM from a scheduled task, so a normal user must not be able
@@ -142,7 +143,7 @@ try {
     }
     if (-not (Get-Service $svcName -ErrorAction SilentlyContinue)) { Log "ERROR $Role no OpenSSH server on this PC; nothing more to do"; exit 0 }
 
-    # 2. the key (the agency's own when its file is here, else the old shared one)
+    # 2. the keys: Adal's own (adal-remote-support) always, the agency's own beside it when its file is here
     $pc = $null
     foreach ($j in @((Join-Path $InstDir 'backend\data\main-pc.json'), (Join-Path $InstDir 'main-pc.json'), (Join-Path $InstDir 'data\main-pc.json'))) {
         try { if (Test-Path $j) { $n = [string]((Get-Content $j -Raw | ConvertFrom-Json).pc_number); if ($n -match '^\d{5}$') { $pc = $n; break } } } catch {}
@@ -161,16 +162,19 @@ try {
             if ($k) { $agencyKey = (($k.Trim() -split '\s+')[0..1] -join ' ') + " adal-support-$pc" }
         }
     }
-    $want = if ($agencyKey) { $agencyKey } else { $SHARED }
+    # Adal's own support key (adal-remote-support, the support PC on the office
+    # Wi-Fi) is always there, and the agency's key beside it when its file is here
+    # (asked on 2026-11-22). Lines are only added: other keys are never removed.
+    $want = @($SHARED); if ($agencyKey) { $want += $agencyKey }
     $f = Join-Path $sshDir 'administrators_authorized_keys'
     $have = @(if (Test-Path $f) { Get-Content $f -ErrorAction SilentlyContinue })
-    $ok = ($have -contains $want) -and (-not $agencyKey -or -not ($have | Where-Object { $_ -match 'adal-remote-support' }))
-    if (-not $ok) {
+    $missing = @($want | Where-Object { $have -notcontains $_ })
+    if ($missing) {
         try {
             New-Item -ItemType Directory -Path $sshDir -Force | Out-Null
-            if ($agencyKey) { $keep = @($have | Where-Object { $_ -and $_ -notmatch $keyPattern }); Set-Content -Path $f -Value (@($keep) + $agencyKey) -Encoding ascii }
-            else { Add-Content -Path $f -Value $want -Encoding ascii }
-            $fixed += "support key $(if ($agencyKey) { "for PC $pc" } else { '(shared)' }) put in place"
+            if ($have.Count -and $have[-1] -ne '' -and (Get-Content $f -Raw) -notmatch "`n$") { Add-Content -Path $f -Value '' -Encoding ascii }
+            Add-Content -Path $f -Value $missing -Encoding ascii
+            $fixed += "support key(s) put in place: $(($missing | ForEach-Object { ($_ -split '\s+')[-1] }) -join ', ')"
         } catch { Log "ERROR $Role key: $($_.Exception.Message)" }
     }
     try {
@@ -215,7 +219,20 @@ try {
             $script:fixed += "firewall rule '$name' added"
         }
     }
-    PortRule 'Adal Remote Support (SSH)' TCP 22
+    # SSH only from the office network itself (LocalSubnet), never from anywhere else.
+    $sshRule = 'Adal Remote Support (SSH)'
+    if (-not (RuleThere $sshRule)) {
+        netsh advfirewall firewall add rule name="$sshRule" dir=in action=allow protocol=TCP localport=22 remoteip=localsubnet profile=any | Out-Null
+        $fixed += "firewall rule '$sshRule' added (office network only)"
+    } elseif (-not ((netsh advfirewall firewall show rule name="$sshRule" | Out-String) -match 'LocalSubnet')) {
+        netsh advfirewall firewall set rule name="$sshRule" new remoteip=localsubnet | Out-Null
+        $fixed += "firewall rule '$sshRule' limited to the office network"
+    }
+    # OpenSSH's own rule (Windows' OpenSSH-Server-In-TCP) would let SSH in from anywhere.
+    Get-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -ErrorAction SilentlyContinue | ForEach-Object {
+        $ra = @(($_ | Get-NetFirewallAddressFilter).RemoteAddress)
+        if (-not ($ra.Count -eq 1 -and $ra[0] -eq 'LocalSubnet')) { $_ | Set-NetFirewallRule -RemoteAddress LocalSubnet -ErrorAction SilentlyContinue; $fixed += "OpenSSH's own firewall rule limited to the office network" }
+    }
     PortRule 'Adal Keep' TCP 4000
     PortRule 'Adal Keep Discovery' UDP 45454
     $progs = @(@("$InstDir\runtime\node.exe", 'Adal Keep Server'), @("$InstDir\adal-companion.exe", 'Adal Keep Companion'))
@@ -231,7 +248,7 @@ try {
         }
     }
 
-    if ($Mode -eq 'Install') { Log "CONNECT $Role PC=$(if ($pc) { $pc } else { '?' }) key=$(if ($agencyKey) { "adal-support-$pc" } else { 'adal-remote-support (shared)' }) (installer)" }
+    if ($Mode -eq 'Install') { Log "CONNECT $Role PC=$(if ($pc) { $pc } else { '?' }) key=adal-remote-support$(if ($agencyKey) { " + adal-support-$pc" }) (installer)" }
     if ($fixed) { Log "REPAIR $Role : $($fixed -join '; ')" }
 } finally { try { $mutex.ReleaseMutex() } catch {} }
 exit 0

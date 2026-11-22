@@ -50,11 +50,11 @@ try {
 } catch { Say "      sshd problem: $($_.Exception.Message)" }
 
 # 2. Adal's key for THIS agency (administrators_authorized_keys: Administrators + SYSTEM only).
-# Each agency has its own key, named by its Main PC's 5-digit number; the USB
-# carries the public halves in deps\support-keys\<number>.pub. Only that one is
-# installed, and every other Adal key (the old shared adal-remote-support one,
-# other agencies') is removed. Without a file for the number, the old shared key
-# stays as it was, so nothing breaks until the agency's key is on the USB.
+# Adal's own support key (adal-remote-support: the support PC on the office
+# Wi-Fi) always goes in. Each agency also has its own key, named by its Main PC's
+# 5-digit number; the USB carries the public halves in
+# deps\support-keys\<number>.pub, and that one goes in beside it (2026-11-22).
+# Keys are only added, never removed here.
 Say "[2/5] Adal support key..."
 $sshDir = "$env:ProgramData\ssh"
 $logDir = Join-Path $sshDir 'logs'
@@ -100,15 +100,14 @@ try {
   New-Item -ItemType Directory -Path $sshDir -Force | Out-Null
   $f = Join-Path $sshDir 'administrators_authorized_keys'
   $have = @(if (Test-Path $f) { Get-Content $f -ErrorAction SilentlyContinue })
-  if ($agencyKey) {
-    $keep = @($have | Where-Object { $_ -and $_ -notmatch 'adal-remote-support|adal-support-\d{5}' })
-    Set-Content -Path $f -Value (@($keep) + $agencyKey) -Encoding ascii
-    Say "      key for PC $PcNumber in place (old shared key removed)"
-  } else {
-    if (-not ($have -contains $KEY)) { Add-Content -Path $f -Value $KEY -Encoding ascii }
-    Say "      WARNING: no key for PC $PcNumber on this USB (deps\support-keys\$PcNumber.pub)"
-    Say "      the old shared key stays; Adal: run scripts/support-key.sh $PcNumber, then Connect again"
+  $want = @($KEY); if ($agencyKey) { $want += $agencyKey }
+  $missing = @($want | Where-Object { $have -notcontains $_ })
+  if ($missing) {
+    if ($have.Count -and (Get-Content $f -Raw) -notmatch "`n$") { Add-Content -Path $f -Value '' -Encoding ascii }
+    Add-Content -Path $f -Value $missing -Encoding ascii
   }
+  Say "      Adal's support key in place$(if ($agencyKey) { ", and the key for PC $PcNumber" })"
+  if (-not $agencyKey) { Say "      (no key for PC $PcNumber on this USB: deps\support-keys\$PcNumber.pub - Adal's key alone)" }
   icacls.exe $f /inheritance:r /grant '*S-1-5-32-544:F' /grant '*S-1-5-18:F' | Out-Null
 } catch { Say "      key problem: $($_.Exception.Message)" }
 
@@ -126,18 +125,20 @@ try {
     Set-Content -Path $cfg -Value (@('# Adal: every login is logged', 'SyslogFacility LOCAL0', 'LogLevel VERBOSE') + $lines) -Encoding ascii
   }
   New-Item -ItemType Directory -Path $logDir -Force | Out-Null
-  Add-Content -Path (Join-Path $logDir 'adal-support.log') -Encoding ascii -Value "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') CONNECT $Role PC=$PcNumber key=$(if ($agencyKey) { "adal-support-$PcNumber" } else { 'adal-remote-support (old shared)' }) by $User"
+  Add-Content -Path (Join-Path $logDir 'adal-support.log') -Encoding ascii -Value "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') CONNECT $Role PC=$PcNumber key=adal-remote-support$(if ($agencyKey) { " + adal-support-$PcNumber" }) by $User"
   Restart-Service sshd -ErrorAction Stop
   Say "      every SSH login is logged in $logDir\sshd.log"
 } catch { Say "      log setup problem: $($_.Exception.Message)" }
 
 # 3. Firewall: every network type (Public too - the usual blocker)
 Say "[3/5] Firewall (all network types)..."
-function Rule($name, $proto, $port) {
+function Rule($name, $proto, $port, $from = 'any') {
   netsh advfirewall firewall delete rule name="$name" | Out-Null
-  netsh advfirewall firewall add rule name="$name" dir=in action=allow protocol=$proto localport=$port profile=any | Out-Null
+  netsh advfirewall firewall add rule name="$name" dir=in action=allow protocol=$proto localport=$port remoteip=$from profile=any | Out-Null
 }
-Rule 'Adal Remote Support (SSH)' TCP 22
+# SSH only from the office network itself (and OpenSSH's own rule too).
+Rule 'Adal Remote Support (SSH)' TCP 22 'localsubnet'
+Get-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -ErrorAction SilentlyContinue | Set-NetFirewallRule -RemoteAddress LocalSubnet -ErrorAction SilentlyContinue
 Rule 'Adal Keep' TCP $MAIN_PORT
 Rule 'Adal Keep Discovery' UDP $DISCO_PORT
 function InstDir($k, $d) { try { (Get-ItemProperty "HKLM:\Software\$k" -ErrorAction Stop).InstallDir } catch { $d } }
@@ -218,7 +219,7 @@ $summary = @"
   PC name:       $env:COMPUTERNAME
   Windows user:  $User
   LAN IPs:       $lan
-  Agency PC no.: $PcNumber $(if ($agencyKey) { '(own key)' } else { '(OLD shared key - no key file on USB)' })
+  Agency PC no.: $PcNumber $(if ($agencyKey) { "(Adal's key + the agency's own)" } else { "(Adal's key; no agency key file on USB)" })
   Login log:     $logDir\sshd.log
 
   Tell Claude: $Role ready

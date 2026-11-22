@@ -31,6 +31,7 @@ import { createRunQueue } from './runQueue.js'
 import { reportRuns } from './busy.js'
 import { isCancelled, clearCancelled, markCancelled } from './cancellation.js'
 import { assertPoliceReady } from './verification.js'
+import { begin as beginHistory, finishRun as finishHistory, prune as pruneHistory, closeStale as closeStaleHistory } from './runHistory.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SAFE_STORAGE_DIR = path.join(__dirname, '../../data/SafeStorage')
@@ -527,6 +528,7 @@ async function appendLog(db, id, msg, level = 'info') {
 }
 
 async function runJob(db, job) {
+  let page = null, historyId = null
   try {
     // A run the scanner queued (nobody pressed a button now):
     // never opens Brave itself. While Brave is closed it waits, and it goes
@@ -570,20 +572,34 @@ async function runJob(db, job) {
         }
       } catch (e) { console.warn(`[worker] run #${job.id}: where LMIS is open could not be checked (${e.message})`) }
     }
+    // The robot history (services/runHistory.js): who started it, where, and (in finally) how it ended.
+    historyId = await beginHistory(db, {
+      run_id: job.id, workflow_id: job.workflow_id, profile_id: job.profile_id,
+      profile_name: (await db('profiles').where('id', job.profile_id).first('full_name').catch(() => null))?.full_name,
+      employee: (await getActiveEmployee(db).catch(() => null))?.name,
+    })
     const browser = await browserForJob(db, job)
+    if (historyId) {
+      const dev = (await import('./remoteBrowsers.js')).deviceOf(browser)
+      if (dev?.name) await db('run_history').where('id', historyId).update({ pc: String(dev.name).slice(0, 80) }).catch(() => {})
+    }
     // After a server restart the run finds the tab it worked in again.
     await findRunTab(browser, job.id, job.workflow_id, { bySite: false }).catch(() => null)
     // Otherwise a free tab already on the site (signed in), else a new one.
     // A portal account other than the main one works in its own browser space (its own sign-in).
     const space = await spaceForRun(db, browser, job).catch(e => { console.warn(`[worker] run #${job.id}: no space of its own (${e.message})`); return null })
-    const page = await openRunTab(browser, job.id, { workflowId: job.workflow_id, busyRuns: await activeRunIds(db), keepRuns: await keepingRunIds(db), space, quiet: helpedRun(job) })
+    page = await openRunTab(browser, job.id, { workflowId: job.workflow_id, busyRuns: await activeRunIds(db), keepRuns: await keepingRunIds(db), space, quiet: helpedRun(job) })
     // Which account the tab is: its title starts with the account's name.
     try {
       const { labelTab, accountLabel } = await import('./robotCheck.js')
       let acct = job.account_id
       if (!acct) { try { acct = JSON.parse(job.context || '{}').account_id } catch {} }
       const peer = peerOf(job.workflow_id)
-      if (peer) await labelTab(page, await accountLabel(db, peer, acct))
+      if (peer) {
+        const label = await accountLabel(db, peer, acct)
+        await labelTab(page, label)
+        if (historyId && label) await db('run_history').where('id', historyId).update({ account: label.slice(0, 80) }).catch(() => {})
+      }
     } catch {}
     await executeRun(db, page, job)
   } catch (e) {
@@ -591,6 +607,8 @@ async function runJob(db, job) {
     console.error(`[worker] run #${job.id} could not start: ${e.message}`)
     try { await recordFailure(db, job, e.message) } catch {}
   } finally {
+    // The row's end, with the picture of the tab while it is still open.
+    await finishHistory(db, job.id, page)
     const row = await db('automation_queue').where('id', job.id).first().catch(() => null)
     try {
       // Done, failed or cancelled: the tab stays open for the person.
@@ -928,6 +946,8 @@ export function startWorker(db) {
   console.log(
     `[worker] polling every ${POLL_MS}ms — one run at a time, in its own tab`
   )
+  closeStaleHistory(db).then(() => pruneHistory(db))
+  setInterval(() => pruneHistory(db), 6 * 3600_000).unref?.()
   parkInterruptedRuns(db).finally(() => drainQueue(db))
   // The poll only matters for retries whose backoff has run out and for runs
   // queued by the scanner: a click or a finished run starts the next one at once.

@@ -9,6 +9,7 @@ const ProfilesPage = lazy(() => fresh(() => import('./pages/ProfilesPage')))
 const ProfileDetailPage = lazy(() => fresh(() => import('./pages/ProfileDetailPage')))
 const ProfileFormPage = lazy(() => fresh(() => import('./pages/ProfileFormPage')))
 const ChatPage = lazy(() => fresh(() => import('./pages/ChatPage')))
+const RunHistoryPage = lazy(() => fresh(() => import('./pages/RunHistoryPage')))
 const TrashPage = lazy(() => fresh(() => import('./pages/TrashPage')))
 const EmployeesPage = lazy(() => fresh(() => import('./pages/EmployeesPage')))
 const BrokersPage = lazy(() => fresh(() => import('./pages/BrokersPage')))
@@ -167,6 +168,7 @@ function Shell() {
             <Route path="profiles" element={page(ProfilesPage)} />
             <Route path="chat" element={page(ChatPage)} />
             <Route path="trash" element={page(TrashPage)} />
+            <Route path="robot-history" element={page(RunHistoryPage)} />
             <Route path="profiles/new" element={page(ProfileFormPage)} />
             <Route path="profiles/:id/edit" element={page(ProfileFormPage)} />
             <Route path="profiles/:id" element={page(ProfileDetailPage)} />

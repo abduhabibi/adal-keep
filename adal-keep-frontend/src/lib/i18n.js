@@ -256,6 +256,7 @@ const EN = {
   'አዲስ አበባ': 'Addis Ababa',
   'ሪያድ': 'Riyadh',
   'መጣያ': 'Trash',
+  'የሮቦት ታሪክ': 'Robot history',
   'ፍለጋውን ደብቅ': 'Hide search',
   'ፕሮፋይሎችን ፈልግ': 'Search profiles',
   'የተመረጡ': 'Selected',

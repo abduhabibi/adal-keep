@@ -63,6 +63,13 @@ export const trashLink = {
   icon: <Icon name="trash" />,
 }
 
+/** Robot history: every PC (never a phone). */
+export const historyLink = {
+  to: '/robot-history',
+  label: 'የሮቦት ታሪክ',
+  icon: <Icon name="robot" />,
+}
+
 export const settingsLink = {
   to: '/settings',
   label: 'ማስተካከያዎች',
@@ -150,6 +157,15 @@ export default function Sidebar({ isOpen, onToggle, collapsed: narrowWanted, onT
           ))}
 
           <div className={`pt-3 mt-3 border-t ak-side-sep space-y-1 ${collapsed ? 'px-0' : ''}`}>
+            {!onPhone() && [historyLink].map(link => (
+              <NavLink key={link.to} to={link.to}
+                onClick={() => { if (window.innerWidth < 768) onToggle() }}
+                className={({ isActive }) => { const base = getLinkClass({ isActive }); return collapsed ? `${base} justify-center px-0` : base }}
+                title={collapsed ? link.label : ''}>
+                <span className="shrink-0">{link.icon}</span>
+                {!collapsed && <span className="truncate">{link.label}</span>}
+              </NavLink>
+            ))}
             {showTrash() && [trashLink].map(link => (
               <NavLink key={link.to} to={link.to}
                 onClick={() => { if (window.innerWidth < 768) onToggle() }}

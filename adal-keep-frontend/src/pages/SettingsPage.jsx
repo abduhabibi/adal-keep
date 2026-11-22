@@ -27,6 +27,7 @@ import { ConnectedDevices } from '../components/PcAccessGate'
 import { StartupCard, SupportCard } from '../components/AttentionBar'
 import MusanedAuthenticatorCard, { MusanedCodesCard } from '../components/MusanedAuthenticatorCard'
 import ErrorBoundary from '../components/shared/ErrorBoundary'
+import { useCan } from '../lib/staffPerms'
 import PhoneCard from '../components/PhoneCard'
 import WhatsAppCard from '../components/WhatsAppCard'
 import AiKeysCard from '../components/AiKeysCard'
@@ -210,6 +211,7 @@ export default function SettingsPage() {
   }
 
   const daysLeft = subscription?.daysLeft
+  const canSettings = useCan('change_settings')
   const isTrial = subscription?.mode === 'trial'
   const isActive = subscription?.mode === 'active'
 
@@ -218,6 +220,11 @@ export default function SettingsPage() {
       <PageHeader
         title="የስርዓት ቅንብሮች"
       />
+      {!canSettings && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
+          Your role cannot change settings: you can look, and the admin changes them.
+        </div>
+      )}
       {/* Settings in tabs — a short page instead of one long scroll. */}
       <div className="sticky top-0 z-20 py-1" translate="no">
         <Segmented wrap options={TABS} value={tab} onChange={setTab} />

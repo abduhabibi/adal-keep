@@ -13,6 +13,7 @@ import { usePlan, lockedFor, planName, wantFeature } from '../lib/plan'
 import { phoneCloud } from '../lib/phoneMode'
 import { shows } from '../lib/stageActions'
 import { markDone as markStepDone, DONE_LABEL } from '../lib/markDone'
+import { useCan } from '../lib/staffPerms'
 
 // What a paused run is waiting for, in words.
 const PAUSE_TEXT = {
@@ -115,6 +116,7 @@ const DONE_BY = {
 const BOX_SHORT = { 'Wafid medical': 'Wafid', 'Enjaz · Visa': 'Visa', 'LMIS · Police clearance': 'Police' }
 
 export default function ProfileAutomations({ profileId, phase = null, after }) {
+  const canRobots = useCan('run_robots')
   const [order, setOrder] = useState(() => journeyKept || [])
   useEffect(() => { let alive = true; askJourney().then(o => alive && setOrder(o)); return () => { alive = false } }, [])
   const [focus, setFocus] = useState(null)        // a box clicked in the steps row (else: the next one not done)
@@ -262,6 +264,7 @@ export default function ProfileAutomations({ profileId, phase = null, after }) {
   const armedDelete = useRef(0)
   const start = async (workflowId) => {
     if (sending[workflowId]) return
+    if (!canRobots) return toast.error('Your role cannot run robots. Ask the admin.')
     const name = wfName(workflowId)
     // Deleting cannot be undone: a second press within 6 seconds.
     if (workflowId === 'musaned_delete' && Date.now() - armedDelete.current > 6000) {
@@ -480,7 +483,7 @@ export default function ProfileAutomations({ profileId, phase = null, after }) {
               {['running', 'paused', 'pending'].includes(detail.status) && (
                 <button onClick={cancel} className="shrink-0 px-3 py-1.5 rounded-lg border border-red-300 text-red-600 text-xs font-semibold hover:bg-red-50">{cancelArmed ? 'Click again to cancel' : 'Cancel'}</button>
               )}
-              {['done', 'failed', 'cancelled'].includes(detail.status) && (
+              {canRobots && ['done', 'failed', 'cancelled'].includes(detail.status) && (
                 <button
                   onClick={() => start(detail.workflow_id)}
                   disabled={!!sending[detail.workflow_id]}

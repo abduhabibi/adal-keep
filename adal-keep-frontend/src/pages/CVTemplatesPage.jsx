@@ -6,9 +6,11 @@ import PageHeader from '../components/shared/PageHeader'
 import Button from '../components/shared/Button'
 import Spinner from '../components/shared/Spinner'
 import EmptyState from '../components/shared/EmptyState'
+import { useCan } from '../lib/staffPerms'
 
 export default function CVTemplatesPage() {
   const navigate = useNavigate()
+  const canEdit = useCan('edit_templates')
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
 
@@ -41,7 +43,7 @@ export default function CVTemplatesPage() {
         action={
           <div className="flex gap-2">
             <Button variant="secondary" onClick={() => navigate('/cvs')}>← CVs</Button>
-            <Button onClick={() => navigate('/cvs/templates/design')}>🎨 Create template</Button>
+            {canEdit && <Button onClick={() => navigate('/cvs/templates/design')}>🎨 Create template</Button>}
           </div>
         }
       />
@@ -57,7 +59,7 @@ export default function CVTemplatesPage() {
         <EmptyState
           title="No templates yet"
           description="Click Create template to make your first agency layout."
-          action={<Button onClick={() => navigate('/cvs/templates/design')}>Create template</Button>}
+          action={canEdit ? <Button onClick={() => navigate('/cvs/templates/design')}>Create template</Button> : null}
         />
       ) : (
         <div className="grid gap-4 sm:grid-cols-1 lg:grid-cols-2 xl:grid-cols-3">
@@ -92,15 +94,17 @@ export default function CVTemplatesPage() {
                   {t.salary ? `${t.salary} ${t.currency || 'SAR'}` : '—'} · {t.country || '—'} · {t.contract_years || 2}y
                 </div>
 
-                <div className="grid grid-cols-4 gap-1.5 border-t border-slate-100 dark:border-slate-700 pt-3 mt-1">
-                  <button className="py-1.5 text-[11px] rounded-md bg-teal-600 text-white hover:bg-teal-700 transition"
-                    onClick={() => navigate(`/cvs/templates/${t.id}/edit`)}>Edit</button>
+                <div className={`grid ${canEdit ? 'grid-cols-4' : 'grid-cols-1'} gap-1.5 border-t border-slate-100 dark:border-slate-700 pt-3 mt-1`}>
+                  {canEdit && <button className="py-1.5 text-[11px] rounded-md bg-teal-600 text-white hover:bg-teal-700 transition"
+                    onClick={() => navigate(`/cvs/templates/${t.id}/edit`)}>Edit</button>}
                   <button className="py-1.5 text-[11px] rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition"
                     onClick={() => preview(t)}>Preview</button>
+                  {canEdit && <>
                   <button className="py-1.5 text-[11px] rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition"
                     onClick={() => toggleActive(t)}>{t.is_active ? 'Off' : 'On'}</button>
                   <button className="py-1.5 text-[11px] rounded-md text-red-600 bg-red-50 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/40 transition"
                     onClick={() => remove(t)}>Del</button>
+                  </>}
                 </div>
               </article>
             )

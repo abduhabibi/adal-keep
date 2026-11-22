@@ -110,6 +110,8 @@ api.interceptors.request.use((config) => {
     const e = JSON.parse(localStorage.getItem('adal_active_employee') || 'null')
     const who = e?.name || e?.full_name || e?.username
     if (who) config.headers['X-Adal-Who'] = encodeURIComponent(String(who).slice(0, 80))
+    // Her key (given when she signed in): the PC checks her staff role with it.
+    if (e?.staff_token) config.headers['X-Adal-Staff'] = e.staff_token
   } catch {}
   return config
 })

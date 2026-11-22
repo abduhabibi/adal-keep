@@ -29,11 +29,16 @@ export function AuthProvider({ children }) {
           name: emp.name,
           username: emp.username,
           role: emp.role || 'employee',
+          role_id: emp.role_id ?? null,
+          role_name: emp.role_name || null,
+          staff_token: emp.staff_token || null,
         })
       )
     } else {
       localStorage.removeItem('adal_active_employee')
     }
+    // Her staff role decides the buttons (lib/staffPerms.js).
+    window.dispatchEvent(new Event('adal-staff-changed'))
   }, [])
 
   const setCurrentUser = useCallback((u) => {

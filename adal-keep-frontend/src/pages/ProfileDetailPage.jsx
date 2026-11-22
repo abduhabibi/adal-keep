@@ -27,6 +27,7 @@ import { onPhone } from '../lib/phoneMode'
 import { photosFirst, missingPhotos, hasFiles } from '../lib/photosFirst'
 import { ACTIONS, shows } from '../lib/stageActions'
 import useProfilePhase from '../hooks/useProfilePhase'
+import { useCan } from '../lib/staffPerms'
 
 // Her father's name as the emergency contact: his name and his father's (her surname),
 // e.g. "ABAGOLE KEDIR". A saved name that was only his first name gets the surname too.
@@ -62,6 +63,7 @@ const STEP_DETAILS = {
 export default function ProfileDetailPage() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const canDelete = useCan('delete_profiles')
   const [profile, setProfile] = useState(null)
   const [fields, setFields] = useState([])
   const [cvs, setCvs] = useState([])
@@ -294,13 +296,15 @@ export default function ProfileDetailPage() {
             >
               ✏️ Edit
             </Button>
-            <Button
-              className="bg-red-600 hover:bg-red-700 text-white"
-              onClick={deleteProfile}
-              title="Delete" aria-label="Delete"
-            >
-              🗑️<span className="hidden 2xl:inline"> Delete</span>
-            </Button>
+            {canDelete && (
+              <Button
+                className="bg-red-600 hover:bg-red-700 text-white"
+                onClick={deleteProfile}
+                title="Delete" aria-label="Delete"
+              >
+                🗑️<span className="hidden 2xl:inline"> Delete</span>
+              </Button>
+            )}
           </div>
         }
       />

@@ -64,7 +64,9 @@ const GLOBAL = ['/setup/status', '/subscription/status', '/settings', '/profiles
   // The newest good backup and the licence's end: every screen warns (SafetyAlerts).
   '/safety',
   // The agency's order of the steps after the EPRO: the Profiles tabs count the same everywhere.
-  '/settings/journey-order']
+  '/settings/journey-order',
+  // The staff roles (Employees → Roles): the same on every PC and phone.
+  '/staff-roles']
 const PER_PROFILE = (id) => [`/profiles/${id}`, `/profiles/${id}/fields`, `/profiles/${id}/automations`,
   `/profiles/${id}/journey`, `/profiles/${id}/fill-plan`, `/cv/profile-readiness/${id}`, `/cv/generated?profile_id=${id}`,
   `/profiles/${id}/whatsapp`, `/profiles/${id}/days`]

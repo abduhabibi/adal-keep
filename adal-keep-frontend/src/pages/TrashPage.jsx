@@ -4,6 +4,7 @@ import toast from 'react-hot-toast'
 import { createPortal } from 'react-dom'
 import api from '../services/api'
 import PageHeader from '../components/shared/PageHeader'
+import { useCan } from '../lib/staffPerms'
 
 /** Everything deleted in Adal Keep — only on the main PC itself. */
 const KIND = {
@@ -22,6 +23,7 @@ export default function TrashPage() {
   const load = () => api.get('/trash').then(r => setRows(r.data || [])).catch(e => { setError(e.response?.data?.error || e.message); setRows([]) })
   useEffect(() => { load() }, [])
 
+  const canDelete = useCan('delete_profiles')
   const restore = async (r) => {
     try { await api.post(`/trash/${r.id}/restore`); toast.success(`Restored: ${r.title}`); load() }
     catch (e) { toast.error(e.response?.data?.error || 'Not restored') }
@@ -44,7 +46,7 @@ export default function TrashPage() {
               <option value="">Everything</option>
               {Object.entries(KIND).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
             </GlassSelect>
-            {rows?.length > 0 && <button type="button" onClick={empty} className="rounded-lg border border-red-300 px-3 py-2 text-sm text-red-600 hover:bg-red-50">Empty the Trash</button>}
+            {canDelete && rows?.length > 0 && <button type="button" onClick={empty} className="rounded-lg border border-red-300 px-3 py-2 text-sm text-red-600 hover:bg-red-50">Empty the Trash</button>}
           </div>
           {rows === null ? <p className="p-6 text-sm text-slate-400">Loading…</p>
             : list.length === 0 ? <p className="p-10 text-center text-sm text-slate-400">{rows.length ? 'Nothing matches.' : 'The Trash is empty.'}</p>
@@ -64,7 +66,7 @@ export default function TrashPage() {
                       <td className="px-4 py-2.5 text-slate-500">{new Date(r.deleted_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</td>
                       <td className="whitespace-nowrap px-4 py-2.5 text-right">
                         <button type="button" onClick={() => restore(r)} className="rounded-lg bg-teal-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-teal-700">Restore</button>
-                        <button type="button" onClick={() => purge(r)} className="ml-2 rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-red-600 hover:bg-red-50 dark:border-slate-600">Delete for good</button>
+                        {canDelete && <button type="button" onClick={() => purge(r)} className="ml-2 rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-red-600 hover:bg-red-50 dark:border-slate-600">Delete for good</button>}
                       </td>
                     </tr>
                   ))}

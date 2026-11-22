@@ -13,6 +13,8 @@ import Button from '../components/shared/Button'
 import Modal from '../components/shared/Modal'
 import EmployeeSignIn from '../components/EmployeeSignIn'
 import { onPhone } from '../lib/phoneMode'
+import StaffRoles from '../components/StaffRoles'
+import { usePerms } from '../lib/staffPerms'
 
 const COUNTRY_CODES = ['+251', '+966', '+971', '+974', '+965', '+249']
 const digitsOnly = (v) => (v || '').replace(/\D/g, '').slice(0, 9)
@@ -65,6 +67,7 @@ const emptyEmp = {
   username: '',
   work_cc: '+251',
   work_num: '',
+  role_id: '',
 }
 
 export default function EmployeesPage() {
@@ -72,6 +75,11 @@ export default function EmployeesPage() {
   const { setCurrentUser, activeEmployee, setActiveEmployee } = useAuth()
 
   const [employees, setEmployees] = useState([])
+  // Staff roles (Roles panel; each employee's role): only someone who manages staff changes them.
+  const [roles, setRoles] = useState([])
+  const [permLabels, setPermLabels] = useState({})
+  const canManage = usePerms().manage_staff
+  const loadRoles = () => api.get('/staff-roles').then(r => { setRoles(r.data?.roles || []); setPermLabels(r.data?.perms || {}) }).catch(() => {})
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [gateLoading, setGateLoading] = useState(false)
@@ -140,6 +148,7 @@ export default function EmployeesPage() {
   // Restore session when returning from Profiles / any page
   useEffect(() => {
     loadEmployees()
+    loadRoles()
     if (activeEmployee?.id) {
       setActive(activeEmployee)
       loadWorkspace(activeEmployee)
@@ -163,12 +172,13 @@ export default function EmployeesPage() {
   }, [])
 
   /** One click — bind this PC, no password */
-  const openGate = async (emp) => {
+  const openGate = async (emp, pin) => {
     setGateLoading(true)
     try {
       const res = await api.post('/employees/device-login', {
         employeeId: emp.id,
         deviceSerial: getDeviceSerial(),
+        ...(pin ? { pin } : {}),
       })
       const u = { ...emp, ...(res.data?.user || {}) }
       setCurrentUser(u)
@@ -177,6 +187,14 @@ export default function EmployeesPage() {
       toast.success(`እንኳን ደህና መጡ፣ ${emp.name}`)
       loadWorkspace(u)
     } catch (err) {
+      // Roles in use: an admin's card asks for their PIN (the one set for other computers).
+      if (err.response?.data?.needs_pin) {
+        setGateLoading(false)
+        if (pin) toast.error('Wrong PIN')
+        const p = prompt(`${emp.name}'s 6-digit PIN`)
+        if (p) return openGate(emp, p.trim())
+        return
+      }
       toast.error(err.response?.data?.error || 'መግባት አልተቻለም')
     } finally {
       setGateLoading(false)
@@ -221,6 +239,7 @@ export default function EmployeesPage() {
       username: emp.username || '',
       work_cc: '+251',
       work_num: (emp.phone_work || '').replace(/\D/g, '').slice(-9),
+      role_id: emp.role_id ?? '',
     })
     setEmpModal(true)
   }
@@ -242,9 +261,14 @@ export default function EmployeesPage() {
       }
       if (editingEmp) {
         await api.put(`/employees/${editingEmp.id}`, payload)
+        if (empForm.role_id && Number(empForm.role_id) !== editingEmp.role_id) {
+          await api.put(`/employees/${editingEmp.id}/role`, { role_id: Number(empForm.role_id) })
+          loadRoles()
+        }
         toast.success('ሰራተኛ ተዘምኗል')
       } else {
-        await api.post('/employees', payload)
+        await api.post('/employees', { ...payload, ...(empForm.role_id ? { role_id: Number(empForm.role_id) } : {}) })
+        loadRoles()
         toast.success('ሰራተኛ ተፈጥሯል')
       }
       setEmpModal(false)
@@ -346,7 +370,7 @@ export default function EmployeesPage() {
       <div className="animate-fade-up space-y-8">
         <PageHeader
           title={`${active.name}`}
-          subtitle="የስራ ቦታ · ደላሎች እና ፕሮፋይሎች"
+          subtitle={`የስራ ቦታ · ደላሎች እና ፕሮፋይሎች${active.role_name ? ` · ${active.role_name}` : ''}`}
           action={
             <div className="flex gap-2">
               <Button data-tour="new-broker" onClick={openCreateBroker}>+ ደላላ አክል</Button>
@@ -524,7 +548,7 @@ export default function EmployeesPage() {
                 onChange={(e) => setSearch(e.target.value)}
               />
             </div>
-            <Button data-tour="new-employee" onClick={openCreateEmp}>+ ሰራተኛ አክል</Button>
+            {canManage && <Button data-tour="new-employee" onClick={openCreateEmp}>+ ሰራተኛ አክል</Button>}
           </div>
         }
       />
@@ -547,17 +571,19 @@ export default function EmployeesPage() {
                 <h3 className="font-bold text-lg text-slate-800 dark:text-white group-hover:text-teal-600 transition-colors">
                   {emp.name}
                 </h3>
-                <p className="text-sm text-slate-500 mt-0.5">@{emp.username}</p>
+                <p className="text-sm text-slate-500 mt-0.5">@{emp.username}
+                  {emp.role_name && <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">{emp.role_name}</span>}
+                </p>
                 <div className="mt-3 text-sm text-slate-600 dark:text-slate-300">
                   📞 {emp.phone_work || '—'}
                 </div>
                 {/* Her username + PIN for another computer's Adal Companion (main PC only). */}
-                {!onPhone() && !import.meta.env.VITE_ADMIN && <EmployeeSignIn emp={emp} onSaved={loadEmployees} />}
+                {canManage && !onPhone() && !import.meta.env.VITE_ADMIN && <EmployeeSignIn emp={emp} onSaved={loadEmployees} />}
                 <div className="mt-4 text-xs text-teal-600 opacity-0 group-hover:opacity-100 transition-opacity">
                   ለመግባት ጠቅ ያድርጉ →
                 </div>
               </div>
-              <div className="absolute top-3 right-3 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              {canManage && <div className="absolute top-3 right-3 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                 <button
                   type="button"
                   onClick={(e) => {
@@ -580,11 +606,13 @@ export default function EmployeesPage() {
                 >
                   ✕
                 </button>
-              </div>
+              </div>}
             </div>
           ))}
         </div>
       )}
+
+      {canManage && roles.length > 0 && <StaffRoles roles={roles} labels={permLabels} onChanged={() => Promise.all([loadRoles(), loadEmployees()])} />}
 
       <Modal
         isOpen={empModal}
@@ -613,6 +641,18 @@ export default function EmployeesPage() {
             num={empForm.work_num}
             onChange={(p) => setEmpForm({ ...empForm, work_cc: p.cc, work_num: p.num })}
           />
+          {roles.length > 0 && (
+            <div>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Role</label>
+              <GlassSelect
+                value={empForm.role_id || roles.find(r => r.preset === 'admin')?.id || ''}
+                onChange={(e) => setEmpForm({ ...empForm, role_id: e.target.value })}
+                className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm"
+              >
+                {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+              </GlassSelect>
+            </div>
+          )}
           <div className="flex justify-end gap-3 pt-3">
             <Button type="button" variant="secondary" onClick={() => setEmpModal(false)}>
               ሰርዝ

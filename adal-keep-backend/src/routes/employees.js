@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs'
 import crypto from 'crypto'
 import { signToken } from '../services/tenancy.js'
 import { setActiveEmployee, clearActiveEmployee } from '../services/activeEmployee.js'
+import { ensureStaffRoles, listRoles, roleOf, rolesInUse, staffToken } from '../services/staffRoles.js'
 
 const router = express.Router()
 
@@ -27,11 +28,18 @@ router.get('/', async (req, res) => {
   try {
     const db = req.app.locals.db
     await ensureDeviceColumn(db)
+    await ensureStaffRoles(db)
     let query = db('users')
-      .select('id', 'name', 'username', 'phone_work', 'role', 'created_at', 'device_serial')
+      .select('id', 'name', 'username', 'phone_work', 'role', 'role_id', 'pin_set', 'created_at', 'device_serial')
       .orderBy('created_at', 'desc')
     if (req.auth?.companyId) query = query.where({ company_id: req.auth.companyId })
-    res.json(await query)
+    // Each one's staff role (none yet: Admin) — the online copy carries it too.
+    const roles = await listRoles(db)
+    const admin = roles.find(r => r.preset === 'admin')
+    res.json((await query).map(u => {
+      const r = roles.find(x => x.id === u.role_id) || admin
+      return { ...u, role_id: r?.id ?? null, role_name: r?.name || 'Admin', pin_set: !!u.pin_set }
+    }))
   } catch (err) {
     console.error('[employees GET]', err.message)
     res.status(500).json({ error: 'ሰራተኞችን መጫን አልተቻለም' })
@@ -67,12 +75,16 @@ router.post('/', async (req, res) => {
     if (await db('users').where({ username: username.trim() }).first()) {
       return res.status(400).json({ error: 'መለያ ስም ቀድሞ ተወስዷል' })
     }
+    // The staff role picked for her (none picked: Admin, as before).
+    const roles = await listRoles(db)
+    const role = roles.find(r => r.id === Number(req.body.role_id)) || roles.find(r => r.preset === 'admin')
     const [id] = await db('users').insert({
       name: name.trim(),
       username: username.trim(),
       phone_work: normalizePhone(phone_work),
       password: await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 10),
       role: 'employee',
+      role_id: role?.id ?? null,
       company_id: companyId,
       branch_id: branchId,
     })
@@ -87,6 +99,7 @@ router.post('/device-login', async (req, res) => {
   try {
     const db = req.app.locals.db
     await ensureDeviceColumn(db)
+    await ensureStaffRoles(db)
     const employeeId = Number(req.body.employeeId)
     const deviceSerial = String(req.body.deviceSerial || '').trim()
     if (!employeeId || !deviceSerial) {
@@ -94,6 +107,15 @@ router.post('/device-login', async (req, res) => {
     }
     const user = await db('users').where({ id: employeeId }).first()
     if (!user) return res.status(404).json({ error: 'ሰራተኛ አልተገኘም' })
+    // Staff roles in use: signing in as someone who manages staff asks for
+    // their PIN (when they have one), so a Data entry employee cannot just
+    // click the admin's card.
+    const role = await roleOf(db, user)
+    if (role?.perms.manage_staff && user.pin_set && (await rolesInUse(db))) {
+      const pin = String(req.body.pin || '').trim()
+      if (!pin) return res.status(401).json({ error: `${user.name}'s PIN`, needs_pin: true })
+      if (!(await bcrypt.compare(pin, user.password || ''))) return res.status(401).json({ error: 'Wrong PIN', needs_pin: true })
+    }
 
     const other = await db('users')
       .where({ device_serial: deviceSerial })
@@ -127,6 +149,9 @@ router.post('/device-login', async (req, res) => {
         name: user.name,
         username: user.username,
         role: user.role || 'employee',
+        role_id: role?.id ?? null,
+        role_name: role?.name || null,
+        staff_token: staffToken(user),
       },
     })
   } catch (err) {
@@ -153,12 +178,16 @@ router.post('/device-resume', async (req, res) => {
         role: user.role || 'employee',
       })
     )
+    const role = await roleOf(db, user)
     res.json({
       user: {
         id: user.id,
         name: user.name,
         username: user.username,
         role: user.role || 'employee',
+        role_id: role?.id ?? null,
+        role_name: role?.name || null,
+        staff_token: staffToken(user),
       },
     })
   } catch (err) {
@@ -224,7 +253,8 @@ router.put('/:id/sign-in', async (req, res) => {
     if (!user) return res.status(404).json({ error: 'Employee not found' })
     const taken = await db('users').whereRaw('LOWER(username) = ?', [username]).whereNot({ id: user.id }).first()
     if (taken) return res.status(400).json({ error: `"${username}" is someone else's username — pick another` })
-    await db('users').where({ id: user.id }).update({ username, password: await bcrypt.hash(pin, 10), updated_at: new Date().toISOString() })
+    await ensureStaffRoles(db)
+    await db('users').where({ id: user.id }).update({ username, password: await bcrypt.hash(pin, 10), pin_set: true, updated_at: new Date().toISOString() })
     res.json({ success: true, username })
   } catch (err) {
     res.status(500).json({ error: err.message })

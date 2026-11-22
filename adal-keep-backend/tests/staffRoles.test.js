@@ -1,0 +1,167 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import bcrypt from 'bcryptjs'
+
+const { default: express } = await import('express')
+const { default: knex } = await import('knex')
+const { ensureTenancySchema } = await import('../src/services/tenancy.js')
+const { staffGuard, permNeeded, listRoles, staffToken, ensureStaffRoles } = await import('../src/services/staffRoles.js')
+const { default: staffRolesRouter } = await import('../src/routes/staffRoles.js')
+const { default: employeesRouter } = await import('../src/routes/employees.js')
+
+async function office() {
+  const db = knex({ client: 'sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true })
+  await ensureTenancySchema(db)
+  await db.schema.createTable('settings', t => { t.string('key'); t.text('value'); t.timestamps(true, true) })
+  await db('companies').insert({ name: 'Test agency' })
+  // Two employees from before roles: neither has one.
+  await ensureStaffRoles(db)
+  await db('users').insert([{ name: 'Abebe', username: 'abebe', role: 'employee', company_id: 1 }, { name: 'Sara', username: 'sara', role: 'employee', company_id: 1 }])
+  const app = express()
+  app.use(express.json())
+  app.locals.db = db
+  app.use('/api', staffGuard)
+  app.use('/api', staffRolesRouter)
+  app.use('/api/employees', employeesRouter)
+  // Stand-ins for the real routes: each answers 200 when the guard lets it through.
+  const ok = (req, res) => res.json({ ok: true })
+  app.delete('/api/profiles/:id', ok)
+  app.put('/api/profiles/:id', ok)
+  app.post('/api/profiles', ok)
+  app.post('/api/profiles/:id/fields/:f/upload', ok)
+  app.post('/api/settings', ok)
+  app.put('/api/cv/templates/:id/content', ok)
+  app.post('/api/profiles/:id/automations/:wf/start', ok)
+  app.post('/api/backup/run', ok)
+  app.post('/api/trash/empty', ok)
+  const server = app.listen(0)
+  const base = `http://127.0.0.1:${server.address().port}/api`
+  const call = async (method, path, { as, body, token } = {}) => {
+    const headers = { 'content-type': 'application/json' }
+    if (as) headers['x-adal-staff'] = staffToken(await db('users').where({ name: as }).first())
+    if (token) headers['x-adal-staff'] = token
+    const r = await fetch(base + path, { method, headers, body: body ? JSON.stringify(body) : undefined })
+    return { status: r.status, data: await r.json().catch(() => null) }
+  }
+  const roleId = async (preset) => (await listRoles(db)).find(r => r.preset === preset).id
+  return { db, call, roleId, close: async () => { server.close(); await db.destroy() } }
+}
+
+test('which toggle each change needs', () => {
+  assert.equal(permNeeded('DELETE', '/profiles/12'), 'delete_profiles')
+  assert.equal(permNeeded('PUT', '/profiles/12'), null)
+  assert.equal(permNeeded('POST', '/profiles/12/fields/3/upload'), null)
+  assert.equal(permNeeded('POST', '/trash/4/purge'), 'delete_profiles')
+  assert.equal(permNeeded('POST', '/trash/4/restore'), null)
+  assert.equal(permNeeded('PATCH', '/cv/templates/2'), 'edit_templates')
+  assert.equal(permNeeded('POST', '/cv/templates/preview-html'), null)
+  assert.equal(permNeeded('POST', '/cv/generate'), null)
+  assert.equal(permNeeded('POST', '/profiles/1/automations/lmis/start'), 'run_robots')
+  assert.equal(permNeeded('PUT', '/settings'), 'change_settings')
+  assert.equal(permNeeded('GET', '/settings'), null)
+  assert.equal(permNeeded('PATCH', '/musaned/accounts/3'), 'change_settings')
+  assert.equal(permNeeded('POST', '/employees'), 'manage_staff')
+  assert.equal(permNeeded('PUT', '/employees/3/role'), 'manage_staff')
+  assert.equal(permNeeded('POST', '/employees/device-login'), null)
+  assert.equal(permNeeded('POST', '/staff-roles'), 'manage_staff')
+  assert.equal(permNeeded('POST', '/backup/run'), 'export_backup')
+  assert.equal(permNeeded('POST', '/backup/settings'), 'change_settings')
+  assert.equal(permNeeded('GET', '/branch/export'), 'export_backup')
+})
+
+test('the three ready roles; employees from before are Admins and can do everything', async () => {
+  const o = await office()
+  const { data } = await o.call('GET', '/staff-roles')
+  assert.deepEqual(data.roles.map(r => r.name), ['Admin', 'Office', 'Data entry'])
+  const [admin, off, entry] = data.roles
+  assert.ok(Object.values(admin.perms).every(Boolean))
+  assert.deepEqual(off.perms, { delete_profiles: false, edit_templates: false, run_robots: true, change_settings: false, manage_staff: false, export_backup: true })
+  assert.ok(Object.values(entry.perms).every(v => v === false))
+  assert.equal(admin.members, 2)
+  const emps = (await o.call('GET', '/employees')).data
+  assert.ok(emps.every(e => e.role_name === 'Admin'))
+  for (const [m, p] of [['DELETE', '/profiles/1'], ['POST', '/settings'], ['POST', '/backup/run'], ['POST', '/trash/empty']]) {
+    assert.equal((await o.call(m, p, { as: 'Abebe' })).status, 200, `${m} ${p}`)
+  }
+  await o.close()
+})
+
+test('Data entry: profiles and uploads only — the server refuses the rest', async () => {
+  const o = await office()
+  const entry = await o.roleId('data_entry')
+  assert.equal((await o.call('PUT', '/employees/2/role', { as: 'Abebe', body: { role_id: entry } })).status, 200)
+  assert.equal((await o.call('POST', '/profiles', { as: 'Sara' })).status, 200)
+  assert.equal((await o.call('PUT', '/profiles/1', { as: 'Sara' })).status, 200)
+  assert.equal((await o.call('POST', '/profiles/1/fields/2/upload', { as: 'Sara' })).status, 200)
+  for (const [m, p, perm] of [['DELETE', '/profiles/1', 'delete_profiles'], ['POST', '/settings', 'change_settings'],
+    ['PUT', '/cv/templates/1/content', 'edit_templates'], ['POST', '/profiles/1/automations/lmis/start', 'run_robots'],
+    ['POST', '/backup/run', 'export_backup'], ['POST', '/staff-roles', 'manage_staff'], ['PUT', '/employees/2/role', 'manage_staff']]) {
+    const r = await o.call(m, p, { as: 'Sara', body: { role_id: 1, name: 'x' } })
+    assert.equal(r.status, 403, `${m} ${p}`)
+    assert.equal(r.data.forbidden, perm)
+    assert.match(r.data.error, /Data entry/)
+  }
+  // Her own key cannot be changed to someone else's: a made-up key gets nothing.
+  assert.equal((await o.call('DELETE', '/profiles/1', { token: 'eyJzdGFmZiI6MX0.bad' })).status, 403)
+  // No employee signed in (this PC's robots, a phone's call replayed): as before.
+  assert.equal((await o.call('DELETE', '/profiles/1')).status, 200)
+  await o.close()
+})
+
+test('Office: robots and backups, not deleting, templates, settings or staff', async () => {
+  const o = await office()
+  await o.db('users').where({ name: 'Sara' }).update({ role_id: await o.roleId('office') })
+  assert.equal((await o.call('POST', '/profiles/1/automations/lmis/start', { as: 'Sara' })).status, 200)
+  assert.equal((await o.call('POST', '/backup/run', { as: 'Sara' })).status, 200)
+  assert.equal((await o.call('DELETE', '/profiles/1', { as: 'Sara' })).status, 403)
+  assert.equal((await o.call('POST', '/trash/empty', { as: 'Sara' })).status, 403)
+  assert.equal((await o.call('PUT', '/cv/templates/1/content', { as: 'Sara' })).status, 403)
+  assert.equal((await o.call('POST', '/settings', { as: 'Sara' })).status, 403)
+  assert.equal((await o.call('POST', '/employees', { as: 'Sara', body: { name: 'New', username: 'new' } })).status, 403)
+  const me = (await o.call('GET', '/staff-roles/me', { as: 'Sara' })).data
+  assert.equal(me.role.name, 'Office')
+  assert.equal(me.perms.run_robots, true)
+  await o.close()
+})
+
+test('the admin makes a role with its own toggles; Admin stays everything; a role in use stays', async () => {
+  const o = await office()
+  const made = await o.call('POST', '/staff-roles', { as: 'Abebe', body: { name: 'Robots only', perms: { run_robots: true, nonsense: true } } })
+  assert.equal(made.status, 201)
+  const role = (await o.call('GET', '/staff-roles')).data.roles.find(r => r.name === 'Robots only')
+  assert.deepEqual(Object.entries(role.perms).filter(([, v]) => v).map(([k]) => k), ['run_robots'])
+  assert.equal((await o.call('POST', '/staff-roles', { as: 'Abebe', body: { name: 'robots ONLY' } })).status, 400)
+  assert.equal((await o.call('PUT', `/staff-roles/${await o.roleId('admin')}`, { as: 'Abebe', body: { perms: {} } })).status, 400)
+  assert.equal((await o.call('PUT', `/staff-roles/${role.id}`, { as: 'Abebe', body: { perms: { run_robots: true, delete_profiles: true } } })).status, 200)
+  await o.call('PUT', '/employees/2/role', { as: 'Abebe', body: { role_id: role.id } })
+  assert.equal((await o.call('DELETE', '/profiles/1', { as: 'Sara' })).status, 200)
+  assert.equal((await o.call('POST', '/settings', { as: 'Sara' })).status, 403)
+  assert.equal((await o.call('DELETE', `/staff-roles/${role.id}`, { as: 'Abebe' })).status, 400)
+  assert.equal((await o.call('DELETE', `/staff-roles/${await o.roleId('office')}`, { as: 'Abebe' })).status, 400)
+  // A new employee gets the role picked for her (none picked: Admin).
+  await o.call('POST', '/employees', { as: 'Abebe', body: { name: 'Hana', username: 'hana', role_id: await o.roleId('data_entry') } })
+  await o.call('POST', '/employees', { as: 'Abebe', body: { name: 'Lily', username: 'lily' } })
+  const emps = (await o.call('GET', '/employees')).data
+  assert.equal(emps.find(e => e.name === 'Hana').role_name, 'Data entry')
+  assert.equal(emps.find(e => e.name === 'Lily').role_name, 'Admin')
+  await o.close()
+})
+
+test('with roles in use, signing in as an admin who has a PIN asks for it', async () => {
+  const o = await office()
+  await o.db('users').where({ name: 'Abebe' }).update({ password: await bcrypt.hash('123456', 4), pin_set: true })
+  const login = (body) => o.call('POST', '/employees/device-login', { body: { employeeId: 1, deviceSerial: 'pc-1', ...body } })
+  // Everyone still an Admin: one click, as before.
+  const first = await login({})
+  assert.equal(first.status, 200)
+  assert.ok(first.data.user.staff_token)
+  await o.db('users').where({ name: 'Sara' }).update({ role_id: await o.roleId('data_entry') })
+  assert.equal((await login({})).data.needs_pin, true)
+  assert.equal((await login({ pin: '000000' })).status, 401)
+  const ok = await login({ pin: '123456' })
+  assert.equal(ok.status, 200)
+  assert.equal(ok.data.user.role_name, 'Admin')
+  // Sara (no staff managing) still signs in with one click.
+  assert.equal((await o.call('POST', '/employees/device-login', { body: { employeeId: 2, deviceSerial: 'pc-2' } })).status, 200)
+  await o.close()
+})

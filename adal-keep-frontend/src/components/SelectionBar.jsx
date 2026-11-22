@@ -11,6 +11,7 @@ import { useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
+import { useCan } from '../lib/staffPerms'
 import api from '../services/api'
 import { useAuth } from '../context/AuthContext'
 import { loadEmbassy, printEmbassy } from '../lib/embassyPrint'
@@ -65,6 +66,7 @@ function MissingSheet({ sheet, onClose }) {
 // at least one of them (lib/stageActions.js); after: the agency's order after the EPRO.
 export default function SelectionBar({ picked, onRemove, onClear, onAllShown, onLacking, whatsappHere = false, waitingPicked = [], phases = [], after }) {
   const can = (key) => showsForAny(key, phases, after)
+  const canRobots = useCan('run_robots')
   const { company } = useAuth()
   const [busy, setBusy] = useState('')
   const [open, setOpen] = useState(true)
@@ -116,6 +118,7 @@ export default function SelectionBar({ picked, onRemove, onClear, onAllShown, on
   // One run per girl. The server checks each one before it starts (the same
   // check as on her profile): those that lack something are listed, not started.
   const startAll = async (workflowId, name) => {
+    if (!canRobots) return toast.error('Your role cannot run robots. Ask the admin.')
     if (['insurance_certificate', 'tasheer_schedule'].includes(workflowId) && picked.length > 1) return insureTogether(name, workflowId)
     setBusy(workflowId)
     let ok = 0
@@ -132,6 +135,7 @@ export default function SelectionBar({ picked, onRemove, onClear, onAllShown, on
   // Make insurance for several: ONE FetaP certificate with all of them as
   // members (Number Of Insured = how many). The first who has everything leads.
   const insureTogether = async (name, workflowId = 'insurance_certificate') => {
+    if (!canRobots) return toast.error('Your role cannot run robots. Ask the admin.')
     const tasheer = workflowId === 'tasheer_schedule'
     setBusy(workflowId)
     const rows = []

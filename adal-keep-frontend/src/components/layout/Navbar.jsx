@@ -9,6 +9,7 @@ import { onDataChange } from '../../lib/changes'
 import GlassSelect from '../shared/GlassSelect'
 import { cachedGet } from '../../lib/deviceCache'
 import { useDestination, countryChoices } from '../../lib/destination'
+import { useCan } from '../../lib/staffPerms'
 
 export default function Navbar({ onMenuClick, capturedFiles, setCapturedFiles }) {
   const location = useLocation()
@@ -240,6 +241,7 @@ export function CountryPicker() {
 /** Red "Inbox" while chat messages wait unread (Adal, the other agencies, groups). */
 /** Backs up to Telegram now (the main PC), with its progress in one notice. */
 function BackupButton() {
+  const canBackup = useCan('export_backup')
   const [busy, setBusy] = useState(false)
   const [pct, setPct] = useState(null)
   const watch = useRef(null)
@@ -277,6 +279,7 @@ function BackupButton() {
       toast.error(e.response?.data?.error || 'The backup did not start', { id: 'backup-now', duration: 7000 })
     }
   }
+  if (!canBackup) return null
   return (
     <button onClick={run} disabled={busy} title="Back up now: to Telegram, or to the online storage when Telegram does not answer (it also runs by itself)"
       className={`ak-icon-btn ${busy ? '!text-teal-600 bg-teal-500/10' : ''}`}>

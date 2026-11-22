@@ -39,6 +39,8 @@ import { startLiveChannel } from './src/services/liveChannel.js'
 import quickLinksRouter from "./src/routes/quickLinks.js"
 import tenancyRouter, { attachAuth } from "./src/routes/tenancy.js"
 import employeesRouter from "./src/routes/employees.js"
+import staffRolesRouter from './src/routes/staffRoles.js'
+import { staffGuard } from './src/services/staffRoles.js'
 import employeeRegisterRouter from "./src/routes/employeeRegister.js"
 import aiTasksRouter from "./src/routes/aiTasks.js"
 import branchesRouter from "./src/routes/branches.js"
@@ -159,6 +161,9 @@ app.use(subscriptionGuard)
 app.use('/uploads', express.static(path.join(process.cwd(), 'data/SafeStorage')))
 
 app.use(attachAuth)
+// Staff roles: each change needs the toggle its role has (services/staffRoles.js).
+app.use('/api', staffGuard)
+app.use('/api', staffRolesRouter)
 // The big lists every page asks for: made once, kept until their tables change.
 app.use(answerCache())
 

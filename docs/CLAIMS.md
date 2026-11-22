@@ -12,3 +12,7 @@ These are on main and published; their claims are free:
 - tray-pull: arrival pop-up, roomy tray, drag and paste onto fields. Released.
 - transitions-fix: transitions in Adal Browser only. Released.
 - Also in this release: runs waiting for Adal Browser are held back until their wait time (no more "started" loop).
+
+## Active
+
+- support-lan-key (2026-11-22 09:50, PC 192.168.1.17): support-setup.ps1 + usb/deps/adal-connect.ps1 keep Adal's adal-remote key next to the agency key; SSH firewall rule only from the LocalSubnet. Files: adal-installer/files/support-setup.ps1, adal-installer/usb/deps/adal-connect.ps1.

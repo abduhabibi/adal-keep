@@ -27,6 +27,7 @@ import { StartupCard, SupportCard } from '../components/AttentionBar'
 import MusanedAuthenticatorCard, { MusanedCodesCard } from '../components/MusanedAuthenticatorCard'
 import ErrorBoundary from '../components/shared/ErrorBoundary'
 import PhoneCard from '../components/PhoneCard'
+import UsbCard from '../components/UsbCard'
 import WhatsAppCard from '../components/WhatsAppCard'
 import AiKeysCard from '../components/AiKeysCard'
 import TransitionsCard from '../components/TransitionsCard'
@@ -438,6 +439,7 @@ export default function SettingsPage() {
           )}
         </div>
       </Card>
+      <UsbCard />
       </>}
       {tab === 'look' && <>
       <Card>

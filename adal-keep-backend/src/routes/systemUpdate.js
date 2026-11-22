@@ -949,6 +949,21 @@ router.get('/update/notice', async (req, res) => {
   })
 })
 
+// The Adal Keep USB plugged into this PC (services/usbKeeper.js): its state, and the fix.
+router.get('/update/usb', async (req, res) => {
+  try { res.json(await (await import('../services/usbKeeper.js')).status()) }
+  catch (e) { res.status(500).json({ error: e.message }) }
+})
+router.post('/update/usb/fix', async (req, res) => {
+  try {
+    const K = await import('../services/usbKeeper.js')
+    // Only a drive found by its label: never a path from the request.
+    const d = (await K.findDrives()).find(x => x.root === req.body?.root)
+    if (!d) return res.status(404).json({ error: 'The ADAL KEEP USB is not plugged in here.' })
+    res.json(await K.fix(d.root, { label: d.label }))
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
 router.get('/update/status', async (req, res) => {
   const cfg = config()
   const installed = await getInstalled()

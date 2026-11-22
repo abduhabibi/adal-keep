@@ -61,6 +61,7 @@ const SIGN_IN_WAIT = 15 * 60_000
 const MAX_PAGES = 40, MAX_REQUESTS = 3000, MAX_TEMPLATES = 5
 
 const states = new Map()
+const movePages = new Map()   // move id → the tab it works in (for the history's picture)
 const waitingFiles = new Map()   // profile id → the move she belongs to
 const firstPlease = []           // profile ids a person pressed Prioritize on
 /** The profiles saved by a running move whose files have not come yet. */
@@ -498,13 +499,27 @@ export function startTransition(db, id, link, deps = {}) {
   if (!deps.limit && !deps.page) noteRunning(id, url, deps.resumed)   // (tests and trial moves are not noted)
   // A move takes hours on a slow line: the PC must not sleep in the middle.
   const letSleep = (deps.keepAwake || keepAwake)(`moving from ${source.name}`)
+  // The robot history keeps each move: who, where, how it ended, the step and a picture of its tab.
+  const history = import('./runHistory.js').then(async h => ({ h, rid: await h.begin(db, {
+    kind: 'move', workflow_id: id, workflow: `Move from ${source.name}`, site: source.name,
+    employee: (await (await import('./activeEmployee.js')).getActiveEmployee(db).catch(() => null))?.name,
+  }) })).catch(() => null)
+  const closeHistory = async (outcome, reason, step = stateOf(id).step) => {
+    const x = await history
+    if (!x?.rid) return
+    const page = movePages.get(id)
+    movePages.delete(id)
+    await x.h.finish(db, x.rid, { outcome, reason, step: step || '', page })
+  }
   run(db, id, source, url, deps).finally(letSleep).then(async () => {
     forgetRunning(id)
+    closeHistory(stateOf(id).status === 'stopped' ? 'stopped' : 'done').catch(() => {})
     // Done: what came in is backed up as soon as no agent is working.
     try { (await import('./telegramBackup.js')).backupSoon() } catch {}
   }).catch(e => {
     if (e.stopped) forgetRunning(id)   // a person pressed Stop
     console.error(`[transition ${id}]`, e)
+    closeHistory(e.stopped ? 'stopped' : 'failed', e.stopped ? '' : e.message, stateOf(id).step).catch(() => {})
     set(id, { status: e.stopped ? 'stopped' : 'failed', step: '', error: e.stopped ? null : e.message })
   })
   return stateOf(id)
@@ -591,6 +606,7 @@ async function run(db, id, source, url, deps) {
   const check = () => { if (stateOf(id).stop) { const e = new Error('Stopped'); e.stopped = true; throw e } }
   const browser = deps.browser || await getBrowser()
   const { page, quiet, borrowed } = await workTab(db, browser, id, source, url, deps, check)
+  movePages.set(id, page)
   if (!deps.page) page.__adalBorrowed = true   // the move's tab: no run takes it meanwhile
   set(id, { step: quiet ? `Signed in to ${source.name} already: copying` : deps.resumed ? `Going on from where it stopped: sign in to ${source.name} if the window asks` : `Sign in to ${source.name} in the window that opened` })
   // Done with the tab: kept, out of sight, signed in for the next move (never closed under a person).

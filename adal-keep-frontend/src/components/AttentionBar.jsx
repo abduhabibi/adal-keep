@@ -167,7 +167,7 @@ export default function AttentionBar() {
   for (const c of shown) groups.set(c.run_id, [...(groups.get(c.run_id) || []), c])
   const hide = (tasks) => { setHidden(h => { const n = new Set(h); for (const c of tasks) n.add(keyOf(c)); return n }); phone()?.cancelCall?.({ run: tasks[0].run_id }) }
   return (
-    <ul className="fixed right-3 top-3 z-[70] max-h-[calc(100vh-1.5rem)] w-80 max-w-[calc(100vw-1.5rem)] space-y-2 overflow-y-auto">
+    <ul className="fixed end-3 top-3 z-[70] max-h-[calc(100vh-1.5rem)] w-80 max-w-[calc(100vw-1.5rem)] space-y-2 overflow-y-auto">
       {[...groups.entries()].map(([run, tasks]) => <RunTasks key={run} run={run} tasks={tasks.sort((a, b) => (a.step || 0) - (b.step || 0))} onDone={load} onHide={() => hide(tasks)} />)}
     </ul>
   )

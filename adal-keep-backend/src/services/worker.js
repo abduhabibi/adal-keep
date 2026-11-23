@@ -709,6 +709,12 @@ export function readyJobsQuery(db) {
     })
 }
 
+const _hasPriority = new WeakMap()
+async function queueHasPriority(db) {
+  if (_hasPriority.get(db) !== true) _hasPriority.set(db, await db.schema.hasColumn('automation_queue', 'priority').catch(() => false))
+  return _hasPriority.get(db)
+}
+
 /** Claim the oldest ready run, skipping runs this process is still finishing. */
 export async function claimNextJob(db, exclude = []) {
   if (isAppLocked()) return null // trial over and not unlocked: no runs start
@@ -716,6 +722,8 @@ export async function claimNextJob(db, exclude = []) {
   for (let i = 0; i < 5; i++) {
     const q = readyJobsQuery(db)
     if (exclude.length) q.whereNotIn('id', exclude)
+    // The highest priority first (a person moved it up, Robot history → Waiting), then the oldest.
+    if (await queueHasPriority(db)) q.orderBy('priority', 'desc')
     const row = await q.orderBy('id', 'asc').first()
     if (!row) return null
     const now = new Date().toISOString()
@@ -761,7 +769,13 @@ export async function runStatus(db, runId) {
   const snap = queueSnapshot()
   const base = { running: snap.running.length, max: snap.max }
   if (_runs && _runs.isRunning(runId)) return { state: 'running', ahead: 0, ...base }
-  const r = await readyJobsQuery(db).where('id', '<', Number(runId)).count({ c: '*' }).first()
+  const me = await db('automation_queue').where('id', Number(runId)).first('priority')
+  const mine = Number(me?.priority || 0)
+  const q = readyJobsQuery(db)
+  // Ahead of it: a higher priority, or the same and older.
+  if (await queueHasPriority(db)) q.where(function () { this.where('priority', '>', mine).orWhere(function () { this.whereRaw('coalesce(priority, 0) = ?', [mine]).andWhere('id', '<', Number(runId)) }) })
+  else q.where('id', '<', Number(runId))
+  const r = await q.count({ c: '*' }).first()
   return { state: 'queued', ahead: Number(r?.c || 0), ...base }
 }
 

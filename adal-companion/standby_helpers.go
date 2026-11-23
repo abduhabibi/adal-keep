@@ -48,6 +48,7 @@ func restartSelfSoon() {
 	if err != nil {
 		return
 	}
+	exe = originalPath(exe) // Windows says the renamed (.old) file: starting it again kept the old program running
 	cmd := cmdLine(restartLine(exe))
 	cmd.Dir = filepath.Dir(exe)
 	if err := cmd.Start(); err != nil {

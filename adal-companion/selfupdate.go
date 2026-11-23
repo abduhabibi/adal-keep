@@ -1245,6 +1245,7 @@ func (u *updater) installPieces(m *releaseManifest, fromCloud bool) error {
 			return err
 		}
 		log.Printf("⬆️ %s updated (used from the next start)", p.Name)
+		go cleanOldPrograms(u.root) // what the last update left running (never this program)
 		if p.Name == "adal-companion.exe" {
 			selfReplaced = true
 		}

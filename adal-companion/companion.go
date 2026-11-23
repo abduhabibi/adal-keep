@@ -49,6 +49,7 @@ func main() {
 		}
 	}
 	go keepFindingServer()
+	go keepOldProgramsAway()
 
 	// An employee PC (no server here): it updates itself from Supabase and the
 	// office network, and helps the other PCs update (selfupdate.go).

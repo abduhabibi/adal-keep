@@ -61,5 +61,8 @@ html[dir="rtl"] .md\:ml-auto{margin-left:0;margin-right:auto}
 html[dir="rtl"] .lg\:pr-\[20rem\]{padding-right:0;padding-left:20rem}
 html[dir="rtl"] .lg\:right-3{right:auto;left:0.75rem}
 }
+@media (min-width:768px){
+html[dir="rtl"] .md\:translate-x-0{--tw-translate-x:0px}
+}
 html[dir="rtl"] body{direction:rtl}
 html[dir="rtl"] [translate="no"]{unicode-bidi:plaintext}

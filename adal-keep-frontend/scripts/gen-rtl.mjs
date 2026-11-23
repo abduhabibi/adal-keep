@@ -63,6 +63,8 @@ for (const { prefix, cls, decl } of [...rules.values()].sort((a, b) => a.cls.loc
 }
 out += (group.get('') || []).join('\n') + '\n'
 for (const bp of Object.keys(BP)) if (group.has(bp)) out += `@media (min-width:${BP[bp]}px){\n${group.get(bp).join('\n')}\n}\n`
+// A flipped '-translate-x-full' (specificity 0,2,1) must not beat the wide-screen 'md:translate-x-0': the sidebar stayed off-screen in Arabic.
+out += '@media (min-width:768px){\nhtml[dir="rtl"] .md\\:translate-x-0{--tw-translate-x:0px}\n}\n'
 // the page itself
 out += 'html[dir="rtl"] body{direction:rtl}\nhtml[dir="rtl"] [translate="no"]{unicode-bidi:plaintext}\n'
 fs.writeFileSync(path.join(SRC, 'rtl.css'), out)

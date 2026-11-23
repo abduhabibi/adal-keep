@@ -10,6 +10,7 @@ import GlassSelect from '../shared/GlassSelect'
 import { cachedGet } from '../../lib/deviceCache'
 import { useDestination, countryChoices } from '../../lib/destination'
 import { useCan } from '../../lib/staffPerms'
+import LanguageSwitch from '../LanguageSwitch'
 
 export default function Navbar({ onMenuClick, capturedFiles, setCapturedFiles }) {
   const location = useLocation()
@@ -166,6 +167,8 @@ export default function Navbar({ onMenuClick, capturedFiles, setCapturedFiles })
           </div>
           {/* Right beside the Backup button: the destination country (lib/destination.js). */}
           <CountryPicker />
+
+          <LanguageSwitch />
 
           <InboxButton />
 

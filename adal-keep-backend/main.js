@@ -59,6 +59,7 @@ import verificationRouter from './src/routes/verification.js'
 import newProfileRouter from './src/routes/newProfile.js'
 import cropReviewsRouter from './src/routes/cropReviews.js'
 import runHistoryRouter from './src/routes/runHistory.js'
+import runPriorityRouter from './src/routes/runPriority.js'
 import chatRouter, { watchPaid } from './src/routes/chat.js'
 import trashRouter from './src/routes/trash.js'
 import mainPCRouter from './src/routes/mainPC.js'
@@ -216,6 +217,7 @@ app.use('/api', automationsRouter)
 app.use('/api', verificationRouter)
 app.use('/api', newProfileRouter)
 app.use('/api', runHistoryRouter)   // what each robot did, 30 days
+app.use('/api', runPriorityRouter)  // runs waiting to start: move up/down, run next
 app.use('/api', (await import('./src/routes/tower.js')).default)   // crash reports from the pages and Go programs (Admin → Fleet)
 app.use('/api', cropReviewsRouter)   // crops a person checks before they go into her boxes
 app.use('/api', chatRouter)
@@ -1331,6 +1333,11 @@ initSystem().then(() => {
     }
     startMedicalWatcher(app.locals.db) // the medical's battery: warnings as it runs out
     import('./src/services/sessionKeeper.js').then(k => k.startSessionKeeper(app.locals.db)).catch(e => console.warn('[sessions]', e.message)) // signed in once, kept all day
+    // Memory is checked every 5 min: short of memory and no robot working → the idle Adal Browser is quit (never under a person's window).
+    Promise.all([import('./src/services/memoryGuard.js'), import('./src/services/browser.js'), import('./src/services/worker.js')]).then(([g, b, w]) => g.startMemoryGuard({
+      working: () => w.queueSnapshot().running.length,
+      quit: async () => { const br = await b.openBrowserIfAny().catch(() => null); if (!br) return; const pages = await br.pages().catch(() => []); if (pages.some(p => p.__adalBorrowed || p.__adalPerson)) return; await b.quitBrowser() },
+    })).catch(e => console.warn('[memory]', e.message))
     import('./src/services/plans.js').then(p => p.startLicenseWatch(app.locals.db)).catch(e => console.warn('[plans]', e.message)) // Adal's signed licence: plan, dates, features
     import('./src/services/agencyConfig.js').then(async C => { const cl = await import('./src/services/chatCloud.js'); C.startAgencyConfigWatch(app.locals.db, (m, p, o) => m === 'POST' ? cl.cloudCall(app.locals.db, m, p, o) : cl.cloudCall(app.locals.db, m, p, undefined, o), () => cl.cloudAgencyId(app.locals.db)) }).catch(e => console.warn('[config]', e.message)) // the agency's config record from Adal (flag)
     startAppointmentWatcher(app.locals.db) // Tasheer / Wafid appointments: a reminder the day before

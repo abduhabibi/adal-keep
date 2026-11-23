@@ -54,7 +54,7 @@ export function SignupBanner() {
   if (!st?.enabled || !['new', 'setup', 'ready'].includes(st.status) || (st.status === 'ready' && gone)) return null
   const ready = st.status === 'ready'
   return (
-    <div className={`fixed bottom-4 right-4 z-50 max-w-xs rounded-xl shadow-lg p-3 text-sm ${ready ? 'bg-teal-600 text-white' : 'bg-amber-100 text-amber-900'}`}>
+    <div className={`fixed bottom-4 end-4 z-50 max-w-xs rounded-xl shadow-lg p-3 text-sm ${ready ? 'bg-teal-600 text-white' : 'bg-amber-100 text-amber-900'}`}>
       {ready ? 'Adal Keep is ready for your agency. Setup is done.' : 'Your agency is new — Adal Keep is preparing your setup. You can start working meanwhile.'}
       {ready && <button className="ml-2 underline" onClick={() => { try { localStorage.setItem('signup-ready-seen', '1') } catch {} setGone(true) }}>OK</button>}
     </div>

@@ -19,7 +19,7 @@ export default function WhatsNewCard() {
     api.post('/system/update/whats-new/seen', { sha: card.sha }).catch(() => {})
   }
   return (
-    <div role="status" className="fixed bottom-4 right-4 z-40 w-[min(22rem,calc(100vw-2rem))] rounded-xl border border-emerald-200 dark:border-emerald-800 bg-white dark:bg-slate-900 shadow-lg p-4 text-sm">
+    <div role="status" className="fixed bottom-4 end-4 z-40 w-[min(22rem,calc(100vw-2rem))] rounded-xl border border-emerald-200 dark:border-emerald-800 bg-white dark:bg-slate-900 shadow-lg p-4 text-sm">
       <div className="flex items-start justify-between gap-2">
         <h3 className="font-semibold text-emerald-800 dark:text-emerald-200">
           {card.rollback ? '↩️ Back to the version before' : "✨ What's new"} <span translate="no" className="font-mono text-xs font-normal text-slate-400">{card.short}</span>

@@ -85,7 +85,14 @@ func main() {
 	}
 
 	// Already running for this user: just open the page.
-	if !firstCopy() {
+	// An old AdalKeep.exe.old from the last update may still hold the single-copy lock:
+	// it is stopped, and this (new) program takes its place — never two supervisors.
+	first := firstCopy()
+	if !first && cleanOldPrograms(root) > 0 {
+		time.Sleep(500 * time.Millisecond)
+		first = firstCopy()
+	}
+	if !first {
 		if !background {
 			openMainOrFollowed(root)
 		}
@@ -99,6 +106,7 @@ func main() {
 	go ensureBrowser(root)
 	go ensureSharing(root) // the office network may share updates, data and the server (sharing.go)
 	go ensureSupport(root) // remote support by Adal: key, sshd, firewall checked and repaired (support.go)
+	go keepOldProgramsAway(root) // *.exe.old from the last update: stopped and deleted
 	startHidden(filepath.Join(root, "adal-agent.exe"))
 	startHidden(filepath.Join(root, "adal-companion.exe"))
 	go keepServerRunning(root)

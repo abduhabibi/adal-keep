@@ -48,7 +48,7 @@ The main PC downloads; a Companion that can reach its main PC gives it a head st
 (`ADAL_LAN_HEAD_START`, default 20 min from the first time it saw the release) before it goes to
 Supabase itself, and takes pieces from the office meanwhile.
 
-## 3. Staged rollout
+## 3. Staged rollout (only with `publish-update.mjs --staged`; by default every PC at once)
 
 ```jsonc
 "rollout": { "test": ["<agency id>"], "pct": 10, "pct_at": "<ISO>", "everyone_at": "<ISO>", "stopped": false }

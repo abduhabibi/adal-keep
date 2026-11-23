@@ -19,7 +19,7 @@
  * The tests run first: when one fails, nothing is published (--skip-tests only
  * for an emergency). Staged: the agencies marked "updates first" in Adal Keep
  * Admin (adal-updates/release/early.json) get it at once, every other PC
- * STAGE_HOURS later (default 2) — unless --now (an urgent fix).
+ * STAGE_HOURS later (default 2) — only with --staged; by default every PC at once (--now: the same).
  *
  * 1. the frontend is built here (PCs no longer build it — no npm, no Vite)
  * 2. the backend's committed files + the built frontend → one .tar.gz
@@ -35,7 +35,7 @@
  * the release before (bsdiff, services/bsdiff.js) — a typical release is then
  * well under 1 MB instead of ~60 MB; the whole pieces stay for every PC that
  * cannot use the patch. The programs are built for 64-bit AND 32-bit Windows.
- * Staged in three steps (services/rollout.js): the "updates first" agencies at
+ * With --staged, in three steps (services/rollout.js): the "updates first" agencies at
  * once, ~10% of agencies after ROLLOUT_HOLD_HOURS (default 1), everyone after
  * twice that. Before the upload, a release gate runs: 3 PCs of a fake agency on
  * this PC (scripts/release-gate.mjs; --skip-gate only in an emergency).
@@ -84,6 +84,8 @@ const ONLY = (() => {
 })()
 if (ONLY && !ONLY.length) throw new Error('--only-pcs needs at least one PC name')
 const DRY = args.has('--dry-run')
+// Every PC at once by default (owner, 2026-11-23); --staged: test agency → ~10% → everyone, with holds.
+const STAGED = args.has('--staged') && !args.has('--now')
 const HOLD_HOURS = Number(process.env.ROLLOUT_HOLD_HOURS || (process.env.STAGE_HOURS ? Number(process.env.STAGE_HOURS) / 2 : 1))
 const ROLLOUT_PCT = Number(process.env.ROLLOUT_PCT || 10)
 const DELTA = !args.has('--no-delta')
@@ -117,7 +119,7 @@ const ROLL = (() => { const i = argv.indexOf('--rollout'); return i >= 0 ? (argv
 if (ROLL) {
   const cur = await (await storage('GET', `object/${BUCKET}/release/latest.json`)).json()
   if (!verifyManifest(cur.manifest, cur.signature)) throw new Error('latest.json is not signed')
-  const show = (m) => console.log(`${m.short}: stage ${stageOf(m)}${m.rollout ? ` — test ${(m.rollout.test || []).length} agenc(ies), ${m.rollout.pct}% at ${m.rollout.pct_at}, everyone at ${m.rollout.everyone_at}` : ` — everyone at ${m.everyone_at}`}`)
+  const show = (m) => console.log(`${m.short}: stage ${stageOf(m)}${stageOf(m) === 'everyone' ? ' (every PC may take it)' : m.rollout ? ` — test ${(m.rollout.test || []).length} agenc(ies), ${m.rollout.pct}% from ${m.rollout.pct_at}, everyone from ${m.rollout.everyone_at}` : ` — everyone from ${m.everyone_at}`}`)
   if (ROLL === 'status') { show(cur.manifest); process.exit(0) }
   const manifest = changeRollout(cur.manifest, ROLL)
   show(manifest)
@@ -395,7 +397,7 @@ try {
   }
   // Staged: the "updates first" agencies now, ~10% of agencies after the hold, everyone after twice the hold
   // (older PCs read early / everyone_at). --now (an urgent fix) or a seeded release: everyone at once.
-  manifest.rollout = newRollout({ test: manifest.early, pct: ROLLOUT_PCT, holdHours: HOLD_HOURS, at: args.has('--now') || ONLY ? 'now' : null })
+  manifest.rollout = newRollout({ test: manifest.early, pct: ROLLOUT_PCT, holdHours: HOLD_HOURS, at: STAGED && !ONLY ? null : 'now' })
   manifest.everyone_at = manifest.rollout.everyone_at
   // The way back, signed now (only this PC has the key): the release before,
   // re-issued just after this one. Only when its app is still in Storage.
@@ -425,7 +427,7 @@ try {
   // Each version's note is kept too (--rollback goes back to one).
   await put(`release/${sha}.json`, Buffer.from(JSON.stringify({ manifest, signature })), 'application/json')
   await put('release/latest.json', Buffer.from(JSON.stringify({ manifest, signature })), 'application/json')
-  console.log(ONLY ? `✓ published for ${ONLY.join(', ')} only (the others get it from them over the office network; --open lifts it)` : args.has('--now') ? '✓ published for every agency PC' : `✓ published: ${manifest.early.length} agenc${manifest.early.length === 1 ? 'y' : 'ies'} marked "updates first" now, ${ROLLOUT_PCT}% of agencies at ${new Date(manifest.rollout.pct_at).toLocaleString()}, everyone at ${new Date(manifest.everyone_at).toLocaleString()} (Admin → Updates: advance / stop)`)
+  console.log(ONLY ? `✓ published for ${ONLY.join(', ')} only (the others get it from them over the office network; --open lifts it)` : !STAGED ? '✓ published for every agency PC (at once)' : `✓ published: ${manifest.early.length} agenc${manifest.early.length === 1 ? 'y' : 'ies'} marked "updates first" now, ${ROLLOUT_PCT}% of agencies at ${new Date(manifest.rollout.pct_at).toLocaleString()}, everyone at ${new Date(manifest.everyone_at).toLocaleString()} (Admin → Updates: advance / stop)`)
 
   // The phone app, when it is newer than the published one.
   const ver = JSON.parse(fs.readFileSync(path.join(BACK, 'src/phone-app/version.json'), 'utf8'))

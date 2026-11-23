@@ -500,7 +500,7 @@ export async function openRunTab(browser, runId, { workflowId = '', busyRuns = n
     await setupTab(page, { runId: id })
     const peer = peerOf(workflowId)
     const lent = peer ? await borrowSignIn(page, peer).catch(() => null) : null
-    console.log(`[tabManager] run #${id} opened its own tab out of sight (helping another PC)${lent ? ', signed in from another tab' : ''}`)
+    console.log(`[tabManager] run #${id} opened its own tab out of sight${lent ? ', signed in from another tab' : ''}`)
     return page
   }
   const free = await oneAtATime(async () => {

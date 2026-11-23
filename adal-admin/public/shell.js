@@ -15,7 +15,7 @@ const NAV = [
   { g: 'Run the business' },
   { key: 'overview', label: 'Overview', icon: 'i-home', k: 'o' },
   { key: 'work', label: 'Work', icon: 'i-tasks', k: 'w' },
-  { key: 'agencies', label: 'Agencies', icon: 'i-building', k: 'a' },
+  { key: 'agencies', label: 'Agencies', icon: 'i-building', k: 'a', subs: [['agencies', 'Agencies'], ['branches', 'Branches']] },
   { key: 'fleet', label: 'PCs / Fleet', icon: 'i-monitor', k: 'p', subs: [['fleet', 'Fleet'], ['health', 'Health']] },
   { key: 'robots', label: 'Robots', icon: 'i-robot', k: 'r' },
   { key: 'tickets', label: 'Tickets', icon: 'i-inbox', k: 't' },

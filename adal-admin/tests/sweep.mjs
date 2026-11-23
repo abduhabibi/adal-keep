@@ -19,7 +19,7 @@ const require = createRequire(path.join(HERE, '..', '..', 'adal-keep-backend', '
 const puppeteer = require('puppeteer')
 const SHOTS = process.argv[2] || null
 const CHROME = process.env.CHROME || ['/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find(f => fs.existsSync(f))
-const ROUTES = ['overview', 'work', 'agencies', 'agency/200002', 'agency/400004', 'fleet', 'health', 'robots', 'tickets', 'billing', 'payments', 'plans', 'business', 'releases', 'inbox', 'chats', 'setup', 'cvt', 'agents', 'ceos', 'usage']
+const ROUTES = ['overview', 'work', 'agencies', 'branches', 'agency/200002', 'agency/400004', 'fleet', 'health', 'robots', 'tickets', 'billing', 'payments', 'plans', 'business', 'releases', 'inbox', 'chats', 'setup', 'cvt', 'agents', 'ceos', 'usage']
 // Pressed, but their dialog is cancelled: they would remove what the next buttons need.
 const CANCEL = /delete|remove|forget|ban\b|sign out/i
 const CRASH = /TypeError|ReferenceError|SyntaxError|is not a function|Cannot read|undefined|ENOENT|ECONN|Unexpected token|"error":"\d+"/

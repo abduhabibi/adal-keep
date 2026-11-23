@@ -99,7 +99,11 @@ export function demoData(now = Date.now()) {
     [`adal-updates/release/${OLD}.json`, JSON.stringify(release(OLD, 'Run history, office health', now - 4 * DAY, null))],
     ['adal-updates/release/early.json', JSON.stringify({ agencies: [id(1)] })],
   ])
-  return { tables: { agencies, keep_meta, keep_devices, unlock_requests, conversations, messages, members, agency_config, agency_signups, keep_calls: [], agency_invites: [], install_codes: [], keep_secrets: [] }, storage, ADMIN }
+  // Branches: Habesha and Selam linked; Tana asked Abay (supabase/branch-links.sql).
+  const keep_branch_links = [{ agency_a: id(2), agency_b: id(3), a_shares: true, b_shares: false, asked_by: id(3), created_at: iso(now - 4 * DAY) }]
+  const keep_branch_requests = [{ id: crypto.randomUUID(), from_agency: id(6), to_agency: id(4), status: 'pending', tries: 0, codes_made: 0, created_at: iso(now - 20 * MIN) },
+    { id: crypto.randomUUID(), from_agency: id(3), to_agency: id(2), status: 'linked', tries: 1, codes_made: 1, created_at: iso(now - 4 * DAY), decided_at: iso(now - 4 * DAY) }]
+  return { tables: { agencies, keep_meta, keep_branch_links, keep_branch_requests, keep_devices, unlock_requests, conversations, messages, members, agency_config, agency_signups, keep_calls: [], agency_invites: [], install_codes: [], keep_secrets: [] }, storage, ADMIN }
 }
 
 // ------------------------------------------------------------- PostgREST --

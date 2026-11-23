@@ -81,7 +81,7 @@ really kept.
   PC), started in `main.js`.
 * Page: `adal-keep-frontend/src/components/BranchLinksCard.jsx` (Settings →
   Branches tab).
-* Admin: **Branches** tab — every link with both names and who shares,
+* Admin: Agencies → **Branches** — every link with both names and who shares,
   requests of the last 7 days (never codes), Unlink.
 * Tests: `tests/branchLinksSql.test.js` (the SQL in a throw-away local
   Postgres: wrong code, expired, reuse, five wrong, new code replaces old,

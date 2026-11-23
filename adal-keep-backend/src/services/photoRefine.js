@@ -38,9 +38,12 @@ async function geminiRetouch(buf, field, why) {
 export async function refinePhoto(buf, field = 'Photo', { useGemini = true } = {}) {
   const why = []
   const ai = useGemini ? await geminiRetouch(buf, field, why) : null
-  const out = ai ? await finish(ai.buf, { clean: false }) : await finish(buf)
+  // No Gemini: the free cut-out (white background, CV framing) when this PC has the model, else only the cleaning.
+  let cut = null
+  if (!ai) { try { cut = await (await import('./localCutout.js')).localCutout(buf, field) } catch {} }
+  const out = ai ? await finish(ai.buf, { clean: false }) : cut ? cut.buf : await finish(buf)
   const meta = await sharp(out).metadata()
-  return { buf: out, by: ai ? `gemini:${ai.model}` : 'local', width: meta.width, height: meta.height, note: ai ? '' : why.join('; ') }
+  return { buf: out, by: ai ? `gemini:${ai.model}` : cut?.ok ? 'local:cutout' : 'local', width: meta.width, height: meta.height, note: ai ? '' : why.join('; ') }
 }
 
 export const REFINABLE = ['Photo', 'Full Body Photo']

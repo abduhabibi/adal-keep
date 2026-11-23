@@ -2,8 +2,12 @@
 [build]
   publish = "public"
   functions = "netlify/functions"
+  command = "node fetch-model.mjs"
+
+[build.environment]
+  ONNXRUNTIME_NODE_INSTALL_CUDA = "skip"
 
 [functions]
   node_bundler = "esbuild"
-  external_node_modules = ["sharp"]
-  included_files = ["node_modules/sharp/**", "node_modules/@img/**"]
+  external_node_modules = ["sharp", "onnxruntime-node"]
+  included_files = ["models/**", "node_modules/sharp/**", "node_modules/@img/**", "node_modules/onnxruntime-node/{package.json,dist,lib,script}/**", "node_modules/onnxruntime-node/bin/napi-v6/linux/x64/**", "node_modules/onnxruntime-common/**"]

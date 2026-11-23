@@ -45,5 +45,8 @@
     "chrome-headless-shell": {
       "skipDownload": true
     }
+  },
+  "optionalDependencies": {
+    "onnxruntime-node": "^1.20.1"
   }
 }

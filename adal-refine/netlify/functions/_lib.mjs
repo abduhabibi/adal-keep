@@ -43,23 +43,37 @@ export async function start(req, { store, who, startBackground }) {
   return json(202, { job, status: 'working' })
 }
 
-/** The background work: read the picture, Gemini, finish to 4K, keep the result (or the reason). */
-export async function work(job, { store, keys, gemini = null, finishFn = null }) {
+/**
+ * The background work: read the picture, make it, keep the result (or the reason).
+ * engine 'cutout' (default): the girl cut out with silueta (ONNX, free, no quota) on a white background,
+ * cropped to a CV framing, cleaned, 4K. engine 'gemini': the Gemini retouch (needs a billed Google key),
+ * and without it the plain cleaning. Whatever the engine cannot do, the plain cleaning still gives a picture.
+ */
+export async function work(job, { store, keys = [], engine = 'cutout', modelPath = '', cutout = null, gemini = null, finishFn = null }) {
   const st = JSON.parse(await store.get(`state/${job}`) || 'null')
   if (!st || st.status !== 'working') return
   const fail = (error) => store.set(`state/${job}`, JSON.stringify({ ...st, status: 'failed', error }))
   try {
     // (loaded here, so the tests of the rest need no sharp)
-    if (!gemini || !finishFn) { const core = await import('./_refineCore.mjs'); gemini ||= core.tryModels; finishFn ||= core.finish }
+    const need = !finishFn || (engine === 'cutout' ? !cutout : !gemini)
+    const core = need ? await import('./_refineCore.mjs') : null
+    gemini ||= core?.tryModels; finishFn ||= core?.finish; cutout ||= core?.cutoutRefine
     const input = Buffer.from(await store.get(`in/${job}`, { type: 'arrayBuffer' }))
-    const meta = await store.getMetadata(`in/${job}`)
-    const why = []
-    const ai = keys.length ? await gemini(input, meta?.metadata?.field || 'Photo', keys, why) : null
-    // No Gemini (no key, or Google's free plan edits no pictures): the same cleaning without it, here in the cloud.
-    const out = ai ? await finishFn(ai.buf, { clean: false }) : await finishFn(input, { clean: true })
-    const model = ai ? ai.model : 'clean-only'
+    const field = (await store.getMetadata(`in/${job}`))?.metadata?.field || 'Photo'
+    let out, model, note = ''
+    if (engine === 'cutout') {
+      try {
+        const r = await cutout(input, field, { modelPath })
+        out = r.buf; model = r.ok ? 'cutout' : 'clean-only'; note = r.note
+      } catch (e) { note = `cut-out failed: ${e.message}` }
+    } else {
+      const why = []
+      const ai = keys.length ? await gemini(input, field, keys, why) : null
+      if (ai) { out = await finishFn(ai.buf, { clean: false }); model = ai.model } else note = keys.length ? why.join('; ') : 'no Gemini key set'
+    }
+    if (!out) { out = await finishFn(input, { clean: true }); model = 'clean-only' }   // never nothing
     await store.set(`out/${job}`, out, { metadata: { model } })
-    await store.set(`state/${job}`, JSON.stringify({ ...st, status: 'done', model, note: ai ? '' : (keys.length ? why.join('; ') : 'no Gemini key set') }))
+    await store.set(`state/${job}`, JSON.stringify({ ...st, status: 'done', model, note }))
   } catch (e) { await fail(e.message) } finally { try { await store.delete(`in/${job}`) } catch {} }
 }
 

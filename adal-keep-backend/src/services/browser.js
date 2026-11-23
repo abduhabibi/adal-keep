@@ -36,6 +36,16 @@ import { spawn, execFile, execFileSync } from 'child_process'
 import { fileURLToPath } from 'url'
 
 let _browser = null
+/**
+ * Still connected. Puppeteer 25 dropped isConnected() for the `connected`
+ * getter: `_browser.isConnected && _browser.isConnected()` was always false,
+ * so every look made a NEW connection to Adal Browser (2026-11-23, Main): each one ran
+ * the 7-s port check on a weak PC (the live view gave up at 6 s: "does not
+ * answer"), the old connections were never let go, and each new one put its own
+ * request filter on the run's tabs — Musaned's page stayed blank.
+ */
+export const alive = (b) => !!b && (typeof b.isConnected === 'function' ? b.isConnected() : b.connected === true)
+let _connecting = null
 
 /**
  * Adal Browser's executable, or null.
@@ -202,12 +212,14 @@ export function whoseBrowser(cmd, own = OWN_BROWSER, dataDir = path.dirname(PROF
   if (c.includes(lower(dataDir))) return 'old'
   return 'foreign'
 }
-// Checked once for each connection.
-const _checked = new WeakSet()
+// Checked once for each browser started (its address changes with every start), not
+// for each connection: the check takes ~7 s on a weak PC.
+const _checked = new Set()
+const endpointOf = (b) => { try { return b.wsEndpoint() } catch { return '' } }
 async function onlyOurs(b, { closeOld = false } = {}) {
-  if (process.platform !== 'win32' || process.env.BRAVE_CDP_URL || _checked.has(b)) return b
+  if (process.platform !== 'win32' || process.env.BRAVE_CDP_URL || _checked.has(endpointOf(b))) return b
   const who = whoseBrowser(await portOwner())
-  if (who === 'ours' || who === 'unknown') { _checked.add(b); return b }
+  if (who === 'ours' || who === 'unknown') { _checked.add(endpointOf(b)); return b }
   if (who === 'old' && closeOld) {
     // Adal Keep's own agents' window, in the PC's Chrome or Brave: closed, and Adal Browser starts instead.
     console.warn('[browser] the control port is held by the PC\'s Chrome/Brave on Adal Keep\'s profile: it is closed, Adal Browser starts instead')
@@ -230,14 +242,15 @@ async function onlyOurs(b, { closeOld = false } = {}) {
  * never a new window. The browser is not closed when the server stops.
  */
 export async function getBrowser(fresh = false) {
-  if (_browser && _browser.isConnected && _browser.isConnected()) {
-    return _browser
-  }
+  if (alive(_browser)) return _browser
+  if (_connecting) { await _connecting; if (alive(_browser)) return _browser }
 
   const puppeteer = (await import('puppeteer-core')).default
   const cdpUrl = process.env.BRAVE_CDP_URL || `http://localhost:${DEBUG_PORT}`
   let open = null
   try { open = await connectTo(puppeteer, cdpUrl) } catch { /* not open yet — start it */ }
+  // Another look connected meanwhile: one connection only.
+  if (open && alive(_browser)) { open.disconnect().catch(() => {}); return _browser }
   if (open) {
     // Only Adal Browser: the PC's Chrome or Brave on this port is never used.
     _browser = await onlyOurs(open, { closeOld: true })
@@ -290,13 +303,18 @@ export async function getBrowser(fresh = false) {
  * that only act on tabs a person or a run already opened.
  */
 export async function openBrowserIfAny() {
-  if (_browser && _browser.isConnected && _browser.isConnected()) return _browser
-  try {
-    const puppeteer = (await import('puppeteer-core')).default
-    const b = await connectTo(puppeteer, process.env.BRAVE_CDP_URL || `http://localhost:${DEBUG_PORT}`)
-    _browser = await onlyOurs(b).catch(() => null)
-    return _browser
-  } catch { return null }
+  if (alive(_browser)) return _browser
+  // Many looks at once (live view, watchers, a run) share one connection.
+  if (!_connecting) _connecting = (async () => {
+    try {
+      const puppeteer = (await import('puppeteer-core')).default
+      const b = await connectTo(puppeteer, process.env.BRAVE_CDP_URL || `http://localhost:${DEBUG_PORT}`)
+      if (alive(_browser)) { b.disconnect().catch(() => {}); return _browser }
+      _browser = await onlyOurs(b).catch(() => null)
+      return _browser
+    } catch { return null }
+  })().finally(() => { _connecting = null })
+  return _connecting
 }
 
 async function windowOf(page) {

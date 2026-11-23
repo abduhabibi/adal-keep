@@ -318,6 +318,18 @@ async function classifyScreen(page, ctx) {
   return review
 }
 
+const bodyLength = (page) => page.evaluate(() => (document.body?.innerText || '').trim().length).catch(() => -1)
+async function waitForText(page, ms) {
+  const until = Date.now() + ms
+  while (Date.now() < until) { if (await bodyLength(page) > 0) return true; await sleep(400) }
+  return false
+}
+/** Nothing drawn on the page after a few seconds (a page that does not answer is not blank). */
+export async function blankPage(page, ms = 5000) {
+  if (await bodyLength(page) !== 0) return false
+  return !(await waitForText(page, ms)) && await bodyLength(page) === 0
+}
+
 export async function stepOpenMusaned(page, ctx) {
   // Peer-aware: if this tab is ALREADY on a Musaned host we do NOT navigate to
   // the root — that would wipe an in-progress form and/or force a re-login.
@@ -332,6 +344,15 @@ export async function stepOpenMusaned(page, ctx) {
       return { ok: true, finalUrl: page.url(), onKeycloak: false }
     }
     if (onKeycloak) return { ok: true, finalUrl: page.url(), onKeycloak: true }
+    // A blank Musaned page (its app never drew: 2026-11-23, Main) has no form to lose: it
+    // loads again. Left as it was, the run paused for a sign-in that was not there, went on,
+    // and paused again, for ever.
+    if (await blankPage(page)) {
+      log(ctx, 'Musaned page is blank — loading it again')
+      try { await page.goto(MUSANED_ROOT, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS }) }
+      catch { throw new Error('Could not reach tawtheeq.musaned.com.sa') }
+      await waitForText(page, 8000)
+    }
     // On a Musaned host but unclassified — fall through to the login-click loop
     // below WITHOUT re-navigating away.
   } else {

@@ -996,6 +996,8 @@ async function continueSignedIn(db) {
     if (!page) continue
     // A person pressed Sign in on a waiting run: its code box is up and Adal Keep has the code.
     if (hostOf(page.url()) !== 'tawtheeq.musaned.com.sa' && !(await codeBoxUp(page) && await hasAuthenticator(r))) continue
+    // A blank Musaned page is not signed in: going on there paused the run again every 15 s.
+    if (hostOf(page.url()) === 'tawtheeq.musaned.com.sa' && await page.evaluate(() => !(document.body?.innerText || '').trim()).catch(() => true)) continue
     await db('automation_queue').where('id', r.id).where('status', 'paused').update({ status: 'pending', updated_at: new Date().toISOString() })
     console.log(`[worker] run #${r.id} is signed in — going on`)
     drainQueue(db).catch(() => {})

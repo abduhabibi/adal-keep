@@ -9,7 +9,7 @@ test('plans: what each plan has, and an agency set apart', async () => {
   assert.equal(featureState('enjaz_visa', { plan: 'premium' }), 'on')
   assert.equal(featureState('enjaz_visa', { plan: 'basic', features: { enjaz_visa: 'on' } }), 'on')
   assert.equal(featureState('wafid', { plan: 'premium', features: { wafid: 'off' } }), 'off')
-  assert.equal(featureState('insurance', { plan: 'premium', features: { insurance: 'off' }, offers: [{ feature: 'insurance' }] }), 'offered')
+  assert.equal(featureState('insurance', { plan: 'basic', offers: [{ feature: 'insurance' }] }), 'on')   // (every agency is Premium: nothing is left to offer)
   assert.equal(featureForWorkflow('musaned_check_chosen'), null)   // checking who was chosen: every plan
   assert.equal(featureForWorkflow('mofa_visa').key, 'enjaz_visa')
 })

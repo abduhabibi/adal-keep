@@ -42,6 +42,7 @@ const createNoWindow = 0x08000000
 var logFile *os.File
 
 func main() {
+	defer reportPanic()
 	root := exeDir()
 	installRoot = root
 	logDir := filepath.Join(root, "backend", "data")

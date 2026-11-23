@@ -1,4 +1,7 @@
 import { Component } from 'react'
+import { reportCrash, listenForCrashes } from '../../lib/towerReport'
+
+listenForCrashes()
 
 /**
  * One part that breaks never blanks the whole screen: it shows what went
@@ -11,6 +14,7 @@ export default class ErrorBoundary extends Component {
   componentDidCatch(error, info) {
     console.error('[Adal Keep] a part of the page broke:', error, info?.componentStack)
     try { (window.__adalErrors ||= []).push({ at: new Date().toISOString(), method: 'render', path: this.props.name || location.pathname, error: String(error?.message || error) }) } catch {}
+    reportCrash(error, this.props.name || location.pathname)
   }
   componentDidUpdate(prev) { if (this.state.error && prev.resetKey !== this.props.resetKey) this.setState({ error: null }) }
   render() {

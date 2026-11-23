@@ -537,7 +537,7 @@ async function pushAnswers(db, agency, state, { light = false } = {}) {
 }
 
 /** The version this PC runs: the updater's mark (installed PCs) or git (a developer's copy). */
-function installedVersion() {
+export function installedVersion() {
   const back = path.join(path.dirname(fileURLToPath(import.meta.url)), '../..')
   for (const root of [path.join(back, '..'), back]) {
     try {

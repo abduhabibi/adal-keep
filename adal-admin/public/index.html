@@ -174,6 +174,7 @@
     <button data-tab="plans"><span class="ic"><svg class="ico"><use href="#i-star"/></svg></span>Plans</button>
     <button data-tab="usage"><span class="ic"><svg class="ico"><use href="#i-chart"/></svg></span>Usage</button>
     <button data-tab="health"><span class="ic"><svg class="ico"><use href="#i-pulse"/></svg></span>Health</button>
+    <button data-tab="fleet"><span class="ic"><svg class="ico"><use href="#i-monitor"/></svg></span>Fleet</button>
     <button data-tab="cvt"><span class="ic"><svg class="ico"><use href="#i-cv"/></svg></span>CV templates</button>
     <button data-tab="agents"><span class="ic"><svg class="ico"><use href="#i-brokers"/></svg></span>Agents</button>
     <button data-tab="ceos"><span class="ic"><svg class="ico"><use href="#i-user"/></svg></span>CEOs</button>
@@ -241,7 +242,7 @@ document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
   document.body.classList.toggle('chats', tab === 'inbox' || tab === 'chats')
   $('#sideT').textContent = tab === 'inbox' ? 'Inbox — your chat with each agency' : 'All chats'
   if (tab !== 'inbox' && tab !== 'chats') { $('#thread').style.display = 'none'; $('#compose').style.display = 'none' }
-  if (tab === 'payments' || tab === 'agencies' || tab === 'work' || tab === 'setup' || tab === 'agents' || tab === 'ceos' || tab === 'plans' || tab === 'cvt' || tab === 'usage' || tab === 'health') { open = null; showTable() } else renderList()
+  if (tab === 'payments' || tab === 'agencies' || tab === 'work' || tab === 'setup' || tab === 'agents' || tab === 'ceos' || tab === 'plans' || tab === 'cvt' || tab === 'usage' || tab === 'health' || tab === 'fleet') { open = null; showTable() } else renderList()
   renderList()
 })
 
@@ -537,6 +538,111 @@ async function healthView() {
   $('#table').innerHTML = `<table><tr><th>Agency</th><th>Version</th><th>Portals</th><th>Disk</th><th>Database</th><th>Backup check</th><th>Freezes</th><th>Errors</th></tr>${rows}</table>
     <h3 style="margin:22px 0 8px">Errors shared by PCs (${top.length})</h3>
     ${top.length ? `<table><tr><th>Error</th><th>PCs</th><th>Times</th><th>Last</th></tr>${top.map(e => `<tr><td style="font-size:12px">${esc(e.line)}</td><td title="${esc([...e.agencies].join(', '))}">${e.agencies.size}</td><td>${e.times}</td><td class="muted">${ago(e.at)}</td></tr>`).join('')}</table>` : '<p class="muted">No errors reported.</p>'}`
+}
+
+// ------------------------------------------------------------------ Fleet --
+// The control tower: every PC of every agency (its beat each minute), live
+// green / amber / red, commands signed with Adal's tower key, crash reports.
+let fleetF = { light: '', q: '', version: '' }, fleetOpenPC = null
+const LIGHT = { green: '#16a34a', amber: '#d97706', red: '#d92d4b' }
+const dot = (l) => `<span title="${l}" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${LIGHT[l] || '#999'}"></span>`
+async function fleetView() {
+  $('#title').textContent = 'Fleet — every PC, live, and what Adal can do on it'
+  let F, C, K
+  try { [F, C, K] = await Promise.all([api('/api/fleet'), api('/api/fleet/crashes'), api('/api/fleet/kinds')]) }
+  catch (e) { $('#table').innerHTML = `<p class="muted">${esc(e.message)}</p>`; return }
+  if (tab !== 'fleet') return
+  const pcs = F.agencies.flatMap(a => a.pcs)
+  const versions = [...new Set(pcs.map(p => p.beat.version).filter(Boolean))]
+  const q = fleetF.q.toLowerCase()
+  const show = F.agencies.map(a => ({ ...a, pcs: a.pcs.filter(p => (!fleetF.light || p.light === fleetF.light) && (!fleetF.version || p.beat.version === fleetF.version)
+    && (!q || `${a.name} ${p.name} ${p.pc_number} ${p.beat.employee || ''}`.toLowerCase().includes(q))) })).filter(a => a.pcs.length)
+  const n = (l) => pcs.filter(p => p.light === l).length
+  const gb = (mb) => mb == null ? '—' : `${(mb / 1024).toFixed(mb < 10240 ? 1 : 0)} GB`
+  const rob = (r) => r ? `${r.running} working · ${r.waiting} waiting${r.paused ? ` · ${r.paused} paused` : ''}` : '—'
+  const ackLine = (a) => `<div style="font-size:12px"><b>${esc(K.kinds[a.kind] || a.kind || '?')}</b> — <span class="${a.status === 'failed' || a.status === 'refused' ? 'bad' : 'muted'}">${esc(a.status)}</span> ${esc(a.result?.message || '')} <span class="muted">${ago(a.done_at || a.at)}</span>
+    ${a.result?.object ? ` <button class="ghost" style="padding:2px 8px;font-size:11px" onclick="fleetLog('${esc(a.result.object)}')">Open log</button>` : ''}
+    ${a.kind === 'self_check' && a.result ? `<details><summary class="muted">details</summary><pre style="white-space:pre-wrap;font-size:11px">${esc(JSON.stringify(a.result, null, 1))}</pre></details>` : ''}</div>`
+  const row = (a, p) => {
+    const b = p.beat
+    const open = fleetOpenPC === p.id
+    return `<tr style="cursor:pointer" onclick="fleetOpenPC = fleetOpenPC === '${p.id}' ? null : '${p.id}'; fleetView()">
+      <td>${dot(p.light)}</td><td><b>${esc(p.name || '?')}</b><br><span class="muted">${esc(p.role)}${p.pc_number ? ' · PC ' + esc(p.pc_number) : ''}</span></td>
+      <td>${esc(b.employee || '—')}</td><td>${esc(b.version || '—')}</td>
+      <td>${b.cpu?.cores ?? '?'} cores · load ${b.cpu?.load?.[1] ?? '?'}<br><span class="muted">${gb(b.ram?.free_mb)} / ${gb(b.ram?.total_mb)} RAM free</span></td>
+      <td>${gb(b.disk_free_mb)}</td><td>${esc(b.net_type || '—')}${b.net?.rtt_ms ? `<br><span class="muted">${b.net.rtt_ms} ms</span>` : ''}</td>
+      <td>${b.held ? '<b class="bad">suspended</b><br>' : ''}${rob(b.robots)}</td>
+      <td class="muted" style="font-size:12px;max-width:260px">${esc(p.why.join(' · ') || '')}${b.last_error ? `<br>${esc(b.last_error.line).slice(0, 140)}` : ''}</td>
+      <td class="muted">${ago(b.at)}</td></tr>
+      ${open ? `<tr><td></td><td colspan="9" onclick="event.stopPropagation()">
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 8px">${Object.entries(K.kinds).map(([k, label]) => `<button class="${k === 'restart' || k === 'cancel_runs' || k === 'suspend' ? 'danger' : 'ghost'}" onclick="fleetSend('${p.id}','${k}', ${JSON.stringify(p.name || '').replace(/"/g, '&quot;')})" ${K.ready ? '' : 'disabled'}>${esc(label)}</button>`).join('')}</div>
+        ${p.forged ? `<div class="bad" style="font-size:12px">${p.forged} command(s) in this PC's row are not signed by you: the PC refuses them. Someone at the agency may have written them.</div>` : ''}
+        ${p.pending.length ? `<div class="muted" style="font-size:12px">Waiting for the PC: ${p.pending.map(c => esc(K.kinds[c.kind] || c.kind)).join(', ')}</div>` : ''}
+        ${p.acks.map(ackLine).join('') || '<div class="muted" style="font-size:12px">No commands yet.</div>'}
+        <div class="muted" style="font-size:11.5px;margin-top:6px">${esc(b.os || '')} · ${esc(b.cpu?.model || '')} · up ${b.uptime_min ?? '?'} min · tower: ${esc(p.open)}</div></td></tr>` : ''}`
+  }
+  $('#table').innerHTML = `
+    ${K.ready ? '' : `<p class="bad">${esc(K.why)}</p>`}
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+      <span>${dot('green')} ${n('green')} &nbsp; ${dot('amber')} ${n('amber')} &nbsp; ${dot('red')} ${n('red')} &nbsp; <span class="muted">${pcs.length} PCs · ${F.agencies.length} agencies</span></span>
+      <select onchange="fleetF.light=this.value; fleetView()"><option value="">Every light</option>${['red', 'amber', 'green'].map(l => `<option ${fleetF.light === l ? 'selected' : ''}>${l}</option>`).join('')}</select>
+      <select onchange="fleetF.version=this.value; fleetView()"><option value="">Every version</option>${versions.map(v => `<option ${fleetF.version === v ? 'selected' : ''}>${esc(v)}</option>`).join('')}</select>
+      <input id="fleetQ" type="search" placeholder="Agency, PC, employee…" value="${esc(fleetF.q)}" onchange="fleetF.q=this.value; fleetView()" style="padding:7px 10px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);color:var(--text)">
+      <span style="margin-left:auto"></span>
+      <button class="ghost" onclick="fleetOpen()">Open the tower for an agency…</button>
+    </div>
+    ${show.map(a => `<h3 style="margin:16px 0 6px">${dot(a.light)} ${esc(a.name)} <span class="muted" style="font-weight:500;font-size:12px">${a.pcs.length} PC${a.pcs.length > 1 ? 's' : ''}</span>
+      <button class="ghost" style="padding:3px 9px;font-size:11.5px" onclick="fleetSendAll(${JSON.stringify(a.pcs.map(p => p.id)).replace(/"/g, '&quot;')}, ${JSON.stringify(a.name).replace(/"/g, '&quot;')})" ${K.ready ? '' : 'disabled'}>Command every PC…</button></h3>
+      <table><tr><th></th><th>PC</th><th>Signed in</th><th>Version</th><th>CPU / RAM</th><th>Disk free</th><th>Network</th><th>Robots</th><th>Why</th><th>Beat</th></tr>${a.pcs.map(p => row(a, p)).join('')}</table>`).join('')
+      || `<p class="muted">No PC sends its beat yet. The tower is on only for the Adal Test agency until you open it (button above); PCs need the newest Adal Keep.</p>`}
+    <h3 style="margin:24px 0 8px">Crash reports (${C.length})</h3>
+    ${C.length ? `<table><tr><th>From</th><th>Message</th><th>Times</th><th>PCs</th><th>Agencies</th><th>Versions</th><th>Last</th></tr>${C.map(c => `<tr>
+      <td>${esc(c.source)}</td><td style="font-size:12px">${esc(c.message)}${c.where ? `<br><span class="muted">${esc(c.where)}</span>` : ''}</td><td>${c.count}</td><td>${c.pcs}</td>
+      <td style="font-size:12px">${Object.entries(c.agencies).map(([k, v]) => `${esc(k)} ×${v}`).join('<br>')}</td>
+      <td style="font-size:12px">${Object.entries(c.versions).map(([k, v]) => `${esc(k)} ×${v}`).join('<br>')}</td><td class="muted">${ago(c.last)}</td></tr>`).join('')}</table>` : '<p class="muted">No crashes reported.</p>'}`
+}
+async function fleetAsk(kind, who) {
+  const label = { restart: 'Restart Adal Keep', cancel_runs: 'Cancel all robot runs', suspend: 'Suspend robots' }[kind]
+  if (kind === 'support_note') return ask({ title: `Support note to ${who}`, text: 'It shows on the PC under Notifications, from "Adal support".', ok: 'Send', input: '' })
+  if (kind === 'suspend') { const note = await ask({ title: `Suspend robots on ${who}?`, text: 'No new robot run starts there until you press Resume. Runs working now go on. A note shows on the PC; add why (optional):', ok: 'Suspend', danger: true, input: '' }); return note === null ? null : { note } }
+  if (label) return (await ask({ title: `${label} on ${who}?`, text: kind === 'restart' ? 'Adal Keep stops and starts again by itself (about a minute). A run working now is cut off.' : 'Every run working, waiting or paused there is cancelled.', ok: label, danger: true })) ? {} : null
+  return {}
+}
+async function fleetSend(id, kind, who) {
+  let args = await fleetAsk(kind, who)
+  if (args === null) return
+  if (kind === 'support_note') { if (!String(args).trim()) return; args = { text: args } }
+  try { toast((await api('/api/fleet/command', { target: id, kind, args })).message); setTimeout(fleetView, 1500) } catch (e) { tell('Not sent', e.message) }
+}
+async function fleetSendAll(ids, who) {
+  const kinds = await api('/api/fleet/kinds')
+  const list = Object.entries(kinds.kinds).map(([k, l], i) => `${i + 1}. ${l}`).join('\n')
+  const pick = await ask({ title: `Command every PC of ${who} (${ids.length})`, text: `Type the number:\n${list}`, ok: 'Next', input: '' })
+  const kind = Object.keys(kinds.kinds)[Number(pick) - 1]
+  if (!kind) return
+  let args = await fleetAsk(kind, `${ids.length} PCs of ${who}`)
+  if (args === null) return
+  if (kind === 'support_note') { if (!String(args).trim()) return; args = { text: args } }
+  try { toast((await api('/api/fleet/command', { targets: ids, kind, args })).message); setTimeout(fleetView, 1500) } catch (e) { tell('Not sent', e.message) }
+}
+async function fleetOpen() {
+  const list = (work.length ? work : await api('/api/work').catch(() => [])).filter(a => !a.banned)
+  const pick = await ask({ title: 'Open the control tower', text: `Its PCs start sending their beat and take your commands (within 10 minutes). Type the agency's number, or "all" for every agency, or "close N" to close one:\n${list.map((a, i) => `${i + 1}. ${a.name}`).join('\n')}`, ok: 'Next', input: '' })
+  if (!pick) return
+  const m = String(pick).trim().toLowerCase().match(/^(close\s+)?(all|\d+)$/)
+  if (!m) return tell('Not understood', 'Type a number from the list, "all", or "close 3".')
+  const on = !m[1], all = m[2] === 'all', a = all ? null : list[Number(m[2]) - 1]
+  if (!all && !a) return
+  if (!(await ask({ title: `${on ? 'Open' : 'Close'} the tower for ${all ? 'EVERY agency' : a.name}?`, ok: on ? 'Open' : 'Close', danger: all }))) return
+  try { toast((await api('/api/fleet/open', { all, on, ids: all ? [] : (a.ids || [a.id]) })).message) } catch (e) { tell('Not done', e.message) }
+}
+async function fleetLog(object) {
+  try {
+    const r = await api(`/api/fleet/log?object=${encodeURIComponent(object)}`)
+    const w = window.open('', '_blank')
+    if (w) { w.document.title = object; w.document.body.innerHTML = `<pre style="white-space:pre-wrap;font:12px ui-monospace,monospace"></pre>`; w.document.querySelector('pre').textContent = r.text }
+    else tell('Log', r.text.slice(-4000))
+  } catch (e) { tell('Log not opened', e.message) }
 }
 
 // ------------------------------------------------------------------ Usage --
@@ -1043,6 +1149,7 @@ function showTable() {
   if (tab === 'plans') return plansView()
   if (tab === 'usage') return usageView()
   if (tab === 'health') return healthView()
+  if (tab === 'fleet') return fleetView()
   if (tab === 'cvt') return cvtView()
   if (tab === 'payments') {
     $('#title').textContent = 'Payment receipts'
@@ -1136,6 +1243,7 @@ async function refresh() {
     renderList()
     if (tab === 'work') { if (!document.querySelector('#table input:focus')) showTable() }
     else if (tab === 'health') healthView()
+    else if (tab === 'fleet') { if (!document.querySelector('#table input:focus, #table select:focus')) fleetView() }
     else if (tab === 'cvt') { if (!cvtDragged) cvtView() }
     else if (tab === 'ceos') { if (!document.querySelector('#table input:focus')) ceosView() }
     else if (tab === 'agents') { if (!dragged && !document.querySelector('#table input:focus, #table select:focus')) agentsView() }

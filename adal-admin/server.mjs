@@ -1037,6 +1037,9 @@ async function sbProxy(req, res, u) {
   return send(403, { message: 'not allowed' })
 }
 
+// The control tower (Fleet tab): every PC's beat, signed commands, crash reports (tower.mjs).
+Object.assign(api, (await import('./tower.mjs')).towerApi({ rest, sb }))
+
 http.createServer(async (req, res) => {
   const u = new URL(req.url, 'http://localhost')
   try {

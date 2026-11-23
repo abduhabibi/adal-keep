@@ -24,6 +24,7 @@ import { runFullWorkflow } from './lmisWorkflow.js'
 import { decideAgencyActions } from './jev/agencyManager.js'
 import { getActiveEmployee } from './activeEmployee.js'
 import { isAppLocked } from './subscription.js'
+import { towerHeld } from './tower.js'
 import { plainReason, workflowName, withInternetCheck } from './runOutcome.js'
 import { openRunTab, forgetRunTab, tabOfRun, handTabToPerson, findRunTab, activeRunIds, keepingRunIds, tidySiteTabs, hostOf, codeBoxUp, spaceForRun, peerOf } from './tabManager.js'
 import { registerTab, unregisterTab, noteLink } from './bandwidth.js'
@@ -701,6 +702,7 @@ export function readyJobsQuery(db) {
 /** Claim the oldest ready run, skipping runs this process is still finishing. */
 export async function claimNextJob(db, exclude = []) {
   if (isAppLocked()) return null // trial over and not unlocked: no runs start
+  if (towerHeld()) return null   // Adal support held the robots on this PC (Admin → Fleet → Suspend)
   for (let i = 0; i < 5; i++) {
     const q = readyJobsQuery(db)
     if (exclude.length) q.whereNotIn('id', exclude)

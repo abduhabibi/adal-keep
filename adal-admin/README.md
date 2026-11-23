@@ -52,6 +52,28 @@ What it did is in `launcher.log`.
   online copy, and changes wait for the PC. Shown to the agency as "Adal support".
   (Needs `adal-keep-frontend` next to this folder: start-admin.sh rebuilds those
   pages with `npm run build:admin` when they changed.)
+- **Fleet** — the control tower, over the internet (no SSH, no LAN). Every agency
+  PC (main, branch, Companion) sends a beat each minute: agency, PC name, who is
+  signed in, version, CPU cores / load / RAM, free disk, Wi-Fi or cable, robots
+  working / waiting / paused, last error, crash reports. Green = all fine; amber =
+  something to look at (low disk or RAM, high load, weak internet, a crash in the
+  last hour, robots suspended, late beat); red = no beat for 10 minutes. Filter by
+  light, version, or type an agency / PC / employee. Click a PC for its commands:
+  **Restart Adal Keep**, **Cancel all robot runs**, **Collect logs** (passwords,
+  keys, passport and phone numbers hidden; opens here), **Run a self-check**,
+  **Update now**, **Suspend / Resume robots** (no new run starts there), **Support
+  note** (shows on the PC under Notifications, from "Adal support"). The PC does
+  it within ~20 s when it is on (a command waits up to 24 h); each answer is listed
+  under the PC. **Crash reports**: errors of the backend, the pages (React error
+  boundaries, e.g. #310) and the Go programs, grouped by message, with counts per
+  agency and version.
+  - Each command is signed with Adal's tower key `~/.adal-keep/tower-signing.pem`
+    (Ed25519; never commit it, never make a new one: its public half is in every PC,
+    `adal-keep-backend/src/services/tower.js`). A PC runs only a command signed by
+    it, for its own account, before it expires, once. Nothing new in Supabase: the
+    PC's own `keep_meta` rows `/_tower/beat|cmds|acks|flag` and the private `keep` bucket.
+  - Behind a flag: on only for the **Test agency** until you press **Open the tower
+    for an agency…** (a number, `all`, or `close N`). `ADAL_TOWER=0` on a PC turns it off there.
 - **Agents** — every foreign agent any agency works with, name and number, and
   every CV template. Drag one onto an agency (or click it, then the agency): it
   goes to that PC with its CV templates, without the header pictures. **Agents N of …**

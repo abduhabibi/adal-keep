@@ -71,6 +71,8 @@ export function noteError(where, message) {
   errors.push({ at: new Date().toISOString(), line, times: 1 })
   if (errors.length > 40) errors.shift()
 }
+/** The last few error lines (services/tower.js: the beat's "last error"). */
+export const recentErrors = (n = 5) => errors.slice(-n)
 const origError = console.error.bind(console)
 console.error = (...a) => {
   try { noteError('', a.map(x => (x instanceof Error ? x.message : typeof x === 'string' ? x : JSON.stringify(x))).join(' ')) } catch {}

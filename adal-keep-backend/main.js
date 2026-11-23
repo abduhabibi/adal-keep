@@ -215,6 +215,7 @@ app.use('/api', automationsRouter)
 app.use('/api', verificationRouter)
 app.use('/api', newProfileRouter)
 app.use('/api', runHistoryRouter)   // what each robot did, 30 days
+app.use('/api', (await import('./src/routes/tower.js')).default)   // crash reports from the pages and Go programs (Admin → Fleet)
 app.use('/api', cropReviewsRouter)   // crops a person checks before they go into her boxes
 app.use('/api', chatRouter)
 app.use('/api', trashRouter)
@@ -1298,6 +1299,8 @@ initSystem().then(() => {
     // backups, no discovery, no updates (checking a copy of an agency on another PC).
     if (process.env.ADAL_ISOLATED === '1') { console.log('🔒 Isolated: no background work'); return }
     startUpdateWatcher(app.locals.db) // a new version installs by itself when no run is working
+    // Every PC: heartbeat, Adal's signed commands, crash reports (Admin → Fleet; behind a flag).
+    import('./src/services/tower.js').then(async t => t.startTower(app.locals.db, { installedVersion: (await import('./src/services/cloudSync.js')).installedVersion })).catch(e => console.warn('[tower]', e.message))
     import('./src/services/screenClip.js').then(c => c.startClipWatcher(PORT)).catch(e => console.warn('[clip]', e.message)) // double C crops the screen anywhere on this PC
     // New selections on Musaned, every hour, on ONE PC of the agency (the main PC picks the strongest).
     import('./src/services/selectionCheck.js').then(s => s.startSelectionCheck(app.locals.db)).catch(e => console.warn('[selection-check]', e.message))

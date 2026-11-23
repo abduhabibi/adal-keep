@@ -19,6 +19,7 @@ var (
 )
 
 func main() {
+	defer reportPanic()
 	log.SetFlags(log.LstdFlags)
 	log.Printf("🚀 Adal Companion v3.0 — LAN auto-discovery + tray ingest")
 

@@ -27,6 +27,7 @@
  *
  * Cross-platform: pure Puppeteer/CDP — Windows / macOS / Linux identical.
  */
+import { noteCall } from './siteApi.js'
 import { newRunTab, outOfSight, sendAway } from './browser.js'
 
 export const PEERS = {
@@ -110,7 +111,10 @@ export async function setupTab(page, { runId, mute = true } = {}) {
       const allowImages = page.__adalAllowImages === true
       // Fonts too (2026-11-23): 100–400 KB a page on a slow line, and the robot reads text, not letters' shapes.
       if ((!allowImages && (type === 'image' || type === 'font')) || type === 'media' || TRACKERS.test(hostOf(req.url()))) req.abort().catch(() => {})
-      else req.continue().catch(() => {})
+      else {
+        if (type === 'xhr' || type === 'fetch') noteCall(req.method(), req.url())   // the portal's own data calls (siteApi.js)
+        req.continue().catch(() => {})
+      }
     })
   } catch (e) {
     console.log('[tabManager] request interception attach failed:', e.message)

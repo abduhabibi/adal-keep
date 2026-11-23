@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { choose, isWeak, score } from '../src/services/sharePower.js'
+import { choose, chooseBest, isWeak, score } from '../src/services/sharePower.js'
 
 const oldMain = { id: '', name: 'Office PC', cores: 2, mem_gb: 4, free_gb: 0.9, load: 70 }
 const strongMain = { id: '', name: 'Office PC', cores: 8, mem_gb: 16, free_gb: 8, load: 20 }
@@ -43,4 +43,16 @@ test('a Companion that does not say how strong it is (an older one) is never giv
 test('on battery counts less; the run it came from is not lost when its PC is gone', () => {
   assert.ok(score({ ...laptop, battery: true }) < score(laptop))
   assert.deepEqual(choose({ from: 'gone', pcs: [oldMain, laptop] }), { to: 'gone', help: false })
+})
+
+test('never on a PC under 4 cores: a 2-core PC gives its run away even with its tab signed in; a 2-core PC is never given one', () => {
+  const desk = { id: 'D', name: 'Desk', cores: 8, mem_gb: 16, free_gb: 8, load: 10, net: { rtt_ms: 300, mbps: 4, ok: 0.9 } }
+  const main2 = { id: '', name: 'Main', cores: 2, mem_gb: 7, free_gb: 3, load: 20, net: { rtt_ms: 300, mbps: 4, ok: 0.9 } }
+  const c = chooseBest({ from: '', pcs: [main2, desk], tabs: { '': { signedIn: true } } })
+  assert.equal(c.to, 'D')
+  // A strong main PC with two small Companions: the Companions never get it.
+  const small = { id: 'S', name: 'Small', cores: 2, mem_gb: 16, free_gb: 12, load: 0 }
+  assert.equal(chooseBest({ from: '', pcs: [{ ...main2, cores: 4, load: 95 }, small] }).to, '')
+  // A 2-core PC alone (no other PC there): it still works itself.
+  assert.equal(chooseBest({ from: '', pcs: [main2] }).to, '')
 })

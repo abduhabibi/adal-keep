@@ -22,6 +22,7 @@ import path from 'path'
 import crypto from 'crypto'
 import { fileURLToPath } from 'url'
 import { lookup, remember, forget } from './robotCache.js'
+import { apiFirst, learnWhile, learned, unlearn } from './siteApi.js'
 
 const ORIGIN = 'https://tawtheeq.musaned.com.sa'
 const HR_POOL = `${ORIGIN}/hr-pool`
@@ -225,6 +226,81 @@ async function openHerPage(page, url) {
   return got
 }
 
+const API = 'https://api-tawtheeq.musaned.com.sa'
+const HR_SEARCH = 'api:musaned:hrpool-search'
+
+/** In Musaned's answer (any shape: a list, { content: [...] } …), the HR Pool id of exactly this passport. */
+export function idOfPassport(json, passport) {
+  const seen = new Set()
+  const walk = (v) => {
+    if (!v || typeof v !== 'object' || seen.has(v)) return null
+    seen.add(v)
+    if (!Array.isArray(v) && String(v.passportNumber || '').toUpperCase().replace(/\s+/g, '') === passport && (v.id ?? v.candidateId) != null) return v.id ?? v.candidateId
+    for (const x of Object.values(v)) { const r = walk(x); if (r != null) return r }
+    return null
+  }
+  return walk(json)
+}
+
+/**
+ * Her record through Musaned's own data calls, inside this signed-in tab:
+ * her HR Pool id (kept from before, or the search call learned from the
+ * page), then her details and both pictures — no page of hers opened.
+ * → { url, got } or null (then the pages are used, as before).
+ */
+// Musaned's sign-in headers for this tab, kept 5 minutes (the next girl needs no page for them).
+// (Taken from any call this tab makes to Musaned's data address, else from its list page.)
+function watchHeaders(page) {
+  if (page.__adalMusanedWatch) return
+  page.__adalMusanedWatch = true
+  page.on('request', (r) => {
+    try {
+      const h = r.headers()
+      if (r.url().startsWith(API) && h.authorization && h['app-organization']) page.__adalMusanedH = { H: Object.fromEntries(Object.entries(h).filter(([k]) => /^(authorization|app-|accept-language)/.test(k))), at: Date.now() }
+    } catch {}
+  })
+}
+async function headersOf(page, mc) {
+  const k = page.__adalMusanedH
+  if (k && Date.now() - k.at < 5 * 60000) return k.H
+  const H = await mc.apiHeadersOf(page)
+  if (H) page.__adalMusanedH = { H, at: Date.now() }
+  return H
+}
+
+async function herByApi(page, db, passport, key) {
+  const mc = await import('./musanedContracts.js')
+  let id = (await lookup(db, key))?.url?.split('/').pop() || null
+  if (!id) {
+    const q = await learned(db, HR_SEARCH, passport)
+    if (!q) return null   // not learned yet: the first search is clicked, and its call kept
+    const H = await headersOf(page, mc)
+    if (!H) return null
+    const r = await mc.apiGet(page, H, q)
+    if (r?.status === 401 || r?.status === 403) { page.__adalMusanedH = null; return null }
+    if (r?.status !== 200) { if (r?.status === 404 || r?.status === 400) await unlearn(db, HR_SEARCH); return null }
+    id = idOfPassport(r.json, passport)
+    if (id == null) return null   // not in the answer: the pages decide (and say "not found")
+    return herRecord(page, mc, H, db, key, passport, String(id))
+  }
+  const H = await headersOf(page, mc)
+  return H ? herRecord(page, mc, H, db, key, passport, String(id)) : null
+}
+
+async function herRecord(page, mc, H, db, key, passport, id) {
+  const det = await mc.apiGet(page, H, `/api/hrpool/${id}`)
+  if (det?.status === 401 || det?.status === 403) { page.__adalMusanedH = null; return null }
+  if (det?.status !== 200 || String(det.json?.passportNumber || '').toUpperCase() !== passport) { await forget(db, key); return null }
+  const pic = async (kind) => {
+    const r = await mc.apiGet(page, H, `/api/hrpool/${id}/photo/${kind}?size=ORIGINAL`, { binary: true }).catch(() => null)
+    return r?.status === 200 && r.b64 ? { buf: Buffer.from(r.b64, 'base64'), type: r.type || '' } : null
+  }
+  const [passportPic, personal] = await Promise.all([pic('PASSPORT'), pic('PERSONAL')])
+  const url = `${ORIGIN}/hr-pool/candidates/${id}`
+  await remember(db, key, { url })
+  return { url, got: { details: det.json, passport: passportPic, personal } }
+}
+
 /**
  * Her Musaned page and what it showed → { url, got }, url null when she is not
  * in the HR Pool. Seen before (robotCache.js): straight to her page, no search;
@@ -234,6 +310,13 @@ async function openHerPage(page, url) {
 export async function herMusanedPage(page, db, passport, log = () => {}) {
   const key = `musaned_hr:${passport}`
   const hers = (g) => !!g?.details && String(g.details.passportNumber || '').toUpperCase() === passport
+  // API-first (siteApi.js): Musaned's own data calls in this signed-in tab; any doubt → the pages, as before.
+  watchHeaders(page)
+  if (apiFirst()) {
+    const t = Date.now()
+    const r = await herByApi(page, db, passport, key).catch((e) => { log(`ℹ️ Musaned data calls: ${e.message} — using the pages`); return null })
+    if (r && hers(r.got)) { log(`⚡ her Musaned record read through Musaned's own data calls (${((Date.now() - t) / 1000).toFixed(1)} s)`); return r }
+  }
   const kept = (await lookup(db, key))?.url || null
   if (kept) {
     const got = await openHerPage(page, kept)
@@ -241,7 +324,7 @@ export async function herMusanedPage(page, db, passport, log = () => {}) {
     log('ℹ️ her kept Musaned page did not show her: searching again')
     await forget(db, key)
   }
-  const url = await findHerPage(page, passport, log)
+  const url = await learnWhile(page, db, { key: HR_SEARCH, base: API, needle: passport }, () => findHerPage(page, passport, log))
   if (!url) return { url: null, got: null }
   const got = await openHerPage(page, url)
   if (hers(got)) await remember(db, key, { url })

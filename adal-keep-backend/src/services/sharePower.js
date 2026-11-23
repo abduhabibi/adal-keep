@@ -93,6 +93,8 @@ export async function runningOn(db) {
 
 const label = (p) => p ? `${p.name || 'a PC'} (${Math.round(p.mem_gb || 0)} GB, ${p.cores || 1} cores)` : 'a PC'
 
+export const MIN_HELPER_CORES = 4
+
 // ── the PC that finishes first (asked on 2026-11-21) ────────────────────────
 // "When any PC asks for a robot run, Adal Keep picks the PC that will finish
 // fastest": its cores and how busy they are now, its free memory, its internet
@@ -147,18 +149,24 @@ export function chooseBest({ from = '', pcs = [], running = {}, tabs = {}, mainA
   const origin = pcs.find(p => p.id === from)
   if (!origin) return { to: from, help: false, secs: {}, why: '' }
   const known = (p) => p.id === '' || (p.mem_gb != null && p.lan !== false)
+  // Never given to a PC under 4 cores (2026-11-23: "never on a PC under 4 cores"); its own runs stay
+  // there only when no other PC of the office can take them.
+  const able = (p) => (Number(p.cores) || 1) >= MIN_HELPER_CORES
   const secs = {}
   for (const p of pcs) {
-    if (p.id !== from && (!known(p) || (p.id === '' && !mainAllowed))) continue
+    if (p.id !== from && (!known(p) || !able(p) || (p.id === '' && !mainAllowed))) continue
     secs[p.id] = estimate(p, { running: running[p.id] || 0, tab: tabs[p.id] || null, remote: p.id !== '' })
   }
   const mine = secs[from]
-  const best = Object.entries(secs).sort((a, b) => a[1] - b[1] || a[0].localeCompare(b[0]))[0]
+  const ranked = Object.entries(secs).sort((a, b) => a[1] - b[1] || a[0].localeCompare(b[0]))
+  // Under 4 cores: the fastest of the other (able) PCs, even when this one's estimate is lower.
+  const best = (!able(origin) && ranked.find(([id]) => id !== from && !isWeak(pcs.find(p => p.id === id), running[id] || 0))) || ranked[0]
   // A weak PC (4 cores or fewer) does not carry a whole website when another PC of the office can do it
   // better, however small the gain (2026-11-22: a 2-core main PC went to 100% under its own robots).
   const weakOrigin = (Number(origin.cores) || 1) <= 4
   const target = best && pcs.find(p => p.id === best[0])
-  const prefer = weakOrigin && !!best && best[0] !== from && best[1] < mine && !isWeak(target, running[best[0]] || 0)
+  // A PC under 4 cores gives its run to the strongest able PC however the estimate looks; 4 cores gives it when that is faster.
+  const prefer = weakOrigin && !!best && best[0] !== from && !isWeak(target, running[best[0]] || 0) && (best[1] < mine || !able(origin))
   if (!best || best[0] === from || !((best[1] <= mine * 0.85 && mine - best[1] >= 15) || prefer)) return { to: from, help: false, secs, why: '' }
   const to = best[0], b = pcs.find(p => p.id === to)
   const why = weakOrigin && !(best[1] <= mine * 0.85 && mine - best[1] >= 15) ? 'this PC is weak (4 cores or fewer): a stronger PC of the office does it'

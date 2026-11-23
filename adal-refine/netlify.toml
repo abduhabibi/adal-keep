@@ -1,0 +1,9 @@
+# Adal Refine: only functions, no website. Deploy from this folder (see README.md).
+[build]
+  publish = "public"
+  functions = "netlify/functions"
+
+[functions]
+  node_bundler = "esbuild"
+  external_node_modules = ["sharp"]
+  included_files = ["node_modules/sharp/**", "node_modules/@img/**"]

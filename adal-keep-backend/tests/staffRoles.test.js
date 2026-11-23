@@ -175,23 +175,36 @@ test('signing in asks for the password; a device still signed in is not asked', 
   await o.close()
 })
 
-test('signed out: looking only; a new agency with no admin yet may do everything', async () => {
+test('signed out: works as the PC\'s default employee; staff only after signing in; a new agency may do everything', async () => {
   const o = await office()
-  for (const [m, p] of [['POST', '/profiles'], ['PUT', '/profiles/1'], ['POST', '/profiles/1/fields/2/upload'], ['POST', '/employees']]) {
-    const r = await o.call(m, p, { body: { name: 'X', username: 'x', password: 'abcd' } })
-    assert.equal(r.status, 403, `${m} ${p}`)
-    assert.equal(r.data.signed_out, true)
+  // Nobody signed in: the first Admin (Abebe) is the default — robots and normal work go on.
+  for (const [m, p] of [['POST', '/profiles'], ['PUT', '/profiles/1'], ['POST', '/profiles/1/fields/2/upload'], ['POST', '/profiles/1/automations/musaned_add_candidate/start'], ['POST', '/settings']]) {
+    assert.equal((await o.call(m, p, { body: {} })).status, 200, `${m} ${p}`)
   }
+  assert.equal((await o.call('POST', '/employees', { body: { name: 'X', username: 'x', password: 'abcd' } })).data.forbidden, 'manage_staff')
   assert.equal((await o.call('GET', '/employees')).status, 200)
-  assert.equal((await o.call('POST', '/employees/device-login', { body: { employeeId: 2, deviceSerial: 'pc-9' } })).status, 200)
-  assert.equal((await o.call('POST', '/employees/device-logout', { body: { deviceSerial: 'pc-9' } })).status, 200)
+  // Sara signs in on this PC, then out: she stays the default, with her role.
+  await o.db('users').where({ name: 'Sara' }).update({ role_id: await o.roleId('data_entry') })
+  assert.equal((await o.call('POST', '/employees/device-login', { pc: true, body: { employeeId: 2, deviceSerial: 'pc-9' } })).status, 200)
+  await setPcStaff(o.db, null)
+  assert.equal((await o.call('PUT', '/profiles/1', { body: {} })).status, 200)
+  assert.equal((await o.call('POST', '/profiles/1/automations/x/start')).data.forbidden, 'run_robots')
   const me = (await o.call('GET', '/staff-roles/me')).data
-  assert.ok(Object.values(me.perms).every(v => v === false))
-  // No employee who can manage staff (a new agency): everything, to make the first one.
+  assert.equal(me.perms.run_robots, false)
+  // No employee at all: looking only.
+  await o.db('settings').del(); await o.db('users').del()
+  assert.equal((await o.call('PUT', '/profiles/1')).status, 200)   // (no employee can manage staff: a new agency)
+  await o.close()
+})
+
+test('signed out: the first Admin is the default when no one ever signed in on this PC', async () => {
+  const o = await office()
   const entry = await o.roleId('data_entry')
   await o.db('users').update({ role_id: entry })
-  assert.equal((await o.call('POST', '/employees', { body: { name: 'Admin', username: 'boss', password: 'boss1234' } })).status, 201)
-  assert.equal((await o.call('POST', '/profiles')).status, 403)   // now there is an admin
+  await o.db('users').insert({ name: 'Boss', username: 'boss', role: 'employee', company_id: 1 })   // no role: Admin
+  // The first Admin is Boss: works as Boss.
+  assert.equal((await o.call('POST', '/profiles')).status, 200)
+  assert.equal((await o.call('DELETE', '/profiles/1')).status, 200)
   await o.close()
 })
 
@@ -216,9 +229,9 @@ test('the admin sets a password, can read it and change it; she changes her own'
 test('phones and the online copy work as whoever is signed in on the PC', async () => {
   const o = await office()
   await o.db('users').where({ name: 'Sara' }).update({ role_id: await o.roleId('data_entry') })
-  // No one signed in on the PC: the phone only looks.
-  assert.equal((await o.call('POST', '/profiles', { phone: true })).data.signed_out, true)
-  assert.equal((await o.call('POST', '/profiles', { relayed: true })).status, 403)
+  // No one signed in on the PC: the phone works as the PC's default employee (the first Admin).
+  assert.equal((await o.call('POST', '/profiles', { phone: true })).status, 200)
+  assert.equal((await o.call('POST', '/profiles', { relayed: true })).status, 200)
   await setPcStaff(o.db, 2)   // Sara signs in on the PC
   assert.equal((await o.call('POST', '/profiles', { phone: true })).status, 200)
   assert.equal((await o.call('DELETE', '/profiles/1', { phone: true })).data.forbidden, 'delete_profiles')

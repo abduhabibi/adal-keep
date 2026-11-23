@@ -23,6 +23,10 @@ export default function BrowserView({ runId, title = '', onClose }) {
   const [address, setAddress] = useState('')
   const [editing, setEditing] = useState(false)
   const [gone, setGone] = useState(null)
+  // Until the first picture: "opening…"; no picture and no answer for a while: say so (never a grey page).
+  const [seen, setSeen] = useState(false)
+  const [slow, setSlow] = useState(null)
+  const [tries, setTries] = useState(0)
   const box = useRef(null)
   const img = useRef(null)
   const queue = useRef([])
@@ -33,8 +37,10 @@ export default function BrowserView({ runId, title = '', onClose }) {
     let alive = true
     const start = () => alive && setSrc(`${api.defaults.baseURL}/automations/${runId}/stream?t=${Date.now()}`)
     start()
-    return () => { alive = false }
-  }, [runId])
+    setSeen(false); setSlow(null)
+    const t = setTimeout(() => { if (alive) setSlow(s => s || 'The robot browser does not answer just now.') }, 12000)
+    return () => { alive = false; clearTimeout(t) }
+  }, [runId, tries])
   const dropped = () => { if (!gone) setTimeout(() => setSrc(`${api.defaults.baseURL}/automations/${runId}/stream?t=${Date.now()}`), 1000) }
 
   // The address, and whether the tab is still there.
@@ -44,9 +50,11 @@ export default function BrowserView({ runId, title = '', onClose }) {
       try {
         const r = await api.get(`/automations/${runId}/tab`, { timeout: 8000 })
         if (!alive) return
-        setMeta(r.data); setGone(null)
+        setMeta(r.data); setGone(null); setSlow(null)
       } catch (e) {
-        if (alive && e.response?.status === 404) setGone('This browser is closed. When the robot opens it again it shows here.')
+        if (!alive) {}
+        else if (e.response?.status === 404) setGone('No robot browser is running for this now. When a robot opens it again it shows here.')
+        else setSlow(e.response?.data?.error || 'The robot browser does not answer just now.')
       }
       if (alive) timer = setTimeout(step, document.hidden ? 5000 : 1500)
     }
@@ -134,11 +142,24 @@ export default function BrowserView({ runId, title = '', onClose }) {
       <div ref={box} tabIndex={0} onKeyDown={keyboard} onPaste={paste} onPointerDown={() => box.current?.focus()}
         className="relative min-h-0 flex-1 overflow-hidden bg-slate-100 outline-none dark:bg-slate-900" style={{ touchAction: 'none' }}>
         {src && !gone && (
-          <img ref={img} src={src} alt="" draggable={false} onError={dropped}
+          <img ref={img} src={src} alt="" draggable={false} onError={dropped} onLoad={() => { setSeen(true); setSlow(null) }}
             onPointerDown={mouse('down')} onPointerMove={mouse('move')} onPointerUp={mouse('up')} onContextMenu={(e) => e.preventDefault()}
             className="absolute inset-0 h-full w-full cursor-default select-none object-contain" />
         )}
-        {gone && <p className="absolute inset-0 grid place-items-center p-6 text-center text-sm text-slate-500">{gone}</p>}
+        {gone && <p data-testid="browser-gone" className="absolute inset-0 grid place-items-center p-6 text-center text-sm text-slate-500">{gone}</p>}
+        {!gone && !seen && (
+          <div data-testid="browser-waiting" className="pointer-events-none absolute inset-0 grid place-items-center p-6 text-center text-sm text-slate-500">
+            {slow ? (
+              <div className="pointer-events-auto space-y-3">
+                <p>{slow}</p>
+                <div className="flex justify-center gap-2">
+                  <button type="button" onClick={() => setTries(n => n + 1)} className="rounded-lg bg-slate-900 px-3 py-1.5 font-semibold text-white dark:bg-white dark:text-slate-900">↻ Try again</button>
+                  <button type="button" onClick={onClose} className="rounded-lg border border-slate-300 px-3 py-1.5 font-semibold dark:border-slate-600">Close</button>
+                </div>
+              </div>
+            ) : <p>Opening the robot's browser…</p>}
+          </div>
+        )}
       </div>
     </div>
   )

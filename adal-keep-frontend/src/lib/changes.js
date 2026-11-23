@@ -68,14 +68,20 @@ export async function startChanges() {
     return
   }
   if (!('EventSource' in window)) return
+  const { appStream } = await import('./appStream.js')
+  const shared = appStream()
   const open = () => {
-    const es = new EventSource('/api/changes')
-    es.onmessage = (e) => { try { tellChanged(JSON.parse(e.data).tables) } catch {} }
+    // On the main PC itself the window's one stream carries the changes (lib/appStream.js).
+    const es = shared || new EventSource('/api/changes')
+    const got = (e) => { try { tellChanged(JSON.parse(e.data).tables) } catch {} }
+    if (shared) es.addEventListener('changes', got)
+    else es.onmessage = got
     // The PC restarted or the line dropped: the browser reconnects by itself;
     // when it is back, everything is refreshed once (changes may have been missed).
     let wasDown = false
-    es.onerror = () => { wasDown = true; window.__adalLiveUp = false }
-    es.onopen = () => { window.__adalLiveUp = true; if (wasDown) { wasDown = false; tellChanged(['*']) } }
+    es.addEventListener('error', () => { wasDown = true; window.__adalLiveUp = false })
+    es.addEventListener('open', () => { window.__adalLiveUp = true; if (wasDown) { wasDown = false; tellChanged(['*']) } })
+    if (es.readyState === 1) window.__adalLiveUp = true
   }
   open()
 }

@@ -27,6 +27,36 @@ const FIELDS = ['status', 'visa_stage', 'visa_applied_at', 'musaned_stage', 'cho
 
 const undos = new Map()         // token → { at, snap }
 const KEEP_MS = 10 * 60000
+// An older Undo (its toast still showing) must not put back a state from before a
+// later tick or untick of the same thing (asked on 2026-11-23): a later change still
+// undoable that touched the same runs or the same fields of her profile wins.
+let seq = 0
+function keepUndo(snap, changed = []) {
+  const undo = randomBytes(9).toString('base64url')
+  undos.set(undo, { at: Date.now(), seq: ++seq, snap, changed: new Set(changed) })
+  for (const [k, v] of undos) if (Date.now() - v.at > KEEP_MS) undos.delete(k)
+  return undo
+}
+function newerOverlap(u) {
+  const runs = new Set(u.snap.runs.map(r => r.id)), ids = new Set(u.snap.profileIds.map(Number))
+  for (const v of undos.values()) {
+    if (v.seq <= u.seq || !v.snap.profileIds.some(id => ids.has(Number(id)))) continue
+    if (v.snap.runs.some(r => runs.has(r.id)) || [...v.changed].some(k => u.changed.has(k))) return true
+  }
+  return false
+}
+// One change per profile at a time: a double click, the pop-up and the status track
+// at once, never interleave their reads and writes.
+const chains = new Map()
+export function oneAtATime(profileId, fn) {
+  const key = Number(profileId) || 0
+  const prev = chains.get(key) || Promise.resolve()
+  const run = prev.catch(() => {}).then(fn)
+  const tail = run.catch(() => {})
+  chains.set(key, tail)
+  tail.then(() => { if (chains.get(key) === tail) chains.delete(key) })
+  return run
+}
 
 /** The profile fields a done step sets (her stage is read from them). */
 function effects(workflowId, step, p, now) {
@@ -65,7 +95,12 @@ async function startsNext(db, workflowId, profileId) {
  * workflowId (a step's tick), step (a journey step: 'wafid', 'epro', 'visa' …).
  * Returns { ok, message, undo, profile_id, workflow_id }.
  */
-export async function markStepDone(db, { profileId = null, workflowId = null, runId = null, step = null, note = 'done — marked by a person' } = {}) {
+export async function markStepDone(db, opts = {}) {
+  let pid = opts.profileId
+  if (opts.runId && !pid) pid = (await db('automation_queue').where('id', Number(opts.runId)).first('profile_id'))?.profile_id
+  return oneAtATime(pid, () => markStepDoneNow(db, opts))
+}
+async function markStepDoneNow(db, { profileId = null, workflowId = null, runId = null, step = null, note = 'done — marked by a person' } = {}) {
   const now = new Date().toISOString()
   let run = null
   if (runId) {
@@ -96,6 +131,9 @@ export async function markStepDone(db, { profileId = null, workflowId = null, ru
         for (const m of members) { snap.runs.push({ id: m.id, before: { status: m.status, pause_reason: m.pause_reason, finished_at: m.finished_at } }); snap.profileIds.push(m.profile_id) }
         if (members.length) await (await import('./insuranceCertificate.js')).settleMembers(db, run.id, 'done')
       }
+    } else if ((await db('automation_queue').where({ profile_id: profileId, workflow_id: workflowId }).orderBy('id', 'desc').first('id', 'status'))?.status === 'done') {
+      // Already done (a second click): no second "Done by hand" row — one untick must take it back.
+      run = null
     } else {
       const [id] = await db('automation_queue').insert({
         profile_id: profileId, workflow_id: workflowId, status: 'done', pause_reason: 'Done by hand', current_step: 0,
@@ -110,12 +148,11 @@ export async function markStepDone(db, { profileId = null, workflowId = null, ru
   snap.profiles.push({ id: profileId, before: Object.fromEntries(FIELDS.map(k => [k, p[k] ?? null])) })
   if (Object.keys(set).length) await db('profiles').where('id', profileId).update({ ...set, updated_at: now })
   if (run) await noteLine(db, profileId, `${workflowId} (run #${run.id}) ${note}`)
+  else if (workflowId) { /* already done: nothing new to note */ }
   else await noteLine(db, profileId, `${step}: ${note}`)
-  const next = workflowId ? await startsNext(db, workflowId, profileId) : ''
+  const next = workflowId && snap.runs.length ? await startsNext(db, workflowId, profileId) : ''
 
-  const undo = randomBytes(9).toString('base64url')
-  undos.set(undo, { at: Date.now(), snap })
-  for (const [k, v] of undos) if (Date.now() - v.at > KEEP_MS) undos.delete(k)
+  const undo = keepUndo(snap, Object.keys(set))
   return { ok: true, undo, profile_id: profileId, workflow_id: workflowId, run_id: run?.id || null, message: `Marked done.${next}` }
 }
 
@@ -135,7 +172,10 @@ export const UNDONE_STEPS = [...LINE, 'tasheer', 'police']
  * Only the fields her stage is read from change (the old values go in her notes and the
  * undo token); documents, photos, numbers and every run's log stay. By: the employee's name.
  */
-export async function markStepUndone(db, { profileId, step, employee = null } = {}) {
+export async function markStepUndone(db, opts = {}) {
+  return oneAtATime(opts.profileId, () => markStepUndoneNow(db, opts))
+}
+async function markStepUndoneNow(db, { profileId, step, employee = null } = {}) {
   if (step === 'cv') throw Object.assign(new Error('Her CV is a document: delete it from her Generated CVs if it is wrong'), { status: 400 })
   if (!UNDONE_STEPS.includes(step)) throw Object.assign(new Error(`"${step}" cannot be unchecked here`), { status: 400 })
   profileId = Number(profileId)
@@ -169,9 +209,7 @@ export async function markStepUndone(db, { profileId, step, employee = null } = 
   if (Object.keys(set).length) await db('profiles').where('id', profileId).update({ ...set, updated_at: now })
   const who = employee?.name || 'someone'
   await noteLine(db, profileId, `${step}: unchecked by ${who} — back at this stage; later steps open again${had ? ` (was ${had})` : ''}`)
-  const undo = randomBytes(9).toString('base64url')
-  undos.set(undo, { at: Date.now(), snap })
-  for (const [k, v] of undos) if (Date.now() - v.at > KEEP_MS) undos.delete(k)
+  const undo = keepUndo(snap, Object.keys(set))
   return { ok: true, undo, profile_id: profileId, step, message: 'Unchecked — she is back at this step. Her documents and data are kept.' }
 }
 
@@ -179,7 +217,13 @@ export async function markStepUndone(db, { profileId, step, employee = null } = 
 export async function undoMarkDone(db, token) {
   const u = undos.get(String(token || ''))
   if (!u) throw Object.assign(new Error('Too late to undo — tick it back by hand'), { status: 410 })
-  undos.delete(String(token))
+  return oneAtATime(u.snap.profileIds[0], () => undoNow(db, String(token)))
+}
+async function undoNow(db, token) {
+  const u = undos.get(token)
+  if (!u) throw Object.assign(new Error('Already undone'), { status: 410 })
+  if (newerOverlap(u)) throw Object.assign(new Error('She was changed again since — tick or untick it by hand'), { status: 409 })
+  undos.delete(token)
   const now = new Date().toISOString()
   const { snap } = u
   for (const r of snap.runs) {
@@ -192,6 +236,44 @@ export async function undoMarkDone(db, token) {
     .update({ status: 'cancelled', pause_reason: 'Mark as done undone', finished_at: now, updated_at: now })
   for (const id of new Set(snap.profileIds)) await noteLine(db, id, '"mark as done" undone')
   return { ok: true, message: 'Undone — back where she was' }
+}
+
+// The fields a tick by hand set, taken back with it (only when they still say what the tick wrote).
+const UNTICK = {
+  wafid_book: (p) => p.status === 'medical_applied' ? { status: null } : {},
+  wafid_check: (p) => p.status === 'medical_fit' ? { status: null } : {},
+  mofa_visa: (p) => p.visa_stage === 'Visa applied' ? { visa_stage: null, visa_applied_at: null } : {},
+  mofa_pay: (p) => p.visa_stage === 'Visa paid' ? { visa_stage: 'Visa applied' } : {},
+  musaned_check_chosen: (p) => p.chosen_at ? { chosen_at: null } : {},
+}
+
+/**
+ * A tick made by hand taken back (the checkbox on a step's card): every "Done by
+ * hand" row of that step is cancelled (a double click made two), and what the
+ * tick set on her profile goes back. With an Undo token like the rest.
+ */
+export async function untickByHand(db, { profileId, workflowId } = {}) {
+  return oneAtATime(profileId, async () => {
+    profileId = Number(profileId)
+    const p = await db('profiles').where('id', profileId).first()
+    if (!p) throw Object.assign(new Error('Profile not found'), { status: 404 })
+    const latest = await db('automation_queue').where({ profile_id: profileId, workflow_id: workflowId }).orderBy('id', 'desc').first()
+    if (!latest || latest.status !== 'done' || latest.pause_reason !== 'Done by hand') {
+      if (latest && latest.status !== 'done') return { ok: true, profile_id: profileId, message: 'Not done any more' }
+      throw Object.assign(new Error('Only a step ticked by hand can be unticked'), { status: 409 })
+    }
+    const now = new Date().toISOString()
+    const snap = { profiles: [], runs: [], maxRun: Number((await db('automation_queue').max('id as m').first())?.m || 0), profileIds: [profileId] }
+    for (const r of await db('automation_queue').where({ profile_id: profileId, workflow_id: workflowId, status: 'done', pause_reason: 'Done by hand' }).select('id', 'status', 'pause_reason', 'finished_at')) {
+      snap.runs.push({ id: r.id, before: { status: r.status, pause_reason: r.pause_reason, finished_at: r.finished_at } })
+      await db('automation_queue').where('id', r.id).update({ status: 'cancelled', pause_reason: 'Tick taken back', updated_at: now })
+    }
+    const set = UNTICK[workflowId]?.(p) || {}
+    snap.profiles.push({ id: profileId, before: Object.fromEntries(FIELDS.map(k => [k, p[k] ?? null])) })
+    if (Object.keys(set).length) await db('profiles').where('id', profileId).update({ ...set, updated_at: now })
+    await noteLine(db, profileId, `${workflowId}: tick taken back`)
+    return { ok: true, undo: keepUndo(snap, Object.keys(set)), profile_id: profileId, message: 'Not done any more' }
+  })
 }
 
 async function noteLine(db, profileId, what) {

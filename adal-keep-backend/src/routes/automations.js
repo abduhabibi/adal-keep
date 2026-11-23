@@ -1028,11 +1028,22 @@ export async function runTab(db, runId) {
   if (page && !(await tabAnswers(page))) { dropTab(run.id); page = await look(); if (page && !(await tabAnswers(page))) return null }
   return page
 }
-const liveTab = (req) => runTab(req.app.locals.db, req.params.id)
+// A browser that does not answer (a tab that never attached, a PC busy starting it) must
+// not leave the live view grey for ever (asked on 2026-11-23): after 6 s it says so.
+const SLOW = Symbol('slow')
+const liveTab = async (req) => {
+  let t
+  const page = await Promise.race([runTab(req.app.locals.db, req.params.id).catch(() => null), new Promise(ok => { t = setTimeout(() => ok(SLOW), 6000) })])
+  clearTimeout(t)
+  return page
+}
+const noTab = (res, page) => page === SLOW
+  ? res.status(504).json({ error: 'The robot browser does not answer just now.', slow: true })
+  : res.status(404).json({ error: 'No robot browser is open for this.' })
 
 router.get('/automations/:id/screen', async (req, res) => {
   const page = await liveTab(req)
-  if (!page) return res.status(404).json({ error: 'This run has no open tab.' })
+  if (!page || page === SLOW) return noTab(res, page)
   try {
     const shot = await Promise.race([
       page.screenshot({ type: 'jpeg', quality: 60, captureBeyondViewport: false }),
@@ -1048,7 +1059,7 @@ router.get('/automations/:id/screen', async (req, res) => {
 // skips frames instead of falling behind.
 router.get('/automations/:id/stream', async (req, res) => {
   const page = await liveTab(req)
-  if (!page) return res.status(404).json({ error: 'This run has no open tab.' })
+  if (!page || page === SLOW) return noTab(res, page)
   const { watchFrames } = await import('../services/liveFrames.js')
   let stop = () => {}
   let closed = false
@@ -1069,7 +1080,7 @@ router.get('/automations/:id/stream', async (req, res) => {
 // What goes with the pictures: the address, and whether the page asks for a code.
 router.get('/automations/:id/tab', async (req, res) => {
   const page = await liveTab(req)
-  if (!page) return res.status(404).json({ error: 'This run has no open tab.' })
+  if (!page || page === SLOW) return noTab(res, page)
   const slow = (p, d) => Promise.race([p, new Promise(r => setTimeout(() => r(d), 2500))])
   const size = await slow(page.evaluate(() => [innerWidth, innerHeight]).catch(() => null), null)
   res.set('Cache-Control', 'no-store').json({ url: page.url(), title: await slow(page.title().catch(() => ''), ''), codeBox: await slow(codeBoxUp(page), false), size })
@@ -1207,7 +1218,7 @@ export async function personInput(db, runId, page, b) {
 const mirrorShots = new Map()
 router.get('/automations/:id/mirror', async (req, res) => {
   const page = await liveTab(req)
-  if (!page) return res.status(404).json({ error: 'This run has no open tab.' })
+  if (!page || page === SLOW) return noTab(res, page)
   try {
     const { mirrorOf } = await import('../services/pageMirror.js')
     if (!mirrorShots.has(req.params.id)) mirrorShots.set(req.params.id, new Map())
@@ -1218,7 +1229,7 @@ router.get('/automations/:id/mirror', async (req, res) => {
 
 router.post('/automations/:id/input', async (req, res) => {
   const page = await liveTab(req)
-  if (!page) return res.status(404).json({ error: 'This run has no open tab.' })
+  if (!page || page === SLOW) return noTab(res, page)
   const b = req.body || {}
   // A burst of mouse moves, wheel turns and keys from the browser view: done in order, answered at once.
   if (Array.isArray(b.batch)) {
@@ -1384,11 +1395,8 @@ router.post('/profiles/:id/automations/:workflowId/mark-done', async (req, res) 
     const profileId = Number(req.params.id)
     const { workflowId } = req.params
     if (req.body?.done === false) {
-      const now = new Date().toISOString()
-      const last = await db('automation_queue').where({ profile_id: profileId, workflow_id: workflowId, status: 'done', pause_reason: 'Done by hand' }).orderBy('id', 'desc').first()
-      if (!last) return res.status(409).json({ error: 'Only a step ticked by hand can be unticked' })
-      await db('automation_queue').where('id', last.id).update({ status: 'cancelled', pause_reason: 'Tick taken back', updated_at: now })
-      return res.json({ ok: true, message: 'Not done any more' })
+      const { untickByHand } = await import('../services/markDone.js')
+      return res.json(await untickByHand(db, { profileId, workflowId }))
     }
     const { markStepDone } = await import('../services/markDone.js')
     res.json(await markStepDone(db, { profileId, workflowId, note: 'done — ticked by hand' }))

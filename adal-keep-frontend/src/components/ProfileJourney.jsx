@@ -303,8 +303,10 @@ export default function ProfileJourney({ profileId }) {
   const [open, setOpen] = useState(() => { try { return localStorage.getItem('adal-journey-open') === '1' } catch { return false } })
   const [details, setDetails] = useState(false)
   useEffect(() => {
-    let alive = true
-    const load = () => api.get(`/profiles/${profileId}/journey`).then(r => alive && setJ(r.data)).catch(() => {})
+    let alive = true, asked = 0
+    // Only the newest answer counts: an older one arriving late (the 15 s look started before a
+    // tick) must not put the step back as it was.
+    const load = () => { const n = ++asked; api.get(`/profiles/${profileId}/journey`).then(r => alive && n === asked && setJ(r.data)).catch(() => {}) }
     load()
     const t = setInterval(load, 15000)
     // A step marked done (here, in a pop-up or on another PC): at once.

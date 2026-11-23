@@ -2,7 +2,7 @@ import express from 'express'
 import bcrypt from 'bcryptjs'
 import { signToken } from '../services/tenancy.js'
 import { setActiveEmployee, clearActiveEmployee } from '../services/activeEmployee.js'
-import { ensureStaffRoles, listRoles, roleOf, staffToken, setPcStaff, permsFor } from '../services/staffRoles.js'
+import { ensureStaffRoles, listRoles, roleOf, staffToken, setPcStaff, setPcDefaultStaff, permsFor } from '../services/staffRoles.js'
 import { seal, open as openSealed } from '../services/accountVault.js'
 
 // Signed in or out in this PC's own window: the phones work as that employee.
@@ -141,7 +141,7 @@ router.post('/device-login', async (req, res) => {
       updated_at: new Date().toISOString(),
     })
     await setActiveEmployee(db, user)
-    if (await onPC(req)) await setPcStaff(db, user.id)
+    if (await onPC(req)) { await setPcStaff(db, user.id); await setPcDefaultStaff(db, user.id) }
     setTokenCookie(
       res,
       signToken({
@@ -178,7 +178,7 @@ router.post('/device-resume', async (req, res) => {
     const user = await db('users').where({ device_serial: deviceSerial }).first()
     if (!user) return res.json({ user: null })
     await setActiveEmployee(db, user)
-    if (await onPC(req)) await setPcStaff(db, user.id)
+    if (await onPC(req)) { await setPcStaff(db, user.id); await setPcDefaultStaff(db, user.id) }
     setTokenCookie(
       res,
       signToken({

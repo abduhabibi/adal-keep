@@ -7,7 +7,9 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import api from '../services/api'
+import toast from 'react-hot-toast'
 import FieldCard from './fields/FieldCard'
+import { missingNow } from '../lib/missingNow'
 
 const COUNTRIES = ['Kuwait', 'Saudi Arabia', 'Jordan', 'UAE', 'Qatar', 'Bahrain', 'Oman', 'Lebanon']
 // A missing thing's name (as the robots say it) → what to show for it.
@@ -60,6 +62,7 @@ export default function NeedsFill({ profileId, workflowId = null, cv = false, fi
   const [values, setValues] = useState({})
   const [brokers, setBrokers] = useState([])
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState('')
   const [filled, setFilled] = useState(false)   // the person filled something: the step goes on by itself
 
   const check = async () => {
@@ -87,6 +90,17 @@ export default function NeedsFill({ profileId, workflowId = null, cv = false, fi
   useEffect(() => { check() }, [profileId, workflowId, cv, fileCount]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const items = useMemo(() => itemsFor(names || [], profile), [names, profile])
+  // Her details the step's own list does not name but the Missing card does (asked on 2026-11-23:
+  // a pop-up shows both). Shown and saved here too; they never hold the step back.
+  const extras = useMemo(() => {
+    if (names === null) return []
+    const m = missingNow(profile, fields, cv ? 'cv' : workflowId === 'musaned_add_candidate' ? 'musaned' : null)
+    const have = new Set(items.map(i => i.key))
+    return [
+      ...m.texts.map(t => ({ key: `col:${t.key}`, col: t.key, label: t.label, type: t.type === 'select' ? 'text' : t.type, hint: t.hint, options: t.options?.map(o => [o, o[0] + o.slice(1).toLowerCase()]), extra: true })),
+      ...m.files.map(n => ({ key: `file:${n}`, file: n, label: n, extra: true })),
+    ].filter(i => !have.has(i.key))
+  }, [names, profile, fields, items, cv, workflowId])
   useEffect(() => { if (items.some(i => i.brokers)) api.get('/brokers').then(r => setBrokers(r.data || [])).catch(() => {}) }, [items.length]) // eslint-disable-line react-hooks/exhaustive-deps
   const ready = names !== null && !items.length && !note
   useEffect(() => { onState?.({ ready, asking: names === null, items }) }, [ready, names, items]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -95,22 +109,35 @@ export default function NeedsFill({ profileId, workflowId = null, cv = false, fi
 
   const save = async () => {
     const body = {}
-    for (const it of items) if (it.col && String(values[it.col] ?? '').trim() !== '') body[it.col] = it.type === 'number' ? Number(values[it.col]) : values[it.col]
-    if (!Object.keys(body).length) return
+    for (const it of [...items, ...extras]) if (it.col && String(values[it.col] ?? '').trim() !== '') body[it.col] = it.type === 'number' ? Number(values[it.col]) : values[it.col]
+    if (!Object.keys(body).length) return toast.error('Choose or type something first')
     setSaving(true)
-    try { await api.put(`/profiles/${profileId}`, body); setFilled(true); window.dispatchEvent(new Event('adal-profile-changed')); await check() }
-    catch (e) { setNote(e.response?.data?.error || e.message) }
+    setSaveError('')
+    try {
+      // The normal profile update: saved in this PC's database, synced to every PC, fetched again here.
+      await api.put(`/profiles/${profileId}`, body)
+      setValues(v => { const n = { ...v }; for (const k of Object.keys(body)) delete n[k]; return n })
+      setFilled(true)
+      window.dispatchEvent(new Event('adal-profile-changed'))
+      toast.success('Saved')
+      await check()
+    } catch (e) {
+      const why = e.response?.data?.error || e.message
+      setSaveError(why); toast.error(`Not saved: ${why}`, { duration: 7000 })
+    }
     setSaving(false)
   }
 
   if (names === null) return <p className="py-3 text-sm text-slate-500">Checking what she still needs…</p>
   if (note && !items.length) return <p className="rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-900/20 dark:text-amber-200">{note}</p>
-  if (!items.length) return null
-  const cols = items.filter(i => i.col), files = items.filter(i => i.file), unknown = items.filter(i => i.unknown)
+  if (!items.length && !extras.length) return null
+  const all = [...items, ...extras]
+  const cols = all.filter(i => i.col), files = all.filter(i => i.file), unknown = items.filter(i => i.unknown)
   const input = 'w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm dark:border-slate-600 dark:bg-slate-800'
   return (
     <div className="space-y-4">
-      <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Still needed: {items.map(i => i.label).join(', ')}</p>
+      {items.length > 0 && <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Still needed: {items.map(i => i.label).join(', ')}</p>}
+      {extras.length > 0 && <p className="text-sm font-semibold text-amber-700 dark:text-amber-300">Missing from her details: {extras.map(i => i.label).join(', ')}</p>}
       {cols.length > 0 && (
         <form onSubmit={(e) => { e.preventDefault(); save() }} className="space-y-3">
           <div className="grid gap-3 sm:grid-cols-2">
@@ -129,6 +156,7 @@ export default function NeedsFill({ profileId, workflowId = null, cv = false, fi
               </label>
             ))}
           </div>
+          {saveError && <p className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-300" data-testid="needs-save-error">{saveError}</p>}
           <button disabled={saving} className="rounded-xl bg-teal-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-teal-700 disabled:opacity-50">{saving ? 'Saving…' : 'Save'}</button>
         </form>
       )}

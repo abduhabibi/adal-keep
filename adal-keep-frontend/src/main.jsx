@@ -254,10 +254,7 @@ if ('serviceWorker' in navigator && import.meta.env.PROD && import.meta.env.VITE
 
 // On the main PC itself: closing this window keeps Adal Keep working in the
 // background (backend services/appLife.js); "Quit Adal Keep" stops it.
-if (import.meta.env.VITE_DEMO !== '1' && import.meta.env.VITE_PHONE !== '1' && import.meta.env.VITE_ADMIN !== '1'
-  && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && 'EventSource' in window) {
-  new EventSource('/api/app/alive')
-}
+import('./lib/appStream.js').then(m => m.appStream()).catch(() => {})
 
 // English (Settings → Language): shows the Amharic pages in English.
 import('./lib/i18n.js').then(m => m.startLanguage())

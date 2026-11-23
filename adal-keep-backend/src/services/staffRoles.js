@@ -7,9 +7,9 @@
  *
  * Who is asking (whoIsAsking): the signed-in employee's key (X-Adal-Staff,
  * given at device-login, signed so it cannot name someone else), else the
- * cookie of the same sign-in. A window with no one signed in may look but not
- * change (asked on 2026-11-22), unless no employee can manage staff yet (a new
- * agency). Phones, and calls through the online copy, work as whoever is
+ * cookie of the same sign-in. A window with no one signed in works as the PC's
+ * default employee (pcDefaultStaff, asked on 2026-11-23); with no employee at all
+ * it may only look, unless no employee can manage staff yet (a new agency). Phones, and calls through the online copy, work as whoever is
  * signed in on this PC. This PC's own robots, other PCs' servers and Adal
  * support keep everything. An employee with no role yet is an Admin.
  *
@@ -104,6 +104,29 @@ export async function setPcStaff(db, id) {
 }
 const pcStaffId = async (db) => Number((await db('settings').where({ key: PC_STAFF }).first().catch(() => null))?.value) || null
 
+// The PC's default employee (asked on 2026-11-23: robots and normal work must not stop
+// because nobody picked an employee): the last one who signed in on this PC (kept when
+// they sign out), else the first Admin. A window or phone with no one signed in works as them.
+const PC_DEFAULT = 'pc_default_staff_id'
+export async function setPcDefaultStaff(db, id) {
+  if (!id) return
+  const now = new Date().toISOString()
+  try {
+    if (await db('settings').where({ key: PC_DEFAULT }).first()) await db('settings').where({ key: PC_DEFAULT }).update({ value: String(id), updated_at: now })
+    else await db('settings').insert({ key: PC_DEFAULT, value: String(id), created_at: now, updated_at: now })
+  } catch (e) { console.warn('[staffRoles] pc default staff:', e.message) }
+}
+export async function pcDefaultStaff(db) {
+  const id = Number((await db('settings').where({ key: PC_DEFAULT }).first().catch(() => null))?.value) || null
+  const user = id ? await db('users').where({ id }).first().catch(() => null) : null
+  if (user) return user
+  const users = await db('users').select('*').orderBy('id').catch(() => [])
+  if (!users.length) return null
+  const roles = await listRoles(db)
+  const admin = roles.find(r => r.preset === 'admin')
+  return users.find(u => (u.role_id ?? admin?.id) === admin?.id) || null
+}
+
 const header = (req, h) => req.get?.(h) ?? req.headers?.[h]
 const fromBrowser = (req) => /Mozilla\//.test(String(header(req, 'user-agent') || ''))
 const decode = (v) => { try { return decodeURIComponent(String(v || '')) } catch { return String(v || '') } }
@@ -169,6 +192,14 @@ export async function permsFor(db, req) {
     return { perms: role.perms, role, user: who.user, readOnly: false, kind: who.kind }
   }
   if (who.kind === 'signed-out' && (await noStaffManager(db))) return { perms: { ...ALL }, role: null, user: null, readOnly: false, kind: who.kind }
+  if (who.kind === 'signed-out' || who.kind === 'phone') {
+    const user = await pcDefaultStaff(db)
+    if (user) {
+      const role = await roleOf(db, user)
+      // Managing staff stays with someone who signed in.
+      return { perms: { ...role.perms, manage_staff: false }, role, user, readOnly: false, kind: 'default' }
+    }
+  }
   return { perms: { ...NONE }, role: null, user: null, readOnly: true, kind: who.kind }
 }
 

@@ -12,7 +12,7 @@ import MusanedAccountPicker from './MusanedAccountPicker'
 import { usePlan, lockedFor, planName, wantFeature } from '../lib/plan'
 import { phoneCloud } from '../lib/phoneMode'
 import { shows } from '../lib/stageActions'
-import { markDone as markStepDone, DONE_LABEL } from '../lib/markDone'
+import { markDone as markStepDone, untick, DONE_LABEL } from '../lib/markDone'
 import { useCan } from '../lib/staffPerms'
 
 // What a paused run is waiting for, in words.
@@ -177,9 +177,12 @@ export default function ProfileAutomations({ profileId, phase = null, after }) {
   }, [])
   const shownFor = useRef(null)
 
+  const asked = useRef(0)
   const load = async ({ quiet = false } = {}) => {
+    const n = ++asked.current
     try {
       const r = await api.get(`/profiles/${profileId}/automations`)
+      if (n !== asked.current) return   // a newer look is on its way: this answer is stale
       setWorkflows(r.data.workflows || [])
       setStep(r.data.step || null)
       setQueue(r.data.queue || null)
@@ -314,14 +317,16 @@ export default function ProfileAutomations({ profileId, phase = null, after }) {
 
   // A step done by hand: its tick on the card.
   // Ticked: the shared "mark as done" (she moves to the next stage, 5 s Undo).
+  // One at a time per step (its box is off while it goes), then the list is looked at again.
+  const [ticking, setTicking] = useState({})
   const markDone = async (w, done) => {
-    if (done) { await markStepDone({ profileId, workflowId: w.id, label: w.name }); load({ quiet: true }); return }
+    if (ticking[w.id]) return
+    setTicking(t => ({ ...t, [w.id]: true }))
     try {
-      const r = await api.post(`/profiles/${profileId}/automations/${w.id}/mark-done`, { done })
-      toast.success(`${w.name}: ${r.data?.message || 'not done'}`, { duration: 5000 })
-      load({ quiet: true })
-      setTimeout(() => window.dispatchEvent(new Event('adal-profile-changed')), 300)
-    } catch (e) { toast.error(`${w.name}: ${e.response?.data?.error || e.message}`, { duration: 7000 }) }
+      if (done) await markStepDone({ profileId, workflowId: w.id, label: w.name })
+      else await untick({ profileId, workflowId: w.id, label: w.name })
+      await load({ quiet: true })
+    } finally { setTicking(t => { const n = { ...t }; delete n[w.id]; return n }) }
   }
 
   const resume = () => act('resume', 'Continued')
@@ -422,7 +427,7 @@ export default function ProfileAutomations({ profileId, phase = null, after }) {
             {!(isDone && !byHand) && (
               <label className={`flex items-center px-1 ${isRunning ? 'opacity-50' : 'cursor-pointer'}`}
                 title="Done it yourself? Tick it: the step counts as done">
-                <input type="checkbox" aria-label="Done by hand" className="h-3.5 w-3.5 accent-emerald-600" checked={isDone} disabled={isRunning}
+                <input type="checkbox" aria-label="Done by hand" className="h-3.5 w-3.5 accent-emerald-600" checked={isDone} disabled={isRunning || !!ticking[w.id]}
                   onChange={() => markDone(w, !isDone)} />
               </label>
             )}

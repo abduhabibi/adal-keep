@@ -8,12 +8,14 @@
 import toast from 'react-hot-toast'
 
 let started = false
-export function startClipWatch() {
+export async function startClipWatch() {
   if (started || typeof EventSource === 'undefined') return
   started = true
   let wait = null
-  const es = new EventSource('/api/app/clips')
-  es.onmessage = async (e) => {
+  // The window's one stream (lib/appStream.js) carries the pictures as "clips" events.
+  const shared = (await import('./appStream.js')).appStream()
+  const es = shared || new EventSource('/api/app/clips')
+  const got = async (e) => {
     let m = {}
     try { m = JSON.parse(e.data) } catch { return }
     if ('hook' in m) window.__adalClipHook = !!m.hook
@@ -30,5 +32,7 @@ export function startClipWatch() {
       } catch {}
     }
   }
-  es.onerror = () => { window.__adalClipHook = false }
+  if (shared) es.addEventListener('clips', got)
+  else es.onmessage = got
+  es.addEventListener('error', () => { window.__adalClipHook = false })
 }

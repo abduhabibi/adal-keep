@@ -16,7 +16,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'markdone-'))
 process.env.ACCOUNT_VAULT_KEY = path.join(tmp, 'k')
 process.env.ADAL_KEYS_OUTSIDE = path.join(tmp, 'outside')
 
-const { markStepDone, undoMarkDone, markStepUndone } = await import('../src/services/markDone.js')
+const { markStepDone, undoMarkDone, markStepUndone, untickByHand } = await import('../src/services/markDone.js')
 const { journeyOf } = await import('../src/routes/automations.js')
 const { phaseOf, AFTER } = await import('../../adal-keep-frontend/src/lib/phase.js')
 
@@ -118,4 +118,40 @@ test('uncheck a done step: she goes back to it, later steps open, data kept, Und
   assert.equal(q.chosen_at, null); assert.equal(q.musaned_stage, null); assert.equal(q.status, null)
   assert.equal(await phase(db, id), 'waiting')
   await assert.rejects(markStepUndone(db, { profileId: id, step: 'cv' }), /Generated CVs/)
+})
+
+test('races: a double tick is one tick, one untick takes it back, an older Undo cannot undo a newer change', async () => {
+  const db = await setup()
+  const [id] = await db('profiles').insert({ full_name: 'Race' })
+  // Double click on the card's tick: both at once.
+  const [a, b] = await Promise.all([
+    markStepDone(db, { profileId: id, workflowId: 'wafid_check' }),
+    markStepDone(db, { profileId: id, workflowId: 'wafid_check' }),
+  ])
+  assert.ok(a.ok && b.ok)
+  assert.equal((await db('automation_queue').where({ profile_id: id, workflow_id: 'wafid_check', status: 'done' })).length, 1)
+  assert.equal((await db('profiles').where('id', id).first()).status, 'medical_fit')
+  // One untick: not done any more, and her medical status goes back too.
+  const u = await untickByHand(db, { profileId: id, workflowId: 'wafid_check' })
+  assert.equal((await db('automation_queue').where({ profile_id: id, workflow_id: 'wafid_check', status: 'done' })).length, 0)
+  assert.equal((await db('profiles').where('id', id).first()).status, null)
+  // The first tick's Undo (its toast still on screen) may not put back a state from before the untick.
+  await assert.rejects(undoMarkDone(db, a.undo), /changed again/)
+  // The untick's own Undo still works.
+  await undoMarkDone(db, u.undo)
+  assert.equal((await db('profiles').where('id', id).first()).status, 'medical_fit')
+  // Undo twice (a double click on Undo): the second is refused, nothing breaks.
+  await assert.rejects(undoMarkDone(db, u.undo), /Too late|Already/)
+})
+
+test('races: done and undone on the status track at once run one after the other', async () => {
+  const db = await setup()
+  const [id] = await db('profiles').insert({ full_name: 'Track' })
+  await Promise.all([
+    markStepDone(db, { profileId: id, step: 'wafid' }),
+    markStepUndone(db, { profileId: id, step: 'wafid' }),
+  ])
+  // In the order they came: done, then undone.
+  assert.equal((await db('profiles').where('id', id).first()).status, null)
+  assert.equal((await db('automation_queue').where({ profile_id: id, status: 'done' })).length, 0)
 })

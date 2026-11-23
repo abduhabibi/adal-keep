@@ -18,9 +18,18 @@ router.get('/app/alive', async (req, res) => {
   res.flushHeaders()
   const gone = windowOpened(res)
   const tell = async () => { res.write(`data: ${JSON.stringify({ ...(await busyNow()), windows: windowsOpen() })}\n\n`) }
+  // ?all=1: the window's other two streams (/changes, /app/clips) come on this one too, as
+  // named events (asked on 2026-11-23): a browser opens only 6 lines to one PC, and three
+  // streams per window left too few for the pages (and the live robot view) when two were open.
+  const offs = []
+  if (req.query.all === '1') {
+    offs.push(onChanged((c) => res.write(`event: changes\ndata: ${JSON.stringify(c)}\n\n`)))
+    const { listen } = await import('../services/screenClip.js')
+    offs.push(listen({ write: (s) => res.write(`event: clips\n${s}`) }))
+  }
   await tell()
   const t = setInterval(() => tell().catch(() => {}), 5000)
-  req.on('close', () => { clearInterval(t); gone() })
+  req.on('close', () => { clearInterval(t); gone(); for (const off of offs) off() })
 })
 
 // Every window (this PC and the employees' PCs): which tables changed, as they change.

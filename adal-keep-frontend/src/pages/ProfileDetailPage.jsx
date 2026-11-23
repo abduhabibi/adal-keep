@@ -555,7 +555,7 @@ function MissingCard({ miss, fields, profileId, fieldCard, onSaved }) {
               {t.label}
               {t.type === 'select' ? (
                 <select className={`${cls} mt-1 normal-case`} value={vals[t.key] ?? ''} disabled={busy === t.key}
-                  onChange={e => { const v = e.target.value; setVals(x => ({ ...x, [t.key]: v })); if (v) { setBusy(t.key); api.put(`/profiles/${profileId}`, { [t.key]: v }).then(() => onSaved({ [t.key]: v })).catch(() => toast.error('Could not save')).finally(() => setBusy(null)) } }}>
+                  onChange={e => { const v = e.target.value; setVals(x => ({ ...x, [t.key]: v })); if (v) { setBusy(t.key); api.put(`/profiles/${profileId}`, { [t.key]: v }).then(() => onSaved({ [t.key]: v })).catch(e => toast.error(e.response?.data?.error || 'Could not save')).finally(() => setBusy(null)) } }}>
                   <option value="">—</option>
                   {t.options.map(o => <option key={o} value={o}>{o}</option>)}
                 </select>

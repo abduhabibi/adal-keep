@@ -209,12 +209,13 @@ export default function SettingsPage() {
     }
   }
 
+  const canSettings = useCan('change_settings')
+
   if (loading) {
     return <div className="flex h-64 items-center justify-center"><Spinner /></div>
   }
 
   const daysLeft = subscription?.daysLeft
-  const canSettings = useCan('change_settings')
   const isTrial = subscription?.mode === 'trial'
   const isActive = subscription?.mode === 'active'
 

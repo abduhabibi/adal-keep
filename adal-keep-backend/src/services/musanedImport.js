@@ -21,6 +21,7 @@ import os from 'os'
 import path from 'path'
 import crypto from 'crypto'
 import { fileURLToPath } from 'url'
+import { lookup, remember, forget } from './robotCache.js'
 
 const ORIGIN = 'https://tawtheeq.musaned.com.sa'
 const HR_POOL = `${ORIGIN}/hr-pool`
@@ -48,25 +49,43 @@ export async function saveOnProfile(db, profileId, fieldName, file, original) {
   return true
 }
 
-/** HR Pool → Passport Number filter → her row's VIEW address, or null when she is not in the list. */
-async function searchPassport(page, passport, log) {
-  await page.goto(HR_POOL, { waitUntil: 'networkidle2', timeout: 60000 }).catch(() => {})
+/**
+ * HR Pool → Passport Number filter → her passport typed → Musaned's answer.
+ * Faster than a person (2026-11-23): the page is used as soon as its filter
+ * is there (not when the whole site has gone quiet), the number goes in at
+ * once, and with `early` the wait ends the moment her row shows.
+ */
+export async function searchPassport(page, passport, log, { early = false } = {}) {
+  await page.goto(HR_POOL, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {})
   await page.waitForFunction(() => [...document.querySelectorAll('app-filter-search')].some(f => /Passport Number/i.test(f.textContent || '')), { timeout: 30000 })
   const filter = (await page.evaluateHandle(() => [...document.querySelectorAll('app-filter-search')].find(f => /Passport Number/i.test(f.textContent || '')))).asElement()
   await filter.evaluate(f => f.querySelector('button.app-filter-header, .app-filter-header')?.click())
-  await sleep(700)
-  const input = await filter.$('textarea, input')
+  const input = await filter.waitForSelector('textarea, input', { timeout: 5000 }).catch(() => null)
   if (!input) throw new Error('Musaned: the passport search box did not open')
   await input.evaluate(i => { i.focus(); i.value = '' })
-  await input.type(passport, { delay: 40 })
+  await input.type(passport, { delay: 0 })
+  // The rows shown before the search, marked: when none of them is left, Musaned has answered.
+  const before = early ? await page.evaluate(() => { const r = [...document.querySelectorAll('tbody tr')]; r.forEach(x => x.setAttribute('data-adal-old', '1')); return r.length }).catch(() => 0) : 0
   await input.press('Enter')
-  await page.waitForNetworkIdle({ idleTime: 800, timeout: 20000 }).catch(() => {})
-  await sleep(1200)
+  if (early) {
+    // Her row there, or Musaned's answer without her: done at once. Else as before: the page quiet a moment
+    // (the site's own polling can keep it from ever being quiet: then 20 s).
+    const answered = page.waitForFunction((pp, had) => {
+      if ([...document.querySelectorAll('tr, .app-table-value')].some(c => (c.innerText || '').toUpperCase().includes(pp))) return true
+      if (/no (data|records?|results?)( found)?|لا توجد/i.test(document.querySelector('tbody, table, .app-table')?.innerText || '')) return true
+      return had > 0 && !document.querySelector('tr[data-adal-old]')
+    }, { timeout: 20000, polling: 150 }, passport.toUpperCase(), before).then(() => sleep(250))
+    const quiet = page.waitForNetworkIdle({ idleTime: 800, timeout: 20000 }).then(() => sleep(1200))
+    await Promise.race([answered, quiet]).catch(() => {})
+  } else {
+    await page.waitForNetworkIdle({ idleTime: 800, timeout: 20000 }).catch(() => {})
+    await sleep(1200)
+  }
   log(`🔎 HR Pool → passport ${passport}`)
 }
 
 async function findHerPage(page, passport, log) {
-  await searchPassport(page, passport, log)
+  await searchPassport(page, passport, log, { early: true })
   // Her row: the smallest box with her passport and a VIEW link.
   const href = await page.evaluate((pp) => {
     const views = [...document.querySelectorAll('a, button')].filter(b => /^\s*(VIEW|DETAILS|عرض|التفاصيل)\s*$/i.test(b.innerText || ''))
@@ -140,6 +159,7 @@ export async function deleteFromHrPoolInRun(page, ctx) {
     return { ok: false, error: 'Musaned still shows her after Delete' }
   }
   log(`✓ passport ${passport} deleted from the HR Pool`)
+  if (ctx.db) await forget(ctx.db, `musaned_hr:${passport}`)   // her page there is gone
   await ctx.notify?.(`✅ ${ctx.profileName}: deleted from Musaned`, `Passport ${passport} is no longer in the HR Pool.`)
   await ctx.noteProfile?.(`Musaned: deleted from the HR Pool (passport ${passport})`, { musaned_stage: null })
   return { ok: true, done: true }
@@ -169,24 +189,12 @@ export function fieldsFromMusaned(d = {}) {
   }
 }
 
-/** The run's work after the Musaned sign-in. Returns the worker's result. */
-export async function importFromHrPoolInRun(page, ctx) {
-  const db = ctx.db
-  const log = (m, level = 'info') => ctx.onLog?.(level, m)
-  const p = await db('profiles').where('id', ctx.profileId).first()
-  const passport = String(p?.passport_number || '').trim().toUpperCase()
-  if (!passport) return { ok: false, error: 'Profile is missing the passport number' }
-  page.__adalAllowImages = true // her pictures are what this run is for
-
-  const url = await findHerPage(page, passport, log)
-  if (!url) {
-    const msg = `Passport ${passport} is not in our Musaned HR Pool list`
-    log(msg, 'error')
-    await ctx.notify?.(`❌ ${ctx.profileName}: not found on Musaned`, msg)
-    return { ok: false, error: msg }
-  }
-
-  // Her page, in this tab: catch what it asks Musaned for.
+/**
+ * Her page (/hr-pool/candidates/<id>), in this tab: what it asks Musaned for
+ * is caught as it comes (details, passport, personal photo); the wait ends as
+ * soon as the three are in, not when the whole site has gone quiet.
+ */
+async function openHerPage(page, url) {
   const got = { passport: null, personal: null, details: null }
   const id = url.split('/').pop()
   const onResponse = async (r) => {
@@ -200,8 +208,8 @@ export async function importFromHrPoolInRun(page, ctx) {
   }
   page.on('response', onResponse)
   try {
-    await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 }).catch(() => {})
-    for (let i = 0; i < 30 && !(got.details && got.passport && got.personal); i++) await sleep(500)
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {})
+    for (let i = 0; i < 75 && !(got.details && got.passport && got.personal); i++) await sleep(200)
     // Not caught (Musaned changed its addresses): the page's own pictures.
     if (!got.passport && !got.personal) {
       const blobs = await page.evaluate(async () => Promise.all([...document.querySelectorAll('img[src^="blob:"]')].map(async i => {
@@ -214,6 +222,48 @@ export async function importFromHrPoolInRun(page, ctx) {
       if (bufs[1]) got.passport = { buf: bufs[1], type: 'image/jpeg' }
     }
   } finally { page.off('response', onResponse) }
+  return got
+}
+
+/**
+ * Her Musaned page and what it showed → { url, got }, url null when she is not
+ * in the HR Pool. Seen before (robotCache.js): straight to her page, no search;
+ * Musaned stays the truth — a kept page that does not show her is forgotten
+ * and she is searched again.
+ */
+export async function herMusanedPage(page, db, passport, log = () => {}) {
+  const key = `musaned_hr:${passport}`
+  const hers = (g) => !!g?.details && String(g.details.passportNumber || '').toUpperCase() === passport
+  const kept = (await lookup(db, key))?.url || null
+  if (kept) {
+    const got = await openHerPage(page, kept)
+    if (hers(got)) { log(`⚡ her Musaned page from the last search (${kept.split('/').pop()}): no search needed`); return { url: kept, got } }
+    log('ℹ️ her kept Musaned page did not show her: searching again')
+    await forget(db, key)
+  }
+  const url = await findHerPage(page, passport, log)
+  if (!url) return { url: null, got: null }
+  const got = await openHerPage(page, url)
+  if (hers(got)) await remember(db, key, { url })
+  return { url, got }
+}
+
+/** The run's work after the Musaned sign-in. Returns the worker's result. */
+export async function importFromHrPoolInRun(page, ctx) {
+  const db = ctx.db
+  const log = (m, level = 'info') => ctx.onLog?.(level, m)
+  const p = await db('profiles').where('id', ctx.profileId).first()
+  const passport = String(p?.passport_number || '').trim().toUpperCase()
+  if (!passport) return { ok: false, error: 'Profile is missing the passport number' }
+  page.__adalAllowImages = true // her pictures are what this run is for
+
+  const { url, got } = await herMusanedPage(page, db, passport, log)
+  if (!url) {
+    const msg = `Passport ${passport} is not in our Musaned HR Pool list`
+    log(msg, 'error')
+    await ctx.notify?.(`❌ ${ctx.profileName}: not found on Musaned`, msg)
+    return { ok: false, error: msg }
+  }
 
   const shown = got.details?.passportNumber || ''
   if (shown && String(shown).toUpperCase() !== passport) {

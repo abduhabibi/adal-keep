@@ -1073,8 +1073,9 @@ export async function apiHeadersOf(page) {
   const on = (r) => { const h = r.headers(); if (r.url().startsWith(API) && h.authorization && h['app-organization']) H = Object.fromEntries(Object.entries(h).filter(([k]) => /^(authorization|app-|accept-language)/.test(k))) }
   page.on('request', on)
   try {
-    await page.goto('https://tawtheeq.musaned.com.sa/employment-requests?sort=createdAt,DESC&page=0&size=10', { waitUntil: 'networkidle2', timeout: 90000 }).catch(() => {})
-    for (let i = 0; i < 20 && !H; i++) await sleep(500)
+    // Done as soon as the page's first call to Musaned shows its headers (2026-11-23: not when the whole site is quiet).
+    await page.goto('https://tawtheeq.musaned.com.sa/employment-requests?sort=createdAt,DESC&page=0&size=10', { waitUntil: 'domcontentloaded', timeout: 90000 }).catch(() => {})
+    for (let i = 0; i < 100 && !H && !/\/(auth|login|sign-?in)/i.test(page.url()); i++) await sleep(200)
   } finally { page.off('request', on) }
   return H
 }
@@ -1152,7 +1153,7 @@ async function profileFromRequest(db, src, card) {
 
 /** Her contract page, opened straight (no search) and read. */
 export async function openContract(page, card) {
-  await page.goto(`https://tawtheeq.musaned.com.sa/employment-requests/contract/${card.id}`, { waitUntil: 'networkidle2', timeout: 60000 }).catch(() => {})
+  await page.goto(`https://tawtheeq.musaned.com.sa/employment-requests/contract/${card.id}`, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {})
   await page.waitForFunction(() => /Contract\s*#\s*\d+/i.test(document.body.innerText || ''), { timeout: 30000 }).catch(() => {})
   await page.evaluate(() => [...document.querySelectorAll('button, a, span, div')].filter(e => /^\s*Expand\s*$/i.test(e.textContent || '') && e.children.length <= 2).forEach(e => e.click())).catch(() => {})
   await sleep(1200)

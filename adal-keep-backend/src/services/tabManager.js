@@ -108,7 +108,8 @@ export async function setupTab(page, { runId, mute = true } = {}) {
       // 3–4 runs at once every run gets more of the internet connection.
       const type = req.resourceType()
       const allowImages = page.__adalAllowImages === true
-      if ((!allowImages && type === 'image') || type === 'media' || TRACKERS.test(hostOf(req.url()))) req.abort().catch(() => {})
+      // Fonts too (2026-11-23): 100–400 KB a page on a slow line, and the robot reads text, not letters' shapes.
+      if ((!allowImages && (type === 'image' || type === 'font')) || type === 'media' || TRACKERS.test(hostOf(req.url()))) req.abort().catch(() => {})
       else req.continue().catch(() => {})
     })
   } catch (e) {

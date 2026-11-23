@@ -293,6 +293,7 @@ setTimeout(keepNumbersOnTheirPC, 5000).unref?.()
 // paid / trial dates and features, signed with Adal's update key so only this
 // panel can make one; the agency's PC reads it within 30 minutes.
 const plans = await import('../adal-keep-backend/src/services/plans.js')
+const agencyConfig = await import('../adal-keep-backend/src/services/agencyConfig.js')
 const { signManifest } = await import('../adal-keep-backend/src/services/updateChannel.js')
 const SIGNING = path.join(os.homedir(), '.adal-keep', 'update-signing.pem')
 const DAY_MS = 86400000
@@ -737,6 +738,58 @@ const api = {
   'GET /api/backup-download': async (q) => downloads[q.agency] || null,
   // Do something in an agency's Adal Keep now (its PC must be on): the relay.
   'POST /api/agency-call': async (q, b) => agencyCall(String(b.agency || ''), String(b.method || 'POST'), String(b.path || ''), b.body ?? null),
+  // ---- Setup: new agencies waiting for setup, and each agency's config record (agency-config.sql). ----
+  'GET /api/setup': async () => {
+    const [signups, configs, agencies] = await Promise.all([
+      rest('GET', 'agency_signups?select=*&order=created_at.desc'),
+      rest('GET', 'agency_config?select=agency_id,version,updated_at'),
+      rest('GET', 'agencies?select=id,name,pc_number,last_seen&is_admin=eq.false'),
+    ])
+    const cfg = new Map((configs || []).map(c => [c.agency_id, c]))
+    const known = new Set((signups || []).map(x => x.agency_id))
+    return {
+      switches: agencyConfig.FEATURE_SWITCHES,
+      signups: (signups || []).map(x => ({ ...x, config: cfg.get(x.agency_id) || null })),
+      // Agencies that were set up in person: they have no sign-up, but their record can still be edited.
+      others: (agencies || []).filter(a => !known.has(a.id) && !BRANCH_RE.test(a.name)).map(a => ({ id: a.id, name: a.name, pc_number: a.pc_number, config: cfg.get(a.id) || null })),
+    }
+  },
+  'GET /api/agency-config': async (q) => {
+    const [row] = await rest('GET', `agency_config?agency_id=eq.${encodeURIComponent(q.agency)}&select=config,version,updated_at`)
+    return { switches: agencyConfig.FEATURE_SWITCHES, version: row?.version || 0, config: agencyConfig.normalizeConfig(row?.config) }
+  },
+  'POST /api/agency-config/save': async (q, b) => {
+    const agency = String(b.agency || '')
+    if (!/^[0-9a-f-]{36}$/.test(agency)) throw new Error('No such agency')
+    const [old] = await rest('GET', `agency_config?agency_id=eq.${agency}&select=version`)
+    const config = agencyConfig.normalizeConfig(b.config)
+    const version = (old?.version || 0) + 1
+    await rest('POST', 'agency_config?on_conflict=agency_id', { agency_id: agency, config, version, updated_at: new Date().toISOString() }, { Prefer: 'resolution=merge-duplicates,return=minimal' })
+    return { ok: true, version, config }
+  },
+  // The EPRO signature file: into the agency's folder of the private bucket; the record points to it.
+  'POST /api/agency-config/epro': async (q, b) => {
+    const agency = String(b.agency || '')
+    if (!/^[0-9a-f-]{36}$/.test(agency)) throw new Error('No such agency')
+    const name = path.basename(String(b.name || 'signed-contract.pdf')).replace(/[^\w. ()-]/g, '_')
+    if (!/\.(pdf|png|jpe?g)$/i.test(name)) throw new Error('Musaned takes a PDF, PNG or JPG')
+    const buf = Buffer.from(String(b.data || ''), 'base64')
+    if (!buf.length || buf.length > 5 * 1024 * 1024) throw new Error('Musaned takes files up to 5 MB')
+    await sb('POST', `/storage/v1/object/agency-config/${agency}/${name}`, buf, { 'Content-Type': 'application/octet-stream', 'x-upsert': 'true' })
+    return { path: `${agency}/${name}`, name }
+  },
+  // New → setup → ready. "Ready" tells the agency in its inbox with Adal (and the app shows it on its next look).
+  'POST /api/signups/status': async (q, b) => {
+    const agency = String(b.agency || '')
+    const status = String(b.status || '')
+    if (!/^[0-9a-f-]{36}$/.test(agency) || !['new', 'setup', 'ready'].includes(status)) throw new Error('Not a status')
+    await rest('PATCH', `agency_signups?agency_id=eq.${agency}`, { status, note: b.note ? String(b.note).slice(0, 500) : null, ready_at: status === 'ready' ? new Date().toISOString() : null }, { Prefer: 'return=minimal' })
+    if (status === 'ready') {
+      if (!ADMIN_ID) await ensureAdmin()
+      await tell(agency, '✅ Adal Keep is ready for your agency. Open Adal Keep on your PC — your setup is done. Call us if you need anything.')
+    }
+    return { ok: true, status }
+  },
   'POST /api/decide': async (q, b) => {
     const status = b.approve ? 'approved' : 'rejected'
     const [r] = await rest('PATCH', `unlock_requests?id=eq.${Number(b.id)}`, { status, note: b.note || null, decided_at: new Date().toISOString() }, { Prefer: 'return=representation' })

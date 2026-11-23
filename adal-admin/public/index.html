@@ -167,6 +167,7 @@
   <div class="brand"><i>A</i> Adal Keep Admin</div>
   <div class="tabs">
     <button data-tab="work" class="on"><span class="ic"><svg class="ico"><use href="#i-home"/></svg></span>Home</button>
+    <button data-tab="setup"><span class="ic"><svg class="ico"><use href="#i-star"/></svg></span>Setup</button>
     <button data-tab="agencies"><span class="ic"><svg class="ico"><use href="#i-building"/></svg></span>Agencies</button>
     <button data-tab="inbox"><span class="ic"><svg class="ico"><use href="#i-chat"/></svg></span>Inbox</button>
     <button data-tab="payments"><span class="ic"><svg class="ico"><use href="#i-card"/></svg></span>Payments</button>
@@ -240,7 +241,7 @@ document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
   document.body.classList.toggle('chats', tab === 'inbox' || tab === 'chats')
   $('#sideT').textContent = tab === 'inbox' ? 'Inbox — your chat with each agency' : 'All chats'
   if (tab !== 'inbox' && tab !== 'chats') { $('#thread').style.display = 'none'; $('#compose').style.display = 'none' }
-  if (tab === 'payments' || tab === 'agencies' || tab === 'work' || tab === 'agents' || tab === 'ceos' || tab === 'plans' || tab === 'cvt' || tab === 'usage' || tab === 'health') { open = null; showTable() } else renderList()
+  if (tab === 'payments' || tab === 'agencies' || tab === 'work' || tab === 'setup' || tab === 'agents' || tab === 'ceos' || tab === 'plans' || tab === 'cvt' || tab === 'usage' || tab === 'health') { open = null; showTable() } else renderList()
   renderList()
 })
 
@@ -611,6 +612,62 @@ async function usageView() {
   T.onmouseleave = () => { const tip = document.getElementById('utip'); if (tip) tip.style.display = 'none' }
 }
 
+
+// ---- Setup: new agencies waiting for setup + each agency's config record ----
+let setupEdit = null
+async function setupView() {
+  $('#title').textContent = 'Setup — loading…'
+  const d = await api('/api/setup').catch(e => ({ error: e.message }))
+  if (tab !== 'setup') return
+  if (d.error) { $('#title').textContent = /agency_signups|agency_config|schema cache|relation/i.test(d.error) ? 'Run adal-admin/supabase/agency-config.sql in Supabase (SQL Editor) once.' : d.error; $('#table').innerHTML = ''; return }
+  const waiting = d.signups.filter(x => x.status !== 'ready').length
+  $('#title').textContent = `Setup — ${waiting} waiting, ${d.signups.length - waiting} ready`
+  const SN = { new: 'new, waiting for setup', setup: 'setup in progress', ready: 'ready' }
+  const row = (id, name, sub, status, cfg) => `<tr><td><b>${esc(name)}</b><div class="muted">${esc(sub || '')}</div></td>
+    <td>${status ? `<span class="pill ${status === 'ready' ? 'approved' : 'pending'}">${SN[status]}</span>` : '<span class="muted">set up in person</span>'}</td>
+    <td class="muted">${cfg ? `v${cfg.version} · ${when(cfg.updated_at)}` : 'no record yet'}</td>
+    <td><button class="ghost" data-cfg="${id}" data-name="${esc(name)}">Edit settings</button>
+      ${status && status !== 'ready' ? `${status === 'new' ? `<button class="ghost" data-st="setup" data-id="${id}">Start setup</button> ` : ''}<button class="go" data-st="ready" data-id="${id}">Ready</button>` : ''}</td></tr>`
+  $('#table').innerHTML = `<table><tr><th>Agency</th><th>Status</th><th>Config</th><th></th></tr>
+    ${d.signups.map(x => row(x.agency_id, x.name, `${x.phone} · ${x.email} · signed up ${when(x.created_at)}${x.pc_number ? ' · PC ' + x.pc_number : ''}`, x.status, x.config)).join('')}
+    ${d.others.map(x => row(x.id, x.name, x.pc_number ? 'PC ' + x.pc_number : '', null, x.config)).join('')}</table><div id="cfgBox"></div>`
+  $('#table').querySelectorAll('[data-st]').forEach(b => b.onclick = async () => {
+    if (b.dataset.st === 'ready' && !(await ask({ title: 'Mark this agency ready?', text: 'The agency is told in its inbox with Adal, and its app shows that setup is done.', ok: 'Ready' }))) return
+    try { await api('/api/signups/status', { agency: b.dataset.id, status: b.dataset.st }); toast(b.dataset.st === 'ready' ? 'Ready — the agency was told' : 'Setup started'); setupView() } catch (e) { await tell('Not done', e.message) }
+  })
+  $('#table').querySelectorAll('[data-cfg]').forEach(b => b.onclick = () => configForm(b.dataset.cfg, b.dataset.name, d.switches))
+}
+async function configForm(agency, name, switches) {
+  const r = await api('/api/agency-config?agency=' + encodeURIComponent(agency)).catch(e => ({ error: e.message }))
+  if (r.error) return tell('Not loaded', r.error)
+  const c = r.config
+  const PERMS = ['delete_profiles', 'edit_templates', 'run_robots', 'change_settings', 'manage_staff', 'export_backup']
+  const f = (id, label, v, ph = '') => `<label style="display:block;margin:6px 0"><span class="muted">${label}</span><br><input type="text" id="${id}" value="${esc(v || '')}" placeholder="${ph}" style="width:100%;max-width:420px"></label>`
+  $('#cfgBox').innerHTML = `<div style="margin-top:18px;border:1px solid #e2e8f0;border-radius:12px;padding:14px;max-width:760px">
+    <h3>${esc(name)} — settings (version ${r.version})</h3>
+    ${f('cfEmail', 'Agency e-mail', c.agency_email)}${f('cfSms', 'LMIS SMS number (the phone that gets LMIS codes)', c.lmis_sms_number, '+2519…')}
+    <div style="margin:8px 0"><span class="muted">EPRO signature:</span> <b id="cfEproName">${esc(c.epro_signature?.name || 'none')}</b> <input type="file" id="cfEpro" accept=".pdf,.png,.jpg,.jpeg"></div>
+    <div style="margin:8px 0"><span class="muted">CV templates on (one per line: key | name | on/off)</span><br><textarea id="cfCv" rows="4" style="width:100%;max-width:420px">${esc(c.cv_templates.map(t => `${t.key} | ${t.name || ''} | ${t.enabled ? 'on' : 'off'}`).join('\n'))}</textarea></div>
+    <div style="margin:8px 0"><span class="muted">Staff roles (one per line: name | toggles separated by commas — ${PERMS.join(', ')})</span><br><textarea id="cfRoles" rows="3" style="width:100%;max-width:420px">${esc(c.staff_roles.map(x => `${x.name} | ${PERMS.filter(k => x.perms[k]).join(', ')}`).join('\n'))}</textarea></div>
+    <div style="margin:8px 0"><b>Feature switches</b> — a switch, not a release; the agency's PCs pick it up within 10 minutes<br>${switches.map(s => `<label style="margin-right:16px"><input type="checkbox" data-sw="${s.key}" ${c.features[s.key] ?? s.on ? 'checked' : ''}> ${esc(s.title)}</label>`).join('')}</div>
+    <div class="muted" style="margin:8px 0">Licence (shown only; the signed licence in the Plans tab decides): ${c.licence ? esc(JSON.stringify(c.licence)) : 'not recorded'}</div>
+    <button class="go" id="cfSave">Save settings</button></div>`
+  let epro = c.epro_signature
+  $('#cfEpro').onchange = async (e) => {
+    const file = e.target.files[0]; if (!file) return
+    const data = await new Promise(ok => { const fr = new FileReader(); fr.onload = () => ok(String(fr.result).split(',')[1]); fr.readAsDataURL(file) })
+    try { epro = await api('/api/agency-config/epro', { agency, name: file.name, data }); $('#cfEproName').textContent = epro.name + ' (uploaded — Save to use it)' } catch (er) { await tell('Not uploaded', er.message) }
+  }
+  $('#cfSave').onclick = async () => {
+    const config = {
+      agency_email: $('#cfEmail').value, lmis_sms_number: $('#cfSms').value, epro_signature: epro, licence: c.licence,
+      cv_templates: $('#cfCv').value.split('\n').map(l => l.split('|').map(x => x.trim())).filter(p => p[0]).map(p => ({ key: p[0], name: p[1], enabled: p[2] !== 'off' })),
+      staff_roles: $('#cfRoles').value.split('\n').map(l => l.split('|')).filter(p => p[0]?.trim()).map(p => ({ name: p[0].trim(), perms: Object.fromEntries(PERMS.map(k => [k, (p[1] || '').split(',').map(x => x.trim()).includes(k)])) })),
+      features: Object.fromEntries([...document.querySelectorAll('[data-sw]')].map(x => [x.dataset.sw, x.checked])),
+    }
+    try { const o = await api('/api/agency-config/save', { agency, config }); toast(`Saved — version ${o.version}`); setupView() } catch (e) { await tell('Not saved', e.message) }
+  }
+}
 async function plansView() {
   $('#title').textContent = 'Plans — loading…'
   const d = await api('/api/plans').catch(e => ({ error: e.message }))
@@ -974,6 +1031,7 @@ function switchTab(t) { const b = document.querySelector(`.tabs button[data-tab=
 function showTable() {
   $('#thread').style.display = 'none'; $('#compose').style.display = 'none'; $('#table').style.display = 'block'
   if (tab === 'work') return workTable()
+  if (tab === 'setup') return setupView()
   if (tab === 'agents') return agentsView()
   if (tab === 'ceos') return ceosView()
   if (tab === 'plans') return plansView()

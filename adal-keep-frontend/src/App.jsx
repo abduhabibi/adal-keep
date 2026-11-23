@@ -27,7 +27,8 @@ const TasksPage = lazy(() => fresh(() => import('./pages/TasksPage')))
 const LockScreen = lazy(() => fresh(() => import('./components/LockScreen')))
 import PcAccessGate, { SuspendedScreen } from './components/PcAccessGate'
 import api, { joinInfo } from './services/api'
-const IntroWizard = lazy(() => fresh(() => import('./pages/IntroWizard')))
+const IntroWizard = lazy(() => fresh(() => import('./pages/SignUpAgency')))   // first-run sign-up (flag), then the first-start wizard
+const SignupBanner = lazy(() => fresh(() => import('./pages/SignUpAgency').then(m => ({ default: m.SignupBanner }))))
 const JoinAgency = lazy(() => fresh(() => import('./pages/JoinAgency')))
 const CVsPage = lazy(() => fresh(() => import('./pages/CVsPage')))
 const CVNewPage = lazy(() => fresh(() => import('./pages/CVNewPage')))
@@ -165,6 +166,7 @@ function Shell() {
     <FileCaptureProvider>
       <BrowserRouter>
         {toaster}
+        <Suspense fallback={null}><SignupBanner /></Suspense>
         {subscription?.mode === 'trial' && subscription.daysLeft <= 3 && <TrialBanner days={subscription.daysLeft} />}
         {subscription?.mode === 'active' && subscription.paidUntil && !subscription.forGood && subscription.paidDaysLeft <= 7 && <TrialBanner renew days={subscription.paidDaysLeft} />}
         <Routes>

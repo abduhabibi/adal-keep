@@ -229,6 +229,7 @@ app.use('/api', replicaRouter)   // Companions keep a locked copy; /safety (back
 app.use('/api', contractsRouter)
 app.use('/api', embassyRouter)   // the embassy print (3 pages a girl)
 app.use('/api', whatsappRouter)   // Settings → WhatsApp, CVs to agents
+app.use('/api', (await import('./src/routes/agencyConfig.js')).default)   // per-agency config record + first-run sign-up (flags)
 watchPaid(db)
 
 // Utility function to safely check/add missing columns
@@ -1326,6 +1327,7 @@ initSystem().then(() => {
     startMedicalWatcher(app.locals.db) // the medical's battery: warnings as it runs out
     import('./src/services/sessionKeeper.js').then(k => k.startSessionKeeper(app.locals.db)).catch(e => console.warn('[sessions]', e.message)) // signed in once, kept all day
     import('./src/services/plans.js').then(p => p.startLicenseWatch(app.locals.db)).catch(e => console.warn('[plans]', e.message)) // Adal's signed licence: plan, dates, features
+    import('./src/services/agencyConfig.js').then(async C => { const cl = await import('./src/services/chatCloud.js'); C.startAgencyConfigWatch(app.locals.db, (m, p, o) => m === 'POST' ? cl.cloudCall(app.locals.db, m, p, o) : cl.cloudCall(app.locals.db, m, p, undefined, o), () => cl.cloudAgencyId(app.locals.db)) }).catch(e => console.warn('[config]', e.message)) // the agency's config record from Adal (flag)
     startAppointmentWatcher(app.locals.db) // Tasheer / Wafid appointments: a reminder the day before
     startCloudSync(app.locals.db)      // the online copy phones use when this PC is off
     startLiveChannel(app.locals.db)    // phones ↔ this PC, instant (Supabase Realtime)

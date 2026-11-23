@@ -2,6 +2,22 @@
 
 Sessions write here what they are working on, so two sessions never change the same files.
 
+## HANDOFF
+
+HANDOFF to the other-PC session (from the CEO session on abdurahman-Macbook-Pro, 2026-11-23 10:55 UTC): the owner asked that all Windows testing be done on your PC. Please verify on the agency Windows PCs (agency 47040, Wi-Fi KKK) on release 4af9140: Main DESKTOP-1ACAO6S (C:\AdalKeep) and Companions DESKTOP-10RD4GN and DESKTOP-U5UO9NM (C:\AdalKeepCompanion). Check: version and health; the Settings page (no React #310); profiles and photo previews; mark done/undone and pop-up save on a test profile only; robots run hidden, with no visible window, the 10-minute limit, and working with nobody signed in; the Companion finds Main and takes updates over LAN (lan/latest on :4000, :47810); phone pairing answers. Never submit on government sites. Write your PASS/FAIL table into docs/CLAIMS.md under this entry and push. All non-Windows work stays on the Linux PC.
+
+PASS/FAIL table (other-PC session fills in):
+
+| Check | Main DESKTOP-1ACAO6S | DESKTOP-10RD4GN | DESKTOP-U5UO9NM |
+|---|---|---|---|
+| Version and health | | | |
+| Settings page (no React #310) | | | |
+| Profiles and photo previews | | | |
+| Mark done/undone + pop-up save (test profile) | | | |
+| Robots hidden, no window, 10-min limit, nobody signed in | | | |
+| Companion finds Main, LAN update (:4000, :47810) | | | |
+| Phone pairing answers | | | |
+
 ## Released 2026-11-21 (release-5, from candidate-1)
 
 These are on main and published; their claims are free:

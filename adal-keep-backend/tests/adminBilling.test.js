@@ -18,7 +18,7 @@ const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'admin-billing-'))
 const free = () => new Promise(ok => { const s = net.createServer().listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => ok(p)) }) })
 
-const stored = new Map(), posted = []
+const stored = new Map(), posted = [], patched = []
 let fake, proc, base, cookie = ''
 const DAY = 86400000
 const AG = { id: 'ag-1', name: 'ABC Agency', pc_number: '123456', banned: false, created_at: new Date(Date.now() - 30 * DAY).toISOString(), last_seen: new Date().toISOString() }
@@ -38,6 +38,7 @@ before(async () => {
       return stored.has(p) ? res.writeHead(200).end(stored.get(p)) : json({ message: 'not found' }, 404)
     }
     if (u.startsWith('/rest/v1/agencies')) return json(u.includes('is_admin=eq.true') ? [{ id: 'admin-id' }] : [AG])
+    if (u.startsWith('/rest/v1/unlock_requests')) { if (req.method === 'PATCH') { patched.push([u, JSON.parse(body.toString())]); return json([]) } return json([{ id: 7, agency_id: 'ag-1', pc_number: '123456', image_path: 'r.png', created_at: now() }]) }
     if (u.startsWith('/rest/v1/conversations')) return json([{ id: 'conv-1' }])
     if (u.startsWith('/rest/v1/keep_meta')) return json([{ agency_id: 'ag-1', key: '/_pc', data: { at: now() }, updated_at: now() }, { agency_id: 'ag-1', key: '/_stats', data: STATS, updated_at: now() }])
     if (u.startsWith('/rest/v1/messages') && req.method === 'POST') { posted.push(JSON.parse(body.toString())); return json({}) }
@@ -106,4 +107,17 @@ test('business dashboard: counts, success rate, revenue — and no personal data
   assert.equal(d.revenue.thisMonth, 30000); assert.equal(d.agencies.expired, 1)
   assert.ok(d.hours_saved > 0)
   assert.ok(!/ABC Agency|123456/.test(JSON.stringify({ ...d, renewals: undefined })), 'only the renewals list names an agency')
+})
+
+test('a receipt from the app waits in Billing; Confirm (12 months + 1 extra PC) extends the licence and marks it confirmed', async () => {
+  const b = (await call('/api/billing')).json
+  assert.equal(b.receipts[0].agency, 'ABC Agency'); assert.deepEqual([b.quote.six, b.quote.twelve], [49999, 89999])
+  const r = await call('/api/billing/payment', { pc: '123456', method: 'bank', reference: 'FT77', term: 12, extra_pcs: 1, receipt_id: 7 })
+  assert.equal(r.status, 200, JSON.stringify(r.json))
+  assert.equal(r.json.payment.amount, 89999 + 2 * 2500); assert.equal(r.json.payment.periods, 2)
+  assert.ok(Math.abs(r.json.paid_until - (Date.now() + 364 * DAY)) < 120000)
+  const [u, body] = patched.at(-1)
+  assert.match(u, /id=eq\.7/); assert.equal(body.status, 'approved'); assert.match(body.note, /^confirmed:bank FT77/)
+  // USD-indexed: the instructions carry it, the next quote follows the rate.
+  await call('/api/billing/instructions', { instructions: { usd: { on: true, usd_6m: 400, usd_12m: 720, usd_extra: 20, rate: 130 } } })
 })

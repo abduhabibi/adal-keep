@@ -83,7 +83,7 @@ export async function safetyPayload() {
       suspended: !!st.suspended,
       pc_number: st.pcNumber,
       seller_phone: st.sellerPhone,
-      price_etb: st.priceEtb,
+      price_etb: await (async () => { try { const b = await import('../services/billing.js'); return b.billingOn() ? b.currentPrice6() : st.priceEtb } catch { return st.priceEtb } })(),
     },
   }
 }

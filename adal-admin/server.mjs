@@ -879,7 +879,9 @@ const api = {
     const lic = await Promise.all(agencies.map(a => licenseOf(a.pc_number)))
     const now = Date.now()
     return {
-      instructions, revenue: billing.revenueSummary(ledger, now), price: billing.PRICE_ETB,
+      instructions, quote: billing.quote(instructions), revenue: billing.revenueSummary(ledger, now), price: billing.quote(instructions).six,
+      // Receipts the agencies sent from the app, waiting for Adal's Confirm.
+      receipts: (await rest('GET', 'unlock_requests?status=eq.pending&select=id,agency_id,pc_number,image_path,created_at&order=id.desc&limit=50').catch(() => [])).map(r => ({ ...r, agency: agencies.find(a => a.ids.includes(r.agency_id))?.name || '?' })),
       agencies: agencies.map((a, i) => ({
         id: a.id, name: a.name, pc_number: a.pc_number, plan: lic[i]?.plan || 'premium', code: codeFor(a.pc_number),
         renewal: billing.renewalOf({ licence: lic[i], firstSeen: Date.parse(a.first_seen || a.created_at) }, now),
@@ -893,7 +895,8 @@ const api = {
     if (!/^\d{6}$/.test(pc)) throw new Error('bad PC number')
     const a = (await sellable()).find(x => x.pc_number === pc)
     if (!a) throw new Error('No such agency')
-    const p = billing.normalizePayment(b)
+    const ins = await instructionsNow()
+    const p = billing.normalizePayment({ ...b, amount: b.amount ?? billing.amountFor(ins, b.term, b.extra_pcs) })
     const ledger = readLedger()
     const dup = billing.duplicateOf(ledger.filter(x => x.pc === pc), p) || billing.duplicateOf(ledger, p)
     if (dup) throw new Error(`That ${p.method} reference was already recorded (${dup.date}, ${dup.amount} ETB, PC ${dup.pc}).`)
@@ -905,6 +908,8 @@ const api = {
     ledger.push(rec); writeLedger(ledger)
     // The agency's own PCs get a signed copy of its own payments (no other agency's).
     try { await putJson(`billing/payments/${pc}.json`, signedFile({ pc, payments: ledger.filter(x => x.pc === pc).slice(-50).map(({ date, method, reference, amount, periods }) => ({ date, method, reference, amount, periods })), at: rec.recorded_at })) } catch (e) { console.warn('[billing] payments copy:', e.message) }
+    // A receipt picture from the app: confirmed (the signed licence extended; the PC must not add months again, chat.js).
+    if (b.receipt_id) await rest('PATCH', `unlock_requests?id=eq.${Number(b.receipt_id)}&status=eq.pending`, { status: 'approved', note: `confirmed:${p.method} ${p.reference}`.slice(0, 120), decided_at: rec.recorded_at }, { Prefer: 'return=minimal' }).catch(e => console.warn('[billing] receipt:', e.message))
     if (!ADMIN_ID) await ensureAdmin()
     await tell(a.id, `✅ Payment received: ${p.amount.toLocaleString('en')} ETB (${p.method}${p.reference ? ' ' + p.reference : ''}). Adal Keep is paid until ${new Date(until).toLocaleDateString('en-GB')}. Thank you!`)
     return { ok: true, paid_until: until, payment: rec }
@@ -954,7 +959,7 @@ const api = {
       robots,
       stages: Object.entries(rep.stages).map(([stage, v]) => ({ stage, n: v.n, avg_days: v.avg_days })).sort((x, y) => y.avg_days - x.avg_days),
       hours_saved: biz.hoursSaved(rep, days, now), hours_note: 'Estimate: successful robot runs, profiles and CVs, each at the minutes a person needs by hand (bizStats.js MANUAL_MINUTES).',
-      revenue: { ...rev, mrr_estimate: Math.round(paying * billing.PRICE_ETB / 6), months: Object.entries(rev.byMonth).sort(([x], [y]) => x.localeCompare(y)).slice(-12).map(([m, n]) => ({ m, n })) },
+      revenue: { ...rev, mrr_estimate: Math.round(paying * billing.quote(await instructionsNow()).six / 6), months: Object.entries(rev.byMonth).sort(([x], [y]) => x.localeCompare(y)).slice(-12).map(([m, n]) => ({ m, n })) },
       renewals: due.map(x => ({ name: x.a.name, pc_number: x.a.pc_number, ...x.r })).sort((x, y) => (x.days ?? 0) - (y.days ?? 0)),
     }
   },

@@ -28,12 +28,12 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import { canonical, verifyManifest, BUCKET } from './updateChannel.js'
 
+// One plan since 2026-11-23: Premium, everything in it (49,999 ETB / 6 months, 89,999 / 12; billing.js).
+// Licences that say basic / standard are read as Premium.
 export const PLANS = [
-  { key: 'basic', name: 'Basic', price: 29999, training_days: 7, rank: 1 },
-  { key: 'standard', name: 'Standard', price: 39999, training_days: 7, rank: 2 },
-  { key: 'premium', name: 'Premium', price: 49999, training_days: 14, rank: 3, extras: ['New features first', 'Support first', 'One more week of training'] },
+  { key: 'premium', name: 'Premium', price: 49999, training_days: 14, rank: 3, extras: ['Everything in Adal Keep', 'Support first', 'One more week of training'] },
 ]
-const RANK = Object.fromEntries(PLANS.map(p => [p.key, p.rank]))
+const RANK = { basic: 1, standard: 2, premium: 3 }   // (features still name the smallest plan that had them; every agency is Premium now)
 
 /**
  * What can be turned on or off. `plan`: the smallest plan that has it.
@@ -91,7 +91,7 @@ export const licenseNow = () => current
 export function __setLicenseForTest(l) { if (process.env.NODE_TEST_CONTEXT) current = l }
 
 /** The plan: the licence's, else Premium (the trial lets an agency try everything). */
-export function planOf(l = current) { return l?.plan && RANK[l.plan] ? l.plan : 'premium' }
+export function planOf(l = current) { return 'premium' }
 
 /** on · off · offered — for one feature, for this agency. */
 export function featureState(key, l = current) {

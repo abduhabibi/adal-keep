@@ -27,7 +27,10 @@ import { verifyManifest, BUCKET } from './updateChannel.js'
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const CACHE = () => process.env.ADAL_BILLING_CACHE || path.join(HERE, '..', '..', 'data', 'billing.json')
 const DAY = 86400000
-export const PRICE_ETB = 30000        // per 6 months (subscription.js)
+export const PRICE_ETB = 49999        // Premium per 6 months (the one plan since 2026-11-23)
+export const PRICE_12M_ETB = 89999
+export const EXTRA_PC_ETB = 2500      // per extra PC above the included ones, per 6 months (editable in Admin)
+export const INCLUDED_PCS = 3
 export const PERIOD_DAYS = 182        // one period = 6 months
 export const METHODS = ['telebirr', 'bank', 'cash']
 
@@ -36,11 +39,19 @@ export const billingOn = () => localFlag('billing')
 const str = (v, n) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, n)
 const digits = (v, n) => String(v ?? '').replace(/[^\d+]/g, '').slice(0, n)
 
-/** The payment instructions Adal edits: only these fields, each cleaned. */
+/** The payment instructions and prices Adal edits: only these fields, each cleaned. */
 export function normalizeInstructions(raw) {
   const r = raw && typeof raw === 'object' ? raw : {}
+  const num = (v, d) => (Number(v) > 0 ? Math.round(Number(v) * 100) / 100 : d)
+  const u = r.usd && typeof r.usd === 'object' ? r.usd : {}
+  const p6 = num(r.price_6m ?? r.price_etb, PRICE_ETB)
   return {
-    price_etb: Number(r.price_etb) > 0 ? Math.round(Number(r.price_etb)) : PRICE_ETB,
+    price_6m: p6, price_etb: p6,
+    price_12m: num(r.price_12m, PRICE_12M_ETB),
+    extra_pc_etb: num(r.extra_pc_etb, EXTRA_PC_ETB),
+    included_pcs: Math.min(50, Math.max(1, Math.round(Number(r.included_pcs)) || INCLUDED_PCS)),
+    // Optional "USD-indexed" prices: Adal sets the USD price and today's rate; the ETB amount to pay follows. Off: the ETB prices above.
+    usd: { on: u.on === true, usd_6m: num(u.usd_6m, 0), usd_12m: num(u.usd_12m, 0), usd_extra: num(u.usd_extra, 0), rate: num(u.rate, 0), rate_at: u.rate_at ? str(u.rate_at, 40) : null },
     telebirr: { name: str(r.telebirr?.name, 80), number: digits(r.telebirr?.number, 20) },
     banks: (Array.isArray(r.banks) ? r.banks : []).slice(0, 6)
       .map(b => ({ bank: str(b?.bank, 60), account_name: str(b?.account_name, 80), account_number: digits(b?.account_number, 30) }))
@@ -50,6 +61,19 @@ export function normalizeInstructions(raw) {
     at: r.at ? str(r.at, 40) : null,
   }
 }
+
+/** What to pay in ETB: { six, twelve, extra } (USD-indexed: USD price × today's rate, whole ETB). */
+export function quote(ins) {
+  const i = normalizeInstructions(ins)
+  const u = i.usd
+  if (u.on && u.rate > 0 && u.usd_6m > 0) {
+    const e = (usd) => Math.round(usd * u.rate)
+    return { six: e(u.usd_6m), twelve: u.usd_12m > 0 ? e(u.usd_12m) : e(u.usd_6m) * 2, extra: e(u.usd_extra), indexed: true, rate: u.rate, rate_at: u.rate_at }
+  }
+  return { six: i.price_6m, twelve: i.price_12m, extra: i.extra_pc_etb, indexed: false }
+}
+/** The amount for a term (6 or 12 months) and a number of extra PCs (the add-on is per 6 months). */
+export const amountFor = (ins, term, extraPcs = 0) => { const q = quote(ins); return (Number(term) === 12 ? q.twelve : q.six) + Math.max(0, Math.round(extraPcs)) * q.extra * (Number(term) === 12 ? 2 : 1) }
 
 /** One payment Adal marked received. No card data: only a reference Adal reads off the receipt. */
 export function normalizePayment(raw, now = Date.now()) {
@@ -62,9 +86,9 @@ export function normalizePayment(raw, now = Date.now()) {
   if (!(amount > 0) || amount > 10_000_000) throw new Error('Type the amount in ETB')
   const date = /^\d{4}-\d{2}-\d{2}$/.test(String(r.date || '')) ? r.date : new Date(now).toISOString().slice(0, 10)
   if (!Number.isFinite(Date.parse(date))) throw new Error('That date is not right')
-  const periods = r.periods != null ? Number(r.periods) : Math.max(1, Math.round(amount / PRICE_ETB))
+  const periods = r.periods != null ? Number(r.periods) : Number(r.term) === 12 ? 2 : Number(r.term) === 6 ? 1 : amount >= PRICE_12M_ETB * 0.95 ? 2 : 1
   if (!(periods > 0) || periods > 8) throw new Error('Periods must be between 1 and 8 (one period = 6 months)')
-  return { method, reference, amount, date, periods, note: str(r.note, 200) }
+  return { method, reference, amount, date, periods, note: str(r.note, 200), ...(Number(r.extra_pcs) > 0 ? { extra_pcs: Math.min(50, Math.round(Number(r.extra_pcs))) } : {}) }
 }
 
 /** The new "paid until": from today, or from the end of what is paid already. */
@@ -151,7 +175,7 @@ export function billingPayload(st) {
   return {
     enabled: billingOn(),
     mode: st?.mode || null,
-    plan_price_etb: ins.price_etb,
+    plan_price_etb: quote(ins).six, prices: quote(ins), included_pcs: ins.included_pcs,
     ends_at: ends ? new Date(ends).toISOString() : null,
     days_left: ends ? Math.max(0, Math.ceil((ends - now) / DAY)) : null,
     for_good: !!st?.forGood,
@@ -163,4 +187,6 @@ export function billingPayload(st) {
   }
 }
 
+/** The 6-month price now (the lock screen and the reminders show it). */
+export const currentPrice6 = () => quote(readCache().instructions || {}).six
 export const __resetForTest = () => { cache = null; askedAt = 0 }

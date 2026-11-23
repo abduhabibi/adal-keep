@@ -26,7 +26,12 @@ export default function PaymentInstructions({ billing, dark = false }) {
   const row = 'flex flex-wrap items-center justify-between gap-2 rounded-lg px-3 py-2 ' + (dark ? 'bg-white/5' : 'bg-slate-50 dark:bg-slate-900/50')
   return (
     <div translate="no" className={`space-y-2 text-sm ${dark ? 'text-slate-200' : 'text-slate-700 dark:text-slate-200'}`}>
-      <p className="font-semibold">Pay {Number(ins.price_etb || 30000).toLocaleString('en')} ETB for 6 months</p>
+      <p className="font-semibold">Premium — everything in Adal Keep</p>
+      <ul className={muted}>
+        <li><b className="text-inherit">{Number(billing.prices?.six || 49999).toLocaleString('en')} ETB</b> for 6 months · <b className="text-inherit">{Number(billing.prices?.twelve || 89999).toLocaleString('en')} ETB</b> for 12 months</li>
+        <li>Up to {billing.included_pcs || 3} PCs included; each extra PC {Number(billing.prices?.extra || 0).toLocaleString('en')} ETB per 6 months</li>
+        {billing.prices?.indexed && <li>Priced in US dollars: today's rate is {billing.prices.rate} ETB per 1 USD{billing.prices.rate_at ? ` (set ${billing.prices.rate_at})` : ''}. You pay the ETB amount above.</li>}
+      </ul>
       {!billing.has_instructions && <p className={muted}>Adal has not put the payment details here yet: call {ins.phone || 'Adal Keep'}.</p>}
       {ins.telebirr?.number && (
         <div className={row}>

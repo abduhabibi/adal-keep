@@ -1,9 +1,34 @@
+import { useRef, useState } from 'react'
+import api from '../services/api'
 import PageHeader from '../components/shared/PageHeader'
 import PaymentInstructions, { useBilling } from '../components/PaymentInstructions'
 
 /** Billing: when the licence ends, how to pay, and the payments Adal marked received (flag "billing"). */
 const STATE = { trial: 'Free trial', active: 'Paid', locked: 'Ended', suspended: 'Suspended' }
 const day = (iso) => iso ? new Date(iso).toLocaleDateString([], { dateStyle: 'medium' }) : '—'
+
+function ReceiptUpload() {
+  const [msg, setMsg] = useState('')
+  const ref = useRef(null)
+  const send = async (file) => {
+    if (!file) return
+    setMsg('Sending…')
+    try {
+      const fd = new FormData(); fd.append('image', file)
+      await api.post('/chat/unlock-request', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+      setMsg('Sent to Adal. When Adal confirms it, your licence is extended on all your PCs.')
+    } catch (e) { setMsg(e?.response?.data?.error || e.message) }
+  }
+  return (
+    <div>
+      <p className="mb-2 text-xs uppercase text-slate-500">Paid already? Send your receipt</p>
+      <p className="mb-2 text-sm text-slate-600 dark:text-slate-300">Upload a screenshot of the telebirr or bank receipt. Adal checks it and confirms.</p>
+      <input ref={ref} type="file" accept="image/*" className="hidden" onChange={e => send(e.target.files?.[0])} />
+      <button type="button" onClick={() => ref.current?.click()} className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-700">Upload receipt</button>
+      {msg && <p className="mt-2 text-sm">{msg}</p>}
+    </div>
+  )
+}
 
 export default function BillingPage() {
   const b = useBilling()
@@ -24,6 +49,9 @@ export default function BillingPage() {
             </section>
             <section className="panel rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-800">
               <PaymentInstructions billing={b} />
+            </section>
+            <section className="panel rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-800">
+              <ReceiptUpload />
             </section>
             <section className="panel rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-800">
               <p className="mb-2 text-xs uppercase text-slate-500">Payments Adal received</p>

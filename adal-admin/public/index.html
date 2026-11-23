@@ -827,7 +827,8 @@ async function billingView() {
   if (d.error) { $('#title').textContent = d.error; $('#table').innerHTML = ''; return }
   $('#title').textContent = `Billing — ${money(d.revenue.thisMonth)} this month, ${money(d.revenue.total)} in all`
   const ST = { paid: 'approved', trial: 'pending', expired: 'rejected', suspended: 'rejected' }
-  $('#table').innerHTML = `<table><tr><th>Agency</th><th>Licence</th><th>Ends</th><th>Last payments</th><th></th></tr>
+  const rc = d.receipts || []
+  $('#table').innerHTML = `${rc.length ? `<div class="needs"><b>Receipts waiting (${rc.length})</b><table>${rc.map(r => `<tr><td>${img(r.image_path).replace('<img', '<img style="max-height:90px;border-radius:6px"')}</td><td><b>${esc(r.agency)}</b><div class="muted">PC ${esc(r.pc_number)} · ${when(r.created_at)}</div></td><td><button class="go" data-rc="${r.id}" data-pay="${esc(r.pc_number)}" data-name="${esc(r.agency)}">Confirm</button> <button class="ghost" data-rj="${r.id}">Not right</button></td></tr>`).join('')}</table></div>` : ''}<table><tr><th>Agency</th><th>Licence</th><th>Ends</th><th>Last payments</th><th></th></tr>
     ${d.agencies.map(a => `<tr><td><b>${esc(a.name)}</b><div class="muted">PC ${esc(a.pc_number)} · ${esc(a.plan)}</div></td>
       <td><span class="pill ${ST[a.renewal.state] || ''}">${a.renewal.state}</span></td>
       <td>${dshort(a.renewal.ends)}<div class="muted">${a.renewal.days == null ? '' : a.renewal.days >= 0 ? a.renewal.days + ' days left' : -a.renewal.days + ' days ago'}</div></td>
@@ -837,23 +838,28 @@ async function billingView() {
   const i = d.instructions
   const f = (id, label, v, ph = '') => `<label style="display:block;margin:6px 0"><span class="muted">${label}</span><br><input type="text" id="${id}" value="${esc(v || '')}" placeholder="${ph}" style="width:100%;max-width:420px"></label>`
   $('#insBox').innerHTML = `<h3>Payment instructions — what every agency sees (Billing page and lock screen)</h3>
-    ${f('inPrice', 'Price for 6 months (ETB)', i.price_etb)}${f('inTName', 'telebirr account name', i.telebirr.name)}${f('inTNum', 'telebirr number', i.telebirr.number, '09…')}
+    ${f('inPrice', 'Premium for 6 months (ETB)', i.price_6m)}${f('inP12', 'Premium for 12 months (ETB)', i.price_12m)}${f('inExtra', 'Extra PC above the included ones (ETB per 6 months)', i.extra_pc_etb)}${f('inIncl', 'PCs included', i.included_pcs)}
+    <div style="margin:8px 0;padding:8px;border:1px dashed var(--line);border-radius:10px"><label><input type="checkbox" id="inUsd" ${i.usd.on ? 'checked' : ''}> <b>USD-indexed</b> — the app shows the ETB to pay = USD price × today's rate (payment stays in ETB)</label>
+      ${f('inU6', 'USD price, 6 months', i.usd.usd_6m || '')}${f('inU12', 'USD price, 12 months', i.usd.usd_12m || '')}${f('inUx', 'USD price, extra PC (per 6 months)', i.usd.usd_extra || '')}${f('inRate', "Today's rate (ETB per 1 USD)" + (i.usd.rate_at ? ' — set ' + i.usd.rate_at : ''), i.usd.rate || '')}
+      <div class="muted">Now: ${d.quote.indexed ? 'USD-indexed' : 'plain ETB'} → ${money(d.quote.six)} / ${money(d.quote.twelve)} / extra PC ${money(d.quote.extra)}</div></div>${f('inTName', 'telebirr account name', i.telebirr.name)}${f('inTNum', 'telebirr number', i.telebirr.number, '09…')}
     <div style="margin:8px 0"><span class="muted">Banks, one per line: bank | account name | account number</span><br><textarea id="inBanks" rows="3" style="width:100%;max-width:420px">${esc(i.banks.map(b => `${b.bank} | ${b.account_name} | ${b.account_number}`).join('\n'))}</textarea></div>
     ${f('inPhone', 'Phone to call after paying', i.phone, '0995668080')}${f('inNote', 'A line under the details', i.note)}
     <button class="go" id="inSave">Save instructions</button> <span class="muted">Signed with your key: the apps show them within 10 minutes. The app never charges and never asks for card details.</span>`
   $('#inSave').onclick = async () => {
     const banks = $('#inBanks').value.split('\n').map(l => l.split('|').map(x => x.trim())).filter(x => x[0] && x[2]).map(x => ({ bank: x[0], account_name: x[1], account_number: x[2] }))
-    try { await api('/api/billing/instructions', { instructions: { price_etb: $('#inPrice').value, telebirr: { name: $('#inTName').value, number: $('#inTNum').value }, banks, phone: $('#inPhone').value, note: $('#inNote').value } }); toast('Saved — agencies see it soon'); billingView() } catch (e) { await tell('Not saved', e.message) }
+    try { await api('/api/billing/instructions', { instructions: { price_6m: $('#inPrice').value, price_12m: $('#inP12').value, extra_pc_etb: $('#inExtra').value, included_pcs: $('#inIncl').value, usd: { on: $('#inUsd').checked, usd_6m: $('#inU6').value, usd_12m: $('#inU12').value, usd_extra: $('#inUx').value, rate: $('#inRate').value, rate_at: new Date().toLocaleDateString('en-CA') }, telebirr: { name: $('#inTName').value, number: $('#inTNum').value }, banks, phone: $('#inPhone').value, note: $('#inNote').value } }); toast('Saved — agencies see it soon'); billingView() } catch (e) { await tell('Not saved', e.message) }
   }
-  $('#table').querySelectorAll('[data-pay]').forEach(b => b.onclick = () => payForm(b.dataset.pay, b.dataset.name, d.price))
+  $('#table').querySelectorAll('[data-pay]').forEach(b => b.onclick = () => payForm(b.dataset.pay, b.dataset.name, d.quote, b.dataset.rc))
+  $('#table').querySelectorAll('[data-rj]').forEach(b => b.onclick = async () => { const note = await ask({ title: 'Receipt not right', text: 'Tell the agency why (they are asked to send it again).', ok: 'Send', input: '' }); if (note === null) return; try { await api('/api/decide', { id: Number(b.dataset.rj), approve: false, note }); billingView() } catch (e) { await tell('Not done', e.message) } })
 }
-function payForm(pc, name, price) {
+function payForm(pc, name, q, receipt) {
   const f = (id, label, v, ph = '') => `<label style="display:block;margin:6px 0"><span class="muted">${label}</span><br><input type="text" id="${id}" value="${esc(v || '')}" placeholder="${ph}" style="width:100%"></label>`
   $('#dlgT').textContent = `Payment received — ${name}`
   $('#dlgP').innerHTML = `${f('pyRef', 'telebirr / bank reference (from the receipt)', '', 'e.g. CK12AB34')}
     <label style="display:block;margin:6px 0"><span class="muted">Method</span><br><select id="pyMethod"><option value="telebirr">telebirr</option><option value="bank">bank</option><option value="cash">cash</option></select></label>
-    ${f('pyAmt', 'Amount (ETB)', price)}${f('pyDate', 'Date paid', new Date().toLocaleDateString('en-CA'))}
-    <div class="muted">30,000 ETB = 6 months. The licence is extended from the end of what is paid (or from today) on every PC of the agency.</div>`
+    <label style="display:block;margin:6px 0"><span class="muted">Term</span><br><select id="pyTerm"><option value="6">6 months</option><option value="12">12 months</option></select></label>
+    ${f('pyExtra', 'Extra PCs above the included ones', '0')}${f('pyAmt', 'Amount (ETB)', q.six)}${f('pyDate', 'Date paid', new Date().toLocaleDateString('en-CA'))}
+    <div class="muted">Premium: ${money(q.six)} / 6 months, ${money(q.twelve)} / 12, extra PC ${money(q.extra)} per 6 months. The licence is extended from the end of what is paid (or from today) on every PC of the agency.</div>`
   $('#dlgP').style.whiteSpace = 'normal'; $('#dlgI').style.display = 'none'
   const okB = $('#dlgOk'); okB.textContent = 'Mark received'; okB.className = 'go'
   $('#dlgNo').style.display = ''
@@ -861,10 +867,12 @@ function payForm(pc, name, price) {
   $('#dlgNo').onclick = done
   okB.onclick = async () => {
     try {
-      const r = await api('/api/billing/payment', { pc, method: $('#pyMethod').value, reference: $('#pyRef').value, amount: $('#pyAmt').value, date: $('#pyDate').value })
+      const r = await api('/api/billing/payment', { pc, method: $('#pyMethod').value, reference: $('#pyRef').value, amount: $('#pyAmt').value, term: Number($('#pyTerm').value), extra_pcs: Number($('#pyExtra').value) || 0, receipt_id: receipt ? Number(receipt) : undefined, date: $('#pyDate').value })
       done(); toast(`Recorded — paid until ${dshort(r.paid_until)}`); billingView()
     } catch (e) { toast(e.message) }
   }
+  const recalc = () => { const t = $('#pyTerm').value === '12'; $('#pyAmt').value = (t ? q.twelve : q.six) + Math.max(0, Number($('#pyExtra').value) || 0) * q.extra * (t ? 2 : 1) }
+  $('#pyTerm').onchange = recalc; $('#pyExtra').oninput = recalc
   $('#dlg').style.display = 'flex'
 }
 

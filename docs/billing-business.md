@@ -13,3 +13,7 @@
 
 Tests: tests/billing.test.js, bizStats.test.js, adminBilling.test.js (Admin against a fake Supabase).
 Release pending: turn `billing` / `biz_stats` on per agency (or the Adal Test agency first); no SQL to run.
+
+## Pricing (2026-11-23, owner)
+One plan, Premium, everything in it: 49,999 ETB / 6 months, 89,999 ETB / 12 months, 3 PCs included, extra PC add-on per 6 months (2,500 ETB default), 21-day full trial. Old basic/standard licences read as Premium. All prices are editable in Admin → Billing; optional USD-indexed mode (USD prices + today's rate → ETB shown in the app; payment stays ETB). The Authenticator code (subscription.js) still adds 6 months and is untouched.
+Receipts: the app's Billing page uploads a screenshot (existing unlock_requests); Admin → Billing lists it with Confirm (term, extra PCs, amount prefilled) → signed licence extended for all PCs, receipt marked `confirmed:` so the PC does not add months again (routes/chat.js).

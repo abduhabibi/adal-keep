@@ -4,13 +4,12 @@ import assert from 'node:assert/strict'
 test('plans: what each plan has, and an agency set apart', async () => {
   const { featureState, featureForWorkflow } = await import('../src/services/plans.js')
   assert.equal(featureState('wafid', null), 'on')                    // no licence yet: the trial has everything
-  assert.equal(featureState('wafid', { plan: 'basic' }), 'off')
-  assert.equal(featureState('wafid', { plan: 'standard' }), 'on')
-  assert.equal(featureState('enjaz_visa', { plan: 'standard' }), 'off')
+  assert.equal(featureState('wafid', { plan: 'basic' }), 'on')       // one plan since 2026-11-23: old basic / standard read as Premium
+  assert.equal(featureState('enjaz_visa', { plan: 'standard' }), 'on')
   assert.equal(featureState('enjaz_visa', { plan: 'premium' }), 'on')
   assert.equal(featureState('enjaz_visa', { plan: 'basic', features: { enjaz_visa: 'on' } }), 'on')
   assert.equal(featureState('wafid', { plan: 'premium', features: { wafid: 'off' } }), 'off')
-  assert.equal(featureState('insurance', { plan: 'basic', offers: [{ feature: 'insurance' }] }), 'offered')
+  assert.equal(featureState('insurance', { plan: 'premium', features: { insurance: 'off' }, offers: [{ feature: 'insurance' }] }), 'offered')
   assert.equal(featureForWorkflow('musaned_check_chosen'), null)   // checking who was chosen: every plan
   assert.equal(featureForWorkflow('mofa_visa').key, 'enjaz_visa')
 })

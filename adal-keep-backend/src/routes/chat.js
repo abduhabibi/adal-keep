@@ -95,6 +95,8 @@ router.post('/chat/unlock-request', upload.single('image'), wrap(async (req, db)
 router.get('/chat/unlock-status', wrap(async (req, db) => {
   if (!chat.chatConfigured()) return { configured: false }
   const r = await chat.unlockStatus(db)
+  // Confirmed in Admin → Billing: the signed licence did the extending (billing.js); it must not add 6 more months here.
+  if (r?.status === 'approved' && /^confirmed/.test(r.note || '')) return { ...r, unlocked: statusPayload().mode === 'active' }
   if (r?.status === 'approved') { const u = unlockApproved(); return { ...r, unlocked: !!u.ok } }
   return r || { status: 'none' }
 }))

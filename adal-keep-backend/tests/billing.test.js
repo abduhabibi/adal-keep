@@ -29,7 +29,9 @@ test('a payment needs a method, a reference (not for cash) and an amount; no car
   assert.throws(() => B.normalizePayment({ method: 'bank', reference: 'X1', amount: 0 }), /amount/)
   const p = B.normalizePayment({ method: 'telebirr', reference: ' CK12  34 ', amount: '30000', date: '2026-11-20', card_number: '4111111111111111', cvv: '123' })
   assert.deepEqual(p, { method: 'telebirr', reference: 'CK12 34', amount: 30000, date: '2026-11-20', periods: 1, note: '' })
-  assert.equal(B.normalizePayment({ method: 'bank', reference: 'R', amount: 60000 }).periods, 2)
+  assert.equal(B.normalizePayment({ method: 'bank', reference: 'R', amount: 89999 }).periods, 2)
+  assert.equal(B.normalizePayment({ method: 'bank', reference: 'R', amount: 49999, term: 12 }).periods, 2)
+  assert.equal(B.normalizePayment({ method: 'bank', reference: 'R', amount: 52499, term: 6, extra_pcs: 1 }).extra_pcs, 1)
   assert.throws(() => B.normalizePayment({ method: 'bank', reference: 'R', amount: 30000, periods: 99 }), /Periods/)
 })
 
@@ -88,4 +90,16 @@ test('flag on: signed instructions and payments are kept; unsigned or other-PC f
 test('the licence key and Authenticator unlock are untouched: billing never writes the licence', () => {
   const src = fs.readFileSync(new URL('../src/services/billing.js', import.meta.url), 'utf8')
   assert.ok(!/ADAL_LICENSE_KEY|writeSide|applyCode|process\.env\.ADAL_LICENSE/.test(src.replace(/\/\*[\s\S]*?\*\//, '')))
+})
+
+test('one plan: 49,999 / 89,999 ETB, extra PCs above 3; USD-indexed mode follows the rate', () => {
+  const d = B.normalizeInstructions({})
+  assert.deepEqual([d.price_6m, d.price_12m, d.included_pcs, d.usd.on], [49999, 89999, 3, false])
+  assert.deepEqual(B.quote(d), { six: 49999, twelve: 89999, extra: 2500, indexed: false })
+  assert.equal(B.amountFor(d, 6, 2), 49999 + 5000)
+  assert.equal(B.amountFor(d, 12, 2), 89999 + 10000)
+  const x = { ...d, usd: { on: true, usd_6m: 400, usd_12m: 720, usd_extra: 20, rate: 125.5, rate_at: '2026-11-23' } }
+  assert.deepEqual(B.quote(x), { six: 50200, twelve: 90360, extra: 2510, indexed: true, rate: 125.5, rate_at: '2026-11-23' })
+  assert.equal(B.quote({ ...x, usd: { ...x.usd, rate: 0 } }).indexed, false)   // no rate yet: the ETB prices
+  assert.equal(B.amountFor(x, 12, 1), 90360 + 2 * 2510)
 })

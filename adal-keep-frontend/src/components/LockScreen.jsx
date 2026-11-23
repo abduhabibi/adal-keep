@@ -169,6 +169,7 @@ export default function LockScreen({ onClose }) {
   const pc = subscription?.pcNumber || '------'
   const phone = subscription?.sellerPhone || '0995668080'
   const billing = useBilling()
+  const price6 = billing?.enabled ? billing.plan_price_etb : (subscription?.priceEtb || 30000)
   const locked = subscription?.mode === 'locked'
 
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 15000); return () => clearInterval(t) }, [])
@@ -231,13 +232,13 @@ export default function LockScreen({ onClose }) {
                 <img src="/adal-payment.webp" alt="Pay 30,000 ETB for 6 months to Commercial Bank of Ethiopia account 1000709131323 — Adal Keep Subscription"
                   className="block w-full rounded-[21px]" />
               </div>
-              <p className="text-center"><span className="text-2xl font-extrabold text-white">{(subscription?.priceEtb || 30000).toLocaleString()} ETB</span> <span className="text-sm text-slate-300">for {subscription?.paidMonths || 6} months</span></p>
+              <p className="text-center"><span className="text-2xl font-extrabold text-white">{price6.toLocaleString()} ETB</span> <span className="text-sm text-slate-300">for {subscription?.paidMonths || 6} months</span></p>
               <p className="text-sm text-slate-400 text-center">Scan with your CBE app to pay</p>
               {billing?.enabled && <div className="w-full max-w-sm rounded-2xl border border-white/10 p-3"><PaymentInstructions billing={billing} dark /></div>}
               <p className="w-full max-w-sm rounded-2xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-3 text-center text-sm text-emerald-100">
                 <span aria-hidden="true">💚 </span>
                 <strong className="text-emerald-300">10% of your payment goes to charity</strong>
-                <span className="block text-xs text-emerald-200/80 mt-0.5">{Math.round((subscription?.priceEtb || 30000) / 10).toLocaleString()} ETB of the {(subscription?.priceEtb || 30000).toLocaleString()} ETB</span>
+                <span className="block text-xs text-emerald-200/80 mt-0.5">{Math.round((subscription?.priceEtb || 30000) / 10).toLocaleString()} ETB of the {price6.toLocaleString()} ETB</span>
               </p>
             </div>
 

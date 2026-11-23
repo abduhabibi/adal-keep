@@ -307,6 +307,17 @@ try {
   const keep = list.filter(o => o.name.endsWith('.tar.gz')).slice(0, 3).map(o => o.name.slice(0, 40))
   const old = list.filter(o => /^[0-9a-f]{40}\.(tar\.gz|json)$/.test(o.name) && !keep.includes(o.name.slice(0, 40))).map(o => `release/${o.name}`)
   if (old.length) { await storage('DELETE', `object/${BUCKET}`, JSON.stringify({ prefixes: old }), { 'Content-Type': 'application/json' }); console.log(`removed ${old.length} older version(s)`) }
+
+  // 6. The website's download (adalkeep.pages.dev → /api/download → site/install-x64.ps1 in the private adal-install bucket):
+  // refreshed with every release, no manual step. It re-uploads the installers on the USB folder (they update themselves to
+  // this release on first start) and keeps the inner links valid 90 days. Never stops the release; skip: ADAL_NO_SITE=1.
+  if (process.env.ADAL_NO_SITE !== '1' && fs.existsSync(path.join(ROOT, 'Adal Keep USB', '2 - Install Adal Main.exe'))) {
+    try {
+      console.log('== refreshing the website download')
+      execFileSync(process.execPath, [path.join(ROOT, 'adal-keep-backend/scripts/publish-install.mjs'), '90'], { cwd: ROOT, stdio: 'inherit', env: { ...process.env, ADAL_SITE_PUBLISH: '1' }, timeout: 25 * 60 * 1000 })
+      console.log('✓ website download refreshed')
+    } catch (e) { console.warn('!! website download not refreshed (the release is fine): run  ADAL_SITE_PUBLISH=1 node adal-keep-backend/scripts/publish-install.mjs 90') }
+  }
 } finally {
   fs.rmSync(stage, { recursive: true, force: true })
 }

@@ -8,4 +8,4 @@
 
 **One-time Supabase step:** run `adal-admin/supabase/agency-config.sql` in the SQL Editor.
 
-**Website** — `website/pages` (static), `website/functions/api/download.js` (signed links, download codes from `install_codes`), `website/deploy.sh`. Publish the downloadable installer with `ADAL_SITE_PUBLISH=1 node adal-keep-backend/scripts/publish-install.mjs 30` (writes `site/install-x64.ps1`; re-run before its inner links expire). No 32-bit build exists yet (`site/install-x86.ps1` missing → the page says so).
+**Website** — `website/pages` (static), `website/functions/api/download.js` (signed links, download codes from `install_codes`), `website/deploy.sh`. Publish the downloadable installer with `ADAL_SITE_PUBLISH=1 node adal-keep-backend/scripts/publish-install.mjs 90` (writes `site/install-x64.ps1`; refreshed automatically by publish-update.mjs (90-day links); by hand: ... publish-install.mjs 90). No 32-bit build exists yet (`site/install-x86.ps1` missing → the page says so).

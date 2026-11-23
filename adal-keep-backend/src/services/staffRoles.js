@@ -7,9 +7,9 @@
  *
  * Who is asking (whoIsAsking): the signed-in employee's key (X-Adal-Staff,
  * given at device-login, signed so it cannot name someone else), else the
- * cookie of the same sign-in. A window with no one signed in works as the PC's
- * default employee (pcDefaultStaff, asked on 2026-11-23); with no employee at all
- * it may only look, unless no employee can manage staff yet (a new agency). Phones, and calls through the online copy, work as whoever is
+ * cookie of the same sign-in. This PC's own window and the phones with no one signed
+ * in work as the PC's default employee (pcDefaultStaff, asked on 2026-11-23); another
+ * computer's window with no one signed in may only look, unless no employee can manage staff yet (a new agency). Phones, and calls through the online copy, work as whoever is
  * signed in on this PC. This PC's own robots, other PCs' servers and Adal
  * support keep everything. An employee with no role yet is an Admin.
  *
@@ -192,7 +192,8 @@ export async function permsFor(db, req) {
     return { perms: role.perms, role, user: who.user, readOnly: false, kind: who.kind }
   }
   if (who.kind === 'signed-out' && (await noStaffManager(db))) return { perms: { ...ALL }, role: null, user: null, readOnly: false, kind: who.kind }
-  if (who.kind === 'signed-out' || who.kind === 'phone') {
+  // This PC's own window or a phone (never another computer's window: it signs in itself).
+  if ((who.kind === 'signed-out' && ownWindow(req)) || who.kind === 'phone') {
     const user = await pcDefaultStaff(db)
     if (user) {
       const role = await roleOf(db, user)

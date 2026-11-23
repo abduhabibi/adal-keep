@@ -183,6 +183,10 @@ test('signed out: works as the PC\'s default employee; staff only after signing 
   }
   assert.equal((await o.call('POST', '/employees', { body: { name: 'X', username: 'x', password: 'abcd' } })).data.forbidden, 'manage_staff')
   assert.equal((await o.call('GET', '/employees')).status, 200)
+  // Another computer's window with no one signed in: looking only (it signs in itself).
+  const other = await fetch(o.base + '/profiles', { method: 'POST', headers: { 'user-agent': 'Mozilla/5.0 Chrome', 'x-forwarded-for': '192.168.1.9' } })
+  assert.equal(other.status, 403)
+  assert.equal((await other.json()).signed_out, true)
   // Sara signs in on this PC, then out: she stays the default, with her role.
   await o.db('users').where({ name: 'Sara' }).update({ role_id: await o.roleId('data_entry') })
   assert.equal((await o.call('POST', '/employees/device-login', { pc: true, body: { employeeId: 2, deviceSerial: 'pc-9' } })).status, 200)
@@ -250,8 +254,8 @@ test('phones and the online copy work as whoever is signed in on the PC', async 
 test("this PC's own window without its key works as whoever is signed in on the PC; robots' answers always pass", async () => {
   const o = await office()
   await o.db('users').where({ name: 'Sara' }).update({ role_id: await o.roleId('office') })
-  // No one signed in: looking only, but a robot already working may be answered.
-  assert.equal((await o.call('POST', '/profiles/1/automations/musaned-add/start')).data.signed_out, true)
+  // No one signed in: the PC's default employee (the first Admin) — robots start.
+  assert.equal((await o.call('POST', '/profiles/1/automations/musaned-add/start')).status, 200)
   // Sara signed in on this PC before staff roles (only the active employee was kept), the window has no key:
   await o.db('settings').insert({ key: 'active_employee_id', value: '2' })
   assert.equal((await o.call('POST', '/profiles/1/automations/musaned-add/start')).status, 200)
@@ -259,9 +263,9 @@ test("this PC's own window without its key works as whoever is signed in on the 
   // Signed in now (pc staff) as the admin: that one counts.
   await setPcStaff(o.db, 1)
   assert.equal((await o.call('DELETE', '/profiles/1')).status, 200)
-  // Signed out on the PC: looking only again.
+  // Signed out on the PC: the default employee again (not looking only).
   assert.equal((await o.call('POST', '/employees/device-logout', { body: {} })).status, 200)
-  assert.equal((await o.call('POST', '/profiles')).data.signed_out, true)
+  assert.equal((await o.call('POST', '/profiles')).status, 200)
   // Another computer's window (forwarded) never borrows the PC's sign-in.
   await setPcStaff(o.db, 1)
   const r = await fetch(o.base + '/profiles', { method: 'POST', headers: { 'user-agent': 'Mozilla/5.0 Chrome', 'x-forwarded-for': '192.168.1.9' } })
@@ -274,6 +278,8 @@ test("answers to a robot already working are never refused (signed out, or the p
   assert.equal((await o.call('POST', '/automations/12/captcha')).status, 200)
   assert.equal((await o.call('POST', '/automations/12/input')).status, 200)
   assert.equal((await o.call('POST', '/lmis/sms-code', { phone: true })).status, 200)
-  assert.equal((await o.call('POST', '/automations/12/resume')).status, 403)   // starting again is a change
+  // Starting again is a change: another computer's window with no one signed in may not.
+  const fwd = await fetch(o.base + '/automations/12/resume', { method: 'POST', headers: { 'user-agent': 'Mozilla/5.0 Chrome', 'x-forwarded-for': '192.168.1.9' } })
+  assert.equal(fwd.status, 403)
   await o.close()
 })

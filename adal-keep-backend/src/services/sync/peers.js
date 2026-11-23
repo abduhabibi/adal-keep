@@ -26,12 +26,18 @@
  *
  * Both only add addresses to try; node.reach() still checks /sync/hello
  * answers as that very PC (its pc_id) with this agency's key.
+ *
+ * Equal PCs (ADAL_EQUAL_PCS, trust.js): the tag is a hash of the agency's id
+ * (trust.agencyTag) — while the PCs move over, next to the two above; strict,
+ * alone. A PC not on the list yet is listened to then (it joined from the
+ * cloud a moment ago): only its certificate, in the handshake, lets it in.
  */
 import dgram from 'dgram'
 import os from 'os'
 import crypto from 'crypto'
 import fs from 'fs'
 import { execFile } from 'child_process'
+import { agencyTag } from './trust.js'
 
 export const PEER_ASK = 'ADAL_KEEP_PEERS_V1'
 export const PEER_HERE = 'ADAL_KEEP_PEER_V1'
@@ -118,7 +124,9 @@ export class PeerFinder {
     if (first) tags.push(rootTag(first.pc_id))
     const num = this.node.roles.licence()?.pcNumber
     if (num) tags.push(numberTag(num))
-    this.tags = tags
+    const aid = this.node.trust?.store.agencyId()
+    this.agencyTag = aid ? agencyTag(aid) : null
+    this.tags = aid ? (this.node.strict ? [this.agencyTag] : [this.agencyTag, ...tags]) : tags
     return tags
   }
 
@@ -135,7 +143,7 @@ export class PeerFinder {
     const [kind, tags, pcId, port, ips, macs, name] = p
     if (!this.tags.length || !String(tags || '').split(',').some(t => t && this.tags.includes(t))) { this.ignored++; return null }
     if (!/^[0-9a-f]{12}$/.test(pcId || '') || pcId === this.node.pcId) return null
-    if (!this.known.has(pcId)) { this.ignored++; return null }
+    if (!this.known.has(pcId) && !(this.node.trust && this.agencyTag && String(tags || '').split(',').includes(this.agencyTag))) { this.ignored++; return null }
     const httpPort = Number(port) > 0 && Number(port) < 65536 ? Number(port) : 4000
     const urls = []
     const add = (ip) => { if (/^\d+\.\d+\.\d+\.\d+$/.test(ip || '') && !ip.startsWith('169.254.')) { const u = `http://${ip}:${httpPort}`; if (!urls.includes(u)) urls.push(u) } }

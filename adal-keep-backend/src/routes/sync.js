@@ -16,7 +16,20 @@
  *   POST /sync/take-main      {force} → this PC takes the main PC's role (restarts)
  *   POST /sync/hand-main      {pc_id} → the main PC gives its role to another PC (restarts)
  *   GET  /sync/conflicts      merges and documents kept beside
+ *
+ * With ADAL_EQUAL_PCS (docs/equal-pcs.md, services/sync/trust.js) a PC may
+ * also come in with its agency certificate instead of the key:
+ *   POST /sync/auth/hello     {anchor, cert, eph, nonce} → this PC's, signed
+ *   POST /sync/auth/prove     {sid, sig} → the session is on
+ * and every call above is then sealed (x-adal-session: sid.n, the body or
+ * x-adal-box sealed; the answer sealed). Sealed only, for a PC joining from
+ * any PC of the agency (no main PC needed):
+ *   GET  /sync/join-keys      the backup key, the vault key, the locked secrets
+ *   GET  /sync/snapshot       a fresh copy of the database → {snap, length, pieces}
+ *   GET  /sync/snapshot/:snap/:i   one piece of it
+ * ADAL_EQUAL_PCS=strict: the key alone is refused (every PC has its certificate).
  */
+import fs from 'fs'
 import express from 'express'
 import { withSlot } from '../services/replicaThrottle.js'
 
@@ -31,16 +44,43 @@ export function compareVectors(mine = {}, theirs = {}) {
   return { they_lack: they, we_lack: we }
 }
 
-export function createSyncRouter({ getNode, here, admitted = (req) => req.pcAccess || null, keyOf = (req) => String(req.headers['x-adal-pc'] || ''), onJoined = null, onRole = null }) {
+export function createSyncRouter({ getNode, here, admitted = (req) => req.pcAccess || null, keyOf = (req) => String(req.headers['x-adal-pc'] || ''), onJoined = null, onRole = null, getTrust = () => getNode()?.trustServer || null, strict = () => process.env.ADAL_EQUAL_PCS === 'strict', joinData = null }) {
   const router = express.Router()
   const fail = (res, e) => res.status(e.status && e.status < 600 ? e.status : 500).json({ error: e.message, ...(e.suspended ? { suspended: true } : {}) })
   const need = (res) => { const n = getNode(); if (!n) { res.status(503).json({ error: 'The copying is not running on this PC yet' }); return null } return n }
 
+  /** A sealed call (a PC with its agency certificate): opened here, its answer sealed. */
+  const sealed = (req, res, node) => {
+    const trust = getTrust()
+    if (!trust) { res.status(401).json({ error: 'This PC does not take certificates', session: 'unknown', trust: true }); return false }
+    let c
+    try { c = trust.openCall(req.headers['x-adal-session'], req.method, req.originalUrl, req.method === 'GET' || req.method === 'HEAD' ? req.headers['x-adal-box'] : req.body?.box) } catch (e) {
+      res.status(e.status || 401).json({ error: e.message, trust: true, ...(e.session ? { session: e.session } : {}), ...(e.revoked ? { revoked: true } : {}) }); return false
+    }
+    const json = res.json.bind(res)
+    res.json = (o) => json(trust.sealAnswer(c.sid, c.n, c.session, o))
+    res.sealedRaw = (buf) => { res.set('Cache-Control', 'no-store'); return json(trust.sealAnswer(c.sid, c.n, c.session, buf, { raw: true })) }
+    req.body = c.body && typeof c.body === 'object' ? c.body : {}
+    req.syncSealed = true
+    const pc = c.session.peer
+    // Suspended by the agency (sync_pcs, as for the keys): refused like a key would be.
+    const row = node.pcRows?.get(pc.pc_id)
+    if (row?.revoked) { res.status(403).json({ error: 'This computer was removed from the agency' }); return false }
+    if (row?.suspended) { res.status(403).json({ error: 'This computer was suspended', suspended: true }); return false }
+    req.syncPeer = { pc_id: pc.pc_id, name: row?.name || pc.name, cert: pc.serial }
+    if (!node.peerState.get(pc.pc_id)?.ok) node.roundSoon?.(1000)
+    return true
+  }
   const agencyPC = (req, res, next) => {
     const node = need(res)
     if (!node) return
     if (req.headers['x-adal-cloud']) return res.status(403).json({ error: 'Not through the online link' })
+    if (req.headers['x-adal-session']) {
+      if (node.cutOff) return res.status(403).json({ error: `This PC was ${node.cutOff}` })
+      return sealed(req, res, node) ? next() : undefined
+    }
     if (node.cutOff) return res.status(403).json({ error: `This PC was ${node.cutOff} by the main PC` })
+    if (strict()) return res.status(401).json({ error: 'Come in with the agency certificate', trust: true, session: 'unknown' })
     const key = keyOf(req)
     const p = node.peerByKey(key)
     if (p) {
@@ -55,6 +95,26 @@ export function createSyncRouter({ getNode, here, admitted = (req) => req.pcAcce
     return res.status(401).json({ error: 'Not a PC of this agency', pc_access: true })
   }
   const local = (req, res, next) => (here(req) ? next() : res.status(403).json({ error: 'Only on this PC itself' }))
+
+  // ── The handshake (trust.js): no key needed — the certificates decide ──
+  const auth = (step) => (req, res) => {
+    const trust = getTrust()
+    if (!trust || !getNode()) return res.status(503).json({ error: 'This PC does not take certificates', trust: true })
+    if (req.headers['x-adal-cloud']) return res.status(403).json({ error: 'Not through the online link' })
+    try { res.json(trust[step](req.body || {})) } catch (e) { res.status(e.status || 403).json({ error: e.message, trust: true, ...(e.revoked ? { revoked: true } : {}) }) }
+  }
+  router.post('/sync/auth/hello', auth('hello'))
+  router.post('/sync/auth/prove', auth('prove'))
+  const sealedOnly = (req, res, next) => (req.syncSealed ? next() : res.status(403).json({ error: 'Only with the agency certificate' }))
+  router.get('/sync/join-keys', agencyPC, sealedOnly, async (req, res) => {
+    try { if (!joinData) throw Object.assign(new Error('Not here'), { status: 404 }); res.json(await joinData.keys()) } catch (e) { fail(res, e) }
+  })
+  router.get('/sync/snapshot', agencyPC, sealedOnly, async (req, res) => {
+    try { if (!joinData) throw Object.assign(new Error('Not here'), { status: 404 }); res.json(await withSlot(() => joinData.manifest())) } catch (e) { fail(res, e) }
+  })
+  router.get('/sync/snapshot/:snap/:i', agencyPC, sealedOnly, async (req, res) => {
+    try { if (!joinData) throw Object.assign(new Error('Not here'), { status: 404 }); res.sealedRaw(await withSlot(() => joinData.piece(req.params.snap, Number(req.params.i)))) } catch (e) { fail(res, e) }
+  })
 
   router.get('/sync/hello', agencyPC, async (req, res) => { try { res.json(await getNode().hello()) } catch (e) { fail(res, e) } })
   router.post('/sync/pull', agencyPC, async (req, res) => {
@@ -85,6 +145,10 @@ export function createSyncRouter({ getNode, here, admitted = (req) => req.pcAcce
       const name = String(req.params.name)
       if (!node.docs.has(name)) return res.status(404).json({ error: 'No such document' })
       res.set('Cache-Control', 'no-store')
+      if (req.syncSealed) {
+        return withSlot(() => fs.promises.readFile(node.docs.pathOf(name))).then(buf => res.sealedRaw(buf))
+          .catch(e => { if (res.headersSent) return; if (e.retryAfter) res.set('Retry-After', String(e.retryAfter)); fail(res, e) })
+      }
       // One document at a time on this PC, after the robots and people (replicaThrottle).
       withSlot(() => new Promise(resolve => res.sendFile(node.docs.pathOf(name), { dotfiles: 'deny' }, () => resolve())))
         .catch(e => { if (res.headersSent) return; if (e.retryAfter) res.set('Retry-After', String(e.retryAfter)); fail(res, e) })

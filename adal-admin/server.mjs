@@ -1240,6 +1240,41 @@ ${error ? `<div class="err">${error}</div>` : ''}
 </form></body></html>`)
 }
 
+// ------------------------------------------------- agency certificates --
+// Every PC equal (docs/equal-pcs.md, behind ADAL_EQUAL_PCS on the PCs): Admin makes an
+// agency's key (signed with Adal's root key, ~/.adal-keep/agency-root.jwk — never
+// regenerate), says Yes to a PC asking to join, and cuts a PC off everywhere.
+// Needs supabase/agency-trust.sql run once. Not used by any PC yet.
+let trustAuthority = null
+async function trust() {
+  if (trustAuthority) return trustAuthority
+  const lib = path.join(HERE, '..', 'adal-keep-backend', 'src', 'services', 'sync', 'authority.js')
+  const { Authority, SupabaseTrustStore } = await import(pathToFileURL(lib).href)
+  let rootPriv = null
+  try { rootPriv = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.adal-keep', 'agency-root.jwk'), 'utf8')) } catch {}
+  trustAuthority = new Authority({ store: new SupabaseTrustStore({ url: URL_, key: KEY }), rootPriv })
+  return trustAuthority
+}
+Object.assign(api, {
+  // {agency_id, code}: the agency's key and anchor (once per agency; code = the agency's PC number)
+  'POST /api/trust/create': async (q, b) => {
+    const t = await trust()
+    if (!t.rootPriv) throw new Error("Adal's root key is not on this PC (~/.adal-keep/agency-root.jwk)")
+    return t.createAgency(String(b.agency_id), String(b.code || ''))
+  },
+  'GET /api/trust/pending': async (q) => ({ pending: await (await trust()).pending(String(q.agency_id)) }),
+  'POST /api/trust/approve': async (q, b) => (await trust()).approveByAdmin(String(b.request_id)),
+  'GET /api/trust/devices': async (q) => {
+    const t = await trust()
+    const a = await t.store.get('agency', String(q.agency_id))
+    const devices = await t.store.list('device', d => d.agency_id === String(q.agency_id))
+    return { devices: devices.map(({ device_pub, ...d }) => d), crl: a?.crl?.p || null }
+  },
+  // {agency_id, pc_id}: on the revoked list; every PC of the agency refuses it from the next
+  // time it meets a PC that heard it (online: within 10 minutes).
+  'POST /api/trust/revoke': async (q, b) => ({ crl: (await (await trust()).revoke(String(b.agency_id), String(b.pc_id))).p }),
+})
+
 http.createServer(async (req, res) => {
   const u = new URL(req.url, 'http://localhost')
   try {

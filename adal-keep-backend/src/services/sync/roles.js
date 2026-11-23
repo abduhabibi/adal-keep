@@ -21,12 +21,19 @@
  *     it stood in for. That PC back (its heartbeat newer than the take, and
  *     reached on the office network now), the role is handed back to it.
  *     A role taken or handed by a person is never moved by itself.
+ *   • Equal PCs (ADAL_EQUAL_PCS, docs/equal-pcs.md): no PC is "the main
+ *     PC" by install. Each PC writes how strong it is (sync_role
+ *     'power:<pc_id>': cores, memory). The lease run out, the STRONGEST PC
+ *     alive takes the role ('strongest'); a PC holding it by itself hands it
+ *     to a PC on the network at least 1.5× stronger once no run is going
+ *     ('stronger'). A role a person took or handed stays where it is.
  *   • The licence lives with the role: the holder writes its licence state
  *     (sync_role 'licence', signed with the licence key every build has), and
  *     the other PCs follow it — they open while it is paid or in its trial,
  *     and lock or show "suspended" with it.
  */
 import crypto from 'crypto'
+import os from 'os'
 
 export const HEARTBEAT = Number(process.env.ADAL_SYNC_HEARTBEAT_MS) || 3 * 60 * 1000
 export const LEASE = Number(process.env.ADAL_SYNC_LEASE_MS) || 15 * 60 * 1000
@@ -142,6 +149,47 @@ export class Roles {
     return 'taken'
   }
 
+  // ── Equal PCs: the role with the strongest PC that is on ──────────────────
+
+  /** How strong this PC is: 2 per core + 1 per GB of memory (a 2-core 4 GB PC: 8). */
+  static power() {
+    if (process.env.ADAL_PC_POWER) return { score: Number(process.env.ADAL_PC_POWER), cores: 0, ram_gb: 0 }
+    const cores = os.cpus()?.length || 1, ram = Math.round(os.totalmem() / 2 ** 30)
+    return { score: cores * 2 + ram, cores, ram_gb: ram }
+  }
+  powerOf(pcId) { return Number(this.cache?.[`power:${pcId}`]?.data?.score) || 0 }
+  /** This PC's own power, written when it changed (copied to every PC). */
+  async publishPower(p = Roles.power()) {
+    await this.refresh()
+    if (this.powerOf(this.me) === p.score) return false
+    await this.write(`power:${this.me}`, this.me, p)
+    return true
+  }
+  async autoStepEqual({ canHandBack = () => true } = {}) {
+    const l = await this.leaseOf()
+    const now = this.node.now()
+    const d = this.cache?.main?.data || {}
+    const pcs = await this.pcs()
+    const reached = (id) => !!this.node.peerState?.get(id)?.ok
+    const alive = (p) => !p.revoked_at && !p.suspended_at && (p.pc_id === this.me || reached(p.pc_id) || (p.seen_at && now - Date.parse(p.seen_at) < LEASE))
+    const rank = (a, b) => this.powerOf(b.pc_id) - this.powerOf(a.pc_id) || (a.slot || 0) - (b.slot || 0)
+    const me = pcs.find(p => p.pc_id === this.me)
+    if (!me || me.suspended_at || me.revoked_at) return null
+    if (l.holder === this.me) {
+      if (!AUTO.has(d.how)) return null
+      const best = pcs.filter(p => p.pc_id !== this.me && alive(p) && reached(p.pc_id)).sort(rank)[0]
+      if (!best || this.powerOf(best.pc_id) < 1.5 * Math.max(1, this.powerOf(this.me))) return null
+      if (!(await canHandBack())) return null
+      await this.write('main', best.pc_id, { since: new Date(now).toISOString(), by: 'auto', how: 'stronger', from: this.me })
+      return 'handed-stronger'
+    }
+    if (l.holder && l.alive) return null
+    const first = pcs.filter(p => p.pc_id !== l.holder && alive(p)).sort(rank)[0]
+    if (first?.pc_id !== this.me) return null
+    await this.write('main', this.me, { since: new Date(now).toISOString(), by: 'auto', how: 'strongest', from: l.holder || null })
+    return 'taken'
+  }
+
   /** The holder gives the role to another PC of the agency. */
   async handTo(pcId, { by = '' } = {}) {
     await this.refresh()
@@ -181,6 +229,8 @@ export class Roles {
   }
 }
 
+// Roles that moved by themselves (equal PCs may move them again); a person's take or hand-over stays.
+const AUTO = new Set(['first', 'auto', 'back', 'handed back', 'strongest', 'stronger'])
 const safeJSON = (s, d) => { try { return s ? JSON.parse(s) : d } catch { return d } }
 const ago = (now, at) => { const m = Math.round((now - Date.parse(at || 0)) / 60000); return at ? (m < 1 ? 'just now' : `${m} min ago`) : 'never' }
 export function canonical(o) {

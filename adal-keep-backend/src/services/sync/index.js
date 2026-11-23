@@ -25,6 +25,7 @@ import { Relay, SupabaseStore } from './relay.js'
 import { readIdentity, updateIdentity } from './identity.js'
 import { setSlot, currentSlot } from './ids.js'
 import { createSyncRouter } from '../../routes/sync.js'
+import { equalPCs } from './trust.js'
 
 const BACKEND = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
 const SAFE = process.env.ADAL_BACKUP_SAFE || path.join(BACKEND, 'data', 'SafeStorage')
@@ -68,6 +69,9 @@ export async function startSync(appDb, { timers = true } = {}) {
   // The agency's PCs find each other on the office network, with or without the main PC (peers.js).
   const { PeerFinder } = await import('./peers.js')
   node.finder = new PeerFinder(node, { port: Number(process.env.DISCOVERY_PORT) || disco.DISCOVERY_PORT, macs: () => disco.macsOf(), log: console })
+  // Every PC equal (ADAL_EQUAL_PCS, docs/equal-pcs.md): the agency certificate on both sides.
+  const eq = equalPCs() ? await import('./equal.js') : null
+  if (eq) eq.attachTrust(node)
   let soonRound = null
   disco.onPeerMessage((text, rinfo) => {
     const answer = node?.finder?.heard(text, rinfo)
@@ -81,6 +85,7 @@ export async function startSync(appDb, { timers = true } = {}) {
   node.relay = await makeRelay(appDb, id).catch(() => null)
   // An agency's existing Adal Keep takes the role at once; a Companion install waits until it joins.
   await node.start({ timers, claim: !mp.isCompanionInstall() && !id.joined_main })
+  if (eq && timers) eq.startTrustJobs(node)
   // The app's own windows reload what changed (changes.js), whatever PC changed it.
   const { changed, onChanged } = await import('../changes.js')
   engine.onChange((w) => { for (const t of w.applied || []) changed(t) })
@@ -142,7 +147,7 @@ let roleBusySince = 0
 function startAutoRole() {
   const step = async () => {
     if (!node || node.cutOff) return
-    const r = await node.roles.autoStep({
+    const r = await node.roles[node.equal ? 'autoStepEqual' : 'autoStep']({
       // Handing back waits for the robots' runs going here, at most 10 minutes (the run limit).
       canHandBack: async () => {
         const { busyNow } = await import('../appLife.js')
@@ -153,7 +158,7 @@ function startAutoRole() {
       },
     })
     if (!r) return
-    console.log(r === 'taken' ? '[sync] the main PC is gone longer than its lease: this PC takes the main role by itself' : '[sync] the main PC is back: its role is handed back to it')
+    console.log(r === 'taken' ? '[sync] the main PC is gone longer than its lease: this PC takes the main role by itself' : r === 'handed-stronger' ? '[sync] a stronger PC is on: the main role goes to it' : '[sync] the main PC is back: its role is handed back to it')
     await node.round().catch(() => {})   // the others hear it now
   }
   const t = setInterval(() => step().catch(e => console.warn('[sync] role step:', e.message)), Number(process.env.ADAL_AUTO_MAIN_MS) || 60 * 1000)
@@ -240,7 +245,10 @@ export async function syncRoutes() {
     admitted: (req) => req.pcAccess || approvedPC(req),
     onJoined: async () => { const { ensureBackupKey } = await import('../telegramBackup.js'); ensureBackupKey() },
     onRole: () => reconcileRole({ restart: true }).catch(() => {}),
+    // Equal PCs: a PC with its certificate takes its first copy from this one (bootstrap.js).
+    joinData: equalPCs() ? await joinData() : null,
   })
+  if (equalPCs()) (await import('./equal.js')).equalRoutes(router, { getNode: () => node, here: onThisPC, keyOf, dbFile: DB_FILE })
   /**
    * This PC joins an agency as a Companion with its own full copy: the main
    * PC's number, then its database (and later its documents). The database
@@ -277,6 +285,14 @@ export async function syncRoutes() {
     } catch (e) { res.status(e.status || 400).json({ error: e.message, ...(e.suspended ? { suspended: true } : {}) }) }
   })
   return router
+}
+
+async function joinData() {
+  const { snapshotSource } = await import('./bootstrap.js')
+  const { replicaKeys } = await import('../replica.js')
+  let src = null
+  const source = () => (src = src || snapshotSource({ db: node.engine.db, dir: path.join(BACKEND, 'data', 'tmp') }))
+  return { keys: () => replicaKeys(), manifest: () => source().manifest(), piece: (s, i) => source().piece(s, i) }
 }
 
 // ── "Log out of this main PC" on a Companion with its own copy ─────────────

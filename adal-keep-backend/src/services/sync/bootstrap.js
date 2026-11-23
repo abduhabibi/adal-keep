@@ -104,3 +104,60 @@ export async function stageJoin(got, { dbFile }) {
   if (got.secrets.vault_key) stageVaultKey(got.secrets.vault_key)
   if (got.secrets.secrets) restoreSecretBlobs(got.secrets.secrets)
 }
+
+// ── Equal PCs: joining from ANY PC of the agency (trust.js, docs/equal-pcs.md) ──
+
+const PIECE = 4 * 1024 * 1024
+/**
+ * The database, for a PC that came in with its certificate: one fresh copy
+ * (VACUUM INTO, so it is whole even while people work), handed out in 4 MB
+ * pieces over the sealed channel. The copy is dropped after 10 minutes.
+ */
+export function snapshotSource({ db, dir }) {
+  const snaps = new Map()
+  const drop = () => { for (const [k, s] of snaps) if (Date.now() - s.at > 10 * 60000) { try { fs.unlinkSync(s.file) } catch {} snaps.delete(k) } }
+  return {
+    async manifest() {
+      drop()
+      const snap = crypto.randomBytes(8).toString('hex')
+      fs.mkdirSync(dir, { recursive: true })
+      const file = `${dir}/join-snapshot-${snap}.sqlite`
+      await db.raw(`VACUUM INTO ?`, [file])
+      const buf = fs.readFileSync(file)
+      snaps.set(snap, { file, at: Date.now(), length: buf.length })
+      return { snap, length: buf.length, pieces: Math.ceil(buf.length / PIECE), sha256: crypto.createHash('sha256').update(buf).digest('hex'), made: new Date().toISOString() }
+    },
+    async piece(snap, i) {
+      const s = snaps.get(String(snap))
+      if (!s) throw Object.assign(new Error('That copy is gone (start again)'), { status: 404 })
+      const fd = fs.openSync(s.file, 'r')
+      try {
+        const len = Math.max(0, Math.min(PIECE, s.length - i * PIECE))
+        const buf = Buffer.alloc(len)
+        fs.readSync(fd, buf, 0, len, i * PIECE)
+        return buf
+      } finally { fs.closeSync(fd) }
+    },
+  }
+}
+
+/**
+ * A PC with its certificate takes its first copy from whichever PC of the
+ * agency answers (call: node.call-like, sealed — trust.TrustClient.call).
+ * → { raw, secrets, from } for stageJoin.
+ */
+export async function joinFromPeer({ url, call, progress = () => {} }) {
+  progress({ step: 'keys' })
+  const secrets = await call(url, 'GET', '/api/sync/join-keys')
+  progress({ step: 'manifest' })
+  const m = await call(url, 'GET', '/api/sync/snapshot', undefined, { timeout: 180000 })
+  const parts = []
+  for (let i = 0; i < m.pieces; i++) {
+    progress({ step: 'database', done: i, of: m.pieces })
+    parts.push(await call(url, 'GET', `/api/sync/snapshot/${m.snap}/${i}`, undefined, { timeout: 120000, raw: true }))
+  }
+  const raw = Buffer.concat(parts)
+  if (raw.length !== m.length || crypto.createHash('sha256').update(raw).digest('hex') !== m.sha256) throw new Error('The copy of the database came incomplete — try again')
+  if (raw.subarray(0, 16).toString('latin1') !== 'SQLite format 3\0') throw new Error('The copy is not a database')
+  return { raw, secrets, from: url, made: m.made }
+}

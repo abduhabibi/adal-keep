@@ -120,6 +120,7 @@ export class SyncNode {
   async refreshKeys() {
     const rows = await this.engine.db.raw(`SELECT pc_id, name, key_hash, suspended_at, revoked_at FROM sync_pcs`)
     this.keys = new Map(rows.filter(r => r.key_hash).map(r => [r.key_hash, { pc_id: r.pc_id, name: r.name, suspended: !!r.suspended_at, revoked: !!r.revoked_at }]))
+    this.pcRows = new Map(rows.map(r => [r.pc_id, { pc_id: r.pc_id, name: r.name, suspended: !!r.suspended_at, revoked: !!r.revoked_at }]))
     const me = rows.find(r => r.pc_id === this.pcId)
     this.rowCut = me?.revoked_at ? 'removed' : me?.suspended_at ? 'suspended' : null
     return this.keys
@@ -134,7 +135,19 @@ export class SyncNode {
 
   // ── Talking to another PC ─────────────────────────────────────────────────
 
-  async call(url, method, p, body, { timeout = 30000, raw = false } = {}) {
+  async call(url, method, p, body, { timeout = 30000, raw = false, legacy = true } = {}) {
+    // With the agency certificate (ADAL_EQUAL_PCS, trust.js): sealed. A PC that has no
+    // certificate yet (an older version, still being moved over) gets the key as before,
+    // unless strict — then only certificates.
+    if (this.trust && this.trust.store.ready() && !(this.legacyAt?.get(url) > this.now() - 10 * 60000)) {
+      try { return await this.trust.call(url, method, `/api/sync${p}`, body, { timeout, raw }) } catch (e) {
+        // (Only the handshake itself: a PC that has no certificate route or none yet. Never to a
+        // PC not on the agency's list — this PC's key is not shown to a stranger.)
+        const older = (e.status === 404 || e.status === 503) && e.trust === true && !e.revoked
+        if (!older || this.strict || !legacy || this.trust.wasCertified(url)) throw e
+        this.legacyAt = this.legacyAt || new Map(); this.legacyAt.set(url, this.now())
+      }
+    }
     const r = await this.f(`${url}/api/sync${p}`, {
       method, signal: AbortSignal.timeout(timeout),
       headers: { 'x-adal-pc': this.key, 'x-adal-sync-pc': this.pcId, ...(body ? { 'content-type': 'application/json' } : {}) },
@@ -160,7 +173,16 @@ export class SyncNode {
       if (p.pc_id === holder && this.mainURL()) urls.add(this.mainURL())
       for (const a of p.lan || []) if (/^[\w.:[\]-]+$/.test(a)) urls.add(`http://${a.includes(':') && !a.startsWith('[') ? `[${a}]` : a}:${p.port || 4000}`)
       return { ...p, urls: [...urls] }
-    })
+    }).concat(this.trust ? this.newcomers(pcs) : [])
+  }
+  /**
+   * Equal PCs: a PC heard on the office network with this agency's tag that is not on
+   * the list yet (joined from the cloud a moment ago): tried too — its certificate decides.
+   */
+  newcomers(pcs) {
+    const known = new Set([this.pcId, ...pcs.map(p => p.pc_id)])
+    for (const [id, row] of this.pcRows || []) if (row.revoked || row.suspended) known.add(id)
+    return [...(this.finder?.found || [])].filter(([id]) => !known.has(id)).map(([id, f]) => ({ pc_id: id, name: f.name, urls: this.finder.urlsOf(id), newcomer: true }))
   }
 
   /**
@@ -170,12 +192,19 @@ export class SyncNode {
    */
   async reach(pc) {
     const tried = new Set()
+    let again = false
+    const tryAgain = async (url) => { again = true; tried.delete(url); return tryAll([url]) }
     const tryAll = async (urls) => {
       for (const url of urls) {
         if (tried.has(url)) continue
         tried.add(url)
         try {
-          const h = await this.call(url, 'GET', '/hello', null, { timeout: 4000 })
+          const h = await this.call(url, 'GET', '/hello', null, { timeout: 4000, legacy: !pc.newcomer })
+          // Sealed: the PC is the one its certificate names, whatever its hello says.
+          const certified = this.trust?.peerAt(url)
+          if (certified && certified.pc_id !== pc.pc_id) continue
+          // It came by the key but has its certificate now (moved over a moment ago): sealed from now on.
+          if (h.cert && !again && this.legacyAt?.has(url) && this.trust?.store.ready()) { this.legacyAt.delete(url); return tryAgain(url) }
           if (h.pc_id === pc.pc_id) {
             this.peerState.set(pc.pc_id, { url, ok: true, at: this.now(), seen: this.now(), vector: h.vector || {}, main: !!h.main })
             return url
@@ -311,7 +340,7 @@ export class SyncNode {
   }
 
   async hello() {
-    return { pc_id: this.pcId, name: this.name, main: this.roles.isMain(), holder: this.roles.holder(), vector: await this.engine.vector(), version: this.version }
+    return { pc_id: this.pcId, name: this.name, main: this.roles.isMain(), holder: this.roles.holder(), vector: await this.engine.vector(), version: this.version, ...(this.trust?.store.ready() ? { cert: true } : {}) }
   }
 
   /**

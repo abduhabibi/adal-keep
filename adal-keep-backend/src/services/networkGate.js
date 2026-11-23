@@ -171,6 +171,8 @@ export function networkGate(req, res, next) {
   if (isLocal(req)) return next()
   if (OPEN.some(([m, re]) => (req.method === m || (m === 'GET' && req.method === 'HEAD')) && re.test(p))) return next()
   if (req.method === 'GET' && /^\/api\/branch\/export(\/|$)/.test(p) && mergeTokenOk(req)) return next()
+  // Equal PCs (sync/trust.js): the handshake and sealed calls carry the agency certificate — routes/sync.js checks it.
+  if (/^\/api\/sync\//.test(p) && ['1', 'strict'].includes(process.env.ADAL_EQUAL_PCS || '') && (/^\/api\/sync\/auth\/(hello|prove)$/.test(p) || req.headers['x-adal-session'])) return next()
   const pc = approvedPC(req)
   if (pc) { req.pcAccess = pc; return next() }
   // Suspended on the main PC (Settings → Connected devices): cut off at once.

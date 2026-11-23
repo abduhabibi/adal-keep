@@ -171,6 +171,8 @@
     <button data-tab="agencies"><span class="ic"><svg class="ico"><use href="#i-building"/></svg></span>Agencies</button>
     <button data-tab="inbox"><span class="ic"><svg class="ico"><use href="#i-chat"/></svg></span>Inbox</button>
     <button data-tab="payments"><span class="ic"><svg class="ico"><use href="#i-card"/></svg></span>Payments</button>
+    <button data-tab="billing"><span class="ic"><svg class="ico"><use href="#i-card"/></svg></span>Billing</button>
+    <button data-tab="business"><span class="ic"><svg class="ico"><use href="#i-chart"/></svg></span>Business</button>
     <button data-tab="plans"><span class="ic"><svg class="ico"><use href="#i-star"/></svg></span>Plans</button>
     <button data-tab="usage"><span class="ic"><svg class="ico"><use href="#i-chart"/></svg></span>Usage</button>
     <button data-tab="health"><span class="ic"><svg class="ico"><use href="#i-pulse"/></svg></span>Health</button>
@@ -719,6 +721,97 @@ async function usageView() {
 }
 
 
+
+// ---- Billing: each agency's licence and renewal date, mark a payment received, payment instructions ----
+const money = (n) => Number(n || 0).toLocaleString('en') + ' ETB'
+const dshort = (ms) => ms ? new Date(ms).toLocaleDateString('en-GB') : '—'
+async function billingView() {
+  $('#title').textContent = 'Billing — loading…'
+  const d = await api('/api/billing').catch(e => ({ error: e.message }))
+  if (tab !== 'billing') return
+  if (d.error) { $('#title').textContent = d.error; $('#table').innerHTML = ''; return }
+  $('#title').textContent = `Billing — ${money(d.revenue.thisMonth)} this month, ${money(d.revenue.total)} in all`
+  const ST = { paid: 'approved', trial: 'pending', expired: 'rejected', suspended: 'rejected' }
+  $('#table').innerHTML = `<table><tr><th>Agency</th><th>Licence</th><th>Ends</th><th>Last payments</th><th></th></tr>
+    ${d.agencies.map(a => `<tr><td><b>${esc(a.name)}</b><div class="muted">PC ${esc(a.pc_number)} · ${esc(a.plan)}</div></td>
+      <td><span class="pill ${ST[a.renewal.state] || ''}">${a.renewal.state}</span></td>
+      <td>${dshort(a.renewal.ends)}<div class="muted">${a.renewal.days == null ? '' : a.renewal.days >= 0 ? a.renewal.days + ' days left' : -a.renewal.days + ' days ago'}</div></td>
+      <td class="muted">${a.payments.map(p => `${esc(p.date)} · ${esc(p.method)} ${esc(p.reference)} · ${money(p.amount)}`).join('<br>') || 'none yet'}</td>
+      <td><button class="go" data-pay="${esc(a.pc_number)}" data-name="${esc(a.name)}">Payment received</button></td></tr>`).join('')}</table>
+    <div id="insBox" style="margin-top:18px;border:1px solid var(--line);border-radius:12px;padding:14px;max-width:760px"></div>`
+  const i = d.instructions
+  const f = (id, label, v, ph = '') => `<label style="display:block;margin:6px 0"><span class="muted">${label}</span><br><input type="text" id="${id}" value="${esc(v || '')}" placeholder="${ph}" style="width:100%;max-width:420px"></label>`
+  $('#insBox').innerHTML = `<h3>Payment instructions — what every agency sees (Billing page and lock screen)</h3>
+    ${f('inPrice', 'Price for 6 months (ETB)', i.price_etb)}${f('inTName', 'telebirr account name', i.telebirr.name)}${f('inTNum', 'telebirr number', i.telebirr.number, '09…')}
+    <div style="margin:8px 0"><span class="muted">Banks, one per line: bank | account name | account number</span><br><textarea id="inBanks" rows="3" style="width:100%;max-width:420px">${esc(i.banks.map(b => `${b.bank} | ${b.account_name} | ${b.account_number}`).join('\n'))}</textarea></div>
+    ${f('inPhone', 'Phone to call after paying', i.phone, '0995668080')}${f('inNote', 'A line under the details', i.note)}
+    <button class="go" id="inSave">Save instructions</button> <span class="muted">Signed with your key: the apps show them within 10 minutes. The app never charges and never asks for card details.</span>`
+  $('#inSave').onclick = async () => {
+    const banks = $('#inBanks').value.split('\n').map(l => l.split('|').map(x => x.trim())).filter(x => x[0] && x[2]).map(x => ({ bank: x[0], account_name: x[1], account_number: x[2] }))
+    try { await api('/api/billing/instructions', { instructions: { price_etb: $('#inPrice').value, telebirr: { name: $('#inTName').value, number: $('#inTNum').value }, banks, phone: $('#inPhone').value, note: $('#inNote').value } }); toast('Saved — agencies see it soon'); billingView() } catch (e) { await tell('Not saved', e.message) }
+  }
+  $('#table').querySelectorAll('[data-pay]').forEach(b => b.onclick = () => payForm(b.dataset.pay, b.dataset.name, d.price))
+}
+function payForm(pc, name, price) {
+  const f = (id, label, v, ph = '') => `<label style="display:block;margin:6px 0"><span class="muted">${label}</span><br><input type="text" id="${id}" value="${esc(v || '')}" placeholder="${ph}" style="width:100%"></label>`
+  $('#dlgT').textContent = `Payment received — ${name}`
+  $('#dlgP').innerHTML = `${f('pyRef', 'telebirr / bank reference (from the receipt)', '', 'e.g. CK12AB34')}
+    <label style="display:block;margin:6px 0"><span class="muted">Method</span><br><select id="pyMethod"><option value="telebirr">telebirr</option><option value="bank">bank</option><option value="cash">cash</option></select></label>
+    ${f('pyAmt', 'Amount (ETB)', price)}${f('pyDate', 'Date paid', new Date().toLocaleDateString('en-CA'))}
+    <div class="muted">30,000 ETB = 6 months. The licence is extended from the end of what is paid (or from today) on every PC of the agency.</div>`
+  $('#dlgP').style.whiteSpace = 'normal'; $('#dlgI').style.display = 'none'
+  const okB = $('#dlgOk'); okB.textContent = 'Mark received'; okB.className = 'go'
+  $('#dlgNo').style.display = ''
+  const done = () => { $('#dlg').style.display = 'none'; $('#dlgP').textContent = ''; $('#dlgP').style.whiteSpace = 'pre-line' }
+  $('#dlgNo').onclick = done
+  okB.onclick = async () => {
+    try {
+      const r = await api('/api/billing/payment', { pc, method: $('#pyMethod').value, reference: $('#pyRef').value, amount: $('#pyAmt').value, date: $('#pyDate').value })
+      done(); toast(`Recorded — paid until ${dshort(r.paid_until)}`); billingView()
+    } catch (e) { toast(e.message) }
+  }
+  $('#dlg').style.display = 'flex'
+}
+
+// ---- Business: counts only, from the heartbeat, the agencies' 30-minute counts and the ledger ----
+let bizDays = 30
+function bars(list, color = 'var(--teal)') {
+  if (!list.length) return '<p class="muted">Nothing yet.</p>'
+  const max = Math.max(...list.map(x => x.n), 1)
+  return `<div style="display:flex;align-items:flex-end;gap:2px;height:70px">${list.map(x => `<div title="${esc(x.d || x.m)}: ${x.n}" style="flex:1;min-width:3px;height:${Math.max(3, Math.round(x.n / max * 100))}%;background:${color};border-radius:2px 2px 0 0"></div>`).join('')}</div><div class="muted" style="display:flex;justify-content:space-between;font-size:11px"><span>${esc(list[0].d || list[0].m)}</span><span>${esc(list[list.length - 1].d || list[list.length - 1].m)}</span></div>`
+}
+async function businessView() {
+  $('#title').textContent = 'Business — loading…'
+  const d = await api('/api/business?days=' + bizDays).catch(e => ({ error: e.message }))
+  if (tab !== 'business') return
+  if (d.error) { $('#title').textContent = d.error; $('#table').innerHTML = ''; return }
+  $('#title').textContent = 'Business'
+  const tile = (v, label, sub = '') => `<div class="box2" style="text-align:center"><b style="font-size:24px">${v}</b><div class="muted">${label}</div>${sub ? `<div class="muted" style="font-size:11px">${sub}</div>` : ''}</div>`
+  $('#table').innerHTML = `<div class="uctl" style="margin-bottom:12px">${[7, 30, 90].map(n => `<button data-bd="${n}" class="${n === bizDays ? 'on' : ''}">${n} days</button>`).join('')}</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:14px">
+      ${tile(d.agencies.active, 'active agencies', `of ${d.agencies.total} · ${d.agencies.paying} paying · ${d.agencies.trial} on trial · ${d.agencies.expired} ended`)}
+      ${tile(d.pcs.online, 'PCs on now', `${d.pcs.total} PCs in all`)}
+      ${tile(d.added.total, 'profiles added', `last ${d.days} days · ${d.reporting} agencies reporting`)}
+      ${tile(d.moves.total, 'stage moves', `last ${d.days} days`)}
+      ${tile(d.hours_saved, 'staff hours saved', 'estimate')}
+      ${tile(money(d.revenue.thisMonth), 'revenue this month', `${money(d.revenue.total)} in all · ~${money(d.revenue.mrr_estimate)}/month`)}
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px">
+      <div class="box2"><b>Profiles added per day</b>${bars(d.added.day)}</div>
+      <div class="box2"><b>Profiles added per week</b>${bars(d.added.week)}</div>
+      <div class="box2"><b>Stage moves per day</b>${bars(d.moves.day, 'var(--amber)')}</div>
+      <div class="box2"><b>Revenue per month</b>${bars(d.revenue.months.map(x => ({ m: x.m, n: x.n })), 'var(--green)')}</div>
+    </div>
+    <h3 style="margin-top:18px">Robots — runs and success rate (last ${d.days} days)</h3>
+    <table><tr><th>Robot</th><th>Done</th><th>Failed</th><th>Success</th><th>Average run</th></tr>${d.robots.map(r => `<tr><td>${esc(r.robot.replace(/_/g, ' '))}</td><td>${r.done}</td><td>${r.failed}</td><td>${r.success == null ? '—' : r.success + '%'}</td><td>${r.avg_s == null ? '—' : r.avg_s + ' s'}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">No runs yet.</td></tr>'}</table>
+    <h3 style="margin-top:18px">Average time per stage</h3>
+    <table><tr><th>Stage</th><th>Average days</th><th>Stays seen</th></tr>${d.stages.map(x => `<tr><td>${esc(x.stage)}</td><td>${x.avg_days}</td><td>${x.n}</td></tr>`).join('') || '<tr><td colspan="3" class="muted">Not enough moves seen yet.</td></tr>'}</table>
+    <h3 style="margin-top:18px">Renewals due</h3>
+    <table><tr><th>Agency</th><th>State</th><th>Ends</th><th>Days</th></tr>${d.renewals.map(x => `<tr><td>${esc(x.name)}</td><td>${x.state}</td><td>${dshort(x.ends)}</td><td>${x.days}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">Nothing due.</td></tr>'}</table>
+    <p class="muted" style="margin-top:12px">${esc(d.hours_note)} Everything here is counts: no names, passports or accounts leave an agency.</p>`
+  $('#table').querySelectorAll('[data-bd]').forEach(b => b.onclick = () => { bizDays = Number(b.dataset.bd); businessView() })
+}
+
 // ---- Setup: new agencies waiting for setup + each agency's config record ----
 let setupEdit = null
 async function setupView() {
@@ -1147,6 +1240,8 @@ function showTable() {
   if (tab === 'agents') return agentsView()
   if (tab === 'ceos') return ceosView()
   if (tab === 'plans') return plansView()
+  if (tab === 'billing') return billingView()
+  if (tab === 'business') return businessView()
   if (tab === 'usage') return usageView()
   if (tab === 'health') return healthView()
   if (tab === 'fleet') return fleetView()

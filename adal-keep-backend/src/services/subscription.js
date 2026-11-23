@@ -407,6 +407,7 @@ export function unlockApproved() {
 const OPEN_WHEN_LOCKED = [
   ['GET', '/api/setup/status'],
   ['GET', '/api/subscription/status'],
+  ['GET', '/api/subscription/billing'],
   ['POST', '/api/subscription/unlock'],
   ['GET', '/api/health'],
   // The lock screen sends the payment receipt to Adal and waits for approval.

@@ -8,6 +8,7 @@
  */
 import { useEffect, useState } from 'react'
 import api from '../services/api'
+import { Link } from 'react-router-dom'
 import { backupWarning, licenceStep, leftText, ageText, stepShown, markStepShown } from '../lib/safety'
 
 const LATER = 'adal-backup-warning-later'
@@ -19,6 +20,7 @@ export default function SafetyAlerts() {
   const [hiddenUntil, setHiddenUntil] = useState(laterUntil())
   const [step, setStep] = useState(null)
   const [asked, setAsked] = useState('')
+  const [billingOn, setBillingOn] = useState(false)
 
   useEffect(() => {
     let gone = false
@@ -32,7 +34,7 @@ export default function SafetyAlerts() {
   // A licence step reached that this device has not shown yet.
   useEffect(() => {
     const st = licenceStep(s?.licence, now)
-    if (st && !stepShown(st.key)) setStep(st)
+    if (st && !stepShown(st.key)) { setStep(st); api.get('/subscription/billing').then(r => setBillingOn(!!r.data?.enabled)).catch(() => {}) }
   }, [s, now])
 
   const bw = backupWarning(s?.backup, now)
@@ -70,7 +72,8 @@ export default function SafetyAlerts() {
             {s?.licence?.seller_phone && (
               <p className="mt-2">Call <b>{s.licence.seller_phone}</b> and say PC number <b>{s.licence.pc_number}</b>{s.licence.price_etb ? ` (${Number(s.licence.price_etb).toLocaleString('en')} ETB for 6 months)` : ''}.</p>
             )}
-            <div className="mt-4 text-right">
+            <div className="mt-4 flex items-center justify-end gap-3">
+              {billingOn && <Link to="/billing" onClick={close} className="text-teal-700 underline dark:text-teal-300">How to pay</Link>}
               <button type="button" autoFocus onClick={close} className="rounded-lg bg-teal-600 px-4 py-2 font-semibold text-white hover:bg-teal-700">OK</button>
             </div>
           </div>

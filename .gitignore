@@ -112,3 +112,4 @@ adal-admin/cv-collection/
 *.jks
 *.keystore
 adal-keep-backend/.wwebjs_cache/
+adal-admin/billing-ledger.json

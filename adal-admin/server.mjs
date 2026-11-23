@@ -294,6 +294,8 @@ setTimeout(keepNumbersOnTheirPC, 5000).unref?.()
 // panel can make one; the agency's PC reads it within 30 minutes.
 const plans = await import('../adal-keep-backend/src/services/plans.js')
 const agencyConfig = await import('../adal-keep-backend/src/services/agencyConfig.js')
+const billing = await import('../adal-keep-backend/src/services/billing.js')
+const biz = await import('../adal-keep-backend/src/services/bizStats.js')
 const { signManifest } = await import('../adal-keep-backend/src/services/updateChannel.js')
 const SIGNING = path.join(os.homedir(), '.adal-keep', 'update-signing.pem')
 const DAY_MS = 86400000
@@ -334,6 +336,26 @@ async function tell(agencyId, body) {
   const conv = await inboxOf(agencyId)
   if (conv) await rest('POST', 'messages', { conversation_id: conv, sender_id: ADMIN_ID, body }, { Prefer: 'return=minimal' }).catch(() => {})
 }
+
+
+// ---------------------------------------------------------------- billing --
+// A payment Adal marks received (telebirr / bank reference, amount, date): it
+// extends the agency's signed licence (the same paid_until the Authenticator
+// code moves; every PC of the agency reads it) and is kept in Adal's ledger
+// (billing-ledger.json, only on this PC — other agencies never see it) with a
+// signed copy for the agency's own PCs. Nothing is charged here; no card data.
+const LEDGER = path.join(HERE, 'billing-ledger.json')
+const readLedger = () => { try { return JSON.parse(fs.readFileSync(LEDGER, 'utf8')) } catch { return [] } }
+const writeLedger = (l) => fs.writeFileSync(LEDGER, JSON.stringify(l, null, 1))
+const signedFile = (data) => {
+  if (!fs.existsSync(SIGNING)) throw new Error('The signing key (~/.adal-keep/update-signing.pem) is not on this PC: payments can only be recorded on Adal\'s PC.')
+  return { data, signature: signManifest(data, fs.readFileSync(SIGNING, 'utf8')) }
+}
+const putJson = (p, obj) => sb('POST', `/storage/v1/object/adal-updates/${p}`, Buffer.from(JSON.stringify(obj)), { 'Content-Type': 'application/json', 'x-upsert': 'true', 'Cache-Control': 'no-cache' })
+async function instructionsNow() {
+  try { return billing.normalizeInstructions(billing.verified(await sb('GET', `/storage/v1/object/adal-updates/billing/instructions.json?t=${Date.now()}`))) } catch { return billing.normalizeInstructions({}) }
+}
+const sellable = async () => (await mainAgencies()).filter(a => /^\d{6}$/.test(a.pc_number || '') && !BRANCH_RE.test(a.name || ''))
 
 // ------------------------------------------------------------------- api --
 const api = {
@@ -789,6 +811,92 @@ const api = {
       await tell(agency, '✅ Adal Keep is ready for your agency. Open Adal Keep on your PC — your setup is done. Call us if you need anything.')
     }
     return { ok: true, status }
+  },
+  // Billing: every agency's licence, renewal date and payments; the payment instructions the apps show.
+  'GET /api/billing': async () => {
+    const [agencies, instructions] = await Promise.all([sellable(), instructionsNow()])
+    const ledger = readLedger()
+    const lic = await Promise.all(agencies.map(a => licenseOf(a.pc_number)))
+    const now = Date.now()
+    return {
+      instructions, revenue: billing.revenueSummary(ledger, now), price: billing.PRICE_ETB,
+      agencies: agencies.map((a, i) => ({
+        id: a.id, name: a.name, pc_number: a.pc_number, plan: lic[i]?.plan || 'premium', code: codeFor(a.pc_number),
+        renewal: billing.renewalOf({ licence: lic[i], firstSeen: Date.parse(a.first_seen || a.created_at) }, now),
+        payments: ledger.filter(p => p.pc === a.pc_number).slice(-5).reverse(),
+      })).sort((x, y) => (x.renewal.ends || 0) - (y.renewal.ends || 0)),
+    }
+  },
+  // Mark a payment received: extends the licence, records it, tells the agency in its inbox.
+  'POST /api/billing/payment': async (q, b) => {
+    const pc = String(b.pc || '')
+    if (!/^\d{6}$/.test(pc)) throw new Error('bad PC number')
+    const a = (await sellable()).find(x => x.pc_number === pc)
+    if (!a) throw new Error('No such agency')
+    const p = billing.normalizePayment(b)
+    const ledger = readLedger()
+    const dup = billing.duplicateOf(ledger.filter(x => x.pc === pc), p) || billing.duplicateOf(ledger, p)
+    if (dup) throw new Error(`That ${p.method} reference was already recorded (${dup.date}, ${dup.amount} ETB, PC ${dup.pc}).`)
+    const had = (await licenseOf(pc)) || {}
+    const now = Date.now()
+    const until = billing.extendedUntil(had.paid_until, now, p.periods)
+    await saveLicense(pc, { ...had, paid_until: until })
+    const rec = { ...p, id: crypto.randomBytes(6).toString('hex'), pc, agency: a.name, paid_until: until, recorded_at: new Date(now).toISOString() }
+    ledger.push(rec); writeLedger(ledger)
+    // The agency's own PCs get a signed copy of its own payments (no other agency's).
+    try { await putJson(`billing/payments/${pc}.json`, signedFile({ pc, payments: ledger.filter(x => x.pc === pc).slice(-50).map(({ date, method, reference, amount, periods }) => ({ date, method, reference, amount, periods })), at: rec.recorded_at })) } catch (e) { console.warn('[billing] payments copy:', e.message) }
+    if (!ADMIN_ID) await ensureAdmin()
+    await tell(a.id, `✅ Payment received: ${p.amount.toLocaleString('en')} ETB (${p.method}${p.reference ? ' ' + p.reference : ''}). Adal Keep is paid until ${new Date(until).toLocaleDateString('en-GB')}. Thank you!`)
+    return { ok: true, paid_until: until, payment: rec }
+  },
+  // The payment details every app shows (telebirr, banks, a note). Signed, so only Adal can change them.
+  'POST /api/billing/instructions': async (q, b) => {
+    const ins = billing.normalizeInstructions({ ...b.instructions, at: new Date().toISOString() })
+    await putJson('billing/instructions.json', signedFile(ins))
+    return { ok: true, instructions: ins }
+  },
+  // The business dashboard: counts only, from the heartbeat (/_pc), the 30-minute counts (/_stats) and the ledger.
+  'GET /api/business': async (q) => {
+    const days = [7, 30, 90].includes(Number(q.days)) ? Number(q.days) : 30
+    const now = Date.now()
+    const [rows, meta, mains] = await Promise.all([
+      rest('GET', 'agencies?is_admin=eq.false&select=id,name,pc_number,banned,created_at,last_seen'),
+      rest('GET', 'keep_meta?key=in.(/_pc,/_stats)&select=agency_id,key,data,updated_at').catch(() => []),
+      sellable(),
+    ])
+    const beatOf = (id) => meta.find(m => m.agency_id === id && m.key === '/_pc')
+    const live = rows.filter(r => !r.banned && onlineAt(beatOf(r.id)?.data?.at || beatOf(r.id)?.updated_at))
+    const lic = await Promise.all(mains.map(a => licenseOf(a.pc_number)))
+    const ren = mains.map((a, i) => ({ a, r: billing.renewalOf({ licence: lic[i], firstSeen: Date.parse(a.first_seen || a.created_at) }, now) }))
+    const activeAgencies = mains.filter(a => !a.banned && a.ids.some(id => { const t = Date.parse(beatOf(id)?.updated_at || ''); return t && now - t < 7 * 86400000 })).length
+    // Each agency's newest counts report (an agency may have more than one account of the same PC).
+    const reports = mains.map(a => a.ids.map(id => meta.find(m => m.agency_id === id && m.key === '/_stats')).filter(Boolean).sort((x, y) => String(y.updated_at).localeCompare(String(x.updated_at)))[0]?.data).filter(Boolean)
+    const rep = biz.mergeReports(reports)
+    const from = new Date(now - (days - 1) * 86400000).toLocaleDateString('en-CA')
+    const series = (o) => Object.entries(o || {}).filter(([d]) => d >= from).sort(([x], [y]) => x.localeCompare(y)).map(([d, n]) => ({ d, n }))
+    const week = (o) => { const w = {}; for (const [d, n] of Object.entries(o || {})) { const t = new Date(d + 'T00:00:00'); t.setDate(t.getDate() - ((t.getDay() + 6) % 7)); const k = t.toLocaleDateString('en-CA'); if (k >= new Date(now - 91 * 86400000).toLocaleDateString('en-CA')) w[k] = (w[k] || 0) + n } return Object.entries(w).sort(([x], [y]) => x.localeCompare(y)).slice(-13).map(([d, n]) => ({ d, n })) }
+    const robots = Object.entries(rep.robots).map(([w, r]) => {
+      const inDays = Object.entries(r.d).filter(([d]) => d >= from).reduce((t, [, v]) => ({ done: t.done + v.done, failed: t.failed + v.failed }), { done: 0, failed: 0 })
+      const finished = inDays.done + inDays.failed
+      return { robot: w, done: inDays.done, failed: inDays.failed, success: finished ? Math.round(inDays.done / finished * 100) : null, avg_s: (r.done + r.failed + r.other) ? Math.round(r.secs / (r.done + r.failed + r.other)) : null }
+    }).filter(r => r.done + r.failed > 0).sort((x, y) => (y.done + y.failed) - (x.done + x.failed))
+    const ledger = readLedger()
+    const rev = billing.revenueSummary(ledger, now)
+    const due = ren.filter(x => (x.r.state === 'paid' && x.r.days <= 30) || (x.r.state === 'trial' && x.r.days <= 7) || x.r.state === 'expired')
+    const paying = ren.filter(x => x.r.state === 'paid').length
+    return {
+      days, at: new Date(now).toISOString(),
+      agencies: { total: mains.length, active: activeAgencies, paying, trial: ren.filter(x => x.r.state === 'trial').length, expired: ren.filter(x => x.r.state === 'expired').length },
+      pcs: { total: rows.length, online: live.length },
+      reporting: reports.length,
+      added: { day: series(rep.added), week: week(rep.added), total: series(rep.added).reduce((t, x) => t + x.n, 0) },
+      moves: { day: series(rep.moves), total: series(rep.moves).reduce((t, x) => t + x.n, 0) },
+      robots,
+      stages: Object.entries(rep.stages).map(([stage, v]) => ({ stage, n: v.n, avg_days: v.avg_days })).sort((x, y) => y.avg_days - x.avg_days),
+      hours_saved: biz.hoursSaved(rep, days, now), hours_note: 'Estimate: successful robot runs, profiles and CVs, each at the minutes a person needs by hand (bizStats.js MANUAL_MINUTES).',
+      revenue: { ...rev, mrr_estimate: Math.round(paying * billing.PRICE_ETB / 6), months: Object.entries(rev.byMonth).sort(([x], [y]) => x.localeCompare(y)).slice(-12).map(([m, n]) => ({ m, n })) },
+      renewals: due.map(x => ({ name: x.a.name, pc_number: x.a.pc_number, ...x.r })).sort((x, y) => (x.days ?? 0) - (y.days ?? 0)),
+    }
   },
   // Download codes for the website: the installer holds the licence key, so a download needs one of these.
   'GET /api/install-codes': async () => rest('GET', 'install_codes?select=*&order=created_at.desc&limit=30'),

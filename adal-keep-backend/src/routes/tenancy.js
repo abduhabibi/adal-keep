@@ -72,6 +72,17 @@ router.get('/subscription/status', async (req, res) => {
   res.json(statusPayload())
 })
 
+// Billing (services/billing.js, flag "billing"): when the licence ends, how to pay, the payments Adal marked received.
+router.get('/subscription/billing', async (req, res) => {
+  try {
+    const b = await import('../services/billing.js')
+    if (!b.billingOn()) return res.json({ enabled: false })
+    const st = statusPayload()
+    await Promise.race([b.refreshBilling(req.app.locals.db, st.pcNumber), new Promise(ok => setTimeout(ok, 6000))]).catch(() => {})
+    res.json(b.billingPayload(st))
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
 // The agency's plan and features (services/plans.js), from Adal's signed licence.
 router.get('/plan', async (req, res) => {
   const p = await import('../services/plans.js')

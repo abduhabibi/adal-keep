@@ -740,6 +740,8 @@ async function syncOnce(db, { light = false } = {}) {
         const data = await usageReport(db)
         await upsert(db, 'keep_meta', [{ agency_id: agency, key: '/_usage', data, updated_at: data.at }], 'agency_id,key')
       } catch (e) { console.warn('[cloud] usage:', e.message) }
+      // The business counts for Adal Keep Admin → Business (flag "biz_stats"; numbers only, no names).
+      try { await (await import('./bizStats.js')).pushStats(db, upsert, agency, { force: false }) } catch (e) { console.warn('[cloud] stats:', e.message) }
     }
     cloudStatus.error = null
     cloudStatus.last = new Date().toISOString()

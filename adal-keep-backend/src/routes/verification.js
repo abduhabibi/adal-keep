@@ -95,6 +95,8 @@ router.get('/companion/info', async (req, res) => {
       uptime_seconds: Math.round(process.uptime()),
       version: process.env.ADAL_VERSION || '1.0.0',
       time: new Date().toISOString(),
+      // Companions keep a full copy of their own only when this is on (adal-companion full.go).
+      full_copy: (await import('../services/sync/index.js')).companionFullOn(),
     })
   } catch (e) {
     res.status(500).json({ error: e.message })

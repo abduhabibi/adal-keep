@@ -2,7 +2,10 @@
 
 Merged into `main` on 2026-11-22 (the owner's go-ahead: "when main is off, the
 adal companion should still work"). Status: tested on scratch data and in a
-two-PC simulation on Linux, **release pending** (not yet run on Windows).
+two-PC simulation on Linux, not yet run on Windows. **Off by default** (2026-11-23): on only with
+Adal's per-agency switch `companion_full` (agency config, Admin → Setup) or `ADAL_COMPANION_FULL=1`
+on a server / `ADAL_FULL_COPY=1` on a Go Companion (`ADAL_AUTO_MAIN=1` for the role step alone).
+Off, a PC runs as before: no sync tables or triggers, SQLite's own ids, no own copy on Companions.
 
 ## What the user asked
 

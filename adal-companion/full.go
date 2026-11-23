@@ -41,7 +41,7 @@ import (
 )
 
 var (
-	fullCopyOff  = os.Getenv("ADAL_FULL_COPY") == "0"
+	fullCopyEnv  = os.Getenv("ADAL_FULL_COPY") // "1" on, "0" off, else what the main PC says
 	ownAfter     = time.Duration(envInt("ADAL_OWN_AFTER_SECONDS", 45)) * time.Second
 	fullClient   = &http.Client{Timeout: 3 * time.Second}
 	fullMu       sync.Mutex
@@ -91,13 +91,60 @@ func (s *standbyRunner) fullWanted() bool {
 	s.mu.Lock()
 	acting := s.st.Acting
 	s.mu.Unlock()
-	return !fullCopyOff && !acting && hasServer(s.root) && mainNumber() != "" && !signedOut()
+	return fullCopyAllowed(s.root) && !acting && hasServer(s.root) && mainNumber() != "" && !signedOut()
+}
+
+// fullCopyAllowed: OFF unless switched on (2026-11-23, not yet run on Windows): ADAL_FULL_COPY=1,
+// or the main PC says so (/api/companion/info full_copy: Adal's "companion_full" switch for the
+// agency). The last answer is kept (full-copy.json), so it holds while the main PC is off.
+func fullCopyAllowed(root string) bool {
+	switch fullCopyEnv {
+	case "1":
+		return true
+	case "0":
+		return false
+	}
+	b, err := os.ReadFile(filepath.Join(root, "full-copy.json"))
+	if err != nil {
+		return false
+	}
+	var v struct {
+		On bool `json:"on"`
+	}
+	return json.Unmarshal(b, &v) == nil && v.On
+}
+
+// learnFullCopy: what the main PC says now (only when it answers).
+func learnFullCopy(root, mainURL string) {
+	if mainURL == "" || fullCopyEnv != "" {
+		return
+	}
+	resp, err := fullClient.Get(strings.TrimRight(mainURL, "/") + "/api/companion/info")
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+	var info struct {
+		Service  string `json:"service"`
+		FullCopy bool   `json:"full_copy"`
+	}
+	if resp.StatusCode != http.StatusOK || json.NewDecoder(resp.Body).Decode(&info) != nil || info.Service != "adal-keep" {
+		return
+	}
+	if info.FullCopy != fullCopyAllowed(root) {
+		b, _ := json.Marshal(map[string]bool{"on": info.FullCopy})
+		_ = writeAtomic(filepath.Join(root, "full-copy.json"), b, 0o644)
+		log.Printf("🗂 The main PC says this PC's own full copy is %v", map[bool]string{true: "on", false: "off"}[info.FullCopy])
+	}
 }
 
 // fullLoop: the server on the copy kept running; the window follows the main PC.
 func (s *standbyRunner) fullLoop() {
 	var mainGone time.Time
-	for {
+	for tick := 0; ; tick++ {
+		if tick%6 == 0 { // about every minute
+			learnFullCopy(s.root, s.realMainAt([]string{hostServer}))
+		}
 		if !s.fullWanted() {
 			s.stopFull()
 			time.Sleep(20 * time.Second)

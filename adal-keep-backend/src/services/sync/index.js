@@ -25,6 +25,7 @@ import { Relay, SupabaseStore } from './relay.js'
 import { readIdentity, updateIdentity } from './identity.js'
 import { setSlot, currentSlot } from './ids.js'
 import { createSyncRouter } from '../../routes/sync.js'
+import { featureOn } from '../agencyConfig.js'
 import { equalPCs } from './trust.js'
 
 const BACKEND = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
@@ -33,6 +34,19 @@ const DB_FILE = process.env.SQLITE_PATH ? path.resolve(process.env.SQLITE_PATH) 
 
 let node = null
 export const syncNode = () => node
+/**
+ * The copying between PCs is OFF unless switched on (2026-11-23, before the release: not yet
+ * run on Windows): ADAL_COMPANION_FULL=1 on this PC, or Adal's switch "companion_full" for the
+ * agency (agency config). Off, this PC works exactly as before (no sync tables, no time ids).
+ */
+export function companionFullOn() {
+  const env = process.env.ADAL_COMPANION_FULL
+  if (env === '1') return true
+  if (env === '0') return false
+  try { return featureOn('companion_full') } catch { return false }
+}
+/** The main role moving by itself: ADAL_AUTO_MAIN=1, or with the agency's switch above (ADAL_AUTO_MAIN=0 never). */
+const autoMainOn = () => process.env.ADAL_AUTO_MAIN === '1' || (process.env.ADAL_AUTO_MAIN !== '0' && companionFullOn())
 /** This PC logged out of its agency and has not joined one again (no main PC's jobs here then). */
 export const leftAgency = () => { const id = readIdentity(); return !!id.left_at && !id.joined_main }
 export const isMainRole = () => (node ? node.roles.isMain() : leftAgency() ? false : null)
@@ -44,6 +58,7 @@ function version() {
 
 export async function startSync(appDb, { timers = true } = {}) {
   if (process.env.ADAL_SYNC === '0') return null
+  if (!companionFullOn() && !(await import('../mainPC.js')).isCompanionInstall()) return null
   // An older follower PC opens the main PC's own pages: its database here is not the agency's.
   if ((await import('../mainPC.js')).isFollower()) return null
   const id = readIdentity()
@@ -103,7 +118,7 @@ export async function startSync(appDb, { timers = true } = {}) {
   }
   await reconcileRole()
   node.roles.onRole(() => reconcileRole({ restart: true }).catch(e => console.warn('[sync] role:', e.message)))
-  if (timers && process.env.ADAL_AUTO_MAIN !== '0') startAutoRole()
+  if (timers && autoMainOn()) startAutoRole()
   if (node.roles.isMain()) startLicencePublisher()
   else followLicence()
   console.log(`🔁 Copying between the agency's PCs: this PC ${id.pc_id} (slot ${id.slot})${node.roles.isMain() ? ', the main PC' : `, main PC ${node.roles.holder() || '(none yet)'}`}`)

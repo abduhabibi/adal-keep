@@ -60,3 +60,22 @@ func TestSwapServerKeepsDataAndUploads(t *testing.T) {
 		}
 	}
 }
+
+// Off unless switched on: nothing kept → off; the main PC's last word is kept.
+func TestFullCopyOffByDefault(t *testing.T) {
+	root := t.TempDir()
+	old := fullCopyEnv
+	t.Cleanup(func() { fullCopyEnv = old })
+	fullCopyEnv = ""
+	if fullCopyAllowed(root) {
+		t.Fatal("on by default")
+	}
+	os.WriteFile(filepath.Join(root, "full-copy.json"), []byte(`{"on":true}`), 0o644)
+	if !fullCopyAllowed(root) {
+		t.Fatal("the main PC said on")
+	}
+	fullCopyEnv = "0"
+	if fullCopyAllowed(root) {
+		t.Fatal("ADAL_FULL_COPY=0 wins")
+	}
+}

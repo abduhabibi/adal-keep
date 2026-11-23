@@ -4,6 +4,10 @@ import { fileURLToPath } from 'url'
 import { openRows } from './src/services/accountVault.js'
 // New rows get ids no other PC of the agency can make (services/sync/ids.js).
 import { SyncClient } from './src/services/sync/ids.js'
+import { companionFullOn } from './src/services/sync/index.js'
+import { isCompanionInstall } from './src/services/mainPC.js'
+// (Only while the copying is switched on: otherwise SQLite's own ids, as before.)
+const CLIENT = companionFullOn() || isCompanionInstall() ? SyncClient : 'sqlite3'
 dotenv.config()
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SQLITE_FILE = process.env.SQLITE_PATH
@@ -12,7 +16,7 @@ const SQLITE_FILE = process.env.SQLITE_PATH
 const connection = { filename: SQLITE_FILE }
 export default {
   development: {
-    client: SyncClient,
+    client: CLIENT,
     connection,
     useNullAsDefault: true,
     postProcessResponse: openRows,
@@ -35,7 +39,7 @@ export default {
     seeds: { directory: './src/seeds' },
   },
   production: {
-    client: SyncClient,
+    client: CLIENT,
     connection,
     useNullAsDefault: true,
     postProcessResponse: openRows,

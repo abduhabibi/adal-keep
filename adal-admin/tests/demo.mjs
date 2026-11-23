@@ -15,7 +15,9 @@ import { fileURLToPath } from 'node:url'
 import { demoSupabase, demoData } from './demo-supabase.mjs'
 
 const ADMIN = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
-const free = () => new Promise(ok => { const s = net.createServer().listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => ok(p)) }) })
+// The panel also opens port + 1 (its agency port): a port whose next one is free too (Windows hands out ports in a row).
+const onePort = (p) => new Promise(ok => { const s = net.createServer(); s.once('error', () => ok(0)); s.listen(p, '127.0.0.1', () => { const got = s.address().port; s.close(() => ok(got)) }) })
+const free = async () => { for (let i = 0; i < 50; i++) { const p = await onePort(0); if (p && p < 65535 && await onePort(p + 1)) return p } return onePort(0) }
 
 export async function startDemo({ port = null, password = 'demo-pass' } = {}) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'adal-admin-demo-'))
@@ -24,7 +26,7 @@ export async function startDemo({ port = null, password = 'demo-pass' } = {}) {
   const dir = path.join(tmp, 'adal-admin'); fs.mkdirSync(path.join(dir, 'public'), { recursive: true })
   for (const f of fs.readdirSync(ADMIN).filter(f => f.endsWith('.mjs'))) fs.copyFileSync(path.join(ADMIN, f), path.join(dir, f))
   for (const f of fs.readdirSync(path.join(ADMIN, 'public'))) fs.copyFileSync(path.join(ADMIN, 'public', f), path.join(dir, 'public', f))
-  fs.symlinkSync(path.join(ADMIN, '..', 'adal-keep-backend'), path.join(tmp, 'adal-keep-backend'))
+  fs.symlinkSync(path.join(ADMIN, '..', 'adal-keep-backend'), path.join(tmp, 'adal-keep-backend'), 'junction')   // a junction: no admin rights needed on Windows
   const home = path.join(tmp, 'home'); fs.mkdirSync(path.join(home, '.adal-keep'), { recursive: true })
   for (const k of ['update-signing.pem', 'tower-signing.pem']) fs.writeFileSync(path.join(home, '.adal-keep', k), crypto.generateKeyPairSync('ed25519').privateKey.export({ type: 'pkcs8', format: 'pem' }))
   port ||= await free()
@@ -34,7 +36,7 @@ export async function startDemo({ port = null, password = 'demo-pass' } = {}) {
   const proc = spawn(process.execPath, [path.join(dir, 'server.mjs')], { env, stdio: ['ignore', 'pipe', 'pipe'] })
   let log = ''; proc.stdout.on('data', d => { log += d }); proc.stderr.on('data', d => { log += d })
   const base = `http://127.0.0.1:${port}`
-  for (let i = 0; i < 150; i++) { try { await fetch(base + '/'); break } catch { await new Promise(r => setTimeout(r, 100)) } }
+  for (let i = 0; i < 400; i++) { try { await fetch(base + '/'); break } catch { await new Promise(r => setTimeout(r, 100)) } }
   const r = await fetch(base + '/set-password', { method: 'POST', redirect: 'manual', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: `password=${password}&again=${password}` })
   const cookie = (r.headers.get('set-cookie') || '').split(';')[0]
   return { base, cookie, password, fake, log: () => log, stop: () => { proc.kill(); fake.server.close(); fs.rmSync(tmp, { recursive: true, force: true }) } }

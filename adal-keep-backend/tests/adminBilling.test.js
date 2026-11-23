@@ -16,7 +16,9 @@ import { fileURLToPath } from 'url'
 
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'admin-billing-'))
-const free = () => new Promise(ok => { const s = net.createServer().listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => ok(p)) }) })
+// The panel also opens port + 1 (its agency port): a port whose next one is free too (Windows hands out ports in a row).
+const onePort = (p) => new Promise(ok => { const s = net.createServer(); s.once('error', () => ok(0)); s.listen(p, '127.0.0.1', () => { const got = s.address().port; s.close(() => ok(got)) }) })
+const free = async () => { for (let i = 0; i < 50; i++) { const p = await onePort(0); if (p && p < 65535 && await onePort(p + 1)) return p } return onePort(0) }
 
 const stored = new Map(), posted = [], patched = []
 let fake, proc, base, cookie = ''
@@ -57,7 +59,7 @@ before(async () => {
   fs.writeFileSync(path.join(dir, '.env'), `SUPABASE_URL=http://127.0.0.1:${fake.address().port}\nSUPABASE_SERVICE_KEY=test\nADAL_LICENSE_KEY=test-key\n`)
   proc = spawn(process.execPath, [path.join(dir, 'server.mjs')], { env: { ...process.env, HOME: home, USERPROFILE: home, ADMIN_PORT: String(port) }, stdio: 'ignore' })
   base = `http://127.0.0.1:${port}`
-  for (let i = 0; i < 100; i++) { try { await fetch(base + '/'); break } catch { await new Promise(r => setTimeout(r, 100)) } }
+  for (let i = 0; i < 400; i++) { try { await fetch(base + '/'); break } catch { await new Promise(r => setTimeout(r, 100)) } }
   const r = await fetch(base + '/set-password', { method: 'POST', redirect: 'manual', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'password=secret123&again=secret123' })
   cookie = (r.headers.get('set-cookie') || '').split(';')[0]
 })

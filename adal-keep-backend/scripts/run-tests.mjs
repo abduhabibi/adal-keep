@@ -18,7 +18,8 @@ const TESTS = path.join(BACK, 'tests')
 const reporter = (process.argv.find(a => a.startsWith('--reporter=')) || '--reporter=dot').slice(11)
 
 const files = fs.readdirSync(TESTS).filter(f => f.endsWith('.test.js')).sort()
-const needsBrowser = (f) => /puppeteer|chromium|google-chrome|BRAVE_CDP_URL/i.test(fs.readFileSync(path.join(TESTS, f), 'utf8'))
+// Also one at a time: the tests that start an Adal Admin panel (its server, a fake Supabase): side by side they get in each other's way.
+const needsBrowser = (f) => /puppeteer|chromium|google-chrome|BRAVE_CDP_URL|adal-admin/i.test(fs.readFileSync(path.join(TESTS, f), 'utf8'))
 const browser = files.filter(needsBrowser), plain = files.filter(f => !browser.includes(f))
 
 const run = (list, extra) => spawnSync(process.execPath, ['--test', `--test-reporter=${reporter}`, ...extra, ...list.map(f => path.join('tests', f))], { cwd: BACK, stdio: 'inherit', timeout: 20 * 60 * 1000 }).status === 0

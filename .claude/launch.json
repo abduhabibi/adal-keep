@@ -1,0 +1,150 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "adal-test-isolated",
+      "runtimeExecutable": "C:/AdalTools/node/node.exe",
+      "runtimeArgs": ["main.js"],
+      "cwd": "adal-keep-backend",
+      "env": {
+        "PORT": "4555",
+        "ADAL_ISOLATED": "1",
+        "SQLITE_PATH": "C:/Users/hp/AppData/Local/Temp/claude/c9b9ed53d19b1b1a/ca517563-e338-4cda-a59e-91e5f3dad864/scratchpad/testdb/data.sqlite"
+      },
+      "port": 4555
+    },
+    {
+      "name": "demo-preview",
+      "runtimeExecutable": "C:/AdalTools/node/node.exe",
+      "runtimeArgs": ["node_modules/vite/bin/vite.js", "preview", "--mode", "demo", "--outDir", "dist-demo", "--port", "3021", "--strictPort"],
+      "cwd": "adal-keep-frontend",
+      "port": 3021
+    },
+    {
+      "name": "adal-keep",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "adal-keep-backend",
+        "run",
+        "dev"
+      ],
+      "port": 4000
+    },
+    {
+      "name": "adal-demo",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "--prefix",
+        "adal-keep-frontend",
+        "vite",
+        "preview",
+        "adal-keep-frontend",
+        "--mode",
+        "demo",
+        "--outDir",
+        "dist-demo",
+        "--port",
+        "4173",
+        "--strictPort"
+      ],
+      "port": 4173
+    },
+    {
+      "name": "adal-me",
+      "runtimeExecutable": "C:\\AdalKeep\\runtime\\node.exe",
+      "runtimeArgs": [
+        "C:\\Users\\hp\\Documents\\AdalMe\\src\\server.js"
+      ],
+      "port": 4747
+    },
+    {
+      "name": "frontend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "adal-keep-frontend",
+        "run",
+        "dev"
+      ],
+      "port": 3000
+    },
+    {
+      "name": "frontend-node",
+      "runtimeExecutable": "C:/AdalKeep/runtime/node.exe",
+      "runtimeArgs": [
+        "node_modules/vite/bin/vite.js",
+        "--port",
+        "3011",
+        "--strictPort"
+      ],
+      "port": 3011,
+      "cwd": "adal-keep-frontend"
+    },
+    {
+      "name": "demo-dev",
+      "runtimeExecutable": "C:/AdalKeep/runtime/node.exe",
+      "runtimeArgs": [
+        "node_modules/vite/bin/vite.js",
+        "preview",
+        "--mode",
+        "demo",
+        "--outDir",
+        "dist-demo",
+        "--port",
+        "3021",
+        "--strictPort"
+      ],
+      "port": 3021,
+      "cwd": "adal-keep-frontend"
+    },
+    {
+      "name": "promo-site",
+      "runtimeExecutable": "C:/AdalKeep/runtime/node.exe",
+      "runtimeArgs": [
+        "C:/Users/hp/AppData/Local/Temp/claude/c9b9ed53d19b1b1a/21057cf3-4730-4395-8e15-111992240d07/scratchpad/serve.js"
+      ],
+      "port": 5178
+    },
+    {
+      "name": "fake-online",
+      "runtimeExecutable": "C:/AdalKeep/runtime/node.exe",
+      "runtimeArgs": [
+        "C:/Users/hp/AppData/Local/Temp/claude/c9b9ed53d19b1b1a/e433c23f-559b-486a-8f6a-86bbaf7e218b/scratchpad/phonetest/fake-supabase.mjs"
+      ],
+      "port": 54399
+    },
+    {
+      "name": "phone-www",
+      "runtimeExecutable": "C:/AdalKeep/runtime/node.exe",
+      "cwd": "adal-keep-frontend",
+      "runtimeArgs": [
+        "node_modules/vite/bin/vite.js",
+        "preview",
+        "--outDir",
+        "../adal-phone/www",
+        "--port",
+        "3012",
+        "--strictPort"
+      ],
+      "port": 3012
+    },
+    {
+      "name": "phone-dev",
+      "runtimeExecutable": "C:/AdalKeep/runtime/node.exe",
+      "cwd": "adal-keep-frontend",
+      "runtimeArgs": [
+        "node_modules/vite/bin/vite.js",
+        "--mode",
+        "phone",
+        "--port",
+        "3013",
+        "--strictPort"
+      ],
+      "env": {
+        "VITE_PHONE": "1"
+      },
+      "port": 3013
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+- [Adal licensing](adal-licensing.md) — 21-day trial, 30,000 ETB / 6 months, per-PC Authenticator unlock, seller page, never change ADAL_LICENSE_KEY
+- [USB workflow](usb-workflow.md) — after every rebuild, also copy to the physical USB, verify and sync (never eject)
+- [Run tabs in background](run-tabs-background.md) — agent tabs must work unseen (now off-screen, see adal-browser); LMIS Add only after Upload Complete; JEV as verifier
+- [Windows app branding](windows-app-branding.md) — no cmd windows, Adal logo on taskbar, hidden supervisor AdalKeep.exe
+- [Sign-in codes](no-stored-auth.md) — Musaned authenticator allowed again (2026-11-03, per account); LMIS codes still typed by people
+- [Phone app](phone-app.md) — adal-phone Android app, 5-digit PC pairing, signing key in ~/.adal-keep (never regenerate)
+- [Adal Keep Admin](adal-admin.md) — Adal's supervisor app: Work tab over all agencies, per-agency Adal Keep windows (:4101), own desktop window
+- [Supabase updates](supabase-updates.md) — PCs update from signed Supabase releases; publish-update.mjs; never regenerate update-signing.pem
+- [Pixel 8 emulator](pixel8-emulator.md) — phone tests; adb port 15037 (Traccar holds 5001-5250)
+- [PC access gate](pc-access-gate.md) — other computers need a Yes on the main PC; Origin/Host checks
+- [Browser opening rule](browser-opening-rule.md) — hidden mode starts quietly with the server; timers use openBrowserIfAny; Companion uses the online copy when the main PC is off
+- [Tab reuse and no-USB install](tab-reuse.md) — runs take a free tab on their site; private adal-install bucket for installs
+- [WhatsApp always on](whatsapp-always-on.md) — own hidden browser per account + keepConnected; prebuilt Windows modules for web install
+- [Adal Browser](adal-browser.md) — own Chromium bundled in installs (pack-browser.sh), agents off-screen, no pop-ups, one beep; updates do not carry .exe files
+- [Transitions](transitions.md) — copy agencies from EasyEnjaz/EnjazPlus/Musaned/Pextran; generic reader, mock-tested only
+- [Account vault](account-vault.md) — passwords encrypted in the DB; never lose data/account-vault.key; knex opens even db.raw
+- [Linux app](linux-app.md) — this PC runs adal-keep.service + desktop icon; build frontend, restart service; start.sh is dev only
+- [Wrong-account profiles](no-wrong-account-profiles.md) — don't mention them in reports any more; nothing deleted
+- [PC move](pc-move.md) — moved off the Zorin PC 2026-11-05; encrypted bundle on USB, passphrase not on it

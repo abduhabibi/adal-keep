@@ -5,12 +5,22 @@
  */
 import { IN_PHONE_APP, PAIR_PAGE } from '../lib/phoneApp'
 import { useEffect, useState } from 'react'
+import toast from 'react-hot-toast'
 import api from '../services/api'
 import Card from './shared/Card'
 import Button from './shared/Button'
 
+// Copied, with a word saying so (another PC over plain http has no navigator.clipboard: the old way).
+const copyText = async (text) => {
+  try { await navigator.clipboard.writeText(text); return toast.success('Copied') } catch {}
+  const t = document.createElement('textarea'); t.value = text; t.style.cssText = 'position:fixed;opacity:0'
+  document.body.appendChild(t); t.select()
+  const ok = (() => { try { return document.execCommand('copy') } catch { return false } })()
+  t.remove()
+  ok ? toast.success('Copied') : toast(text, { duration: 8000 })
+}
 const Copy = ({ text }) => (
-  <button type="button" onClick={() => navigator.clipboard?.writeText(text)}
+  <button type="button" onClick={() => copyText(text)}
     className="ml-2 text-xs text-teal-600 hover:underline">copy</button>
 )
 

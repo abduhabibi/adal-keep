@@ -963,6 +963,27 @@ const api = {
       renewals: due.map(x => ({ name: x.a.name, pc_number: x.a.pc_number, ...x.r })).sort((x, y) => (x.days ?? 0) - (y.days ?? 0)),
     }
   },
+  // Branches (supabase/branch-links.sql): every link between two agencies, and the requests of the last 7 days (never their codes).
+  'GET /api/branch-links': async () => {
+    const [links, reqs, ags] = await Promise.all([
+      rest('GET', 'keep_branch_links?select=agency_a,agency_b,a_shares,b_shares,asked_by,created_at&order=created_at.desc').catch(e => { if (/keep_branch|schema cache|PGRST/i.test(e.message)) return null; throw e }),
+      rest('GET', `keep_branch_requests?select=id,from_agency,to_agency,status,tries,codes_made,created_at,decided_at&created_at=gte.${new Date(Date.now() - 7 * 86400000).toISOString()}&order=created_at.desc&limit=200`).catch(() => []),
+      rest('GET', 'agencies?select=id,name,city,pc_number'),
+    ])
+    if (links === null) return { missing: true, links: [], requests: [] }
+    const ag = Object.fromEntries((ags || []).map(a => [a.id, a]))
+    const who = (id) => ({ id, name: ag[id]?.name || id, city: ag[id]?.city || null, pc_number: ag[id]?.pc_number || null })
+    return {
+      links: links.map(l => ({ a: who(l.agency_a), b: who(l.agency_b), a_shares: l.a_shares, b_shares: l.b_shares, asked_by: l.asked_by, since: l.created_at })),
+      requests: (reqs || []).map(r => ({ id: r.id, from: who(r.from_agency), to: who(r.to_agency), status: r.status, tries: r.tries, codes: r.codes_made, at: r.created_at, decided_at: r.decided_at })),
+    }
+  },
+  'POST /api/branch-links/unlink': async (q, b) => {
+    const [x, y] = [String(b.a || ''), String(b.b || '')].sort()
+    if (!/^[0-9a-f-]{36}$/i.test(x) || !/^[0-9a-f-]{36}$/i.test(y)) throw new Error('Which link?')
+    await rest('DELETE', `keep_branch_links?agency_a=eq.${x}&agency_b=eq.${y}`, undefined, { Prefer: 'return=minimal' })
+    return { ok: true }
+  },
   // Download codes for the website: the installer holds the licence key, so a download needs one of these.
   'GET /api/install-codes': async () => rest('GET', 'install_codes?select=*&order=created_at.desc&limit=30'),
   'POST /api/install-codes/new': async (q, b) => {

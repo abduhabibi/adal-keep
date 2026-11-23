@@ -227,6 +227,7 @@ app.use('/api', (await import('./src/routes/dataRights.js')).default)   // conse
 app.use('/api', mainPCRouter)
 app.use('/api', mobileRouter)   // the phone app pairs with this PC
 app.use('/api', branchMergeRouter)
+app.use('/api', (await import('./src/routes/branchLinks.js')).default)   // Settings → Branches: agencies linked by a 6-digit code
 app.use('/api', standbyRouter)   // every Companion: the server in waiting, and its merge back
 app.use('/api', wafidRouter)
 app.use('/api', backupRouter)
@@ -1347,6 +1348,7 @@ initSystem().then(() => {
     import('./src/services/agencyConfig.js').then(async C => { const cl = await import('./src/services/chatCloud.js'); C.startAgencyConfigWatch(app.locals.db, (m, p, o) => m === 'POST' ? cl.cloudCall(app.locals.db, m, p, o) : cl.cloudCall(app.locals.db, m, p, undefined, o), () => cl.cloudAgencyId(app.locals.db)) }).catch(e => console.warn('[config]', e.message)) // the agency's config record from Adal (flag)
     startAppointmentWatcher(app.locals.db) // Tasheer / Wafid appointments: a reminder the day before
     startCloudSync(app.locals.db)      // the online copy phones use when this PC is off
+    Promise.all([import('./src/services/branchLinks.js'), import('./src/services/chatCloud.js')]).then(([L, c]) => L.startBranchLinks(app.locals.db, { isMain: () => !notMainPC(), configured: c.chatConfigured })).catch(e => console.warn('[branches]', e.message))   // linked branches: requests and their profiles
     startLiveChannel(app.locals.db)    // phones ↔ this PC, instant (Supabase Realtime)
     startWorker(db)               // runs queued jobs, each in its own tab
     import("./src/services/transition.js").then(m => m.resumeTransitions(db)).catch(() => {})            // a move cut off by a restart goes on

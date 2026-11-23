@@ -37,6 +37,7 @@ import AiKeysCard from '../components/AiKeysCard'
 import TransitionsCard from '../components/TransitionsCard'
 import PlanCard from '../components/PlanCard'
 import EproSignatureCard from '../components/EproSignatureCard'
+import BranchLinksCard from '../components/BranchLinksCard'
 import Segmented from '../components/shared/Segmented'
 import { onCompanionOnline, phoneCloud } from '../lib/phoneMode'
 
@@ -46,6 +47,7 @@ import { onCompanionOnline, phoneCloud } from '../lib/phoneMode'
 const isPhoneView = () => !onCompanionOnline() && (!!window.Capacitor?.isNativePlatform?.() || import.meta.env.VITE_PHONE === '1')
 const SETTINGS_TABS = [
   ['agency', 'Agency'],
+  ['branches', 'Branches'],
   ['plan', 'Plan'],
   ['portals', 'Portals'],
   ['health', 'Health'],
@@ -303,6 +305,7 @@ export default function SettingsPage() {
       {/* An Adal Companion only: log out of its main PC, connect to another. */}
       <CompanionSwitchCard />
       </>}
+      {tab === 'branches' && import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Branches"><BranchLinksCard /></ErrorBoundary>}
       {tab === 'plan' && import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Plan"><PlanCard /></ErrorBoundary>}
       {tab === 'portals' && <>
       {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Portals now"><PortalsHealthCard /></ErrorBoundary>}

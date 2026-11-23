@@ -37,8 +37,9 @@ export const FEATURE_SWITCHES = [
   { key: 'agency_signup', title: 'First-run sign-up', on: false },
   { key: 'remote_setup', title: 'Remote setup from Admin', on: false },
   { key: 'new_dashboard', title: 'New dashboard (pitch preview)', on: false },
-  // Every PC on its own full copy, working with the main PC off (docs/companion-full.md). Not yet run on Windows.
-  { key: 'companion_full', title: 'Companions keep a full copy (work with Main off)', on: false },
+  // Every PC on its own full copy, working with the main PC off (docs/companion-full.md): on for every
+  // agency since 2026-11-23, whatever the record says (off only by ADAL_COMPANION_FULL=0 / the tower).
+  { key: 'companion_full', title: 'Companions keep a full copy (work with Main off)', on: true },
 ]
 const PERMS = ['delete_profiles', 'edit_templates', 'run_robots', 'change_settings', 'manage_staff', 'export_backup']
 const str = (v, max) => (v == null ? null : String(v).trim().slice(0, max) || null)

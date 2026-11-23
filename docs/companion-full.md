@@ -2,9 +2,10 @@
 
 Merged into `main` on 2026-11-22 (the owner's go-ahead: "when main is off, the
 adal companion should still work"). Status: tested on scratch data and in a
-two-PC simulation on Linux, not yet run on Windows. **Off by default** (2026-11-23): on only with
-Adal's per-agency switch `companion_full` (agency config, Admin → Setup) or `ADAL_COMPANION_FULL=1`
-on a server / `ADAL_FULL_COPY=1` on a Go Companion (`ADAL_AUTO_MAIN=1` for the role step alone).
+two-PC simulation on Linux, not yet run on Windows. **On for every agency and every PC** (owner, 2026-11-23: "you turn it on for every one for ever").
+Emergency off only: `ADAL_COMPANION_FULL=0` on a server / `ADAL_FULL_COPY=0` on a Go Companion
+(`ADAL_AUTO_MAIN=0` for the role step alone), or Admin → Fleet "Companions: full copy OFF" (signed
+tower command: data/flags.json `{"companion_full": false}` on that PC; its Companions follow).
 Off, a PC runs as before: no sync tables or triggers, SQLite's own ids, no own copy on Companions.
 
 ## What the user asked

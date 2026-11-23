@@ -94,9 +94,10 @@ func (s *standbyRunner) fullWanted() bool {
 	return fullCopyAllowed(s.root) && !acting && hasServer(s.root) && mainNumber() != "" && !signedOut()
 }
 
-// fullCopyAllowed: OFF unless switched on (2026-11-23, not yet run on Windows): ADAL_FULL_COPY=1,
-// or the main PC says so (/api/companion/info full_copy: Adal's "companion_full" switch for the
-// agency). The last answer is kept (full-copy.json), so it holds while the main PC is off.
+// fullCopyAllowed: ON for every agency and every PC (the owner, 2026-11-23: "you turn it on for
+// every one for ever"). Off only in an emergency: ADAL_FULL_COPY=0 here, or the main PC says it is
+// off (/api/companion/info full_copy false: its ADAL_COMPANION_FULL=0 or Adal's tower OFF command);
+// that last answer is kept (full-copy.json), so it holds while the main PC is off.
 func fullCopyAllowed(root string) bool {
 	switch fullCopyEnv {
 	case "1":
@@ -106,12 +107,15 @@ func fullCopyAllowed(root string) bool {
 	}
 	b, err := os.ReadFile(filepath.Join(root, "full-copy.json"))
 	if err != nil {
-		return false
+		return true
 	}
 	var v struct {
-		On bool `json:"on"`
+		On *bool `json:"on"`
 	}
-	return json.Unmarshal(b, &v) == nil && v.On
+	if json.Unmarshal(b, &v) != nil || v.On == nil {
+		return true
+	}
+	return *v.On
 }
 
 // learnFullCopy: what the main PC says now (only when it answers).
@@ -126,15 +130,15 @@ func learnFullCopy(root, mainURL string) {
 	defer resp.Body.Close()
 	var info struct {
 		Service  string `json:"service"`
-		FullCopy bool   `json:"full_copy"`
+		FullCopy *bool  `json:"full_copy"`
 	}
-	if resp.StatusCode != http.StatusOK || json.NewDecoder(resp.Body).Decode(&info) != nil || info.Service != "adal-keep" {
-		return
+	if resp.StatusCode != http.StatusOK || json.NewDecoder(resp.Body).Decode(&info) != nil || info.Service != "adal-keep" || info.FullCopy == nil {
+		return // (an older main PC says nothing: on, as everywhere)
 	}
-	if info.FullCopy != fullCopyAllowed(root) {
-		b, _ := json.Marshal(map[string]bool{"on": info.FullCopy})
+	if *info.FullCopy != fullCopyAllowed(root) {
+		b, _ := json.Marshal(map[string]bool{"on": *info.FullCopy})
 		_ = writeAtomic(filepath.Join(root, "full-copy.json"), b, 0o644)
-		log.Printf("🗂 The main PC says this PC's own full copy is %v", map[bool]string{true: "on", false: "off"}[info.FullCopy])
+		log.Printf("🗂 The main PC says this PC's own full copy is %v", map[bool]string{true: "on", false: "off"}[*info.FullCopy])
 	}
 }
 

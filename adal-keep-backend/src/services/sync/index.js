@@ -36,19 +36,18 @@ const DB_FILE = process.env.SQLITE_PATH ? path.resolve(process.env.SQLITE_PATH) 
 let node = null
 export const syncNode = () => node
 /**
- * The copying between PCs is OFF unless switched on (2026-11-23, before the release: not yet
- * run on Windows): ADAL_COMPANION_FULL=1 on this PC, or Adal's switch "companion_full" for the
- * agency (agency config). Off, this PC works exactly as before (no sync tables, no time ids).
+ * The copying between PCs is ON for every agency and every PC (the owner, 2026-11-23: "you turn
+ * it on for every one for ever"). Emergency off only: ADAL_COMPANION_FULL=0 on a PC, or Adal's
+ * signed tower command companion_full_off (data/flags.json {"companion_full": false}).
  */
 export function companionFullOn() {
   const env = process.env.ADAL_COMPANION_FULL
   if (env === '1') return true
   if (env === '0') return false
-  // Adal's signed tower command (tower.js companion_full_on/off) writes it here; it wins over the record.
-  try { const f = JSON.parse(fs.readFileSync(process.env.ADAL_FLAGS_FILE || path.join(BACKEND, 'data', 'flags.json'), 'utf8'))?.companion_full; if (typeof f === 'boolean') return f } catch {}
-  try { return featureOn('companion_full') } catch { return false }
+  try { if (JSON.parse(fs.readFileSync(process.env.ADAL_FLAGS_FILE || path.join(BACKEND, 'data', 'flags.json'), 'utf8'))?.companion_full === false) return false } catch {}
+  return true
 }
-/** The main role moving by itself: ADAL_AUTO_MAIN=1, or with the agency's switch above (ADAL_AUTO_MAIN=0 never). */
+/** The main role moving by itself: on with the copying (ADAL_AUTO_MAIN=0 never, ADAL_AUTO_MAIN=1 always). */
 const autoMainOn = () => process.env.ADAL_AUTO_MAIN === '1' || (process.env.ADAL_AUTO_MAIN !== '0' && companionFullOn())
 /** This PC logged out of its agency and has not joined one again (no main PC's jobs here then). */
 export const leftAgency = () => { const id = readIdentity(); return !!id.left_at && !id.joined_main }

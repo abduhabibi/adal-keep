@@ -61,14 +61,18 @@ func TestSwapServerKeepsDataAndUploads(t *testing.T) {
 	}
 }
 
-// Off unless switched on: nothing kept → off; the main PC's last word is kept.
-func TestFullCopyOffByDefault(t *testing.T) {
+// On by default for everyone; off only when the main PC said so (kept) or ADAL_FULL_COPY=0.
+func TestFullCopyOnByDefault(t *testing.T) {
 	root := t.TempDir()
 	old := fullCopyEnv
 	t.Cleanup(func() { fullCopyEnv = old })
 	fullCopyEnv = ""
+	if !fullCopyAllowed(root) {
+		t.Fatal("off by default")
+	}
+	os.WriteFile(filepath.Join(root, "full-copy.json"), []byte(`{"on":false}`), 0o644)
 	if fullCopyAllowed(root) {
-		t.Fatal("on by default")
+		t.Fatal("the main PC said off (emergency)")
 	}
 	os.WriteFile(filepath.Join(root, "full-copy.json"), []byte(`{"on":true}`), 0o644)
 	if !fullCopyAllowed(root) {

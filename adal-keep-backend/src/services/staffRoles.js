@@ -136,7 +136,21 @@ export async function whoIsAsking(db, req) {
   }
   if (!fromBrowser(req)) return { kind: 'pc' }
   if (req.auth?.uid) return byId(Number(req.auth.uid), 'staff')
+  // This PC's own window that lost its key (signed in before staff roles came, 2026-11-22, or
+  // its storage cleared): it works as whoever is signed in on this PC, like the phones. On the
+  // agency's main PC every robot start was refused "Signed out" while someone was signed in.
+  if (ownWindow(req)) {
+    const id = (await pcStaffId(db)) || Number((await db('settings').where({ key: 'active_employee_id' }).first().catch(() => null))?.value) || null
+    if (id) { const w = await byId(id, 'staff'); if (w.user) return w }
+  }
   return { kind: 'signed-out' }
+}
+
+// The window on this PC itself (127.0.0.1, nothing forwarded), not another computer's.
+function ownWindow(req) {
+  const ip = String(req.socket?.remoteAddress || '')
+  const local = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1'
+  return local && !['x-adal-cloud', 'x-forwarded-for', 'forwarded', 'x-real-ip', 'x-adal-pc'].some(h => header(req, h) !== undefined)
 }
 
 /** No employee can manage staff yet (a new agency): a window with no one signed in may do everything. */
@@ -158,8 +172,10 @@ export async function permsFor(db, req) {
   return { perms: { ...NONE }, role: null, user: null, readOnly: true, kind: who.kind }
 }
 
-// Changes anyone may send, signed in or not: signing in, the window itself, "still here" calls.
-const FREE = /^\/(employees\/device-(login|resume|logout)$|auth\/|setup\/|subscription\/|pc-access\/|mobile\/(pair|push-token)$|app\/|tutor|chat\/ping|plan\/refresh|profiles\/-?\d+\/opened$|cv\/(preview|prepare|warm|templates\/preview-html)$)|(ping|warm|typing|alive|heartbeat|seen|read)$/
+// Changes anyone may send, signed in or not: signing in, the window itself, "still here" calls,
+// and answers to a robot already working (its captcha, a code, "done" on its human step; the
+// phone's LMIS SMS code): the run was started by someone signed in, and it waits for them.
+const FREE = /^\/(automations\/\d+\/(captcha|input|attention\/done)$|lmis\/sms-code$|employees\/device-(login|resume|logout)$|auth\/|setup\/|subscription\/|pc-access\/|mobile\/(pair|push-token)$|app\/|tutor|chat\/ping|plan\/refresh|profiles\/-?\d+\/opened$|cv\/(preview|prepare|warm|templates\/preview-html)$)|(ping|warm|typing|alive|heartbeat|seen|read)$/
 
 // Which toggle each change needs (method, path under /api). The first match wins.
 const W = '(POST|PUT|PATCH|DELETE)'

@@ -38,6 +38,9 @@ async function office() {
   app.put('/api/cv/templates/:id/content', ok)
   app.post('/api/profiles/:id/automations/:wf/start', ok)
   app.post('/api/backup/run', ok)
+  app.post('/api/automations/:id/captcha', ok)
+  app.post('/api/automations/:id/input', ok)
+  app.post('/api/lmis/sms-code', ok)
   app.post('/api/trash/empty', ok)
   const server = app.listen(0)
   const base = `http://127.0.0.1:${server.address().port}/api`
@@ -181,6 +184,7 @@ test('signed out: looking only; a new agency with no admin yet may do everything
   }
   assert.equal((await o.call('GET', '/employees')).status, 200)
   assert.equal((await o.call('POST', '/employees/device-login', { body: { employeeId: 2, deviceSerial: 'pc-9' } })).status, 200)
+  assert.equal((await o.call('POST', '/employees/device-logout', { body: { deviceSerial: 'pc-9' } })).status, 200)
   const me = (await o.call('GET', '/staff-roles/me')).data
   assert.ok(Object.values(me.perms).every(v => v === false))
   // No employee who can manage staff (a new agency): everything, to make the first one.
@@ -227,5 +231,36 @@ test('phones and the online copy work as whoever is signed in on the PC', async 
   // Adal support (Adal Keep Admin) through the online copy: as before.
   await setPcStaff(o.db, null)
   assert.equal((await o.call('DELETE', '/profiles/1', { relayed: true, who: 'Adal support' })).status, 200)
+  await o.close()
+})
+
+test("this PC's own window without its key works as whoever is signed in on the PC; robots' answers always pass", async () => {
+  const o = await office()
+  await o.db('users').where({ name: 'Sara' }).update({ role_id: await o.roleId('office') })
+  // No one signed in: looking only, but a robot already working may be answered.
+  assert.equal((await o.call('POST', '/profiles/1/automations/musaned-add/start')).data.signed_out, true)
+  // Sara signed in on this PC before staff roles (only the active employee was kept), the window has no key:
+  await o.db('settings').insert({ key: 'active_employee_id', value: '2' })
+  assert.equal((await o.call('POST', '/profiles/1/automations/musaned-add/start')).status, 200)
+  assert.equal((await o.call('DELETE', '/profiles/1')).data.forbidden, 'delete_profiles')
+  // Signed in now (pc staff) as the admin: that one counts.
+  await setPcStaff(o.db, 1)
+  assert.equal((await o.call('DELETE', '/profiles/1')).status, 200)
+  // Signed out on the PC: looking only again.
+  assert.equal((await o.call('POST', '/employees/device-logout', { body: {} })).status, 200)
+  assert.equal((await o.call('POST', '/profiles')).data.signed_out, true)
+  // Another computer's window (forwarded) never borrows the PC's sign-in.
+  await setPcStaff(o.db, 1)
+  const r = await fetch(o.base + '/profiles', { method: 'POST', headers: { 'user-agent': 'Mozilla/5.0 Chrome', 'x-forwarded-for': '192.168.1.9' } })
+  assert.equal(r.status, 403)
+  await o.close()
+})
+
+test("answers to a robot already working are never refused (signed out, or the phone's LMIS code)", async () => {
+  const o = await office()
+  assert.equal((await o.call('POST', '/automations/12/captcha')).status, 200)
+  assert.equal((await o.call('POST', '/automations/12/input')).status, 200)
+  assert.equal((await o.call('POST', '/lmis/sms-code', { phone: true })).status, 200)
+  assert.equal((await o.call('POST', '/automations/12/resume')).status, 403)   // starting again is a change
   await o.close()
 })

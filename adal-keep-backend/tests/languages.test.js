@@ -106,3 +106,24 @@ test('every English phrase the Amharic pages turn into is also in Arabic (covera
   console.log(`Arabic covers ${Math.round(covered * 100)}% of the ${values.length} English phrases`)
   assert.ok(covered >= 0.85, `only ${Math.round(covered * 100)}% covered; first missing: ${missing.slice(0, 15).join(' | ')}`)
 })
+
+test('confirm, alert and prompt speak the app\'s language (English by default), not Amharic only', async () => {
+  const { speakDialogs } = await import('../../adal-keep-frontend/src/lib/i18n.js')
+  const said = []
+  const w = { confirm: (m) => { said.push(m); return true }, alert: (m) => { said.push(m) }, prompt: (m, d) => { said.push(m); return d } }
+  speakDialogs('en', w)
+  assert.equal(w.confirm('ሁሉንም ለመሰራት ተግባሮች ይሰረዙ?'), true)   // Tasks → Remove all
+  w.alert('ይህ ተግባር ይሰረዝ?')
+  assert.deepEqual(said, ['Delete all to-do tasks?', 'Delete this task?'])
+  // Every Amharic confirm() text in the pages has English words.
+  const fs = await import('fs'), path = await import('path')
+  const { translateText } = await import('../../adal-keep-frontend/src/lib/i18n.js')
+  const root = path.join(import.meta.dirname, '..', '..', 'adal-keep-frontend', 'src')
+  const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap(e => e.isDirectory() ? (e.name === 'demo' ? [] : walk(path.join(d, e.name))) : /\.jsx?$/.test(e.name) ? [path.join(d, e.name)] : [])
+  const left = []
+  for (const f of walk(root)) for (const m of fs.readFileSync(f, 'utf8').matchAll(/confirm\(\s*[`'"]([^`'"]*[ሀ-፿][^`'"]*)[`'"]/g)) {
+    const en = translateText(m[1].replace(/\$\{[^}]+\}/g, 'X'), 'en')
+    if (/[ሀ-፿]/.test(en)) left.push(`${path.basename(f)}: ${m[1]} → ${en}`)
+  }
+  assert.deepEqual(left, [])
+})

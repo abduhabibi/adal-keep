@@ -155,3 +155,21 @@ test('races: done and undone on the status track at once run one after the other
   assert.equal((await db('profiles').where('id', id).first()).status, null)
   assert.equal((await db('automation_queue').where({ profile_id: id, status: 'done' })).length, 0)
 })
+
+test('"On Musaned" done, then unchecked: back to Musaned, Undo puts it back, her notes name who did it', async () => {
+  const db = await setup()
+  const [id] = await db('profiles').insert({ full_name: 'Musaned uncheck' })
+  const state = async () => {
+    const p = await db('profiles').where('id', id).first()
+    const runs = {}
+    for (const r of await db('automation_queue').where('profile_id', id).orderBy('id')) runs[r.workflow_id] = r
+    return journeyOf(p, runs, true).embassy.find(s => s.key === 'musaned').state
+  }
+  await markStepDone(db, { profileId: id, step: 'musaned' })
+  assert.equal(await state(), 'waiting')   // on Musaned, not chosen yet: the track offers ↩ Uncheck there
+  const u = await markStepUndone(db, { profileId: id, step: 'musaned', employee: { name: 'Sara' } })
+  assert.equal(await state(), 'todo')
+  assert.match((await db('profiles').where('id', id).first()).notes, /musaned: unchecked by Sara/)
+  await undoMarkDone(db, u.undo)
+  assert.equal(await state(), 'waiting')
+})

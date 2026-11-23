@@ -161,6 +161,10 @@ async function connectTo(puppeteer, url) {
 /** Nobody can see this tab's window. */
 export async function outOfSight(page) {
   if (!HIDDEN) return true
+  // Headless (Linux, services/noWindows.js): no window, nobody can see any tab. Its window
+  // state is not to be read: "minimized" sticks only sometimes there, and a signed-in tab
+  // was then taken for one in sight and a run opened a new one.
+  if (noWindows()) return true
   try {
     const { bounds } = await (await windowOf(page)).cdp.send('Browser.getWindowForTarget')
     return bounds.windowState === 'minimized' || bounds.left < -10000

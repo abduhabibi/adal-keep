@@ -570,11 +570,21 @@ async function runJob(db, job) {
       const line = await placeRun(db, job, { mainAllowed: !nobodyAsked || !!(await openBrowserIfAny()) })
       if (line) { await appendLog(db, job.id, line); console.log(`[share] run #${job.id}: ${line}`) }
     } catch (e) { console.warn(`[share] run #${job.id} stays where it is:`, e.message) }
-    // Under 4 cores (ADAL_HW_GATE=1) no robot runs on this PC: it waits for a stronger PC of the office.
+    // Under 4 cores no robot runs on this PC while a stronger PC of the office is on: it waits
+    // for that one. With none on it runs here anyway, said in its log (never stopped silently).
     try {
       const H = await import('./hardware.js')
       const hw = H.hardwareNow()
-      if (!onDevice(job) && H.robotsBlocked(hw)) {
+      let strongerOn = false
+      if (!onDevice(job) && hw.cores < H.MIN_CORES) {
+        try { strongerOn = H.strongerPCOn(await (await import('./sharePower.js')).officePCs()) } catch {}
+        if (!H.robotsBlocked(hw, process.env, { strongerOn }) && process.env.ADAL_HW_GATE !== '0') {
+          const note = `This PC has ${hw.cores} core${hw.cores === 1 ? '' : 's'} (robots need ${H.MIN_CORES}) and no stronger office PC is on: it runs here, slower`
+          await appendLog(db, job.id, note)
+          console.warn(`[hardware] run #${job.id}: ${note}`)
+        }
+      }
+      if (!onDevice(job) && H.robotsBlocked(hw, process.env, { strongerOn })) {
         const note = `Waiting for a stronger PC (this PC has ${hw.cores} core${hw.cores === 1 ? '' : 's'}; robots need ${H.MIN_CORES})`
         await db('automation_queue').where('id', job.id).update({ status: 'pending', pause_reason: note, updated_at: new Date(Date.now() + 2 * 60000).toISOString() })
         await appendLog(db, job.id, note)

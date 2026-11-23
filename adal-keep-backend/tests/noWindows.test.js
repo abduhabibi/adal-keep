@@ -20,6 +20,9 @@ test('on Linux every browser Adal Keep starts is headless', { skip: process.plat
   assert.deepEqual(headlessArgs(), ['--headless=new'])
   const { _browserArgs } = await import('../src/services/browser.js')
   assert.ok(_browserArgs.includes('--headless=new'), 'Adal Browser is started headless')
+  // No window: every tab counts as out of sight (runs take the signed-in tab), whatever its window says.
+  const { outOfSight } = await import('../src/services/browser.js')
+  assert.equal(await outOfSight({ target: () => { throw new Error('never asked') } }), true)
   if (before !== undefined) process.env.ADAL_SHOW_WINDOWS = before
 })
 

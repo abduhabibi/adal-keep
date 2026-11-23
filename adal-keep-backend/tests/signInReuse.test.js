@@ -115,7 +115,11 @@ test('sign-in: tab reuse, one space per account, the person only ticks the box',
     assert.equal(await cookieOf(nuzlaTab), 'nuzla', 'Nuzla is still signed in as Nuzla')
   })
 
+  // The keeper's background look (keepAlive) borrows a tab for a moment: wait until both are free,
+  // so the checks below never depend on that timing (it made this test fail now and then).
+  const bothFree = () => waitFor(async () => !zadTab.__adalBorrowed && !nuzlaTab.__adalBorrowed, 30000, 'both tabs free')
   await t.test('again for Zad: its signed-in tab is used, no new sign-in', async () => {
+    await bothFree()
     const before = (await allPages()).length, posts = mock.events.length
     const r = await keeper.openSite('musaned', db, { accountId: 2, browser })
     assert.equal(r.already, true)
@@ -124,6 +128,7 @@ test('sign-in: tab reuse, one space per account, the person only ticks the box',
   })
 
   await t.test('runs take the signed-in tab of their own account, never the other one', async () => {
+    await bothFree()
     const { spaceForAccount } = await import('../src/services/tabManager.js')
     const runZad = await openRunTab(browser, 901, { workflowId: 'musaned_check_chosen', busyRuns: new Set([901]), keepRuns: new Set([901]), space: await spaceForAccount(db, browser, 'musaned', 2) })
     assert.equal(runZad, zadTab, "Zad's run uses Zad's signed-in tab")

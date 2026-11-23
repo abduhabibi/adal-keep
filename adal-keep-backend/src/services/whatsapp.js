@@ -138,9 +138,18 @@ export const PASSING = /already exists|timed out/i
  * a QR code, or (with `phone`) a code to type in WhatsApp → Linked devices →
  * Link with phone number instead. Safe to call again.
  */
+/**
+ * WhatsApp on this copy at all (asked on 2026-11-23): never in a test or isolated copy
+ * (ADAL_ISOLATED=1, a copy of an agency checked on another PC, or ADAL_WHATSAPP=0) — it
+ * would sign in the agency's real number, or ask WhatsApp for a link code, from a test.
+ */
+export const whatsappAllowed = (env = process.env) => env.ADAL_ISOLATED !== '1' && env.ADAL_WHATSAPP !== '0'
+const OFF_HERE = 'WhatsApp is off on this copy (a test or isolated copy): it never signs in from here.'
+
 export async function connect(db, key = 'owner', { phone = '' } = {}, tries = 2) {
   if (db) dbRef = db
   const s = session(key)
+  if (!whatsappAllowed()) { setState(key, { status: 'off', qr: null, code: null, error: OFF_HERE }); return s.state }
   if (s.client && !['off', 'failed'].includes(s.state.status) && !phone) return s.state
   // WhatsApp's own window is open on this profile: connecting would close it.
   if (s.state.status === 'web') return s.state
@@ -346,6 +355,7 @@ function linkTiming(s) {
  */
 export async function linkByCode(db, key = 'owner', phone = '') {
   if (db) dbRef = db
+  if (!whatsappAllowed()) throw Object.assign(new Error(OFF_HERE), { status: 403 })
   const digits = String(phone || '').replace(/\D/g, '').replace(/^00/, '')
   if (digits.length < 9 || digits.length > 15) throw new Error('Type the WhatsApp number with its country code, e.g. 2519…')
   const s = session(key)
@@ -518,6 +528,7 @@ const webWatch = new Map()
 export async function openWeb(db, key = 'owner') {
   if (db) dbRef = db
   const s = session(key)
+  if (!whatsappAllowed()) { setState(key, { status: 'off', qr: null, code: null, error: OFF_HERE }); return s.state }
   // Said first: the 30-second check must not start its own WhatsApp on this profile.
   setState(key, { status: 'web', qr: null, code: null, error: null, where: 'a WhatsApp window on this PC' })
   if (s.client) { const old = s.client; s.client = null; await release(old) }
@@ -647,6 +658,7 @@ async function online() {
 }
 
 async function keepConnected() {
+  if (!whatsappAllowed()) return
   // A page opened ahead for a link nobody made: closed again after WARM_MS.
   const on = readNote().on || []
   for (const [key, s] of sessions) {
@@ -698,6 +710,7 @@ async function keepConnected() {
 /** At start: the accounts connected before connect again by themselves (no QR needed). */
 export function startWhatsApp(db) {
   dbRef = db
+  if (!whatsappAllowed()) return console.log('[whatsapp] off on this copy (test or isolated)')
   const n = readNote()
   // Before accounts.json: the one account in Adal Keep's Brave.
   if (!n.on?.length && fs.existsSync(path.join(BACKEND, 'data', 'whatsapp-on'))) { n.brave ||= 'owner'; n.on = ['owner']; writeNote(n) }

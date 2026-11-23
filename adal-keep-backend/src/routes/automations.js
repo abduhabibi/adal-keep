@@ -1418,8 +1418,10 @@ router.post('/profiles/:id/steps/:step/undone', async (req, res) => {
   try {
     const db = req.app.locals.db
     const { markStepUndone } = await import('../services/markDone.js')
+    // Named in her notes: who asked (signed in, or the PC's default employee), else the PC's active one.
     let employee = null
-    try { employee = await (await import('../services/activeEmployee.js')).getActiveEmployee(db) } catch {}
+    try { employee = (await (await import('../services/staffRoles.js')).permsFor(db, req)).user || null } catch {}
+    if (!employee) try { employee = await (await import('../services/activeEmployee.js')).getActiveEmployee(db) } catch {}
     res.json(await markStepUndone(db, { profileId: Number(req.params.id), step: req.params.step, employee }))
   } catch (e) { res.status(e.status || 500).json({ error: e.message }) }
 })

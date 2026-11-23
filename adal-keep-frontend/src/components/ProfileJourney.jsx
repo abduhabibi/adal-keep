@@ -15,6 +15,10 @@ import { useEffect, useRef, useState } from 'react'
 import api from '../services/api'
 import { markDone, markUndone, STEP_DONE_LABEL, STEP_UNDONE } from '../lib/markDone'
 
+// "✔️ On Musaned" done: she waits there until chosen ('waiting'), and that counts as done here —
+// the ✔️ is not offered again and ↩ Uncheck is (asked on 2026-11-23).
+const doneLike = (s) => s.state === 'done' || (s.key === 'musaned' && s.state === 'waiting')
+
 export const SHARED = [['cv', 'CV'], ['musaned', 'Musaned'], ['selected', 'Selected'], ['wafid', 'Wafid']]
 export const BRANCHES = [
   { key: 'embassy-track', title: 'Embassy', icon: '🇸🇦', steps: [['epro', 'EPRO approval', 'EPRO'], ['insurance', 'Insurance'], ['fmol', 'FMOL approval', 'FMOL'], ['embassy', 'Saudi Embassy', 'Embassy'], ['visa', 'Visa issued', 'Visa'], ['arrived', 'Arrived KSA', 'Arrived']] },
@@ -244,7 +248,7 @@ const STATE_CHIP = {
 /** One step under the fork: its state, who it is with, its documents; "✔️ … done" when it is not. */
 function StepCard({ s, profileId, onDone }) {
   const missing = (s.docs || []).filter(d => !d.have).length
-  const can = profileId && STEP_DONE_LABEL[s.key] && s.state !== 'done' && s.state !== 'soon'
+  const can = profileId && STEP_DONE_LABEL[s.key] && !doneLike(s) && s.state !== 'soon'
   return (
     <div className={`min-w-0 rounded-xl border p-2.5 text-xs ${s.state === 'active' ? 'border-amber-300 dark:border-amber-700' : 'border-slate-200 dark:border-slate-700'}`}>
       <div className="flex items-center justify-between gap-1">
@@ -262,7 +266,7 @@ function StepCard({ s, profileId, onDone }) {
           ))}
         </div>
       )}
-      {profileId && s.state === 'done' && STEP_UNDONE.includes(s.key) && (
+      {profileId && doneLike(s) && STEP_UNDONE.includes(s.key) && (
         <button type="button" title="Not done after all: she goes back to this step; later steps open again, nothing is deleted"
           onClick={async () => { await markUndone({ profileId, step: s.key, label: s.title }); onDone?.() }}
           className="mt-1.5 rounded-lg border border-slate-300 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800">
@@ -327,7 +331,14 @@ export default function ProfileJourney({ profileId }) {
         <span className="min-w-0 flex-1 text-sm"><b className={look.text}>{now.step.title}</b> <span className="text-slate-500">— {shortDate(now.text)}</span></span>
         <span className="shrink-0 text-xs text-slate-400">{open ? '▾' : '▸'}</span>
       </button>
-      {STEP_DONE_LABEL[now.step.key] && now.step.state !== 'done' && now.step.state !== 'soon' && (
+      {profileId && now.step.key === 'musaned' && now.step.state === 'waiting' && (
+        <button type="button" title="Not on Musaned after all: she goes back to this step; nothing is deleted"
+          onClick={() => markUndone({ profileId, step: 'musaned', label: now.step.title })}
+          className="ml-10 mt-1 rounded-lg border border-slate-300 px-2 py-0.5 text-[11px] font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800">
+          ↩ Uncheck
+        </button>
+      )}
+      {STEP_DONE_LABEL[now.step.key] && !doneLike(now.step) && now.step.state !== 'soon' && (
         <button type="button" onClick={() => markDone({ profileId, step: now.step.key, label: STEP_DONE_LABEL[now.step.key] })}
           className="ml-10 mt-1 rounded-lg border border-emerald-300 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-50 dark:border-emerald-700 dark:text-emerald-300 dark:hover:bg-emerald-900/20">
           {STEP_DONE_LABEL[now.step.key]}

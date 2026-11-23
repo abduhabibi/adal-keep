@@ -591,13 +591,14 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
 
           {/* Media */}
           {previewFile.mimetype?.startsWith('image/') ? (
-            <img
-              src={`/api/files/${previewFile.id}/download`}
-              alt={previewFile.original_name}
-              onClick={(e) => e.stopPropagation()}
-              className="max-w-[92vw] max-h-[88vh] object-contain rounded-3xl shadow-2xl select-none"
-              draggable={false}
-            />
+            <div className="relative min-h-[12rem] min-w-[16rem] rounded-3xl" onClick={(e) => e.stopPropagation()}>
+              <FileImage
+                src={`/api/files/${previewFile.id}/download`}
+                alt={previewFile.original_name}
+                className="max-w-[92vw] max-h-[88vh] object-contain rounded-3xl shadow-2xl select-none"
+                draggable={false}
+              />
+            </div>
           ) : previewFile.mimetype?.includes('pdf') ? (
             <iframe
               src={`/api/files/${previewFile.id}/download#toolbar=1&view=FitH`}

@@ -26,12 +26,18 @@ test('32-bit and the network link are reported', () => {
   assert.equal(H.linkOf(null), 'unknown')
 })
 
-test('the robot gate only works with the flag, and only under 4 cores', () => {
+test('the robot gate is on by default, only under 4 cores, and only while a stronger office PC is on', () => {
   const two = H.measure({ cores: 2, totalmem: 16 * GB, arch: 'x64', env: {} })
   const four = H.measure({ cores: 4, totalmem: 16 * GB, arch: 'x64', env: {} })
-  assert.equal(H.robotsBlocked(two, {}), false)
-  assert.equal(H.robotsBlocked(two, { ADAL_HW_GATE: '1' }), true)
-  assert.equal(H.robotsBlocked(four, { ADAL_HW_GATE: '1' }), false)
+  assert.equal(H.robotsBlocked(two, {}, { strongerOn: true }), true)
+  assert.equal(H.robotsBlocked(two, {}, { strongerOn: false }), false)   // none on: it runs here (with a notice)
+  assert.equal(H.robotsBlocked(two, { ADAL_HW_GATE: '0' }, { strongerOn: true }), false)
+  assert.equal(H.robotsBlocked(four, {}, { strongerOn: true }), false)
+  // Which office PCs count: another PC of 4+ cores on the office network.
+  assert.equal(H.strongerPCOn([{ id: '', cores: 2 }]), false)
+  assert.equal(H.strongerPCOn([{ id: '', cores: 2 }, { id: 'b', cores: 2, lan: true }]), false)
+  assert.equal(H.strongerPCOn([{ id: '', cores: 2 }, { id: 'b', cores: 8, lan: false }]), false)
+  assert.equal(H.strongerPCOn([{ id: '', cores: 2 }, { id: 'b', cores: 8, lan: true }]), true)
 })
 
 test('the heartbeat carries the specs', () => {

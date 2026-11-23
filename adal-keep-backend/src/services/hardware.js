@@ -1,9 +1,11 @@
 /**
  * hardware.js — what this PC is made of: processor cores, RAM, 32/64-bit and
  * the network link. Weak agency PCs (2-core AMD A4, 7 GB) were swamped by
- * robots, so below 4 cores / 8 GB the app warns, and — with ADAL_HW_GATE=1 —
- * the robot worker never runs on a PC under 4 cores (the run waits for a
- * stronger PC of the office, services/sharePower.js hands it over).
+ * robots, so below 4 cores / 8 GB the app warns, and the robot worker does not
+ * run on a PC under 4 cores while a stronger PC of the office is on (the run
+ * waits for it, services/sharePower.js hands it over). With none on, it runs
+ * here anyway, with a notice: robots never stop silently (2026-11-23, on by
+ * default; ADAL_HW_GATE=0 turns it off).
  * The numbers go out in the heartbeat (cloudSync beatData, key `hw`).
  */
 import os from 'os'
@@ -45,8 +47,11 @@ let ownNetFn = null
 import('./netQuality.js').then(n => { ownNetFn = n.ownNet }).catch(() => {})
 export const hardwareNow = () => measure({ net: ownNetFn ? ownNetFn() : null })
 
-/** The robot worker's rule: never on a PC under 4 cores (ADAL_HW_GATE=1 turns it on). */
-export const robotsBlocked = (hw = hardwareNow(), env = process.env) => env.ADAL_HW_GATE === '1' && hw.cores < MIN_CORES
+/** The robot worker's rule: not on a PC under 4 cores while a stronger office PC is on (ADAL_HW_GATE=0: off). */
+export const robotsBlocked = (hw = hardwareNow(), env = process.env, { strongerOn = true } = {}) => env.ADAL_HW_GATE !== '0' && hw.cores < MIN_CORES && !!strongerOn
+
+/** A PC of the office (not this one) that can take robots now: 4 cores or more, on the office network. */
+export const strongerPCOn = (pcs = []) => pcs.some(p => p.id !== '' && (Number(p.cores) || 1) >= MIN_CORES && p.lan !== false)
 
 /** The short form in the heartbeat. */
 export const hardwareBeat = () => { const h = hardwareNow(); return { cores: h.cores, mem_gb: h.mem_gb, bits: h.bits, link: h.link, weak: h.weak } }

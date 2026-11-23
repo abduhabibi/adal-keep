@@ -437,6 +437,20 @@ function layer(lang) {
   return tree
 }
 
+/**
+ * The browser's own boxes (confirm, alert, prompt) in the app's language too (asked on
+ * 2026-11-23: "Remove all" asked in Amharic only): their text goes through the same words.
+ */
+export function speakDialogs(lang, w = typeof window !== 'undefined' ? window : null) {
+  if (!w || w.__adalDialogsIn === lang) return
+  const orig = w.__adalDialogs || (w.__adalDialogs = { confirm: w.confirm?.bind(w), alert: w.alert?.bind(w), prompt: w.prompt?.bind(w) })
+  const say = (m) => (typeof m === 'string' ? translateText(m, lang) : m)
+  if (orig.confirm) w.confirm = (m) => orig.confirm(say(m))
+  if (orig.alert) w.alert = (m) => orig.alert(say(m))
+  if (orig.prompt) w.prompt = (m, d) => orig.prompt(say(m), d)
+  w.__adalDialogsIn = lang
+}
+
 /** Start the language layer. English shows the Amharic pages in English; Amharic and Arabic show the labels in theirs. */
 export function startLanguage() {
   const lang = running = getLang()
@@ -447,6 +461,7 @@ export function startLanguage() {
   const tree = layer(lang)
   const title = () => { const t = translateText(document.title, lang); if (t !== document.title) document.title = t }
   tree(document.body); title()
+  speakDialogs(lang)
   new MutationObserver((list) => {
     for (const m of list) {
       if (m.type === 'childList') m.addedNodes.forEach(tree)

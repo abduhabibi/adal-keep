@@ -49,7 +49,7 @@ function log(ctx, msg, level = 'info') {
 }
 async function until(test, ms, ctx) {
   const end = Date.now() + ms
-  while (Date.now() < end) { stop(ctx); if (await test().catch(() => false)) return true; await sleep(1000) }
+  while (Date.now() < end) { stop(ctx); if (await test().catch(() => false)) return true; await sleep(300) }   // 300 ms: the page's signal is seen at once (was 1 s)
   return false
 }
 
@@ -413,7 +413,13 @@ export async function afterConcurrentLogin(page, user, pass, { say = () => {}, g
 }
 
 // Cloudflare's "Just a moment…" / "Verify you are human" before the site.
-const challenged = (page) => page.evaluate(() => /just a moment|verify you are human|attention required|checking your browser/i.test(document.title + ' ' + (document.body?.innerText || '').slice(0, 400))).catch(() => false)
+// Cloudflare's hard block ("Sorry, you have been blocked", titled "Attention Required"): no box to tick, nobody
+// can pass it from this browser (seen live 2026-11-23 from a headless browser). Not a challenge: the run stops at once.
+const BLOCKED = /you have been blocked|you are unable to access/i
+export const blockedText = (text) => BLOCKED.test(String(text || ''))
+const blocked = (page) => page.evaluate(() => document.title + ' ' + (document.body?.innerText || '').slice(0, 400)).then(blockedText).catch(() => false)
+export const challengeText = (text) => !blockedText(text) && /just a moment|verify you are human|attention required|checking your browser/i.test(String(text || ''))
+const challenged = (page) => page.evaluate(() => document.title + ' ' + (document.body?.innerText || '').slice(0, 400)).then(challengeText).catch(() => false)
 const notAllowed = (page) => page.evaluate(() => /method\s+'?get'?\s+is not supported/i.test(document.body?.innerText || '')).catch(() => false)
 
 /** Past Cloudflare's check: by itself, or a person ticks it (rung once). */
@@ -434,7 +440,10 @@ async function signIn(page, ctx) {
     if (/tasheer\.com/i.test(page.url()) && await home()) return log(ctx, '✓ already signed in to Tasheer')
     log(ctx, 'opening Tasheer (agents.tasheer.com)')
     await page.goto(START, { waitUntil: 'domcontentloaded', timeout: 120000 }).catch(e => log(ctx, `navigation threw: ${e.message}`, 'warn'))
-    await sleep(2500)
+    // Until the page says what it is (its sign-in, home, Cloudflare), 2.5 s at most — was always 2.5 s.
+    const shown = async () => (await blocked(page)) || (await challenged(page)) || (await hasPassword(page)) || (await home())
+    for (const end = Date.now() + 2500; Date.now() < end && !(await shown());) await sleep(200)
+    if (await blocked(page)) throw new Error("Tasheer's Cloudflare blocks this PC's browser (\"Sorry, you have been blocked\"): there is nothing to tick. Open agents.tasheer.com once in a normal browser on this PC, or run it from another PC or internet line")
     await pastCloudflare(page, ctx)
     if (await notAllowed(page)) await page.goto(START, { waitUntil: 'domcontentloaded', timeout: 120000 }).catch(() => {})
     if (!(await until(async () => (await hasPassword(page)) || (await home()), 30000, ctx))) {

@@ -91,3 +91,12 @@ test("Musaned's first page: a reason a person can act on", () => {
   assert.match(unreachable(new Error('Runtime.callFunctionOn timed out.')), /tab stopped answering/)
   assert.match(unreachable(new Error('net::ERR_INTERNET_DISCONNECTED at https://tawtheeq.musaned.com.sa/')), /not on the internet/)
 })
+
+test("Tasheer: Cloudflare's hard block is not a box to tick (live page text, 2026-11-23)", async () => {
+  const { blockedText, challengeText } = await import('../src/services/tasheer.js')
+  const live = 'Attention Required! | Cloudflare Sorry, you have been blocked You are unable to access agents.tasheer.com Why have I been blocked?'
+  assert.equal(blockedText(live), true)
+  assert.equal(challengeText(live), false)
+  assert.equal(challengeText('Just a moment... Verify you are human by completing the action below.'), true)
+  assert.equal(blockedText('Login Username Password'), false)
+})

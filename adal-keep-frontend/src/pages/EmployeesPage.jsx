@@ -160,14 +160,14 @@ export default function EmployeesPage() {
     if (activeEmployee?.id) {
       setActive(activeEmployee)
       loadWorkspace(activeEmployee)
-      return
+      if (activeEmployee.staff_token) return   // (no key yet: asked for it below)
     }
     ;(async () => {
       try {
         const res = await api.post('/employees/device-resume', {
           deviceSerial: getDeviceSerial(),
         })
-        if (res.data?.user) {
+        if (res.data?.user && (!activeEmployee?.id || res.data.user.id === activeEmployee.id)) {
           const u = res.data.user
           setCurrentUser(u)
           setActiveEmployee(u)

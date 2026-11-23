@@ -69,6 +69,18 @@ export function AuthProvider({ children }) {
     setState('error')
   }, [])
 
+  // Signed in before staff roles (2026-11-22): the window keeps her name but has no staff key,
+  // so the PC took it as signed out. Its device asks once for her key (asked on 2026-11-23).
+  useEffect(() => {
+    const e = loadStoredEmployee()
+    let serial = null
+    try { serial = localStorage.getItem('adal_device_serial') } catch {}
+    if (!(e?.id > 0) || e.staff_token || !serial) return
+    api.post('/employees/device-resume', { deviceSerial: serial })
+      .then(r => { if (r.data?.user?.id === e.id) setActiveEmployee(r.data.user) })
+      .catch(() => {})
+  }, [setActiveEmployee])
+
   useEffect(() => {
     refresh()
   }, [refresh])

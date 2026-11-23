@@ -26,7 +26,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -283,59 +282,6 @@ func addPeerRoutes(mux *http.ServeMux, root string) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(copyState{PCNumber: st.PCNumber, Made: st.Made, DB: st.DB, Docs: st.Docs, LastGood: st.MainLastGood})
 	})
-	// The server in waiting (never its data folder), for a Companion that has none.
-	mux.HandleFunc("/standby/bundle", func(w http.ResponseWriter, r *http.Request) {
-		if !numberOK(r, loadState()) {
-			http.Error(w, "not this main PC's number", http.StatusForbidden)
-			return
-		}
-		if !hasServer(root) || standbyActing() {
-			http.Error(w, "no server to give now", http.StatusNotFound)
-			return
-		}
-		ver := ""
-		if standby != nil {
-			standby.mu.Lock()
-			ver = standby.st.BundleVersion
-			standby.mu.Unlock()
-		}
-		w.Header().Set("Content-Type", "application/gzip")
-		w.Header().Set("X-Adal-Version", ver)
-		// Its settings (licence and AI keys) only locked with the agency's backup key.
-		args := []string{"-czf", "-", "-C", serverDir(root), "--exclude", "./backend/data", "--exclude", "./backend/.env", "--exclude", "./backend/*.sqlite*", "--exclude", "*.log", "."}
-		if tmp := lockedSettingsDir(root); tmp != "" {
-			defer os.RemoveAll(tmp)
-			args = append(args, "-C", tmp, "backend/.env.locked")
-		}
-		cmd := exec.Command(windowsTar(), args...)
-		hideWindow(cmd)
-		cmd.Stdout = w
-		if err := cmd.Run(); err != nil {
-			log.Printf("🏢 server for another Companion: %v", err)
-		}
-	})
-}
-
-// bundleFromPeers: the main PC away and no server here — another Companion's.
-func (s *standbyRunner) bundleFromPeers() error {
-	for _, b := range peerBases() {
-		resp, err := peerGet(b + "/standby/bundle")
-		if err != nil {
-			continue
-		}
-		if resp.StatusCode != http.StatusOK {
-			resp.Body.Close()
-			continue
-		}
-		err = s.installBundle(resp.Body, resp.Header.Get("X-Adal-Version"))
-		resp.Body.Close()
-		if err == nil {
-			log.Printf("🏢 The server in waiting came from another Companion (%s)", b)
-			return nil
-		}
-		log.Printf("🏢 server from %s: %v", b, err)
-	}
-	return nil
 }
 
 // peerIP: the address a UDP message came from, as text.
@@ -368,25 +314,6 @@ func openSettings(serverRoot string) {
 	if err := os.WriteFile(filepath.Join(serverRoot, "backend", ".env"), plain, 0o600); err == nil {
 		os.Remove(locked)
 	}
-}
-
-// lockedSettingsDir: a folder holding backend/.env.locked (this server's
-// settings locked with the backup key), or "" when there is nothing to send.
-func lockedSettingsDir(root string) string {
-	b, err := os.ReadFile(filepath.Join(serverBackend(root), ".env"))
-	pw := loadKeys().Password
-	if err != nil || pw == "" {
-		// Still locked here (no key yet): passed on locked, as it came.
-		if lb, err := os.ReadFile(filepath.Join(serverBackend(root), ".env.locked")); err == nil {
-			return writeLocked(lb)
-		}
-		return ""
-	}
-	lb, err := lockPiece(b, pw)
-	if err != nil {
-		return ""
-	}
-	return writeLocked(lb)
 }
 
 func writeLocked(lb []byte) string {

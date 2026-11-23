@@ -26,6 +26,8 @@ export const KINDS = {
   suspend: 'Suspend robots',
   resume: 'Resume robots',
   support_note: 'Support note',
+  companion_full_on: 'Companions: full copy ON',
+  companion_full_off: 'Companions: full copy OFF',
 }
 // Sent by the Tickets tab, not a button of its own.
 const HIDDEN_KINDS = { ticket_reply: 'Ticket answer' }

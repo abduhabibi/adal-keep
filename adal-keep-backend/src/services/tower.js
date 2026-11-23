@@ -230,7 +230,23 @@ function tail(file, bytes = 200 * 1024) {
   } catch { return null }
 }
 
+// Adal's switch for one agency's PCs, when its agency-config record cannot reach them
+// (agency_config off on the PC): data/flags.json companion_full, then a restart (sync starts at boot).
+function setCompanionFull(on, ctx) {
+  const file = process.env.ADAL_FLAGS_FILE || path.join(BACKEND, 'data', 'flags.json')
+  let flags = {}
+  try { flags = JSON.parse(fs.readFileSync(file, 'utf8')) || {} } catch {}
+  flags.companion_full = on
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  fs.writeFileSync(`${file}.tmp`, JSON.stringify(flags, null, 1))
+  fs.renameSync(`${file}.tmp`, file)
+  ctx.after = () => setTimeout(() => process.exit(0), 1500).unref?.()
+  return { companion_full: on, message: `Full copy on the Companions ${on ? 'ON' : 'OFF'} for this PC (Adal Keep starts again in a few seconds).` }
+}
+
 export const handlers = {
+  async companion_full_on(db, args, ctx) { return setCompanionFull(true, ctx) },
+  async companion_full_off(db, args, ctx) { return setCompanionFull(false, ctx) },
   async restart(db, args, ctx) {
     ctx.after = () => setTimeout(() => process.exit(0), 1500).unref?.()
     return { message: 'Adal Keep starts again in a few seconds (the launcher / service brings it back).' }

@@ -40,6 +40,24 @@ let responder = null
 let peerHandler = null
 /** fn(text, rinfo) → the answer to send back, or null. */
 export function onPeerMessage(fn) { peerHandler = typeof fn === 'function' ? fn : null }
+// Every PC saying who it is (services/pcPresence.js).
+let presenceHandler = null
+export function onPresence(fn) { presenceHandler = typeof fn === 'function' ? fn : null }
+/** One message to every PC of this PC's networks on the discovery port (the responder's socket). */
+export function broadcastOnDiscovery(text, { port = responder?.port || DISCOVERY_PORT } = {}) {
+  const sock = responder?.sock
+  if (!sock) return false
+  const buf = Buffer.from(text, 'utf8')
+  const to = new Set(['255.255.255.255'])
+  for (const list of Object.values(os.networkInterfaces())) for (const a of list || []) {
+    if (a.family !== 'IPv4' || a.internal || !a.netmask || !lanUsable(a.address)) continue
+    const ip = a.address.split('.').map(Number), m = a.netmask.split('.').map(Number)
+    to.add(ip.map((n, i) => (n | (~m[i] & 255))).join('.'))
+  }
+  for (const t of String(process.env.ADAL_PRESENCE_TO || '').split(',').map(x => x.trim()).filter(Boolean)) to.add(t)
+  for (const addr of to) { const [h, p] = addr.includes(':') ? addr.split(':') : [addr, port]; sock.send(buf, Number(p), h, () => {}) }
+  return true
+}
 
 /**
  * Every non-internal IPv4 address this machine can be reached on.
@@ -162,6 +180,7 @@ export function startDiscoveryResponder(opts = {}) {
 
   sock.on('message', (msg, rinfo) => {
     const text = msg.toString('utf8').trim()
+    if (text.startsWith('ADAL_KEEP_PC_V1')) { try { presenceHandler?.(text, rinfo) } catch {} ; return }
     if (text.startsWith('ADAL_KEEP_PEER')) {
       try {
         const answer = peerHandler?.(text, rinfo)
@@ -205,6 +224,7 @@ export function startDiscoveryResponder(opts = {}) {
 
   responder = {
     port,
+    sock,
     close() {
       try { sock.close() } catch {}
       responder = null

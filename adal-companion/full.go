@@ -239,6 +239,8 @@ func (s *standbyRunner) startFull() error {
 		"ADAL_HIDDEN_AGENTS=1",
 		"ADAL_BROWSER_EXE="+filepath.Join(s.root, "browser", "AdalBrowser.exe"),
 		"ADAL_AUTO_UPDATE=0", // this program keeps server\ at the main PC's version (standby.go bundle loop)
+		// It runs only when the full copy is on (fullCopyAllowed): its copying and the main role moving too.
+		"ADAL_COMPANION_FULL=1",
 	)
 	if joinMain != "" {
 		env = append(env, "ADAL_SYNC_JOIN_MAIN="+joinMain, "ADAL_SYNC_JOIN_KEY="+joinKey)

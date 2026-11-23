@@ -191,12 +191,12 @@ func (s *standbyRunner) bundleLoop() {
 	time.Sleep(2 * time.Minute)
 	for {
 		learnNumberOnline(s.root)
-		if !standbyActing() {
+		// Only for this PC's own full copy (switched on per agency, full.go); never from another
+		// Companion (2026-11-23: no update pieces between the office's PCs).
+		if !standbyActing() && fullCopyAllowed(s.root) {
 			var err error
 			if hostServer != "" && pingServer() {
 				err = s.fetchBundle()
-			} else if !hasServer(s.root) {
-				err = s.bundleFromPeers() // the main PC away: another Companion's
 			}
 			if err != nil {
 				log.Printf("🏢 server copy: %v", err)

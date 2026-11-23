@@ -33,6 +33,9 @@ type mainIdentity struct {
 	Macs   []string `json:"macs,omitempty"`
 	URL    string   `json:"url,omitempty"`
 	Seen   string   `json:"seen,omitempty"`
+	// PCID: the main PC's permanent id (its data/sync-id.json pc_id): found by it
+	// on the office network whatever its address (presence.go).
+	PCID string `json:"pc_id,omitempty"`
 }
 
 var (

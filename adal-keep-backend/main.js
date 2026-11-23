@@ -1325,6 +1325,8 @@ initSystem().then(() => {
       // A Companion standing in for the main PC: the office reaches it on its Companion's port (4000).
       getInfo: () => ({ port: Number(process.env.ADAL_ADVERTISE_PORT) || Number(PORT) }),
     })
+    // Every PC says who it is (its permanent id) every 5 s; the others find it by that, never by an old IP.
+    import('./src/services/pcPresence.js').then(P => P.startOnThisPC({ port: () => Number(process.env.ADAL_ADVERTISE_PORT) || Number(PORT), role: () => (!notMainPC() && isMainRole() !== false ? 'main' : 'pc') })).catch(e => console.warn('[presence]', e.message))
     if (notMainPC() || isMainRole() === false) {
       // A Companion with its own copy: everything a person does happens here, at once;
       // the main PC's jobs (robots, backups, the online copy, phones, reminders) stay there.

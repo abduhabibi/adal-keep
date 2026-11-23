@@ -95,6 +95,10 @@ router.get('/companion/info', async (req, res) => {
       uptime_seconds: Math.round(process.uptime()),
       version: process.env.ADAL_VERSION || '1.0.0',
       time: new Date().toISOString(),
+      // This PC's permanent id (the office's PCs find each other by it, pcPresence.js) and
+      // whether its Wi-Fi card's address is random (Windows "random hardware addresses").
+      pc_id: (await import('../services/sync/identity.js')).pcId(),
+      random_mac: (await import('../services/pcPresence.js')).randomMac().length > 0,
       // Companions keep a full copy of their own only when this is on (adal-companion full.go).
       full_copy: (await import('../services/sync/index.js')).companionFullOn(),
     })

@@ -90,6 +90,14 @@ func broadcastTargets() []*net.UDPAddr {
 // discoverServer asks the LAN for an Adal Keep server and returns the first
 // valid answer, or nil when nobody replies within the timeout.
 func discoverServer(timeout time.Duration) *serverInfo {
+	// Where the main PC said it is a moment ago, by its permanent id (presence.go).
+	if u := mainFromPresence(); u != "" {
+		if answersAdalKeep(u) && acceptServer(u) {
+			log.Printf("🪪 Main PC found by its id at %s", u)
+			return infoFromURL(u)
+		}
+		presenceFailed(loadIdentity().PCID)
+	}
 	// The network card it had, in this PC's neighbour table: its address now.
 	if u := findByMAC(); u != "" {
 		log.Printf("🪪 Main PC found by its network card at %s", u)
@@ -463,7 +471,14 @@ func keepFindingServer() {
 			continue
 		}
 	search:
-		// Not answering: looked for again every 15 s (its network card first, then the broadcast).
+		// The main PC said it from another address (its id, presence.go): there at once.
+		if u := mainFromPresence(); u != "" && u != strings.TrimRight(hostServer, "/") && !pingServer() {
+			switchToMainAt(u)
+			if strings.TrimRight(hostServer, "/") == u {
+				continue
+			}
+		}
+		// Not answering: looked for again every 15 s (its id, its network card, then the broadcast).
 		if tick%3 != 0 || pingServer() {
 			continue
 		}

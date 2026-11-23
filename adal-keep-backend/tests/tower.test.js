@@ -184,3 +184,22 @@ test('Help: a ticket goes online with logs and the picture; Adal\'s signed answe
   assert.equal(t.status, 'closed'); assert.equal(t.replies.length, 1)
   assert.equal(T.ticketList()[0].status, 'closed')
 })
+
+test('Adal\'s signed switch for the Companions\' full copy: flags.json on this PC, then a restart', async () => {
+  const f = path.join(tmp, 'flags.json')
+  process.env.ADAL_FLAGS_FILE = f
+  fs.writeFileSync(f, JSON.stringify({ billing: true }))
+  const ctx = {}
+  const r = await T.handlers.companion_full_on(null, {}, ctx)
+  assert.equal(r.companion_full, true)
+  assert.equal(typeof ctx.after, 'function', 'a restart after the answer')
+  assert.deepEqual(JSON.parse(fs.readFileSync(f, 'utf8')), { billing: true, companion_full: true })
+  const { companionFullOn } = await import('../src/services/sync/index.js')
+  const env = process.env.ADAL_COMPANION_FULL; delete process.env.ADAL_COMPANION_FULL
+  try {
+    assert.equal(companionFullOn(), true)
+    await T.handlers.companion_full_off(null, {}, {})
+    assert.equal(companionFullOn(), false)
+    assert.equal(JSON.parse(fs.readFileSync(f, 'utf8')).billing, true)
+  } finally { if (env !== undefined) process.env.ADAL_COMPANION_FULL = env; delete process.env.ADAL_FLAGS_FILE }
+})

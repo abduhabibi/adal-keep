@@ -42,25 +42,6 @@ test('the audience is part of the signature: removing it breaks it', () => {
   assert.equal(U.verifyManifest({ ...m, audience: { pcs: ['desk-2'] } }, sig), false)
 })
 
-test('a PC of the office offers the seeded release: another PC (not in the audience) takes it as newer, only forward', async () => {
-  const m = manifest('d', 5, { audience: { pcs: ['seed-pc'] } })
-  const signature = U.signManifest(m, privateKey.export({ type: 'pkcs8', format: 'pem' }))
-  const srv = http.createServer((req, res) => {
-    if (req.url === '/lan/latest') { res.setHeader('content-type', 'application/json'); return res.end(JSON.stringify({ manifest: m, signature, have: [] })) }
-    res.statusCode = 404; res.end()
-  })
-  await new Promise(r => srv.listen(0, '127.0.0.1', r))
-  process.env.ADAL_RELEASE_BASES = `http://127.0.0.1:${srv.address().port}/lan`
-  try {
-    const older = manifest('c', 4)
-    const got = await L.newestFromPeers(older, { extra: true })
-    assert.equal(got?.manifest.sha, m.sha, 'the office offers it')
-    assert.deepEqual(got.manifest.audience, { pcs: ['seed-pc'] })
-    assert.equal(await L.newestFromPeers(manifest('e', 9), { extra: true }), null, 'never an older one')
-    assert.equal(await L.newestFromPeers(m, { extra: true }), null, 'never the same one')
-  } finally { srv.close(); process.env.ADAL_RELEASE_BASES = '' }
-})
-
 test('the trail: a PC is first seen on a version once; the list names each PC, its version and since when', async () => {
   const t0 = Date.parse('2026-11-22T09:00:00Z')
   const a = await TR.pcsNow({ version: 'aaaaaaa' }, [{ name: 'DESK-2', version: 'aaaaaaa', at: t0 }, { name: 'DESK-3', version: 'aaaaaaa', at: t0 }], t0)

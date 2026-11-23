@@ -8,3 +8,8 @@ import "syscall"
 func setSockoptBroadcast(fd uintptr) error {
 	return syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_BROADCAST, 1)
 }
+
+// setSockoptReuse: SO_REUSEADDR, so the Companion and Adal Keep on the same PC both hear :45454.
+func setSockoptReuse(fd uintptr) error {
+	return syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_REUSEADDR, 1)
+}

@@ -13,7 +13,7 @@ import fs from 'fs'
 import http from 'http'
 import os from 'os'
 import path from 'path'
-import { spawn, execFileSync } from 'child_process'
+import { execFileSync } from 'child_process'
 import { fileURLToPath } from 'url'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
@@ -23,7 +23,6 @@ const ROOT = fs.mkdtempSync(path.join(BACK, '.test-rollback-main-'))
 process.env.ADAL_LAN_RELEASE_DIR = path.join(T, 'main-release')
 process.env.ADAL_WHATS_NEW_FILE = path.join(T, 'whats-new.json')
 process.env.ADAL_PROJECT_ROOT = ROOT
-process.env.ADAL_LAN_UPDATES = '0'
 process.env.SUPABASE_ANON_KEY = 'anon'
 process.env.SUPABASE_URL = 'http://127.0.0.1:1'
 process.env.ADAL_CHAT_SESSION_FILE = path.join(T, 'session.json')
@@ -116,14 +115,11 @@ mainApp.use((req, res, next) => { if (role) req.auth = { role }; next() })
 mainApp.use('/api/system', S.default)
 const mainSrv = await new Promise(ok => { const s = mainApp.listen(0, '127.0.0.1', () => ok(s)) })
 const API = `http://127.0.0.1:${mainSrv.address().port}/api/system`
-const MAIN_LAN = `${API}/update/lan`
 const runs = () => fs.readFileSync(path.join(ROOT, 'backend', 'server.js'), 'utf8').trim()
 const get = (p) => fetch(`${API}${p}`).then(async r => ({ status: r.status, body: await r.json() }))
 const post = (p, b = {}) => fetch(`${API}${p}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(async r => ({ status: r.status, body: await r.json() }))
 
-const kids = []
 after(async () => {
-  for (const k of kids) k.kill()
   mainSrv.close(); sup.close()
   await db.destroy()
   fs.rmSync(ROOT, { recursive: true, force: true })
@@ -175,7 +171,7 @@ test('only an admin can go back', async () => {
   assert.equal(runs(), '// release 2')
 })
 
-test('an admin presses "Go back": the main PC runs Y, kept to hand on, and says so once', async () => {
+test('an admin presses "Go back": the main PC runs Y, kept here, and says so once', async () => {
   const plan = await get('/update/rollback')
   assert.deepEqual([plan.body.available, plan.body.from, plan.body.to], [true, '2222222', '1111111'])
   const r = await post('/update/rollback')
@@ -193,30 +189,6 @@ test('an admin presses "Go back": the main PC runs Y, kept to hand on, and says 
   assert.match(card.notes[0], /went back to the version before/)
   await post('/update/whats-new/seen', { sha: card.sha })
   assert.equal((await get('/update/whats-new')).body.whatsNew, null)
-})
-
-test('a Companion still on X takes the way back from the main PC over the network', async () => {
-  await L.completeRelease(L.current(), { tries: 1 })
-  assert.equal(L.completeHere(L.current().manifest), true)
-  const dir = path.join(T, 'companion')
-  fs.mkdirSync(path.join(dir, 'files'), { recursive: true })
-  fs.writeFileSync(path.join(dir, 'current.json'), JSON.stringify(XE))
-  for (const [s, b] of Object.entries(X.pieces)) fs.writeFileSync(path.join(dir, 'files', s), b)
-  const kid = spawn(process.execPath, [path.join(HERE, 'fixtures', 'lanPeer.mjs'), dir, PUB], { stdio: ['pipe', 'pipe', 'inherit'] })
-  kids.push(kid)
-  kid.stdout.setEncoding('utf8')
-  const lines = []
-  const next = (prefix) => new Promise((ok, no) => {
-    const t = setTimeout(() => no(new Error(`no ${prefix}`)), 30000)
-    const look = () => { const l = lines.find(x => prefix.some(p => x.startsWith(p))); if (l) { clearTimeout(t); lines.splice(lines.indexOf(l), 1); ok(l) } }
-    kid.stdout.on('data', d => { lines.push(...d.split('\n').filter(Boolean)); look() })
-    look()
-  })
-  await next(['PORT'])
-  kid.stdin.write(`pull ${MAIN_LAN}\n`)
-  assert.equal(await next(['PULLED', 'NOPE']), `PULLED ${Y.manifest.sha}`)
-  const kept = JSON.parse(fs.readFileSync(path.join(dir, 'current.json'), 'utf8'))
-  assert.equal(kept.manifest.rollback_of, X.manifest.sha)
 })
 
 test('Supabase still offering X changes nothing; the next release (with notes) moves forward and shows its What\'s new once', async () => {

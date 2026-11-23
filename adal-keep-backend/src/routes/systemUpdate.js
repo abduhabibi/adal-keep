@@ -15,7 +15,6 @@ import * as Undo from '../services/autoUndo.js'
 
 const execAsync = promisify(exec)
 const router = Router()
-const lanRouter = Router()
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const BACKEND_ROOT = path.join(__dirname, '..', '..')
 
@@ -233,14 +232,12 @@ export async function checkForUpdate() {
 }
 
 async function checkSupabase(installed) {
-  // The office FIRST (2026-11-19: the main PC's internet timed out while a
-  // Companion on the same Wi-Fi had the newer release), Supabase second. Both
-  // are signed by Adal; the newer of the two wins, never one older than this PC's.
+  // Supabase only (2026-11-23, the owner: no update pieces between the office's PCs).
+  // Signed by Adal; never one older than this PC's.
   const L = await import('../services/lanRelease.js')
   const mine = installedRelease(installed, L.current()?.manifest)
   mineNow = mine
   const known = L.orderKnown(mine)
-  const peer = known ? await L.newestFromPeers(mine).catch(() => null) : null
   let m = null, cloudError = null, notForMe = false
   try {
     m = await latestRelease('release')
@@ -248,17 +245,16 @@ async function checkSupabase(installed) {
     if (installed.sha === m.sha && L.current()?.manifest?.sha !== m.sha && lastEnvelope?.manifest?.sha === m.sha) L.recordInstalled(lastEnvelope, config().projectRoot).catch(() => {})
   } catch (e) {
     m = null
-    // Adal is trying this release on other PCs first: this PC gets it from them over the office network.
+    // Adal is trying this release on other PCs first: this PC's turn comes later.
     if (e?.audience) notForMe = true
     else cloudError = e
   }
-  if (peer && (!m || L.isNewer(peer.manifest, m) || (peer.manifest.sha === m.sha && peer.complete))) { lanEnvelope = peer; m = peer.manifest } else lanEnvelope = null
   if (!m && notForMe) {
     return {
       waitUntil: null, hasUpdate: false, upToDate: true, installed,
       latest: { sha: installed.sha, short: installed.short, message: installed.message, date: installed.date },
       changes: [], count: 0, source: 'supabase', manifest: null,
-      note: 'A newer release is being tried on other PCs first; it comes from them over the office network.',
+      note: 'A newer release is being tried on other PCs first; this PC gets it later.',
     }
   }
   if (!m) throw cloudError || new Error('no release published yet')
@@ -280,8 +276,8 @@ async function checkSupabase(installed) {
     latest: { sha: m.sha, short: m.short, message: m.message, date: m.date },
     changes: upToDate ? [] : (m.changes || []).slice(0, 40),
     count: upToDate ? 0 : (m.changes || []).length || 1,
-    source: lanEnvelope?.manifest?.sha === m.sha ? 'lan' : 'supabase', manifest: m,
-    note: lanEnvelope?.manifest?.sha === m.sha ? `From ${lanEnvelope.base} on the office network` : (cloudError ? `Supabase not reachable: ${cloudError.message}` : null),
+    source: 'supabase', manifest: m,
+    note: cloudError ? `Supabase not reachable: ${cloudError.message}` : null,
   }
 }
 
@@ -353,9 +349,7 @@ async function handleCheck(req, res) {
 
 let watcher = null
 let lastCheck = 0
-// The signed release a PC of this office offered (newer than Supabase's, or Supabase not reached).
-let lanEnvelope = null
-// What this PC runs, with its order (the last check's): offers are measured against it.
+// What this PC runs, with its order (the last check's).
 let mineNow = null
 
 /**
@@ -414,8 +408,8 @@ async function autoUpdate(db, result) {
     const { rolledBack } = await import('../../safeStart.js')
     if (sha && rolledBack(backendDirOf(config().projectRoot))?.from === sha) return
   } catch {}
-  // A release that failed waits 2 hours (a cut download: 15 minutes, it goes on from where it stopped) — unless a PC of the office now offers it.
-  if (sha && sha === autoState.failedSha && Date.now() - autoState.failedAt < (autoState.failedDownload ? 15 * 60 * 1000 : 2 * 3600 * 1000) && !(result.source === 'lan' && autoState.failedSource !== 'lan')) return
+  // A release that failed waits 2 hours (a cut download: 15 minutes, it goes on from where it stopped).
+  if (sha && sha === autoState.failedSha && Date.now() - autoState.failedAt < (autoState.failedDownload ? 15 * 60 * 1000 : 2 * 3600 * 1000)) return
   const b = await busyNow(db)
   const hold = holdForRuns(b.busy, autoState.waitingSince)
   autoState.waitingSince = hold.since
@@ -449,7 +443,7 @@ async function autoUpdate(db, result) {
 
 /**
  * Going back by itself (services/autoUndo.js): the way back signed into the
- * release this PC runs (the office first, Supabase last), else the copy
+ * release this PC runs (kept here, else Supabase), else the copy
  * safeStart.js kept of the version before. Waits for runs at most 10 minutes.
  */
 export async function autoRollback(reason) {
@@ -537,11 +531,6 @@ export function startUpdateWatcher(db = null) {
   Undo.setUndoer(autoRollback)
   getInstalled().then(i => { if (!i.isRepo && i.sha) Undo.watch({ installedSha: i.sha, checks: undoChecks(db, i.sha) }) }).catch(() => {})
   const every = Number(process.env.UPDATE_CHECK_MINUTES || 15) * 60 * 1000
-  // A PC of this office has a newer release: looked at at the next minute, not in 15.
-  import('../services/lanRelease.js').then(L => {
-    L.setInstalledOf(() => mineNow || L.current()?.manifest || null)
-    L.startLan({ onNews: () => { lastCheck = 0 } })
-  }).catch(e => console.warn('[lan-update]', e.message))
   const tick = async () => {
     if (updateNotice.applying) return
     try {
@@ -705,10 +694,10 @@ export async function installFromRelease(cfg, logs, manifest, localArchive = nul
   try {
     const archive = localArchive || path.join(tmp, 'release.tar.gz')
     const L = await import('../services/lanRelease.js')
-    // From a PC of this office that has it, else Supabase; checked against the signed manifest either way.
+    // From Supabase (or kept here / rebuilt from a patch); checked against the signed manifest.
     if (!localArchive) await L.fetchPiece(manifest, { file: manifest.file, sha256: manifest.sha256 }, archive, pieceFrom)
     logs.push(`Downloaded ${(fs.statSync(archive).size / 1048576).toFixed(1)} MB (signed by Adal, checked)`)
-    await L.keepPiece(manifest.sha256, archive).catch(() => {})   // to hand on to the office's other PCs
+    await L.keepPiece(manifest.sha256, archive).catch(() => {})   // kept: "Go back to previous version" and the next patch start from it
     const extracted = path.join(tmp, 'src')
     fs.mkdirSync(extracted, { recursive: true })
     // The .tar.gz, or the plain .tar a patch rebuilt (updates v2).
@@ -824,13 +813,11 @@ async function handleApply(req, res) {
 
 /**
  * Installs one signed release ({ manifest, signature }) on an installed PC:
- * only forward, the app first fetched whole into the cache (the office first
- * when `from.bases` names a PC, then Supabase, resumable), then put in place.
- * When the download fails (a slow line, Supabase cut off), any PC of the
- * office with a newer release is tried at once (`fallback`). Answers like a
- * route ({ success, … } or { code, error }).
+ * only forward, the app first fetched whole into the cache (kept here, a patch,
+ * or Supabase, resumable), then put in place. Answers like a route
+ * ({ success, … } or { code, error }).
  */
-async function installEnvelope(cfg, logs, installed, mine, env, from = {}, fallback = null) {
+async function installEnvelope(cfg, logs, installed, mine, env, from = {}) {
   const L = await import('../services/lanRelease.js')
   if (!env?.manifest || !verifyManifest(env.manifest, env.signature)) return { code: 400, error: 'The release is not signed by Adal — not installed' }
   let manifest = env.manifest
@@ -845,27 +832,20 @@ async function installEnvelope(cfg, logs, installed, mine, env, from = {}, fallb
     await L.fetchPiece(manifest, app, null, from)
   } catch (e) {
     logs.push(`Download of ${manifest.short} failed: ${e.message}`)
-    const peer = fallback ? await fallback(from.bases || []) : null
-    if (!peer) throw e
-    logs.push(`Trying the office network at once: ${peer.manifest.short} from ${peer.base}`)
-    env = peer; manifest = peer.manifest; from = { bases: [peer.base] }
-    const again = await databaseRefusal(dbOf(), manifest)
-    if (again) return { code: 409, error: again, databaseAhead: true }
-    await L.fetchPiece(manifest, { file: manifest.file, sha256: manifest.sha256 }, null, from)
+    throw e
   }
   await installFromRelease(cfg, logs, manifest, null, from)
   WhatsNew.rememberInstalled(manifest)
   // On probation: a version that breaks this PC goes back by itself (services/autoUndo.js).
   if (!manifest.rollback_of) Undo.beginProbation({ to: manifest, from: mine })
   else Undo.endProbation()
-  lanEnvelope = null
-  await L.recordInstalled(env, cfg.projectRoot).catch(e => logs.push(`Not kept for the other PCs: ${e.message}`))
+  await L.recordInstalled(env, cfg.projectRoot).catch(e => logs.push(`Not kept here: ${e.message}`))
   writeMarker(cfg.projectRoot, { sha: manifest.sha, branch: 'release', source: 'supabase', lock_hash: manifest.lock_hash, message: manifest.message, date: manifest.date || '', published_at: manifest.published_at || '', ...(manifest.seq ? { seq: manifest.seq } : {}) })
   mineNow = manifest
   const restarts = ['AdalKeep.exe', 'run-server.bat'].some(f => fs.existsSync(path.join(cfg.projectRoot, f)))
   if (restarts) setTimeout(() => process.exit(0), 3000)
   return {
-    success: true, branch: 'release', source: from.bases?.length ? 'lan' : 'supabase',
+    success: true, branch: 'release', source: 'supabase',
     installed: { sha: manifest.sha, short: manifest.short },
     message: restarts ? 'Update installed. The server restarts now — reload the page in about 20 seconds.' : 'Update installed. Please restart the app to apply changes.',
   }
@@ -906,10 +886,10 @@ async function handleRollback(req, res) {
     const installed = await getInstalled()
     const mine = installedRelease(installed, L.current()?.manifest)
     const back = rollbackOf(L.current().manifest)
-    logs.push(`Going back from ${plan.from} to ${plan.to} (signed by Adal) — this PC's kept pieces first, the office next, Supabase last`)
+    logs.push(`Going back from ${plan.from} to ${plan.to} (signed by Adal) — this PC's kept pieces first, Supabase next`)
     console.log(`↩️ Going back from ${plan.from} to ${plan.to}`)
     const result = await installEnvelope(config(), logs, installed, mine, back, {}, null)
-    if (result.success && !result.alreadyUpToDate) result.message = `Went back to ${plan.to}. The other PCs of this office follow within a few minutes. ${result.message.replace(/^Update installed\.\s*/, '')}`
+    if (result.success && !result.alreadyUpToDate) result.message = `Went back to ${plan.to}. The other PCs follow at their next update check. ${result.message.replace(/^Update installed\.\s*/, '')}`
     res.status(result.code || 200).json({ ...result, code: undefined, log: logs.join('\n').slice(-4000) })
   } catch (err) {
     console.error('[system/update/rollback]', err.message)
@@ -988,25 +968,15 @@ async function applyUpdate(req, res) {
     setUpdateDb(req?.app?.locals?.db)
     if (req?.app?.locals?.db) updateDb = req.app.locals.db
 
-    // --- Installed PC: Adal's signed release, the office first, then Supabase ---
+    // --- Installed PC: Adal's signed release from Supabase ---
     if (!installed.isRepo) {
       const L = await import('../services/lanRelease.js')
       const mine = installedRelease(installed, L.current()?.manifest)
       mineNow = mine
-      const fromOffice = async (skip = []) => (L.orderKnown(mine) ? await L.newestFromPeers(mine, { skip }).catch(() => null) : null)
-      // 1. A PC of this office (a Companion on the same Wi-Fi) that has a newer signed release.
-      let env = lanEnvelope && L.verifyIsNewer(lanEnvelope, mine) ? lanEnvelope : await fromOffice()
-      let source = env ? 'lan' : ''
-      // 2. Supabase: taken when it is newer still.
-      let cloudErr = null
-      try {
-        await latestRelease('release')
-        if (lastEnvelope && (!env || L.isNewer(lastEnvelope.manifest, env.manifest))) { env = lastEnvelope; source = 'supabase' }
-      } catch (e) { cloudErr = e }
-      if (!env) throw new Error(`Supabase updates: ${cloudErr?.message || 'no release published yet'}`)
-      if (cloudErr) logs.push(`Supabase not reachable (${cloudErr.message})`)
-      if (source === 'lan') logs.push(`The signed release ${env.manifest.short} from ${env.base} (office network)`)
-      const result = await installEnvelope(cfg, logs, installed, mine, env, source === 'lan' ? { bases: [env.base] } : {}, fromOffice)
+      try { await latestRelease('release') } catch (e) { throw new Error(`Supabase updates: ${e.message}`) }
+      const env = lastEnvelope
+      if (!env) throw new Error('Supabase updates: no release published yet')
+      const result = await installEnvelope(cfg, logs, installed, mine, env, {})
       return res.status(result.code || 200).json({ ...result, code: undefined, log: logs.join('\n').slice(-4000) })
     }
 
@@ -1105,11 +1075,8 @@ getInstalled().then(i => { BOOT_VERSION = i.sha || '' }).catch(() => {})
 
 // Routes (mounted at /api/system)
 // ---------------------------------------------------------------------------
-// The release this PC keeps for the office's other PCs (services/lanRelease.js).
-import('../services/lanRelease.js').then(L => L.lanRoutes(lanRouter))
 // Windows: its own tar.exe (bsdtar). Git's tar, when first on the PATH, reads "C:…" as a host and fails.
 const TAR = process.platform === 'win32' ? path.join(process.env.SystemRoot || 'C:/Windows', 'System32', 'tar.exe') : 'tar'
-router.use(lanRouter)
 router.get('/update/check', handleCheck)
 router.post('/update/apply', handleApply)
 router.post('/update/apply-local', handleApplyLocal)

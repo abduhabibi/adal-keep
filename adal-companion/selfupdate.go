@@ -9,23 +9,12 @@
 //
 // What a Companion installs from a release: its programs (AdalKeep.exe,
 // adal-companion.exe — used from the next start) and its own online pages
-// (the "online" folder). The rest of Adal Keep comes from the main PC.
-// Since 2026-11-19 it also KEEPS every other piece of the release (the app,
-// the agent) so it can hand the whole release to a main PC whose internet is
-// too slow, and offers it to the main PC (POST <main>/api/system/update/lan/offer)
-// whenever its release is newer and complete. Downloads go in Range pieces
-// that resume after a cut (dl), never one timeout for the whole file.
+// (the "online" folder), whole or as small patches from the release before
+// (updates v2). Downloads go in Range pieces that resume after a cut (dl).
 //
-// The office network helps (the same as the main PC, services/lanRelease.js):
-//
-//	UDP 45455 broadcast  ADAL_KEEP_RELEASE_V1|<sha>|<published_at>|<port>|<path>
-//	GET :47810/lan/latest       { manifest, signature } — the release kept here
-//	GET :47810/lan/file/<sha256> one of its pieces
-//
-// A PC that hears of a newer release (published later, another sha: the same
-// sha is never fetched twice, so nothing goes round) asks that PC for it,
-// checks the signature, downloads the pieces from it (checked), installs, and
-// then tells the others itself. Pieces a peer does not have come from Supabase.
+// Only from Supabase (2026-11-23, the owner): no PC of the office hands update
+// pieces to another any more (the :47810 /lan routes, the UDP 45455 news, the
+// offers to the main PC and the "whole release to hand on" were removed).
 package main
 
 import (
@@ -64,12 +53,9 @@ const updatePublicKeyPEM = `-----BEGIN PUBLIC KEY-----
 MCowBQYDK2VwAyEAimpnKnJzVGiLNH27Lkf4b2aCJoLOpL1fQuqF/gM1HTo=
 -----END PUBLIC KEY-----`
 
-const releaseMagic = "ADAL_KEEP_RELEASE_V1"
-
 var (
-	releaseUDPPort = envInt("ADAL_RELEASE_UDP", 45455)
-	lanHTTPPort    = envInt("ADAL_LAN_HTTP", 47810)
-	hexSHA         = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	lanHTTPPort = envInt("ADAL_LAN_HTTP", 47810)
+	hexSHA      = regexp.MustCompile(`^[0-9a-f]{64}$`)
 	// The programs a Companion has (the agent and the server are the main PC's).
 	companionPrograms = map[string]bool{"AdalKeep.exe": true, "adal-companion.exe": true}
 )
@@ -349,31 +335,17 @@ var builtRelease = func() *releaseManifest {
 // ── what this Companion has ────────────────────────────────────────────────
 
 type updater struct {
-	root string
-	key  ed25519.PublicKey
-	mu   sync.Mutex // one install at a time
-	pm   sync.Mutex
-	// peers heard on the network: base → what it has
-	peers    map[string]peerInfo
+	root     string
+	key      ed25519.PublicKey
+	mu       sync.Mutex // one install at a time
 	failed   map[string]time.Time
-	conn     *net.UDPConn
 	client   *http.Client     // small calls (sign-in, latest.json)
 	dlClient *http.Client     // downloads: each piece has its own timeout (dl)
 	built    *releaseManifest // the release this program was built from (builtRelease)
-	// LAN first: when the main PC last answered, and when each release was first seen in Supabase.
-	headMu    sync.Mutex
-	mainAt    time.Time
-	firstSeen map[string]time.Time
-	headTold  map[string]bool
-}
-
-type peerInfo struct {
-	SHA, PublishedAt string
-	At               time.Time
 }
 
 func newUpdater(root string) *updater {
-	return &updater{root: root, key: updatePublicKey, peers: map[string]peerInfo{}, failed: map[string]time.Time{}, firstSeen: map[string]time.Time{}, headTold: map[string]bool{}, built: builtRelease, client: &http.Client{Timeout: time.Minute}, dlClient: &http.Client{}}
+	return &updater{root: root, key: updatePublicKey, failed: map[string]time.Time{}, built: builtRelease, client: &http.Client{Timeout: time.Minute}, dlClient: &http.Client{}}
 }
 
 func (u *updater) dir() string         { return filepath.Join(u.root, "updates") }
@@ -649,22 +621,8 @@ func (u *updater) downloadPiece(url string, hdr map[string]string, part string, 
 	return false, nil
 }
 
-func (u *updater) peersWith(sha string) []string {
-	u.pm.Lock()
-	defer u.pm.Unlock()
-	var out []string
-	for b, p := range u.peers {
-		if p.SHA == sha && time.Since(p.At) < time.Hour {
-			out = append(out, b)
-		}
-	}
-	sort.Strings(out)
-	return out
-}
-
 // getPiece: kept here already (in any whole form), else rebuilt from the
-// release before with its small patch, else whole from a PC of the office
-// that has this release, else (when allowed) from Supabase. Checked every
+// release before with its small patch, else (when allowed) from Supabase. Checked every
 // time. The path it gives may be a .tar.gz or a plain .tar (untarGz reads both).
 func (u *updater) getPiece(m *releaseManifest, p piece, fromCloud bool) (string, error) {
 	whole := []string{p.SHA256}
@@ -686,27 +644,10 @@ func (u *updater) getPiece(m *releaseManifest, p piece, fromCloud bool) (string,
 		}
 		log.Printf("update: no patch for %s (%v), the whole piece instead", filepath.Base(p.File), err)
 	}
-	for _, sha := range whole {
-		if got, ok := u.fromPeers(m, sha, p.File); ok {
-			return got, nil
-		}
-	}
 	if !fromCloud {
-		return "", errors.New("no PC of the office has it")
+		return "", errors.New("not kept on this PC")
 	}
 	return u.fromSupabase(p.File, p.SHA256)
-}
-
-// fromPeers: one file (by SHA-256) from a PC of the office that has release m.
-func (u *updater) fromPeers(m *releaseManifest, sha, name string) (string, bool) {
-	dest := filepath.Join(u.files(), sha)
-	for _, base := range u.peersWith(m.SHA) {
-		if err := u.download(base+"/file/"+sha, nil, sha, dest); err == nil {
-			log.Printf("⬇️ update: %s from %s", filepath.Base(name), base)
-			return dest, true
-		}
-	}
-	return "", false
 }
 
 // fromSupabase: one file of the release from adal-updates, checked against sha.
@@ -770,14 +711,11 @@ func (u *updater) patchPiece(m *releaseManifest, p piece, fromCloud bool) (strin
 	}
 	pp := u.piecePath(pf.SHA256)
 	if pp == "" || fileSHA(pp) != pf.SHA256 {
-		var ok bool
-		if pp, ok = u.fromPeers(m, pf.SHA256, pf.File); !ok {
-			if !fromCloud {
-				return "", errors.New("no PC of the office has the patch")
-			}
-			if pp, err = u.fromSupabase(pf.File, pf.SHA256); err != nil {
-				return "", err
-			}
+		if !fromCloud {
+			return "", errors.New("the patch is not kept on this PC")
+		}
+		if pp, err = u.fromSupabase(pf.File, pf.SHA256); err != nil {
+			return "", err
 		}
 	}
 	pb, err := os.ReadFile(pp)
@@ -930,7 +868,7 @@ func rolloutBucket(sha, agency string) int {
 func (u *updater) install(m *releaseManifest, env *envelope, fromCloud bool) error {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	// Only forward, on every path (Supabase, a PC of the office, the main PC).
+	// Only forward.
 	if !isNewerRelease(m, u.baseline()) {
 		return nil
 	}
@@ -977,238 +915,7 @@ func (u *updater) install(m *releaseManifest, env *envelope, fromCloud bool) err
 		selfReplaced = false
 		go restartSelfSoon()
 	}
-	// The WHOLE release (the app, every program, the pages), so this Companion
-	// can hand it all to a main PC whose internet is slow (2026-11-19).
-	go u.completeSet(m, fromCloud)
-	u.announce()
-	go u.offerToMain()
-	go u.offerToPeers()
 	return nil
-}
-
-// completeSet: every piece of the kept release fetched (the office first, then
-// Supabase when allowed), tried again every 10 minutes for a few hours.
-func (u *updater) completeSet(m *releaseManifest, fromCloud bool) bool {
-	for i := 0; i < completeTries; i++ {
-		if cur, _ := u.current(); cur == nil || cur.SHA != m.SHA {
-			return false // another release came meanwhile
-		}
-		missing := 0
-		for _, p := range piecesOf(m) {
-			if _, err := u.getPiece(m, p, fromCloud); err != nil {
-				missing++
-			}
-		}
-		if missing == 0 {
-			log.Printf("📦 the whole release %s is here to hand on", m.Short)
-			u.announce()
-			u.offerToMain()
-			u.offerToPeers()
-			return true
-		}
-		time.Sleep(completeEvery)
-	}
-	return false
-}
-
-var completeTries, completeEvery = 6, 10 * time.Minute
-
-// have: every form of the release's pieces that is here (both program lists).
-func (u *updater) have(m *releaseManifest) []string {
-	out := []string{}
-	seen := map[string]bool{}
-	for _, p := range allPieces(m) {
-		for _, sha := range forms(p) {
-			if !seen[sha] && u.piecePath(sha) != "" {
-				seen[sha] = true
-				out = append(out, sha)
-			}
-		}
-	}
-	return out
-}
-
-// complete: every piece of the kept release (this PC's programs) is here in one whole form.
-func (u *updater) complete(m *releaseManifest) bool {
-	if m == nil {
-		return false
-	}
-	for _, p := range piecesOf(m) {
-		if u.pieceHere(p) == "" {
-			return false
-		}
-	}
-	return true
-}
-
-// ── pushing to the main PC (and hearing pushes) ────────────────────────────
-
-type offerMsg struct {
-	SHA         string `json:"sha"`
-	PublishedAt string `json:"published_at"`
-	Seq         int64  `json:"seq"`
-	Port        int    `json:"port"`
-	Path        string `json:"path"`
-	Tags        string `json:"tags"`
-}
-
-// mainBase: the main PC's LAN release address ("" when none is known). Replaced in tests.
-var mainBase = func() string {
-	if hostServer == "" {
-		return ""
-	}
-	return strings.TrimRight(hostServer, "/") + "/api/system/update/lan"
-}
-
-var offeredAt = struct {
-	sync.Mutex
-	m map[string]time.Time
-}{m: map[string]time.Time{}}
-
-// offerToMain: when this Companion holds a COMPLETE release newer than the
-// main PC's, it tells the main PC straight (POST /offer), so the main PC takes
-// it within a minute even when the Wi-Fi drops broadcasts. Once per release
-// per 5 minutes. Returns true when an offer was made.
-func (u *updater) offerToMain() bool {
-	base := mainBase()
-	m, _ := u.current()
-	tag := ownAgencyTag()
-	if base == "" || m == nil || tag == "" || !u.complete(m) {
-		return false
-	}
-	offeredAt.Lock()
-	last := offeredAt.m[base+m.SHA]
-	offeredAt.Unlock()
-	if time.Since(last) < 5*time.Minute {
-		return false
-	}
-	// What the main PC has: an offer only when ours is newer (it may have none kept yet).
-	hc := &http.Client{Timeout: 6 * time.Second}
-	if resp, err := hc.Get(base + "/latest"); err == nil {
-		u.mainAnswered()
-		var env envelope
-		ok := resp.StatusCode == http.StatusOK && json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&env) == nil
-		resp.Body.Close()
-		if ok {
-			if theirs, err := verifyRelease(env, u.key); err == nil && !isNewerRelease(m, theirs) {
-				return false
-			}
-		}
-	} else {
-		return false // the main PC does not answer
-	}
-	body, _ := json.Marshal(offerMsg{SHA: m.SHA, PublishedAt: m.PublishedAt, Seq: m.Seq, Port: lanHTTPPort, Path: "/lan", Tags: tag})
-	resp, err := hc.Post(base+"/offer", "application/json", bytes.NewReader(body))
-	if err != nil {
-		return false
-	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return false
-	}
-	offeredAt.Lock()
-	offeredAt.m[base+m.SHA] = time.Now()
-	offeredAt.Unlock()
-	log.Printf("📣 told the main PC: update %s is here for it", m.Short)
-	return true
-}
-
-// otherCompanions: the LAN release addresses of the other Companions (the main PC's list of them, and the ones heard).
-func otherCompanions() []string {
-	seen := map[string]bool{}
-	var out []string
-	add := func(b string) {
-		if !seen[b] {
-			seen[b] = true
-			out = append(out, b)
-		}
-	}
-	officeMu.Lock()
-	ps := append([]officePeer(nil), officePeers...)
-	officeMu.Unlock()
-	for _, p := range ps {
-		ip := net.ParseIP(p.IP)
-		if ip == nil || isOwnIP(ip) {
-			continue
-		}
-		port := p.Port
-		if port <= 0 {
-			port = lanHTTPPort
-		}
-		add("http://" + net.JoinHostPort(p.IP, strconv.Itoa(port)) + "/lan")
-	}
-	for _, b := range peerBases() {
-		add(b + "/lan")
-	}
-	return out
-}
-
-var peerOfferedAt = struct {
-	sync.Mutex
-	m map[string]time.Time
-}{m: map[string]time.Time{}}
-
-// offerToPeers: a COMPLETE release here is offered to the other Companions (POST /lan/offer) that
-// have an older one, so a seeded Companion does not wait for the main PC to pass it on.
-// Returns how many were told.
-func (u *updater) offerToPeers() int {
-	m, _ := u.current()
-	tag := ownAgencyTag()
-	if m == nil || tag == "" || !u.complete(m) {
-		return 0
-	}
-	hc := &http.Client{Timeout: 6 * time.Second}
-	told := 0
-	for _, base := range otherCompanions() {
-		peerOfferedAt.Lock()
-		last := peerOfferedAt.m[base+m.SHA]
-		peerOfferedAt.Unlock()
-		if time.Since(last) < 5*time.Minute {
-			continue
-		}
-		resp, err := hc.Get(base + "/latest")
-		if err != nil {
-			continue
-		}
-		var env envelope
-		ok := resp.StatusCode == http.StatusOK && json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&env) == nil
-		resp.Body.Close()
-		if ok {
-			if theirs, err := verifyRelease(env, u.key); err == nil && !isNewerRelease(m, theirs) {
-				continue // it has this one (or a newer)
-			}
-		}
-		body, _ := json.Marshal(offerMsg{SHA: m.SHA, PublishedAt: m.PublishedAt, Seq: m.Seq, Port: lanHTTPPort, Path: "/lan", Tags: tag})
-		r2, err := hc.Post(base+"/offer", "application/json", bytes.NewReader(body))
-		if err != nil {
-			continue
-		}
-		r2.Body.Close()
-		if r2.StatusCode == http.StatusOK {
-			peerOfferedAt.Lock()
-			peerOfferedAt.m[base+m.SHA] = time.Now()
-			peerOfferedAt.Unlock()
-			told++
-			log.Printf("📣 told %s: update %s is here for it", base, m.Short)
-		}
-	}
-	return told
-}
-
-// pollPeers: the other Companions are asked what they have; a newer signed release is taken from them
-// (a Wi-Fi that drops broadcasts must not leave a Companion behind).
-func (u *updater) pollPeers() {
-	for _, base := range otherCompanions() {
-		if err := u.fromPeer(base); err != nil {
-			log.Printf("update from %s: %v", base, err)
-		}
-	}
-}
-
-// heardOffer: a PC of this agency (the main PC) says it has a newer release.
-func (u *updater) heardOffer(o offerMsg, from net.IP) (string, bool) {
-	line := strings.Join([]string{releaseMagic, o.SHA, o.PublishedAt, strconv.Itoa(o.Port), o.Path, o.Tags}, "|")
-	return u.heard(line, from)
 }
 
 func (u *updater) installPieces(m *releaseManifest, fromCloud bool) error {
@@ -1385,143 +1092,11 @@ func agencyTag(number string) string {
 // it has none. Replaced in tests.
 var ownAgencyTag = func() string { return agencyTag(confNumber()) }
 
-func releaseTargets() []*net.UDPAddr {
-	out := []*net.UDPAddr{{IP: net.IPv4bcast, Port: releaseUDPPort}}
-	if ifs, err := net.Interfaces(); err == nil {
-		for _, ifc := range ifs {
-			if ifc.Flags&net.FlagUp == 0 || ifc.Flags&net.FlagLoopback != 0 {
-				continue
-			}
-			addrs, _ := ifc.Addrs()
-			for _, a := range addrs {
-				n, ok := a.(*net.IPNet)
-				if !ok || n.IP.To4() == nil || len(n.Mask) != 4 {
-					continue
-				}
-				ip, b := n.IP.To4(), make(net.IP, 4)
-				for i := range b {
-					b[i] = ip[i] | ^n.Mask[i]
-				}
-				out = append(out, &net.UDPAddr{IP: b, Port: releaseUDPPort})
-			}
-		}
-	}
-	// Tests and odd networks: extra places to tell (host:port, comma-separated).
-	for _, t := range strings.Split(os.Getenv("ADAL_RELEASE_PEERS"), ",") {
-		if a, err := net.ResolveUDPAddr("udp4", strings.TrimSpace(t)); err == nil && strings.TrimSpace(t) != "" {
-			out = append(out, a)
-		}
-	}
-	return out
-}
-
-func (u *updater) announce() {
-	m, _ := u.current()
-	tag := ownAgencyTag()
-	if m == nil || u.conn == nil || tag == "" { // no agency known: nothing is offered
-		return
-	}
-	msg := []byte(strings.Join([]string{releaseMagic, m.SHA, m.PublishedAt, strconv.Itoa(lanHTTPPort), "/lan", tag}, "|"))
-	for _, t := range releaseTargets() {
-		u.conn.WriteToUDP(msg, t)
-	}
-}
-
-var pathPart = regexp.MustCompile(`^/[\w/-]*$`)
-
-// heard: a peer's release; true when it is newer than the one here.
-func (u *updater) heard(text string, from net.IP) (string, bool) {
-	parts := strings.Split(strings.TrimSpace(text), "|")
-	if len(parts) < 5 || parts[0] != releaseMagic || !regexp.MustCompile(`^[0-9a-f]{7,64}$`).MatchString(parts[1]) || !pathPart.MatchString(parts[4]) {
-		return "", false
-	}
-	port, err := strconv.Atoi(parts[3])
-	if err != nil || port < 1 || port > 65535 {
-		return "", false
-	}
-	// Another agency's PC (or an old one that does not say whose it is): never listened to.
-	own := ownAgencyTag()
-	theirs := ""
-	if len(parts) > 5 {
-		theirs = parts[5]
-	}
-	if own == "" {
-		return "", false
-	}
-	same := false
-	for _, t := range strings.Split(theirs, ",") {
-		same = same || t == own
-	}
-	if !same {
-		return "", false
-	}
-	if port == lanHTTPPort && isOwnIP(from) {
-		return "", false // this PC itself
-	}
-	base := "http://" + net.JoinHostPort(from.String(), parts[3]) + strings.TrimRight(parts[4], "/")
-	u.pm.Lock()
-	u.peers[base] = peerInfo{SHA: parts[1], PublishedAt: parts[2], At: time.Now()}
-	u.pm.Unlock()
-	return base, isNewerRelease(&releaseManifest{SHA: parts[1], PublishedAt: parts[2]}, u.baseline())
-}
-
-func isOwnIP(ip net.IP) bool {
-	if ip.IsLoopback() && os.Getenv("ADAL_RELEASE_PEERS") == "" {
-		return true
-	}
-	addrs, _ := net.InterfaceAddrs()
-	for _, a := range addrs {
-		if n, ok := a.(*net.IPNet); ok && n.IP.Equal(ip) && !ip.IsLoopback() {
-			return true
-		}
-	}
-	return false
-}
-
-// fromPeer: a newer signed release a PC of the office offers, installed.
-func (u *updater) fromPeer(base string) error {
-	resp, err := (&http.Client{Timeout: 8 * time.Second}).Get(base + "/latest")
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if base == mainBase() {
-		u.mainAnswered()
-	}
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("%s has no signed release (%d)", base, resp.StatusCode)
-	}
-	var env envelope
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&env); err != nil {
-		return err
-	}
-	m, err := verifyRelease(env, u.key)
-	if err != nil {
-		return fmt.Errorf("%s: %w — not installed", base, err)
-	}
-	if !isNewerRelease(m, u.baseline()) {
-		return nil // older or the same: never taken (it may take ours instead)
-	}
-	u.pm.Lock()
-	u.peers[base] = peerInfo{SHA: m.SHA, PublishedAt: m.PublishedAt, At: time.Now()}
-	u.pm.Unlock()
-	// Staged: its turn comes as on Supabase (a PC of the office that installed it already had its turn).
-	agency := ""
-	if c := readCloud(u.root); c != nil {
-		agency = c.Agency
-	}
-	if agency != "" && !itsTurn(m, agency, time.Now()) {
-		return nil
-	}
-	log.Printf("🆕 %s offers update %s", base, m.Short)
-	return u.install(m, &env, true)
-}
-
 // fromCloud: Supabase's newest signed release, when it is newer and its turn has come.
 func (u *updater) fromCloud() error {
 	m, env, err := u.cloudLatest()
 	if errors.Is(err, errAudience) {
-		return nil // not for this PC from Supabase: it comes from the PCs it was seeded on, over the office network
+		return nil // being tried on other PCs first: this PC's turn comes later
 	}
 	if err != nil {
 		return err
@@ -1532,104 +1107,13 @@ func (u *updater) fromCloud() error {
 	if c := readCloud(u.root); !itsTurn(m, c.Agency, time.Now()) {
 		return nil
 	}
-	if u.headStart(m) {
-		return nil // the main PC downloads it first; it comes from the office meanwhile
-	}
 	log.Printf("🆕 update %s from Supabase", m.Short)
 	return u.install(m, env, true)
 }
 
-// updateNow: the clock of the LAN head start. Replaced in tests.
-var updateNow = time.Now
-
-// mainAnswered: the main PC answered /latest (it is reachable on the office network).
-func (u *updater) mainAnswered() {
-	u.headMu.Lock()
-	u.mainAt = updateNow()
-	u.headMu.Unlock()
-}
-
-// headStart: true while this Companion leaves release m to the main PC
-// (docs/updates-v2.md §2): the main PC answered in the last 2 minutes, and
-// ADAL_LAN_HEAD_START minutes (20) have not passed since m was first seen in Supabase.
-func (u *updater) headStart(m *releaseManifest) bool {
-	now := updateNow()
-	u.headMu.Lock()
-	defer u.headMu.Unlock()
-	first, ok := u.firstSeen[m.SHA]
-	if !ok {
-		first = now
-		u.firstSeen[m.SHA] = now
-	}
-	if mainBase() == "" || u.mainAt.IsZero() || now.Sub(u.mainAt) > 2*time.Minute {
-		return false
-	}
-	if now.Sub(first) >= time.Duration(envInt("ADAL_LAN_HEAD_START", 20))*time.Minute {
-		return false
-	}
-	if !u.headTold[m.SHA] {
-		u.headTold[m.SHA] = true
-		log.Printf("giving the main PC a head start for %s", m.Short)
-	}
-	return true
-}
-
-// serveLAN: the release kept here and its pieces (only those its signed manifest names), and offers.
+// handler: what this program answers on :47810 (this PC's own window; no update pieces since 2026-11-23).
 func (u *updater) handler() *http.ServeMux {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/lan/latest", func(w http.ResponseWriter, r *http.Request) {
-		m, env := u.current()
-		if env == nil {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		// have: the pieces that are here (a main PC prefers a PC with all of them).
-		json.NewEncoder(w).Encode(map[string]any{"manifest": env.Manifest, "signature": env.Signature, "have": u.have(m)})
-	})
-	// A PC of this agency (the main PC) says it has a newer release.
-	mux.HandleFunc("/lan/offer", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "POST", http.StatusMethodNotAllowed)
-			return
-		}
-		var o offerMsg
-		if json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&o) != nil {
-			http.Error(w, "bad offer", http.StatusBadRequest)
-			return
-		}
-		host, _, _ := net.SplitHostPort(r.RemoteAddr)
-		base, newer := u.heardOffer(o, net.ParseIP(host))
-		if newer {
-			log.Printf("📣 %s offers update %.7s", base, o.SHA)
-			go func() {
-				if err := u.fromPeer(base); err != nil {
-					log.Printf("⚠️ update from %s: %v", base, err)
-				}
-			}()
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"ok": true, "newer": newer})
-	})
-	mux.HandleFunc("/lan/file/", func(w http.ResponseWriter, r *http.Request) {
-		sha := strings.TrimPrefix(r.URL.Path, "/lan/file/")
-		m, _ := u.current()
-		ok := false
-		if m != nil && hexSHA.MatchString(sha) {
-			for _, p := range allPieces(m) {
-				for _, f := range forms(p) {
-					ok = ok || f == sha
-				}
-			}
-		}
-		file := u.piecePath(sha)
-		if !ok || file == "" {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", "application/octet-stream")
-		http.ServeFile(w, r, file)
-	})
 	// "Back up now" in this PC's own Adal Keep window while the main PC is off
 	// (asked on 2026-11-19): the locked copy kept here goes to the agency's
 	// Telegram at once. Only from this PC itself, never from the network.
@@ -1746,61 +1230,16 @@ func startSelfUpdate(root string) *updater {
 		go announceRobot()
 		go probeNetwork()
 	} else {
-		log.Printf("⚠️ update sharing: %v", err)
-	}
-	if c, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: releaseUDPPort}); err == nil {
-		u.conn = c
-		go func() {
-			buf := make([]byte, 512)
-			for {
-				n, from, err := c.ReadFromUDP(buf)
-				if err != nil {
-					return
-				}
-				if base, newer := u.heard(string(buf[:n]), from.IP); newer {
-					go func() {
-						if err := u.fromPeer(base); err != nil {
-							log.Printf("⚠️ update from %s: %v", base, err)
-						}
-					}()
-				}
-			}
-		}()
-	} else {
-		log.Printf("⚠️ update news: %v", err)
+		log.Printf("⚠️ this PC's own routes (:%d): %v", lanHTTPPort, err)
 	}
 	go func() {
 		time.Sleep(20 * time.Second)
 		for {
-			// The main PC first (it answers on the network), then Supabase (the source of truth).
-			if hostServer != "" {
-				if err := u.fromPeer(strings.TrimRight(hostServer, "/") + "/api/system/update/lan"); err != nil {
-					log.Printf("update from the main PC: %v", err)
-				}
-			}
+			// Supabase only (2026-11-23: no update pieces between the office's PCs).
 			if err := u.fromCloud(); err != nil && readCloud(root) != nil {
 				log.Printf("update from Supabase: %v", err)
 			}
-			u.announce()
 			time.Sleep(time.Duration(envInt("ADAL_UPDATE_MINUTES", 30)) * time.Minute)
-		}
-	}()
-	go func() {
-		// A release kept before this version (only its own pieces): made whole behind.
-		time.Sleep(time.Minute)
-		if m, _ := u.current(); m != nil && !u.complete(m) {
-			u.completeSet(m, true)
-		}
-	}()
-	go func() {
-		// Every minute: a newer, complete release here than the main PC's is offered to it.
-		for i := 0; ; i++ {
-			time.Sleep(time.Minute)
-			u.offerToMain()
-			u.offerToPeers()
-			if i%2 == 1 {
-				u.pollPeers()
-			}
 		}
 	}()
 	return u

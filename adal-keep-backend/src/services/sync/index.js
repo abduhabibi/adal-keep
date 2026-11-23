@@ -14,6 +14,7 @@
  * checks read. reconcileRole() puts it right at start, before anything
  * decides what runs here; a change while running restarts the server.
  */
+import { presenceNow } from '../pcPresence.js'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -43,6 +44,8 @@ export function companionFullOn() {
   const env = process.env.ADAL_COMPANION_FULL
   if (env === '1') return true
   if (env === '0') return false
+  // Adal's signed tower command (tower.js companion_full_on/off) writes it here; it wins over the record.
+  try { const f = JSON.parse(fs.readFileSync(process.env.ADAL_FLAGS_FILE || path.join(BACKEND, 'data', 'flags.json'), 'utf8'))?.companion_full; if (typeof f === 'boolean') return f } catch {}
   try { return featureOn('companion_full') } catch { return false }
 }
 /** The main role moving by itself: ADAL_AUTO_MAIN=1, or with the agency's switch above (ADAL_AUTO_MAIN=0 never). */
@@ -225,7 +228,7 @@ export async function reconcileRole({ restart = false } = {}) {
   } else {
     const pcs = await node.roles.pcs()
     const h = pcs.find(p => p.pc_id === holder)
-    const url = node.peerState.get(holder)?.url || (h?.lan?.[0] ? `http://${h.lan[0]}:${h.port || 4000}` : '') || mp.mainURL()
+    const url = presenceNow()?.urlsOf(holder)[0] || node.peerState.get(holder)?.url || (h?.lan?.[0] ? `http://${h.lan[0]}:${h.port || 4000}` : '') || mp.mainURL()
     if (mp.isCompanion() && (mp.mainURL() === url || !url)) return
     mp.setRole({ mode: 'companion', main_url: url, pc_key: readIdentity().key })
     console.log(`[sync] ${h?.name || holder} holds the main PC's role: this PC is a Companion with its own copy`)

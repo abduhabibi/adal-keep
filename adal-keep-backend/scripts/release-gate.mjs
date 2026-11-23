@@ -20,12 +20,12 @@
  *   3. all 3 show the same profile (with the edit) and the document (same SHA-256)
  *   4. PC3 switched off (killed); PC1 changes the profile and uploads another
  *      document meanwhile; PC3 back on its same folder catches up
- *   5. an update goes round the office: a throw-away signing key, a signed
- *      fake release (app .tar.gz + a program) given to PC1 only; PC2 and PC3
- *      (3 more child processes, scripts/gate/lan-pc.mjs, ports 4314–4316) get
- *      every piece from PC1 over HTTP (lanRelease, no Supabase) with matching
- *      SHA-256. Then, when lanRelease knows patches (updates v2), a second
- *      release whose app comes as a small patch from the first.
+ *   5. an update on each PC: a throw-away signing key, a signed fake release
+ *      (app .tar.gz + a program) installed on PC1, PC2 and PC3 (3 more child
+ *      processes, scripts/gate/update-pc.mjs), then a second release given
+ *      ONLY as its small patch (updates v2): each PC rebuilds the app from the
+ *      first and checks every SHA-256; a badly signed release is refused.
+ *      (Since 2026-11-23 nothing goes between PCs: every PC updates from Supabase.)
  *
  * Everything (processes, the temp folder) is cleaned up, also on failure; the
  * whole gate stops after 7 minutes at most.
@@ -41,9 +41,8 @@ import { fileURLToPath, pathToFileURL } from 'url'
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const BACK = path.join(HERE, '..')
 const SYNC_PC = path.join(HERE, 'gate', 'sync-pc.mjs')
-const LAN_PC = path.join(HERE, 'gate', 'lan-pc.mjs')
+const UPDATE_PC = path.join(HERE, 'gate', 'update-pc.mjs')
 const SYNC_PORTS = [4311, 4312, 4313]
-const LAN_PORTS = [4314, 4315, 4316]
 const BUDGET_MS = 7 * 60 * 1000
 // (A document can wait for a PC's next minute round: a round asked for during one is folded into it.)
 const CONVERGE_MS = 90 * 1000
@@ -214,11 +213,11 @@ export async function releaseGate({ log = console.log } = {}) {
     // (The sync PCs are done: stopped first, so this PC carries fewer processes at once.)
     for (const pc of pcs) if (pc.k) kill(pc.k)
     await Promise.all(pcs.filter(p => p.k).map(p => gone(p.k)))
-    const ok5 = await step('5. a signed update goes round the office from PC1 to PC2 and PC3', () => updateSpread())
+    const ok5 = await step('5. a signed update on each PC, the next one rebuilt from a small patch', () => updateEach())
     return ok1 && ok2 && ok3 && ok4 && ok5
   }
 
-  async function updateSpread() {
+  async function updateEach() {
     const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519')
     const pub = publicKey.export({ type: 'spki', format: 'pem' })
     const priv = privateKey.export({ type: 'pkcs8', format: 'pem' })
@@ -229,11 +228,11 @@ export async function releaseGate({ log = console.log } = {}) {
     const piece = (name, buf) => { const f = path.join(rel, name); fs.writeFileSync(f, buf); return { path: f, sha256: sha256(buf), size: buf.length } }
     const appTar = (v) => makeTar(path.join(rel, `app-${v}`), v)
 
-    const lans = ['PC1', 'PC2', 'PC3'].map((name, i) => ({ name, port: LAN_PORTS[i], base: `http://127.0.0.1:${LAN_PORTS[i]}/api/system/update/lan`, dir: path.join(root, `lan-${name}`), k: null, n: 0 }))
-    const [l1, l2, l3] = lans
+    const lans = ['PC1', 'PC2', 'PC3'].map((name) => ({ name, dir: path.join(root, `lan-${name}`), k: null, n: 0 }))
+    const [l1] = lans
     for (const l of lans) {
       fs.mkdirSync(l.dir, { recursive: true })
-      l.k = launch(LAN_PC, { ADAL_LAN_RELEASE_DIR: l.dir, GATE_PORT: String(l.port), ADAL_RELEASE_BASES: l === l1 ? '' : l1.base }, `${l.name} (updates)`)
+      l.k = launch(UPDATE_PC, { ADAL_LAN_RELEASE_DIR: l.dir }, `${l.name} (updates)`)
       // The throw-away PUBLIC key, in-process to that PC (its stdin): never the environment, a file or the network.
       l.k.child.stdin.write(JSON.stringify({ pub }) + '\n')
     }
@@ -259,30 +258,18 @@ export async function releaseGate({ log = console.log } = {}) {
       programs: [{ name: 'AdalKeep.exe', file: `programs/${prog.sha256}-AdalKeep.exe`, sha256: prog.sha256, size: prog.size }],
       notes: ['release gate (fake)'],
     }
-    await ask(l1, { op: 'install', env: { manifest: m1, signature: signManifest(m1, priv) }, pieces: [gz1, tar1, prog] })
-    const unsigned = await fetch(`${l1.base}/latest`).then(r => r.json())
-    if (unsigned.manifest?.sha !== sha1) throw new Error('PC1 does not offer the release it was given')
     const s = Date.now()
-    const [a, b] = await Promise.all([ask(l2, { op: 'fetch' }), ask(l3, { op: 'fetch' })])
-    const total = Date.now() - s
-    for (const [l, r] of [[l2, a], [l3, b]]) {
-      if (r.sha !== sha1) throw new Error(`${l.name} got release ${String(r.sha).slice(0, 7)}, not ${sha1.slice(0, 7)}`)
-      if (r.from !== l1.base) throw new Error(`${l.name} got it from ${r.from}, not PC1`)
-      if (!r.complete) throw new Error(`${l.name} does not have every piece`)
-      if (r.pieces.length !== 2) throw new Error(`${l.name} got ${r.pieces.length} pieces, not 2`)
-    }
-    // A tampered offer is refused: the same manifest with another piece, signed by nobody.
+    await Promise.all(lans.map(l => ask(l, { op: 'install', env: { manifest: m1, signature: signManifest(m1, priv) }, pieces: [gz1, tar1, prog] })))
+    const states = await Promise.all(lans.map(l => ask(l, { op: 'state' })))
+    for (const [i, st] of states.entries()) if (st.sha !== sha1 || !st.complete) throw new Error(`${lans[i].name} does not keep release 1 whole`)
+    // A tampered release is refused: the same manifest with another piece, signed by nobody.
     const bad = { ...m1, seq: 9, sha: hex(20), sha256: hex(32) }
     const r3 = await ask(l1, { op: 'install', env: { manifest: bad, signature: signManifest(m1, priv) }, pieces: [] }).then(() => 'kept', e => e.message)
     if (r3 === 'kept') throw new Error('PC1 kept a release whose signature does not match')
-    const bytes = a.pieces.reduce((n, p) => n + p.size, 0)
-    let note = `${(bytes / 1024).toFixed(0)} KB in 2 pieces, SHA-256 checked: PC2 ${secs(a.ms)}, PC3 ${secs(b.ms)}, both ${secs(total)}; a badly signed release refused`
+    let note = `release 1 (${((gz1.size + prog.size) / 1024).toFixed(0)} KB) kept whole on 3 PCs in ${secs(Date.now() - s)}; a badly signed release refused`
 
-    // Bonus: release 2, the app as a small patch from release 1 (updates v2), when lanRelease knows patches.
-    const lanSrc = fs.readFileSync(path.join(BACK, 'src', 'services', 'lanRelease.js'), 'utf8')
-    const bsd = path.join(BACK, 'src', 'services', 'bsdiff.js')
-    if (!fs.existsSync(bsd) || !/piece\.patch/.test(lanSrc)) return `${note}; delta: skipped (lanRelease.fetchPiece has no patch support yet)`
-    const { diff } = await import(pathToFileURL(bsd).href)
+    // Release 2: only the app's small patch from release 1 is handed in (as Supabase would send it).
+    const { diff } = await import(pathToFileURL(path.join(BACK, 'src', 'services', 'bsdiff.js')).href)
     const raw2 = appTar(2)
     const gz2 = piece('app2.tar.gz', zlib.gzipSync(raw2.buf, { level: 9 }))
     const tar2 = piece('app2.tar', raw2.buf)
@@ -293,15 +280,14 @@ export async function releaseGate({ log = console.log } = {}) {
       file: `release/${sha2}.tar.gz`, sha256: gz2.sha256, size: gz2.size,
       app_delta: { raw: { sha256: tar2.sha256, size: tar2.size }, patch: { from: tar1.sha256, from_gz: gz1.sha256, file: `release/patches/${sha2}-from-${sha1.slice(0, 12)}.adalpatch`, sha256: pat.sha256, size: pat.size } },
     }
-    await ask(l1, { op: 'install', env: { manifest: m2, signature: signManifest(m2, priv) }, pieces: [gz2, tar2, pat, prog] })
     const s2 = Date.now()
-    const [c, d] = await Promise.all([ask(l2, { op: 'fetch' }), ask(l3, { op: 'fetch' })])
-    for (const [l, r] of [[l2, c], [l3, d]]) {
-      if (r.sha !== sha2 || !r.complete) throw new Error(`${l.name}: release 2 not complete`)
+    const got = await Promise.all(lans.map(l => ask(l, { op: 'patch', env: { manifest: m2, signature: signManifest(m2, priv) }, pieces: [pat] })))
+    for (const [i, r] of got.entries()) {
+      if (r.sha !== sha2 || !r.complete) throw new Error(`${lans[i].name}: release 2 not complete`)
       const app = r.pieces.find(p => p.file === m2.file)
-      if (!app || app.sha256 !== tar2.sha256 || !r.patched.length) throw new Error(`${l.name}: the app was not rebuilt from the patch (${app?.form || 'missing'}${r.patched.length ? '' : ', no patch used'})`)
+      if (!app || app.sha256 !== tar2.sha256 || !r.patched.length) throw new Error(`${lans[i].name}: the app was not rebuilt from the patch (${app?.form || 'missing'}${r.patched.length ? '' : ', no patch used'})`)
     }
-    note += `; delta: app ${(tar2.size / 1024).toFixed(0)} KB rebuilt on PC2 and PC3 from a ${(pat.size / 1024).toFixed(1)} KB patch in ${secs(Date.now() - s2)}`
+    note += `; delta: app ${(tar2.size / 1024).toFixed(0)} KB rebuilt on 3 PCs from a ${(pat.size / 1024).toFixed(1)} KB patch in ${secs(Date.now() - s2)}`
     return note
   }
 

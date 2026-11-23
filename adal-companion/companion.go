@@ -23,6 +23,12 @@ func main() {
 	log.SetFlags(log.LstdFlags)
 	log.Printf("🚀 Adal Companion v3.0 — LAN auto-discovery + tray ingest")
 
+	// This PC's permanent id (made once, here: an update is enough), and the
+	// office's PCs heard by theirs (presence.go).
+	if exe, err := os.Executable(); err == nil {
+		startPresence(filepath.Dir(exe))
+	}
+
 	// Company name first (used in every log line and in the client id).
 	if host := hostServer; host != "" {
 		log.Printf("🌐 Server from ADAL_HOST_URL: %s", host)

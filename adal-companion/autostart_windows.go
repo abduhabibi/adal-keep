@@ -68,4 +68,3 @@ func ensureFirewall() {
 	hideWindow(c)
 	_ = c.Run()
 }
-

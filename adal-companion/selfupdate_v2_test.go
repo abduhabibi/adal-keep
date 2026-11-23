@@ -173,7 +173,7 @@ func companionOnA(t *testing.T, pub ed25519.PublicKey, d deltaSet, cloud *counti
 }
 
 // From Supabase only the patches come; the pieces are rebuilt, checked, installed,
-// kept (and A's pieces too, the base of the next patch), and served in every form.
+// kept (and A's pieces too, the base of the next patch).
 func TestUpdateByPatches(t *testing.T) {
 	fastDownloads(t)
 	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
@@ -192,18 +192,11 @@ func TestUpdateByPatches(t *testing.T) {
 	if got, _ := os.ReadFile(filepath.Join(b.root, "online", "config.js")); !strings.Contains(string(got), "ADAL_CLOUD_CONFIG") {
 		t.Fatal("config.js lost")
 	}
-	m, _ := b.current()
-	deadline := time.Now().Add(5 * time.Second)
-	for !b.complete(m) && time.Now().Before(deadline) {
-		time.Sleep(20 * time.Millisecond)
+	// The app is the main PC's: a Companion never downloads it (nothing to hand on since 2026-11-23).
+	if cloud.was("release/b.tar.gz") || cloud.was("release/patches/app.adalpatch") {
+		t.Fatal("a Companion downloaded the app")
 	}
-	if !b.complete(m) {
-		t.Fatal("not complete")
-	}
-	if got, _ := os.ReadFile(filepath.Join(b.files(), sum(d.app))); !bytes.Equal(got, d.app) {
-		t.Fatal("the app not rebuilt as a plain .tar")
-	}
-	for _, f := range []string{"release/b.tar.gz", "programs/b", "online/b.tar.gz"} {
+	for _, f := range []string{"programs/b", "online/b.tar.gz"} {
 		if cloud.was(f) {
 			t.Fatalf("%s downloaded whole although a patch was there", f)
 		}
@@ -212,37 +205,6 @@ func TestUpdateByPatches(t *testing.T) {
 		if b.piecePath(sha) == "" {
 			t.Fatalf("a piece of the release before (%s) was removed", sha[:8])
 		}
-	}
-	// Served in every form the manifest names; nothing else.
-	srv := httptest.NewServer(b.handler())
-	defer srv.Close()
-	for _, sha := range append([]string{sum(d.app), sum(d.prog), sum(d.pages)}, d.patchSHAs...) {
-		resp, err := http.Get(srv.URL + "/lan/file/" + sha)
-		if err != nil || resp.StatusCode != 200 {
-			t.Fatalf("form %s not served", sha[:8])
-		}
-		resp.Body.Close()
-	}
-	if resp, _ := http.Get(srv.URL + "/lan/file/" + sum([]byte("other"))); resp.StatusCode != 404 {
-		t.Fatal("served a file the manifest does not name")
-	}
-	// have lists every form here (the patches too).
-	have := strings.Join(b.have(m), ",")
-	for _, sha := range append([]string{sum(d.app), sum(d.pages)}, d.patchSHAs...) {
-		if !strings.Contains(have, sha) {
-			t.Fatalf("have misses %s", sha[:8])
-		}
-	}
-
-	// A second Companion on A takes B from the first one over the office (raw forms
-	// and patches), with no Supabase at all.
-	c := companionOnA(t, pub, d, cloud)
-	os.Remove(filepath.Join(c.root, "companion-cloud.json"))
-	if err := c.fromPeer(srv.URL + "/lan"); err != nil {
-		t.Fatal(err)
-	}
-	if got, _ := os.ReadFile(filepath.Join(c.root, "adal-companion.exe")); !bytes.Equal(got, d.prog) {
-		t.Fatal("not handed on")
 	}
 }
 
@@ -321,128 +283,35 @@ func TestThirtyTwoBitPrograms(t *testing.T) {
 
 	is32bit = func() bool { return true }
 	b := companionPC(t, pub)
-	if err := b.fromPeer(base); err != nil {
+	if err := fromHere(b, base); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := os.ReadFile(filepath.Join(b.root, "adal-companion.exe")); !bytes.Equal(got, p86) {
 		t.Fatalf("32-bit PC got %q", got)
 	}
-	m, _ := b.current()
-	deadline := time.Now().Add(3 * time.Second)
-	for !b.complete(m) && time.Now().Before(deadline) {
-		time.Sleep(20 * time.Millisecond)
-	}
-	if !b.complete(m) || b.piecePath(sum(p64)) != "" {
-		t.Fatal("a 32-bit PC must be complete with its own programs only")
+	if b.piecePath(sum(p64)) != "" {
+		t.Fatal("a 32-bit PC kept the 64-bit program")
 	}
 	// A release without 32-bit programs: the installed one stays.
 	env2, pieces2 := mk(strings.Repeat("2", 40), 2, false)
 	_, base2 := holder(t, pub, env2, pieces2)
-	if err := b.fromPeer(base2); err != nil {
+	if err := fromHere(b, base2); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := os.ReadFile(filepath.Join(b.root, "adal-companion.exe")); !bytes.Equal(got, p86) {
 		t.Fatalf("a 64-bit program went on a 32-bit PC: %q", got)
 	}
 
-	// A 64-bit PC: the amd64 program; complete without the x86 one, which it serves once here.
+	// A 64-bit PC: the amd64 program, never the x86 one.
 	is32bit = func() bool { return false }
 	c := companionPC(t, pub)
-	if err := c.fromPeer(base); err != nil {
+	if err := fromHere(c, base); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := os.ReadFile(filepath.Join(c.root, "adal-companion.exe")); !bytes.Equal(got, p64) {
 		t.Fatalf("64-bit PC got %q", got)
 	}
-	mc, _ := c.current()
-	for !c.complete(mc) && time.Now().Before(deadline.Add(3*time.Second)) {
-		time.Sleep(20 * time.Millisecond)
-	}
-	if !c.complete(mc) || c.piecePath(sum(p86)) != "" {
-		t.Fatal("a 64-bit PC fetched the 32-bit program just to hand on")
-	}
-	os.WriteFile(filepath.Join(c.files(), sum(p86)), p86, 0o644)
-	srv := httptest.NewServer(c.handler())
-	defer srv.Close()
-	if resp, err := http.Get(srv.URL + "/lan/file/" + sum(p86)); err != nil || resp.StatusCode != 200 {
-		t.Fatal("the x86 program is not served")
-	}
-}
-
-// LAN first: while the main PC answers, Supabase waits 20 minutes from the first sight of a release.
-func TestMainPCGetsAHeadStart(t *testing.T) {
-	now := time.Date(2026, 11, 23, 12, 0, 0, 0, time.UTC)
-	oldNow, oldMain := updateNow, mainBase
-	updateNow = func() time.Time { return now }
-	main := "http://192.168.1.4:4000/api/system/update/lan"
-	mainBase = func() string { return main }
-	t.Cleanup(func() { updateNow, mainBase = oldNow, oldMain })
-	u := newUpdater(t.TempDir())
-	m := &releaseManifest{SHA: strings.Repeat("5", 40), Short: "5555555"}
-	if u.headStart(m) {
-		t.Fatal("the main PC never answered: no wait")
-	}
-	u.mainAnswered()
-	if !u.headStart(m) {
-		t.Fatal("no head start")
-	}
-	now = now.Add(10 * time.Minute)
-	if u.headStart(m) {
-		t.Fatal("the main PC has not answered for 10 minutes: no wait")
-	}
-	u.mainAnswered()
-	if !u.headStart(m) {
-		t.Fatal("no head start at 10 minutes")
-	}
-	other := &releaseManifest{SHA: strings.Repeat("6", 40)}
-	now = now.Add(10*time.Minute + time.Second)
-	u.mainAnswered()
-	if u.headStart(m) {
-		t.Fatal("still waiting after 20 minutes")
-	}
-	if !u.headStart(other) {
-		t.Fatal("a release seen now waits from now")
-	}
-	t.Setenv("ADAL_LAN_HEAD_START", "5")
-	now = now.Add(5 * time.Minute)
-	u.mainAnswered()
-	if u.headStart(other) {
-		t.Fatal("ADAL_LAN_HEAD_START")
-	}
-	main = ""
-	if u.headStart(&releaseManifest{SHA: strings.Repeat("7", 40)}) {
-		t.Fatal("no main PC known: no wait")
-	}
-}
-
-// The whole way: the main PC answers, so fromCloud waits; after 20 minutes it goes.
-func TestFromCloudWaitsForTheMainPC(t *testing.T) {
-	fastDownloads(t)
-	now := time.Date(2026, 11, 23, 12, 0, 0, 0, time.UTC)
-	oldNow := updateNow
-	updateNow = func() time.Time { return now }
-	t.Cleanup(func() { updateNow = oldNow })
-	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
-	prog := []byte("newer companion")
-	env, _, byFile := fullRelease(t, priv, strings.Repeat("4", 40), 12, prog)
-	cloud := newCountingCloud(t, env, byFile)
-	b := companionPC(t, pub)
-	cj, _ := json.Marshal(cloudCreds{URL: cloud.srv.URL, Anon: "anon", Email: "c@x", Password: "p"})
-	os.WriteFile(filepath.Join(b.root, "companion-cloud.json"), cj, 0o600)
-	newLanMain(t, nil)
-	b.fromPeer(mainBase()) // the main PC answers (it has nothing kept yet)
-	if err := b.fromCloud(); err != nil {
-		t.Fatal(err)
-	}
-	if got, _ := os.ReadFile(filepath.Join(b.root, "adal-companion.exe")); string(got) != "old companion" {
-		t.Fatal("did not wait for the main PC")
-	}
-	now = now.Add(21 * time.Minute)
-	b.fromPeer(mainBase())
-	if err := b.fromCloud(); err != nil {
-		t.Fatal(err)
-	}
-	if got, _ := os.ReadFile(filepath.Join(b.root, "adal-companion.exe")); !bytes.Equal(got, prog) {
-		t.Fatal("not taken from Supabase after the head start")
+	if c.piecePath(sum(p86)) != "" {
+		t.Fatal("a 64-bit PC fetched the 32-bit program")
 	}
 }

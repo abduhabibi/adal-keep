@@ -615,6 +615,7 @@ async function fleetAsk(kind, who) {
   const label = { restart: 'Restart Adal Keep', cancel_runs: 'Cancel all robot runs', suspend: 'Suspend robots' }[kind]
   if (kind === 'support_note') return ask({ title: `Support note to ${who}`, text: 'It shows on the PC under Notifications, from "Adal support".', ok: 'Send', input: '' })
   if (kind === 'suspend') { const note = await ask({ title: `Suspend robots on ${who}?`, text: 'No new robot run starts there until you press Resume. Runs working now go on. A note shows on the PC; add why (optional):', ok: 'Suspend', danger: true, input: '' }); return note === null ? null : { note } }
+  if (kind === 'companion_full_on' || kind === 'companion_full_off') return (await ask({ title: `Full copy ${kind.endsWith('_on') ? 'ON' : 'OFF'} for ${who}'s Companions?`, text: 'Sent to this agency\'s main PC: its Companions follow within a minute, and Adal Keep there starts again (a run working now is cut off). Not yet run on Windows.', ok: kind.endsWith('_on') ? 'Turn on' : 'Turn off', danger: true })) ? {} : null
   if (label) return (await ask({ title: `${label} on ${who}?`, text: kind === 'restart' ? 'Adal Keep stops and starts again by itself (about a minute). A run working now is cut off.' : 'Every run working, waiting or paused there is cancelled.', ok: label, danger: true })) ? {} : null
   return {}
 }

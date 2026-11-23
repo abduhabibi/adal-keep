@@ -84,6 +84,7 @@ func pingServer() bool {
 		Primary string   `json:"primary_address"`
 		Lan     []string `json:"lan_addresses"`
 		Macs    []string `json:"macs"`
+		PCID    string   `json:"pc_id"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 8192)).Decode(&info); err != nil {
 		return true // it answered 200 — good enough
@@ -100,6 +101,8 @@ func pingServer() bool {
 	}
 	// Its network card: found by it next time the router moves it (mainid.go).
 	learnMain(hostServer, info.Macs)
+	// Its permanent id: found by it from now on, whatever address it gets (presence.go).
+	learnMainID(info.PCID)
 	// keepFindingServer asks every 30 seconds: say it only when something
 	// changed, not two log lines every 30 seconds all day.
 	said := strings.TrimSpace(info.Name) + "|" + hostServer + "|" + strings.Join(info.Lan, ", ")

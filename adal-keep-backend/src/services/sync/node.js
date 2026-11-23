@@ -23,6 +23,7 @@ import { DOC_COLUMNS } from './tables.js'
 import { Roles, HEARTBEAT } from './roles.js'
 import { keyHash } from './identity.js'
 import { lanOrder, lanUsable } from '../discovery.js'
+import { presenceNow } from '../pcPresence.js'
 
 export const PULL_EVERY = 60 * 1000
 const PUSH_DELAY = 2500
@@ -167,12 +168,17 @@ export class SyncNode {
     const holder = this.roles.holder()
     return pcs.map(p => {
       const urls = new Set()
+      // Where that PC said it is a moment ago (its permanent id, pcPresence.js): first, always.
+      const here = presenceNow()?.urlsOf(p.pc_id) || []
+      for (const u of here) urls.add(u)
       const last = this.peerState.get(p.pc_id)?.url
-      if (last) urls.add(last)
+      if (last && !here.length) urls.add(last)
       // Where it answered the office network's broadcast lately (peers.js).
       for (const u of this.finder?.urlsOf(p.pc_id) || []) urls.add(u)
       if (p.pc_id === holder && this.mainURL()) urls.add(this.mainURL())
-      for (const a of lanOrder(p.lan || [], this.addresses())) if (/^[\w.:[\]-]+$/.test(a)) urls.add(`http://${a.includes(':') && !a.startsWith('[') ? `[${a}]` : a}:${p.port || 4000}`)
+      // Its saved addresses: only when it has not said where it is lately (an older PC without
+      // presence), and only as a last try — reach() keeps an address only when that PC answers there.
+      if (!here.length) for (const a of lanOrder(p.lan || [], this.addresses())) if (/^[\w.:[\]-]+$/.test(a)) urls.add(`http://${a.includes(':') && !a.startsWith('[') ? `[${a}]` : a}:${p.port || 4000}`)
       // (never a Tailscale / link-local address: another PC of the office times out there)
       return { ...p, urls: [...urls].filter(u => { try { return lanUsable(new URL(u).hostname) || /^(127\.|localhost)/.test(new URL(u).hostname) } catch { return false } }) }
     }).concat(this.trust ? this.newcomers(pcs) : [])
@@ -216,6 +222,11 @@ export class SyncNode {
       return null
     }
     let url = await tryAll(pc.urls)
+    // Not there: where it says it is now (it may have moved while this was trying).
+    if (!url && !pc.newcomer) {
+      url = await tryAll(presenceNow()?.urlsOf(pc.pc_id) || [])
+      if (!url) presenceNow()?.failed(pc.pc_id)   // that address is not trusted until it says it again
+    }
     if (!url && this.finder) url = await tryAll(this.finder.urlsOf(pc.pc_id)) || await tryAll(await this.finder.byCard(pc).catch(() => []))
     if (url) return url
     this.peerState.set(pc.pc_id, { ...(this.peerState.get(pc.pc_id) || {}), ok: false, at: this.now(), error: 'not on the network' })

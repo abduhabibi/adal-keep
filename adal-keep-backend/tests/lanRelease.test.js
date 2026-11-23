@@ -15,16 +15,6 @@ test('a newer release is one published later with another sha; the same sha neve
   assert.equal(L.isNewer({ sha: 'b'.repeat(40) }, null), true)
 })
 
-test('news from the network: kept as a peer; nonsense is ignored', () => {
-  L.setAgencyNumbers(['470401'])
-  const tag = L.agencyTag('470401')
-  assert.equal(L.heard(`ADAL_KEEP_RELEASE_V1|${'c'.repeat(40)}|2026-11-19T11:00:00.000Z|47810|/lan|${tag}`, '192.168.1.30'), true)
-  assert.deepEqual(L.peersWith('c'.repeat(40)), ['http://192.168.1.30:47810/lan'])
-  assert.equal(L.heard(`ADAL_KEEP_RELEASE_V1|nothex|x|47810|/lan|${tag}`, '192.168.1.31'), false)
-  assert.equal(L.heard(`ADAL_KEEP_RELEASE_V1|${'c'.repeat(40)}|x|80|/../etc|${tag}`, '192.168.1.32'), false)
-  assert.equal(L.heard('HELLO', '192.168.1.33'), false)
-})
-
 test('an unsigned release is never kept to hand on; a piece that does not match is not kept', async () => {
   assert.equal(await L.recordInstalled({ manifest: { sha: 'd'.repeat(40) }, signature: 'AAAA' }), false)
   assert.equal(L.current(), null)
@@ -56,18 +46,10 @@ test('never downgrading (2026-11-19): only forward, by publish order, then commi
   assert.equal(L.orderKnown(usb), true)
 })
 
-test('another agency\'s PC is never listened to (2026-11-19: Adal Nuzla vs a test PC on the same Wi-Fi)', () => {
-  L.setAgencyNumbers(['470401'])
-  const sha = 'e'.repeat(40)
-  const line = (tags) => `ADAL_KEEP_RELEASE_V1|${sha}|2026-11-19T12:00:00.000Z|47810|/lan${tags === null ? '' : '|' + tags}`
-  assert.equal(L.heard(line(L.agencyTag('999999')), '192.168.1.15'), false)
-  assert.equal(L.heard(line(null), '192.168.1.15'), false) // an old PC that does not say whose it is
-  assert.equal(L.heard(line(''), '192.168.1.15'), false)
-  assert.deepEqual(L.peersWith(sha), [])
-  assert.equal(L.heard(line(L.agencyTag('111111') + ',' + L.agencyTag('470401')), '192.168.1.16'), true)
-  // The number itself is not what is broadcast.
+test('the agency\'s tag: a hash, never the number itself (sync/peers.js)', () => {
+  assert.equal(L.agencyTag('470401'), L.agencyTag('47 04 01'))
+  assert.notEqual(L.agencyTag('470401'), L.agencyTag('999999'))
   assert.ok(!L.agencyTag('470401').includes('470401'))
-  // This PC does not know its agency: it listens to nobody.
-  L.setAgencyNumbers([])
-  assert.equal(L.heard(line(L.agencyTag('470401')), '192.168.1.17'), false)
+  L.setAgencyNumbers(['470401', ''])
+  assert.deepEqual(L.agencyTags(), [L.agencyTag('470401')])
 })

@@ -1,4 +1,4 @@
-// Updates v2 (docs/updates-v2.md): patches, the office first, the staged rollout, going back by itself.
+// Updates v2 (docs/updates-v2.md): patches (from Supabase only, 2026-11-23), the staged rollout, going back by itself.
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import crypto from 'crypto'
@@ -11,6 +11,11 @@ import zlib from 'zlib'
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'adal-v2-'))
 process.env.ADAL_LAN_RELEASE_DIR = path.join(TMP, 'lan')
 process.env.ADAL_UNDO_DIR = path.join(TMP, 'data')
+// Supabase is a fake on this PC (peer() below): signed in already.
+process.env.SUPABASE_ANON_KEY = 'anon'
+process.env.SUPABASE_URL = 'http://127.0.0.1:1'
+process.env.ADAL_CHAT_SESSION_FILE = path.join(TMP, 'session.json')
+fs.writeFileSync(process.env.ADAL_CHAT_SESSION_FILE, JSON.stringify({ access_token: 'test-token', expires_at: Date.now() + 3600 * 1000 }))
 const { diff, patch } = await import('../src/services/bsdiff.js')
 const L = await import('../src/services/lanRelease.js')
 const U = await import('../src/services/updateChannel.js')
@@ -48,11 +53,11 @@ test('bsdiff: a damaged patch is refused, never a wrong file', () => {
   assert.throws(() => patch(old, cut))
 })
 
-// A PC of the office: serves pieces by SHA-256 (no Range: the whole file, as some servers do).
+// Supabase on this PC: serves the release's files by name (no Range: the whole file, as some servers do).
 async function peer(files) {
   const asked = []
   const srv = http.createServer((req, res) => {
-    const s = req.url.split('/').pop()
+    const s = decodeURIComponent(req.url.split('/adal-updates/')[1] || '')
     asked.push(s)
     const b = files[s]
     if (!b) { res.statusCode = 404; return res.end() }
@@ -60,7 +65,8 @@ async function peer(files) {
     res.end(b)
   })
   await new Promise(ok => srv.listen(0, '127.0.0.1', ok))
-  return { base: `http://127.0.0.1:${srv.address().port}`, asked, close: () => srv.close() }
+  process.env.SUPABASE_URL = `http://127.0.0.1:${srv.address().port}`
+  return { asked, close: () => { srv.close(); process.env.SUPABASE_URL = 'http://127.0.0.1:1' } }
 }
 
 function appRelease() {
@@ -75,36 +81,36 @@ function appRelease() {
 }
 const clean = () => { for (const f of fs.readdirSync(FILES)) fs.rmSync(path.join(FILES, f), { force: true }) }
 
-test('the app: rebuilt from the release before (kept as .tar.gz) + the patch from the office; only the patch travels', async () => {
+test('the app: rebuilt from the release before (kept as .tar.gz) + the patch from Supabase; only the patch travels', async () => {
   clean()
   const r = appRelease()
   fs.writeFileSync(path.join(FILES, sha(r.oldGz)), r.oldGz) // what the PC kept of the release before
-  const pc = await peer({ [r.m.app_delta.patch.sha256]: r.p, [r.m.sha256]: r.newGz })
+  const pc = await peer({ [r.m.app_delta.patch.file]: r.p, [r.m.file]: r.newGz })
   try {
     const dest = path.join(TMP, 'app.tar')
-    await L.fetchPiece(r.m, { file: r.m.file, sha256: r.m.sha256 }, dest, { bases: [pc.base], cloud: false })
+    await L.fetchPiece(r.m, { file: r.m.file, sha256: r.m.sha256 }, dest)
     assert.ok(fs.readFileSync(dest).equals(r.nw))
-    assert.deepEqual(pc.asked, [r.m.app_delta.patch.sha256])
-    // Kept in its plain form: complete, and handed on as such.
+    assert.deepEqual(pc.asked, [r.m.app_delta.patch.file])
+    // Kept in its plain form (the next patch starts from it).
     assert.equal(L.completeHere(r.m), true)
     assert.ok(L.haveOf(r.m).includes(r.m.app_delta.raw.sha256))
   } finally { pc.close() }
 })
 
-test('a damaged patch, or ADAL_DELTA=0: the whole piece instead (from the office)', async () => {
+test('a damaged patch, or ADAL_DELTA=0: the whole piece instead (from Supabase)', async () => {
   clean()
   const r = appRelease()
   fs.writeFileSync(path.join(FILES, sha(r.oldGz)), r.oldGz)
   const bad = Buffer.from(r.p); bad[bad.length - 5] ^= 1
-  const pc = await peer({ [r.m.app_delta.patch.sha256]: bad, [r.m.sha256]: r.newGz })
+  const pc = await peer({ [r.m.app_delta.patch.file]: bad, [r.m.file]: r.newGz })
   try {
-    const got = await L.fetchPiece(r.m, { file: r.m.file, sha256: r.m.sha256 }, null, { bases: [pc.base], cloud: false })
+    const got = await L.fetchPiece(r.m, { file: r.m.file, sha256: r.m.sha256 }, null)
     assert.equal(sha(fs.readFileSync(got)), r.m.sha256)
     clean(); fs.writeFileSync(path.join(FILES, sha(r.oldGz)), r.oldGz)
     process.env.ADAL_DELTA = '0'
     pc.asked.length = 0
-    await L.fetchPiece(r.m, { file: r.m.file, sha256: r.m.sha256 }, null, { bases: [pc.base], cloud: false })
-    assert.ok(!pc.asked.includes(r.m.app_delta.patch.sha256))
+    await L.fetchPiece(r.m, { file: r.m.file, sha256: r.m.sha256 }, null)
+    assert.ok(!pc.asked.includes(r.m.app_delta.patch.file))
   } finally { delete process.env.ADAL_DELTA; pc.close() }
 })
 
@@ -116,16 +122,16 @@ test('a program: patched from the one installed on this PC', async () => {
   fs.writeFileSync(installed, old)
   const prog = { name: 'AdalKeep.exe', file: 'programs/x-AdalKeep.exe', sha256: sha(nw), size: nw.length, patch: { from: sha(old), file: 'programs/patches/y', sha256: sha(p), size: p.length } }
   const m = { sha: 'e'.repeat(40), file: 'release/e.tar.gz', sha256: 'a'.repeat(64), programs: [prog] }
-  const pc = await peer({ [prog.patch.sha256]: p })
+  const pc = await peer({ [prog.patch.file]: p })
   try {
     const dest = path.join(TMP, 'new.exe')
-    await L.fetchPiece(m, prog, dest, { bases: [pc.base], cloud: false, local: [installed] })
+    await L.fetchPiece(m, prog, dest, { local: [installed] })
     assert.ok(fs.readFileSync(dest).equals(nw))
-    assert.deepEqual(pc.asked, [prog.patch.sha256])
+    assert.deepEqual(pc.asked, [prog.patch.file])
   } finally { pc.close() }
 })
 
-test('every form a signed piece has is handed on; the 32-bit programs only when here', () => {
+test('every form a signed piece has is kept; the 32-bit programs only when here', () => {
   const m = { sha: '1'.repeat(40), file: 'a', sha256: 'a'.repeat(64), app_delta: { raw: { sha256: 'b'.repeat(64) }, patch: { file: 'p', sha256: 'c'.repeat(64), from: 'd'.repeat(64) } },
     programs: [{ name: 'AdalKeep.exe', file: 'f', sha256: 'e'.repeat(64) }], programs_x86: [{ name: 'AdalKeep.exe', file: 'g', sha256: '9'.repeat(64) }] }
   assert.deepEqual(L.piecesOf(m).map(L.formsOf).flat(), ['a'.repeat(64), 'b'.repeat(64), 'c'.repeat(64), 'e'.repeat(64)])

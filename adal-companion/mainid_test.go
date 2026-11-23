@@ -1,7 +1,6 @@
 package main
 
 import (
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -100,39 +99,6 @@ func TestNoNumberStillChecksTheCard(t *testing.T) {
 	saveIdentity(mainIdentity{Macs: []string{"aa:bb:cc:dd:ee:01"}})
 	if !serverIsOurs(m.URL) {
 		t.Fatal("the known card refused")
-	}
-}
-
-// Release offers: only from the same agency.
-func TestReleaseOfferFromAnotherAgencyIsIgnored(t *testing.T) {
-	old := ownAgencyTag
-	defer func() { ownAgencyTag = old }()
-	ownAgencyTag = func() string { return agencyTag("47040") }
-	u := newUpdater(t.TempDir())
-	u.built = nil
-	line := func(tag string) string {
-		return releaseMagic + "|" + strings.Repeat("9", 40) + "|2099-01-01T00:00:00.000Z|47810|/lan" + tag
-	}
-	from := net.IPv4(10, 99, 88, 77)
-	if _, newer := u.heard(line("|"+agencyTag("99999")), from); newer {
-		t.Fatal("heard another agency's release")
-	}
-	if _, newer := u.heard(line(""), from); newer {
-		t.Fatal("heard an offer that does not say whose it is")
-	}
-	if len(u.peersWith(strings.Repeat("9", 40))) != 0 {
-		t.Fatal("another agency's PC kept as a peer")
-	}
-	if _, newer := u.heard(line("|"+agencyTag("47040")), from); !newer {
-		t.Fatal("our own agency's offer refused")
-	}
-	// Not joined (no number): listens to nobody, offers nothing.
-	ownAgencyTag = func() string { return "" }
-	if _, newer := u.heard(line("|"+agencyTag("47040")), from); newer {
-		t.Fatal("a PC without an agency listened")
-	}
-	if agencyTag("470 40") != agencyTag("47040") || strings.Contains(agencyTag("47040"), "47040") {
-		t.Fatal("tag must be a stable hash of the digits")
 	}
 }
 

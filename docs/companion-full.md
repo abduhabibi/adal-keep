@@ -347,8 +347,8 @@ adal-companion.exe too), so no USB and no installer is needed.
    the previous release ignores the extra `sync_*` tables (they are only read
    by this version); rows made meanwhile have big ids, which the old version
    reads as plain integers.
-2. **Each Go Companion updates** (adal-companion.exe from the same release, LAN
-   first). Its bundle loop already keeps Main's server in `server\` (GET
+2. **Each Go Companion updates** (adal-companion.exe from the same release, from
+   Supabase only since 2026-11-23). Its bundle loop (on only with the full copy) already keeps Main's server in `server\` (GET
    `/api/companion/server-bundle`, re-fetched when Main's version changes), so it
    now has the new backend too. Then `full.go`:
    * starts that server on `127.0.0.1:4140` with its data in

@@ -260,8 +260,8 @@ export async function buildTemplateData(db, profile, template, overrides = {}, {
   if (!merged.phone_number && brokerPhone) {
     merged.phone_number = brokerPhone
   }
-  // Living town is no longer asked: the region (from the passport) stands in.
-  if (!merged.living_town) merged.living_town = merged.zone_subcity || merged.region || merged.place_of_birth || ''
+  // Living town: her place of birth when none is written (then the zone or region).
+  if (!merged.living_town) merged.living_town = merged.place_of_birth || merged.zone_subcity || merged.region || ''
   // Height and weight: what is written, else her own believable numbers (services/bodySize.js).
   {
     const { withBodySize } = await import('./bodySize.js')

@@ -22,6 +22,7 @@ import { exec } from 'child_process'
 import helmet from 'helmet'
 import cron from 'node-cron'
 import knexConfig from './knexfile.js'
+import { withLivingTown } from './src/services/livingTown.js'
 import filesRouter from './src/routes/files.js'
 import multer from 'multer'
 import path from 'path'
@@ -571,6 +572,7 @@ app.post('/api/profiles', async (req, res) => {
     data.created_by = (data.created_by || '').toString().trim() || 'System'
     if (data.broker_id === '' || data.broker_id === null) data.broker_id = null
     else if (data.broker_id !== undefined) data.broker_id = Number(data.broker_id)
+    withLivingTown(data)   // empty living town: her place of birth
 
     const [id] = await db('profiles').insert(data)
     const profile = await db('profiles')
@@ -670,6 +672,7 @@ app.put('/api/profiles/:id', async (req, res) => {
     if (data.broker_id === '' || data.broker_id === null) data.broker_id = null
     else if (data.broker_id !== undefined) data.broker_id = Number(data.broker_id)
 
+    withLivingTown(data, existing)   // empty living town: her place of birth
     data.updated_at = new Date().toISOString()
     await db('profiles').where('id', req.params.id).update(data)
 

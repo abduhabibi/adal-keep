@@ -69,6 +69,7 @@ export async function fillPassportDetails(db, profileId, imagePath, log = consol
   const upd = {}
   if (need.place && got.place_of_birth) upd.place_of_birth = got.place_of_birth
   if (need.issue && got.passport_issue_date) upd.passport_issue_date = got.passport_issue_date
+  if (upd.place_of_birth && 'living_town' in p) { const { withLivingTown } = await import('./livingTown.js'); withLivingTown(upd, p) }
   if (Object.keys(upd).length) await db('profiles').where('id', profileId).update({ ...upd, updated_at: new Date().toISOString() })
   return upd
 }

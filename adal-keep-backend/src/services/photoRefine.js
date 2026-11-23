@@ -83,6 +83,8 @@ async function finish(buf, { clean = true } = {}) {
   return img.jpeg({ quality: 93, chromaSubsampling: '4:4:4', mozjpeg: true }).toBuffer()
 }
 
+export const finishLocal = finish
+
 /**
  * The refined picture: { buf, by, width, height, note }.
  * `by` is 'gemini:<model>' or 'local' (Gemini could not: `note` says why).

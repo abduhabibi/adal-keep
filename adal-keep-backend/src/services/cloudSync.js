@@ -33,7 +33,9 @@ export const lanNow = () => { try { return getLanAddresses().map(a => typeof a =
 let licBeat = null
 import('./plans.js').then(P => { licBeat = () => { const l = P.licenseNow(); return l ? { lic_at: l.at || null, suspended: !!l.suspended } : {} } }).catch(() => {})
 // acting: an Adal Companion standing in for the main PC (services/standby) — the Companions tell it from the real one.
-const beatData = () => ({ at: new Date().toISOString(), ...(isFollower() ? {} : { pc: myPcNumber(), lan: lanNow(), port: Number(process.env.ADAL_ADVERTISE_PORT) || PORT(), ...(process.env.ADAL_ACTING_MAIN === '1' ? { acting: true } : {}), ...(licBeat?.() || {}) }) })
+let hwBeat = () => ({})
+import('./hardware.js').then(H => { hwBeat = () => ({ hw: H.hardwareBeat() }) }).catch(() => {})
+const beatData = () => ({ at: new Date().toISOString(), ...hwBeat(), ...(isFollower() ? {} : { pc: myPcNumber(), lan: lanNow(), port: Number(process.env.ADAL_ADVERTISE_PORT) || PORT(), ...(process.env.ADAL_ACTING_MAIN === '1' ? { acting: true } : {}), ...(licBeat?.() || {}) }) })
 import { waitForQuiet } from './userUploads.js'
 import { tgReady, tgPut, tgDelete, TG_MAX_DOWNLOAD, findStorageChat } from './tgStore.js'
 import { viewCopy } from './viewCopy.js'

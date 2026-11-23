@@ -355,7 +355,8 @@ router.post('/files/:fileId/refine', async (req, res) => {
     const { resolveStoredPath } = await import('../services/cvRender.js')
     const src = resolveStoredPath(file.path)
     if (!src || !fs.existsSync(src)) return res.status(404).json({ error: 'The picture is not on this PC' })
-    const r = await refinePhoto(fs.readFileSync(src), field.name)
+    const { refineSmart } = await import('../services/cloudRefine.js')
+    const r = await refineSmart(db, fs.readFileSync(src), field.name)
     const dir = path.join(process.cwd(), 'data', 'SafeStorage')
     fs.mkdirSync(dir, { recursive: true })
     const stem = String(file.original_name || field.name).replace(/\.[^.]+$/, '').replace(/[^\w.\-]+/g, '_').slice(0, 60)
@@ -368,8 +369,8 @@ router.post('/files/:fileId/refine', async (req, res) => {
       profile_field_id: field.id, original_name: `${stem}-refined.jpg`, path: stored,
       mimetype: 'image/jpeg', size: r.buf.length, created_at: now, updated_at: now,
     })
-    console.log(`[refine] ${field.name} of profile ${field.profile_id}: ${r.by}, ${r.width}x${r.height}${r.note ? ' — Gemini not used: ' + r.note.slice(0, 200) : ''}`)
-    res.json({ ok: true, file: await db('files').where('id', newId).first(), by: r.by, width: r.width, height: r.height, ai: r.by !== 'local' })
+    console.log(`[refine] ${field.name} of profile ${field.profile_id}: ${r.by}, ${r.width}x${r.height}${r.note ? ' — note: ' + r.note.slice(0, 200) : ''}`)
+    res.json({ ok: true, file: await db('files').where('id', newId).first(), by: r.by, width: r.width, height: r.height, ai: r.by !== 'local', cloud: r.by.startsWith('cloud:') })
   } catch (e) {
     console.error('[refine]', e)
     res.status(500).json({ error: 'Refine failed: ' + e.message })

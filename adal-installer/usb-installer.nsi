@@ -138,6 +138,13 @@ Section "Install"
   InitPluginsDir
   SetOutPath "$PLUGINSDIR"
   File "stage\stop-adal.ps1"
+  ; --- this PC's hardware (cores, RAM, 32/64-bit, network): a warning below 4 cores / 8 GB, never a stop
+  File "stage\hw-check.ps1"
+  nsExec::ExecToLog '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\hw-check.ps1"'
+  Pop $0
+  ${If} $0 == 3
+    MessageBox MB_ICONEXCLAMATION|MB_OK "This PC is below 4 processor cores / 8 GB of memory.$\r$\n$\r$\nAdal Keep will work, but the robots (Musaned, LMIS ...) will not run on this PC: a stronger PC of the office does them. Use this PC for office work, or choose a stronger PC as the Main PC." /SD IDOK
+  ${EndIf}
   ${If} ${FileExists} "$INSTDIR\*.*"
     DetailPrint "Stopping the running ${PRODUCT}..."
     nsExec::Exec '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\stop-adal.ps1" -InstDir "$INSTDIR"'

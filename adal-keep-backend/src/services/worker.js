@@ -569,6 +569,17 @@ async function runJob(db, job) {
       const line = await placeRun(db, job, { mainAllowed: !nobodyAsked || !!(await openBrowserIfAny()) })
       if (line) { await appendLog(db, job.id, line); console.log(`[share] run #${job.id}: ${line}`) }
     } catch (e) { console.warn(`[share] run #${job.id} stays where it is:`, e.message) }
+    // Under 4 cores (ADAL_HW_GATE=1) no robot runs on this PC: it waits for a stronger PC of the office.
+    try {
+      const H = await import('./hardware.js')
+      const hw = H.hardwareNow()
+      if (!onDevice(job) && H.robotsBlocked(hw)) {
+        const note = `Waiting for a stronger PC (this PC has ${hw.cores} core${hw.cores === 1 ? '' : 's'}; robots need ${H.MIN_CORES})`
+        await db('automation_queue').where('id', job.id).update({ status: 'pending', pause_reason: note, updated_at: new Date(Date.now() + 2 * 60000).toISOString() })
+        await appendLog(db, job.id, note)
+        return
+      }
+    } catch (e) { console.warn(`[hardware] run #${job.id}: core check skipped (${e.message})`) }
     // One LMIS per account (services/lmisOne.js): where this account's LMIS is
     // open already, the run works there — never a second sign-in on another PC.
     if (peerOf(job.workflow_id) === 'lmis') {

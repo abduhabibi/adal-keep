@@ -27,7 +27,7 @@ import { getActiveEmployee } from './activeEmployee.js'
 import { isAppLocked } from './subscription.js'
 import { towerHeld } from './tower.js'
 import { plainReason, workflowName, withInternetCheck } from './runOutcome.js'
-import { openRunTab, forgetRunTab, tabOfRun, handTabToPerson, findRunTab, activeRunIds, keepingRunIds, tidySiteTabs, hostOf, codeBoxUp, spaceForRun, peerOf } from './tabManager.js'
+import { openRunTab, forgetRunTab, tabOfRun, handTabToPerson, findRunTab, activeRunIds, keepingRunIds, tidySiteTabs, hostOf, codeBoxUp, spaceForRun, peerOf, tabAnswers } from './tabManager.js'
 import { registerTab, unregisterTab, noteLink } from './bandwidth.js'
 import { createRunQueue } from './runQueue.js'
 import { reportRuns } from './busy.js'
@@ -479,7 +479,7 @@ async function sendToFreeCompanion(db, job) {
     for (const r of await db('automation_queue').where('status', 'running').whereNot('id', job.id).select('context')) {
       try { const d = JSON.parse(r.context || '{}').on_device; if (d) busy.add(d) } catch {}
     }
-    const dev = rb.freeStrongDevice(busy)
+    const dev = rb.freeStrongDevice(busy, Date.now(), (await import('./officeHealth.js')).ownVersion())
     if (!dev) return
     let ctx = {}
     try { ctx = JSON.parse(job.context || '{}') } catch {}
@@ -510,6 +510,10 @@ async function browserForJob(db, job, { quiet = false } = {}) {
   if (dev) {
     const rb = await import('./remoteBrowsers.js')
     try {
+      // Never a Companion installing an update, restarting, or on another release than this PC (sharePower.ready).
+      const sp = await import('./sharePower.js')
+      const d = rb.liveDevices().find(x => x.id === dev)
+      if (d && !sp.ready(d, sp.ownPower())) throw new Error(d.updating ? `${d.name} is installing an update` : d.version !== sp.ownPower().version ? `${d.name} is on another release (${d.version || '?'})` : `${d.name} has not been heard from for a while`)
       const helping = helpedRun(job)
       const b = await rb.browserForDevice(dev, { quiet: true })
       if (!quiet) await appendLog(db, job.id, helping
@@ -582,7 +586,8 @@ async function runJob(db, job) {
       const hw = H.hardwareNow()
       let strongerOn = false
       if (!onDevice(job) && hw.cores < H.MIN_CORES) {
-        if (LAN_ROBOTS) try { strongerOn = H.strongerPCOn(await (await import('./sharePower.js')).officePCs()) } catch {}
+        // Only a PC that may take runs now (same release, not updating): else the run would wait for one that never takes it.
+        if (LAN_ROBOTS) try { const sp = await import('./sharePower.js'); const pcs = await sp.officePCs(); strongerOn = H.strongerPCOn(pcs.filter(p => sp.ready(p, pcs[0]))) } catch {}
         if (!H.robotsBlocked(hw, process.env, { strongerOn }) && process.env.ADAL_HW_GATE !== '0') {
           const note = `This PC has ${hw.cores} core${hw.cores === 1 ? '' : 's'} (robots need ${H.MIN_CORES}) and no stronger office PC is on: it runs here, slower`
           await appendLog(db, job.id, note)
@@ -632,6 +637,23 @@ async function runJob(db, job) {
     // A portal account other than the main one works in its own browser space (its own sign-in).
     const space = await spaceForRun(db, browser, job).catch(e => { console.warn(`[worker] run #${job.id}: no space of its own (${e.message})`); return null })
     page = await openRunTab(browser, job.id, { workflowId: job.workflow_id, busyRuns: await activeRunIds(db), keepRuns: await keepingRunIds(db), space, quiet: helpedRun(job) })
+    // A Companion's tab that does not answer in 5 s (its browser's CDP is stuck): the run works on this PC
+    // instead, at once — not 5 minutes on a blank page and "detached Frame" at the end (2026-11-23).
+    if (onDevice(job) && !(await tabAnswers(page, 5000))) {
+      const rb = await import('./remoteBrowsers.js')
+      await appendLog(db, job.id, `${rb.deviceOf(browser)?.name || 'The Companion'}'s Adal Browser tab does not answer — working on the main PC instead`, 'warn')
+      forgetRunTab(job.id)
+      page.close().catch(() => {})
+      let ctx = {}
+      try { ctx = JSON.parse(job.context || '{}') } catch {}
+      delete ctx.on_device; delete ctx.helped_by
+      job.context = JSON.stringify(ctx)
+      const { seal } = await import('./accountVault.js')
+      await db('automation_queue').where('id', job.id).update({ context: seal(job.context) }).catch(() => {})
+      const here = await getBrowser()
+      const space2 = await spaceForRun(db, here, job).catch(() => null)
+      page = await openRunTab(here, job.id, { workflowId: job.workflow_id, busyRuns: await activeRunIds(db), keepRuns: await keepingRunIds(db), space: space2, quiet: true })
+    }
     // Which account the tab is: its title starts with the account's name.
     try {
       const { labelTab, accountLabel } = await import('./robotCheck.js')
@@ -720,8 +742,20 @@ async function queueHasPriority(db) {
   return _hasPriority.get(db)
 }
 
-/** Claim the oldest ready run, skipping runs this process is still finishing. */
-export async function claimNextJob(db, exclude = []) {
+/** A run's lane: its site and account ('musaned:3'); runs of one lane share one tab, one after another. '' = none. */
+export function laneOf(job) {
+  const peer = peerOf(job?.workflow_id)
+  if (!peer) return ''
+  let acct = job.account_id
+  if (!acct) { try { acct = JSON.parse(job.context || '{}').account_id } catch {} }
+  return `${peer}:${acct ? Number(acct) || String(acct) : 'main'}`
+}
+
+/**
+ * Claim the oldest ready run, skipping runs this process is still finishing
+ * and runs of a lane (site + account) another run holds now (`lanes`).
+ */
+export async function claimNextJob(db, exclude = [], lanes = new Set()) {
   if (isAppLocked()) return null // trial over and not unlocked: no runs start
   if (towerHeld()) return null   // Adal support held the robots on this PC (Admin → Fleet → Suspend)
   for (let i = 0; i < 5; i++) {
@@ -729,7 +763,8 @@ export async function claimNextJob(db, exclude = []) {
     if (exclude.length) q.whereNotIn('id', exclude)
     // The highest priority first (a person moved it up, Robot history → Waiting), then the oldest.
     if (await queueHasPriority(db)) q.orderBy('priority', 'desc')
-    const row = await q.orderBy('id', 'asc').first()
+    const rows = await q.orderBy('id', 'asc').limit(lanes.size ? 50 : 1)
+    const row = rows.find(r => !lanes.has(laneOf(r)))
     if (!row) return null
     const now = new Date().toISOString()
     const updated = await db('automation_queue')
@@ -747,7 +782,8 @@ function runs(db) {
     _runs = createRunQueue({
       max: MAX_RUNS,
       isIdle: (id) => isWaiting(id),
-      claimNext: (exclude) => claimNextJob(db, exclude),
+      claimNext: (exclude, lanes) => claimNextJob(db, exclude, lanes),
+      laneOf,
       runJob: (job) => runJob(db, job),
     })
     reportRuns(() => _runs.snapshot().running.length)

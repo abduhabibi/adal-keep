@@ -481,8 +481,10 @@ export async function openRunTab(browser, runId, { workflowId = '', busyRuns = n
     // A free tab already on the site is taken (tab reuse, 2026-11-21; LMIS: never
     // a second LMIS of the same account). findFreeTab never takes the front tab
     // nor one a person typed in.
+    // Also the site's tab an earlier run still holds while it waits for a sign-in (siteTab): one tab per
+    // site and account, never a second one beside it (2026-11-23: two Musaned runs opened two tabs).
     const there = await oneAtATime(async () => {
-      const p = await findFreeTab(browser, workflowId, busyRuns, space)
+      const p = await findFreeTab(browser, workflowId, busyRuns, space) || (keepRuns && await siteTab(browser, workflowId, keepRuns, space))
       if (p) _tabs.set(id, p)
       return p
     })

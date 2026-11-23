@@ -1212,6 +1212,9 @@ async function sbProxy(req, res, u) {
 
 // The control tower (Fleet tab): every PC's beat, signed commands, crash reports (tower.mjs).
 Object.assign(api, (await import('./tower.mjs')).towerApi({ rest, sb }))
+// Overview, search, one agency's page, Releases, the live stream (home.mjs: read-only).
+const HOME = (await import('./home.mjs')).homeApi({ api, rest, sb, url: URL_, key: KEY })
+Object.assign(api, HOME.routes)
 
 http.createServer(async (req, res) => {
   const u = new URL(req.url, 'http://localhost')
@@ -1373,6 +1376,12 @@ http.createServer(async (req, res) => {
       return
     }
     if (u.pathname === '/api/image') return await image(res, u.searchParams.get('path'))
+    if (u.pathname === '/api/live') return HOME.live(req, res)
+    // The page's own script and styles (public/shell.js, shell.css): nothing else is served from public/.
+    if (/^\/shell\.(js|css)$/.test(u.pathname)) {
+      res.writeHead(200, { 'Content-Type': u.pathname.endsWith('.js') ? 'text/javascript; charset=utf-8' : 'text/css; charset=utf-8', 'Cache-Control': 'no-store' }).end(fs.readFileSync(path.join(HERE, 'public', u.pathname.slice(1))))
+      return
+    }
     // A header picture from the CV template collection.
     if (u.pathname === '/api/cvt/header') {
       const item = readCvt().items.find(i => i.key === u.searchParams.get('key'))
@@ -1389,6 +1398,7 @@ http.createServer(async (req, res) => {
       body = JSON.parse(Buffer.concat(chunks).toString() || '{}')
     }
     const out = await fn(Object.fromEntries(u.searchParams), body)
+    if (req.method === 'POST') HOME.forget()
     res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(out))
   } catch (e) {
     res.writeHead(500, { 'Content-Type': 'application/json' }).end(JSON.stringify({ error: e.message }))

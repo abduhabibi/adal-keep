@@ -57,6 +57,7 @@ let _connecting = null
  * Linux / macOS (developers' PCs): the Chromium that is there.
  */
 export function findBrowserExecutable() {
+  if (!ADAL_MODE) return systemBrowser()
   if (process.platform === 'win32') {
     try { return fs.existsSync(OWN_BROWSER) ? OWN_BROWSER : null } catch { return null }
   }
@@ -88,9 +89,53 @@ export function findBrowserExecutable() {
 // browser wrote, and Brave's may be newer.
 // (A Companion standing in for the main PC: its own Adal Browser, ADAL_BROWSER_EXE.)
 const OWN_BROWSER = process.env.ADAL_BROWSER_EXE || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'browser', 'AdalBrowser.exe')
-// (Windows: always Adal Browser's profile — no other browser is used there.)
+
+/*
+ * Which browser the robots use (the owner, 2026-11-23: "get that specific browser stuff [from before Adal
+ * Browser] and put it back here and just make the robots work"):
+ *   system (default) — as before f7eb45e (2026-11-04): the PC's own Brave, else Chrome, else Edge (Windows
+ *     always has Edge), started by Adal Keep on port 9222 with its own profile and driven over CDP; a run's
+ *     tab is a plain new tab. Out of sight: headless on Linux, off-screen on Windows. Adal Browser only when
+ *     the PC has none of them.
+ *   adal (ADAL_ROBOT_BROWSER=adal) — Adal Browser (<install>\browser\AdalBrowser.exe) only, its agents' window.
+ */
+export const ADAL_MODE = process.env.ADAL_ROBOT_BROWSER === 'adal'
+export const robotBrowserMode = () => (ADAL_MODE ? 'adal' : 'system')
+function systemBrowser() {
+  const c = []
+  if (process.platform === 'win32') {
+    const pf = process.env['ProgramFiles'] || 'C:\\Program Files'
+    const pf86 = process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)'
+    const la = process.env['LOCALAPPDATA'] || path.join(process.env.USERPROFILE || 'C:\\Users\\Public', 'AppData', 'Local')
+    c.push(
+      path.join(pf, 'BraveSoftware', 'Brave-Browser', 'Application', 'brave.exe'),
+      path.join(pf86, 'BraveSoftware', 'Brave-Browser', 'Application', 'brave.exe'),
+      path.join(la, 'BraveSoftware', 'Brave-Browser', 'Application', 'brave.exe'),
+      path.join(pf, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+      path.join(pf86, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+      path.join(la, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+      path.join(pf, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+      path.join(pf86, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+    )
+  } else if (process.platform === 'darwin') {
+    c.push('/Applications/Brave Browser.app/Contents/MacOS/Brave Browser', '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge')
+  } else {
+    c.push('/usr/bin/brave-browser', '/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser', '/snap/bin/chromium')
+  }
+  c.push(OWN_BROWSER)   // none of them: Adal Browser after all
+  for (const x of c) { try { if (fs.existsSync(x)) return x } catch {} }
+  return null
+}
+/** The profile folder for that browser: Brave keeps the old one; another browser its own (a profile a newer browser wrote is refused). */
+export function profileFor(exe, mode = robotBrowserMode()) {
+  const name = String(exe || '').toLowerCase()
+  if (mode === 'adal' ? (process.platform === 'win32' || fs.existsSync(OWN_BROWSER)) : name === String(OWN_BROWSER).toLowerCase()) return 'adal-browser'
+  if (/msedge/.test(name)) return 'browser-profile-edge'
+  if (/chrome|chromium/.test(name) && !/brave/.test(name)) return 'browser-profile-chrome'
+  return 'browser-profile'
+}
 export const PROFILE_DIR = process.env.ADAL_BROWSER_PROFILE ||
-  path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'data', process.platform === 'win32' || fs.existsSync(OWN_BROWSER) ? 'adal-browser' : 'browser-profile')
+  path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'data', profileFor(findBrowserExecutable()))
 // Out of sight needs today's AdalKeep.exe: an older one opens Adal Keep's page
 // inside this browser, and that page must stay on the screen.
 const HIDDEN = process.platform !== 'win32' || process.env.ADAL_HIDDEN_AGENTS === '1'
@@ -217,6 +262,8 @@ export function whoseBrowser(cmd, own = OWN_BROWSER, dataDir = path.dirname(PROF
 const _checked = new Set()
 const endpointOf = (b) => { try { return b.wsEndpoint() } catch { return '' } }
 async function onlyOurs(b, { closeOld = false } = {}) {
+  // The PC's own browser is the robots' browser (system mode): no look at who holds the port (7 s on Main).
+  if (!ADAL_MODE) return b
   if (process.platform !== 'win32' || process.env.BRAVE_CDP_URL || _checked.has(endpointOf(b))) return b
   const who = whoseBrowser(await portOwner())
   if (who === 'ours' || who === 'unknown') { _checked.add(endpointOf(b)); return b }
@@ -261,9 +308,9 @@ export async function getBrowser(fresh = false) {
   if (process.env.ADAL_NO_BROWSER_START === '1') throw new Error('No browser (not started in tests)')
   const exec = findBrowserExecutable()
   if (!exec) {
-    throw new Error(
-      'Adal Browser is not on this PC yet: it is getting ready, try again in a minute.'
-    )
+    throw new Error(ADAL_MODE
+      ? 'Adal Browser is not on this PC yet: it is getting ready, try again in a minute.'
+      : 'No browser for the robots on this PC: install Brave, Chrome or Edge (Windows has Edge), then press the button again.')
   }
 
   fs.mkdirSync(PROFILE_DIR, { recursive: true })
@@ -395,6 +442,14 @@ export async function newRunTab(browser, space = null, { quiet = false } = {}) {
     return page
   }
   if (!browser.target) return browser.newPage()
+  // System mode (as before Adal Browser): a plain new tab — headless on Linux; on a PC with windows
+  // its own window out of sight (a plain tab would go to whichever window was used last, maybe a person's).
+  if (!ADAL_MODE) {
+    if (noWindows() || !HIDDEN) return quiet ? keepBehind(await browser.newPage()) : browser.newPage()
+    const page = await newWindow(browser, OFF, true)
+    await hide(page).catch(() => {})
+    return keepBehind(page)
+  }
   // Work for another PC (services/sharePower.js): in the agents' window out of
   // sight on that PC, and it never comes to the front there.
   if (quiet) {

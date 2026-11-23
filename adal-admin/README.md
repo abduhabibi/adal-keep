@@ -42,6 +42,36 @@ Startup folder runs `start-admin.vbs /keep` at sign-in, which starts the panel
 again within 10 seconds whenever it stops (opening the window starts it too).
 What it did is in `launcher.log`.
 
+The left nav has groups: **Overview**, **Work**, **Agencies**, **PCs / Fleet**
+(Fleet, Health), **Robots**, **Tickets**, **Billing** (renewals & payments, receipts,
+plans, business), **Releases**, **Messages** (inbox, all chats), **Settings** (agency
+setup, CV templates, agents, CEOs, usage). Every page has its address (`#/overview`,
+`#/agency/123456`, `#/pc/<id>`, `#/releases` …): Back works. **Ctrl K** (or `/`)
+searches everything — agencies, PCs, candidates (name or passport, from each agency's
+online copy; Ctrl Enter opens the profile in Adal Keep) and tickets. `g` then a letter
+goes to a page (`g o` Overview, `g a` Agencies, `g p` PCs, `g r` Robots, `g t` Tickets,
+`g b` Billing, `g u` Releases, `g m` Messages, `g s` Settings), `t` light / dark, `r` look
+again, `[` `]` sub-tabs, `?` the list. Live: the page looks again the moment Supabase
+changes (`/api/live`: Realtime on messages / receipts / agencies, a 4-second look at the
+heartbeats and tickets), no reload.
+
+- **Overview** — "is everything OK?": agencies on, PCs green / amber / red, robot success
+  today, open tickets, renewals due, revenue this month, the release and its stage; then
+  **Needs you** (most urgent first) and every agency with why it is amber or red. Everything
+  opens what it is about.
+- **Agency page** (click an agency anywhere) — its PCs (light, version, restart / update /
+  logs each), robots (today, 7 and 30 days), tickets, licence & payments, setup record,
+  staff, work; actions: Open Adal Keep, Message, Suspend, Update now, Collect logs, Note to
+  its PCs, plan, backup, ban, delete.
+- **Robots** — success per robot (today, 7, 30 days), why runs failed, who is waiting for a
+  person, per agency.
+- **Releases** — the published release on its track (test → 10% → all): **Advance**,
+  **Everyone now**, **Stop**, **Resume**; the PCs that went back by themselves with the
+  reason and **Assign** (try again / keep / everyone); the release list; which PC runs which
+  version.
+- Try it without real agencies: `node adal-admin/tests/demo.mjs` (pretend Supabase,
+  password `demo-pass`); `node adal-admin/tests/sweep.mjs shots/` clicks every button
+  headless and saves a picture of every page.
 - **Work** — **Needs you** at the top lists what deserves a look first. Every agency live: PC on/off, profiles, chosen, runs waiting for
   a person, failures this week, open tasks, medicals running out, where the
   profiles stand. Pick an agency: **Continue** / **Cancel** its runs, mark its

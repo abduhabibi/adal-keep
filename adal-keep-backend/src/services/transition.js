@@ -22,6 +22,7 @@
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { withLivingTown } from './livingTown.js'
 import { fileURLToPath } from 'url'
 import { getBrowser, openForPerson, sendAway, newRunTab } from './browser.js'
 import { saveOnProfile } from './musanedImport.js'
@@ -1120,6 +1121,7 @@ async function saveOne(db, id, source, person) {
   const now = new Date().toISOString()
   const cols = await db('profiles').columnInfo()
   const row = Object.fromEntries(Object.entries(person).filter(([k, v]) => cols[k] && v !== ''))
+  if (cols.living_town) withLivingTown(row)   // empty living town: her place of birth
   const had = await db('profiles').whereRaw(SAME_PASSPORT, [passportKey(person.passport_number)]).orderBy('id').first()
   if (!had) {
     const [newId] = await db('profiles').insert({ ...row, created_by: `Transition: ${source.name}`, created_at: now, updated_at: now })

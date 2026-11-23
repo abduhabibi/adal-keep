@@ -91,20 +91,27 @@ test('the PC: polls the cloud, and falls back on every failure', async () => {
   assert.equal((await refineSmart(null, await photo(), 'Photo', { round: async () => { throw new Error('no') }, local, on: false })).note, '')
 })
 
-test('the cloud engine is the cut-out by default; a failed cut-out still gives a cleaned picture', async () => {
+test('the cloud engine is enhance by default (cutout optional); a failed engine still gives a cleaned picture', async () => {
   const who = async () => ({ id: 'ag1' }), bg = async () => {}
   const fin = await photo()
   const s1 = memStore()
   await L.start(req('/f/s?job=job_dddddddddddddddddddd&field=Full%20Body%20Photo', { method: 'POST', body: await photo() }), { store: s1, who, startBackground: bg })
   let sawField
-  await L.work('job_dddddddddddddddddddd', { store: s1, cutout: async (b, f, o) => { sawField = f; assert.equal(o.modelPath, '/m.onnx'); return { buf: fin, ok: true, note: '' } }, finishFn: async b => b, modelPath: '/m.onnx' })
+  await L.work('job_dddddddddddddddddddd', { store: s1, engine: 'cutout', cutout: async (b, f, o) => { sawField = f; assert.equal(o.modelPath, '/m.onnx'); return { buf: fin, ok: true, note: '' } }, finishFn: async b => b, modelPath: '/m.onnx' })
   assert.equal(sawField, 'Full Body Photo')
   assert.equal((await L.status(req('/f/s?job=job_dddddddddddddddddddd'), { store: s1, who })).headers.get('x-refine-model'), 'cutout')
   const s2 = memStore()
   await L.start(req('/f/s?job=job_eeeeeeeeeeeeeeeeeeee', { method: 'POST', body: await photo() }), { store: s2, who, startBackground: bg })
-  await L.work('job_eeeeeeeeeeeeeeeeeeee', { store: s2, cutout: async () => { throw new Error('no model') }, finishFn: async b => b })
+  await L.work('job_eeeeeeeeeeeeeeeeeeee', { store: s2, enhance: async () => { throw new Error('no model') }, finishFn: async b => b })
   const r = await L.status(req('/f/s?job=job_eeeeeeeeeeeeeeeeeeee'), { store: s2, who })
   assert.equal(r.status, 200); assert.equal(r.headers.get('x-refine-model'), 'clean-only'); assert.match(r.headers.get('x-refine-note'), /no model/)
+})
+
+test('enhance is the default engine and gets the field and the model', async () => {
+  const who = async () => ({ id: 'ag1' }), s = memStore()
+  await L.start(req('/f/s?job=job_ffffffffffffffffffff&field=Photo', { method: 'POST', body: await photo() }), { store: s, who, startBackground: async () => {} })
+  await L.work('job_ffffffffffffffffffff', { store: s, srModelPath: '/sr.onnx', enhance: async (b, f, o) => { assert.equal(f, 'Photo'); assert.equal(o.modelPath, '/sr.onnx'); return { buf: b, ok: true, note: '' } }, finishFn: async b => b })
+  assert.equal((await L.status(req('/f/s?job=job_ffffffffffffffffffff'), { store: s, who })).headers.get('x-refine-model'), 'enhance')
 })
 
 test('framing: a Photo is 3:4 around head and shoulders, a Full Body Photo 2:3 around all of her', async () => {
@@ -118,6 +125,17 @@ test('framing: a Photo is 3:4 around head and shoulders, a Full Body Photo 2:3 a
   const mask = Buffer.alloc(10 * 10); for (let y = 2; y < 8; y++) for (let x = 3; x < 7; x++) mask[y * 10 + x] = 255
   const b = C.personBox({ alpha: mask, w: 10, h: 10 })
   assert.deepEqual([b.x0, b.x1, b.y0, b.y1, b.share], [3, 6, 2, 7, 0.24])
+})
+
+test('the PC enhance: off without its flag, off on a weak PC, never throws without the model', async () => {
+  const M = await import('../src/services/localCutout.js')
+  const no404 = { fetchFn: async () => new Response('x', { status: 404 }), file: '/nonexistent/sr.onnx' }
+  delete process.env.ADAL_LOCAL_ENHANCE
+  assert.equal(await M.localEnhance(await photo(), 'Photo', { ...no404, strong: true }), null)
+  process.env.ADAL_LOCAL_ENHANCE = '1'
+  assert.equal(await M.localEnhance(await photo(), 'Photo', { ...no404, strong: false }), null)
+  assert.equal(await M.localEnhance(await photo(), 'Photo', { ...no404, strong: true }), null); delete process.env.ADAL_LOCAL_ENHANCE
+  assert.equal(M.strongEnough(2, 16), false); assert.equal(M.strongEnough(4, 6), false); assert.equal(M.strongEnough(4, 7.6), true)
 })
 
 test('the PC cut-out is off without its flag and never throws without the model', async () => {

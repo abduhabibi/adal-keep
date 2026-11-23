@@ -38,12 +38,13 @@ async function geminiRetouch(buf, field, why) {
 export async function refinePhoto(buf, field = 'Photo', { useGemini = true } = {}) {
   const why = []
   const ai = useGemini ? await geminiRetouch(buf, field, why) : null
-  // No Gemini: the free cut-out (white background, CV framing) when this PC has the model, else only the cleaning.
+  // No Gemini: the free local AI (enhance or cut-out) when this PC has the model and is strong enough, else only the cleaning.
   let cut = null
-  if (!ai) { try { cut = await (await import('./localCutout.js')).localCutout(buf, field) } catch {} }
+  // (The default is the enhance engine — sharper, cleaner, 4K, background kept; the white-background cut-out is the optional extra.)
+  if (!ai) { try { const L = await import('./localCutout.js'); cut = (await L.localEnhance(buf, field)) || (await L.localCutout(buf, field)) } catch {} }
   const out = ai ? await finish(ai.buf, { clean: false }) : cut ? cut.buf : await finish(buf)
   const meta = await sharp(out).metadata()
-  return { buf: out, by: ai ? `gemini:${ai.model}` : cut?.ok ? 'local:cutout' : 'local', width: meta.width, height: meta.height, note: ai ? '' : why.join('; ') }
+  return { buf: out, by: ai ? `gemini:${ai.model}` : cut?.ok ? 'local:ai' : 'local', width: meta.width, height: meta.height, note: ai ? '' : why.join('; ') }
 }
 
 export const REFINABLE = ['Photo', 'Full Body Photo']

@@ -45,23 +45,29 @@ export async function start(req, { store, who, startBackground }) {
 
 /**
  * The background work: read the picture, make it, keep the result (or the reason).
- * engine 'cutout' (default): the girl cut out with silueta (ONNX, free, no quota) on a white background,
+ * engine 'enhance' (default): sharper, cleaner, 4K, background kept (Real-ESRGAN x4 in ONNX, free). Optional extras:
+ * engine 'cutout': the girl cut out with silueta (ONNX, free, no quota) on a white background,
  * cropped to a CV framing, cleaned, 4K. engine 'gemini': the Gemini retouch (needs a billed Google key),
  * and without it the plain cleaning. Whatever the engine cannot do, the plain cleaning still gives a picture.
  */
-export async function work(job, { store, keys = [], engine = 'cutout', modelPath = '', cutout = null, gemini = null, finishFn = null }) {
+export async function work(job, { store, keys = [], engine = 'enhance', modelPath = '', srModelPath = '', enhance = null, cutout = null, gemini = null, finishFn = null }) {
   const st = JSON.parse(await store.get(`state/${job}`) || 'null')
   if (!st || st.status !== 'working') return
   const fail = (error) => store.set(`state/${job}`, JSON.stringify({ ...st, status: 'failed', error }))
   try {
     // (loaded here, so the tests of the rest need no sharp)
-    const need = !finishFn || (engine === 'cutout' ? !cutout : !gemini)
+    const need = !finishFn || (engine === 'enhance' ? !enhance : engine === 'cutout' ? !cutout : !gemini)
     const core = need ? await import('./_refineCore.mjs') : null
-    gemini ||= core?.tryModels; finishFn ||= core?.finish; cutout ||= core?.cutoutRefine
+    gemini ||= core?.tryModels; finishFn ||= core?.finish; cutout ||= core?.cutoutRefine; enhance ||= core?.enhanceRefine
     const input = Buffer.from(await store.get(`in/${job}`, { type: 'arrayBuffer' }))
     const field = (await store.getMetadata(`in/${job}`))?.metadata?.field || 'Photo'
     let out, model, note = ''
-    if (engine === 'cutout') {
+    if (engine === 'enhance') {
+      try {
+        const r = await enhance(input, field, { modelPath: srModelPath })
+        out = r.buf; model = r.ok ? 'enhance' : 'clean-only'; note = r.note
+      } catch (e) { note = `enhance failed: ${e.message}` }
+    } else if (engine === 'cutout') {
       try {
         const r = await cutout(input, field, { modelPath })
         out = r.buf; model = r.ok ? 'cutout' : 'clean-only'; note = r.note

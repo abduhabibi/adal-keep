@@ -154,3 +154,33 @@ test('the flag: Adal Test agency on, others only with a signed flag for their ow
   assert.equal((await T.towerOn({ cloud: none, me: ME, agencyName: 'Adal Test agency' })).on, false)
   delete process.env.ADAL_TOWER
 })
+
+test('Help: a ticket goes online with logs and the picture; Adal\'s signed answer comes back as a notification', async () => {
+  T._resetState()
+  const db = await makeDb()
+  const f = fakeCloud([])
+  await assert.rejects(T.createTicket(db, { text: 'x' }, null), /not open/)
+  await assert.rejects(T.createTicket(db, { text: '  ' }, { cloud: f.cloud, me: ME }), /Write/)
+  const png = 'data:image/png;base64,' + Buffer.from('fakepng').toString('base64')
+  const r = await T.createTicket(db, { text: 'The CV button does nothing, password=abc123', image: png, who: 'Selam', page: '/cv' }, { cloud: f.cloud, me: ME })
+  assert.equal(r.ok, true)
+  const ups = f.calls.filter(c => c.p.startsWith('/storage/v1/object/keep/')).map(c => c.p)
+  assert.ok(ups.some(p => p.endsWith(`/_support/tickets/${r.ticket.id}/log.txt.gz`)))
+  assert.ok(ups.some(p => p.endsWith(`/_support/tickets/${r.ticket.id}/screen.png`)))
+  const online = f.meta.get('/_tower/tickets').tickets
+  assert.equal(online.length, 1)
+  assert.equal(online[0].who, 'Selam'); assert.equal(online[0].status, 'open')
+  assert.doesNotMatch(online[0].text, /abc123/)
+  // Adal answers (signed), then closes.
+  f.meta.set('/_tower/cmds', { cmds: [sign(cmd({ kind: 'ticket_reply', args: { ticket: r.ticket.id, reply_id: 'r1', text: 'Press Prepare first, then CV.' } }))] })
+  await T.pollCommands(db, { cloud: f.cloud, me: ME })
+  let t = f.meta.get('/_tower/tickets').tickets[0]
+  assert.equal(t.status, 'answered'); assert.equal(t.replies[0].text, 'Press Prepare first, then CV.')
+  const n = await db('notifications').orderBy('id', 'desc').first()
+  assert.match(n.body, /Adal support answered .*Press Prepare first/)
+  f.meta.set('/_tower/cmds', { cmds: [sign(cmd({ kind: 'ticket_reply', args: { ticket: r.ticket.id, status: 'closed' } }))] })
+  await T.pollCommands(db, { cloud: f.cloud, me: ME })
+  t = f.meta.get('/_tower/tickets').tickets[0]
+  assert.equal(t.status, 'closed'); assert.equal(t.replies.length, 1)
+  assert.equal(T.ticketList()[0].status, 'closed')
+})

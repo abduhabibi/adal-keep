@@ -74,6 +74,13 @@ What it did is in `launcher.log`.
     PC's own `keep_meta` rows `/_tower/beat|cmds|acks|flag` and the private `keep` bucket.
   - Behind a flag: on only for the **Test agency** until you press **Open the tower
     for an agency…** (a number, `all`, or `close N`). `ADAL_TOWER=0` on a PC turns it off there.
+- **Tickets** — the agencies' **? Help** button (every page, PC and phone, where
+  the tower is open): a short note, maybe a picture (attach, paste, or "Picture of
+  the screen" on a PC). Each ticket comes with that PC's logs (passwords hidden),
+  version, PC name and who asked. Open / Answered / Closed; type an answer: it shows
+  on their PC as a notification from "Adal support" and in their Help window. The
+  answer is shown here at once ("waiting for the PC" until it is on). **Show the PC
+  in Fleet** acts from the control tower; Fleet shows "🎫 N open tickets" per PC.
 - **Agents** — every foreign agent any agency works with, name and number, and
   every CV template. Drag one onto an agency (or click it, then the agency): it
   goes to that PC with its CV templates, without the header pictures. **Agents N of …**

@@ -175,7 +175,7 @@ export async function permsFor(db, req) {
 // Changes anyone may send, signed in or not: signing in, the window itself, "still here" calls,
 // and answers to a robot already working (its captcha, a code, "done" on its human step; the
 // phone's LMIS SMS code): the run was started by someone signed in, and it waits for them.
-const FREE = /^\/(automations\/\d+\/(captcha|input|attention\/done)$|lmis\/sms-code$|tower\/crash$|employees\/device-(login|resume|logout)$|auth\/|setup\/|subscription\/|pc-access\/|mobile\/(pair|push-token)$|app\/|tutor|chat\/ping|plan\/refresh|profiles\/-?\d+\/opened$|cv\/(preview|prepare|warm|templates\/preview-html)$)|(ping|warm|typing|alive|heartbeat|seen|read)$/
+const FREE = /^\/(automations\/\d+\/(captcha|input|attention\/done)$|lmis\/sms-code$|tower\/(crash|ticket)$|employees\/device-(login|resume|logout)$|auth\/|setup\/|subscription\/|pc-access\/|mobile\/(pair|push-token)$|app\/|tutor|chat\/ping|plan\/refresh|profiles\/-?\d+\/opened$|cv\/(preview|prepare|warm|templates\/preview-html)$)|(ping|warm|typing|alive|heartbeat|seen|read)$/
 
 // Which toggle each change needs (method, path under /api). The first match wins.
 const W = '(POST|PUT|PATCH|DELETE)'

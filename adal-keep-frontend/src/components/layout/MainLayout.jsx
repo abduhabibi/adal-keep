@@ -9,6 +9,7 @@ import PhoneCalls from '../PhoneCalls'
 import JoinRequests from '../JoinRequests'
 import { PcAccessRequests } from '../PcAccessGate'
 import AttentionBar from '../AttentionBar'
+import HelpButton from '../HelpButton'
 import useReadyChime from '../../hooks/useReadyChime'
 import useNewVersion from '../../hooks/useNewVersion'
 import api from '../../services/api'
@@ -151,6 +152,7 @@ export default function MainLayout() {
       {!DEMO && <AttentionBar />}
       {!DEMO && <PhoneCalls />}
       {!DEMO && <WhatsNewCard />}
+      {!DEMO && !inChat && !bare && <HelpButton phone={!wide} />}   {/* Help → a ticket for Adal (on where Adal opened the control tower) */}
       {/* (A phone has the More tab instead of the side menu.) */}
       {wide && <Sidebar
         isOpen={sidebarOpen}

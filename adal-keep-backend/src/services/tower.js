@@ -36,7 +36,7 @@ MCowBQYDK2VwAyEAF4PqpNepJ8OcYL3v0/BUp7BWYd4AXmpGBMP8cpnddlQ=
 let verifyKey = TOWER_PUBLIC_KEY
 export const _setTowerKeyForTests = (pem) => { verifyKey = pem || TOWER_PUBLIC_KEY }
 
-export const KINDS = ['restart', 'cancel_runs', 'collect_logs', 'self_check', 'update_now', 'suspend', 'resume', 'support_note']
+export const KINDS = ['restart', 'cancel_runs', 'collect_logs', 'self_check', 'update_now', 'suspend', 'resume', 'support_note', 'ticket_reply']
 export const BEAT_MS = 60_000
 const POLL_MS = 20_000
 const FLAG_MS = 10 * 60_000
@@ -135,16 +135,19 @@ let state = null
 function st() {
   if (state) return state
   try { state = JSON.parse(fs.readFileSync(STATE_FILE(), 'utf8')) } catch { state = {} }
-  state.done ||= []; state.acks ||= []
+  state.done ||= []; state.acks ||= []; state.tickets ||= []
   return state
 }
 function saveState() { try { fs.mkdirSync(DATA(), { recursive: true }); fs.writeFileSync(STATE_FILE(), JSON.stringify(state)) } catch {} }
-export const _resetState = () => { state = { done: [], acks: [] } }
+export const _resetState = () => { state = { done: [], acks: [], tickets: [] } }
 
 /** Robots held by Adal (suspend): no new run starts on this PC; the ones working go on. */
 export const towerHeld = () => !!st().held
 export const towerStatus = () => ({ on: status.on, why: status.why, held: st().held || null, last_beat: status.lastBeat, error: status.error, acks: st().acks.slice(0, 10) })
 const status = { on: false, why: 'not started', lastBeat: null, error: null }
+// This PC's Supabase calls while the tower is on (the Help button sends with it).
+let live = null
+export const _setLiveForTests = (l) => { live = l }
 
 // ---------------------------------------------------------------- the beat --
 let versionOf = () => null
@@ -279,15 +282,84 @@ export const handlers = {
     return { message: 'The note is on the PC (Notifications).' }
   },
   async collect_logs(db, args, ctx) {
-    const parts = [`Adal Keep support logs — ${os.hostname()} — ${new Date().toISOString()} — version ${versionNow() || '?'}`]
-    try { const D = await import('./diag.js'); parts.push('== health ==', JSON.stringify(await D.healthReport(db, versionOf()), null, 1)) } catch (e) { parts.push(`== health == ${e.message}`) }
-    parts.push('== crashes ==', JSON.stringify(crashList(), null, 1))
-    for (const f of ['server.log', 'launcher.log']) parts.push(`== ${f} (end) ==`, tail(path.join(DATA(), f)) ?? '(none)')
-    const gz = zlib.gzipSync(Buffer.from(hide(parts.join('\n'))))
+    const gz = await logBundle(db)
     const name = `${ctx.me}/_support/logs/${os.hostname().replace(/[^\w-]/g, '_').slice(0, 40)}-${Date.now()}.txt.gz`
     await ctx.cloud('POST', `/storage/v1/object/keep/${name}`, gz, { headers: { 'Content-Type': 'application/gzip', 'x-upsert': 'true' } })
     return { object: name, bytes: gz.length, message: `Logs sent (${Math.round(gz.length / 1024)} KB).` }
   },
+  // Adal answered a Help ticket (and/or closed it): a notification on this PC.
+  async ticket_reply(db, args, ctx) {
+    const t = st().tickets.find(x => x.id === args?.ticket)
+    const text = String(args?.text || '').trim().slice(0, 2000)
+    const statusNow = ['open', 'answered', 'closed'].includes(args?.status) ? args.status : (text ? 'answered' : null)
+    if (t) {
+      if (text && !t.replies.some(r => r.id === args.reply_id)) t.replies.push({ id: args.reply_id || crypto.randomUUID(), from: 'Adal support', text, at: new Date().toISOString() })
+      if (statusNow) t.status = statusNow
+      saveState()
+      await pushTickets(ctx.cloud, ctx.me).catch(() => {})
+    }
+    const about = t ? `“${t.text.slice(0, 60)}${t.text.length > 60 ? '…' : ''}”` : 'your question'
+    if (text) await supportNote(db, `Adal support answered ${about}: ${text}`)
+    else if (statusNow === 'closed') await supportNote(db, `Adal support closed ${about}.`)
+    return { message: t ? `Ticket ${statusNow || t.status}.` : 'Ticket not on this PC (answered as a note).' }
+  },
+}
+async function logBundle(db) {
+  const parts = [`Adal Keep support logs — ${os.hostname()} — ${new Date().toISOString()} — version ${versionNow() || '?'}`]
+  try { const D = await import('./diag.js'); parts.push('== health ==', JSON.stringify(await D.healthReport(db, versionOf()), null, 1)) } catch (e) { parts.push(`== health == ${e.message}`) }
+  parts.push('== crashes ==', JSON.stringify(crashList(), null, 1))
+  for (const f of ['server.log', 'launcher.log']) parts.push(`== ${f} (end) ==`, tail(path.join(DATA(), f)) ?? '(none)')
+  return zlib.gzipSync(Buffer.from(hide(parts.join('\n'))))
+}
+
+// ------------------------------------------------------------- Help tickets --
+// The Help button (every page, PC and phone): a short note, maybe a picture of
+// the screen. It goes to Adal with this PC's logs, version and PC; Adal answers
+// from Admin → Tickets (a signed ticket_reply command) and the answer shows here
+// as a notification. Online: <account>/_support/tickets/<id>/… in the private
+// bucket and the list in keep_meta "/_tower/tickets". Kept here until it is online.
+const pushTickets = (cloud, me) => upsertMeta(cloud, me, '/_tower/tickets', {
+  at: new Date().toISOString(),
+  tickets: st().tickets.filter(t => t.online).map(({ online, ...t }) => t),
+})
+export const ticketList = () => st().tickets.map(({ online, ...t }) => ({ ...t, sent: !!online }))
+
+export async function createTicket(db, { text = '', image = null, who = null, page = '' } = {}, link = live) {
+  const note = String(text || '').trim().slice(0, 2000)
+  if (!note) throw Object.assign(new Error('Write what is wrong first.'), { code: 400 })
+  if (!link?.cloud || !link?.me) throw Object.assign(new Error('Help is not open on this PC yet (no internet, or not switched on by Adal).'), { code: 503 })
+  let shot = null
+  if (image) {
+    const m = String(image).match(/^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/)
+    if (!m) throw Object.assign(new Error('The picture must be a JPEG, PNG or WebP.'), { code: 400 })
+    shot = { type: `image/${m[1]}`, buf: Buffer.from(m[2], 'base64') }
+    if (shot.buf.length > 4 * 1024 * 1024) throw Object.assign(new Error('The picture is too big (4 MB at most).'), { code: 413 })
+  }
+  const M = await import('./mainPC.js').catch(() => ({}))
+  const t = {
+    id: crypto.randomUUID(), at: new Date().toISOString(), status: 'open', replies: [],
+    text: hide(note), who: who ? String(who).slice(0, 60) : null, page: String(page || '').slice(0, 120),
+    agency: status.agencyName || null, pc_name: os.hostname().slice(0, 60), pc_number: M.pcNumber?.() || null, version: versionNow(),
+    log: null, shot: null,
+  }
+  const dir = `${link.me}/_support/tickets/${t.id}`
+  try {
+    const gz = await logBundle(db)
+    await link.cloud('POST', `/storage/v1/object/keep/${dir}/log.txt.gz`, gz, { headers: { 'Content-Type': 'application/gzip', 'x-upsert': 'true' } })
+    t.log = `${dir}/log.txt.gz`
+  } catch (e) { t.log_error = hide(e.message).slice(0, 200) }
+  if (shot) {
+    const ext = shot.type.split('/')[1].replace('jpeg', 'jpg')
+    await link.cloud('POST', `/storage/v1/object/keep/${dir}/screen.${ext}`, shot.buf, { headers: { 'Content-Type': shot.type, 'x-upsert': 'true' } })
+    t.shot = `${dir}/screen.${ext}`
+  }
+  t.online = true
+  st().tickets.unshift(t)
+  st().tickets = st().tickets.slice(0, 30)
+  saveState()
+  await pushTickets(link.cloud, link.me)
+  console.log(`[tower] Help ticket sent to Adal${t.who ? ` by ${t.who}` : ''}`)
+  return { ok: true, ticket: { id: t.id, at: t.at, status: t.status }, message: 'Sent to Adal support. The answer comes here as a notification.' }
 }
 let ctx_local = local
 export const _setLocalForTests = (fn) => { ctx_local = fn || local }
@@ -381,6 +453,7 @@ export function startTower(db, { installedVersion } = {}) {
           Object.assign(status, await towerOn({ cloud, me, agencyName }), { agencyName })
           flagAt = Date.now()
         }
+        live = status.on ? { cloud, me } : null
         if (!status.on) wait = FLAG_MS
         else {
           if (Date.now() - beatAt >= BEAT_MS - 2000) {

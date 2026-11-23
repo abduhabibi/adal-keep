@@ -177,6 +177,7 @@
     <button data-tab="usage"><span class="ic"><svg class="ico"><use href="#i-chart"/></svg></span>Usage</button>
     <button data-tab="health"><span class="ic"><svg class="ico"><use href="#i-pulse"/></svg></span>Health</button>
     <button data-tab="fleet"><span class="ic"><svg class="ico"><use href="#i-monitor"/></svg></span>Fleet</button>
+    <button data-tab="tickets"><span class="ic"><svg class="ico"><use href="#i-inbox"/></svg></span>Tickets<span class="count" id="ticketCount" style="display:none"></span></button>
     <button data-tab="cvt"><span class="ic"><svg class="ico"><use href="#i-cv"/></svg></span>CV templates</button>
     <button data-tab="agents"><span class="ic"><svg class="ico"><use href="#i-brokers"/></svg></span>Agents</button>
     <button data-tab="ceos"><span class="ic"><svg class="ico"><use href="#i-user"/></svg></span>CEOs</button>
@@ -244,7 +245,7 @@ document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
   document.body.classList.toggle('chats', tab === 'inbox' || tab === 'chats')
   $('#sideT').textContent = tab === 'inbox' ? 'Inbox — your chat with each agency' : 'All chats'
   if (tab !== 'inbox' && tab !== 'chats') { $('#thread').style.display = 'none'; $('#compose').style.display = 'none' }
-  if (tab === 'payments' || tab === 'agencies' || tab === 'work' || tab === 'setup' || tab === 'agents' || tab === 'ceos' || tab === 'plans' || tab === 'cvt' || tab === 'usage' || tab === 'health' || tab === 'fleet') { open = null; showTable() } else renderList()
+  if (tab === 'payments' || tab === 'agencies' || tab === 'work' || tab === 'setup' || tab === 'agents' || tab === 'ceos' || tab === 'plans' || tab === 'cvt' || tab === 'usage' || tab === 'health' || tab === 'fleet' || tab === 'tickets') { open = null; showTable() } else renderList()
   renderList()
 })
 
@@ -574,7 +575,7 @@ async function fleetView() {
       <td>${b.cpu?.cores ?? '?'} cores · load ${b.cpu?.load?.[1] ?? '?'}<br><span class="muted">${gb(b.ram?.free_mb)} / ${gb(b.ram?.total_mb)} RAM free</span></td>
       <td>${gb(b.disk_free_mb)}</td><td>${esc(b.net_type || '—')}${b.net?.rtt_ms ? `<br><span class="muted">${b.net.rtt_ms} ms</span>` : ''}</td>
       <td>${b.held ? '<b class="bad">suspended</b><br>' : ''}${rob(b.robots)}</td>
-      <td class="muted" style="font-size:12px;max-width:260px">${esc(p.why.join(' · ') || '')}${b.last_error ? `<br>${esc(b.last_error.line).slice(0, 140)}` : ''}</td>
+      <td class="muted" style="font-size:12px;max-width:260px">${p.tickets_open ? `<a href="#" class="bad" onclick="event.stopPropagation(); ticketF.q=${JSON.stringify(p.name || '').replace(/"/g, '&quot;')}; switchTab('tickets'); return false">🎫 ${p.tickets_open} open ticket${p.tickets_open > 1 ? 's' : ''}</a><br>` : ''}${esc(p.why.join(' · ') || '')}${b.last_error ? `<br>${esc(b.last_error.line).slice(0, 140)}` : ''}</td>
       <td class="muted">${ago(b.at)}</td></tr>
       ${open ? `<tr><td></td><td colspan="9" onclick="event.stopPropagation()">
         <div style="display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 8px">${Object.entries(K.kinds).map(([k, label]) => `<button class="${k === 'restart' || k === 'cancel_runs' || k === 'suspend' ? 'danger' : 'ghost'}" onclick="fleetSend('${p.id}','${k}', ${JSON.stringify(p.name || '').replace(/"/g, '&quot;')})" ${K.ready ? '' : 'disabled'}>${esc(label)}</button>`).join('')}</div>
@@ -645,6 +646,66 @@ async function fleetLog(object) {
     if (w) { w.document.title = object; w.document.body.innerHTML = `<pre style="white-space:pre-wrap;font:12px ui-monospace,monospace"></pre>`; w.document.querySelector('pre').textContent = r.text }
     else tell('Log', r.text.slice(-4000))
   } catch (e) { tell('Log not opened', e.message) }
+}
+
+// ---------------------------------------------------------------- Tickets --
+// The agencies' Help button: a note (+ a picture), their PC's logs and version.
+// Answer here: it shows on their PC as a notification (a signed command).
+let ticketF = { status: 'open', q: '' }, ticketOpen = null
+const TSTATUS = { open: 'Open', answered: 'Answered', closed: 'Closed' }
+async function ticketBadge() {
+  try {
+    const T = await api('/api/tickets')
+    const n = T.filter(t => t.status === 'open').length
+    const el = $('#ticketCount'); if (el) { el.textContent = n; el.style.display = n ? '' : 'none' }
+    return T
+  } catch { return null }
+}
+async function ticketsView() {
+  $('#title').textContent = "Tickets — the agencies' Help button"
+  let T
+  try { T = await api('/api/tickets') } catch (e) { $('#table').innerHTML = `<p class="muted">${esc(e.message)}</p>`; return }
+  if (tab !== 'tickets') return
+  const q = ticketF.q.toLowerCase()
+  const n = (st) => T.filter(t => t.status === st).length
+  const list = T.filter(t => (!ticketF.status || t.status === ticketF.status) && (!q || `${t.agency_name} ${t.pc_name} ${t.who || ''} ${t.text}`.toLowerCase().includes(q)))
+  $('#table').innerHTML = `
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+      ${['open', 'answered', 'closed', ''].map(st => `<button class="${ticketF.status === st ? 'go' : 'ghost'}" onclick="ticketF.status='${st}'; ticketsView()">${st ? `${TSTATUS[st]} (${n(st)})` : `All (${T.length})`}</button>`).join('')}
+      <input type="search" placeholder="Agency, PC, person, words…" value="${esc(ticketF.q)}" onchange="ticketF.q=this.value; ticketsView()" style="padding:7px 10px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);color:var(--text)">
+    </div>
+    ${list.map(t => {
+      const k = `${t.account}|${t.id}`, isOpen = ticketOpen === k
+      return `<div style="background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin-bottom:10px">
+        <div style="display:flex;gap:10px;align-items:baseline;cursor:pointer" onclick="ticketOpen = ticketOpen === '${k}' ? null : '${k}'; ticketsView()">
+          <b>${esc(t.agency_name)}</b><span class="muted">${esc(t.pc_name || '')}${t.pc_number ? ' · PC ' + esc(t.pc_number) : ''}${t.who ? ' · ' + esc(t.who) : ''} · ${ago(t.at)}</span>
+          <span style="margin-left:auto" class="${t.status === 'open' ? 'bad' : 'muted'}">${TSTATUS[t.status] || esc(t.status)}</span></div>
+        <div style="white-space:pre-wrap;margin-top:6px">${esc(t.text)}</div>
+        ${isOpen ? `
+          <div class="muted" style="font-size:12px;margin-top:6px">Page ${esc(t.page || '—')} · version ${esc(t.version || '?')} · PC last seen ${ago(t.pc_seen)}</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
+            ${t.log ? `<button class="ghost" onclick="fleetLog('${esc(t.log)}')">Open its logs</button>` : `<span class="muted">${esc(t.log_error ? 'Logs not sent: ' + t.log_error : 'No logs')}</span>`}
+            ${t.shot ? `<button class="ghost" onclick="ticketShot('${esc(t.shot)}')">Show the picture</button>` : ''}
+            <button class="ghost" onclick="fleetOpenPC='${t.account}'; fleetF={ light: '', q: '', version: '' }; switchTab('fleet')">Show the PC in Fleet</button>
+          </div>
+          <div id="shot-${esc(t.id)}"></div>
+          ${(t.replies || []).map(r => `<div style="margin-top:8px;background:var(--mine);border-radius:10px;padding:8px 10px"><b>${esc(r.from || 'Adal support')}</b> <span class="muted">${ago(r.at)}${r.waiting ? ' · waiting for the PC' : ''}</span><div style="white-space:pre-wrap">${esc(r.text)}</div></div>`).join('')}
+          <textarea id="ans-${esc(t.id)}" rows="3" placeholder="Your answer… (shows on their PC as a notification)" style="width:100%;margin-top:8px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);color:var(--text);padding:8px"></textarea>
+          <div style="display:flex;gap:6px;margin-top:6px">
+            <button class="go" onclick="ticketAnswer('${t.account}','${t.id}', null)">Send answer</button>
+            <button class="ghost" onclick="ticketAnswer('${t.account}','${t.id}', 'closed')">${'Answer and close'}</button>
+            ${t.status === 'closed' ? `<button class="ghost" onclick="ticketAnswer('${t.account}','${t.id}', 'open', true)">Reopen</button>` : ''}
+          </div>` : (t.replies?.length ? `<div class="muted" style="font-size:12px;margin-top:4px">${t.replies.length} answer(s)</div>` : '')}
+      </div>`
+    }).join('') || '<p class="muted">No tickets here.</p>'}`
+}
+async function ticketAnswer(account, ticket, status, silent = false) {
+  const text = silent ? '' : ($(`#ans-${ticket}`)?.value || '').trim()
+  if (!text && !status) return tell('Nothing to send', 'Type the answer first.')
+  try { toast((await api('/api/tickets/answer', { account, ticket, text, status })).message); ticketsView(); ticketBadge() } catch (e) { tell('Not sent', e.message) }
+}
+async function ticketShot(object) {
+  try { const r = await api(`/api/tickets/shot?object=${encodeURIComponent(object)}`); zoom.querySelector('img').src = r.data; zoom.style.display = 'flex' } catch (e) { tell('Picture not opened', e.message) }
 }
 
 // ------------------------------------------------------------------ Usage --
@@ -1245,6 +1306,7 @@ function showTable() {
   if (tab === 'usage') return usageView()
   if (tab === 'health') return healthView()
   if (tab === 'fleet') return fleetView()
+  if (tab === 'tickets') return ticketsView()
   if (tab === 'cvt') return cvtView()
   if (tab === 'payments') {
     $('#title').textContent = 'Payment receipts'
@@ -1336,9 +1398,11 @@ async function refresh() {
     synced = Date.now(); $('#sync').className = ''; $('#sync').textContent = '● synced'
     if (open) open = data.conversations.find(c => c.id === open.id) || open
     renderList()
+    ticketBadge()
     if (tab === 'work') { if (!document.querySelector('#table input:focus')) showTable() }
     else if (tab === 'health') healthView()
     else if (tab === 'fleet') { if (!document.querySelector('#table input:focus, #table select:focus')) fleetView() }
+    else if (tab === 'tickets') { if (!document.querySelector('#table input:focus, #table textarea:focus, #table select:focus')) ticketsView() }
     else if (tab === 'cvt') { if (!cvtDragged) cvtView() }
     else if (tab === 'ceos') { if (!document.querySelector('#table input:focus')) ceosView() }
     else if (tab === 'agents') { if (!dragged && !document.querySelector('#table input:focus, #table select:focus')) agentsView() }

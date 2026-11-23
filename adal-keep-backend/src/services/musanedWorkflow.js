@@ -36,7 +36,9 @@ const PHOTO_MODAL_SRC  = 'personal\\s+photo\\s+upload'
 const DROPZONE_SRC     = 'click\\s+or\\s+drag\\s+a\\s+personal\\s+photo'
 
 const DEFAULT_TIMEOUT_MS     = 180000
-const NAV_TIMEOUT_MS         = 180000
+const NAV_TIMEOUT_MS         = 90000
+// Musaned's first page: its shell is ~40 KB; 60 s is far more than any line needs. One try, never a second (2026-11-23: 2 × 180 s = a run failed after 307 s).
+const FIRST_LOAD_MS          = 60000
 const UPLOAD_PROCESS_MS      = 120000
 const MODAL_CLOSED_SETTLE_MS = 2000
 
@@ -91,11 +93,13 @@ export async function disableSmoothScroll(page, ctx) {
     else document.addEventListener('DOMContentLoaded', add)
   }
   try {
+    // Each call given 5 s: a tab whose CDP is slow (a Companion's) must not hold the run for the 180-s protocol timeout.
+    const within = (p) => Promise.race([p, new Promise((_, no) => setTimeout(() => no(new Error('no answer in 5 s')), 5000))])
     if (!page.__adalNoSmoothScroll) {
-      await page.evaluateOnNewDocument(inject)
+      await within(page.evaluateOnNewDocument(inject))
       page.__adalNoSmoothScroll = true
     }
-    await page.evaluate(inject)
+    await within(page.evaluate(inject))
   } catch (e) { log(ctx, `smooth-scroll override failed: ${e.message}`, 'warn') }
 }
 
@@ -330,6 +334,15 @@ export async function blankPage(page, ms = 5000) {
   return !(await waitForText(page, ms)) && await bodyLength(page) === 0
 }
 
+/** Why Musaned's first page did not come, in words a person can act on. */
+export function unreachable(e) {
+  const m = String(e?.message || e || '')
+  if (/detached|Target closed|Session closed|timed out.*Runtime|Runtime\.\w+ timed out|Protocol error/i.test(m)) return `Could not reach tawtheeq.musaned.com.sa: the robot's browser tab stopped answering (${m.slice(0, 80)})`
+  if (/Navigation timeout|timeout/i.test(m)) return `Could not reach tawtheeq.musaned.com.sa: no answer in ${FIRST_LOAD_MS / 1000} s (the internet or Musaned is slow now)`
+  if (/ERR_NAME_NOT_RESOLVED|ERR_INTERNET_DISCONNECTED|ERR_NETWORK_CHANGED|ERR_ADDRESS_UNREACHABLE/.test(m)) return `Could not reach tawtheeq.musaned.com.sa: this PC is not on the internet (${(m.match(/ERR_[A-Z_]+/) || [''])[0]})`
+  return `Could not reach tawtheeq.musaned.com.sa (${m.slice(0, 100) || 'no answer'})`
+}
+
 export async function stepOpenMusaned(page, ctx) {
   // Peer-aware: if this tab is ALREADY on a Musaned host we do NOT navigate to
   // the root — that would wipe an in-progress form and/or force a re-login.
@@ -349,16 +362,15 @@ export async function stepOpenMusaned(page, ctx) {
     // and paused again, for ever.
     if (await blankPage(page)) {
       log(ctx, 'Musaned page is blank — loading it again')
-      try { await page.goto(MUSANED_ROOT, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS }) }
-      catch { throw new Error('Could not reach tawtheeq.musaned.com.sa') }
+      try { await page.goto(MUSANED_ROOT, { waitUntil: 'domcontentloaded', timeout: FIRST_LOAD_MS }) }
+      catch (e) { throw new Error(unreachable(e)) }
       await waitForText(page, 8000)
     }
     // On a Musaned host but unclassified — fall through to the login-click loop
     // below WITHOUT re-navigating away.
   } else {
-    try { await page.goto(MUSANED_ROOT, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS }) }
-    catch { try { await page.goto(MUSANED_ROOT, { waitUntil: 'networkidle2', timeout: NAV_TIMEOUT_MS }) }
-      catch { throw new Error('Could not reach tawtheeq.musaned.com.sa') } }
+    try { await page.goto(MUSANED_ROOT, { waitUntil: 'domcontentloaded', timeout: FIRST_LOAD_MS }) }
+    catch (e) { throw new Error(unreachable(e)) }
     await sleep(1500)
     const preState = await snapshotState(page)
     if (preState?.hasAgencyPicker || preState?.hasDashboardNav || preState?.hasGoToDashboard) {

@@ -876,8 +876,11 @@ func (u *updater) install(m *releaseManifest, env *envelope, fromCloud bool) err
 		return errors.New("tried a moment ago")
 	}
 	before, _ := u.current()
+	// The main PC gives this PC no robot run while it installs and restarts (robot.go announces it).
+	updatingNow.Store(true)
 	err := u.installPieces(m, fromCloud)
 	if err != nil {
+		updatingNow.Store(false)
 		u.failed[m.SHA] = time.Now()
 		return err
 	}
@@ -914,6 +917,8 @@ func (u *updater) install(m *releaseManifest, env *envelope, fromCloud bool) err
 	if selfReplaced && !standbyActing() {
 		selfReplaced = false
 		go restartSelfSoon()
+	} else {
+		updatingNow.Store(false)
 	}
 	return nil
 }

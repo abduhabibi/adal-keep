@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -107,10 +108,17 @@ func dialQuick(addr string) bool {
 }
 
 // officeNow: the fields added to the robot announcement.
+// updatingNow: an update is being installed here (selfupdate.go install).
+var updatingNow atomic.Bool
+
 func officeNow() map[string]any {
 	out := map[string]any{}
 	if v := ownVersion(); v != "" {
 		out["version"] = v
+	}
+	// Installing an update (and restarting for it): no robot run comes here meanwhile.
+	if updatingNow.Load() {
+		out["updating"] = true
 	}
 	if w := wifiNow(); w >= 0 {
 		out["wifi"] = w

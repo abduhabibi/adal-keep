@@ -52,6 +52,7 @@ export function registerDevice(pc, ip, body = {}) {
   const peersTotal = num(body.peers_total, 0, 500)
   const health = {
     version: body.version ? String(body.version).slice(0, 20) : null,
+    updating: body.updating === true,   // installing an update / restarting for it: no run goes there
     wifi: num(body.wifi, 0, 100),
     peers_total: peersTotal,
     peers_ok: peersTotal == null ? null : num(body.peers_ok, 0, peersTotal),
@@ -93,8 +94,9 @@ export async function tabForPerson(id) {
  * closed: the strongest Companion that is there, and not busy with a run of its
  * own already, does it ("the fast PCs do the most work"). '' when none.
  */
-export function freeStrongDevice(busyIds = new Set(), now = Date.now()) {
-  const list = [...devices.values()].filter(d => now - d.at < SEEN_MS && !busyIds.has(d.id))
+export function freeStrongDevice(busyIds = new Set(), now = Date.now(), version = null) {
+  // Never one installing an update, silent for 45 s, or on another release than this PC (sharePower.ready).
+  const list = [...devices.values()].filter(d => now - d.at < 45e3 && !d.updating && (!version || d.version === version) && !busyIds.has(d.id))
   list.sort((a, b) => (b.cores || 1) - (a.cores || 1) || String(a.id).localeCompare(String(b.id)))
   return list[0]?.id || ''
 }
@@ -138,12 +140,15 @@ export async function browserForDevice(id, { quiet = false } = {}) {
   }
   const p = (async () => {
     // quiet: opened for another PC's work — it starts minimized there, never over the person's work.
-    const r = await fetch(`${base(d)}/robot/json/version${quiet ? '?quiet=1' : ''}`, { headers: { 'x-adal-robot': d.token }, signal: AbortSignal.timeout(45000) })
+    const r = await fetch(`${base(d)}/robot/json/version${quiet ? '?quiet=1' : ''}`, { headers: { 'x-adal-robot': d.token }, signal: AbortSignal.timeout(20000) })   // fail fast: 20 s also covers its browser starting
     if (!r.ok) throw new Error(`the Companion's browser did not open (${r.status})`)
     const v = await r.json()
     if (!v.webSocketDebuggerUrl) throw new Error('the Companion gave no browser address')
     const puppeteer = (await import('puppeteer-core')).default
-    const b = await puppeteer.connect({ browserWSEndpoint: v.webSocketDebuggerUrl, headers: { 'x-adal-robot': d.token }, defaultViewport: null, protocolTimeout: 180000 })
+    const b = await puppeteer.connect({ browserWSEndpoint: v.webSocketDebuggerUrl, headers: { 'x-adal-robot': d.token }, defaultViewport: null, protocolTimeout: 60000 })
+    // It must answer now, or the run works on the main PC (a browser that connects but never answers held a run 5 min).
+    const answers = await Promise.race([b.version().then(() => true, () => false), new Promise(r => setTimeout(() => r(false), 5000))])
+    if (!answers) { b.disconnect().catch(() => {}); throw new Error('its Adal Browser does not answer') }
     remote.set(b, d)
     b.on('disconnected', () => { if (conns.get(id) === p) conns.delete(id) })
     await patchUploads(b)

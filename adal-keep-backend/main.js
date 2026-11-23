@@ -169,6 +169,7 @@ app.use('/uploads', express.static(path.join(process.cwd(), 'data/SafeStorage'))
 app.use(attachAuth)
 // Staff roles: each change needs the toggle its role has (services/staffRoles.js).
 app.use('/api', staffGuard)
+app.use('/api', (await import('./src/services/audit.js')).auditViews)   // who viewed / downloaded whose data
 app.use('/api', staffRolesRouter)
 // The big lists every page asks for: made once, kept until their tables change.
 app.use(answerCache())
@@ -219,6 +220,7 @@ app.use('/api', (await import('./src/routes/tower.js')).default)   // crash repo
 app.use('/api', cropReviewsRouter)   // crops a person checks before they go into her boxes
 app.use('/api', chatRouter)
 app.use('/api', trashRouter)
+app.use('/api', (await import('./src/routes/dataRights.js')).default)   // consent, export / erase one candidate, audit log
 app.use('/api', mainPCRouter)
 app.use('/api', mobileRouter)   // the phone app pairs with this PC
 app.use('/api', branchMergeRouter)

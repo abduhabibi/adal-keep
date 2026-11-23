@@ -29,6 +29,7 @@ import os from 'os'
 import path from 'path'
 import zlib from 'zlib'
 import crypto from 'crypto'
+import { forCloud as sealedForCloud } from './backupSeal.js'
 import { fileURLToPath } from 'url'
 import sqlite3 from 'sqlite3'
 import { getSecret, setSecret, secretBlobs, restoreSecretBlobs } from './secretStore.js'
@@ -667,7 +668,7 @@ async function publishBackup(db, data) {
   if (!c?.agency) return
   const [old] = await c.cloudCall(db, 'GET', `/rest/v1/keep_meta?agency_id=eq.${c.agency}&key=eq.${encodeURIComponent(BACKUP_KEY)}&select=data`).catch(() => [])
   await c.cloudCall(db, 'POST', '/rest/v1/keep_meta?on_conflict=agency_id,key',
-    [{ agency_id: c.agency, key: BACKUP_KEY, data: { ...(old?.data || {}), ...data }, updated_at: new Date().toISOString() }],
+    [{ agency_id: c.agency, key: BACKUP_KEY, data: sealedForCloud({ ...(old?.data || {}), ...data }), updated_at: new Date().toISOString() }],
     { headers: { Prefer: 'resolution=merge-duplicates,return=minimal' } })
 }
 /** The newest backup: { index (buffer), key } — from this PC's notes or the agency's online rows. */
@@ -677,7 +678,8 @@ export async function newestBackup(db, { file_id, key } = {}) {
     if (c?.agency) {
       const rows = await c.cloudCall(db, 'GET', `/rest/v1/keep_meta?agency_id=eq.${c.agency}&key=in.(${BACKUP_KEY},/_backup_index)&select=key,data`).catch(() => [])
       const b = rows.find(r => r.key === BACKUP_KEY)?.data || rows.find(r => r.key === '/_backup_index')?.data
-      if (b?.file_id) { file_id = b.file_id; key ||= b.key }
+      // (A sealed key — ADAL_BACKUP_SEAL — is opened only by Adal; this PC's own key still works.)
+      if (b?.file_id) { file_id = b.file_id; key ||= b.key || undefined }
     }
     file_id ||= readState().index_file_id
   }

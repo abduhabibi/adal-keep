@@ -22,6 +22,7 @@ import SharePowerCard from '../components/SharePowerCard'
 import AutomationHealthCard from '../components/AutomationHealthCard'
 import InsuranceCard from '../components/InsuranceCard'
 import BackupCard from '../components/BackupCard'
+import AuditLogCard from '../components/AuditLogCard'
 import RollbackCard from '../components/RollbackCard'
 import TelegramChannelCard from '../components/TelegramChannelCard'
 import { ConnectedDevices } from '../components/PcAccessGate'
@@ -451,13 +452,15 @@ export default function SettingsPage() {
         </div>
       </Card>
       <UsbCard />
+      {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Audit log"><AuditLogCard /></ErrorBoundary>}
       </>}
       {tab === 'look' && <>
       <Card>
         <h2 className="font-display text-lg font-bold mb-4 flex items-center gap-2">
           Language · ቋንቋ
         </h2>
-        <Segmented translate="no" options={[['am', 'አማርኛ'], ['en', 'English']]} value={getLang()} onChange={(id) => {
+        <p className="text-xs text-slate-500 mb-3" translate="no">Saved for the employee signed in here · Arabic reads right to left</p>
+        <Segmented translate="no" options={[['en', 'English'], ['am', 'አማርኛ'], ['ar', 'العربية']]} value={getLang()} onChange={(id) => {
             if (getLang() === id) return
             // The tips panel follows the app's language — told in the
             // background (on a phone the PC can be slow or off; the switch

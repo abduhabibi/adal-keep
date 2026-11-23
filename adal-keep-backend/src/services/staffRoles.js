@@ -198,6 +198,9 @@ const RULES = [
   [/^POST \/backup\/settings$/, 'change_settings'],
   [/^POST \/backup\/(run|restore|restore-companion|test|find-chats)$/, 'export_backup'],
   [/^GET \/branch\/export(\/|$)/, 'export_backup'],
+  [/^GET \/profiles\/\d+\/data-export$/, 'export_backup'],   // data protection: all of one candidate's data
+  [/^POST \/profiles\/\d+\/erase$/, 'delete_profiles'],
+  [/^GET \/audit$/, 'manage_staff'],
   [new RegExp(`^${W} \\/settings(\\/|$)`), 'change_settings'],
   [new RegExp(`^${W} \\/system\\/ai-keys(\\/|$)`), 'change_settings'],
   [new RegExp(`^${W} \\/(lmis|musaned|visa|tasheer|insurance)\\/accounts(\\/|$)`), 'change_settings'],

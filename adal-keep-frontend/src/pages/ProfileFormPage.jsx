@@ -150,6 +150,8 @@ export default function ProfileFormPage({ embeddedId = null, onDone = null } = {
   }, [isEdit])
   const [loading, setLoading] = useState(isEdit)
   const [saving, setSaving] = useState(false)
+  const [consent, setConsent] = useState(false)           // the candidate agreed to share her data for recruitment
+  const [consentWas, setConsentWas] = useState(false)
   const [hydrated, setHydrated] = useState(false)
   // New profile: the passport comes first (PassportFirst), then a short form.
   const [step, setStep] = useState(isEdit ? 'form' : 'passport')
@@ -190,6 +192,7 @@ export default function ProfileFormPage({ embeddedId = null, onDone = null } = {
           const res = await api.get(`/profiles/${id}`)
           if (!alive) return
           const p = res.data
+          setConsent(!!p.data_consent); setConsentWas(!!p.data_consent)
           setForm({
             full_name: p.full_name || '',
             destination_country: p.destination_country || '',
@@ -351,8 +354,11 @@ export default function ProfileFormPage({ embeddedId = null, onDone = null } = {
         if (!createdBy.trim()) { toast.error('Who created this profile? Pick the employee.'); setSaving(false); return }
         payload.created_by = createdBy.trim()
       }
+      // The consent line is its own call (it is logged with who and when); a failure never loses the profile.
+      const saveConsent = (pid) => api.post(`/profiles/${pid}/consent`, { consent }).catch(() => toast.error('The profile was saved, but the consent line was not — open her page and tick it again.'))
       if (isEdit) {
         await api.put(`/profiles/${id}`, payload)
+        if (consent !== consentWas) await saveConsent(id)
         toast.success('ፕሮፋይሉ በስኬት ተዘምኗል')
         if (onDone) onDone(true)
         else navigate(`/profiles/${id}`)
@@ -368,6 +374,7 @@ export default function ProfileFormPage({ embeddedId = null, onDone = null } = {
         else { toast.success('Saved — the office PC makes the profile with her passport as soon as it answers', { duration: 7000 }); navigate('/profiles') }
       } else {
         const res = await api.post('/profiles', payload)
+        if (consent) await saveConsent(res.data.id)
         if (passport?.upload) {
           try {
             await api.post('/new-profile/attach', { upload: passport.upload, profileId: res.data.id, filename: passport.filename })
@@ -864,6 +871,11 @@ export default function ProfileFormPage({ embeddedId = null, onDone = null } = {
           <label className={labelClass} htmlFor="notes">ማስታወሻዎች</label>
           <textarea id="notes" rows={4} className={`${inputClass} resize-y`} placeholder="ስለዚህ ደንበኛ ጠቃሚ የሆኑ መረጃዎች…" value={form.notes} onChange={setField('notes')} />
         </div>}
+
+        <label className="flex items-start gap-2.5 rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-2.5 text-sm text-slate-700 dark:text-slate-300 cursor-pointer">
+          <input type="checkbox" className="mt-0.5 h-4 w-4 accent-teal-600" checked={consent} onChange={e => setConsent(e.target.checked)} />
+          <span>The candidate agreed to share her data for recruitment.</span>
+        </label>
 
         <div className="flex flex-wrap gap-3 border-t border-slate-200 dark:border-slate-700 pt-5">
           <button type="submit" className="px-5 py-2.5 rounded-lg bg-teal-600 hover:bg-teal-700 text-white font-medium text-sm transition-colors disabled:opacity-50" disabled={saving}>

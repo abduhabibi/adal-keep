@@ -39,6 +39,8 @@ export function AuthProvider({ children }) {
     }
     // Her staff role decides the buttons (lib/staffPerms.js).
     window.dispatchEvent(new Event('adal-staff-changed'))
+    // Each employee has their own language (Settings → Look & language).
+    import('../lib/i18n').then(m => m.followUser()).catch(() => {})
   }, [])
 
   const setCurrentUser = useCallback((u) => {

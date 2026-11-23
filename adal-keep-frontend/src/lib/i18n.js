@@ -1,22 +1,46 @@
 /**
- * Language: Amharic (as written in the pages) or English.
+ * Language: English (the default, always), Amharic or Arabic (right to left), chosen in
+ * Settings for each employee (the PC's own choice before anyone is signed in).
  *
- * English is a layer over the pages: while it is on, every known Amharic
- * phrase on screen (text, placeholders, titles) is shown in English. Only
- * whole phrases are replaced, never parts of words, and nothing inside
- * [translate="no"] (chat messages, people's data) is touched. Choosing
- * Amharic again reloads the page as written. Saved per PC.
+ * The pages are written in Amharic or in English, and this layer shows them in the
+ * chosen language. English: every known Amharic phrase on screen (text, placeholders,
+ * titles) is shown in English. Amharic: the English labels (lib/i18n/labels.js and AM
+ * below) are shown in Amharic. Arabic: Amharic text goes through English first, then
+ * every known English phrase is shown in Arabic (lib/i18n/ar-from-english.js, labels.js)
+ * and the page turns right to left. Only whole phrases are replaced, never parts of
+ * words, and nothing inside [translate="no"] (chat messages, people's data) is touched.
+ * Government terms (Musaned, LMIS, EPRO, Wafid) stay as they are in every language.
+ * Choosing a language reloads the page.
  */
-// English by default; a new key so older saved choices reset once. Only a hand-picked Amharic is kept.
-const KEY = 'adal-lang-v2'
+import { AR_FROM_ENGLISH } from './i18n/ar-from-english.js'
+import { LABELS } from './i18n/labels.js'
 
+export const LANGS = ['en', 'am', 'ar']
+const PC_KEY = 'adal-lang-v2'   // the PC's own choice (English until someone picks another)
+const userKey = () => {
+  try { const e = JSON.parse(localStorage.getItem('adal_active_employee') || 'null'); return e?.id != null ? `adal-lang-v3:${e.id}` : null } catch { return null }
+}
+const clean = (v) => (LANGS.includes(v) ? v : null)
+
+/** The language of the employee signed in here, else the PC's, else English. */
 export function getLang() {
-  try { return localStorage.getItem(KEY) === 'am' ? 'am' : 'en' } catch { return 'en' }
+  try { return clean(localStorage.getItem(userKey() || '-')) || clean(localStorage.getItem(PC_KEY)) || 'en' } catch { return 'en' }
 }
 
+let running = null
 export function setLang(lang) {
-  try { localStorage.setItem(KEY, lang === 'am' ? 'am' : 'en') } catch {}
+  lang = clean(lang) || 'en'
+  try {
+    const k = userKey()
+    if (k) localStorage.setItem(k, lang)
+    else localStorage.setItem(PC_KEY, lang)
+  } catch {}
   window.location.reload()
+}
+
+/** An employee signed in or out: their own language (reloads only when it differs). */
+export function followUser() {
+  if (running && getLang() !== running) window.location.reload()
 }
 
 const EN = {
@@ -308,35 +332,6 @@ function skip(node) {
   const el = node.nodeType === 1 ? node : node.parentElement
   return !el || !!el.closest('[translate="no"], script, style, textarea, [contenteditable="true"]')
 }
-function translateTree(root) {
-  if (skip(root)) return
-  if (root.nodeType === 3) {
-    const t = tr(root.nodeValue)
-    if (t !== root.nodeValue) root.nodeValue = t
-    return
-  }
-  if (root.nodeType !== 1) return
-  for (const a of ['placeholder', 'title', 'aria-label']) {
-    const v = root.getAttribute?.(a)
-    if (v && ETHIOPIC.test(v)) { const t = tr(v); if (t !== v) root.setAttribute(a, t) }
-  }
-  if (root.tagName === 'OPTION' || root.tagName === 'BUTTON' || root.childNodes.length) {
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT)
-    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
-      if (n.nodeType === 1) {
-        if (n.closest('[translate="no"], script, style, textarea')) continue
-        for (const a of ['placeholder', 'title', 'aria-label']) {
-          const v = n.getAttribute(a)
-          if (v && ETHIOPIC.test(v)) { const t = tr(v); if (t !== v) n.setAttribute(a, t) }
-        }
-      } else if (ETHIOPIC.test(n.nodeValue) && !skip(n)) {
-        const t = tr(n.nodeValue)
-        if (t !== n.nodeValue) n.nodeValue = t
-      }
-    }
-  }
-}
-
 /**
  * Amharic for the labels that were written in English. Only a whole label
  * (a text, placeholder or title that is exactly one of these) is replaced, so
@@ -347,8 +342,8 @@ const AM = {
   'Drag a step to change the order — every girl follows it. Done steps fold away.': 'ቅደም ተከተሉን ለመቀየር አንድን ደረጃ ይጎትቱ — ሁሉም ልጃገረዶች ይከተሉታል። የተጠናቀቁ ደረጃዎች ይታጠፋሉ።',
   '✓ Every step is done.': '✓ ሁሉም ደረጃዎች ተጠናቀዋል።',
   // Profiles
-  'Wakala': 'ዋካላ', '✓ Paid': '✓ ተከፍሏል', '⏳ Unpaid': '⏳ አልተከፈለም', 'Musaned': 'ሙሳነድ', 'Selected': 'ተመርጧል',
-  'Wafid': 'ዋፊድ', 'Insurance': 'ኢንሹራንስ', 'Embassy': 'ኤምባሲ', 'Visa': 'ቪዛ', 'Arrived': 'ደርሳለች',
+  'Wakala': 'ዋካላ', '✓ Paid': '✓ ተከፍሏል', '⏳ Unpaid': '⏳ አልተከፈለም', 'Selected': 'ተመርጧል',
+  'Insurance': 'ኢንሹራንስ', 'Embassy': 'ኤምባሲ', 'Visa': 'ቪዛ', 'Arrived': 'ደርሳለች',
   '🔎 Check for new selections': '🔎 አዲስ ምርጫዎችን ፈልግ', '🔎 Checking…': '🔎 በመፈለግ ላይ…', '⚙ Filters': '⚙ ማጣሪያዎች', '⚙ Filters ▾': '⚙ ማጣሪያዎች ▾',
   'profiles': 'ፕሮፋይሎች', 'Sort by:': 'ደርድር በ:', 'Recent (opened or updated)': 'የቅርብ (የተከፈቱ ወይም የተቀየሩ)',
   'Date Added': 'የተጨመረበት ቀን', 'Name': 'ስም', 'Age': 'ዕድሜ', 'Pending': 'በመጠባበቅ ላይ', 'Active': 'ንቁ',
@@ -360,7 +355,7 @@ const AM = {
   'The passport is saved on the profile when you press Create.': '«ፍጠር»ን ሲጫኑ ፓስፖርቱ በፕሮፋይሉ ላይ ይቀመጣል።',
   'No passport yet — fill the form by hand': 'ገና ፓስፖርት የለም — ቅጹን በእጅ ይሙሉ',
   // CVs
-  'All generated CVs': 'ሁሉም የተዘጋጁ ሲቪዎች', 'Templates': 'ቅጦች', '📥 Add from Musaned': '📥 ከሙሳነድ አክል', '+ New CV': '+ አዲስ ሲቪ',
+  'All generated CVs': 'ሁሉም የተዘጋጁ ሲቪዎች', 'Templates': 'ቅጦች', '📥 Add from Musaned': '📥 ከMusaned አክል', '+ New CV': '+ አዲስ ሲቪ',
   'No CVs yet': 'ገና ሲቪ የለም', 'Click New CV to pick a candidate and generate a formatted CV': 'ዕጩ ለመምረጥና ሲቪ ለማዘጋጀት «አዲስ ሲቪ»ን ይጫኑ',
   'Create first CV': 'የመጀመሪያውን ሲቪ ፍጠር', 'New CV — pick profile': 'አዲስ ሲቪ — ፕሮፋይል ይምረጡ',
   'Search by name, phone, or passport': 'በስም፣ በስልክ ወይም በፓስፖርት ይፈልጉ', 'Cancel': 'ተው', 'Passport:': 'ፓስፖርት:', 'Broker:': 'ደላላ:',
@@ -374,10 +369,10 @@ const AM = {
   // Settings
   'Agency': 'ኤጀንሲ', 'Plan': 'ዕቅድ', 'Portals': 'ፖርታሎች', 'Integrations': 'ውህደቶች', 'Transitions': 'ሽግግሮች',
   'Backup & updates': 'ምትኬ እና ማሻሻያዎች', 'Look & language': 'መልክ እና ቋንቋ',
-  'Agency Email (for Musaned/Notifications)': 'የኤጀንሲ ኢሜይል (ለሙሳነድ/ማሳወቂያዎች)', 'Save Settings': 'ቅንብሮችን አስቀምጥ',
+  'Agency Email (for Musaned/Notifications)': 'የኤጀንሲ ኢሜይል (ለMusaned/ማሳወቂያዎች)', 'Save Settings': 'ቅንብሮችን አስቀምጥ',
   'PC number': 'የኮምፒውተር ቁጥር', 'Software Updates': 'የሶፍትዌር ማሻሻያዎች', 'Update by itself': 'ራሱ ይዘምን',
   'Check GitHub for the latest version and install it': 'አዲሱን ስሪት ፈልገው ይጫኑ', 'Check for Updates': 'ማሻሻያ ፈልግ',
-  'This email will be used as the default contact for automated workflows like Musaned.': 'ይህ ኢሜይል እንደ ሙሳነድ ላሉ ራስ-ሰር ሥራዎች ዋና መገናኛ ሆኖ ያገለግላል።',
+  'This email will be used as the default contact for automated workflows like Musaned.': 'ይህ ኢሜይል እንደ Musaned ላሉ ራስ-ሰር ሥራዎች ዋና መገናኛ ሆኖ ያገለግላል።',
   '— a new version installs as soon as no automation run is working (checked every 15 minutes)': '— ምንም ሮቦት በማይሠራበት ጊዜ አዲስ ስሪት ራሱ ይጫናል (በየ15 ደቂቃው ይፈተሻል)',
   'Click New CV to pick a candidate and generate a formatted CV for one of your agencies.': '«አዲስ ሲቪ»ን ይጫኑ፤ ዕጩ ይምረጡና ለአንዱ ኤጀንሲዎ የተዘጋጀ ሲቪ ያውጡ።',
   'No new documents today. Save a passport, slip or photo into Downloads and it shows up here within a few seconds.': 'ዛሬ አዲስ ሰነድ የለም። ፓስፖርት፣ ስሊፕ ወይም ፎቶ ወደ Downloads ያስቀምጡ፤ በጥቂት ሰከንዶች ውስጥ እዚህ ይታያል።',
@@ -386,54 +381,76 @@ const AM = {
   'Light': 'ብሩህ', 'Dark': 'ጨለማ', 'Gradient': 'ቅልመት', 'No wallpaper': 'የግድግዳ ምስል የለም', 'Upload wallpaper': 'የግድግዳ ምስል ስቀል',
 }
 const LATIN = /[A-Za-z]/
-function trAm(text) {
-  if (!text || !LATIN.test(text)) return text
-  const t = text.trim()
-  const hit = AM[t]
-  return hit ? text.replace(t, hit) : text
-}
-function amharicTree(root) {
-  const one = (el) => {
-    for (const a of ['placeholder', 'title', 'aria-label']) {
-      const v = el.getAttribute?.(a)
-      if (v && LATIN.test(v)) { const t = trAm(v); if (t !== v) el.setAttribute(a, t) }
-    }
-  }
-  if (root.nodeType === 3) {
-    if (!skip(root)) { const t = trAm(root.nodeValue); if (t !== root.nodeValue) root.nodeValue = t }
-    return
-  }
-  if (root.nodeType !== 1 || skip(root)) return
-  one(root)
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT)
-  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
-    if (n.nodeType === 1) { if (!n.closest('[translate="no"], script, style, textarea')) one(n) }
-    else if (LATIN.test(n.nodeValue) && !skip(n)) { const t = trAm(n.nodeValue); if (t !== n.nodeValue) n.nodeValue = t }
-  }
-}
-function startAmharic() {
-  document.documentElement.lang = 'am'
-  amharicTree(document.body)
-  new MutationObserver((list) => {
-    for (const m of list) {
-      if (m.type === 'childList') m.addedNodes.forEach(amharicTree)
-      else amharicTree(m.target)
-    }
-  }).observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['placeholder', 'title', 'aria-label'] })
+const AMHARIC = { ...Object.fromEntries(LABELS.filter(l => l[1]).map(l => [l[0], l[1]])) }
+const AM_ALL = { ...AM, ...AMHARIC }
+const GOV_AM = [[/ሙሳነድ/g, 'Musaned'], [/ዋፊድ/g, 'Wafid'], [/ኤልኤምአይኤስ/g, 'LMIS']]
+const AR = { ...Object.fromEntries(AR_FROM_ENGLISH), ...Object.fromEntries(LABELS.map(l => [l[0], l[2]])) }
+let arRules = null
+function arCompile() {
+  const keys = Object.keys(AR).filter(k => k.length >= 6).sort((a, b) => b.length - a.length)
+  const esc = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  arRules = new RegExp(`(?<![A-Za-z])(${keys.map(esc).join('|')})(?![A-Za-z])`, 'g')
 }
 
-/** Start the language layer: English over the Amharic pages, or Amharic for the English labels. */
+function trAm(text) {
+  if (!text) return text
+  let out = text
+  if (ETHIOPIC.test(out)) for (const [re, to] of GOV_AM) out = out.replace(re, to)
+  if (LATIN.test(out)) { const t = out.trim(), hit = AM_ALL[t]; if (hit) out = out.replace(t, hit) }
+  return out
+}
+/** Arabic: a phrase written in English is exactly one of the known labels; Amharic text goes through English first (every known phrase in it). */
+function trAr(text) {
+  if (!text) return text
+  const fromAmharic = ETHIOPIC.test(text)
+  const en = fromAmharic ? tr(text) : text
+  if (!LATIN.test(en)) return en
+  const t = en.trim(), hit = AR[t]
+  if (hit) return en.replace(t, hit)
+  if (!fromAmharic) return text
+  if (!arRules) arCompile()
+  return en.replace(arRules, (m) => AR[m] ?? m)
+}
+
+/** The text as the language shows it (pure: used by the layer below and by the tests). */
+export function translateText(text, lang) {
+  if (lang === 'am') return trAm(text)
+  if (lang === 'ar') return trAr(text)
+  return tr(text)
+}
+
+const ATTRS = ['placeholder', 'title', 'aria-label']
+const SEL = '[translate="no"], script, style, textarea'
+function layer(lang) {
+  const fn = (t) => translateText(t, lang)
+  const attrs = (el) => { for (const a of ATTRS) { const v = el.getAttribute?.(a); if (v) { const t = fn(v); if (t !== v) el.setAttribute(a, t) } } }
+  const textNode = (n) => { if (!skip(n)) { const t = fn(n.nodeValue); if (t !== n.nodeValue) n.nodeValue = t } }
+  const tree = (root) => {
+    if (root.nodeType === 3) return textNode(root)
+    if (root.nodeType !== 1 || skip(root)) return
+    attrs(root)
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT)
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      if (n.nodeType === 1) { if (!n.closest(SEL)) attrs(n) } else textNode(n)
+    }
+  }
+  return tree
+}
+
+/** Start the language layer. English shows the Amharic pages in English; Amharic and Arabic show the labels in theirs. */
 export function startLanguage() {
-  if (getLang() !== 'en') return startAmharic()
-  document.documentElement.lang = 'en'
-  const titleOnce = () => { const t = tr(document.title); if (t !== document.title) document.title = t }
-  const run = () => { translateTree(document.body); titleOnce() }
-  run()
+  const lang = running = getLang()
+  const root = document.documentElement
+  root.lang = lang
+  root.dir = lang === 'ar' ? 'rtl' : 'ltr'
+  root.classList.toggle('rtl', lang === 'ar')
+  const tree = layer(lang)
+  const title = () => { const t = translateText(document.title, lang); if (t !== document.title) document.title = t }
+  tree(document.body); title()
   new MutationObserver((list) => {
     for (const m of list) {
-      if (m.type === 'characterData') translateTree(m.target)
-      else if (m.type === 'attributes') translateTree(m.target)
-      else m.addedNodes.forEach(translateTree)
+      if (m.type === 'childList') m.addedNodes.forEach(tree)
+      else tree(m.target)
     }
-  }).observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['placeholder', 'title', 'aria-label'] })
+  }).observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ATTRS })
 }

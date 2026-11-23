@@ -30,6 +30,7 @@ import { missingNow } from '../lib/missingNow'
 import { ACTIONS, shows } from '../lib/stageActions'
 import useProfilePhase from '../hooks/useProfilePhase'
 import { useCan } from '../lib/staffPerms'
+import DataRights from '../components/DataRights'
 
 // Her father's name as the emergency contact: his name and his father's (her surname),
 // e.g. "ABAGOLE KEDIR". A saved name that was only his first name gets the surname too.
@@ -311,6 +312,8 @@ export default function ProfileDetailPage() {
           </div>
         }
       />
+
+      <DataRights profile={profile} onChanged={(v) => setProfile(p => ({ ...p, ...v }))} />
 
       {/* Labor ID — first thing on the page */}
       <div data-tour="labor-id" className="rounded-2xl p-[2px] bg-gradient-to-r from-teal-500 via-sky-500 to-indigo-500 shadow-sm">

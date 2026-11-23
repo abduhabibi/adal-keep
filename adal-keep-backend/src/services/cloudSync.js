@@ -1058,15 +1058,12 @@ export function startRelay(db) {
 }
 
 // ------------------------------------------------------------ pairing
-/** Phones pair from anywhere: this PC's number + the agency's phone password. */
-export async function setPhonePassword(db, pc, password) {
-  await cloudCall(db, 'POST', '/rest/v1/rpc/keep_set_phone_password', { p_pc: String(pc), p_password: String(password || '') })
-}
-export async function phonePasswordSet(db) {
+/** Phones pair from anywhere: this PC's number + "Yes, it's me" on the PC (no second password). */
+export async function pairingState(db) {
   const agency = await cloudAgencyId(db)
-  const rows = await cloudCall(db, 'GET', `/rest/v1/keep_pairing?agency_id=eq.${agency}&select=pc_number,updated_at,pass_hash`).catch(() => [])
+  const rows = await cloudCall(db, 'GET', `/rest/v1/keep_pairing?agency_id=eq.${agency}&select=pc_number,updated_at`).catch(() => [])
   const r = rows?.[0]
-  return r ? { pc_number: r.pc_number, updated_at: r.updated_at, pass_set: !!r.pass_hash } : null
+  return r ? { pc_number: r.pc_number, updated_at: r.updated_at } : null
 }
 
 // ------------------------------------------------------------ Telegram channel

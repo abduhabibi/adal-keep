@@ -16,7 +16,7 @@ import { fileURLToPath } from 'url'
 import { pcNumber, notMainPC as isFollower, tailscaleInfo } from '../services/mainPC.js'   // (phones pair with the main PC's role)
 import { getLanAddresses } from '../services/discovery.js'
 import { liveStatus } from '../services/liveChannel.js'
-import { joinRequests, joinPresence, answerJoin, setPhonePassword, phonePasswordSet, relayStatus, cloudOn, cloudStatus, makeDevice, listDevices, setDeviceRevoked, syncNow } from '../services/cloudSync.js'
+import { joinRequests, joinPresence, answerJoin, pairingState, relayStatus, cloudOn, cloudStatus, makeDevice, listDevices, setDeviceRevoked, syncNow } from '../services/cloudSync.js'
 import { onThisPC, fromCompanion } from './trash.js'
 
 const router = express.Router()
@@ -74,16 +74,10 @@ router.get('/mobile/cloud', async (req, res) => {
   let devices = []
   let error = cloudStatus.error
   try { if (await cloudOn(db)) devices = await listDevices(db) } catch (e) { error = error || e.message }
-  const pairing = await phonePasswordSet(db).catch(() => null)
+  const pairing = await pairingState(db).catch(() => null)
   res.json({ ...cloudStatus, on: await cloudOn(db).catch(() => false), devices, error, relay: relayStatus, live: liveStatus, pcNumber: pcNumber(), pairing })
 })
-// The agency's phone password (pairing from anywhere). Set on the main PC itself.
-router.post('/mobile/phone-password', async (req, res) => {
-  if (!onThisPC(req) && !fromCompanion(req)) return res.status(403).json({ error: 'Set the phone password on the main PC itself.' })
-  if (isFollower()) return res.status(403).json({ error: 'This PC follows the main PC — set it there.' })
-  try { await setPhonePassword(req.app.locals.db, pcNumber(), req.body?.password); res.json({ ok: true }) }
-  catch (e) { res.status(400).json({ error: /keep_set_phone_password|schema cache|PGRST/i.test(e.message) ? 'Run adal-admin/supabase/keep-sync.sql in Supabase once more first.' : e.message }) }
-})
+// (No phone password any more: one agency, one password. Phones pair with this PC's number and a "Yes, it's me" below.)
 // Phones asking to join: the PC answers "Yes, it's me" / No (never a phone itself).
 router.get('/mobile/join-requests', async (req, res) => {
   // Asked by this PC's own open page: someone is here to say Yes.

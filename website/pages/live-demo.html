@@ -1,0 +1,759 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<meta name="description" content="Watch Adal Keep work: a passport read in a second, a CV made and sent on WhatsApp, robots doing Musaned, Wafid, insurance and visa, the phone app, Telegram backup and Adal Keep Admin.">
+<title>Adal Keep — Live demo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+/* ---------- outer page (brand: black, white, green) ---------- */
+:root{
+  --k:#000;--w:#fff;--w70:rgba(255,255,255,.72);--w50:rgba(255,255,255,.5);--w12:rgba(255,255,255,.12);--w06:rgba(255,255,255,.06);
+  --g:#1fe07a;--g15:rgba(31,224,122,.15);--g30:rgba(31,224,122,.3);
+  /* the app itself (as it really looks) */
+  --bg:#f1f5f9;--card:#fff;--line:#e2e8f0;--line2:#eef2f6;--ink:#0f172a;--ink2:#475569;--ink3:#94a3b8;
+  --p:#0d9488;--p2:#0f766e;--p50:#f0fdfa;--p100:#ccfbf1;--amber:#f59e0b;--amb50:#fef3c7;--blue:#3b82f6;--violet:#8b5cf6;--red:#ef4444;--ok:#16a34a;
+  --disp:'Space Grotesk',system-ui,sans-serif;--ui:'Inter',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;--mono:ui-monospace,Consolas,monospace;
+  --ease:cubic-bezier(.2,.8,.2,1);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:#000;color:var(--w);font-family:var(--ui);-webkit-font-smoothing:antialiased;overflow:hidden}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+a{color:inherit;text-decoration:none}
+.shell{height:100%;display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:auto 1fr;background:radial-gradient(900px 500px at 75% -10%,rgba(31,224,122,.12),transparent 60%),#000}
+.top{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--w12)}
+.brand{display:flex;align-items:center;gap:9px;font-family:var(--disp);font-weight:700;letter-spacing:-.02em;white-space:nowrap}
+.brand .m{width:26px;height:26px;border-radius:8px;background:var(--g);color:#000;display:grid;place-items:center;font-size:14px}
+.brand small{font-family:var(--ui);font-weight:500;font-size:12px;color:var(--g);border:1px solid var(--g30);padding:2px 8px;border-radius:99px;margin-left:4px}
+.live{width:7px;height:7px;border-radius:50%;background:var(--g);display:inline-block;margin-right:6px;box-shadow:0 0 0 0 var(--g30);animation:pl 1.6s infinite}
+@keyframes pl{to{box-shadow:0 0 0 8px transparent}}
+.ctrl{margin-left:auto;display:flex;gap:6px;align-items:center}
+.cb{height:34px;min-width:34px;padding:0 12px;border-radius:99px;border:1px solid var(--w12);display:inline-flex;align-items:center;justify-content:center;gap:6px;font-size:13px;font-weight:600;color:var(--w70);transition:.2s}
+.cb:hover{color:#fff;border-color:var(--w50)}
+.cb.pri{background:var(--g);color:#000;border-color:var(--g)}
+.cb.hide-s{display:none}
+@media(min-width:760px){.cb.hide-s{display:inline-flex}}
+.main{display:grid;grid-template-columns:minmax(0,1fr);min-height:0;min-width:0}
+@media(min-width:1100px){.main{grid-template-columns:250px minmax(0,1fr)}}
+.chaps{display:flex;gap:6px;overflow-x:auto;padding:10px 14px;scrollbar-width:none;border-bottom:1px solid var(--w12)}
+.chaps::-webkit-scrollbar{display:none}
+@media(min-width:1100px){.chaps{flex-direction:column;overflow:auto;border-bottom:0;border-right:1px solid var(--w12);padding:16px 12px;gap:3px}}
+.chap{flex:none;display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:12px;font-size:13px;color:var(--w50);border:1px solid var(--w12);white-space:nowrap;text-align:left;transition:.2s}
+@media(min-width:1100px){.chap{border-color:transparent;padding:9px 10px}}
+.chap b{font-family:var(--mono);font-size:11px;color:var(--w50);font-weight:500}
+.chap:hover{color:#fff}
+.chap.on{color:#fff;background:var(--w06);border-color:var(--g30)}
+.chap.on b{color:var(--g)}
+.chap.done b::after{content:" ✓";color:var(--g)}
+.chap .bar{display:none}
+@media(min-width:1100px){.chap{position:relative;overflow:hidden}.chap .bar{display:block;position:absolute;left:0;bottom:0;height:2px;background:var(--g);width:0}}
+.stage{min-height:0;min-width:0;display:flex;flex-direction:column;padding:12px;gap:10px;position:relative}
+@media(min-width:760px){.stage{padding:18px 22px}}
+.cap{display:flex;align-items:flex-start;gap:12px;min-height:58px}
+.cap .num{font-family:var(--mono);font-size:11px;color:var(--g);border:1px solid var(--g30);border-radius:99px;padding:3px 9px;white-space:nowrap;margin-top:3px}
+.cap p{font-family:var(--disp);font-size:clamp(16px,2vw,22px);font-weight:600;letter-spacing:-.02em;line-height:1.25}
+.cap p em{font-style:normal;color:var(--g)}
+.cap p.swap{animation:sw .45s var(--ease)}
+@keyframes sw{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.prog{height:3px;border-radius:3px;background:var(--w12);overflow:hidden}
+.prog i{display:block;height:100%;width:0;background:var(--g);transition:width .4s linear}
+
+/* ---------- the Windows app window ---------- */
+.devices{flex:1;min-height:0;display:flex;gap:18px;align-items:stretch;justify-content:center;position:relative}
+.win{flex:1;min-width:0;max-width:1320px;display:flex;flex-direction:column;border-radius:12px;overflow:hidden;background:var(--bg);color:var(--ink);
+  box-shadow:0 40px 100px -30px rgba(31,224,122,.35),0 0 0 1px rgba(255,255,255,.14);transition:opacity .5s,transform .6s var(--ease),filter .5s}
+.win.dim{opacity:.35;filter:blur(1px);transform:scale(.97)}
+.tbar{height:32px;flex:none;display:flex;align-items:center;gap:8px;padding-left:12px;background:#fff;border-bottom:1px solid var(--line);font-size:12px;color:var(--ink2);user-select:none}
+.tbar .ic{width:16px;height:16px;border-radius:4px;background:var(--p);color:#fff;display:grid;place-items:center;font-size:10px;font-weight:700}
+.tbar .wc{margin-left:auto;display:flex;height:100%}
+.tbar .wc span{width:44px;display:grid;place-items:center;color:var(--ink2)}
+.tbar .wc span:last-child:hover{background:#e81123;color:#fff}
+.banner{flex:none;background:#fef3c7;color:#78350f;font-size:12px;text-align:center;padding:4px 8px}
+.app{flex:1;min-height:0;display:flex;position:relative}
+.side{width:220px;flex:none;background:#fff;border-right:1px solid var(--line);display:none;flex-direction:column;padding:12px 10px}
+@media(min-width:900px){.side{display:flex}}
+.logo{display:flex;align-items:center;gap:10px;padding:4px 6px 16px}
+.logo .lm{width:34px;height:34px;border-radius:10px;background:var(--p);color:#fff;display:grid;place-items:center;font-weight:800;font-size:16px}
+.logo b{display:block;font-size:15px;letter-spacing:-.01em}
+.logo small{font-size:11px;color:var(--ink3)}
+.nav a{display:flex;align-items:center;gap:11px;padding:9px 10px;border-radius:10px;font-size:13.5px;color:var(--ink2);font-weight:500;margin-bottom:2px}
+.nav a svg{width:17px;height:17px;flex:none}
+.nav a.on{background:var(--p50);color:var(--p2);font-weight:600}
+.nav hr{border:0;border-top:1px solid var(--line);margin:8px 4px}
+.side .foot{margin-top:auto;font-size:11px;color:var(--ink3);padding:6px}
+.side .foot i{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--ok);margin-right:6px}
+.body{flex:1;min-width:0;display:flex;flex-direction:column}
+.hdr{flex:none;margin:10px 10px 0;background:#fff;border:1px solid var(--line);border-radius:16px;padding:10px 12px;display:flex;align-items:center;gap:10px}
+.hdr h1{font-size:16px;letter-spacing:-.01em}
+.hdr p{font-size:12px;color:var(--ink3)}
+.hdr .sp{margin-left:auto;display:flex;align-items:center;gap:6px}
+.ib{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;color:var(--ink2);position:relative}
+.ib:hover{background:var(--bg)}
+.ib svg{width:18px;height:18px}
+.ib .dot{position:absolute;top:6px;right:7px;width:8px;height:8px;border-radius:50%;background:var(--red);border:2px solid #fff;display:none}
+.ib .dot.on{display:block}
+.av{width:32px;height:32px;border-radius:50%;background:var(--p);color:#fff;display:grid;place-items:center;font-weight:700;font-size:13px}
+.ham{display:grid}
+@media(min-width:900px){.ham{display:none}}
+.view{flex:1;min-height:0;overflow:auto;padding:12px 10px 40px;scroll-behavior:smooth}
+@media(min-width:760px){.view{padding:16px 18px 40px}}
+.cols{display:flex;gap:14px;align-items:flex-start}
+.colm{flex:1;min-width:0}
+.search{width:250px;flex:none;background:#fff;border:1px solid var(--line);border-radius:16px;padding:12px;display:none;position:sticky;top:0}
+@media(min-width:1280px){.search{display:block}}
+.search h6{font-size:10.5px;letter-spacing:.1em;color:var(--ink3);margin-bottom:8px}
+.search .in{border:1px solid var(--line);border-radius:10px;padding:7px 10px;font-size:12px;color:var(--ink3);margin-bottom:8px}
+.search .r{padding:6px 4px;border-bottom:1px solid var(--line2);font-size:12px;font-weight:600}
+.search .r small{display:block;font-weight:400;color:var(--ink3);font-size:11px}
+.search .r.new{background:var(--p50);border-radius:8px;animation:fl 1.4s}
+@keyframes fl{0%{background:var(--p100)}}
+.ttl{font-size:22px;font-weight:700;letter-spacing:-.02em}
+.sub{font-size:13px;color:var(--ink3);margin-bottom:14px}
+.card{background:#fff;border:1px solid var(--line);border-radius:18px;padding:16px}
+.grid4{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
+@media(min-width:760px){.grid4{grid-template-columns:repeat(4,1fr);gap:14px}}
+.st .ic{width:36px;height:36px;border-radius:10px;color:#fff;display:grid;place-items:center;font-weight:700;font-size:15px;margin-bottom:12px}
+.st p{font-size:13px;color:var(--ink2);font-weight:500}
+.row{display:flex;align-items:center;gap:10px;padding:11px 6px;border-bottom:1px solid var(--line2);font-size:13px}
+.row:last-child{border-bottom:0}
+.row .nm{font-weight:600;font-size:13px}
+.row .nm small{display:block;font-weight:400;color:var(--ink3);font-size:12px}
+.row .bk{margin-left:auto;color:var(--ink2);font-size:12px;display:none}
+@media(min-width:600px){.row .bk{display:block}}
+.chip{font-size:11px;font-weight:600;padding:3px 9px;border-radius:99px;white-space:nowrap;background:var(--amb50);color:#92400e}
+.chip.t{background:var(--p50);color:var(--p2)}
+.chip.g{background:#dcfce7;color:#166534}
+.chip.b{background:#dbeafe;color:#1e40af}
+.chip.s{background:#f1f5f9;color:var(--ink2)}
+.chip.fl{animation:pop .6s var(--ease)}
+@keyframes pop{0%{transform:scale(.6);opacity:0}60%{transform:scale(1.15)}100%{transform:none;opacity:1}}
+.btn{display:inline-flex;align-items:center;gap:7px;height:36px;padding:0 14px;border-radius:10px;font-size:13px;font-weight:600;background:var(--p);color:#fff;white-space:nowrap;transition:.15s}
+.btn:hover{background:var(--p2)}
+.btn.o{background:#fff;color:var(--ink);border:1px solid var(--line)}
+.btn.r{background:#dc2626}
+.btn.g{background:#16a34a}
+.btn svg{width:15px;height:15px}
+.btn[disabled]{opacity:.45;pointer-events:none}
+.acts{display:flex;flex-wrap:wrap;gap:8px}
+.ph-h{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start;justify-content:space-between;margin-bottom:12px}
+.lab{border:1.5px solid var(--p);background:var(--p50);border-radius:12px;padding:10px 14px;display:flex;justify-content:space-between;align-items:center;font-size:11px;letter-spacing:.12em;color:var(--p2);font-weight:700;margin-bottom:10px}
+.lab span{font-family:var(--mono);font-size:15px;letter-spacing:.04em}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+.pgrid{display:grid;gap:14px}
+@media(min-width:1000px){.pgrid{grid-template-columns:270px 1fr}}
+.fld{background:var(--bg);border-radius:10px;padding:8px 11px;margin-bottom:8px}
+.fld small{display:block;font-size:10px;letter-spacing:.08em;color:var(--ink3);font-weight:600;text-transform:uppercase}
+.fld b{font-size:13.5px;font-weight:600;display:block;min-height:1.3em}
+.docs{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+@media(min-width:700px){.docs{grid-template-columns:repeat(4,1fr)}}
+.doc{border:1px solid var(--line);border-radius:14px;padding:10px;min-height:150px;display:flex;flex-direction:column;gap:8px;background:#fff;transition:.3s}
+.doc h5{font-size:13px;display:flex;justify-content:space-between;align-items:center}
+.doc h5 span{font-size:10px;color:var(--p);font-weight:600;background:var(--p50);padding:2px 7px;border-radius:99px}
+.up{flex:1;border:1.5px dashed #cbd5e1;border-radius:10px;display:grid;place-items:center;text-align:center;font-size:11px;color:var(--p);font-weight:600;padding:8px;min-height:84px}
+.up svg{width:20px;height:20px;margin:0 auto 4px;color:#94a3b8}
+.thumb{flex:1;border-radius:10px;min-height:84px;background:#e2e8f0;position:relative;overflow:hidden;animation:pop .5s var(--ease)}
+.thumb.pass{background:linear-gradient(135deg,#d9f0e6,#cfe3f5)}
+.thumb.pass::before{content:"";position:absolute;left:10%;top:22%;width:28%;height:52%;border-radius:6px;background:#94a3b8}
+.thumb.pass::after{content:"";position:absolute;left:46%;right:10%;top:26%;height:6px;background:#64748b;box-shadow:0 12px 0 #94a3b8,0 24px 0 #94a3b8,0 36px 0 #94a3b8;border-radius:3px}
+.thumb.face{background:linear-gradient(180deg,#e7ecf2,#cfd8e3)}
+.thumb.face::before{content:"";position:absolute;left:50%;top:18%;width:34%;aspect-ratio:1;margin-left:-17%;border-radius:50%;background:#8b6d5c}
+.thumb.face::after{content:"";position:absolute;left:50%;bottom:-25%;width:80%;aspect-ratio:1;margin-left:-40%;border-radius:50%;background:#0d9488}
+.thumb.body::before{content:"";position:absolute;left:50%;top:10%;width:16%;aspect-ratio:1;margin-left:-8%;border-radius:50%;background:#8b6d5c}
+.thumb.body::after{content:"";position:absolute;left:50%;top:28%;width:30%;height:66%;margin-left:-15%;border-radius:30px 30px 6px 6px;background:#0d9488}
+.thumb.pdf{background:#fff;border:1px solid var(--line)}
+.thumb.pdf::before{content:"PDF";position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-weight:800;font-size:13px;color:#dc2626;border:2px solid #dc2626;border-radius:6px;padding:8px 6px}
+.cvst{border:1.5px solid #fbbf24;background:#fffbeb;border-radius:10px;padding:8px;font-size:11px;color:#92400e}
+.cvst b{display:block;font-size:12px;margin-bottom:3px}
+.cvst.ok{border-color:#86efac;background:#f0fdf4;color:#166534}
+/* journey */
+.jr{margin-bottom:14px}
+.jr h4{font-size:14px;margin-bottom:6px;display:flex;justify-content:space-between}
+.jr h4 small{font-weight:500;color:var(--ink3)}
+.jsvg{width:100%;height:auto;display:none}
+@media(min-width:700px){.jsvg{display:block}}
+.jsvg .tr{fill:none;stroke:#e2e8f0;stroke-width:6;stroke-linecap:round}
+.jsvg .fi{fill:none;stroke:var(--p);stroke-width:6;stroke-linecap:round;transition:stroke-dashoffset 1s var(--ease)}
+.jsvg circle{fill:#fff;stroke:#cbd5e1;stroke-width:3;transition:.4s}
+.jsvg circle.on{fill:var(--p);stroke:var(--p)}
+.jsvg circle.now{fill:#fff;stroke:var(--p);stroke-width:4}
+.jsvg text{font:600 13px var(--ui);fill:var(--ink2)}
+.jsvg text.on{fill:var(--p2)}
+.jlist{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+@media(min-width:700px){.jlist{display:none}}
+.jlist div{font-size:12px;padding:6px 8px;border-radius:8px;background:var(--bg);color:var(--ink3);font-weight:600}
+.jlist div.on{background:var(--p50);color:var(--p2)}
+.jlist div.on::before{content:"✓ "}
+.jlist div.now{outline:2px solid var(--p)}
+/* add profile */
+.addg{display:grid;gap:14px}
+@media(min-width:1000px){.addg{grid-template-columns:1fr 1.1fr}}
+.drop{border:2px dashed #94a3b8;border-radius:16px;min-height:260px;display:grid;place-items:center;text-align:center;color:var(--ink2);font-size:13px;position:relative;overflow:hidden;background:#fff}
+.drop svg{width:34px;height:34px;color:var(--p);margin:0 auto 8px}
+.drop.has{border-style:solid;border-color:var(--p)}
+.pp{position:absolute;inset:16px;border-radius:12px;background:linear-gradient(135deg,#e6f4ee,#dbe7f5);display:grid;grid-template-columns:30% 1fr;gap:10px;padding:14px;color:#334155;font-size:10px;box-shadow:0 10px 30px -10px rgba(0,0,0,.3)}
+.pp .ph{border-radius:8px;background:linear-gradient(180deg,#cfd8e3,#b6c2d1);position:relative;overflow:hidden}
+.pp .ph::before{content:"";position:absolute;left:50%;top:18%;width:44%;aspect-ratio:1;margin-left:-22%;border-radius:50%;background:#8b6d5c}
+.pp .ph::after{content:"";position:absolute;left:50%;bottom:-20%;width:90%;aspect-ratio:1;margin-left:-45%;border-radius:50%;background:#475569}
+.pp .ln{display:grid;gap:5px;align-content:start}
+.pp .ln b{display:block;font-family:var(--mono);font-size:11px;color:#0f172a}
+.pp .mrz{grid-column:1/-1;font-family:var(--mono);font-size:9.5px;letter-spacing:.06em;line-height:1.5;white-space:nowrap;overflow:hidden;color:#0f172a}
+.pp .top{grid-column:1/-1;display:flex;justify-content:space-between;font-weight:700;letter-spacing:.1em;padding:0;border:0}
+.laser{position:absolute;left:10px;right:10px;height:3px;border-radius:3px;background:var(--p);box-shadow:0 0 16px 4px rgba(13,148,136,.45);top:16px;opacity:0}
+.laser.go{animation:lz .9s linear forwards}
+@keyframes lz{0%{opacity:1;top:16px}92%{opacity:1}100%{opacity:0;top:calc(100% - 16px)}}
+.flyin{animation:flyin .7s var(--ease)}
+@keyframes flyin{from{transform:translate(120px,-90px) rotate(14deg) scale(.6);opacity:0}to{transform:none;opacity:1}}
+.form{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.inp{display:flex;flex-direction:column;gap:4px;font-size:11.5px;color:var(--ink2);font-weight:600}
+.inp.full{grid-column:1/-1}
+.inp div{height:36px;border:1px solid var(--line);border-radius:10px;background:#fff;padding:0 10px;display:flex;align-items:center;font-size:13px;color:var(--ink);font-weight:500;transition:.3s}
+.inp div.got{border-color:var(--p);background:var(--p50)}
+.ocr{display:flex;align-items:center;gap:8px;margin-top:10px;font-size:12.5px;color:var(--ink2)}
+.ocr b{font-family:var(--mono);color:var(--p2);font-size:16px}
+/* CV */
+.cvwrap{display:grid;gap:14px}
+@media(min-width:1000px){.cvwrap{grid-template-columns:1fr 240px}}
+.a4{background:#fff;border:1px solid var(--line);border-radius:6px;box-shadow:0 20px 50px -20px rgba(15,23,42,.35);width:100%;max-width:620px;margin:0 auto;aspect-ratio:1/1.414;display:flex;flex-direction:column;overflow:hidden;font-size:clamp(7px,1.15vw,11px);animation:pop .6s var(--ease)}
+.a4 .hd{background:linear-gradient(90deg,#0f766e,#0d9488);color:#fff;padding:3.5% 5%;display:flex;justify-content:space-between;align-items:center}
+.a4 .hd b{font-size:1.6em;letter-spacing:.04em}
+.a4 .hd small{display:block;opacity:.85}
+.a4 .bd{flex:1;display:grid;grid-template-columns:34% 1fr;gap:4%;padding:4% 5%}
+.a4 .pic{aspect-ratio:3/4;border-radius:4px;background:linear-gradient(180deg,#e7ecf2,#cfd8e3);position:relative;overflow:hidden}
+.a4 .pic::before{content:"";position:absolute;left:50%;top:16%;width:40%;aspect-ratio:1;margin-left:-20%;border-radius:50%;background:#8b6d5c}
+.a4 .pic::after{content:"";position:absolute;left:50%;bottom:-22%;width:86%;aspect-ratio:1;margin-left:-43%;border-radius:50%;background:#0d9488}
+.a4 .pic.full{aspect-ratio:1/1.5;margin-top:6%}
+.a4 .pic.full::before{top:6%;width:22%;margin-left:-11%}
+.a4 .pic.full::after{bottom:auto;top:22%;width:44%;height:74%;aspect-ratio:auto;margin-left:-22%;border-radius:40px 40px 6px 6px}
+.a4 h3{font-size:1.9em;color:#0f766e;letter-spacing:-.01em;margin-bottom:2%}
+.a4 .pos{display:inline-block;background:#ccfbf1;color:#0f766e;font-weight:700;padding:.3em .8em;border-radius:99px;margin-bottom:4%}
+.a4 table{width:100%;border-collapse:collapse;margin-bottom:4%}
+.a4 td{padding:.45em .3em;border-bottom:1px solid #eef2f6}
+.a4 td:first-child{color:#64748b;width:46%}
+.a4 td:last-child{font-weight:600}
+.a4 h4{font-size:1.05em;color:#0f766e;letter-spacing:.08em;margin:3% 0 2%}
+.a4 .sk{display:grid;grid-template-columns:1fr 1fr;gap:.4em}
+.a4 .sk span::before{content:"✓ ";color:#0d9488;font-weight:800}
+.a4 .ft{background:#0f172a;color:#cbd5e1;padding:2% 5%;display:flex;justify-content:space-between}
+.side-card h5{font-size:13px;margin-bottom:8px}
+.side-card p{font-size:12px;color:var(--ink2);margin-bottom:10px}
+/* list with checkboxes */
+.ck{width:18px;height:18px;border-radius:5px;border:2px solid #cbd5e1;flex:none;display:grid;place-items:center;transition:.2s}
+.ck.on{background:var(--p);border-color:var(--p)}
+.ck.on::after{content:"";width:8px;height:4px;border-left:2px solid #fff;border-bottom:2px solid #fff;transform:rotate(-45deg) translate(1px,-1px)}
+/* modal */
+.modal{position:absolute;inset:0;background:rgba(15,23,42,.45);display:grid;place-items:center;padding:14px;z-index:30;animation:fd .3s}
+@keyframes fd{from{opacity:0}}
+.mbox{background:#fff;border-radius:18px;width:min(460px,100%);padding:18px;box-shadow:0 30px 80px -20px rgba(0,0,0,.5);animation:pop .4s var(--ease);max-height:100%;overflow:auto}
+.mbox h3{font-size:16px;margin-bottom:4px}
+.mbox p{font-size:12.5px;color:var(--ink2);margin-bottom:12px}
+.opt{display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:12px;padding:10px;margin-bottom:8px;font-size:13px;font-weight:600}
+.opt small{display:block;font-weight:400;color:var(--ink3);font-size:11.5px}
+.opt.on{border-color:var(--p);background:var(--p50)}
+.wa{background:#efeae2;border-radius:12px;padding:10px;display:flex;flex-direction:column;gap:7px;min-height:200px}
+.wa .hd{display:flex;align-items:center;gap:8px;background:#075e54;color:#fff;margin:-10px -10px 4px;padding:9px 10px;border-radius:12px 12px 0 0;font-size:13px;font-weight:600}
+.wa .hd i{width:26px;height:26px;border-radius:50%;background:#dfe5e7;display:block}
+.wa .hd small{display:block;font-weight:400;font-size:11px;opacity:.8}
+.bub{align-self:flex-end;background:#d9fdd3;color:#111;border-radius:10px 10px 2px 10px;padding:7px 9px;font-size:12.5px;max-width:85%;animation:pop .4s var(--ease);box-shadow:0 1px 1px rgba(0,0,0,.1)}
+.bub.them{align-self:flex-start;background:#fff;border-radius:10px 10px 10px 2px}
+.bub .pf{display:flex;gap:8px;align-items:center;background:rgba(0,0,0,.05);border-radius:8px;padding:6px}
+.bub .pf i{width:26px;height:32px;border-radius:4px;background:#dc2626;color:#fff;font-style:normal;font-size:8px;font-weight:800;display:grid;place-items:center}
+.bub .pf small{display:block;color:#667781;font-size:10.5px}
+.bub time{display:block;text-align:right;font-size:10px;color:#667781;margin-top:2px}
+.bub time b{color:#53bdeb;font-weight:600}
+/* robot browser */
+.robot{position:absolute;inset:8px;z-index:25;background:#fff;border-radius:12px;border:1px solid var(--line);box-shadow:0 30px 80px -20px rgba(0,0,0,.5);display:flex;flex-direction:column;overflow:hidden;animation:pop .45s var(--ease)}
+.rb-tabs{display:flex;align-items:flex-end;gap:2px;background:#dfe3e8;padding:6px 8px 0}
+.rb-tab{background:#fff;border-radius:8px 8px 0 0;padding:6px 12px;font-size:11.5px;display:flex;gap:6px;align-items:center;max-width:240px;white-space:nowrap;overflow:hidden}
+.rb-tab i{width:12px;height:12px;border-radius:3px;background:var(--ok)}
+.rb-tab.off{background:transparent;color:var(--ink2)}
+.rb-url{display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid var(--line);font-size:12px;color:var(--ink2)}
+.rb-url div{flex:1;background:#f1f3f4;border-radius:99px;padding:5px 12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rb-url b{color:var(--ink)}
+.rb-url .bot{font-size:11px;font-weight:700;color:#fff;background:var(--p);border-radius:99px;padding:4px 10px;white-space:nowrap}
+.rb-body{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr)}
+@media(min-width:900px){.rb-body{grid-template-columns:minmax(0,1fr) 240px}}
+.portal{overflow:auto;padding:0;background:#f7f8fa;position:relative}
+.pt-h{background:#24323d;color:#fff;padding:12px 16px;display:flex;align-items:center;gap:10px;font-weight:700;font-size:14px}
+.pt-h i{width:24px;height:24px;border-radius:6px;background:var(--hc,#3aa76d)}
+.pt-h small{margin-left:auto;font-weight:500;font-size:11px;opacity:.7}
+.pt-b{padding:14px 16px}
+.pt-b h3{font-size:15px;margin-bottom:10px}
+.pt-f{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.pt-f .inp div{border-radius:6px}
+.pt-f .inp div.typing{border-color:var(--hc,#3aa76d);box-shadow:0 0 0 3px rgba(58,167,109,.15)}
+.pt-btn{margin-top:12px;display:inline-flex;height:34px;align-items:center;padding:0 16px;border-radius:6px;background:var(--hc,#3aa76d);color:#fff;font-size:13px;font-weight:600}
+.pt-ok{margin:12px 0 0;padding:12px;border-radius:8px;background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46;font-size:13px;font-weight:600;animation:pop .4s var(--ease)}
+.rlog{border-left:1px solid var(--line);padding:12px;font-size:12px;display:none;flex-direction:column;gap:6px;background:#fff;overflow:auto}
+@media(min-width:900px){.rlog{display:flex}}
+.rlog h6{font-size:11px;letter-spacing:.1em;color:var(--ink3);margin-bottom:4px}
+.rlog div{display:flex;gap:8px;align-items:flex-start;color:var(--ink2);animation:fd .3s}
+.rlog div::before{content:"";flex:none;width:14px;height:14px;border-radius:50%;border:2px solid #cbd5e1;border-top-color:var(--p);animation:spin .8s linear infinite;margin-top:1px}
+.rlog div.ok::before{animation:none;border:0;background:var(--p) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='4'%3E%3Cpath d='M5 12l5 5 9-10'/%3E%3C/svg%3E") center/9px no-repeat}
+@keyframes spin{to{transform:rotate(360deg)}}
+.rcur{position:absolute;z-index:5;width:20px;height:20px;pointer-events:none;transition:transform .55s var(--ease);left:0;top:0}
+.rcur svg{width:20px;height:20px;filter:drop-shadow(0 2px 3px rgba(0,0,0,.3))}
+/* toast */
+.toasts{position:absolute;top:56px;right:12px;z-index:40;display:flex;flex-direction:column;gap:8px;pointer-events:none;max-width:calc(100% - 24px)}
+.toast{background:#fff;border:1px solid var(--line);border-left:4px solid var(--p);border-radius:12px;padding:10px 12px;font-size:12.5px;box-shadow:0 14px 40px -12px rgba(15,23,42,.35);animation:tin .45s var(--ease);min-width:240px}
+.toast b{display:block;font-size:13px}
+.toast.out{animation:tout .4s forwards}
+@keyframes tin{from{transform:translateX(30px);opacity:0}}
+@keyframes tout{to{transform:translateX(30px);opacity:0}}
+/* import + settings + admin */
+.srcs{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
+@media(min-width:800px){.srcs{grid-template-columns:repeat(4,1fr)}}
+.src{border:1.5px solid var(--line);border-radius:14px;padding:14px;background:#fff;font-weight:700;font-size:14px}
+.src small{display:block;font-weight:400;color:var(--ink3);font-size:11.5px;margin-top:3px}
+.src.on{border-color:var(--p);background:var(--p50)}
+.pbar{height:8px;border-radius:8px;background:var(--line);overflow:hidden;margin:6px 0 12px}
+.pbar i{display:block;height:100%;width:0;background:var(--p);border-radius:8px;transition:width .3s linear}
+.kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.kpi{background:var(--bg);border-radius:12px;padding:10px}
+.kpi b{display:block;font-size:22px;font-variant-numeric:tabular-nums}
+.kpi small{color:var(--ink2);font-size:12px}
+.set{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--line2);font-size:13px}
+.set:last-child{border:0}
+.set .tg{margin-left:auto;width:38px;height:22px;border-radius:99px;background:var(--p);position:relative;flex:none}
+.set .tg::after{content:"";position:absolute;right:3px;top:3px;width:16px;height:16px;border-radius:50%;background:#fff}
+.set small{display:block;color:var(--ink3);font-size:12px}
+.tbl{width:100%;border-collapse:collapse;font-size:12.5px}
+.tbl th{text-align:left;font-size:11px;color:var(--ink3);letter-spacing:.06em;font-weight:600;padding:8px;border-bottom:1px solid var(--line)}
+.tbl td{padding:10px 8px;border-bottom:1px solid var(--line2);white-space:nowrap}
+.tbl .hide-m{display:none}
+@media(min-width:760px){.tbl .hide-m{display:table-cell}}
+.on-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--ok);margin-right:6px;box-shadow:0 0 0 0 rgba(22,163,74,.4);animation:pd 2s infinite}
+.on-dot.off{background:#94a3b8;animation:none}
+@keyframes pd{to{box-shadow:0 0 0 7px transparent}}
+.mini{height:6px;width:90px;border-radius:6px;background:var(--line);overflow:hidden;display:inline-block;vertical-align:middle}
+.mini i{display:block;height:100%;background:var(--p)}
+/* phone */
+.phone{flex:none;width:min(300px,86vw);aspect-ratio:9/19.3;border-radius:40px;padding:10px;background:#0b0c0c;box-shadow:0 0 0 1.5px #333,0 40px 90px -30px rgba(31,224,122,.5);position:relative;display:none;align-self:center;animation:pop .5s var(--ease)}
+.phone.show{display:block}
+.pscr{width:100%;height:100%;border-radius:31px;background:#f1f5f9;overflow:hidden;position:relative;color:var(--ink);display:flex;flex-direction:column}
+.psb{height:28px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 18px;font-size:11px;font-weight:600;background:#fff}
+.psb i{width:60px;height:16px;border-radius:99px;background:#000;display:block}
+.pah{background:#fff;padding:8px 14px 10px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--line)}
+.pah b{font-size:16px}
+.pah span{margin-left:auto;font-size:10.5px;font-weight:600;color:#b45309;background:#fef3c7;padding:3px 8px;border-radius:99px}
+.pbody{flex:1;overflow:auto;padding:10px}
+.pr{background:#fff;border-radius:14px;padding:9px;display:flex;gap:9px;align-items:center;margin-bottom:7px;font-size:12px;font-weight:600}
+.pr i{width:32px;height:32px;border-radius:50%;background:linear-gradient(180deg,#cfd8e3,#94a3b8);flex:none}
+.pr small{display:block;font-weight:400;color:var(--ink3);font-size:10.5px}
+.pr .chip{margin-left:auto}
+.pr.new{animation:pop .5s var(--ease);outline:2px solid var(--p)}
+.fab{position:absolute;right:16px;bottom:18px;width:50px;height:50px;border-radius:16px;background:var(--p);color:#fff;display:grid;place-items:center;font-size:26px;box-shadow:0 10px 24px -8px rgba(13,148,136,.7)}
+.cam{position:absolute;inset:0;background:#111;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;animation:fd .3s;z-index:5}
+.cam .fr{width:78%;aspect-ratio:1.42;border:2px solid rgba(255,255,255,.7);border-radius:12px;position:relative;display:grid;place-items:center;color:rgba(255,255,255,.6);font-size:11px}
+.cam .fr .pp{inset:6px;transform:scale(.98)}
+.cam .shut{width:58px;height:58px;border-radius:50%;border:4px solid #fff;background:rgba(255,255,255,.25)}
+.cam p{color:#fff;font-size:12px}
+.notif{position:absolute;left:8px;right:8px;top:34px;background:#fff;border-radius:18px;padding:10px 12px;box-shadow:0 14px 34px -10px rgba(0,0,0,.45);display:flex;gap:10px;font-size:11.5px;z-index:6;animation:ndrop .5s var(--ease)}
+.notif .ni{width:30px;height:30px;border-radius:9px;background:var(--p);color:#fff;display:grid;place-items:center;font-weight:800;flex:none}
+.notif b{display:block;font-size:12px}
+.notif small{color:var(--ink3)}
+@keyframes ndrop{from{transform:translateY(-120%)}}
+/* fake cursor + hot spot */
+#cur{position:fixed;left:0;top:0;z-index:100;pointer-events:none;width:26px;height:26px;transform:translate(-100px,-100px);transition:transform .8s var(--ease)}
+#cur svg{width:26px;height:26px;filter:drop-shadow(0 3px 5px rgba(0,0,0,.45))}
+#cur .rp{position:absolute;left:-14px;top:-14px;width:28px;height:28px;border-radius:50%;border:2px solid var(--g);opacity:0}
+#cur.click .rp{animation:rp .5s ease-out}
+@keyframes rp{0%{opacity:1;transform:scale(.3)}100%{opacity:0;transform:scale(1.8)}}
+.hot{position:relative;z-index:2;box-shadow:0 0 0 3px rgba(31,224,122,.9),0 0 0 8px rgba(31,224,122,.25)!important;animation:hot 1.4s infinite;border-radius:10px}
+@keyframes hot{50%{box-shadow:0 0 0 3px rgba(31,224,122,.9),0 0 0 14px rgba(31,224,122,0)}}
+.tip{position:fixed;z-index:99;pointer-events:none;background:var(--g);color:#000;font-size:12px;font-weight:700;padding:5px 10px;border-radius:99px;white-space:nowrap;opacity:0;transition:opacity .3s}
+.tip.on{opacity:1}
+/* end card */
+.end{position:absolute;inset:0;z-index:60;background:rgba(0,0,0,.82);backdrop-filter:blur(8px);display:none;place-items:center;text-align:center;padding:20px}
+.end.on{display:grid;animation:fd .4s}
+.end h2{font-family:var(--disp);font-size:clamp(36px,6vw,72px);letter-spacing:-.05em;line-height:.95;margin-bottom:14px}
+.end h2 span{color:var(--g)}
+.end p{color:var(--w70);max-width:520px;margin:0 auto 22px}
+.end .r{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+.end .cb{height:44px;padding:0 20px;font-size:14px}
+@media(max-width:899px){.win.dim{display:none}.phone{height:100%;width:auto;max-width:100%;max-height:640px}}
+@media(max-width:520px){.top{padding:8px 10px;gap:6px}.brand small{font-size:0;padding:4px;margin-left:0;border:0}.brand small .live{margin:0}.cb{min-width:32px;height:32px;padding:0 9px}#bPlay span{display:none!important}.cap{min-height:0;gap:8px}.cap p{font-size:15px}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div class="shell">
+  <header class="top">
+    <a class="brand" href="adal-3d.html"><span class="m">A</span>Adal Keep <small><span class="live"></span>Live demo</small></a>
+    <div class="ctrl">
+      <button class="cb" id="bPrev" title="Back" aria-label="Previous step">◀</button>
+      <button class="cb pri" id="bPlay" aria-label="Pause">❚❚ <span class="hide-s" style="display:inline">Pause</span></button>
+      <button class="cb" id="bNext" title="Next" aria-label="Next step">▶</button>
+      <button class="cb hide-s" id="bSpeed">1×</button>
+      <a class="cb hide-s" href="adal-3d.html">Website</a>
+    </div>
+  </header>
+  <div class="main">
+    <nav class="chaps" id="chaps" aria-label="Chapters"></nav>
+    <section class="stage">
+      <div class="cap"><span class="num" id="capNum">1 / 12</span><p id="cap">Loading the demo…</p></div>
+      <div class="prog"><i id="prog"></i></div>
+      <div class="devices">
+        <div class="win" id="win">
+          <div class="tbar"><span class="ic">A</span><span id="wTitle">Adal Keep — Adal Demo Agency</span><span class="wc"><span>—</span><span>▢</span><span>✕</span></span></div>
+          <div class="banner">Demo — everyone and every number here is made up.</div>
+          <div class="app">
+            <aside class="side" id="side"></aside>
+            <div class="body">
+              <div class="hdr">
+                <button class="ib ham" aria-label="Menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+                <div><h1 id="hTitle">Dashboard</h1><p id="hSub">Welcome back · 3 tasks waiting</p></div>
+                <div class="sp">
+                  <button class="ib" id="bNew" aria-label="New profile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg></button>
+                  <button class="ib" id="bBell" aria-label="Notifications"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 8 3 8H3s3-1 3-8"/><path d="M10 20a2 2 0 0 0 4 0"/></svg><span class="dot" id="bellDot"></span></button>
+                  <span class="av">A</span>
+                </div>
+              </div>
+              <div class="view" id="view"></div>
+            </div>
+            <div class="toasts" id="toasts"></div>
+          </div>
+        </div>
+        <div class="phone" id="phone"><div class="pscr" id="pscr"></div></div>
+      </div>
+    </section>
+  </div>
+</div>
+<div id="cur" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 2l15 11-6.5 1.2L16 21l-3 1.4-3.6-6.8L4 20z" fill="#fff" stroke="#000" stroke-width="1.4" stroke-linejoin="round"/></svg><span class="rp"></span></div>
+<div class="tip" id="tip">Click here</div>
+<div class="end" id="end">
+  <div>
+    <h2>That's Adal Keep.<br><span>Every girl, every portal.</span></h2>
+    <p>Passports read in a second, CVs on WhatsApp, robots for Musaned, Wafid, insurance and visa, a phone app that works with the PC off, Telegram backup and Admin.</p>
+    <div class="r">
+      <button class="cb pri" id="bReplay">↺ Watch again</button>
+      <a class="cb" href="https://adaltokeep.netlify.app/">Open the full demo app</a>
+      <a class="cb" href="adal-3d.html">Back to the website</a>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+'use strict';
+var RM=matchMedia('(prefers-reduced-motion: reduce)').matches;
+var $=function(s,r){return (r||document).querySelector(s)};
+var $$=function(s,r){return Array.prototype.slice.call((r||document).querySelectorAll(s))};
+var view=$('#view'),win=$('#win'),phone=$('#phone'),pscr=$('#pscr'),toasts=$('#toasts');
+var speed=1,playing=true,token=0,idx=-1;
+function alive(t){return t===token}
+function sleep(ms){return new Promise(function(r){setTimeout(r,RM?Math.min(ms,300):ms/speed)})}
+
+/* ---------- made-up data ---------- */
+var GIRL={name:'AMINA HASSAN YUSUF',pass:'EP3141592',dob:'12 Mar 1999',pob:'ADDIS ABABA',sex:'F',iss:'10 Jan 2025',exp:'09 Jan 2030',nat:'ETHIOPIAN',rel:'Muslim',phone:'0911 204 381',broker:'Tesfaye Brokerage'};
+var PEOPLE=[['ALMAZ DEREJE TEKLE','0911095028','Tesfaye Brokerage','Pending',''],['ZAHARA ABDELLA MUSA','0911102947','Amanuel Agency','On Musaned','t'],['LIDYA SOLOMON HAILU','0911110866','Hawassa Link','Selected','g'],['MEKDES YOHANNES AYELE','0911118785','Dessie Partners','Wafid','b'],['NEJAT KEMAL SHAFI','0911126704','Tesfaye Brokerage','Visa','g'],['EDEN FIKRE LEMMA','0911134623','Amanuel Agency','Pending','']];
+var STAGES=['CV','Musaned','Selected','Wafid','Wakala','Tasheer','Insurance','Visa'];
+var S={};
+function reset(){S={girl:false,photos:false,cv:false,stage:-1,musaned:false,wafid:false,ins:false,visa:false,newOnPhone:false,bell:false};}
+reset();
+
+/* ---------- sidebar ---------- */
+var ICON={
+ dash:'<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+ prof:'<circle cx="9" cy="8" r="4"/><path d="M2 21c1-4 4-6 7-6s6 2 7 6M17 11h5M19.5 8.5v5"/>',
+ brok:'<circle cx="8" cy="8" r="3"/><circle cx="17" cy="9" r="2.5"/><path d="M2 20c1-3.5 3.5-5 6-5s5 1.5 6 5M14 19c.6-2.4 2-3.5 3.5-3.5S21 16.6 22 19"/>',
+ emp:'<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
+ chk:'<rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 12l3 3 5-6"/>',
+ task:'<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>',
+ cv:'<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/>',
+ imp:'<path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>',
+ bell:'<path d="M6 8a6 6 0 1 1 12 0c0 7 3 8 3 8H3s3-1 3-8"/><path d="M10 20a2 2 0 0 0 4 0"/>',
+ set:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+ pc:'<rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/>',
+ bill:'<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/>',
+ up:'<path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/>'
+};
+function svg(n){return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+ICON[n]+'</svg>'}
+var NAV_APP=[['dash','Dashboard'],['prof','Profiles'],['brok','Brokers'],['emp','Employees'],['chk','Checklist'],['task','Tasks'],['cv','CVs'],['imp','Move in'],['bell','Notifications'],['-'],['set','Settings']];
+var NAV_ADMIN=[['dash','Overview'],['pc','PCs'],['bill','Plans'],['chk','Usage'],['up','Back ups'],['-'],['set','Settings']];
+function side(admin,on){
+  var items=admin?NAV_ADMIN:NAV_APP;
+  $('#side').innerHTML='<div class="logo"><span class="lm">A</span><div><b>'+(admin?'Adal Keep Admin':'Adal Demo Agency')+'</b><small>'+(admin?'All agencies':'Recruitment CRM')+'</small></div></div><nav class="nav">'+
+    items.map(function(it){return it[0]==='-'?'<hr>':'<a class="'+(it[1]===on?'on':'')+'" data-nav="'+it[1]+'">'+svg(it[0])+it[1]+'</a>'}).join('')+'</nav>'+
+    '<div class="foot"><i></i>'+(admin?'Online · 3 PCs on':'Main PC · SQLite')+'</div>';
+}
+function head(t,s){$('#hTitle').textContent=t;$('#hSub').textContent=s||''}
+function searchPanel(){
+  var list=(S.girl?[[GIRL.name,GIRL.pass+' · '+GIRL.phone,1]]:[]).concat(PEOPLE.map(function(p,i){return [p[0],'EP22'+(56748+i*7919)+' · '+p[1],0]}));
+  return '<aside class="search"><h6>PROFILES — SEARCH</h6><div class="in">Name, passport, labor ID…</div>'+list.map(function(r){return '<div class="r'+(r[2]?' new':'')+'">'+r[0]+'<small>'+r[1]+'</small></div>'}).join('')+'</aside>';
+}
+function chip(txt,c){return '<span class="chip '+(c||'')+'">'+txt+'</span>'}
+function stageChip(){return S.stage<0?chip('Pending'):chip(STAGES[S.stage]+(S.stage===7?' ✓':''),S.stage>=7?'g':S.stage>=2?'g':'t')}
+
+/* ---------- app views ---------- */
+var V={};
+V.dashboard=function(){
+  side(false,'Dashboard');head('Dashboard','Welcome back · 3 tasks waiting');
+  var n=18+(S.girl?1:0);
+  return '<div class="cols"><div class="colm"><div class="ttl">Dashboard</div><div class="sub">Everything in your agency at a glance</div>'+
+  '<div class="grid4"><div class="card st" id="stProfiles"><div class="ic" style="background:#0d9488">'+n+'</div><p>Profiles</p></div><div class="card st"><div class="ic" style="background:#3b82f6">4</div><p>Brokers</p></div><div class="card st"><div class="ic" style="background:#f59e0b">3</div><p>Tasks to do</p></div><div class="card st"><div class="ic" style="background:#8b5cf6">2</div><p>Tasks in progress</p></div></div>'+
+  '<div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:6px"><b style="font-size:15px">Recent profiles</b><span style="font-size:12px;color:var(--p);font-weight:600">See all →</span></div>'+
+  (S.girl?'<div class="row" id="rowGirl"><div class="nm">'+GIRL.name+'<small>'+GIRL.phone+'</small></div><span class="bk">'+GIRL.broker+'</span>'+stageChip()+'</div>':'')+
+  PEOPLE.map(function(p){return '<div class="row"><div class="nm">'+p[0]+'<small>'+p[1]+'</small></div><span class="bk">'+p[2]+'</span>'+chip(p[3],p[4])+'</div>'}).join('')+
+  '</div></div>'+searchPanel()+'</div>';
+};
+V.add=function(){
+  side(false,'Profiles');head('New profile','Drop her passport — Adal Keep fills the rest');
+  var F=[['Full name','name','full'],['Passport no.','pass'],['Gender','sex'],['Date of birth','dob'],['Place of birth','pob'],['Passport issued','iss'],['Passport expiry','exp'],['Nationality','nat'],['Phone','phone'],['Broker','broker']];
+  return '<div class="ttl">New profile</div><div class="sub">Start with her passport. No typing.</div><div class="addg">'+
+   '<div><div class="drop" id="drop"><div id="dropTxt">'+svg('up')+'<b>Drop the passport photo here</b><br>or click to choose · scanner, phone or file</div></div><div class="ocr" id="ocr" style="visibility:hidden">Reading passport… <b id="ocrT">0.0 s</b></div></div>'+
+   '<div class="card"><div class="form">'+F.map(function(f){return '<label class="inp '+(f[2]||'')+'">'+f[0]+'<div data-f="'+f[1]+'"></div></label>'}).join('')+'</div>'+
+   '<div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end"><button class="btn o">Cancel</button><button class="btn" id="bSave" disabled>Save profile</button></div></div></div>';
+};
+function journeyHTML(){
+  var s=S.stage,pts=[[60,30],[60,95],[60,160],[260,190],[540,190],[740,160],[740,95],[740,30]];
+  var d='M60,30 V160 Q60,190 90,190 H710 Q740,190 740,160 V30',len=130+47+620+47+130;
+  var frac=s<0?0:[0,65,130,130+47+170,130+47+450,len-130,len-65,len][s]/len;
+  var c=pts.map(function(p,i){var cls=i<s?'on':i===s?'on':'';if(i===s+1)cls='now';return '<circle cx="'+p[0]+'" cy="'+p[1]+'" r="10" class="'+cls+'"/><text x="'+(i<3?p[0]+22:i>4?p[0]-22:p[0])+'" y="'+(i>2&&i<5?p[1]-20:p[1]+5)+'" text-anchor="'+(i<3?'start':i>4?'end':'middle')+'" class="'+(i<=s?'on':'')+'">'+STAGES[i]+'</text>'}).join('');
+  return '<div class="card jr" id="journey"><h4>Her journey <small>'+(s<0?'Not started':s>=7?'Visa issued — ready to fly':'Now: '+STAGES[Math.min(s+1,7)])+'</small></h4>'+
+    '<svg class="jsvg" viewBox="0 0 800 215"><path class="tr" d="'+d+'"/><path class="fi" d="'+d+'" stroke-dasharray="'+len+'" stroke-dashoffset="'+(len*(1-frac))+'"/>'+c+'</svg>'+
+    '<div class="jlist">'+STAGES.map(function(n,i){return '<div class="'+(i<=s?'on':i===s+1?'now':'')+'">'+n+'</div>'}).join('')+'</div></div>';
+}
+V.profile=function(){
+  side(false,'Profiles');head('Profile','Her file, her documents, her journey');
+  var docs=[['Passport',S.girl?'pass':''],['Photo',S.photos?'face':''],['Full body photo',S.photos?'body':''],['CV',S.cv?'pdf':'cv'],['Medical report',S.wafid?'pdf':''],['Contract',S.stage>=4?'pdf':''],['Insurance',S.ins?'pdf':''],['Visa',S.visa?'pdf':'']];
+  return '<div class="cols"><div class="colm"><div class="ph-h"><div><div class="ttl">'+GIRL.name+'</div><div class="sub" style="margin:0">'+GIRL.phone+'</div></div>'+
+  '<div class="acts"><button class="btn o">← Back</button><button class="btn" id="bCV">'+svg('cv')+'Create CV</button><button class="btn" id="bMus">Musaned</button><button class="btn" id="bWafid"'+(S.stage<2?' disabled':'')+'>Book Wafid medical</button><button class="btn" id="bIns"'+(S.stage<5?' disabled':'')+'>Insurance</button><button class="btn" id="bVisa"'+(S.stage<6?' disabled':'')+'>Visa</button></div></div>'+
+  '<div class="lab">LABOR ID<span>'+(S.stage>=4?'LM-4471902':'— not set —')+'</span></div>'+
+  '<div class="chips">'+stageChip()+chip('Broker: '+GIRL.broker,'s')+chip('ETHIOPIAN','s')+(S.musaned?chip('On Musaned','t'):'')+'</div>'+
+  journeyHTML()+
+  '<div class="pgrid"><div class="card"><b style="font-size:15px;display:block;margin-bottom:10px">Client details</b>'+
+   [['Full name',GIRL.name],['Passport',GIRL.pass],['Date of birth',GIRL.dob],['Place of birth',GIRL.pob],['Passport expiry',GIRL.exp],['Religion',GIRL.rel]].map(function(f){return '<div class="fld"><small>'+f[0]+'</small><b>'+f[1]+'</b></div>'}).join('')+'</div>'+
+  '<div class="card"><b style="font-size:15px;display:block;margin-bottom:10px">Documents</b><div class="docs">'+docs.map(function(d,i){
+    var inner=d[1]==='cv'?'<div class="cvst"><b>⚠ CV not ready</b>Photo and full body photo missing</div>':d[1]==='pdf'&&d[0]==='CV'?'<div class="cvst ok"><b>✓ CV ready</b>2 pages · PDF</div>':d[1]?'<div class="thumb '+d[1]+'"></div>':'<div class="up">'+svg('up')+'Click to upload</div>';
+    return '<div class="doc" id="doc'+i+'"><h5>'+d[0]+'<span>+ Add</span></h5>'+inner+'</div>'}).join('')+'</div></div></div></div>'+searchPanel()+'</div>';
+};
+V.cv=function(){
+  side(false,'CVs');head('CV','Made from her profile, with your agency\'s look');
+  return '<div class="cvwrap"><div class="a4" id="a4"><div class="hd"><div><b>ADAL DEMO AGENCY</b><small>Foreign Employment Agency · Addis Ababa</small></div><div style="text-align:right"><small>+251 11 000 0000</small><small>demo@example.com</small></div></div>'+
+  '<div class="bd"><div><div class="pic"></div><div class="pic full"></div></div><div><h3>'+GIRL.name+'</h3><span class="pos">HOUSEMAID</span>'+
+  '<table>'+[['Nationality','Ethiopian'],['Religion','Muslim'],['Date of birth','12 Mar 1999 (26)'],['Place of birth','Addis Ababa'],['Marital status','Single'],['Children','0'],['Education','Grade 10'],['Height / weight','160 cm / 55 kg'],['Passport no.',GIRL.pass],['Passport expiry',GIRL.exp]].map(function(r){return '<tr><td>'+r[0]+'</td><td>'+r[1]+'</td></tr>'}).join('')+'</table>'+
+  '<h4>LANGUAGES</h4><table><tr><td>Arabic</td><td>Good</td></tr><tr><td>English</td><td>Fair</td></tr></table>'+
+  '<h4>EXPERIENCE</h4><table><tr><td>Saudi Arabia</td><td>2 years</td></tr></table>'+
+  '<h4>SKILLS</h4><div class="sk"><span>Cleaning</span><span>Cooking</span><span>Baby sitting</span><span>Ironing</span><span>Washing</span><span>Elderly care</span></div></div></div>'+
+  '<div class="ft"><span>adal demo agency</span><span>Page 1 of 2</span></div></div>'+
+  '<div class="card side-card"><h5>CV ready</h5><p>Made from her profile and photos in your agency template.</p><div class="acts" style="flex-direction:column;align-items:stretch"><button class="btn" id="bPdf">⬇ Download PDF</button><button class="btn o" id="bToCvs">Send on WhatsApp</button></div></div></div>';
+};
+V.cvs=function(){
+  side(false,'CVs');head('CVs','Choose girls, choose an agent, press Send');
+  var list=[[GIRL.name,'Housemaid · 26'],['ZAHARA ABDELLA MUSA','Housemaid · 24'],['LIDYA SOLOMON HAILU','Nanny · 29'],['MEKDES YOHANNES AYELE','Housemaid · 31'],['EDEN FIKRE LEMMA','Cook · 27']];
+  return '<div class="ttl">CVs</div><div class="sub">Every CV is a ready PDF</div><div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;gap:10px;flex-wrap:wrap"><b style="font-size:15px">Ready to send <span id="selN" style="color:var(--ink3);font-weight:500">· 0 selected</span></b><button class="btn g" id="bSendWa" disabled>Send on WhatsApp</button></div>'+
+   list.map(function(r,i){return '<div class="row" id="cvr'+i+'"><span class="ck" id="ck'+i+'"></span><div class="nm">'+r[0]+'<small>'+r[1]+'</small></div><span class="bk">PDF · 2 pages</span>'+chip('Ready','g')+'</div>'}).join('')+'</div>';
+};
+V.imp=function(){
+  side(false,'Move in');head('Move in','Bring everything from your old system');
+  return '<div class="ttl">Move in</div><div class="sub">Pick where your records are today. Adal Keep reads them and moves them across.</div>'+
+  '<div class="srcs">'+[['EasyEnjaz','Web system'],['EnjazPlus','Web system'],['Musaned','Your Musaned accounts'],['Pextran','Web system']].map(function(s,i){return '<div class="src" id="src'+i+'">'+s[0]+'<small>'+s[1]+'</small></div>'}).join('')+'</div>'+
+  '<div class="card" id="impCard"><b style="font-size:15px">Moving from EasyEnjaz</b><div style="font-size:12.5px;color:var(--ink2);margin-top:4px" id="impStep">Waiting to start…</div><div class="pbar"><i id="impBar"></i></div>'+
+  '<div class="kpis"><div class="kpi"><b id="k1">0</b><small>Profiles</small></div><div class="kpi"><b id="k2">0</b><small>Documents</small></div><div class="kpi"><b id="k3">0</b><small>Photos</small></div></div></div>';
+};
+V.settings=function(){
+  side(false,'Settings');head('Settings','Back up, accounts, CV templates');
+  return '<div class="ttl">Settings</div><div class="sub">Back up and accounts</div><div class="card" id="bkCard"><div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><div style="width:40px;height:40px;border-radius:12px;background:#229ed9;display:grid;place-items:center;color:#fff;font-weight:800">✈</div><div><b style="font-size:15px">Telegram backup</b><div style="font-size:12.5px;color:var(--ink2)">Copies everything to your own Telegram. Secrets stay locked.</div></div><button class="btn" id="bBackup" style="margin-left:auto">Back up now</button></div>'+
+  '<div class="pbar" style="margin-top:14px"><i id="bkBar"></i></div><div style="font-size:12.5px;color:var(--ink2)" id="bkTxt">Last back up: yesterday 18:00</div></div>'+
+  '<div class="card" style="margin-top:14px">'+[['Back up every day at 18:00','Automatic'],['Locked vault for authenticator keys','Musaned codes, bot key'],['Open Adal Keep when the PC starts','Off by default']].map(function(r){return '<div class="set"><div>'+r[0]+'<small>'+r[1]+'</small></div><span class="tg"></span></div>'}).join('')+'</div>';
+};
+V.admin=function(){
+  side(true,'Overview');head('Adal Keep Admin','Every agency, every PC');
+  var rows=[['Adal Demo Agency','Main PC','on','12 s ago','Pro',72,'10 min ago'],['Adal Demo Agency','Reception (Companion)','on','8 s ago','Pro',72,'—'],['Hawassa Link Agency','Main PC','on','5 s ago','Basic',41,'1 h ago'],['Dessie Partners','Main PC','off','2 h ago','Basic',18,'yesterday']];
+  return '<div class="ttl">Overview</div><div class="sub">Live — refreshed every 15 seconds</div><div class="grid4"><div class="card st"><div class="ic" style="background:#0d9488">3</div><p>Agencies</p></div><div class="card st"><div class="ic" style="background:#16a34a" id="onN">3</div><p>PCs on now</p></div><div class="card st"><div class="ic" style="background:#3b82f6">2</div><p>Pro plans</p></div><div class="card st"><div class="ic" style="background:#8b5cf6">4</div><p>Backed up today</p></div></div>'+
+  '<div class="card" style="overflow:auto"><table class="tbl"><tr><th>AGENCY</th><th>PC</th><th>STATUS</th><th class="hide-m">PLAN</th><th class="hide-m">USAGE</th><th class="hide-m">LAST BACK UP</th></tr>'+
+  rows.map(function(r,i){return '<tr id="ar'+i+'"><td><b>'+r[0]+'</b></td><td>'+r[1]+'</td><td><span class="on-dot '+(r[2]==='off'?'off':'')+'"></span>'+r[2]+' · <span class="hb">'+r[3]+'</span></td><td class="hide-m">'+chip(r[4],r[4]==='Pro'?'t':'s')+'</td><td class="hide-m"><span class="mini"><i style="width:'+r[5]+'%"></i></span> '+r[5]+'%</td><td class="hide-m">'+r[6]+'</td></tr>'}).join('')+'</table></div>';
+};
+function go(name){view.innerHTML=V[name]();view.scrollTop=0;$('#wTitle').textContent=name==='admin'?'Adal Keep Admin':'Adal Keep — Adal Demo Agency';$('#bellDot').classList.toggle('on',S.bell)}
+
+/* ---------- little helpers ---------- */
+function toast(t,s){var d=document.createElement('div');d.className='toast';d.innerHTML='<b>'+t+'</b>'+(s||'');toasts.appendChild(d);setTimeout(function(){d.classList.add('out');setTimeout(function(){d.remove()},400)},3600/speed)}
+async function type(el,txt,my,cps){el.classList.add('typing');el.textContent='';for(var i=0;i<txt.length;i++){if(!alive(my))return;el.textContent+=txt[i];await sleep(1000/(cps||28))}el.classList.remove('typing');el.classList.add('got')}
+function rect(el){return el.getBoundingClientRect()}
+var cur=$('#cur'),tip=$('#tip'),curX=-100,curY=-100;
+function moveCur(x,y){var d=Math.hypot(x-curX,y-curY);cur.style.transitionDuration=(RM?0:Math.min(1.1,0.35+d/1400)/speed)+'s';cur.style.transform='translate('+x+'px,'+y+'px)';curX=x;curY=y;return sleep(RM?50:(Math.min(1100,350+d/1.4)))}
+async function clickFx(){cur.classList.remove('click');void cur.offsetWidth;cur.classList.add('click');await sleep(260)}
+function scrollTo(el){var vr=rect(view),r=rect(el);if(r.top<vr.top+10||r.bottom>vr.bottom-10){view.scrollTop+=r.top-vr.top-vr.height/2+r.height/2;return sleep(450)}return Promise.resolve()}
+
+/* ---------- robot browser ---------- */
+function robotOpen(site,url,color,title,fields,btn){
+  var r=document.createElement('div');r.className='robot';r.style.setProperty('--hc',color);
+  r.innerHTML='<div class="rb-tabs"><div class="rb-tab off">Adal Keep</div><div class="rb-tab"><i style="background:'+color+'"></i>'+site+'</div></div>'+
+   '<div class="rb-url">🔒<div><b>'+url+'</b> — simulated for this demo</div><span class="bot">🤖 Robot working</span></div>'+
+   '<div class="rb-body"><div class="portal"><div class="pt-h"><i></i>'+site+'<small>Signed in · Adal Demo Agency</small></div><div class="pt-b"><h3>'+title+'</h3><div class="pt-f">'+
+   fields.map(function(f,i){return '<label class="inp '+(f[2]||'')+'">'+f[0]+'<div data-rf="'+i+'"></div></label>'}).join('')+'</div><span class="pt-btn">'+btn+'</span><div id="ptOk"></div></div>'+
+   '<div class="rcur" id="rcur"><svg viewBox="0 0 24 24"><path d="M4 2l15 11-6.5 1.2L16 21l-3 1.4-3.6-6.8L4 20z" fill="'+color+'" stroke="#fff" stroke-width="1.4"/></svg></div></div>'+
+   '<div class="rlog" id="rlog"><h6>ROBOT · STEPS</h6></div></div>';
+  $('.app',win).appendChild(r);return r;
+}
+function logStep(r,txt){var d=document.createElement('div');d.textContent=txt;$('#rlog',r).appendChild(d);return d}
+async function robotRun(r,steps,fields,my){
+  var portal=$('.portal',r),rc=$('#rcur',r);
+  for(var i=0;i<steps.length;i++){if(!alive(my))return;var d=logStep(r,steps[i][0]);
+    if(steps[i][1]==='fill'){
+      for(var k=0;k<fields.length;k++){if(!alive(my))return;var el=$('[data-rf="'+k+'"]',r),pr=rect(portal),er=rect(el);
+        rc.style.transform='translate('+(er.left-pr.left+20)+'px,'+(er.top-pr.top+portal.scrollTop+14)+'px)';await sleep(420);await type(el,fields[k][1],my,40)}
+    }else if(steps[i][1]==='click'){var b=$('.pt-btn',r),pr2=rect(portal),br=rect(b);rc.style.transform='translate('+(br.left-pr2.left+30)+'px,'+(br.top-pr2.top+portal.scrollTop+12)+'px)';await sleep(600)}
+    else await sleep(steps[i][1]||650);
+    d.classList.add('ok');
+  }
+}
+
+/* ---------- phone ---------- */
+function phoneHTML(){
+  var rows=(S.newOnPhone?[[GIRL.name,'Made on the phone · #P-1','New','t',1]]:[]).concat([[S.girl?GIRL.name:'ALMAZ DEREJE TEKLE',S.girl?GIRL.pass:'EP2256748',S.girl?STAGES[Math.max(S.stage,0)]:'Pending','g'],['ZAHARA ABDELLA MUSA','EP2264667','On Musaned','t'],['LIDYA SOLOMON HAILU','EP2272586','Selected','g'],['MEKDES YOHANNES AYELE','EP2280505','Wafid','b'],['NEJAT KEMAL SHAFI','EP2288424','Visa','g']]);
+  return '<div class="psb"><span>9:41</span><i></i><span>● ▮</span></div><div class="pah"><b>Adal Keep</b><span id="pcState">Office PC off</span></div><div class="pbody" id="pbody">'+
+  rows.map(function(r){return '<div class="pr'+(r[4]?' new':'')+'"><i></i><div>'+r[0]+'<small>'+r[1]+'</small></div>'+chip(r[2],r[3])+'</div>'}).join('')+'</div><div class="fab" id="fab">+</div>';
+}
+
+/* ---------- the story ---------- */
+var CH=['Dashboard','Passport → profile','Photos & CV','CVs on WhatsApp','Musaned robot','Selected!','Wafid medical','Insurance & visa','Move in','Phone app','Telegram backup','Adal Keep Admin'];
+var steps=[
+ // 0 dashboard
+ {ch:0,say:'This is <em>Adal Keep</em> on the office PC — every girl, broker and task in one place.',enter:function(){go('dashboard')},wait:3200},
+ {ch:0,say:'Live counts of profiles, brokers and tasks.',hot:'#stProfiles',wait:1600},
+ // 1 passport
+ {ch:1,say:'A new girl came in. Press <em>+</em> to add her.',hot:'#bNew',act:function(){go('add')},wait:700},
+ {ch:1,say:'Drop a photo of her passport — from the scanner, the phone or a file.',hot:'#drop',act:async function(my){
+   var dr=$('#drop');dr.classList.add('has');dr.innerHTML='<div class="pp flyin"><div class="top"><span>PASSPORT</span><span>ETH</span></div><div class="ph"></div><div class="ln"><span>Surname<b>HASSAN</b></span><span>Given names<b>AMINA</b></span><span>Passport no.<b>'+GIRL.pass+'</b></span><span>Date of birth<b>12 MAR 1999</b></span></div><div class="mrz">P&lt;ETHHASSAN&lt;&lt;AMINA&lt;YUSUF&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;<br>EP31415924ETH9903128F3001095&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;02</div></div><div class="laser" id="lz"></div>';
+   await sleep(800);if(!alive(my))return;
+   $('#ocr').style.visibility='visible';$('#lz').classList.add('go');
+   var t0=performance.now(),ocrT=$('#ocrT'),keys=['name','pass','sex','dob','pob','iss','exp','nat','phone','broker'];
+   var tick=setInterval(function(){var s=Math.min(0.9,(performance.now()-t0)/1000*speed);ocrT.textContent=s.toFixed(1)+' s'},50);
+   for(var i=0;i<keys.length;i++){if(!alive(my)){clearInterval(tick);return}var el=$('[data-f="'+keys[i]+'"]');if(keys[i]==='phone'||keys[i]==='broker'){continue}el.textContent=GIRL[keys[i]];el.classList.add('got');await sleep(105)}
+   await sleep(150);clearInterval(tick);ocrT.textContent='0.9 s ✓';
+ },wait:1200},
+ {ch:1,say:'Name, passport number, dates, place of birth — read in <em>0.9 seconds</em>. Add her phone and broker.',enter:async function(my){
+   await type($('[data-f="phone"]'),GIRL.phone,my,22);if(!alive(my))return;await type($('[data-f="broker"]'),GIRL.broker,my,30);$('#bSave').disabled=false},wait:500},
+ {ch:1,say:'Save. Her profile is made and the passport is filed.',hot:'#bSave',act:function(){S.girl=true;toast('Profile created','AMINA HASSAN YUSUF · passport filed');go('profile')},wait:1800},
+ // 2 photos + cv
+ {ch:2,say:'Her photos arrive from the phone or the scanner and drop into place.',enter:function(){if(!S.girl){S.girl=true}go('profile')},hot:'#doc1',act:async function(my){S.photos=true;go('profile');await scrollTo($('#doc3'));await sleep(500);if(!alive(my))return;S.cv=true;go('profile');await scrollTo($('#doc3'))},wait:1500},
+ {ch:2,say:'Everything the CV needs is here. Press <em>Create CV</em>.',hot:'#bCV',act:function(){go('cv')},wait:2600},
+ {ch:2,say:'A clean CV in your agency\'s template — ready as a PDF.',hot:'#bPdf',act:function(){toast('Saved','AMINA_HASSAN_YUSUF_CV.pdf · 2 pages')},wait:1500},
+ // 3 whatsapp
+ {ch:3,say:'Now send CVs to an agent in Saudi Arabia. Pick the girls…',enter:function(){go('cvs')},act:null,wait:600},
+ {ch:3,say:'Pick the girls…',enter:async function(my){for(var i=0;i<3;i++){if(!alive(my))return;var c=$('#ck'+i);var r=rect(c);await moveCur(r.left+9,r.top+9);await clickFx();c.classList.add('on');$('#selN').textContent='· '+(i+1)+' selected'}$('#bSendWa').disabled=false},wait:400},
+ {ch:3,say:'…and press <em>Send on WhatsApp</em>.',hot:'#bSendWa',act:function(){
+   var m=document.createElement('div');m.className='modal';m.id='waModal';
+   m.innerHTML='<div class="mbox"><h3>Send 3 CVs</h3><p>Choose the agent. Each CV goes as a PDF.</p><div class="opt on" id="agent1"><span class="ck on"></span><div>Al-Noor Recruitment<small>Riyadh · WhatsApp +966 5• ••• ••••</small></div></div><div class="opt"><span class="ck"></span><div>Gulf Home Services<small>Jeddah · WhatsApp</small></div></div><div style="display:flex;justify-content:flex-end;gap:8px;margin-top:6px"><button class="btn o">Cancel</button><button class="btn g" id="bSendNow">Send now</button></div></div>';
+   $('.app',win).appendChild(m)},wait:500},
+ {ch:3,say:'Send.',hot:'#bSendNow',act:async function(my){
+   var b=$('#waModal .mbox');b.innerHTML='<div class="wa" id="wa"><div class="hd"><i></i><div>Al-Noor Recruitment<small>online</small></div></div></div>';
+   var wa=$('#wa'),msgs=['<div class="bub">Salam! 3 new CVs for you 👇<time>09:41 <b>✓✓</b></time></div>'].concat([GIRL.name,'ZAHARA ABDELLA MUSA','LIDYA SOLOMON HAILU'].map(function(n){return '<div class="bub"><div class="pf"><i>PDF</i><div>'+n.split(' ').slice(0,2).join('_')+'_CV.pdf<small>2 pages</small></div></div><time>09:41 <b>✓✓</b></time></div>'}));
+   for(var i=0;i<msgs.length;i++){if(!alive(my))return;wa.insertAdjacentHTML('beforeend',msgs[i]);await sleep(550)}
+   await sleep(700);if(!alive(my))return;wa.insertAdjacentHTML('beforeend','<div class="bub them">Great, I\'ll show my client now 🙏<time>09:43</time></div>');
+ },wait:2400},
+ // 4 musaned
+ {ch:4,say:'Back on her profile, press <em>Musaned</em>. The robot does the rest.',enter:function(){var m=$('#waModal');if(m)m.remove();S.girl=S.photos=S.cv=true;S.stage=Math.max(S.stage,0);go('profile')},hot:'#bMus',act:async function(my){
+   var F=[['Worker name',GIRL.name,'full'],['Passport no.',GIRL.pass],['Nationality','Ethiopia'],['Date of birth','1999-03-12'],['Religion','Islam'],['Profession','Housemaid'],['Salary (SAR)','1000']];
+   var r=robotOpen('Musaned','musaned.com.sa','#2e8b57','Add a worker',F,'Save worker');
+   await robotRun(r,[['Signed in with this account\'s authenticator code',700],['Opened "Add a worker"',500],['Filling 7 fields from her profile','fill'],['Uploaded photo, full body photo and passport',800],['Pressed Save','click'],['Saved — her CV is now on Musaned',400]],F,my);
+   if(!alive(my))return;$('#ptOk',r).innerHTML='<div class="pt-ok">✓ Worker saved. Visible to employers.</div>';await sleep(1300);if(!alive(my))return;
+   r.remove();S.musaned=true;S.stage=1;go('profile');toast('Musaned done','AMINA is on Musaned — the robot checks for selections')},wait:1800},
+ // 5 selected
+ {ch:5,say:'Adal Keep checks Musaned for you. When an employer picks her, you know at once.',enter:async function(my){S.girl=S.photos=S.cv=S.musaned=true;S.stage=Math.max(S.stage,1);go('profile');await sleep(1400);if(!alive(my))return;S.bell=true;$('#bellDot').classList.add('on');toast('🎉 Selected on Musaned','AMINA HASSAN YUSUF was chosen by an employer in Riyadh');S.stage=2;go('profile');await scrollTo($('#journey'))},wait:3200},
+ {ch:5,say:'Her journey moves on by itself: <em>CV → Musaned → Selected</em> → Wafid → Wakala → Tasheer → Insurance → Visa.',hot:'#journey',wait:2400},
+ // 6 wafid
+ {ch:6,say:'Press <em>Book Wafid medical</em>. Wafid is only booked when a person presses this.',enter:function(){S.girl=S.photos=S.cv=S.musaned=true;S.stage=Math.max(S.stage,2);go('profile')},hot:'#bWafid',act:async function(my){
+   var F=[['Passport no.',GIRL.pass],['Nationality','Ethiopia'],['City','Addis Ababa'],['Medical centre','Demo Medical Centre'],['Travelling to','Saudi Arabia'],['Date','Next free slot']];
+   var r=robotOpen('Wafid','wafid.com','#1d6fb8','Book a medical appointment',F,'Book');
+   await robotRun(r,[['Opened Wafid in its own tab',500],['Filling the booking from her passport','fill'],['Pressed Book','click'],['Saved the booking slip to her profile',600]],F,my);
+   if(!alive(my))return;$('#ptOk',r).innerHTML='<div class="pt-ok">✓ Appointment booked · slip saved</div>';await sleep(1200);if(!alive(my))return;
+   r.remove();S.wafid=true;S.stage=3;go('profile');toast('Wafid booked','Results will be checked for you — FIT shows here');await sleep(1600);if(!alive(my))return;S.stage=4;go('profile');toast('Medical result: FIT ✓','Wakala and contract are next')},wait:1800},
+ // 7 insurance + visa
+ {ch:7,say:'Tasheer done — now the <em>Insurance</em> robot.',enter:function(){S.girl=S.photos=S.cv=S.musaned=S.wafid=true;S.stage=Math.max(S.stage,5);go('profile')},hot:'#bIns',act:async function(my){
+   var F=[['Passport no.',GIRL.pass],['Visa no.','600 381 4472'],['Employer','Demo Employer'],['Period','2 years']];
+   var r=robotOpen('Insurance','insurance portal','#7a5af8','New policy',F,'Issue policy');
+   await robotRun(r,[['Opened the insurance site',500],['Filling her policy','fill'],['Issued the policy','click'],['Saved the policy PDF',500]],F,my);
+   if(!alive(my))return;r.remove();S.ins=true;S.stage=6;go('profile');toast('Insurance saved','Policy PDF filed to her profile')},wait:1000},
+ {ch:7,say:'And the <em>Visa</em> robot follows her visa on Enjaz until it\'s issued.',hot:'#bVisa',act:async function(my){
+   var F=[['Application no.','E-7731904'],['Passport no.',GIRL.pass]];
+   var r=robotOpen('Enjaz','enjaz.gov.sa','#0f766e','Visa status',F,'Check');
+   await robotRun(r,[['Checking her visa status','fill'],['Pressed Check','click'],['Visa issued — downloaded',700],['Filed to her profile',400]],F,my);
+   if(!alive(my))return;$('#ptOk',r).innerHTML='<div class="pt-ok">✓ Visa issued</div>';await sleep(1000);if(!alive(my))return;
+   r.remove();S.visa=true;S.stage=7;go('profile');await scrollTo($('#journey'));toast('✈ Visa issued','AMINA is ready to fly')},wait:2600},
+ // 8 move in
+ {ch:8,say:'Coming from another system? Adal Keep moves everything across.',enter:function(){go('imp')},hot:'#src0',act:async function(my){
+   $('#src0').classList.add('on');var st=$('#impStep'),bar=$('#impBar'),k1=$('#k1'),k2=$('#k2'),k3=$('#k3');
+   var phases=['Reading the pages of your old system…','Making brokers…','Making profiles…','Filing documents and photos…','Done — everything is in Adal Keep ✓'];
+   for(var p=0;p<=40;p++){if(!alive(my))return;var f=p/40;st.textContent=phases[Math.min(4,Math.floor(f*4.01))];bar.style.width=(f*100)+'%';k1.textContent=Math.round(240*f);k2.textContent=Math.round(1180*f).toLocaleString();k3.textContent=Math.round(512*f);await sleep(75)}
+ },wait:2000},
+ // 9 phone
+ {ch:9,say:'The <em>phone app</em> works even when the office PC is off.',enter:function(){S.girl=true;S.stage=Math.max(S.stage,2);go('dashboard');win.classList.add('dim');phone.classList.add('show');pscr.innerHTML=phoneHTML()},hot:'#fab',act:async function(my){
+   pscr.insertAdjacentHTML('beforeend','<div class="cam" id="cam"><p>Passport</p><div class="fr"><div class="pp" style="position:absolute"><div class="top"><span>PASSPORT</span><span>ETH</span></div><div class="ph"></div><div class="ln"><span>Surname<b>HASSAN</b></span><span>Passport no.<b>'+GIRL.pass+'</b></span></div></div></div><div class="shut" id="shut"></div></div>');
+   await sleep(900);if(!alive(my))return;var sh=$('#shut'),r=rect(sh);await moveCur(r.left+29,r.top+29);await clickFx();
+   $('#cam').remove();S.newOnPhone=true;pscr.innerHTML=phoneHTML();
+ },wait:1600},
+ {ch:9,say:'A new profile at once, on the phone — the PC files it when it\'s back on. And alerts come even with the app closed.',enter:async function(my){
+   if(!phone.classList.contains('show')){win.classList.add('dim');phone.classList.add('show');S.newOnPhone=true;pscr.innerHTML=phoneHTML()}
+   await sleep(1200);if(!alive(my))return;pscr.insertAdjacentHTML('beforeend','<div class="notif"><span class="ni">A</span><div><b>Selected on Musaned</b>LIDYA SOLOMON HAILU was chosen by an employer.<br><small>Adal Keep · now</small></div></div>')},wait:3600},
+ // 10 backup
+ {ch:10,say:'Every day, everything is backed up to <em>your own Telegram</em> — with the secrets locked.',enter:function(){phone.classList.remove('show');win.classList.remove('dim');go('settings')},hot:'#bBackup',act:async function(my){
+   var bar=$('#bkBar'),t=$('#bkTxt');for(var p=0;p<=30;p++){if(!alive(my))return;bar.style.width=(p/30*100)+'%';t.textContent=p<30?'Backing up… '+Math.round(p/30*100)+'%':'Backed up just now · secrets locked 🔒';await sleep(70)}toast('Backed up','Saved to your Telegram')},wait:1800},
+ // 11 admin
+ {ch:11,say:'And <em>Adal Keep Admin</em> shows every agency PC live — which are on, plans, usage and back ups.',enter:function(){go('admin')},wait:2600},
+ {ch:11,say:'The PCs check in every 15 seconds.',enter:async function(my){for(var k=0;k<4;k++){if(!alive(my))return;$$('.hb').forEach(function(h,i){if(i<3)h.textContent=(1+((k*3+i*4)%14))+' s ago'});await sleep(900)}},wait:600},
+ {ch:11,say:'That\'s the tour. <em>Every girl, every portal — on autopilot.</em>',enter:function(){$('#end').classList.add('on')},wait:999999}
+];
+
+/* ---------- chapters ---------- */
+var chapsEl=$('#chaps'),firstOf=[];
+steps.forEach(function(s,i){if(firstOf[s.ch]==null)firstOf[s.ch]=i});
+CH.forEach(function(n,i){var b=document.createElement('button');b.className='chap';b.innerHTML='<b>'+(i<9?'0':'')+(i+1)+'</b>'+n+'<span class="bar"></span>';b.addEventListener('click',function(){$('#end').classList.remove('on');jump(firstOf[i])});chapsEl.appendChild(b)});
+var chapBtns=$$('.chap',chapsEl);
+function setChap(c){chapBtns.forEach(function(b,i){b.classList.toggle('on',i===c);b.classList.toggle('done',i<c)});var on=chapBtns[c];if(on&&on.scrollIntoView&&innerWidth<1100)on.parentNode.scrollLeft=on.offsetLeft-20;$('#capNum').textContent=(c+1)+' / '+CH.length}
+
+/* ---------- step engine ---------- */
+var hotEl=null,hotResolve=null;
+function clearHot(){if(hotEl)hotEl.classList.remove('hot');hotEl=null;tip.classList.remove('on')}
+document.addEventListener('click',function(e){if(hotEl&&hotResolve&&(e.target===hotEl||hotEl.contains(e.target))&&e.isTrusted){e.preventDefault();var r=hotResolve;hotResolve=null;r('user')}},true);
+function prep(ch){ // put the story state where this chapter starts
+  reset();$('#end').classList.remove('on');phone.classList.remove('show');win.classList.remove('dim');
+  $$('.robot,.modal',win).forEach(function(x){x.remove()});toasts.innerHTML='';
+  if(ch>=2){S.girl=true}if(ch>=3){S.photos=S.cv=true;S.stage=0}if(ch>=5){S.musaned=true;S.stage=1}if(ch>=6){S.stage=2}if(ch>=7){S.wafid=true;S.stage=5}if(ch>=8){S.ins=S.visa=true;S.stage=7}
+}
+async function run(i){
+  var my=++token;idx=i;clearHot();var s=steps[i];if(!s)return;
+  setChap(s.ch);var cap=$('#cap');cap.innerHTML=s.say;cap.classList.remove('swap');void cap.offsetWidth;cap.classList.add('swap');
+  $('#prog').style.width=(i/(steps.length-1)*100)+'%';
+  if(s.enter){await s.enter(my);if(!alive(my))return}
+  if(s.hot){
+    var el=$(s.hot);if(!el){await sleep(300);el=$(s.hot)}
+    if(el){
+      await scrollTo(el);if(!alive(my))return;
+      el.classList.add('hot');hotEl=el;var r=rect(el);tip.style.left=Math.min(innerWidth-110,r.left+r.width/2-40)+'px';tip.style.top=Math.max(4,r.top-30)+'px';tip.classList.add('on');
+      var how=await new Promise(function(res){hotResolve=res;if(playing){var rr=rect(el);moveCur(rr.left+rr.width/2,rr.top+rr.height/2).then(function(){return clickFx()}).then(function(){if(hotResolve===res){hotResolve=null;res('auto')}})}});
+      if(!alive(my))return;clearHot();
+      if(s.act){await s.act(my);if(!alive(my))return}
+    }
+  }
+  await sleep(s.wait||1500);if(!alive(my))return;
+  if(playing||s.hot) next();
+}
+function next(){if(idx<steps.length-1)run(idx+1)}
+function jump(i){var ch=steps[i].ch;prep(ch);if(ch===0||ch===1)go('dashboard');run(i)}
+$('#bNext').addEventListener('click',function(){var c=steps[idx].ch;if(c<CH.length-1)jump(firstOf[c+1])});
+$('#bPrev').addEventListener('click',function(){var c=steps[idx].ch;jump(firstOf[Math.max(0,steps[idx]===steps[firstOf[c]]?c-1:c)])});
+function setPlay(p){playing=p;var b=$('#bPlay');b.innerHTML=p?'❚❚ <span class="hide-s" style="display:inline">Pause</span>':'▶ <span class="hide-s" style="display:inline">Play</span>';b.classList.toggle('pri',p);
+  if(p&&hotEl&&hotResolve){var el=hotEl,res=hotResolve,r=rect(el);moveCur(r.left+r.width/2,r.top+r.height/2).then(clickFx).then(function(){if(hotResolve===res){hotResolve=null;res('auto')}})}
+  else if(p&&!hotEl){var my=token;setTimeout(function(){if(alive(my)&&playing&&!hotEl)next()},600)}
+  tip.textContent=p?'Watch':'Click here';}
+$('#bPlay').addEventListener('click',function(){setPlay(!playing)});
+$('#bSpeed').addEventListener('click',function(){speed=speed===1?2:1;this.textContent=speed+'×'});
+$('#bReplay').addEventListener('click',function(){jump(0);setPlay(true)});
+addEventListener('keydown',function(e){if(e.code==='Space'){e.preventDefault();setPlay(!playing)}else if(e.code==='ArrowRight')$('#bNext').click();else if(e.code==='ArrowLeft')$('#bPrev').click()});
+// show the cursor near the window to start
+var wr=rect(win);curX=wr.left+wr.width*0.6;curY=wr.top+wr.height*0.6;cur.style.transitionDuration='0s';cur.style.transform='translate('+curX+'px,'+curY+'px)';
+// clicking a chip of the real app while paused should feel alive
+view.addEventListener('click',function(e){var c=e.target.closest('.ck');if(c&&!hotEl&&!playing){c.classList.toggle('on')}});
+go('dashboard');
+setTimeout(function(){run(0)},500);
+})();
+</script>
+</body>
+</html>

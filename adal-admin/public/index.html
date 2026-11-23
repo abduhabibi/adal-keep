@@ -631,6 +631,12 @@ async function setupView() {
   $('#table').innerHTML = `<table><tr><th>Agency</th><th>Status</th><th>Config</th><th></th></tr>
     ${d.signups.map(x => row(x.agency_id, x.name, `${x.phone} · ${x.email} · signed up ${when(x.created_at)}${x.pc_number ? ' · PC ' + x.pc_number : ''}`, x.status, x.config)).join('')}
     ${d.others.map(x => row(x.id, x.name, x.pc_number ? 'PC ' + x.pc_number : '', null, x.config)).join('')}</table><div id="cfgBox"></div>`
+  $('#table').insertAdjacentHTML('afterbegin', `<p><button class="ghost" id="newCode">New website download code</button> <span class="muted">Give it to an agency: adalkeep.pages.dev → Download (valid 7 days, 3 downloads).</span></p>`)
+  $('#newCode').onclick = async () => {
+    const note = await ask({ title: 'Download code for…', text: 'Whose is it? (only for your list)', ok: 'Make code', input: '' })
+    if (note === null) return
+    try { const r = await api('/api/install-codes/new', { note, days: 7, uses: 3 }); await tell('Download code', `${r.code}\n\nValid ${r.days} days, 3 downloads. The agency types it on adalkeep.pages.dev.`) } catch (e) { await tell('Not made', e.message) }
+  }
   $('#table').querySelectorAll('[data-st]').forEach(b => b.onclick = async () => {
     if (b.dataset.st === 'ready' && !(await ask({ title: 'Mark this agency ready?', text: 'The agency is told in its inbox with Adal, and its app shows that setup is done.', ok: 'Ready' }))) return
     try { await api('/api/signups/status', { agency: b.dataset.id, status: b.dataset.st }); toast(b.dataset.st === 'ready' ? 'Ready — the agency was told' : 'Setup started'); setupView() } catch (e) { await tell('Not done', e.message) }

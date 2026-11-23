@@ -55,3 +55,16 @@ insert into storage.buckets (id, name, public) values ('agency-config', 'agency-
 drop policy if exists agency_config_files_read on storage.objects;
 create policy agency_config_files_read on storage.objects for select to authenticated
   using (bucket_id = 'agency-config' and (storage.foldername(name))[1] = public.keep_agency()::text);
+
+-- Download codes for the website (adalkeep.pages.dev): the installer holds the
+-- licence key, so a download needs a code Adal made in Admin → Setup. Only the
+-- website's function (service key) reads this table; nobody else has a rule.
+create table if not exists public.install_codes (
+  code        text primary key,
+  note        text,
+  expires_at  timestamptz not null,
+  max_uses    integer not null default 3,
+  uses        integer not null default 0,
+  created_at  timestamptz not null default now()
+);
+alter table public.install_codes enable row level security;

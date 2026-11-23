@@ -790,6 +790,14 @@ const api = {
     }
     return { ok: true, status }
   },
+  // Download codes for the website: the installer holds the licence key, so a download needs one of these.
+  'GET /api/install-codes': async () => rest('GET', 'install_codes?select=*&order=created_at.desc&limit=30'),
+  'POST /api/install-codes/new': async (q, b) => {
+    const days = Math.min(30, Math.max(1, Number(b.days) || 7))
+    const code = crypto.randomBytes(5).toString('hex').toUpperCase()
+    await rest('POST', 'install_codes', { code, note: String(b.note || '').slice(0, 120) || null, max_uses: Math.min(20, Math.max(1, Number(b.uses) || 3)), expires_at: new Date(Date.now() + days * 86400000).toISOString() }, { Prefer: 'return=minimal' })
+    return { code, days }
+  },
   'POST /api/decide': async (q, b) => {
     const status = b.approve ? 'approved' : 'rejected'
     const [r] = await rest('PATCH', `unlock_requests?id=eq.${Number(b.id)}`, { status, note: b.note || null, decided_at: new Date().toISOString() }, { Prefer: 'return=representation' })

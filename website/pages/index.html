@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Adal Keep — your agency on autopilot</title>
+<meta name="description" content="Adal Keep runs the paperwork of an Ethiopian recruitment agency: profiles, CVs, Musaned, LMIS, Wafid, WhatsApp. Download it, and Adal sets it up for you.">
+<style>
+:root{--bg:#f6f8fb;--card:#fff;--text:#0b1220;--dim:#4b5768;--line:rgba(15,23,42,.1);--teal:#0d9488;--teal2:#0f766e;--soft:#ecfdf5}
+@media (prefers-color-scheme:dark){:root{--bg:#070b12;--card:#0e1626;--text:#eef2f7;--dim:#9aa7bd;--line:rgba(255,255,255,.1);--teal:#14b8a6;--teal2:#2dd4bf;--soft:#0b2a27}}
+*{box-sizing:border-box;margin:0}
+body{font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text)}
+a{color:var(--teal2)}
+.wrap{max-width:1000px;margin:0 auto;padding:0 20px}
+nav{display:flex;align-items:center;justify-content:space-between;padding:16px 0;gap:12px;flex-wrap:wrap}
+.logo{font-weight:800;font-size:20px;text-decoration:none;color:var(--text)}.logo b{display:inline-grid;place-items:center;width:32px;height:32px;border-radius:9px;background:var(--teal);color:#fff;margin-right:8px}
+nav a.l{margin-left:16px;text-decoration:none;color:var(--dim);font-size:15px}
+.hero{padding:56px 0 40px}.hero h1{font-size:clamp(32px,6vw,52px);line-height:1.1;font-weight:800;max-width:16em}.hero p{font-size:19px;color:var(--dim);max-width:34em;margin:18px 0 26px}
+.btn{display:inline-block;background:var(--teal);color:#fff;padding:13px 22px;border-radius:12px;font-weight:700;text-decoration:none;border:0;font-size:16px;cursor:pointer}.btn.ghost{background:none;color:var(--text);border:1px solid var(--line);margin-left:8px}
+section{padding:36px 0}h2{font-size:28px;margin-bottom:6px}.sub{color:var(--dim);margin-bottom:22px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px}.card h3{font-size:17px;margin-bottom:4px}.card p{color:var(--dim);font-size:15px}
+.req{display:flex;gap:12px;flex-wrap:wrap}.req .card{flex:1;min-width:150px;text-align:center}.req b{display:block;font-size:30px;color:var(--teal2)}
+ol.steps{counter-reset:s;list-style:none;display:grid;gap:12px}ol.steps li{counter-increment:s;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px 14px 56px;position:relative}
+ol.steps li::before{content:counter(s);position:absolute;left:14px;top:12px;width:30px;height:30px;border-radius:50%;background:var(--teal);color:#fff;display:grid;place-items:center;font-weight:800}
+.dl{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:24px}
+.dl label{display:block;margin:14px 0 6px;font-weight:600}
+.arch{display:flex;gap:10px;flex-wrap:wrap}.arch label{display:flex;align-items:center;gap:8px;margin:0;border:1px solid var(--line);border-radius:12px;padding:10px 14px;font-weight:500;cursor:pointer}.arch input:checked+span{font-weight:700}
+input[type=text]{width:100%;max-width:320px;padding:11px 12px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--text);font:inherit;letter-spacing:.08em;text-transform:uppercase}
+#out{margin-top:16px}#out code{display:block;word-break:break-all;background:var(--soft);border-radius:10px;padding:12px;font-size:13px;margin:8px 0}
+.err{color:#dc2626}.note{color:var(--dim);font-size:14px;margin-top:10px}
+footer{padding:36px 0 48px;color:var(--dim);font-size:14px;border-top:1px solid var(--line);margin-top:30px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<nav><a class="logo" href="#top"><b>አ</b>Adal Keep</a><div><a class="l" href="#what">What it does</a><a class="l" href="#need">Your PC</a><a class="l" href="#download">Download</a><a class="l" href="#how">How to</a><a class="l" href="overview.html">Overview</a></div></nav>
+
+<header class="hero" id="top">
+<h1>Your agency's paperwork, on autopilot.</h1>
+<p>Adal Keep reads passports and documents, makes the CVs, and does the Musaned, LMIS and Wafid steps for you. Download it, and Adal sets it up from far away — one person comes for training.</p>
+<a class="btn" href="#download">Download Adal Keep</a><a class="btn ghost" href="demo.html">Try the demo</a>
+</header>
+
+<section id="what"><h2>What you get</h2><p class="sub">One program on your office PCs. Your data stays with you.</p>
+<div class="grid">
+<div class="card"><h3>Profiles and documents</h3><p>Passport, photo and medical read by themselves, kept in order.</p></div>
+<div class="card"><h3>CVs in your own template</h3><p>Ready to send to agents, with WhatsApp built in.</p></div>
+<div class="card"><h3>Robots for the portals</h3><p>Musaned, LMIS, Wafid, Tasheer, insurance — you only type the sign-in codes.</p></div>
+<div class="card"><h3>Phone app</h3><p>See the whole office from your phone, even when the main PC is off.</p></div>
+</div></section>
+
+<section id="need"><h2>What your PC needs</h2><p class="sub">Windows 10 or 11. The main PC does the robot work, so it should not be the weakest one.</p>
+<div class="req"><div class="card"><b>4</b>CPU cores or more</div><div class="card"><b>8 GB</b>memory (RAM) or more</div><div class="card"><b>Cable</b>or 5&nbsp;GHz Wi-Fi — recommended</div></div>
+<p class="note">Slower than this still starts, but the robots will be slow. The first 21 days are free to try.</p></section>
+
+<section id="download"><h2>Download</h2><p class="sub">Choose your Windows, type the code Adal Keep gave you, and press Download.</p>
+<form class="dl" id="f">
+<label>Windows version</label>
+<div class="arch"><label><input type="radio" name="arch" value="x64" checked><span>64-bit (most PCs)</span></label><label><input type="radio" name="arch" value="x86"><span>32-bit (old PCs)</span></label></div>
+<p class="note">Not sure? Open <b>Settings → System → About</b> and read "System type".</p>
+<label for="code">Download code</label><input type="text" id="code" maxlength="10" autocomplete="off" placeholder="XXXXXXXXXX">
+<p style="margin-top:16px"><button class="btn" id="go" type="submit">Download installer</button></p>
+<div id="out" aria-live="polite"></div>
+</form></section>
+
+<section id="how"><h2>How to install</h2><p class="sub">About 15 minutes. Use the PC that will stay on in the office (the main PC) first.</p>
+<ol class="steps">
+<li><b>Download</b> the installer above and double-click <i>Install Adal Keep</i>. Say <i>Yes</i> if Windows asks.</li>
+<li>Type <b>1</b> for the <b>Main PC</b> (it holds your data), or <b>2</b> for a <b>Companion</b> (an employee PC). Wait until it says it is finished.</li>
+<li>Adal Keep opens. Type your <b>agency name, phone and e-mail</b> once. That is all you have to do.</li>
+<li>Adal sets up your agency from far away — templates, e-mail, sign-in numbers, staff. You are told when it is <b>Ready</b>.</li>
+<li>One person from Adal Keep comes to train your staff.</li>
+</ol>
+<p class="note">After 21 days, a payment unlocks each PC for 6 months. Call <a href="tel:0995668080">0995 668 080</a> for help any time.</p></section>
+
+<footer>Adal Keep · Addis Ababa · <a href="tel:0995668080">0995 668 080</a></footer>
+</div>
+<script>
+const $ = (s) => document.querySelector(s), out = $('#out')
+$('#f').onsubmit = async (e) => {
+  e.preventDefault()
+  const arch = document.querySelector('input[name=arch]:checked').value, code = $('#code').value.trim()
+  out.innerHTML = 'One moment…'
+  try {
+    const r = await fetch(`/api/download?arch=${arch}&code=${encodeURIComponent(code)}`)
+    const j = await r.json()
+    if (!r.ok) { out.innerHTML = `<span class="err">${j.error || 'Not possible now.'}</span>`; return }
+    const file = `/api/download?arch=${arch}&code=${encodeURIComponent(code)}&as=file`
+    out.innerHTML = `<p><b>Ready.</b> Your code was used once to make this. Choose one way:</p>
+      <p><b>A.</b> <a class="btn" href="${file}" id="file">Save “Install Adal Keep” and double-click it</a></p>
+      <p class="note">(That file asks for a new link, valid ${j.minutes} minutes.)</p>
+      <p><b>B.</b> Or open PowerShell on the PC and paste this line (valid ${j.minutes} minutes):</p><code id="cmd"></code>`
+    $('#cmd').textContent = j.command
+  } catch { out.innerHTML = '<span class="err">No internet? Try again.</span>' }
+}
+</script>
+</body>
+</html>

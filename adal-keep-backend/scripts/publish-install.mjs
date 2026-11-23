@@ -74,6 +74,8 @@ const script = fs.readFileSync(path.join(ROOT, 'adal-installer/files/web-install
   .replace('__MODULE_URLS__', moduleUrls).replace('__MODULES_SHA__', shaOf(modules))
   .replace('__BROWSER_URLS__', browserUrls).replace('__BROWSER_SHA__', shaOf(browser))
 await put('install.ps1', script, 'text/plain')
+// The website (adalkeep.pages.dev, website/functions/api/download.js) hands out fresh short links to this one: run with a long [days] (30).
+if (process.env.ADAL_SITE_PUBLISH === '1') await put('site/install-x64.ps1', script, 'text/plain')
 // Written backwards: a long secret-looking link gets hidden or cut when copied
 // from a chat, and then the PC gets a broken link.
 const back = [...await link('install.ps1')].reverse().join('')

@@ -46,7 +46,7 @@ before(async () => {
   await new Promise(ok => fake.listen(0, '127.0.0.1', ok))
   // A copy of the panel beside a link to the real backend: its .env / session files stay in tmp.
   const dir = path.join(tmp, 'adal-admin'); fs.mkdirSync(path.join(dir, 'public'), { recursive: true })
-  fs.copyFileSync(path.join(REPO, 'adal-admin', 'server.mjs'), path.join(dir, 'server.mjs'))
+  for (const f of fs.readdirSync(path.join(REPO, 'adal-admin')).filter(f => f.endsWith('.mjs'))) fs.copyFileSync(path.join(REPO, 'adal-admin', f), path.join(dir, f))
   fs.copyFileSync(path.join(REPO, 'adal-admin', 'public', 'index.html'), path.join(dir, 'public', 'index.html'))
   fs.symlinkSync(path.join(REPO, 'adal-keep-backend'), path.join(tmp, 'adal-keep-backend'))
   const home = path.join(tmp, 'home'); fs.mkdirSync(path.join(home, '.adal-keep'), { recursive: true })

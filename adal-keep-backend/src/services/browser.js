@@ -102,9 +102,9 @@ const OWN_BROWSER = process.env.ADAL_BROWSER_EXE || path.resolve(path.dirname(fi
  */
 export const ADAL_MODE = process.env.ADAL_ROBOT_BROWSER === 'adal'
 export const robotBrowserMode = () => (ADAL_MODE ? 'adal' : 'system')
-function systemBrowser() {
+export function systemBrowser(exists = fs.existsSync, platform = process.platform) {
   const c = []
-  if (process.platform === 'win32') {
+  if (platform === 'win32') {
     const pf = process.env['ProgramFiles'] || 'C:\\Program Files'
     const pf86 = process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)'
     const la = process.env['LOCALAPPDATA'] || path.join(process.env.USERPROFILE || 'C:\\Users\\Public', 'AppData', 'Local')
@@ -118,15 +118,16 @@ function systemBrowser() {
       path.join(pf, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
       path.join(pf86, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
     )
-  } else if (process.platform === 'darwin') {
+  } else if (platform === 'darwin') {
     c.push('/Applications/Brave Browser.app/Contents/MacOS/Brave Browser', '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge')
   } else {
     c.push('/usr/bin/brave-browser', '/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser', '/snap/bin/chromium')
   }
   c.push(OWN_BROWSER)   // none of them: Adal Browser after all
-  for (const x of c) { try { if (fs.existsSync(x)) return x } catch {} }
+  for (const x of c) { try { if (exists(x)) return x } catch {} }
   return null
 }
+export const ownBrowserPath = () => OWN_BROWSER
 /** The profile folder for that browser: Brave keeps the old one; another browser its own (a profile a newer browser wrote is refused). */
 export function profileFor(exe, mode = robotBrowserMode()) {
   const name = String(exe || '').toLowerCase()
@@ -197,6 +198,30 @@ const BROWSER_ARGS = [
   // No crash reports gathered or sent.
   '--disable-breakpad',
 ]
+
+/**
+ * System mode on a PC that used Adal Browser: its sign-ins (Musaned, LMIS … cookies) come along once, so
+ * nobody signs in again. Adal Browser's profile is copied (caches left out) to this browser's profile
+ * when that has no newer sign-ins of its own; Adal Browser's own stays as it was (ADAL_ROBOT_BROWSER=adal
+ * goes back to it). An older profile of the same name is kept beside it. Never while the browser runs.
+ */
+export function carryOverSignIns({ from = path.join(path.dirname(PROFILE_DIR), 'adal-browser'), to = PROFILE_DIR, mode = robotBrowserMode(), now = Date.now() } = {}) {
+  if (mode === 'adal' || path.resolve(from) === path.resolve(to) || process.env.ADAL_BROWSER_PROFILE) return false
+  const cookies = (dir) => {
+    let t = 0
+    for (const f of [['Default', 'Network', 'Cookies'], ['Default', 'Cookies']]) { try { t = Math.max(t, fs.statSync(path.join(dir, ...f)).mtimeMs) } catch {} }
+    return t
+  }
+  const theirs = cookies(from)
+  if (!theirs || cookies(to) >= theirs) return false
+  try {
+    if (fs.existsSync(to)) fs.renameSync(to, `${to}.before-${new Date(now).toISOString().slice(0, 10)}-${now % 100000}`)
+    const SKIP = /^(Cache|Code Cache|GPUCache|GrShaderCache|ShaderCache|DawnCache|DawnGraphiteCache|DawnWebGPUCache|Service Worker|CacheStorage|Crashpad|Safe Browsing|component_crx_cache|optimization_guide_model_store|BrowserMetrics|Singleton.*|lockfile|LOCK)$/i
+    fs.cpSync(from, to, { recursive: true, filter: (src) => !SKIP.test(path.basename(src)) })
+    console.log(`[browser] the sign-ins of Adal Browser carried over to ${path.basename(to)} (nobody signs in again)`)
+    return true
+  } catch (e) { console.warn('[browser] sign-ins not carried over:', e.message); return false }
+}
 
 async function connectTo(puppeteer, url) {
   const b = await puppeteer.connect({ browserURL: url, defaultViewport: null })
@@ -315,6 +340,7 @@ export async function getBrowser(fresh = false) {
       : 'No browser for the robots on this PC: install Brave, Chrome or Edge (Windows has Edge), then press the button again.')
   }
 
+  carryOverSignIns()
   fs.mkdirSync(PROFILE_DIR, { recursive: true })
   freshStart()
   // No page of its own: with Brave already open on this profile (without the

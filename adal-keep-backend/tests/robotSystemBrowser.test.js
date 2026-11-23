@@ -61,3 +61,34 @@ test("a run's tab in the PC's own browser, over CDP, out of sight", { skip: !EXE
     fs.rmSync(tmp, { recursive: true, force: true })
   }
 })
+
+test("Adal Browser's sign-ins carry over once to the PC's browser; its own profile stays", async () => {
+  const { carryOverSignIns, profileFor } = await import('../src/services/browser.js')
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'adal-carry-'))
+  const from = path.join(root, 'adal-browser'), to = path.join(root, 'browser-profile-edge')
+  const saved = process.env.ADAL_BROWSER_PROFILE; delete process.env.ADAL_BROWSER_PROFILE
+  try {
+    fs.mkdirSync(path.join(from, 'Default', 'Network'), { recursive: true })
+    fs.mkdirSync(path.join(from, 'Default', 'Cache'), { recursive: true })
+    fs.writeFileSync(path.join(from, 'Default', 'Network', 'Cookies'), 'musaned-signin')
+    fs.writeFileSync(path.join(from, 'Local State'), '{"os_crypt":{}}')
+    fs.writeFileSync(path.join(from, 'SingletonLock'), 'x')
+    assert.equal(carryOverSignIns({ from, to, mode: 'system' }), true)
+    assert.equal(fs.readFileSync(path.join(to, 'Default', 'Network', 'Cookies'), 'utf8'), 'musaned-signin')
+    assert.ok(fs.existsSync(path.join(to, 'Local State')))           // the key the cookies are locked with
+    assert.ok(!fs.existsSync(path.join(to, 'Default', 'Cache')) && !fs.existsSync(path.join(to, 'SingletonLock')))
+    assert.ok(fs.existsSync(path.join(from, 'Default', 'Network', 'Cookies')))   // Adal Browser's own stays
+    assert.equal(carryOverSignIns({ from, to, mode: 'system' }), false)          // once: its own are as new now
+    assert.equal(carryOverSignIns({ from, to, mode: 'adal' }), false)
+    // A PC with no Brave/Chrome/Edge: Adal Browser after all, on its own profile.
+    const { systemBrowser, ownBrowserPath } = await import('../src/services/browser.js')
+    const own = ownBrowserPath()
+    assert.equal(systemBrowser((f) => f === own, 'win32'), own)
+    assert.equal(profileFor(own, 'system'), 'adal-browser')
+    assert.match(systemBrowser((f) => /msedge|AdalBrowser/.test(f), 'win32'), /msedge\.exe$/)   // Edge before Adal Browser
+    assert.equal(systemBrowser(() => false, 'win32'), null)
+  } finally {
+    if (saved !== undefined) process.env.ADAL_BROWSER_PROFILE = saved
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})

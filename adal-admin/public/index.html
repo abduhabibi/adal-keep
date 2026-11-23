@@ -538,7 +538,9 @@ async function healthView() {
       ${cell(ph.freeze ? false : (ph.at ? true : null), ph.freeze ? `froze ${ago(ph.freeze.at)} ago` : ph.at ? 'none' : '—')}
       ${cell(h.errors ? (h.errors.length < 10) : null, String(h.errors?.length ?? '—'))}</tr>`
   }).join('')
-  $('#table').innerHTML = `<table><tr><th>Agency</th><th>Version</th><th>Portals</th><th>Disk</th><th>Database</th><th>Backup check</th><th>Freezes</th><th>Errors</th></tr>${rows}</table>
+  const up = await api('/api/updates').catch(e => ({ error: e.message }))
+  if (tab !== 'health') return
+  $('#table').innerHTML = `${updatesBox(up)}<table><tr><th>Agency</th><th>Version</th><th>Portals</th><th>Disk</th><th>Database</th><th>Backup check</th><th>Freezes</th><th>Errors</th></tr>${rows}</table>
     <h3 style="margin:22px 0 8px">Errors shared by PCs (${top.length})</h3>
     ${top.length ? `<table><tr><th>Error</th><th>PCs</th><th>Times</th><th>Last</th></tr>${top.map(e => `<tr><td style="font-size:12px">${esc(e.line)}</td><td title="${esc([...e.agencies].join(', '))}">${e.agencies.size}</td><td>${e.times}</td><td class="muted">${ago(e.at)}</td></tr>`).join('')}</table>` : '<p class="muted">No errors reported.</p>'}`
 }
@@ -706,6 +708,38 @@ async function ticketAnswer(account, ticket, status, silent = false) {
 }
 async function ticketShot(object) {
   try { const r = await api(`/api/tickets/shot?object=${encodeURIComponent(object)}`); zoom.querySelector('img').src = r.data; zoom.style.display = 'flex' } catch (e) { tell('Picture not opened', e.message) }
+}
+
+// The staged rollout of the newest release, and the PCs that went back from an update by themselves.
+function updatesBox(up) {
+  if (up?.error) return `<p class="muted">Updates: ${esc(up.error)}</p>`
+  const r = up?.release
+  const STAGE = { test: 'test agency only', pct: `test + ${r?.rollout?.pct ?? 10}% of agencies`, everyone: 'every PC', stopped: 'STOPPED — nobody new gets it' }
+  const kb = (n) => n == null ? '—' : n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`
+  const next = r?.rollout && r.stage === 'test' ? `${r.rollout.pct}% at ${when(r.rollout.pct_at)}` : r?.stage === 'pct' ? `everyone at ${when(r.everyone_at)}` : ''
+  const ACT = { retry: 'retry', keep: 'kept on old version', everyone: 'pushed to everyone' }
+  setTimeout(() => {
+    document.querySelectorAll('[data-roll]').forEach(btn => btn.onclick = async () => {
+      if (!(await ask({ title: `${btn.textContent} the rollout of ${r.short}?`, ok: btn.textContent, danger: btn.dataset.roll === 'stop' }))) return
+      try { const j = await api('/api/updates/rollout', { action: btn.dataset.roll }); toast(`Now: ${STAGE[j.stage] || j.stage}`); healthView() } catch (e) { tell('Not done', e.message) }
+    })
+    document.querySelectorAll('[data-assign]').forEach(sel => sel.onchange = async () => {
+      const [sha, pc, agency] = sel.dataset.assign.split('|'), action = sel.value
+      if (!action) return
+      try { await api('/api/updates/assign', { sha, pc, agency, action }); toast(`${sha} on ${pc}: ${ACT[action]}`); healthView() } catch (e) { tell('Not done', e.message) }
+    })
+  })
+  return `<h3 style="margin:4px 0 8px">Updates</h3>
+    ${r ? `<p><b>${esc(r.short)}</b> ${esc(r.message || '')} <span class="muted">· published ${when(r.published_at)} · download ${kb(r.patch)} with the patch (${kb(r.size)} whole)${r.x86 ? ` · 32-bit too` : ''}</span><br>
+      Reaches: <b class="${r.stage === 'stopped' ? 'bad' : ''}">${STAGE[r.stage] || r.stage}</b>${next ? ` <span class="muted">· next: ${esc(next)}</span>` : ''}
+      ${r.stage !== 'everyone' && r.stage !== 'stopped' ? '<button class="go" data-roll="advance">Advance</button>' : ''}
+      ${r.stage !== 'stopped' && r.stage !== 'everyone' ? '<button class="danger" data-roll="stop">Stop</button>' : ''}
+      ${r.stage === 'stopped' ? '<button class="go" data-roll="resume">Resume</button>' : ''}</p>` : '<p class="muted">Nothing published.</p>'}
+    ${up?.undone?.length ? `<table><tr><th>Rolled back</th><th>Why</th><th>When</th><th>Next</th></tr>${up.undone.map(u => `<tr>
+      <td><b>rolled back on ${esc(u.pc)}</b><br><span class="muted">${esc(u.agencyName)} · ${esc(u.sha)} → ${esc(u.to || '?')}${u.status === 'could-not-roll-back' ? ' · could NOT go back' : ''}</span></td>
+      <td style="font-size:12px">${esc(u.reason)}</td><td class="muted">${ago(u.at)}</td>
+      <td>${u.decided ? esc(ACT[u.decided]) : `<select data-assign="${esc(u.sha)}|${esc(u.pc)}|${esc(u.agency)}"><option value="">Assign…</option><option value="retry">Retry on this PC</option><option value="keep">Keep on old version</option><option value="everyone">Push to everyone</option></select>`}</td></tr>`).join('')}</table>` : '<p class="muted">No PC went back from an update by itself.</p>'}
+    <div style="height:18px"></div>`
 }
 
 // ------------------------------------------------------------------ Usage --

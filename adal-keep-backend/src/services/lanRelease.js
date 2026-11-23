@@ -34,7 +34,9 @@ import os from 'os'
 import path from 'path'
 import { execFileSync } from 'child_process'
 import { fileURLToPath } from 'url'
+import zlib from 'zlib'
 import { verifyManifest, downloadRelease, rangedDownload, sha256File } from './updateChannel.js'
+import { patch as applyPatch } from './bsdiff.js'
 
 const DATA = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'data')
 const DIR = process.env.ADAL_LAN_RELEASE_DIR || path.join(DATA, 'lan-release')
@@ -56,14 +58,26 @@ export function current() {
   } catch { return null }
 }
 
-/** The pieces of a manifest, by SHA-256: the app, the programs, the Companion's pages. */
-export function piecesOf(m) {
+/**
+ * The pieces of a manifest, by SHA-256: the app, the programs, the Companion's pages.
+ * Since updates v2 (docs/updates-v2.md) a piece may also name its plain .tar (`raw`) and a
+ * small patch from the release before (`patch`): any form of it counts, every form is handed on.
+ * `all`: the 32-bit programs too (handed on when here, never fetched just to hand on).
+ */
+const form = (f) => (f && HEX.test(f.sha256 || '') ? f : undefined)
+export function piecesOf(m, { all = false } = {}) {
   const out = []
-  if (m?.sha256 && m.file) out.push({ file: m.file, sha256: m.sha256, size: m.size })
-  for (const p of m?.programs || []) if (p?.sha256) out.push({ file: p.file, sha256: p.sha256, name: p.name, size: p.size })
-  if (m?.online?.sha256) out.push({ file: m.online.file, sha256: m.online.sha256, size: m.online.size })
+  const delta = (p) => ({ ...(form(p?.raw) ? { raw: p.raw } : {}), ...(form(p?.patch) && p.patch.file ? { patch: p.patch } : {}) })
+  if (m?.sha256 && m.file) out.push({ file: m.file, sha256: m.sha256, size: m.size, ...delta(m.app_delta) })
+  for (const p of m?.programs || []) if (p?.sha256) out.push({ file: p.file, sha256: p.sha256, name: p.name, size: p.size, ...delta(p) })
+  if (all) for (const p of m?.programs_x86 || []) if (p?.sha256) out.push({ file: p.file, sha256: p.sha256, name: p.name, size: p.size, arch: 'x86', ...delta(p) })
+  if (m?.online?.sha256) out.push({ file: m.online.file, sha256: m.online.sha256, size: m.online.size, ...delta(m.online) })
   return out
 }
+/** Every SHA-256 a piece can be kept as: itself, its plain .tar, its patch. */
+export const formsOf = (p) => [p?.sha256, p?.raw?.sha256, p?.patch?.sha256].filter(s => HEX.test(s || ''))
+/** The kept form of a piece (the piece itself or its plain .tar), or null. */
+export const pieceHere = (p) => piecePath(p?.sha256) || piecePath(p?.raw?.sha256)
 
 /** A piece kept here to hand on (only one the signed manifest names, checked). */
 export async function keepPiece(sha256, from) {
@@ -76,8 +90,10 @@ export async function keepPiece(sha256, from) {
 }
 export const piecePath = (sha256) => HEX.test(sha256) && fs.existsSync(path.join(FILES, sha256)) ? path.join(FILES, sha256) : null
 /** The pieces of the kept release that are here. */
-export const haveOf = (m) => piecesOf(m).filter(p => piecePath(p.sha256)).map(p => p.sha256)
-export const completeHere = (m) => !!m && piecesOf(m).every(p => piecePath(p.sha256))
+export const haveOf = (m) => piecesOf(m, { all: true }).flatMap(formsOf).filter(s => piecePath(s))
+export const completeHere = (m) => !!m && piecesOf(m).every(p => pieceHere(p))
+/** A peer's `have` list holds this piece in some form (the patch alone does not count). */
+const peerHas = (have, p) => have.includes(p.sha256) || (p.raw && have.includes(p.raw.sha256))
 
 /**
  * The release now installed here: kept (signed) to hand on, its pieces that
@@ -93,7 +109,8 @@ export async function recordInstalled(env, projectRoot = '') {
     if (projectRoot && p.name && !piecePath(p.sha256)) await keepPiece(p.sha256, path.join(projectRoot, p.name)).catch(() => {})
   }
   // The pieces of the release before stay too: "Go back to previous version" then needs no internet (services/rollback.js).
-  const wanted = new Set([...piecesOf(env.manifest), ...piecesOf(env.manifest.rollback?.manifest)].map(p => p.sha256))
+  // (Every form: the next release's patches start from this one's plain .tar.)
+  const wanted = new Set([...piecesOf(env.manifest, { all: true }), ...piecesOf(env.manifest.rollback?.manifest, { all: true })].flatMap(formsOf))
   for (const f of fs.readdirSync(FILES)) {
     const base = f.replace(/\.part$/, '')
     // A half-download of a piece still wanted (or of a newer release, for a day) stays: the next try goes on from it.
@@ -116,7 +133,7 @@ export function completeRelease(env, { tries = 6, every = 10 * 60 * 1000 } = {})
       if (current()?.manifest?.sha !== env.manifest.sha) return false // another release came meanwhile
       let missing = 0
       for (const piece of piecesOf(env.manifest)) {
-        if (piecePath(piece.sha256)) continue
+        if (pieceHere(piece)) continue
         try { await fetchPiece(env.manifest, piece, null) } catch { missing++ }
       }
       if (!missing) { console.log(`[lan-update] the whole release ${env.manifest.short || env.manifest.sha.slice(0, 7)} is here to hand on`); announce(); offerToKnown(); return true }
@@ -173,29 +190,99 @@ export async function pieceFromPeer(base, sha256, dest, size) {
 /** The peers that have this release (same sha). */
 export const peersWith = (sha) => [...peers].filter(([, p]) => p.sha === sha && Date.now() - p.at < 3600 * 1000).map(([b]) => b)
 
+/** Updates v2 patches on (ADAL_DELTA=0: always the whole piece, as before). */
+export const deltaOn = () => process.env.ADAL_DELTA !== '0'
+
 /**
- * A piece of a signed release: kept here already, else from a PC on the
- * network that has it (fast, no internet; `bases` first), else from Supabase
- * (resumable, unless cloud is false). It lands in this PC's cache (so it is
- * handed on too) and is copied to `dest` when one is given. Checked every time.
+ * The file a patch starts from: kept here (the plain .tar of the release
+ * before, or its .tar.gz un-gzipped), else a program installed on this PC
+ * (`local`: paths). Only one whose SHA-256 is the patch's `from`.
  */
-export async function fetchPiece(manifest, piece, dest, { bases = [], cloud = true } = {}) {
+export async function patchBase(pt, local = []) {
+  const want = pt?.from
+  if (!HEX.test(want || '')) return null
+  const sha = (b) => crypto.createHash('sha256').update(b).digest('hex')
+  const kept = piecePath(want)
+  if (kept) { const b = fs.readFileSync(kept); if (sha(b) === want) return b }
+  if (HEX.test(pt.from_gz || '') && piecePath(pt.from_gz)) {
+    try { const b = zlib.gunzipSync(fs.readFileSync(piecePath(pt.from_gz))); if (sha(b) === want) return b } catch {}
+  }
+  for (const f of local) {
+    try { if (f && fs.existsSync(f) && (await sha256File(f)) === want) return fs.readFileSync(f) } catch {}
+  }
+  return null
+}
+
+/**
+ * The piece rebuilt from the release before + its small patch (the office
+ * first, then Supabase): its plain .tar (or the program itself) lands in the
+ * cache, checked against the signed SHA-256. Null when there is no base here.
+ */
+async function viaPatch(manifest, piece, { bases = [], cloud = true, local = [] } = {}) {
+  const pt = piece.patch
+  const base = await patchBase(pt, local)
+  if (!base) return null
+  const target = piece.raw?.sha256 || piece.sha256
+  const pfile = path.join(FILES, pt.sha256)
+  let lastErr = null, got = !!piecePath(pt.sha256)
+  for (const b of got ? [] : [...new Set([...bases, ...peersWith(manifest.sha)])]) {
+    try { await pieceFromPeer(b, pt.sha256, pfile, pt.size); got = true; break } catch (e) { lastErr = e }
+  }
+  if (!got) {
+    if (!cloud) throw lastErr || new Error('no PC of the office has the patch')
+    await downloadRelease({ file: pt.file, sha256: pt.sha256, size: pt.size }, pfile)
+  }
+  const out = applyPatch(base, fs.readFileSync(pfile))
+  if (crypto.createHash('sha256').update(out).digest('hex') !== target) throw new Error('the patched file does not match Adal\'s signed release')
+  const dest = path.join(FILES, target)
+  fs.writeFileSync(`${dest}.tmp`, out)
+  fs.renameSync(`${dest}.tmp`, dest)
+  return { file: dest, bytes: pt.size || fs.statSync(pfile).size }
+}
+
+/**
+ * A piece of a signed release: kept here already (any form), else rebuilt
+ * from the release before and a small patch, else the whole piece from a PC
+ * on the network that has it (fast, no internet; `bases` first), else from
+ * Supabase (resumable, unless cloud is false). It lands in this PC's cache
+ * (so it is handed on too) and is copied to `dest` when one is given — the
+ * .tar.gz or the plain .tar (tar -xf reads both). Checked every time.
+ * `local`: files on this PC a program patch may start from (the installed program).
+ */
+export async function fetchPiece(manifest, piece, dest, { bases = [], cloud = true, local = [] } = {}) {
   if (!HEX.test(piece?.sha256 || '')) throw new Error('bad piece')
   fs.mkdirSync(FILES, { recursive: true })
-  const cache = path.join(FILES, piece.sha256)
-  const hit = piecePath(piece.sha256)
-  const out = () => { if (dest && path.resolve(dest) !== path.resolve(cache)) fs.copyFileSync(cache, dest); return dest || cache }
-  if (hit && (await sha256File(hit)) === piece.sha256) return out()
+  // The full description from the signed manifest (callers may pass only file + sha256).
+  piece = { ...(piecesOf(manifest, { all: true }).find(p => p.sha256 === piece.sha256) || {}), ...piece }
+  const out = (from) => { if (dest && path.resolve(dest) !== path.resolve(from)) fs.copyFileSync(from, dest); return dest || from }
+  for (const s of [piece.sha256, piece.raw?.sha256]) {
+    const hit = piecePath(s)
+    if (hit && (await sha256File(hit)) === s) return out(hit)
+  }
   const label = path.basename(piece.file || piece.sha256)
+  if (piece.patch && deltaOn()) {
+    try {
+      const r = await viaPatch(manifest, piece, { bases, cloud, local })
+      if (r) { console.log(`[lan-update] ${label} rebuilt from the version before + a ${(r.bytes / 1024).toFixed(0)} KB patch`); return out(r.file) }
+    } catch (e) { console.warn(`[lan-update] ${label}: the patch did not work (${e.message}) — the whole piece instead`) }
+  }
   let lastErr = null
   for (const base of [...new Set([...bases, ...peersWith(manifest.sha)])]) {
-    try { await pieceFromPeer(base, piece.sha256, cache, piece.size); console.log(`[lan-update] ${label} from ${base}`); return out() } catch (e) { lastErr = e }
+    for (const s of [piece.raw?.sha256, piece.sha256].filter(Boolean)) {
+      try {
+        const file = path.join(FILES, s)
+        await pieceFromPeer(base, s, file, s === piece.sha256 ? piece.size : piece.raw.size)
+        console.log(`[lan-update] ${label} from ${base}`)
+        return out(file)
+      } catch (e) { lastErr = e }
+    }
   }
   if (!cloud) throw lastErr || new Error('no PC of the office has it')
+  const cache = path.join(FILES, piece.sha256)
   try { await downloadRelease({ file: piece.file, sha256: piece.sha256, size: piece.size }, cache) } catch (e) {
     throw lastErr ? new Error(`${e.message} (the office: ${lastErr.message})`) : e
   }
-  return out()
+  return out(cache)
 }
 
 /** A peer's envelope that is signed and newer than `than`. */
@@ -232,7 +319,7 @@ export async function newestFromPeers(than, { extra = true, skip = [] } = {}) {
       const env = await getJSON(`${base}/latest`, 4000)
       if (!env?.manifest || !verifyManifest(env.manifest, env.signature)) return null
       peers.set(base, { sha: env.manifest.sha, published_at: env.manifest.published_at || '', at: Date.now() })
-      const complete = piecesOf(env.manifest).every(p => (env.have || []).includes(p.sha256))
+      const complete = piecesOf(env.manifest).every(p => peerHas(env.have || [], p))
       return { manifest: env.manifest, signature: env.signature, base, complete, have: env.have || [] }
     } catch { return null }
   }))
@@ -285,16 +372,22 @@ export async function importRelease(src) {
     }
     if (!env) throw new Error('no release signed by Adal in it (current.json / latest.json)')
     const kept = []
-    for (const p of piecesOf(env.manifest)) {
-      if (piecePath(p.sha256) && (await sha256File(piecePath(p.sha256))) === p.sha256) { kept.push(p.sha256); continue }
-      const names = new Set([p.sha256, path.basename(p.file || ''), p.name || '', `${p.sha256}-${p.name || ''}`].filter(Boolean))
-      for (const f of all) {
-        if (!names.has(path.basename(f))) continue
-        if (await keepPiece(p.sha256, f)) { kept.push(p.sha256); break }
+    for (const p of piecesOf(env.manifest, { all: true })) {
+      const here = pieceHere(p)
+      if (here && formsOf(p).includes(path.basename(here)) && (await sha256File(here)) === path.basename(here)) { kept.push(p.sha256); continue }
+      // The piece itself or its plain .tar (a PC that updated by patch keeps that one).
+      for (const s of [p.sha256, p.raw?.sha256].filter(Boolean)) {
+        const names = new Set([s, path.basename(p.file || ''), p.name || '', `${p.sha256}-${p.name || ''}`].filter(Boolean))
+        let done = false
+        for (const f of all) {
+          if (!names.has(path.basename(f))) continue
+          if (await keepPiece(s, f)) { kept.push(p.sha256); done = true; break }
+        }
+        if (done) break
       }
     }
     if (!kept.includes(env.manifest.sha256)) throw new Error(`the app itself (${path.basename(env.manifest.file || '')}, sha256 ${String(env.manifest.sha256).slice(0, 12)}…) is not in it, or does not match the signed release`)
-    return { ...env, pieces: kept.length, of: piecesOf(env.manifest).length }
+    return { ...env, pieces: kept.length, of: piecesOf(env.manifest, { all: true }).length }
   } finally {
     if (tmp) fs.rmSync(tmp, { recursive: true, force: true })
   }
@@ -422,7 +515,7 @@ export function lanRoutes(router) {
   router.get('/update/lan/file/:sha', (req, res) => {
     const env = current()
     const sha = String(req.params.sha || '')
-    if (!env || !piecesOf(env.manifest).some(p => p.sha256 === sha)) return res.status(404).end()
+    if (!env || !piecesOf(env.manifest, { all: true }).some(p => formsOf(p).includes(sha))) return res.status(404).end()
     const file = piecePath(sha)
     if (!file) return res.status(404).end()
     // sendFile answers Range requests (206): a cut download goes on where it stopped.

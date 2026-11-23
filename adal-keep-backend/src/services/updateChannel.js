@@ -84,6 +84,15 @@ export async function latestRelease(channel = 'release') {
   return manifest
 }
 
+/** A small signed file of the release folder (release/assign.json: Admin's decisions), or null. */
+export async function readSigned(name, channel = 'release') {
+  const { cloudCall } = await cloud()
+  const res = await cloudCall(dbRef, 'GET', `/storage/v1/object/authenticated/${BUCKET}/${channel}/${name}`, undefined, { raw: true, timeout: 20_000, headers: { 'Cache-Control': 'no-cache' } })
+  if (!res.ok) return null
+  const env = await res.json().catch(() => null)
+  return env?.manifest && verifyManifest(env.manifest, env.signature) ? env : null
+}
+
 export const sha256File = (file) => new Promise((ok, no) => {
   const h = crypto.createHash('sha256')
   fs.createReadStream(file).on('data', c => h.update(c)).on('end', () => ok(h.digest('hex'))).on('error', no)

@@ -10,6 +10,8 @@ import { latestRelease, setUpdateDb, lastEnvelope, verifyManifest } from '../ser
 import { withTimeout, RUN_LIMIT_MS } from '../services/runLimit.js'
 import { rollbackOf, databaseRefusal } from '../services/rollback.js'
 import * as WhatsNew from '../services/whatsNew.js'
+import { itsTurn, turnAt, programsFor, pcArch } from '../services/rollout.js'
+import * as Undo from '../services/autoUndo.js'
 
 const execAsync = promisify(exec)
 const router = Router()
@@ -262,16 +264,18 @@ async function checkSupabase(installed) {
   if (!m) throw cloudError || new Error('no release published yet')
   // Unknown order (an old marker with only a sha): Supabase's release is trusted, as before.
   const upToDate = !!installed.sha && (installed.sha === m.sha || (known && !L.isNewer(m, mine)))
-  // Staged: the agencies marked "updates first" get it at once, everyone else
-  // at manifest.everyone_at (a bad version reaches one agency, not all of them).
-  let waitUntil = null
-  if (!upToDate && m.everyone_at && Date.parse(m.everyone_at) > Date.now()) {
+  // Staged (services/rollout.js): the test agency first, then ~10% of agencies, then
+  // everyone — a bad version reaches one agency, not all of them. Admin can stop it.
+  let waitUntil = null, stopped = false
+  if (!upToDate && (m.rollout || (m.everyone_at && Date.parse(m.everyone_at) > Date.now()))) {
     let me = null
     try { me = await withTimeout((await import('../services/chatCloud.js')).cloudAgencyId(dbOf()), 5000, null) } catch {}
-    if (!me || !(m.early || []).includes(me)) waitUntil = m.everyone_at
+    if (!itsTurn(m, me)) { const t = turnAt(m, me); stopped = t === 'stopped'; waitUntil = stopped ? '9999-12-31T00:00:00.000Z' : (t || m.everyone_at) }
   }
+  // A release this PC went back from by itself waits for Adal's decision (Admin → Updates → assign).
+  const undone = !upToDate ? Undo.blocked(m.sha) : null
   return {
-    waitUntil,
+    waitUntil, ...(stopped ? { stopped: true } : {}), ...(undone ? { blocked: undone.reason } : {}),
     hasUpdate: !upToDate, upToDate, installed,
     latest: { sha: m.sha, short: m.short, message: m.message, date: m.date },
     changes: upToDate ? [] : (m.changes || []).slice(0, 40),
@@ -403,6 +407,8 @@ async function autoUpdate(db, result) {
   const sha = result.latest?.sha || ''
   // Staged release: this PC's turn has not come yet (it can still be installed by hand).
   if (result.waitUntil && Date.parse(result.waitUntil) > Date.now()) return
+  // Went back from it by itself: never again by itself until Adal assigns a retry.
+  if (result.blocked) return
   // A version this PC had to go back from is not installed again by itself.
   try {
     const { rolledBack } = await import('../../safeStart.js')
@@ -441,11 +447,95 @@ async function autoUpdate(db, result) {
   }
 }
 
+/**
+ * Going back by itself (services/autoUndo.js): the way back signed into the
+ * release this PC runs (the office first, Supabase last), else the copy
+ * safeStart.js kept of the version before. Waits for runs at most 10 minutes.
+ */
+export async function autoRollback(reason) {
+  const logs = []
+  try {
+    for (let since = 0; ;) {
+      const b = await busyNow(dbOf())
+      const h = holdForRuns(b.busy, since)
+      if (!h.wait) break
+      since = h.since
+      await new Promise(r => setTimeout(r, 30_000))
+    }
+    while (updateNotice.applying) await new Promise(r => setTimeout(r, 5000))
+    const plan = await rollbackPlan()
+    if (plan.available) {
+      const L = await import('../services/lanRelease.js')
+      const installed = await getInstalled()
+      const mine = installedRelease(installed, L.current()?.manifest)
+      console.log(`↩️ Going back by itself from ${plan.from} to ${plan.to}: ${reason}`)
+      updateNotice.applying = true
+      updateNotice.applyingSince = new Date().toISOString()
+      try {
+        const r = await installEnvelope(config(), logs, installed, mine, rollbackOf(L.current().manifest), {}, null)
+        return r.success ? { ok: true, to: plan.to } : { ok: false, to: plan.to, error: r.error }
+      } finally { updateNotice.applying = false; updateNotice.result = null }
+    }
+    // No signed way back (an older release): the copy kept before the update.
+    const S = await import('../../safeStart.js')
+    const backendDir = backendDirOf(config().projectRoot)
+    let prev = null
+    try { prev = JSON.parse(fs.readFileSync(path.join(S.paths(backendDir).prev, 'version.json'), 'utf8')) } catch {}
+    if (prev?.sha && prev.sha === Undo.probation()?.from) {
+      const r = S.rollBack(backendDir, prev, reason)
+      setTimeout(() => process.exit(1), 3000) // the launcher starts the version put back
+      return { ok: !r.failed.length, to: String(prev.sha).slice(0, 7), error: r.failed.length ? `not put back: ${r.failed.join(', ')}` : '' }
+    }
+    return { ok: false, error: plan.reason || 'no version before is kept on this PC' }
+  } catch (e) { return { ok: false, error: e.message } }
+}
+
+/** Admin's decisions for a release this PC went back from (release/assign.json, signed on Adal's PC). */
+async function applyAssignments() {
+  const open = Undo.reports().filter(r => r.status === 'rolled-back' || r.status === 'kept')
+  if (!open.length) return
+  const { readSigned } = await import('../services/updateChannel.js')
+  const rules = Undo.readAssign(await readSigned('assign.json').catch(() => null))
+  if (!rules.length) return
+  let agency = ''
+  try { agency = await withTimeout((await import('../services/chatCloud.js')).cloudAgencyId(dbOf()), 5000, '') || '' } catch {}
+  for (const row of open) {
+    const d = Undo.decisionFor(rules, row, { agency })
+    if (d && Undo.settle(row.sha, d)) {
+      console.log(`📋 Adal decided for ${row.short}: ${d === 'keep' ? 'stay on the version before' : 'try it again'}`)
+      if (d !== 'keep') lastCheck = 0
+    }
+  }
+}
+
+/** The self-check of a version just installed (services/autoUndo.js). */
+function undoChecks(db, sha) {
+  const cfg = config()
+  const backendDir = backendDirOf(cfg.projectRoot)
+  return {
+    files: async () => {
+      const kept = (await import('../services/lanRelease.js')).current()?.manifest
+      if (kept?.sha !== sha || !kept.app_files) return ''
+      const bad = Undo.filesDiffer(kept.app_files, cfg.projectRoot, backendDir)
+      return bad.length ? `${bad.length} file(s) not as signed (${bad.slice(0, 3).join(', ')})` : ''
+    },
+    packages: async () => { const b = await brokenPackages(backendDir); return b.length ? `${b.join(', ')} do not load` : '' },
+    database: async () => { if (!db) return ''; const ok = await withTimeout(db.raw('select 1').then(() => true), 10_000, false); return ok ? '' : 'no answer in 10 s' },
+    server: async () => {
+      const r = await fetch(`http://127.0.0.1:${process.env.PORT || 4000}/api/health`, { signal: AbortSignal.timeout(10_000) })
+      return r.status >= 500 ? `answers ${r.status}` : ''
+    },
+  }
+}
+
 /** Looks for a new version now and then, and installs it by itself (see autoUpdate). */
 export function startUpdateWatcher(db = null) {
   setUpdateDb(db)
   if (db) updateDb = db
   if (watcher) return
+  // Just updated: on probation (crash loops, a failed self-check or many errors go back by themselves).
+  Undo.setUndoer(autoRollback)
+  getInstalled().then(i => { if (!i.isRepo && i.sha) Undo.watch({ installedSha: i.sha, checks: undoChecks(db, i.sha) }) }).catch(() => {})
   const every = Number(process.env.UPDATE_CHECK_MINUTES || 15) * 60 * 1000
   // A PC of this office has a newer release: looked at at the next minute, not in 15.
   import('../services/lanRelease.js').then(L => {
@@ -465,6 +555,7 @@ export function startUpdateWatcher(db = null) {
           console.log(`🆕 Update available: ${result.count} change(s), newest ${result.latest.short}`)
         }
         Object.assign(updateNotice, { checkedAt: new Date().toISOString(), result, error: null })
+        await applyAssignments().catch(e => console.warn('[update] Adal\'s decisions:', e.message))
       }
       await autoUpdate(db, result)
     } catch (e) {
@@ -620,7 +711,9 @@ export async function installFromRelease(cfg, logs, manifest, localArchive = nul
     await L.keepPiece(manifest.sha256, archive).catch(() => {})   // to hand on to the office's other PCs
     const extracted = path.join(tmp, 'src')
     fs.mkdirSync(extracted, { recursive: true })
-    const tar = await run(`tar -xzf "${archive}" -C "${extracted}"`, tmp, 5 * 60 * 1000)
+    // The .tar.gz, or the plain .tar a patch rebuilt (updates v2).
+    const gz = (() => { try { const fd = fs.openSync(archive, 'r'); const b = Buffer.alloc(2); fs.readSync(fd, b, 0, 2, 0); fs.closeSync(fd); return b[0] === 0x1f && b[1] === 0x8b } catch { return true } })()
+    const tar = await run(`tar -x${gz ? 'z' : ''}f "${archive}" -C "${extracted}"`, tmp, 5 * 60 * 1000)
     if (!tar.ok) throw new Error(`Extraction failed: ${tar.out.slice(-300)}`)
     const keepData = (from) => (src) => {
       const rel = path.relative(from, src)
@@ -662,14 +755,18 @@ export async function installFromRelease(cfg, logs, manifest, localArchive = nul
     // The Windows programs (AdalKeep.exe, the Companion, the agent): only the
     // ones that changed. A running program cannot be overwritten, but it can be
     // renamed: the old one becomes <name>.old and the new one is used from the next start.
-    for (const p of manifest.programs || []) {
+    // 32-bit Windows: the GOARCH=386 builds (never a 64-bit program there).
+    const progs = programsFor(manifest)
+    if (progs.missing) logs.push(`No 32-bit programs in ${manifest.short}: this ${pcArch()} PC keeps the ones it has`)
+    for (const p of progs.list) {
       try {
         const dest = path.join(cfg.projectRoot, p.name)
         if (!PROGRAMS.has(p.name) || !fs.existsSync(dest)) continue
         const { createHash } = await import('crypto')
         if (createHash('sha256').update(fs.readFileSync(dest)).digest('hex') === p.sha256) continue
         const got = path.join(tmp, p.name)
-        await L.fetchPiece(manifest, p, got, pieceFrom)
+        // A small patch from the program installed here when the release has one (updates v2).
+        await L.fetchPiece(manifest, p, got, { ...pieceFrom, local: [dest, `${dest}.old`] })
         fs.rmSync(`${dest}.old`, { force: true })
         fs.renameSync(dest, `${dest}.old`)
         try { fs.copyFileSync(got, dest) } catch (e) { fs.renameSync(`${dest}.old`, dest); throw e }
@@ -758,6 +855,9 @@ async function installEnvelope(cfg, logs, installed, mine, env, from = {}, fallb
   }
   await installFromRelease(cfg, logs, manifest, null, from)
   WhatsNew.rememberInstalled(manifest)
+  // On probation: a version that breaks this PC goes back by itself (services/autoUndo.js).
+  if (!manifest.rollback_of) Undo.beginProbation({ to: manifest, from: mine })
+  else Undo.endProbation()
   lanEnvelope = null
   await L.recordInstalled(env, cfg.projectRoot).catch(e => logs.push(`Not kept for the other PCs: ${e.message}`))
   writeMarker(cfg.projectRoot, { sha: manifest.sha, branch: 'release', source: 'supabase', lock_hash: manifest.lock_hash, message: manifest.message, date: manifest.date || '', published_at: manifest.published_at || '', ...(manifest.seq ? { seq: manifest.seq } : {}) })

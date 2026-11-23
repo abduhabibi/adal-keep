@@ -299,6 +299,11 @@ const biz = await import('../adal-keep-backend/src/services/bizStats.js')
 const { signManifest } = await import('../adal-keep-backend/src/services/updateChannel.js')
 const SIGNING = path.join(os.homedir(), '.adal-keep', 'update-signing.pem')
 const DAY_MS = 86400000
+/** latest.json (and the release's own copy) signed again with Adal's update key. */
+async function publishLatest(manifest) {
+  const body = Buffer.from(JSON.stringify({ manifest, signature: signManifest(manifest, fs.readFileSync(SIGNING, 'utf8')) }))
+  for (const f of [`release/${manifest.sha}.json`, 'release/latest.json']) await sb('POST', `/storage/v1/object/adal-updates/${f}`, body, { 'Content-Type': 'application/json', 'x-upsert': 'true', 'Cache-Control': 'no-cache' })
+}
 async function licenseOf(pc) {
   try {
     const file = await sb('GET', `/storage/v1/object/adal-updates/licenses/${pc}.json?t=${Date.now()}`)
@@ -400,6 +405,61 @@ const api = {
     for (const id of a.ids) b.on ? list.add(id) : list.delete(id)
     await sb('POST', '/storage/v1/object/adal-updates/release/early.json', Buffer.from(JSON.stringify({ agencies: [...list], at: new Date().toISOString() })), { 'Content-Type': 'application/json', 'x-upsert': 'true', 'Cache-Control': 'no-cache' })
     return { ok: true, early: !!b.on }
+  },
+  // Updates (adal-keep-backend docs/updates-v2.md): the staged rollout of the release published now,
+  // and the PCs that went back from an update by themselves.
+  'GET /api/updates': async () => {
+    const R = await import('../adal-keep-backend/src/services/rollout.js')
+    const cur = await sb('GET', `/storage/v1/object/adal-updates/release/latest.json?t=${Date.now()}`).catch(() => null)
+    const m = cur?.manifest || null
+    const [agencies, diag, assign] = await Promise.all([
+      mainAgencies(),
+      rest('GET', 'keep_meta?key=eq./_diag&select=agency_id,data,updated_at').catch(() => []),
+      sb('GET', `/storage/v1/object/adal-updates/release/assign.json?t=${Date.now()}`).catch(() => null),
+    ])
+    const nameOf = (id) => agencies.find(a => a.id === id || (a.ids || []).includes(id))?.name || id
+    const undone = []
+    for (const d of diag) for (const r of d.data?.autoUndo || []) undone.push({ ...r, agency: d.agency_id, agencyName: nameOf(d.agency_id) })
+    const rules = assign?.manifest?.rules || []
+    for (const u of undone) u.decided = rules.filter(r => String(u.sha).startsWith(String(r.sha).slice(0, 7)) && (!r.pc || r.pc === u.pc) && (!r.agency || r.agency === u.agency) && r.at > u.at).sort((x, y) => (x.at < y.at ? 1 : -1))[0]?.action || null
+    return {
+      release: m && { sha: m.sha, short: m.short, message: m.message, published_at: m.published_at, stage: R.stageOf(m), rollout: m.rollout || null, everyone_at: m.everyone_at,
+        size: m.size, patch: m.app_delta?.patch?.size ?? null, x86: (m.programs_x86 || []).length },
+      undone: undone.sort((x, y) => (x.at < y.at ? 1 : -1)).slice(0, 50),
+    }
+  },
+  // Advance (the next stage now), stop, resume, or everyone now: latest.json signed again (the same release).
+  'POST /api/updates/rollout': async (q, b) => {
+    if (!fs.existsSync(SIGNING)) throw new Error('The signing key is not on this PC: the rollout can only be changed on Adal\'s PC.')
+    const R = await import('../adal-keep-backend/src/services/rollout.js')
+    const cur = await sb('GET', `/storage/v1/object/adal-updates/release/latest.json?t=${Date.now()}`)
+    if (!cur?.manifest?.sha) throw new Error('Nothing published')
+    const manifest = R.changeRollout(cur.manifest, String(b.action))
+    await publishLatest(manifest)
+    return { ok: true, stage: R.stageOf(manifest) }
+  },
+  // After a PC went back by itself: retry (that PC / agency tries the release again), keep (stays on the
+  // version before), everyone (the release goes to every PC, the ones that went back too).
+  'POST /api/updates/assign': async (q, b) => {
+    if (!fs.existsSync(SIGNING)) throw new Error('The signing key is not on this PC: only on Adal\'s PC.')
+    if (!['retry', 'keep', 'everyone'].includes(b.action) || !/^[0-9a-f]{7,40}$/.test(String(b.sha || ''))) throw new Error('Say retry, keep or everyone, and which release')
+    const old = await sb('GET', `/storage/v1/object/adal-updates/release/assign.json?t=${Date.now()}`).catch(() => null)
+    const at = new Date().toISOString()
+    const rule = { sha: String(b.sha), action: b.action, at, ...(b.action !== 'everyone' && b.pc ? { pc: String(b.pc) } : {}), ...(b.action !== 'everyone' && b.agency ? { agency: String(b.agency) } : {}) }
+    const rules = [...(old?.manifest?.rules || []).filter(r => Date.now() - Date.parse(r.at) < 30 * 86400000), rule].slice(-200)
+    const assign = { kind: 'assign', at, rules }
+    await sb('POST', '/storage/v1/object/adal-updates/release/assign.json', Buffer.from(JSON.stringify({ manifest: assign, signature: signManifest(assign, fs.readFileSync(SIGNING, 'utf8')) })), { 'Content-Type': 'application/json', 'x-upsert': 'true', 'Cache-Control': 'no-cache' })
+    // Retry / everyone: the release is signed again just now, so it is newer than the way back the PC took.
+    if (b.action !== 'keep') {
+      const cur = await sb('GET', `/storage/v1/object/adal-updates/release/latest.json?t=${Date.now()}`).catch(() => null)
+      if (cur?.manifest?.sha?.startsWith(String(b.sha).slice(0, 7))) {
+        const R = await import('../adal-keep-backend/src/services/rollout.js')
+        let m = { ...cur.manifest, seq: Math.max(Date.now(), (Number(cur.manifest.seq) || 0) + 2), published_at: at }
+        if (b.action === 'everyone') m = R.changeRollout(m, 'everyone')
+        await publishLatest(m)
+      }
+    }
+    return { ok: true }
   },
   // A command still waiting for its PC: not sent after all.
   'POST /api/waiting/cancel': async (q, b) => {

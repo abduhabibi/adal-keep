@@ -78,8 +78,10 @@ console.error = (...a) => {
   try { noteError('', a.map(x => (x instanceof Error ? x.message : typeof x === 'string' ? x : JSON.stringify(x))).join(' ')) } catch {}
   origError(...a)
 }
-process.on('uncaughtException', (e) => noteError('crash', e))
-process.on('unhandledRejection', (e) => noteError('unhandled', e))
+// Just after an update, many of these send the PC back to the version before (services/autoUndo.js).
+const failed = (kind) => import('./autoUndo.js').then(u => u.noteFailure(kind)).catch(() => {})
+process.on('uncaughtException', (e) => { noteError('crash', e); failed('crash') })
+process.on('unhandledRejection', (e) => { noteError('unhandled', e); failed('unhandled') })
 
 async function browserInUse() {
   try {
@@ -109,6 +111,9 @@ export async function healthReport(db, version = null) {
     errors: errors.slice(-25),
     // Which version each PC of the office runs and since when (services/updateTrail.js).
     pcs: await import('./updateTrail.js').then(t => t.pcsNow({ version })).catch(() => null),
+    // Releases this PC went back from by itself, for Adal Keep Admin → Updates (services/autoUndo.js).
+    autoUndo: await import('./autoUndo.js').then(u => u.forReport()).catch(() => []),
+    arch: await import('./rollout.js').then(r => r.pcArch()).catch(() => null),
     pc_health: await import('./pcHealth.js').then(p => p.pcStatus()).catch(() => null),
     portals: await import('./portalHealth.js').then(p => p.portalStatus().portals.map(({ key, name, ok, why }) => ({ key, name, ok, why }))).catch(() => []),
   }

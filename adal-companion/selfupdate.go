@@ -30,6 +30,7 @@ package main
 
 import (
 	"archive/tar"
+	"bufio"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -37,6 +38,7 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
@@ -49,6 +51,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -93,26 +96,58 @@ func mustPublicKey(p string) ed25519.PublicKey {
 var updatePublicKey = mustPublicKey(updatePublicKeyPEM)
 
 type piece struct {
-	Name   string `json:"name,omitempty"`
+	Name   string     `json:"name,omitempty"`
+	File   string     `json:"file"`
+	SHA256 string     `json:"sha256"`
+	Size   int64      `json:"size,omitempty"`
+	Raw    *rawForm   `json:"raw,omitempty"`   // the plain .tar of a .tar.gz piece (what a patch rebuilds)
+	Patch  *patchForm `json:"patch,omitempty"` // a small patch from the release before (bspatch.go)
+}
+
+// rawForm: a piece as a plain .tar (docs/updates-v2.md §1).
+type rawForm struct {
+	SHA256 string `json:"sha256"`
+	Size   int64  `json:"size,omitempty"`
+}
+
+// patchForm: the patch that turns the release before's piece (from, or from_gz un-gzipped) into this one.
+type patchForm struct {
+	From   string `json:"from"`
+	FromGz string `json:"from_gz,omitempty"`
 	File   string `json:"file"`
 	SHA256 string `json:"sha256"`
 	Size   int64  `json:"size,omitempty"`
 }
 
+// rollout: a staged release (docs/updates-v2.md §3).
+type rollout struct {
+	Test       []string `json:"test"`
+	Pct        int      `json:"pct"`
+	PctAt      string   `json:"pct_at"`
+	EveryoneAt string   `json:"everyone_at"`
+	Stopped    bool     `json:"stopped"`
+}
+
 type releaseManifest struct {
-	SHA         string   `json:"sha"`
-	Short       string   `json:"short"`
-	File        string   `json:"file"`
-	SHA256      string   `json:"sha256"`
-	PublishedAt string   `json:"published_at"`
-	Date        string   `json:"date"`        // the commit's date (%cI)
-	Seq         int64    `json:"seq"`         // publish order (a newer release has a higher one)
-	RollbackOf  string   `json:"rollback_of"` // a deliberate "back to the version before"
-	EveryoneAt  string   `json:"everyone_at"`
-	Early       []string `json:"early"`
+	SHA         string    `json:"sha"`
+	Short       string    `json:"short"`
+	File        string    `json:"file"`
+	SHA256      string    `json:"sha256"`
+	PublishedAt string    `json:"published_at"`
+	Date        string    `json:"date"`        // the commit's date (%cI)
+	Seq         int64     `json:"seq"`         // publish order (a newer release has a higher one)
+	RollbackOf  string    `json:"rollback_of"` // a deliberate "back to the version before"
+	EveryoneAt  string    `json:"everyone_at"`
+	Early       []string  `json:"early"`
 	Audience    *audience `json:"audience"` // only these PCs take it from Supabase (the others get it from them over the office network)
-	Programs    []piece  `json:"programs"`
-	Online      *piece   `json:"online"`
+	Programs    []piece   `json:"programs"`
+	ProgramsX86 []piece   `json:"programs_x86"` // the same programs built for 32-bit Windows
+	Online      *piece    `json:"online"`
+	AppDelta    *struct {
+		Raw   *rawForm   `json:"raw"`
+		Patch *patchForm `json:"patch"`
+	} `json:"app_delta"`
+	Rollout *rollout `json:"rollout"`
 }
 
 // audience: PC names (os.Hostname, lower case) that may take a release from Supabase.
@@ -325,6 +360,11 @@ type updater struct {
 	client   *http.Client     // small calls (sign-in, latest.json)
 	dlClient *http.Client     // downloads: each piece has its own timeout (dl)
 	built    *releaseManifest // the release this program was built from (builtRelease)
+	// LAN first: when the main PC last answered, and when each release was first seen in Supabase.
+	headMu    sync.Mutex
+	mainAt    time.Time
+	firstSeen map[string]time.Time
+	headTold  map[string]bool
 }
 
 type peerInfo struct {
@@ -333,7 +373,7 @@ type peerInfo struct {
 }
 
 func newUpdater(root string) *updater {
-	return &updater{root: root, key: updatePublicKey, peers: map[string]peerInfo{}, failed: map[string]time.Time{}, built: builtRelease, client: &http.Client{Timeout: time.Minute}, dlClient: &http.Client{}}
+	return &updater{root: root, key: updatePublicKey, peers: map[string]peerInfo{}, failed: map[string]time.Time{}, firstSeen: map[string]time.Time{}, headTold: map[string]bool{}, built: builtRelease, client: &http.Client{Timeout: time.Minute}, dlClient: &http.Client{}}
 }
 
 func (u *updater) dir() string         { return filepath.Join(u.root, "updates") }
@@ -366,16 +406,77 @@ func (u *updater) baseline() *releaseManifest {
 	return cur
 }
 
-func piecesOf(m *releaseManifest) []piece {
-	var out []piece
-	if m.SHA256 != "" && m.File != "" {
-		out = append(out, piece{File: m.File, SHA256: m.SHA256})
+// is32bitWindows: this PC runs 32-bit Windows (or this program is a 32-bit build).
+func is32bitWindows() bool {
+	return runtime.GOOS == "windows" && (runtime.GOARCH == "386" || os.Getenv("PROCESSOR_ARCHITECTURE") == "x86" && os.Getenv("PROCESSOR_ARCHITEW6432") == "")
+}
+
+// is32bit: replaced in tests.
+var is32bit = is32bitWindows
+
+// ownPrograms: the programs built for this PC — programs_x86 on 32-bit Windows
+// (when the release has them), else programs.
+func ownPrograms(m *releaseManifest) []piece {
+	if is32bit() && len(m.ProgramsX86) > 0 {
+		return m.ProgramsX86
 	}
-	out = append(out, m.Programs...)
+	return m.Programs
+}
+
+func appPiece(m *releaseManifest) (piece, bool) {
+	if m.SHA256 == "" || m.File == "" {
+		return piece{}, false
+	}
+	p := piece{File: m.File, SHA256: m.SHA256}
+	if m.AppDelta != nil {
+		p.Raw, p.Patch = m.AppDelta.Raw, m.AppDelta.Patch
+	}
+	return p, true
+}
+
+// piecesOf: what a complete release here is — the app, this PC's programs, the pages.
+// (The other build's programs are kept and served when here, never fetched just to hand on.)
+func piecesOf(m *releaseManifest) []piece {
+	return piecesWith(m, ownPrograms(m))
+}
+
+// allPieces: every piece the release names (both program lists), for serving and keeping.
+func allPieces(m *releaseManifest) []piece {
+	return piecesWith(m, append(append([]piece(nil), m.Programs...), m.ProgramsX86...))
+}
+
+func piecesWith(m *releaseManifest, programs []piece) []piece {
+	var out []piece
+	if p, ok := appPiece(m); ok {
+		out = append(out, p)
+	}
+	out = append(out, programs...)
 	if m.Online != nil && m.Online.SHA256 != "" {
 		out = append(out, *m.Online)
 	}
 	return out
+}
+
+// forms: every SHA-256 a piece is known by (the .tar.gz or program, the plain .tar, the patch).
+func forms(p piece) []string {
+	out := []string{p.SHA256}
+	if p.Raw != nil && p.Raw.SHA256 != "" {
+		out = append(out, p.Raw.SHA256)
+	}
+	if p.Patch != nil && p.Patch.SHA256 != "" {
+		out = append(out, p.Patch.SHA256)
+	}
+	return out
+}
+
+// pieceHere: the piece kept here in a whole form (plain .tar first, then as published); "" when none.
+func (u *updater) pieceHere(p piece) string {
+	if p.Raw != nil {
+		if hit := u.piecePath(p.Raw.SHA256); hit != "" {
+			return hit
+		}
+	}
+	return u.piecePath(p.SHA256)
 }
 
 func fileSHA(p string) string {
@@ -561,25 +662,55 @@ func (u *updater) peersWith(sha string) []string {
 	return out
 }
 
-// getPiece: kept here already, else from a PC of the office that has this
-// release, else (when allowed) from Supabase. Checked every time.
+// getPiece: kept here already (in any whole form), else rebuilt from the
+// release before with its small patch, else whole from a PC of the office
+// that has this release, else (when allowed) from Supabase. Checked every
+// time. The path it gives may be a .tar.gz or a plain .tar (untarGz reads both).
 func (u *updater) getPiece(m *releaseManifest, p piece, fromCloud bool) (string, error) {
-	if hit := u.piecePath(p.SHA256); hit != "" && fileSHA(hit) == p.SHA256 {
-		return hit, nil
+	whole := []string{p.SHA256}
+	if p.Raw != nil && hexSHA.MatchString(p.Raw.SHA256) {
+		whole = []string{p.Raw.SHA256, p.SHA256}
+	}
+	for _, sha := range whole {
+		if hit := u.piecePath(sha); hit != "" && fileSHA(hit) == sha {
+			return hit, nil
+		}
 	}
 	if !hexSHA.MatchString(p.SHA256) {
 		return "", errors.New("bad piece")
 	}
-	dest := filepath.Join(u.files(), p.SHA256)
-	for _, base := range u.peersWith(m.SHA) {
-		if err := u.download(base+"/file/"+p.SHA256, nil, p.SHA256, dest); err == nil {
-			log.Printf("⬇️ update: %s from %s", filepath.Base(p.File), base)
-			return dest, nil
+	if p.Patch != nil && os.Getenv("ADAL_DELTA") != "0" {
+		got, err := u.patchPiece(m, p, fromCloud)
+		if err == nil {
+			return got, nil
+		}
+		log.Printf("update: no patch for %s (%v), the whole piece instead", filepath.Base(p.File), err)
+	}
+	for _, sha := range whole {
+		if got, ok := u.fromPeers(m, sha, p.File); ok {
+			return got, nil
 		}
 	}
 	if !fromCloud {
 		return "", errors.New("no PC of the office has it")
 	}
+	return u.fromSupabase(p.File, p.SHA256)
+}
+
+// fromPeers: one file (by SHA-256) from a PC of the office that has release m.
+func (u *updater) fromPeers(m *releaseManifest, sha, name string) (string, bool) {
+	dest := filepath.Join(u.files(), sha)
+	for _, base := range u.peersWith(m.SHA) {
+		if err := u.download(base+"/file/"+sha, nil, sha, dest); err == nil {
+			log.Printf("⬇️ update: %s from %s", filepath.Base(name), base)
+			return dest, true
+		}
+	}
+	return "", false
+}
+
+// fromSupabase: one file of the release from adal-updates, checked against sha.
+func (u *updater) fromSupabase(file, sha string) (string, error) {
 	c := readCloud(u.root)
 	if c == nil {
 		return "", errors.New("no online account yet")
@@ -588,9 +719,92 @@ func (u *updater) getPiece(m *releaseManifest, p piece, fromCloud bool) (string,
 	if err != nil {
 		return "", err
 	}
-	err = u.download(c.URL+"/storage/v1/object/authenticated/adal-updates/"+p.File, map[string]string{"apikey": c.Anon, "Authorization": "Bearer " + tok}, p.SHA256, dest)
+	dest := filepath.Join(u.files(), sha)
+	err = u.download(c.URL+"/storage/v1/object/authenticated/adal-updates/"+file, map[string]string{"apikey": c.Anon, "Authorization": "Bearer " + tok}, sha, dest)
 	return dest, err
 }
+
+// patchBase: the release before's form of the piece that the patch starts from.
+func (u *updater) patchBase(p piece) ([]byte, error) {
+	from := p.Patch.From
+	if hit := u.piecePath(from); hit != "" {
+		if b, err := os.ReadFile(hit); err == nil && sum256(b) == from {
+			return b, nil
+		}
+	}
+	if hit := u.piecePath(p.Patch.FromGz); hit != "" {
+		if f, err := os.Open(hit); err == nil {
+			defer f.Close()
+			if zr, err := gzip.NewReader(f); err == nil {
+				b, err := io.ReadAll(io.LimitReader(zr, 1<<31))
+				if err == nil && sum256(b) == from {
+					return b, nil
+				}
+			}
+		}
+	}
+	// A program: the one installed on this PC.
+	if p.Name != "" && filepath.Base(p.Name) == p.Name {
+		if b, err := os.ReadFile(filepath.Join(u.root, p.Name)); err == nil && sum256(b) == from {
+			return b, nil
+		}
+	}
+	return nil, errors.New("the release before is not here")
+}
+
+// patchPiece: piece p rebuilt from the release before and its patch (the
+// patch from a PC of the office, else Supabase), checked against the signed
+// SHA-256 (the plain .tar's for a .tar.gz piece, the program's own otherwise).
+func (u *updater) patchPiece(m *releaseManifest, p piece, fromCloud bool) (string, error) {
+	pf := p.Patch
+	want := p.SHA256
+	if p.Raw != nil {
+		want = p.Raw.SHA256
+	}
+	if !hexSHA.MatchString(pf.From) || !hexSHA.MatchString(pf.SHA256) || !hexSHA.MatchString(want) {
+		return "", errors.New("bad patch")
+	}
+	old, err := u.patchBase(p)
+	if err != nil {
+		return "", err
+	}
+	pp := u.piecePath(pf.SHA256)
+	if pp == "" || fileSHA(pp) != pf.SHA256 {
+		var ok bool
+		if pp, ok = u.fromPeers(m, pf.SHA256, pf.File); !ok {
+			if !fromCloud {
+				return "", errors.New("no PC of the office has the patch")
+			}
+			if pp, err = u.fromSupabase(pf.File, pf.SHA256); err != nil {
+				return "", err
+			}
+		}
+	}
+	pb, err := os.ReadFile(pp)
+	if err != nil {
+		return "", err
+	}
+	out, err := bspatch(old, pb)
+	old = nil
+	if err != nil {
+		return "", err
+	}
+	if sum256(out) != want {
+		return "", errors.New("the patched piece does not match Adal's signed release")
+	}
+	dest := filepath.Join(u.files(), want)
+	os.MkdirAll(u.files(), 0o755)
+	if err := os.WriteFile(dest+".part", out, 0o644); err != nil {
+		return "", err
+	}
+	if err := os.Rename(dest+".part", dest); err != nil {
+		return "", err
+	}
+	log.Printf("⬇️ update: %s rebuilt from a %d KB patch", filepath.Base(p.File), len(pb)>>10)
+	return dest, nil
+}
+
+func sum256(b []byte) string { h := sha256.Sum256(b); return hex.EncodeToString(h[:]) }
 
 // ── Supabase (the source of truth) ─────────────────────────────────────────
 
@@ -668,7 +882,24 @@ func (u *updater) cloudLatest() (*releaseManifest, *envelope, error) {
 }
 
 // itsTurn: a staged release reaches the "updates first" agencies at once, everyone else at everyone_at.
+// With a rollout (docs/updates-v2.md §3): not stopped, and (a test agency, or
+// everyone_at has come, or pct_at has come and the agency's bucket < pct).
 func itsTurn(m *releaseManifest, agency string, now time.Time) bool {
+	if r := m.Rollout; r != nil {
+		if r.Stopped {
+			return false
+		}
+		for _, a := range r.Test {
+			if agency != "" && a == agency {
+				return true
+			}
+		}
+		reached := func(at string) bool {
+			t, err := time.Parse(time.RFC3339, at)
+			return err == nil && !now.Before(t)
+		}
+		return reached(r.EveryoneAt) || reached(r.PctAt) && rolloutBucket(m.SHA, agency) < r.Pct
+	}
 	if m.EveryoneAt == "" {
 		return true
 	}
@@ -681,6 +912,15 @@ func itsTurn(m *releaseManifest, agency string, now time.Time) bool {
 		}
 	}
 	return false
+}
+
+// rolloutBucket: 0-99, the same for an agency and a release on every PC (and in Node).
+func rolloutBucket(sha, agency string) int {
+	if agency == "" {
+		return 99
+	}
+	h := sha256.Sum256([]byte("adal-rollout|" + sha + "|" + agency))
+	return int(binary.BigEndian.Uint32(h[:4]) % 100)
 }
 
 // ── installing ─────────────────────────────────────────────────────────────
@@ -697,6 +937,7 @@ func (u *updater) install(m *releaseManifest, env *envelope, fromCloud bool) err
 	if t, ok := u.failed[m.SHA]; ok && time.Since(t) < 10*time.Minute {
 		return errors.New("tried a moment ago")
 	}
+	before, _ := u.current()
 	err := u.installPieces(m, fromCloud)
 	if err != nil {
 		u.failed[m.SHA] = time.Now()
@@ -707,10 +948,18 @@ func (u *updater) install(m *releaseManifest, env *envelope, fromCloud bool) err
 	if err := os.WriteFile(u.currentFile(), b, 0o644); err != nil {
 		return err
 	}
-	// The pieces of older releases go.
+	// The pieces of older releases go: every form of this release's pieces stays,
+	// and those of the release before (the base of the next patch).
 	want := map[string]bool{}
-	for _, p := range piecesOf(m) {
-		want[p.SHA256] = true
+	for _, r := range []*releaseManifest{m, before} {
+		if r == nil {
+			continue
+		}
+		for _, p := range allPieces(r) {
+			for _, sha := range forms(p) {
+				want[sha] = true
+			}
+		}
 	}
 	if es, err := os.ReadDir(u.files()); err == nil {
 		for _, e := range es {
@@ -764,19 +1013,32 @@ func (u *updater) completeSet(m *releaseManifest, fromCloud bool) bool {
 
 var completeTries, completeEvery = 6, 10 * time.Minute
 
-// complete: every piece of the kept release is here.
+// have: every form of the release's pieces that is here (both program lists).
 func (u *updater) have(m *releaseManifest) []string {
 	out := []string{}
-	for _, p := range piecesOf(m) {
-		if u.piecePath(p.SHA256) != "" {
-			out = append(out, p.SHA256)
+	seen := map[string]bool{}
+	for _, p := range allPieces(m) {
+		for _, sha := range forms(p) {
+			if !seen[sha] && u.piecePath(sha) != "" {
+				seen[sha] = true
+				out = append(out, sha)
+			}
 		}
 	}
 	return out
 }
 
+// complete: every piece of the kept release (this PC's programs) is here in one whole form.
 func (u *updater) complete(m *releaseManifest) bool {
-	return m != nil && len(u.have(m)) == len(piecesOf(m))
+	if m == nil {
+		return false
+	}
+	for _, p := range piecesOf(m) {
+		if u.pieceHere(p) == "" {
+			return false
+		}
+	}
+	return true
 }
 
 // ── pushing to the main PC (and hearing pushes) ────────────────────────────
@@ -823,6 +1085,7 @@ func (u *updater) offerToMain() bool {
 	// What the main PC has: an offer only when ours is newer (it may have none kept yet).
 	hc := &http.Client{Timeout: 6 * time.Second}
 	if resp, err := hc.Get(base + "/latest"); err == nil {
+		u.mainAnswered()
 		var env envelope
 		ok := resp.StatusCode == http.StatusOK && json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&env) == nil
 		resp.Body.Close()
@@ -949,13 +1212,19 @@ func (u *updater) heardOffer(o offerMsg, from net.IP) (string, bool) {
 }
 
 func (u *updater) installPieces(m *releaseManifest, fromCloud bool) error {
-	for _, p := range m.Programs {
+	// 32-bit Windows: only programs_x86; never a 64-bit program there.
+	no32 := is32bit() && len(m.ProgramsX86) == 0
+	for _, p := range ownPrograms(m) {
 		if !companionPrograms[p.Name] {
 			continue
 		}
 		dest := filepath.Join(u.root, p.Name)
 		if _, err := os.Stat(dest); err != nil {
 			continue // not on this PC
+		}
+		if no32 {
+			log.Printf("no 32-bit build of %s in %s: kept the one installed", p.Name, m.Short)
+			continue
 		}
 		got, err := u.getPiece(m, p, fromCloud)
 		if err != nil {
@@ -1051,11 +1320,17 @@ func untarGz(archive, dest string) error {
 		return err
 	}
 	defer f.Close()
-	gz, err := gzip.NewReader(f)
-	if err != nil {
-		return err
+	// A .tar.gz, or a plain .tar (a piece rebuilt from a patch).
+	br := bufio.NewReader(f)
+	var r io.Reader = br
+	if magic, _ := br.Peek(2); len(magic) == 2 && magic[0] == 0x1f && magic[1] == 0x8b {
+		gz, err := gzip.NewReader(br)
+		if err != nil {
+			return err
+		}
+		r = gz
 	}
-	tr := tar.NewReader(gz)
+	tr := tar.NewReader(r)
 	base, _ := filepath.Abs(dest)
 	for {
 		h, err := tr.Next()
@@ -1209,6 +1484,9 @@ func (u *updater) fromPeer(base string) error {
 		return err
 	}
 	defer resp.Body.Close()
+	if base == mainBase() {
+		u.mainAnswered()
+	}
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("%s has no signed release (%d)", base, resp.StatusCode)
 	}
@@ -1253,8 +1531,46 @@ func (u *updater) fromCloud() error {
 	if c := readCloud(u.root); !itsTurn(m, c.Agency, time.Now()) {
 		return nil
 	}
+	if u.headStart(m) {
+		return nil // the main PC downloads it first; it comes from the office meanwhile
+	}
 	log.Printf("🆕 update %s from Supabase", m.Short)
 	return u.install(m, env, true)
+}
+
+// updateNow: the clock of the LAN head start. Replaced in tests.
+var updateNow = time.Now
+
+// mainAnswered: the main PC answered /latest (it is reachable on the office network).
+func (u *updater) mainAnswered() {
+	u.headMu.Lock()
+	u.mainAt = updateNow()
+	u.headMu.Unlock()
+}
+
+// headStart: true while this Companion leaves release m to the main PC
+// (docs/updates-v2.md §2): the main PC answered in the last 2 minutes, and
+// ADAL_LAN_HEAD_START minutes (20) have not passed since m was first seen in Supabase.
+func (u *updater) headStart(m *releaseManifest) bool {
+	now := updateNow()
+	u.headMu.Lock()
+	defer u.headMu.Unlock()
+	first, ok := u.firstSeen[m.SHA]
+	if !ok {
+		first = now
+		u.firstSeen[m.SHA] = now
+	}
+	if mainBase() == "" || u.mainAt.IsZero() || now.Sub(u.mainAt) > 2*time.Minute {
+		return false
+	}
+	if now.Sub(first) >= time.Duration(envInt("ADAL_LAN_HEAD_START", 20))*time.Minute {
+		return false
+	}
+	if !u.headTold[m.SHA] {
+		u.headTold[m.SHA] = true
+		log.Printf("giving the main PC a head start for %s", m.Short)
+	}
+	return true
 }
 
 // serveLAN: the release kept here and its pieces (only those its signed manifest names), and offers.
@@ -1298,9 +1614,11 @@ func (u *updater) handler() *http.ServeMux {
 		sha := strings.TrimPrefix(r.URL.Path, "/lan/file/")
 		m, _ := u.current()
 		ok := false
-		if m != nil {
-			for _, p := range piecesOf(m) {
-				ok = ok || p.SHA256 == sha
+		if m != nil && hexSHA.MatchString(sha) {
+			for _, p := range allPieces(m) {
+				for _, f := range forms(p) {
+					ok = ok || f == sha
+				}
 			}
 		}
 		file := u.piecePath(sha)
@@ -1419,8 +1737,8 @@ func startSelfUpdate(root string) *updater {
 	u := newUpdater(root)
 	if ln, err := net.Listen("tcp", fmt.Sprintf(":%d", lanHTTPPort)); err == nil {
 		mux := u.handler()
-		addReplicaRoutes(mux) // the copy, for a restore on a new main PC (replica.go)
-		addMainProxy(mux)     // the online pages reach the main PC over the network (mainproxy.go)
+		addReplicaRoutes(mux)     // the copy, for a restore on a new main PC (replica.go)
+		addMainProxy(mux)         // the online pages reach the main PC over the network (mainproxy.go)
 		addRobotRoutes(mux, root) // the main PC's robots in this PC's Adal Browser (robot.go)
 		addPeerRoutes(mux, root)  // its copy and server for the other Companions (peers.go)
 		go http.Serve(ln, mux)

@@ -1,0 +1,63 @@
+/**
+ * robotSystemBrowser.test.js — 2026-11-23, the owner: "get that specific browser stuff [before Adal Browser]
+ * and put it back here and just make the robots work". The robots' browser is the PC's own Brave / Chrome /
+ * Edge again (system mode, the default), started on its port and driven over CDP; a run's tab is a plain new
+ * tab (headless on Linux). Adal Browser stays behind ADAL_ROBOT_BROWSER=adal.
+ * In a headless browser of the test's own on a free port (never the PC's browser on 9222). Skipped without one.
+ * BENCH_LIVE=1 also opens Musaned's public home page in that tab (read-only, nothing typed).
+ */
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import fs from 'fs'
+import os from 'os'
+import path from 'path'
+import net from 'net'
+import { spawn } from 'child_process'
+
+const EXE = ['/usr/bin/brave-browser', '/usr/bin/google-chrome', '/usr/bin/chromium'].find(f => fs.existsSync(f))
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'adal-sysbrowser-'))
+process.env.ADAL_NO_BROWSER_START = '1'
+process.env.ADAL_BROWSER_PROFILE = path.join(tmp, 'never')
+process.env.ADAL_SPACES_FILE = path.join(tmp, 'spaces.json')
+process.env.JEV_ENABLED = 'false'
+const freePort = () => new Promise(r => { const s = net.createServer().listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => r(p)) }) })
+const sleep = (ms) => new Promise(r => setTimeout(r, ms))
+
+test('system mode is the default; the profile follows the browser', async () => {
+  const b = await import('../src/services/browser.js')
+  assert.equal(b.robotBrowserMode(), 'system')
+  assert.equal(b.profileFor('C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe', 'system'), 'browser-profile')
+  assert.equal(b.profileFor('C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe', 'system'), 'browser-profile-edge')
+  assert.equal(b.profileFor('/usr/bin/google-chrome', 'system'), 'browser-profile-chrome')
+  if (process.platform === 'linux') assert.ok(b.findBrowserExecutable(), 'a browser of the PC is found')
+})
+
+test("a run's tab in the PC's own browser, over CDP, out of sight", { skip: !EXE && 'no browser on this PC', timeout: 90000 }, async () => {
+  const port = await freePort()
+  const child = spawn(EXE, ['--headless=new', `--remote-debugging-port=${port}`, `--user-data-dir=${path.join(tmp, 'profile')}`, '--no-first-run', '--no-default-browser-check', 'about:blank'], { stdio: 'ignore', detached: true })
+  try {
+    process.env.BRAVE_CDP_URL = `http://127.0.0.1:${port}`
+    for (let i = 0; i < 60; i++) { try { await fetch(`${process.env.BRAVE_CDP_URL}/json/version`); break } catch { await sleep(250) } }
+    const t0 = Date.now()
+    const { getBrowser, closeBrowser } = await import('../src/services/browser.js')
+    const tm = await import('../src/services/tabManager.js')
+    const browser = await getBrowser()
+    const page = await tm.openRunTab(browser, 1, { workflowId: 'musaned_check_chosen', busyRuns: new Set([1]), keepRuns: new Set([1]), quiet: true })
+    assert.ok(page && !page.isClosed())
+    assert.equal(await page.evaluate(() => window.name), 'adal-run-1')
+    console.log(`connected + run tab: ${(Date.now() - t0) / 1000} s`)
+    if (process.env.BENCH_LIVE === '1') {
+      const t1 = Date.now()
+      await page.goto('https://tawtheeq.musaned.com.sa/', { waitUntil: 'domcontentloaded', timeout: 60000 })
+      const dcl = (Date.now() - t1) / 1000
+      await page.waitForFunction(() => [...document.querySelectorAll('a, button')].some(e => e.offsetWidth > 0 && /^\s*login\s*$/i.test(e.textContent || '')), { timeout: 45000 })
+      console.log(`Musaned home: first page ${dcl} s, LOGIN shown ${(Date.now() - t1) / 1000} s (${page.url()})`)
+    }
+    tm.forgetRunTab(1)
+    await closeBrowser()
+  } finally {
+    try { process.kill(-child.pid) } catch { child.kill() }   // the whole group: brave-browser is a script that starts brave
+    await sleep(500)
+    fs.rmSync(tmp, { recursive: true, force: true })
+  }
+})

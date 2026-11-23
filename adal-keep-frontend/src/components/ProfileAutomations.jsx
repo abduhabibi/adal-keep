@@ -710,7 +710,8 @@ export default function ProfileAutomations({ profileId, phase = null, after }) {
           </div>
           <p className="mt-2 text-base font-bold text-slate-900 dark:text-white">{step.n}. {step.title}</p>
           {step.unfit && <p className="text-sm font-semibold text-red-600">Wafid says UNFIT — she cannot go on.</p>}
-          {shows('make_cv', phase, after) && (
+          {/* Only while her CV is the step (she has one: the next step's box, never "make it again"). */}
+          {step.key === 'cv' && shows('make_cv', phase, after) && (
             <button type="button" onClick={() => navigate(`/cvs/new?profile=${profileId}`)}
               className="mt-2 rounded-lg bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-700">📄 Make her CV</button>
           )}

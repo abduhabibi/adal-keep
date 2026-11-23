@@ -618,6 +618,7 @@ export const STAGES = [
 // Musaned's own contract stages, in order (its tabs).
 import { MUSANED_ORDER, musanedStep } from '../services/musanedStages.js'
 import { featureForWorkflow, needFeature } from '../services/plans.js'
+import { chosenNote, isChosen } from '../services/chosen.js'
 export { MUSANED_ORDER, musanedStep }
 
 export function stageOf(p, runs = {}) {
@@ -634,9 +635,9 @@ export function stageOf(p, runs = {}) {
   if (runs.insurance_certificate?.status === 'done') return 'insured'
   if (live(runs.insurance_certificate)) return 'insurance'
   if (at >= 0) return MUSANED_ORDER[at][1]
-  if (p.status === 'medical_fit') return p.chosen_at ? 'contract_ready' : 'medical_fit'
+  if (p.status === 'medical_fit') return isChosen(p) ? 'contract_ready' : 'medical_fit'
   if (p.status === 'medical_applied' || live(runs.wafid_book) || runs.wafid_book?.status === 'done') return 'wafid'
-  if (p.chosen_at) return 'chosen'
+  if (isChosen(p)) return 'chosen'
   if (/another agency/i.test(p.musaned_stage || '')) return 'other_agency'
   if (!goneFromMusaned(runs) && (p.musaned_stage || runs.musaned_add_candidate?.status === 'done')) return 'musaned'
   return 'new'
@@ -698,7 +699,7 @@ export function journeyOf(p, runs = {}, hasCv = false, docs = null, agents = [])
   // On Musaned and nobody chose her yet: 'waiting' (its own colour), not done.
   const m = live(runs.musaned_add_candidate) ? fromRun(runs.musaned_add_candidate)
     : /another agency/i.test(p.musaned_stage || '') ? ['failed', 'registered by another agency']
-    : added ? (p.chosen_at ? ['done', `chosen ${String(p.chosen_at).slice(0, 10)}`] : ['waiting', 'not chosen yet'])
+    : added ? (isChosen(p) ? ['done', `chosen ${chosenNote(p)}`] : ['waiting', 'not chosen yet'])
     : gone ? ['todo', 'not on Musaned']
     : runs.musaned_add_candidate?.status === 'failed' ? fromRun(runs.musaned_add_candidate) : ['todo', '']
   const musaned = step('musaned', 'Musaned', m[0], m[1], 'musaned_add_candidate')
@@ -707,8 +708,9 @@ export function journeyOf(p, runs = {}, hasCv = false, docs = null, agents = [])
   const wafid = step('wafid', 'Wafid', w[0], w[1], 'wafid_book')
   // Chosen by an employer on Musaned (a cancelled or rejected request is not).
   const at = musanedStep(p.musaned_stage)
-  const chosen = (!!p.chosen_at || at >= 0) && !/CANCEL|REJECT/i.test(p.musaned_stage || '')
-  const selected = step('selected', 'Selected', chosen ? 'done' : 'todo', chosen ? String(p.chosen_at).slice(0, 10) : '', 'musaned_check_chosen')
+  // Her employer's contract on her profile counts too (services/chosen.js).
+  const chosen = isChosen(p, at)
+  const selected = step('selected', 'Selected', chosen ? 'done' : 'todo', chosen ? chosenNote(p) : '', 'musaned_check_chosen')
   // The wakala the office pays on Musaned (Employment Requests → Payment).
   const pay = String(p.musaned_payment || '').trim()
   const wakala = step('wakala', 'Paid wakala', /^paid$/i.test(pay) ? 'done' : chosen && /^unpaid$/i.test(pay) ? 'failed' : 'todo',

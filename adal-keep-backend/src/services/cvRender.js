@@ -686,7 +686,13 @@ async function pdfElsewhere(html, outPath) {
   } catch (e) {
     console.warn('[cv] the other PC could not draw it — drawn here:', e.message)
     return false
-  } finally { if (page) await page.close().catch(() => {}) }
+  } finally {
+    if (page) {
+      // Its last tab closing would close that PC's browser (tabManager.keepBrowserOpen).
+      await (await import('./tabManager.js')).keepBrowserOpen(page).catch(() => {})
+      await page.close().catch(() => {})
+    }
+  }
 }
 
 export async function htmlToPdf(html, outPath) {

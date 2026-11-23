@@ -12,6 +12,7 @@ import { usePlan } from '../lib/plan'
 import { useAuth } from '../context/AuthContext'
 import { AFTER, phaseOf } from '../lib/phase'
 import { shows } from '../lib/stageActions'
+import { isChosen } from '../lib/chosen'
 
 const err = (e) => e?.response?.data?.error || e.message
 const STATUS = {
@@ -50,7 +51,7 @@ export default function WhatsAppSend({ profile }) {
   if (plan?.features?.find(f => f.key === 'whatsapp')?.state === 'off') return null
   // Where her CV went is always shown (even after she is chosen, or with
   // WhatsApp off); sending only while it can still be sent.
-  const canSend = due && !profile.chosen_at && !!conn && agents.length > 0
+  const canSend = due && !isChosen(profile) && !!conn && agents.length > 0
   if (!canSend && !sends.length) return null
   const ready = conn?.status === 'ready'
   // Each agent she was ever sent to: how many times, first and last.

@@ -18,6 +18,7 @@
  */
 import { seal } from './accountVault.js'
 import { goneFromMusaned } from './runOutcome.js'
+import { isChosen } from './chosen.js'
 
 const PER_SCAN = 3                 // CVs made per scan (a PDF each: keep the PC free)
 const CV_RETRY_MS = 60 * 60 * 1000
@@ -37,7 +38,8 @@ export function cvBlockers(p, { hasPhoto, hasFullBody }) {
 /** Should Musaned: Add candidate be queued for her? (runs: latest run per workflow) */
 export function wantsMusaned(p, runs = {}, hasCv = false) {
   if (!hasCv) return false
-  if (p.musaned_stage || p.chosen_at) return false
+  // Chosen already (Musaned's date, or her employer's contract on her profile): never back to Musaned.
+  if (p.musaned_stage || isChosen(p)) return false
   const r = runs.musaned_add_candidate
   if (r) {
     if (['pending', 'running', 'paused', 'done'].includes(r.status)) return false
@@ -99,7 +101,7 @@ export async function pushFirstStage(db, { log = console.log } = {}) {
   const profiles = await db('profiles').whereNull('chosen_at').where('created_at', '>=', since)
     .where(q => q.whereNull('musaned_stage').orWhere('musaned_stage', ''))
     .select('id', 'full_name', 'broker_id', 'religion', 'marital_status', 'musaned_stage', 'chosen_at', 'photo_path',
-      'passport_number', 'phone_number', 'date_of_birth', 'nationality', 'gender')
+      'passport_number', 'phone_number', 'date_of_birth', 'nationality', 'gender', 'contract_number', 'visa_number', 'employer_id')
   if (!profiles.length) return done
   const ids = profiles.map(p => p.id)
   const hasCv = await withCvIds(db, ids)

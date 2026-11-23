@@ -2,6 +2,7 @@ import './lib/phoneApp'
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'
+import './lib/toastOnce'   // one box per error message, never five of the same
 // The fonts are part of the app (no waiting for Google Fonts, works offline).
 import '@fontsource-variable/hanken-grotesk/index.css'
 import '@fontsource-variable/sora/index.css'

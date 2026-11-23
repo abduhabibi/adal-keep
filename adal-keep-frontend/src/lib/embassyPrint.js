@@ -9,6 +9,7 @@ import api from '../services/api'
 import { barcodeSvg } from './barcode'
 import { printOnPhone } from './phoneApp'
 import { EMBASSY_FOOTER } from './embassyFooter'
+import { isChosen } from './chosen'
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
 const day = (d) => { const m = String(d || '').match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? `${m[3]}-${m[2]}-${m[1]}` : esc(d) }
@@ -91,7 +92,7 @@ td.l { color: #333; width: 15% } td.v { font-weight: bold; width: 18% } td.r { t
 export function embassyMissing(p, hasPhoto) {
   const has = (v) => String(v ?? '').trim() !== ''
   return [
-    !p.chosen_at && 'Selected (chosen by an employer)',
+    !isChosen(p) && 'Selected (chosen by an employer)',
     !has(p.visa_application_number) && 'Application number',
     !has(p.visa_number) && 'Visa number',
     !hasPhoto && 'Photo',

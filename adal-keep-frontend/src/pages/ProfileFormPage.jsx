@@ -872,11 +872,6 @@ export default function ProfileFormPage({ embeddedId = null, onDone = null } = {
           <textarea id="notes" rows={4} className={`${inputClass} resize-y`} placeholder="ስለዚህ ደንበኛ ጠቃሚ የሆኑ መረጃዎች…" value={form.notes} onChange={setField('notes')} />
         </div>}
 
-        <label className="flex items-start gap-2.5 rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-2.5 text-sm text-slate-700 dark:text-slate-300 cursor-pointer">
-          <input type="checkbox" className="mt-0.5 h-4 w-4 accent-teal-600" checked={consent} onChange={e => setConsent(e.target.checked)} />
-          <span>The candidate agreed to share her data for recruitment.</span>
-        </label>
-
         <div className="flex flex-wrap gap-3 border-t border-slate-200 dark:border-slate-700 pt-5">
           <button type="submit" className="px-5 py-2.5 rounded-lg bg-teal-600 hover:bg-teal-700 text-white font-medium text-sm transition-colors disabled:opacity-50" disabled={saving}>
             {saving ? 'በማስቀመጥ ላይ…' : isEdit ? 'ለወጦችን አስቀምጥ' : 'ፕሮፋይል ፍጠር'}

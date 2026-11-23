@@ -29,6 +29,24 @@
  */
 import { noteCall } from './siteApi.js'
 import { newRunTab, outOfSight, sendAway } from './browser.js'
+import { isRemote } from './remoteBrowsers.js'
+
+/**
+ * A Companion's robot browser closes by itself when its last tab closes, and
+ * the next robot then waits for it to start again (asked on 2026-11-23: "it
+ * restarts every time I tried to run a robot"). Before a run's tab closes there,
+ * a blank tab is opened when it is the last one: the browser stays open.
+ */
+export async function keepBrowserOpen(page) {
+  try {
+    const b = page?.browser?.()
+    if (!b || !isRemote(b)) return false
+    const others = (await b.pages()).filter(p => p !== page && !p.isClosed?.())
+    if (others.length) return false
+    await b.newPage()
+    return true
+  } catch { return false }
+}
 
 export const PEERS = {
   musaned: { hosts: ['tawtheeq.musaned.com.sa', 'accounts.wahid.sa'], label: 'Musaned' },
@@ -541,7 +559,7 @@ export async function borrowOpenTab(browser, workflowId, busyRuns = new Set()) {
 }
 export async function doneWithTab(page) {
   if (!page) return
-  if (!page.__adalBorrowed) { await page.close().catch(() => {}); return }
+  if (!page.__adalBorrowed) { await keepBrowserOpen(page); await page.close().catch(() => {}); return }
   page.__adalBorrowed = false
   page.__adalRunId = undefined
   handTabToPerson(page)
@@ -573,6 +591,7 @@ export async function closeRunTab(runId) {
   _tabs.delete(id)
   if (isClosed(page)) return false
   try {
+    await keepBrowserOpen(page)
     await page.close()
   } catch {
     return false

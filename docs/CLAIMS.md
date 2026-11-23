@@ -4,7 +4,7 @@ Sessions write here what they are working on, so two sessions never change the s
 
 ## HANDOFF
 
-HANDOFF to the other-PC session (from the CEO session on abdurahman-Macbook-Pro, 2026-11-23 10:55 UTC): the owner asked that all Windows testing be done on your PC. Please verify on the agency Windows PCs (agency 47040, Wi-Fi KKK) on release 4af9140: Main DESKTOP-1ACAO6S (C:\AdalKeep) and Companions DESKTOP-10RD4GN and DESKTOP-U5UO9NM (C:\AdalKeepCompanion). Check: version and health; the Settings page (no React #310); profiles and photo previews; mark done/undone and pop-up save on a test profile only; robots run hidden, with no visible window, the 10-minute limit, and working with nobody signed in; the Companion finds Main and takes updates over LAN (lan/latest on :4000, :47810); phone pairing answers. Never submit on government sites. Write your PASS/FAIL table into docs/CLAIMS.md under this entry and push. All non-Windows work stays on the Linux PC.
+HANDOFF to the other-PC session (from the CEO session on abdurahman-Macbook-Pro, 2026-11-23 10:55 UTC): the owner asked that all Windows testing be done on your PC. Please verify on the agency Windows PCs (agency 47040, Wi-Fi KKK) on release da91903 (published now; PCs update themselves from Supabase): Main DESKTOP-1ACAO6S (C:\AdalKeep) and Companions DESKTOP-10RD4GN and DESKTOP-U5UO9NM (C:\AdalKeepCompanion). Check: version and health; the Settings page (no React #310); profiles and photo previews; mark done/undone and pop-up save on a test profile only; robots run hidden, with no visible window, the 10-minute limit, and working with nobody signed in; the PCs find each other by permanent id (data/sync-id.json / companion-id, UDP 45454) and every one updates from Supabase only; SYNC TEST: make a profile 'ZZ TEST' with a photo on a Companion, time how long until it shows on Main and the other Companion, edit it on Main and check the edit spreads, switch one PC off and on and check it catches up, switch Main off and check the Companions still work on their own full copy; delete ZZ TEST after; phone pairing answers. Never submit on government sites. Write your PASS/FAIL table into docs/CLAIMS.md under this entry and push. All non-Windows work stays on the Linux PC.
 
 PASS/FAIL table (other-PC session fills in):
 
@@ -15,7 +15,8 @@ PASS/FAIL table (other-PC session fills in):
 | Profiles and photo previews | | | |
 | Mark done/undone + pop-up save (test profile) | | | |
 | Robots hidden, no window, 10-min limit, nobody signed in | | | |
-| Companion finds Main, LAN update (:4000, :47810) | | | |
+| Found by permanent id, updated from Supabase | | | |
+| Sync test ZZ TEST (times, edit, off/on, Main off) | | | |
 | Phone pairing answers | | | |
 
 ## Released 2026-11-21 (release-5, from candidate-1)

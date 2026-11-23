@@ -56,6 +56,9 @@ func main() {
 	if exe, err := os.Executable(); err == nil && os.Getenv("ADAL_SELFUPDATE") != "0" {
 		root := filepath.Dir(exe)
 		if _, err := os.Stat(filepath.Join(root, "runtime", "node.exe")); err != nil || os.Getenv("ADAL_SELFUPDATE") == "1" {
+			// It runs whenever the PC is on (no window), and the office can reach it.
+			ensureAutostart()
+			go ensureFirewall()
 			startSelfUpdate(root)
 			// A locked copy of the agency's data, backed up from here when the main PC is off (replica.go).
 			watchReplica()

@@ -213,9 +213,9 @@ try {
 
     # 4. firewall: every network type
     function RuleThere($name) { -not ((netsh advfirewall firewall show rule name="$name" | Out-String) -match 'No rules match') }
-    function PortRule($name, $proto, $port) {
+    function PortRule($name, $proto, $port, $remote = 'any') {
         if (-not (RuleThere $name)) {
-            netsh advfirewall firewall add rule name="$name" dir=in action=allow protocol=$proto localport=$port profile=any | Out-Null
+            netsh advfirewall firewall add rule name="$name" dir=in action=allow protocol=$proto localport=$port remoteip=$remote profile=any | Out-Null
             $script:fixed += "firewall rule '$name' added"
         }
     }
@@ -235,6 +235,9 @@ try {
     }
     PortRule 'Adal Keep' TCP 4000
     PortRule 'Adal Keep Discovery' UDP 45454
+    # The office's PCs update and copy each other (adal-companion :47810, UDP 45455/45456).
+    PortRule 'Adal Keep Sharing (LAN) TCP' TCP 47810 localsubnet
+    PortRule 'Adal Keep Sharing (LAN)' UDP '45455,45456' localsubnet
     $progs = @(@("$InstDir\runtime\node.exe", 'Adal Keep Server'), @("$InstDir\adal-companion.exe", 'Adal Keep Companion'))
     foreach ($p in $progs) {
         if (Test-Path $p[0]) {

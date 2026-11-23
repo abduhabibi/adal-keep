@@ -222,8 +222,23 @@ func resolveHostURL() string {
 	if url := pinnedHostURL(); url != "" && refusedServer(url) {
 		// The address typed or saved here now belongs to another agency's PC.
 		log.Printf("🚫 %s is another main PC (not ours) — searching for ours instead", url)
-	} else if url != "" {
+	} else if url != "" && answersAt(url) {
 		log.Printf("🌐 Server from companion.conf: %s", url)
+		os.Setenv("ADAL_HOST_URL", url)
+		return url
+	} else if url != "" {
+		// Saved, but nobody answers there now (the router gave the main PC a new address):
+		// looked for by its network card and on the network first — never stuck on an old address.
+		log.Printf("🌐 %s (companion.conf) does not answer — looking for the main PC", url)
+		if info := discoverServer(2500 * time.Millisecond); info != nil && info.URL != url {
+			log.Printf("✅ Found it at %s", info.URL)
+			os.Setenv("ADAL_HOST_URL", info.URL)
+			if !strings.HasPrefix(readConfHeader(), autoConfHeader) {
+				forgetTypedHostURL()
+			}
+			rememberHostURL(info.URL)
+			return info.URL
+		}
 		os.Setenv("ADAL_HOST_URL", url)
 		return url
 	}
@@ -345,12 +360,13 @@ func replyCandidates(from net.IP, parts []string) []string {
 	seen := map[string]bool{}
 	add := func(s string) {
 		ip := net.ParseIP(strings.TrimSpace(s)).To4()
-		if ip == nil || ip.IsUnspecified() || ip.IsLoopback() || seen[ip.String()] {
+		if ip == nil || !lanUsable(ip) || seen[ip.String()] {
 			return
 		}
 		seen[ip.String()] = true
 		out = append(out, ip.String())
 	}
+
 	if from != nil {
 		add(from.String())
 	}
@@ -362,7 +378,8 @@ func replyCandidates(from net.IP, parts []string) []string {
 			add(s)
 		}
 	}
-	return out
+	// The packet's own sender first when it is on this PC's network, then the others on it.
+	return lanOrder(out)
 }
 
 // pickReachable: the first candidate where Adal Keep answers on port; when
@@ -381,7 +398,11 @@ func pickReachable(cands []string, port int) string {
 			}
 		}
 	}
-	return cands[0]
+	// Nothing answered: the first one only when it is on this PC's own network.
+	if onOwnNet(net.ParseIP(cands[0])) {
+		return cands[0]
+	}
+	return ""
 }
 
 // itoa avoids pulling strconv in for a single call site.
@@ -408,7 +429,7 @@ func itoa(n int) string {
 }
 
 // keepFindingServer: while the main PC does not answer (turned off, moved to
-// a new address), look for it again every 30 seconds and remember where it is.
+// a new address), look for it again every 15 seconds and remember where it is.
 // Another main PC chosen in Adal Keep's window (companion.conf), or a log out
 // of this one, is taken within 5 seconds.
 func keepFindingServer() {
@@ -427,11 +448,10 @@ func keepFindingServer() {
 			continue
 		}
 		if pinned != "" && pinned != strings.TrimRight(hostServer, "/") && (hostServer == "" || !strings.HasPrefix(readConfHeader(), autoConfHeader)) {
-			// An address typed on this PC that no longer answers (the main PC got a
-			// new address from the router) never pushes out the one found by its
-			// network card: the Companion stays on the office network.
-			if hostServer != "" && !answersAt(pinned) && pingServer() {
-				continue
+			// An address saved here that does not answer is never taken (2026-11-23: a
+			// Companion kept the main PC's old address 192.168.1.4 after it moved to .12).
+			if !answersAt(pinned) {
+				goto search
 			}
 			if refusedServer(pinned) {
 				continue // another agency's PC at that address: never taken
@@ -442,11 +462,13 @@ func keepFindingServer() {
 			pingServer()
 			continue
 		}
-		if tick%6 != 0 || pingServer() {
+	search:
+		// Not answering: looked for again every 15 s (its network card first, then the broadcast).
+		if tick%3 != 0 || pingServer() {
 			continue
 		}
 		// An address typed on this PC (the "cannot find the main PC" page).
-		if pinned := pinnedHostURL(); pinned != "" && pinned != strings.TrimRight(hostServer, "/") && !refusedServer(pinned) {
+		if pinned := pinnedHostURL(); pinned != "" && pinned != strings.TrimRight(hostServer, "/") && !refusedServer(pinned) && answersAt(pinned) {
 			log.Printf("👉 Using the saved address %s", pinned)
 			hostServer = pinned
 			os.Setenv("ADAL_HOST_URL", pinned)

@@ -197,7 +197,7 @@ export async function tailscaleInfo() {
   const r = await runTailscale(['status', '--json'])
   if (!r.ok) {
     // Not installed (or no CLI): an address in 100.64.0.0/10 still means it runs.
-    const ip = getLanAddresses().find(a => /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(a))
+    const ip = getLanAddresses({ withTailscale: true }).find(a => /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(a))
     return { installed: !!ip, connected: !!ip, ip: ip || null, name: null, https: null, error: ip ? null : r.error }
   }
   try {

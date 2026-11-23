@@ -66,6 +66,12 @@ async function cloud() {
 export let lastEnvelope = null
 
 const wait = (ms) => new Promise(r => setTimeout(r, ms))
+const DOWN = /ENETUNREACH|EHOSTUNREACH|ENETDOWN|ENOTFOUND|EAI_AGAIN|ECONNREFUSED/
+/** The error says this PC has no route out (not a slow line): trying again at once does not help. */
+export function netDown(e) {
+  for (let x = e, i = 0; x && i < 4; x = x.cause, i++) if (DOWN.test(String(x.code || '')) || DOWN.test(String(x.message || ''))) return true
+  return false
+}
 
 /** The newest signed release, or an error that says why not (a slow line gets 3 tries). */
 export async function latestRelease(channel = 'release') {
@@ -73,7 +79,13 @@ export async function latestRelease(channel = 'release') {
   let res = null, lastErr = null
   for (let i = 0; i < 3 && !res; i++) {
     try { res = await cloudCall(dbRef, 'GET', `/storage/v1/object/authenticated/${BUCKET}/${channel}/latest.json`, undefined, { raw: true, timeout: 45_000, headers: { 'Cache-Control': 'no-cache' } }) }
-    catch (e) { lastErr = e; if (i < 2) await wait(2000 * (i + 1)) }
+    catch (e) {
+      lastErr = e
+      // No way out to the internet at all (ENETUNREACH …): no more tries — the office network
+      // is asked instead (lanRelease), and the check is not held up for minutes (2026-11-23).
+      if (netDown(e)) break
+      if (i < 2) await wait(2000 * (i + 1))
+    }
   }
   if (!res) throw lastErr
   if (!res.ok) throw new Error(`Supabase updates answered ${res.status}${res.status === 400 || res.status === 404 ? ' (nothing published yet, or updates.sql not run)' : ''}`)

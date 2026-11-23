@@ -297,7 +297,7 @@ func findByMAC() string {
 		want[m] = true
 	}
 	for ip, mac := range neighbourTableFn() {
-		if !want[mac] {
+		if !want[mac] || neverLAN(net.ParseIP(ip)) {
 			continue
 		}
 		u := "http://" + net.JoinHostPort(ip, port)

@@ -22,6 +22,7 @@ import { DocStore } from './docs.js'
 import { DOC_COLUMNS } from './tables.js'
 import { Roles, HEARTBEAT } from './roles.js'
 import { keyHash } from './identity.js'
+import { lanOrder, lanUsable } from '../discovery.js'
 
 export const PULL_EVERY = 60 * 1000
 const PUSH_DELAY = 2500
@@ -171,8 +172,9 @@ export class SyncNode {
       // Where it answered the office network's broadcast lately (peers.js).
       for (const u of this.finder?.urlsOf(p.pc_id) || []) urls.add(u)
       if (p.pc_id === holder && this.mainURL()) urls.add(this.mainURL())
-      for (const a of p.lan || []) if (/^[\w.:[\]-]+$/.test(a)) urls.add(`http://${a.includes(':') && !a.startsWith('[') ? `[${a}]` : a}:${p.port || 4000}`)
-      return { ...p, urls: [...urls] }
+      for (const a of lanOrder(p.lan || [], this.addresses())) if (/^[\w.:[\]-]+$/.test(a)) urls.add(`http://${a.includes(':') && !a.startsWith('[') ? `[${a}]` : a}:${p.port || 4000}`)
+      // (never a Tailscale / link-local address: another PC of the office times out there)
+      return { ...p, urls: [...urls].filter(u => { try { return lanUsable(new URL(u).hostname) || /^(127\.|localhost)/.test(new URL(u).hostname) } catch { return false } }) }
     }).concat(this.trust ? this.newcomers(pcs) : [])
   }
   /**

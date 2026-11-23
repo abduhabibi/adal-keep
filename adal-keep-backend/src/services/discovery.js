@@ -48,7 +48,13 @@ export function onPeerMessage(fn) { peerHandler = typeof fn === 'function' ? fn 
  * Docker bridges). Windows machines routinely have five of these.
  * @returns {string[]}
  */
-export function getLanAddresses() {
+/**
+ * This PC's office-network addresses, best first. Never Tailscale / carrier NAT
+ * (100.64.0.0/10) or link-local (169.254): another PC of the office cannot reach
+ * them (2026-11-23: a Companion timed out copying from Main's 100.89.x address).
+ * withTailscale: the remote-access code that wants that address too.
+ */
+export function getLanAddresses({ withTailscale = false } = {}) {
   const out = []
   const ifaces = os.networkInterfaces()
   for (const [name, addrs] of Object.entries(ifaces || {})) {
@@ -56,6 +62,7 @@ export function getLanAddresses() {
       const family = typeof a.family === 'string' ? a.family : `IPv${a.family}`
       if (family !== 'IPv4' || a.internal) continue
       if (!a.address || a.address.startsWith('169.254.')) continue // APIPA = no LAN
+      if (!withTailscale && isCgnat(a.address)) continue
       out.push({ address: a.address, name })
     }
   }
@@ -89,6 +96,22 @@ export function macsOf(addresses = getLanAddresses(), ifaces = os.networkInterfa
 }
 
 /** 100.64.0.0/10: Tailscale and carrier-grade NAT, never reachable on the LAN. */
+/** An address another PC of the office can use: not Tailscale/CGNAT, link-local, loopback or empty. */
+export function lanUsable(ip) {
+  const a = String(ip || '').replace(/^\[|\]$/g, '')
+  if (!a || a.startsWith('169.254.') || /^fe80:/i.test(a) || a === '0.0.0.0') return false
+  return !isCgnat(a)
+}
+/**
+ * Another PC's addresses, the ones on this PC's own network first (the same /24 as one of
+ * this PC's addresses), the unusable ones (Tailscale, link-local) left out.
+ */
+export function lanOrder(addrs = [], mine = getLanAddresses()) {
+  const nets = new Set(mine.map(a => String(a).split('.').slice(0, 3).join('.')))
+  const same = (a) => nets.has(String(a).split('.').slice(0, 3).join('.'))
+  return [...new Set(addrs)].filter(lanUsable).sort((x, y) => Number(same(y)) - Number(same(x)))
+}
+
 export function isCgnat(ip) {
   const m = /^100\.(\d+)\./.exec(String(ip || ''))
   return !!m && Number(m[1]) >= 64 && Number(m[1]) <= 127

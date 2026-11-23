@@ -3,14 +3,15 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'fs'
 import path from 'path'
-import { fileURLToPath } from 'url'
+import { fileURLToPath, pathToFileURL } from 'url'
 
 const LIB = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'adal-keep-frontend', 'src', 'lib')
 const store = {}
 globalThis.window = { location: { reload() { store.reloaded = (store.reloaded || 0) + 1 } } }
 globalThis.localStorage = { getItem: k => (k in store.ls ? store.ls[k] : null), setItem: (k, v) => { store.ls[k] = String(v) }, removeItem: k => { delete store.ls[k] } }
 const fresh = () => { store.ls = {}; store.reloaded = 0 }
-const I = () => import(`${LIB}/i18n.js`)
+const LIBURL = pathToFileURL(LIB).href
+const I = () => import(LIBURL + `/i18n.js`)
 const asEmployee = (id) => { store.ls.adal_active_employee = JSON.stringify({ id }) }
 const ARABIC = /[؀-ۿ]/, ETHIOPIC = /[ሀ-፿]/
 
@@ -71,7 +72,7 @@ test('government terms stay as they are in every language', async () => {
   const files = ['i18n.js', 'i18n/labels.js', 'i18n/ar-from-english.js'].map(f => fs.readFileSync(`${LIB}/${f}`, 'utf8')).join('\n')
   assert.ok(!/'(Musaned|LMIS|EPRO|Wafid)'\s*:/.test(files), 'a government term is a key in the Amharic map')
   assert.ok(!/\['(Musaned|LMIS|EPRO|Wafid)',/.test(files))
-  const { LABELS } = await import(`${LIB}/i18n/labels.js`); const { AR_FROM_ENGLISH } = await import(`${LIB}/i18n/ar-from-english.js`)
+  const { LABELS } = await import(LIBURL + `/i18n/labels.js`); const { AR_FROM_ENGLISH } = await import(LIBURL + `/i18n/ar-from-english.js`)
   for (const row of [...LABELS, ...AR_FROM_ENGLISH]) if (/Musaned|LMIS|EPRO|Wafid/.test(row[0])) for (const v of row.slice(1)) if (v) assert.match(v, /Musaned|LMIS|EPRO|Wafid/, `${row[0]} lost its term`)
 })
 
@@ -84,7 +85,7 @@ test('data a person typed is never translated (inside translate="no" the layer s
 })
 
 test('dictionaries are complete: every row has its languages, in the right script', async () => {
-  const { LABELS } = await import(`${LIB}/i18n/labels.js`); const { AR_FROM_ENGLISH } = await import(`${LIB}/i18n/ar-from-english.js`)
+  const { LABELS } = await import(LIBURL + `/i18n/labels.js`); const { AR_FROM_ENGLISH } = await import(LIBURL + `/i18n/ar-from-english.js`)
   for (const [en, am, ar] of LABELS) {
     assert.ok(en && ar, en); assert.match(ar, ARABIC, `Arabic of "${en}"`)
     if (am !== null) { assert.match(am, ETHIOPIC, `Amharic of "${en}"`) }

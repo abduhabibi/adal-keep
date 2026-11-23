@@ -49,7 +49,7 @@ before(async () => {
   const dir = path.join(tmp, 'adal-admin'); fs.mkdirSync(path.join(dir, 'public'), { recursive: true })
   for (const f of fs.readdirSync(path.join(REPO, 'adal-admin')).filter(f => f.endsWith('.mjs'))) fs.copyFileSync(path.join(REPO, 'adal-admin', f), path.join(dir, f))
   fs.copyFileSync(path.join(REPO, 'adal-admin', 'public', 'index.html'), path.join(dir, 'public', 'index.html'))
-  fs.symlinkSync(path.join(REPO, 'adal-keep-backend'), path.join(tmp, 'adal-keep-backend'))
+  fs.symlinkSync(path.join(REPO, 'adal-keep-backend'), path.join(tmp, 'adal-keep-backend'), 'junction')   // a junction: no admin rights needed on Windows
   const home = path.join(tmp, 'home'); fs.mkdirSync(path.join(home, '.adal-keep'), { recursive: true })
   const { privateKey } = crypto.generateKeyPairSync('ed25519')
   fs.writeFileSync(path.join(home, '.adal-keep', 'update-signing.pem'), privateKey.export({ type: 'pkcs8', format: 'pem' }))

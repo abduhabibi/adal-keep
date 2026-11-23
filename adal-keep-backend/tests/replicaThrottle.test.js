@@ -38,7 +38,7 @@ test('a queue that does not move answers 503 with a retry time', async () => {
 test('nothing suspends a computer by itself: setSuspended is called only by the explicit route', () => {
   const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src')
   const hits = []
-  const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else if (/\.js$/.test(e.name) && /setSuspended\(/.test(fs.readFileSync(p, 'utf8'))) hits.push(path.relative(root, p)) } }
+  const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else if (/\.js$/.test(e.name) && /setSuspended\(/.test(fs.readFileSync(p, 'utf8'))) hits.push(path.relative(root, p).split(path.sep).join('/')) } }
   walk(root)
   assert.deepEqual(hits.sort(), ['routes/pcAccess.js', 'services/networkGate.js'])
   const route = fs.readFileSync(path.join(root, 'routes/pcAccess.js'), 'utf8')

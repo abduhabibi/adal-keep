@@ -56,7 +56,7 @@ function release(letter, hour, extra = {}) {
   fs.writeFileSync(path.join(stage, 'adal-keep-backend', 'server.js'), `// release ${letter}\n`)
   fs.writeFileSync(path.join(stage, 'adal-keep-frontend', 'dist', 'index.html'), `pages ${letter}`)
   const tgz = path.join(T, `${letter}.tar.gz`)
-  execFileSync('tar', ['-czf', tgz, '-C', stage, 'adal-keep-backend', 'adal-keep-frontend'])
+  execFileSync(process.platform === 'win32' ? path.join(process.env.SystemRoot || 'C:/Windows', 'System32', 'tar.exe') : 'tar', ['-czf', tgz, '-C', stage, 'adal-keep-backend', 'adal-keep-frontend'])
   const app = fs.readFileSync(tgz), prog = Buffer.from(`companion program ${letter}`), online = Buffer.from(`online pages ${letter}`)
   const at = new Date(Date.UTC(2026, 10, 20, hour)).toISOString()
   const manifest = {

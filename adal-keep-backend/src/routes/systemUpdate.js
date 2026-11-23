@@ -657,7 +657,7 @@ async function installFromTarball(cfg, logs, sha = '') {
 
     const extracted = path.join(tmp, 'src')
     fs.mkdirSync(extracted, { recursive: true })
-    const tar = await run(`tar -xzf "${archive}" -C "${extracted}"`, tmp, 5 * 60 * 1000)
+    const tar = await run(`"${TAR}" -xzf "${archive}" -C "${extracted}"`, tmp, 5 * 60 * 1000)   // Windows: its own tar.exe (Git's tar reads C: as a host)
     if (!tar.ok) throw new Error(`Extraction failed (is "tar" installed?): ${tar.out.slice(-300)}`)
 
     const entries = fs.readdirSync(extracted, { withFileTypes: true }).filter((e) => e.isDirectory())
@@ -713,7 +713,7 @@ export async function installFromRelease(cfg, logs, manifest, localArchive = nul
     fs.mkdirSync(extracted, { recursive: true })
     // The .tar.gz, or the plain .tar a patch rebuilt (updates v2).
     const gz = (() => { try { const fd = fs.openSync(archive, 'r'); const b = Buffer.alloc(2); fs.readSync(fd, b, 0, 2, 0); fs.closeSync(fd); return b[0] === 0x1f && b[1] === 0x8b } catch { return true } })()
-    const tar = await run(`tar -x${gz ? 'z' : ''}f "${archive}" -C "${extracted}"`, tmp, 5 * 60 * 1000)
+    const tar = await run(`"${TAR}" -x${gz ? 'z' : ''}f "${archive}" -C "${extracted}"`, tmp, 5 * 60 * 1000)
     if (!tar.ok) throw new Error(`Extraction failed: ${tar.out.slice(-300)}`)
     const keepData = (from) => (src) => {
       const rel = path.relative(from, src)
@@ -1107,6 +1107,8 @@ getInstalled().then(i => { BOOT_VERSION = i.sha || '' }).catch(() => {})
 // ---------------------------------------------------------------------------
 // The release this PC keeps for the office's other PCs (services/lanRelease.js).
 import('../services/lanRelease.js').then(L => L.lanRoutes(lanRouter))
+// Windows: its own tar.exe (bsdtar). Git's tar, when first on the PATH, reads "C:…" as a host and fails.
+const TAR = process.platform === 'win32' ? path.join(process.env.SystemRoot || 'C:/Windows', 'System32', 'tar.exe') : 'tar'
 router.use(lanRouter)
 router.get('/update/check', handleCheck)
 router.post('/update/apply', handleApply)

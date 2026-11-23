@@ -57,7 +57,7 @@ function release(letter, seq, { key = privateKey } = {}) {
   fs.writeFileSync(path.join(stage, 'adal-keep-backend', 'package.json'), '{"name":"x","type":"module"}')
   fs.writeFileSync(path.join(stage, 'adal-keep-frontend', 'dist', 'index.html'), `pages ${letter}`)
   const tgz = path.join(T, `${letter}.tar.gz`)
-  execFileSync('tar', ['-czf', tgz, '-C', stage, 'adal-keep-backend', 'adal-keep-frontend'])
+  execFileSync(process.platform === 'win32' ? path.join(process.env.SystemRoot || 'C:/Windows', 'System32', 'tar.exe') : 'tar', ['-czf', tgz, '-C', stage, 'adal-keep-backend', 'adal-keep-frontend'])
   const app = fs.readFileSync(tgz)
   const prog = Buffer.from(`companion program ${letter}`)
   const online = Buffer.from(`online pages ${letter}`)
@@ -236,7 +236,8 @@ test('a release copied by hand (scp) is installed from a .zip: signed and checke
   fs.writeFileSync(path.join(dir, 'current.json'), JSON.stringify(R.F.env))
   for (const [s, b] of Object.entries(R.F.pieces)) fs.writeFileSync(path.join(dir, 'files', s), b)
   const zip = path.join(T, 'adal-release-f.zip')
-  execFileSync('zip', ['-qr', zip, '.'], { cwd: dir })
+  if (process.platform === 'win32') execFileSync(path.join(process.env.SystemRoot || 'C:/Windows', 'System32', 'tar.exe'), ['-a', '-cf', zip, '.'], { cwd: dir })   // no zip on Windows: its tar makes one
+  else execFileSync('zip', ['-qr', zip, '.'], { cwd: dir })
   const r = await (await fetch(`${MAIN}/api/system/update/apply-local?path=${encodeURIComponent(zip)}`, { method: 'POST' })).json()
   assert.equal(r.success, true, JSON.stringify(r))
   assert.equal(runs(), '// release f')
@@ -260,7 +261,7 @@ test('apply-release.mjs (for a PC whose server is older than apply-local) runs t
   fs.mkdirSync(path.join(stage, 'adal-keep-backend'))
   for (const f of ['src', 'safeStart.js', 'package.json', 'server.js']) fs.cpSync(path.join(BACK, f), path.join(stage, 'adal-keep-backend', f), { recursive: true })
   const tgz = path.join(T, 'real.tar.gz')
-  execFileSync('tar', ['-czf', tgz, '-C', stage, 'adal-keep-backend'])
+  execFileSync(process.platform === 'win32' ? path.join(process.env.SystemRoot || 'C:/Windows', 'System32', 'tar.exe') : 'tar', ['-czf', tgz, '-C', stage, 'adal-keep-backend'])
   const app = fs.readFileSync(tgz)
   const manifest = { ...R.F.env.manifest, sha: hex40('9'), short: '9999999', sha256: sha256(app), size: app.length }
   const bundle = path.join(T, 'bundle-real')

@@ -4,6 +4,12 @@ import fs from 'fs'
 import sharp from 'sharp'
 import imageToPdf from 'image-to-pdf'
 import { upload, generateThumbnail, getRelativePath } from '../services/storage.js'
+import { fileURLToPath } from 'url'
+import { fetchMissing } from '../services/fileOnDemand.js'
+
+// The backend folder: where the agency's PCs put the documents they copy (sync/index.js), when
+// the program was started from another folder.
+const BACKEND = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 
 const router = express.Router()
 
@@ -18,12 +24,12 @@ function resolveStoredPath(file) {
   const base = path.basename(raw)
   // Files attached by profileFiles.js are stored with their full path.
   if (path.isAbsolute(raw)) { try { if (fs.existsSync(raw)) return raw } catch {} }
-  const candidates = [
-    path.join(cwd, 'data/SafeStorage', raw),   // AI files (basename) + data/SafeStorage/<subpath>
-    path.join(cwd, raw),                        // uploads/... paths
-    path.join(cwd, 'data/SafeStorage', base),   // basename fallback
-    path.join(cwd, 'uploads', base),            // last-ditch
-  ]
+  const candidates = [...new Set([cwd, BACKEND])].flatMap(root => [
+    path.join(root, 'data/SafeStorage', raw),   // AI files (basename) + data/SafeStorage/<subpath>
+    path.join(root, raw),                        // uploads/... paths
+    path.join(root, 'data/SafeStorage', base),   // basename fallback
+    path.join(root, 'uploads', base),            // last-ditch
+  ])
   for (const c of candidates) {
     try { if (c && fs.existsSync(c)) return c } catch {}
   }
@@ -303,8 +309,9 @@ router.get('/files/:fileId/download', async (req, res) => {
     const file = await db('files').where('id', fileId).first()
     if (!file) return res.status(404).json({ error: 'File not found' })
 
-    const fullPath = resolveStoredPath(file)
-    if (!fullPath) return res.status(404).json({ error: 'File not found on disk' })
+    const fullPath = resolveStoredPath(file) || ((await fetchMissing(file)) ? resolveStoredPath(file) : null)
+    // Listed here, its file still on another PC: the page shows "coming" and asks again.
+    if (!fullPath) return res.status(404).set('X-Adal-Pending', '1').json({ error: 'This file is not on this PC yet — it is being copied from the other PC.', pending: true })
 
     res.download(fullPath, file.original_name || path.basename(fullPath))
   } catch (err) {
@@ -321,8 +328,9 @@ router.get('/files/:fileId/thumbnail', async (req, res) => {
     const file = await db('files').where('id', fileId).first()
     if (!file) return res.status(404).json({ error: 'File not found' })
 
-    const fullPath = resolveStoredPath(file)
-    if (!fullPath) return res.status(404).json({ error: 'File not found on disk' })
+    const fullPath = resolveStoredPath(file) || ((await fetchMissing(file)) ? resolveStoredPath(file) : null)
+    // Listed here, its file still on another PC: the page shows "coming" and asks again.
+    if (!fullPath) return res.status(404).set('X-Adal-Pending', '1').json({ error: 'This file is not on this PC yet — it is being copied from the other PC.', pending: true })
 
     // Prefer a real thumbnail if one exists; else send the file itself
     const thumb = resolveThumbPath(fullPath)

@@ -1,4 +1,5 @@
 import puppeteer from 'puppeteer-core'
+import { headlessHere } from './noWindows.js'
 import { execSync } from 'child_process'
 import path from 'path'
 import fs from 'fs'
@@ -72,7 +73,7 @@ async function ensureBrowser() {
   try {
     browser = await puppeteer.launch({
       executablePath,
-      headless: false,
+      headless: headlessHere(),   // Linux: no window (services/noWindows.js)
       userDataDir,
       defaultViewport: null,
       args: [

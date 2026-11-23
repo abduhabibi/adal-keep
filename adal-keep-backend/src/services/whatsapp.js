@@ -16,6 +16,7 @@ import { execFileSync } from 'child_process'
  * when too old to delete, answered "Selected — no longer available").
  */
 import fs from 'fs'
+import { headlessHere } from './noWindows.js'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { findBrowserExecutable } from './browser.js'
@@ -527,7 +528,7 @@ export async function openWeb(db, key = 'owner') {
   if (!exe) throw new Error('Adal Browser is not on this PC yet')
   const { default: puppeteer } = await import('puppeteer-core').catch(() => import('puppeteer'))
   try {
-    own = await puppeteer.launch({ executablePath: exe, headless: false, defaultViewport: null,
+    own = await puppeteer.launch({ executablePath: exe, headless: headlessHere(), defaultViewport: null,
       userDataDir: path.join(DIR, `session-${key}`), args: ['--no-first-run', '--no-default-browser-check', '--window-size=1100,800'] })
     page = (await own.pages())[0] || await own.newPage()
   } catch (e) {

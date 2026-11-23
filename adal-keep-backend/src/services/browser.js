@@ -30,6 +30,7 @@
  */
 
 import fs from 'fs'
+import { headlessArgs, noWindows } from './noWindows.js'
 import path from 'path'
 import { spawn, execFile, execFileSync } from 'child_process'
 import { fileURLToPath } from 'url'
@@ -108,6 +109,8 @@ function freshStart() {
 }
 
 const BROWSER_ARGS = [
+  // Linux: no window at all (services/noWindows.js); the live view shows the pages.
+  ...headlessArgs(),
   `--remote-debugging-port=${DEBUG_PORT}`,
   `--user-data-dir=${PROFILE_DIR}`,
   '--no-first-run',
@@ -308,6 +311,7 @@ const place = async ({ cdp, windowId }, bounds) => {
  * Only ever a window of Adal Keep's own: moving a person's window resizes it.
  */
 async function hide(page) {
+  if (noWindows()) return   // headless on Linux: there is no window to hide
   const w = await windowOf(page)
   if (process.platform !== 'linux') return place(w, OFF)
   // A new window ignores this until the desktop has finished showing it.
@@ -516,3 +520,5 @@ export async function quitBrowser() {
   console.log('[browser] idle with nothing to keep — quit')
   return true
 }
+
+export const _browserArgs = BROWSER_ARGS

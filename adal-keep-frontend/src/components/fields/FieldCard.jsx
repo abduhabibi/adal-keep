@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import FileImage from '../shared/FileImage'
 import { usePickFile, ON_PHONE } from '../shared/PickFile'
 import { useNavigate } from 'react-router-dom'
 import { createPortal } from 'react-dom'
@@ -410,7 +411,7 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
                 muted
               />
             ) : isImage(mainFile) ? (
-              <img
+              <FileImage
                 src={`/api/files/${mainFile.id}/thumbnail`}
                 alt=""
                 className="h-full w-full object-cover cursor-zoom-in transition-transform hover:scale-[1.02]"

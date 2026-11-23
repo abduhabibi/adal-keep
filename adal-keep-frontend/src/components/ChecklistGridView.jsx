@@ -1,4 +1,5 @@
 import GlassSelect from './shared/GlassSelect'
+import FileImage from './shared/FileImage'
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
@@ -345,7 +346,7 @@ export default function ChecklistGridView({ checklist, onClose }) {
                         onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) handleUpload(profile.id, c.key, f) }}>
                         {file ? (
                           file.mimetype?.startsWith('image/')
-                            ? <img src={`/api/files/${file.id}/thumbnail`} className="w-12 h-12 object-cover rounded mx-auto border border-slate-200" alt="" />
+                            ? <span className="relative mx-auto block h-12 w-12 overflow-hidden"><FileImage src={`/api/files/${file.id}/thumbnail`} className="h-12 w-12 object-cover rounded border border-slate-200" alt="" /></span>
                             : <div className="w-12 h-12 bg-slate-100 dark:bg-slate-800 rounded mx-auto flex items-center justify-center text-slate-400">📄</div>
                         ) : hasCv(profile.id, c.key) ? (
                           <span className="text-base font-bold text-emerald-600" title="CV made in Adal Keep">✓</span>

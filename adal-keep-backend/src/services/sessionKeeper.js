@@ -284,18 +284,24 @@ async function closeSpareTabs(pages) {
   }
 }
 
-// Tabs the robot's own tab list no longer shows (2026-11-24, this PC: six left on wahid.sa's sign-out page with
-// "no internet" after a dropped line, never closed) but the browser keeps: closed by the browser's own list —
-// only a portal's sign-out page or the browser's error page, never anything else.
-export const lostSignOut = (url) => /^https?:\/\/[^/]*(wahid\.sa|musaned\.com\.sa)(:\d+)?\/.*(openid-connect\/logout|\/logout\b)/i.test(url) || /^chrome-error:/i.test(url)
+// Tabs left on a portal's sign-out page (2026-11-24, this PC: six on wahid.sa's sign-out with "no internet" after a
+// dropped line, never closed — the robot saw only the browser's error page in them, not where they were): closed by
+// the address the browser gives for the tab. Never a tab a run, a check or a person uses.
+export const lostSignOut = (url) => /^https?:\/\/[^/]*(wahid\.sa|musaned\.com\.sa)(:\d+)?\/.*(openid-connect\/logout|\/logout\b)/i.test(url)
 async function closeLostSignOuts(browser, pages) {
-  const known = new Set(pages.map(p => { try { return p.target()._targetId } catch { return null } }).filter(Boolean))
+  const { activeRunIds } = await import('./tabManager.js')
+  const active = await activeRunIds(db)
+  const byId = new Map(pages.map(p => { try { return [p.target()._targetId, p] } catch { return [null, p] } }))
   const cdp = await browser.target().createCDPSession()
   try {
     const { targetInfos } = await cdp.send('Target.getTargets')
-    const lost = targetInfos.filter(t => t.type === 'page' && !known.has(t.targetId) && lostSignOut(t.url))
+    const lost = targetInfos.filter(t => {
+      if (t.type !== 'page' || !lostSignOut(t.url)) return false
+      const p = byId.get(t.targetId)
+      return !p || !(p.__adalBorrowed || p.__adalShown || p.__adalPerson || p.__adalMayLogOut || active.has(Number(p.__adalRunId)))
+    })
     for (const t of lost) await cdp.send('Target.closeTarget', { targetId: t.targetId }).catch(() => {})
-    if (lost.length) console.log(`[sessions] ${lost.length} tab(s) left on a site's sign-out or error page closed`)
+    if (lost.length) console.log(`[sessions] ${lost.length} tab(s) left on a site's sign-out page closed`)
   } finally { await cdp.detach().catch(() => {}) }
 }
 

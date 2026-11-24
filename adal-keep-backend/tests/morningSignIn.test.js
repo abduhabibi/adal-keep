@@ -75,9 +75,9 @@ test('after a restart the account\'s own sign-in tab is found again by its label
   assert.ok(!k.isSignInTabOf(visa, 'Nuzla', 'https://wafid.com/en/', '[Nuzla] Wafid'))
 })
 
-test('lost tabs closed only when on a portal\'s sign-out or the browser\'s error page', () => {
+test('lost tabs closed only when on a portal\'s sign-out page', () => {
   assert.ok(k.lostSignOut('https://accounts.wahid.sa/auth/realms/wahid/protocol/openid-connect/logout?client_id=etawtheeq-fe'))
-  assert.ok(k.lostSignOut('chrome-error://chromewebdata/'))
+  assert.ok(!k.lostSignOut('chrome-error://chromewebdata/'))
   assert.ok(!k.lostSignOut('https://tawtheeq.musaned.com.sa/hr-pool/candidates/add'))
   assert.ok(!k.lostSignOut('https://accounts.wahid.sa/auth/realms/wahid/protocol/openid-connect/auth?x'))
   assert.ok(!k.lostSignOut('https://example.com/logout'))

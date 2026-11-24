@@ -65,6 +65,8 @@ if (import.meta.env.VITE_DEMO !== '1') {
   api.interceptors.request.use((c) => { if (!c.responseType || c.responseType === "json") c.__t0 = performance.now(); return c })
   const took = (c) => { if (!c?.__t0) return; avg = avg ? avg * 0.8 + (performance.now() - c.__t0) * 0.2 : performance.now() - c.__t0; window.__adalSlowLine = avg > 1500 }
   api.interceptors.response.use((r) => { took(r.config); return r }, (e) => { took(e?.config); return Promise.reject(e) })
+  // "Signed out": who to sign in as, for the message's one-click button (lib/toastOnce.js).
+  api.interceptors.response.use((r) => r, (e) => { const d = e?.response?.data; if (d?.signed_out) window.__adalSignInAs = d.sign_in_as || null; return Promise.reject(e) })
 }
 
 // An Adal Companion (or another computer) let in with the main PC's number

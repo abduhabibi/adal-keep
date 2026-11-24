@@ -65,3 +65,12 @@ test('sign-in tabs show in the sidebar by site and account, not twice when a run
   assert.equal(lmis.site, 'LMIS'); assert.equal(lmis.girl, 'Main'); assert.ok(lmis.needs_you); assert.equal(lmis.pc, 'this PC')
   await db.destroy()
 })
+
+test('after a restart the account\'s own sign-in tab is found again by its label (Musaned\'s on wahid.sa too), never a sign-out page', () => {
+  const mus = k.SITES.find(s => s.key === 'musaned'), visa = k.SITES.find(s => s.key === 'mofa')
+  assert.ok(k.isSignInTabOf(mus, 'Zad', 'https://accounts.wahid.sa/auth/realms/wahid/protocol/openid-connect/auth?x', '[Zad] Sign in to Musaned'))
+  assert.ok(!k.isSignInTabOf(mus, 'Zad', 'https://accounts.wahid.sa/auth/realms/wahid/protocol/openid-connect/logout', '[Zad] accounts.wahid.sa'))
+  assert.ok(!k.isSignInTabOf(mus, 'Zad', 'https://accounts.wahid.sa/auth', '[nuzla] Sign in to Musaned'), 'another account\'s tab')
+  assert.ok(k.isSignInTabOf(visa, 'Nuzla', 'https://visa.mofa.gov.sa/Account/Login/enjazcompany', '[Nuzla] Visa platform'))
+  assert.ok(!k.isSignInTabOf(visa, 'Nuzla', 'https://wafid.com/en/', '[Nuzla] Wafid'))
+})

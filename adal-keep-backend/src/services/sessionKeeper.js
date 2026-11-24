@@ -551,6 +551,32 @@ export async function siteTabOf(browser, site, space, running = new Set()) {
   return { page: null, signedIn: false }
 }
 
+/**
+ * After Adal Keep started again its sign-in tabs are still in the browser but no longer known: the account's
+ * own (its label "[Zad] …", its space, on the site or Musaned's sign-in site wahid.sa, no run in it) is used
+ * again — never a second one; copies of it are closed.
+ */
+export const isSignInTabOf = (site, label, url, title) => {
+  let h = ''
+  try { h = hostOf(url) } catch { return false }
+  const onSite = site.host.test(h) || (site.key === 'musaned' && /(^|\.)wahid\.sa$/.test(h))
+  return onSite && !!label && String(title || '').startsWith(`[${label}]`) && !/openid-connect\/logout|\/logout\b/i.test(url)
+}
+async function adoptSignInTab(browser, site, space, label, liveKey, running) {
+  const mine = space || browser.defaultBrowserContext?.() || null
+  const pages = (await browser.pages().catch(() => [])).filter(p => !p.isClosed?.() && (!mine || spaceIs(p, mine)) && !running.has(Number(p.__adalRunId)) && !p.__adalRunId)
+  const found = []
+  for (const p of pages) {
+    const title = await Promise.race([p.title().catch(() => ''), new Promise(r => setTimeout(() => r(''), 3000))])
+    if (isSignInTabOf(site, label, p.url(), title)) found.push(p)
+  }
+  if (!found.length) return null
+  live.set(liveKey, found[0])
+  for (const extra of found.slice(1)) await extra.close().catch(() => {})
+  console.log(`[sessions] ${site.name} (${label}): its sign-in tab from before is used again${found.length > 1 ? `, ${found.length - 1} copy closed` : ''}`)
+  return found[0]
+}
+
 /** Presses a sign-in form's own button (never a "Login" link elsewhere). */
 const pressFormButton = (page) => page.evaluate(() => {
   const pw = document.querySelector('input[type="password"]')
@@ -618,6 +644,7 @@ export async function openSite(key, database = null, { accountId = null, browser
   // The site's main account is always "site-musaned" (asked by id or not): one tab, one sign-in for it.
   const liveKey = `site-${key}${space && accountId ? `-${Number(accountId)}` : ''}`
   liveInfo.set(liveKey, { key, name: site.name, account: label })
+  if (!siteTab(liveKey)) await adoptSignInTab(browser, site, space, label, liveKey, running)
   const signing = live.get(liveKey)
   if (signing && !signing.isClosed?.() && signing.__adalBorrowed && signing.__adalSigning) {
     console.log(`[sessions] ${site.name}${label ? ` (${label})` : ''}: its sign-in is filled and waiting in its tab — shown, not started again`)

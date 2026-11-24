@@ -51,5 +51,10 @@ test('a browser started again gets the day\'s sign-ins back, locked on disk, non
     assert.equal(cookies.find(c => c.name === 'KEYCLOAK_SESSION')?.value, 'nuzla-signed-in')
     assert.ok(!cookies.some(c => c.name === 'ad'))
     assert.equal(await restoreSessionCookies(b, { now: Date.now() + 25 * 3600e3 }), 0)   // older than a day: not given
+    // A connection where the browser will not give its own session ("No target with given id"): through a tab.
+    const stubborn = { target: () => ({ createCDPSession: async () => { throw new Error('Protocol error (Target.attachToTarget): No target with given id found') } }), pages: () => b.pages() }
+    if (!(await b.pages()).length) await b.newPage()
+    assert.equal(await saveSessionCookies(stubborn), 1, 'kept through a tab')
+    assert.equal(await restoreSessionCookies(stubborn), 1, 'given back through a tab')
   } finally { await b.close(); fs.rmSync(tmp, { recursive: true, force: true }) }
 })

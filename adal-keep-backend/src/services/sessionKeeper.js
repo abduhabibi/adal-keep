@@ -224,10 +224,19 @@ export const portalSessionCookies = (cookies = []) => cookies
   .filter(c => c.session && PORTAL_COOKIES.test(String(c.domain || '').replace(/^\./, '')))
   .map(({ name, value, domain, path, secure, httpOnly, sameSite }) => ({ name, value, domain, path, secure, httpOnly, ...(sameSite ? { sameSite } : {}) }))
 
+// The browser's own session; when the browser will not give one ("No target with given id", seen on this PC's
+// robot connection 2026-11-24), a session of one of its tabs (the browser's own space): the same cookies and tabs.
+async function browserSession(browser) {
+  try { return { cdp: await browser.target().createCDPSession(), page: false } } catch (e) {
+    const p = (await browser.pages().catch(() => [])).find(p => !p.isClosed?.() && !p.__adalFrozen && !spaceOf(p))
+    if (!p) throw e
+    return { cdp: await p.createCDPSession(), page: true }
+  }
+}
 export async function saveSessionCookies(browser, { file = COOKIE_FILE, now = Date.now() } = {}) {
-  const cdp = await browser.target().createCDPSession()
+  const { cdp, page } = await browserSession(browser)
   try {
-    const { cookies } = await cdp.send('Storage.getCookies')
+    const { cookies } = await cdp.send(page ? 'Network.getAllCookies' : 'Storage.getCookies')
     const keep = portalSessionCookies(cookies)
     if (!keep.length) return 0
     const { seal } = await import('./accountVault.js')
@@ -246,8 +255,8 @@ export async function restoreSessionCookies(browser, { file = COOKIE_FILE, now =
   let cookies = []
   try { cookies = JSON.parse(open(saved.cookies) || '[]') } catch { return 0 }
   if (!cookies.length) return 0
-  const cdp = await browser.target().createCDPSession()
-  try { await cdp.send('Storage.setCookies', { cookies }) } finally { cdp.detach().catch(() => {}) }
+  const { cdp, page } = await browserSession(browser)
+  try { await cdp.send(page ? 'Network.setCookies' : 'Storage.setCookies', { cookies }) } finally { cdp.detach().catch(() => {}) }
   console.log(`[sessions] the day's sign-ins are back in the robot browser (${cookies.length} cookies, kept ${Math.round((now - saved.at) / 60000)} min ago)`)
   return cookies.length
 }
@@ -315,7 +324,7 @@ async function closeLostSignOuts(browser, pages) {
   const { activeRunIds } = await import('./tabManager.js')
   const active = await activeRunIds(db)
   const byId = new Map(pages.map(p => { try { return [p.target()._targetId, p] } catch { return [null, p] } }))
-  const cdp = await browser.target().createCDPSession()
+  const { cdp } = await browserSession(browser)
   try {
     const { targetInfos } = await cdp.send('Target.getTargets')
     const lost = targetInfos.filter(t => {

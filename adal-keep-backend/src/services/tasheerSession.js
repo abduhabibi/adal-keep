@@ -48,6 +48,8 @@ export async function setHolder(db, h) {
   if (!n) await db('settings').insert({ key: KEY, value }).catch(() => {})
 }
 
+/** Tasheer's sign-in tab known now (no look in the browser): the Browsers list. */
+export const tabNow = () => (tab && !tab.isClosed?.() ? tab : null)
 /** The live view's tab for a site sign-in ("site-tasheer"), or null. */
 export async function siteTab(name) {
   if (name !== 'site-tasheer') return null

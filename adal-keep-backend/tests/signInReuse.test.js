@@ -27,6 +27,7 @@ process.env.ACCOUNT_VAULT_KEY = path.join(tmp, 'vault.key')
 process.env.ADAL_SPACES_FILE = path.join(tmp, 'spaces.json')
 process.env.JEV_ENABLED = 'false'
 process.env.ADAL_NO_BROWSER_START = '1'
+process.env.ADAL_WAFID_STANDBY = '0'   // the keeper's look never opens Wafid (the internet) in this test's Chrome
 process.env.ADAL_BROWSER_PROFILE = path.join(tmp, 'never')
 const freePort = () => new Promise(r => { const s = net.createServer().listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => r(p)) }) })
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
@@ -92,7 +93,7 @@ test('sign-in: tab reuse, one space per account, the person only ticks the box',
     assert.ok(zadTab, 'the live view finds the tab')
     assert.equal(spaceOf(zadTab), 'musaned:2', 'Zad works in its own browser space')
     // The vault's name and password are filled, the box is left for the person.
-    await waitFor(() => zadTab.evaluate(() => document.querySelector('#username')?.value === 'zad' && document.querySelector('#password')?.value === 'pw-zad'), 30000, 'name and password filled')
+    await waitFor(() => zadTab.evaluate(() => document.querySelector('#username')?.value === 'zad' && document.querySelector('#password')?.value === 'pw-zad'), 60000, 'name and password filled')
     await sleep(3000)
     assert.equal(mock.events.filter(e => e.what === 'login-post').length, 0, 'Sign in is never pressed before the tick')
     const anchor = zadTab.frames().find(f => /recaptcha\/api2\/anchor/.test(f.url()))

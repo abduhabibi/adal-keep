@@ -92,7 +92,15 @@ async function clickBackAndForth(p) {
 export async function tabSignedIn(site, p) {
   let inNow = signedInAt(site, p.url())
   if (inNow && site.key === 'musaned') {
-    const st = await Promise.race([import('./musanedWorkflow.js').then(w => w.snapshotState(p)).catch(() => null), new Promise(r => setTimeout(() => r(null), 8000))])
+    // A page that gives no answer is loading (the keeper's reload, a slow line): asked again once it has loaded,
+    // never taken as signed out — that started a second sign-in in a signed-in tab.
+    const look = () => Promise.race([import('./musanedWorkflow.js').then(w => w.snapshotState(p)).catch(() => null), new Promise(r => setTimeout(() => r(null), 8000))])
+    let st = await look()
+    for (let i = 0; i < 3 && (!st || !(st.hasDashboardNav || st.hasHrPoolPage)) && !st?.hasPassword && !p.isClosed?.(); i++) {
+      await p.waitForFunction(() => document.readyState === 'complete', { timeout: 8000 }).catch(() => {})
+      await new Promise(r => setTimeout(r, 700))
+      st = await look()
+    }
     inNow = !!(st && (st.hasDashboardNav || st.hasHrPoolPage) && !st.hasPassword)
   }
   if (inNow && site.key === 'lmis') {
@@ -306,6 +314,8 @@ async function knowSignInTabs(pages) {
     const site = siteOf(p.url())
     const title = await Promise.race([p.title().catch(() => ''), new Promise(r => setTimeout(() => r(''), 2000))])
     p.__adalBlocked = !!site && BLOCKED_TITLE.test(title)
+    // Tasheer's one tab (signed in or not, or blocked) is its sign-in tab.
+    if (site?.key === 'tasheer' && !siteTab('site-tasheer') && ![...live.values()].includes(p)) { live.set('site-tasheer', p); liveInfo.set('site-tasheer', { key: 'tasheer', name: 'Tasheer', account: '' }); continue }
     if (!site || !(kept[site.key]?.spaces || {})[spaceOf(p)] || [...live.values()].includes(p)) continue
     if (!(await tabSignedIn(site, p).catch(() => false))) continue
     const sp = spaceOf(p)

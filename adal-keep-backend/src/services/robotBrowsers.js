@@ -67,7 +67,7 @@ export async function listBrowsers(db, deps = {}) {
   const signIns = deps.signIns || await (async () => {
     const k = await import('./sessionKeeper.js')
     const list = k.signInTabs()
-    const t = await (await import('./tasheerSession.js')).siteTab('site-tasheer').catch(() => null)
+    const t = (await import('./tasheerSession.js')).tabNow()   // (known tabs only: listing never looks in a browser)
     if (t && !list.some(x => x.page === t)) {
       const inNow = !!k.kept.tasheer?.signedIn, blocked = !inNow && !!t.__adalBlocked
       list.push({ key: 'site-tasheer', page: t, site: 'Tasheer', girl: '', status: inNow ? 'Signed in' : blocked ? 'Blocked by the site' : 'Sign in', needs_you: !inNow && !blocked,

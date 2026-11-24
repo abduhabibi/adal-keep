@@ -1026,19 +1026,31 @@ export async function runTab(db, runId) {
   const browser = await openBrowserIfAny()
   const look = () => findRunTab(browser, run.id, run.workflow_id, { adopt: ['pending', 'running', 'paused'].includes(run.status) })
   let page = await look()
-  // A tab that no longer answers (closed under it, discarded): forget it and look again.
-  if (page && !(await tabAnswers(page))) { dropTab(run.id); page = await look(); if (page && !(await tabAnswers(page))) return null }
-  return page
+  // A closed tab: forget it and look again. A slow one is NOT forgotten: on a weak PC or a slow line the
+  // page is busy (Google's reCAPTCHA loading) and missed the 2.5-s look, the live view dropped the tab the
+  // run was working in, and the person's clicks got "no robot browser" (2026-11-24, this PC).
+  if (page && page.isClosed?.()) { dropTab(run.id); page = await look() }
+  return page && !page.isClosed?.() ? page : null
 }
 // A browser that does not answer (a tab that never attached, a PC busy starting it) must
 // not leave the live view grey for ever (asked on 2026-11-23): after 6 s it says so.
 const SLOW = Symbol('slow')
+// The tab a live view found for a run, kept: every click, key and picture of the view uses it at once
+// (each one used to look for it again — the database, every tab's name, an answer from the page).
+const _liveTabs = new Map()   // run id → { page, at }
+const KEEP_MS = 60000
 const liveTab = async (req) => {
+  const id = String(req.params.id)
+  const k = _liveTabs.get(id)
+  if (k && !k.page.isClosed?.() && Date.now() - k.at < KEEP_MS) return k.page
   let t
   const page = await Promise.race([runTab(req.app.locals.db, req.params.id).catch(() => null), new Promise(ok => { t = setTimeout(() => ok(SLOW), 6000) })])
   clearTimeout(t)
+  if (page && page !== SLOW) { _liveTabs.set(id, { page, at: Date.now() }); if (_liveTabs.size > 30) _liveTabs.delete(_liveTabs.keys().next().value) }
   return page
 }
+/** One input, 8 s at most: a stuck one never holds the person's next click behind it. */
+const bounded = (p, ms = 8000) => Promise.race([p, new Promise((_, no) => setTimeout(() => no(Object.assign(new Error('The tab did not take it in time (slow PC or line): try again.'), { status: 504 })), ms))])
 const noTab = (res, page) => page === SLOW
   ? res.status(504).json({ error: 'The robot browser does not answer just now.', slow: true })
   : res.status(404).json({ error: 'No robot browser is open for this.' })
@@ -1211,7 +1223,8 @@ async function codeOfRun(db, runId) {
 
 /** liveInput for a person: answers with the Musaned code when the tap was Sign in. */
 export async function personInput(db, runId, page, b) {
-  const signIn = await pressesSignIn(page, b).catch(() => false)
+  // (Is it Sign In? 1 s at most: the click itself never waits for a busy page to say.)
+  const signIn = await Promise.race([pressesSignIn(page, b).catch(() => false), new Promise(r => setTimeout(() => r(false), 1000))])
   await liveInput(page, b)
   return signIn ? codeOfRun(db, runId).catch(() => null) : null
 }
@@ -1236,17 +1249,17 @@ router.post('/automations/:id/input', async (req, res) => {
   // A burst of mouse moves, wheel turns and keys from the browser view: done in order, answered at once.
   if (Array.isArray(b.batch)) {
     let code = null
-    const run = async () => { for (const x of b.batch.slice(0, 200)) { try { code = (await personInput(req.app.locals.db, req.params.id, page, x)) || code } catch {} } }
+    const run = async () => { for (const x of b.batch.slice(0, 200)) { try { code = (await bounded(personInput(req.app.locals.db, req.params.id, page, x))) || code } catch {} } }
     page.__adalInputChain = (page.__adalInputChain || Promise.resolve()).then(run, run)
     await page.__adalInputChain
     return res.json({ ok: true, code })
   }
   // Mouse moves and the wheel: answered at once, done in order behind (a drag stays smooth).
   if ((b.kind === 'mouse' && b.type === 'move') || b.kind === 'wheel') {
-    page.__adalInputChain = (page.__adalInputChain || Promise.resolve()).then(() => liveInput(page, b)).catch(() => {})
+    page.__adalInputChain = (page.__adalInputChain || Promise.resolve()).then(() => bounded(liveInput(page, b), 3000)).catch(() => {})
     return res.json({ ok: true })
   }
-  try { await page.__adalInputChain; res.json({ ok: true, code: await personInput(req.app.locals.db, req.params.id, page, b) }) }
+  try { await bounded(page.__adalInputChain || Promise.resolve(), 3000).catch(() => {}); res.json({ ok: true, code: await bounded(personInput(req.app.locals.db, req.params.id, page, b), b.kind === 'nav' || b.kind === 'reload' ? 50000 : 8000) }) }
   catch (e) { res.status(e.status || 500).json({ error: e.message }) }
 })
 

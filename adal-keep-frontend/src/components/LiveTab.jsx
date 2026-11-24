@@ -35,7 +35,10 @@ async function copyCode(code) {
 }
 
 export default function LiveTab({ runId, fill = false, startFull = false, onClose }) {
-  const [view, setView] = useState(() => { try { return localStorage.getItem(VIEW_KEY) || (PHONE ? 'mirror' : 'picture') } catch { return 'picture' } })
+  // On a PC it always opens as the real picture: the "Page" view rebuilds the page as text and buttons and
+  // cannot show another site's frame — Google's "I'm not a robot" stayed an empty space there and could not
+  // be clicked (2026-11-24). "Page" stays one click away; the phone keeps its choice.
+  const [view, setView] = useState(() => { if (!PHONE) return 'picture'; try { return localStorage.getItem(VIEW_KEY) || 'mirror' } catch { return 'mirror' } })
   const [src, setSrc] = useState(null)
   const [page, setPage] = useState(null)        // the light page
   const [meta, setMeta] = useState({ url: '', title: '' })
@@ -154,7 +157,8 @@ export default function LiveTab({ runId, fill = false, startFull = false, onClos
     if (live.current) return live.current.sendLive({ t: 'input', run: runId, ack: true, ...body })
     setBusy(true)
     try {
-      const r = await api.post(`/automations/${runId}/input`, body)
+      // 10 s at most (a navigation 50 s): a request that hangs on a slow PC or line never holds the next click.
+      const r = await api.post(`/automations/${runId}/input`, body, { timeout: ['nav', 'reload'].includes(body.kind) ? 55000 : 10000 })
       if (r.data?.code) copyCode(r.data.code)
       setErr(null)
     }
@@ -227,9 +231,10 @@ export default function LiveTab({ runId, fill = false, startFull = false, onClos
         const b = queue.current.shift()
         if (live.current) { live.current.sendLive({ t: 'input', run: runId, ack: true, ...b }); continue }
         try {
-          const r = await api.post(`/automations/${runId}/input`, b)
+          const r = await api.post(`/automations/${runId}/input`, b, { timeout: 10000 })
           if (r.data?.code) copyCode(r.data.code)
-        } catch (e) { setErr(e.response?.data?.error || 'The PC did not do it.') }
+          setErr(null)
+        } catch (e) { setErr(e.response?.data?.error || (e.code === 'ECONNABORTED' ? 'The PC is slow just now: click again.' : 'The PC did not do it.')) }
       }
     } finally { pumping.current = false }
   }

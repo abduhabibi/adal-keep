@@ -5,9 +5,10 @@ import toast from 'react-hot-toast'
 import api from '../services/api'
 import { phoneCloud } from '../lib/phoneMode'
 import { markDone, DONE_LABEL } from '../lib/markDone'
+import { lazyOrNothing } from '../lib/reloadGuard'
 // The live view's code (30 kB) only when a notification is opened: not part of every start.
 // (After an update its old file is gone: the page reloads with the new files.)
-const LiveTab = lazy(() => import('./LiveTab').catch(() => { location.reload(); return new Promise(() => {}) }))
+const LiveTab = lazy(lazyOrNothing(() => import('./LiveTab'), 'the live view\'s file did not load'))
 
 /**
  * What needs a person, as normal notifications in the corner of Adal Keep, each

@@ -1248,6 +1248,9 @@ if (frontendDir) {
   app.use(express.static(frontendDir, {
     setHeaders: (res, file) => res.setHeader('Cache-Control', /[\\/]assets[\\/]/.test(file) ? 'public, max-age=31536000, immutable' : 'no-cache'),
   }))
+  // A page file this build does not have (a window from another release): a plain 404, never
+  // index.html with 200 — that made the page's import fail as "not JavaScript" (lib/reloadGuard.js).
+  app.use('/assets', (req, res) => res.status(404).set('Cache-Control', 'no-store').type('text/plain').send('Not in this version of Adal Keep'))
   console.log(`🖥️  Serving UI from ${frontendDir}`)
 } else {
   console.warn('⚠️  No built UI found — run "npm run build" inside adal-keep-frontend')

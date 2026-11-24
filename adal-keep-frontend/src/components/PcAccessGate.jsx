@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import api, { joinInfo, rememberJoin, forgetJoin } from '../services/api'
+import { reloadOnce } from '../lib/reloadGuard'
 
 /**
  * Opened from another computer (an Adal Companion PC, a branch PC, a laptop):
@@ -35,7 +36,8 @@ export default function PcAccessGate() {
   }
   useEffect(() => {
     api.get('/pc-access/status').then(r => {
-      if (r.data.state === 'approved') return location.reload()
+      // Let in already: once (a call still refused right after would reload it again and again).
+      if (r.data.state === 'approved' && reloadOnce('this PC is let in')) return
       if (r.data.state === 'suspended') return window.dispatchEvent(new Event('adal-suspended'))
       // Taken off the main PC's list there: typed again, never by itself.
       const n = r.data.state === 'removed' ? '' : (joinInfo().number || '').replace(/\D/g, '')

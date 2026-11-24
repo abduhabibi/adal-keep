@@ -7,6 +7,7 @@
 import { useEffect, useRef, useState } from 'react'
 import api from '../services/api'
 import { onPhone } from '../lib/phoneMode'
+import { reloadOnce } from '../lib/reloadGuard'
 
 const LATER_KEY = 'adal-update-later'
 const later = () => { try { return JSON.parse(localStorage.getItem(LATER_KEY) || 'null') } catch { return null } }
@@ -21,18 +22,18 @@ export default function UpdateBanner() {
   // The version the server ran when this page opened: when it changes, the
   // server updated itself. The page then reloads once nobody has typed or
   // clicked for 2 minutes (nothing half-typed is lost).
-  const [firstVersion, setFirstVersion] = useState('')
+  const first = useRef('')
   const [updated, setUpdated] = useState(false)
   const lastTouch = useRef(Date.now())
+  const seen = useRef('')
   const load = () => api.get('/system/update/notice').then(r => {
     setN(r.data)
     const v = r.data?.version || ''
     if (!v) return
-    setFirstVersion(f => {
-      if (!f) return v
-      if (f !== v) setUpdated(true)
-      return f
-    })
+    // Updated only when the new version is seen twice in a row (one odd answer is not an update).
+    if (!first.current) { first.current = v; seen.current = v; return }
+    if (v !== first.current && seen.current === v) setUpdated(true)
+    seen.current = v
   }).catch(() => {})
   useEffect(() => {
     load()
@@ -43,7 +44,9 @@ export default function UpdateBanner() {
   }, [])
   useEffect(() => {
     if (!updated) return
-    const t = setInterval(() => { if (Date.now() - lastTouch.current > 2 * 60 * 1000) location.reload() }, 10000)
+    // At most once in 10 minutes: a window whose answers come from two servers on different
+    // versions (a Companion and the main PC) saw a "new" version at every look.
+    const t = setInterval(() => { if (Date.now() - lastTouch.current > 2 * 60 * 1000) reloadOnce('the server was updated', { everyMs: 10 * 60 * 1000 }) }, 10000)
     return () => clearInterval(t)
   }, [updated])
 

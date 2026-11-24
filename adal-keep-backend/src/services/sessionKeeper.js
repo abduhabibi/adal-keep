@@ -29,6 +29,7 @@ export const SITES = [
 ]
 const EVERY_MS = 4 * 60000, RELOAD_MS = 20 * 60000
 export const kept = {}   // site key → { at, tabs, signedIn, error }
+const signedSince = new Map()   // 'musaned|' / 'musaned|musaned:7' → when it was first seen signed in
 let timer = null, busy = false, db = null
 
 const siteOf = (url) => { try { const h = hostOf(url); return SITES.find(s => s.host.test(h)) || null } catch { return null } }
@@ -189,6 +190,12 @@ export async function keepAlive() {
     }
     const at = new Date().toISOString()
     for (const s of SITES) kept[s.key] = { ...seen[s.key], at }
+    // Since when each site and account is signed in (the card's "until about …"); a sign-in gone starts over.
+    for (const s of SITES) for (const sp of ['', ...Object.keys(seen[s.key].spaces)]) {
+      const k = `${s.key}|${sp}`
+      if (seen[s.key].spaces[sp]) { if (!signedSince.has(k)) signedSince.set(k, Date.now()) } else signedSince.delete(k)
+    }
+    for (const k of [...signedSince.keys()]) { const [key, sp] = k.split('|'); if (!seen[key]?.spaces?.[sp]) signedSince.delete(k) }
     if (Object.values(seen).some(x => x.signedIn)) await saveSessionCookies(browser).catch(e => console.warn('[sessions] cookies not kept:', e.message))
     await closeSpareTabs(pages).catch(e => console.warn('[sessions] spare tabs:', e.message))
     await wafidStandby(browser, pages, running).catch(e => console.warn('[sessions] Wafid standby:', e.message))
@@ -258,7 +265,9 @@ async function closeSpareTabs(pages) {
       // (Musaned's sign-in site, wahid.sa, is Musaned's too: a tab left there is a signed-out Musaned tab.)
       const mine = siteOf(p.url()) === site || (site.key === 'musaned' && (() => { try { return /(^|\.)wahid\.sa$/.test(hostOf(p.url())) } catch { return false } })())
       if (p.isClosed?.() || !mine || spaceOf(p)) continue   // the main account's space only
-      const typed = await Promise.race([p.evaluate(() => [...document.querySelectorAll('input, textarea')].some(e => !['hidden', 'password', 'checkbox', 'radio', 'file', 'submit', 'button'].includes(e.type) && e.value && e.value !== e.defaultValue)).catch(() => true), new Promise(r => setTimeout(() => r(true), 5000))])
+      // (A tab left on a site's sign-out or on the browser's error page has nothing typed in it, even when it cannot be read.)
+      const dead = /openid-connect\/logout|\/logout\b|^chrome-error:/i.test(p.url())
+      const typed = dead ? false : await Promise.race([p.evaluate(() => [...document.querySelectorAll('input, textarea')].some(e => !['hidden', 'password', 'checkbox', 'radio', 'file', 'submit', 'button'].includes(e.type) && e.value && e.value !== e.defaultValue)).catch(() => true), new Promise(r => setTimeout(() => r(true), 5000))])
       const id = Number(p.__adalRunId)
       tabs.push({ p, owned: Number.isFinite(id) && active.has(id), borrowed: !!p.__adalBorrowed || !!p.__adalShown || !!p.__adalPerson, typed, signedIn: signedInAt(site, p.url()) })
     }
@@ -304,6 +313,7 @@ export async function wafidStandby(browser, pages, running = new Set(), now = Da
   }
   await p.goto(WAFID_STANDBY, { waitUntil: 'domcontentloaded', timeout: 60000 })
   p.__adalStandbyAt = Date.now()
+  live.set('site-wafid', p); liveInfo.set('site-wafid', { key: 'wafid', name: 'Wafid', account: '' })
   console.log(`[sessions] Wafid on standby: ${step === 'open' ? 'a tab opened' : 'its page loaded again'} (${WAFID_STANDBY})`)
   return step
 }
@@ -315,6 +325,8 @@ export function startSessionKeeper(database) {
   db = database
   if (timer) return
   setTimeout(() => keepAlive().catch(() => {}), 60000)
+  // Adal Keep started: each site's sign-in tab made ready, one after another (after the runs found their tabs again).
+  setTimeout(() => prepareSignIns(db, { force: true, why: 'Adal Keep started' }), Number(process.env.ADAL_MORNING_DELAY_MS) || 45000).unref?.()
   timer = setInterval(() => {
     keepAlive().catch(e => console.warn('[sessions]', e.message))
     insuranceMorning().catch(e => console.warn('[sessions] insurance morning:', e.message))
@@ -350,7 +362,30 @@ async function insuranceMorning() {
   await openSite('insurance', db)
 }
 
-/** Each site, for the "Morning sign-in" list. */
+export const ACCOUNT_TABLES = { musaned: 'musaned_accounts', lmis: 'lmis_accounts', mofa: 'visa_accounts', insurance: 'insurance_accounts', tasheer: 'tasheer_accounts' }
+// One sign-in for the whole site whatever the accounts (Tasheer: the agency's one; insurance: its robot's).
+const ONE_SIGN_IN = new Set(['tasheer', 'insurance'])
+/** The accounts to sign in to on a site, the main one first, each with its browser space key. */
+async function accountsOf(key) {
+  if (!db || !ACCOUNT_TABLES[key]) return []
+  const rows = await db(ACCOUNT_TABLES[key]).orderBy('is_default', 'desc').orderBy('id').select('*').catch(() => [])
+  return (ONE_SIGN_IN.has(key) ? rows.slice(0, 1) : rows).map((a, i) => ({
+    id: a.id, name: String(a.name || a.username || a.login_value || `Account ${a.id}`).trim(), main: i === 0,
+    space: i === 0 || ONE_SIGN_IN.has(key) ? '' : `${key}:${a.id}`, live: i === 0 || ONE_SIGN_IN.has(key) ? `site-${key}` : `site-${key}-${a.id}`,
+  }))
+}
+/** What the person does on each site to sign in (the robot fills the name and password). */
+export const ASK = {
+  musaned: 'tick "I\'m not a robot" — Adal Keep presses Sign in and types the code',
+  lmis: 'press Open: Adal Keep fills in and presses Sign In, you type the SMS code',
+  mofa: 'type the picture\'s numbers and press Login',
+  tasheer: 'type the captcha and sign in',
+  insurance: 'nothing — it signs in by itself',
+}
+/**
+ * Each site, for the "Sign in to your sites" card: every account apart — signed in (since when, kept until
+ * about when), or its sign-in tab ready and waiting for the person (filled up to the captcha), or not yet.
+ */
 export async function sessionsNow() {
   // At once (asked on 2026-11-19): what is known now; the browser's tabs are
   // looked at behind it (the first time at most 1.5 s), the page asks again soon.
@@ -358,25 +393,128 @@ export async function sessionsNow() {
   if (!Object.keys(kept).length) await Promise.race([looking, new Promise(r => setTimeout(r, 1500))])
   const { holderOf } = await import('./tasheerSession.js')
   const holder = db ? await holderOf(db).catch(() => null) : null
-  // Insurance is not in the morning sign-in: its robot signs in by itself (FetaP's reCAPTCHA needs nobody).
-  // Sites with several accounts: each account signed in or not, apart (each in its own browser space).
-  const TABLES = { musaned: 'musaned_accounts', lmis: 'lmis_accounts', mofa: 'visa_accounts' }
   const out = []
-  for (const s of SITES.filter(s => s.key !== 'insurance')) {
+  for (const s of SITES) {
     const k = kept[s.key] || { tabs: 0, signedIn: false, spaces: {} }
-    let accounts
-    if (db && TABLES[s.key]) {
-      const rows = await db(TABLES[s.key]).orderBy('is_default', 'desc').orderBy('id').select('id', 'name').catch(() => [])
-      if (rows.length > 1) accounts = rows.map((a, i) => ({ id: a.id, name: a.name || `Account ${a.id}`, main: i === 0, signedIn: !!(k.spaces || {})[i === 0 ? '' : `${s.key}:${a.id}`] }))
-    }
+    const accounts = (await accountsOf(s.key)).map(a => {
+      const signedIn = !!(k.spaces || {})[a.space] || (ONE_SIGN_IN.has(s.key) && !!k.signedIn)
+      const t = live.get(a.live)
+      const since = signedSince.get(`${s.key}|${a.space}`) || null
+      const state = signedIn ? 'signed-in' : t && !t.isClosed?.() ? (t.__adalSigning ? 'waiting' : 'ready') : preparing && !prepDone.has(a.live) ? 'queued' : 'not-open'
+      return { ...a, signedIn, state, since: since ? new Date(since).toISOString() : null, until: since ? new Date(since + COOKIES_KEPT_MS).toISOString() : null }
+    })
     const { spaces, ...rest } = k
-    out.push({ key: s.key, name: s.name, ...rest, ...(accounts ? { accounts, signedIn: accounts.every(a => a.signedIn) } : {}), ...(s.key === 'tasheer' ? { holder, shared: true } : {}) })
+    out.push({ key: s.key, name: s.name, ...rest, ask: ASK[s.key] || '', accounts, noAccount: !accounts.length,
+      signedIn: accounts.length ? accounts.every(a => a.signedIn) : !!k.signedIn, ...(s.key === 'tasheer' ? { holder, shared: true } : {}) })
+  }
+  out.push({ key: 'wafid', name: 'Wafid', standby: true, signedIn: true, ask: '', accounts: [], ready: !!siteTab('site-wafid') })
+  return out
+}
+
+// ── Morning sign-in by itself (the owner, 2026-11-24: "whenever I open Adal Keep create every one and tell me
+// to sign in into each, and the whole day will be flawless") ─────────────────────────────────────────────
+// When Adal Keep starts, and when a person opens it (its card asks for /sessions; at most every 10 minutes),
+// each site and account not signed in gets its sign-in tab, out of sight, one after another (a weak PC never
+// loads six sites at once): the name and password filled from the vault, waiting for the person's tick, picture
+// or code only. LMIS is opened on its sign-in page but Sign In is pressed only when the person presses Open
+// (each press costs an SMS code). Tasheer only when nobody holds its one sign-in (never signs a person out).
+// A site signed in already is left as it is. Nothing is ever pressed past the captcha.
+let preparing = null, preparedAt = 0
+const prepDone = new Set()
+export const PREPARE_EVERY_MS = 10 * 60e3
+export const PREPARE_ORDER = ['musaned', 'insurance', 'mofa', 'lmis', 'tasheer']
+/** Which sign-in tabs to prepare now: each line not signed in and with no tab of its own yet. Pure. */
+export function toPrepare(lines) {
+  return lines.filter(l => !l.signedIn && !l.hasTab && !(l.key === 'tasheer' && l.heldByOther))
+    .sort((a, b) => PREPARE_ORDER.indexOf(a.key) - PREPARE_ORDER.indexOf(b.key))
+}
+/** Until the tab's page has loaded and its form is filled (or 45 s): the next site starts after it. */
+async function settled(page, ms = 45000) {
+  for (const end = Date.now() + ms; Date.now() < end;) {
+    const st = await Promise.race([page.evaluate(() => ({ ready: document.readyState === 'complete', filled: [...document.querySelectorAll('input[type=password]')].some(e => e.value) })).catch(() => null), new Promise(r => setTimeout(() => r(null), 5000))])
+    if (st?.filled) return 'filled'
+    if (st?.ready && Date.now() > end - ms + 8000) return 'loaded'
+    await new Promise(r => setTimeout(r, 1500))
+  }
+  return 'slow'
+}
+export function prepareSignIns(database, { force = false, why = 'opened' } = {}) {
+  if (database) db = database
+  if (preparing) return preparing
+  if (process.env.ADAL_MORNING_SIGNIN === '0' || !db) return Promise.resolve(null)
+  if (!force && Date.now() - preparedAt < PREPARE_EVERY_MS) return Promise.resolve(null)
+  preparedAt = Date.now()
+  prepDone.clear()
+  preparing = (async () => {
+    const { isFollower } = await import('./mainPC.js')
+    if (isFollower?.()) return null
+    const browser = await getBrowser()
+    await keepAlive().catch(() => {})
+    const { holderOf } = await import('./tasheerSession.js')
+    const holder = await holderOf(db).catch(() => null)
+    const lines = []
+    for (const s of SITES) {
+      const k = kept[s.key] || { spaces: {} }
+      for (const a of await accountsOf(s.key)) {
+        const t = live.get(a.live)
+        lines.push({ key: s.key, name: s.name, account: a, signedIn: !!(k.spaces || {})[a.space] || (ONE_SIGN_IN.has(s.key) && !!k.signedIn),
+          hasTab: !!(t && !t.isClosed?.()), heldByOther: holder?.state === 'signing-in' && Date.now() - Date.parse(holder.at || 0) < 30 * 60e3 })
+      }
+    }
+    const todo = toPrepare(lines)
+    console.log(`[sessions] morning sign-in (${why}): ${todo.length ? todo.map(l => `${l.name}${l.account.main ? '' : ` (${l.account.name})`}`).join(', ') + ' — one after another' : 'every site signed in or its tab ready'}`)
+    for (const l of todo) {
+      const t0 = Date.now()
+      try {
+        let r
+        if (l.key === 'lmis') r = await openLmisSignIn(browser, l.account)
+        else if (l.key === 'tasheer') r = await (await import('./tasheerSession.js')).takeOver(db, { by: 'Morning sign-in', pc: (await import('os')).hostname() })
+        else r = await openSite(l.key, db, { accountId: l.account.main ? null : l.account.id, browser })
+        const page = siteTab(r?.live || l.account.live) || await (await import('./tasheerSession.js')).siteTab(r?.live || '').catch(() => null)
+        const how = r?.already ? 'signed in already' : page ? await settled(page) : 'no tab'
+        console.log(`[sessions] morning sign-in: ${l.name}${l.account.main ? '' : ` (${l.account.name})`} — ${how} in ${((Date.now() - t0) / 1000).toFixed(1)} s`)
+      } catch (e) { console.warn(`[sessions] morning sign-in: ${l.name} not opened — ${e.message}`) }
+      prepDone.add(l.account.live)
+    }
+    await wafidStandby(browser, await browser.pages().catch(() => []), await runningTabs().catch(() => new Set())).catch(() => {})
+    return todo.length
+  })().catch(e => { console.warn('[sessions] morning sign-in:', e.message); return null }).finally(() => { preparing = null })
+  return preparing
+}
+/** LMIS: its sign-in page in its tab, nothing pressed (Sign In sends an SMS code: only when the person presses Open). */
+async function openLmisSignIn(browser, account) {
+  const site = SITES.find(s => s.key === 'lmis')
+  let space = null
+  if (!account.main) space = await (await import('./tabManager.js')).spaceForAccount(db, browser, 'lmis', account.id).catch(() => null)
+  const found = await siteTabOf(browser, site, space, await (await import('./tabManager.js')).keepingRunIds(db))
+  if (found.signedIn) { live.set(account.live, found.page); return { already: true, live: account.live } }
+  const page = found.page || await newRunTab(browser, space)
+  await (await import('./tabManager.js')).setupTab(page, {}).catch(() => {})
+  const { labelTab } = await import('./robotCheck.js')
+  await labelTab(page, account.name).catch(() => {})
+  live.set(account.live, page); liveInfo.set(account.live, { key: 'lmis', name: 'LMIS', account: account.name })
+  await page.goto('https://lmis.gov.et/auth', { waitUntil: 'domcontentloaded', timeout: 120000 }).catch(() => {})
+  return { live: account.live }
+}
+/** The sign-in tabs for the sidebar's Browsers: each site's own, by name and account. */
+export function signInTabs() {
+  const out = []
+  for (const [key, p] of live) {
+    if (!p || p.isClosed?.()) { live.delete(key); continue }
+    const info = liveInfo.get(key) || {}
+    let inNow = false
+    try { const site = SITES.find(s => s.key === info.key); inNow = !!site && !!(kept[site.key]?.spaces || {})[spaceOf(p)] } catch {}
+    const wafid = info.key === 'wafid'
+    out.push({ key, page: p, run_id: Number(p.__adalRunId) || null, site: info.name || 'Site', girl: info.account || '',
+      status: wafid ? 'Ready (no sign-in)' : inNow ? 'Signed in' : p.__adalSigning ? 'Waiting for your sign-in' : 'Sign in',
+      needs_you: !wafid && !inNow, task: !wafid && !inNow ? `Sign in to ${info.name}${info.account ? ` (${info.account})` : ''}: ${ASK[info.key] || ''}` : null })
   }
   return out
 }
 
 // The sign-in tabs shown in the live view ("site-musaned", "site-musaned-7").
 const live = new Map()
+const liveInfo = new Map()   // live key → { key, name, account }
 /** The live view's tab of a Morning sign-in, or null. */
 export function siteTab(name) {
   const p = live.get(String(name))
@@ -470,7 +608,14 @@ export async function openSite(key, database = null, { accountId = null, browser
   // (A run working, or one waiting on its page for a person's Save, keeps its tab.)
   const running = db ? await (await import('./tabManager.js')).keepingRunIds(db) : new Set()
   const found = await siteTabOf(browser, site, space, running)
-  const liveKey = `site-${key}${accountId ? `-${Number(accountId)}` : ''}`
+  // The site's main account is always "site-musaned" (asked by id or not): one tab, one sign-in for it.
+  const liveKey = `site-${key}${space && accountId ? `-${Number(accountId)}` : ''}`
+  liveInfo.set(liveKey, { key, name: site.name, account: label })
+  const signing = live.get(liveKey)
+  if (signing && !signing.isClosed?.() && signing.__adalBorrowed && signing.__adalSigning) {
+    console.log(`[sessions] ${site.name}${label ? ` (${label})` : ''}: its sign-in is filled and waiting in its tab — shown, not started again`)
+    return { ok: true, live: liveKey, waiting: true }
+  }
   if (found.signedIn) {
     // Musaned's main space can hold another account (a person signed in by hand): its menu says who.
     if (key === 'musaned' && label && !space) {
@@ -488,13 +633,15 @@ export async function openSite(key, database = null, { accountId = null, browser
   }
   const { setupTab } = await import('./tabManager.js')
   const page = found.page || await newRunTab(browser, space)
-  page.__adalAllowImages = true          // the robot check's pictures
+  // Pictures off on a weak PC: Google's and Cloudflare's checks show theirs anyway (tabManager); Enjaz's own picture needs them.
+  page.__adalAllowImages = key === 'mofa'
   await setupTab(page, {}).catch(() => {})
   page.__adalBorrowed = true             // no run takes it while it signs in
+  page.__adalSigning = true
   await labelTab(page, label)
   live.set(liveKey, page)
   // Signed in: the tab is free for the runs at once (the person's tick is not "someone working in it").
-  const done = () => { page.__adalBorrowed = false; handTabToPerson(page); keepAlive().catch(() => {}) }
+  const done = () => { page.__adalBorrowed = false; page.__adalSigning = false; handTabToPerson(page); keepAlive().catch(() => {}) }
   console.log(`[sessions] ${site.name}${label ? ` (${label})` : ''}: signing in in ${found.page ? 'its tab on the site' : 'a new tab'} (live view ${liveKey})`)
   // Musaned: the vault's name and password, the person's tick, Sign in at once, the authenticator code.
   if (key === 'musaned' && db) {
@@ -552,7 +699,7 @@ export async function openSite(key, database = null, { accountId = null, browser
       return { ok: true, auto: true, live: liveKey }
     }
   }
-  page.__adalBorrowed = false
+  page.__adalBorrowed = false; page.__adalSigning = false
   await page.goto(site.start, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {})
   return { ok: true, live: liveKey }
 }

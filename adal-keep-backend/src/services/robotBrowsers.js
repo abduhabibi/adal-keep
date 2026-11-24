@@ -63,6 +63,19 @@ export async function listBrowsers(db, deps = {}) {
       at: new Date(r.started_at || r.updated_at || Date.now()).getTime(),
     })
   }
+  // Each site's sign-in tab (Morning sign-in, Wafid on standby), by site and account — unless a run works in it now.
+  const signIns = deps.signIns || await (async () => {
+    const k = await import('./sessionKeeper.js')
+    const list = k.signInTabs()
+    const t = await (await import('./tasheerSession.js')).siteTab('site-tasheer').catch(() => null)
+    if (t && !list.some(x => x.page === t)) list.push({ key: 'site-tasheer', page: t, site: 'Tasheer', girl: '', status: k.kept.tasheer?.signedIn ? 'Signed in' : 'Sign in', needs_you: !k.kept.tasheer?.signedIn, task: k.kept.tasheer?.signedIn ? null : 'Sign in to Tasheer: type the captcha and sign in' })
+    return list
+  })().catch(() => [])
+  const runIds = new Set(out.map(b => b.run_id))
+  for (const t of signIns) {
+    if (t.run_id && runIds.has(t.run_id)) continue
+    out.push({ key: t.key, run_id: null, site: t.site, girl: t.girl || '', pc: nameOf(''), pc_id: '', remote: false, sign_in: true, status: t.status, needs_you: !!t.needs_you, task: t.task || null, at: 0 })
+  }
   for (const [key, t] of extra) {
     if (t.page?.isClosed?.()) { extra.delete(key); continue }
     out.push({ key, run_id: null, site: t.site || 'Browser', girl: t.girl || '', pc: nameOf(t.pc_id || ''), pc_id: t.pc_id || '', remote: !!t.pc_id, status: t.status || 'Working', needs_you: !!t.needs_you, task: t.task || null, at: t.at })

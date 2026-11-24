@@ -536,7 +536,12 @@ router.post('/automations/:id/attention/done', (req, res) => {
 })
 // Morning sign-in (services/sessionKeeper.js): each site signed in or not; a window to sign in.
 router.get('/sessions', async (req, res) => {
-  try { res.json(await (await import('../services/sessionKeeper.js')).sessionsNow()) } catch (e) { res.status(500).json({ error: e.message }) }
+  try {
+    const k = await import('../services/sessionKeeper.js')
+    // A person opened Adal Keep (its card asks): the sign-in tabs made ready behind the answer (at most every 10 min).
+    if (req.query.prepare !== '0') k.prepareSignIns(req.app.locals.db, { why: 'Adal Keep opened' })
+    res.json(await k.sessionsNow())
+  } catch (e) { res.status(500).json({ error: e.message }) }
 })
 router.post('/sessions/:key/open', async (req, res) => {
   try {

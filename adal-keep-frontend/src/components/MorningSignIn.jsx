@@ -1,5 +1,7 @@
 /**
- * Dashboard → Morning sign-in: every site the robots use, signed in or not.
+ * Dashboard → "Sign in to your sites" (Morning sign-in): every site and account the robots use, signed in
+ * (kept until about when) or its sign-in tab made ready by Adal Keep when it starts / is opened, filled up to
+ * the captcha — Open shows that tab live here.
  * Sign in to each once in the morning: Adal Keep keeps them signed in all day
  * (services/sessionKeeper.js) and the robots go straight to work there.
  * Tasheer has one sign-in for the whole agency: every PC sees who signed it
@@ -28,7 +30,7 @@ export default function MorningSignIn() {
   const [choose, setChoose] = useState(null)   // { site, accounts } while the person picks the account
   const load = () => api.get('/sessions').then(r => setSites(Array.isArray(r.data) ? r.data : [])).catch(() => setSitesNow(s => s || []))
   // Asked again after 3 s (the PC looks at its tabs behind its first answer), then every 15 s.
-  useEffect(() => { load(); const s = setTimeout(load, 3000); const t = setInterval(load, 15000); return () => { clearTimeout(s); clearInterval(t) } }, [])
+  useEffect(() => { load(); const s = setTimeout(load, 3000); const t = setInterval(load, 5000); return () => { clearTimeout(s); clearInterval(t) } }, [])
   if (sites == null) return (
     <div className="panel p-4" aria-hidden="true">
       <span className="ak-skel mb-3 block h-5 w-40" />
@@ -50,7 +52,8 @@ export default function MorningSignIn() {
     setChoose(null)
     try {
       const { data } = await api.post(`/sessions/${s.key}/open`, accountId ? { account_id: accountId } : {})
-      if (data?.already) toast.success(`${s.name} is signed in already — its tab is used, nothing more to do`, { duration: 6000 })
+      if (data?.waiting && data?.live) { setLive(data.live); toast.success(`${s.name}: its sign-in is filled in — ${s.ask || 'finish it here'}`, { duration: 7000 }) }
+      else if (data?.already) toast.success(`${s.name} is signed in already — its tab is used, nothing more to do`, { duration: 6000 })
       else if (data?.live) {
         setLive(data.live)
         const what = s.key === 'musaned' ? 'tick "I\'m not a robot" here — Adal Keep presses Sign in, types the code and goes on'
@@ -60,47 +63,60 @@ export default function MorningSignIn() {
     } catch (e) { toast.error(err(e)) }
     setTimeout(load, 8000)
   }
-  const inCount = sites.filter(s => s.signedIn).length
+  const lines = sites.filter(s => !s.standby)
+  const inCount = lines.filter(s => s.signedIn).length
+  const allIn = lines.length > 0 && inCount === lines.length
+  const until = (iso) => { try { const d = new Date(iso); return `${d.toDateString() === new Date().toDateString() ? '' : 'tomorrow '}${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` } catch { return '' } }
+  // Every site signed in: the card says so in one line and gets out of the way.
+  if (allIn && !live && !choose) return (
+    <div className="panel flex items-center gap-2 px-4 py-2 text-sm">
+      <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
+      <span className="font-semibold text-emerald-700 dark:text-emerald-300">All your sites are signed in</span>
+      <span className="text-slate-500">— kept signed in all day; the robots go straight to work</span>
+    </div>
+  )
+  const state = (s, a) => a.signedIn ? null
+    : a.state === 'waiting' ? `Filled in — ${s.ask}`
+    : a.state === 'ready' ? `Its page is open — ${s.ask}`
+    : a.state === 'queued' ? 'Opening in turn (one site after another)…'
+    : 'Not open yet'
   return (
     <div className="panel p-4">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <p className="ak-card-title">Morning sign-in <span className="ml-1 text-sm font-normal text-slate-500 tabular-nums">{inCount}/{sites.length}</span></p>
+        <p className="ak-card-title">Sign in to your sites <span className="ml-1 text-sm font-normal text-slate-500 tabular-nums">{inCount}/{lines.length} signed in</span></p>
+        <p className="text-xs text-slate-500">Adal Keep fills each name and password — you only do the tick, picture or code. Then they stay signed in all day.</p>
       </div>
-      <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(14rem,1fr))]">
+      <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(16rem,1fr))]">
         {sites.map(s => (
-          // The site's name on its own line (never squeezed); its accounts or button under it.
-          <div key={s.key} className={`rounded-xl border px-3 py-2 ${s.signedIn ? 'border-emerald-200 bg-emerald-50/60 dark:border-emerald-800 dark:bg-emerald-900/10' : 'border-slate-200 dark:border-slate-700'}`}>
+          <div key={s.key} className={`rounded-xl border px-3 py-2 ${s.signedIn ? 'border-emerald-200 bg-emerald-50/60 dark:border-emerald-800 dark:bg-emerald-900/10' : 'border-amber-300 dark:border-amber-700'}`}>
             <div className="flex items-center gap-2">
-            <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${s.signedIn ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`} />
-            <span className="min-w-0 flex-1">
-              <span className="block text-sm font-semibold leading-snug">{s.name}</span>
-              {s.shared && s.holder?.by && (
-                <span className="block text-[11px] text-slate-500" title={`${s.holder.by} · ${s.holder.pc} · ${when(s.holder.at)}`}>
-                  {s.holder.state === 'signing-in' && !s.signedIn ? 'signing in: ' : s.signedIn ? 'by ' : 'last: '}{s.holder.by} · {when(s.holder.at)}
-                </span>
-              )}
-            </span>
-            {!(s.accounts?.length > 1) && (s.signedIn && !s.shared
-              ? <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-300">Signed in</span>
-              : <button type="button" onClick={() => start(s)} title={s.shared ? 'One sign-in for the agency: this takes it over for you' : ''}
-                  className={`shrink-0 rounded-lg px-2.5 py-1 text-xs font-semibold ${s.shared && s.signedIn ? 'border border-teal-600 text-teal-700 hover:bg-teal-50 dark:text-teal-300' : 'bg-teal-600 text-white hover:bg-teal-700'}`}>
-                  {s.shared && s.signedIn ? 'Sign in here' : 'Sign in'}
-                </button>)}
+              <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${s.signedIn ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+              <span className="min-w-0 flex-1 text-sm font-semibold leading-snug">{s.name}</span>
+              {s.standby && <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-300">{s.ready ? 'Ready — no sign-in needed' : 'No sign-in needed'}</span>}
             </div>
-            {s.accounts?.length > 1 && (
-              // Several accounts: each one apart, in a browser space of its own — signing in as one never signs the other out.
-              <div className="mt-1.5 space-y-1 pl-[1.125rem]">
-                  {s.accounts.map(a => (
-                    <div key={a.id} className="flex items-center gap-1.5 text-xs">
-                      <span className={`h-2 w-2 shrink-0 rounded-full ${a.signedIn ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`} />
-                      <span className="min-w-0 flex-1" title={a.main ? "Main account (the browser's own window)" : 'Its own browser window'}>{a.name}</span>
-                      {a.signedIn
-                        ? <span className="font-semibold text-emerald-700 dark:text-emerald-300">✓</span>
-                        : <button type="button" onClick={() => open(s, a.id)} className="shrink-0 rounded-md bg-teal-600 px-2 py-0.5 font-semibold text-white hover:bg-teal-700">Sign in</button>}
-                    </div>
-                  ))}
-              </div>
+            {s.shared && s.holder?.by && (
+              <p className="pl-[1.125rem] text-[11px] text-slate-500">{s.holder.state === 'signing-in' && !s.signedIn ? 'signing in: ' : s.signedIn ? 'signed in by ' : 'last: '}{s.holder.by} · {when(s.holder.at)}</p>
             )}
+            {s.noAccount && !s.standby && <p className="pl-[1.125rem] text-xs text-slate-500">No account saved — add it under AI Actions first.</p>}
+            <div className="mt-1 space-y-1.5 pl-[1.125rem]">
+              {(s.accounts || []).map(a => (
+                <div key={a.id} className="flex items-start gap-1.5 text-xs">
+                  <span className="min-w-0 flex-1">
+                    {(s.accounts.length > 1 || a.name) && <span className="block truncate font-medium">{a.name}</span>}
+                    {a.signedIn
+                      ? <span className="block text-emerald-700 dark:text-emerald-300">✓ Signed in{a.until ? ` · kept until about ${until(a.until)}` : ''}</span>
+                      : <span className="block text-slate-600 dark:text-slate-300">{state(s, a)}</span>}
+                  </span>
+                  {!a.signedIn && a.state !== 'queued' && (
+                    <button type="button" onClick={() => s.shared ? start(s) : open(s, a.main ? null : a.id)}
+                      className="shrink-0 rounded-md bg-teal-600 px-2.5 py-1 font-semibold text-white hover:bg-teal-700">
+                      {a.state === 'waiting' || a.state === 'ready' ? 'Open' : 'Sign in'}
+                    </button>
+                  )}
+                  {a.signedIn && s.shared && <button type="button" onClick={() => start(s)} className="shrink-0 rounded-md border border-teal-600 px-2 py-0.5 font-semibold text-teal-700 dark:text-teal-300">Sign in here</button>}
+                </div>
+              ))}
+            </div>
           </div>
         ))}
       </div>

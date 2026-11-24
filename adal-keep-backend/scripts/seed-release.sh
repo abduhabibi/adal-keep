@@ -4,6 +4,7 @@
 # (about a minute; it waits for runs as always). Nothing is installed by this script, nothing signed.
 #
 #   sh adal-keep-backend/scripts/seed-release.sh hp@192.168.1.7 [~/.ssh/adal-remote]
+#   (SSH_OPTS="-o UserKnownHostsFile=/path/kh" for your own ssh options)
 #
 # Then watch:  ssh … "Get-Content C:\AdalKeep\backend\data\server.log -Tail 40 -Wait"
 # for "[update] download …: done" / "✅ Update … installed by itself". If it has not installed in
@@ -32,6 +33,6 @@ Get-ChildItem (Join-Path $dir 'files') | ForEach-Object {
 Get-ChildItem $cache -Filter *.part | Where-Object { Test-Path (Join-Path $cache $_.BaseName) } | Remove-Item -Force
 Write-Host 'OK: the pieces are in the cache; Adal Keep installs the release by itself at its next look.'
 PS1
-scp -i "$KEY" -o IdentitiesOnly=yes "$ZIP" "$HOST:adal-release.zip"
-scp -i "$KEY" -o IdentitiesOnly=yes "$PS" "$HOST:adal-seed-release.ps1"
-ssh -i "$KEY" -o IdentitiesOnly=yes "$HOST" 'powershell -NoProfile -ExecutionPolicy Bypass -File adal-seed-release.ps1'
+scp -i "$KEY" -o IdentitiesOnly=yes $SSH_OPTS "$ZIP" "$HOST:adal-release.zip"
+scp -i "$KEY" -o IdentitiesOnly=yes $SSH_OPTS "$PS" "$HOST:adal-seed-release.ps1"
+ssh -i "$KEY" -o IdentitiesOnly=yes $SSH_OPTS "$HOST" 'powershell -NoProfile -ExecutionPolicy Bypass -File adal-seed-release.ps1'

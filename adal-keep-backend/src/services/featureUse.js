@@ -122,7 +122,13 @@ export async function flushFeatureUse(db = dbRef) {
 export function startFeatureUse(db) {
   dbRef = db
   setInterval(() => flushFeatureUse(db).catch(() => {}), 60000).unref()
-  for (const sig of ['SIGINT', 'SIGTERM']) process.once(sig, () => { flushFeatureUse(db).catch(() => {}) })
+  // A listener on a signal takes away Node's own exit on it: a stop of the service then waited
+  // its 15 s for a SIGKILL every time, and left its browsers behind. So: flush, then end (3 s at most).
+  for (const [sig, code] of [['SIGINT', 130], ['SIGTERM', 143]]) process.once(sig, () => {
+    const end = () => process.exit(code)
+    setTimeout(end, 3000).unref?.()
+    flushFeatureUse(db).catch(() => {}).finally(end)
+  })
 }
 
 // ---------------------------------------------------------------- report --

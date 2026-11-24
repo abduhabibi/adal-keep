@@ -20,6 +20,7 @@ import { headlessHere } from './noWindows.js'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { findBrowserExecutable } from './browser.js'
+import { liveEndpoint, launchKept, backoffMs } from './waBrowser.js'
 
 const BACKEND = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const DIR = path.join(BACKEND, 'data', 'whatsapp')
@@ -146,7 +147,7 @@ export const PASSING = /already exists|timed out/i
 export const whatsappAllowed = (env = process.env) => env.ADAL_ISOLATED !== '1' && env.ADAL_WHATSAPP !== '0'
 const OFF_HERE = 'WhatsApp is off on this copy (a test or isolated copy): it never signs in from here.'
 
-export async function connect(db, key = 'owner', { phone = '' } = {}, tries = 2) {
+export async function connect(db, key = 'owner', { phone = '', reuse = true } = {}, tries = 2) {
   if (db) dbRef = db
   const s = session(key)
   if (!whatsappAllowed()) { setState(key, { status: 'off', qr: null, code: null, error: OFF_HERE }); return s.state }
@@ -157,7 +158,11 @@ export async function connect(db, key = 'owner', { phone = '' } = {}, tries = 2)
   if (s.startingAt && Date.now() - s.startingAt < 45000 && !phone) return s.state
   s.startingAt = Date.now()
   if (s.client) { const old = s.client; s.client = null; await release(old) }
-  freeProfile(key)
+  const dir = path.join(DIR, `session-${key}`)
+  // Its browser from before a restart of Adal Keep, still running: used again (no new browser).
+  let ws = reuse ? await liveEndpoint(dir) : null
+  if (ws) console.log(`[whatsapp ${key}] its browser from before is used again (no new browser)`)
+  else freeProfile(key)
   setState(key, { status: 'starting', qr: null, code: null, error: null })
   const { default: wweb } = await import('whatsapp-web.js')
   const opts = {}
@@ -167,13 +172,31 @@ export async function connect(db, key = 'owner', { phone = '' } = {}, tries = 2)
   opts.userAgent = realUserAgent(exe)
   // Right after the library's own user-agent, before WhatsApp's page opens.
   const afterLaunch = opts.authStrategy.afterBrowserInitialized.bind(opts.authStrategy)
-  opts.authStrategy.afterBrowserInitialized = async (...a) => { if (s.client?.pupPage) await realBrowser(s.client.pupPage, opts.userAgent); return afterLaunch(...a) }
-  // A page busy loading the chats answers late: find out in 90s, not WhatsApp's 3 minutes.
-  opts.puppeteer = { executablePath: exe, headless: true, protocolTimeout: 90_000, args: ['--no-first-run', '--no-default-browser-check', '--disable-gpu', '--disable-dev-shm-usage', '--mute-audio', '--disable-extensions',
+  opts.authStrategy.afterBrowserInitialized = async (...a) => {
+    if (s.client?.pupPage) {
+      await realBrowser(s.client.pupPage, opts.userAgent)
+      // One tab: the library opens its own; the one from before the restart (and about:blank) go.
+      for (const p of await s.client.pupBrowser?.pages().catch(() => []) || []) if (p !== s.client.pupPage) await p.close().catch(() => {})
+    }
+    return afterLaunch(...a)
+  }
+  const args = ['--no-first-run', '--no-default-browser-check', '--disable-gpu', '--disable-dev-shm-usage', '--mute-audio', '--disable-extensions',
     // Light: nothing the hidden WhatsApp does not need (updates, sync, translate, spell check…).
     '--disable-background-networking', '--disable-component-update', '--disable-sync', '--disable-default-apps', '--no-pings', '--disable-breakpad',
     '--disable-features=Translate,MediaRouter,OptimizationHints,CalculateNativeWinOcclusion,SpareRendererForSitePerProcess,AutofillServerCommunication',
-    '--disable-site-isolation-trials', '--renderer-process-limit=2'] }
+    '--disable-site-isolation-trials', '--renderer-process-limit=2', `--user-agent=${opts.userAgent}`, '--disable-blink-features=AutomationControlled']
+  // Started on its own, not as the server's child: a restart of Adal Keep leaves it running (waBrowser.js).
+  if (!ws) {
+    try { ws = await launchKept({ exe, dir, args }) } catch (e) {
+      s.startingAt = 0
+      s.fails = [...(s.fails || []), Date.now()]; s.retryAt = Date.now() + backoffMs(s.fails)
+      console.warn(`[whatsapp ${key}] its browser did not start (${e.message}) — trying again in ${Math.round((s.retryAt - Date.now()) / 1000)} s`)
+      setState(key, { status: 'failed', error: 'WhatsApp did not start: Adal Keep tries again by itself.' })
+      return s.state
+    }
+  }
+  // A page busy loading the chats answers late: find out in 90s, not WhatsApp's 3 minutes.
+  opts.puppeteer = { browserWSEndpoint: ws, protocolTimeout: 90_000 }
   // Always today's WhatsApp Web (a saved old copy of its page cannot link new devices).
   opts.webVersionCache = { type: 'none' }
   const digits = String(phone || '').replace(/\D/g, '')
@@ -201,10 +224,11 @@ export async function connect(db, key = 'owner', { phone = '' } = {}, tries = 2)
       console.warn(`[whatsapp ${key}] tab closed while starting — trying again:`, why.slice(0, 160))
       setState(key, { status: 'off' }); s.startingAt = 0
       await new Promise(r => setTimeout(r, 2000))
-      return connect(db, key, { phone }, tries - 1)
+      return connect(db, key, { phone, reuse: false }, tries - 1)
     }
     s.startingAt = 0
-    console.warn(`[whatsapp ${key}] start-up failed:`, why)
+    s.fails = [...(s.fails || []), Date.now()]; s.retryAt = Date.now() + backoffMs(s.fails)
+    console.warn(`[whatsapp ${key}] start-up failed (trying again in ${Math.round((s.retryAt - Date.now()) / 1000)} s):`, why)
     setState(key, { status: 'failed', error: 'WhatsApp did not start: Adal Keep tries again by itself.' })
   }
   // WhatsApp opens and closes a hidden PDF-viewer frame while it starts; a
@@ -294,11 +318,17 @@ export async function connect(db, key = 'owner', { phone = '' } = {}, tries = 2)
     { const n = readNote(); writeNote({ ...n, daily: { ...(n.daily || {}), [key]: new Date().toLocaleDateString('en-CA') } }) }
     rememberNumber(key, c.info?.wid?.user)
     // Its browser died (closed, crashed): connect again now, not at the next look.
+    // Dying again and again: later and later (3 s, 30 s, 2 min, then 5 min), never a loop.
+    s.fails = []
     c.pupBrowser?.once('disconnected', () => {
       if (s.client !== c) return
       s.client = null
+      s.deaths = [...(s.deaths || []).filter(t => Date.now() - t < 10 * 60_000), Date.now()]
+      const wait = backoffMs(s.deaths)
+      s.retryAt = Date.now() + wait
+      console.warn(`[whatsapp ${key}] its browser closed (${s.deaths.length} time(s) in 10 min) — connecting again in ${wait / 1000} s`)
       setState(key, { status: 'off', me: null, error: 'Connecting again…' })
-      setTimeout(() => connect(dbRef, key).catch(e => console.warn('[whatsapp]', e.message)), 3000)
+      setTimeout(() => connect(dbRef, key).catch(e => console.warn('[whatsapp]', e.message)), wait)
     })
     setTimeout(() => closeChosenSends().catch(() => {}), 10_000)
   })
@@ -693,7 +723,10 @@ async function keepConnected() {
       await release(old)
       connect(dbRef, key).catch(e => console.warn('[whatsapp]', e.message))
     }
-    if (st === 'off' || st === 'failed') return connect(dbRef, key).catch(e => console.warn('[whatsapp]', e.message))
+    if (st === 'off' || st === 'failed') {
+      if (Date.now() < (s.retryAt || 0)) return   // backing off after its browser died or failed to start
+      return connect(dbRef, key).catch(e => console.warn('[whatsapp]', e.message))
+    }
     // A code just entered: WhatsApp brings the chats (minutes on a slow line) — never cut that short.
     const linking = s.link?.linkedAt && Date.now() - s.link.linkedAt < 10 * 60_000
     if (['starting', 'signing-in'].includes(st) && !linking && Date.now() - new Date(s.state.since).getTime() > 4 * 60_000) return restart('stuck starting')

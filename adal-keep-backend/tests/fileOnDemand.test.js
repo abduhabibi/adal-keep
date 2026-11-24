@@ -36,3 +36,23 @@ test('no PC has it: false, and not asked again for a minute; a file already here
   // No sync node (a PC alone): nothing to ask.
   assert.equal(await fetchMissing({ path: 'uploads/7/8/b.jpg' }, { node: null }), false)
 })
+
+// "Loading the photo…" for ever (2026-11-24): a PC that never answers must not hold the picture's request.
+test('a window asking for a photo hears "not here yet" in time; the copy goes on behind', async () => {
+  const { fetchMissing: fm, _reset: reset } = await import('../src/services/fileOnDemand.js')
+  reset()
+  let put = null, release
+  const node = {
+    docs: { has: () => false, put: async (n, b) => { put = n } },
+    others: async () => [{ pc_id: 'b', name: 'Front desk' }],
+    reach: () => new Promise(r => { release = () => r('http://pc-b') }),   // finding the PC takes for ever
+    call: async () => Buffer.from('jpeg'),
+  }
+  const t0 = Date.now()
+  const here = await fm({ path: 'uploads/1/2/abc.jpg' }, { node, answerWithinMs: 300 })
+  assert.equal(here, false)
+  assert.ok(Date.now() - t0 < 1000, `${Date.now() - t0} ms`)
+  release()   // the PC answers later: the copy is still made
+  await new Promise(r => setTimeout(r, 50))
+  assert.ok(put)
+})

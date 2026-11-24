@@ -5,7 +5,7 @@ import sharp from 'sharp'
 import imageToPdf from 'image-to-pdf'
 import { upload, generateThumbnail, getRelativePath } from '../services/storage.js'
 import { fileURLToPath } from 'url'
-import { fetchMissing } from '../services/fileOnDemand.js'
+import { fetchMissing, ANSWER_MS } from '../services/fileOnDemand.js'
 
 // The backend folder: where the agency's PCs put the documents they copy (sync/index.js), when
 // the program was started from another folder.
@@ -309,7 +309,7 @@ router.get('/files/:fileId/download', async (req, res) => {
     const file = await db('files').where('id', fileId).first()
     if (!file) return res.status(404).json({ error: 'File not found' })
 
-    const fullPath = resolveStoredPath(file) || ((await fetchMissing(file)) ? resolveStoredPath(file) : null)
+    const fullPath = resolveStoredPath(file) || ((await fetchMissing(file, { answerWithinMs: ANSWER_MS })) ? resolveStoredPath(file) : null)
     // Listed here, its file still on another PC: the page shows "coming" and asks again.
     if (!fullPath) return res.status(404).set('X-Adal-Pending', '1').json({ error: 'This file is not on this PC yet — it is being copied from the other PC.', pending: true })
 
@@ -328,7 +328,7 @@ router.get('/files/:fileId/thumbnail', async (req, res) => {
     const file = await db('files').where('id', fileId).first()
     if (!file) return res.status(404).json({ error: 'File not found' })
 
-    const fullPath = resolveStoredPath(file) || ((await fetchMissing(file)) ? resolveStoredPath(file) : null)
+    const fullPath = resolveStoredPath(file) || ((await fetchMissing(file, { answerWithinMs: ANSWER_MS })) ? resolveStoredPath(file) : null)
     // Listed here, its file still on another PC: the page shows "coming" and asks again.
     if (!fullPath) return res.status(404).set('X-Adal-Pending', '1').json({ error: 'This file is not on this PC yet — it is being copied from the other PC.', pending: true })
 

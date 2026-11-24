@@ -26,7 +26,7 @@ import { onDataChange } from '../lib/changes'
 import { onPhone, phoneCloud } from '../lib/phoneMode'
 import { pcOnline } from '../cloud/adapter'
 import { photosFirst, missingPhotos, hasFiles } from '../lib/photosFirst'
-import { missingNow } from '../lib/missingNow'
+import { missingNow, noteCleared } from '../lib/missingNow'
 import { ACTIONS, shows } from '../lib/stageActions'
 import useProfilePhase from '../hooks/useProfilePhase'
 import { useCan } from '../lib/staffPerms'
@@ -196,10 +196,18 @@ export default function ProfileDetailPage() {
     return () => { window.removeEventListener('adal-profile-changed', again); window.removeEventListener('adal-fields-changed', fieldsAgain); off() }
   }, [id])
 
+  // A detail or document of hers that had a value and now has none: in Missing at once (lib/missingNow.js).
+  const seen = useRef(null)
+  useEffect(() => {
+    if (!profile) return
+    noteCleared(id, seen.current, { profile, fields })
+    seen.current = { profile, fields }
+  }, [id, profile, fields])
+
   // Photo and Full Body Photo first; a missing one sits outside the fold, always in view.
   const orderedFields = photosFirst(fields)
   const gapNames = missingPhotos(fields)
-  const miss = missingNow(profile, fields, step?.key)
+  const miss = missingNow(profile, fields, step?.key, id)
   const missFields = orderedFields.filter(f => miss.files.includes(f.name) || gapNames.includes(f.name))
   const restFiles = orderedFields.filter(f => !miss.files.includes(f.name) && !gapNames.includes(f.name) && (!needFiles || needFiles.includes(f.name)))
   const fieldCard = (field) => (

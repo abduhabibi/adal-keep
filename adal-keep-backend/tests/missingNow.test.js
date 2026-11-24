@@ -40,3 +40,28 @@ test('living town and Date of Issue reach the CV', async () => {
   assert.equal(d.LIVING_TOWN, 'ADAMA')
   assert.equal(d.PASSPORT_ISSUE_DATE, '09 APR 2024')
 })
+
+// "Whenever I delete a field, make it appear at the top as a required field" (2026-11-24).
+test('a detail or a document cleared shows in Missing at once, first, until it is filled again', async () => {
+  const m = new Map()
+  globalThis.localStorage = { getItem: k => m.get(k) ?? null, setItem: (k, v) => m.set(k, String(v)), removeItem: k => m.delete(k) }
+  const { missingNow: miss, noteCleared } = await import('../../adal-keep-frontend/src/lib/missingNow.js')
+  const photo = (n) => ({ name: 'Photo', files: Array.from({ length: n }, (_, i) => ({ id: i })) })
+  const full = { id: 7, height: '160', religion: 'Muslim', marital_status: 'SINGLE', phone_number: '0911223344', living_town: 'Adama', passport_issue_date: '2024-01-01' }
+  const fields = [photo(1), { name: 'Full Body Photo', files: [{ id: 9 }] }]
+  assert.deepEqual(miss(full, fields, 'musaned', 7), { files: [], texts: [] })
+  // Height (not a step's need) and her Photo deleted:
+  const after = { ...full, height: '' }, fields2 = [photo(0), fields[1]]
+  noteCleared(7, { profile: full, fields }, { profile: after, fields: fields2 })
+  const now = miss(after, fields2, 'wafid', 7)
+  assert.equal(now.texts[0].key, 'height')
+  assert.equal(now.texts[0].label, 'Height')
+  assert.ok(now.files.includes('Photo'))
+  // Filled again: gone from Missing (and forgotten).
+  const back = miss({ ...after, height: '158' }, fields, 'wafid', 7)
+  assert.ok(!back.texts.some(t => t.key === 'height'))
+  assert.ok(!back.files.includes('Photo'))
+  assert.equal(m.size, 0)
+  // Another profile, or no profileId: untouched.
+  assert.ok(!miss(after, fields2, 'wafid').texts.some(t => t.key === 'height'))
+})

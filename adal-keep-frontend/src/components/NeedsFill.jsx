@@ -10,6 +10,7 @@ import api from '../services/api'
 import toast from 'react-hot-toast'
 import FieldCard from './fields/FieldCard'
 import { missingNow } from '../lib/missingNow'
+import { onDataChange } from '../lib/changes'
 
 const COUNTRIES = ['Kuwait', 'Saudi Arabia', 'Jordan', 'UAE', 'Qatar', 'Bahrain', 'Oman', 'Lebanon']
 // A missing thing's name (as the robots say it) → what to show for it.
@@ -88,13 +89,20 @@ export default function NeedsFill({ profileId, workflowId = null, cv = false, fi
   // Asked again whenever a document arrives (her fields change).
   const fileCount = fields.reduce((n, f) => n + (f.files?.length || 0), 0)
   useEffect(() => { check() }, [profileId, workflowId, cv, fileCount]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Her details changed (cleared or filled here, on the page or on another PC): the list follows at once.
+  useEffect(() => {
+    const again = () => api.get(`/profiles/${profileId}`).then(r => setProfile(r.data || {})).catch(() => {})
+    window.addEventListener('adal-profile-changed', again)
+    const off = onDataChange(['profiles'], again)
+    return () => { window.removeEventListener('adal-profile-changed', again); off() }
+  }, [profileId])
 
   const items = useMemo(() => itemsFor(names || [], profile), [names, profile])
   // Her details the step's own list does not name but the Missing card does (asked on 2026-11-23:
   // a pop-up shows both). Shown and saved here too; they never hold the step back.
   const extras = useMemo(() => {
     if (names === null) return []
-    const m = missingNow(profile, fields, cv ? 'cv' : workflowId === 'musaned_add_candidate' ? 'musaned' : null)
+    const m = missingNow(profile, fields, cv ? 'cv' : workflowId === 'musaned_add_candidate' ? 'musaned' : null, profileId)
     const have = new Set(items.map(i => i.key))
     return [
       ...m.texts.map(t => ({ key: `col:${t.key}`, col: t.key, label: t.label, type: t.type === 'select' ? 'text' : t.type, hint: t.hint, options: t.options?.map(o => [o, o[0] + o.slice(1).toLowerCase()]), extra: true })),

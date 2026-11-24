@@ -264,10 +264,10 @@ Section "Install"
   IfSilent done
 !ifdef COMPANION
   DetailPrint "Starting Adal Keep..."
-  Exec '"$INSTDIR\AdalKeep.exe"'   ; opens its window; closing it ends everything
+  Exec '"$INSTDIR\AdalKeep.exe" --background'   ; the server only: the window opens from its icon (or the finish page's box)
 !else
   DetailPrint "Starting Adal Keep..."
-  Exec '"$INSTDIR\AdalKeep.exe"'   ; opens its window; closing it ends everything
+  Exec '"$INSTDIR\AdalKeep.exe" --background'   ; the server only: the window opens from its icon (or the finish page's box)
 !endif
   DetailPrint "Done."
   done:

@@ -3,8 +3,8 @@
 // AdalKeep.exe — starts Adal Keep with no command window anywhere.
 //
 //	AdalKeep.exe                   open Adal Keep (starts it first when needed)
-//	AdalKeep.exe --background      start it without any window (Windows login);
-//	                               its window opens too only if allowed in Settings
+//	AdalKeep.exe --background      start it without any window (Windows login, an
+//	                               update, a restart): its window never opens then
 //	AdalKeep.exe --set-shortcut-ids <.lnk>...   installer: tag the shortcuts (see brand.go)
 //
 // On an older employee PC (Companion program only, no server) it opens the
@@ -66,10 +66,11 @@ func main() {
 	}
 	background := len(args) > 0 && args[0] == "--background"
 
-	// Companion: a start by Windows at sign-in does nothing, unless someone
-	// switched on "open Adal Keep when the PC starts". Main: the server always
-	// starts at sign-in (no window); that setting only decides the window.
-	if (employeePC(root) || companionInstall(root)) && background && !openAtStart(filepath.Join(root, "backend", "data")) {
+	// Companion: a start by Windows at sign-in does nothing. Main: the server always
+	// starts at sign-in, with no window. The window opens ONLY when a person opens it
+	// (its icon, the Start menu, a notification): never at a start, an update or a
+	// restart (the owner, 2026-11-24: "don't make Adal open by itself in any way").
+	if (employeePC(root) || companionInstall(root)) && background {
 		logf("started by Windows at sign-in: Adal Keep opens only from its icon — nothing started")
 		return
 	}
@@ -113,7 +114,7 @@ func main() {
 	go brandWindows(root)
 	startAppDoor(root)
 
-	if !background || openAtStart(filepath.Join(root, "backend", "data")) {
+	if !background {
 		openMainOrFollowed(root)
 	}
 	select {} // stay in the background: server, Companion, logo
@@ -217,12 +218,6 @@ func profileDir(root string) string {
 		return filepath.Join(root, "browser-profile")
 	}
 	return filepath.Join(root, "backend", "data", "ui-profile")
-}
-
-// openAtStart: someone allowed Adal Keep's window to open when the PC starts.
-func openAtStart(dir string) bool {
-	b, err := os.ReadFile(filepath.Join(dir, "open-at-start.json"))
-	return err == nil && strings.Contains(strings.ReplaceAll(string(b), " ", ""), `"on":true`)
 }
 
 // openUI opens Adal Keep's window: an app window of Adal Browser (no address

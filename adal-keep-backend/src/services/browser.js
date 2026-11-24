@@ -604,8 +604,14 @@ export async function openForPerson(space = null) {
  */
 export const PERSON_SHOW_MS = 10 * 60e3
 export const showsWindowHere = ({ platform = process.platform, hidden = HIDDEN, windowless = noWindows() } = {}) => platform === 'win32' && hidden && !windowless
-export async function showForPerson(page, { force = false, ms = PERSON_SHOW_MS } = {}) {
+export async function showForPerson(page, { force = false, ms = PERSON_SHOW_MS, appOpen = null } = {}) {
   if (!page || page.isClosed?.() || !(force || showsWindowHere())) return false
+  // Only while Adal Keep's own window is open on this PC (the owner, 2026-11-24): with it
+  // closed, the person step only notifies — nothing comes on the screen by itself.
+  if (!force) {
+    const open = appOpen ?? (await import('./appLife.js')).windowsOpen()
+    if (!open) return false
+  }
   try {
     const w = await windowOf(page)
     await w.cdp.send('Browser.setWindowBounds', { windowId: w.windowId, bounds: { windowState: 'normal' } })

@@ -23,17 +23,13 @@ const thisPCOnly = (req, res, next) => (onThisPC(req)
   ? next()
   : res.status(403).json({ error: 'Change this on the PC itself (open Adal Keep on that PC).' }))
 
-// Open Adal Keep's window when this PC starts: off until someone allows it here.
-// (The server itself always starts, without any window. AdalKeep.exe reads this.)
+// Adal Keep's window never opens when this PC starts (the owner, 2026-11-24: "don't make Adal
+// open by itself in any way"): the setting is gone, an old file is taken away, and an older page
+// asking to turn it on gets "off".
 const START_FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'data', 'open-at-start.json')
-router.get('/main-pc/open-at-start', (req, res) => {
-  try { res.json({ on: JSON.parse(fs.readFileSync(START_FILE, 'utf8')).on === true }) } catch { res.json({ on: false }) }
-})
-router.post('/main-pc/open-at-start', thisPCOnly, (req, res) => {
-  fs.mkdirSync(path.dirname(START_FILE), { recursive: true })
-  fs.writeFileSync(START_FILE, JSON.stringify({ on: !!req.body?.on }))
-  res.json({ on: !!req.body?.on })
-})
+try { fs.rmSync(START_FILE, { force: true }) } catch {}
+router.get('/main-pc/open-at-start', (req, res) => res.json({ on: false, gone: true }))
+router.post('/main-pc/open-at-start', thisPCOnly, (req, res) => res.json({ on: false, gone: true }))
 
 // Remote support by Adal (default ON): off does what Adal Disconnect does; on puts it back.
 router.get('/main-pc/support', (req, res) => res.json({ on: supportOn(), on_this_pc: onThisPC(req) }))

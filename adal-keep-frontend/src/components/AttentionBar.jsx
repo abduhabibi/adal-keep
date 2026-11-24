@@ -186,18 +186,12 @@ async function quit() {
 }
 
 export function StartupCard() {
-  const [on, setOn] = useState(false)
-  useEffect(() => { api.get('/main-pc/open-at-start').then(r => setOn(!!r.data.on)).catch(() => {}) }, [])
-  const set = async (v) => {
-    try { setOn((await api.post('/main-pc/open-at-start', { on: v })).data.on) } catch (e) { toast.error(err(e)) }
-  }
+  // (No "Open Adal Keep when this PC starts" any more: the window opens only from its icon.)
+  if (!(here() && /Windows/i.test(navigator.userAgent) && import.meta.env.VITE_ADMIN !== '1')) return null
   return (
     <section className="panel space-y-3 p-4">
-      <label className="flex items-center gap-2 text-sm font-semibold">
-        <input type="checkbox" checked={on} onChange={e => set(e.target.checked)} /> Open Adal Keep when this PC starts
-      </label>
       {/* Quit: out of the sidebar (2026-11-21, Browsers took its place); here, quiet, after a Yes. */}
-      {here() && /Windows/i.test(navigator.userAgent) && import.meta.env.VITE_ADMIN !== '1' && (
+      {(
         <button type="button" onClick={quit} className="text-xs font-semibold text-slate-500 hover:text-rose-600 hover:underline">Quit Adal Keep on this PC…</button>
       )}
     </section>

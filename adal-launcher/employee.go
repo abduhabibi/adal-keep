@@ -105,8 +105,9 @@ func runEmployee(root string, background bool) {
 	go brandWindows(root)
 	online := startOnlinePage(root)
 	go retryLeaves(root) // a main PC this Companion logged out of while it was off
-	// At Windows login: the Companion works; the window opens from the icon.
-	if background && !openAtStart(root) {
+	// At Windows login (or any start without a person): the Companion works; the window opens
+	// only from its icon (the owner, 2026-11-24: "don't make Adal open by itself in any way").
+	if background {
 		select {}
 	}
 
@@ -174,6 +175,11 @@ func companionURL(root, u string) string {
 // openAppWindow: the main PC's Adal Keep as its own app-style window (no
 // address bar, no tabs), in this PC's Adal Keep browser profile.
 func openAppWindow(root, url string) {
+	// Already open: that window in front, never a second one (single.go).
+	if focusAppWindow(root) {
+		logf("Adal Keep's window is already open — brought to the front")
+		return
+	}
 	profile := profileDir(root)
 	os.MkdirAll(profile, 0o755)
 	args := []string{

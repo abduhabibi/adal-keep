@@ -11,6 +11,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 process.env.JEV_ENABLED = 'false'
+// (this PC's own licence file must not lock the worker in the test)
+process.env.HOME = (await import('fs')).mkdtempSync((await import('path')).join((await import('os')).tmpdir(), 'rr-home-'))
 const { createRunQueue } = await import('../src/services/runQueue.js')
 const { chooseBest, ready } = await import('../src/services/sharePower.js')
 const { unreachable } = await import('../src/services/musanedWorkflow.js')
@@ -99,4 +101,30 @@ test("Tasheer: Cloudflare's hard block is not a box to tick (live page text, 202
   assert.equal(challengeText(live), false)
   assert.equal(challengeText('Just a moment... Verify you are human by completing the action below.'), true)
   assert.equal(blockedText('Login Username Password'), false)
+})
+
+test('a run paused at the sign-in (a captcha) holds back the next run of its site and account, not other ones', async () => {
+  const { claimNextJob, signInLanes } = await import('../src/services/worker.js')
+  const { default: knex } = await import('knex')
+  const db = knex({ client: 'sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true })
+  try {
+    await db.schema.createTable('automation_queue', t => {
+      t.increments('id'); t.string('workflow_id'); t.integer('profile_id'); t.integer('account_id'); t.text('context')
+      t.string('status'); t.string('pause_reason'); t.string('updated_at'); t.string('started_at'); t.text('log')
+    })
+    const now = new Date().toISOString()
+    await db('automation_queue').insert([
+      { workflow_id: 'musaned_add_candidate', account_id: 1, status: 'paused', pause_reason: 'awaiting-musaned-captcha', updated_at: now },
+      { workflow_id: 'musaned_add_candidate', account_id: 1, status: 'pending', updated_at: now },
+      { workflow_id: 'lmis_add_labour', account_id: 4, status: 'pending', updated_at: now },
+      { workflow_id: 'musaned_add_candidate', account_id: 2, status: 'paused', pause_reason: 'awaiting-human-save', updated_at: now },
+    ])
+    assert.deepEqual([...await signInLanes(db)], ['musaned:1'])
+    const first = await claimNextJob(db)
+    assert.equal(first.workflow_id, 'lmis_add_labour')          // the second Musaned run of account 1 waits
+    assert.equal(await claimNextJob(db), null)
+    // The person signed in: the paused run went on and ended; the next one starts.
+    await db('automation_queue').where('id', 1).update({ status: 'done' })
+    assert.equal((await claimNextJob(db)).id, 2)
+  } finally { await db.destroy() }
 })

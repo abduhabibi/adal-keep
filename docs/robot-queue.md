@@ -14,8 +14,8 @@ The agency's SQLite database on the **main PC**:
 - A Companion's own copy: `C:\AdalKeepCompanion\server\backend\data\data.sqlite`. Companions do not run
   robots: their jobs reach the main PC with the rest of the data (`dispatchRun` → `on_main`).
 
-Open it with a busy timeout (Adal Keep writes to it all the time): `PRAGMA busy_timeout=15000`.
-Keep transactions short; never change its journal mode or schema.
+Open it like Adal Keep's knexfile does: `PRAGMA journal_mode=WAL; PRAGMA busy_timeout=8000;`
+(or a longer timeout). Keep transactions short; never change its schema.
 
 ## Table `automation_queue` (migrations 021, 025, 067)
 

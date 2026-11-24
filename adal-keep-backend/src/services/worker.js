@@ -1169,6 +1169,8 @@ export function startWorker(db) {
   setInterval(() => continueSignedIn(db).catch(e => console.warn('[worker] sign-in look:', e.message)), 15000).unref?.()
   setInterval(() => closeSavedRuns(db).catch(e => console.warn('[worker] saved look:', e.message)), 3000).unref?.()
 
+  // ADAL_AGENCY_MANAGER=0: no runs put in line by the agency manager (Adal Robots' first start on a PC: only the runs a person queues).
+  if (process.env.ADAL_AGENCY_MANAGER === '0') { console.log('[worker] agency manager off (ADAL_AGENCY_MANAGER=0)'); return }
   console.log(`[worker] agency manager every ${AGENCY_INTERVAL_MS / 60000}min`)
   _agencyTimer = setInterval(() => {
     runAgencyManager(db).catch(e => console.error('[agency]', e))

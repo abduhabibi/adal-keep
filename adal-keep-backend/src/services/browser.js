@@ -603,7 +603,7 @@ export async function openForPerson(space = null) {
  * agents): on Linux there is no window at all (headless) and the live view is the way in.
  */
 export const PERSON_SHOW_MS = 10 * 60e3
-export const showsWindowHere = ({ platform = process.platform, hidden = HIDDEN, headless = noWindows() } = {}) => platform === 'win32' && hidden && !headless
+export const showsWindowHere = ({ platform = process.platform, hidden = HIDDEN, windowless = noWindows() } = {}) => platform === 'win32' && hidden && !windowless
 export async function showForPerson(page, { force = false, ms = PERSON_SHOW_MS } = {}) {
   if (!page || page.isClosed?.() || !(force || showsWindowHere())) return false
   try {

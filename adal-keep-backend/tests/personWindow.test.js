@@ -20,9 +20,9 @@ function fakeTab() {
 }
 
 test('where the window comes: Windows with hidden agents only', () => {
-  assert.equal(B.showsWindowHere({ platform: 'win32', hidden: true, headless: false }), true)
-  assert.equal(B.showsWindowHere({ platform: 'linux', hidden: true, headless: true }), false)
-  assert.equal(B.showsWindowHere({ platform: 'win32', hidden: false, headless: false }), false)   // already on the screen
+  assert.equal(B.showsWindowHere({ platform: 'win32', hidden: true, windowless: false }), true)
+  assert.equal(B.showsWindowHere({ platform: 'linux', hidden: true, windowless: true }), false)
+  assert.equal(B.showsWindowHere({ platform: 'win32', hidden: false, windowless: false }), false)   // already on the screen
 })
 
 test('on the screen and in front for the step, out of sight again after it', async () => {

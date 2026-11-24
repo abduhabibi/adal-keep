@@ -2594,6 +2594,19 @@ async function musanedRun(page, ctx) {
       }
       await sleep(2000)
       let review = await classifyScreen(page, ctx)
+      // The form is filled but Google's box has not come yet (a slow line: ~40 s, 2026-11-24): wait for it
+      // (90 s at most) instead of calling the page unclassified and pausing as "awaiting-musaned-login".
+      if (review.screen === 'login-form') {
+        const { robotCheck } = await import('./robotCheck.js')
+        const t1 = Date.now()
+        let present = false
+        while (Date.now() - t1 < 90000 && !(present = (await robotCheck(page)).present)) {
+          if (!(await page.evaluate(() => !!document.querySelector('input[type="password"]')).catch(() => true))) break
+          await sleep(500)
+        }
+        if (present) { log(ctx, `Google's "I'm not a robot" came after ${Math.round((Date.now() - t1) / 1000)} s`); review = { ...review, screen: 'captcha' } }
+        else review = await classifyScreen(page, ctx)
+      }
       if (review.screen === 'captcha') {
         const w = await waitForPersonCaptcha(page, ctx)
         if (w === 'timeout') return { ok: true, pauseReason: 'awaiting-musaned-captcha', seconds: Math.round((Date.now() - t0) / 1000) }

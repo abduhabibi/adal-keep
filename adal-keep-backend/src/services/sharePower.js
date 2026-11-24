@@ -244,8 +244,15 @@ export async function placeRun(db, job, { mainAllowed = true, pcs = null, tabs =
   return line
 }
 
+/**
+ * Work handed to another PC over the office network (robots, moves, CV PDFs, another PC's LMIS):
+ * OFF unless ADAL_LAN_ROBOTS=1 (the owner, 2026-11-24: "forget making the robots through LAN").
+ */
+export const lanRobots = () => process.env.ADAL_LAN_ROBOTS === '1'
+
 /** The PC for a move (Transitions): the same choice, from this PC, with the site's open tabs counted. */
 export async function placeTransition(siteUrl, { from = '', pcs = null, browsers = null } = {}) {
+  if (!lanRobots()) return { to: from }   // on the PC itself (see lanRobots)
   pcs = pcs || await officePCs()
   let host = ''
   try { host = new URL(siteUrl).hostname } catch {}
@@ -267,6 +274,7 @@ export async function placeTransition(siteUrl, { from = '', pcs = null, browsers
  * weak, else null (drawn here as before).
  */
 export async function helperForPdf() {
+  if (!lanRobots()) return null   // CV PDFs are made on this PC (see lanRobots)
   const pcs = await officePCs()
   const c = choose({ from: '', pcs })
   return c.help && c.to ? c.to : null

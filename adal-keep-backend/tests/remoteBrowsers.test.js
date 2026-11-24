@@ -65,7 +65,18 @@ test('an upload in a Companion\'s browser sends the file there first; the main P
   srv.close()
 })
 
-test('a run nobody pressed goes to the strongest free Companion', async () => {
+test('runs stay on this PC unless ADAL_LAN_ROBOTS=1', async () => {
+  const { freeStrongDevice } = await import('../src/services/remoteBrowsers.js')
+  const { helperForPdf, placeTransition } = await import('../src/services/sharePower.js')
+  delete process.env.ADAL_LAN_ROBOTS
+  assert.equal(freeStrongDevice(), '')
+  assert.equal(await helperForPdf(), null, 'a CV PDF is made here')
+  assert.deepEqual(await placeTransition('https://example.org', { from: '' }), { to: '' })
+})
+
+test('a run nobody pressed goes to the strongest free Companion (ADAL_LAN_ROBOTS=1)', async (t) => {
+  process.env.ADAL_LAN_ROBOTS = '1'
+  t.after(() => { delete process.env.ADAL_LAN_ROBOTS })
   const { freeStrongDevice } = await import('../src/services/remoteBrowsers.js')
   _resetForTest()
   assert.equal(freeStrongDevice(), '')

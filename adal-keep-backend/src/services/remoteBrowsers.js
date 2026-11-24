@@ -94,6 +94,7 @@ export async function tabForPerson(id) {
  * own already, does it ("the fast PCs do the most work"). '' when none.
  */
 export function freeStrongDevice(busyIds = new Set(), now = Date.now()) {
+  if (process.env.ADAL_LAN_ROBOTS !== '1') return ''   // runs stay on this PC (sharePower.lanRobots)
   const list = [...devices.values()].filter(d => now - d.at < SEEN_MS && !busyIds.has(d.id))
   list.sort((a, b) => (b.cores || 1) - (a.cores || 1) || String(a.id).localeCompare(String(b.id)))
   return list[0]?.id || ''

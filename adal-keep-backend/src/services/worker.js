@@ -775,7 +775,9 @@ export async function signInLanes(db, now = Date.now(), { tabLive = _tabLive } =
     .select('id', 'workflow_id', 'account_id', 'context', 'pause_reason').catch(() => [])
   // Only while its tab is really there: a run whose browser is gone (closed, restarted) holds nothing
   // (2026-11-24: the robot browser died, 4 runs stayed "waiting for the sign-in" and held 25 others).
-  return new Set(rows.filter(r => SIGN_IN_WAIT.test(String(r.pause_reason || '')) && tabLive(r.id)).map(laneOf).filter(Boolean))
+  // (Also a sign-in nobody answered in 5 minutes, NO_ANSWER: its tab still waits at the box — the next run
+  // would only open a second sign-in tab beside it and call again.)
+  return new Set(rows.filter(r => (SIGN_IN_WAIT.test(String(r.pause_reason || '')) || r.pause_reason === NO_ANSWER) && tabLive(r.id)).map(laneOf).filter(Boolean))
 }
 
 /** The run's tab is open in a browser this PC is connected to. */

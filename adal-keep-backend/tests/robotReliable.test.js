@@ -121,6 +121,13 @@ test('a run paused at the sign-in (a captcha) holds back the next run of its sit
       { workflow_id: 'musaned_add_candidate', account_id: 2, status: 'paused', pause_reason: 'awaiting-human-save', updated_at: now },
     ])
     assert.deepEqual([...await signInLanes(db)], ['musaned:1'])
+    // A sign-in nobody answered in 5 minutes holds its account too while its tab waits at the box.
+    const { NO_ANSWER } = await import('../src/services/worker.js')
+    const [nid] = await db('automation_queue').insert({ workflow_id: 'musaned_add_candidate', account_id: 3, status: 'paused', pause_reason: NO_ANSWER, updated_at: now })
+    _setTabLiveForTest((id) => id === 1 || id === nid)
+    assert.deepEqual([...await signInLanes(db)].sort(), ['musaned:1', 'musaned:3'])
+    await db('automation_queue').where('id', nid).del()
+    _setTabLiveForTest((id) => id === 1)
     const first = await claimNextJob(db)
     assert.equal(first.workflow_id, 'lmis_add_labour')          // the second Musaned run of account 1 waits
     assert.equal(await claimNextJob(db), null)

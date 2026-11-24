@@ -1242,14 +1242,18 @@ router.get('/automations/:id/mirror', async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message, ...(e.feature ? { feature: e.feature, plan: e.plan } : {}) }) }
 })
 
+// Every person input (not the mouse moves) in the log with how it went (2026-11-24: "I can't click it").
+const inputLog = (id, what, t0, err) => console.log(`[live] run ${id} ${what} → ${err ? `failed: ${String(err.message || err).slice(0, 80)}` : 'ok'} (${Date.now() - t0} ms)`)
+const what = (x) => [x.kind, x.type, x.key, x.x != null ? `${Number(x.x).toFixed(2)},${Number(x.y).toFixed(2)}` : ''].filter(Boolean).join(' ')
 router.post('/automations/:id/input', async (req, res) => {
+  const t0 = Date.now()
   const page = await liveTab(req)
-  if (!page || page === SLOW) return noTab(res, page)
+  if (!page || page === SLOW) { console.log(`[live] run ${req.params.id} input → ${page === SLOW ? 'the tab did not answer in 6 s' : 'no tab'}`); return noTab(res, page) }
   const b = req.body || {}
   // A burst of mouse moves, wheel turns and keys from the browser view: done in order, answered at once.
   if (Array.isArray(b.batch)) {
     let code = null
-    const run = async () => { for (const x of b.batch.slice(0, 200)) { try { code = (await bounded(personInput(req.app.locals.db, req.params.id, page, x))) || code } catch {} } }
+    const run = async () => { for (const x of b.batch.slice(0, 200)) { const t1 = Date.now(); try { code = (await bounded(personInput(req.app.locals.db, req.params.id, page, x))) || code; if (!(x.kind === 'mouse' && x.type === 'move')) inputLog(req.params.id, what(x), t1) } catch (e) { inputLog(req.params.id, what(x), t1, e) } } }
     page.__adalInputChain = (page.__adalInputChain || Promise.resolve()).then(run, run)
     await page.__adalInputChain
     return res.json({ ok: true, code })
@@ -1259,8 +1263,8 @@ router.post('/automations/:id/input', async (req, res) => {
     page.__adalInputChain = (page.__adalInputChain || Promise.resolve()).then(() => bounded(liveInput(page, b), 3000)).catch(() => {})
     return res.json({ ok: true })
   }
-  try { await bounded(page.__adalInputChain || Promise.resolve(), 3000).catch(() => {}); res.json({ ok: true, code: await bounded(personInput(req.app.locals.db, req.params.id, page, b), b.kind === 'nav' || b.kind === 'reload' ? 50000 : 8000) }) }
-  catch (e) { res.status(e.status || 500).json({ error: e.message }) }
+  try { await bounded(page.__adalInputChain || Promise.resolve(), 3000).catch(() => {}); const code = await bounded(personInput(req.app.locals.db, req.params.id, page, b), b.kind === 'nav' || b.kind === 'reload' ? 50000 : 8000); inputLog(req.params.id, what(b), t0); res.json({ ok: true, code }) }
+  catch (e) { inputLog(req.params.id, what(b), t0, e); res.status(e.status || 500).json({ error: e.message }) }
 })
 
 

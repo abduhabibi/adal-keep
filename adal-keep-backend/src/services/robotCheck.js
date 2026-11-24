@@ -50,6 +50,10 @@ export async function waitForTick(page, { onForm, submit, refill = null, isCance
   let pressed = false
   while (Date.now() < deadline) {
     if (isCancelled?.()) { const e = new Error('Cancelled by user'); e.cancelled = true; throw e }
+    // Its tab or its browser is gone (closed, crashed): nothing to wait for (the run goes back in line).
+    let gone = false
+    try { gone = page.isClosed?.() || page.browser?.()?.connected === false } catch { gone = true }
+    if (gone) { log('the tab is gone (its browser closed) — not waiting for the tick'); return 'timeout' }
     if (!(await onForm().catch(() => true))) return pressed ? 'submitted' : 'left'
     const rc = await robotCheck(page)
     if (rc.ticked) {

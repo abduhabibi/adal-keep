@@ -393,6 +393,36 @@ export function holdForRuns(busy, since, now = Date.now(), limit = RUN_LIMIT_MS)
   return { wait: waited < limit, since: from, waited }
 }
 
+/**
+ * What the last automatic install did, kept in data/update-state.json: an install that the server's
+ * stop cut off (no "installed", no "failed" in the log) is said at the next start, and a version
+ * this PC went back from (safeStart.js) is said with its reason.
+ */
+const STATE_FILE = () => path.join(backendDirOf(config().projectRoot), 'data', 'update-state.json')
+function installStep(s) {
+  try { fs.writeFileSync(STATE_FILE(), JSON.stringify({ ...s, pid: process.pid, at: new Date().toISOString() }, null, 1)) } catch {}
+}
+function sayLastInstall() {
+  try {
+    const s = JSON.parse(fs.readFileSync(STATE_FILE(), 'utf8'))
+    if (s.step === 'installing' && s.pid !== process.pid) {
+      console.error(`[update] the automatic install of ${s.short || s.sha} that began ${s.at} did not finish: the server stopped during it (it starts again by itself)`)
+      installStep({ ...s, step: 'cut off', cut_at: s.at })
+    } else if (s.step === 'failed' && !s.said) {
+      console.error(`[update] the last automatic install of ${s.short || s.sha} failed (${s.at}): ${s.error}`)
+      fs.writeFileSync(STATE_FILE(), JSON.stringify({ ...s, said: true }, null, 1))
+    }
+  } catch {}
+  try {
+    const rolledFile = path.join(backendDirOf(config().projectRoot), 'data', 'rolled-back.json')
+    const r = JSON.parse(fs.readFileSync(rolledFile, 'utf8'))
+    if (r && !r.said) {
+      console.error(`[update] this PC went back from ${String(r.from || '?').slice(0, 7)} to ${String(r.to || '?').slice(0, 7)} on ${r.at}: ${r.why}${r.failed?.length ? ` (not put back: ${r.failed.join(', ')})` : ''} — not installed again by itself until Adal says so`)
+      fs.writeFileSync(rolledFile, JSON.stringify({ ...r, said: new Date().toISOString() }, null, 2))
+    }
+  } catch {}
+}
+
 async function autoUpdate(db, result) {
   if (!result?.hasUpdate || updateNotice.applying) return
   if (!(await autoUpdateOn(db))) return
@@ -421,15 +451,17 @@ async function autoUpdate(db, result) {
   if (b.busy) console.log(`🆕 Update ${result.latest?.short} waited ${Math.round(waited / 60000)} min for ${b.running} run(s) working, ${b.waiting} in line — installing now`)
   autoState.waitingSince = 0
   console.log(`🆕 Installing update ${result.latest?.short} by itself (${result.count} change(s))`)
+  installStep({ sha, short: result.latest?.short, step: 'installing' })
   updateNotice.auto = true
   // applyUpdate answers like a route; this collects its answer.
   const res = { code: 200, body: null, status(c) { this.code = c; return this }, json(b) { this.body = b; return this } }
   updateNotice.applying = true
   updateNotice.applyingSince = new Date().toISOString()
-  try { await applyUpdate(null, res) } finally {
+  try { await applyUpdate(null, res) } catch (e) { res.code = 500; res.body = { error: e.message } } finally {
     updateNotice.applying = false
     updateNotice.auto = false
   }
+  installStep({ sha, short: result.latest?.short, step: res.code >= 400 || !res.body?.success ? 'failed' : 'installed', error: res.body?.error || null, log: String(res.body?.log || '').slice(-1500) })
   if (res.code >= 400 || !res.body?.success) {
     Object.assign(autoState, { failedSha: sha, failedAt: Date.now(), failedSource: result.source || '', failedDownload: /download|fetch|timeout|abort|stalled|no answer|Supabase/i.test(String(res.body?.error || '')) })
     updateNotice.autoError = res.body?.error || 'the update did not install'
@@ -531,8 +563,13 @@ export function startUpdateWatcher(db = null) {
   Undo.setUndoer(autoRollback)
   getInstalled().then(i => { if (!i.isRepo && i.sha) Undo.watch({ installedSha: i.sha, checks: undoChecks(db, i.sha) }) }).catch(() => {})
   const every = Number(process.env.UPDATE_CHECK_MINUTES || 15) * 60 * 1000
+  sayLastInstall()
+  let ticking = false
   const tick = async () => {
-    if (updateNotice.applying) return
+    // One look at a time: on a slow line a check outlasted the minute, and two looks then both
+    // installed the same release into the same download (2026-11-24, Main).
+    if (updateNotice.applying || ticking) return
+    ticking = true
     try {
       // GitHub is asked every UPDATE_CHECK_MINUTES; a found update is tried
       // again every minute until the runs are idle.
@@ -549,7 +586,8 @@ export function startUpdateWatcher(db = null) {
       await autoUpdate(db, result)
     } catch (e) {
       Object.assign(updateNotice, { checkedAt: new Date().toISOString(), error: e.message })
-    }
+      console.error(`[update] the update look failed: ${e.message}`)
+    } finally { ticking = false }
   }
   setTimeout(tick, 60 * 1000).unref?.()
   watcher = setInterval(tick, 60 * 1000)

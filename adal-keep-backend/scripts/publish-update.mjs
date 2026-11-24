@@ -42,6 +42,7 @@
  *
  *   --rollout status|advance|stop|resume|everyone   (the release published now; also in Adal Keep Admin → Updates)
  *   --no-delta                                       (whole pieces only)
+ *   --patch-from SHA[,SHA]                           (also a patch from these older releases: release/<sha>.tar.gz in Storage)
  */
 import fs from 'fs'
 import os from 'os'
@@ -185,6 +186,32 @@ try {
   if (r.ok) { const j = await r.json(); if (verifyManifest(j.manifest, j.signature)) previous = j.manifest }
 } catch {}
 if (previous?.sha === sha) { console.log(`Already published: ${sha.slice(0, 7)}`); process.exit(0) }
+// The last 5 releases (the one before first), each with its app piece: patches start from each of them
+// (the one before, the one before that — its way back —, the history they carried, and --patch-from ones).
+const PATCH_FROM = (() => { for (let i = 0; i < argv.length; i++) { const v = argv[i] === '--patch-from' ? argv[i + 1] : argv[i].startsWith('--patch-from=') ? argv[i].slice(13) : null; if (v != null) return v.split(',').map(x => x.trim()).filter(x => /^[0-9a-f]{7,40}$/.test(x)) } return [] })()
+const HISTORY = await (async () => {
+  const list = []
+  const add = (r) => { if (r?.sha && r.sha256 && r.file && r.sha !== sha && !list.some(x => x.sha === r.sha)) list.push({ sha: r.sha, short: r.short || r.sha.slice(0, 7), file: r.file, sha256: r.sha256, raw: r.raw || r.app_delta?.raw }) }
+  add(previous)
+  add(previous?.rollback?.manifest)
+  for (const h of previous?.history || []) add(h)
+  const keep = list.slice(0, 5)
+  for (const short of PATCH_FROM) {
+    if (keep.some(x => x.sha.startsWith(short))) continue
+    let full = short
+    try { full = sh('git', ['rev-parse', short]) } catch {}
+    const file = `release/${full}.tar.gz`
+    try {
+      const r = await storage('GET', `object/${BUCKET}/${file}`)
+      if (!r.ok) { console.log(`   (--patch-from ${short}: ${file} is not in Storage)`); continue }
+      const b = Buffer.from(await r.arrayBuffer())
+      cachePut(b)
+      keep.push({ sha: full, short: full.slice(0, 7), file, sha256: sha256(b) })
+    } catch (e) { console.log(`   (--patch-from ${short}: ${e.message})`) }
+  }
+  return keep
+})()
+if (HISTORY.length) console.log(`   patches from: ${HISTORY.map(h => h.short).join(', ')}`)
 
 // 0. The tests: a version that fails one is never published.
 if (!args.has('--skip-tests')) {
@@ -373,11 +400,21 @@ try {
     file: `release/${sha}.tar.gz`, size: buf.length,
     sha256: crypto.createHash('sha256').update(buf).digest('hex'),
     // Updates v2: the app as a plain .tar and a small patch from the release before.
+    // Patches from the last 5 releases (2026-11-24: Main, three releases behind, had only the whole
+    // 16.8 MB piece to take on a slow line): `patch` = from the release just before (older PCs read
+    // only that one), `patches` = from each of the releases before it.
     app_delta: { raw: { sha256: appRawSha, size: appRaw.length }, ...(await (async () => {
-      const old = previous?.sha256 ? { file: previous.file, sha256: previous.sha256, raw: previous.app_delta?.raw } : null
-      const pt = old ? await makePatch(old, appRaw, `release/patches/${appRawSha.slice(0, 12)}-from-${(old.raw?.sha256 || old.sha256).slice(0, 12)}.adalpatch`, { gz: true }) : null
-      return pt ? { patch: pt } : {}
+      const out = {}
+      for (const old of HISTORY) {
+        const pt = await makePatch(old, appRaw, `release/patches/${appRawSha.slice(0, 12)}-from-${(old.raw?.sha256 || old.sha256).slice(0, 12)}.adalpatch`, { gz: true }).catch(e => { console.log(`   (no patch from ${old.short}: ${e.message})`); return null })
+        if (!pt) continue
+        if (!out.patch && old.sha === previous?.sha) out.patch = pt
+        else (out.patches ||= []).push({ ...pt, from_release: old.short })
+      }
+      return out
     })()) },
+    // The releases those patches start from (the next release makes its patches from these too).
+    history: HISTORY.map(({ sha, short, file, sha256, raw }) => ({ sha, short, file, sha256, ...(raw ? { raw } : {}) })),
     app_files: appFiles,
     // The Windows programs (AdalKeep.exe, the Companion, the agent): each PC
     // downloads only the ones that differ from its own (updates no longer need the USB).

@@ -45,7 +45,8 @@ export function current() {
 const form = (f) => (f && HEX.test(f.sha256 || '') ? f : undefined)
 export function piecesOf(m, { all = false } = {}) {
   const out = []
-  const delta = (p) => ({ ...(form(p?.raw) ? { raw: p.raw } : {}), ...(form(p?.patch) && p.patch.file ? { patch: p.patch } : {}) })
+  const delta = (p) => ({ ...(form(p?.raw) ? { raw: p.raw } : {}), ...(form(p?.patch) && p.patch.file ? { patch: p.patch } : {}),
+    ...(Array.isArray(p?.patches) && p.patches.some(x => form(x) && x.file) ? { patches: p.patches.filter(x => form(x) && x.file) } : {}) })
   if (m?.sha256 && m.file) out.push({ file: m.file, sha256: m.sha256, size: m.size, ...delta(m.app_delta) })
   for (const p of m?.programs || []) if (p?.sha256) out.push({ file: p.file, sha256: p.sha256, name: p.name, size: p.size, ...delta(p) })
   if (all) for (const p of m?.programs_x86 || []) if (p?.sha256) out.push({ file: p.file, sha256: p.sha256, name: p.name, size: p.size, arch: 'x86', ...delta(p) })
@@ -154,8 +155,12 @@ export async function patchBase(pt, local = []) {
  * cache, checked against the signed SHA-256. Null when there is no base here.
  */
 async function viaPatch(manifest, piece, { cloud = true, local = [] } = {}) {
-  const pt = piece.patch
-  const base = await patchBase(pt, local)
+  // The patch from whichever earlier release is here (the one just before first).
+  let pt = null, base = null
+  for (const c of [piece.patch, ...(piece.patches || [])].filter(Boolean)) {
+    base = await patchBase(c, local)
+    if (base) { pt = c; break }
+  }
   if (!base) return null
   const target = piece.raw?.sha256 || piece.sha256
   const pfile = path.join(FILES, pt.sha256)
@@ -178,9 +183,29 @@ async function viaPatch(manifest, piece, { cloud = true, local = [] } = {}) {
  * .tar.gz or the plain .tar (tar -xf reads both). Checked every time.
  * `local`: files on this PC a program patch may start from (the installed program).
  */
+/**
+ * Half-downloads of pieces no release wants any more (2026-11-24: Main kept two from the day
+ * before): gone. A .part of a piece of `manifest` (or of the kept release) always stays — the next
+ * try goes on from it. Returns the names removed.
+ */
+export function cleanParts(manifest, { maxAgeMs = 6 * 3600 * 1000, now = Date.now() } = {}) {
+  const keep = new Set([...piecesOf(manifest, { all: true }), ...piecesOf(current()?.manifest, { all: true })].flatMap(p => [...formsOf(p), ...(p.patches || []).map(x => x.sha256)]))
+  const gone = []
+  try {
+    for (const f of fs.readdirSync(FILES)) {
+      if (!f.endsWith('.part') || keep.has(f.slice(0, -5))) continue
+      const fp = path.join(FILES, f)
+      try { if (now - fs.statSync(fp).mtimeMs < maxAgeMs) continue; fs.rmSync(fp, { force: true }); gone.push(f) } catch {}
+    }
+  } catch {}
+  if (gone.length) console.log(`[update] old half-downloads removed: ${gone.length}`)
+  return gone
+}
+
 export async function fetchPiece(manifest, piece, dest, { cloud = true, local = [] } = {}) {
   if (!HEX.test(piece?.sha256 || '')) throw new Error('bad piece')
   fs.mkdirSync(FILES, { recursive: true })
+  cleanParts(manifest)
   // The full description from the signed manifest (callers may pass only file + sha256).
   piece = { ...(piecesOf(manifest, { all: true }).find(p => p.sha256 === piece.sha256) || {}), ...piece }
   const out = (from) => { if (dest && path.resolve(dest) !== path.resolve(from)) fs.copyFileSync(from, dest); return dest || from }
@@ -189,7 +214,7 @@ export async function fetchPiece(manifest, piece, dest, { cloud = true, local = 
     if (hit && (await sha256File(hit)) === s) return out(hit)
   }
   const label = path.basename(piece.file || piece.sha256)
-  if (piece.patch && deltaOn()) {
+  if ((piece.patch || piece.patches?.length) && deltaOn()) {
     try {
       const r = await viaPatch(manifest, piece, { cloud, local })
       if (r) { console.log(`[lan-update] ${label} rebuilt from the version before + a ${(r.bytes / 1024).toFixed(0)} KB patch`); return out(r.file) }

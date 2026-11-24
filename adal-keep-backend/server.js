@@ -9,6 +9,8 @@ import { noteStart, startedWell, shouldRollBack, rollBack } from './safeStart.js
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const info = noteStart(HERE)
+// A version that has not run 2 minutes yet, started again: said, so a going back later has its story.
+if (info.guarded && info.starts > 1) console.warn(`[start] version ${String(info.sha).slice(0, 7)}: start ${info.starts} without 2 good minutes (at 3 it goes back to the version before)`)
 const prev = shouldRollBack(HERE, info)
 if (prev) {
   try {

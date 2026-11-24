@@ -126,9 +126,23 @@ const defaults = { chunk: 2 * 1048576, timeout: 180_000, stall: 60_000, tries: 6
 /** Tests only: shorter waits. */
 export const _setDownloadDefaultsForTests = (o) => Object.assign(defaults, o)
 
-export async function rangedDownload(open, dest, want, opts = {}) {
-  const { chunk, timeout, stall, tries, backoff, size } = { ...defaults, ...Object.fromEntries(Object.entries(opts).filter(([, v]) => v !== undefined)) }
+// One download per file at a time (2026-11-24: two automatic installs wrote into the same .part on
+// Main, which never finished): a second caller waits for the first and gets its result.
+const downloading = new Map()
+export function rangedDownload(open, dest, want, opts = {}) {
+  const key = path.resolve(dest)
+  if (downloading.has(key)) return downloading.get(key)
+  const job = rangedDownloadOnce(open, dest, want, opts).finally(() => downloading.delete(key))
+  downloading.set(key, job)
+  return job
+}
+const mb = (n) => `${(n / 1048576).toFixed(1)} MB`
+async function rangedDownloadOnce(open, dest, want, opts = {}) {
+  const { chunk, timeout, stall, tries, backoff, size, log = console } = { ...defaults, ...Object.fromEntries(Object.entries(opts).filter(([, v]) => v !== undefined)) }
   const part = `${dest}.part`
+  const name = opts.label || path.basename(dest).slice(0, 12)
+  let lastSaid = 0
+  const say = (force = false) => { if (force || Date.now() - lastSaid > 30_000) { lastSaid = Date.now(); log.log?.(`[update] download ${name}: ${mb(have())}${total ? ` of ${mb(total)}` : ''}`) } }
   fs.mkdirSync(path.dirname(dest), { recursive: true })
   const have = () => { try { return fs.statSync(part).size } catch { return 0 } }
   // A .part that is already the whole piece (a download that was cut or hung just after its last byte,
@@ -138,6 +152,7 @@ export async function rangedDownload(open, dest, want, opts = {}) {
     return dest
   }
   let total = Number(size) > 0 ? Number(size) : 0, failures = 0
+  if (have() > 0) log.log?.(`[update] download ${name}: going on from ${mb(have())}${total ? ` of ${mb(total)}` : ''}`)
   for (;;) {
     const before = have()
     if (total && before >= total) break
@@ -163,14 +178,21 @@ export async function rangedDownload(open, dest, want, opts = {}) {
         if (!m || Number(m[1]) !== before) throw new Error('the server sent another part than asked')
         if (m[2] !== '*') total = Number(m[2])
       } else {
-        // The whole file from the start: what was here is replaced; a stall ends it, not the total time.
+        // The whole file from the start (the server did not take the Range): the bytes already
+        // here are kept, the same ones from the stream are skipped — never back to zero
+        // (2026-11-24: Main's 16.8 MB download went back to 0 at 15 MB, again and again).
         total = Number(res.headers.get('content-length')) || 0
+        if (before) log.warn?.(`[update] download ${name}: the server sent the whole file (no Range) — the first ${mb(before)} already here are skipped`)
       }
-      const ws = fs.createWriteStream(part, { flags: ranged ? 'a' : 'w' })
+      let skip = ranged ? 0 : before
+      const ws = fs.createWriteStream(part, { flags: 'a' })
       try {
-        for await (const c of Readable.fromWeb(res.body)) {
+        for await (const c0 of Readable.fromWeb(res.body)) {
           restartStall()
+          let c = c0
+          if (skip) { if (c.length <= skip) { skip -= c.length; continue } c = c.subarray(skip); skip = 0 }
           if (!ws.write(c)) await new Promise(r => ws.once('drain', r))
+          say()
         }
       } finally {
         await new Promise(r => ws.end(r))
@@ -178,7 +200,8 @@ export async function rangedDownload(open, dest, want, opts = {}) {
       if (!ranged && !total) total = have() // no length given: what came is all of it
       if (!ranged && have() < total) throw new Error('cut off')
     } catch (e) { lastErr = e } finally { clearTimeout(timer) }
-    if (total && have() > total) { fs.rmSync(part, { force: true }); total = 0 } // nonsense: from the start again
+    if (total && have() > total) { log.warn?.(`[update] download ${name}: ${mb(have())} is more than the ${mb(total)} of the file — from the start again`); fs.rmSync(part, { force: true }); total = 0 } // nonsense: from the start again
+    if (lastErr) log.warn?.(`[update] download ${name}: ${lastErr.message} at ${mb(have())}${total ? ` of ${mb(total)}` : ''}${have() > before ? ' (goes on from here)' : ` (try ${failures + 1} of ${tries} with no progress)`}`)
     if (have() > before) failures = 0 // progress: the count starts again
     else if (lastErr) {
       if (lastErr.final) throw new Error(`download failed: ${lastErr.message}`)
@@ -186,9 +209,15 @@ export async function rangedDownload(open, dest, want, opts = {}) {
       await wait(Math.min(60_000, backoff * 2 ** (failures - 1)))
     } else if (++failures >= tries) throw new Error('download stopped: no data')
   }
+  say(true)
   const got = await sha256File(part)
-  if (got !== want) { fs.rmSync(part, { force: true }); throw new Error('The download does not match Adal\'s signed release (damaged or changed) — not installed') }
+  if (got !== want) {
+    log.error?.(`[update] download ${name}: ${mb(have())} downloaded but it does not match the signed SHA-256 — thrown away`)
+    fs.rmSync(part, { force: true })
+    throw new Error('The download does not match Adal\'s signed release (damaged or changed) — not installed')
+  }
   fs.renameSync(part, dest)
+  log.log?.(`[update] download ${name}: done, ${mb(fs.statSync(dest).size)} (checked)`)
   return dest
 }
 
@@ -196,5 +225,7 @@ export async function rangedDownload(open, dest, want, opts = {}) {
 export async function downloadRelease(manifest, dest, opts = {}) {
   const { cloudCall } = await cloud()
   const url = `/storage/v1/object/authenticated/${BUCKET}/${manifest.file}`
-  return rangedDownload((start, end, signal) => cloudCall(dbRef, 'GET', url, undefined, { raw: true, timeout: opts.timeout || 180_000, signal, headers: { Range: `bytes=${start}-${end}` } }), dest, manifest.sha256, { size: manifest.size, ...opts })
+  // No limit on the whole request here: rangedDownload's own timers end a piece that does not answer
+  // (`timeout`) or stops sending (`stall`). A whole-file answer on a slow line was cut at 180 s.
+  return rangedDownload((start, end, signal) => cloudCall(dbRef, 'GET', url, undefined, { raw: true, timeout: 6 * 3600_000, signal, headers: { Range: `bytes=${start}-${end}` } }), dest, manifest.sha256, { size: manifest.size, label: path.basename(manifest.file || dest), ...opts })
 }

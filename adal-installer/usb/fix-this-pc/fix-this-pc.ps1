@@ -97,25 +97,39 @@ foreach ($root in $roots) {
 Say "Freed: $freed leftover file(s) (half-downloads, old programs)."
 
 # --- 3. The newest release from this USB -------------------------------------------------------
+# Main (C:\AdalKeep) and a Companion's own server copy (C:\AdalKeepCompanion\server): the release's
+# own apply-release.mjs (Adal's signature + every piece's SHA-256). A Companion's programs
+# (adal-companion.exe, AdalKeep.exe, adal-agent.exe): fix-programs.mjs (the same checks).
 $installed = @()
 if (-not (Test-Path (Join-Path $Release 'current.json'))) {
   Say 'NOT UPDATED: this USB has no release (release\current.json is missing).'
 } else {
   foreach ($root in $roots) {
-    $mainBackend = Join-Path $root 'backend'
-    if (Test-Path (Join-Path $mainBackend 'server.js')) {
-      $node = Join-Path $root 'runtime\node.exe'
-      Say "Installing the release into $root ..."
-      $out = & $node (Join-Path $Release 'apply-release.mjs') $Release --root $root 2>&1 | ForEach-Object { "$_" }
+    foreach ($ir in @($root, (Join-Path $root 'server'))) {
+      if (-not (Test-Path (Join-Path $ir 'backend\server.js'))) { continue }
+      $node = Join-Path $ir 'runtime\node.exe'
+      if (-not (Test-Path $node)) { Say "  NOT INSTALLED in ${ir}: no $node"; continue }
+      Say "Installing the release into $ir ..."
+      $out = & $node (Join-Path $Release 'apply-release.mjs') $Release --root $ir 2>&1 | ForEach-Object { "$_" }
       $out | ForEach-Object { Say "  $_" }
-      if ($LASTEXITCODE -eq 0) { $installed += $root } else { Say "  NOT INSTALLED in $root (see above)" }
-    } elseif (Test-Path (Join-Path $root 'adal-companion.exe')) {
-      # A Companion without its own server: the pieces go into its update cache; it installs them
-      # itself at its next update look (it checks each piece against Adal's signed release).
-      $cache = Join-Path $root 'updates\files'
-      New-Item -ItemType Directory -Force $cache | Out-Null
-      Get-ChildItem (Join-Path $Release 'files') -File | ForEach-Object { Copy-Item $_.FullName (Join-Path $cache $_.Name) -Force }
-      Say "  The release's pieces are in $cache (the Companion installs them itself)."
+      if ($LASTEXITCODE -eq 0) { $installed += $ir } else { Say "  NOT INSTALLED in $ir (see above)" }
+    }
+    $isCompanionRoot = (Test-Path (Join-Path $root 'adal-companion.exe')) -and -not (Test-Path (Join-Path $root 'backend\server.js'))
+    if ($isCompanionRoot) {
+      $sb = Join-Path $root 'server\backend'
+      $node = Join-Path $root 'server\runtime\node.exe'
+      if ((Test-Path $node) -and (Test-Path (Join-Path $sb 'src\services\updateChannel.js'))) {
+        Say "Installing the Companion's programs in $root ..."
+        $out = & $node (Join-Path $Here 'fix-programs.mjs') $Release $root $sb 2>&1 | ForEach-Object { "$_" }
+        $out | ForEach-Object { Say "  $_" }
+        if ($LASTEXITCODE -eq 0) { $installed += $root }
+      } else {
+        # No Adal Keep here to check the signature with: the pieces go into its update cache.
+        $cache = Join-Path $root 'updates\files'
+        New-Item -ItemType Directory -Force $cache | Out-Null
+        Get-ChildItem (Join-Path $Release 'files') -File | ForEach-Object { Copy-Item $_.FullName (Join-Path $cache $_.Name) -Force }
+        Say "  No server copy in $root : the release's pieces are in $cache (the Companion installs them at its next update look)."
+      }
     }
   }
 }
@@ -147,7 +161,7 @@ foreach ($root in $roots) {
     if (Test-Path $f) { try { $v = (Get-Content $f -Raw | ConvertFrom-Json).sha } catch {} ; if ($v) { break } }
   }
   $short = if ($v) { $v.Substring(0, [Math]::Min(7, $v.Length)) } else { '?' }
-  Say ("  {0}: version {1}{2}" -f $root, $short, $(if ($installed -contains $root) { ' (installed now)' } else { '' }))
+  Say ("  {0}: version {1}{2}" -f $root, $short, $(if (($installed -contains $root) -or ($installed -contains (Join-Path $root 'server'))) { ' (installed now)' } else { '' }))
 }
 Say "  Robots stopped: $runsStopped run(s), $robotBrowsers robot browser(s)"
 Say ("  Adal Keep answers on this PC: {0}" -f $(if ($up) { 'yes' } else { 'not yet (it may still be starting)' }))

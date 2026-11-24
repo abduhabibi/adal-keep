@@ -18,7 +18,7 @@ unzip -q "$TMP/release.zip" -d "$OUT/release.new"
 GOT="$(node -e "console.log(require(process.argv[1]).manifest.sha)" "$OUT/release.new/current.json")"
 case "$GOT" in "$EXPECT"*) ;; *) rm -rf "$OUT/release.new"; echo "NOT PUT ON THE USB: the published release is ${GOT%"${GOT#???????}"}, not ${EXPECT:-(EXPECT not given)}"; exit 1;; esac
 rm -rf "$OUT/release"; mv "$OUT/release.new" "$OUT/release"
-cp "$HERE/Fix this PC.cmd" "$HERE/fix-this-pc.ps1" "$HERE/fix-runs.mjs" "$OUT/"
+cp "$HERE/Fix this PC.cmd" "$HERE/fix-this-pc.ps1" "$HERE/fix-runs.mjs" "$HERE/fix-programs.mjs" "$OUT/"
 node -e "const j=require(process.argv[1]); console.log('release on the USB:', j.manifest.short, j.manifest.published_at)" "$OUT/release/current.json" | tee "$OUT/release/VERSION.txt"
 sync
 rm -rf "$TMP"

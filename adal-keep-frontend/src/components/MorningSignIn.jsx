@@ -63,7 +63,9 @@ export default function MorningSignIn() {
     } catch (e) { toast.error(err(e)) }
     setTimeout(load, 8000)
   }
-  const lines = sites.filter(s => !s.standby)
+  // Only the sites this agency has an account for (and Wafid, no sign-in).
+  const shown = sites.filter(s => s.standby || !s.noAccount)
+  const lines = shown.filter(s => !s.standby)
   const inCount = lines.filter(s => s.signedIn).length
   const allIn = lines.length > 0 && inCount === lines.length
   const until = (iso) => { try { const d = new Date(iso); return `${d.toDateString() === new Date().toDateString() ? '' : 'tomorrow '}${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` } catch { return '' } }
@@ -76,6 +78,7 @@ export default function MorningSignIn() {
     </div>
   )
   const state = (s, a) => a.signedIn ? null
+    : a.state === 'blocked' ? a.why
     : a.state === 'waiting' ? `Filled in — ${s.ask}`
     : a.state === 'ready' ? `Its page is open — ${s.ask}`
     : a.state === 'queued' ? 'Opening in turn (one site after another)…'
@@ -87,7 +90,7 @@ export default function MorningSignIn() {
         <p className="text-xs text-slate-500">Adal Keep fills each name and password — you only do the tick, picture or code. Then they stay signed in all day.</p>
       </div>
       <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(16rem,1fr))]">
-        {sites.map(s => (
+        {shown.map(s => (
           <div key={s.key} className={`rounded-xl border px-3 py-2 ${s.signedIn ? 'border-emerald-200 bg-emerald-50/60 dark:border-emerald-800 dark:bg-emerald-900/10' : 'border-amber-300 dark:border-amber-700'}`}>
             <div className="flex items-center gap-2">
               <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${s.signedIn ? 'bg-emerald-500' : 'bg-amber-500'}`} />
@@ -97,7 +100,6 @@ export default function MorningSignIn() {
             {s.shared && s.holder?.by && (
               <p className="pl-[1.125rem] text-[11px] text-slate-500">{s.holder.state === 'signing-in' && !s.signedIn ? 'signing in: ' : s.signedIn ? 'signed in by ' : 'last: '}{s.holder.by} · {when(s.holder.at)}</p>
             )}
-            {s.noAccount && !s.standby && <p className="pl-[1.125rem] text-xs text-slate-500">No account saved — add it under AI Actions first.</p>}
             <div className="mt-1 space-y-1.5 pl-[1.125rem]">
               {(s.accounts || []).map(a => (
                 <div key={a.id} className="flex items-start gap-1.5 text-xs">
@@ -105,9 +107,9 @@ export default function MorningSignIn() {
                     {(s.accounts.length > 1 || a.name) && <span className="block truncate font-medium">{a.name}</span>}
                     {a.signedIn
                       ? <span className="block text-emerald-700 dark:text-emerald-300">✓ Signed in{a.until ? ` · kept until about ${until(a.until)}` : ''}</span>
-                      : <span className="block text-slate-600 dark:text-slate-300">{state(s, a)}</span>}
+                      : <span className={`block ${a.state === 'blocked' ? 'text-red-700 dark:text-red-300' : 'text-slate-600 dark:text-slate-300'}`}>{state(s, a)}</span>}
                   </span>
-                  {!a.signedIn && a.state !== 'queued' && (
+                  {!a.signedIn && a.state !== 'queued' && a.state !== 'blocked' && (
                     <button type="button" onClick={() => s.shared ? start(s) : open(s, a.main ? null : a.id)}
                       className="shrink-0 rounded-md bg-teal-600 px-2.5 py-1 font-semibold text-white hover:bg-teal-700">
                       {a.state === 'waiting' || a.state === 'ready' ? 'Open' : 'Sign in'}

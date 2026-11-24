@@ -390,6 +390,11 @@ async function insuranceMorning() {
   await openSite('insurance', db)
 }
 
+const BLOCKED_TITLE = /attention required|access denied|you have been blocked/i
+const BLOCKED_WHY = {
+  tasheer: "Tasheer's security (Cloudflare) blocks this PC's robot browser: \"Sorry, you have been blocked\" — there is nothing to tick. Sign in to Tasheer from another PC or another internet line; the robots there use it.",
+  any: 'The site blocks this PC\'s robot browser — there is nothing to tick. Try from another PC or another internet line.',
+}
 export const ACCOUNT_TABLES = { musaned: 'musaned_accounts', lmis: 'lmis_accounts', mofa: 'visa_accounts', insurance: 'insurance_accounts', tasheer: 'tasheer_accounts' }
 // One sign-in for the whole site whatever the accounts (Tasheer: the agency's one; insurance: its robot's).
 const ONE_SIGN_IN = new Set(['tasheer', 'insurance'])
@@ -425,13 +430,20 @@ export async function sessionsNow() {
   const out = []
   for (const s of SITES) {
     const k = kept[s.key] || { tabs: 0, signedIn: false, spaces: {} }
-    const accounts = (await accountsOf(s.key)).map(a => {
+    const accounts = []
+    for (const a of await accountsOf(s.key)) {
       const signedIn = !!(k.spaces || {})[a.space] || (ONE_SIGN_IN.has(s.key) && !!k.signedIn)
       const t = live.get(a.live) || (s.key === 'tasheer' ? tasheerTab : null)
       const since = signedSince.get(`${s.key}|${a.space}`) || null
-      const state = signedIn ? 'signed-in' : t && !t.isClosed?.() ? (t.__adalSigning ? 'waiting' : 'ready') : preparing && !prepDone.has(a.live) ? 'queued' : 'not-open'
-      return { ...a, signedIn, state, since: since ? new Date(since).toISOString() : null, until: since ? new Date(since + COOKIES_KEPT_MS).toISOString() : null }
-    })
+      let state = signedIn ? 'signed-in' : t && !t.isClosed?.() ? (t.__adalSigning ? 'waiting' : 'ready') : preparing && !prepDone.has(a.live) ? 'queued' : 'not-open'
+      // A site that shuts this PC's robot browser out (Tasheer's Cloudflare): said plainly, no Open to a dead page.
+      let why = ''
+      if (!signedIn && t && !t.isClosed?.()) {
+        const title = await Promise.race([t.title().catch(() => ''), new Promise(r => setTimeout(() => r(''), 2000))])
+        if (BLOCKED_TITLE.test(title)) { state = 'blocked'; why = BLOCKED_WHY[s.key] || BLOCKED_WHY.any }
+      }
+      accounts.push({ ...a, signedIn, state, why, since: since ? new Date(since).toISOString() : null, until: since ? new Date(since + COOKIES_KEPT_MS).toISOString() : null })
+    }
     const { spaces, ...rest } = k
     out.push({ key: s.key, name: s.name, ...rest, ask: ASK[s.key] || '', accounts, noAccount: !accounts.length,
       signedIn: accounts.length ? accounts.every(a => a.signedIn) : !!k.signedIn, ...(s.key === 'tasheer' ? { holder, shared: true } : {}) })

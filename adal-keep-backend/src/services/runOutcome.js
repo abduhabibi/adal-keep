@@ -14,9 +14,6 @@ const REASONS = [
   [/this PC's internet was down/i, () => "this PC's internet was down"],
   [/Could not reach|net::ERR|ERR_[A-Z_]+|Navigation timeout|timed? ?out|Could not determine login state/i, () => 'the site was not available'],
   [/Worker card not found/i, () => 'she was not found on the site'],
-  // A slow Musaned is not a changed one (2026-11-24: its agency list and its form kept spinning).
-  [/list of agencies kept loading/i, () => "Musaned's list of agencies kept loading: nothing was filled — try again when Musaned answers"],
-  [/did not open the Add Candidate form/i, () => 'Musaned did not open the Add Candidate form (its page kept loading): nothing was filled — try again when Musaned answers'],
   [/(\S.*) not found/i, (m) => `the site changed: ${m[1]} was not there`],
   [/detached|Target closed|Session closed|context was destroyed|Protocol error|Cannot read properties/i, () => 'the page changed while it was working'],
 ]

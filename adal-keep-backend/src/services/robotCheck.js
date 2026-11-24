@@ -50,10 +50,6 @@ export async function waitForTick(page, { onForm, submit, refill = null, isCance
   let pressed = false
   while (Date.now() < deadline) {
     if (isCancelled?.()) { const e = new Error('Cancelled by user'); e.cancelled = true; throw e }
-    // Its tab or its browser is gone (closed, crashed): nothing to wait for (the run goes back in line).
-    let gone = false
-    try { gone = page.isClosed?.() || page.browser?.()?.connected === false } catch { gone = true }
-    if (gone) { log('the tab is gone (its browser closed) — not waiting for the tick'); return 'timeout' }
     if (!(await onForm().catch(() => true))) return pressed ? 'submitted' : 'left'
     const rc = await robotCheck(page)
     if (rc.ticked) {
@@ -89,14 +85,10 @@ export async function labelTab(page, label) {
   const put = (l) => {
     window.__adalLabel = l
     if (window !== window.top) return
-    // Compared as the browser gives the title back (spaces collapsed, trimmed): on a page with no title,
-    // "[nuzla] " came back as "[nuzla]", was set again, woke the observer, … for ever — the tab's page froze
-    // at 100 % of a core and every robot call to it timed out (2026-11-23, this PC).
-    const norm = (x) => String(x || '').replace(/\s+/g, ' ').trim()
     const mark = () => {
       const t = document.title || ''
-      const want = norm(`[${window.__adalLabel}] ` + t.replace(/^\[[^\]]*\]\s*/, ''))
-      if (norm(t) !== want) document.title = want
+      const want = `[${window.__adalLabel}] ` + t.replace(/^\[[^\]]*\]\s*/, '')
+      if (t !== want) document.title = want
     }
     const go = () => {
       mark()

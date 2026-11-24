@@ -12,7 +12,7 @@ import MusanedAccountPicker from './MusanedAccountPicker'
 import { usePlan, lockedFor, planName, wantFeature } from '../lib/plan'
 import { phoneCloud } from '../lib/phoneMode'
 import { shows } from '../lib/stageActions'
-import { markDone as markStepDone, untick, markUndone, DONE_LABEL, WF_STEP } from '../lib/markDone'
+import { markDone as markStepDone, untick, DONE_LABEL } from '../lib/markDone'
 import { useCan } from '../lib/staffPerms'
 
 // What a paused run is waiting for, in words.
@@ -329,20 +329,6 @@ export default function ProfileAutomations({ profileId, phase = null, after }) {
     } finally { setTicking(t => { const n = { ...t }; delete n[w.id]; return n }) }
   }
 
-  // "↩ Back to this step" (asked on 2026-11-24: "I don't know how to get her back"): a tick by hand is
-  // taken back; a step a robot did moves her back to that stage (later steps open again, nothing
-  // deleted, her notes say who). Both with the 5 s Undo.
-  const goBack = async (w, byHand) => {
-    if (ticking[w.id]) return
-    setTicking(t => ({ ...t, [w.id]: true }))
-    try {
-      if (byHand) await untick({ profileId, workflowId: w.id, label: w.name })
-      else await markUndone({ profileId, step: WF_STEP[w.id], label: w.name })
-      await load({ quiet: true })
-      window.dispatchEvent(new Event('adal-profile-changed'))
-    } finally { setTicking(t => { const n = { ...t }; delete n[w.id]; return n }) }
-  }
-
   const resume = () => act('resume', 'Continued')
   const pause = () => act('pause', 'Paused')
   // "✔️ … saved": the shared "mark as done" (she moves to the next stage, 5 s Undo).
@@ -444,13 +430,6 @@ export default function ProfileAutomations({ profileId, phase = null, after }) {
                 <input type="checkbox" aria-label="Done by hand" className="h-3.5 w-3.5 accent-emerald-600" checked={isDone} disabled={isRunning || !!ticking[w.id]}
                   onChange={() => markDone(w, !isDone)} />
               </label>
-            )}
-            {isDone && !isActive && (byHand || WF_STEP[w.id]) && (
-              <button type="button" disabled={!!ticking[w.id]} onClick={() => goBack(w, byHand)}
-                title="Not done after all: she goes back to this step. Later steps open again, nothing is deleted, and you can Undo for 5 seconds."
-                className="self-start rounded-lg border border-slate-300 px-2 py-0.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800">
-                ↩ Back to this step
-              </button>
             )}
             </div>
           )
@@ -651,27 +630,6 @@ export default function ProfileAutomations({ profileId, phase = null, after }) {
           })}
         </div>
         <p className="mt-1.5 text-[10px] text-slate-500">Drag a step to change the order — every girl follows it. Done steps fold away.</p>
-        {(() => {
-          // Each done step: "↩ Back to …" right here, not behind the fold.
-          const backs = ordered.filter(boxDone).map(g => {
-            const w = workflows.find(x => x.id === DONE_BY[g.title])
-            const byHand = w?.latest?.pause_reason === 'Done by hand'
-            return w && (byHand || WF_STEP[w.id]) ? { g, w, byHand } : null
-          }).filter(Boolean)
-          if (!backs.length) return null
-          return (
-            <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-teal-200/70 pt-2 dark:border-teal-800/70">
-              <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">Move her back:</span>
-              {backs.map(({ g, w, byHand }) => (
-                <button key={g.title} type="button" disabled={!!ticking[w.id]} onClick={() => goBack(w, byHand)}
-                  title="Not done after all: she goes back to this step. Later steps open again, nothing is deleted, and you can Undo for 5 seconds."
-                  className="rounded-full border border-slate-300 bg-white px-2.5 py-0.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800">
-                  ↩ Back to {BOX_SHORT[g.title] || g.title}
-                </button>
-              ))}
-            </div>
-          )
-        })()}
       </div>
 
       {done.length > 0 && fold(showDone, setShowDone, `${done.length} done: ${done.map(g => BOX_SHORT[g.title] || g.title).join(' · ')}`)}

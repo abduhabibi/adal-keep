@@ -134,7 +134,7 @@ export async function cvData(profile, template, overrides = {}, imgs = {}, broke
     (prev0.years ? `${prev0.years} year${Number(prev0.years) === 1 ? '' : 's'}` : '')
 
   if (!merged.phone_number && brokerPhone) merged.phone_number = brokerPhone
-  if (!merged.living_town) merged.living_town = merged.place_of_birth || merged.zone_subcity || merged.region || ''  // her place of birth first
+  if (!merged.living_town) merged.living_town = merged.zone_subcity || merged.region || merged.place_of_birth || ''
   Object.assign(merged, await withBodySize(merged))
 
   const skillLabels = { cleaning: 'cleaning', ironing: 'ironing', washing: 'washing', baby_sitting: 'baby sitting', cooking: (cookingLevel || 'cooking').toLowerCase() }

@@ -1,5 +1,5 @@
 import GlassSelect from '../components/shared/GlassSelect'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { cachedGet } from '../lib/deviceCache'
 import { profilesList } from '../lib/profilesCache'
 import { useNavigate } from 'react-router-dom'
@@ -179,22 +179,6 @@ export default function EmployeesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // "Sign in as <name>" from a "Signed out" message (lib/toastOnce.js): /employees?signin=<id>&back=<page>
-  // signs her in at once (her password asked only when she has one), then goes back to that page.
-  const signinBack = useRef(null)
-  useEffect(() => {
-    const q = new URLSearchParams(window.location.search)
-    const id = Number(q.get('signin'))
-    if (!id || phone || !employees.length) return
-    const emp = employees.find(e => e.id === id)
-    window.history.replaceState(null, '', '/employees')
-    if (!emp) return
-    const back = q.get('back')
-    signinBack.current = back && back.startsWith('/') && !back.startsWith('//') ? back : null
-    openGate(emp)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [employees])
-
   /** One click — bind this PC, no password */
   const openGate = async (emp, password) => {
     if (phone) return toast('On the phone you work as the person signed in on the PC', { icon: 'ℹ️' })
@@ -212,7 +196,6 @@ export default function EmployeesPage() {
       setActiveEmployee(u)
       setActive(u)
       toast.success(`እንኳን ደህና መጡ፣ ${emp.name}`)
-      if (signinBack.current) { const b = signinBack.current; signinBack.current = null; return navigate(b) }
       loadWorkspace(u)
     } catch (err) {
       // Signing in asks for her password (the one the admin gave her).

@@ -323,11 +323,6 @@ export default function CVNewPage() {
     try {
       const body = cvBody(tid)
       const html = await previewOf(body)
-      // Never a white page: an empty answer says so (and is not kept for the next look).
-      if (!String(html || '').trim() || !/<(body|div|table|img|p)\b/i.test(String(html))) {
-        previews.current.delete(JSON.stringify(body))
-        throw new Error('The PC sent back an empty CV preview. Press Preview again; if it stays empty, open Settings → Health.')
-      }
       setPreviewHtml(html)
       setPreviewTemplateId(String(tid))
       setTemplateId(String(tid))

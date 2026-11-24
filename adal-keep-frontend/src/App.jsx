@@ -28,7 +28,6 @@ const TasksPage = lazy(() => fresh(() => import('./pages/TasksPage')))
 const LockScreen = lazy(() => fresh(() => import('./components/LockScreen')))
 import PcAccessGate, { SuspendedScreen } from './components/PcAccessGate'
 import api, { joinInfo } from './services/api'
-import { reloadOnce } from './lib/reloadGuard'
 const IntroWizard = lazy(() => fresh(() => import('./pages/SignUpAgency')))   // first-run sign-up (flag), then the first-start wizard
 const SignupBanner = lazy(() => fresh(() => import('./pages/SignUpAgency').then(m => ({ default: m.SignupBanner }))))
 const JoinAgency = lazy(() => fresh(() => import('./pages/JoinAgency')))
@@ -46,14 +45,13 @@ if (typeof window !== 'undefined' && import.meta.env.VITE_DEMO !== '1') {
   window.addEventListener('load', () => setTimeout(warm, 2500), { once: true })
 }
 
-// After an update the old page files are gone: a page that cannot load reloads
-// Adal Keep once (then the new files are used). Never again within a minute: the
-// "once" was forgotten as soon as any other page loaded (and every page is warmed
-// right after the start), so a page whose file stayed missing reloaded forever,
-// blank in between. Now the page's catcher shows the error with a Reload button.
+// After an update the old page files are gone: a page that cannot load
+// reloads Adal Keep once (then the new files are used).
 function fresh(load) {
-  return load().catch((e) => {
-    if (reloadOnce(`a page's file did not load: ${e?.message || e}`)) return new Promise(() => {})
+  return load().then((m) => { try { sessionStorage.removeItem('adal-reloaded') } catch {} return m }).catch((e) => {
+    let again = false
+    try { again = !sessionStorage.getItem('adal-reloaded'); sessionStorage.setItem('adal-reloaded', '1') } catch {}
+    if (again) { location.reload(); return new Promise(() => {}) }
     throw e
   })
 }

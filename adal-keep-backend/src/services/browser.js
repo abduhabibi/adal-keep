@@ -57,7 +57,6 @@ let _connecting = null
  * Linux / macOS (developers' PCs): the Chromium that is there.
  */
 export function findBrowserExecutable() {
-  if (!ADAL_MODE) return systemBrowser()
   if (process.platform === 'win32') {
     try { return fs.existsSync(OWN_BROWSER) ? OWN_BROWSER : null } catch { return null }
   }
@@ -89,54 +88,9 @@ export function findBrowserExecutable() {
 // browser wrote, and Brave's may be newer.
 // (A Companion standing in for the main PC: its own Adal Browser, ADAL_BROWSER_EXE.)
 const OWN_BROWSER = process.env.ADAL_BROWSER_EXE || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'browser', 'AdalBrowser.exe')
-
-/*
- * Which browser the robots use (the owner, 2026-11-23: "get that specific browser stuff [from before Adal
- * Browser] and put it back here and just make the robots work"):
- *   system (default) — as before f7eb45e (2026-11-04): the PC's own Brave, else Chrome, else Edge (Windows
- *     always has Edge), started by Adal Keep on port 9222 with its own profile and driven over CDP; a run's
- *     tab is a plain new tab. Out of sight: headless on Linux, off-screen on Windows. Adal Browser only when
- *     the PC has none of them.
- *   adal (ADAL_ROBOT_BROWSER=adal) — Adal Browser (<install>\browser\AdalBrowser.exe) only, its agents' window.
- */
-export const ADAL_MODE = process.env.ADAL_ROBOT_BROWSER === 'adal'
-export const robotBrowserMode = () => (ADAL_MODE ? 'adal' : 'system')
-export function systemBrowser(exists = fs.existsSync, platform = process.platform) {
-  const c = []
-  if (platform === 'win32') {
-    const pf = process.env['ProgramFiles'] || 'C:\\Program Files'
-    const pf86 = process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)'
-    const la = process.env['LOCALAPPDATA'] || path.join(process.env.USERPROFILE || 'C:\\Users\\Public', 'AppData', 'Local')
-    c.push(
-      path.join(pf, 'BraveSoftware', 'Brave-Browser', 'Application', 'brave.exe'),
-      path.join(pf86, 'BraveSoftware', 'Brave-Browser', 'Application', 'brave.exe'),
-      path.join(la, 'BraveSoftware', 'Brave-Browser', 'Application', 'brave.exe'),
-      path.join(pf, 'Google', 'Chrome', 'Application', 'chrome.exe'),
-      path.join(pf86, 'Google', 'Chrome', 'Application', 'chrome.exe'),
-      path.join(la, 'Google', 'Chrome', 'Application', 'chrome.exe'),
-      path.join(pf, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
-      path.join(pf86, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
-    )
-  } else if (platform === 'darwin') {
-    c.push('/Applications/Brave Browser.app/Contents/MacOS/Brave Browser', '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge')
-  } else {
-    c.push('/usr/bin/brave-browser', '/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser', '/snap/bin/chromium')
-  }
-  c.push(OWN_BROWSER)   // none of them: Adal Browser after all
-  for (const x of c) { try { if (exists(x)) return x } catch {} }
-  return null
-}
-export const ownBrowserPath = () => OWN_BROWSER
-/** The profile folder for that browser: Brave keeps the old one; another browser its own (a profile a newer browser wrote is refused). */
-export function profileFor(exe, mode = robotBrowserMode()) {
-  const name = String(exe || '').toLowerCase()
-  if (mode === 'adal' ? (process.platform === 'win32' || fs.existsSync(OWN_BROWSER)) : name === String(OWN_BROWSER).toLowerCase()) return 'adal-browser'
-  if (/msedge/.test(name)) return 'browser-profile-edge'
-  if (/chrome|chromium/.test(name) && !/brave/.test(name)) return 'browser-profile-chrome'
-  return 'browser-profile'
-}
+// (Windows: always Adal Browser's profile — no other browser is used there.)
 export const PROFILE_DIR = process.env.ADAL_BROWSER_PROFILE ||
-  path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'data', profileFor(findBrowserExecutable()))
+  path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'data', process.platform === 'win32' || fs.existsSync(OWN_BROWSER) ? 'adal-browser' : 'browser-profile')
 // Out of sight needs today's AdalKeep.exe: an older one opens Adal Keep's page
 // inside this browser, and that page must stay on the screen.
 const HIDDEN = process.platform !== 'win32' || process.env.ADAL_HIDDEN_AGENTS === '1'
@@ -197,30 +151,6 @@ const BROWSER_ARGS = [
   // No crash reports gathered or sent.
   '--disable-breakpad',
 ]
-
-/**
- * System mode on a PC that used Adal Browser: its sign-ins (Musaned, LMIS … cookies) come along once, so
- * nobody signs in again. Adal Browser's profile is copied (caches left out) to this browser's profile
- * when that has no newer sign-ins of its own; Adal Browser's own stays as it was (ADAL_ROBOT_BROWSER=adal
- * goes back to it). An older profile of the same name is kept beside it. Never while the browser runs.
- */
-export function carryOverSignIns({ from = path.join(path.dirname(PROFILE_DIR), 'adal-browser'), to = PROFILE_DIR, mode = robotBrowserMode(), now = Date.now() } = {}) {
-  if (mode === 'adal' || path.resolve(from) === path.resolve(to) || process.env.ADAL_BROWSER_PROFILE) return false
-  const cookies = (dir) => {
-    let t = 0
-    for (const f of [['Default', 'Network', 'Cookies'], ['Default', 'Cookies']]) { try { t = Math.max(t, fs.statSync(path.join(dir, ...f)).mtimeMs) } catch {} }
-    return t
-  }
-  const theirs = cookies(from)
-  if (!theirs || cookies(to) >= theirs) return false
-  try {
-    if (fs.existsSync(to)) fs.renameSync(to, `${to}.before-${new Date(now).toISOString().slice(0, 10)}-${now % 100000}`)
-    const SKIP = /^(Cache|Code Cache|GPUCache|GrShaderCache|ShaderCache|DawnCache|DawnGraphiteCache|DawnWebGPUCache|Service Worker|CacheStorage|Crashpad|Safe Browsing|component_crx_cache|optimization_guide_model_store|BrowserMetrics|Singleton.*|lockfile|LOCK)$/i
-    fs.cpSync(from, to, { recursive: true, filter: (src) => !SKIP.test(path.basename(src)) })
-    console.log(`[browser] the sign-ins of Adal Browser carried over to ${path.basename(to)} (nobody signs in again)`)
-    return true
-  } catch (e) { console.warn('[browser] sign-ins not carried over:', e.message); return false }
-}
 
 async function connectTo(puppeteer, url) {
   const b = await puppeteer.connect({ browserURL: url, defaultViewport: null })
@@ -287,8 +217,6 @@ export function whoseBrowser(cmd, own = OWN_BROWSER, dataDir = path.dirname(PROF
 const _checked = new Set()
 const endpointOf = (b) => { try { return b.wsEndpoint() } catch { return '' } }
 async function onlyOurs(b, { closeOld = false } = {}) {
-  // The PC's own browser is the robots' browser (system mode): no look at who holds the port (7 s on Main).
-  if (!ADAL_MODE) return b
   if (process.platform !== 'win32' || process.env.BRAVE_CDP_URL || _checked.has(endpointOf(b))) return b
   const who = whoseBrowser(await portOwner())
   if (who === 'ours' || who === 'unknown') { _checked.add(endpointOf(b)); return b }
@@ -333,12 +261,11 @@ export async function getBrowser(fresh = false) {
   if (process.env.ADAL_NO_BROWSER_START === '1') throw new Error('No browser (not started in tests)')
   const exec = findBrowserExecutable()
   if (!exec) {
-    throw new Error(ADAL_MODE
-      ? 'Adal Browser is not on this PC yet: it is getting ready, try again in a minute.'
-      : 'No browser for the robots on this PC: install Brave, Chrome or Edge (Windows has Edge), then press the button again.')
+    throw new Error(
+      'Adal Browser is not on this PC yet: it is getting ready, try again in a minute.'
+    )
   }
 
-  carryOverSignIns()
   fs.mkdirSync(PROFILE_DIR, { recursive: true })
   freshStart()
   // No page of its own: with Brave already open on this profile (without the
@@ -357,8 +284,6 @@ export async function getBrowser(fresh = false) {
       // Just started: Brave restores its last tabs and replaces its first
       // blank one — a run's tab opened in that moment is closed under it.
       await new Promise(r => setTimeout(r, 3000))
-      // The day's sign-ins back (sessionKeeper): no new sign-in, no captcha after a restart.
-      await (await import('./sessionKeeper.js')).restoreSessionCookies(_browser).catch(e => console.warn('[browser] sign-ins not restored:', e.message))
       await tuckAway().catch(() => {})
       return _browser
     } catch (e) { lastErr = e }
@@ -470,14 +395,6 @@ export async function newRunTab(browser, space = null, { quiet = false } = {}) {
     return page
   }
   if (!browser.target) return browser.newPage()
-  // System mode (as before Adal Browser): a plain new tab — headless on Linux; on a PC with windows
-  // its own window out of sight (a plain tab would go to whichever window was used last, maybe a person's).
-  if (!ADAL_MODE) {
-    if (noWindows() || !HIDDEN) return quiet ? keepBehind(await browser.newPage()) : browser.newPage()
-    const page = await newWindow(browser, OFF, true)
-    await hide(page).catch(() => {})
-    return keepBehind(page)
-  }
   // Work for another PC (services/sharePower.js): in the agents' window out of
   // sight on that PC, and it never comes to the front there.
   if (quiet) {
@@ -594,48 +511,6 @@ export async function openForPerson(space = null) {
   }
   await page.bringToFront()
   return page
-}
-
-/*
- * A person's step on Windows (the owner, 2026-11-24: "yes build it"): while a run waits for a person (a captcha,
- * a code, a tick), the robot's own window comes on the screen, in front, with the run's tab; when the step is
- * over, or after 10 minutes, it goes back out of sight. Only where windows are out of sight (Windows with hidden
- * agents): on Linux there is no window at all (headless) and the live view is the way in.
- */
-export const PERSON_SHOW_MS = 10 * 60e3
-export const showsWindowHere = ({ platform = process.platform, hidden = HIDDEN, windowless = noWindows() } = {}) => platform === 'win32' && hidden && !windowless
-export async function showForPerson(page, { force = false, ms = PERSON_SHOW_MS, appOpen = null } = {}) {
-  if (!page || page.isClosed?.() || !(force || showsWindowHere())) return false
-  // Only while Adal Keep's own window is open on this PC (the owner, 2026-11-24): with it
-  // closed, the person step only notifies — nothing comes on the screen by itself.
-  if (!force) {
-    const open = appOpen ?? (await import('./appLife.js')).windowsOpen()
-    if (!open) return false
-  }
-  try {
-    const w = await windowOf(page)
-    await w.cdp.send('Browser.setWindowBounds', { windowId: w.windowId, bounds: { windowState: 'normal' } })
-    await w.cdp.send('Browser.setWindowBounds', { windowId: w.windowId, bounds: { left: 40, top: 20, width: 1366, height: 900 } })
-    await w.cdp.send('Browser.setWindowBounds', { windowId: w.windowId, bounds: { windowState: 'maximized' } }).catch(() => {})
-    // (setupTab turned page.bringToFront into nothing for runs: this one is a person's.)
-    await w.cdp.send('Page.bringToFront').catch(() => {})
-    clearTimeout(page.__adalShowTimer)
-    page.__adalShown = Date.now()
-    page.__adalShowTimer = setTimeout(() => hideFromPerson(page).catch(() => {}), ms)
-    page.__adalShowTimer.unref?.()
-    console.log('[browser] a person step: the robot window is on the screen')
-    return true
-  } catch (e) { console.warn('[browser] the robot window could not come on the screen:', e.message); return false }
-}
-/** The person's step is over: the window goes back out of sight (only one this brought on the screen). */
-export async function hideFromPerson(page) {
-  if (!page?.__adalShown) return false
-  clearTimeout(page.__adalShowTimer)
-  page.__adalShown = 0
-  if (page.isClosed?.()) return false
-  await place(await windowOf(page), OFF).catch(() => {})
-  console.log('[browser] the person step is over: the robot window is out of sight again')
-  return true
 }
 
 /** A window a person is done with goes out of sight; its tab keeps working. */

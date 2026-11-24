@@ -24,19 +24,6 @@ const BOOK_URL = 'https://wafid.com/en/book-appointment/'
 const STATUS_URL = 'https://wafid.com/en/medical-status-search/'
 const SLIP_URL = 'https://wafid.com/en/search-slip/'
 
-/**
- * Its page: at once when the tab is on it already, loaded in the last 30 minutes and nothing typed in it
- * (Wafid on standby, sessionKeeper.wafidStandby), else loaded.
- */
-export async function toPage(page, url, { now = Date.now() } = {}) {
-  const fresh = page.url() === url && now - (page.__adalStandbyAt || 0) < 30 * 60e3
-    && await page.evaluate(() => document.readyState !== 'loading' && ![...document.querySelectorAll('input, textarea')].some(e => !['hidden', 'checkbox', 'radio', 'file', 'submit', 'button'].includes(e.type) && e.value && e.value !== e.defaultValue)).catch(() => false)
-  if (fresh) return 'ready'
-  await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 })
-  page.__adalStandbyAt = Date.now()
-  return 'loaded'
-}
-
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 
 function log(ctx, msg, level = 'info') {
@@ -133,7 +120,7 @@ export async function runWafidBooking(page, ctx) {
   }
 
   log(ctx, `🩺 Wafid booking for ${ctx.profileName} — opening the booking page`)
-  await toPage(page, BOOK_URL)
+  await page.goto(BOOK_URL, { waitUntil: 'domcontentloaded', timeout: 60000 })
   await page.waitForSelector('#id_country', { timeout: 30000 })
   await page.waitForFunction(() => !!window.jQuery && !!window.jQuery.fn.calendar, { timeout: 30000 }).catch(() => {})
   await sleep(800)
@@ -258,7 +245,7 @@ export async function runWafidBooking(page, ctx) {
  * Returns { state: 'fit'|'unfit'|'pending'|'none'|'challenge'|'unknown', text }.
  */
 export async function checkMedicalStatus(page, passport, nationality = 'Ethiopian') {
-  await toPage(page, STATUS_URL)
+  await page.goto(STATUS_URL, { waitUntil: 'domcontentloaded', timeout: 60000 })
   await page.waitForSelector('#id_passport', { timeout: 30000 })
   // The page asks Google for its invisible token on load; give it a moment.
   await page.waitForFunction(() => !!document.querySelector('#id_captcha')?.value, { timeout: 15000, polling: 300 }).catch(() => {})
@@ -467,7 +454,7 @@ export async function runWafidSlip(page, ctx) {
   log(ctx, `🧾 Wafid appointment slip for passport ${passport}`)
 
   const search = async () => {
-    await toPage(page, SLIP_URL)
+    await page.goto(SLIP_URL, { waitUntil: 'domcontentloaded', timeout: 60000 })
     await page.waitForSelector('#id_passport', { timeout: 30000 })
     await page.waitForFunction(() => !!document.querySelector('#id_captcha')?.value, { timeout: 15000, polling: 300 }).catch(() => {})
     const filled = await page.evaluate((passport) => {

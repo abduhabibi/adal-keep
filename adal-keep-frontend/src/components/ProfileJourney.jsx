@@ -270,7 +270,7 @@ function StepCard({ s, profileId, onDone }) {
         <button type="button" title="Not done after all: she goes back to this step; later steps open again, nothing is deleted"
           onClick={async () => { await markUndone({ profileId, step: s.key, label: s.title }); onDone?.() }}
           className="mt-1.5 rounded-lg border border-slate-300 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800">
-          ↩ Back to this step
+          ↩ Uncheck
         </button>
       )}
       {can && (
@@ -299,37 +299,6 @@ export function statusLine(steps) {
   if (last === steps.length - 1) return { step: steps[last], text: steps[last].note || 'done' }
   const next = steps.slice(last + 1).find(x => x.state === 'todo') || steps[last + 1]
   return { step: { ...next, state: 'todo' }, text: last >= 0 ? `next · ${steps[last].title} done` : 'next' }
-}
-
-/**
- * "↩ Move back…" (asked on 2026-11-24: "I don't know how to get her back to the previous
- * stages"): every step she has done, newest first — "↩ Back to Insurance" puts her back
- * there. Later steps open again, nothing is deleted, her notes say who, 5 s Undo.
- */
-function MoveBack({ profileId, steps }) {
-  const [open, setOpen] = useState(false)
-  const done = steps.filter(s => doneLike(s) && STEP_UNDONE.includes(s.key)).reverse()
-  if (!profileId || !done.length) return null
-  return (
-    <div className="relative ml-10 mt-1 inline-block">
-      <button type="button" onClick={() => setOpen(o => !o)} aria-expanded={open}
-        className="rounded-lg border border-slate-300 px-2 py-0.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800">
-        ↩ Move back… {open ? '▴' : '▾'}
-      </button>
-      {open && (
-        <div role="menu" className="absolute left-0 z-30 mt-1 w-72 rounded-xl border border-slate-200 bg-white p-1 shadow-lg dark:border-slate-700 dark:bg-slate-900">
-          <p className="px-2 py-1 text-[11px] text-slate-500">Move her back to a step she already did. The later steps open again, nothing is deleted, and you can Undo for 5 seconds.</p>
-          {done.map(s => (
-            <button key={s.key} type="button" role="menuitem"
-              onClick={async () => { setOpen(false); await markUndone({ profileId, step: s.key, label: s.title }); window.dispatchEvent(new Event('adal-profile-changed')) }}
-              className="block w-full rounded-lg px-2 py-1.5 text-left text-sm font-medium text-slate-800 hover:bg-slate-50 dark:text-slate-100 dark:hover:bg-slate-800">
-              ↩ Back to {s.title}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  )
 }
 
 export default function ProfileJourney({ profileId }) {
@@ -366,10 +335,9 @@ export default function ProfileJourney({ profileId }) {
         <button type="button" title="Not on Musaned after all: she goes back to this step; nothing is deleted"
           onClick={() => markUndone({ profileId, step: 'musaned', label: now.step.title })}
           className="ml-10 mt-1 rounded-lg border border-slate-300 px-2 py-0.5 text-[11px] font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800">
-          ↩ Back to this step
+          ↩ Uncheck
         </button>
       )}
-      <MoveBack profileId={profileId} steps={all} />
       {STEP_DONE_LABEL[now.step.key] && !doneLike(now.step) && now.step.state !== 'soon' && (
         <button type="button" onClick={() => markDone({ profileId, step: now.step.key, label: STEP_DONE_LABEL[now.step.key] })}
           className="ml-10 mt-1 rounded-lg border border-emerald-300 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-50 dark:border-emerald-700 dark:text-emerald-300 dark:hover:bg-emerald-900/20">

@@ -438,7 +438,6 @@ export async function applyMusanedFiles(ctx, got) {
       if (cols.has(k) && v && !upd[k] && !String(now[k] ?? '').trim()) upd[k] = String(v).trim()
     }
   }
-  if (cols.has('living_town')) { const { withLivingTown } = await import('./livingTown.js'); withLivingTown(upd, now) }
   if (Object.keys(upd).length) {
     await db('profiles').where('id', p.id).update({ ...upd, updated_at: new Date().toISOString() })
     log(`✓ filled: ${Object.keys(upd).join(', ')}`)

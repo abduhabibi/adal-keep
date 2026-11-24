@@ -35,11 +35,9 @@ test('"Have experience" on the profile fills the experience rows', async () => {
   assert.equal(none.PREV_COUNTRY, '-')
 })
 
-test('living town falls back to her place of birth, then the region', async () => {
+test('living town falls back to the region', async () => {
   const d = await buildTemplateData(emptyDb(), { id: 1, region: 'Oromia', place_of_birth: 'HALABA' }, tpl, {})
-  assert.equal(d.LIVING_TOWN, 'HALABA')
-  const r = await buildTemplateData(emptyDb(), { id: 1, region: 'Oromia' }, tpl, {})
-  assert.equal(r.LIVING_TOWN, 'Oromia')
+  assert.equal(d.LIVING_TOWN, 'Oromia')
 })
 
 test('a CV carries its one-page fit, so preview and PDF are the same page', () => {

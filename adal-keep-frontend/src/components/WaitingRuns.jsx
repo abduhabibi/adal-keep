@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
 import api from '../services/api'
-import { onDataChange } from '../lib/changes'
 
 /** Robot history → Waiting: runs in line to start. Move one up or down, make it run next, pause or cancel it. */
 export default function WaitingRuns() {
@@ -10,8 +9,7 @@ export default function WaitingRuns() {
   const load = useCallback(() => api.get('/run-queue', { adalNoCache: true })
     .then(r => { setRows(Array.isArray(r.data) ? r.data : []); setError('') })
     .catch(e => { setError(e.response?.data?.error || e.message); setRows([]) }), [])
-  // Live: the queue changing (on any PC) reloads it at once; a slow look besides, in case the live line dropped.
-  useEffect(() => { load(); const off = onDataChange(['automation_queue'], load, 500); const t = setInterval(load, 60000); return () => { off(); clearInterval(t) } }, [load])
+  useEffect(() => { load(); const t = setInterval(load, 5000); return () => clearInterval(t) }, [load])
 
   const act = async (id, path) => {
     setBusy(id)

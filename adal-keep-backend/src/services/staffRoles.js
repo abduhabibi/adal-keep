@@ -170,25 +170,11 @@ export async function whoIsAsking(db, req) {
 }
 
 // The window on this PC itself (127.0.0.1, nothing forwarded), not another computer's.
-// An office PC (a Companion on its own full copy, or standing in for the main PC) is reached
-// through adal-companion.exe's door: it connects from a loopback address of its own and says who
-// asks (x-adal-real-ip, X-Forwarded-For, always its own values). The PC's own window then says
-// 127.0.0.1 there — before, it counted as another computer and every tick was "Signed out".
-const LOOP = /^(127\.0\.0\.1|::1|::ffff:127\.0\.0\.1)$/
-export function ownWindow(req, env = process.env) {
-  const sock = String(req.socket?.remoteAddress || '')
-  let ip = sock
-  if (env.ADAL_BEHIND_COMPANION === '1' && /^(::ffff:)?127\./.test(sock)) ip = String(header(req, 'x-adal-real-ip') || sock)
-  if (!LOOP.test(ip)) return false
-  // (X-Adal-PC from a window is only that window's own key — a Companion's window sends it with
-  // every call; servers that pass calls on are not browsers and count as 'pc' before this.)
-  if (['x-adal-cloud', 'forwarded', 'x-real-ip'].some(h => header(req, h) !== undefined)) return false
-  const xff = header(req, 'x-forwarded-for')
-  return xff === undefined || String(xff).split(',').every(a => LOOP.test(a.trim()))
+function ownWindow(req) {
+  const ip = String(req.socket?.remoteAddress || '')
+  const local = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1'
+  return local && !['x-adal-cloud', 'x-forwarded-for', 'forwarded', 'x-real-ip', 'x-adal-pc'].some(h => header(req, h) !== undefined)
 }
-// A window on another computer of the office that the main PC said "Yes" to (networkGate sets
-// req.pcAccess): a person at an office PC ticks and unticks steps as the PC's default employee.
-const approvedOfficePC = (req) => !!req.pcAccess && !req.pcAccess.sync && fromBrowser(req)
 
 /** No employee can manage staff yet (a new agency): a window with no one signed in may do everything. */
 async function noStaffManager(db) {
@@ -206,8 +192,8 @@ export async function permsFor(db, req) {
     return { perms: role.perms, role, user: who.user, readOnly: false, kind: who.kind }
   }
   if (who.kind === 'signed-out' && (await noStaffManager(db))) return { perms: { ...ALL }, role: null, user: null, readOnly: false, kind: who.kind }
-  // This PC's own window, an approved office PC's window, or a phone: the PC's default employee.
-  if ((who.kind === 'signed-out' && (ownWindow(req) || approvedOfficePC(req))) || who.kind === 'phone') {
+  // This PC's own window or a phone (never another computer's window: it signs in itself).
+  if ((who.kind === 'signed-out' && ownWindow(req)) || who.kind === 'phone') {
     const user = await pcDefaultStaff(db)
     if (user) {
       const role = await roleOf(db, user)
@@ -275,13 +261,10 @@ export function staffGuard(req, res, next) {
   const change = CHANGE.has(String(req.method).toUpperCase()) && !FREE.test(req.path)
   if (!perm && !change) return next()
   const db = req.app.locals.db
-  permsFor(db, req).then(async ({ perms, role, readOnly, kind }) => {
+  permsFor(db, req).then(({ perms, role, readOnly, kind }) => {
     if (perm ? perms[perm] : !readOnly) return next()
     if (readOnly) {
-      // Never a dead end: who to sign in as, in one click (the window's "Sign in as …").
-      const as = kind === 'phone' ? null : await pcDefaultStaff(db).catch(() => null)
       return res.status(403).json({
-        ...(as ? { sign_in_as: { id: as.id, name: as.name || as.username || 'the employee' } } : {}),
         error: kind === 'phone' ? 'No one is signed in on the PC: sign in there (Employees) to make changes from the phone.'
           : 'Signed out: you can look, not change. Sign in (Employees) first.',
         signed_out: true, ...(perm ? { forbidden: perm } : {}),

@@ -2,9 +2,8 @@ import { lazy, Suspense, useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import api from '../services/api'
 import Icon from './shared/Icon'
-import { lazyOrNothing } from '../lib/reloadGuard'
 
-const BrowserView = lazy(lazyOrNothing(() => import('./BrowserView'), 'the browser view\'s file did not load'))
+const BrowserView = lazy(() => import('./BrowserView').catch(() => { location.reload(); return new Promise(() => {}) }))
 
 /**
  * The sidebar's Browsers ("Adal Browser", asked on 2026-11-21): every robot

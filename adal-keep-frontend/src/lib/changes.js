@@ -47,7 +47,6 @@ const BY_PATH = [
   [/^\/?brokers/, ['brokers', 'profiles']],
   [/^\/?tasks/, ['tasks']],
   [/^\/?notifications/, ['notifications']],
-  [/^\/?run-history/, ['run_history']],
   [/automations|runs/, ['automation_queue', 'profile_automations', 'profiles']],
   [/^\/?chat\/(send|conversations\/[^/]+\/read|messages\/\d+|direct|groups)/, ['chat']],
 ]

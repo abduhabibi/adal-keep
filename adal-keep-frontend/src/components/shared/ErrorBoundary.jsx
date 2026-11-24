@@ -25,9 +25,6 @@ export default class ErrorBoundary extends Component {
         <p className="mt-1 text-xs text-amber-800 dark:text-amber-300 break-words">{String(this.state.error?.message || this.state.error)}</p>
         <button type="button" onClick={() => this.setState({ error: null })}
           className="mt-2 rounded-lg bg-amber-600 text-white px-3 py-1.5 text-xs font-semibold">↻ Try again</button>
-        {/* A page whose file did not load stays failed until the page is loaded again (a person's click, always allowed). */}
-        <button type="button" onClick={() => window.location.reload()}
-          className="mt-2 ml-2 rounded-lg border border-amber-600 text-amber-800 dark:text-amber-200 px-3 py-1.5 text-xs font-semibold">Reload Adal Keep</button>
       </div>
     )
   }

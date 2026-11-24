@@ -343,8 +343,8 @@ export default function ProfileFormPage({ embeddedId = null, onDone = null } = {
         ...form,
         broker_id: form.broker_id === '' ? null : Number(form.broker_id),
         children_count: childrenOrZero(form.children_count),
-        // Living town: her place of birth unless one is written (the region when neither is).
-        ...(String(form.living_town || '').trim() ? {} : (form.place_of_birth || form.region) ? { living_town: form.place_of_birth || form.region } : {}),
+        // Living town is the region (read from the passport) — no separate field.
+        ...(form.region ? { living_town: form.region } : {}),
         experience_country: form.work_experience === 'Have experience' ? form.experience_country : '',
         experience_years: form.work_experience === 'Have experience' && form.experience_years !== '' ? Number(form.experience_years) : null,
       }

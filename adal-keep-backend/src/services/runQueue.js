@@ -11,7 +11,7 @@
  * null) and `runJob(job)` does the work. worker.js wires in the real ones.
  */
 
-export function createRunQueue({ max = 3, claimNext, runJob, isIdle = () => false, laneOf = () => '', log = console.log, warn = console.error } = {}) {
+export function createRunQueue({ max = 3, claimNext, runJob, isIdle = () => false, log = console.log, warn = console.error } = {}) {
   const limit = Math.max(1, Number(max) || 1)
 
   // runId -> { runId, workflowId, profileId, startedAt } for runs working now
@@ -29,7 +29,6 @@ export function createRunQueue({ max = 3, claimNext, runJob, isIdle = () => fals
       runId,
       workflowId: job.workflow_id,
       profileId: job.profile_id,
-      lane: laneOf(job) || '',
       startedAt: new Date().toISOString(),
     })
     log(`[runs] run #${runId} ${job.workflow_id} (profile ${job.profile_id}) started — ${running.size}/${limit} working`)
@@ -49,10 +48,7 @@ export function createRunQueue({ max = 3, claimNext, runJob, isIdle = () => fals
     while (working() < limit) {
       // Runs still finishing here are skipped even if their row already says
       // pending again (a resume clicked a moment early): one row, one run.
-      // One run at a time on each site and account (its one tab): a run of a site and account another run
-      // still holds — working, or waiting there for a code or a captcha — waits for it (lanes).
-      const lanes = new Set([...running.values()].map(r => r.lane).filter(Boolean))
-      const job = await claimNext([...running.keys()], lanes)
+      const job = await claimNext([...running.keys()])
       if (!job) break
       start(job)
     }

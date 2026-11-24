@@ -36,9 +36,7 @@ const PHOTO_MODAL_SRC  = 'personal\\s+photo\\s+upload'
 const DROPZONE_SRC     = 'click\\s+or\\s+drag\\s+a\\s+personal\\s+photo'
 
 const DEFAULT_TIMEOUT_MS     = 180000
-const NAV_TIMEOUT_MS         = 90000
-// Musaned's first page: its shell is ~40 KB; 60 s is far more than any line needs. One try, never a second (2026-11-23: 2 × 180 s = a run failed after 307 s).
-const FIRST_LOAD_MS          = 60000
+const NAV_TIMEOUT_MS         = 180000
 const UPLOAD_PROCESS_MS      = 120000
 const MODAL_CLOSED_SETTLE_MS = 2000
 
@@ -93,13 +91,11 @@ export async function disableSmoothScroll(page, ctx) {
     else document.addEventListener('DOMContentLoaded', add)
   }
   try {
-    // Each call given 5 s: a tab whose CDP is slow (a Companion's) must not hold the run for the 180-s protocol timeout.
-    const within = (p) => Promise.race([p, new Promise((_, no) => setTimeout(() => no(new Error('no answer in 5 s')), 5000))])
     if (!page.__adalNoSmoothScroll) {
-      await within(page.evaluateOnNewDocument(inject))
+      await page.evaluateOnNewDocument(inject)
       page.__adalNoSmoothScroll = true
     }
-    await within(page.evaluate(inject))
+    await page.evaluate(inject)
   } catch (e) { log(ctx, `smooth-scroll override failed: ${e.message}`, 'warn') }
 }
 
@@ -334,22 +330,11 @@ export async function blankPage(page, ms = 5000) {
   return !(await waitForText(page, ms)) && await bodyLength(page) === 0
 }
 
-/** Why Musaned's first page did not come, in words a person can act on. */
-export function unreachable(e) {
-  const m = String(e?.message || e || '')
-  if (/detached|Target closed|Session closed|timed out.*Runtime|Runtime\.\w+ timed out|Protocol error/i.test(m)) return `Could not reach tawtheeq.musaned.com.sa: the robot's browser tab stopped answering (${m.slice(0, 80)})`
-  if (/Navigation timeout|timeout/i.test(m)) return `Could not reach tawtheeq.musaned.com.sa: no answer in ${FIRST_LOAD_MS / 1000} s (the internet or Musaned is slow now)`
-  if (/ERR_NAME_NOT_RESOLVED|ERR_INTERNET_DISCONNECTED|ERR_NETWORK_CHANGED|ERR_ADDRESS_UNREACHABLE/.test(m)) return `Could not reach tawtheeq.musaned.com.sa: this PC is not on the internet (${(m.match(/ERR_[A-Z_]+/) || [''])[0]})`
-  return `Could not reach tawtheeq.musaned.com.sa (${m.slice(0, 100) || 'no answer'})`
-}
-
 export async function stepOpenMusaned(page, ctx) {
   // Peer-aware: if this tab is ALREADY on a Musaned host we do NOT navigate to
   // the root — that would wipe an in-progress form and/or force a re-login.
   // We just inspect the current screen and continue.
-  // (A tab left on Musaned's own /login page is not a signed-in page: it loads Musaned fresh — a second run
-  // that took such a tab sat at the agency picker until a person clicked, 2026-11-24.)
-  const alreadyOnMusaned = isPeerUrl(page.url(), 'musaned') && !/^\/login\b/.test((() => { try { return new URL(page.url()).pathname } catch { return '' } })())
+  const alreadyOnMusaned = isPeerUrl(page.url(), 'musaned')
   if (alreadyOnMusaned) {
     await sleep(500)
     const preState = await snapshotState(page)
@@ -364,15 +349,16 @@ export async function stepOpenMusaned(page, ctx) {
     // and paused again, for ever.
     if (await blankPage(page)) {
       log(ctx, 'Musaned page is blank — loading it again')
-      try { await page.goto(MUSANED_ROOT, { waitUntil: 'domcontentloaded', timeout: FIRST_LOAD_MS }) }
-      catch (e) { throw new Error(unreachable(e)) }
+      try { await page.goto(MUSANED_ROOT, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS }) }
+      catch { throw new Error('Could not reach tawtheeq.musaned.com.sa') }
       await waitForText(page, 8000)
     }
     // On a Musaned host but unclassified — fall through to the login-click loop
     // below WITHOUT re-navigating away.
   } else {
-    try { await page.goto(MUSANED_ROOT, { waitUntil: 'domcontentloaded', timeout: FIRST_LOAD_MS }) }
-    catch (e) { throw new Error(unreachable(e)) }
+    try { await page.goto(MUSANED_ROOT, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS }) }
+    catch { try { await page.goto(MUSANED_ROOT, { waitUntil: 'networkidle2', timeout: NAV_TIMEOUT_MS }) }
+      catch { throw new Error('Could not reach tawtheeq.musaned.com.sa') } }
     await sleep(1500)
     const preState = await snapshotState(page)
     if (preState?.hasAgencyPicker || preState?.hasDashboardNav || preState?.hasGoToDashboard) {
@@ -457,27 +443,16 @@ export async function stepClickAgencyCard(page, ctx) {
     if (ctx.accountSwitched) throw new Error(`Musaned stays signed in as ${other}`)
     ctx.accountSwitched = true
     log(ctx, `Musaned offers ${other}'s agency: logging out, to sign in as this run's account`, 'warn')
-    // "Not you? Log Out" is on this page. (Its sign-out is ours: allowed in this tab — tabManager.)
-    page.__adalMayLogOut = true
+    // "Not you? Log Out" is on this page.
     const pressed = await page.evaluate(`(() => { const b = (${logoutItem})(); b?.click(); return !!b })()`).catch(() => false)
     if (pressed) await page.waitForFunction(() => !!document.querySelector('input[type="password"]'), { timeout: 15000 }).catch(() => {})
     else await logOutInNewTab(page, ctx)
     throw Object.assign(new Error('signing in again as this run\'s account'), { signInAgain: true })
   }
   const agencyHint = String(ctx.musaned_name || ctx.musaned_username || '').trim().toUpperCase()
-  // Musaned's list of agencies ("Please select the establishment") can spin for a long time (2026-11-24: three
-  // runs failed after 20 s with its spinner still turning): 45 s, then Musaned loaded fresh once, 45 s more.
-  let deadline = Date.now() + 45000, fresh = false
+  const deadline = Date.now() + 20000
   let clicked = false
-  while (!clicked) {
-    if (Date.now() >= deadline) {
-      if (fresh) break
-      fresh = true
-      log(ctx, '⏳ Musaned\'s list of agencies is still loading after 45 s — loading Musaned again once', 'warn')
-      await page.goto('https://tawtheeq.musaned.com.sa/', { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {})
-      deadline = Date.now() + 45000
-      continue
-    }
+  while (Date.now() < deadline && !clicked) {
     const found = await page.evaluate((hint) => {
       const collectAll = (root) => {
         const out = []
@@ -517,7 +492,7 @@ export async function stepClickAgencyCard(page, ctx) {
     }
     await sleep(700)
   }
-  if (!clicked) throw new Error('Agency card not found: Musaned\'s list of agencies kept loading for 90 s (loaded again once). Nothing was filled. Try again when Musaned answers.')
+  if (!clicked) throw new Error('Agency card not found')
   return { ok: true }
 }
 
@@ -570,13 +545,6 @@ export async function stepClickHrPool(page, ctx) {
 }
 
 export async function stepClickAddNewCandidate(page, ctx) {
-  // A tab already on an Add Candidate form (this run's own, filled before Adal Keep restarted — 2026-11-24, run
-  // 402 failed there: "ADD NEW CANDIDATE not found"): back to the HR Pool list, then Add New Candidate as always.
-  if (/\/hr-pool\/candidates\/add/i.test(page.url())) {
-    log(ctx, '↩ this tab is still on an Add Candidate form from before Adal Keep restarted — back to the HR Pool list to add her again')
-    await page.goto(new URL('/hr-pool', page.url()).href, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {})
-    await page.waitForFunction(() => [...document.querySelectorAll('button, a, [role="button"]')].some(el => /add\s+new\s+candidate/i.test(el.textContent || '')), { timeout: 45000 }).catch(() => {})
-  }
   const deadline = Date.now() + 20000
   let clicked = false
   while (Date.now() < deadline && !clicked) {
@@ -2614,19 +2582,6 @@ async function musanedRun(page, ctx) {
       }
       await sleep(2000)
       let review = await classifyScreen(page, ctx)
-      // The form is filled but Google's box has not come yet (a slow line: ~40 s, 2026-11-24): wait for it
-      // (90 s at most) instead of calling the page unclassified and pausing as "awaiting-musaned-login".
-      if (review.screen === 'login-form') {
-        const { robotCheck } = await import('./robotCheck.js')
-        const t1 = Date.now()
-        let present = false
-        while (Date.now() - t1 < 90000 && !(present = (await robotCheck(page)).present)) {
-          if (!(await page.evaluate(() => !!document.querySelector('input[type="password"]')).catch(() => true))) break
-          await sleep(500)
-        }
-        if (present) { log(ctx, `Google's "I'm not a robot" came after ${Math.round((Date.now() - t1) / 1000)} s`); review = { ...review, screen: 'captcha' } }
-        else review = await classifyScreen(page, ctx)
-      }
       if (review.screen === 'captcha') {
         const w = await waitForPersonCaptcha(page, ctx)
         if (w === 'timeout') return { ok: true, pauseReason: 'awaiting-musaned-captcha', seconds: Math.round((Date.now() - t0) / 1000) }
@@ -2699,10 +2654,9 @@ async function musanedRun(page, ctx) {
       log(ctx, '✓ the Add Candidate form is open — filling it')
       await sleep(1500)
     }
-    // The form: up to 45 s while Musaned's spinner turns (a slow Musaned took longer than the 12 s waited
-    // before, 2026-11-24), else at once when Musaned says she is registered.
+    // The form did not open and Musaned said nothing: is she in our list?
     let formOpen = false
-    for (const end = Date.now() + 45000; !formOpen && Date.now() < end;) {
+    for (let i = 0; i < 24 && !formOpen; i++) {
       formOpen = await addFormOpen(page)
       if (!formOpen) { if (await readAlreadyRegistered(page, 0)) break; await sleep(500) }
     }
@@ -2711,15 +2665,7 @@ async function musanedRun(page, ctx) {
       log(ctx, 'the Add Candidate form did not open after the passport check', 'warn')
       const seen = await readAlreadyRegistered(page, 1500)
       if (seen) return await stopAlreadyRegistered(page, ctx, seen, Math.round((Date.now() - t0) / 1000))
-      // Is she in our HR Pool already? Musaned's own data calls (seconds), the page search only as a fallback.
-      ctx.onLog?.('info', `🔎 Checking if ${ctx.profileName} is already on Musaned (passport ${passport})`)
-      let mine   // undefined = the quick look could not be done: then the page search
-      try { mine = await (await import('./musanedImport.js')).herMusanedPage(page, ctx.db, passport, (m) => log(ctx, m)) } catch (e) { log(ctx, `quick HR Pool look: ${e.message}`, 'warn') }
-      if (mine || (mine === undefined && await findInOurList(page, ctx, passport))) return await stopAlreadyRegistered(page, ctx, { kind: 'ours', found: true }, Math.round((Date.now() - t0) / 1000))
-      // Not in our list and no form: nothing is filled on a page that is not the form (it was, and failed
-      // after 224 s). One try: the person presses Continue when Musaned answers again.
-      ctx.onLog?.('info', `ℹ️ ${ctx.profileName} is not in our Musaned HR Pool`)
-      return { ok: false, step: 'musaned', error: "Musaned did not open the Add Candidate form after the passport check (its page kept loading). Nothing was filled. Try again when Musaned answers.", seconds: Math.round((Date.now() - t0) / 1000) }
+      if (await findInOurList(page, ctx, passport)) return await stopAlreadyRegistered(page, ctx, { kind: 'ours', found: true }, Math.round((Date.now() - t0) / 1000))
     }
     if (!pre || !pre.ok) {
       log(ctx, `pre-check failed (${pre?.error || 'unknown'}) — running diagnostics before details`, 'warn')
@@ -2757,22 +2703,6 @@ async function musanedRun(page, ctx) {
   }
 }
 
-/** Google's "I'm not a robot" checkbox is on the screen (its frame loaded and the box drawn). */
-async function boxDrawn(page, ms) {
-  for (const end = Date.now() + ms; Date.now() < end;) {
-    for (const f of page.frames()) {
-      let url = ''
-      try { url = f.url() } catch { continue }
-      if (!/\/recaptcha\/(api2|enterprise)\/anchor/.test(url)) continue
-      const ok = await f.evaluate(() => { const b = document.querySelector('#recaptcha-anchor'); if (!b) return false; const r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0 }).catch(() => false)
-      if (ok) return true
-    }
-    if (!(await page.evaluate(() => !!document.querySelector('input[type="password"]')).catch(() => true))) return true   // signed in meanwhile
-    await sleep(500)
-  }
-  return false
-}
-
 /**
  * Musaned's "I'm not a robot" is answered by a person — Adal Keep never
  * ticks it. The run brings its tab to the front, rings and waits (up to 10
@@ -2780,13 +2710,8 @@ async function boxDrawn(page, ms) {
  * carries on: the authenticator code and the rest of the work follow.
  */
 async function waitForPersonCaptcha(page, ctx) {
-  // The person is called when Google's box is drawn, not before (2026-11-23, this PC: the box took ~40 s
-  // on a slow line; the person saw an empty space, pressed Sign In, and Musaned said "Invalid Recaptcha").
-  const t0 = Date.now()
-  const drawn = await boxDrawn(page, 90000)
-  log(ctx, drawn ? `the "I'm not a robot" box is drawn (${Math.round((Date.now() - t0) / 1000)} s)` : 'the "I\'m not a robot" box did not draw in 90 s (slow line to Google) — calling a person anyway', drawn ? 'info' : 'warn')
   await ctx.notify(`🖐 ${ctx.profileName}: tick "I'm not a robot" on Musaned`,
-    (drawn ? 'Only the tick (and the pictures, if Google shows some).' : 'Google\'s box is still loading: wait until it shows, then tick it.') + ' Do not press Sign In: Adal Keep signs in and continues by itself once it is ticked.', 'info', { login: page })
+    'Only the tick (and the pictures, if Google shows some). Adal Keep signs in and continues by itself.', 'info', { login: page })
   log(ctx, '🖐 waiting for a person to tick "I\'m not a robot" (up to 10 min)')
   const { waitForTick } = await import('./robotCheck.js')
   const w = await waitForTick(page, {

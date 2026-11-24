@@ -60,13 +60,6 @@ const reload = () => {
   window.dispatchEvent(new Event('adal-profile-changed'))
 }
 
-// Which stage of her journey each robot's step belongs to: its "↩ Back to this step" moves her back there.
-export const WF_STEP = {
-  musaned_add_candidate: 'musaned', musaned_check_chosen: 'selected', musaned_epro_approve: 'epro',
-  wafid_book: 'wafid', wafid_slip: 'wafid', wafid_check: 'wafid',
-  insurance_certificate: 'insurance', insurance_fetch: 'insurance', tasheer_schedule: 'tasheer',
-  mofa_visa: 'visa', mofa_find_app: 'visa', mofa_pay: 'visa', police_certificate: 'police',
-}
 /** Steps a person may uncheck (not the CV: a document). */
 export const STEP_UNDONE = ['musaned', 'selected', 'wafid', 'epro', 'insurance', 'fmol', 'embassy', 'visa', 'arrived', 'tasheer', 'police']
 
@@ -80,7 +73,7 @@ export function markUndone({ profileId, step, label = '' } = {}) {
       showUndo(profileId, id)
       toast((tt) => (
         <span className="flex items-center gap-3 text-sm">
-          <span>↩ {label ? `${label}: ` : ''}{r.data?.message || 'Moved back to this step'}</span>
+          <span>↩ {label ? `${label}: ` : ''}{r.data?.message || 'Unchecked'}</span>
           {undo && undoButton(tt, undo)}
         </span>
       ), { duration: 5000, id })

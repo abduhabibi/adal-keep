@@ -33,10 +33,8 @@ setInterval(sampleLoad, 10000).unref?.()
 const GB = 1024 ** 3
 let ownNet = () => null
 import('./netQuality.js').then(n => { ownNet = n.ownNet }).catch(() => {})
-let ownRelease = () => null
-import('./officeHealth.js').then(o => { ownRelease = o.ownVersion }).catch(() => {})
 export function ownPower() {
-  return { id: '', version: ownRelease(), name: os.hostname(), cores: os.cpus()?.length || 1, mem_gb: os.totalmem() / GB, free_gb: os.freemem() / GB, load: lastLoad ?? 30, net: ownNet(), lan: true }
+  return { id: '', name: os.hostname(), cores: os.cpus()?.length || 1, mem_gb: os.totalmem() / GB, free_gb: os.freemem() / GB, load: lastLoad ?? 30, net: ownNet(), lan: true }
 }
 
 // ── how strong, how weak ────────────────────────────────────────────────────
@@ -96,21 +94,6 @@ export async function runningOn(db) {
 const label = (p) => p ? `${p.name || 'a PC'} (${Math.round(p.mem_gb || 0)} GB, ${p.cores || 1} cores)` : 'a PC'
 
 export const MIN_HELPER_CORES = 4
-export const FRESH_MS = 45e3   // a Companion says how it is every 20 s: silent longer = restarting or gone
-
-/**
- * May this Companion be given a run now? Not while it installs an update or
- * restarts for one, not when it was silent for 45 s, and not on another
- * release than the PC that asks (2026-11-23: a run went to a Companion still
- * on an old release, sat on a blank page 5 minutes and failed after 307 s).
- */
-export function ready(p, origin = null, now = Date.now()) {
-  if (!p || p.id === '') return true
-  if (p.updating) return false
-  if (p.at && now - p.at > FRESH_MS) return false
-  const mine = origin?.version
-  return !mine || p.version === mine
-}
 
 // ── the PC that finishes first (asked on 2026-11-21) ────────────────────────
 // "When any PC asks for a robot run, Adal Keep picks the PC that will finish
@@ -165,7 +148,7 @@ export function estimate(p, { running = 0, tab = null, remote = false } = {}) {
 export function chooseBest({ from = '', pcs = [], running = {}, tabs = {}, mainAllowed = true }) {
   const origin = pcs.find(p => p.id === from)
   if (!origin) return { to: from, help: false, secs: {}, why: '' }
-  const known = (p) => p.id === '' || (p.mem_gb != null && p.lan !== false && ready(p, pcs.find(x => x.id === '')))
+  const known = (p) => p.id === '' || (p.mem_gb != null && p.lan !== false)
   // Never given to a PC under 4 cores (2026-11-23: "never on a PC under 4 cores"); its own runs stay
   // there only when no other PC of the office can take them.
   const able = (p) => (Number(p.cores) || 1) >= MIN_HELPER_CORES

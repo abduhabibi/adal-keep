@@ -21,7 +21,6 @@
 import fs from 'fs'
 import sharp from 'sharp'
 import path from 'path'
-import { withLivingTown } from './livingTown.js'
 import crypto from 'crypto'
 import { fileURLToPath } from 'url'
 import { getBrowser, openBrowserIfAny } from './browser.js'
@@ -723,7 +722,6 @@ export async function addFromMusaned(db, browser, page, card, d) {
       company_id: company?.id || 1, created_by: 'Musaned list', created_at: now, updated_at: now,
     }
     for (const k of Object.keys(row)) if (row[k] === null || row[k] === '') delete row[k]
-    withLivingTown(row)   // empty living town: her place of birth
     const [id] = await db('profiles').insert(row)
     p = await db('profiles').where('id', id).first()
     await task(db, id, `On Musaned, added to Adal Keep: ${name}`, `She was on the Musaned list (${card.stage || 'request'}, contract ${card.contract_number}) but not in Adal Keep. Her profile was made from Musaned — check it and add her documents.`)
@@ -1148,7 +1146,6 @@ async function profileFromRequest(db, src, card) {
   for (const k of Object.keys(row)) if (row[k] === null || row[k] === '') delete row[k]
   const cols = await db('profiles').columnInfo().catch(() => null)
   if (cols) for (const k of Object.keys(row)) if (!(k in cols)) delete row[k]
-  if (!cols || 'living_town' in cols) withLivingTown(row)   // empty living town: her place of birth
   const [id] = await db('profiles').insert(row)
   await task(db, id, `On Musaned, added to Adal Keep: ${name}`, `She was on the Musaned list (${card.stage || 'request'}, contract ${card.contract_number}) but not in Adal Keep. Her profile was made from Musaned with her photo and passport — look it over.`)
   return db('profiles').where('id', id).first()

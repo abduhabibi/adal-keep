@@ -22,7 +22,6 @@ import { exec } from 'child_process'
 import helmet from 'helmet'
 import cron from 'node-cron'
 import knexConfig from './knexfile.js'
-import { withLivingTown } from './src/services/livingTown.js'
 import filesRouter from './src/routes/files.js'
 import multer from 'multer'
 import path from 'path'
@@ -120,16 +119,6 @@ app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false,
 app.use(cors((req, cb) => cb(null, { origin: originOk(req) ? (req.headers.origin || false) : false, credentials: true })))
 // From another computer: only one this PC said "Yes" to (services/networkGate.js).
 app.use(networkGate)
-// At once, before everything else (no database, no browser): other PCs and the windows ask it every few seconds,
-// and a slow answer made the Companions' windows jump between the main PC and their own copy (2026-11-24).
-const HEALTH_BASE = { status: 'ok' }
-let healthInstance = null
-app.get('/api/health', (req, res) => {
-  // role/instance let another PC check it is choosing a real main PC.
-  // acting: an Adal Companion (the older Go kind) standing in for the main PC while it is away (services/standby).
-  res.json({ ...HEALTH_BASE, role: isCompanion() ? 'companion' : isFollower() ? 'follower' : 'main', main_url: mainURL() || undefined, instance: (healthInstance ||= instanceId()), ...(process.env.ADAL_ACTING_MAIN === '1' ? { acting: true, acting_since: process.env.ADAL_ACTING_SINCE || null } : {}) })
-})
-
 // The user's own uploads first: the online copy and the backup wait (services/userUploads.js).
 app.use(trackUserUploads)
 // Big answers go packed (gzip) — the profiles list is megabytes, and a phone
@@ -237,7 +226,6 @@ app.use('/api', (await import('./src/routes/dataRights.js')).default)   // conse
 app.use('/api', mainPCRouter)
 app.use('/api', mobileRouter)   // the phone app pairs with this PC
 app.use('/api', branchMergeRouter)
-app.use('/api', (await import('./src/routes/branchLinks.js')).default)   // Settings → Branches: agencies linked by a 6-digit code
 app.use('/api', standbyRouter)   // every Companion: the server in waiting, and its merge back
 app.use('/api', wafidRouter)
 app.use('/api', backupRouter)
@@ -389,6 +377,12 @@ app.get('/api/system/automation-health', async (req, res) => {
   try { res.json(await (await import('./src/services/automationHealth.js')).automationHealth(app.locals.db)) }
   catch (e) { res.status(500).json({ error: e.message }) }
 })
+app.get('/api/health', (req, res) => {
+  // role/instance let another PC check it is choosing a real main PC.
+  // acting: an Adal Companion (the older Go kind) standing in for the main PC while it is away (services/standby).
+  res.json({ status: 'ok', role: isCompanion() ? 'companion' : isFollower() ? 'follower' : 'main', main_url: mainURL() || undefined, instance: instanceId(), ...(process.env.ADAL_ACTING_MAIN === '1' ? { acting: true, acting_since: process.env.ADAL_ACTING_SINCE || null } : {}) })
+})
+
 app.get('/api/dashboard', async (req, res) => {
   try {
     const profiles = await db('profiles').count('id as count').first()
@@ -577,7 +571,6 @@ app.post('/api/profiles', async (req, res) => {
     data.created_by = (data.created_by || '').toString().trim() || 'System'
     if (data.broker_id === '' || data.broker_id === null) data.broker_id = null
     else if (data.broker_id !== undefined) data.broker_id = Number(data.broker_id)
-    withLivingTown(data)   // empty living town: her place of birth
 
     const [id] = await db('profiles').insert(data)
     const profile = await db('profiles')
@@ -677,7 +670,6 @@ app.put('/api/profiles/:id', async (req, res) => {
     if (data.broker_id === '' || data.broker_id === null) data.broker_id = null
     else if (data.broker_id !== undefined) data.broker_id = Number(data.broker_id)
 
-    withLivingTown(data, existing)   // empty living town: her place of birth
     data.updated_at = new Date().toISOString()
     await db('profiles').where('id', req.params.id).update(data)
 
@@ -1252,9 +1244,6 @@ if (frontendDir) {
   app.use(express.static(frontendDir, {
     setHeaders: (res, file) => res.setHeader('Cache-Control', /[\\/]assets[\\/]/.test(file) ? 'public, max-age=31536000, immutable' : 'no-cache'),
   }))
-  // A page file this build does not have (a window from another release): a plain 404, never
-  // index.html with 200 — that made the page's import fail as "not JavaScript" (lib/reloadGuard.js).
-  app.use('/assets', (req, res) => res.status(404).set('Cache-Control', 'no-store').type('text/plain').send('Not in this version of Adal Keep'))
   console.log(`🖥️  Serving UI from ${frontendDir}`)
 } else {
   console.warn('⚠️  No built UI found — run "npm run build" inside adal-keep-frontend')
@@ -1349,14 +1338,12 @@ initSystem().then(() => {
     // Memory is checked every 5 min: short of memory and no robot working → the idle Adal Browser is quit (never under a person's window).
     Promise.all([import('./src/services/memoryGuard.js'), import('./src/services/browser.js'), import('./src/services/worker.js')]).then(([g, b, w]) => g.startMemoryGuard({
       working: () => w.queueSnapshot().running.length,
-      // Never a browser holding a site signed in: the day's sign-ins stay (2026-11-24).
-      quit: async () => { if ((await import('./src/services/sessionKeeper.js')).holdsSignIns()) return; const br = await b.openBrowserIfAny().catch(() => null); if (!br) return; const pages = await br.pages().catch(() => []); if (pages.some(p => p.__adalBorrowed || p.__adalPerson)) return; await b.quitBrowser() },
+      quit: async () => { const br = await b.openBrowserIfAny().catch(() => null); if (!br) return; const pages = await br.pages().catch(() => []); if (pages.some(p => p.__adalBorrowed || p.__adalPerson)) return; await b.quitBrowser() },
     })).catch(e => console.warn('[memory]', e.message))
     import('./src/services/plans.js').then(p => p.startLicenseWatch(app.locals.db)).catch(e => console.warn('[plans]', e.message)) // Adal's signed licence: plan, dates, features
     import('./src/services/agencyConfig.js').then(async C => { const cl = await import('./src/services/chatCloud.js'); C.startAgencyConfigWatch(app.locals.db, (m, p, o) => m === 'POST' ? cl.cloudCall(app.locals.db, m, p, o) : cl.cloudCall(app.locals.db, m, p, undefined, o), () => cl.cloudAgencyId(app.locals.db)) }).catch(e => console.warn('[config]', e.message)) // the agency's config record from Adal (flag)
     startAppointmentWatcher(app.locals.db) // Tasheer / Wafid appointments: a reminder the day before
     startCloudSync(app.locals.db)      // the online copy phones use when this PC is off
-    Promise.all([import('./src/services/branchLinks.js'), import('./src/services/chatCloud.js')]).then(([L, c]) => L.startBranchLinks(app.locals.db, { isMain: () => !notMainPC(), configured: c.chatConfigured })).catch(e => console.warn('[branches]', e.message))   // linked branches: requests and their profiles
     startLiveChannel(app.locals.db)    // phones ↔ this PC, instant (Supabase Realtime)
     startWorker(db)               // runs queued jobs, each in its own tab
     import("./src/services/transition.js").then(m => m.resumeTransitions(db)).catch(() => {})            // a move cut off by a restart goes on

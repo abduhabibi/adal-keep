@@ -172,7 +172,6 @@
     <button data-tab="work" class="on"><span class="ic"><svg class="ico"><use href="#i-home"/></svg></span>Home</button>
     <button data-tab="setup"><span class="ic"><svg class="ico"><use href="#i-star"/></svg></span>Setup</button>
     <button data-tab="agencies"><span class="ic"><svg class="ico"><use href="#i-building"/></svg></span>Agencies</button>
-    <button data-tab="branches"><span class="ic"><svg class="ico"><use href="#i-building"/></svg></span>Branches</button>
     <button data-tab="inbox"><span class="ic"><svg class="ico"><use href="#i-chat"/></svg></span>Inbox</button>
     <button data-tab="payments"><span class="ic"><svg class="ico"><use href="#i-card"/></svg></span>Payments</button>
     <button data-tab="billing"><span class="ic"><svg class="ico"><use href="#i-card"/></svg></span>Billing</button>
@@ -754,32 +753,6 @@ function updatesBox(up) {
 // the counts every 30 minutes).
 let usage = null, usageDays = 30, usageAt = 0
 const dayKey = (d) => d.toLocaleDateString('en-CA')
-// Branches: agencies linked to each other (Settings → Branches, a 6-digit code; supabase/branch-links.sql).
-async function branchesView() {
-  $('#title').textContent = 'Branches — agencies linked to each other'
-  let d
-  try { d = await api('/api/branch-links') } catch (e) { $('#table').innerHTML = `<p class="muted">Could not load: ${esc(e.message)}</p>`; return }
-  if (tab !== 'branches') return
-  if (d.missing) { $('#table').innerHTML = '<p class="muted">Run <b>supabase/branch-links.sql</b> once in Supabase (SQL Editor) first.</p>'; return }
-  const name = (a) => `<b>${esc(a.name)}</b>${a.city ? ` <span class="muted">· ${esc(a.city)}</span>` : ''}${a.pc_number ? ` <span class="code">${esc(a.pc_number)}</span>` : ''}`
-  const words = { pending: 'waiting for “Yes, it is me”', shown: 'code shown, not typed yet', linked: 'linked', denied: 'said No', expired: 'code ran out', failed: 'too many wrong codes', cancelled: 'replaced' }
-  $('#table').innerHTML = `<h4>Linked (${d.links.length})</h4>` + (d.links.length
-    ? `<table><tr><th>Agency</th><th>Branch</th><th>Shares profiles</th><th>Since</th><th></th></tr>` + d.links.map(l => `<tr><td>${name(l.a)}</td><td>${name(l.b)}</td>
-        <td>${l.a_shares ? '✓' : '—'} / ${l.b_shares ? '✓' : '—'}</td><td>${when(l.since)}</td>
-        <td><button class="ghost" data-unlink="${l.a.id}|${l.b.id}">Unlink</button></td></tr>`).join('') + '</table>'
-    : '<p class="muted">No agencies linked yet.</p>') +
-    `<h4>Requests, last 7 days (${d.requests.length})</h4>` + (d.requests.length
-    ? `<table><tr><th>From</th><th>To</th><th>State</th><th>Wrong codes</th><th>Asked</th></tr>` + d.requests.map(r => `<tr><td>${name(r.from)}</td><td>${name(r.to)}</td>
-        <td><span class="pill ${r.status === 'linked' ? 'approved' : ['pending', 'shown'].includes(r.status) ? 'pending' : 'rejected'}">${esc(words[r.status] || r.status)}</span></td>
-        <td>${r.tries || 0}</td><td>${when(r.at)}</td></tr>`).join('') + '</table>'
-    : '<p class="muted">None.</p>') +
-    '<p class="muted">Codes are never shown here: only their hash is kept, and only for 10 minutes. Unlink ends it for both agencies at once.</p>'
-  $('#table').querySelectorAll('[data-unlink]').forEach(b => b.onclick = async () => {
-    const [a, c] = b.dataset.unlink.split('|')
-    if (!(await ask({ title: 'Unlink these two agencies?', text: 'They stop seeing each other’s profiles at once. They can link again with a new code.', ok: 'Unlink', danger: true }))) return
-    await api('/api/branch-links/unlink', { a, b: c }); branchesView()
-  })
-}
 async function usageView() {
   $('#title').textContent = 'Usage — how much each agency uses every feature'
   if (!usage || Date.now() - usageAt > 120000) {
@@ -1383,7 +1356,6 @@ function showTable() {
   if (tab === 'billing') return billingView()
   if (tab === 'business') return businessView()
   if (tab === 'usage') return usageView()
-  if (tab === 'branches') return branchesView()
   if (tab === 'health') return healthView()
   if (tab === 'fleet') return fleetView()
   if (tab === 'tickets') return ticketsView()

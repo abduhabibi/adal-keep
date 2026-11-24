@@ -10,7 +10,7 @@ process.env.ACCOUNT_VAULT_KEY = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 
 const { default: express } = await import('express')
 const { default: knex } = await import('knex')
 const { ensureTenancySchema } = await import('../src/services/tenancy.js')
-const { staffGuard, permNeeded, listRoles, staffToken, ensureStaffRoles, setPcStaff, ownWindow } = await import('../src/services/staffRoles.js')
+const { staffGuard, permNeeded, listRoles, staffToken, ensureStaffRoles, setPcStaff } = await import('../src/services/staffRoles.js')
 const { default: staffRolesRouter } = await import('../src/routes/staffRoles.js')
 const { default: employeesRouter } = await import('../src/routes/employees.js')
 
@@ -25,8 +25,6 @@ async function office() {
   const app = express()
   app.use(express.json())
   app.locals.db = db
-  // (networkGate's work in the real server: an office computer the main PC said Yes to.)
-  app.use((req, res, next) => { if (req.headers['x-test-approved']) req.pcAccess = { id: 'pc-1', name: 'Front desk' }; next() })
   app.use('/api', staffGuard)
   app.use('/api', staffRolesRouter)
   app.use('/api/employees', employeesRouter)
@@ -284,36 +282,4 @@ test("answers to a robot already working are never refused (signed out, or the p
   const fwd = await fetch(o.base + '/automations/12/resume', { method: 'POST', headers: { 'user-agent': 'Mozilla/5.0 Chrome', 'x-forwarded-for': '192.168.1.9' } })
   assert.equal(fwd.status, 403)
   await o.close()
-})
-
-test("an office PC's window is never a dead end: through the Companion's door, an approved computer, or one click to sign in", async () => {
-  const o = await office()
-  const W = { 'user-agent': 'Mozilla/5.0 Chrome', 'content-type': 'application/json' }
-  // A Companion's own window (its full copy): adal-companion.exe passes it on with X-Forwarded-For
-  // 127.0.0.1, and the window sends its key (X-Adal-PC) with every call. It was "Signed out".
-  const tick = await fetch(o.base + '/profiles/1', { method: 'PUT', headers: { ...W, 'x-forwarded-for': '127.0.0.1', 'x-adal-pc': 'its-key' }, body: '{}' })
-  assert.equal(tick.status, 200)
-  // A computer of the office the main PC said Yes to: the PC's default employee too.
-  assert.equal((await fetch(o.base + '/profiles/1', { method: 'PUT', headers: { ...W, 'x-forwarded-for': '192.168.1.9', 'x-test-approved': '1' }, body: '{}' })).status, 200)
-  // Not approved: looking only — and the answer says who to sign in as (the window's one-click button).
-  const r = await fetch(o.base + '/profiles/1', { method: 'PUT', headers: { ...W, 'x-forwarded-for': '192.168.1.9' }, body: '{}' })
-  assert.equal(r.status, 403)
-  const d = await r.json()
-  assert.equal(d.signed_out, true)
-  assert.deepEqual(d.sign_in_as, { id: 1, name: 'Abebe' })
-  await o.close()
-})
-
-test("ownWindow: this PC's window, also behind the Companion's door; never another computer", () => {
-  const req = (sock, headers = {}) => ({ socket: { remoteAddress: sock }, headers })
-  assert.equal(ownWindow(req('127.0.0.1')), true)
-  assert.equal(ownWindow(req('::ffff:127.0.0.1', { 'x-forwarded-for': '127.0.0.1', 'x-adal-pc': 'k' })), true)
-  assert.equal(ownWindow(req('127.0.0.1', { 'x-forwarded-for': '127.0.0.1, 192.168.1.9' })), false)
-  assert.equal(ownWindow(req('192.168.1.9')), false)
-  assert.equal(ownWindow(req('127.0.0.1', { 'x-adal-cloud': '1' })), false)
-  // Standing in for the main PC: the door connects from 127.168.1.20 and says who asks.
-  const behind = { ADAL_BEHIND_COMPANION: '1' }
-  assert.equal(ownWindow(req('127.168.1.20', { 'x-adal-real-ip': '127.0.0.1', 'x-forwarded-for': '127.0.0.1' }), behind), true)
-  assert.equal(ownWindow(req('127.168.1.20', { 'x-adal-real-ip': '192.168.1.20', 'x-forwarded-for': '192.168.1.20' }), behind), false)
-  assert.equal(ownWindow(req('127.168.1.20', { 'x-adal-real-ip': '127.0.0.1' })), false)   // (not behind the door: as it says)
 })

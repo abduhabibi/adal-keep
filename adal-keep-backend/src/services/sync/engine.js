@@ -210,9 +210,7 @@ export class SyncEngine {
     // Triggers of tables no longer copied (or gone).
     const trig = await db.raw(`SELECT name, tbl_name FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'sync\\_%' ESCAPE '\\'`)
     for (const t of trig) if (!seen.has(t.tbl_name)) await db.raw(`DROP TRIGGER IF EXISTS ${q(t.name)}`)
-    // Only tables keyed by "id": ids.js gives a new row an "id" (run_history_shots, keyed by
-    // history_id, got one too and every insert there failed: no stop picture was ever kept).
-    ids.useTables([...this.tables.values()].filter(t => t.pkInt && t.pk === 'id' && !isInternal(t.name)).map(t => t.name))
+    ids.useTables([...this.tables.values()].filter(t => t.pkInt && !isInternal(t.name)).map(t => t.name))
   }
 
   async uniquesOf(name, pk) {

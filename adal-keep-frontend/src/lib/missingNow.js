@@ -2,7 +2,7 @@
 // right at the top (the "Missing" card). Pure: the page (PC, Companion, phone)
 // feeds it her profile, her documents and her step key (backend stepNow).
 //
-//   cv        Photo + Full Body Photo + living town (her place of birth when empty) + passport Date of Issue
+//   cv        Photo + Full Body Photo + living town + passport Date of Issue
 //   musaned   Photo, marital status, religion, a mobile (9 + 8 digits)  — musanedPreflight.js
 //   wafid     passport Date of Issue + Expiry, date of birth             — wafidWorkflow.js
 //   lmis      passport Date of Issue, date of birth, passport number     — lmisWorkflow.js
@@ -38,9 +38,7 @@ const AHEAD = {
 
 const blank = (v) => v == null || String(v).trim() === ''
 const mobileOk = (v) => /^9\d{8}$/.test((() => { let d = String(v || '').replace(/\D/g, ''); if (d.startsWith('251') && d.length > 9) d = d.slice(3); if (d.length === 10 && d.startsWith('0')) d = d.slice(1); return d })())
-const isBad = (k, v, p = {}) => (k === 'phone_number' ? !mobileOk(v)
-  : k === 'living_town' ? blank(v) && blank(p.place_of_birth)   // her place of birth stands in
-  : blank(v))
+const isBad = (k, v) => (k === 'phone_number' ? !mobileOk(v) : blank(v))
 
 /** { files: [field names with no file], texts: [{ key, label, type, options?, hint? }] } — both empty: nothing missing. */
 export function missingNow(profile, fields = [], stepKey) {
@@ -52,7 +50,7 @@ export function missingNow(profile, fields = [], stepKey) {
       if (f && !hasFiles(f) && !files.includes(n)) files.push(n)
     }
     for (const k of NEEDS[s].texts) {
-      if (profile && isBad(k, profile[k], profile) && !texts.some(t => t.key === k)) texts.push({ key: k, ...TEXT[k] })
+      if (profile && isBad(k, profile[k]) && !texts.some(t => t.key === k)) texts.push({ key: k, ...TEXT[k] })
     }
   }
   return { files, texts }

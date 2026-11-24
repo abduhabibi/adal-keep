@@ -4,15 +4,12 @@
  * Every try of a run (and every move from another system) is one row: who
  * started it, the PC and the site, the profile, start, end, how long, how it
  * ended and the step it stopped at; when it did not finish, also a small
- * picture of its tab taken at the stop (JPEG, ≤ 100 KB). The rows (and the
- * pictures) are copied between the agency's PCs like the rest of the data
- * (sync/engine.js), so every PC and Companion shows the same list, each row
- * with the PC that ran it (pc) and the one that asked for it (asked_on).
+ * picture of its tab taken at the stop (JPEG, ≤ 100 KB). The rows are in the
+ * main PC's database, so every PC and Companion shows the same list.
  * Nothing here may ever stop a robot: every call is best effort.
  */
 import os from 'os'
 import { plainReason, workflowName } from './runOutcome.js'
-import { SLOTS, TIME_ID_MIN } from './sync/ids.js'
 
 export const KEEP_DAYS = 30
 export const SHOT_MAX = 100 * 1024
@@ -95,19 +92,15 @@ export async function finish(db, id, o = {}) {
     const reason = o.reason ? (outcome === 'failed' ? plainReason(o.reason) : clip(o.reason, 300)) : ''
     let shot = null
     if (o.page && outcome !== 'done') shot = await takeShot(o.page)
-    const kept = await db('run_history').where('id', id).update({
+    await db('run_history').where('id', id).update({
       ended_at: ended, outcome, reason,
       step: clip(o.step, 240),
       duration_s: Math.max(0, Math.round((Date.parse(ended) - Date.parse(row.started_at)) / 1000)) || 0,
       has_shot: !!shot,
     })
-    // (Deleted from the page while it worked: no picture left behind.)
-    if (shot && kept) {
-      const saved = await db('run_history_shots').insert({ history_id: id, jpg: shot, taken_at: ended }).then(() => true, () =>
-        db('run_history_shots').where('history_id', id).update({ jpg: shot, taken_at: ended }).then(n => n > 0)).catch(() => false)
-      // Never a "Picture" button with no picture behind it.
-      if (!saved) await db('run_history').where('id', id).update({ has_shot: false })
-    }
+    if (shot) await db('run_history_shots').insert({ history_id: id, jpg: shot, taken_at: ended }).catch(async () => {
+      await db('run_history_shots').where('history_id', id).update({ jpg: shot, taken_at: ended })
+    })
   } catch (e) { console.warn('[history] not finished:', e.message) }
 }
 
@@ -153,26 +146,9 @@ export async function prune(db, now = Date.now()) {
   } catch { return 0 }
 }
 
-// What the list shows: no pictures, no big columns (a picture is asked for when opened, shotOf).
-export const LIST_COLS = ['id', 'run_id', 'kind', 'workflow_id', 'workflow', 'site', 'profile_id', 'profile_name', 'account',
-  'employee', 'pc', 'started_at', 'ended_at', 'duration_s', 'outcome', 'reason', 'step', 'has_shot']
-export const PAGE = 100
-
-/** The PCs of the agency by slot (sync_pcs), to say which PC asked for a run; {} on a PC without copying. */
-async function pcsBySlot(db) {
-  try { return Object.fromEntries((await db('sync_pcs').select('slot', 'name')).filter(p => p.slot != null).map(p => [Number(p.slot), p.name || ''])) } catch { return {} }
-}
-/** The PC that made a row (its id's last three digits are that PC's slot, sync/ids.js); '' for an old counted id. */
-const madeOn = (id, slots) => (Number(id) >= TIME_ID_MIN ? slots[Number(id) % SLOTS] || '' : '')
-
-/**
- * The rows, newest first, narrowed by filters; q looks in the names, the step and the reason.
- * A page at a time (limit, at most 500): the next page starts below `before` ("started_at|id"
- * of the last row shown), so a run that starts meanwhile never shifts the pages.
- * Each row also says the PC that asked for the run (asked_on) when it is not the PC that ran it.
- */
+/** The rows, newest first, narrowed by filters; q looks in the names, the step and the reason. */
 export async function list(db, f = {}) {
-  const q = db('run_history').select(LIST_COLS).orderBy('started_at', 'desc').orderBy('id', 'desc')
+  const q = db('run_history').orderBy('started_at', 'desc').orderBy('id', 'desc')
   if (f.site) q.where('site', f.site)
   if (f.outcome) q.where('outcome', f.outcome)
   if (f.employee) q.where('employee', f.employee)
@@ -180,44 +156,13 @@ export async function list(db, f = {}) {
   if (f.profile_id) q.where('profile_id', Number(f.profile_id))
   if (f.from) q.where('started_at', '>=', f.from)
   if (f.to) q.where('started_at', '<=', f.to)
-  if (f.before) {
-    const [at, id] = String(f.before).split('|')
-    if (at) q.where(w => w.where('started_at', '<', at).orWhere(w2 => w2.where('started_at', at).where('id', '<', Number(id) || 0)))
-  }
   if (f.q) {
     const like = `%${String(f.q).trim().replace(/[%_]/g, m => '\\' + m)}%`
     q.where(w => w.whereRaw(`(coalesce(profile_name,'') || ' ' || coalesce(workflow,'') || ' ' || coalesce(step,'') || ' ' || coalesce(reason,'') || ' ' || coalesce(account,'')) like ? escape '\\'`, [like]))
   }
-  const limit = Math.min(500, Math.max(1, Number(f.limit) || PAGE))
+  const limit = Math.min(500, Math.max(1, Number(f.limit) || 100))
   const rows = await q.limit(limit).offset(Math.max(0, Number(f.offset) || 0))
-  const slots = rows.some(r => Number(r.run_id) >= TIME_ID_MIN) ? await pcsBySlot(db) : {}
-  return rows.map(r => {
-    const asked = madeOn(r.run_id, slots)
-    return { ...r, has_shot: !!r.has_shot, asked_on: asked && asked !== r.pc ? asked : '' }
-  })
-}
-
-/**
- * Rows go (one or several, with their pictures), the newest and the running ones too.
- * A running one only with running_ok (the page asks the person first): otherwise
- * nothing goes and the running ids are said. Deletes reach the other PCs through
- * the copying (sync/engine.js: a deleted row is a tombstone there too).
- */
-export async function remove(db, ids, { running_ok = false } = {}) {
-  const list = [...new Set((Array.isArray(ids) ? ids : [ids]).map(Number).filter(n => Number.isSafeInteger(n) && n > 0))]
-  if (!list.length) return { deleted: 0, running: [] }
-  const running = []
-  for (let i = 0; i < list.length; i += 400) {
-    running.push(...(await db('run_history').whereIn('id', list.slice(i, i + 400)).where('outcome', 'running').select('id')).map(r => r.id))
-  }
-  if (running.length && !running_ok) return { deleted: 0, running }
-  let deleted = 0
-  for (let i = 0; i < list.length; i += 400) {
-    const part = list.slice(i, i + 400)
-    await db('run_history_shots').whereIn('history_id', part).del()
-    deleted += await db('run_history').whereIn('id', part).del()
-  }
-  return { deleted, running: [] }
+  return rows.map(r => ({ ...r, has_shot: !!r.has_shot }))
 }
 
 /** What each filter can offer: the sites, people and PCs that appear. */

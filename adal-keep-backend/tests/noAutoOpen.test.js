@@ -100,17 +100,3 @@ test('Linux: only the icon opens the window; one window; no old windows back; X 
   const callers = [...files('adal-keep-backend/src', /\.js$/), ...files('adal-companion', /\.go$/), ...files('adal-launcher', /\.go$/)].filter(f => /open-adal-keep/.test(read(f)))
   assert.deepEqual(callers, [])
 })
-
-test('a robot window comes on the screen only for a person step AND only while the Adal Keep window is open', async () => {
-  const B = await import('../src/services/browser.js')
-  const calls = []
-  const page = { isClosed: () => false, target: () => ({ createCDPSession: async () => ({ send: async (m, b) => { calls.push([m, b]); return m === 'Browser.getWindowForTarget' ? { windowId: 1, bounds: {} } : {} }, detach: async () => {} }) }), browser: () => ({}) }
-  // Even where windows may show (Windows, hidden agents): closed app window → nothing on the screen.
-  const real = B.showsWindowHere
-  assert.equal(typeof real, 'function')
-  assert.equal(await B.showForPerson(page, { appOpen: 0 }), false)
-  assert.equal(calls.length, 0)
-  const src = read('adal-keep-backend/src/services/browser.js')
-  const fn = src.slice(src.indexOf('export async function showForPerson'), src.indexOf('export async function hideFromPerson'))
-  assert.ok(fn.indexOf('windowsOpen()') > 0 && fn.indexOf('windowsOpen()') < fn.indexOf('setWindowBounds'), 'the open-window check comes before the window moves')
-})

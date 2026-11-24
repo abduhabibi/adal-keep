@@ -70,9 +70,6 @@ export function isPeerUrl(url, peer) {
 
 const TRACKERS = /(^|\.)(google-analytics\.com|googletagmanager\.com|doubleclick\.net|facebook\.net|facebook\.com|hotjar\.com|clarity\.ms|tiktok\.com|snapchat\.com|twitter\.com|linkedin\.com|youtube\.com)$/i
 
-const LOGOUT = /^https?:\/\/[^/]*(wahid\.sa|musaned\.com\.sa)(:\d+)?\/.*(openid-connect\/logout|\/logout\b)/i
-const CAPTCHA_HOSTS = /(^|\.)(google\.com|gstatic\.com|recaptcha\.net)$/i
-
 function isClosed(page) {
   try { return !page || (typeof page.isClosed === 'function' && page.isClosed()) } catch { return true }
 }
@@ -86,10 +83,8 @@ function isClosed(page) {
  * and request-intercepted with the dynamic `page.__adalAllowImages` policy.
  * Idempotent — safe to call on a tab the run already owns.
  */
-const wake = async (p) => { if (p?.__adalWake) await p.__adalWake().catch(() => {}) }   // sessionKeeper.freezeTab
 export async function setupTab(page, { runId, mute = true } = {}) {
   if (!page) return page
-  if (page.__adalFrozen) await wake(page)
   // The tab remembers its run in the page itself, so after a server restart
   // Adal Keep finds it again. Going to another site wipes window.name: it is
   // written again on every page load (the top page only, not its frames).
@@ -127,20 +122,11 @@ export async function setupTab(page, { runId, mute = true } = {}) {
   try {
     await page.setRequestInterception(true)
     page.on('request', req => {
-      // Never signed out by the site itself (the owner: "keep every login for a day"): a Musaned page whose
-      // sign-in refresh failed on a dropped line went to the sign-out address — six tabs on this PC, 2026-11-24.
-      // Only Adal Keep's own account switch signs out (page.__adalMayLogOut, or a tab of its own).
-      if (!page.__adalMayLogOut && req.isNavigationRequest() && LOGOUT.test(req.url())) {
-        console.log(`[tabManager] a sign-out of ${hostOf(req.url())} stopped (the day's sign-in stays)`)
-        req.abort().catch(() => {})
-        return
-      }
       // Only what the work needs comes down: no tracking scripts, videos or
       // sounds (and no pictures, except where the reCAPTCHA needs them). With
       // 3–4 runs at once every run gets more of the internet connection.
       const type = req.resourceType()
-      // Google's reCAPTCHA (its box and its pictures) always comes: a person must see it to tick it.
-      const allowImages = page.__adalAllowImages === true || CAPTCHA_HOSTS.test(hostOf(req.url()))
+      const allowImages = page.__adalAllowImages === true
       // Fonts too (2026-11-23): 100–400 KB a page on a slow line, and the robot reads text, not letters' shapes.
       if ((!allowImages && (type === 'image' || type === 'font')) || type === 'media' || TRACKERS.test(hostOf(req.url()))) req.abort().catch(() => {})
       else {
@@ -341,8 +327,6 @@ async function findFreeTab(browser, workflowId, busyRuns, space = null) {
   const mine = space || browser.defaultBrowserContext?.() || null
   const onSite = (await browser.pages().catch(() => [])).filter(p => !isClosed(p) && !owned.has(p) && host.test(p.url()) && (!mine || spaceIs(p, mine)))
   const signedIn = (p) => { try { return !!signedInHere[peer]?.(p.url()) } catch { return false } }
-  // A waiting sign-in tab is frozen (sessionKeeper.freezeTab): woken first, so it can be looked at and taken.
-  for (const p of onSite) if (p.__adalFrozen) await wake(p)
   for (const p of onSite.sort((a, b) => signedIn(b) - signedIn(a))) {
     if (await isFree(p, busyRuns, signedIn(p))) return p
   }
@@ -497,10 +481,8 @@ export async function openRunTab(browser, runId, { workflowId = '', busyRuns = n
     // A free tab already on the site is taken (tab reuse, 2026-11-21; LMIS: never
     // a second LMIS of the same account). findFreeTab never takes the front tab
     // nor one a person typed in.
-    // Also the site's tab an earlier run still holds while it waits for a sign-in (siteTab): one tab per
-    // site and account, never a second one beside it (2026-11-23: two Musaned runs opened two tabs).
     const there = await oneAtATime(async () => {
-      const p = await findFreeTab(browser, workflowId, busyRuns, space) || (keepRuns && await siteTab(browser, workflowId, keepRuns, space))
+      const p = await findFreeTab(browser, workflowId, busyRuns, space)
       if (p) _tabs.set(id, p)
       return p
     })
@@ -516,7 +498,7 @@ export async function openRunTab(browser, runId, { workflowId = '', busyRuns = n
     await setupTab(page, { runId: id })
     const peer = peerOf(workflowId)
     const lent = peer ? await borrowSignIn(page, peer).catch(() => null) : null
-    console.log(`[tabManager] run #${id} opened its own tab out of sight${lent ? ', signed in from another tab' : ''}`)
+    console.log(`[tabManager] run #${id} opened its own tab out of sight (helping another PC)${lent ? ', signed in from another tab' : ''}`)
     return page
   }
   const free = await oneAtATime(async () => {

@@ -107,11 +107,9 @@ export default function NeedsFill({ profileId, workflowId = null, cv = false, fi
   // Everything there after the person filled it in: the step goes on by itself.
   useEffect(() => { if (ready && filled) { setFilled(false); onReady?.() } }, [ready, filled]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // What a box starts with: living town is her place of birth unless typed otherwise.
-  const valueOf = (col) => values[col] ?? (col === 'living_town' ? (profile.place_of_birth || '') : '')
   const save = async () => {
     const body = {}
-    for (const it of [...items, ...extras]) if (it.col && String(valueOf(it.col)).trim() !== '') body[it.col] = it.type === 'number' ? Number(valueOf(it.col)) : valueOf(it.col)
+    for (const it of [...items, ...extras]) if (it.col && String(values[it.col] ?? '').trim() !== '') body[it.col] = it.type === 'number' ? Number(values[it.col]) : values[it.col]
     if (!Object.keys(body).length) return toast.error('Choose or type something first')
     setSaving(true)
     setSaveError('')
@@ -152,7 +150,7 @@ export default function NeedsFill({ profileId, workflowId = null, cv = false, fi
                     {(it.brokers ? brokers.map(b => [b.id, b.name || b.full_name || `Broker ${b.id}`]) : it.options).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                   </select>
                 ) : (
-                  <input className={`${input} mt-1`} type={it.type} placeholder={it.hint || ''} value={valueOf(it.col)}
+                  <input className={`${input} mt-1`} type={it.type} placeholder={it.hint || ''} value={values[it.col] ?? ''}
                     onChange={e => setValues(v => ({ ...v, [it.col]: e.target.value }))} />
                 )}
               </label>

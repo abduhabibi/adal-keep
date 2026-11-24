@@ -783,11 +783,46 @@ const SIGN_IN_FRESH_MS = 30 * 60e3
  * paused at the same reCAPTCHA, each one more beep and one more notice). It waits; once the person
  * signs in, the paused run goes on, ends, and the next one starts in the signed-in tab.
  */
-export async function signInLanes(db, now = Date.now()) {
+export async function signInLanes(db, now = Date.now(), { tabLive = _tabLive } = {}) {
   const since = new Date(now - SIGN_IN_FRESH_MS).toISOString()
   const rows = await db('automation_queue').where('status', 'paused').where('updated_at', '>', since)
     .select('id', 'workflow_id', 'account_id', 'context', 'pause_reason').catch(() => [])
-  return new Set(rows.filter(r => SIGN_IN_WAIT.test(String(r.pause_reason || ''))).map(laneOf).filter(Boolean))
+  // Only while its tab is really there: a run whose browser is gone (closed, restarted) holds nothing
+  // (2026-11-24: the robot browser died, 4 runs stayed "waiting for the sign-in" and held 25 others).
+  return new Set(rows.filter(r => SIGN_IN_WAIT.test(String(r.pause_reason || '')) && tabLive(r.id)).map(laneOf).filter(Boolean))
+}
+
+/** The run's tab is open in a browser this PC is connected to. */
+export function runTabLive(runId) {
+  const t = tabOfRun(runId)
+  try { return !!t && t.browser?.()?.connected !== false } catch { return false }
+}
+
+let _tabLive = (id) => runTabLive(id)
+export const _setTabLiveForTest = (fn) => { _tabLive = fn || ((id) => runTabLive(id)) }
+const SIGN_IN_GIVE_UP_MS = 6 * 3600e3
+/**
+ * A run paused for a sign-in whose tab is gone (its browser closed or died, the server restarted) never stays
+ * paused for ever: it goes back in line at its step, opens the browser and the site's sign-in again, and calls
+ * the person once more. Past 6 hours nobody expects it: it ends, saying why. At start and every minute.
+ */
+export async function reviveSignIns(db, now = Date.now(), { tabLive = _tabLive } = {}) {
+  const rows = await db('automation_queue').where('status', 'paused').select('id', 'pause_reason', 'updated_at').catch(() => [])
+  let back = 0, ended = 0
+  for (const r of rows) {
+    if (!SIGN_IN_WAIT.test(String(r.pause_reason || '')) || tabLive(r.id)) continue
+    const at = Date.parse(r.updated_at || '') || 0
+    const iso = new Date(now).toISOString()
+    if (now - at > SIGN_IN_GIVE_UP_MS) {
+      ended += await db('automation_queue').where({ id: r.id, status: 'paused' }).update({ status: 'cancelled', pause_reason: 'Nobody signed in within 6 hours (its browser was closed meanwhile): start it again', finished_at: iso, updated_at: iso }).catch(() => 0)
+    } else {
+      // Pending with its step kept (pause_reason): it goes on from the sign-in.
+      back += await db('automation_queue').where({ id: r.id, status: 'paused' }).update({ status: 'pending', updated_at: iso }).catch(() => 0)
+    }
+  }
+  if (back) console.log(`[worker] ${back} run(s) waiting for a sign-in had lost their browser — back in line, the sign-in opens again`)
+  if (ended) console.log(`[worker] ${ended} run(s) waiting for a sign-in for over 6 hours without a browser — ended`)
+  return { back, ended }
 }
 
 export async function claimNextJob(db, exclude = [], lanes = new Set()) {
@@ -1092,7 +1127,8 @@ export function startWorker(db) {
   )
   closeStaleHistory(db).then(() => pruneHistory(db))
   setInterval(() => pruneHistory(db), 6 * 3600_000).unref?.()
-  parkInterruptedRuns(db).finally(() => drainQueue(db))
+  parkInterruptedRuns(db).then(() => reviveSignIns(db)).catch(() => {}).finally(() => drainQueue(db))
+  setInterval(() => reviveSignIns(db).then(r => { if (r.back) drainQueue(db) }).catch(e => console.warn('[worker] sign-in revive:', e.message)), 60000).unref?.()
   // The poll only matters for retries whose backoff has run out and for runs
   // queued by the scanner: a click or a finished run starts the next one at once.
   _interval = setInterval(() => {

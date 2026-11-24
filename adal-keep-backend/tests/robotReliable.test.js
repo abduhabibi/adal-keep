@@ -104,7 +104,8 @@ test("Tasheer: Cloudflare's hard block is not a box to tick (live page text, 202
 })
 
 test('a run paused at the sign-in (a captcha) holds back the next run of its site and account, not other ones', async () => {
-  const { claimNextJob, signInLanes } = await import('../src/services/worker.js')
+  const { claimNextJob, signInLanes, _setTabLiveForTest } = await import('../src/services/worker.js')
+  _setTabLiveForTest((id) => id === 1)   // run 1's tab is open
   const { default: knex } = await import('knex')
   const db = knex({ client: 'sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true })
   try {
@@ -126,5 +127,31 @@ test('a run paused at the sign-in (a captcha) holds back the next run of its sit
     // The person signed in: the paused run went on and ended; the next one starts.
     await db('automation_queue').where('id', 1).update({ status: 'done' })
     assert.equal((await claimNextJob(db)).id, 2)
-  } finally { await db.destroy() }
+  } finally { _setTabLiveForTest(null); await db.destroy() }
+})
+
+test("a run waiting for a sign-in whose browser is gone holds nothing and goes back in line; past 6 h it ends", async () => {
+  const { claimNextJob, signInLanes, reviveSignIns, _setTabLiveForTest } = await import('../src/services/worker.js')
+  const { default: knex } = await import('knex')
+  const db = knex({ client: 'sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true })
+  _setTabLiveForTest(() => false)   // the robot browser died: no tab of any run
+  try {
+    await db.schema.createTable('automation_queue', t => {
+      t.increments('id'); t.string('workflow_id'); t.integer('profile_id'); t.integer('account_id'); t.text('context')
+      t.string('status'); t.string('pause_reason'); t.string('updated_at'); t.string('started_at'); t.string('finished_at'); t.text('log')
+    })
+    const now = Date.now(), iso = (ms) => new Date(ms).toISOString()
+    await db('automation_queue').insert([
+      { workflow_id: 'musaned_add_candidate', account_id: 1, status: 'paused', pause_reason: 'awaiting-musaned-login', updated_at: iso(now - 5 * 60e3) },
+      { workflow_id: 'musaned_add_candidate', account_id: 1, status: 'paused', pause_reason: 'awaiting-musaned-captcha', updated_at: iso(now - 7 * 3600e3) },
+      { workflow_id: 'musaned_add_candidate', account_id: 1, status: 'paused', pause_reason: 'awaiting-human-save', updated_at: iso(now) },
+    ])
+    assert.equal((await signInLanes(db)).size, 0)
+    assert.deepEqual(await reviveSignIns(db, now), { back: 1, ended: 1 })
+    const rows = await db('automation_queue').orderBy('id')
+    assert.deepEqual(rows.map(r => r.status), ['pending', 'cancelled', 'paused'])
+    assert.equal(rows[0].pause_reason, 'awaiting-musaned-login')   // it goes on from its step
+    assert.match(rows[1].pause_reason, /within 6 hours/)
+    assert.equal((await claimNextJob(db)).id, 1)
+  } finally { _setTabLiveForTest(null); await db.destroy() }
 })

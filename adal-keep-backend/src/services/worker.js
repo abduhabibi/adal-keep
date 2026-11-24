@@ -777,13 +777,39 @@ export async function signInLanes(db, now = Date.now(), { tabLive = _tabLive } =
   // (2026-11-24: the robot browser died, 4 runs stayed "waiting for the sign-in" and held 25 others).
   // (Also a sign-in nobody answered in 5 minutes, NO_ANSWER: its tab still waits at the box — the next run
   // would only open a second sign-in tab beside it and call again.)
-  return new Set(rows.filter(r => (SIGN_IN_WAIT.test(String(r.pause_reason || '')) || r.pause_reason === NO_ANSWER) && tabLive(r.id)).map(laneOf).filter(Boolean))
+  const lanes = new Set(rows.filter(r => (SIGN_IN_WAIT.test(String(r.pause_reason || '')) || r.pause_reason === NO_ANSWER) && tabLive(r.id)).map(laneOf).filter(Boolean))
+  // Forms waiting for a person's Save: each holds a tab with its filled form (8 Musaned tabs on this PC,
+  // 2026-11-24, gigabytes on a weak PC). At most a few per site and account; the next run waits in line
+  // until a person saves one (nothing is lost, nothing is filled twice).
+  const saves = await db('automation_queue').where('status', 'paused').where('pause_reason', 'like', 'awaiting-%-save')
+    .select('id', 'workflow_id', 'account_id', 'context').catch(() => [])
+  const count = {}
+  for (const r of saves) if (tabLive(r.id)) { const l = laneOf(r); if (l) count[l] = (count[l] || 0) + 1 }
+  for (const [l, n] of Object.entries(count)) if (n >= maxSaveWaiting()) lanes.add(l)
+  return lanes
 }
+/** How many forms may wait for Save per site and account: 3, 2 on a PC of 4 cores or fewer (ADAL_MAX_SAVE_WAITING). */
+export const maxSaveWaiting = () => Number(process.env.ADAL_MAX_SAVE_WAITING) || ((os.cpus()?.length || 2) <= 4 ? 2 : 3)
 
 /** The run's tab is open in a browser this PC is connected to. */
 export function runTabLive(runId) {
   const t = tabOfRun(runId)
   try { return !!t && t.browser?.()?.connected !== false } catch { return false }
+}
+
+/**
+ * After a restart: each paused run's tab (its form waiting for Save, its sign-in) is found again in the robot
+ * browser (the tab carries the run's name), so the limits above count it and the run goes on in it.
+ */
+export async function adoptWaitingTabs(db) {
+  const browser = await openBrowserIfAny().catch(() => null)
+  if (!browser) return 0
+  let n = 0
+  for (const r of await db('automation_queue').where('status', 'paused').select('id', 'workflow_id').catch(() => [])) {
+    if (await findRunTab(browser, r.id, r.workflow_id, { bySite: false }).catch(() => null)) n++
+  }
+  if (n) console.log(`[worker] ${n} waiting run(s) found their tab again after the restart`)
+  return n
 }
 
 let _tabLive = (id) => runTabLive(id)
@@ -1121,7 +1147,7 @@ export function startWorker(db) {
   )
   closeStaleHistory(db).then(() => pruneHistory(db))
   setInterval(() => pruneHistory(db), 6 * 3600_000).unref?.()
-  parkInterruptedRuns(db).then(() => reviveSignIns(db)).catch(() => {}).finally(() => drainQueue(db))
+  parkInterruptedRuns(db).then(() => adoptWaitingTabs(db)).then(() => reviveSignIns(db)).catch(() => {}).finally(() => drainQueue(db))
   setInterval(() => reviveSignIns(db).then(r => { if (r.back) drainQueue(db) }).catch(e => console.warn('[worker] sign-in revive:', e.message)), 60000).unref?.()
   // The poll only matters for retries whose backoff has run out and for runs
   // queued by the scanner: a click or a finished run starts the next one at once.

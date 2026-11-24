@@ -162,3 +162,28 @@ test("a run waiting for a sign-in whose browser is gone holds nothing and goes b
     assert.equal((await claimNextJob(db)).id, 1)
   } finally { _setTabLiveForTest(null); await db.destroy() }
 })
+
+test('at most a few forms wait for Save per site and account: the next run waits in line', async () => {
+  process.env.ADAL_MAX_SAVE_WAITING = '2'
+  const { claimNextJob, _setTabLiveForTest } = await import('../src/services/worker.js')
+  const { default: knex } = await import('knex')
+  const db = knex({ client: 'sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true })
+  _setTabLiveForTest(() => true)
+  try {
+    await db.schema.createTable('automation_queue', t => {
+      t.increments('id'); t.string('workflow_id'); t.integer('profile_id'); t.integer('account_id'); t.text('context')
+      t.string('status'); t.string('pause_reason'); t.string('updated_at'); t.string('started_at'); t.string('finished_at'); t.text('log')
+    })
+    const now = new Date().toISOString()
+    await db('automation_queue').insert([
+      { workflow_id: 'musaned_add_candidate', account_id: 1, status: 'paused', pause_reason: 'awaiting-human-save', updated_at: now },
+      { workflow_id: 'musaned_add_candidate', account_id: 1, status: 'paused', pause_reason: 'awaiting-human-save', updated_at: now },
+      { workflow_id: 'musaned_add_candidate', account_id: 1, status: 'pending', updated_at: now },
+      { workflow_id: 'wafid_slip', status: 'pending', updated_at: now },
+    ])
+    assert.equal((await claimNextJob(db)).workflow_id, 'wafid_slip')     // Musaned waits: 2 forms wait for Save
+    assert.equal(await claimNextJob(db), null)
+    await db('automation_queue').where('id', 1).update({ status: 'done' })   // a person saved one
+    assert.equal((await claimNextJob(db)).id, 3)
+  } finally { delete process.env.ADAL_MAX_SAVE_WAITING; _setTabLiveForTest(null); await db.destroy() }
+})

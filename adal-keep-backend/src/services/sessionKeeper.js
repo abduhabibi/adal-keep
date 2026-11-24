@@ -255,7 +255,9 @@ async function closeSpareTabs(pages) {
   for (const site of SITES) {
     const tabs = []
     for (const p of pages) {
-      if (p.isClosed?.() || siteOf(p.url()) !== site || spaceOf(p)) continue   // the main account's space only
+      // (Musaned's sign-in site, wahid.sa, is Musaned's too: a tab left there is a signed-out Musaned tab.)
+      const mine = siteOf(p.url()) === site || (site.key === 'musaned' && (() => { try { return /(^|\.)wahid\.sa$/.test(hostOf(p.url())) } catch { return false } })())
+      if (p.isClosed?.() || !mine || spaceOf(p)) continue   // the main account's space only
       const typed = await Promise.race([p.evaluate(() => [...document.querySelectorAll('input, textarea')].some(e => !['hidden', 'password', 'checkbox', 'radio', 'file', 'submit', 'button'].includes(e.type) && e.value && e.value !== e.defaultValue)).catch(() => true), new Promise(r => setTimeout(() => r(true), 5000))])
       const id = Number(p.__adalRunId)
       tabs.push({ p, owned: Number.isFinite(id) && active.has(id), borrowed: !!p.__adalBorrowed || !!p.__adalShown || !!p.__adalPerson, typed, signedIn: signedInAt(site, p.url()) })

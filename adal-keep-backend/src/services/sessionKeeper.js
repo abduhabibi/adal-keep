@@ -204,6 +204,7 @@ async function keepAliveNow() {
     for (const k of [...signedSince.keys()]) { const [key, sp] = k.split('|'); if (!seen[key]?.spaces?.[sp]) signedSince.delete(k) }
     if (Object.values(seen).some(x => x.signedIn)) await saveSessionCookies(browser).catch(e => console.warn('[sessions] cookies not kept:', e.message))
     await closeSpareTabs(pages).catch(e => console.warn('[sessions] spare tabs:', e.message))
+    await closeLostSignOuts(browser, pages).catch(e => console.warn('[sessions] lost sign-out tabs:', e.message))
     await wafidStandby(browser, pages, running).catch(e => console.warn('[sessions] Wafid standby:', e.message))
     return kept
   } finally { busy = false }
@@ -281,6 +282,21 @@ async function closeSpareTabs(pages) {
     for (const t of go) await t.p.close().catch(() => {})
     if (go.length) console.log(`[sessions] ${site.name}: ${go.length} tab(s) no run needs any more closed (one signed-in tab stays)`)
   }
+}
+
+// Tabs the robot's own tab list no longer shows (2026-11-24, this PC: six left on wahid.sa's sign-out page with
+// "no internet" after a dropped line, never closed) but the browser keeps: closed by the browser's own list —
+// only a portal's sign-out page or the browser's error page, never anything else.
+export const lostSignOut = (url) => /^https?:\/\/[^/]*(wahid\.sa|musaned\.com\.sa)(:\d+)?\/.*(openid-connect\/logout|\/logout\b)/i.test(url) || /^chrome-error:/i.test(url)
+async function closeLostSignOuts(browser, pages) {
+  const known = new Set(pages.map(p => { try { return p.target()._targetId } catch { return null } }).filter(Boolean))
+  const cdp = await browser.target().createCDPSession()
+  try {
+    const { targetInfos } = await cdp.send('Target.getTargets')
+    const lost = targetInfos.filter(t => t.type === 'page' && !known.has(t.targetId) && lostSignOut(t.url))
+    for (const t of lost) await cdp.send('Target.closeTarget', { targetId: t.targetId }).catch(() => {})
+    if (lost.length) console.log(`[sessions] ${lost.length} tab(s) left on a site's sign-out or error page closed`)
+  } finally { await cdp.detach().catch(() => {}) }
 }
 
 // ── Wafid on standby (the owner, 2026-11-24: "keep the wafid stand by to make things faster, cuz wafid doesn't

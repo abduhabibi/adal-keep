@@ -68,7 +68,11 @@ export async function listBrowsers(db, deps = {}) {
     const k = await import('./sessionKeeper.js')
     const list = k.signInTabs()
     const t = await (await import('./tasheerSession.js')).siteTab('site-tasheer').catch(() => null)
-    if (t && !list.some(x => x.page === t)) list.push({ key: 'site-tasheer', page: t, site: 'Tasheer', girl: '', status: k.kept.tasheer?.signedIn ? 'Signed in' : 'Sign in', needs_you: !k.kept.tasheer?.signedIn, task: k.kept.tasheer?.signedIn ? null : 'Sign in to Tasheer: type the captcha and sign in' })
+    if (t && !list.some(x => x.page === t)) {
+      const inNow = !!k.kept.tasheer?.signedIn, blocked = !inNow && !!t.__adalBlocked
+      list.push({ key: 'site-tasheer', page: t, site: 'Tasheer', girl: '', status: inNow ? 'Signed in' : blocked ? 'Blocked by the site' : 'Sign in', needs_you: !inNow && !blocked,
+        task: inNow ? null : blocked ? "Tasheer's security (Cloudflare) blocks this PC's robot browser — sign in from another PC or internet line" : 'Sign in to Tasheer: type the captcha and sign in' })
+    }
     return list
   })().catch(() => [])
   const runIds = new Set(out.map(b => b.run_id))

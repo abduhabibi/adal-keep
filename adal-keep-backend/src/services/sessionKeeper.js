@@ -203,6 +203,7 @@ async function keepAliveNow() {
     }
     for (const k of [...signedSince.keys()]) { const [key, sp] = k.split('|'); if (!seen[key]?.spaces?.[sp]) signedSince.delete(k) }
     if (Object.values(seen).some(x => x.signedIn)) await saveSessionCookies(browser).catch(e => console.warn('[sessions] cookies not kept:', e.message))
+    await knowSignInTabs(pages).catch(e => console.warn('[sessions] sign-in tabs:', e.message))
     await closeSpareTabs(pages).catch(e => console.warn('[sessions] spare tabs:', e.message))
     await closeLostSignOuts(browser, pages).catch(e => console.warn('[sessions] lost sign-out tabs:', e.message))
     await wafidStandby(browser, pages, running).catch(e => console.warn('[sessions] Wafid standby:', e.message))
@@ -284,6 +285,26 @@ async function closeSpareTabs(pages) {
   }
 }
 
+// After Adal Keep started again: each site's signed-in tab (no run in it) is its sign-in tab again, so the sidebar
+// shows it; a sign-in tab that a site blocks (Cloudflare's "Sorry, you have been blocked") is marked as such.
+async function knowSignInTabs(pages) {
+  const { keepingRunIds } = await import('./tabManager.js')
+  const keeping = await keepingRunIds(db).catch(() => new Set())
+  for (const p of pages) {
+    if (p.isClosed?.() || p.__adalRunId || keeping.has(Number(p.__adalRunId))) continue
+    const site = siteOf(p.url())
+    const title = await Promise.race([p.title().catch(() => ''), new Promise(r => setTimeout(() => r(''), 2000))])
+    p.__adalBlocked = !!site && BLOCKED_TITLE.test(title)
+    if (!site || !(kept[site.key]?.spaces || {})[spaceOf(p)] || [...live.values()].includes(p)) continue
+    if (!(await tabSignedIn(site, p).catch(() => false))) continue
+    const sp = spaceOf(p)
+    const key = sp ? `site-${site.key}-${sp.split(':')[1]}` : `site-${site.key}`
+    if (siteTab(key)) continue
+    live.set(key, p)
+    liveInfo.set(key, { key: site.key, name: site.name, account: (/^\[([^\]]+)\]/.exec(title) || [])[1] || '' })
+  }
+}
+
 // Tabs left on a portal's sign-out page (2026-11-24, this PC: six on wahid.sa's sign-out with "no internet" after a
 // dropped line, never closed — the robot saw only the browser's error page in them, not where they were): closed by
 // the address the browser gives for the tab. Never a tab a run, a check or a person uses.
@@ -334,6 +355,7 @@ export async function wafidStandby(browser, pages, running = new Set(), now = Da
     info = { url: p.url(), busy: running.has(Number(p.__adalRunId)) || !!p.__adalBorrowed, typed: !!st?.typed, broken: !st || st.broken, loadedAt: p.__adalStandbyAt || 0 }
   }
   const step = standbyStep(info, now)
+  if (p) { live.set('site-wafid', p); liveInfo.set('site-wafid', { key: 'wafid', name: 'Wafid', account: '' }) }
   if (step === 'ok') return step
   if (step === 'open') {
     p = await newRunTab(browser, null, { quiet: true })
@@ -440,7 +462,7 @@ export async function sessionsNow() {
       let why = ''
       if (!signedIn && t && !t.isClosed?.()) {
         const title = await Promise.race([t.title().catch(() => ''), new Promise(r => setTimeout(() => r(''), 2000))])
-        if (BLOCKED_TITLE.test(title)) { state = 'blocked'; why = BLOCKED_WHY[s.key] || BLOCKED_WHY.any }
+        if (BLOCKED_TITLE.test(title)) { state = 'blocked'; why = BLOCKED_WHY[s.key] || BLOCKED_WHY.any; t.__adalBlocked = true }
       }
       accounts.push({ ...a, signedIn, state, why, since: since ? new Date(since).toISOString() : null, until: since ? new Date(since + COOKIES_KEPT_MS).toISOString() : null })
     }
@@ -547,8 +569,9 @@ export function signInTabs() {
     try { const site = SITES.find(s => s.key === info.key); inNow = !!site && !!(kept[site.key]?.spaces || {})[spaceOf(p)] } catch {}
     const wafid = info.key === 'wafid'
     out.push({ key, page: p, run_id: Number(p.__adalRunId) || null, site: info.name || 'Site', girl: info.account || '',
-      status: wafid ? 'Ready (no sign-in)' : inNow ? 'Signed in' : p.__adalSigning ? 'Waiting for your sign-in' : 'Sign in',
-      needs_you: !wafid && !inNow, task: !wafid && !inNow ? `Sign in to ${info.name}${info.account ? ` (${info.account})` : ''}: ${ASK[info.key] || ''}` : null })
+      status: wafid ? 'Ready (no sign-in)' : inNow ? 'Signed in' : p.__adalBlocked ? 'Blocked by the site' : p.__adalSigning ? 'Waiting for your sign-in' : 'Sign in',
+      needs_you: !wafid && !inNow && !p.__adalBlocked,
+      task: wafid || inNow ? null : p.__adalBlocked ? (BLOCKED_WHY[info.key] || BLOCKED_WHY.any) : `Sign in to ${info.name}${info.account ? ` (${info.account})` : ''}: ${ASK[info.key] || ''}` })
   }
   return out
 }

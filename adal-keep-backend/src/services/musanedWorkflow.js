@@ -465,9 +465,19 @@ export async function stepClickAgencyCard(page, ctx) {
     throw Object.assign(new Error('signing in again as this run\'s account'), { signInAgain: true })
   }
   const agencyHint = String(ctx.musaned_name || ctx.musaned_username || '').trim().toUpperCase()
-  const deadline = Date.now() + 20000
+  // Musaned's list of agencies ("Please select the establishment") can spin for a long time (2026-11-24: three
+  // runs failed after 20 s with its spinner still turning): 45 s, then Musaned loaded fresh once, 45 s more.
+  let deadline = Date.now() + 45000, fresh = false
   let clicked = false
-  while (Date.now() < deadline && !clicked) {
+  while (!clicked) {
+    if (Date.now() >= deadline) {
+      if (fresh) break
+      fresh = true
+      log(ctx, '⏳ Musaned\'s list of agencies is still loading after 45 s — loading Musaned again once', 'warn')
+      await page.goto('https://tawtheeq.musaned.com.sa/', { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {})
+      deadline = Date.now() + 45000
+      continue
+    }
     const found = await page.evaluate((hint) => {
       const collectAll = (root) => {
         const out = []
@@ -507,7 +517,7 @@ export async function stepClickAgencyCard(page, ctx) {
     }
     await sleep(700)
   }
-  if (!clicked) throw new Error('Agency card not found')
+  if (!clicked) throw new Error('Agency card not found: Musaned\'s list of agencies kept loading for 90 s (loaded again once). Nothing was filled. Try again when Musaned answers.')
   return { ok: true }
 }
 
@@ -560,6 +570,13 @@ export async function stepClickHrPool(page, ctx) {
 }
 
 export async function stepClickAddNewCandidate(page, ctx) {
+  // A tab already on an Add Candidate form (this run's own, filled before Adal Keep restarted — 2026-11-24, run
+  // 402 failed there: "ADD NEW CANDIDATE not found"): back to the HR Pool list, then Add New Candidate as always.
+  if (/\/hr-pool\/candidates\/add/i.test(page.url())) {
+    log(ctx, '↩ this tab is still on an Add Candidate form from before Adal Keep restarted — back to the HR Pool list to add her again')
+    await page.goto(new URL('/hr-pool', page.url()).href, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {})
+    await page.waitForFunction(() => [...document.querySelectorAll('button, a, [role="button"]')].some(el => /add\s+new\s+candidate/i.test(el.textContent || '')), { timeout: 45000 }).catch(() => {})
+  }
   const deadline = Date.now() + 20000
   let clicked = false
   while (Date.now() < deadline && !clicked) {

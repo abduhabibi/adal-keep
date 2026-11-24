@@ -537,7 +537,7 @@ export function prepareSignIns(database, { force = false, why = 'opened' } = {})
       try {
         let r
         if (l.key === 'lmis') r = await openLmisSignIn(browser, l.account)
-        else if (l.key === 'tasheer') r = await (await import('./tasheerSession.js')).takeOver(db, { by: 'Morning sign-in', pc: (await import('os')).hostname() })
+        else if (l.key === 'tasheer') r = await (await import('./tasheerSession.js')).takeOver(db, { by: 'Morning sign-in', pc: (await import('os')).hostname(), quiet: true })
         else r = await openSite(l.key, db, { accountId: l.account.main ? null : l.account.id, browser })
         const page = siteTab(r?.live || l.account.live) || await (await import('./tasheerSession.js')).siteTab(r?.live || '').catch(() => null)
         const how = r?.already ? 'signed in already' : page ? await settled(page) : 'no tab'

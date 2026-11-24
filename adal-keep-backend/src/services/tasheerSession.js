@@ -67,7 +67,7 @@ export async function tasheerNow(db) {
 }
 
 /** "Sign in here": the agency's Tasheer sign-in moves to this person. */
-export async function takeOver(db, { by = '', pc = '', accountId = null } = {}) {
+export async function takeOver(db, { by = '', pc = '', accountId = null, quiet = false } = {}) {
   const working = await db('automation_queue').where('status', 'running').where('workflow_id', 'like', 'tasheer%').first('id').catch(() => null)
   if (working) throw new Error(`A Tasheer robot is working now (run #${working.id}) — wait until it is done, or stop it, then sign in.`)
   const acct = await (accountId ? db('tasheer_accounts').where('id', Number(accountId)) : db('tasheer_accounts').orderBy('is_default', 'desc')).first().catch(() => null)
@@ -75,7 +75,8 @@ export async function takeOver(db, { by = '', pc = '', accountId = null } = {}) 
   if (!acct?.username || !acct?.password) throw new Error('No Tasheer account yet — add one under AI Actions → Tasheer → Login')
   const browser = await getBrowser()
   const pages = (await browser.pages().catch(() => [])).filter(p => onTasheer(p) && !p.isClosed?.())
-  const page = pages[0] || await openForPerson()
+  // (The morning sign-in, from start-up: a tab out of sight, never a window — the live view shows it.)
+  const page = pages[0] || (quiet ? await (await import('./browser.js')).newRunTab(browser, null, { quiet: true }) : await openForPerson())
   for (const p of pages.slice(1)) await p.close().catch(() => {})
   // The old session ends here: Tasheer's cookies go, so the sign-in is a new one.
   const cdp = await page.createCDPSession()

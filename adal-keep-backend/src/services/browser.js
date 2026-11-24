@@ -594,6 +594,42 @@ export async function openForPerson(space = null) {
   return page
 }
 
+/*
+ * A person's step on Windows (the owner, 2026-11-24: "yes build it"): while a run waits for a person (a captcha,
+ * a code, a tick), the robot's own window comes on the screen, in front, with the run's tab; when the step is
+ * over, or after 10 minutes, it goes back out of sight. Only where windows are out of sight (Windows with hidden
+ * agents): on Linux there is no window at all (headless) and the live view is the way in.
+ */
+export const PERSON_SHOW_MS = 10 * 60e3
+export const showsWindowHere = ({ platform = process.platform, hidden = HIDDEN, headless = noWindows() } = {}) => platform === 'win32' && hidden && !headless
+export async function showForPerson(page, { force = false, ms = PERSON_SHOW_MS } = {}) {
+  if (!page || page.isClosed?.() || !(force || showsWindowHere())) return false
+  try {
+    const w = await windowOf(page)
+    await w.cdp.send('Browser.setWindowBounds', { windowId: w.windowId, bounds: { windowState: 'normal' } })
+    await w.cdp.send('Browser.setWindowBounds', { windowId: w.windowId, bounds: { left: 40, top: 20, width: 1366, height: 900 } })
+    await w.cdp.send('Browser.setWindowBounds', { windowId: w.windowId, bounds: { windowState: 'maximized' } }).catch(() => {})
+    // (setupTab turned page.bringToFront into nothing for runs: this one is a person's.)
+    await w.cdp.send('Page.bringToFront').catch(() => {})
+    clearTimeout(page.__adalShowTimer)
+    page.__adalShown = Date.now()
+    page.__adalShowTimer = setTimeout(() => hideFromPerson(page).catch(() => {}), ms)
+    page.__adalShowTimer.unref?.()
+    console.log('[browser] a person step: the robot window is on the screen')
+    return true
+  } catch (e) { console.warn('[browser] the robot window could not come on the screen:', e.message); return false }
+}
+/** The person's step is over: the window goes back out of sight (only one this brought on the screen). */
+export async function hideFromPerson(page) {
+  if (!page?.__adalShown) return false
+  clearTimeout(page.__adalShowTimer)
+  page.__adalShown = 0
+  if (page.isClosed?.()) return false
+  await place(await windowOf(page), OFF).catch(() => {})
+  console.log('[browser] the person step is over: the robot window is out of sight again')
+  return true
+}
+
 /** A window a person is done with goes out of sight; its tab keeps working. */
 export async function sendAway(page) {
   if (HIDDEN) await hide(page)

@@ -283,7 +283,7 @@ async function executeRun(db, page, job) {
       if (onLog) await onLog(level, `🔔 ${title}`)
       // A sign-in, code or reCAPTCHA waits for a person: it stays in the bar
       // until the run goes on (its next "✓"). Paused runs show from the queue.
-      if (human) needPerson(runId, title, body, { confirm: !!opts.confirm })
+      if (human) { needPerson(runId, title, body, { confirm: !!opts.confirm }); showWhileWaiting(runId, opts.login?.target ? opts.login : page) }
       beepFor(runId)
     } catch (e) {
       console.error('[notify] failed:', e.message)
@@ -526,6 +526,24 @@ async function browserForJob(db, job, { quiet = false } = {}) {
   return getBrowser()
 }
 
+/**
+ * Windows: the robot's window on the screen while the run waits for a person, out of sight again once
+ * it no longer waits (or after 10 min: browser.showForPerson). Not for a Companion's browser: nobody at
+ * that PC asked for it.
+ */
+export async function showWhileWaiting(runId, page, { B = null, A = null } = {}) {
+  try {
+    B = B || await import('./browser.js')
+    A = A || await import('./attention.js')
+    if ((await import('./remoteBrowsers.js')).deviceOf(page?.browser?.())) return false
+    if (page?.__adalShown) return true
+    if (!(await B.showForPerson(page))) return false
+    const off = A.onAttentionChange(() => { if (!A.isWaiting(runId)) { off(); B.hideFromPerson(page).catch(() => {}) } })
+    const t = setTimeout(off, B.PERSON_SHOW_MS + 1000); t.unref?.()
+    return true
+  } catch { return false }
+}
+
 async function appendLog(db, id, msg, level = 'info') {
   try {
     const row = await db('automation_queue').where('id', id).first('log')
@@ -686,6 +704,7 @@ async function runJob(db, job) {
       // Done, failed or cancelled: the tab stays open for the person.
       doneWith(job.id, { keepCaptcha: row?.status === 'paused' })
       if (['cancelled', 'failed', 'done'].includes(row?.status)) {
+        if (page?.__adalShown) (await import('./browser.js')).hideFromPerson(page).catch(() => {})
         forgetRunTab(job.id)
         // One tab for the site: the extra ones runs opened there close.
         const b = onDevice(job) ? await browserForJob(db, job, { quiet: true }).catch(() => null) : await openBrowserIfAny().catch(() => null)

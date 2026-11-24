@@ -66,7 +66,7 @@ async function main() {
   if (notMainPC()) { say('this PC is not the agency\'s main PC: the robots work there — nothing to do here'); return }
   // Below the person's programs: on a 2-core PC Adal Keep's window and the PC answer first (its browser inherits it).
   try { os.setPriority(0, os.constants.priority.PRIORITY_BELOW_NORMAL) } catch {}
-  const token = robotsToken()
+  const token = robotsToken(process.env.ADAL_ROBOTS_DATA || undefined)
   const db = await openDb()
   await db.raw('select 1')
   const express = (await import('express')).default
@@ -97,7 +97,8 @@ async function main() {
   })
   worker.startWorker(db)
   // What Adal Keep no longer runs itself (main.js, ROBOTS_HERE): it runs here.
-  const later = (name, f) => Promise.resolve().then(f).catch(e => console.warn(`[robots] ${name}:`, e.message))
+  // (ADAL_ROBOTS_EXTRAS=0: the queue only — a scratch copy's test.)
+  const later = (name, f) => process.env.ADAL_ROBOTS_EXTRAS === '0' ? null : Promise.resolve().then(f).catch(e => console.warn(`[robots] ${name}:`, e.message))
   later('sessions', async () => (await import('../src/services/sessionKeeper.js')).startSessionKeeper(db))   // a day's sign-ins kept, Wafid on standby
   later('scanner', async () => (await import('../src/services/autoScanner.js')).startScanner(db))              // new work found every 2 min
   later('wafid', async () => (await import('../src/services/wafidStatus.js')).startWafidChecker(db))

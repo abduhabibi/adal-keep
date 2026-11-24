@@ -25,7 +25,7 @@ export const passedTo = (method, p) => PASSED.find(([m, re]) => m === method && 
 let token = null
 const tokenOf = () => {
   if (token) return token
-  try { token = fs.readFileSync(path.resolve(process.cwd(), 'data', 'robots-token'), 'utf8').trim() } catch { token = null }
+  try { token = fs.readFileSync(path.resolve(process.env.ADAL_ROBOTS_DATA || path.join(process.cwd(), 'data'), 'robots-token'), 'utf8').trim() } catch { token = null }
   return token
 }
 

@@ -25,7 +25,8 @@ const page = (title, body, head = '') => `<!doctype html><html><head><title>${ti
 const cookies = (req) => Object.fromEntries(String(req.headers.cookie || '').split(/;\s*/).filter(Boolean).map(c => c.split('=').map(decodeURIComponent)))
 const form = (req) => new Promise(r => { let b = ''; req.on('data', d => b += d); req.on('end', () => r(Object.fromEntries(new URLSearchParams(b)))) })
 
-export async function startMockPortal({ accounts, dir = fs.mkdtempSync(path.join(os.tmpdir(), 'adal-mock-')) }) {
+// chosen: the rows Musaned's Employment Requests list answers (its data address, api-tawtheeq), [] = nobody chosen.
+export async function startMockPortal({ accounts, dir = fs.mkdtempSync(path.join(os.tmpdir(), 'adal-mock-')), chosen = [] }) {
   const events = []   // what happened, in order: { what, user, at }
   const note = (what, extra = {}) => events.push({ what, at: Date.now(), ...extra })
   const pending = new Map()   // otp ticket → username
@@ -83,7 +84,25 @@ a.addEventListener('click', (e) => {
       }
     }
 
+    // Musaned's data address: the Employment Requests list (the page's own sign-in headers; CORS like Musaned).
+    if (host === 'api-tawtheeq.musaned.com.sa') {
+      const cors = { 'access-control-allow-origin': 'https://tawtheeq.musaned.com.sa', 'access-control-allow-credentials': 'true', 'access-control-allow-headers': 'authorization, app-organization, accept-language, content-type' }
+      if (req.method === 'OPTIONS') { res.writeHead(204, cors); return res.end() }
+      if (url.pathname === '/api/search/employment') {
+        const ok = /^Bearer /.test(String(req.headers.authorization || '')) && req.headers['app-organization']
+        note('list', { ok: !!ok, page: url.searchParams.get('page') })
+        res.writeHead(ok ? 200 : 401, { ...cors, 'content-type': 'application/json' })
+        return res.end(JSON.stringify(ok ? { content: Number(url.searchParams.get('page')) ? [] : chosen } : { error: 'unauthorized' }))
+      }
+      res.writeHead(404, cors); return res.end()
+    }
     if (host === 'tawtheeq.musaned.com.sa') {
+      if (url.pathname.startsWith('/employment-requests') && cookies(req).sess) {
+        const who = cookies(req).sess
+        return send(page('Musaned - Employment Requests', `<h2>Employment Requests</h2><div id="rows">…</div>
+<script>fetch('https://api-tawtheeq.musaned.com.sa/api/search/employment?sort=createdAt,DESC&page=0&size=10', { headers: { authorization: 'Bearer ' + ${JSON.stringify('t-')} + ${JSON.stringify(who)}, 'app-organization': '7' } })
+  .then(r => r.json()).then(j => { document.getElementById('rows').textContent = (j.content || []).length + ' requests' })</script>`))
+      }
       if (url.pathname === '/sso') {
         note('signed-in', { user: url.searchParams.get('u') })
         return go('/dashboard', { 'set-cookie': `sess=${encodeURIComponent(url.searchParams.get('u'))}; Path=/; Secure; HttpOnly` })

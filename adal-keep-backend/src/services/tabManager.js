@@ -86,11 +86,7 @@ function isClosed(page) {
  * and request-intercepted with the dynamic `page.__adalAllowImages` policy.
  * Idempotent — safe to call on a tab the run already owns.
  */
-async function wake(p) {
-  const c = await p.createCDPSession().catch(() => null)
-  if (!c) return
-  try { await c.send('Page.setWebLifecycleState', { state: 'active' }); p.__adalFrozen = false } catch {} finally { await c.detach().catch(() => {}) }
-}
+const wake = async (p) => { if (p?.__adalWake) await p.__adalWake().catch(() => {}) }   // sessionKeeper.freezeTab
 export async function setupTab(page, { runId, mute = true } = {}) {
   if (!page) return page
   if (page.__adalFrozen) await wake(page)

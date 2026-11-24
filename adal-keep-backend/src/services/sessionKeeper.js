@@ -146,6 +146,7 @@ async function keepAliveNow() {
       const site = siteOf(p.url())
       if (!site) continue
       seen[site.key].tabs++
+      if (p.__adalFrozen) continue   // a waiting sign-in tab (paused): signed out, nothing to keep
       const inNow = await tabSignedIn(site, p)
       // Which account: its browser space ("musaned:7"; '' = the site's main account).
       if (inNow) { seen[site.key].signedIn = true; seen[site.key].spaces[spaceOf(p)] = true }
@@ -274,6 +275,7 @@ async function closeSpareTabs(pages) {
       const mine = siteOf(p.url()) === site || (site.key === 'musaned' && (() => { try { return /(^|\.)wahid\.sa$/.test(hostOf(p.url())) } catch { return false } })())
       if (p.isClosed?.() || !mine || spaceOf(p)) continue   // the main account's space only
       // (A tab left on a site's sign-out or on the browser's error page has nothing typed in it, even when it cannot be read.)
+      if (p.__adalFrozen) continue   // a waiting sign-in tab (paused) stays
       const dead = /openid-connect\/logout|\/logout\b|^chrome-error:/i.test(p.url())
       const typed = dead ? false : await Promise.race([p.evaluate(() => [...document.querySelectorAll('input, textarea')].some(e => !['hidden', 'password', 'checkbox', 'radio', 'file', 'submit', 'button'].includes(e.type) && e.value && e.value !== e.defaultValue)).catch(() => true), new Promise(r => setTimeout(() => r(true), 5000))])
       const id = Number(p.__adalRunId)
@@ -291,7 +293,7 @@ async function knowSignInTabs(pages) {
   const { keepingRunIds } = await import('./tabManager.js')
   const keeping = await keepingRunIds(db).catch(() => new Set())
   for (const p of pages) {
-    if (p.isClosed?.() || p.__adalRunId || keeping.has(Number(p.__adalRunId))) continue
+    if (p.isClosed?.() || p.__adalFrozen || p.__adalRunId || keeping.has(Number(p.__adalRunId))) continue
     const site = siteOf(p.url())
     const title = await Promise.race([p.title().catch(() => ''), new Promise(r => setTimeout(() => r(''), 2000))])
     p.__adalBlocked = !!site && BLOCKED_TITLE.test(title)
@@ -551,16 +553,27 @@ export function prepareSignIns(database, { force = false, why = 'opened' } = {})
   })().catch(e => { console.warn('[sessions] morning sign-in:', e.message); return null }).finally(() => { preparing = null })
   return preparing
 }
-// A sign-in tab waiting for nobody costs a weak PC: LMIS's sign-in page keeps the processor busy (13 % of a core
-// each, two accounts, 2026-11-24 this PC). Frozen while it waits (the browser runs nothing in it); woken when a
-// person opens it (live view, Open) or the robots sign in there.
-export async function freezeTab(p, frozen = true) {
-  if (!p || p.isClosed?.() || !!p.__adalFrozen === frozen) return
+// A sign-in tab waiting for nobody costs a weak PC: LMIS's sign-in page keeps its scripts running (18 % of a core
+// per account plus the drawing, 2026-11-24 this PC). While it waits for its Open its scripts are paused (the
+// browser's debugger, a session held open; a headless browser does not freeze a page); woken when a person opens
+// it (live view, Open) or a run takes it. If Adal Keep stops, the session ends and the page runs again by itself.
+export async function freezeTab(p) {
+  if (!p || p.isClosed?.() || p.__adalFrozen) return
   const c = await p.createCDPSession().catch(() => null)
   if (!c) return
-  try { await c.send('Page.setWebLifecycleState', { state: frozen ? 'frozen' : 'active' }); p.__adalFrozen = frozen } catch {} finally { await c.detach().catch(() => {}) }
+  try {
+    await c.send('Debugger.enable')
+    await c.send('Debugger.pause')
+    p.__adalFrozen = true
+    p.__adalWake = async () => {
+      p.__adalFrozen = false; p.__adalWake = null
+      await c.send('Debugger.resume').catch(() => {})
+      await c.send('Debugger.disable').catch(() => {})
+      await c.detach().catch(() => {})
+    }
+  } catch { await c.detach().catch(() => {}) }
 }
-export const wakeTab = (p) => freezeTab(p, false)
+export const wakeTab = async (p) => { if (p?.__adalWake) await p.__adalWake() }
 
 /** LMIS: its sign-in page in its tab, nothing pressed (Sign In sends an SMS code: only when the person presses Open). */
 async function openLmisSignIn(browser, account) {

@@ -6,6 +6,9 @@
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import fs from 'fs'
+import os from 'os'
+import path from 'path'
 
 process.env.JEV_ENABLED = 'false'
 process.env.ADAL_NO_BROWSER_START = '1'
@@ -81,4 +84,26 @@ test('lost tabs closed only when on a portal\'s sign-out page', () => {
   assert.ok(!k.lostSignOut('https://tawtheeq.musaned.com.sa/hr-pool/candidates/add'))
   assert.ok(!k.lostSignOut('https://accounts.wahid.sa/auth/realms/wahid/protocol/openid-connect/auth?x'))
   assert.ok(!k.lostSignOut('https://example.com/logout'))
+})
+
+test('a waiting sign-in tab is paused (its scripts stop) and runs again when woken', { skip: !['/usr/bin/google-chrome', '/usr/bin/chromium', '/opt/brave.com/brave/brave'].some(f => fs.existsSync(f)) && 'no browser', timeout: 60000 }, async () => {
+  const puppeteer = (await import('puppeteer-core')).default
+  const exe = ['/usr/bin/google-chrome', '/usr/bin/chromium', '/opt/brave.com/brave/brave'].find(f => fs.existsSync(f))
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'adal-freeze-'))
+  const b = await puppeteer.launch({ executablePath: exe, headless: true, userDataDir: dir, args: ['--no-first-run'] })
+  try {
+    const p = await b.newPage()
+    await p.setContent('<script>window.n = 0; setInterval(() => window.n++, 20)</script>')
+    await new Promise(r => setTimeout(r, 300))
+    const before = await p.evaluate(() => window.n)
+    await k.freezeTab(p)
+    assert.ok(p.__adalFrozen)
+    await new Promise(r => setTimeout(r, 1000))      // 50 ticks if it were running
+    await k.wakeTab(p)
+    const woke = await p.evaluate(() => window.n)
+    assert.ok(woke - before < 8, `paused while it waited (${woke - before} ticks in 1 s)`)
+    await new Promise(r => setTimeout(r, 300))
+    assert.ok(await p.evaluate(() => window.n) > woke, 'runs again after waking')
+    assert.ok(!p.__adalFrozen)
+  } finally { await b.close(); fs.rmSync(dir, { recursive: true, force: true }) }
 })

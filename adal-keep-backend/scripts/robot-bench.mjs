@@ -34,7 +34,8 @@ if (!CHROME) { console.error('No Chrome/Chromium on this PC (BENCH_CHROME=/path/
 const JSON_OUT = process.argv.includes('--json')
 
 // ── the line and the person ─────────────────────────────────────────────────
-const LINE = { offline: false, latency: 150, downloadThroughput: 4e6 / 8, uploadThroughput: 1e6 / 8 }
+// The line: BENCH_MS (each way) and BENCH_MBIT (down; up is a quarter), e.g. BENCH_MS=300 BENCH_MBIT=1 for a slow office line.
+const LINE = { offline: false, latency: Number(process.env.BENCH_MS) || 150, downloadThroughput: (Number(process.env.BENCH_MBIT) || 4) * 1e6 / 8, uploadThroughput: Math.max(0.25, (Number(process.env.BENCH_MBIT) || 4) / 4) * 1e6 / 8 }
 const KLM = { click: 1.1, read: 1.5, char: 0.3, file: 6, copy: 3 }
 const CONNECT_BEFORE = 7   // s: a new CDP connection + port check at every look on Main (b07b135, measured live)
 
@@ -107,6 +108,7 @@ function serve() {
 async function tabFor(browser, mode) {
   const ctx = await browser.createBrowserContext()
   const p = await ctx.newPage()
+  p.setDefaultTimeout(180000); p.setDefaultNavigationTimeout(180000)   // a slow line (BENCH_MBIT=1) takes its time
   const cdp = await p.target().createCDPSession()
   await cdp.send('Network.enable')
   await cdp.send('Network.emulateNetworkConditions', LINE)
@@ -131,7 +133,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 async function open(t, mode, url, signal = '#app *') {
   const t0 = Date.now()
   if (mode === 'person') { await t.p.goto(url, { waitUntil: 'load' }); await t.p.waitForSelector(signal) }
-  else if (mode === 'before') await t.p.goto(url, { waitUntil: 'networkidle2', timeout: 60000 })
+  else if (mode === 'before') await t.p.goto(url, { waitUntil: 'networkidle2', timeout: 180000 })
   else { await t.p.goto(url, { waitUntil: 'domcontentloaded' }); await t.p.waitForSelector(signal) }
   return secs(t0)
 }

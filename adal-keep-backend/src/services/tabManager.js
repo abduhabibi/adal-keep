@@ -70,6 +70,8 @@ export function isPeerUrl(url, peer) {
 
 const TRACKERS = /(^|\.)(google-analytics\.com|googletagmanager\.com|doubleclick\.net|facebook\.net|facebook\.com|hotjar\.com|clarity\.ms|tiktok\.com|snapchat\.com|twitter\.com|linkedin\.com|youtube\.com)$/i
 
+const CAPTCHA_HOSTS = /(^|\.)(google\.com|gstatic\.com|recaptcha\.net)$/i
+
 function isClosed(page) {
   try { return !page || (typeof page.isClosed === 'function' && page.isClosed()) } catch { return true }
 }
@@ -126,7 +128,8 @@ export async function setupTab(page, { runId, mute = true } = {}) {
       // sounds (and no pictures, except where the reCAPTCHA needs them). With
       // 3–4 runs at once every run gets more of the internet connection.
       const type = req.resourceType()
-      const allowImages = page.__adalAllowImages === true
+      // Google's reCAPTCHA (its box and its pictures) always comes: a person must see it to tick it.
+      const allowImages = page.__adalAllowImages === true || CAPTCHA_HOSTS.test(hostOf(req.url()))
       // Fonts too (2026-11-23): 100–400 KB a page on a slow line, and the robot reads text, not letters' shapes.
       if ((!allowImages && (type === 'image' || type === 'font')) || type === 'media' || TRACKERS.test(hostOf(req.url()))) req.abort().catch(() => {})
       else {

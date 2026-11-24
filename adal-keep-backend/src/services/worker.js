@@ -254,13 +254,17 @@ async function executeRun(db, page, job) {
   const isVisa = job.workflow_id.startsWith('mofa')
   const isInsurance = job.workflow_id.startsWith('insurance')
   const isTasheer = job.workflow_id.startsWith('tasheer')
-  // The visa platform's sign-in captcha is a picture a person reads.
-  page.__adalAllowImages = isMusaned || isWafid || isVisa || isInsurance || isTasheer
+  // The visa platform's, insurance's and Tasheer's sign-in captcha is a picture on their own site: pictures on.
+  // Musaned and Wafid have Google's reCAPTCHA, whose pictures always come (tabManager: Google's captcha hosts);
+  // their own pages' pictures stay off — on a slow line they were most of each page (2026-11-24). Steps that
+  // need a picture (a contract PDF, Wafid's slip) switch them on themselves.
+  void isMusaned; void isWafid
+  page.__adalAllowImages = isVisa || isInsurance || isTasheer
   console.log(
     `[worker] run #${runId} image policy: ` +
-    (isMusaned || isWafid || isVisa || isInsurance
-      ? `ALLOW (${job.workflow_id} — the captcha needs images)`
-      : 'BLOCK (bandwidth saver)')
+    (page.__adalAllowImages
+      ? `ALLOW (${job.workflow_id} — its captcha is a picture)`
+      : isMusaned || isWafid ? "BLOCK except Google's reCAPTCHA (bandwidth saver)" : 'BLOCK (bandwidth saver)')
   )
 
   const notify = async (title, body, level = 'info', opts = {}) => {

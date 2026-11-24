@@ -29,6 +29,7 @@
  *      `page.__adalAllowImages` flag inside the request interceptor.
  */
 
+import { robotsInApp } from './robotsInApp.js'
 import fs from 'fs'
 import { headlessArgs, noWindows } from './noWindows.js'
 import path from 'path'
@@ -242,6 +243,7 @@ async function onlyOurs(b, { closeOld = false } = {}) {
  * never a new window. The browser is not closed when the server stops.
  */
 export async function getBrowser(fresh = false) {
+  if (!robotsInApp()) throw Object.assign(new Error('The robots work in Adal Robots now: Adal Keep does not open the robot browser (ADAL_ROBOTS_IN_APP=1 to use it here).'), { status: 409, robotsElsewhere: true })
   if (alive(_browser)) return _browser
   if (_connecting) { await _connecting; if (alive(_browser)) return _browser }
 
@@ -303,6 +305,7 @@ export async function getBrowser(fresh = false) {
  * that only act on tabs a person or a run already opened.
  */
 export async function openBrowserIfAny() {
+  if (!robotsInApp()) return null   // no connection to the robot browser (Adal Robots has it)
   if (alive(_browser)) return _browser
   // Many looks at once (live view, watchers, a run) share one connection.
   if (!_connecting) _connecting = (async () => {
@@ -444,6 +447,7 @@ async function tabInAgentsWindow(browser) {
 
 /** With Adal Keep: the browser is up, out of sight, for the runs and the background checks. */
 export function startBrowserQuietly() {
+  if (!robotsInApp()) return
   if (HIDDEN) setTimeout(() => getBrowser().then(hideRunWindows).catch(e => console.warn('[browser] not started:', e.message)), 5000).unref?.()
 }
 

@@ -13,6 +13,7 @@
  *      Permanent errors (LMIS "not in pool" and the like) are not retried.
  */
 
+import { robotsInApp, IN_LINE } from './robotsInApp.js'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -760,6 +761,7 @@ function runs(db) {
 
 /** Start as many waiting runs as there are free slots. */
 export function drainQueue(db) {
+  if (!robotsInApp()) return Promise.resolve()   // Adal Robots runs the queue (services/robotsInApp.js)
   return runs(db).drain()
 }
 
@@ -789,6 +791,10 @@ export async function dispatchRun(db, runId) {
   // main PC with the rest of the data; the main PC's worker runs it (one PC runs robots).
   const { notMainPC } = await import('./mainPC.js')
   if (notMainPC()) return { ...(await runStatus(db, runId)), on_main: true }
+  if (!robotsInApp()) {
+    await db('automation_queue').where({ id: Number(runId?.id ?? runId), status: 'pending' }).whereNull('pause_reason').update({ pause_reason: IN_LINE }).catch(() => {})
+    return { ...(await runStatus(db, runId)), in_line: true, message: IN_LINE }
+  }
   await drainQueue(db)
   return runStatus(db, runId)
 }
@@ -1013,6 +1019,7 @@ async function continueSignedIn(db) {
 // --------------------------------------------------------------------------
 export function startWorker(db) {
   if (_interval) return
+  if (!robotsInApp()) { console.log('[worker] robots run in Adal Robots: this app runs no robot job (ADAL_ROBOTS_IN_APP=1 to run them here)'); return }
 
   console.log(
     `[worker] polling every ${POLL_MS}ms — one run at a time, in its own tab`

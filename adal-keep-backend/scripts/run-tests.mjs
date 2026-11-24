@@ -22,7 +22,7 @@ const files = fs.readdirSync(TESTS).filter(f => f.endsWith('.test.js')).sort()
 const needsBrowser = (f) => /puppeteer|chromium|google-chrome|BRAVE_CDP_URL|adal-admin/i.test(fs.readFileSync(path.join(TESTS, f), 'utf8'))
 const browser = files.filter(needsBrowser), plain = files.filter(f => !browser.includes(f))
 
-const run = (list, extra) => spawnSync(process.execPath, ['--test', `--test-reporter=${reporter}`, ...extra, ...list.map(f => path.join('tests', f))], { cwd: BACK, stdio: 'inherit', timeout: 20 * 60 * 1000 }).status === 0
+const run = (list, extra) => spawnSync(process.execPath, ['--test', `--test-reporter=${reporter}`, ...extra, ...list.map(f => path.join('tests', f))], { cwd: BACK, stdio: 'inherit', timeout: 20 * 60 * 1000, env: { ADAL_ROBOTS_IN_APP: '1', ...process.env } }).status === 0
 
 console.log(`== tests: ${plain.length} files in parallel, then ${browser.length} browser files one at a time (${browser.join(', ')})`)
 const a = run(plain, [])

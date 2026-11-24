@@ -54,6 +54,9 @@ import lmisAccountsRouter from './src/routes/lmisAccounts.js'
 import settingsRouter from './src/routes/settings.js'
 import { startFolderWatcher } from "./src/services/aiIngestion.js"
 import { startWorker } from './src/services/worker.js'
+import { robotsInApp } from './src/services/robotsInApp.js'
+// Robots in their own program (Adal Robots) unless ADAL_ROBOTS_IN_APP=1 (services/robotsInApp.js).
+const ROBOTS_HERE = robotsInApp()
 import { startScanner } from './src/services/autoScanner.js'
 import verificationRouter from './src/routes/verification.js'
 import newProfileRouter from './src/routes/newProfile.js'
@@ -1307,7 +1310,7 @@ initSystem().then(() => {
     import('./src/services/tower.js').then(async t => t.startTower(app.locals.db, { installedVersion: (await import('./src/services/cloudSync.js')).installedVersion })).catch(e => console.warn('[tower]', e.message))
     import('./src/services/screenClip.js').then(c => c.startClipWatcher(PORT)).catch(e => console.warn('[clip]', e.message)) // double C crops the screen anywhere on this PC
     // New selections on Musaned, every hour, on ONE PC of the agency (the main PC picks the strongest).
-    import('./src/services/selectionCheck.js').then(s => s.startSelectionCheck(app.locals.db)).catch(e => console.warn('[selection-check]', e.message))
+    if (ROBOTS_HERE) import('./src/services/selectionCheck.js').then(s => s.startSelectionCheck(app.locals.db)).catch(e => console.warn('[selection-check]', e.message))
     if (isFollower()) {
       // Another PC is the main PC: all work happens there, nothing here.
       console.log(`🔗 This PC follows the main PC at ${mainURL()} — no automations, no discovery here`)
@@ -1334,9 +1337,9 @@ initSystem().then(() => {
       return
     }
     startMedicalWatcher(app.locals.db) // the medical's battery: warnings as it runs out
-    import('./src/services/sessionKeeper.js').then(k => k.startSessionKeeper(app.locals.db)).catch(e => console.warn('[sessions]', e.message)) // signed in once, kept all day
+    if (ROBOTS_HERE) import('./src/services/sessionKeeper.js').then(k => k.startSessionKeeper(app.locals.db)).catch(e => console.warn('[sessions]', e.message)) // signed in once, kept all day
     // Memory is checked every 5 min: short of memory and no robot working → the idle Adal Browser is quit (never under a person's window).
-    Promise.all([import('./src/services/memoryGuard.js'), import('./src/services/browser.js'), import('./src/services/worker.js')]).then(([g, b, w]) => g.startMemoryGuard({
+    if (ROBOTS_HERE) Promise.all([import('./src/services/memoryGuard.js'), import('./src/services/browser.js'), import('./src/services/worker.js')]).then(([g, b, w]) => g.startMemoryGuard({
       working: () => w.queueSnapshot().running.length,
       quit: async () => { const br = await b.openBrowserIfAny().catch(() => null); if (!br) return; const pages = await br.pages().catch(() => []); if (pages.some(p => p.__adalBorrowed || p.__adalPerson)) return; await b.quitBrowser() },
     })).catch(e => console.warn('[memory]', e.message))
@@ -1346,18 +1349,18 @@ initSystem().then(() => {
     startCloudSync(app.locals.db)      // the online copy phones use when this PC is off
     startLiveChannel(app.locals.db)    // phones ↔ this PC, instant (Supabase Realtime)
     startWorker(db)               // runs queued jobs, each in its own tab
-    import("./src/services/transition.js").then(m => m.resumeTransitions(db)).catch(() => {})            // a move cut off by a restart goes on
-    startScanner(db)              // discovers new work every 2 min
-    startWafidChecker(db)         // Medical · Applied → Fit / Rejected from wafid.com
+    if (ROBOTS_HERE) import("./src/services/transition.js").then(m => m.resumeTransitions(db)).catch(() => {})            // a move cut off by a restart goes on
+    if (ROBOTS_HERE) startScanner(db)              // discovers new work every 2 min
+    if (ROBOTS_HERE) startWafidChecker(db)         // Medical · Applied → Fit / Rejected from wafid.com
     import('./src/services/needsAction.js').then(n => n.startNeedsAction(db, { isFollower: notMainPC })).catch(e => console.warn('[needs-action]', e.message))   // "Needs action today": one notification a day
     import('./src/services/portalHealth.js').then(p => p.startPortalHealth()).catch(() => {})
     setTimeout(() => import('./src/services/placement.js').then(p => p.sweepRecent(db)).catch(() => {}), 4 * 60 * 1000).unref?.()   // pictures put in the wrong box (last 7 days) set right
     import('./src/services/pcHealth.js').then(p => p.startPCHealth(db)).catch(() => {})   // disk space, database check, freezes (Admin sees it)   // is each portal answering? (Admin sees it)
     import('./src/services/officeHealth.js').then(o => o.startOfficeDay(db)).catch(e => console.warn('[office-day]', e.message))   // 17:30: one push with the day's summary
     startBackupSchedule(db)       // locked copy to Telegram: within minutes of switching on, then every 2 h
-    startContractChecker(db)      // chosen by a Saudi employer? contract + PDFs from Musaned
+    if (ROBOTS_HERE) startContractChecker(db)      // chosen by a Saudi employer? contract + PDFs from Musaned
     import('./src/services/profileDays.js').then(d => d.startProfileDays(db)).catch(e => console.warn('[days]', e.message)) // each profile's status, per day
-    console.log('🤖 Automation: worker + scanner running')
+    console.log(ROBOTS_HERE ? '🤖 Automation: worker + scanner running' : '🤖 Robots: in Adal Robots (none in this app; ADAL_ROBOTS_IN_APP=1 runs them here)')
 
   })
 })

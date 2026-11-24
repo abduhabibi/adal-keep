@@ -357,6 +357,8 @@ export async function getBrowser(fresh = false) {
       // Just started: Brave restores its last tabs and replaces its first
       // blank one — a run's tab opened in that moment is closed under it.
       await new Promise(r => setTimeout(r, 3000))
+      // The day's sign-ins back (sessionKeeper): no new sign-in, no captcha after a restart.
+      await (await import('./sessionKeeper.js')).restoreSessionCookies(_browser).catch(e => console.warn('[browser] sign-ins not restored:', e.message))
       await tuckAway().catch(() => {})
       return _browser
     } catch (e) { lastErr = e }

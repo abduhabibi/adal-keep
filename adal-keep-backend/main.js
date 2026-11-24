@@ -1342,7 +1342,8 @@ initSystem().then(() => {
     // Memory is checked every 5 min: short of memory and no robot working → the idle Adal Browser is quit (never under a person's window).
     Promise.all([import('./src/services/memoryGuard.js'), import('./src/services/browser.js'), import('./src/services/worker.js')]).then(([g, b, w]) => g.startMemoryGuard({
       working: () => w.queueSnapshot().running.length,
-      quit: async () => { const br = await b.openBrowserIfAny().catch(() => null); if (!br) return; const pages = await br.pages().catch(() => []); if (pages.some(p => p.__adalBorrowed || p.__adalPerson)) return; await b.quitBrowser() },
+      // Never a browser holding a site signed in: the day's sign-ins stay (2026-11-24).
+      quit: async () => { if ((await import('./src/services/sessionKeeper.js')).holdsSignIns()) return; const br = await b.openBrowserIfAny().catch(() => null); if (!br) return; const pages = await br.pages().catch(() => []); if (pages.some(p => p.__adalBorrowed || p.__adalPerson)) return; await b.quitBrowser() },
     })).catch(e => console.warn('[memory]', e.message))
     import('./src/services/plans.js').then(p => p.startLicenseWatch(app.locals.db)).catch(e => console.warn('[plans]', e.message)) // Adal's signed licence: plan, dates, features
     import('./src/services/agencyConfig.js').then(async C => { const cl = await import('./src/services/chatCloud.js'); C.startAgencyConfigWatch(app.locals.db, (m, p, o) => m === 'POST' ? cl.cloudCall(app.locals.db, m, p, o) : cl.cloudCall(app.locals.db, m, p, undefined, o), () => cl.cloudAgencyId(app.locals.db)) }).catch(e => console.warn('[config]', e.message)) // the agency's config record from Adal (flag)

@@ -141,7 +141,7 @@ export const PROFILE_DIR = process.env.ADAL_BROWSER_PROFILE ||
 // Out of sight needs today's AdalKeep.exe: an older one opens Adal Keep's page
 // inside this browser, and that page must stay on the screen.
 const HIDDEN = process.platform !== 'win32' || process.env.ADAL_HIDDEN_AGENTS === '1'
-const DEBUG_PORT = 9222
+const DEBUG_PORT = Number(process.env.ADAL_CDP_PORT) || 9222   // (Adal Robots may use another: robots/adal-robots.mjs)
 const OFF = { left: -32000, top: -32000, width: 1366, height: 900 }
 
 /**

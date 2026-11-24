@@ -77,6 +77,7 @@ test('a weak Main gives its run to a ready Companion only', () => {
 
 test('freeStrongDevice: not one on another release or updating', () => {
   rb._resetForTest()
+  process.env.ADAL_LAN_ROBOTS = '1'   // (the hand-off over the LAN is off unless switched on: ce98582)
   const reg = (id, body) => rb.registerDevice({ id, name: id }, '192.168.1.20', { token: 'x'.repeat(20), cores: 8, ...body })
   reg('OLD', { version: '4af9140' })
   reg('UPD', { version: 'aaaaaaa', updating: true })

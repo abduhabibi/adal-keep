@@ -861,13 +861,25 @@ export async function claimNextJob(db, exclude = [], lanes = new Set()) {
   return null
 }
 
+// Adal Robots (robots/adal-robots.mjs) on a weak PC: no new run starts while the processor is over 80 % busy
+// (the run waits in line; the PC's person comes first). Set by the program that runs the robots; none = always.
+let _claimGate = null, _gateAt = 0, _gateOk = true
+export function setClaimGate(fn) { _claimGate = fn; _gateAt = 0 }
+async function mayClaim() {
+  if (!_claimGate) return true
+  if (Date.now() - _gateAt < 4000) return _gateOk          // looked at a moment ago
+  _gateAt = Date.now()
+  try { _gateOk = !!(await _claimGate()) } catch { _gateOk = true }
+  return _gateOk
+}
+
 let _runs = null
 function runs(db) {
   if (!_runs) {
     _runs = createRunQueue({
       max: MAX_RUNS,
       isIdle: (id) => isWaiting(id),
-      claimNext: (exclude, lanes) => claimNextJob(db, exclude, lanes),
+      claimNext: async (exclude, lanes) => ((await mayClaim()) ? claimNextJob(db, exclude, lanes) : null),
       laneOf,
       runJob: (job) => runJob(db, job),
     })

@@ -215,6 +215,8 @@ app.use('/api/insurance', accountsRouter('insurance_accounts', 'insurance_accoun
 app.use('/api/cv', cvRouter)
 app.use('/api/settings', settingsRouter)
 app.use('/api', (await import('./src/routes/mainProxy.js')).default)   // a Companion: the robots' live calls go to the main PC
+// Robots in Adal Robots (services/robotsInApp.js): a run's tab, the person's clicks, Stop and Continue go there.
+app.use('/api', (await import('./src/services/robotsLink.js')).robotsLink)
 app.use('/api', automationsRouter)
 // 3-green-tick verification gate + the LAN endpoints the Employee-PC Companion talks to
 app.use('/api', verificationRouter)
@@ -1362,6 +1364,7 @@ initSystem().then(() => {
     if (ROBOTS_HERE) startContractChecker(db)      // chosen by a Saudi employer? contract + PDFs from Musaned
     import('./src/services/profileDays.js').then(d => d.startProfileDays(db)).catch(e => console.warn('[days]', e.message)) // each profile's status, per day
     console.log(ROBOTS_HERE ? '🤖 Automation: worker + scanner running' : '🤖 Robots: in Adal Robots (none in this app; ADAL_ROBOTS_IN_APP=1 runs them here)')
+    if (!ROBOTS_HERE) import('./src/services/robotsLink.js').then(r => r.keepRobotsRunning()).catch(e => console.warn('[robots]', e.message))   // Adal Robots, its own program (Windows: started here, no window)
 
   })
 })

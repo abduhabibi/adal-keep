@@ -1,0 +1,19 @@
+# Adal Robots on Linux (this PC): its own program, started and stopped apart from Adal Keep.
+#   cp robots/adal-robots.service ~/.config/systemd/user/ && systemctl --user daemon-reload && systemctl --user enable --now adal-robots.service
+# WorkingDirectory: the folder holding Adal Keep's backend (its data.sqlite, data/ and uploads/).
+[Unit]
+Description=Adal Robots (the robots of Adal Keep, in a program of their own)
+After=adal-keep.service
+
+[Service]
+WorkingDirectory=%h/Documents/Adal_keep-live/adal-keep-backend
+ExecStart=/usr/bin/node robots/adal-robots.mjs
+Restart=always
+RestartSec=10
+Nice=10
+CPUWeight=50
+StandardOutput=append:%h/Documents/Adal_keep/adal-keep-backend/logs/adal-robots.log
+StandardError=append:%h/Documents/Adal_keep/adal-keep-backend/logs/adal-robots.log
+
+[Install]
+WantedBy=default.target

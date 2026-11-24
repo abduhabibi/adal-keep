@@ -36,18 +36,46 @@ export async function robotCheck(page) {
   return { present: top.present || box, ticked: top.token || box, token: top.token }
 }
 
+/** A sign-in page's own error, in words (Keycloak's line under the form), or ''. */
+export const SIGN_IN_ERROR = () => {
+  const el = document.querySelector('#input-error, .kc-feedback-text, #kc-error-message, .alert-error, .alert-danger, .pf-c-alert__title, p.err')
+  const t = (el?.innerText || el?.textContent || '').replace(/\s+/g, ' ').trim()
+  return t.slice(0, 200)
+}
+/** What a sign-in error means: 'expired' (start again), 'tick' (the tick was refused), 'account' (name or password), or ''. */
+export function signInErrorKind(text) {
+  const t = String(text || '')
+  if (/timed? ?out|start from the beginning|session (has )?expired|expired|انتهت/i.test(t)) return 'expired'
+  if (/invalid ?re-?captcha|recaptcha|robot/i.test(t)) return 'tick'
+  if (/invalid (username|user|email)|password|credentials|كلمة المرور/i.test(t)) return 'account'
+  return t ? 'other' : ''
+}
+
 /**
  * Waits for the person's tick, then presses the button. opts:
  *   onForm()   → true while the sign-in form is still up
  *   submit()   → presses the sign-in button
  *   refill()   → fills again what the site cleared (optional)
- *   isCancelled(), timeoutMs, log(msg)
- * Returns 'submitted' (ticked, pressed, the form went away), 'left' (the form
- * went away by itself: the person pressed it) or 'timeout'.
+ *   restart()  → the sign-in loaded fresh and filled again (optional): after "Your login attempt timed out" or a
+ *                refused tick, and when a person opens a form that has waited over freshMs (wahid.sa's sign-in
+ *                expires in about 2–3 minutes: a tick on it was lost, 2026-11-24 live)
+ *   again(why) → the person is told once to tick again (optional)
+ *   isCancelled(), timeoutMs, freshMs (60 s), log(msg)
+ * Returns 'submitted' (ticked, pressed, the form went away), 'left' (the form went away by itself: the person
+ * pressed it) or 'timeout'. A refused name or password throws (nothing more is tried).
  */
-export async function waitForTick(page, { onForm, submit, refill = null, isCancelled = null, timeoutMs = 10 * 60000, log = () => {}, pollMs = 300 } = {}) {
+export async function waitForTick(page, { onForm, submit, refill = null, restart = null, again = null, isCancelled = null, timeoutMs = 10 * 60000, freshMs = 60000, log = () => {}, pollMs = 300 } = {}) {
   const deadline = Date.now() + timeoutMs
-  let pressed = false
+  let pressed = false, formSince = Date.now(), lastLook = page.__adalLookedAt || 0, errAt = 0
+  const readError = () => page.evaluate(SIGN_IN_ERROR).catch(() => '')
+  const startAgain = async (why, tell) => {
+    if (!restart) return false
+    log(why)
+    await restart().catch(e => log(`the sign-in could not be loaded again: ${e.message}`))
+    formSince = Date.now(); pressed = false
+    if (tell) await again?.(why)
+    return true
+  }
   while (Date.now() < deadline) {
     if (isCancelled?.()) { const e = new Error('Cancelled by user'); e.cancelled = true; throw e }
     // Its tab or its browser is gone (closed, crashed): nothing to wait for (the run goes back in line).
@@ -55,6 +83,23 @@ export async function waitForTick(page, { onForm, submit, refill = null, isCance
     try { gone = page.isClosed?.() || page.browser?.()?.connected === false } catch { gone = true }
     if (gone) { log('the tab is gone (its browser closed) — not waiting for the tick'); return 'timeout' }
     if (!(await onForm().catch(() => true))) return pressed ? 'submitted' : 'left'
+    // A person opens the tab (after nobody looked for 15 s) and the form has waited long: fresh first, so the
+    // tick goes onto a sign-in that is still alive. Never right after a click of theirs.
+    const look = page.__adalLookedAt || 0
+    if (look !== lastLook) {
+      const opened = look - lastLook > 15000
+      lastLook = look
+      if (opened && Date.now() - formSince > freshMs && !(Date.now() - (page.__adalInputAt || 0) < 30000) && !(await robotCheck(page)).ticked) {
+        await startAgain(`the sign-in waited ${Math.round((Date.now() - formSince) / 1000)} s — loaded fresh for the tick (Musaned's sign-in expires)`, false)
+        continue
+      }
+    }
+    // The page says it timed out by itself (every 5 s): started again at once.
+    if (Date.now() - errAt > 5000) {
+      errAt = Date.now()
+      const err = await readError()
+      if (signInErrorKind(err) === 'expired' && await startAgain(`Musaned's sign-in timed out ("${err}") — started again: name and password filled, tick once more`, true)) continue
+    }
     const rc = await robotCheck(page)
     if (rc.ticked) {
       // The box says ticked a moment before its token is in the page.
@@ -64,13 +109,20 @@ export async function waitForTick(page, { onForm, submit, refill = null, isCance
       await submit().catch(() => {})
       pressed = true
       // The page goes on to the next step (the code); a wrong or expired tick
-      // leaves the form up again: then the person ticks once more.
+      // leaves the form up again: what the page says is read and acted on.
       for (const end = Date.now() + 20000; Date.now() < end;) {
         await sleep(400)
         if (!(await onForm().catch(() => true))) return 'submitted'
         if (!(await robotCheck(page)).ticked) break
       }
-      if (await onForm().catch(() => true)) log('still on the sign-in form after Sign in — waiting for a new tick')
+      if (await onForm().catch(() => true)) {
+        const err = await readError()
+        const kind = signInErrorKind(err)
+        if (kind === 'account') throw Object.assign(new Error(`Musaned refused the name or password ("${err}"): check this account in Settings → Musaned. Nothing more was tried.`), { signInRefused: true })
+        if (kind === 'expired' && await startAgain(`Musaned's sign-in timed out ("${err}") — started again: name and password filled, tick once more`, true)) continue
+        if (kind === 'tick' && await startAgain(`Musaned did not take the tick ("${err}") — the sign-in loaded fresh: tick once more`, true)) continue
+        log(err ? `still on the sign-in form after Sign in — Musaned says: "${err}" — waiting for a new tick` : 'still on the sign-in form after Sign in — waiting for a new tick')
+      }
       continue
     }
     await sleep(pollMs)

@@ -1042,11 +1042,17 @@ const KEEP_MS = 60000
 const liveTab = async (req) => {
   const id = String(req.params.id)
   const k = _liveTabs.get(id)
-  if (k && !k.page.isClosed?.() && Date.now() - k.at < KEEP_MS) return k.page
+  if (k && !k.page.isClosed?.() && Date.now() - k.at < KEEP_MS) return marked(k.page, req)
   let t
   const page = await Promise.race([runTab(req.app.locals.db, req.params.id).catch(() => null), new Promise(ok => { t = setTimeout(() => ok(SLOW), 6000) })])
   clearTimeout(t)
   if (page && page !== SLOW) { _liveTabs.set(id, { page, at: Date.now() }); if (_liveTabs.size > 30) _liveTabs.delete(_liveTabs.keys().next().value) }
+  return marked(page, req)
+}
+// When a person looked at the tab and when they last clicked in it (robotCheck.waitForTick: a sign-in waiting
+// long is loaded fresh when the person opens it — never just after a click of theirs).
+const marked = (page, req) => {
+  if (page && page !== SLOW) { if (req.method === 'GET') page.__adalLookedAt = Date.now(); else page.__adalInputAt = Date.now() }
   return page
 }
 /** One input, 8 s at most: a stuck one never holds the person's next click behind it. */

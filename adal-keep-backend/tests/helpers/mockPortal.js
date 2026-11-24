@@ -26,7 +26,8 @@ const cookies = (req) => Object.fromEntries(String(req.headers.cookie || '').spl
 const form = (req) => new Promise(r => { let b = ''; req.on('data', d => b += d); req.on('end', () => r(Object.fromEntries(new URLSearchParams(b)))) })
 
 // chosen: the rows Musaned's Employment Requests list answers (its data address, api-tawtheeq), [] = nobody chosen.
-export async function startMockPortal({ accounts, dir = fs.mkdtempSync(path.join(os.tmpdir(), 'adal-mock-')), chosen = [] }) {
+// loginTtlMs: a sign-in form older than this answers like wahid.sa's Keycloak: "Your login attempt timed out…".
+export async function startMockPortal({ accounts, dir = fs.mkdtempSync(path.join(os.tmpdir(), 'adal-mock-')), chosen = [], loginTtlMs = 0 }) {
   const events = []   // what happened, in order: { what, user, at }
   const note = (what, extra = {}) => events.push({ what, at: Date.now(), ...extra })
   const pending = new Map()   // otp ticket → username
@@ -51,7 +52,8 @@ a.addEventListener('click', (e) => {
 
     if (host === 'accounts.wahid.sa') {
       if (url.pathname === '/login' && req.method === 'GET') {
-        return send(page('Sign in', `<form method="post" action="/login">
+        return send(page('Sign in', `<form method="post" action="/login"><input type="hidden" name="started" value="${Date.now()}">
+${url.searchParams.get('expired') ? '<span id="input-error" class="kc-feedback-text">Your login attempt timed out. Login will start from the beginning.</span>' : ''}
 <input id="username" name="username"><input id="password" name="password" type="password">
 <div class="g-recaptcha"><iframe src="https://www.google.com/recaptcha/api2/anchor?k=mock" width="300" height="80"></iframe>
 <textarea name="g-recaptcha-response" style="display:none"></textarea></div>
@@ -60,6 +62,7 @@ a.addEventListener('click', (e) => {
       }
       if (url.pathname === '/login' && req.method === 'POST') {
         const f = await form(req)
+        if (loginTtlMs && Date.now() - Number(f.started || 0) > loginTtlMs) { note('login-expired', { user: f.username }); return go('/login?expired=1') }
         const acct = accounts.find(a => a.username === f.username && a.password === f.password)
         const ticked = /^tok-x{40}$/.test(f['g-recaptcha-response'] || '')
         note('login-post', { user: f.username, ticked, ok: !!acct && ticked })

@@ -2802,6 +2802,16 @@ async function waitForPersonCaptcha(page, ctx) {
       const b = document.querySelector('#kc-login') || document.querySelector('button[type="submit"], input[type="submit"]')
       b?.click()
     }),
+    // wahid.sa's sign-in expires while it waits ("Your login attempt timed out. Login will start from the
+    // beginning", 2026-11-24 live): Musaned opened again (a new sign-in), the name and password filled, the box drawn.
+    restart: async () => {
+      await page.goto(MUSANED_ROOT, { waitUntil: 'domcontentloaded', timeout: FIRST_LOAD_MS }).catch(() => {})   // Musaned's front page: its Login makes a new sign-in
+      const o = await stepOpenMusaned(page, ctx)
+      if (o?.onKeycloak !== false) await stepFillMusanedLogin(page, ctx)
+      await boxDrawn(page, 60000)
+    },
+    again: (why) => ctx.notify(`🖐 ${ctx.profileName}: tick "I'm not a robot" again on Musaned`, `${why}. Only the tick: Adal Keep signs in and continues by itself.`, 'info', { login: page }),
+    freshMs: ctx.loginFreshMs || 60000,
     isCancelled: ctx.isCancelled, timeoutMs: ctx.captchaWaitMs || 10 * 60 * 1000, log: (m) => log(ctx, m),
   })
   if (w === 'left') { log(ctx, '✓ the person signed in'); return 'signed-in' }

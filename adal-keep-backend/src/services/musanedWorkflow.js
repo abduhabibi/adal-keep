@@ -343,6 +343,21 @@ export function unreachable(e) {
   return `Could not reach tawtheeq.musaned.com.sa (${m.slice(0, 100) || 'no answer'})`
 }
 
+/**
+ * Is this tab on a wahid.sa sign-in page this run did not just load itself (a run put back in line, 2026-11-24:
+ * name and password filled on a page about 30 min old that said "Your login attempt timed out"), or one that says
+ * it timed out? Never the code page, nor a form whose box the person has ticked (unless it says it timed out).
+ */
+async function staleSignIn(page) {
+  if (!page.url().includes(KEYCLOAK_HOST)) return false
+  const { SIGN_IN_ERROR, signInErrorKind, robotCheck } = await import('./robotCheck.js')
+  const within = (p, d) => Promise.race([p.catch(() => d), new Promise(r => setTimeout(() => r(d), 5000))])
+  if (signInErrorKind(await within(page.evaluate(SIGN_IN_ERROR), '')) === 'expired') return true
+  if (Date.now() - (page.__adalRootAt || 0) < 60000) return false
+  if (!(await within(page.evaluate(() => !!document.querySelector('input[type="password"]')), true)) || await within(codeBoxUp(page), false)) return false
+  return !(await within(robotCheck(page), { ticked: false })).ticked
+}
+
 export async function stepOpenMusaned(page, ctx) {
   // Peer-aware: if this tab is ALREADY on a Musaned host we do NOT navigate to
   // the root — that would wipe an in-progress form and/or force a re-login.
@@ -358,7 +373,16 @@ export async function stepOpenMusaned(page, ctx) {
       log(ctx, '✓ already on Musaned (peer tab) — skipping root navigation')
       return { ok: true, finalUrl: page.url(), onKeycloak: false }
     }
-    if (onKeycloak) return { ok: true, finalUrl: page.url(), onKeycloak: true }
+    if (onKeycloak) {
+      if (!(await staleSignIn(page))) return { ok: true, finalUrl: page.url(), onKeycloak: true }
+      log(ctx, 'this tab shows an older sign-in page (Musaned\'s sign-in expires in 2–3 min) — loading Musaned\'s sign-in fresh')
+      try { await page.goto(MUSANED_ROOT, { waitUntil: 'domcontentloaded', timeout: FIRST_LOAD_MS }) }
+      catch (e) { throw new Error(unreachable(e)) }
+      page.__adalRootAt = Date.now()
+      await sleep(1500)
+      const st = await snapshotState(page)
+      if (!page.url().includes(KEYCLOAK_HOST) && (st?.hasAgencyPicker || st?.hasDashboardNav || st?.hasGoToDashboard)) return { ok: true, finalUrl: page.url(), onKeycloak: false }
+    } else
     // A blank Musaned page (its app never drew: 2026-11-23, Main) has no form to lose: it
     // loads again. Left as it was, the run paused for a sign-in that was not there, went on,
     // and paused again, for ever.
@@ -373,6 +397,7 @@ export async function stepOpenMusaned(page, ctx) {
   } else {
     try { await page.goto(MUSANED_ROOT, { waitUntil: 'domcontentloaded', timeout: FIRST_LOAD_MS }) }
     catch (e) { throw new Error(unreachable(e)) }
+    page.__adalRootAt = Date.now()
     await sleep(1500)
     const preState = await snapshotState(page)
     if (preState?.hasAgencyPicker || preState?.hasDashboardNav || preState?.hasGoToDashboard) {
@@ -2584,7 +2609,8 @@ async function musanedRun(page, ctx) {
   // works in it and nowhere else, so a second run never lands in this tab.
 
   try {
-    if (stage === 'awaiting-musaned-captcha' || stage === 'awaiting-musaned-otp') {
+    // An old sign-in page: from the start, where it is loaded fresh and filled (stepOpenMusaned).
+    if ((stage === 'awaiting-musaned-captcha' || stage === 'awaiting-musaned-otp') && !(await staleSignIn(page))) {
       let review = await classifyScreen(page, ctx)
       if (review.screen === 'captcha') {
         const w = await waitForPersonCaptcha(page, ctx)
@@ -2806,6 +2832,7 @@ async function waitForPersonCaptcha(page, ctx) {
     // beginning", 2026-11-24 live): Musaned opened again (a new sign-in), the name and password filled, the box drawn.
     restart: async () => {
       await page.goto(MUSANED_ROOT, { waitUntil: 'domcontentloaded', timeout: FIRST_LOAD_MS }).catch(() => {})   // Musaned's front page: its Login makes a new sign-in
+      page.__adalRootAt = Date.now()
       const o = await stepOpenMusaned(page, ctx)
       if (o?.onKeycloak !== false) await stepFillMusanedLogin(page, ctx)
       await boxDrawn(page, 60000)

@@ -51,7 +51,7 @@ a.addEventListener('click', (e) => {
     }
 
     if (host === 'accounts.wahid.sa') {
-      if (url.pathname === '/login' && req.method === 'GET') {
+      if ((url.pathname === '/login' || url.pathname === '/auth/realms/wahid/protocol/openid-connect/auth') && req.method === 'GET') {   // (wahid.sa's own address too)
         return send(page('Sign in', `<form method="post" action="/login"><input type="hidden" name="started" value="${Date.now()}">
 ${url.searchParams.get('expired') ? '<span id="input-error" class="kc-feedback-text">Your login attempt timed out. Login will start from the beginning.</span>' : ''}
 <input id="username" name="username"><input id="password" name="password" type="password">

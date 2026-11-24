@@ -26,7 +26,7 @@ const freePort = () => new Promise(r => { const s = net.createServer().listen(0,
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 const ACCOUNTS = [{ id: 1, name: 'Nuzla', username: 'nuzla', password: 'pw-nuzla', secret: 'JBSWY3DPEHPK3PXP' }]
 
-test('an expired Musaned sign-in starts again; a stale form is fresh for the tick; a wrong password is said', { skip: !CHROME && 'no Chrome', timeout: 180000 }, async (t) => {
+test('an expired Musaned sign-in starts again; a stale form is fresh for the tick; a wrong password is said', { skip: !CHROME && 'no Chrome', timeout: 280000 }, async (t) => {
   const { startMockPortal } = await import('./helpers/mockPortal.js')
   const mock = await startMockPortal({ accounts: ACCOUNTS, dir: tmp, loginTtlMs: 4000 })
   const cdp = await freePort()
@@ -77,6 +77,38 @@ test('an expired Musaned sign-in starts again; a stale form is fresh for the tic
     await tick(p)
     assert.equal(await run, 'dashboard', logs.join('\n'))
     assert.equal(mock.events.filter(e => e.what === 'login-expired').length, expiredBefore, 'the tick went onto a live sign-in')
+    await p.close()
+  })
+
+  // Run 1795531032938001, 18:14: put back in line, filled on the old page that said it had timed out.
+  for (const how of ['shows "timed out"', 'is an old form']) await t.test(`a run put back in line whose tab ${how}: loaded fresh before anything is filled`, async () => {
+    const p = await (await browser.createBrowserContext()).newPage()
+    await p.goto(`https://accounts.wahid.sa/auth/realms/wahid/protocol/openid-connect/auth${/timed out/.test(how) ? '?expired=1' : ''}`)
+    await p.evaluate(() => { window.oldPage = true })
+    if (/timed out/.test(how)) p.__adalRootAt = Date.now()       // even one it loaded a moment ago
+    const logs = [], asks = []
+    let cancelled = false
+    const run = w.runMusanedWorkflow(p, ctxOf(logs, asks, { musanedStage: 'awaiting-musaned-captcha', workflowId: 'musaned_check_chosen', profile: { passport_number: 'EP1234567' }, isCancelled: () => cancelled }))
+    run.catch(() => {})
+    for (let i = 0; i < 160 && !logs.some(l => /waiting for a person to tick/.test(l)); i++) await sleep(250)
+    assert.ok(logs.some(l => /loading Musaned's sign-in fresh/.test(l)), logs.join('\n'))
+    assert.equal(await p.evaluate(() => !!window.oldPage), false, 'a new page')
+    assert.equal(await p.evaluate(() => document.querySelector('#password').value), 'pw-nuzla', 'filled again')
+    assert.equal(asks.filter(a => /tick/.test(a)).length, 1, 'asked once')
+    cancelled = true
+    await run.catch(() => {})
+    await p.close().catch(() => {})
+  })
+
+  await t.test('a form the person has ticked is left as it is', async () => {
+    const p = await (await browser.createBrowserContext()).newPage()
+    await p.goto('https://accounts.wahid.sa/auth/realms/wahid/protocol/openid-connect/auth')
+    await p.evaluate(() => { window.oldPage = true })
+    await tick(p)
+    await sleep(500)
+    const o = await w.stepOpenMusaned(p, ctxOf([], []))
+    assert.equal(o.onKeycloak, true)
+    assert.equal(await p.evaluate(() => window.oldPage), true, 'not loaded again')
     await p.close()
   })
 

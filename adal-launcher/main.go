@@ -111,6 +111,7 @@ func main() {
 	startHidden(filepath.Join(root, "adal-agent.exe"))
 	startHidden(filepath.Join(root, "adal-companion.exe"))
 	go keepServerRunning(root)
+	go keepRobotsRunning(root) // Adal Robots, no window (robots.go)
 	go brandWindows(root)
 	startAppDoor(root)
 
@@ -175,6 +176,9 @@ func keepServerRunning(root string) {
 		out, _ := os.OpenFile(filepath.Join(backend, "data", "server.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 		cmd := hidden(exec.Command(filepath.Join(root, "runtime", "node.exe"), "server.js"))
 		cmd.Env = append(os.Environ(), "ADAL_HIDDEN_AGENTS=1") // this launcher keeps Adal Keep's window apart
+		if robotsHere(root) {
+			cmd.Env = append(cmd.Env, "ADAL_ROBOTS_SPAWN=0") // this launcher keeps Adal Robots running (robots.go)
+		}
 		cmd.Dir = backend
 		cmd.Stdout, cmd.Stderr = out, out
 		logf("starting the server")

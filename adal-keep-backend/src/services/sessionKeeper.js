@@ -14,6 +14,7 @@
  * POST /api/sessions/:key/open   a window on that site to sign in
  */
 import fs from 'fs'
+import os from 'os'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { getBrowser, openBrowserIfAny, quitBrowser, newRunTab, spaceOf } from './browser.js'
@@ -364,7 +365,7 @@ export function standbyStep(tab, now = Date.now()) {
   return now - (tab.loadedAt || 0) > STANDBY_FRESH_MS ? 'load' : 'ok'
 }
 export async function wafidStandby(browser, pages, running = new Set(), now = Date.now()) {
-  if (process.env.ADAL_WAFID_STANDBY === '0') return null
+  if (process.env.ADAL_WAFID_STANDBY === '0' || (isWeakPC() && process.env.ADAL_WAFID_STANDBY !== '1')) return null   // a weak PC keeps no extra tab
   const tabs = pages.filter(p => { try { return !p.isClosed?.() && WAFID.test(hostOf(p.url())) } catch { return false } })
   let p = tabs.find(t => !running.has(Number(t.__adalRunId)) && !t.__adalBorrowed) || tabs[0] || null
   let info = null
@@ -397,7 +398,7 @@ export function startSessionKeeper(database) {
   if (timer) return
   setTimeout(() => keepAlive().catch(() => {}), 60000)
   // Adal Keep started: each site's sign-in tab made ready, one after another (after the runs found their tabs again).
-  setTimeout(() => prepareSignIns(db, { force: true, why: 'Adal Keep started' }), Number(process.env.ADAL_MORNING_DELAY_MS) || 45000).unref?.()
+  setTimeout(() => prepareSignIns(db, { force: true, why: 'Adal Keep started' }), Number(process.env.ADAL_MORNING_DELAY_MS) || (isWeakPC() ? WEAK_UP_S * 1000 + 5000 : 45000)).unref?.()
   timer = setInterval(() => {
     keepAlive().catch(e => console.warn('[sessions]', e.message))
     insuranceMorning().catch(e => console.warn('[sessions] insurance morning:', e.message))
@@ -481,8 +482,8 @@ export async function sessionsNow() {
     const k = kept[s.key] || { tabs: 0, signedIn: false, spaces: {} }
     const accounts = []
     for (const a of await accountsOf(s.key)) {
-      const signedIn = !!(k.spaces || {})[a.space] || (ONE_SIGN_IN.has(s.key) && !!k.signedIn)
       const t = live.get(a.live) || (s.key === 'tasheer' ? tasheerTab : null)
+      const signedIn = !!(k.spaces || {})[a.space] || (ONE_SIGN_IN.has(s.key) && !!k.signedIn) || !!(t?.__adalRemote && !t.isClosed?.() && signedInAt(s, t.url()))
       const since = signedSince.get(`${s.key}|${a.space}`) || null
       let state = signedIn ? 'signed-in' : t && !t.isClosed?.() ? (t.__adalSigning ? 'waiting' : 'ready') : preparing && !prepDone.has(a.live) ? 'queued' : 'not-open'
       // A site that shuts this PC's robot browser out (Tasheer's Cloudflare): said plainly, no Open to a dead page.
@@ -510,6 +511,15 @@ export async function sessionsNow() {
 // (each press costs an SMS code). Tasheer only when nobody holds its one sign-in (never signs a person out).
 // A site signed in already is left as it is. Nothing is ever pressed past the captcha.
 let preparing = null, preparedAt = 0
+export const WEAK_CORES = 4, WEAK_UP_S = 180, WEAK_GAP_MS = 20e3
+export const isWeakPC = () => process.env.ADAL_WEAK_PC ? process.env.ADAL_WEAK_PC === '1' : (os.cpus()?.length || 2) <= WEAK_CORES
+/** Is the processor over 70 % busy now (1 s sample; Windows has no load average)? */
+export async function cpuBusy(limit = 0.7) {
+  const t = () => os.cpus().reduce((a, c) => { const v = Object.values(c.times); a.all += v.reduce((x, y) => x + y, 0); a.idle += c.times.idle; return a }, { all: 0, idle: 0 })
+  const a = t(); await new Promise(r => setTimeout(r, 1000)); const b = t()
+  const all = b.all - a.all
+  return all > 0 && 1 - (b.idle - a.idle) / all > limit
+}
 const prepDone = new Set()
 export const PREPARE_EVERY_MS = 10 * 60e3
 export const PREPARE_ORDER = ['musaned', 'insurance', 'mofa', 'lmis', 'tasheer']
@@ -538,8 +548,26 @@ export function prepareSignIns(database, { force = false, why = 'opened' } = {})
   preparing = (async () => {
     const { isFollower } = await import('./mainPC.js')
     if (isFollower?.()) return null
-    const browser = await getBrowser()
-    await keepAlive().catch(() => {})
+    // A weak PC (4 cores or fewer, 2026-11-24: Main of 2 cores went blank and stopped answering): the sign-in tabs
+    // open on the strongest office PC that is on (its Adal Companion's browser, out of sight, like runs —
+    // sharePower), else here one at a time, at most one every 20 s, after 3 min up, never while the processor is busy.
+    const weak = isWeakPC()
+    let browser = null, where = 'this PC'
+    if (weak) {
+      const rb = await import('./remoteBrowsers.js')
+      const dev = rb.freeStrongDevice(new Set(), Date.now(), (await import('./officeHealth.js')).ownVersion())
+      const d = dev && rb.liveDevices().find(x => x.id === dev)
+      if (d && (Number(d.cores) || 0) > WEAK_CORES) {
+        browser = await rb.browserForDevice(dev, { quiet: true }).catch(e => { console.warn(`[sessions] morning sign-in: ${d.name || dev} did not answer — ${e.message}`); return null })
+        if (browser) where = d.name || dev
+      }
+      if (!browser) {
+        if (process.uptime() < WEAK_UP_S) { console.log(`[sessions] morning sign-in: a weak PC — waits until Adal Keep has been up ${WEAK_UP_S / 60} min`); preparedAt = Date.now() - PREPARE_EVERY_MS + 60e3; return null }
+        if (await cpuBusy()) { console.log('[sessions] morning sign-in: the processor is busy (over 70 %) — later'); preparedAt = Date.now() - PREPARE_EVERY_MS + 60e3; return null }
+      }
+    }
+    browser = browser || await getBrowser()
+    if (where === 'this PC') await keepAlive().catch(() => {})
     const { holderOf } = await import('./tasheerSession.js')
     const holder = await holderOf(db).catch(() => null)
     const lines = []
@@ -552,22 +580,33 @@ export function prepareSignIns(database, { force = false, why = 'opened' } = {})
       }
     }
     const todo = toPrepare(lines)
-    console.log(`[sessions] morning sign-in (${why}): ${todo.length ? todo.map(l => `${l.name}${l.account.main ? '' : ` (${l.account.name})`}`).join(', ') + ' — one after another' : 'every site signed in or its tab ready'}`)
+    console.log(`[sessions] morning sign-in (${why}, on ${where}): ${todo.length ? todo.map(l => `${l.name}${l.account.main ? '' : ` (${l.account.name})`}`).join(', ') + ' — one after another' : 'every site signed in or its tab ready'}`)
+    let last = 0
     for (const l of todo) {
+      // A weak PC working on its own browser: one tab at a time, 20 s apart, never while the processor is busy.
+      if (weak && where === 'this PC') {
+        const gap = WEAK_GAP_MS - (Date.now() - last)
+        if (last && gap > 0) await new Promise(r => setTimeout(r, gap))
+        for (let i = 0; i < 10 && await cpuBusy(); i++) await new Promise(r => setTimeout(r, 10000))
+        if (await cpuBusy()) { console.log('[sessions] morning sign-in: the processor stays busy — the rest later'); break }
+      }
+      last = Date.now()
       const t0 = Date.now()
       try {
         let r
+        if (l.key === 'tasheer' && where !== 'this PC') { console.log('[sessions] morning sign-in: Tasheer is left for its Sign in button (its one agency sign-in opens on the main PC)'); prepDone.add(l.account.live); continue }
         if (l.key === 'lmis') r = await openLmisSignIn(browser, l.account)
         else if (l.key === 'tasheer') r = await (await import('./tasheerSession.js')).takeOver(db, { by: 'Morning sign-in', pc: (await import('os')).hostname(), quiet: true })
         else r = await openSite(l.key, db, { accountId: l.account.main ? null : l.account.id, browser })
         const page = siteTab(r?.live || l.account.live) || await (await import('./tasheerSession.js')).siteTab(r?.live || '').catch(() => null)
+        if (page && where !== 'this PC') page.__adalRemote = where   // on another PC: its address says whether it is signed in
         const how = r?.already ? 'signed in already' : page ? await settled(page) : 'no tab'
         if (l.key === 'lmis' && page && !r?.already) await freezeTab(page)
         console.log(`[sessions] morning sign-in: ${l.name}${l.account.main ? '' : ` (${l.account.name})`} — ${how} in ${((Date.now() - t0) / 1000).toFixed(1)} s`)
       } catch (e) { console.warn(`[sessions] morning sign-in: ${l.name} not opened — ${e.message}`) }
       prepDone.add(l.account.live)
     }
-    await wafidStandby(browser, await browser.pages().catch(() => []), await runningTabs().catch(() => new Set())).catch(() => {})
+    if (where === 'this PC') await wafidStandby(browser, await browser.pages().catch(() => []), await runningTabs().catch(() => new Set())).catch(() => {})
     return todo.length
   })().catch(e => { console.warn('[sessions] morning sign-in:', e.message); return null }).finally(() => { preparing = null })
   return preparing

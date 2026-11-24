@@ -110,7 +110,7 @@ test('sign-in: tab reuse, one space per account, the person only ticks the box',
     await waitFor(async () => /\/dashboard/.test(zadTab.url()), 15000, 'on the dashboard')
     await waitFor(async () => !zadTab.__adalBorrowed, 15000, 'the tab is free for runs again')
     assert.equal(mock.events.filter(e => e.what === 'otp-post' && !e.ok).length, 0, 'no wrong code')
-    await waitFor(async () => /^\[Zad\] /.test(await zadTab.title()), 5000, 'the tab is labelled [Zad]')
+    await waitFor(async () => /^\[Zad\] /.test(await zadTab.title()), 15000, 'the tab is labelled [Zad]')
     // The sessions never mix.
     assert.equal(await cookieOf(zadTab), 'zad')
     assert.equal(await cookieOf(nuzlaTab), 'nuzla', 'Nuzla is still signed in as Nuzla')

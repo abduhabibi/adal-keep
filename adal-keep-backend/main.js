@@ -120,6 +120,16 @@ app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false,
 app.use(cors((req, cb) => cb(null, { origin: originOk(req) ? (req.headers.origin || false) : false, credentials: true })))
 // From another computer: only one this PC said "Yes" to (services/networkGate.js).
 app.use(networkGate)
+// At once, before everything else (no database, no browser): other PCs and the windows ask it every few seconds,
+// and a slow answer made the Companions' windows jump between the main PC and their own copy (2026-11-24).
+const HEALTH_BASE = { status: 'ok' }
+let healthInstance = null
+app.get('/api/health', (req, res) => {
+  // role/instance let another PC check it is choosing a real main PC.
+  // acting: an Adal Companion (the older Go kind) standing in for the main PC while it is away (services/standby).
+  res.json({ ...HEALTH_BASE, role: isCompanion() ? 'companion' : isFollower() ? 'follower' : 'main', main_url: mainURL() || undefined, instance: (healthInstance ||= instanceId()), ...(process.env.ADAL_ACTING_MAIN === '1' ? { acting: true, acting_since: process.env.ADAL_ACTING_SINCE || null } : {}) })
+})
+
 // The user's own uploads first: the online copy and the backup wait (services/userUploads.js).
 app.use(trackUserUploads)
 // Big answers go packed (gzip) — the profiles list is megabytes, and a phone
@@ -379,12 +389,6 @@ app.get('/api/system/automation-health', async (req, res) => {
   try { res.json(await (await import('./src/services/automationHealth.js')).automationHealth(app.locals.db)) }
   catch (e) { res.status(500).json({ error: e.message }) }
 })
-app.get('/api/health', (req, res) => {
-  // role/instance let another PC check it is choosing a real main PC.
-  // acting: an Adal Companion (the older Go kind) standing in for the main PC while it is away (services/standby).
-  res.json({ status: 'ok', role: isCompanion() ? 'companion' : isFollower() ? 'follower' : 'main', main_url: mainURL() || undefined, instance: instanceId(), ...(process.env.ADAL_ACTING_MAIN === '1' ? { acting: true, acting_since: process.env.ADAL_ACTING_SINCE || null } : {}) })
-})
-
 app.get('/api/dashboard', async (req, res) => {
   try {
     const profiles = await db('profiles').count('id as count').first()

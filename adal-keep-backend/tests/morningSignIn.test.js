@@ -107,3 +107,18 @@ test('a waiting sign-in tab is paused (its scripts stop) and runs again when wok
     assert.ok(!p.__adalFrozen)
   } finally { await b.close(); fs.rmSync(dir, { recursive: true, force: true }) }
 })
+
+test('a weak PC: no sign-in tabs in its first 3 minutes (no browser started), the processor sampled', async () => {
+  process.env.ADAL_WEAK_PC = '1'
+  process.env.ADAL_MORNING_SIGNIN = ''
+  try {
+    assert.equal(k.isWeakPC(), true)
+    assert.equal(typeof await k.cpuBusy(), 'boolean')
+    const { default: knex } = await import('knex')
+    const db = knex({ client: 'sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true })
+    const t0 = Date.now()
+    assert.equal(await k.prepareSignIns(db, { force: true, why: 'test' }), null, 'nothing opened: up for less than 3 min')
+    assert.ok(Date.now() - t0 < 5000, 'answered at once')
+    await db.destroy()
+  } finally { delete process.env.ADAL_WEAK_PC; process.env.ADAL_MORNING_SIGNIN = '0' }
+})

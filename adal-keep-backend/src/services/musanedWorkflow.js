@@ -2715,6 +2715,22 @@ async function musanedRun(page, ctx) {
   }
 }
 
+/** Google's "I'm not a robot" checkbox is on the screen (its frame loaded and the box drawn). */
+async function boxDrawn(page, ms) {
+  for (const end = Date.now() + ms; Date.now() < end;) {
+    for (const f of page.frames()) {
+      let url = ''
+      try { url = f.url() } catch { continue }
+      if (!/\/recaptcha\/(api2|enterprise)\/anchor/.test(url)) continue
+      const ok = await f.evaluate(() => { const b = document.querySelector('#recaptcha-anchor'); if (!b) return false; const r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0 }).catch(() => false)
+      if (ok) return true
+    }
+    if (!(await page.evaluate(() => !!document.querySelector('input[type="password"]')).catch(() => true))) return true   // signed in meanwhile
+    await sleep(500)
+  }
+  return false
+}
+
 /**
  * Musaned's "I'm not a robot" is answered by a person — Adal Keep never
  * ticks it. The run brings its tab to the front, rings and waits (up to 10
@@ -2722,8 +2738,13 @@ async function musanedRun(page, ctx) {
  * carries on: the authenticator code and the rest of the work follow.
  */
 async function waitForPersonCaptcha(page, ctx) {
+  // The person is called when Google's box is drawn, not before (2026-11-23, this PC: the box took ~40 s
+  // on a slow line; the person saw an empty space, pressed Sign In, and Musaned said "Invalid Recaptcha").
+  const t0 = Date.now()
+  const drawn = await boxDrawn(page, 90000)
+  log(ctx, drawn ? `the "I'm not a robot" box is drawn (${Math.round((Date.now() - t0) / 1000)} s)` : 'the "I\'m not a robot" box did not draw in 90 s (slow line to Google) — calling a person anyway', drawn ? 'info' : 'warn')
   await ctx.notify(`🖐 ${ctx.profileName}: tick "I'm not a robot" on Musaned`,
-    'Only the tick (and the pictures, if Google shows some). Adal Keep signs in and continues by itself.', 'info', { login: page })
+    (drawn ? 'Only the tick (and the pictures, if Google shows some).' : 'Google\'s box is still loading: wait until it shows, then tick it.') + ' Do not press Sign In: Adal Keep signs in and continues by itself once it is ticked.', 'info', { login: page })
   log(ctx, '🖐 waiting for a person to tick "I\'m not a robot" (up to 10 min)')
   const { waitForTick } = await import('./robotCheck.js')
   const w = await waitForTick(page, {

@@ -755,9 +755,27 @@ export function laneOf(job) {
  * Claim the oldest ready run, skipping runs this process is still finishing
  * and runs of a lane (site + account) another run holds now (`lanes`).
  */
+/** A run waits in its site's tab for a person to sign in (a captcha, a code, a tick): not for a Save. */
+export const SIGN_IN_WAIT = /^awaiting-[a-z]+-(login|captcha|otp|code|robot|precheck)$/
+const SIGN_IN_FRESH_MS = 30 * 60e3
+
+/**
+ * Lanes held by a run paused for a sign-in in the last 30 minutes: the next run of that site and
+ * account would only need the same sign-in (2026-11-23: 20 Musaned runs one after another, each
+ * paused at the same reCAPTCHA, each one more beep and one more notice). It waits; once the person
+ * signs in, the paused run goes on, ends, and the next one starts in the signed-in tab.
+ */
+export async function signInLanes(db, now = Date.now()) {
+  const since = new Date(now - SIGN_IN_FRESH_MS).toISOString()
+  const rows = await db('automation_queue').where('status', 'paused').where('updated_at', '>', since)
+    .select('id', 'workflow_id', 'account_id', 'context', 'pause_reason').catch(() => [])
+  return new Set(rows.filter(r => SIGN_IN_WAIT.test(String(r.pause_reason || ''))).map(laneOf).filter(Boolean))
+}
+
 export async function claimNextJob(db, exclude = [], lanes = new Set()) {
   if (isAppLocked()) return null // trial over and not unlocked: no runs start
   if (towerHeld()) return null   // Adal support held the robots on this PC (Admin → Fleet → Suspend)
+  lanes = new Set([...lanes, ...(await signInLanes(db))])
   for (let i = 0; i < 5; i++) {
     const q = readyJobsQuery(db)
     if (exclude.length) q.whereNotIn('id', exclude)

@@ -22,7 +22,12 @@ const LiveTab = lazy(() => import('./LiveTab').catch(() => { location.reload(); 
 const err = (e) => e?.response?.data?.error || e.message
 const here = () => ['localhost', '127.0.0.1'].includes(location.hostname)
 
+// One beep, however many notices come together (2026-11-23: a run's call and its task each rang, and
+// every new run rang again — "weird noises"). Another one only after 20 s.
+let lastBeep = 0
 export function beep() {
+  if (Date.now() - lastBeep < 20000) return
+  lastBeep = Date.now()
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)()
     const o = ctx.createOscillator(), g = ctx.createGain()

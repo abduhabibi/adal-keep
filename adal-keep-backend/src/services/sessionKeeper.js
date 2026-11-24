@@ -190,6 +190,7 @@ export async function keepAlive() {
     const at = new Date().toISOString()
     for (const s of SITES) kept[s.key] = { ...seen[s.key], at }
     if (Object.values(seen).some(x => x.signedIn)) await saveSessionCookies(browser).catch(e => console.warn('[sessions] cookies not kept:', e.message))
+    await closeSpareTabs(pages).catch(e => console.warn('[sessions] spare tabs:', e.message))
     await wafidStandby(browser, pages, running).catch(e => console.warn('[sessions] Wafid standby:', e.message))
     return kept
   } finally { busy = false }
@@ -233,6 +234,36 @@ export async function restoreSessionCookies(browser, { file = COOKIE_FILE, now =
   try { await cdp.send('Storage.setCookies', { cookies }) } finally { cdp.detach().catch(() => {}) }
   console.log(`[sessions] the day's sign-ins are back in the robot browser (${cookies.length} cookies, kept ${Math.round((now - saved.at) / 60000)} min ago)`)
   return cookies.length
+}
+
+/**
+ * What to close of a site's tabs (each { owned, signedIn, typed, borrowed }): none while no tab is signed in;
+ * else every tab no run needs any more (its run ended, or none) that is signed out or a spare copy — one free
+ * signed-in tab stays for the next run. Never a run's tab, a borrowed one, or one with something typed. Pure.
+ */
+export function spareTabs(tabs) {
+  if (!tabs.some(t => t.signedIn)) return []
+  const free = tabs.filter(t => !t.owned && !t.borrowed && !t.typed)
+  const keepOne = tabs.some(t => t.signedIn && (t.owned || t.borrowed)) ? null : free.find(t => t.signedIn)
+  return free.filter(t => t !== keepOne)
+}
+// Finished runs' tabs and a stray signed-out tab cost memory and processor on a weak PC (2026-11-24: two
+// forms waiting for Save, a /login tab, the standby): closed every 4 minutes, out of sight.
+async function closeSpareTabs(pages) {
+  const { activeRunIds } = await import('./tabManager.js')
+  const active = await activeRunIds(db)
+  for (const site of SITES) {
+    const tabs = []
+    for (const p of pages) {
+      if (p.isClosed?.() || siteOf(p.url()) !== site || spaceOf(p)) continue   // the main account's space only
+      const typed = await Promise.race([p.evaluate(() => [...document.querySelectorAll('input, textarea')].some(e => !['hidden', 'password', 'checkbox', 'radio', 'file', 'submit', 'button'].includes(e.type) && e.value && e.value !== e.defaultValue)).catch(() => true), new Promise(r => setTimeout(() => r(true), 5000))])
+      const id = Number(p.__adalRunId)
+      tabs.push({ p, owned: Number.isFinite(id) && active.has(id), borrowed: !!p.__adalBorrowed || !!p.__adalShown || !!p.__adalPerson, typed, signedIn: signedInAt(site, p.url()) })
+    }
+    const go = spareTabs(tabs)
+    for (const t of go) await t.p.close().catch(() => {})
+    if (go.length) console.log(`[sessions] ${site.name}: ${go.length} tab(s) no run needs any more closed (one signed-in tab stays)`)
+  }
 }
 
 // ── Wafid on standby (the owner, 2026-11-24: "keep the wafid stand by to make things faster, cuz wafid doesn't

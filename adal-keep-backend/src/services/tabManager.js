@@ -70,6 +70,7 @@ export function isPeerUrl(url, peer) {
 
 const TRACKERS = /(^|\.)(google-analytics\.com|googletagmanager\.com|doubleclick\.net|facebook\.net|facebook\.com|hotjar\.com|clarity\.ms|tiktok\.com|snapchat\.com|twitter\.com|linkedin\.com|youtube\.com)$/i
 
+const LOGOUT = /^https?:\/\/[^/]*(wahid\.sa|musaned\.com\.sa)(:\d+)?\/.*(openid-connect\/logout|\/logout\b)/i
 const CAPTCHA_HOSTS = /(^|\.)(google\.com|gstatic\.com|recaptcha\.net)$/i
 
 function isClosed(page) {
@@ -124,6 +125,14 @@ export async function setupTab(page, { runId, mute = true } = {}) {
   try {
     await page.setRequestInterception(true)
     page.on('request', req => {
+      // Never signed out by the site itself (the owner: "keep every login for a day"): a Musaned page whose
+      // sign-in refresh failed on a dropped line went to the sign-out address — six tabs on this PC, 2026-11-24.
+      // Only Adal Keep's own account switch signs out (page.__adalMayLogOut, or a tab of its own).
+      if (!page.__adalMayLogOut && req.isNavigationRequest() && LOGOUT.test(req.url())) {
+        console.log(`[tabManager] a sign-out of ${hostOf(req.url())} stopped (the day's sign-in stays)`)
+        req.abort().catch(() => {})
+        return
+      }
       // Only what the work needs comes down: no tracking scripts, videos or
       // sounds (and no pictures, except where the reCAPTCHA needs them). With
       // 3–4 runs at once every run gets more of the internet connection.

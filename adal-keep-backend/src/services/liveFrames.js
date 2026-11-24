@@ -4,10 +4,10 @@
  * live view run a second or more behind). A page that stands still sends nothing,
  * and a tab Chromium stops drawing sends nothing either, so a screenshot fills in.
  */
-// A picture by request only when Chromium sent none: 0.7 s while nothing came yet, then every 3 s on a
+// A picture by request only when Chromium sent none: 0.7 s while nothing came yet, then every 1 s on a
 // still page (a full JPEG every 0.7 s on a page that does not change cost a weak PC most of a core).
 const FILL_IN_MS = 700
-const STILL_MS = 3000
+const STILL_MS = 1000
 const IDLE_MS = 6000
 // Small pictures: a weak PC encodes them faster and a slow line carries them (text stays readable).
 const QUALITY = 50, MAX_W = 1280, MAX_H = 840

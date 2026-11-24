@@ -16,7 +16,7 @@ import net from 'net'
 import http from 'http'
 import { spawn } from 'child_process'
 
-const EXE = ['/usr/bin/google-chrome', '/usr/bin/chromium', '/opt/brave.com/brave/brave'].find(f => fs.existsSync(f))
+const EXE = process.env.TEST_BROWSER || ['/usr/bin/google-chrome', '/usr/bin/chromium', '/opt/brave.com/brave/brave'].find(f => fs.existsSync(f))
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'adal-liveinput-'))
 process.env.ADAL_NO_BROWSER_START = '1'
 process.env.ADAL_SPACES_FILE = path.join(tmp, 'spaces.json')
@@ -61,6 +61,8 @@ test('clicks reach the run tab and a box in another site\'s frame, on a slow PC 
     await page.waitForFunction(() => document.getElementById('f')?.contentWindow, { timeout: 30000 })
     for (let i = 0; i < 40 && !page.frames().some(f => /anchor/.test(f.url())); i++) await sleep(250)
 
+    // Other tabs opened after it (other runs): the run's tab is a background tab now, as on the owner's PC.
+    if (process.env.LIVE_BACKGROUND !== '0') { const other = await browser.newPage(); await other.goto('about:blank'); await other.bringToFront?.() }
     const express = (await import('express')).default
     const router = (await import('../src/routes/automations.js')).default
     const server = express(); server.use(express.json()); server.locals.db = db; server.use('/api', router)
@@ -72,6 +74,15 @@ test('clicks reach the run tab and a box in another site\'s frame, on a slow PC 
         body: JSON.stringify({ batch: [{ kind: 'mouse', type: 'move', ...at(x, y) }, { kind: 'mouse', type: 'down', ...at(x, y), button: 0, buttons: 1, clickCount: 1 }, { kind: 'mouse', type: 'up', ...at(x, y), button: 0, buttons: 0, clickCount: 1 }] }) })
       return { status: r.status, ms: Date.now() - t0 }
     }
+    // The pictures of the background tab while its page changes (a clock in it).
+    await page.evaluate(() => { const d = document.createElement('div'); d.id = 'clock'; d.style = 'position:absolute;left:10px;top:10px'; document.body.appendChild(d); setInterval(() => { d.textContent = String(Date.now()) }, 200) })
+    const { watchFrames } = await import('../src/services/liveFrames.js')
+    let frames = 0
+    const stop = await watchFrames(page, () => { frames++ })
+    await sleep(3000)
+    stop()
+    console.log(`pictures of the background tab in 3 s: ${frames}`)
+    assert.ok(frames >= 5, `the live view gets pictures (${frames} in 3 s)`)
     const a = await click(200, 130)
     const b = await click(200, 130)
     const box = await click(100 + 10 + 16, 300 + 10 + 16)

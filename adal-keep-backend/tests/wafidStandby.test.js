@@ -37,3 +37,15 @@ test('a run on the ready tab starts with no page load; otherwise the page loads'
   const typedIn = fakePage(WAFID_STANDBY, { typed: true })
   assert.equal(await toPage(typedIn, WAFID_STANDBY), 'loaded')
 })
+
+test("a site's tabs no run needs any more are closed; one signed-in tab stays; forms and people's tabs never", async () => {
+  const { spareTabs } = await import('../src/services/sessionKeeper.js')
+  const form = { owned: true, signedIn: true }, login = { signedIn: false }, done1 = { signedIn: true }, done2 = { signedIn: true }
+  const typed = { signedIn: true, typed: true }, person = { signedIn: false, borrowed: true }
+  // A run's form waits for Save (signed in): the finished runs' tabs and the stray /login tab go.
+  assert.deepEqual(spareTabs([form, login, done1, done2, typed, person]), [login, done1, done2])
+  // No run holds a signed-in tab: one free signed-in tab stays for the next run.
+  assert.deepEqual(spareTabs([login, done1, done2]), [login, done2])
+  // Nothing signed in: nothing closed (the sign-in may be in progress there).
+  assert.deepEqual(spareTabs([login, { signedIn: false }]), [])
+})

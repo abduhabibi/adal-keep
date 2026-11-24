@@ -347,7 +347,9 @@ export async function stepOpenMusaned(page, ctx) {
   // Peer-aware: if this tab is ALREADY on a Musaned host we do NOT navigate to
   // the root — that would wipe an in-progress form and/or force a re-login.
   // We just inspect the current screen and continue.
-  const alreadyOnMusaned = isPeerUrl(page.url(), 'musaned')
+  // (A tab left on Musaned's own /login page is not a signed-in page: it loads Musaned fresh — a second run
+  // that took such a tab sat at the agency picker until a person clicked, 2026-11-24.)
+  const alreadyOnMusaned = isPeerUrl(page.url(), 'musaned') && !/^\/login\b/.test((() => { try { return new URL(page.url()).pathname } catch { return '' } })())
   if (alreadyOnMusaned) {
     await sleep(500)
     const preState = await snapshotState(page)
@@ -455,7 +457,8 @@ export async function stepClickAgencyCard(page, ctx) {
     if (ctx.accountSwitched) throw new Error(`Musaned stays signed in as ${other}`)
     ctx.accountSwitched = true
     log(ctx, `Musaned offers ${other}'s agency: logging out, to sign in as this run's account`, 'warn')
-    // "Not you? Log Out" is on this page.
+    // "Not you? Log Out" is on this page. (Its sign-out is ours: allowed in this tab — tabManager.)
+    page.__adalMayLogOut = true
     const pressed = await page.evaluate(`(() => { const b = (${logoutItem})(); b?.click(); return !!b })()`).catch(() => false)
     if (pressed) await page.waitForFunction(() => !!document.querySelector('input[type="password"]'), { timeout: 15000 }).catch(() => {})
     else await logOutInNewTab(page, ctx)
@@ -2679,9 +2682,10 @@ async function musanedRun(page, ctx) {
       log(ctx, '✓ the Add Candidate form is open — filling it')
       await sleep(1500)
     }
-    // The form did not open and Musaned said nothing: is she in our list?
+    // The form: up to 45 s while Musaned's spinner turns (a slow Musaned took longer than the 12 s waited
+    // before, 2026-11-24), else at once when Musaned says she is registered.
     let formOpen = false
-    for (let i = 0; i < 24 && !formOpen; i++) {
+    for (const end = Date.now() + 45000; !formOpen && Date.now() < end;) {
       formOpen = await addFormOpen(page)
       if (!formOpen) { if (await readAlreadyRegistered(page, 0)) break; await sleep(500) }
     }
@@ -2690,7 +2694,15 @@ async function musanedRun(page, ctx) {
       log(ctx, 'the Add Candidate form did not open after the passport check', 'warn')
       const seen = await readAlreadyRegistered(page, 1500)
       if (seen) return await stopAlreadyRegistered(page, ctx, seen, Math.round((Date.now() - t0) / 1000))
-      if (await findInOurList(page, ctx, passport)) return await stopAlreadyRegistered(page, ctx, { kind: 'ours', found: true }, Math.round((Date.now() - t0) / 1000))
+      // Is she in our HR Pool already? Musaned's own data calls (seconds), the page search only as a fallback.
+      ctx.onLog?.('info', `🔎 Checking if ${ctx.profileName} is already on Musaned (passport ${passport})`)
+      let mine   // undefined = the quick look could not be done: then the page search
+      try { mine = await (await import('./musanedImport.js')).herMusanedPage(page, ctx.db, passport, (m) => log(ctx, m)) } catch (e) { log(ctx, `quick HR Pool look: ${e.message}`, 'warn') }
+      if (mine || (mine === undefined && await findInOurList(page, ctx, passport))) return await stopAlreadyRegistered(page, ctx, { kind: 'ours', found: true }, Math.round((Date.now() - t0) / 1000))
+      // Not in our list and no form: nothing is filled on a page that is not the form (it was, and failed
+      // after 224 s). One try: the person presses Continue when Musaned answers again.
+      ctx.onLog?.('info', `ℹ️ ${ctx.profileName} is not in our Musaned HR Pool`)
+      return { ok: false, step: 'musaned', error: "Musaned did not open the Add Candidate form after the passport check (its page kept loading). Nothing was filled. Try again when Musaned answers.", seconds: Math.round((Date.now() - t0) / 1000) }
     }
     if (!pre || !pre.ok) {
       log(ctx, `pre-check failed (${pre?.error || 'unknown'}) — running diagnostics before details`, 'warn')

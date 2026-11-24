@@ -190,6 +190,7 @@ export async function keepAlive() {
     const at = new Date().toISOString()
     for (const s of SITES) kept[s.key] = { ...seen[s.key], at }
     if (Object.values(seen).some(x => x.signedIn)) await saveSessionCookies(browser).catch(e => console.warn('[sessions] cookies not kept:', e.message))
+    await wafidStandby(browser, pages, running).catch(e => console.warn('[sessions] Wafid standby:', e.message))
     return kept
   } finally { busy = false }
 }
@@ -232,6 +233,46 @@ export async function restoreSessionCookies(browser, { file = COOKIE_FILE, now =
   try { await cdp.send('Storage.setCookies', { cookies }) } finally { cdp.detach().catch(() => {}) }
   console.log(`[sessions] the day's sign-ins are back in the robot browser (${cookies.length} cookies, kept ${Math.round((now - saved.at) / 60000)} min ago)`)
   return cookies.length
+}
+
+// ── Wafid on standby (the owner, 2026-11-24: "keep the wafid stand by to make things faster, cuz wafid doesn't
+// need login") ─────────────────────────────────────────────────────────────────────────────────────────────
+// One Wafid tab out of sight, its page loaded and ready: a Wafid run takes it (tabManager.findFreeTab) and
+// starts at once, no page load (wafidWorkflow.toPage). Checked with the other sites every 4 minutes, nothing
+// else: loaded again only when it is 30 minutes old or shows an error; after a run, back to its page. Its
+// pictures stay off (Google's reCAPTCHA always comes: tabManager).
+export const WAFID_STANDBY = 'https://wafid.com/en/search-slip/'
+export const STANDBY_FRESH_MS = 30 * 60e3
+const WAFID = /(^|\.)wafid\.com$/i
+/** What to do with the Wafid tabs now: 'open' | 'load' (back to its page / fresh again) | 'ok'. Pure. */
+export function standbyStep(tab, now = Date.now()) {
+  if (!tab) return 'open'
+  if (tab.busy || tab.typed) return 'ok'                     // a run or a person in it: never touched
+  if (tab.url !== WAFID_STANDBY || tab.broken) return 'load'
+  return now - (tab.loadedAt || 0) > STANDBY_FRESH_MS ? 'load' : 'ok'
+}
+export async function wafidStandby(browser, pages, running = new Set(), now = Date.now()) {
+  if (process.env.ADAL_WAFID_STANDBY === '0') return null
+  const tabs = pages.filter(p => { try { return !p.isClosed?.() && WAFID.test(hostOf(p.url())) } catch { return false } })
+  let p = tabs.find(t => !running.has(Number(t.__adalRunId)) && !t.__adalBorrowed) || tabs[0] || null
+  let info = null
+  if (p) {
+    const st = await Promise.race([p.evaluate(() => ({
+      typed: [...document.querySelectorAll('input, textarea')].some(e => !['hidden', 'checkbox', 'radio', 'file', 'submit', 'button'].includes(e.type) && e.value && e.value !== e.defaultValue),
+      broken: (document.body?.innerText || '').trim().length < 40 || /\b(50[234]|error|not available|unavailable)\b/i.test(document.title),
+    })).catch(() => null), new Promise(r => setTimeout(() => r(null), 8000))])
+    info = { url: p.url(), busy: running.has(Number(p.__adalRunId)) || !!p.__adalBorrowed, typed: !!st?.typed, broken: !st || st.broken, loadedAt: p.__adalStandbyAt || 0 }
+  }
+  const step = standbyStep(info, now)
+  if (step === 'ok') return step
+  if (step === 'open') {
+    p = await newRunTab(browser, null, { quiet: true })
+    await (await import('./tabManager.js')).setupTab(p)       // pictures off (reCAPTCHA on), out of sight
+  }
+  await p.goto(WAFID_STANDBY, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  p.__adalStandbyAt = Date.now()
+  console.log(`[sessions] Wafid on standby: ${step === 'open' ? 'a tab opened' : 'its page loaded again'} (${WAFID_STANDBY})`)
+  return step
 }
 
 /** The robot browser holds a site signed in now (memoryGuard leaves such a browser open). */

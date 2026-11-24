@@ -13,6 +13,9 @@
  * GET  /api/sessions             each site: signed in or not, its tabs, last kept
  * POST /api/sessions/:key/open   a window on that site to sign in
  */
+import fs from 'fs'
+import path from 'path'
+import { fileURLToPath } from 'url'
 import { getBrowser, openBrowserIfAny, quitBrowser, newRunTab, spaceOf } from './browser.js'
 import { hostOf, handTabToPerson } from './tabManager.js'
 
@@ -186,9 +189,53 @@ export async function keepAlive() {
     }
     const at = new Date().toISOString()
     for (const s of SITES) kept[s.key] = { ...seen[s.key], at }
+    if (Object.values(seen).some(x => x.signedIn)) await saveSessionCookies(browser).catch(e => console.warn('[sessions] cookies not kept:', e.message))
     return kept
   } finally { busy = false }
 }
+
+// ── a day's sign-ins survive the browser starting again (the owner, 2026-11-24: "not relogin at all and keep
+// every login for a day") ──────────────────────────────────────────────────────────────────────────────────
+// A site's sign-in that lives only while the browser is open (a "session" cookie) was lost each time the
+// robot browser started again (Adal Keep starts it without its last tabs). Every 4 minutes those cookies of
+// the portals are kept here, locked with the account vault; a browser started again gets them back (24 h).
+const PORTAL_COOKIES = /(^|\.)(musaned\.com\.sa|wahid\.sa|visa\.mofa\.gov\.sa|niscofetap\.com|lmis\.gov\.et|tasheer\.com|wafid\.com)$/i
+const COOKIE_FILE = process.env.ADAL_SESSION_COOKIES || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'data', 'session-cookies.json')
+export const COOKIES_KEPT_MS = 24 * 3600e3
+export const portalSessionCookies = (cookies = []) => cookies
+  .filter(c => c.session && PORTAL_COOKIES.test(String(c.domain || '').replace(/^\./, '')))
+  .map(({ name, value, domain, path, secure, httpOnly, sameSite }) => ({ name, value, domain, path, secure, httpOnly, ...(sameSite ? { sameSite } : {}) }))
+
+export async function saveSessionCookies(browser, { file = COOKIE_FILE, now = Date.now() } = {}) {
+  const cdp = await browser.target().createCDPSession()
+  try {
+    const { cookies } = await cdp.send('Storage.getCookies')
+    const keep = portalSessionCookies(cookies)
+    if (!keep.length) return 0
+    const { seal } = await import('./accountVault.js')
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, JSON.stringify({ at: now, cookies: seal(JSON.stringify(keep)) }), { mode: 0o600 })
+    return keep.length
+  } finally { cdp.detach().catch(() => {}) }
+}
+
+/** A robot browser just started: the day's sign-ins back (none older than 24 h). → how many cookies. */
+export async function restoreSessionCookies(browser, { file = COOKIE_FILE, now = Date.now() } = {}) {
+  let saved = null
+  try { saved = JSON.parse(fs.readFileSync(file, 'utf8')) } catch { return 0 }
+  if (!saved?.cookies || !(now - Number(saved.at) < COOKIES_KEPT_MS)) return 0
+  const { open } = await import('./accountVault.js')
+  let cookies = []
+  try { cookies = JSON.parse(open(saved.cookies) || '[]') } catch { return 0 }
+  if (!cookies.length) return 0
+  const cdp = await browser.target().createCDPSession()
+  try { await cdp.send('Storage.setCookies', { cookies }) } finally { cdp.detach().catch(() => {}) }
+  console.log(`[sessions] the day's sign-ins are back in the robot browser (${cookies.length} cookies, kept ${Math.round((now - saved.at) / 60000)} min ago)`)
+  return cookies.length
+}
+
+/** The robot browser holds a site signed in now (memoryGuard leaves such a browser open). */
+export const holdsSignIns = (now = Date.now()) => Object.values(kept).some(k => k?.signedIn && now - Date.parse(k.at || 0) < 15 * 60e3)
 
 export function startSessionKeeper(database) {
   db = database

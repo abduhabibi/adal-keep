@@ -140,7 +140,23 @@ export const PROFILE_DIR = process.env.ADAL_BROWSER_PROFILE ||
   path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'data', profileFor(findBrowserExecutable()))
 // Out of sight needs today's AdalKeep.exe: an older one opens Adal Keep's page
 // inside this browser, and that page must stay on the screen.
-const HIDDEN = process.platform !== 'win32' || process.env.ADAL_HIDDEN_AGENTS === '1'
+// Adal Robots with its window on the screen (the person ticks in it): only in that program (ADAL_ROBOT_PROCESS) and
+// only when switched on for this PC (ADAL_ROBOTS_WINDOW=1). Off: no window, as the owner asked (2026-11-23). Adal
+// Keep itself never shows one.
+export const robotWindow = () => process.env.ADAL_ROBOT_PROCESS === '1' && process.env.ADAL_ROBOTS_WINDOW === '1'
+const HIDDEN = !robotWindow() && (process.platform !== 'win32' || process.env.ADAL_HIDDEN_AGENTS === '1')
+/** A person is needed in this tab: it and its window to the front (only with the window switched on). */
+export async function raiseForPerson(page) {
+  if (!robotWindow() || !page || page.isClosed?.()) return false
+  const c = await page.createCDPSession().catch(() => null)
+  if (!c) return false
+  try {
+    const { windowId, bounds } = await c.send('Browser.getWindowForTarget')
+    if (bounds?.windowState === 'minimized') await c.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'normal' } })
+    await c.send('Page.bringToFront')
+    return true
+  } catch { return false } finally { c.detach().catch(() => {}) }
+}
 const DEBUG_PORT = Number(process.env.ADAL_CDP_PORT) || 9222   // (Adal Robots may use another: robots/adal-robots.mjs)
 const OFF = { left: -32000, top: -32000, width: 1366, height: 900 }
 

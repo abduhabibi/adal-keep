@@ -6,6 +6,7 @@
  * only write the queue).
  */
 import fs from 'fs'
+import http from 'http'
 import path from 'path'
 import { robotsInApp } from './robotsInApp.js'
 
@@ -16,7 +17,7 @@ export const PASSED = [
   ['GET', /^\/automations\/attention$/, false],
   ['POST', /^\/automations\/\d+\/captcha$/, false],
   ['POST', /^\/automations\/\d+\/attention\/done$/, false],
-  ['GET', /^\/automations\/[\w-]+\/(screen|tab|mirror)$/, false],
+  ['GET', /^\/automations\/[\w-]+\/(screen|stream|tab|mirror)$/, false],
   ['POST', /^\/automations\/[\w-]+\/input$/, false],
   ['POST', /^\/automations\/\d+\/(cancel|resume)$/, true],
 ]
@@ -37,21 +38,31 @@ export async function robotsLink(req, res, next) {
   const t = tokenOf()
   const fallback = rule[2]
   if (!t) return fallback ? next() : res.status(503).json({ error: 'Adal Robots is not running on this PC', robots: 'off' })
-  try {
-    const r = await fetch(ROBOTS_URL() + '/api' + req.url, {
-      method: req.method,
-      headers: { 'content-type': 'application/json', 'x-adal-robots': t, ...(req.get('accept') ? { accept: req.get('accept') } : {}) },
-      body: req.method === 'GET' ? undefined : JSON.stringify(req.body || {}),
-      signal: AbortSignal.timeout(req.path.endsWith('/input') ? 15000 : 30000),
-    })
-    res.status(r.status)
-    for (const h of ['content-type', 'cache-control', 'x-frame-at']) { const v = r.headers.get(h); if (v) res.set(h, v) }
-    res.end(Buffer.from(await r.arrayBuffer()))
-  } catch (e) {
+  const off = () => {
     token = null   // made again when Adal Robots starts again
-    if (fallback) return next()
-    res.status(503).json({ error: 'Adal Robots is not running on this PC (start it: Adal Robots)', robots: 'off' })
+    if (fallback && !res.headersSent) return next()
+    if (!res.headersSent) res.status(503).json({ error: 'Adal Robots is not running on this PC (start it: Adal Robots)', robots: 'off' })
+    else res.end()
   }
+  // Passed on as it comes, piece by piece (2026-11-24: the live view's pictures are one endless stream — read whole
+  // it never came, and the view stayed on "Opening the robot's browser…").
+  const body = req.method === 'GET' ? null : JSON.stringify(req.body || {})
+  const u = new URL(ROBOTS_URL() + '/api' + req.url)
+  const up = http.request({ host: u.hostname, port: u.port, path: u.pathname + u.search, method: req.method, agent: false,
+    headers: { 'x-adal-robots': t, ...(body ? { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) } : {}) } }, (r) => {
+    up.setTimeout(0)
+    res.status(r.statusCode)
+    for (const h of ['content-type', 'cache-control', 'x-frame-at', 'x-accel-buffering']) if (r.headers[h]) res.set(h, r.headers[h])
+    res.flushHeaders?.()
+    res.socket?.setNoDelay?.(true)
+    r.on('error', () => res.end())
+    r.pipe(res)
+  })
+  // Nothing at all in 30 s (a stream's headers come at once): it is stuck or off.
+  up.setTimeout(30000, () => up.destroy(new Error('no answer')))
+  up.on('error', off)
+  res.on('close', () => up.destroy())   // the viewer closed: the robot stops sending
+  up.end(body || undefined)
 }
 
 /**

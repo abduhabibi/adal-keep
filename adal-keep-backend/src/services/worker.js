@@ -284,7 +284,8 @@ async function executeRun(db, page, job) {
       if (onLog) await onLog(level, `🔔 ${title}`)
       // A sign-in, code or reCAPTCHA waits for a person: it stays in the bar
       // until the run goes on (its next "✓"). Paused runs show from the queue.
-      if (human) needPerson(runId, title, body, { confirm: !!opts.confirm })
+      const raised = opts.login ? await import('./browser.js').then(b => b.raiseForPerson(opts.login?.target ? opts.login : page)) : false
+      if (human) needPerson(runId, title, raised ? `In the Adal Robots window on this PC. ${body || ''}` : body, { confirm: !!opts.confirm })
       beepFor(runId)
     } catch (e) {
       console.error('[notify] failed:', e.message)

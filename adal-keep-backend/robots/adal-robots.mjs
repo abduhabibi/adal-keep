@@ -8,13 +8,14 @@
  *  - Its own database connection, never held: one at most, closed after 2 s unused, a short wait for it
  *    (2026-11-24: Adal Keep stopped answering with its connection pool full).
  *  - Its own browser (the PC's Brave / Chrome / Edge, its own profile): headless on Linux, out of sight on Windows.
- *    Never a window.
+ *    No window, unless switched on for this PC (ADAL_ROBOTS_WINDOW=1).
  *  - A weak PC: while the processor is over 80 % busy no new run starts (it waits in line).
  *  - 127.0.0.1:4010 (this PC only, a token): the live view of a run's tab and the person's clicks (the "I'm not a
  *    robot" tick), the "needs you" list, Stop and Continue — Adal Keep passes those on (src/services/robotsLink.js).
  *
  * Start: node robots/adal-robots.mjs   (Linux: adal-robots.service; Windows: AdalRobots, hidden, with the PC)
- * Env:   ADAL_ROBOTS_PORT (4010), ADAL_CDP_PORT (9222), ADAL_ROBOTS_CPU (0.8), SQLITE_PATH (Adal Keep's file)
+ * Env:   ADAL_ROBOTS_WINDOW=1: its browser on the screen, brought to the front when a person must tick (off: no window)
+ *        ADAL_ROBOTS_PORT (4010), ADAL_CDP_PORT (9222), ADAL_ROBOTS_CPU (0.8), SQLITE_PATH (Adal Keep's file)
  */
 import fs from 'fs'
 import os from 'os'

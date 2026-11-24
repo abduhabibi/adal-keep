@@ -85,6 +85,11 @@ export async function waitForTick(page, { onForm, submit, refill = null, restart
     if (!(await onForm().catch(() => true))) return pressed ? 'submitted' : 'left'
     // A person opens the tab (after nobody looked for 15 s) and the form has waited long: fresh first, so the
     // tick goes onto a sign-in that is still alive. Never right after a click of theirs.
+    // (Adal Robots' own window: the person's mouse coming over the page is the look.)
+    if (process.env.ADAL_ROBOT_PROCESS === '1' && process.env.ADAL_ROBOTS_WINDOW === '1') {
+      const moved = await page.evaluate(() => { if (!window.__adalW) { window.__adalW = 1; addEventListener('mousemove', (e) => { if (e.isTrusted) window.__adalMovedAt = Date.now() }, true) } return window.__adalMovedAt || 0 }).catch(() => 0)
+      if (moved > (page.__adalLookedAt || 0)) page.__adalLookedAt = moved
+    }
     const look = page.__adalLookedAt || 0
     if (look !== lastLook) {
       const opened = look - lastLook > 15000

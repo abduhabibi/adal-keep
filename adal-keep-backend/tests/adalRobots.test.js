@@ -24,16 +24,53 @@ test('Adal Keep passes the live view, the clicks, the "needs you" list, Stop and
   assert.equal(passedTo('POST', '/automations/queue'), null)
 })
 
-test('Adal Keep answers at once that Adal Robots is not running (no tab to show), and Stop falls back to its own', async () => {
+test('Adal Robots off: the live view is told at once, Stop falls back to Adal Keep; on: an endless stream comes piece by piece', async () => {
   delete process.env.ADAL_ROBOTS_IN_APP
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'adal-link-'))
+  process.env.ADAL_ROBOTS_DATA = dir
+  fs.writeFileSync(path.join(dir, 'robots-token'), 'x'.repeat(40))
   process.env.ADAL_ROBOTS_PORT = '9'   // nothing answers there
+  const express = (await import('express')).default
   const { robotsLink } = await import('../src/services/robotsLink.js')
-  const res = { code: 0, body: null, status(c) { this.code = c; return this }, json(b) { this.body = b; return this } }
-  let nexted = false
-  await robotsLink({ method: 'GET', path: '/automations/5/screen', url: '/automations/5/screen', get: () => '' }, res, () => { nexted = true })
-  assert.equal(res.code, 503); assert.match(res.body.error, /Adal Robots is not running/); assert.ok(!nexted)
-  await robotsLink({ method: 'POST', path: '/automations/5/cancel', url: '/automations/5/cancel', get: () => '', body: {} }, res, () => { nexted = true })
-  assert.ok(nexted, 'Stop is done by Adal Keep itself')
+  const keep = express(); keep.use(express.json()); keep.use('/api', robotsLink); keep.use('/api', (req, res) => res.json({ here: true }))
+  const ks = await new Promise(r => { const s = keep.listen(0, '127.0.0.1', () => r(s)) })
+  const K = `http://127.0.0.1:${ks.address().port}/api`
+  const off = await fetch(`${K}/automations/5/stream`)
+  assert.equal(off.status, 503); assert.match((await off.json()).error, /Adal Robots is not running/)
+  assert.deepEqual(await (await fetch(`${K}/automations/5/cancel`, { method: 'POST' })).json(), { here: true }, 'Stop is done by Adal Keep itself')
+  // A stand-in for Adal Robots: a stream that never ends, and an answer to the person's click.
+  let gone = false, got = null
+  const robots = express(); robots.use(express.json())
+  robots.use((req, res, next) => req.get('x-adal-robots') === 'x'.repeat(40) ? next() : res.status(403).end())
+  robots.get('/api/automations/5/stream', (req, res) => { res.writeHead(200, { 'Content-Type': 'multipart/x-mixed-replace; boundary=adalframe' }); const t = setInterval(() => res.write('--adalframe picture\r\n'), 50); req.on('close', () => { gone = true; clearInterval(t) }) })
+  robots.post('/api/automations/5/input', (req, res) => { got = req.body; res.json({ ok: true }) })
+  const rs = await new Promise(r => { const s = robots.listen(0, '127.0.0.1', () => r(s)) })
+  process.env.ADAL_ROBOTS_PORT = String(rs.address().port)
+  const ac = new AbortController()
+  const st = await fetch(`${K}/automations/5/stream`, { signal: ac.signal })
+  assert.equal(st.status, 200); assert.match(st.headers.get('content-type'), /multipart\/x-mixed-replace/)
+  const first = await st.body.getReader().read()
+  assert.match(Buffer.from(first.value).toString(), /picture/, 'the first picture comes at once')
+  ac.abort()
+  await new Promise(r => setTimeout(r, 400))
+  assert.ok(gone, 'the viewer closed: the robot stops sending')
+  assert.deepEqual(await (await fetch(`${K}/automations/5/input`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ x: 1 }) })).json(), { ok: true })
+  assert.deepEqual(got, { x: 1 }, 'the click reached Adal Robots')
+  ks.closeAllConnections(); ks.close(); rs.closeAllConnections(); rs.close()
+  fs.rmSync(dir, { recursive: true, force: true })
+})
+
+test('the robot window: off unless switched on, and never in Adal Keep itself', async () => {
+  const { noWindows } = await import('../src/services/noWindows.js')
+  const { robotWindow, raiseForPerson } = await import('../src/services/browser.js')
+  delete process.env.ADAL_ROBOT_PROCESS; delete process.env.ADAL_ROBOTS_WINDOW
+  assert.equal(robotWindow(), false); assert.equal(await raiseForPerson({}), false)
+  process.env.ADAL_ROBOTS_WINDOW = '1'
+  assert.equal(robotWindow(), false, 'Adal Keep itself: never')
+  if (process.platform === 'linux') assert.equal(noWindows(), true)
+  process.env.ADAL_ROBOT_PROCESS = '1'
+  assert.equal(robotWindow(), true); assert.equal(noWindows(), false)
+  delete process.env.ADAL_ROBOT_PROCESS; delete process.env.ADAL_ROBOTS_WINDOW
 })
 
 test('Windows: Adal Robots is started with no window, apart (detached), and never on Linux (its own unit)', async () => {

@@ -116,6 +116,15 @@ test('Adal Robots claims a queued Check if chosen, the person ticks through Adal
   assert.equal(shot.status, 200, 'Adal Keep shows the run\'s tab (through Adal Robots)')
   assert.match(shot.headers.get('content-type') || '', /image/)
 
+  const ac = new AbortController()
+  const st = await fetch(`${K}/automations/${runId}/stream`, { signal: ac.signal })
+  assert.equal(st.status, 200, 'the live view\'s stream')
+  const tPic = Date.now()
+  const piece = await Promise.race([st.body.getReader().read(), sleep(15000).then(() => null)])
+  assert.ok(piece?.value?.length, 'its first picture comes')
+  console.log(`the live view's first picture: ${Date.now() - tPic} ms`)
+  ac.abort()
+
   // The person ticks the box in Adal Keep's live view.
   const tick = await fetch(`${K}/automations/${runId}/input`, { method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ batch: [{ kind: 'mouse', type: 'move', ...anchorBox }, { kind: 'mouse', type: 'down', ...anchorBox, button: 0, buttons: 1, clickCount: 1 }, { kind: 'mouse', type: 'up', ...anchorBox, button: 0, buttons: 0, clickCount: 1 }] }) })

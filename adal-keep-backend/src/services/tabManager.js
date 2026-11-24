@@ -86,8 +86,14 @@ function isClosed(page) {
  * and request-intercepted with the dynamic `page.__adalAllowImages` policy.
  * Idempotent — safe to call on a tab the run already owns.
  */
+async function wake(p) {
+  const c = await p.createCDPSession().catch(() => null)
+  if (!c) return
+  try { await c.send('Page.setWebLifecycleState', { state: 'active' }); p.__adalFrozen = false } catch {} finally { await c.detach().catch(() => {}) }
+}
 export async function setupTab(page, { runId, mute = true } = {}) {
   if (!page) return page
+  if (page.__adalFrozen) await wake(page)
   // The tab remembers its run in the page itself, so after a server restart
   // Adal Keep finds it again. Going to another site wipes window.name: it is
   // written again on every page load (the top page only, not its frames).
@@ -339,6 +345,8 @@ async function findFreeTab(browser, workflowId, busyRuns, space = null) {
   const mine = space || browser.defaultBrowserContext?.() || null
   const onSite = (await browser.pages().catch(() => [])).filter(p => !isClosed(p) && !owned.has(p) && host.test(p.url()) && (!mine || spaceIs(p, mine)))
   const signedIn = (p) => { try { return !!signedInHere[peer]?.(p.url()) } catch { return false } }
+  // A waiting sign-in tab is frozen (sessionKeeper.freezeTab): woken first, so it can be looked at and taken.
+  for (const p of onSite) if (p.__adalFrozen) await wake(p)
   for (const p of onSite.sort((a, b) => signedIn(b) - signedIn(a))) {
     if (await isFree(p, busyRuns, signedIn(p))) return p
   }

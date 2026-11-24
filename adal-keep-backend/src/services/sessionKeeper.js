@@ -541,6 +541,7 @@ export function prepareSignIns(database, { force = false, why = 'opened' } = {})
         else r = await openSite(l.key, db, { accountId: l.account.main ? null : l.account.id, browser })
         const page = siteTab(r?.live || l.account.live) || await (await import('./tasheerSession.js')).siteTab(r?.live || '').catch(() => null)
         const how = r?.already ? 'signed in already' : page ? await settled(page) : 'no tab'
+        if (l.key === 'lmis' && page && !r?.already) await freezeTab(page)
         console.log(`[sessions] morning sign-in: ${l.name}${l.account.main ? '' : ` (${l.account.name})`} — ${how} in ${((Date.now() - t0) / 1000).toFixed(1)} s`)
       } catch (e) { console.warn(`[sessions] morning sign-in: ${l.name} not opened — ${e.message}`) }
       prepDone.add(l.account.live)
@@ -550,6 +551,17 @@ export function prepareSignIns(database, { force = false, why = 'opened' } = {})
   })().catch(e => { console.warn('[sessions] morning sign-in:', e.message); return null }).finally(() => { preparing = null })
   return preparing
 }
+// A sign-in tab waiting for nobody costs a weak PC: LMIS's sign-in page keeps the processor busy (13 % of a core
+// each, two accounts, 2026-11-24 this PC). Frozen while it waits (the browser runs nothing in it); woken when a
+// person opens it (live view, Open) or the robots sign in there.
+export async function freezeTab(p, frozen = true) {
+  if (!p || p.isClosed?.() || !!p.__adalFrozen === frozen) return
+  const c = await p.createCDPSession().catch(() => null)
+  if (!c) return
+  try { await c.send('Page.setWebLifecycleState', { state: frozen ? 'frozen' : 'active' }); p.__adalFrozen = frozen } catch {} finally { await c.detach().catch(() => {}) }
+}
+export const wakeTab = (p) => freezeTab(p, false)
+
 /** LMIS: its sign-in page in its tab, nothing pressed (Sign In sends an SMS code: only when the person presses Open). */
 async function openLmisSignIn(browser, account) {
   const site = SITES.find(s => s.key === 'lmis')
@@ -562,6 +574,7 @@ async function openLmisSignIn(browser, account) {
   const { labelTab } = await import('./robotCheck.js')
   await labelTab(page, account.name).catch(() => {})
   live.set(account.live, page); liveInfo.set(account.live, { key: 'lmis', name: 'LMIS', account: account.name })
+  await wakeTab(page)
   await page.goto('https://lmis.gov.et/auth', { waitUntil: 'domcontentloaded', timeout: 120000 }).catch(() => {})
   return { live: account.live }
 }
@@ -703,6 +716,7 @@ export async function openSite(key, database = null, { accountId = null, browser
   const label = db ? await accountLabel(db, key, accountId) : ''
   // (A run working, or one waiting on its page for a person's Save, keeps its tab.)
   const running = db ? await (await import('./tabManager.js')).keepingRunIds(db) : new Set()
+  for (const [k2, p] of live) if (k2 === `site-${key}` || k2.startsWith(`site-${key}-`)) await wakeTab(p)   // (frozen while it waited)
   const found = await siteTabOf(browser, site, space, running)
   // The site's main account is always "site-musaned" (asked by id or not): one tab, one sign-in for it.
   const liveKey = `site-${key}${space && accountId ? `-${Number(accountId)}` : ''}`
@@ -719,6 +733,7 @@ export async function openSite(key, database = null, { accountId = null, browser
     if (filled && key === 'mofa') return { ok: true, live: liveKey, waiting: true }   // (Musaned: signed in again in it, its tick pressing Sign in)
     found.page = signing
   }
+  if (found.page) await wakeTab(found.page)
   if (found.signedIn) {
     // Musaned's main space can hold another account (a person signed in by hand): its menu says who.
     if (key === 'musaned' && label && !space) {

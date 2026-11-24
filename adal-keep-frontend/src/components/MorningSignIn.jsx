@@ -30,7 +30,7 @@ export default function MorningSignIn() {
   const [choose, setChoose] = useState(null)   // { site, accounts } while the person picks the account
   const load = () => api.get('/sessions').then(r => setSites(Array.isArray(r.data) ? r.data : [])).catch(() => setSitesNow(s => s || []))
   // Asked again after 3 s (the PC looks at its tabs behind its first answer), then every 15 s.
-  useEffect(() => { load(); const s = setTimeout(load, 3000); const t = setInterval(load, 5000); return () => { clearTimeout(s); clearInterval(t) } }, [])
+  useEffect(() => { load(); const s = setTimeout(load, 3000); const t = setInterval(load, 10000); return () => { clearTimeout(s); clearInterval(t) } }, [])
   if (sites == null) return (
     <div className="panel p-4" aria-hidden="true">
       <span className="ak-skel mb-3 block h-5 w-40" />

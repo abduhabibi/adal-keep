@@ -417,6 +417,8 @@ const BLOCKED_WHY = {
   tasheer: "Tasheer's security (Cloudflare) blocks this PC's robot browser: \"Sorry, you have been blocked\" — there is nothing to tick. Sign in to Tasheer from another PC or another internet line; the robots there use it.",
   any: 'The site blocks this PC\'s robot browser — there is nothing to tick. Try from another PC or another internet line.',
 }
+let lastLook = 0
+const LOOK_MS = 60e3
 export const ACCOUNT_TABLES = { musaned: 'musaned_accounts', lmis: 'lmis_accounts', mofa: 'visa_accounts', insurance: 'insurance_accounts', tasheer: 'tasheer_accounts' }
 // One sign-in for the whole site whatever the accounts (Tasheer: the agency's one; insurance: its robot's).
 const ONE_SIGN_IN = new Set(['tasheer', 'insurance'])
@@ -444,8 +446,12 @@ export const ASK = {
 export async function sessionsNow() {
   // At once (asked on 2026-11-19): what is known now; the browser's tabs are
   // looked at behind it (the first time at most 1.5 s), the page asks again soon.
-  const looking = keepAlive().catch(() => {})
-  if (!Object.keys(kept).length) await Promise.race([looking, new Promise(r => setTimeout(r, 1500))])
+  // (The card asks every few seconds: the tabs are looked at again at most once a minute — each look touches every tab.)
+  if (Date.now() - lastLook > LOOK_MS || !Object.keys(kept).length) {
+    lastLook = Date.now()
+    const looking = keepAlive().catch(() => {})
+    if (!Object.keys(kept).length) await Promise.race([looking, new Promise(r => setTimeout(r, 1500))])
+  }
   const { holderOf } = await import('./tasheerSession.js')
   const holder = db ? await holderOf(db).catch(() => null) : null
   const tasheerTab = await (await import('./tasheerSession.js')).siteTab('site-tasheer').catch(() => null)

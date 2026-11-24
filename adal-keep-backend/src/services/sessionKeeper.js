@@ -120,7 +120,13 @@ async function hasPersonWindow(browser) {
 }
 
 /** One round: every site tab that is signed in gets its sign of life. */
-export async function keepAlive() {
+// A look already going: its answer is waited for (the morning sign-in must know what is signed in, not guess).
+let looking = null
+export function keepAlive() {
+  if (!looking) looking = keepAliveNow().finally(() => { looking = null })
+  return looking
+}
+async function keepAliveNow() {
   if (busy) return kept
   busy = true
   try {
@@ -393,12 +399,13 @@ export async function sessionsNow() {
   if (!Object.keys(kept).length) await Promise.race([looking, new Promise(r => setTimeout(r, 1500))])
   const { holderOf } = await import('./tasheerSession.js')
   const holder = db ? await holderOf(db).catch(() => null) : null
+  const tasheerTab = await (await import('./tasheerSession.js')).siteTab('site-tasheer').catch(() => null)
   const out = []
   for (const s of SITES) {
     const k = kept[s.key] || { tabs: 0, signedIn: false, spaces: {} }
     const accounts = (await accountsOf(s.key)).map(a => {
       const signedIn = !!(k.spaces || {})[a.space] || (ONE_SIGN_IN.has(s.key) && !!k.signedIn)
-      const t = live.get(a.live)
+      const t = live.get(a.live) || (s.key === 'tasheer' ? tasheerTab : null)
       const since = signedSince.get(`${s.key}|${a.space}`) || null
       const state = signedIn ? 'signed-in' : t && !t.isClosed?.() ? (t.__adalSigning ? 'waiting' : 'ready') : preparing && !prepDone.has(a.live) ? 'queued' : 'not-open'
       return { ...a, signedIn, state, since: since ? new Date(since).toISOString() : null, until: since ? new Date(since + COOKIES_KEPT_MS).toISOString() : null }
@@ -456,7 +463,7 @@ export function prepareSignIns(database, { force = false, why = 'opened' } = {})
     for (const s of SITES) {
       const k = kept[s.key] || { spaces: {} }
       for (const a of await accountsOf(s.key)) {
-        const t = live.get(a.live)
+        const t = live.get(a.live) || (s.key === 'tasheer' ? await (await import('./tasheerSession.js')).siteTab('site-tasheer').catch(() => null) : null)
         lines.push({ key: s.key, name: s.name, account: a, signedIn: !!(k.spaces || {})[a.space] || (ONE_SIGN_IN.has(s.key) && !!k.signedIn),
           hasTab: !!(t && !t.isClosed?.()), heldByOther: holder?.state === 'signing-in' && Date.now() - Date.parse(holder.at || 0) < 30 * 60e3 })
       }
@@ -615,6 +622,12 @@ export async function openSite(key, database = null, { accountId = null, browser
   if (signing && !signing.isClosed?.() && signing.__adalBorrowed && signing.__adalSigning) {
     console.log(`[sessions] ${site.name}${label ? ` (${label})` : ''}: its sign-in is filled and waiting in its tab — shown, not started again`)
     return { ok: true, live: liveKey, waiting: true }
+  }
+  // Its sign-in tab made ready this morning: that one, never a second (a filled form is only shown; LMIS is pressed now).
+  if (!found.signedIn && signing && !signing.isClosed?.() && !running.has(Number(signing.__adalRunId))) {
+    const filled = await Promise.race([signing.evaluate(() => [...document.querySelectorAll('input[type=password]')].some(e => e.value)).catch(() => false), new Promise(r => setTimeout(() => r(false), 5000))])
+    if (filled && key === 'mofa') return { ok: true, live: liveKey, waiting: true }   // (Musaned: signed in again in it, its tick pressing Sign in)
+    found.page = signing
   }
   if (found.signedIn) {
     // Musaned's main space can hold another account (a person signed in by hand): its menu says who.

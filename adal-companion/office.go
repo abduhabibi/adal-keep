@@ -9,6 +9,7 @@ package main
 
 import (
 	"net"
+	"os"
 	"os/exec"
 	"regexp"
 	"runtime"
@@ -66,6 +67,23 @@ func parseWifi(goos, text string) int {
 	return -1
 }
 
+// wifiSeen: asked every 5 minutes, not with every announcement (netsh is a program started each
+// time). Off: ADAL_WIFI_EVERY=0.
+var (
+	wifiMu  sync.Mutex
+	wifiAt  time.Time
+	wifiVal int
+)
+
+func wifiSeen(now time.Time, ask func() int) int {
+	wifiMu.Lock()
+	defer wifiMu.Unlock()
+	if os.Getenv("ADAL_WIFI_EVERY") == "0" || wifiAt.IsZero() || now.Sub(wifiAt) >= 5*time.Minute {
+		wifiVal, wifiAt = ask(), now
+	}
+	return wifiVal
+}
+
 func wifiNow() int {
 	switch runtime.GOOS {
 	case "windows":
@@ -120,7 +138,7 @@ func officeNow() map[string]any {
 	if updatingNow.Load() {
 		out["updating"] = true
 	}
-	if w := wifiNow(); w >= 0 {
+	if w := wifiSeen(time.Now(), wifiNow); w >= 0 {
 		out["wifi"] = w
 	}
 	officeMu.Lock()

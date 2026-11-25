@@ -179,7 +179,7 @@ try {
   let online = null
   if (!has('--no-online')) {
     let www = val('--online') ? path.resolve(val('--online')) : ''
-    if (!www) { console.log('== the Companion\'s own pages'); www = path.join(tmp, 'www'); vite(['--mode', 'phone', '--outDir', www, '--emptyOutDir'], { VITE_PHONE: '1' }) }
+    if (!www) { console.log('== the Companion\'s own pages'); www = path.join(ROOT, 'adal-phone/www'); vite(['--mode', 'phone'], { VITE_PHONE: '1' }) }
     const o = packDir(www, ['.']), h = put(o.gz), rawSha = put(o.raw)
     online = { file: `online/${h}.tar.gz`, sha256: h, size: o.gz.length, raw: { sha256: rawSha, size: o.raw.length } }
     if (before?.online && before.online.sha256 !== h) { const p = patchOf(oldRaw(before.online), o.raw, `online/patches/${rawSha.slice(0, 12)}.adalpatch`, { from_gz: before.online.sha256 }); if (p) online.patch = p }

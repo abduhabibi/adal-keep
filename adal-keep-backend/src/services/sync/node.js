@@ -32,6 +32,10 @@ const DOC_TABLES = new Set(['files', 'generated_cvs', 'cv_templates', 'cv_header
 const LIMIT = 2000
 const RELAY_EVERY = 3 * 60 * 1000
 
+// (Off: ADAL_SLOT_CHECK=0.)
+const slotCheck = () => process.env.ADAL_SLOT_CHECK !== '0'
+
+
 export class SyncNode {
   /**
    * engine: a SyncEngine (init()ed). safeDir: the documents folder.
@@ -92,9 +96,34 @@ export class SyncNode {
   }
   stop() { clearTimeout(this.soonTimer); for (const t of this.timers) clearInterval(t); this.timers = []; clearTimeout(this.pushTimer) }
 
+  /**
+   * Two PCs with one slot (an id made again, an old copy): the one that joined first keeps it,
+   * the other takes a free one at once, for every row it makes from now on.
+   */
+  async ownSlot() {
+    if (!slotCheck() || this.trust?.store.ready()) return null   // (equal PCs: the slot is in the certificate)
+    const rows = await this.engine.db.raw(`SELECT pc_id, slot, joined_at FROM sync_pcs`)
+    const me = rows.find(r => r.pc_id === this.pcId)
+    const s = Number(this.engine.slot)
+    const same = rows.filter(r => r.pc_id !== this.pcId && Number(r.slot) === s)
+    if (!same.length) return null
+    const first = [...same, me || { pc_id: this.pcId, joined_at: '9' }].sort((x, y) => String(x.joined_at || '').localeCompare(String(y.joined_at || '')) || x.pc_id.localeCompare(y.pc_id))[0]
+    if (first.pc_id === this.pcId) return null
+    const used = new Set(rows.map(r => Number(r.slot)))
+    let n = 1
+    while (used.has(n)) n++
+    if (n >= 1000) return null
+    this.log.warn?.(`[sync] slot ${s} is ${first.pc_id}'s too: this PC takes slot ${n}`)
+    this.engine.slot = n
+    await this.onSlot?.(n)
+    await this.engine.primeIds()
+    return n
+  }
+
   /** This PC's own row: where it is, that it is alive, what it has. */
   async selfRow() {
     const db = this.engine.db
+    await this.ownSlot().catch(e => this.log.warn?.(`[sync] slot: ${e.message}`))
     const lan = JSON.stringify(this.addresses())
     const macs = JSON.stringify((this.macs() || []).slice(0, 8))
     const at = new Date(this.now()).toISOString()
@@ -370,8 +399,10 @@ export class SyncNode {
     const had = (await db.raw(`SELECT * FROM sync_pcs WHERE pc_id = ?`, [pc_id]))[0]
     if (had?.suspended_at) throw Object.assign(new Error('This computer was suspended by the main PC'), { status: 403, suspended: true })
     let slot = had?.slot
-    if (!Number.isInteger(Number(slot)) || slot == null) {
-      const used = new Set((await db.raw(`SELECT slot FROM sync_pcs`)).map(r => Number(r.slot)))
+    // (A PC that made itself slot 1 and wrote its own row came in again with that slot, another PC's: two PCs
+    // then make the same row ids, and one girl's row goes over another's. 2026-11-25)
+    const used = new Set((await db.raw(`SELECT slot FROM sync_pcs WHERE pc_id <> ?`, [pc_id])).map(r => Number(r.slot)))
+    if (!Number.isInteger(Number(slot)) || slot == null || (slotCheck() && used.has(Number(slot)))) {
       slot = 1
       while (used.has(slot)) slot++
       if (slot >= 1000) throw new Error('The agency has 999 PCs already')

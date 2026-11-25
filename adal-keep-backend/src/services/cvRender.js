@@ -1,3 +1,4 @@
+import { childrenOn } from './childrenCount.js'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -312,7 +313,7 @@ export async function buildTemplateData(db, profile, template, overrides = {}, {
     PLACE_OF_BIRTH:   merged.place_of_birth || '',
     RELIGION:         merged.religion || '',
     MARITAL_STATUS:   merged.marital_status || 'SINGLE',
-    CHILDREN_COUNT:   merged.children_count == null || merged.children_count === '' ? 'None' : String(merged.children_count),
+    CHILDREN_COUNT:   merged.children_count == null || String(merged.children_count).trim() === '' ? (childrenOn() ? '0' : 'None') : String(merged.children_count),
     WEIGHT:           merged.weight,
     HEIGHT:           merged.height,
     COMPLEXION:       merged.complexion || '',

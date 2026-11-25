@@ -5,6 +5,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import api from '../services/api'
 import PickBrokerHere from '../components/PickBrokerHere'
+import { childrenOrZero } from '../lib/childrenCount'
 import SendCvWhatsApp from '../components/SendCvWhatsApp'
 import UploadPhotoHere from '../components/UploadPhotoHere'
 import { pdfHere } from '../lib/pdfHere'
@@ -126,7 +127,7 @@ export default function CVNewPage() {
         ...DEFAULT_FORM,
         religion: religionOption(p.religion),
         marital_status: p.marital_status || 'SINGLE',
-        children_count: p.children_count ?? '',
+        children_count: childrenOrZero(p.children_count),
         weight: /^normal$/i.test(p.weight || '') ? '' : (p.weight || ''),
         height: /^normal$/i.test(p.height || '') ? '' : (p.height || ''),
         mother_name: p.mother_name || '',
@@ -457,7 +458,7 @@ export default function CVNewPage() {
       const body = {}
       for (const k of ['religion', 'marital_status', 'weight', 'height', 'mother_name', 'father_name', 'education_level', 'region', 'zone_subcity', 'labor_id', 'personal_number', 'emergency_name', 'emergency_phone', 'emergency_gender', 'emergency_relationship', 'cooking_skill',
         'speaks_english', 'speaks_arabic', 'english_read', 'english_write', 'arabic_read', 'arabic_write']) if (f[k] !== undefined) body[k] = f[k]
-      body.children_count = parseInt(f.children_count, 10) || 0
+      body.children_count = childrenOrZero(f.children_count)
       body.skills = JSON.stringify(f.skills || {})
       body.previous_employment = JSON.stringify(f.previous_employment || [])
       await api.put(`/profiles/${profileId}`, body)

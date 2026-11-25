@@ -113,9 +113,17 @@ export async function queueInsuranceFetch(db, now = Date.now()) {
   return queued
 }
 
+// Nothing changed since the last scan (changedOnly.js): nothing to find. What depends on the time (an insurance
+// asked a day ago, a CV tried again) is found by the whole scan every 30 minutes. (Off: ADAL_CHANGED_ONLY_SCAN=0.)
+const WHOLE_MS = 30 * 60 * 1000
+let wholeAt = 0
 async function scanOnce(db) {
   if (isAppLocked()) return
   try {
+    const look = await (await import('./changedOnly.js')).changedGirls(db, 'scan')
+    if (look.ids && !look.ids.size && !look.others.size && Date.now() - wholeAt < WHOLE_MS) return look.done()
+    wholeAt = Date.now()
+    let more = false
     if (await queueInsuranceFetch(db).catch(e => { console.warn('[scanner] insurance fetch:', e.message); return 0 })) {
       import('./worker.js').then(({ drainQueue }) => drainQueue(db).catch(() => {}))
     }
@@ -123,9 +131,11 @@ async function scanOnce(db) {
     try {
       const { pushFirstStage } = await import('./firstStage.js')
       const moved = await pushFirstStage(db)
+      more = !!(moved.musaned || moved.cvs)   // (a few CVs a scan: the rest with the next one)
       if (moved.musaned) import('./worker.js').then(({ drainQueue }) => drainQueue(db).catch(() => {}))
     } catch (e) { console.warn('[scanner] first stage:', e.message) }
     const ready = (await findReadyProfiles(db)).map(p => ({ ...p, wf: WORKFLOW_ID, why: 'Kuwait + labor_id + order_id + all 4 files present' }))
+    if (!more) look.done()
     if (ready.length === 0) return
 
     const account = await getDefaultAccount(db)

@@ -50,3 +50,23 @@ test('off switch, and a database without a change log: everything, as before', a
     assert.equal((await changedGirls(a.app, 'x')).ids, null)
   } finally { await a.close() }
 })
+
+test('the scanner: nothing changed, nothing read; a change: the whole scan', async () => {
+  const a = await makePC('ChgScan', { slot: 1 })
+  try {
+    const { scanOnce } = await import('../src/services/autoScanner.js')
+    await a.app.schema.alterTable('profiles', t => { for (const c of ['destination_country', 'labor_id', 'order_id', 'chosen_at', 'musaned_stage']) t.string(c) })
+    await a.engine.refreshTables()
+    await a.app('profiles').insert({ full_name: 'X' }); await a.engine.stampNow()
+    let reads = []
+    a.app.on('query', q => { if (/automation_queue/.test(q.sql)) reads.push(q.sql) })
+    await scanOnce(a.app)
+    await scanOnce(a.app)
+    reads = []
+    await scanOnce(a.app)
+    assert.equal(reads.length, 0)
+    await a.app('profiles').update({ status: 'ready' }); await a.engine.stampNow()
+    await scanOnce(a.app)
+    assert.ok(reads.length > 0)
+  } finally { await a.close() }
+})

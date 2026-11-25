@@ -286,6 +286,12 @@ export function standbyStep(tab, now = Date.now()) {
 }
 export async function wafidStandby(browser, pages, running = new Set(), now = Date.now()) {
   if (process.env.ADAL_WAFID_STANDBY === '0') return null
+  // A weak PC keeps no page open just in case (2026-11-25, 2 cores and 7 GB: a Wafid tab is about 100 MB); the one it
+  // has is closed. A Wafid run loads its page itself. ADAL_WAFID_STANDBY=1: as on any PC.
+  if (process.env.ADAL_WAFID_STANDBY !== '1' && (await import('./hardware.js')).hardwareNow().weak) {
+    for (const t of pages) if (t.__adalStandbyAt && !t.__adalBorrowed && !running.has(Number(t.__adalRunId)) && t.__adalRunId === undefined) await t.close().catch(() => {})
+    return null
+  }
   const tabs = pages.filter(p => { try { return !p.isClosed?.() && WAFID.test(hostOf(p.url())) } catch { return false } })
   let p = tabs.find(t => !running.has(Number(t.__adalRunId)) && !t.__adalBorrowed) || tabs[0] || null
   let info = null

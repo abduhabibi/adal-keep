@@ -121,7 +121,12 @@ router.post('/companion/robot-browser', async (req, res) => {
 })
 // The sidebar's Browsers: every robot browser working now, on any PC (services/robotBrowsers.js).
 router.get('/browsers', async (req, res) => {
-  try { res.set('Cache-Control', 'no-store').json(await (await import('../services/robotBrowsers.js')).listBrowsers(req.app.locals.db)) }
+  try {
+    const list = await (await import('../services/robotBrowsers.js')).listBrowsers(req.app.locals.db)
+    // The live view's tab strip: the sites' own open tabs too (services/openTabs.js).
+    if (req.query.tabs) list.push(...await (await import('../services/openTabs.js')).openTabs(null, list.map(x => Number(x.run_id)).filter(Boolean)).catch(() => []))
+    res.set('Cache-Control', 'no-store').json(list)
+  }
   catch (e) { res.status(500).json({ error: e.message }) }
 })
 router.get('/companion/robot-browsers', async (req, res) => {
@@ -1019,6 +1024,7 @@ router.get('/automations/:id/login', async (req, res) => {
 export async function runTab(db, runId) {
   // A site's sign-in tab, not a run's ("site-tasheer"): the same live view.
   // A move's browser (Transitions, "tr-pextran"): the same live view.
+  if (/^tab-/.test(String(runId))) return (await import('../services/openTabs.js')).pageOfTab(String(runId))
   if (/^tr-/.test(String(runId))) return (await import('../services/robotBrowsers.js')).liveTabOf(String(runId))
   if (/^site-/.test(String(runId))) return (await import('../services/sessionKeeper.js')).siteTab(String(runId)) || (await import('../services/tasheerSession.js')).siteTab(String(runId))
   const run = await db('automation_queue').where('id', runId).first('id', 'workflow_id', 'status').catch(() => null)
@@ -1078,7 +1084,7 @@ router.get('/automations/:id/live', async (req, res) => {
       found = Date.now()
       return Promise.race([runTab(db, id).catch(() => null), new Promise(ok => setTimeout(() => ok(null), 6000))])
     },
-    ended: async () => /^\d+$/.test(id) && !['pending', 'running', 'paused'].includes((await db('automation_queue').where('id', id).first('status'))?.status),
+    ended: async () => /^tab-/.test(id) || /^\d+$/.test(id) && !['pending', 'running', 'paused'].includes((await db('automation_queue').where('id', id).first('status'))?.status),
     onOpen: async (page) => {
       page.__adalLookedAt = Date.now()
       const { freshForm } = await import('../services/freshForm.js')

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 import api from '../services/api'
 import { clickIs, isClick, stateOf } from '../lib/liveClicks'
+import LiveTabs from './LiveTabs'
 import LiveCanvas from './LiveCanvas'
 import { onBack, IN_PHONE_APP } from '../lib/phoneApp'
 
@@ -36,7 +37,10 @@ async function copyCode(code) {
   toast.success('Musaned code copied', { id: 'sign-in-code', duration: 3000 })
 }
 
-export default function LiveTab({ runId, fill = false, startFull = false, onClose }) {
+export default function LiveTab({ runId: opened, fill = false, startFull = false, onClose }) {
+  // Another tab of the robot browser, picked in the strip (full screen only; LiveTabs).
+  const [runId, setRunId] = useState(opened)
+  useEffect(() => setRunId(opened), [opened])
   // On a PC it always opens as the real picture: the "Page" view rebuilds the page as text and buttons and
   // cannot show another site's frame — Google's "I'm not a robot" stayed an empty space there and could not
   // be clicked (2026-11-24). "Page" stays one click away; the phone keeps its choice.
@@ -78,7 +82,8 @@ export default function LiveTab({ runId, fill = false, startFull = false, onClos
   }
   const GONE = 'This run\'s tab on the PC was closed. Press ▶ Continue — the run opens it again and it shows here.'
 
-  const shrink = () => { setFull(false); onClose?.() }
+  const shrink = () => { setFull(false); setRunId(opened); onClose?.() }
+  const pick = (key) => { queue.current = []; setErr(null); setPage(null); setMeta({ url: '', title: '' }); setCodeBox(false); setRunId(key) }
   // Back closes full screen first (phone app).
   useEffect(() => full ? onBack(shrink) : undefined, [full])
 
@@ -314,6 +319,7 @@ export default function LiveTab({ runId, fill = false, startFull = false, onClos
         </div>
       )}
 
+      {full && !fill && !PHONE && <LiveTabs current={runId} onPick={pick} />}
       {view === 'mirror' && (
         page
           ? <Mirror page={page} send={send} className={fill || full ? 'flex-1 min-h-0 overflow-y-auto overscroll-contain' : 'max-h-[70vh] overflow-y-auto'} />
@@ -324,7 +330,7 @@ export default function LiveTab({ runId, fill = false, startFull = false, onClos
         {shared && (
           <div className={`relative ${full || fill ? 'flex-1 min-h-0' : 'max-h-[50vh] min-h-[10rem]'} overflow-auto rounded-lg border border-slate-200 outline-none focus:border-indigo-400 dark:border-slate-800`}
             tabIndex={0} onKeyDown={keyboard} onPaste={paste} style={{ touchAction: zoom > 1 ? 'pan-x pan-y' : 'none' }}>
-            <LiveCanvas runId={runId} onPicture={tick} onMeta={(m) => { setCodeBox(!!m.codeBox); setMeta({ url: m.url || '', title: m.title || '' }) }}
+            <LiveCanvas key={runId} runId={runId} onPicture={tick} onMeta={(m) => { setCodeBox(!!m.codeBox); setMeta({ url: m.url || '', title: m.title || '' }) }}
               onState={(st) => setErr(st === 'gone' ? GONE : null)} onUnsupported={() => setShared(false)}
               onMouseDown={mouse('down')} onMouseMove={mouse('move')} onMouseUp={mouse('up')} onWheel={wheelAt} onContextMenu={(e) => e.preventDefault()}
               style={{ width: `${zoom * 100}%`, maxWidth: 'none' }} className="block select-none cursor-default" />

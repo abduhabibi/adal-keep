@@ -977,9 +977,12 @@ export async function runAgencyManager(db) {
   const t0 = Date.now()
 
   try {
-    const profiles = await db('profiles')
-      .select('profiles.*')
-      .limit(AGENCY_PROFILE_LIMIT)
+    // Only the girls changed since the last check (changedOnly.js): it looked at the same 200, with the AI, every 30 minutes.
+    // (Off: ADAL_CHANGED_ONLY_AGENCY=0. Its own tasks are no change.)
+    const look = await (await import('./changedOnly.js')).changedGirls(db, 'agency', { ignore: ['tasks'] })
+    if (look.ids && !look.ids.size) { look.done(); return }
+    const q = db('profiles').select('profiles.*')
+    const profiles = await (look.ids ? q.whereIn('id', [...look.ids].slice(0, AGENCY_PROFILE_LIMIT)) : q.limit(AGENCY_PROFILE_LIMIT))
 
     for (const p of profiles) {
       const files = await db('files')
@@ -1080,6 +1083,7 @@ export async function runAgencyManager(db) {
       }
     }
 
+    if (!look.ids || look.ids.size <= AGENCY_PROFILE_LIMIT) look.done()
     const secs = Math.round((Date.now() - t0) / 1000)
     console.log(
       `[agency] evaluated ${profiles.length} profiles in ${secs}s — ` +

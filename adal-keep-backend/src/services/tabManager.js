@@ -34,7 +34,7 @@ import { robotsOwnTab } from './robotsOwnTab.js'
 import { stopSignOut } from './oneSitePage.js'
 import { tabRank } from './bestTab.js'
 import { noteCall } from './siteApi.js'
-import { newRunTab, outOfSight, sendAway } from './browser.js'
+import { newRunTab, outOfSight, sendAway, spaceOf } from './browser.js'
 import { isRemote } from './remoteBrowsers.js'
 
 /**
@@ -314,7 +314,7 @@ export async function spaceForRun(db, browser, job) {
   if (!id) { try { id = JSON.parse(job?.context || '{}').account_id } catch {} }
   return spaceForAccount(db, browser, peerOf(job?.workflow_id), id)
 }
-const spaceIs = (p, space) => { try { return p.browserContext() === space } catch { return !space } }
+const spaceIs = (p, space) => { try { return p.browserContext() === space && !(space === p.browser?.()?.defaultBrowserContext?.() && spaceOf(p)) } catch { return !space } }
 
 /** The runs that still need their tabs (a paused one's tab waits for it). */
 export async function activeRunIds(db) {

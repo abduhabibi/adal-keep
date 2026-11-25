@@ -606,10 +606,11 @@ export function accountSpace(browser, key) {
 /** Which account's space a tab is in ("musaned:7"), or '' for the browser's own. */
 export function spaceOf(page) {
   try {
-    const id = page.browserContext()?.id
-    if (!id) return ''
-    // (A space that has no name just now is never the main account's: its signed-in tab was closed as a spare copy.)
-    return Object.entries(readSpaces()).find(([, v]) => v === id)?.[0] || '?'
+    const id = page.browserContext()?.id, spaces = Object.entries(readSpaces())
+    // (A connection made before that space was counts its tabs as the main account's: the tab itself knows. Its
+    // signed-in tab was closed as a spare copy. And a space without a name just now is never the main account's.)
+    const own = page.target?.()?._getTargetInfo?.()?.browserContextId
+    return spaces.find(([, v]) => v === id || (own && v === own))?.[0] || (id ? '?' : '')
   } catch { return '' }
 }
 

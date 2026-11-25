@@ -3,7 +3,10 @@ import path from 'path'
 
 const SETTLE_MS = 1000 // the watcher already waited for the file to stop changing
 const MAX_ATTEMPTS = 5
-const TICK_MS = 1000
+const TICK_MS = process.env.ADAL_INGEST_TICK_MS ? Number(process.env.ADAL_INGEST_TICK_MS) : 10_000   // a new file wakes it at once (wake)
+const wakes = new Set()
+/** A file came in: read in a moment (it settles first), not at the next look. */
+export function wake(ms = SETTLE_MS + 300) { setTimeout(() => { for (const w of wakes) w() }, ms).unref?.() }
 const RETRY_BACKOFF_MS = 8000
 
 // Only files that arrive while Adal Keep runs are read. Windows also reports
@@ -141,6 +144,7 @@ export async function enqueueFile(db, filePath, { since = null } = {}) {
     updated_at: new Date().toISOString(),
   })
   console.log('[QUEUE] +', filename, '(' + stat.size + ' bytes)')
+  wake()
 }
 
 /**
@@ -263,12 +267,7 @@ async function processOne(db, processorFn, tag) {
 }
 
 export function startQueueWorker(db, processorFn, tag = '[QUEUE]', watchDir = null, concurrency = 3) {
-  purgeStale(db).then(() => {
-    if (watchDir) {
-      const files = listDownloads(watchDir)
-      console.log(tag, 'Downloads snapshot:', files.length, 'file(s) — watching new arrivals only')
-    }
-  }).catch(() => {})
+  purgeStale(db).then(() => wake()).catch(() => {})
 
   console.log(tag, 'worker started (concurrency', concurrency + ', tick ' + TICK_MS + 'ms)')
 
@@ -277,7 +276,7 @@ export function startQueueWorker(db, processorFn, tag = '[QUEUE]', watchDir = nu
     // A reading takes many seconds: the next tick waits for it, or every
     // second another file would start beside it (10 files at once on a 4 GB PC).
     let busy = false
-    setInterval(async () => {
+    const go = async () => {
       if (busy) return
       busy = true
       try {
@@ -286,6 +285,8 @@ export function startQueueWorker(db, processorFn, tag = '[QUEUE]', watchDir = nu
       } catch (e) {
         console.log(tag, 'worker', w, 'error:', e.message)
       } finally { busy = false }
-    }, TICK_MS + w * 300) // stagger startup
+    }
+    wakes.add(go)
+    setInterval(go, TICK_MS + w * 300) // stagger startup
   }
 }

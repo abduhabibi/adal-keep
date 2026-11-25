@@ -612,7 +612,8 @@ export async function stepClickHrPool(page, ctx) {
   if (!clicked) {
     // Its menu is folded away: the page itself still opens.
     log(ctx, 'HR Pool is not on the screen — going to its page', 'warn')
-    await openPage(page, ctx, new URL('/hr-pool', page.url()).href)
+    // (Not from Chrome's error page: chrome-error://…/hr-pool, 2026-11-25.)
+    await openPage(page, ctx, new URL('/hr-pool', /^https?:/.test(page.url()) && isPeerUrl(page.url(), 'musaned') && !page.url().includes(KEYCLOAK_HOST) ? page.url() : MUSANED_ROOT).href)
   }
   const navDeadline = Date.now() + 20000
   while (Date.now() < navDeadline) {

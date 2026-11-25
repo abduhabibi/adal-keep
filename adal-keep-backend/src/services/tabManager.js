@@ -31,6 +31,7 @@ import { notNeeded } from './pageDiet.js'
 import { noteSent } from './lostBrowser.js'
 import { stopRequest } from './emptyPicture.js'
 import { robotsOwnTab } from './robotsOwnTab.js'
+import { stopSignOut } from './oneSitePage.js'
 import { noteCall } from './siteApi.js'
 import { newRunTab, outOfSight, sendAway } from './browser.js'
 import { isRemote } from './remoteBrowsers.js'
@@ -145,7 +146,8 @@ export async function setupTab(page, { runId, mute = true } = {}) {
       // Only Adal Keep's own account switch signs out (page.__adalMayLogOut, or a tab of its own).
       if (!page.__adalMayLogOut && req.isNavigationRequest() && LOGOUT.test(req.url())) {
         console.log(`[tabManager] a sign-out of ${hostOf(req.url())} stopped (the day's sign-in stays)`)
-        req.abort().catch(() => {})
+        page.__adalSignOutStopped = Date.now()
+        stopSignOut(req)
         return
       }
       // Only what the work needs comes down: no tracking scripts, videos or

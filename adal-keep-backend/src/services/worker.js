@@ -685,6 +685,7 @@ async function runJob(db, job) {
     // Otherwise a free tab already on the site (signed in), else a new one.
     // A portal account other than the main one works in its own browser space (its own sign-in).
     const space = await spaceForRun(db, browser, job).catch(e => { console.warn(`[worker] run #${job.id}: no space of its own (${e.message})`); return null })
+    await (await import('./oneSitePage.js')).pageForRun(job.workflow_id, { log: (msg, level) => { appendLog(db, job.id, msg, level || 'info').catch(() => {}) } })
     page = await openRunTab(browser, job.id, { workflowId: job.workflow_id, busyRuns: await activeRunIds(db), keepRuns: await keepingRunIds(db), space, quiet: helpedRun(job) })
     // A Companion's tab that does not answer in 5 s (its browser's CDP is stuck): the run works on this PC
     // instead, at once — not 5 minutes on a blank page and "detached Frame" at the end (2026-11-23).

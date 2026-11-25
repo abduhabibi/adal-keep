@@ -7,10 +7,12 @@
  */
 import zlib from 'zlib'
 import { onChanged } from './changes.js'
+import { ROWS, made, since, versionOf } from './changedRows.js'
 
 // Path (exactly, without a query) → the tables it is made from.
 const KEPT = {
   '/api/profiles': ['profiles', 'brokers'],
+  '/api/profiles/list': ['profiles', 'brokers'],
   '/api/profiles/brief': ['profiles', 'brokers'],
   '/api/automations/stages': ['profiles', 'automation_queue', 'profile_automations', 'profile_fields', 'files', 'generated_cvs', 'whatsapp_sends'],
   '/api/brokers': ['brokers', 'profiles'],
@@ -31,6 +33,14 @@ export function forget(p) { drop(p) }
 
 const gzip = (text) => new Promise((ok, no) => zlib.gzip(text, { level: 2 }, (e, b) => e ? no(e) : ok(b)))
 async function answer(req, res, kept) {
+  // A window that has the list already: only the rows changed since (services/changedRows.js).
+  const p = req.originalUrl, have = ROWS[p] && req.headers['x-adal-have']
+  if (have) {
+    const few = cache.get(p) === kept ? since(p, have) : null
+    if (few) return res.type('application/json').set('Cache-Control', 'no-store').send(few)
+    const v = cache.get(p) === kept && versionOf(p)
+    if (v) res.set('X-Adal-V', v)
+  }
   if (kept.text.length > 16384 && /\bgzip\b/.test(req.headers['accept-encoding'] || '')) {
     // Packed once, off the main thread (a megabyte packed there held up every other click).
     const gz = await (kept.gz ||= gzip(kept.text).catch(() => null))
@@ -67,7 +77,7 @@ export function answerCache() {
       let kept
       try { kept = { at: Date.now(), type: 'application/json; charset=utf-8', text: JSON.stringify(body), gz: null } }
       catch { over(); return json(body) }
-      if (!mine.stale) cache.set(p, kept)
+      if (!mine.stale) { cache.set(p, kept); try { made(p, body) } catch (e) { console.warn('[lists]', e.message) } }
       over(mine.stale ? null : kept)
       answer(req, res, kept).catch(() => res.end())   // as just made: not turned into JSON and packed a second time
       return res

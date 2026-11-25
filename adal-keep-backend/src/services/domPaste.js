@@ -20,6 +20,8 @@
  * implements, so the same code is correct on both drivers.
  */
 
+import { pasteOn, waitOn } from './pasteAll.js'
+
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
 
 /**
@@ -35,11 +37,12 @@ export async function insertTextCompat(page, text) {
   const kb = page && page.keyboard
   if (!kb) return false
 
-  // Puppeteer: one character event per char, no key events — closest match to
-  // a real paste and the exact analogue of Playwright's insertText().
+  // Puppeteer: no key events — the exact analogue of Playwright's insertText().
   if (typeof kb.sendCharacter === 'function') {
     try {
-      for (const ch of v) await kb.sendCharacter(ch)
+      // The whole value at once: Puppeteer's sendCharacter is CDP Input.insertText, which takes any text.
+      if (pasteOn()) await kb.sendCharacter(v)
+      else for (const ch of v) await kb.sendCharacter(ch)
       return true
     } catch { /* fall through */ }
   }
@@ -84,7 +87,7 @@ export async function pasteText(page, input, text) {
   // Paste-like: one bulk insert event for the whole string (no per-char delay).
   const ok = await insertTextCompat(page, v)
 
-  await sleep(70)
+  await waitOn(input, (n, val) => n.value === val, v, 70)
   let actual = await input.evaluate(n => n.value).catch(() => '')
 
   // Fallback: native prototype setter + input/change events.

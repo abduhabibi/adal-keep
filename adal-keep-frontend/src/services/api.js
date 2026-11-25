@@ -31,7 +31,7 @@ if (typeof window !== 'undefined' && !off('line') && !(import.meta.env.VITE_PHON
   api.get = (url, config = {}) => {
     if (window.__ADAL_CLOUD || (config.responseType && config.responseType !== 'json')) return get(url, config)
     return new Promise((ok, no) => {
-      line[config.adalBehind ? 'later' : 'now'].push({ key: url + '?' + JSON.stringify(config.params || {}), behind: !!config.adalBehind, ask: () => { const p = get(url, config); p.then(ok, no); return p } })
+      line[config.adalBehind ? 'later' : 'now'].push({ key: url + '?' + JSON.stringify(config.params || {}) + (config.headers?.['X-Adal-Have'] ? '#rows' : ''), behind: !!config.adalBehind, ask: () => { const p = get(url, config); p.then(ok, no); return p } })
       next()
     })
   }
@@ -53,7 +53,7 @@ if (typeof window !== 'undefined' && !off('line') && !(import.meta.env.VITE_PHON
   const inflight = new Map()
   api.get = (url, config = {}) => {
     if (config.responseType && config.responseType !== 'json') return get(url, config)
-    const key = url + '?' + JSON.stringify(config.params || {})
+    const key = url + '?' + JSON.stringify(config.params || {}) + (config.headers?.['X-Adal-Have'] ? '#rows' : '')   // (only its changed rows: lib/changedOnly.js)
     if (inflight.has(key)) { if (!config.adalBehind) api.adalNow?.(key); return inflight.get(key) }
     const p = get(url, config).finally(() => inflight.delete(key))
     inflight.set(key, p)
@@ -99,7 +99,10 @@ if (import.meta.env.VITE_DEMO !== '1') {
 // What a page's timer asks (main.jsx) is a refresh: it goes behind what a person just asked for.
 if (typeof window !== 'undefined') {
   const get = api.get
-  api.get = (url, config = {}) => get(url, window.__adalTimer ? { ...config, adalBehind: true } : config)
+  api.get = (url, config = {}) => {
+    window.__adalTimerOf?.asks?.add(String(url))   // (what this timer asks: a change elsewhere does not run it — lib/changes.js)
+    return get(url, window.__adalTimer ? { ...config, adalBehind: true } : config)
+  }
 }
 
 // How fast the PC answers: on a slow line (answers taking 1.5 s+ on average)

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../services/api'
+import { changedGet, isList } from '../lib/changedOnly'
 import { dragProfiles } from '../lib/profileDrag'
 import { prefetchProfile } from '../lib/profileCache'
 import Segmented from './shared/Segmented'
@@ -39,13 +40,15 @@ export default function ProfileSearchPad({
     let alive = true
     // Every profile: the PC's slim list (only what the pad shows: the full one
     // is megabytes); a phone's copy has only the full one.
-    const all = () => api.get('/profiles/brief').then(r => { if (!Array.isArray(r.data)) throw new Error('no brief list'); return r })
+    const all = () => (isList('/profiles/brief') ? changedGet('/profiles/brief').then(data => ({ data })) : api.get('/profiles/brief')).then(r => { if (!Array.isArray(r.data)) throw new Error('no brief list'); return r })
       .catch(() => api.get('/profiles'))
     // The same list as last time is not drawn again (the pad is on every page).
-    let last = null
+    let last = null, same = null
     const load = () => (brokerId ? api.get('/profiles', { params: { broker_id: brokerId } }) : all())
       .then(r => {
         const rows = Array.isArray(r.data) ? r.data : r.data?.profiles || []
+        if (rows === same) return
+        same = rows
         const now = JSON.stringify(rows)
         if (!alive || now === last) return
         last = now

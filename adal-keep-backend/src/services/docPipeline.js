@@ -269,7 +269,7 @@ export async function pdfPictures(pdfPath) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'adal-pdfpics-'))
   const save = async (f, name) => {
     const out = path.join(dir, name)
-    await sharp(Buffer.from(f.image.toPixmap().asPNG())).flatten({ background: '#ffffff' }).jpeg({ quality: 92 }).toFile(out)
+    await sharp(Buffer.from(f.image.toPixmap().asPNG())).flatten({ background: '#ffffff' }).jpeg({ quality: 95, chromaSubsampling: '4:4:4' }).toFile(out)
     return out
   }
   const biggest = (list) => list.sort((a, b) => b.share - a.share)[0]

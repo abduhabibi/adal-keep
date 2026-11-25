@@ -35,7 +35,8 @@ async function geminiRetouch(buf, field, why) {
  * The refined picture: { buf, by, width, height, note }.
  * `by` is 'gemini:<model>' or 'local' (Gemini could not: `note` says why).
  */
-export async function refinePhoto(buf, field = 'Photo', { useGemini = true } = {}) {
+// Gemini (her photo goes to Google) only when a person chose it: the default is off (ADAL_PHOTO_QUALITY=0 brings the old default back).
+export async function refinePhoto(buf, field = 'Photo', { useGemini = process.env.ADAL_PHOTO_QUALITY === '0' } = {}) {
   const why = []
   const ai = useGemini ? await geminiRetouch(buf, field, why) : null
   // No Gemini: the free local AI (enhance or cut-out) when this PC has the model and is strong enough, else only the cleaning.

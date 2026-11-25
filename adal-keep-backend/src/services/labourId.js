@@ -101,8 +101,8 @@ export async function labourIdFrom(file, dir) {
   if (!box) return null
   const text = await readBlock(data, w, box).catch(() => null)
   const crop = path.join(dir, 'labour-id.jpg')
-  await sharp(data, { raw: { width: w, height: h, channels: 3 } }).extract({ left: box.left, top: box.top, width: box.right - box.left, height: box.bottom - box.top }).jpeg({ quality: 93 }).toFile(crop)
+  await sharp(data, { raw: { width: w, height: h, channels: 3 } }).extract({ left: box.left, top: box.top, width: box.right - box.left, height: box.bottom - box.top }).jpeg({ quality: 95, chromaSubsampling: '4:4:4' }).toFile(crop)
   const clean = path.join(dir, 'passport-clean.jpg')
-  await sharp(paint(data, w, h, box), { raw: { width: w, height: h, channels: 3 } }).jpeg({ quality: 93 }).toFile(clean)
+  await sharp(paint(data, w, h, box), { raw: { width: w, height: h, channels: 3 } }).jpeg({ quality: 95, chromaSubsampling: '4:4:4' }).toFile(clean)
   return { text, file: crop, passport: clean }
 }

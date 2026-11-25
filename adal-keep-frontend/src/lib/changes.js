@@ -3,10 +3,12 @@
  * (GET /api/changes on a PC, the live link on a phone), and every page that
  * shows them reloads at once:
  *   - onDataChange(tables, fn): a page's own reload, for the tables it shows;
- *   - every repeating refresh a page already has (setInterval, see main.jsx)
- *     also runs at once — so lists, counts and statuses everywhere follow.
+ *   - every repeating refresh a page already has (setInterval, see main.jsx) that
+ *     shows one of those tables also runs at once — so lists, counts and statuses everywhere follow.
  * A change made on this page itself is told at once too (no wait for the PC).
  */
+import { off } from './offSwitch.js'
+
 const listeners = new Set()
 const ALL = null
 
@@ -24,11 +26,38 @@ export function onDataChange(tables, fn, gap = 800) {
   return () => { clearTimeout(timer); listeners.delete(l) }
 }
 
+// What each address shows. Only what is known here is left out when other tables changed:
+// anything else runs at every change, as before. [] = not from the database (its own timer looks).
+// Off: "only" in the off switch.
+const QUEUE = ['automation_queue', 'profile_automations', 'run_history']
+const SHOWS = [
+  [/^\/?(subscription\/status|pc-access\/pending|mobile\/join-requests|system\/update\/notice|transitions\/waiting-files|tasks\/reading|health)\b/, []],
+  [/^\/?profiles(\/(list|brief))?$/, ['profiles', 'brokers']],
+  [/^\/?brokers$/, ['brokers', 'profiles']],
+  [/^\/?tasks(\/count)?$/, ['tasks']],
+  [/^\/?notifications/, ['notifications', 'tasks']],
+  [/^\/?automations\/stages$/, ['profiles', 'profile_fields', 'files', 'generated_cvs', 'whatsapp_sends', 'whatsapp_log', ...QUEUE]],
+  [/^\/?automations\/(active|browsers|run-history)/, QUEUE],
+  [/^\/?automations\/(attention|ready-for-submit)/, ['profiles', 'notifications', 'settings', ...QUEUE]],
+  // Her page: whatever is about a girl, so everything but these.
+  [/^\/?profiles\/\d+/, { not: ['tasks', 'notifications', 'chat', 'quick_links', 'branches', 'users', 'checklists', 'checklist_cells', 'checklist_profiles'] }],
+  [/^\/?chat\//, ['chat', 'users', 'profiles']],
+]
+const showsAny = (url, tables) => {
+  const s = SHOWS.find(([re]) => re.test(url.split('?')[0]))?.[1]
+  return !s ? true : s.not ? tables.some(t => !s.not.includes(t)) : tables.some(t => s.includes(t))
+}
+/** Does a timer that asks these addresses show one of these tables? (not known yet = yes) */
+export function concerns(asks, tables) {
+  if (!asks?.size || tables.includes('*') || off('only')) return true
+  return [...asks].some(u => showsAny(u, tables))
+}
+
 let refreshAll = () => {}
 /** main.jsx hands over how to run every page's repeating refresh at once. */
 export function setRefreshAll(fn) { refreshAll = fn }
 
-let lastAll = 0, allTimer = null
+let lastAll = 0, allTimer = null, told = new Set()
 /** mine: a change made on this page — while the PC's live link is up its own word for it
  *  comes within a second and runs the timers; run here too, each click asked for everything twice. */
 export function tellChanged(tables, { mine = false } = {}) {
@@ -38,8 +67,9 @@ export function tellChanged(tables, { mine = false } = {}) {
   if (tables.every(t => t === 'whatsapp_log')) return
   if (mine && typeof window !== 'undefined' && window.__adalLiveUp) return
   // The pages' own timers: once, soon (not once per change).
+  for (const t of tables) told.add(t)
   if (allTimer) return
-  allTimer = setTimeout(() => { allTimer = null; lastAll = Date.now(); if (!document.hidden) refreshAll() }, Math.max(300, 2000 - (Date.now() - lastAll)))
+  allTimer = setTimeout(() => { allTimer = null; lastAll = Date.now(); const all = [...told]; told = new Set(); if (!document.hidden) refreshAll(all) }, Math.max(300, 2000 - (Date.now() - lastAll)))
 }
 
 // Which tables a write through the API touches (for the page's own changes).

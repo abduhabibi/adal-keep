@@ -8,8 +8,11 @@
  */
 import api from '../services/api'
 import { cachedGet } from './deviceCache'
+import { isList } from './changedOnly'
 
 const KEEP_MS = 30_000
+// What a list needs of each girl (a phone's and the online copy have only the whole rows).
+const URL_ = () => isList('/profiles/list') ? '/profiles/list' : '/profiles'
 let hit = null // { at, promise }
 let last = null // the list as last seen by this window: a page opens with it, at once
 export const lastProfiles = () => last
@@ -22,10 +25,10 @@ api.interceptors.response.use((r) => {
 export function profilesList({ fresh = false, onSaved } = {}) {
   if (!fresh && hit && Date.now() - hit.at < KEEP_MS) {
     // Still on its way (a slow line): the copy kept on this device shows meanwhile.
-    if (onSaved) import('./deviceCache').then(d => d.saved('/profiles')).then(old => { if (old !== undefined) onSaved(last || old) }).catch(() => {})
+    if (onSaved) import('./deviceCache').then(d => d.saved(URL_())).then(old => { if (old !== undefined) onSaved(last || old) }).catch(() => {})
     return hit.promise
   }
-  const promise = cachedGet('/profiles', { onSaved: onSaved && ((d) => { if (!last) last = d || []; onSaved(d) }) }).then(d => (last = d || []))
+  const promise = cachedGet(URL_(), { onSaved: onSaved && ((d) => { if (!last) last = d || []; onSaved(d) }) }).then(d => (last = d || []))
   hit = { at: Date.now(), promise }
   promise.catch(() => { if (hit?.promise === promise) hit = null })
   return promise

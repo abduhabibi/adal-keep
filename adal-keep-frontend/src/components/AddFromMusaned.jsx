@@ -10,6 +10,7 @@ import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import api from '../services/api'
+import { profilesList } from '../lib/profilesCache'
 import Button from './shared/Button'
 
 const TEMPLATE_KEY = 'adal-musaned-cv-template'
@@ -24,7 +25,7 @@ export default function AddFromMusaned({ onClose }) {
   const [busy, setBusy] = useState(0)
 
   useEffect(() => {
-    api.get('/profiles').then(r => setProfiles(r.data || [])).catch(() => setProfiles([]))
+    profilesList({ fresh: true }).then(d => setProfiles(d || [])).catch(() => setProfiles([]))
     api.get('/cv/templates').then(r => {
       const list = (r.data || []).filter(t => t.is_active !== 0)
       setTemplates(list)

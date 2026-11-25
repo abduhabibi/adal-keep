@@ -285,7 +285,8 @@ export async function importRelease(src) {
         if (done) break
       }
     }
-    for (const x of extrasOf(env.manifest)) {
+    // (The pieces' own patches too: the office's other PCs start from them.)
+    for (const x of [...extrasOf(env.manifest), ...piecesOf(env.manifest, { all: true }).map(p => p.patch).filter(Boolean)]) {
       for (const f of all) if (path.basename(f) === x.sha256 && await keepPiece(x.sha256, f)) break
     }
     if (!kept.includes(env.manifest.sha256)) throw new Error(`the app itself (${path.basename(env.manifest.file || '')}, sha256 ${String(env.manifest.sha256).slice(0, 12)}…) is not in it, or does not match the signed release`)

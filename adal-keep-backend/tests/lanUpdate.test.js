@@ -77,6 +77,8 @@ test('Main hands out the release it runs, to its own Companions, and only files 
   const env = await L.importRelease(path.join(tmp, 'rel/two'))
   await L.recordInstalled(env)
   for (const x of L.extrasOf(env.manifest)) assert.ok(L.piecePath(x.sha256), 'the small patches are kept on Main')
+  assert.ok(two.manifest.app_delta.patch && L.piecePath(two.manifest.app_delta.patch.sha256), 'and the pieces\' own patches')
+  assert.equal(two.manifest.online.sha256, one.manifest.online.sha256, 'pages that did not change are the same piece')
   assert.equal(Lan.releaseHere({ root }), null, 'another version runs here (hand-placed files): nothing is handed on')
   fs.writeFileSync(path.join(root, '.adal-version.json'), JSON.stringify({ sha: env.manifest.sha }))
   const here = { root, backend: path.join(root, 'backend'), env: Lan.releaseHere({ root }) }

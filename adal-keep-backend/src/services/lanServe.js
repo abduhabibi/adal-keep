@@ -57,10 +57,12 @@ function byHash(manifest, tree) {
   index = { sha: key, byHash: m }
   return m
 }
+let treeSeen = { sha: '', tree: null }
 async function treeHere(manifest) {
+  if (treeSeen.sha && treeSeen.sha === manifest.tree?.sha256) return treeSeen.tree
   const f = manifest.tree?.sha256 && piecePath(manifest.tree.sha256)
   if (!f) return null
-  try { return JSON.parse((await import('zlib')).gunzipSync(fs.readFileSync(f)).toString()) } catch { return null }
+  try { treeSeen = { sha: manifest.tree.sha256, tree: JSON.parse((await import('zlib')).gunzipSync(fs.readFileSync(f)).toString()) }; return treeSeen.tree } catch { return null }
 }
 
 const checked = new Map()   // file → "size|mtime|sha" that was hashed

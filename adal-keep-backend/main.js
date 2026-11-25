@@ -219,6 +219,7 @@ app.use('/api/settings', settingsRouter)
 app.use('/api', (await import('./src/routes/mainProxy.js')).default)   // a Companion: the robots' live calls go to the main PC
 // Robots in Adal Robots (services/robotsInApp.js): a run's tab, the person's clicks, Stop and Continue go there.
 app.use('/api', (await import('./src/services/robotsLink.js')).robotsLink)
+app.use('/api', (await import('./src/routes/musanedAsk.js')).default)   // "Make Musaned": asked only when it may be
 app.use('/api', automationsRouter)
 // 3-green-tick verification gate + the LAN endpoints the Employee-PC Companion talks to
 app.use('/api', verificationRouter)

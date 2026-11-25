@@ -29,6 +29,8 @@ import { photosFirst, missingPhotos, hasFiles } from '../lib/photosFirst'
 import { missingNow, noteCleared } from '../lib/missingNow'
 import { ACTIONS, shows } from '../lib/stageActions'
 import useProfilePhase from '../hooks/useProfilePhase'
+import { MusanedState, useMusanedAsk } from '../components/MusanedState'
+import '../components/solidPop.css'
 import { useCan } from '../lib/staffPerms'
 import DataRights from '../components/DataRights'
 
@@ -74,7 +76,8 @@ export default function ProfileDetailPage() {
   const [loading, setLoading] = useState(true)
   const [step, setStep] = useState(null)        // the step she is at (backend stepNow)
   const [everything, setEverything] = useState(false)
-  const { phase, after } = useProfilePhase(profile)
+  const { phase, after, musaned } = useProfilePhase(profile)
+  const ask = useMusanedAsk(id, phase, musaned)   // may "Make Musaned" be asked? (the server says)
   // Edit opens as a pop-up over her page (asked on 2026-11-19).
   const [editOpen, setEditOpen] = useState(false)
   // A new profile: her photos → her CV → Musaned, one pop-up after the other.
@@ -88,7 +91,7 @@ export default function ProfileDetailPage() {
     if (search.get('next') === 'photos') { setNextOpen(true); search.delete('next'); setSearch(search, { replace: true }) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
-  useEffect(() => { if (['cv', 'musaned'].includes(phase) && hidden !== id) setNextOpen(true) }, [id, phase]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if ((phase === 'cv' || (phase === 'musaned' && ask?.ask)) && hidden !== id) setNextOpen(true) }, [id, phase, ask?.ask]) // eslint-disable-line react-hooks/exhaustive-deps
   // Past the Musaned step: nothing left for the pop-up.
   useEffect(() => { if (phase && !['cv', 'musaned'].includes(phase)) setNextOpen(false) }, [phase])
   const closeNext = () => { setHidden(id); setNextOpen(false) }
@@ -283,7 +286,7 @@ export default function ProfileDetailPage() {
         </GlassPopup>
       )}
       {nextOpen && !editOpen && !fill && (
-        <NextSteps profileId={id} fields={fields} cvs={cvs} onFileUpdate={handleFileUpdate} onClose={closeNext} onDone={doneNext}
+        <NextSteps profileId={id} fields={fields} cvs={cvs} onFileUpdate={handleFileUpdate} onClose={closeNext} onDone={doneNext} ask={ask}
           onCv={() => navigate(`/cvs/new?profile=${id}&auto=1`)} />
       )}
       <PageHeader
@@ -360,6 +363,7 @@ export default function ProfileDetailPage() {
       <MissingCard miss={miss} fields={missFields} profileId={id} fieldCard={fieldCard}
         onSaved={(patch) => { setProfile(p => ({ ...p, ...patch })); window.dispatchEvent(new Event('adal-profile-changed')) }} />
 
+      <MusanedState ask={ask} />
       <ProfileJourney profileId={id} />
       {can('day_by_day') && <ProfileDays profileId={id} />}
 
@@ -715,7 +719,7 @@ function LaborIdEdit({ profile, onSaved }) {
   )
 }
 
-/** A glassy, luxurious pop-up over the page (Edit, and the new profile's next steps). */
+/** A solid pop-up over the page, light on weak PCs (Edit, and the new profile's next steps). */
 function GlassPopup({ children, onClose, wide = false, title = null }) {
   useEffect(() => {
     const esc = (e) => { if (e.key === 'Escape') onClose?.() }
@@ -725,9 +729,9 @@ function GlassPopup({ children, onClose, wide = false, title = null }) {
     return () => { window.removeEventListener('keydown', esc); document.body.style.overflow = prev }
   }, [onClose])
   return createPortal(
-    <div className="fixed inset-0 z-[70] flex items-start justify-center overflow-y-auto bg-slate-950/45 p-3 backdrop-blur-md sm:items-center sm:p-6"
+    <div className="ak-solid-back fixed inset-0 z-[70] flex items-start justify-center overflow-y-auto p-3 sm:items-center sm:p-6"
       onMouseDown={(e) => { if (e.target === e.currentTarget) onClose?.() }}>
-      <div className={`relative w-full ${wide ? 'max-w-5xl' : 'max-w-xl'} max-h-[92vh] overflow-y-auto rounded-3xl border border-slate-200 bg-white p-4 shadow-[0_30px_80px_-20px_rgba(15,23,42,0.55)] ring-1 ring-black/5 dark:border-slate-700 dark:bg-slate-900 sm:p-6`}>
+      <div className={`ak-solid-pop relative w-full ${wide ? 'max-w-5xl' : 'max-w-xl'} max-h-[92vh] overflow-y-auto rounded-3xl border border-slate-200 bg-white p-4 shadow-[0_30px_80px_-20px_rgba(15,23,42,0.55)] ring-1 ring-black/5 dark:border-slate-700 dark:bg-slate-900 sm:p-6`}>
         <div className="pointer-events-none absolute inset-x-10 top-0 h-px bg-gradient-to-r from-transparent via-white/90 to-transparent dark:via-white/30" />
         <button type="button" onClick={onClose} aria-label="Close"
           className="absolute right-4 top-4 z-10 grid h-9 w-9 place-items-center rounded-full border border-slate-200/70 bg-white/70 text-slate-500 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-800/70 dark:hover:text-white">✕</button>
@@ -743,7 +747,7 @@ function GlassPopup({ children, onClose, wide = false, title = null }) {
  * A new profile's next steps, one pop-up after the other (asked on 2026-11-19):
  * 1. her Photo and Full Body Photo, 2. her CV (a "Created" box too), 3. Musaned.
  */
-function NextSteps({ profileId, fields, cvs, onFileUpdate, onClose, onDone, onCv }) {
+function NextSteps({ profileId, fields, cvs, onFileUpdate, onClose, onDone, onCv, ask }) {
   // The phone on the online copy: Musaned runs on an office PC, so with none reachable the step is not offered at all.
   const viaPhone = phoneCloud()
   const [pcOk, setPcOk] = useState(!viaPhone)
@@ -769,7 +773,7 @@ function NextSteps({ profileId, fields, cvs, onFileUpdate, onClose, onDone, onCv
     setSending(true)
     const t = toast.loading('Musaned: checking her profile…')
     try {
-      const r = await api.post(`/profiles/${profileId}/automations/musaned_add_candidate/start`, {})
+      const r = await api.post(`/profiles/${profileId}/automations/musaned_add_candidate/start`, { popup: true })
       toast.success(viaPhone ? 'Sent to the office PC' : `Musaned: ${r.data?.message || 'started'}`, { id: t })
       try { sessionStorage.removeItem(`next-cv-${profileId}`) } catch {}
       onDone()
@@ -783,6 +787,8 @@ function NextSteps({ profileId, fields, cvs, onFileUpdate, onClose, onDone, onCv
     </div>
   )
   if (photosOk && cvOk && !pcOk) return null
+  // Already in line, working, waiting or on Musaned (or not known yet): never asked; her page shows its state.
+  if (photosOk && cvOk && !ask?.ask) return null
   return (
     <GlassPopup onClose={onClose} wide={!photosOk}>
       <div className="mb-5 flex flex-wrap items-center gap-4 pr-10">

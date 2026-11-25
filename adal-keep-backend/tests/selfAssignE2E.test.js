@@ -42,7 +42,6 @@ test('a run goes to the best PC by itself; a PC that dies ends it once', { skip:
   const mainChrome = chromeAt(mainPort, 'main'), compChrome = chromeAt(compPort, 'comp')
   // The Companion: what robot.go answers. dead = the PC is switched off (its connections stay, nothing comes back).
   let dead = false
-  const trace = process.env.E2E_OUT ? fs.createWriteStream(process.env.E2E_OUT) : null
   const pipes = []
   const comp = http.createServer(async (q, r) => {
     if (dead) return
@@ -74,7 +73,6 @@ test('a run goes to the best PC by itself; a PC that dies ends it once', { skip:
   const robots = spawn(process.execPath, [path.join(COPY, 'robots', 'adal-robots.mjs')], { env, stdio: ['ignore', 'pipe', 'pipe'] })
   let out = ''
   robots.stdout.on('data', d => { out += d }); robots.stderr.on('data', d => { out += d })
-  if (trace) { robots.stdout.pipe(trace); robots.stderr.pipe(trace) }
   const puppeteer = (await import('puppeteer-core')).default
   let there, here
   t.after(async () => {
@@ -101,6 +99,7 @@ test('a run goes to the best PC by itself; a PC that dies ends it once', { skip:
   const done = await waitFor(async () => { const r = await row(id); return ['done', 'failed', 'cancelled'].includes(r.status) ? r : null }, 60000, 'the run finished')
   assert.equal(done.status, 'done', done.pause_reason)
   assert.equal((await here.pages()).filter(p => p.url() !== 'about:blank').length, 0)
+  for (let i = 0; i < 40 && !fs.existsSync(path.join(tmp, 'sign-in-homes.json')); i++) await sleep(250)   // (written just after the run's end)
   assert.deepEqual(Object.values(JSON.parse(fs.readFileSync(path.join(tmp, 'sign-in-homes.json'), 'utf8')))[0].pc, 'C1', 'the account is signed in there now')
 
   // The next run: the PC is switched off while it works.

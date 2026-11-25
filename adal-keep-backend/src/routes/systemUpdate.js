@@ -878,7 +878,7 @@ async function installEnvelope(cfg, logs, installed, mine, env, from = {}) {
   if (!manifest.rollback_of) Undo.beginProbation({ to: manifest, from: mine })
   else Undo.endProbation()
   await L.recordInstalled(env, cfg.projectRoot).catch(e => logs.push(`Not kept here: ${e.message}`))
-  writeMarker(cfg.projectRoot, { sha: manifest.sha, branch: 'release', source: 'supabase', lock_hash: manifest.lock_hash, message: manifest.message, date: manifest.date || '', published_at: manifest.published_at || '', ...(manifest.seq ? { seq: manifest.seq } : {}) })
+  writeMarker(cfg.projectRoot, { sha: manifest.sha, branch: 'release', source: manifest.lan ? 'lan' : 'supabase', lock_hash: manifest.lock_hash, message: manifest.message, date: manifest.date || '', published_at: manifest.published_at || '', ...(manifest.seq ? { seq: manifest.seq } : {}) })
   mineNow = manifest
   const restarts = ['AdalKeep.exe', 'run-server.bat'].some(f => fs.existsSync(path.join(cfg.projectRoot, f)))
   if (restarts) setTimeout(() => process.exit(0), 3000)
@@ -989,6 +989,13 @@ async function handleApplyLocal(req, res) {
   updateNotice.applyingSince = new Date().toISOString()
   try {
     const force = ['1', 'true', 'yes'].includes(String(req.body?.force ?? req.query?.force ?? '').toLowerCase())
+    // Not while a run works (10 minutes at most, as every update); force: at once.
+    for (let since = 0; !force && !['1', 'true'].includes(String(req.body?.now ?? ''));) {
+      const h = holdForRuns((await busyNow(dbOf())).running > 0, since)
+      if (!h.wait) break
+      since = h.since
+      await new Promise(r => setTimeout(r, 5000))
+    }
     const r = await applyLocalRelease(src, { force })
     res.status(r.code || 200).json({ ...r, code: undefined })
   } finally {

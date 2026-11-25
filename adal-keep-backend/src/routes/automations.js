@@ -117,7 +117,10 @@ router.post('/companion/robot-browser', async (req, res) => {
   const r = registerDevice(req.pcAccess, ipOf(req), req.body || {})
   // The other Companions it should reach over the office network (it says how many it did).
   const { liveDevices } = await import('../services/remoteBrowsers.js')
-  res.json({ ...r, peers: liveDevices().filter(d => d.id !== req.pcAccess.id).map(d => ({ name: d.name, ip: d.ip, port: d.port })) })
+  // The signed release this PC runs (a Companion takes it from here, lanUpdate.js), and whether a run works now.
+  const lan = await import('../services/lanServe.js').then(l => ({ release: l.releaseHere()?.manifest?.sha || '' })).catch(() => ({}))
+  const { runsWorking } = await import('../services/busy.js')
+  res.json({ ...r, ...lan, runs: runsWorking(), peers: liveDevices().filter(d => d.id !== req.pcAccess.id).map(d => ({ name: d.name, ip: d.ip, port: d.port })) })
 })
 // The sidebar's Browsers: every robot browser working now, on any PC (services/robotBrowsers.js).
 router.get('/browsers', async (req, res) => {

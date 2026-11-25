@@ -12,9 +12,8 @@
 // (the "online" folder), whole or as small patches from the release before
 // (updates v2). Downloads go in Range pieces that resume after a cut (dl).
 //
-// Only from Supabase (2026-11-23, the owner): no PC of the office hands update
-// pieces to another any more (the :47810 /lan routes, the UDP 45455 news, the
-// offers to the main PC and the "whole release to hand on" were removed).
+// From Supabase, or (2026-11-25) the signed release the main PC runs, over the
+// office network (lanupdate.go). Companions hand nothing to each other (2026-11-23).
 package main
 
 import (
@@ -134,6 +133,11 @@ type releaseManifest struct {
 		Patch *patchForm `json:"patch"`
 	} `json:"app_delta"`
 	Rollout *rollout `json:"rollout"`
+	// The server's files, for a Companion's own server (lanupdate.go).
+	LockHash    string                `json:"lock_hash"`
+	AppFiles    map[string]string     `json:"app_files"`
+	FilePatches map[string]*patchForm `json:"file_patches"` // by the new file's SHA-256
+	Tree        *piece                `json:"tree"`         // the packages and Node, file by file
 }
 
 // audience: PC names (os.Hostname, lower case) that may take a release from Supabase.
@@ -339,8 +343,11 @@ type updater struct {
 	key      ed25519.PublicKey
 	mu       sync.Mutex // one install at a time
 	failed   map[string]time.Time
-	client   *http.Client     // small calls (sign-in, latest.json)
-	dlClient *http.Client     // downloads: each piece has its own timeout (dl)
+	client   *http.Client // small calls (sign-in, latest.json)
+	dlClient *http.Client // downloads: each piece has its own timeout (dl)
+	lanAgain time.Time
+	lanDone  string           // Main's release last followed (lanupdate.go)
+	quit     chan struct{}    // tests: stop waiting
 	built    *releaseManifest // the release this program was built from (builtRelease)
 }
 
@@ -644,10 +651,22 @@ func (u *updater) getPiece(m *releaseManifest, p piece, fromCloud bool) (string,
 		}
 		log.Printf("update: no patch for %s (%v), the whole piece instead", filepath.Base(p.File), err)
 	}
+	if f, err := u.fromMainPC(m, p.SHA256); err == nil {
+		return f, nil
+	}
 	if !fromCloud {
 		return "", errors.New("not kept on this PC")
 	}
 	return u.fromSupabase(p.File, p.SHA256)
+}
+
+// fromMainPC: one file of the release Main runs too, over the office network (lanupdate.go).
+func (u *updater) fromMainPC(m *releaseManifest, sha string) (string, error) {
+	if named, _ := lanNamed.Load().(string); !lanUpdatesOn() || named == "" || !sameSHA(named, m.SHA) {
+		return "", errors.New("the main PC runs another release")
+	}
+	dest := filepath.Join(u.files(), sha)
+	return dest, lanFile(sha, dest)
 }
 
 // fromSupabase: one file of the release from adal-updates, checked against sha.
@@ -711,10 +730,11 @@ func (u *updater) patchPiece(m *releaseManifest, p piece, fromCloud bool) (strin
 	}
 	pp := u.piecePath(pf.SHA256)
 	if pp == "" || fileSHA(pp) != pf.SHA256 {
-		if !fromCloud {
+		if f, err := u.fromMainPC(m, pf.SHA256); err == nil {
+			pp = f
+		} else if !fromCloud {
 			return "", errors.New("the patch is not kept on this PC")
-		}
-		if pp, err = u.fromSupabase(pf.File, pf.SHA256); err != nil {
+		} else if pp, err = u.fromSupabase(pf.File, pf.SHA256); err != nil {
 			return "", err
 		}
 	}
@@ -1237,10 +1257,10 @@ func startSelfUpdate(root string) *updater {
 	} else {
 		log.Printf("⚠️ this PC's own routes (:%d): %v", lanHTTPPort, err)
 	}
+	go u.lanLoop()
 	go func() {
 		time.Sleep(20 * time.Second)
 		for {
-			// Supabase only (2026-11-23: no update pieces between the office's PCs).
 			if err := u.fromCloud(); err != nil && readCloud(root) != nil {
 				log.Printf("update from Supabase: %v", err)
 			}

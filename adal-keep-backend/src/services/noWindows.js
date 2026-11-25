@@ -7,7 +7,10 @@
  * opens Adal Keep. ADAL_SHOW_WINDOWS=1 shows them again (for a developer, by hand).
  */
 // (Adal Robots with its window switched on for this PC: browser.js robotWindow.)
-export const noWindows = () => process.platform === 'linux' && process.env.ADAL_SHOW_WINDOWS !== '1' &&
+// Windows: the robots' browser has a window off the screen; ADAL_ROBOTS_HEADLESS=1 gives it none at all (Adal Robots
+// only). Off until the robot check has been seen to work there (2026-11-25: no difference in speed measured on Linux).
+const headlessAsked = () => process.platform === 'win32' && process.env.ADAL_ROBOT_PROCESS === '1' && process.env.ADAL_ROBOTS_HEADLESS === '1'
+export const noWindows = () => (process.platform === 'linux' || headlessAsked()) && process.env.ADAL_SHOW_WINDOWS !== '1' &&
   !(process.env.ADAL_ROBOT_PROCESS === '1' && process.env.ADAL_ROBOTS_WINDOW === '1')
 /** puppeteer.launch's `headless` for a browser that would otherwise show a window. */
 export const headlessHere = () => (noWindows() ? true : false)

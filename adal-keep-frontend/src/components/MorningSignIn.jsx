@@ -14,6 +14,8 @@ import LiveTab from './LiveTab'
 
 // Each site's list of saved accounts (AI Actions): the visa platform's is /visa/accounts.
 const ACCOUNT_LIST = { mofa: 'visa' }
+// Musaned: the agency's own account only (its other accounts are in Settings).
+const listed = (s) => (s.key === 'musaned' ? (s.accounts || []).filter(a => a.main).slice(0, 1) : s.accounts || [])
 const err = (e) => e?.response?.data?.error || e.message
 const when = (iso) => { try { const d = new Date(iso); return d.toDateString() === new Date().toDateString() ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : d.toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) } catch { return '' } }
 
@@ -25,7 +27,6 @@ export default function MorningSignIn() {
   const [sites, setSitesNow] = useState(cached)
   const setSites = (v) => { setSitesNow(v); try { if (v.length) localStorage.setItem(CACHE, JSON.stringify(v)) } catch {} }
   const [live, setLive] = useState(null)
-  const [choose, setChoose] = useState(null)   // { site, accounts } while the person picks the account
   const load = () => api.get('/sessions').then(r => setSites(Array.isArray(r.data) ? r.data : [])).catch(() => setSitesNow(s => s || []))
   // Asked again after 3 s (the PC looks at its tabs behind its first answer), then every 15 s.
   useEffect(() => { load(); const s = setTimeout(load, 3000); const t = setInterval(load, 15000); return () => { clearTimeout(s); clearInterval(t) } }, [])
@@ -38,16 +39,15 @@ export default function MorningSignIn() {
     </div>
   )
   if (!sites.length) return null
-  // Sign in: with several accounts for the site, the person chooses which one first.
+  const isIn = (s) => (s.key === 'musaned' && listed(s)[0] ? !!listed(s)[0].signedIn : !!s.signedIn)
+  // Sign in: the agency's own (default) account, never asked which (the owner, 2026-11-25); others in Settings.
   const start = async (s) => {
     if (s.shared && s.signedIn && s.holder?.by && !confirm(`${s.name} is signed in by ${s.holder.by} (${s.holder.pc}). Tasheer allows one sign-in for the agency: sign in as you instead? Their sign-in ends.`)) return
     let accounts = []
     try { accounts = (await api.get(`/${ACCOUNT_LIST[s.key] || s.key}/accounts`)).data || [] } catch {}
-    if (accounts.length > 1) return setChoose({ site: s, accounts })
-    open(s, accounts[0]?.id)
+    open(s, (accounts.find(a => a.is_default) || accounts[0])?.id)
   }
   const open = async (s, accountId) => {
-    setChoose(null)
     try {
       const { data } = await api.post(`/sessions/${s.key}/open`, accountId ? { account_id: accountId } : {})
       if (data?.already) toast.success(`${s.name} is signed in already — its tab is used, nothing more to do`, { duration: 6000 })
@@ -60,7 +60,7 @@ export default function MorningSignIn() {
     } catch (e) { toast.error(err(e)) }
     setTimeout(load, 8000)
   }
-  const inCount = sites.filter(s => s.signedIn).length
+  const inCount = sites.filter(isIn).length
   return (
     <div className="panel p-4">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -69,9 +69,9 @@ export default function MorningSignIn() {
       <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(14rem,1fr))]">
         {sites.map(s => (
           // The site's name on its own line (never squeezed); its accounts or button under it.
-          <div key={s.key} className={`rounded-xl border px-3 py-2 ${s.signedIn ? 'border-emerald-200 bg-emerald-50/60 dark:border-emerald-800 dark:bg-emerald-900/10' : 'border-slate-200 dark:border-slate-700'}`}>
+          <div key={s.key} className={`rounded-xl border px-3 py-2 ${isIn(s) ? 'border-emerald-200 bg-emerald-50/60 dark:border-emerald-800 dark:bg-emerald-900/10' : 'border-slate-200 dark:border-slate-700'}`}>
             <div className="flex items-center gap-2">
-            <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${s.signedIn ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`} />
+            <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${isIn(s) ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`} />
             <span className="min-w-0 flex-1">
               <span className="block text-sm font-semibold leading-snug">{s.name}</span>
               {s.shared && s.holder?.by && (
@@ -80,17 +80,17 @@ export default function MorningSignIn() {
                 </span>
               )}
             </span>
-            {!(s.accounts?.length > 1) && (s.signedIn && !s.shared
+            {!(listed(s).length > 1) && (isIn(s) && !s.shared
               ? <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-300">Signed in</span>
               : <button type="button" onClick={() => start(s)} title={s.shared ? 'One sign-in for the agency: this takes it over for you' : ''}
                   className={`shrink-0 rounded-lg px-2.5 py-1 text-xs font-semibold ${s.shared && s.signedIn ? 'border border-teal-600 text-teal-700 hover:bg-teal-50 dark:text-teal-300' : 'bg-teal-600 text-white hover:bg-teal-700'}`}>
                   {s.shared && s.signedIn ? 'Sign in here' : 'Sign in'}
                 </button>)}
             </div>
-            {s.accounts?.length > 1 && (
+            {listed(s).length > 1 && (
               // Several accounts: each one apart, in a browser space of its own — signing in as one never signs the other out.
               <div className="mt-1.5 space-y-1 pl-[1.125rem]">
-                  {s.accounts.map(a => (
+                  {listed(s).map(a => (
                     <div key={a.id} className="flex items-center gap-1.5 text-xs">
                       <span className={`h-2 w-2 shrink-0 rounded-full ${a.signedIn ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`} />
                       <span className="min-w-0 flex-1" title={a.main ? "Main account (the browser's own window)" : 'Its own browser window'}>{a.name}</span>
@@ -104,24 +104,6 @@ export default function MorningSignIn() {
           </div>
         ))}
       </div>
-      {choose && createPortal(
-        <div className="fixed inset-0 z-[80] flex items-end justify-center bg-black/30 sm:items-center" onClick={() => setChoose(null)}>
-          <div onClick={e => e.stopPropagation()} className="solid-sheet w-full max-w-sm space-y-2 rounded-t-2xl border border-slate-200 p-4 shadow-2xl dark:border-slate-700 sm:rounded-2xl"
-            style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}>
-            <p className="font-bold">Sign in to {choose.site.name} as…</p>
-            {choose.accounts.map(a => (
-              <button key={a.id} type="button" onClick={() => open(choose.site, a.id)}
-                className="flex w-full items-center justify-between gap-2 rounded-xl border border-slate-200 px-3 py-2.5 text-left hover:border-teal-400 hover:bg-teal-50 dark:border-slate-700 dark:hover:bg-teal-900/20">
-                <span className="min-w-0">
-                  <span className="block truncate font-semibold">{a.name || a.username || a.login_value}</span>
-                  <span className="block truncate text-xs text-slate-500">{a.username || a.login_value || a.phone || ''}</span>
-                </span>
-                {a.is_default ? <span className="shrink-0 rounded bg-teal-100 px-1.5 text-[10px] font-semibold text-teal-800 dark:bg-teal-900/40 dark:text-teal-200">default</span> : null}
-              </button>
-            ))}
-            <button type="button" onClick={() => setChoose(null)} className="w-full rounded-lg py-2 text-sm text-slate-500">Cancel</button>
-          </div>
-        </div>, document.body)}
       {live && createPortal(<LiveTab runId={live} startFull onClose={() => { setLive(null); load() }} />, document.body)}
     </div>
   )

@@ -360,7 +360,7 @@ export function startRobotGuard(db) {
     busy = true
     try {
       const browser = await openBrowserIfAny()
-      if (browser) { await guardLook(browser, db, { atStart: first }); first = false }
+      if (browser) { await guardLook(browser, db, { atStart: first }); first = false; await (await import('./spareBlanks.js')).closeSpareBlanks(browser) }
     } catch (e) { console.warn('[guard]', e.message) } finally { busy = false }
   }
   setTimeout(look, 10000).unref?.()

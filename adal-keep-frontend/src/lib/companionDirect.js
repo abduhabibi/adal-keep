@@ -8,6 +8,7 @@
  * first that answers opens, at the same page. When the main PC goes away
  * again, its page comes back here (lib/companionOnline.js).
  */
+import { backStep, watchSaves, busyHere } from './steady.js'
 const ON_COMPANION = typeof location !== 'undefined' && location.host === '127.0.0.1:47801'
 
 async function look() {
@@ -28,12 +29,17 @@ let cid = ''   // this Companion's own id (AdalKeep.exe, hand.go): the main PC k
 export function startCompanionDirect() {
   if (!ON_COMPANION) return
   let stopped = false
+  watchSaves()
+  // Left the main PC a moment ago: back only once it answers steadily (lib/steady.js).
+  const left = location.hash === '#adal_left'
+  if (left) history.replaceState(history.state, '', location.pathname + location.search)
+  const steps = {}
   const run = async () => {
     if (stopped) return
     let url = null
     try { url = await look() } catch {}
     if (url === null && stopped) return
-    if (url) {
+    if (backStep(steps, !!url, Date.now(), left) && !busyHere()) {
       stopped = true
       // A page about a profile made here (not on the PC yet) opens the list instead.
       const here = /\/-\d+/.test(location.pathname) ? '/' : location.pathname

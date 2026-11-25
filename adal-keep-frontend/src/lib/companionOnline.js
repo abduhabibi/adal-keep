@@ -10,6 +10,7 @@
  * A browser that is not a Companion never does this.
  */
 import api, { forgetJoin } from '../services/api'
+import { look, leaveStep, watchSaves, busyHere, HOLD_MS } from './steady.js'
 
 const ONLINE = 'http://127.0.0.1:47801'
 const IS = 'adal-is-companion'
@@ -19,15 +20,22 @@ const get = (k) => { try { return localStorage.getItem(k) } catch { return null 
 const set = (k, v) => { try { localStorage.setItem(k, v) } catch {} }
 
 // The main PC stops answering (turned off, the Companion left the office): the
-// window goes back to the online copy at once, at the same page; that copy
-// comes back here by itself when the main PC answers (lib/companionDirect.js).
+// window goes back to the online copy, at the same page; that copy comes back
+// here by itself when the main PC answers (lib/companionDirect.js). Only once it is
+// really away (lib/steady.js): a slow answer, a save or someone typing moves nothing.
 function watchMainPC() {
-  let misses = 0
+  watchSaves()
+  const s = {}
+  let asking = false, heldAt = 0
   const t = setInterval(async () => {
-    let ok = false
-    try { ok = (await fetch('/api/health', { cache: 'no-store', signal: AbortSignal.timeout(5000) })).status < 500 } catch {}
-    misses = ok ? 0 : misses + 1
-    if (misses >= 2) { clearInterval(t); location.replace(`${ONLINE}${location.pathname}`) }
+    if (asking) return
+    asking = true
+    const seen = await look(() => fetch('/api/health', { cache: 'no-store', signal: AbortSignal.timeout(8000) }))
+    asking = false
+    if (!leaveStep(s, seen, Date.now())) { heldAt = 0; return }
+    heldAt ||= Date.now()
+    if (busyHere() && Date.now() - heldAt < HOLD_MS) return
+    clearInterval(t); location.replace(`${ONLINE}${location.pathname}#adal_left`)
   }, 8000)
 }
 

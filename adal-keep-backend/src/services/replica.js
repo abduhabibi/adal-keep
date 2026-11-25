@@ -31,6 +31,7 @@ import { fileURLToPath } from 'url'
 import { rawSnapshot, pageSizeOf, pageHashes, lockFast, HAS_ZSTD, backupHealth, getConfig } from './telegramBackup.js'
 import { getSecret, secretBlobs } from './secretStore.js'
 import { vaultKey } from './accountVault.js'
+import { deltaOn, framesOf, joinFrames, subPiece, Versions, DocsFeed, FRAME } from './replicaDelta.js'
 
 const BACKEND = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const DATA = path.join(BACKEND, 'data')
@@ -53,21 +54,32 @@ function dropOldSnaps() {
 }
 
 /** One fingerprint per chunk: from the page fingerprints in it (and its length). */
-export function chunkSums(raw, ps = pageSizeOf(raw), chunk = CHUNK) {
-  const fp = pageHashes(raw, ps)
+export function chunkSums(raw, ps = pageSizeOf(raw), chunk = CHUNK) { return sumsOf(raw.length, pageHashes(raw, ps), ps, chunk) }
+function sumsOf(length, fp, ps, chunk = CHUNK) {
   const perChunk = chunk / ps
   const out = []
-  for (let i = 0; i * chunk < raw.length; i++) {
-    const len = Math.min(chunk, raw.length - i * chunk)
+  for (let i = 0; i * chunk < length; i++) {
+    const len = Math.min(chunk, length - i * chunk)
     out.push(crypto.createHash('sha1').update(String(len)).update(fp.subarray(i * perChunk * 8, (i + 1) * perChunk * 8)).digest('hex').slice(0, 20))
   }
   return out
+}
+/** pageHashes a chunk at a time (a whole database at once stopped every answer for up to a second). */
+async function hashesInSteps(raw, ps) {
+  const out = []
+  for (let i = 0; i < raw.length; i += CHUNK) { out.push(pageHashes(raw.subarray(i, i + CHUNK), ps)); await new Promise(r => setImmediate(r)) }
+  return Buffer.concat(out)
 }
 
 /** What a document is (cheap: no reading of the file): its name, size and time. */
 export const docSum = (name, st) => crypto.createHash('sha1').update(`${name}|${st.size}|${Math.round(st.mtimeMs)}`).digest('hex').slice(0, 20)
 
+const docEntry = (name, st) => ({ name, size: st.size, sum: docSum(name, st), parts: Math.max(1, Math.ceil(st.size / PIECE)) })
+export const docs = new DocsFeed(SAFE, docEntry)
+const versions = new Versions({ file: HAS_ZSTD ? path.join(path.dirname(SNAPS), 'replica-versions.gz') : null })
+const history = new Map()   // snap → its chunks (a Companion says which one it has)
 function listDocs() {
+  if (deltaOn()) return docs.refresh().all()
   let names = []
   try { names = fs.readdirSync(SAFE, { withFileTypes: true }).filter(d => d.isFile()).map(d => d.name) } catch {}
   const out = []
@@ -88,20 +100,53 @@ let lastManifest = null   // { m, at, mark }
 const DB_PATH = process.env.SQLITE_PATH ? path.resolve(process.env.SQLITE_PATH) : path.join(BACKEND, 'data.sqlite')
 const dbMark = () => ['', '-wal'].map(x => { try { const s = fs.statSync(DB_PATH + x); return `${s.size}:${s.mtimeMs}` } catch { return '-' } }).join('|')
 
-export async function manifest({ snapshot = rawSnapshot } = {}) {
+const IDLE = new Set(['sync_pcs', 'sync_role', 'audit_log', 'run_history', 'profile_days', 'notifications'])
+const IDLE_MS = (Number(process.env.ADAL_REPLICA_IDLE_MIN) || 30) * 60000
+/** Only the PCs' own signs of life changed since the last snapshot (the change log, sync_log): it is used again. */
+async function onlyIdle(db, last) {
+  if (!db || !deltaOn() || !last?.vec || Date.now() - last.at > IDLE_MS) return false
+  try {
+    for (const [o, s] of Object.entries(await logVec(db))) {
+      if (s <= (last.vec[o] || 0)) continue
+      for (const r of await db.raw('SELECT DISTINCT tbl FROM sync_log WHERE origin = ? AND seq > ?', [o, last.vec[o] || 0])) if (!IDLE.has(r.tbl)) return false
+    }
+    return true
+  } catch { return false }
+}
+const logVec = async (db) => Object.fromEntries((await db.raw('SELECT origin, MAX(seq) AS s FROM sync_log GROUP BY origin')).map(r => [r.origin, Number(r.s)]))
+
+/** What a Companion that has snapshot `have` and the documents as of `docsAt` needs to know (v2). */
+export async function manifestFor({ have = '', docsAt = '', db = null, ...o } = {}) {
+  const m = await manifest({ db, ...o })
+  const out = { v: 2, pc_number: m.pc_number, made: m.made, snap: m.snap, backup: m.backup, docs_at: docs.at }
+  const was = history.get(have)
+  if (have === m.snap) out.same_db = true
+  else if (was && was.length <= m.db.chunks.length + 64) out.db = { ...m.db, chunks: undefined, n: m.db.chunks.length, set: Object.fromEntries(m.db.chunks.map((s, i) => [i, s]).filter(([i, s]) => was[i] !== s)), from: have }
+  else out.db = m.db
+  const ch = docs.since(docsAt)
+  if (ch) { if (ch.set.length || ch.gone.length) { out.docs_set = ch.set; out.docs_gone = ch.gone } else out.same_docs = true } else out.docs = m.docs
+  return out
+}
+
+export async function manifest({ snapshot = rawSnapshot, db = null } = {}) {
   if (!getSecret('backup_password')) throw new Error('No backup key on the main PC yet')
   dropOldSnaps()
   const mark = dbMark()
   if (snapshot === rawSnapshot && lastManifest && snaps.has(lastManifest.m.snap) && Date.now() - lastManifest.at < SNAP_TTL / 2 &&
-      (Date.now() - lastManifest.at < 45000 || lastManifest.mark === mark)) {
+      (Date.now() - lastManifest.at < 45000 || lastManifest.mark === mark || await onlyIdle(db, lastManifest))) {
+    const s = snaps.get(lastManifest.m.snap)
+    if (deltaOn()) s.at = Date.now()   // in use: it stays
     return { ...lastManifest.m, docs: listDocs(), backup: backupHealth() }
   }
+  const vec = db ? await logVec(db).catch(() => null) : null
   const raw = await snapshot()
   const ps = pageSizeOf(raw)
+  const fp = await hashesInSteps(raw, ps)
+  const chunks = sumsOf(raw.length, fp, ps)
   const id = crypto.randomBytes(8).toString('hex')
   fs.mkdirSync(SNAPS, { recursive: true })
   const file = path.join(SNAPS, `${id}.sqlite`)
-  fs.writeFileSync(file, raw)
+  await fs.promises.writeFile(file, raw)
   snaps.set(id, { file, at: Date.now(), length: raw.length, ps })
   let number = null
   try { number = (await import('./mainPC.js')).pcNumber() } catch {}
@@ -110,11 +155,18 @@ export async function manifest({ snapshot = rawSnapshot } = {}) {
     pc_number: number,
     made: new Date().toISOString(),
     snap: id,
-    db: { length: raw.length, ps, chunk: CHUNK, z: HAS_ZSTD ? 'zstd' : 'gzip', chunks: chunkSums(raw, ps) },
+    db: { length: raw.length, ps, chunk: CHUNK, z: HAS_ZSTD ? 'zstd' : 'gzip', chunks },
     docs: listDocs(),
     backup: backupHealth(),
   }
-  if (snapshot === rawSnapshot) lastManifest = { m, at: Date.now(), mark }
+  if (snapshot === rawSnapshot) lastManifest = { m, at: Date.now(), mark, vec }
+  if (deltaOn() && HAS_ZSTD) {
+    const per = CHUNK / ps * 8
+    chunks.forEach((s, i) => versions.add(i, s, fp.subarray(i * per, (i + 1) * per)))
+    history.set(id, chunks)
+    while (history.size > 60) history.delete(history.keys().next().value)
+    versions.save()
+  }
   return m
 }
 
@@ -135,7 +187,7 @@ export function dbChunk(snap, i) {
 }
 
 /** dbChunk without blocking the event loop (reading and compressing in the thread pool): the one the routes use. */
-export async function dbChunkAsync(snap, i) {
+export async function dbChunkAsync(snap, i, { framed = false, base = '' } = {}) {
   const s = snaps.get(String(snap))
   if (!s) throw Object.assign(new Error('That snapshot is gone: ask for a new manifest'), { status: 410 })
   const n = Number(i)
@@ -145,6 +197,14 @@ export async function dbChunkAsync(snap, i) {
     const len = Math.min(CHUNK, s.length - n * CHUNK)
     const buf = Buffer.alloc(len)
     await fh.read(buf, 0, len, n * CHUNK)
+    // In frames (v2): the whole piece, or only the frames that differ from the one the Companion has.
+    if (framed && HAS_ZSTD && deltaOn()) {
+      const frames = await framesOf(buf)
+      const to = history.get(String(snap))?.[n]
+      const ch = base && to ? versions.changed(n, base, to, FRAME / s.ps) : null
+      if (base && (!ch || ch.length > frames.length / 2)) return lockFast(joinFrames(frames), getSecret('backup_password'))
+      return lockFast(base ? subPiece(frames, ch) : joinFrames(frames), getSecret('backup_password'))
+    }
     const z = HAS_ZSTD
       ? await new Promise((ok, no) => zlib.zstdCompress(buf, { params: { [ZL.ZSTD_c_compressionLevel]: 3 } }, (e, r) => e ? no(e) : ok(r)))
       : await new Promise((ok, no) => zlib.gzip(buf, { level: 6 }, (e, r) => e ? no(e) : ok(r)))

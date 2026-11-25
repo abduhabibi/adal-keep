@@ -20,6 +20,7 @@ const db = knex({ client: 'sqlite3', connection: { filename: ':memory:' }, useNu
 await db.schema.createTable('files', t => { t.integer('id'); t.string('path'); t.string('mimetype'); t.integer('size'); t.integer('profile_field_id') })
 await db.schema.createTable('profile_fields', t => { t.integer('id'); t.integer('profile_id') })
 await db.schema.createTable('sync_log', t => { t.string('origin'); t.integer('seq'); t.string('tbl'); t.string('rid') })
+await db.schema.createTable('sync_dirty', t => { t.increments('seq'); t.string('tbl'); t.string('rid') })
 await db('profile_fields').insert({ id: 4, profile_id: 31 })
 await db('files').insert([{ id: 1, path: 'a.jpg', mimetype: 'image/jpeg', size: 5, profile_field_id: 4 }, { id: 2, path: 'uploads/3/9/b.pdf', mimetype: 'application/pdf', size: 3, profile_field_id: 4 }])
 fs.writeFileSync(path.join(tmp, 'safe', 'a.jpg'), 'photo'); fs.writeFileSync(path.join(tmp, 'uploads', '3', '9', 'b.pdf'), 'pdf')
@@ -64,6 +65,11 @@ test('a new file row of a girl is told with her number; a deleted one as gone', 
   changed('files')
   const r = await open
   assert.deepEqual(r.rows.map(x => [x.id, x.profile, x.gone]), [['1', 31, false], ['77', null, true]])
+  const b = (await json('/companion/docs?at=' + r.at)).at
+  await db('sync_dirty').insert({ tbl: 'files', rid: '2' })   // (not yet in the log)
+  const c = await json('/companion/docs?at=' + b)
+  assert.deepEqual(c.rows.map(x => x.id), ['2'])
+  assert.deepEqual((await json('/companion/docs?at=' + c.at)).rows, [])
 })
 
 test('an answer says what the file is; the audit list as ever; a program reading is not a person', async () => {

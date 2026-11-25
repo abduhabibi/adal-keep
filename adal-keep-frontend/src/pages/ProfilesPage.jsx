@@ -91,7 +91,7 @@ export default function ProfilesPage() {
   const byStatusBroker = useMemo(() => profiles.filter(p => goesTo(dest, p) &&
     (status === 'all' || (p.status || 'pending') === status) && (!brokerId || String(p.broker_id ?? '') === String(brokerId))), [profiles, status, brokerId, dest])
   // A profile changed anywhere (a person, a robot, a phone): the list follows at once.
-  useEffect(() => onDataChange(['profiles', 'brokers'], () => load(true), 3000), [load])
+  useEffect(() => onDataChange(['profiles', 'brokers'], () => load(true)), [load])
   // A move running: its new girls show as they come (every 5 s), even if a change notice is missed.
   const waitingFiles = useWaitingFiles()
   useEffect(() => { if (!waitingFiles.size) return; const t = setInterval(() => load(true), 5000); return () => clearInterval(t) }, [waitingFiles.size > 0, load]) // eslint-disable-line react-hooks/exhaustive-deps

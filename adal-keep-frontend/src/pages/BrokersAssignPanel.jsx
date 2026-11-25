@@ -6,6 +6,7 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import api from '../services/api'
+import { profilesList } from '../lib/profilesCache'
 import toast from 'react-hot-toast'
 
 const SHOWN = 60
@@ -19,8 +20,7 @@ export default function BrokersAssignPanel({ brokerId, onAssigned }) {
 
   const load = async () => {
     try {
-      const res = await api.get('/profiles')
-      const list = Array.isArray(res.data) ? res.data : (res.data?.data || [])
+      const list = await profilesList({ fresh: true })
       setAll(list.filter(p => !p.broker_id).sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || ''))))
     } catch {
       setAll([])

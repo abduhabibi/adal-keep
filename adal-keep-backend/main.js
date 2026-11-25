@@ -476,6 +476,22 @@ app.get('/api/profiles', async (req, res) => {
   }
 })
 
+// The Profiles page and the others that need every girl: what a list shows, searches and
+// filters (her whole row is 3.5 kB, megabytes for all: 1.8 MB on the office PC). A window
+// that has it gets only the rows that changed (services/changedRows.js).
+app.get('/api/profiles/list', async (req, res) => {
+  try {
+    res.json(await db('profiles')
+      .leftJoin('brokers', 'profiles.broker_id', 'brokers.id')
+      .select(...['id', 'full_name', 'phone_number', 'national_id', 'passport_number', 'labor_id', 'order_id', 'status', 'broker_id', 'created_by', 'created_at', 'updated_at',
+        'last_opened_at', 'work_experience', 'date_of_birth', 'marital_status', 'destination_country', 'skills', 'religion', 'chosen_at', 'musaned_stage'].map(c => `profiles.${c}`), 'brokers.name as broker_name')
+      .orderBy('profiles.created_at', 'desc'))
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Failed to load profiles' })
+  }
+})
+
 // The search pad beside every page: only what it shows and searches (the full
 // list is 3 MB+ for a thousand profiles and was fetched on every page).
 app.get('/api/profiles/brief', async (req, res) => {
@@ -495,7 +511,7 @@ app.get('/api/profiles/brief', async (req, res) => {
 app.post('/api/profiles/:id/opened', async (req, res) => {
   try {
     await db('profiles').where('id', Number(req.params.id)).update({ last_opened_at: new Date().toISOString() })
-    forgetAnswer('/api/profiles')
+    forgetAnswer('/api/profiles'); forgetAnswer('/api/profiles/list')
     res.json({ ok: true })
   } catch (err) {
     res.status(500).json({ error: 'Could not note it' })

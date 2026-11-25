@@ -124,8 +124,10 @@ function useStages() {
     // The saved counts at once (deviceCache), the fresh ones behind them.
     // Every 8 s the same counts come back most times: only a different answer
     // is shown (else every profile was filtered, sorted and drawn again).
-    let last = ''
+    let last = '', same = null
     const show = (data) => {
+      if (data && data === same) return
+      same = data
       const now = JSON.stringify(data ?? null)
       if (!alive || now === last) return
       last = now

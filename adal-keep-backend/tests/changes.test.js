@@ -79,3 +79,21 @@ test('a change made on this page: its own reloads run at once, the timers once (
   assert.equal(timers, 2)
   off(); delete globalThis.window; delete globalThis.document
 })
+
+test('a change runs only the timers that show its tables; what is not known runs always', async () => {
+  const fs = await import('fs')
+  const src = fs.readFileSync(new URL('../../adal-keep-frontend/src/lib/changes.js', import.meta.url), 'utf8')
+  const part = src.slice(src.indexOf('const QUEUE ='), src.indexOf('let refreshAll'))
+  const { concerns } = await import('data:text/javascript,' + encodeURIComponent(`const off = () => false\n${part}`))
+  const c = (urls, tables) => concerns(new Set(urls), tables)
+  assert.equal(c(['/profiles/brief'], ['tasks']), false)
+  assert.equal(c(['/profiles/brief'], ['profiles']), true)
+  assert.equal(c(['/automations/stages'], ['generated_cvs']), true)
+  assert.equal(c(['/subscription/status'], ['profiles', 'tasks']), false)     // not from the database
+  assert.equal(c(['/subscription/status', '/tasks/count'], ['tasks']), true)
+  assert.equal(c(['/something/new'], ['tasks']), true)
+  assert.equal(c(['/profiles/7/automations'], ['tasks']), false)
+  assert.equal(c(['/profiles/7/automations'], ['anything_else']), true)
+  assert.equal(c([], ['tasks']), true)
+  assert.equal(c(['/profiles/brief'], ['*']), true)
+})

@@ -33,7 +33,14 @@ if (typeof document !== 'undefined') {
   const later = new Set()
   window.setInterval = (fn, ms, ...args) => {
     if (typeof fn !== 'function' || !(ms < 60000)) return every(fn, ms, ...args)
-    const run = () => { window.__adalTimer = (window.__adalTimer || 0) + 1; try { return fn(...args) } finally { window.__adalTimer-- } }
+    // What it asks is noted (services/api.js): a refresh for the PC waits behind a person's click, and
+    // a change told by the PC runs only the timers that show the tables that changed (lib/changes.js).
+    const run = () => {
+      const before = window.__adalTimerOf
+      window.__adalTimer = (window.__adalTimer || 0) + 1; window.__adalTimerOf = run
+      try { return fn(...args) } finally { window.__adalTimer--; window.__adalTimerOf = before }
+    }
+    run.asks = new Set()
     // While the PC's live link is up (it says at once what changed, and every
     // refresh then runs), a refresh of 3 s+ is needed less often: every 3rd
     // tick; on a slow line (answers taking 1.5 s+) half as often again. At
@@ -51,9 +58,9 @@ if (typeof document !== 'undefined') {
     return id
   }
   window.clearInterval = (id) => { liveRefreshes.delete(id); stop(id) }
-  import('./lib/changes.js').then(c => c.setRefreshAll(() => {
+  import('./lib/changes.js').then(c => c.setRefreshAll((tables) => {
     let i = 0
-    for (const run of liveRefreshes.values()) setTimeout(() => { try { run() } catch {} }, (i++) * 25) // spread out
+    for (const run of liveRefreshes.values()) if (c.concerns(run.asks, tables)) setTimeout(() => { try { run() } catch {} }, (i++) * 25) // spread out
   }))
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) return

@@ -14,7 +14,7 @@ fs.writeFileSync(process.env.ACCOUNT_VAULT_KEY, Buffer.alloc(32, 1).toString('ba
 
 test("a person's press on a run the scanner found is written on it, and its wait for the browser ends", async (t) => {
   const knex = (await import('knex')).default
-  const db = knex({ client: 'sqlite3', connection: { filename: process.env.SQLITE_PATH }, useNullAsDefault: true })
+  const db = knex({ client: 'sqlite3', connection: { filename: process.env.SQLITE_PATH }, useNullAsDefault: true, postProcessResponse: (await import('../src/services/accountVault.js')).openRows })   // (as in knexfile)
   t.after(async () => { await db.destroy(); fs.rmSync(tmp, { recursive: true, force: true }); setTimeout(() => process.exit(), 200).unref() })
   await db.migrate.latest({ directory: path.resolve('src/migrations') })
   const [pid] = await db('profiles').insert({ full_name: 'TEST ONE' })

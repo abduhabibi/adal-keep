@@ -1366,7 +1366,7 @@ async function agencyPage(pc, fresh = true) {
         <div class="box2"><h4>Receipts</h4>${A.receipts.map(r => `<div class="row2"><span class="grow">${when(r.created_at)}</span><span class="pill ${r.status}">${r.status}</span></div>`).join('') || '<p class="muted">No receipts yet.</p>'}
           <h4 style="margin-top:14px">Phones</h4>${A.phones.map(p => `<div class="row2"><span class="grow">${esc(p.name || 'Phone')}</span><span class="muted">since ${new Date(p.since).toLocaleDateString()}</span></div>`).join('') || '<p class="muted">No phone paired.</p>'}</div>
       </div><div id="aReg"></div><div id="aMore"></div></div>`
-    agencyDetails(A, pc)
+    agencyDetails(A, pc).catch(e => console.warn('[details]', e))
     $('#aOpen').onclick = () => openAgency(A.id)
     if ($('#aChat')) $('#aChat').onclick = () => { const c = data.conversations.find(x => x.id === A.inbox); if (c) { switchTab('inbox'); openConv(c) } }
     $('#aPlan').onclick = () => { switchTab('plans') }

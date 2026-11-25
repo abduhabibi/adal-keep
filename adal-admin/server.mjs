@@ -558,6 +558,7 @@ const api = {
     const pc = String(b.pc || '')
     if (!/^\d{6}$/.test(pc)) throw new Error('bad PC number')
     // (A page opened before this version: its Suspend / Allow is Lock / Unlock.)
+    if (typeof b.suspend === 'boolean' && !REG) throw new Error('Lock / Unlock is not working in this Admin: nothing was changed.')
     if (typeof b.suspend === 'boolean') return REG.setLock({ pc, locked: b.suspend, note: b.suspend_note })
     const had = (await licenseToChange(pc)) || {}
     const now = Date.now()
@@ -1230,8 +1231,9 @@ Object.assign(api, (await import('./tower.mjs')).towerApi({ rest, sb }))
 const HOME = (await import('./home.mjs')).homeApi({ api, rest, sb, url: URL_, key: KEY })
 Object.assign(api, HOME.routes)
 // Lock / Unlock, the registrations and each agency's details (registry.mjs).
-const REG = (await import('./registry.mjs')).registryApi({ dir: HERE, rest, readLicense: licenseToChange, saveLicense, mainAgencies, branchRe: BRANCH_RE, api, tell: async (id, t) => { if (!ADMIN_ID) await ensureAdmin(); return tell(id, t) } })
-Object.assign(api, REG.routes)
+// In a file of its own: when it fails, Admin opens without it.
+const REG = await import('./registry.mjs').then(r => r.registryApi({ dir: HERE, rest, readLicense: licenseToChange, saveLicense, mainAgencies, branchRe: BRANCH_RE, api, tell: async (id, t) => { if (!ADMIN_ID) await ensureAdmin(); return tell(id, t) } })).catch(e => { console.error('[registry] not working:', e.message); return null })
+if (REG) Object.assign(api, REG.routes)
 
 http.createServer(async (req, res) => {
   const u = new URL(req.url, 'http://localhost')

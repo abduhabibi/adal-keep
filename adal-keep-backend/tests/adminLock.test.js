@@ -85,3 +85,20 @@ test('a new registration is told once, with its PC number, until seen; what was 
   await call('/api/registrations/seen', { ids: [id] })
   assert.deepEqual((await call('/api/registrations')).json.fresh, [])
 })
+
+test('a broken registry.mjs: Admin opens without it, Lock says so', async () => {
+  const fs = await import('fs'), os = await import('os')
+  const src = path.join(REPO, 'adal-admin'), at = fs.mkdtempSync(path.join(os.tmpdir(), 'adm-broken-'))
+  fs.cpSync(src, path.join(at, 'adal-admin'), { recursive: true, filter: (p) => !/\.env$|\.sessions\.json$|keep-app|cv-collection/.test(p) })
+  fs.symlinkSync(path.join(REPO, 'adal-keep-backend'), path.join(at, 'adal-keep-backend'), 'junction')
+  fs.writeFileSync(path.join(at, 'adal-admin', 'registry.mjs'), 'this is not javascript (')
+  const d = await (await import(pathToFileURL(path.join(at, 'adal-admin', 'tests', 'demo.mjs')).href)).startDemo()
+  try {
+    const h = { cookie: d.cookie, 'Content-Type': 'application/json' }
+    assert.equal((await fetch(d.base + '/api/overview', { headers: h })).status, 200)
+    assert.equal((await fetch(d.base + `/api/agency?pc=${PC}`, { headers: h })).status, 200)
+    assert.equal((await fetch(d.base + '/api/lock', { method: 'POST', headers: h, body: '{}' })).status, 404)
+    const r = await fetch(d.base + '/api/plans/save', { method: 'POST', headers: h, body: JSON.stringify({ pc: PC, suspend: true }) })
+    assert.match((await r.json()).error, /nothing was changed/)
+  } finally { d.stop(); fs.rmSync(at, { recursive: true, force: true }) }
+})

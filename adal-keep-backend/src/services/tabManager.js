@@ -27,6 +27,7 @@
  *
  * Cross-platform: pure Puppeteer/CDP — Windows / macOS / Linux identical.
  */
+import { notNeeded } from './pageDiet.js'
 import { noteCall } from './siteApi.js'
 import { newRunTab, outOfSight, sendAway } from './browser.js'
 import { isRemote } from './remoteBrowsers.js'
@@ -150,7 +151,7 @@ export async function setupTab(page, { runId, mute = true } = {}) {
       // Google's reCAPTCHA (its box and its pictures) always comes: a person must see it to tick it.
       const allowImages = page.__adalAllowImages === true || CAPTCHA_HOSTS.test(hostOf(req.url()))
       // Fonts too (2026-11-23): 100–400 KB a page on a slow line, and the robot reads text, not letters' shapes.
-      if ((!allowImages && (type === 'image' || type === 'font')) || type === 'media' || TRACKERS.test(hostOf(req.url()))) req.abort().catch(() => {})
+      if (notNeeded(req, { pictures: page.__adalAllowImages === true }) || (!allowImages && (type === 'image' || type === 'font')) || type === 'media' || TRACKERS.test(hostOf(req.url()))) req.abort().catch(() => {})
       else {
         if (type === 'xhr' || type === 'fetch') noteCall(req.method(), req.url())   // the portal's own data calls (siteApi.js)
         req.continue().catch(() => {})

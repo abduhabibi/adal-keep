@@ -29,11 +29,10 @@
  * A Companion gets the main PC's signed file through the copying (roles.js) and
  * keeps it the same way: it stays locked with the main PC off.
  */
-import fs from 'fs'
-import os from 'os'
-import path from 'path'
-import { fileURLToPath } from 'url'
-import { canonical, verifyManifest, BUCKET } from './updateChannel.js'
+import { canonical, BUCKET } from './updateChannel.js'
+// The signed licence itself and Adal's lock (what is kept, what locks): adalLock.js.
+import { signedPart, verifyLicense, loadSaved, licenseNow, licenseFile, useLicense, keepAgencyLicense, lockedAgencyNumbers, __setLicenseForTest, __resetLicenseForTest } from './adalLock.js'
+export { signedPart, verifyLicense, licenseNow, licenseFile, __setLicenseForTest, __resetLicenseForTest }
 
 // One plan since 2026-11-23: Premium, everything in it (49,999 ETB / 6 months, 89,999 / 12; billing.js).
 // Licences that say basic / standard are read as Premium.
@@ -60,103 +59,24 @@ export const FEATURES = [
 export const featureOf = (key) => FEATURES.find(f => f.key === key) || null
 export const featureForWorkflow = (id) => FEATURES.find(f => f.workflows.includes(id)) || null
 
-const HERE = path.dirname(fileURLToPath(import.meta.url))
-const DIR = process.env.ADAL_LICENSE_DIR || path.join(HERE, '..', '..', 'data')
-// The second copy, outside the install folder (a test only writes where it says).
-const SIDE = process.env.ADAL_LICENSE_SIDE || (process.env.NODE_TEST_CONTEXT ? null
-  : process.platform === 'win32' ? path.join(process.env.ProgramData || 'C:\\ProgramData', 'AdalKeep') : path.join(os.homedir(), '.config', 'adal-keep'))
 const DAY = 86400000
 
-/** The licence's signed part (what Adal signs and the PC checks). */
-export const signedPart = (l) => ({
-  pc: String(l.pc || ''), plan: l.plan || 'premium',
-  paid_until: l.paid_until || null, trial_until: l.trial_until || null,
-  features: l.features || {}, offers: l.offers || [], note: l.note || '', at: l.at || null,
-  // Only when set: a licence that is not suspended is signed exactly as before
-  // (PCs on an older version keep accepting it).
-  ...(l.suspended ? { suspended: { at: l.suspended.at || null, note: String(l.suspended.note || '').slice(0, 300) } } : {}),
-})
 /** The licence says this PC is suspended by Adal. */
-export const isSuspended = (l = current) => !!l?.suspended
-export function verifyLicense(file, pc) {
-  if (!file?.license || !file?.signature) return null
-  const l = signedPart(file.license)
-  if (pc && l.pc !== String(pc)) return null
-  return verifyManifest(l, file.signature) ? l : null
-}
-
-let current = null // the verified licence in use
+export const isSuspended = (l = licenseNow()) => !!l?.suspended
 let dbRef = null
-let currentFile = null   // … as Adal signed it ({license, signature}), for the other PCs of the agency
-const readJSON = (p) => { try { return JSON.parse(fs.readFileSync(p, 'utf8')) } catch { return null } }
-const copies = (name) => [path.join(DIR, name), ...(SIDE ? [path.join(SIDE, name)] : [])]
-const writeCopies = (name, o) => { for (const p of copies(name)) try { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, JSON.stringify(o, null, 1)) } catch {} }
-const when = (l) => Date.parse(l?.at || '') || 0
-/** The newest licence Adal signed for this PC, of the copies kept here. */
-function loadSaved(pc) {
-  for (const p of copies('license.json')) {
-    const file = readJSON(p), l = verifyLicense(file, pc)
-    if (l && (!current || when(l) > when(current))) { current = l; currentFile = { license: file.license, signature: file.signature } }
-  }
-  // A copy that was deleted, edited or is older is put right.
-  if (currentFile && copies('license.json').some(p => JSON.stringify(readJSON(p)) !== JSON.stringify(currentFile))) writeCopies('license.json', currentFile)
-}
-
 /** The licence in use (null: none from Adal yet — the trial, or an old unlock code). */
 export async function license() {
-  if (current) return current
+  if (licenseNow()) return licenseNow()
   const { pcNumber } = await import('./subscription.js')
   loadSaved(pcNumber())
-  return current
+  return licenseNow()
 }
-let loadedFor = null
-/** The licence in use, at once; with the PC's number: read from this PC's copies the first time (a lock holds from the first moment). */
-export function licenseNow(pc) {
-  if (pc && loadedFor !== pc) { loadedFor = pc; if (!current) loadSaved(pc) }
-  return current
-}
-export const licenseFile = () => currentFile
-/** Tests only: the licence in use, without a signature. */
-export function __setLicenseForTest(l) { if (process.env.NODE_TEST_CONTEXT) { current = l; currentFile = null; loadedFor = null } }
-
-// ── The main PC's licence, kept on the agency's other PCs ───────────────────
-// {main PC's number: its newest signed file}: only what Adal signed counts, an older one never replaces a newer.
-let agencyFiles = null
-function agencyKept() {
-  if (agencyFiles) return agencyFiles
-  agencyFiles = {}
-  for (const p of copies('agency-license.json')) for (const f of Object.values(readJSON(p) || {})) keepNewer(f)
-  if (Object.keys(agencyFiles).length && copies('agency-license.json').some(p => JSON.stringify(readJSON(p)) !== JSON.stringify(agencyFiles))) writeCopies('agency-license.json', agencyFiles)
-  return agencyFiles
-}
-function keepNewer(file) {
-  const l = verifyLicense(file)
-  if (!l || !/^\d{6}$/.test(l.pc)) return false
-  const had = agencyFiles[l.pc]
-  if (had && when(had.license) >= when(l)) return false
-  agencyFiles[l.pc] = { license: l, signature: file.signature }
-  return true
-}
-let lastSeenSig = null
-/** The main PC's signed licence, as it came through the copying (subscription.js followed()). */
-export function keepAgencyLicense(file) {
-  if (!file?.signature || file.signature === lastSeenSig) return
-  lastSeenSig = file.signature
-  agencyKept()
-  if (keepNewer(file)) writeCopies('agency-license.json', agencyFiles)
-}
-/** Adal locked this agency (its main PC's signed licence): {at, note}, or null. */
-export function agencyLock() {
-  for (const f of Object.values(agencyKept())) if (f.license?.suspended) return f.license.suspended
-  return null
-}
-export function __resetLicenseForTest() { if (process.env.NODE_TEST_CONTEXT) { current = currentFile = loadedFor = agencyFiles = lastSeenSig = null } }
 
 /** The plan: the licence's, else Premium (the trial lets an agency try everything). */
-export function planOf(l = current) { return 'premium' }
+export function planOf(l = licenseNow()) { return 'premium' }
 
 /** on · off · offered — for one feature, for this agency. */
-export function featureState(key, l = current) {
+export function featureState(key, l = licenseNow()) {
   const f = featureOf(key)
   if (!f) return 'on'
   const own = l?.features?.[key]
@@ -192,7 +112,7 @@ export async function refreshLicense() {
     const c = await import('./chatCloud.js')
     if (!c.chatConfigured()) return license()
     // Locked with its agency earlier and holding the main role now: that licence is read too (an Unlock opens it).
-    for (const other of Object.keys(agencyKept()).filter(n => n !== pc && agencyFiles[n].license?.suspended)) {
+    for (const other of lockedAgencyNumbers().filter(n => n !== pc)) {
       const r = await c.cloudCall(dbRef, 'GET', `/storage/v1/object/authenticated/${BUCKET}/licenses/${other}.json?t=${Date.now()}`, undefined, { raw: true, headers: { 'Cache-Control': 'no-cache' } }).catch(() => null)
       if (r?.ok) { keepAgencyLicense(await r.json().catch(() => null)); (await import('./subscription.js')).licenseChanged() }
     }
@@ -202,12 +122,11 @@ export async function refreshLicense() {
     const file = await res.json()
     const l = verifyLicense(file, pc)
     if (!l) { console.warn('[plans] the licence on the server is not signed by Adal — ignored'); return license() }
-    const had = current
+    const had = licenseNow()
     // Never an older licence than the one in use (a copy put back to undo a suspension).
     if (had?.at && l.at && Date.parse(l.at) < Date.parse(had.at)) return had
-    current = l; currentFile = { license: file.license, signature: file.signature }
+    useLicense(l, file)
     if (!had || had.at !== l.at) { try { (await import('./subscription.js')).licenseChanged() } catch {} }
-    writeCopies('license.json', file)
     if (!had || had.at !== l.at) console.log(`[plans] licence from Adal: ${planOf(l)}${l.paid_until ? `, paid until ${new Date(l.paid_until).toISOString().slice(0, 10)}` : ''}${l.suspended ? ' — SUSPENDED' : ''}`)
     return l
   } catch (e) {
@@ -238,7 +157,7 @@ export function startLicenseWatch(db) {
 }
 
 /** What the pages need: the plan, each feature's state, what is offered. */
-export function planPayload(l = current) {
+export function planPayload(l = licenseNow()) {
   const plan = planOf(l)
   return {
     plan, plans: PLANS,

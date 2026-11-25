@@ -35,12 +35,10 @@ import { execSync } from 'child_process'
 import { fileURLToPath } from 'url'
 import dotenv from 'dotenv'
 import { generateFingerprint } from './fingerprints.js'
-import { licenseNow, keepAgencyLicense, agencyLock } from './plans.js'
+import { licenseNow, lockNow, say } from './adalLock.js'
 
 // Adal's signed licence (plans.js): paid until / a longer trial, given in the admin panel.
 const licPaid = () => Number(licenseNow(pcNumber())?.paid_until) || 0
-// Adal suspended this PC (Admin → Suspend): locked until Admin allows it again, whatever is paid.
-const suspension = () => licenseNow(pcNumber())?.suspended || null
 const trialEnd = (s) => Math.max((s?.installation_date || trustedNow()) + TRIAL_DAYS * DAY, Number(licenseNow()?.trial_until) || 0)
 
 dotenv.config()
@@ -286,7 +284,6 @@ function followed(s = readSide()) {
   let f = null
   try { f = follow?.() } catch {}
   const l = f?.licence || null
-  if (l?.adal) keepAgencyLicense(l.adal)
   const now = trustedNow()
   const paidUntil = Math.max(Number(l?.paidUntil) || 0, ownPaid(s)) || null
   // (forGood is always on in what the main PC writes, for PCs on an older version: see roles.js.)
@@ -297,24 +294,19 @@ function followed(s = readSide()) {
 }
 
 /**
- * What locks this PC, or null: Adal's signed licence saying so (this PC's own,
- * or its agency's main PC's), or the main PC cutting it off. Nothing else does
- * (owner, 2026-11-25): not an ended trial or paid time, no licence, no internet,
- * the clock, nor another PC's trial.
+ * What locks this PC, or null (adalLock.js; never throws): Adal's signed licence saying so
+ * (this PC's own, or its agency's main PC's), or the main PC cutting it off. Nothing else
+ * does (owner, 2026-11-25): not an ended trial or paid time, no licence, no internet, the
+ * clock, nor another PC's trial. An error in the licence work never locks or stops anything.
  */
-function lockedBy() {
-  const f = follow ? followed(null) : null   // (also keeps the signed file it carries)
-  const own = suspension()
-  if (own) return { at: own.at || null, note: own.note || '' }
-  const agency = agencyLock()
-  if (agency) return { at: agency.at || null, note: agency.note || '' }
-  return f?.cut ? { at: null, note: `This PC was ${f.cut} by the main PC.` } : null
-}
+const lockedBy = () => lockNow({ pc: pcNumber, follow })
 
 /** 'active' (paid) · 'trial' · 'ended' (the trial or the paid time is over: information only, everything works) · 'locked' (by Adal) */
 export function computeMode(s) {
-  syncClock()
   if (lockedBy()) return 'locked'
+  try { syncClock(); return modeOf(s) } catch (e) { say('the dates', e); return 'ended' }
+}
+function modeOf(s) {
   if (follow) return followed(s).mode
   if (!s) return 'trial'
   const now = effectiveNow(s)
@@ -322,9 +314,22 @@ export function computeMode(s) {
   return now < trialEnd(s) ? 'trial' : 'ended'
 }
 
-export function statusPayload(s = state()) {
-  const mode = computeMode(s)
+export function statusPayload(s) {
   const lock = lockedBy()
+  try { return payloadOf(s === undefined ? state() : s, lock) } catch (e) {
+    // The dates could not be worked out: the pages open all the same.
+    say('the status', e)
+    let pc = null
+    try { pc = pcNumber() } catch {}
+    return {
+      mode: lock ? 'locked' : 'ended', daysLeft: 0, trialDays: TRIAL_DAYS, trialEndsAt: null, pcNumber: pc, sellerPhone: SELLER_PHONE,
+      clockBack: false, unlockedAt: null, forGood: false, paidUntil: null, paidDaysLeft: 0, priceEtb: PRICE_ETB, paidMonths: 6, serverTime: Date.now(),
+      suspended: !!lock, suspendedAt: lock?.at || null, suspendNote: lock?.note || '',
+    }
+  }
+}
+function payloadOf(s, lock) {
+  const mode = lock ? 'locked' : modeOf(s)
   const locked = { suspended: !!lock, suspendedAt: lock?.at || null, suspendNote: lock?.note || '' }
   if (follow) {
     const { l, now, paidUntil, forGood } = followed(s)
@@ -366,7 +371,7 @@ export function onLicenseChanged(fn) { changedFns.add(fn) }
 export function licenseChanged() { _cache.at = 0; for (const fn of changedFns) { try { fn() } catch {} } }
 /** For background work: true while Adal has this PC locked. */
 export function isAppLocked() {
-  if (Date.now() - _cache.at > 30000) _cache = { at: Date.now(), locked: computeMode(readSide()) === 'locked' }
+  if (Date.now() - _cache.at > 30000) _cache = { at: Date.now(), locked: !!lockedBy() }
   return _cache.locked
 }
 
@@ -440,9 +445,8 @@ export function subscriptionGuard(req, res, next) {
   const p = req.path
   // The page itself (HTML, scripts, the lock screen's images) always loads.
   if (!p.startsWith('/api') && !p.startsWith('/uploads')) return next()
-  const s = state()
-  touch(s)
-  if (computeMode(s) !== 'locked') return next()
+  try { syncClock(); touch(state()) } catch (e) { say('the dates', e) }
+  if (!lockedBy()) return next()
   if (OPEN_WHEN_LOCKED.some(([m, q]) => req.method === m && p === q)) return next()
   return res.status(402).json({ error: 'locked', suspended: true, message: 'Adal Keep is locked on this PC by Adal. Call Adal to have it opened again.' })
 }

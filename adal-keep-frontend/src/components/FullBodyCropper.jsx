@@ -71,17 +71,21 @@ export default function FullBodyCropper({ file, onDone, onCancel, ratio: RATIO =
   }
 
   const save = () => {
+    // The crop's own pixels (the owner, 2026-11-25: never lose quality): as many pixels as the frame covers of the
+    // picture — no shrinking to a fixed size, no enlarging (up to 4096 wide); outW / outH are only the shape now.
+    const own = Math.round(frame.w / view.s)
+    const W = Math.min(4096, Math.max(2, own)), H = Math.round(W / RATIO)
     const c = document.createElement('canvas')
-    c.width = OUT_W; c.height = OUT_H
+    c.width = W; c.height = H
     const g = c.getContext('2d')
-    g.fillStyle = '#ffffff'; g.fillRect(0, 0, OUT_W, OUT_H)
-    const k = OUT_W / frame.w
+    g.fillStyle = '#ffffff'; g.fillRect(0, 0, W, H)
+    const k = W / frame.w
     g.imageSmoothingQuality = 'high'
     g.drawImage(img, view.x * k, view.y * k, img.naturalWidth * view.s * k, img.naturalHeight * view.s * k)
     c.toBlob(b => {
       const name = (file.name || 'full-body').replace(/\.[^.]+$/, '') + '-cropped.jpg'
       onDone(new File([b], name, { type: 'image/jpeg' }))
-    }, 'image/jpeg', 0.9)
+    }, 'image/jpeg', 0.95)
   }
 
   // Esc cancels, Enter saves.

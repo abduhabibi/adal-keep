@@ -534,7 +534,7 @@ export async function imageUri(blob, maxPx, { trim = false } = {}) {
     // Transparent banners stay PNG; everything else a JPEG (quality 85).
     let alpha = false
     if (/png|webp|gif/.test(type)) { const d = x.getImageData(0, 0, c.width, c.height).data; for (let i = 3; i < d.length; i += 4) if (d[i] < 255) { alpha = true; break } }
-    return alpha ? c.toDataURL('image/png') : c.toDataURL('image/jpeg', 0.85)
+    return alpha ? c.toDataURL('image/png') : c.toDataURL('image/jpeg', 0.95)
   } catch { return dataUrlOf(blob) }
 }
 

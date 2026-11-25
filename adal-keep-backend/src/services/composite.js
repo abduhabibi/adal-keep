@@ -96,7 +96,7 @@ export async function splitComposite(filePath, { find = null, anyShape = false }
     const right = Math.min(W, Math.ceil(b.right * W)), bottom = Math.min(H, Math.ceil(b.bottom * H))
     if (right - left < 20 || bottom - top < 20) { out[k] = null; continue }
     const file = path.join(dir, `${k}.jpg`)
-    await sharp(png).extract({ left, top, width: right - left, height: bottom - top }).jpeg({ quality: 93 }).toFile(file)
+    await sharp(png).extract({ left, top, width: right - left, height: bottom - top }).jpeg({ quality: 95, chromaSubsampling: '4:4:4' }).toFile(file)
     out[k] = file
   }
   // The Labour ID in red on the passport: read here, taken off the passport.

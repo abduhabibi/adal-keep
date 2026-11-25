@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url'
 import { createHash } from 'crypto'
 import { findBrowserExecutable } from './browser.js'
 import { smallCopy, isKept, inLine, pdfFirstPagePng } from './pictures.js'
+import * as PQ from './photoQuality.js'
 
 // Her father's name as the emergency contact: his name and his father's (her surname),
 // e.g. "ABAGOLE KEDIR". A saved name that was only his first name gets the surname too.
@@ -95,6 +96,7 @@ const _shrunk = new Map()   // key -> Promise of the data: address
 async function imageDataUri(absPath, mime, maxPx, { trim = false, quality = 85, palette = false, quick = false } = {}) {
   if (!absPath || !fs.existsSync(absPath)) return ''
   if (mime && !mime.startsWith('image/')) return fileToDataUri(absPath, mime)
+  if (PQ.on() && !trim && await PQ.fitsAsIs(absPath, maxPx)) return fileToDataUri(absPath, mime)   // already fits: not one bit lost
   const name = maxPx + ':' + trim + ':' + quality + ':' + palette
   const key = absPath + ':' + fs.statSync(absPath).mtimeMs + ':' + name
   if (_shrunk.has(key)) return _shrunk.get(key)
@@ -109,7 +111,7 @@ async function imageDataUri(absPath, mime, maxPx, { trim = false, quality = 85, 
     const { hasAlpha } = await sharp(abs).metadata()
     return hasAlpha   // transparent banners stay PNG
       ? img.png({ compressionLevel: 9, palette }).toBuffer()
-      : img.jpeg({ quality, mozjpeg: true }).toBuffer()
+      : img.jpeg(PQ.jpegOptions(quality)).toBuffer()
   }).then(({ buf }) => `data:image/${buf[0] === 0x89 ? 'png' : 'jpeg'};base64,` + buf.toString('base64'))
     .catch(() => fileToDataUri(absPath, mime))
   if (_shrunk.size > 200) _shrunk.delete(_shrunk.keys().next().value)
@@ -134,7 +136,7 @@ function quickDataUri(absPath, key, maxPx, trim) {
     const { hasAlpha } = await sharp(absPath).metadata()
     return hasAlpha
       ? 'data:image/webp;base64,' + (await img.webp({ quality: 90, effort: 0 }).toBuffer()).toString('base64')
-      : 'data:image/jpeg;base64,' + (await img.jpeg({ quality: 85 }).toBuffer()).toString('base64')
+      : 'data:image/jpeg;base64,' + (await img.jpeg({ quality: 92 }).toBuffer()).toString('base64')
   }, { first: true }).catch(() => imageDataUri(absPath, null, maxPx, { trim }))
   if (_quick.size > 60) _quick.delete(_quick.keys().next().value)
   _quick.set(key, made)
@@ -221,7 +223,7 @@ const LEVELS = [
 const px = (n, L) => Math.round(n * L.scale)
 
 export async function buildTemplateData(db, profile, template, overrides = {}, { level = 0, quick = false } = {}) {
-  const L = LEVELS[Math.min(Math.max(level, 0), LEVELS.length - 1)]
+  const L = PQ.level(LEVELS, level)   // one full-quality level (services/photoQuality.js); the old ones with ADAL_PHOTO_QUALITY=0
   const pic = { quality: L.q, palette: L.palette, quick }
   const photoFile    = await findProfileFile(db, profile.id, 'Photo')
   const fullBodyFile = await findProfileFile(db, profile.id, 'Full Body Photo')
@@ -791,7 +793,7 @@ async function renderSmall(build, first, outPath) {
     data = made.data
     await htmlToPdf(made.html, outPath)
     const size = fs.statSync(outPath).size
-    if (size <= CV_MAX_BYTES) break
+    if (size <= CV_MAX_BYTES || PQ.on()) break   // megabytes are fine now: no smaller level for size
     if (level < LEVELS.length - 1) console.log(`[cv] ${Math.round(size / 1024)} KB is over ${CV_MAX_BYTES / 1024} KB - smaller pictures`)
   }
   return data
@@ -836,3 +838,4 @@ export async function isGeneratedCV(db, filename) {
     return !!row
   } catch { return false }
 }
+export { imageDataUri as _imageDataUri }   // (the picture-quality bench and tests)

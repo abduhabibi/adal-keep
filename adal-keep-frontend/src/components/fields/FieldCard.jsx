@@ -8,6 +8,7 @@ import toast from 'react-hot-toast'
 import api from '../../services/api'
 import { useFileCapture } from '../../context/FileCaptureContext'
 import FullBodyCropper from '../FullBodyCropper'
+import RefineCompare from '../RefineCompare'
 import { printFileOnPhone } from '../../lib/phoneApp'
 import { onPhone } from '../../lib/phoneMode'
 import { trayFilesDropped, trayFilesFromClip, typingIn, tapMode } from '../../lib/trayDrag'
@@ -72,6 +73,7 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
   const { capturedFiles } = useFileCapture()
   const [uploading, setUploading] = useState(false)
   const [refining, setRefining] = useState(false)
+  const [compare, setCompare] = useState(false)   // the faithful Refine's before / after
   const [pendingFile, setPendingFile] = useState(null)
   // Full Body Photo: cropped to the CV's 1:3 shape before it is uploaded.
   const [cropFile, setCropFile] = useState(null)
@@ -308,6 +310,8 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
               type="button"
               disabled={refining}
               onClick={async () => {
+                // The faithful Refine (before / after, a person keeps it); the old one only when this PC turned it off.
+                try { if ((await api.get('/photo-refine/status', { adalNoCache: true })).data?.faithful) { setCompare(true); return } } catch {}
                 setRefining(true)
                 const t = toast.loading('Refining the picture… (up to a minute)')
                 try {
@@ -323,6 +327,8 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
               title="Clean the picture, make it a little more beautiful and 4K — the same girl; the original stays"
             >{refining ? '⏳' : '✨'}<span className="hidden sm:inline"> {refining ? 'Refining…' : 'Refine'}</span></button>
           )}
+          {compare && <RefineCompare file={mainFile} fieldName={field.name} onClose={() => setCompare(false)}
+            onKept={async () => { const res = await api.get(`/profiles/${profileId}/fields`); const u = res.data.find(f => f.id === field.id); onFileUpdate(field.id, u ? u.files : []) }} />}
           <button
             type="button"
             data-tour="field-upload"

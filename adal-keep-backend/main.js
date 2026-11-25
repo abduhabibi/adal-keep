@@ -229,6 +229,7 @@ app.use('/api', automationsRouter)
 app.use('/api', verificationRouter)
 app.use('/api', newProfileRouter)
 app.use('/api', (await import('./src/routes/scan.js')).default)   // the Scan button (WIA)
+app.use('/api', (await import('./src/routes/refineCompare.js')).default)   // faithful Refine with before / after
 app.use('/tess', tessFilesRouter)   // the passport reader's files for another PC's window
 app.use('/api', runHistoryRouter)   // what each robot did, 30 days
 app.use('/api', runPriorityRouter)  // runs waiting to start: move up/down, run next

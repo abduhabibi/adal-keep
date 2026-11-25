@@ -85,7 +85,7 @@ export function CameraShot({ onShot, onClose, onFail, onGallery, onFiles, guide 
       if (!b) return
       const file = new File([b], `photo-${Date.now()}.jpg`, { type: 'image/jpeg' })
       setShot({ url: URL.createObjectURL(b), file })
-    }, 'image/jpeg', 0.92)
+    }, 'image/jpeg', 0.95)
   }
   useEffect(() => () => { if (shot?.url) URL.revokeObjectURL(shot.url) }, [shot])
   const round = 'flex h-11 w-11 items-center justify-center rounded-full bg-white/15 text-white backdrop-blur active:scale-90 transition'

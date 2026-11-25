@@ -1,66 +1,57 @@
-import { useState, useEffect, lazy, Suspense } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import ErrorBoundary from './components/shared/ErrorBoundary'
 import { Toaster } from 'react-hot-toast'
 import MainLayout from './components/layout/MainLayout'
+import { lazyPage, warmPages, FirstPage, PageComing } from './lib/pageCode'
+import { off } from './lib/offSwitch'
 import { MorePage } from './components/layout/PhoneChrome'
-const DashboardPage = lazy(() => fresh(() => import('./pages/DashboardPage')))
-const ProfilesPage = lazy(() => fresh(() => import('./pages/ProfilesPage')))
-const ProfileDetailPage = lazy(() => fresh(() => import('./pages/ProfileDetailPage')))
-const ProfileFormPage = lazy(() => fresh(() => import('./pages/ProfileFormPage')))
-const ChatPage = lazy(() => fresh(() => import('./pages/ChatPage')))
-const RunHistoryPage = lazy(() => fresh(() => import('./pages/RunHistoryPage')))
-const BillingPage = lazy(() => fresh(() => import('./pages/BillingPage')))
-const TrashPage = lazy(() => fresh(() => import('./pages/TrashPage')))
-const EmployeesPage = lazy(() => fresh(() => import('./pages/EmployeesPage')))
-const BrokersPage = lazy(() => fresh(() => import('./pages/BrokersPage')))
-const BrokerDetailPage = lazy(() => fresh(() => import('./pages/BrokerDetailPage')))
-const ChecklistPage = lazy(() => fresh(() => import('./pages/ChecklistPage')))
-const OfficePage = lazy(() => fresh(() => import('./pages/OfficePage')))
-const SettingsPage = lazy(() => fresh(() => import('./pages/SettingsPage')))
-const WhatsAppSentPage = lazy(() => fresh(() => import('./pages/WhatsAppSentPage')))
-const WhatsAppLinkPage = lazy(() => fresh(() => import('./pages/WhatsAppLinkPage')))
-const NotificationsPage = lazy(() => fresh(() => import('./pages/NotificationsPage')))
+const DashboardPage = lazyPage(() => import('./pages/DashboardPage'))
+const ProfilesPage = lazyPage(() => import('./pages/ProfilesPage'))
+const ProfileDetailPage = lazyPage(() => import('./pages/ProfileDetailPage'))
+const ProfileFormPage = lazyPage(() => import('./pages/ProfileFormPage'))
+const ChatPage = lazyPage(() => import('./pages/ChatPage'))
+const RunHistoryPage = lazyPage(() => import('./pages/RunHistoryPage'))
+const BillingPage = lazyPage(() => import('./pages/BillingPage'))
+const TrashPage = lazyPage(() => import('./pages/TrashPage'))
+const EmployeesPage = lazyPage(() => import('./pages/EmployeesPage'))
+const BrokersPage = lazyPage(() => import('./pages/BrokersPage'))
+const BrokerDetailPage = lazyPage(() => import('./pages/BrokerDetailPage'))
+const ChecklistPage = lazyPage(() => import('./pages/ChecklistPage'))
+const OfficePage = lazyPage(() => import('./pages/OfficePage'))
+const SettingsPage = lazyPage(() => import('./pages/SettingsPage'))
+const WhatsAppSentPage = lazyPage(() => import('./pages/WhatsAppSentPage'))
+const WhatsAppLinkPage = lazyPage(() => import('./pages/WhatsAppLinkPage'))
+const NotificationsPage = lazyPage(() => import('./pages/NotificationsPage'))
 import { FileCaptureProvider } from './context/FileCaptureContext'
 import { AuthProvider, useAuth } from './context/AuthContext'
-const TasksPage = lazy(() => fresh(() => import('./pages/TasksPage')))
+const TasksPage = lazyPage(() => import('./pages/TasksPage'))
 // The lock screen and the first-start wizard are seen rarely: their code is
 // fetched only when one is shown (a smaller first download on every start).
-const LockScreen = lazy(() => fresh(() => import('./components/LockScreen')))
+const LockScreen = lazyPage(() => import('./components/LockScreen'))
 import PcAccessGate, { SuspendedScreen } from './components/PcAccessGate'
 import api, { joinInfo } from './services/api'
-const IntroWizard = lazy(() => fresh(() => import('./pages/SignUpAgency')))   // first-run sign-up (flag), then the first-start wizard
-const SignupBanner = lazy(() => fresh(() => import('./pages/SignUpAgency').then(m => ({ default: m.SignupBanner }))))
-const JoinAgency = lazy(() => fresh(() => import('./pages/JoinAgency')))
-const CVsPage = lazy(() => fresh(() => import('./pages/CVsPage')))
-const CVNewPage = lazy(() => fresh(() => import('./pages/CVNewPage')))
-const CVTemplatesPage = lazy(() => fresh(() => import('./pages/CVTemplatesPage')))
-const CVTemplateEditPage = lazy(() => fresh(() => import('./pages/CVTemplateEditPage')))
-const CVTemplateDesignPage = lazy(() => fresh(() => import('./pages/CVTemplateDesignPage')))
+const IntroWizard = lazyPage(() => import('./pages/SignUpAgency'))   // first-run sign-up (flag), then the first-start wizard
+const SignupBanner = lazyPage(() => import('./pages/SignUpAgency'), m => m.SignupBanner)
+const JoinAgency = lazyPage(() => import('./pages/JoinAgency'))
+const CVsPage = lazyPage(() => import('./pages/CVsPage'))
+const CVNewPage = lazyPage(() => import('./pages/CVNewPage'))
+const CVTemplatesPage = lazyPage(() => import('./pages/CVTemplatesPage'))
+const CVTemplateEditPage = lazyPage(() => import('./pages/CVTemplateEditPage'))
+const CVTemplateDesignPage = lazyPage(() => import('./pages/CVTemplateDesignPage'))
 
-// Every page's code, fetched once while nothing else is happening: opening a
-// tab never waits for its code (the browser keeps those files for good).
+// Every page's code, fetched once while nothing else is happening, the pages used most
+// first: opening a tab never waits for its code (the browser keeps those files for good).
 if (typeof window !== 'undefined' && import.meta.env.VITE_DEMO !== '1') {
-  const warm = () => [() => import('./pages/DashboardPage'), () => import('./pages/ProfilesPage'), () => import('./pages/ProfileDetailPage'), () => import('./pages/ProfileFormPage'), () => import('./pages/ChatPage'), () => import('./pages/TrashPage'), () => import('./pages/EmployeesPage'), () => import('./pages/BrokersPage'), () => import('./pages/BrokerDetailPage'), () => import('./pages/ChecklistPage'), () => import('./pages/SettingsPage'), () => import('./pages/NotificationsPage'), () => import('./pages/TasksPage'), () => import('./pages/CVsPage'), () => import('./pages/CVNewPage'), () => import('./pages/CVTemplatesPage'), () => import('./pages/CVTemplateEditPage'), () => import('./pages/CVTemplateDesignPage')]
-    .reduce((p, load) => p.then(() => new Promise(r => (window.requestIdleCallback || setTimeout)(() => load().catch(() => {}).finally(r)))), Promise.resolve())
-  window.addEventListener('load', () => setTimeout(warm, 2500), { once: true })
-}
-
-// After an update the old page files are gone: a page that cannot load
-// reloads Adal Keep once (then the new files are used).
-function fresh(load) {
-  return load().then((m) => { try { sessionStorage.removeItem('adal-reloaded') } catch {} return m }).catch((e) => {
-    let again = false
-    try { again = !sessionStorage.getItem('adal-reloaded'); sessionStorage.setItem('adal-reloaded', '1') } catch {}
-    if (again) { location.reload(); return new Promise(() => {}) }
-    throw e
-  })
+  const warm = () => warmPages([ProfilesPage, CVsPage, ProfileDetailPage, DashboardPage, CVNewPage, ProfileFormPage, TasksPage, BrokersPage, BrokerDetailPage, ChecklistPage, ChatPage, SettingsPage, EmployeesPage, NotificationsPage, WhatsAppSentPage, TrashPage, CVTemplatesPage, CVTemplateEditPage, CVTemplateDesignPage])
+  const start = () => setTimeout(warm, 600)
+  if (document.readyState === 'complete') start(); else window.addEventListener('load', start, { once: true })
 }
 
 // Each page is loaded when it is first opened: a low-end PC starts faster.
 // Every page in its own catcher: a fault shows a notice, never a blank screen.
 function Guarded({ children }) { const loc = useLocation(); return <ErrorBoundary resetKey={loc.pathname}>{children}</ErrorBoundary> }
-const page = (P) => <Guarded><Suspense fallback={<div className="p-6 text-sm text-slate-400">…</div>}><P /></Suspense></Guarded>
+const page = (P) => <Guarded><FirstPage><P /></FirstPage></Guarded>
 
 const toaster = (
   <Toaster
@@ -166,7 +157,9 @@ function Shell() {
 
   return (
     <FileCaptureProvider>
-      <BrowserRouter>
+      {/* A page is shown when it is ready: until then the one before stays (lib/pageCode.jsx). */}
+      <BrowserRouter future={{ v7_startTransition: !off('pages') }}>
+        <PageComing />
         {toaster}
         <Suspense fallback={null}><SignupBanner /></Suspense>
         {subscription?.mode === 'trial' && subscription.daysLeft <= 3 && <TrialBanner days={subscription.daysLeft} />}

@@ -96,6 +96,7 @@ import { isFollower, isCompanion, notMainPC, mainURL, instanceId } from './src/s
 import { startSync, syncRoutes, isMainRole } from './src/services/sync/index.js'
 import { moveToTrash } from './src/services/trash.js'
 import { profileFields } from './src/services/profileFields.js'
+import { pageFiles, keepPageFiles } from './src/services/pageFiles.js'
 import { startDiscoveryResponder } from './src/services/discovery.js'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -1189,20 +1190,8 @@ const frontendDir = process.env.FRONTEND_DIR || resolveFrontendDir()
 if (frontendDir) {
   // Fast pages: the built files (their names change with every build) are
   // kept by the browser for good and sent gzipped; index.html is always fresh.
-  const gz = new Map()
-  app.use('/assets', (req, res, next) => {
-    if (!/\bgzip\b/.test(req.headers['accept-encoding'] || '')) return next()
-    const file = path.join(frontendDir, 'assets', path.normalize(decodeURIComponent(req.path)).replace(/^([/\\])+/, ''))
-    if (!file.startsWith(path.join(frontendDir, 'assets')) || !/\.(js|css|svg|json)$/.test(file)) return next()
-    let hit = gz.get(file)
-    if (!hit) {
-      try { hit = { body: zlib.gzipSync(fs.readFileSync(file), { level: 9 }), type: file.endsWith('.css') ? 'text/css' : file.endsWith('.svg') ? 'image/svg+xml' : file.endsWith('.json') ? 'application/json' : 'text/javascript' } }
-      catch { return next() }
-      gz.set(file, hit)
-    }
-    res.set({ 'Content-Encoding': 'gzip', 'Content-Type': `${hit.type}; charset=utf-8`, 'Cache-Control': 'public, max-age=31536000, immutable', Vary: 'Accept-Encoding' })
-    res.end(hit.body)
-  })
+  app.use('/assets', pageFiles(frontendDir))   // a missing one is 404; an older build's are kept (services/pageFiles.js)
+  setTimeout(() => keepPageFiles(frontendDir), 3 * 60 * 1000).unref()
   app.use(express.static(frontendDir, {
     setHeaders: (res, file) => res.setHeader('Cache-Control', /[\\/]assets[\\/]/.test(file) ? 'public, max-age=31536000, immutable' : 'no-cache'),
   }))

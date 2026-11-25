@@ -60,13 +60,23 @@ func robotAllowed(r *http.Request) bool {
 	return t != "" && len(t) == len(robotToken) && t == robotToken
 }
 
-// robotBrowserExe: Adal Browser of this install only, never the PC's own
-// Chrome or Edge (asked on 2026-11-20: runs and Transitions went to Chrome).
+// robotBrowserExe: Adal Browser of this install, else the PC's own Brave, Chrome or Edge (as on the main PC since
+// 2026-11-23: every Windows has Edge) — always with a profile of the robots' own, never a person's, and no window.
 func robotBrowserExe(root string) string {
-	for _, p := range []string{
+	c := []string{
 		filepath.Join(root, "browser", "AdalBrowser.exe"),
 		filepath.Join(root, "browser", "chrome.exe"), // Adal Browser's own folder, not yet renamed
-	} {
+	}
+	for _, d := range []string{os.Getenv("ProgramFiles"), os.Getenv("ProgramFiles(x86)"), os.Getenv("LOCALAPPDATA")} {
+		if d == "" {
+			continue
+		}
+		c = append(c,
+			filepath.Join(d, "BraveSoftware", "Brave-Browser", "Application", "brave.exe"),
+			filepath.Join(d, "Google", "Chrome", "Application", "chrome.exe"),
+			filepath.Join(d, "Microsoft", "Edge", "Application", "msedge.exe"))
+	}
+	for _, p := range c {
 		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
 			return p
 		}
@@ -74,7 +84,43 @@ func robotBrowserExe(root string) string {
 	return ""
 }
 
-func robotLocal(path string) string { return fmt.Sprintf("http://127.0.0.1:%d%s", robotDebugPort, path) }
+// robotProfile: a profile a newer browser wrote is refused by another: one for each.
+func robotProfile(root, exe string) string {
+	switch strings.ToLower(filepath.Base(exe)) {
+	case "brave.exe":
+		return filepath.Join(root, "robot-profile-brave")
+	case "msedge.exe":
+		return filepath.Join(root, "robot-profile-edge")
+	case "chrome.exe":
+		if filepath.Dir(exe) != filepath.Join(root, "browser") {
+			return filepath.Join(root, "robot-profile-chrome")
+		}
+	}
+	return filepath.Join(root, "robot-profile")
+}
+
+// robotArgs: light, and for another PC's work nothing to see on this one: no window, no taskbar button.
+func robotArgs(profile string, quiet bool) []string {
+	a := []string{
+		fmt.Sprintf("--remote-debugging-port=%d", robotDebugPort),
+		"--remote-debugging-address=127.0.0.1",
+		"--user-data-dir=" + profile,
+		"--no-first-run", "--no-default-browser-check", "--hide-crash-restore-bubble", "--noerrdialogs",
+		"--disable-background-networking", "--disable-notifications", "--disable-breakpad", "--disable-popup-blocking",
+		"--disable-backgrounding-occluded-windows", "--mute-audio",
+		"--disable-features=Translate,MediaRouter,OptimizationHints,CalculateNativeWinOcclusion,SpareRendererForSitePerProcess,AutofillServerCommunication,IntensiveWakeUpThrottling",
+	}
+	if quiet {
+		a = append(a, "--headless=new", "--window-size=1366,900")
+	} else {
+		a = append(a, "--start-maximized")
+	}
+	return append(a, "about:blank")
+}
+
+func robotLocal(path string) string {
+	return fmt.Sprintf("http://127.0.0.1:%d%s", robotDebugPort, path)
+}
 
 // robotVersion: the browser's /json/version (it answers only while it is open).
 func robotVersion() (map[string]any, error) {
@@ -92,8 +138,7 @@ func robotVersion() (map[string]any, error) {
 }
 
 // ensureRobotBrowser: the robot browser open on this PC (opened when it is not).
-// ensureRobotBrowser: quiet — opened for another PC's work (this PC helps):
-// it starts minimized, never over what the person here is doing.
+// quiet — opened for another PC's work (this PC helps): nothing to see here.
 func ensureRobotBrowser(root string, quiet bool) (map[string]any, error) {
 	if v, err := robotVersion(); err == nil {
 		return v, nil
@@ -107,17 +152,9 @@ func ensureRobotBrowser(root string, quiet bool) (map[string]any, error) {
 	if exe == "" {
 		return nil, fmt.Errorf("no Adal Browser on this PC")
 	}
-	profile := filepath.Join(root, "robot-profile")
+	profile := robotProfile(root, exe)
 	os.MkdirAll(profile, 0o755)
-	cmd := exec.Command(exe,
-		fmt.Sprintf("--remote-debugging-port=%d", robotDebugPort),
-		"--remote-debugging-address=127.0.0.1",
-		"--user-data-dir="+profile,
-		"--no-first-run", "--no-default-browser-check", "--hide-crash-restore-bubble",
-		// Work in a window out of sight or behind goes on at full speed.
-		"--disable-background-timer-throttling", "--disable-renderer-backgrounding",
-		"--disable-backgrounding-occluded-windows",
-		map[bool]string{true: "--start-minimized", false: "--start-maximized"}[quiet], "about:blank")
+	cmd := exec.Command(exe, robotArgs(profile, quiet)...)
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("Adal Browser did not start: %v", err)
 	}
@@ -154,7 +191,61 @@ func tidyRobotFiles(root string) {
 	}
 }
 
+// robotNow: how this PC is at this moment (the main PC asks every PC just before a run, 0.6 s at most).
+func robotNow(root string) map[string]any {
+	out := map[string]any{"cores": runtime.NumCPU(), "browser": robotBrowserExe(root) != "", "updating": updatingNow.Load()}
+	for k, v := range powerLately() {
+		out[k] = v
+	}
+	if v := ownVersionOnce(); v != "" {
+		out["version"] = v
+	}
+	return out
+}
+
+var (
+	powerMu   sync.Mutex
+	powerAt   time.Time
+	powerLast map[string]any
+	versionMu sync.Mutex
+	versionAt time.Time
+	versionV  string
+)
+
+// powerLately: powerNow, at most every 3 s (its load is the one since the last look).
+func powerLately() map[string]any {
+	powerMu.Lock()
+	defer powerMu.Unlock()
+	if powerLast == nil || time.Since(powerAt) > 3*time.Second {
+		n := powerNow()
+		if _, ok := n["load"]; !ok && powerLast != nil {
+			if l, ok := powerLast["load"]; ok {
+				n["load"] = l
+			}
+		}
+		powerLast, powerAt = n, time.Now()
+	}
+	return powerLast
+}
+
+func ownVersionOnce() string {
+	versionMu.Lock()
+	defer versionMu.Unlock()
+	if versionAt.IsZero() || time.Since(versionAt) > time.Minute {
+		versionV, versionAt = ownVersion(), time.Now()
+	}
+	return versionV
+}
+
 func addRobotRoutes(mux *http.ServeMux, root string) {
+	mux.HandleFunc("/robot/now", func(w http.ResponseWriter, r *http.Request) {
+		if !robotAllowed(r) {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(robotNow(root))
+	})
 	mux.HandleFunc("/robot/json/version", func(w http.ResponseWriter, r *http.Request) {
 		if !robotAllowed(r) {
 			http.NotFound(w, r)
@@ -262,6 +353,22 @@ func bufReader(rw *bufio.ReadWriter) io.Reader {
 	return strings.NewReader(string(b))
 }
 
+// announceOnce: 8 s at most. A busy main PC that did not answer held this for 30 s, and the next one came 50 s later:
+// it was "gone" (45 s) though it was there (2026-11-25).
+func announceOnce(body map[string]any, key string, answer any) error {
+	done := make(chan error, 1)
+	go func() {
+		_, err := mainJSON(http.MethodPost, "/api/companion/robot-browser", body, key, answer)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(8 * time.Second):
+		return fmt.Errorf("the main PC did not answer in 8 s")
+	}
+}
+
 // announceRobot: every 20 seconds, while joined to a main PC on the network.
 func announceRobot() {
 	for {
@@ -269,7 +376,7 @@ func announceRobot() {
 		if keys.AccessKey != "" && hostServer != "" {
 			body := map[string]any{"token": robotToken, "port": lanHTTPPort, "name": clientName, "cores": runtime.NumCPU()}
 			// How strong it is right now: the main PC gives the heavy work to the strongest.
-			for k, v := range powerNow() {
+			for k, v := range powerLately() {
 				body[k] = v
 			}
 			// Its internet: the run goes to the PC that finishes first (netprobe.go).
@@ -283,11 +390,12 @@ func announceRobot() {
 			var answer struct {
 				Peers []officePeer `json:"peers"`
 			}
-			if _, err := mainJSON(http.MethodPost, "/api/companion/robot-browser", body, keys.AccessKey, &answer); err != nil {
-				log.Printf("🤖 robot browser not announced: %v", err)
-			} else {
-				rememberPeers(answer.Peers)
+			if err := announceOnce(body, keys.AccessKey, &answer); err != nil {
+				log.Printf("🤖 robot browser not announced: %v (again in 5 s)", err)
+				time.Sleep(5 * time.Second)
+				continue
 			}
+			rememberPeers(answer.Peers)
 		}
 		time.Sleep(20 * time.Second)
 	}

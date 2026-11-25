@@ -436,6 +436,10 @@ func syncReplica() error {
 			if pieceExists(name) {
 				continue
 			}
+			if pieceFromOwn(d, k, name) { // it came already, for the people here (owndocs.go)
+				got++
+				continue
+			}
 			if pieceFromPeers(name, bases) {
 				got++
 				fromPeers++

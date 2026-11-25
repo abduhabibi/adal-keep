@@ -24,6 +24,11 @@ import fs from 'fs'
 import path from 'path'
 import { keepAnnounced, announced, askAll } from './robotPCs.js'
 
+/** How long a Companion may take to open its robot browser (its own wait for a first start is 30 s and more). */
+const OPEN_MS = () => Number(process.env.ADAL_REMOTE_OPEN_MS) || 50000
+const steps = new WeakMap()              // Browser -> how long each step took (a slow one)
+/** For the run's log: ": opening its robot browser 24.1 s" (nothing when it was quick). */
+export const stepsOf = (browser) => steps.get(browser) || ''
 const SEEN_MS = 3 * 60e3                 // a Companion not heard from for 3 minutes is gone
 const devices = new Map()                // pc id → { id, name, ip, port, token, at }
 const conns = new Map()                  // pc id → Promise<Browser>
@@ -173,21 +178,44 @@ export async function browserForDevice(id, { quiet = false } = {}) {
     conns.delete(id)
   }
   const p = (async () => {
+    // Each step by itself and named in the run's log (2026-11-25: "aborted due to timeout" said nothing; the Companion's
+    // browser did open, its first start taking longer than the 20 s given).
+    const took = [], t0 = Date.now()
+    const step = async (name, ms, fn) => {
+      const from = Date.now()
+      try { const v = await fn(AbortSignal.timeout(ms)); took.push(`${name} ${((Date.now() - from) / 1000).toFixed(1)} s`); return v }
+      catch (e) {
+        const why = e?.name === 'TimeoutError' || /due to timeout/i.test(String(e?.message)) ? `no answer in ${Math.round((Date.now() - from) / 1000)} s` : (e?.cause?.code || e?.message || 'failed')
+        throw new Error(`${name}: ${why}${took.length ? `; before: ${took.join(', ')}` : ''}`)
+      }
+    }
+    const headers = { 'x-adal-robot': d.token }
+    // Is it there at all? (A PC that is off fails here in 5 s, whatever a start may take.)
+    await step('reaching it', 5000, (signal) => fetch(`${base(d)}/robot/now`, { headers, signal }).then(r => r.arrayBuffer()))
     // quiet: opened for another PC's work — it starts minimized there, never over the person's work.
-    const r = await fetch(`${base(d)}/robot/json/version${quiet ? '?quiet=1' : ''}`, { headers: { 'x-adal-robot': d.token }, signal: AbortSignal.timeout(20000) })   // fail fast: 20 s also covers its browser starting
-    if (!r.ok) throw new Error(`the Companion's browser did not open (${r.status})`)
-    const v = await r.json()
+    const v = await step('opening its robot browser', OPEN_MS(), async (signal) => {
+      const r = await fetch(`${base(d)}/robot/json/version${quiet ? '?quiet=1' : ''}`, { headers, signal })
+      if (!r.ok) throw new Error(`the Companion's browser did not open (${r.status}${r.status === 404 ? '' : ` ${(await r.text().catch(() => '')).slice(0, 80)}`})`)
+      return r.json()
+    })
     if (!v.webSocketDebuggerUrl) throw new Error('the Companion gave no browser address')
     const puppeteer = (await import('puppeteer-core')).default
-    const b = await puppeteer.connect({ browserWSEndpoint: v.webSocketDebuggerUrl, headers: { 'x-adal-robot': d.token }, defaultViewport: null, protocolTimeout: 60000 })
+    const b = await step('connecting to it', 20000, (signal) => {
+      const c = puppeteer.connect({ browserWSEndpoint: v.webSocketDebuggerUrl, headers, defaultViewport: null, protocolTimeout: 60000 })
+      return new Promise((ok, no) => {
+        signal.addEventListener('abort', () => { no(signal.reason); c.then(x => x.disconnect()).catch(() => {}) })
+        c.then(ok, no)
+      })
+    })
     // It must answer now, or the run works on the main PC (a browser that connects but never answers held a run 5 min).
     const answers = await Promise.race([b.version().then(() => true, () => false), new Promise(r => setTimeout(() => r(false), 5000))])
-    if (!answers) { b.disconnect().catch(() => {}); throw new Error('its Adal Browser does not answer') }
+    if (!answers) { b.disconnect().catch(() => {}); throw new Error(`its robot browser does not answer (${took.join(', ')})`) }
+    steps.set(b, Date.now() - t0 > 3000 ? `: ${took.join(', ')}` : '')
     remote.set(b, d)
     const beat = watchOver(b, d)
     b.on('disconnected', () => { clearInterval(beat); lost.set(id, Date.now()); if (conns.get(id) === p) conns.delete(id) })
     await patchUploads(b)
-    console.log(`[remote-browser] connected to ${d.name}'s Adal Browser (${d.ip})`)
+    console.log(`[remote-browser] connected to ${d.name}'s Adal Browser (${d.ip}): ${took.join(', ')}`)
     return b
   })()
   conns.set(id, p)

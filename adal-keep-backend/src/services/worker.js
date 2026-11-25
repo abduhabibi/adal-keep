@@ -538,7 +538,7 @@ async function browserForJob(db, job, { quiet = false } = {}) {
         if (d && !sp.ready(d, sp.ownPower())) throw new Error(d.updating ? `${d.name} is installing an update` : `${d.name} does not answer now or is on another release (${d.version || '?'})`)
         const b = await rb.browserForDevice(id, { quiet: true })
         if (id !== dev) await movedTo(db, job, id)
-        if (!quiet) await appendLog(db, job.id, `Working in ${rb.deviceOf(b)?.name || 'the other PC'}'s robot browser (out of sight there)`)
+        if (!quiet) await appendLog(db, job.id, `Working in ${rb.deviceOf(b)?.name || 'the other PC'}'s robot browser (out of sight there)${rb.stepsOf(b)}`)
         return b
       } catch (e) {
         if (!quiet) await appendLog(db, job.id, `Not on ${rb.nameOf(id) || 'that PC'} (${e.message}) — ${next.length && id === dev ? 'the next best PC' : 'on this PC instead'}`, 'warn')

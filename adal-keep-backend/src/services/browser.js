@@ -177,7 +177,14 @@ function freshStart() {
   } catch (e) { console.warn('[browser] fresh start:', e.message) }
 }
 
+// The browser's own work that no run needs (2026-11-25, measured): its component updates (1–3 s of processor and 25–47 MB
+// down in the first 2 minutes after each fresh start), its account sync, its default apps; pages kept in memory for a
+// "Back" nobody presses (about 100 MB at a run's peak). ADAL_BROWSER_DIET=0: as before.
+const DIET = process.env.ADAL_BROWSER_DIET !== '0'
+export const DIET_FLAGS = ['--disable-component-update', '--disable-sync', '--disable-default-apps', '--disable-domain-reliability']
+
 const BROWSER_ARGS = [
+  ...(DIET ? DIET_FLAGS : []),
   // Linux: no window at all (services/noWindows.js); the live view shows the pages.
   ...headlessArgs(),
   `--remote-debugging-port=${DEBUG_PORT}`,
@@ -203,7 +210,7 @@ const BROWSER_ARGS = [
   // IntensiveWakeUpThrottling: never slower than once a second (a site renews its sign-in by a timer).
   // SpareRendererForSitePerProcess: no extra empty page process kept waiting
   // (tens of MB on a 4 GB PC; runs reuse their tabs, so it is rarely used).
-  '--disable-features=Translate,MediaRouter,OptimizationHints,CalculateNativeWinOcclusion,SpareRendererForSitePerProcess,AutofillServerCommunication,IntensiveWakeUpThrottling',
+  '--disable-features=Translate,MediaRouter,OptimizationHints,CalculateNativeWinOcclusion,SpareRendererForSitePerProcess,AutofillServerCommunication,IntensiveWakeUpThrottling' + (DIET ? ',BackForwardCache' : ''),
   '--disable-popup-blocking',
   '--noerrdialogs',
   '--disable-infobars',

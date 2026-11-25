@@ -108,7 +108,8 @@ func robotArgs(profile string, quiet bool) []string {
 		"--no-first-run", "--no-default-browser-check", "--hide-crash-restore-bubble", "--noerrdialogs",
 		"--disable-background-networking", "--disable-notifications", "--disable-breakpad", "--disable-popup-blocking",
 		"--disable-backgrounding-occluded-windows", "--mute-audio",
-		"--disable-features=Translate,MediaRouter,OptimizationHints,CalculateNativeWinOcclusion,SpareRendererForSitePerProcess,AutofillServerCommunication,IntensiveWakeUpThrottling",
+		"--disable-component-update", "--disable-sync", "--disable-default-apps", "--disable-domain-reliability",
+		"--disable-features=Translate,MediaRouter,OptimizationHints,CalculateNativeWinOcclusion,SpareRendererForSitePerProcess,AutofillServerCommunication,IntensiveWakeUpThrottling,BackForwardCache",
 	}
 	if quiet {
 		a = append(a, "--headless=new", "--window-size=1366,900")

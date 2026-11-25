@@ -103,10 +103,10 @@ const vite = (args, env = {}) => execFileSync(process.execPath, [path.join(FRONT
 
 function buildPrograms(dir, arch) {
   const out = path.join(dir, arch); fs.mkdirSync(out, { recursive: true })
-  const env = { ...process.env, GOOS: 'windows', GOARCH: arch, CGO_ENABLED: '0', GOFLAGS: '-mod=mod', GOPROXY: 'off', GOTOOLCHAIN: 'local' }
+  const env = { ...process.env, GOOS: 'windows', GOARCH: arch, CGO_ENABLED: '0', GOPROXY: 'off' }
   const go = (src, name, gui, pkg = '.') => {
     try { execFileSync('go', ['build', '-trimpath', '-buildvcs=false', '-ldflags', `${gui ? '-H windowsgui ' : ''}-buildid=`, '-o', path.join(out, name), pkg], { cwd: path.join(ROOT, src), env, stdio: 'pipe' }) }
-    catch (e) { if (arch === 'amd64') throw e; console.log(`   (no 32-bit ${name})`) }
+    catch (e) { if (arch === 'amd64') throw new Error(`${name}: ${String(e.stderr || e.message).trim()}`); console.log(`   (no 32-bit ${name})`) }
   }
   go('adal-launcher', 'AdalKeep.exe', true); go('adal-companion', 'adal-companion.exe', true); go('adal-agent', 'adal-agent.exe', false, './cmd/agent')
   const icon = path.join(dir, 'seticon.exe')

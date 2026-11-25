@@ -101,9 +101,12 @@ export function getConfig() {
 }
 
 // Only documents still here count: a deleted one stays marked as sent.
+let counted = { of: null, dir: null, v: null }   // (counted again only when the folder or the state changed; off: ADAL_BACKUP_COUNT_CACHE=0)
 function documentCounts(s) {
   const all = listDocuments()
-  return { files_sent: all.filter(n => s.sent?.[n]).length, files_total: all.length }
+  if (process.env.ADAL_BACKUP_COUNT_CACHE !== '0' && counted.of === s && counted.dir === listed) return counted.v
+  counted = { of: s, dir: listed, v: { files_sent: all.filter(n => s.sent?.[n]).length, files_total: all.length } }
+  return counted.v
 }
 
 export function saveConfig({ bot_token, password, chat_id, window_start, window_end, enabled }) {
@@ -829,7 +832,8 @@ export function startBackupSchedule(db) {
       if (failures && s.last_error && ago(s.last_error_at) < retryAfterMs(failures)) return
 
       // New documents: a quick run.
-      const fresh = listDocuments().filter(n => !s.sent?.[n])
+      const c = documentCounts(s)
+      const fresh = c.files_sent === c.files_total ? [] : listDocuments().filter(n => !s.sent?.[n])
       if (fresh.length && ago(s.last_docs_run) >= DOCS_GAP_MS && !wanted) {
         runBackup(db, { docsOnly: true, light: true })
           .then(r => { failures = 0; console.log(`[backup] ${fresh.length} new document(s) backed up (${r.route})`, r.documents_left ? `(${r.documents_left} still to go)` : '') })

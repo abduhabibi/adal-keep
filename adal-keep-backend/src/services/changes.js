@@ -11,9 +11,11 @@ const bus = new EventEmitter()
 bus.setMaxListeners(200)
 
 // Bookkeeping tables that change all the time and show nowhere.
+// Told under another name: only the page that shows it looks (not every list and timer).
+const AS = { whatsapp_sends: 'whatsapp_log' }
 const QUIET = new Set(['activity_log', 'cloud_sync', 'downloads_state', 'tutor_days', 'tutor_prefs', 'tutor_usage',
   'knowledge_base', 'license', 'updates', 'ingest_queue', 'ai_messages', 'ai_conversations', 'sqlite_sequence',
-  'knex_migrations', 'knex_migrations_lock', 'whatsapp_sends'])
+  'knex_migrations', 'knex_migrations_lock'])
 const WRITE = /^\s*(?:insert(?:\s+or\s+\w+)?\s+into|update(?:\s+or\s+\w+)?|delete\s+from|replace\s+into)\s+[`"[]?(\w+)/i
 const GAP = 700
 
@@ -21,7 +23,7 @@ let pending = new Set(), timer = null, last = 0, version = 0
 
 export function changed(table) {
   if (!table || QUIET.has(table)) return
-  pending.add(table)
+  pending.add(AS[table] || table)
   if (timer) return
   timer = setTimeout(flush, Math.max(150, GAP - (Date.now() - last)))
 }

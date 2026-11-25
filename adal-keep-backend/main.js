@@ -242,6 +242,7 @@ app.use('/api', officeRouter)    // office health, morning backup line, end-of-d
 app.use('/api', replicaRouter)   // Companions keep a locked copy; /safety (backup age, licence end)
 app.use('/api', contractsRouter)
 app.use('/api', embassyRouter)   // the embassy print (3 pages a girl)
+app.use('/api', (await import('./src/routes/waSend.js')).default)   // "Send on WhatsApp" (CV preview) and the WhatsApp page
 app.use('/api', whatsappRouter)   // Settings → WhatsApp, CVs to agents
 app.use('/api', (await import('./src/routes/agencyConfig.js')).default)   // per-agency config record + first-run sign-up (flags)
 watchPaid(db)

@@ -302,6 +302,8 @@ export async function connect(db, key = 'owner', { phone = '' } = {}, tries = 2)
     })
     setTimeout(() => closeChosenSends().catch(() => {}), 10_000)
   })
+  // How far a sent message went (the WhatsApp page): 1 on WhatsApp, 2 delivered, 3 read.
+  c.on('message_ack', (m, ack) => { import('./waRecords.js').then(r => r.acked(dbRef, msgIdOf(m), Number(ack))).catch(() => {}) })
   c.on('auth_failure', (m) => { s.startingAt = 0; setState(key, { status: 'failed', error: `Sign-in failed: ${m}` }) })
   c.on('disconnected', (why) => {
     s.startingAt = 0
@@ -884,7 +886,7 @@ export function agentsOf(db) {
 
 /** Her CV with this template: the newest one already made (file still there, made after her last change), else a new one. */
 /** Her newest self video on file (field "Self Video"), or null. */
-async function selfVideo(db, profileId) {
+export async function selfVideo(db, profileId) {
   const f = await db('profile_fields').join('files', 'files.profile_field_id', 'profile_fields.id')
     .where('profile_fields.profile_id', profileId).where('profile_fields.name', 'like', 'Self Video%')
     .where(q => q.where('files.mimetype', 'like', 'video/%').orWhere('files.path', 'like', '%.mp4').orWhere('files.path', 'like', '%.mov').orWhere('files.path', 'like', '%.3gp').orWhere('files.path', 'like', '%.webm').orWhere('files.path', 'like', '%.mkv').orWhere('files.path', 'like', '%.m4v'))
@@ -896,7 +898,7 @@ async function selfVideo(db, profileId) {
   return { path: abs, name: f.original_name || path.basename(abs), size: fs.statSync(abs).size }
 }
 
-async function cvFor(db, p, tid) {
+export async function cvFor(db, p, tid) {
   const old = await db('generated_cvs').where({ profile_id: p.id, template_id: tid }).orderBy('id', 'desc').first().catch(() => null)
   if (old?.pdf_path && new Date(old.created_at) >= new Date(p.updated_at || 0)) {
     const full = path.join(BACKEND, 'data', 'SafeStorage', path.basename(old.pdf_path))
@@ -912,17 +914,38 @@ async function cvFor(db, p, tid) {
   return generateCvFile(db, p, t, {}, 'whatsapp')
 }
 
+/** This WhatsApp as a way to send one file (services/waSend.js). Throws when it is not connected. */
+export async function agencyTransport(key) {
+  const c = ready(key)
+  const { default: wweb } = await import('whatsapp-web.js')
+  return {
+    key, label: 'the agency\'s WhatsApp',
+    async send(chatId, f) {
+      await shim(c)
+      const media = wweb.MessageMedia.fromFilePath(f.path)
+      if (f.name) media.filename = f.name
+      return msgIdOf(await c.sendMessage(chatId, media, { sendMediaAsDocument: f.asFile !== false, caption: f.caption || '' }))
+    },
+  }
+}
+
 /** Of these profiles, the ones in the Profiles page's Waiting tab (routes/automations.js). */
 export async function waitingOnly(db, ids) {
   const { waitingIds } = await import('../routes/automations.js')
   return waitingIds(db, ids)
 }
 
+/** Who sent it and from which PC (migration 069's columns, when they are there). */
+async function whoRow(db, by, from) {
+  const { rowFor } = await import('./waRecords.js')
+  return rowFor(db, {}, { sent_by: by || null, sent_from: from || null })
+}
+
 /**
  * Sends her CV to this person's chosen agents (none chosen → all of them),
  * each with its own template(s). Returns one line per agent and template.
  */
-export async function sendCV(db, key, profileId, agentIds, by = '') {
+export async function sendCV(db, key, profileId, agentIds, by = '', from = '') {
   const c = ready(key)
   await shim(c) // also after WhatsApp reloaded its page
   const { default: wweb } = await import('whatsapp-web.js')
@@ -946,7 +969,7 @@ export async function sendCV(db, key, profileId, agentIds, by = '') {
     for (const tid of tids) {
       const already = await db('whatsapp_sends').where({ profile_id: p.id, agent_id: a.id, template_id: tid, status: 'sent' }).first()
       if (already) { out.push({ agent: a.name, template_id: tid, ok: true, already: true }); continue }
-      const row = { profile_id: p.id, agent_id: a.id, template_id: tid, chat_id: a.chat_id, user_key: key, sent_at: new Date().toISOString() }
+      const row = { profile_id: p.id, agent_id: a.id, template_id: tid, chat_id: a.chat_id, user_key: key, sent_at: new Date().toISOString(), ...await whoRow(db, by, from) }
       try {
         if (!made.has(tid)) made.set(tid, await cvFor(db, p, tid))
         const f = made.get(tid)
@@ -965,7 +988,7 @@ export async function sendCV(db, key, profileId, agentIds, by = '') {
     // (Also when her CV went before without it.)
     const videoSent = video && await db('whatsapp_sends').where({ profile_id: p.id, agent_id: a.id, status: 'sent' }).whereNull('template_id').first().catch(() => null)
     if (video && !videoSent && out.some(o => o.agent === a.name && o.ok)) {
-      const vrow = { profile_id: p.id, agent_id: a.id, template_id: null, chat_id: a.chat_id, user_key: key, sent_at: new Date().toISOString() }
+      const vrow = { profile_id: p.id, agent_id: a.id, template_id: null, chat_id: a.chat_id, user_key: key, sent_at: new Date().toISOString(), ...await whoRow(db, by, from) }
       try {
         const media = wweb.MessageMedia.fromFilePath(video.path)
         media.filename = video.name
@@ -989,9 +1012,9 @@ export const bulk = {}
  * Many CVs to many agents. A send started while one is still going waits its
  * turn (other girls to other agents, one after another — asked on 2026-11-18).
  */
-export function sendMany(db, key, profileIds, agentIds, by = '') {
+export function sendMany(db, key, profileIds, agentIds, by = '', from = '') {
   ready(key)
-  const job = { ids: profileIds, agents: agentIds }
+  const job = { ids: profileIds, agents: agentIds, by, from }
   if (bulk[key]?.running) {
     const b = bulk[key]
     b.jobs.push(job)
@@ -1001,13 +1024,13 @@ export function sendMany(db, key, profileIds, agentIds, by = '') {
   const b = bulk[key] = { running: true, total: profileIds.length, done: 0, sent: 0, failed: 0, current: '', errors: [], jobs: [job] }
   ;(async () => {
     while (b.jobs.length) {
-      const { ids, agents } = b.jobs.shift()
+      const { ids, agents, by, from } = b.jobs.shift()
       for (const id of ids) {
         let name = ''
         try {
           name = (await db('profiles').where('id', id).first('full_name'))?.full_name || ''
           b.current = name
-          const r = await sendCV(db, key, id, agents, by)
+          const r = await sendCV(db, key, id, agents, by, from)
           b.sent += r.filter(x => x.ok && !x.already && !x.video).length
           for (const x of r.filter(x => !x.ok)) { b.failed++; b.errors.push(`${name}: ${x.agent} — ${x.error}`) }
         } catch (e) { b.failed++; b.errors.push(`${name}: ${e.message}`) }

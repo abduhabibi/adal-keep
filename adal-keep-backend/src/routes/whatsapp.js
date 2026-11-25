@@ -5,6 +5,7 @@
  * copy, which passes no headers).
  */
 import express from 'express'
+import os from 'os'
 import { lastNumber, keyOf, stateOf, allStates, connect, linkByCode, prepare, openWeb, logout, listChats, chatForNumber, agentRow, agentsOf, sendCV, sendMany, bulk, notifyMany, notices, sendsOf, onChosen, available, agentLimit, roomForAgent, waitingOnly } from '../services/whatsapp.js'
 
 const router = express.Router()
@@ -17,6 +18,7 @@ router.use(async (req, res, next) => {
 const fail = (res, e) => res.status(400).json({ error: e.message })
 const now = () => new Date().toISOString()
 const who = (req) => keyOf(req.query.u ?? req.body?.u)
+const from = (req) => String(req.pcAccess?.name || (req.headers['x-adal-cloud'] ? 'phone' : os.hostname())).slice(0, 80)
 const by = (req) => { try { return decodeURIComponent(req.get('x-adal-who') || '') } catch { return '' } }
 
 router.get('/whatsapp', async (req, res) => res.json({ agent_limit: await agentLimit(req.app.locals.db), ...stateOf(who(req)), key: who(req), last_number: lastNumber(who(req)), others: allStates().filter(s => s.key !== who(req) && s.status === 'ready') }))
@@ -87,7 +89,7 @@ router.get('/whatsapp/sent', async (req, res) => {
 })
 router.get('/profiles/:id/whatsapp', async (req, res) => { try { res.json(await sendsOf(req.app.locals.db, req.params.id)) } catch (e) { fail(res, e) } })
 router.post('/profiles/:id/whatsapp/send', async (req, res) => {
-  try { res.json({ results: await sendCV(req.app.locals.db, who(req), Number(req.params.id), req.body?.agent_ids || [], by(req)) }) }
+  try { res.json({ results: await sendCV(req.app.locals.db, who(req), Number(req.params.id), req.body?.agent_ids || [], by(req), from(req)) }) }
   catch (e) { fail(res, e) }
 })
 router.post('/profiles/:id/whatsapp/close', async (req, res) => { try { await onChosen(req.app.locals.db, Number(req.params.id)); res.json(await sendsOf(req.app.locals.db, req.params.id)) } catch (e) { fail(res, e) } })
@@ -103,7 +105,7 @@ router.post('/whatsapp/bulk', async (req, res) => {
     const waiting = await waitingOnly(req.app.locals.db, asked)
     const ids = asked.filter(id => waiting.has(id))
     if (!ids.length) throw new Error('None of them is in Waiting (added to Musaned, not chosen yet): only those CVs go to agents on WhatsApp')
-    res.json({ ...sendMany(req.app.locals.db, who(req), ids, req.body?.agent_ids || [], by(req)), not_waiting: asked.length - ids.length })
+    res.json({ ...sendMany(req.app.locals.db, who(req), ids, req.body?.agent_ids || [], by(req), from(req)), not_waiting: asked.length - ids.length })
   } catch (e) { fail(res, e) }
 })
 

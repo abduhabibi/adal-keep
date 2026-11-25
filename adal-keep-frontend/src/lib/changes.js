@@ -32,6 +32,8 @@ let lastAll = 0, allTimer = null
 export function tellChanged(tables) {
   if (!tables?.length) return
   for (const l of listeners) l(tables)
+  // (A CV sent on WhatsApp: only the WhatsApp page shows it, nothing else reloads.)
+  if (tables.every(t => t === 'whatsapp_log')) return
   // The pages' own timers: once, soon (not once per change).
   if (allTimer) return
   allTimer = setTimeout(() => { allTimer = null; lastAll = Date.now(); if (!document.hidden) refreshAll() }, Math.max(300, 2000 - (Date.now() - lastAll)))

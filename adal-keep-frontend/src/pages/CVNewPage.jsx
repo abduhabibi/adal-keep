@@ -5,6 +5,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import api from '../services/api'
 import PickBrokerHere from '../components/PickBrokerHere'
+import SendCvWhatsApp from '../components/SendCvWhatsApp'
 import UploadPhotoHere from '../components/UploadPhotoHere'
 import { pdfHere } from '../lib/pdfHere'
 import PageHeader from '../components/shared/PageHeader'
@@ -76,6 +77,7 @@ export default function CVNewPage() {
   const [previewTemplateId, setPreviewTemplateId] = useState(null)
   const [previewUrl, setPreviewUrl] = useState(null)
   const [saving, setSaving] = useState(false)
+  const [waOpen, setWaOpen] = useState(false)   // "Send on WhatsApp": the agents' picker
   const [form, setForm] = useState({ ...DEFAULT_FORM })
   const [formReady, setFormReady] = useState(false)
 
@@ -674,6 +676,11 @@ export default function CVNewPage() {
           <Button onClick={done} isLoading={saving} disabled={!!blocker && blocker !== 'Pick a template'}>✓ Done</Button>
         </div>
       </div>
+          {waOpen && (
+            <SendCvWhatsApp profileId={profileId} templateId={previewTemplateId || templateId} name={readiness?.profile?.full_name || ''}
+              onMake={async () => { const r = await api.post('/cv/generate', cvBody(previewTemplateId || templateId)); if (r.data?.download_url) setGenResult(r.data); return r.data }}
+              onClose={() => setWaOpen(false)} />
+          )}
           {/* Preview modal */}
       {showPreview && previewUrl && createPortal(
 <div className="fixed inset-0 z-[9999] bg-black/80 flex items-center justify-center p-2 sm:p-4"
@@ -701,6 +708,14 @@ export default function CVNewPage() {
                   className="px-4 py-1.5 rounded-lg border border-teal-600 text-teal-700 dark:text-teal-300 text-xs font-semibold hover:bg-teal-50 dark:hover:bg-teal-900/30 disabled:opacity-50"
                 >
                   💾 Save as…
+                </button>
+                <button
+                  onClick={() => setWaOpen(true)}
+                  disabled={saving}
+                  title="Pick the agents, then Send"
+                  className="px-4 py-1.5 rounded-lg border border-emerald-600 text-emerald-700 dark:text-emerald-300 text-xs font-semibold hover:bg-emerald-50 dark:hover:bg-emerald-900/30 disabled:opacity-50"
+                >
+                  Send on WhatsApp
                 </button>
                 <button
                   onClick={() => setShowPreview(false)}

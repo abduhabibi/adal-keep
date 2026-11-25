@@ -1,5 +1,5 @@
 import GlassSelect from './shared/GlassSelect'
-import { useEffect, useMemo, useState } from 'react'
+import { startTransition, useEffect, useMemo, useState } from 'react'
 import api from '../services/api'
 import { after } from './ProfileJourney'
 import { cachedGet } from '../lib/deviceCache'
@@ -101,7 +101,7 @@ function useRunStates() {
         const now = JSON.stringify(r.data || [])
         if (!alive || now === last) return
         last = now
-        setStates(Object.fromEntries((r.data || []).map(x => [x.profile_id, x.state])))
+        startTransition(() => setStates(Object.fromEntries((r.data || []).map(x => [x.profile_id, x.state]))))
       })
       .catch(() => {})
     load()
@@ -132,13 +132,14 @@ function useStages() {
       if (!alive || now === last) return
       last = now
       const list = data?.profiles || []
-      setSt(stagesSeen = {
+      stagesSeen = {
         names: data?.stages || [],
         of: Object.fromEntries(list.map(x => [x.profile_id, x.stage])),
         steps: Object.fromEntries(list.map(x => [x.profile_id, x.steps || {}])),
         who: Object.fromEntries(list.map(x => [x.profile_id, x.who || {}])),
         missing: Object.fromEntries(list.map(x => [x.profile_id, x.missing || {}])),
-      })
+      }
+      if (first) setSt(stagesSeen); else startTransition(() => setSt(stagesSeen))
     }
     let first = true
     const load = () => cachedGet('/automations/stages', { onSaved: first ? show : undefined })

@@ -107,6 +107,9 @@ let cvListCols = null
 async function generatedListColumns(db) {
   if (!cvListCols) {
     const info = await db('generated_cvs').columnInfo()
+    // The list without reading each CV's 1–2 MB copy on the way (67 MB on the office PC for a page of
+    // names). Made here, not in a migration: an older version is not refused this database.
+    await db.raw('CREATE INDEX IF NOT EXISTS generated_cvs_list ON generated_cvs (created_at, profile_id, template_id, filename, pdf_path, created_by, updated_at)').catch(e => console.warn('[cv] list index:', e.message))
     cvListCols = Object.keys(info).filter(c => c !== 'data_snapshot').map(c => `generated_cvs.${c}`)
   }
   return cvListCols

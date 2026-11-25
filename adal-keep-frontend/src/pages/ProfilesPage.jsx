@@ -1,6 +1,6 @@
 import GlassSelect from '../components/shared/GlassSelect'
 import { createPortal } from 'react-dom'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { startTransition, useCallback, useEffect, useMemo, useState } from 'react'
 import PrioritizeButton, { useWaitingFiles } from '../components/PrioritizeButton'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
@@ -54,7 +54,7 @@ export default function ProfilesPage() {
   // The search looks 150 ms after the last key (not on every letter: it waited 500 ms for the
   // PC to look, now this page itself does); the address follows at 500 ms.
   const [q, setQ] = useState(query)
-  useEffect(() => { const t = setTimeout(() => setQ(query), 150); return () => clearTimeout(t) }, [query])
+  useEffect(() => { const t = setTimeout(() => startTransition(() => setQ(query)), 150); return () => clearTimeout(t) }, [query])
   useEffect(() => {
     const t = setTimeout(() => {
       setSearchParams(prev => {
@@ -78,8 +78,9 @@ export default function ProfilesPage() {
         profilesList({ fresh: quiet === true, onSaved: quiet === true ? undefined : (d) => { setProfiles(d || []); setLoading(false) } }),
         cachedGet('/brokers', { onSaved: quiet === true ? undefined : (d) => setBrokers(d || []) }),
       ])
-      setProfiles(profilesRes || [])
-      setBrokers(brokersSeen = brokersRes || [])
+      brokersSeen = brokersRes || []
+      const show = () => { setProfiles(profilesRes || []); setBrokers(brokersSeen) }
+      if (quiet === true) startTransition(show); else show()   // (in the background: in small pieces, a click goes first)
     } catch {
       if (quiet !== true) toast.error('ፕሮፋይሎችን መጫን አልተቻለም')
     } finally {

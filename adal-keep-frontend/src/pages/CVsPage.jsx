@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { startTransition, useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import api from '../services/api'
@@ -11,20 +11,30 @@ import AddFromMusaned from '../components/AddFromMusaned'
 import { onPhone } from '../lib/phoneMode'
 import Segmented from '../components/shared/Segmented'
 
+// As last seen by this window: the page opens with it, the new list comes in behind.
+let seen = { of: null, rows: null }
+const FIRST = 30
+const WHEN = new Intl.DateTimeFormat(undefined, { dateStyle: 'short', timeStyle: 'medium' })
+const when = (d) => { try { return WHEN.format(new Date(d)) } catch { return '' } }
+
 export default function CVsPage() {
   const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
   const profileFilter = params.get('profile')
   const tab = params.get('tab') === 'whatsapp' && !profileFilter ? 'whatsapp' : 'cvs'
-  const [rows, setRows] = useState([])
-  const [loading, setLoading] = useState(true)
+  const [rows, setRows] = useState(() => (seen.rows && seen.of === profileFilter ? seen.rows : []))
+  const [loading, setLoading] = useState(() => !(seen.rows && seen.of === profileFilter))
+  // The first ones at once, the rest a moment later (a hundred at once froze a weak PC half a second).
+  const [shown, setShown] = useState(FIRST)
+  useEffect(() => { if (shown >= rows.length) return; const t = setTimeout(() => startTransition(() => setShown(n => n + FIRST)), 60); return () => clearTimeout(t) }, [shown, rows.length])
   const [fromMusaned, setFromMusaned] = useState(false)
 
   const load = async () => {
-    setLoading(true)
+    if (seen.of !== profileFilter || !seen.rows) setLoading(true)
     try {
       const res = await api.get('/cv/generated', profileFilter ? { params: { profile_id: profileFilter } } : undefined)
-      setRows(res.data || [])
+      seen = { of: profileFilter, rows: res.data || [] }
+      setRows(seen.rows)
     } catch { toast.error('Failed to load CVs') }
     finally { setLoading(false) }
   }
@@ -70,8 +80,8 @@ export default function CVsPage() {
         />
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {rows.map(r => (
-            <article key={r.id} className="panel p-4 flex flex-col gap-3">
+          {rows.slice(0, shown).map(r => (
+            <article key={r.id} className="panel ak-lazy p-4 flex flex-col gap-3">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
                   <h3 className="truncate font-display font-bold text-slate-900 dark:text-white">
@@ -84,7 +94,7 @@ export default function CVsPage() {
                 </span>
               </div>
               <p className="text-xs text-slate-500">Passport: <span className="font-medium">{r.passport_number || '—'}</span></p>
-              <p className="text-[10px] text-slate-400">{new Date(r.created_at).toLocaleString()}</p>
+              <p className="text-[10px] text-slate-400">{when(r.created_at)}</p>
               <div className="flex gap-2 border-t border-slate-100 dark:border-slate-700 pt-3">
                 <a
                   href={`/api/cv/generated/${r.id}/view`}

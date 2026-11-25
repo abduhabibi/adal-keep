@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { startTransition, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../services/api'
 import { changedGet, isList } from '../lib/changedOnly'
@@ -52,7 +52,7 @@ export default function ProfileSearchPad({
         const now = JSON.stringify(rows)
         if (!alive || now === last) return
         last = now
-        setLoaded(rows)
+        startTransition(() => setLoaded(rows))
       })
       .catch(() => { if (alive) { last = null; setLoaded([]) } })
     load()

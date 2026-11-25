@@ -1257,6 +1257,7 @@ func startSelfUpdate(root string) *updater {
 	} else {
 		log.Printf("⚠️ this PC's own routes (:%d): %v", lanHTTPPort, err)
 	}
+	startOwnDoor() // the photos and documents used here, from this PC's disk (owndocs.go)
 	go u.lanLoop()
 	go func() {
 		time.Sleep(20 * time.Second)

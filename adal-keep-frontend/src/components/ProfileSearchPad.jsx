@@ -132,7 +132,7 @@ export default function ProfileSearchPad({
         options={[['', 'All'], ['on', 'Running'], ['off', 'Not running']]} value={run} onChange={setRun} />
       <ul className={`overflow-y-auto custom-scrollbar -mx-1 ${maxHeight}`}>
         {shown.map(p => (
-          <li key={p.id}>
+          <li key={p.id} className="ak-lazy ak-lazy-line">
             <button
               type="button"
               draggable

@@ -142,7 +142,7 @@ api.interceptors.response.use(
     // A change made here: this page and its neighbours reload at once.
     const m = String(response.config?.method || 'get').toLowerCase()
     if (m !== 'get' && m !== 'head') {
-      import('../lib/changes.js').then(c => { const t = c.tablesOfRequest(response.config?.url); if (t) c.tellChanged(t) }).catch(() => {})
+      import('../lib/changes.js').then(c => { const t = c.tablesOfRequest(response.config?.url); if (t) c.tellChanged(t, { mine: true }) }).catch(() => {})
     }
     return response
   },

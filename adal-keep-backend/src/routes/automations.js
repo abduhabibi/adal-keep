@@ -23,6 +23,12 @@ export async function insuranceAlreadyDone(db, profileId) {
   return `Her insurance was already requested on ${dayOf(h.last)} (${h.count} time${h.count === 1 ? '' : 's'}). FetaP issues it about a day later: use "Get insurance certificate" instead.`
 }
 
+const runCols = new WeakMap()   // per database
+async function runColumns(db) {
+  if (!runCols.has(db)) runCols.set(db, Object.keys(await db('automation_queue').columnInfo()))
+  return runCols.get(db)
+}
+
 /** Run rows go to the browser: never send login passwords back with them. */
 function publicRun(row) {
   if (!row) return row
@@ -65,11 +71,12 @@ router.get('/profiles/:profileId/automations', async (req, res) => {
     const db = req.app.locals.db
     const profileId = Number(req.params.profileId)
     const workflows = listWorkflows()
-    const runs = await db('automation_queue')
-      .where('profile_id', profileId)
-      .orderBy('id', 'desc')
+    // The newest run of each robot only, without its log (up to 100 KB; /automations/:id gives it).
+    const newest = await db('automation_queue').where('profile_id', profileId).groupBy('workflow_id').max('id as id')
+    const cols = (await runColumns(db)).filter(c => c !== 'log')
+    const runs = await db('automation_queue').whereIn('id', newest.map(r => r.id)).select(cols)
     const latest = {}
-    for (const r of runs) if (!latest[r.workflow_id]) latest[r.workflow_id] = publicRun(r)
+    for (const r of runs) latest[r.workflow_id] = publicRun(r)
     // She has a contract: she is chosen on Musaned and her Musaned record is
     // there — "Check if chosen" and "Add from Musaned" count as done (✓) unless
     // a run of them is working now.

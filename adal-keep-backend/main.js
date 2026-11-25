@@ -95,6 +95,7 @@ import { startWafidChecker } from './src/services/wafidStatus.js'
 import { isFollower, isCompanion, notMainPC, mainURL, instanceId } from './src/services/mainPC.js'
 import { startSync, syncRoutes, isMainRole } from './src/services/sync/index.js'
 import { moveToTrash } from './src/services/trash.js'
+import { profileFields } from './src/services/profileFields.js'
 import { startDiscoveryResponder } from './src/services/discovery.js'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -879,65 +880,10 @@ app.delete('/api/brokers/:id', async (req, res) => {
   }
 })
 
-// The document fields not used for now: kept (with any file in them), not offered.
-// Medical Report and Labour ID too (asked on 2026-11-19): Wafid's result and the Labor ID live on the profile itself.
-const HIDDEN_FIELDS = new Set(['COC', 'Saudi-letter', 'Musaned', 'Broker ID', 'Ticket-ongoing', 'Ticket-deported', 'Experience Form', 'Employee ID', 'Client ID', 'Medical Report', 'Labour ID'])
-
 // Fetch & auto-create permanent profile fields
 app.get('/api/profiles/:id/fields', async (req, res) => {
   try {
-    const { id } = req.params
-    const database = req.app.locals.db
-
-    const templates = await database('field_templates').where('is_permanent', true).orderBy('id')
-
-    const forcedFields = ['Photo', 'Self Video']
-    for (const f of forcedFields) {
-      const exists = templates.some(t => t.name === f)
-      if (!exists) {
-        const [newTpl] = await database('field_templates').insert({
-          name: f,
-          data_type: 'file',
-          is_permanent: true,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        }).returning('*')
-        templates.push(newTpl)
-      }
-    }
-
-    const result = []
-    for (const template of templates) {
-      // Not used now (asked on 2026-11-09): shown only when she already has a file in it.
-      const hidden = HIDDEN_FIELDS.has(template.name)
-      // A profile can hold the same field twice: its files count whichever copy they are in.
-      const copies = await database('profile_fields')
-        .where('profile_id', id)
-        .andWhere('name', template.name)
-        .orderBy('id')
-      let field = copies[0]
-
-      if (!field && hidden) continue
-      if (!field) {
-        const [newFieldId] = await database('profile_fields').insert({
-          profile_id: id,
-          field_template_id: template.id,
-          name: template.name,
-          data_type: template.data_type,
-          is_permanent: true,
-        })
-        field = { id: newFieldId, name: template.name, data_type: template.data_type, is_permanent: true }
-      }
-
-      const files = await database('files')
-        .whereIn('profile_field_id', copies.length ? copies.map(c => c.id) : [field.id])
-        .select('id', 'original_name', 'path', 'mimetype', 'size')
-
-      if (hidden && !files.length) continue
-      result.push({ ...field, files })
-    }
-
-    res.json(result)
+    res.json(await profileFields(req.app.locals.db, req.params.id))
   } catch (err) {
     console.error('Fields error:', err)
     res.status(500).json({ error: 'Failed to load profile fields' })

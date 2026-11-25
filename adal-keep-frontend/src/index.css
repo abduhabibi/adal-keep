@@ -843,3 +843,8 @@ main h3.truncate, main .font-display.truncate { white-space: normal !important; 
 /* The destination country beside Backup (Navbar.jsx CountryPicker). */
 button.ak-gsel-btn.ak-country-pick:not([multiple]):not([size]) { min-height: 34px; width: 9.5rem; font-size: .8rem; padding-left: .7rem; }
 @media (max-width: 640px) { button.ak-gsel-btn.ak-country-pick:not([multiple]):not([size]) { width: 8.5rem; } }
+
+/* A card or line out of sight is not laid out or painted until it comes into
+   view: 100 cards and the 200 lines of the search pad took a weak PC half a second. */
+.ak-lazy { content-visibility: auto; contain-intrinsic-size: auto 96px; }
+.ak-lazy-line { contain-intrinsic-size: auto 46px; }

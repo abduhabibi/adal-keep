@@ -23,9 +23,11 @@ export function useMusanedCodes() {
   const load = useRef(null)
   useEffect(() => {
     let alive = true
-    load.current = () => api.get('/musaned/authenticators').then(r => { if (alive) setAll(r.data || {}) }).catch(() => {})
+    // No account has an authenticator here: there is no code to follow, asked again every 30 s.
+    let none = false, n = 0
+    load.current = () => api.get('/musaned/authenticators').then(r => { none = !Object.values(r.data || {}).some(v => v?.code); if (alive) setAll(r.data || {}) }).catch(() => {})
     load.current()
-    const t = setInterval(() => load.current(), 2000)
+    const t = setInterval(() => { if (none && ++n % 15) return; load.current() }, 2000)
     return () => { alive = false; clearInterval(t) }
   }, [])
   return [all, () => load.current?.()]

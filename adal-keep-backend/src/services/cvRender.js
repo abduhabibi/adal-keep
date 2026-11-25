@@ -4,6 +4,7 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import { createHash } from 'crypto'
 import { findBrowserExecutable } from './browser.js'
+import { smallCopy, isKept, inLine, pdfFirstPagePng } from './pictures.js'
 
 // Her father's name as the emergency contact: his name and his father's (her surname),
 // e.g. "ABAGOLE KEDIR". A saved name that was only his first name gets the surname too.
@@ -87,32 +88,56 @@ function fileToDataUri(absPath, mime) {
   return `data:${m};base64,${b64}`
 }
 
-// Phone photos are 3-12 MB; a CV prints them a few centimetres wide. Shrink
-// once (cached by path + modified time) so preview and PDF are light and fast.
-const _shrunk = new Map()
-async function imageDataUri(absPath, mime, maxPx, { trim = false, quality = 85, palette = false } = {}) {
+// Phone photos are 3-12 MB; a CV prints them a few centimetres wide. Shrunk
+// once (kept by path + modified time, on disk too: pictures.js) so preview and PDF are light and fast.
+const _shrunk = new Map()   // key -> Promise of the data: address
+async function imageDataUri(absPath, mime, maxPx, { trim = false, quality = 85, palette = false, quick = false } = {}) {
   if (!absPath || !fs.existsSync(absPath)) return ''
   if (mime && !mime.startsWith('image/')) return fileToDataUri(absPath, mime)
-  const key = absPath + ':' + fs.statSync(absPath).mtimeMs + ':' + maxPx + ':' + trim + ':' + quality + ':' + palette
+  const name = maxPx + ':' + trim + ':' + quality + ':' + palette
+  const key = absPath + ':' + fs.statSync(absPath).mtimeMs + ':' + name
   if (_shrunk.has(key)) return _shrunk.get(key)
-  let uri
-  try {
+  if (quick && !(await isKept(absPath, 'cv:' + name, 'img'))) return quickDataUri(absPath, key, maxPx, trim)
+  const made = smallCopy(absPath, 'cv:' + name, 'img', async (abs) => {
     const sharp = (await import('sharp')).default
     // Trimmed on its own first: sharp cannot trim and resize in one go, and a
-    // blank picture has nothing to trim.
-    let source = absPath
-    if (trim) source = await sharp(absPath).rotate().trim({ background: '#ffffff', threshold: 25 }).toBuffer().catch(() => absPath)
-    const img = (source === absPath ? sharp(absPath).rotate() : sharp(source)).resize({ width: maxPx, height: maxPx, fit: 'inside', withoutEnlargement: true })
-    const { hasAlpha } = await sharp(absPath).metadata()
-    uri = hasAlpha   // transparent banners stay PNG
-      ? 'data:image/png;base64,' + (await img.png({ compressionLevel: 9, palette }).toBuffer()).toString('base64')
-      : 'data:image/jpeg;base64,' + (await img.jpeg({ quality, mozjpeg: true }).toBuffer()).toString('base64')
-  } catch {
-    uri = fileToDataUri(absPath, mime)
-  }
+    // blank picture has nothing to trim. (Raw in between: packed as a PNG it took 2 s on a weak PC.)
+    let img = null
+    if (trim) img = await sharp(abs).rotate().trim({ background: '#ffffff', threshold: 25 }).raw().toBuffer({ resolveWithObject: true }).then(r => sharp(r.data, { raw: { width: r.info.width, height: r.info.height, channels: r.info.channels } }), () => null)
+    img = (img || sharp(abs).rotate()).resize({ width: maxPx, height: maxPx, fit: 'inside', withoutEnlargement: true })
+    const { hasAlpha } = await sharp(abs).metadata()
+    return hasAlpha   // transparent banners stay PNG
+      ? img.png({ compressionLevel: 9, palette }).toBuffer()
+      : img.jpeg({ quality, mozjpeg: true }).toBuffer()
+  }).then(({ buf }) => `data:image/${buf[0] === 0x89 ? 'png' : 'jpeg'};base64,` + buf.toString('base64'))
+    .catch(() => fileToDataUri(absPath, mime))
   if (_shrunk.size > 200) _shrunk.delete(_shrunk.keys().next().value)
-  _shrunk.set(key, uri)
-  return uri
+  _shrunk.set(key, made)
+  return made
+}
+
+// The same picture for the preview, in a fifth of the time (packing a picture small enough for
+// the 300 KB PDF and looking for its white edges at full size took seconds on a weak PC): the
+// PDF's own are made behind it (/cv/prepare), and the next preview shows those.
+const _quick = new Map()
+function quickDataUri(absPath, key, maxPx, trim) {
+  if (_quick.has(key)) return _quick.get(key)
+  const made = inLine(async () => {
+    const sharp = (await import('sharp')).default
+    const size = { width: maxPx, height: maxPx, fit: 'inside', withoutEnlargement: true }
+    let img = sharp(absPath).rotate().resize(size)
+    if (trim) {
+      const small = await img.png({ compressionLevel: 1 }).toBuffer()
+      img = sharp(await sharp(small).trim({ background: '#ffffff', threshold: 25 }).toBuffer().catch(() => small))
+    }
+    const { hasAlpha } = await sharp(absPath).metadata()
+    return hasAlpha
+      ? 'data:image/webp;base64,' + (await img.webp({ quality: 90, effort: 0 }).toBuffer()).toString('base64')
+      : 'data:image/jpeg;base64,' + (await img.jpeg({ quality: 85 }).toBuffer()).toString('base64')
+  }, { first: true }).catch(() => imageDataUri(absPath, null, maxPx, { trim }))
+  if (_quick.size > 60) _quick.delete(_quick.keys().next().value)
+  _quick.set(key, made)
+  return made
 }
 
 /**
@@ -128,15 +153,12 @@ export async function bannersOf(template) {
 
 async function renderPdfFirstPageToDataUri(pdfPath, maxPx = 1600, quality = 85) {
   try {
-    const mupdf = await import('mupdf')
-    const data = fs.readFileSync(pdfPath)
-    const doc = mupdf.Document.openDocument(data, 'application/pdf')
-    if (doc.countPages() === 0) return ''
-    const page = doc.loadPage(0)
-    const pix = page.toPixmap([2,0,0,2,0,0], mupdf.ColorSpace.DeviceRGB, false, true)
-    const sharp = (await import('sharp')).default
-    const jpg = await sharp(Buffer.from(pix.asPNG())).resize({ width: maxPx, height: maxPx, fit: 'inside', withoutEnlargement: true }).jpeg({ quality, mozjpeg: true }).toBuffer()
-    return 'data:image/jpeg;base64,' + jpg.toString('base64')
+    const { buf } = await smallCopy(pdfPath, `cvpage:${maxPx}:${quality}`, 'img', async (abs) => {
+      const png = await pdfFirstPagePng(abs)
+      const sharp = (await import('sharp')).default
+      return sharp(png).resize({ width: maxPx, height: maxPx, fit: 'inside', withoutEnlargement: true }).jpeg({ quality, mozjpeg: true }).toBuffer()
+    })
+    return 'data:image/jpeg;base64,' + buf.toString('base64')
   } catch (e) {
     console.warn('[cvRender] PDF render failed:', e.message)
     return ''
@@ -197,9 +219,9 @@ const LEVELS = [
 ]
 const px = (n, L) => Math.round(n * L.scale)
 
-export async function buildTemplateData(db, profile, template, overrides = {}, { level = 0 } = {}) {
+export async function buildTemplateData(db, profile, template, overrides = {}, { level = 0, quick = false } = {}) {
   const L = LEVELS[Math.min(Math.max(level, 0), LEVELS.length - 1)]
-  const pic = { quality: L.q, palette: L.palette }
+  const pic = { quality: L.q, palette: L.palette, quick }
   const photoFile    = await findProfileFile(db, profile.id, 'Photo')
   const fullBodyFile = await findProfileFile(db, profile.id, 'Full Body Photo')
   const passportFile = await findProfileFile(db, profile.id, 'Passport')
@@ -651,6 +673,8 @@ async function pdfBrowser() {
     if (!exec) throw new Error('No Chrome/Edge/Chromium found for PDF rendering')
     const puppeteer = (await import('puppeteer-core')).default
     _pdfBrowser = await puppeteer.launch({ executablePath: exec, headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage'] })
+    // The PDF is made behind the page a person is working on: the clicks go first.
+    try { os.setPriority(_pdfBrowser.process().pid, os.constants.priority.PRIORITY_BELOW_NORMAL) } catch {}
     return _pdfBrowser
   })().finally(() => { _launching = null })
 }

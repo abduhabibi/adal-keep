@@ -76,6 +76,8 @@ export default function CVNewPage() {
   const editList = () => Object.entries(editsRef.current).map(([from, to]) => ({ from, to }))
   const [previewTemplateId, setPreviewTemplateId] = useState(null)
   const [previewUrl, setPreviewUrl] = useState(null)
+  const [drawing, setDrawing] = useState(false)   // the preview window is open, its CV on the way
+  const drawNo = useRef(0)
   const [saving, setSaving] = useState(false)
   const [waOpen, setWaOpen] = useState(false)   // "Send on WhatsApp": the agents' picker
   const [form, setForm] = useState({ ...DEFAULT_FORM })
@@ -321,16 +323,25 @@ export default function CVNewPage() {
     const err = validate()
     if (err) return toast.error(err)
     const tid = templateIdOverride || templateId
+    // The window opens at once and says the CV is being drawn (a weak PC takes a moment).
+    const was = { show: showPreview, tid: previewTemplateId }
+    const mine = ++drawNo.current
     setBusy(true)
+    setDrawing(true)
+    setPreviewTemplateId(String(tid))
+    if (!was.show) setPreviewHtml(null)
+    setShowPreview(true)
     try {
       const body = cvBody(tid)
       const html = await previewOf(body)
+      if (mine !== drawNo.current) return   // another template was clicked, or it was closed meanwhile
       setPreviewHtml(html)
-      setPreviewTemplateId(String(tid))
       setTemplateId(String(tid))
-      setShowPreview(true)
       preparePdf(body)
     } catch (e) {
+      if (mine !== drawNo.current) return
+      setPreviewTemplateId(was.tid)
+      setShowPreview(was.show)
       const msg = e.response?.data?.error || e.message || 'Preview failed'
       // Her pictures are listed but not on this device yet: the upload box shows instead of a CV without them.
       if (/not on this device yet/i.test(msg)) {
@@ -339,8 +350,9 @@ export default function CVNewPage() {
         setReadiness(r => r && ({ ...r, has_photo: r.has_photo && !lostPhoto, has_full_body_photo: r.has_full_body_photo && !lostBody }))
       }
       toast.error(msg)
-    } finally { setBusy(false) }
+    } finally { setBusy(false); if (mine === drawNo.current) setDrawing(false) }
   }
+  const closePreview = () => { drawNo.current++; setDrawing(false); setShowPreview(false) }
 
   // Makes the PDF and saves it straight to Downloads (no new tab to allow).
   // Save as: where and under what name is asked first (while the click still
@@ -682,9 +694,9 @@ export default function CVNewPage() {
               onClose={() => setWaOpen(false)} />
           )}
           {/* Preview modal */}
-      {showPreview && previewUrl && createPortal(
+      {showPreview && (previewUrl || previewHtml || drawing) && createPortal(
 <div className="fixed inset-0 z-[9999] bg-black/80 flex items-center justify-center p-2 sm:p-4"
-          onClick={() => setShowPreview(false)}>
+          onClick={closePreview}>
           <div className="relative bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 w-[98vw] max-w-[1600px] h-[96vh] overflow-hidden flex flex-col"
             onClick={e => e.stopPropagation()}>
 
@@ -711,14 +723,14 @@ export default function CVNewPage() {
                 </button>
                 <button
                   onClick={() => setWaOpen(true)}
-                  disabled={saving}
+                  disabled={saving || drawing}
                   title="Pick the agents, then Send"
                   className="px-4 py-1.5 rounded-lg border border-emerald-600 text-emerald-700 dark:text-emerald-300 text-xs font-semibold hover:bg-emerald-50 dark:hover:bg-emerald-900/30 disabled:opacity-50"
                 >
                   Send on WhatsApp
                 </button>
                 <button
-                  onClick={() => setShowPreview(false)}
+                  onClick={closePreview}
                   className="w-8 h-8 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 flex items-center justify-center"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -747,7 +759,13 @@ export default function CVNewPage() {
             </div>
 
             {/* Iframe */}
-            <iframe
+            {drawing && (
+              <div data-testid="cv-drawing" className="flex items-center gap-3 px-5 py-3 text-sm text-slate-600 dark:text-slate-300">
+                <span className="h-5 w-5 animate-spin rounded-full border-2 border-slate-300 border-t-teal-600" />
+                Drawing the CV of {readiness?.profile?.full_name || 'her'}…
+              </div>
+            )}
+            {previewUrl && <iframe
               src={previewUrl}
               title="CV Preview — double-click a text to change it"
               className="flex-1 w-full border-0 bg-white"
@@ -787,7 +805,7 @@ export default function CVNewPage() {
                   if (k > 0) d.documentElement.style.zoom = String(Math.min(2.5, Math.max(0.3, k)))
                 } catch {}
               }}
-            />
+            />}
           </div>
         </div>
       ,

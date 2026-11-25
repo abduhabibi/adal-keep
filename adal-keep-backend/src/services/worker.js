@@ -420,6 +420,8 @@ async function executeRun(db, page, job) {
 
     const result = await runFullWorkflow(page, ctx)
 
+    // Stopped at 10 minutes meanwhile: its end is written already and stays (a late answer never puts it back).
+    if (_limited.has(runId)) return false
     if (isCancelled(runId)) {
       await handleCancelled()
       return false
@@ -453,6 +455,7 @@ async function executeRun(db, page, job) {
     await recordFailure(db, job, errText)
     return false
   } catch (e) {
+    if (_limited.has(runId)) return false
     if (e?.cancelled || isCancelled(runId)) {
       await handleCancelled()
       return false
@@ -555,10 +558,10 @@ export async function stopAtLimit(db, job, page) {
     await appendLog(db, job.id, `⛔ ${LIMIT_NOTE[0].toUpperCase()}${LIMIT_NOTE.slice(1)} (${Math.round(RUN_LIMIT_MS / 60000)} min is the most a robot works at one task) — the tab is released`, 'warn')
   } catch (e) { console.warn(`[worker] run #${job.id}: could not write the stop: ${e.message}`) }
   try { await page?.close?.() } catch {}
-  setTimeout(() => _limited.delete(job.id), 60000).unref?.()
 }
 
 async function runJob(db, job) {
+  _limited.delete(job.id)
   let page = null, historyId = null
   try {
     // A run the scanner queued (nobody pressed a button now):
@@ -675,7 +678,7 @@ async function runJob(db, job) {
     // for good, its tab released, and the queue goes on — even when the workflow itself is stuck.
     const clock = startRunClock({ waiting: () => isWaiting(job.id) })
     const work = executeRun(db, page, job).then(() => 'done', (e) => { if (!_limited.has(job.id)) throw e; return 'limit' })
-    work.catch(() => {})
+    work.catch(() => {}).finally(() => { if (_limited.has(job.id)) setTimeout(() => _limited.delete(job.id), 1000).unref?.() })
     try {
       const first = await Promise.race([work, clock.hit.then(() => 'limit')])
       if (first === 'limit') await stopAtLimit(db, job, page)
@@ -1027,18 +1030,8 @@ export async function runAgencyManager(db) {
         }
 
         case 'submit_police_certificate': {
-          // Never a second police run: one already queued/running/waiting/done,
-          // or one that failed in the last 12 hours (same rule as autoTrigger).
-          const existing = await db('automation_queue')
-            .where({ profile_id: d.profileId, workflow_id: 'police_certificate' })
-            .where(function () {
-              this.whereIn('status', ['pending', 'running', 'paused', 'done'])
-                .orWhere(function () {
-                  this.where('status', 'failed')
-                    .andWhere('updated_at', '>', new Date(Date.now() - 12 * 3600 * 1000).toISOString())
-                })
-            })
-            .first()
+          // Never a second police run by itself, however the first ended (one try; a person presses it again).
+          const existing = await db('automation_queue').where({ profile_id: d.profileId, workflow_id: 'police_certificate' }).first('id')
           if (existing) { skipped++; break }
           const gate = await assertPoliceReady(d.profileId, { handle: db })
           if (!gate.ok) {

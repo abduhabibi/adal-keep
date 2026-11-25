@@ -27,7 +27,7 @@ test('Musaned once, after her CV', () => {
   }
   const now = new Date().toISOString(), old = new Date(Date.now() - 3 * 3600e3).toISOString()
   assert.equal(wantsMusaned(p, { musaned_add_candidate: { id: 1, status: 'failed', updated_at: now } }, true), false)
-  assert.equal(wantsMusaned(p, { musaned_add_candidate: { id: 1, status: 'failed', updated_at: old } }, true), true)
+  assert.equal(wantsMusaned(p, { musaned_add_candidate: { id: 1, status: 'failed', updated_at: old } }, true), false, 'one try: a person presses it again')
   // Deleted from Musaned on purpose: not put back by itself.
   assert.equal(wantsMusaned(p, { musaned_add_candidate: { id: 1, status: 'done' }, musaned_delete: { id: 2, status: 'done' } }, true), false)
 })

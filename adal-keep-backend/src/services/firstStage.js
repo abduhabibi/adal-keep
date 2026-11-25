@@ -11,9 +11,8 @@
  *      "Musaned: Add candidate" is queued once (it waits while Adal Browser
  *      is closed, like the other robots nobody pressed).
  *
- * Never twice: a girl whose CV could not be made is left for an hour; a
- * Musaned run that is in line, done or failed in the last 2 hours is not
- * queued again. Only girls added from 3 days before it first ran (first_stage_since).
+ * Never twice: a girl whose CV could not be made is left for an hour; with a
+ * Musaned run of hers, however it ended, none is queued by itself again. Only girls added from 3 days before it first ran (first_stage_since).
  * Settings key first_stage_auto = '0' turns it off.
  */
 import { seal } from './accountVault.js'
@@ -40,11 +39,10 @@ export function wantsMusaned(p, runs = {}, hasCv = false) {
   if (!hasCv) return false
   // Chosen already (Musaned's date, or her employer's contract on her profile): never back to Musaned.
   if (p.musaned_stage || isChosen(p)) return false
-  const r = runs.musaned_add_candidate
-  if (r) {
-    if (['pending', 'running', 'paused', 'done'].includes(r.status)) return false
-    if (r.status === 'failed' && Date.now() - new Date(r.updated_at || 0).getTime() < 2 * 60 * 60 * 1000) return false
-  }
+  // One try: a run that ended in any way (done, failed, stopped at 10 minutes, stopped by a person) is not started
+  // again by itself — a person presses it. (2026-11-25, live: one stopped at 10 minutes is 'cancelled', which was not
+  // counted: the scan queued her again 2 minutes later, two girls in turn for hours.)
+  if (runs.musaned_add_candidate) return false
   if (goneFromMusaned(runs)) return false
   return true
 }

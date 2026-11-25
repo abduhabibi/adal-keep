@@ -523,7 +523,9 @@ body[data-picking="1"] .search-pad { display: none !important; }
    painted once, still — so the processor and the graphics chip are free while
    the window just sits there (the drifting layers and flowing titles kept an
    8 GB PC's graphics busy every frame). Small "live" dots (a run working, a
-   new message) still pulse. */
+   new message) pulse three times, then stay lit: one dot pulsing for ever drew
+   the window 60 times a second, all day (2026-11-25: 6 % of the office PC). */
+.animate-pulse, .animate-ping, .animate-bounce, .journey-pulse { animation-iteration-count: 3 !important; }
 [data-theme="gradient"] .gradient-backdrop span,
 [data-theme="gradient"] h1,
 .lock-backdrop span, .lock-frame, .lock-flow, .lock-button {

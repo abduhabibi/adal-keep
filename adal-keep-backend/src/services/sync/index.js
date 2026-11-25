@@ -83,6 +83,15 @@ export async function startSync(appDb, { timers = true } = {}) {
     engine, safeDir: SAFE, uploadsDir: path.join(BACKEND, 'uploads'), key: id.key, port: Number(process.env.ADAL_ADVERTISE_PORT) || Number(process.env.PORT) || 4000, name: process.env.ADAL_PC_NAME || os.hostname(), version: version(),
     addresses: () => getLanAddresses(), macs: () => disco.macsOf(), mainURL: () => mp.mainURL(), log: console,
   })
+  // Is this PC itself on a network? (roles.js: a PC that reaches nobody never takes the main role by itself)
+  node.netOk = async () => {
+    try {
+      const { url } = (await import('../chatCloud.js')).cloudConfig()
+      if (!url) return true
+      await fetch(`${url}/auth/v1/health`, { signal: AbortSignal.timeout(8000) })
+      return true
+    } catch { return false }
+  }
   node.onSlot = (s) => { setSlot(s); updateIdentity({ slot: s }) }
   // The agency's PCs find each other on the office network, with or without the main PC (peers.js).
   const { PeerFinder } = await import('./peers.js')
@@ -178,7 +187,7 @@ function startAutoRole() {
       },
     })
     if (!r) return
-    console.log(r === 'taken' ? '[sync] the main PC is gone longer than its lease: this PC takes the main role by itself' : r === 'handed-stronger' ? '[sync] a stronger PC is on: the main role goes to it' : '[sync] the main PC is back: its role is handed back to it')
+    console.log(r === 'taken' ? '[sync] the main PC is gone longer than its lease: this PC takes the main role by itself' : r === 'handed-stronger' ? '[sync] a stronger PC is on: the main role goes to it' : r === 'back' ? '[sync] this PC is back: it takes its main role again' : '[sync] the main PC is back: its role is handed back to it')
     await node.round().catch(() => {})   // the others hear it now
   }
   const t = setInterval(() => step().catch(e => console.warn('[sync] role step:', e.message)), Number(process.env.ADAL_AUTO_MAIN_MS) || 60 * 1000)

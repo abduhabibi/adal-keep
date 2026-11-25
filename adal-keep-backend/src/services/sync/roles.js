@@ -21,6 +21,12 @@
  *     it stood in for. That PC back (its heartbeat newer than the take, and
  *     reached on the office network now), the role is handed back to it.
  *     A role taken or handed by a person is never moved by itself.
+ *   • Gone is what THIS PC saw itself (2026-11-25: Main lost its role twice while it was
+ *     only restarting or off the Wi-Fi): the holder not reached and not a word of it for
+ *     AUTO_AFTER while this PC was up and looking (not the age of a copied row: a PC just
+ *     started, just woken, or with another clock took the role at once), and this PC's own
+ *     network works (netProof). The PC it was taken from takes it back itself when it was
+ *     not handed back in 10 minutes. Off: ADAL_ROLE_STEADY=0.
  *   • Equal PCs (ADAL_EQUAL_PCS, docs/equal-pcs.md): no PC is "the main
  *     PC" by install. Each PC writes how strong it is (sync_role
  *     'power:<pc_id>': cores, memory). The lease run out, the STRONGEST PC
@@ -37,12 +43,52 @@ import os from 'os'
 
 export const HEARTBEAT = Number(process.env.ADAL_SYNC_HEARTBEAT_MS) || 3 * 60 * 1000
 export const LEASE = Number(process.env.ADAL_SYNC_LEASE_MS) || 15 * 60 * 1000
+/** The role moves by itself only after this long without the holder, seen by this PC itself. */
+export const AUTO_AFTER = Number(process.env.ADAL_AUTO_MAIN_AFTER_MS) || Number(process.env.ADAL_SYNC_LEASE_MS) || 30 * 60 * 1000
+const GAP = 5 * 60 * 1000            // no look for this long (asleep, the clock moved): the wait starts again
+const BACK_AFTER = 10 * 60 * 1000    // (a run is at most 10 minutes)
+const steady = () => process.env.ADAL_ROLE_STEADY !== '0'
 
 export class Roles {
   constructor(node) {
     this.node = node
     this.cache = null
     this.listeners = new Set()
+    this.watch = new Map()    // pc_id → { seen, at, changed }: when THIS PC (its own clock) last saw a new heartbeat
+    this.lastLook = 0
+  }
+  /** Look at every PC's heartbeat: a new one counts from now, by this PC's clock. */
+  look(pcs) {
+    const now = this.node.now()
+    const gap = now - this.lastLook > GAP || now < this.lastLook
+    this.lastLook = now
+    for (const p of pcs) {
+      const w = this.watch.get(p.pc_id)
+      if (!w) this.watch.set(p.pc_id, { seen: p.seen_at, at: now, changed: 0 })
+      else if (w.seen !== p.seen_at) Object.assign(w, { seen: p.seen_at, at: now, changed: now })
+      else if (gap) w.at = now
+    }
+    if (gap) this.homeSince = 0
+  }
+  /** Gone for AUTO_AFTER as this PC saw it, and this PC is not the one that is cut off. */
+  async holderGone(l, pcs) {
+    if (!steady()) return !l.alive   // (the age of its row, by that PC's clock)
+    const pc = pcs.find(p => p.pc_id === l.holder)
+    if (!pc || pc.revoked_at || pc.suspended_at) return true
+    const st = this.node.peerState?.get(l.holder)
+    if (this.node.now() - Math.max(this.watch.get(l.holder)?.at || 0, st?.seen || 0) < AUTO_AFTER) return false
+    const ok = await this.node.netProof?.(l.holder)
+    if (ok === false && !this.saidCut) { this.saidCut = true; this.node.log?.warn?.('[sync] the main PC is not seen, but this PC reaches nobody else either: the main role is not taken') }
+    if (ok) this.saidCut = false
+    return ok !== false
+  }
+  /** On now, as this PC sees it: reached, or a new heartbeat within the lease. */
+  onNow(p) {
+    const now = this.node.now()
+    if (p.pc_id === this.me) return true
+    if (!steady()) return !!p.seen_at && now - Date.parse(p.seen_at) < LEASE
+    const c = this.watch.get(p.pc_id)?.changed
+    return !!this.node.peerState?.get(p.pc_id)?.ok || (!!c && now - c < LEASE)
   }
   get db() { return this.node.engine.db }
   get me() { return this.node.pcId }
@@ -125,22 +171,36 @@ export class Roles {
     const now = this.node.now()
     const d = this.cache?.main?.data || {}
     const pcs = await this.pcs()
+    this.look(pcs)
     if (l.holder === this.me) {
       if (d.how !== 'auto' || !d.from || d.from === this.me) return null
       const home = pcs.find(p => p.pc_id === d.from)
       if (!home || home.revoked_at || home.suspended_at) return null
       const seen = home.seen_at ? Date.parse(home.seen_at) : 0
-      if (seen <= Date.parse(d.since || 0) || now - seen > LEASE || !this.node.peerState.get(d.from)?.ok) return null
+      const st = this.node.peerState.get(d.from)
+      // (Steady: reached now, and a word of it since the role was taken here — by this PC's clock.)
+      if (steady() ? !(this.watch.get(d.from)?.changed > (this.tookAt || 0)) || now - (st?.seen || 0) > GAP : seen <= Date.parse(d.since || 0) || now - seen > LEASE) return null
+      if (!st?.ok) return null
       if (!(await canHandBack())) return null
       await this.write('main', d.from, { since: new Date(now).toISOString(), by: 'auto', how: 'handed back', from: this.me })
       return 'handed-back'
     }
-    if (l.alive) return null
     const me = pcs.find(p => p.pc_id === this.me)
     if (!me || me.suspended_at || me.revoked_at) return null
-    const alive = pcs.filter(p => p.pc_id !== l.holder && !p.revoked_at && !p.suspended_at && (p.pc_id === this.me || (p.seen_at && now - Date.parse(p.seen_at) < LEASE)))
+    // This PC was stood in for and is up again: handed back within 10 minutes, or it takes its role back.
+    if (steady() && d.how === 'auto' && d.from === this.me) {
+      this.homeSince ||= now
+      if (now - this.homeSince < BACK_AFTER) return null
+      this.homeSince = 0
+      await this.write('main', this.me, { since: new Date(now).toISOString(), by: 'auto', how: 'back', from: l.holder })
+      return 'back'
+    }
+    this.homeSince = 0
+    if (!(await this.holderGone(l, pcs))) return null
+    const alive = pcs.filter(p => p.pc_id !== l.holder && !p.revoked_at && !p.suspended_at && this.onNow(p))
     alive.sort((a, b) => (a.slot || 0) - (b.slot || 0))
     if (alive[0]?.pc_id !== this.me) return null
+    this.tookAt = now
     // Stood in for again (a chain): the role still goes back to the PC it first came from.
     const home = d.how === 'auto' && d.from ? d.from : l.holder
     await this.write('main', this.me, home === this.me
@@ -170,6 +230,7 @@ export class Roles {
     const now = this.node.now()
     const d = this.cache?.main?.data || {}
     const pcs = await this.pcs()
+    this.look(pcs)
     const reached = (id) => !!this.node.peerState?.get(id)?.ok
     const alive = (p) => !p.revoked_at && !p.suspended_at && (p.pc_id === this.me || reached(p.pc_id) || (p.seen_at && now - Date.parse(p.seen_at) < LEASE))
     const rank = (a, b) => this.powerOf(b.pc_id) - this.powerOf(a.pc_id) || (a.slot || 0) - (b.slot || 0)
@@ -183,7 +244,7 @@ export class Roles {
       await this.write('main', best.pc_id, { since: new Date(now).toISOString(), by: 'auto', how: 'stronger', from: this.me })
       return 'handed-stronger'
     }
-    if (l.holder && l.alive) return null
+    if (l.holder && !(await this.holderGone(l, pcs))) return null
     const first = pcs.filter(p => p.pc_id !== l.holder && alive(p)).sort(rank)[0]
     if (first?.pc_id !== this.me) return null
     await this.write('main', this.me, { since: new Date(now).toISOString(), by: 'auto', how: 'strongest', from: l.holder || null })

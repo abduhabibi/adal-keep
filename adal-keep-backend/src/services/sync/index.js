@@ -83,6 +83,7 @@ export async function startSync(appDb, { timers = true } = {}) {
     engine, safeDir: SAFE, uploadsDir: path.join(BACKEND, 'uploads'), key: id.key, port: Number(process.env.ADAL_ADVERTISE_PORT) || Number(process.env.PORT) || 4000, name: process.env.ADAL_PC_NAME || os.hostname(), version: version(),
     addresses: () => getLanAddresses(), macs: () => disco.macsOf(), mainURL: () => mp.mainURL(), log: console,
   })
+  node.onSlot = (s) => { setSlot(s); updateIdentity({ slot: s }) }
   // The agency's PCs find each other on the office network, with or without the main PC (peers.js).
   const { PeerFinder } = await import('./peers.js')
   node.finder = new PeerFinder(node, { port: Number(process.env.DISCOVERY_PORT) || disco.DISCOVERY_PORT, macs: () => disco.macsOf(), log: console })

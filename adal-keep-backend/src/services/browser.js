@@ -608,7 +608,8 @@ export function spaceOf(page) {
   try {
     const id = page.browserContext()?.id
     if (!id) return ''
-    return Object.entries(readSpaces()).find(([, v]) => v === id)?.[0] || ''
+    // (A space that has no name just now is never the main account's: its signed-in tab was closed as a spare copy.)
+    return Object.entries(readSpaces()).find(([, v]) => v === id)?.[0] || '?'
   } catch { return '' }
 }
 

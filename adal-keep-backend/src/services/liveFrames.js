@@ -4,6 +4,7 @@
  * live view run a second or more behind). A page that stands still sends nothing,
  * and a tab Chromium stops drawing sends nothing either, so a screenshot fills in.
  */
+import { handsBusy } from './liveHands.js'
 // A picture by request only when Chromium sent none: 0.7 s while nothing came yet. Then a still page costs nothing
 // (a whole picture asked for every second took 2.4 s each on a 2-core PC, 2026-11-25): it is looked at every 5 s,
 // and only a tab that changed without Chromium saying so (it stopped drawing it) is asked every second again.
@@ -41,8 +42,9 @@ async function castOf(page) {
   }
   c.ready = (async () => {
     c.cdp = await page.createCDPSession()
-    c.cdp.on('Page.screencastFrame', ({ data, sessionId }) => {
+    c.cdp.on('Page.screencastFrame', ({ data, metadata, sessionId }) => {
       c.at = Date.now()
+      if (metadata?.deviceWidth > 0 && metadata?.deviceHeight > 0) page.__adalFrameSize = { w: metadata.deviceWidth, h: metadata.deviceHeight }   // (a click needs it: liveHands.js)
       c.blind = false; c.shot = null
       give(Buffer.from(data, 'base64'))
       // The next picture is made only after this: a page that never stands still (a spinner, an animation) drew and
@@ -57,6 +59,7 @@ async function castOf(page) {
   c.timer = setInterval(async () => {
     if (!c.subs.size && Date.now() - c.used > IDLE_MS) return stop(page, c)
     if (c.filling || Date.now() - c.at < (!c.last ? FILL_IN_MS : c.blind ? BLIND_MS : STILL_MS)) return
+    if (handsBusy(page) && c.last) return            // a person's click goes first
     c.filling = true
     try {
       const b = await shot(page)

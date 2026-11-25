@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 import api from '../services/api'
 import LiveCanvas from './LiveCanvas'
+import { clickIs, isClick, stateOf } from '../lib/liveClicks'
 
 /**
  * A robot browser opened from the sidebar's Browsers (2026-11-22): the real
@@ -78,7 +79,8 @@ export default function BrowserView({ runId, title = '', onClose }) {
         try {
           const r = await api.post(`/automations/${runId}/input`, { batch }, { timeout: 20000 })
           if (r.data?.code) giveCode(r.data.code)
-        } catch (e) { if (e.response?.status === 404) setGone('This browser is closed.') }
+          if (batch.some(isClick)) clickIs(runId, stateOf(r.data))
+        } catch (e) { if (batch.some(isClick)) clickIs(runId, 'failed'); if (e.response?.status === 404) setGone('This browser is closed.') }
       }
     } finally { pumping.current = false }
   }

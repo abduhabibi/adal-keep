@@ -2,6 +2,7 @@ import GlassSelect from './shared/GlassSelect'
 import { useEffect, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 import api from '../services/api'
+import { clickIs, isClick, stateOf } from '../lib/liveClicks'
 import LiveCanvas from './LiveCanvas'
 import { onBack, IN_PHONE_APP } from '../lib/phoneApp'
 
@@ -238,8 +239,9 @@ export default function LiveTab({ runId, fill = false, startFull = false, onClos
         try {
           const r = await api.post(`/automations/${runId}/input`, b, { timeout: 10000 })
           if (r.data?.code) copyCode(r.data.code)
+          if (isClick(b)) clickIs(runId, stateOf(r.data))
           setErr(null)
-        } catch (e) { setErr(e.response?.data?.error || (e.code === 'ECONNABORTED' ? 'The PC is slow just now: click again.' : 'The PC did not do it.')) }
+        } catch (e) { if (isClick(b)) clickIs(runId, 'failed'); setErr(e.response?.data?.error || (e.code === 'ECONNABORTED' ? 'The PC is slow just now: click again.' : 'The PC did not do it.')) }
       }
     } finally { pumping.current = false }
   }

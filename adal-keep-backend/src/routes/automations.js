@@ -7,6 +7,7 @@ import { openBrowserIfAny, openForPerson } from '../services/browser.js'
 import { waiting, answerCaptcha, doneWith, TASK_MS } from '../services/attention.js'
 import { seal } from '../services/accountVault.js'
 import { plainReason, problemOf, goneFromMusaned } from '../services/runOutcome.js'
+import { hands, handsOn } from '../services/liveHands.js'
 import { personAsked } from '../services/personPress.js'
 import { CV_COLUMNS, completeIds, isComplete, lacksOf } from '../services/cvComplete.js'
 import { assertPoliceReady, getProfileVerification, runPassportVerification } from '../services/verification.js'
@@ -1294,6 +1295,20 @@ router.post('/automations/:id/input', async (req, res) => {
   const page = await liveTab(req)
   if (!page || page === SLOW) { console.log(`[live] run ${req.params.id} input → ${page === SLOW ? 'the tab did not answer in 6 s' : 'no tab'}`); return noTab(res, page) }
   const b = req.body || {}
+  // Straight to the browser, in order, never behind a picture, never given up (services/liveHands.js).
+  if (handsOn()) {
+    try {
+      const db = req.app.locals.db, list = Array.isArray(b.batch) ? b.batch.slice(0, 200) : [b]
+      const signIn = [...list].reverse().find(x => x.kind === 'click' || (x.kind === 'mouse' && x.type === 'up'))
+      const asked = signIn ? bounded(pressesSignIn(page, signIn), 1000).catch(() => false) : false   // asked beside, the click does not wait for it
+      const move = list.every(x => (x.kind === 'mouse' && x.type === 'move') || x.kind === 'wheel')
+      const r = await hands(page, list, { waitMs: move ? 0 : 1200, other: (x) => personInput(db, req.params.id, page, x),
+        log: (x, ms, err) => { if (!err || x.kind !== 'mouse' || x.type !== 'move') console.log(`[live] run ${req.params.id} ${what(x)} → ${err ? `failed: ${String(err.message || err).slice(0, 80)}` : 'taken'} (${ms} ms)`) } })
+      const code = r.code || (signIn && await asked ? await codeOfRun(db, req.params.id).catch(() => null) : null)
+      if (list.some(x => x.kind === 'reload')) import('../services/freshForm.js').then(f => f.refillAfterReload(db, req.params.id, page)).catch(() => {})
+      return res.json({ ok: true, code, sent: r.sent, taken: r.taken, ...(r.error ? { error: r.error.message } : {}) })
+    } catch (e) { return res.status(e.status || 500).json({ error: e.message }) }
+  }
   // A burst of mouse moves, wheel turns and keys from the browser view: done in order, answered at once.
   if (Array.isArray(b.batch)) {
     let code = null

@@ -57,8 +57,8 @@ test('REGRESSION: works on a Puppeteer page (sendCharacter, no insertText)', asy
   assert.equal(ok, true, 'must not fail on a Puppeteer page')
   assert.deepEqual(
     calls.map(c => c[0]),
-    ['sendCharacter', 'sendCharacter', 'sendCharacter', 'sendCharacter', 'sendCharacter', 'sendCharacter'],
-    'one sendCharacter per character'
+    ['sendCharacter'],
+    'the whole value at once'
   )
   assert.equal(calls.map(c => c[1]).join(''), 'Kuwait')
 })
@@ -73,7 +73,11 @@ test('works on a Playwright page (insertText, no sendCharacter)', async () => {
 test('prefers sendCharacter when BOTH are present', async () => {
   const { page, calls } = fakePage(['sendCharacter', 'insertText'])
   await insertTextCompat(page, 'ET')
-  assert.deepEqual(calls.map(c => c[0]), ['sendCharacter', 'sendCharacter'])
+  assert.deepEqual(calls, [['sendCharacter', 'ET']])
+  process.env.ADAL_PASTE_ALL = '0'
+  await insertTextCompat(page, 'ET')
+  delete process.env.ADAL_PASTE_ALL
+  assert.deepEqual(calls.slice(1).map(c => c[1]), ['E', 'T'], 'off: letter by letter')
 })
 
 test('falls back to type() when neither bulk API exists', async () => {

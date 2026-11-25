@@ -27,7 +27,7 @@ import { getActiveEmployee } from './activeEmployee.js'
 import { isAppLocked } from './subscription.js'
 import { towerHeld } from './tower.js'
 import { plainReason, workflowName, withInternetCheck } from './runOutcome.js'
-import { openRunTab, forgetRunTab, tabOfRun, handTabToPerson, findRunTab, activeRunIds, keepingRunIds, tidySiteTabs, hostOf, codeBoxUp, spaceForRun, peerOf, tabAnswers } from './tabManager.js'
+import { openRunTab, forgetRunTab, tabOfRun, handTabToPerson, findRunTab, activeRunIds, keepingRunIds, tidySiteTabs, hostOf, codeBoxUp, spaceForRun, peerOf, tabAnswers, closeTarget } from './tabManager.js'
 import { registerTab, unregisterTab, noteLink } from './bandwidth.js'
 import { createRunQueue } from './runQueue.js'
 import { reportRuns } from './busy.js'
@@ -615,7 +615,7 @@ async function runJob(db, job) {
       const at = new Date(Date.now() + 2 * 60000).toISOString()
       await db('automation_queue').where('id', job.id).update({
         status: 'pending',
-        pause_reason: 'Waiting for Adal Browser to be open',
+        pause_reason: WAIT_BROWSER,
         updated_at: at,
       })
       return
@@ -689,6 +689,16 @@ async function runJob(db, job) {
       const here = await getBrowser()
       const space2 = await spaceForRun(db, here, job).catch(() => null)
       page = await openRunTab(here, job.id, { workflowId: job.workflow_id, busyRuns: await activeRunIds(db), keepRuns: await keepingRunIds(db), space: space2, quiet: true })
+    }
+    // A tab taken on this PC that does not answer (2026-11-25, Main: a run started in a dead sign-in tab and hung):
+    // closed, a fresh one at once.
+    if (!onDevice(job) && page.__adalReused && !(await tabAnswers(page, 5000))) {
+      await appendLog(db, job.id, 'The tab on the site does not answer — closed, a fresh one opened', 'warn')
+      console.warn(`[worker] run #${job.id}: its tab (${page.url().slice(0, 60)}) does not answer — closed, a fresh one opened`)
+      const dead = page
+      forgetRunTab(job.id)
+      page = await openRunTab(await getBrowser(), job.id, { workflowId: job.workflow_id, space, quiet: true, fresh: true })
+      await closeTarget(dead)
     }
     // Which account the tab is: its title starts with the account's name.
     try {
@@ -880,10 +890,20 @@ export async function reviveSignIns(db, now = Date.now(), { tabLive = _tabLive }
   return { back, ended }
 }
 
-export async function claimNextJob(db, exclude = [], lanes = new Set()) {
+/**
+ * Lanes of the runs working now, as the database says (one Musaned tab per account: the second run waits in line
+ * until the first ends — also one another program of this PC started). One not touched for 15 minutes holds nothing.
+ */
+export async function workingLanes(db, mine = [], now = Date.now()) {
+  const rows = await db('automation_queue').where('status', 'running').where('started_at', '>', new Date(now - 15 * 60e3).toISOString())
+    .select('id', 'workflow_id', 'account_id', 'context').catch(() => [])
+  return new Set(rows.map(laneOf).filter(Boolean))
+}
+
+export async function claimNextJob(db, exclude = [], lanes = new Set(), { wait = null } = {}) {
   if (isAppLocked()) return null // trial over and not unlocked: no runs start
   if (towerHeld()) return null   // Adal support held the robots on this PC (Admin → Fleet → Suspend)
-  lanes = new Set([...lanes, ...(await signInLanes(db))])
+  lanes = new Set([...lanes, ...(await signInLanes(db)), ...(await workingLanes(db, exclude))])
   for (let i = 0; i < 5; i++) {
     const q = readyJobsQuery(db)
     if (exclude.length) q.whereNotIn('id', exclude)
@@ -892,6 +912,9 @@ export async function claimNextJob(db, exclude = [], lanes = new Set()) {
     const rows = await q.orderBy('id', 'asc').limit(lanes.size ? 50 : 1)
     const row = rows.find(r => !lanes.has(laneOf(r)))
     if (!row) return null
+    // A run only the scanner asked for, the robot browser closed: it waits in line, it is not started and put back
+    // (2026-11-25, Main: two such runs "started — 1/1 working" in the same second, again and again).
+    if (wait && isNobodys(row) && !onDevice(row) && await wait(row)) continue
     const now = new Date().toISOString()
     const updated = await db('automation_queue')
       .where('id', row.id)
@@ -914,13 +937,23 @@ async function mayClaim() {
   return _gateOk
 }
 
+const WAIT_BROWSER = 'Waiting for Adal Browser to be open'
+const waitsForBrowser = (db) => async (row) => {
+  try {
+    if (await openBrowserIfAny()) return false
+    if (LAN_ROBOTS) { const rb = await import('./remoteBrowsers.js'); await rb.hear?.(); if (rb.freeStrongDevice()) return false }
+    await db('automation_queue').where({ id: row.id, status: 'pending' }).update({ pause_reason: WAIT_BROWSER, updated_at: new Date(Date.now() + 2 * 60000).toISOString() })
+    return true
+  } catch { return false }
+}
+
 let _runs = null
 function runs(db) {
   if (!_runs) {
     _runs = createRunQueue({
       max: MAX_RUNS,
       isIdle: (id) => isWaiting(id),
-      claimNext: async (exclude, lanes) => ((await mayClaim()) ? claimNextJob(db, exclude, lanes) : null),
+      claimNext: async (exclude, lanes) => ((await mayClaim()) ? claimNextJob(db, exclude, lanes, { wait: waitsForBrowser(db) }) : null),
       laneOf,
       runJob: (job) => runJob(db, job),
     })
@@ -1137,8 +1170,9 @@ export async function closeSavedRuns(db) {
   const browser = await openBrowserIfAny()
   if (!browser) return
   const { savedOnPage } = await import('./musanedWorkflow.js')
+  const liveRuns = await activeRunIds(db)
   for (const r of rows) {
-    const page = await findRunTab(browser, r.id, r.workflow_id)
+    const page = await findRunTab(browser, r.id, r.workflow_id, { liveRuns })
     if (!page || !(await savedOnPage(page))) continue
     const now = new Date().toISOString()
     let log = []
@@ -1165,8 +1199,9 @@ async function continueSignedIn(db) {
   if (!rows.length) return
   const browser = await openBrowserIfAny()
   if (!browser) return
+  const liveRuns = await activeRunIds(db)
   for (const r of rows) {
-    const page = await findRunTab(browser, r.id, r.workflow_id)
+    const page = await findRunTab(browser, r.id, r.workflow_id, { liveRuns })
     if (!page) continue
     // A person pressed Sign in on a waiting run: its code box is up and Adal Keep has the code.
     if (hostOf(page.url()) !== 'tawtheeq.musaned.com.sa' && !(await codeBoxUp(page) && await hasAuthenticator(r))) continue

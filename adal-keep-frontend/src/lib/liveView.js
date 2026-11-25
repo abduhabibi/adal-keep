@@ -12,6 +12,7 @@ const KEEP_MS = 10000          // the stream stays this long after the last view
 const DEAD_MS = 12000          // nothing at all (not even "still here") this long: connect again
 const BACKOFF = [250, 500, 1000, 2000, 3000]
 const hubs = new Map()
+const last = new Map()         // the last picture of the tabs looked at (8): shown at once when one is picked again
 
 const u32 = (a, o = 0) => new DataView(a.buffer, a.byteOffset).getUint32(o)
 
@@ -27,11 +28,12 @@ async function openStream(runId, signal) {
 }
 
 function makeHub(runId) {
-  const canvas = document.createElement('canvas')
+  const was = last.get(runId)
+  const canvas = was || document.createElement('canvas')
   const g = canvas.getContext('2d', { alpha: false })
   const kept = new Map()      // picture id → ImageBitmap (the last 8)
   const h = {
-    runId, canvas, views: new Set(), seen: false, frames: 0, at: 0,
+    runId, canvas, views: new Set(), seen: !!was, frames: 0, at: 0,
     meta: { url: '', title: '', codeBox: false }, state: 'connecting', text: 'Opening the robot\'s browser…',
     ac: null, tries: 0, closeT: null, alive: true, chain: Promise.resolve(),
   }
@@ -95,7 +97,7 @@ function makeHub(runId) {
     }
   }
   h.start = () => { h.done = run() }
-  h.stop = () => { h.alive = false; h.ac?.abort(); for (const b of kept.values()) b.close?.(); kept.clear() }
+  h.stop = () => { h.alive = false; if (h.seen) { last.delete(runId); last.set(runId, canvas); if (last.size > 8) last.delete(last.keys().next().value) }; h.ac?.abort(); for (const b of kept.values()) b.close?.(); kept.clear() }
   return h
 }
 
@@ -114,4 +116,4 @@ export function watchLive(runId, fn) {
   }]
 }
 /** What was seen of this run last (null: nothing). */
-export const lastSeen = (runId) => { const h = hubs.get(String(runId)); return h?.seen ? h : null }
+export const lastSeen = (runId) => { const k = String(runId), h = hubs.get(k); return h?.seen ? h : last.has(k) ? { canvas: last.get(k) } : null }

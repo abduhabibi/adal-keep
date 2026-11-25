@@ -164,7 +164,7 @@ test('in a real browser', { skip: !CHROME && 'no Chrome', timeout: 110000 }, asy
   await t.test('the run is over: said, not a blank', async () => {
     await page.close(); over = true
     const w = await watch()
-    await until(() => w.states.some(s => s.state === 'gone' && s.text), 3000, 'gone')
+    await until(() => w.states.some(s => s.state === 'gone' && s.text), 6000, 'gone')
     w.ac.abort()
   })
 })

@@ -24,7 +24,7 @@ export default function BrowserView({ runId: opened, title = '', onClose }) {
   // Another tab of the robot browser, picked in the strip (LiveTabs).
   const [runId, setRunId] = useState(opened)
   useEffect(() => setRunId(opened), [opened])
-  const pick = (key) => { queue.current = []; setGone(null); setMeta({ url: '' }); setEditing(false); setRunId(key); box.current?.focus() }
+  const pick = (key) => { queue.current = []; setGone(null); setMeta({ url: '' }); setEditing(false); before.current = runId; setRunId(key); box.current?.focus() }
   // The shared stream (lib/liveView.js); a PC that has none (older): the picture stream of before.
   const [old, setOld] = useState(false)
   const [src, setSrc] = useState(null)
@@ -37,6 +37,7 @@ export default function BrowserView({ runId: opened, title = '', onClose }) {
   const [slow, setSlow] = useState(null)
   const [tries, setTries] = useState(0)
   const box = useRef(null)
+  const before = useRef(null)     // the tab shown before this one: its picture stays, dimmed, until the new one's comes
   const img = useRef(null)
   const queue = useRef([])
   const pumping = useRef(false)
@@ -152,10 +153,10 @@ export default function BrowserView({ runId: opened, title = '', onClose }) {
         <button type="button" className={btn} onClick={onClose} title="Close">✕</button>
       </div>
       <LiveTabs current={runId} onPick={pick} />
-      <div ref={box} tabIndex={0} onKeyDown={keyboard} onPaste={paste} onPointerDown={() => box.current?.focus()}
+      <div ref={box} data-live-keys="" tabIndex={0} onKeyDown={keyboard} onPaste={paste} onPointerDown={() => box.current?.focus()}
         className="relative min-h-0 flex-1 overflow-hidden bg-slate-100 outline-none dark:bg-slate-900" style={{ touchAction: 'none' }}>
         {!old && (
-          <LiveCanvas key={runId} runId={runId} canvasRef={img} onMeta={setMeta} onState={(st, t) => setGone(g => (st === 'gone' ? t || 'No robot browser is running for this now.' : null))} onUnsupported={() => setOld(true)}
+          <LiveCanvas key={runId} runId={runId} before={before.current} canvasRef={img} onMeta={setMeta} onState={(st, t) => setGone(g => (st === 'gone' ? t || 'No robot browser is running for this now.' : null))} onUnsupported={() => setOld(true)}
             onPointerDown={mouse('down')} onPointerMove={mouse('move')} onPointerUp={mouse('up')} onContextMenu={(e) => e.preventDefault()}
             className="absolute inset-0 h-full w-full cursor-default select-none object-contain" />
         )}

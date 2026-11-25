@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { watchLive } from '../lib/liveView'
+import { watchLive, lastSeen } from '../lib/liveView'
 import { onClicks } from '../lib/liveClicks'
 
 const RING = { sent: 'border-sky-500 bg-sky-500/20', taken: 'border-emerald-500 bg-emerald-500/25', waiting: 'border-amber-500 bg-amber-500/20 animate-pulse', failed: 'border-red-500 bg-red-500/20' }
@@ -10,13 +10,16 @@ const WORD = { sent: 'sent', taken: 'taken', waiting: 'sent — the page is slow
  * the last picture at once and keeps it while the line comes back, with a word about it — never a broken picture.
  * onUnsupported: that PC has no such stream (older): the caller shows its older view.
  */
-export default function LiveCanvas({ runId, canvasRef = null, onMeta, onState, onPicture, onUnsupported, className = '', style, ...events }) {
+export default function LiveCanvas({ runId, before = null, canvasRef = null, onMeta, onState, onPicture, onUnsupported, className = '', style, ...events }) {
   const own = useRef(null)
   const ref = canvasRef || own
   const cb = useRef({})
   cb.current = { onMeta, onState, onPicture, onUnsupported }
   const [note, setNote] = useState({ state: 'connecting', text: 'Opening the robot\'s browser…', seen: false })
+  const [ghost, setGhost] = useState(false)      // the last tab's picture, dimmed: not to be clicked
   useEffect(() => {
+    const b = before && before !== runId ? lastSeen(before) : null, c = ref.current
+    if (b && c && !lastSeen(runId)) { c.width = b.canvas.width; c.height = b.canvas.height; c.getContext('2d', { alpha: false }).drawImage(b.canvas, 0, 0); setGhost(true) }
     const [, leave] = watchLive(runId, (what, h) => {
       if (what === 'state') {
         if (h.state === 'unsupported') return cb.current.onUnsupported?.()
@@ -59,7 +62,7 @@ export default function LiveCanvas({ runId, canvasRef = null, onMeta, onState, o
         </div>
       )}
       <canvas ref={ref} data-testid="live-canvas" width="1366" height="900" role="img" aria-label="The robot's browser"
-        className={`${className} ${note.seen ? '' : 'invisible'}`} style={style} {...events} {...down} />
+        className={`${className} ${note.seen ? '' : ghost ? 'pointer-events-none opacity-40' : 'invisible'}`} style={style} {...events} {...down} />
       {note.state !== 'live' && (
         <div data-testid="live-note" className={`pointer-events-none absolute inset-x-0 z-10 flex justify-center p-3 ${note.seen ? 'top-0' : 'inset-y-0 items-center'}`}>
           <span className="flex items-center gap-2 rounded-full bg-slate-900/80 px-3 py-1.5 text-xs font-semibold text-white">

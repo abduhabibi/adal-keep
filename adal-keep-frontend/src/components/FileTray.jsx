@@ -90,6 +90,7 @@ export default function FileTray({ phone = false }) {
       if (window.__adalClipHook) return
       if (e.repeat || e.ctrlKey || e.altKey || e.metaKey || String(e.key).toLowerCase() !== 'c') return
       const t = e.target
+      if (t?.closest?.('[data-live-keys]') || document.activeElement?.closest?.('[data-live-keys]')) { last = 0; return }   // keys for the robot's browser
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
       const now = Date.now()
       if (now - last > 450) { last = now; return }

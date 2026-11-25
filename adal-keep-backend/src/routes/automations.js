@@ -1090,7 +1090,7 @@ router.get('/automations/:id/live', async (req, res) => {
       found = Date.now()
       return Promise.race([runTab(db, id).catch(() => null), new Promise(ok => setTimeout(() => ok(null), 6000))])
     },
-    ended: async () => /^tab-/.test(id) || /^\d+$/.test(id) && !['pending', 'running', 'paused'].includes((await db('automation_queue').where('id', id).first('status'))?.status),
+    ended: async () => /^tab-/.test(id) ? (await import('../services/openTabs.js')).tabGone(id) : /^\d+$/.test(id) && !['pending', 'running', 'paused'].includes((await db('automation_queue').where('id', id).first('status'))?.status),
     onOpen: async (page) => {
       page.__adalLookedAt = Date.now()
       const { freshForm } = await import('../services/freshForm.js')

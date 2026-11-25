@@ -92,8 +92,8 @@ async function metaOf(page, codeBox) {
  * Serves one viewer until it leaves. tabOf(): the run's tab now, or null (asked again while there is none);
  * ended(): true when the run is over (its tab will not come). onOpen(page): a person looks at it now.
  */
-export async function serveLive(req, res, { tabOf, ended = async () => false, onOpen = null, codeBox = async () => false, lookMs = 400 }) {
-  let closed = false, stop = null, page = null, metaAt = 0, metaBusy = false
+export async function serveLive(req, res, { tabOf, ended = async () => false, onOpen = null, codeBox = async () => false, lookMs = 400, goneMs = 3000 }) {
+  let closed = false, stop = null, page = null, metaAt = 0, metaBusy = false, missAt = 0
   req.on('close', () => { closed = true; try { stop?.() } catch {} })
   const pad = !!(req.headers['x-adal-pc'] && !req.headers['x-adal-flush'])
   res.socket?.setNoDelay?.(true)
@@ -119,12 +119,14 @@ export async function serveLive(req, res, { tabOf, ended = async () => false, on
       page = await tabOf().catch(() => null)
       if (closed) break
       if (!page) {
-        if (await ended().catch(() => false)) { v.say({ state: 'gone', text: 'No robot browser is running for this now.' }); await wait(2000, () => closed); continue }
+        missAt ||= Date.now()
+        // (Said to be gone only after 3 s of looking: one look missed on a busy PC is not "gone", 2026-11-25.)
+        if (await ended().catch(() => false) && Date.now() - missAt >= goneMs) { v.say({ state: 'gone', text: 'No robot browser is running for this now.' }); await wait(2000, () => closed); continue }
         v.say({ state: 'opening', text: n < 25 ? 'The robot is opening its browser…' : 'The robot browser is slow to open on this PC — still trying.' })
         await wait(lookMs, () => closed)
         continue
       }
-      n = 0
+      n = 0; missAt = 0
       v.say({ state: 'live', url: page.url() })
       // What it looked like last, at once; the fresh picture follows.
       const kept = lastPicture(page)

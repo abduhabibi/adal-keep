@@ -329,7 +329,7 @@ export default function LiveTab({ runId: opened, fill = false, startFull = false
       {view === 'picture' && <>
         {shared && (
           <div className={`relative ${full || fill ? 'flex-1 min-h-0' : 'max-h-[50vh] min-h-[10rem]'} overflow-auto rounded-lg border border-slate-200 outline-none focus:border-indigo-400 dark:border-slate-800`}
-            tabIndex={0} onKeyDown={keyboard} onPaste={paste} style={{ touchAction: zoom > 1 ? 'pan-x pan-y' : 'none' }}>
+            data-live-keys="" tabIndex={0} onKeyDown={keyboard} onPaste={paste} style={{ touchAction: zoom > 1 ? 'pan-x pan-y' : 'none' }}>
             <LiveCanvas key={runId} runId={runId} onPicture={tick} onMeta={(m) => { setCodeBox(!!m.codeBox); setMeta({ url: m.url || '', title: m.title || '' }) }}
               onState={(st) => setErr(st === 'gone' ? GONE : null)} onUnsupported={() => setShared(false)}
               onMouseDown={mouse('down')} onMouseMove={mouse('move')} onMouseUp={mouse('up')} onWheel={wheelAt} onContextMenu={(e) => e.preventDefault()}
@@ -338,7 +338,7 @@ export default function LiveTab({ runId: opened, fill = false, startFull = false
         )}
         {!shared && src && (
           <div className={`${full || fill ? 'flex-1 min-h-0' : 'max-h-[50vh]'} overflow-auto rounded-lg border border-slate-200 outline-none focus:border-indigo-400 dark:border-slate-800`}
-            tabIndex={PHONE ? undefined : 0} onKeyDown={PHONE ? undefined : keyboard} onPaste={PHONE ? undefined : paste}
+            data-live-keys="" tabIndex={PHONE ? undefined : 0} onKeyDown={PHONE ? undefined : keyboard} onPaste={PHONE ? undefined : paste}
             style={{ touchAction: zoom > 1 ? 'pan-x pan-y' : 'none' }}>
             <img src={src} alt="The run's tab on the PC" draggable={false}
               onError={() => { if (!String(src).startsWith('blob:')) { streamFailed.current = true; setSrc(null); poke.current?.() } }}

@@ -36,23 +36,43 @@ export async function applyMedicalRecord(db, profileId, buf) {
 
 /** Once at start: every profile's newest medical record sets its battery; FIT means booked. */
 export async function backfillMedical(db) {
-  const SAFE = (await import('path')).join((await import('path')).dirname((await import('url')).fileURLToPath(import.meta.url)), '..', '..', 'data', 'SafeStorage')
+  const path = (await import('path')).default
+  const { afterClicks, breath } = await import('./userUploads.js')
+  const SAFE = process.env.ADAL_SAFE_DIR || (await import('path')).join((await import('path')).dirname((await import('url')).fileURLToPath(import.meta.url)), '..', '..', 'data', 'SafeStorage')
   const fs = await import('fs')
   const rows = await db('files').join('profile_fields', 'files.profile_field_id', 'profile_fields.id')
     .where('profile_fields.name', 'Medical Report').andWhere('files.mimetype', 'application/pdf')
-    .orderBy('files.id', 'desc').select('files.path', 'profile_fields.profile_id').catch(() => [])
+    .orderBy('files.id', 'desc').leftJoin('profiles', 'profiles.id', 'profile_fields.profile_id')
+    .select('files.id', 'files.path', 'files.size', 'profile_fields.profile_id', 'profiles.medical_valid_until as until').catch(() => [])
+  // Read once each (data/medical-read.json): every start read every medical record again.
+  const DONE = process.env.ADAL_MEDICAL_READ || path.join(SAFE, '..', 'medical-read.json')
+  let read = {}
+  try { read = JSON.parse(fs.readFileSync(DONE, 'utf8')) || {} } catch {}
+  const mark = (r) => `${r.path}|${r.size ?? ''}`
+  let news = 0, set = 0
   const seen = new Set()
   for (const r of rows) {
     if (seen.has(r.profile_id)) continue
+    const was = read[r.id]?.m === mark(r) ? read[r.id] : null
+    if (was?.ok && r.until) { seen.add(r.profile_id); continue }
+    if (was && !was.ok) continue
     const file = [r.path, (await import('path')).join(SAFE, (await import('path')).basename(r.path || ''))].find(f => f && fs.existsSync(f))
     if (!file) continue
-    try { if (await applyMedicalRecord(db, r.profile_id, fs.readFileSync(file))) seen.add(r.profile_id) } catch {}
+    const t = Date.now()
+    try {
+      const ok = !!(await applyMedicalRecord(db, r.profile_id, fs.readFileSync(file)))
+      if (ok) { seen.add(r.profile_id); set++ }
+      read[r.id] = { m: mark(r), ok }
+    } catch { read[r.id] = { m: mark(r), ok: false } }
+    news++
+    await afterClicks(); await breath(Date.now() - t)
   }
+  if (news) try { fs.writeFileSync(DONE, JSON.stringify(read)) } catch {}
   try {
     const { markBookingDone } = await import('./wafidStatus.js')
     for (const p of await db('profiles').where('status', 'medical_fit').select('id')) await markBookingDone(db, p.id)
   } catch (e) { console.warn('[medical] booking marks:', e.message) }
-  if (seen.size) console.log(`[medical] ${seen.size} battery(ies) set from the medical record`)
+  if (set) console.log(`[medical] ${set} battery(ies) set from the medical record`)
 }
 
 const STEPS = [[60, '2 months'], [30, '1 month'], [14, '2 weeks'], [7, '1 week'], [3, '3 days'], [1, '1 day']]
@@ -103,6 +123,7 @@ export async function checkMedicalValidity(db) {
 
 export function startMedicalWatcher(db) {
   const run = () => checkMedicalValidity(db).catch(e => console.warn('[medical]', e.message))
-  setTimeout(() => backfillMedical(db).catch(e => console.warn('[medical] backfill:', e.message)).then(run), 30000)
+  setTimeout(run, 40000)
+  setTimeout(() => backfillMedical(db).catch(e => console.warn('[medical] backfill:', e.message)).then(run), 5 * 60000)
   setInterval(run, 60 * 60 * 1000)
 }

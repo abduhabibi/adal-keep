@@ -21,7 +21,7 @@
  *
  * Without the password nobody — not Telegram, not Adal — can read a backup.
  */
-import { waitForQuiet } from './userUploads.js'
+import { waitForQuiet, personBusy } from './userUploads.js'
 import { runsWorking } from './busy.js'
 import { vaultKey, stageVaultKey, applyStagedVaultKey } from './accountVault.js'
 import fs from 'fs'
@@ -53,6 +53,15 @@ const UPLOADS_AT_ONCE = 2
 function readState() {
   try { return JSON.parse(fs.readFileSync(STATE, 'utf8')) } catch { return {} }
 }
+// Only to look at (never changed by the caller): read again when the file changed. The schedule
+// and Settings look every few seconds, and the list of sent documents grows to megabytes.
+let peeked = { sig: '', s: {} }
+function peekState() {
+  let sig = ''
+  try { const st = fs.statSync(STATE); sig = `${st.mtimeMs}|${st.size}` } catch { return {} }
+  if (sig !== peeked.sig || Date.now() - Number(sig.split('|')[0]) < 2000) peeked = { sig, s: readState() }
+  return peeked.s
+}
 function writeState(s) {
   fs.mkdirSync(DATA, { recursive: true })
   fs.writeFileSync(STATE, JSON.stringify(s, null, 1))
@@ -64,7 +73,7 @@ const botToken = () => getSecret('telegram_bot_token') || process.env.TELEGRAM_B
 const chatOf = (s) => s.chat_id || process.env.TELEGRAM_STORAGE_CHAT || ''
 
 export function getConfig() {
-  const s = readState()
+  const s = peekState()
   return {
     chat_id: chatOf(s),
     shared: !getSecret('telegram_bot_token') && !!process.env.TELEGRAM_BOT_TOKEN,
@@ -325,9 +334,15 @@ export function setReader(fetchOne, password) {
 
 // ── What to back up ──────────────────────────────────────────────────────────
 
+// (Thousands of names: read from the disk again only when the folder changed, or after 10 minutes.)
+let listed = { at: 0, dirAt: -1, names: [] }
 function listDocuments() {
   try {
-    return fs.readdirSync(SAFE, { withFileTypes: true }).filter(d => d.isFile()).map(d => d.name)
+    const dirAt = fs.statSync(SAFE).mtimeMs, now = Date.now()
+    if (dirAt !== listed.dirAt || now - dirAt < 5000 || listed.at - dirAt < 5000 || now - listed.at > 10 * 60000) {
+      listed = { at: now, dirAt, names: fs.readdirSync(SAFE, { withFileTypes: true }).filter(d => d.isFile()).map(d => d.name) }
+    }
+    return listed.names.slice()
   } catch { return [] }
 }
 
@@ -375,21 +390,30 @@ export function rawSnapshot() {
         if (e1) { src.close(); return no(e1) }
         b.step(-1, (e2) => b.finish(() => src.close(() => {
           if (e2) return no(e2)
-          try { const buf = fs.readFileSync(out); fs.rmSync(out, { force: true }); ok(buf) } catch (e3) { no(e3) }
+          fs.promises.readFile(out).then(buf => { fs.rmSync(out, { force: true }); ok(buf) }, no)
         })))
       })
     })
   })
 }
 export const pageSizeOf = (buf) => { const n = buf.readUInt16BE(16); return n === 1 ? 65536 : n || 4096 }
+/** The same, in small steps: a big database froze the pages for a second or more. */
+async function pageHashesSlow(buf, ps) {
+  const n = Math.ceil(buf.length / ps), out = Buffer.alloc(n * 8)
+  for (let i = 0, t = Date.now(); i < n; i++) {
+    crypto.createHash('sha1').update(buf.subarray(i * ps, (i + 1) * ps)).digest().copy(out, i * 8, 0, 8)
+    if (Date.now() - t >= 15) { await new Promise(r => setTimeout(r, 45)); t = Date.now() }
+  }
+  return out
+}
 export function pageHashes(buf, ps) {
   const n = Math.ceil(buf.length / ps), out = Buffer.alloc(n * 8)
   for (let i = 0; i < n; i++) crypto.createHash('sha1').update(buf.subarray(i * ps, (i + 1) * ps)).digest().copy(out, i * 8, 0, 8)
   return out
 }
 /** The pages of buf that differ from the whole copy (its fingerprints): [4-byte head length][JSON][pages]. */
-export function makeDelta(buf, ps, baseHashes) {
-  const now = pageHashes(buf, ps), pages = []
+export function makeDelta(buf, ps, baseHashes, now = pageHashes(buf, ps)) {
+  const pages = []
   for (let i = 0; i < now.length / 8; i++) if (!now.subarray(i * 8, i * 8 + 8).equals(baseHashes.subarray(i * 8, i * 8 + 8))) pages.push(i)
   const head = Buffer.from(JSON.stringify({ ps, length: buf.length, pages }))
   const len = Buffer.alloc(4); len.writeUInt32BE(head.length)
@@ -469,7 +493,7 @@ async function sendDatabase(s, token, chat_id, password) {
   let baseHashes = null
   try { baseHashes = fs.readFileSync(BASE_HASHES) } catch {}
   if (full && baseHashes && full.ps === ps && Date.now() - new Date(full.date).getTime() < FULL_EVERY_MS) {
-    const { delta, pages } = makeDelta(raw, ps, baseHashes)
+    const { delta, pages } = makeDelta(raw, ps, baseHashes, await pageHashesSlow(raw, ps))
     const sum = crypto.createHash('sha256').update(delta).digest('hex')
     const old = s.sets.find(x => x.type === 'dbz-delta' && x.base_date === full.date)
     if (old?.sum === sum) return false // the database has not changed since the last backup
@@ -489,7 +513,7 @@ async function sendDatabase(s, token, chat_id, password) {
   const parts = await sendSet(token, chat_id, password, z, `database-${today()}`)
   s.sets = s.sets.filter(x => !['db', 'dbz', 'dbz-delta'].includes(x.type))
   s.sets.push({ type: 'dbz', date: new Date().toISOString(), parts, bytes: z.length, ps })
-  fs.writeFileSync(BASE_HASHES, pageHashes(raw, ps))
+  fs.writeFileSync(BASE_HASHES, await pageHashesSlow(raw, ps))
   writeState(s)
   return true
 }
@@ -716,7 +740,8 @@ const QUIET_MS = 10 * 60 * 1000          // full runs: at most one every 10 minu
 // Agency PCs are unplugged at night: a PC switched on whose last whole backup
 // is older than this starts one within a few minutes of starting.
 export const CATCH_UP_MS = 20 * 3600 * 1000
-const BOOT_SETTLE_MS = 90 * 1000         // let the PC finish starting first
+const BOOT_SETTLE_MS = 90 * 1000         // the last one over 20 h old: let the PC finish starting first
+const BOOT_DAY_MS = 15 * 60 * 1000       // a newer one (the evening before): never in the first minutes a person works
 const BOOT_IDLE_MAX_MS = 5 * 60 * 1000   // waits this long at most for the robots to be quiet
 const IDLE_MAX_LATE_MS = 30 * 60 * 1000  // a day-time run waits for quiet robots at most this long
 const bootAt = Date.now()
@@ -745,7 +770,7 @@ export function fullBackupDue({ now = Date.now(), lastFull = null, lastRun = nul
     return robots === 0 || sinceBoot >= BOOT_IDLE_MAX_MS
   }
   if (now - ms(lastRun) < QUIET_MS) return false
-  if (since < DB_EVERY_MS) return false
+  if (since < DB_EVERY_MS || sinceBoot < BOOT_DAY_MS) return false
   return robots === 0 || since >= DB_EVERY_MS + IDLE_MAX_LATE_MS
 }
 
@@ -783,6 +808,7 @@ const DOCS_GAP_MS = 15 * 1000            // quick runs: at most one every 15 sec
 const TICK_MS = 10 * 1000
 let kick = null
 let failures = 0
+let heldSince = 0
 /** After a failed run: when to try again (1, 2, 4, 8, 15 minutes). Exported for tests. */
 export const retryAfterMs = (n) => Math.min(15, 2 ** Math.max(0, n - 1)) * 60 * 1000
 export function startBackupSchedule(db) {
@@ -798,7 +824,7 @@ export function startBackupSchedule(db) {
       if (!cfg.enabled || !cfg.has_password || progress.running) return
       // A route: Telegram, or the online storage.
       if (!(cfg.has_token && cfg.chat_id) && !(await cloudOf(db).catch(() => null))?.agency) return
-      const s = readState()
+      const s = peekState()
       const ago = (t) => t ? Date.now() - new Date(t).getTime() : Infinity
       if (failures && s.last_error && ago(s.last_error_at) < retryAfterMs(failures)) return
 
@@ -812,6 +838,9 @@ export function startBackupSchedule(db) {
       }
 
       // The database (text first: it goes before the documents in a full run).
+      // (A person clicking: after their click, unless it waited 10 minutes already.)
+      if (!wanted && personBusy() && (!heldSince || Date.now() - heldSince < 10 * 60000)) { heldSince ||= Date.now(); return }
+      heldSince = 0
       if (!wanted && !fullBackupDue({ now: Date.now(), lastFull: lastFullAt(s), lastRun: s.last_run, bootAt, robots: runsWorking() })) return
       wanted = false
       runBackup(db).then(done('[backup] done')).catch(failed('[backup] failed:'))

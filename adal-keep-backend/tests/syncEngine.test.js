@@ -57,6 +57,8 @@ test('the same girl edited on two PCs while apart: every field kept, the same re
     // Apart: different fields, and one field both change.
     await main.app('profiles').where({ id }).update({ phone_number: '0911000000', notes: 'main note' })
     t += 1000
+    // (The triggers stamp with SQLite's own clock, not `t`: in the same millisecond the PC's id decides.)
+    await new Promise(r => setTimeout(r, 5))
     await comp.app('profiles').where({ id }).update({ status: 'ready', notes: 'companion note (later)' })
     t += 1000
     await syncPair(comp, main)

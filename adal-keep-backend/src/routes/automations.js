@@ -935,7 +935,7 @@ export function cvMissing(p, docs = new Set(), hasCv = false) {
   ].filter(Boolean)
 }
 
-// The dashboard's "Needs action today" (services/needsAction.js).
+// "Needs action today" (services/needsAction.js): older pages ask it; today's dashboard does not.
 router.get('/needs-action', async (req, res) => {
   try {
     const { needsActionToday } = await import('../services/needsAction.js')

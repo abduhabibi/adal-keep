@@ -1,0 +1,20 @@
+/* The dashboard's header: two still colours and a thin gold line. No blur, no animation, no shadow. */
+.ak-morning { display: flex; flex-direction: column; gap: 20px; padding: 24px 20px; border-radius: 24px; border: 1px solid var(--border);
+  background: var(--surface); background-image: linear-gradient(120deg, var(--band), transparent 60%); border-top: 3px solid #c9a24b; }
+.ak-morning-top { display: flex; align-items: center; gap: 16px; min-width: 0; flex: 1 1 auto; }
+.ak-morning-logo { width: 56px; height: 56px; flex: none; border-radius: 16px; object-fit: cover; border: 1px solid var(--border); background: #fff; }
+.ak-morning-title { font-size: 1.75rem; overflow-wrap: anywhere; }
+[data-theme] .ak-morning .ak-morning-title.ak-morning-title { color: var(--text) !important; }
+.ak-morning-date { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 6px; font-size: .95rem; color: var(--text-muted); }
+@media (max-width: 767px) { .ak-morning .ak-morning-dot { display: none; } }
+.ak-morning-dot { width: 4px; height: 4px; border-radius: 50%; background: #c9a24b; }
+.ak-morning-go { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; min-width: 0; }
+.ak-morning-go .ak-pill-btn { min-width: 128px; justify-content: center; }
+.ak-morning-back { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; min-height: 44px; font-size: .92rem; font-weight: 500; color: var(--text-muted); }
+.ak-morning-back:hover { color: var(--text); }
+@media (min-width: 768px) {
+  .ak-morning { flex-direction: row; align-items: center; justify-content: space-between; padding: 32px; }
+  .ak-morning-logo { width: 72px; height: 72px; border-radius: 20px; }
+  .ak-morning-title { font-size: 2.25rem; }
+  .ak-morning-go { flex-direction: column; align-items: flex-end; flex: 0 0 auto; max-width: min(40%, 240px); }
+}

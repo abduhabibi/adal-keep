@@ -43,6 +43,8 @@ type serverInfo struct {
 	Port int
 	Name string
 	Macs []string
+
+	cands []string // the addresses of a broadcast answer, not asked yet
 }
 
 // broadcastTargets returns 255.255.255.255 plus the directed broadcast
@@ -109,7 +111,14 @@ func discoverServer(timeout time.Duration) *serverInfo {
 	if os.Getenv("ADAL_NO_DISCOVERY") == "1" {
 		return nil
 	}
-	return scanForServer(4000)
+	if !sweepDue(time.Now(), networkNow()) {
+		return nil
+	}
+	info := scanForServer(4000)
+	if info != nil {
+		sweepFound()
+	}
+	return info
 }
 
 // askByBroadcast: the UDP question to the whole network (see the top).
@@ -148,12 +157,15 @@ func askByBroadcast(timeout time.Duration) *serverInfo {
 	buf := make([]byte, 1024)
 	deadline := time.Now().Add(timeout)
 	known := loadIdentity().Macs
-	var other *serverInfo // a main PC that is not the one with our card (when nothing better answers)
+	// Every answer first, then who they are: while one was asked over HTTP (a busy main PC: seconds)
+	// the time for answers ran out, and "no answer" was said with the main PC's answer unread.
+	var replies []*serverInfo
+	heard := map[string]bool{}
 
 	for time.Now().Before(deadline) {
 		n, from, err := conn.ReadFromUDP(buf)
 		if err != nil {
-			return other // deadline or socket error — either way we are done
+			break // deadline or socket error — either way we are done
 		}
 		text := strings.TrimSpace(string(buf[:n]))
 		if !strings.HasPrefix(text, discoveryResponse) {
@@ -171,30 +183,29 @@ func askByBroadcast(timeout time.Duration) *serverInfo {
 		if len(parts) > 3 && strings.TrimSpace(parts[3]) != "" {
 			name = strings.TrimSpace(parts[3])
 		}
-		ip := pickReachable(replyCandidates(from.IP, parts), port)
-		if ip == "" {
+		if heard[from.IP.String()] {
 			continue
 		}
-		info := &serverInfo{
-			URL:  "http://" + net.JoinHostPort(ip, itoa(port)),
-			IP:   ip,
-			Port: port,
-			Name: name,
-			Macs: macsInReply(parts),
+		heard[from.IP.String()] = true
+		info := &serverInfo{Port: port, Name: name, Macs: macsInReply(parts), cands: replyCandidates(from.IP, parts)}
+		if len(known) > 0 && sameCard(known, info.Macs) {
+			replies = append([]*serverInfo{info}, replies...) // the one with the card we know: first, at once
+			break
 		}
-		// Not the main PC with our number: never taken.
-		if !acceptServer(info.URL) {
+		replies = append(replies, info)
+	}
+	for _, info := range replies {
+		info.IP = pickReachable(info.cands, info.Port)
+		if info.IP == "" {
 			continue
 		}
-		// The one with the card we know: at once. Another (a new card?): only if nothing better answers.
-		if len(known) == 0 || sameCard(known, info.Macs) || len(info.Macs) == 0 {
+		info.URL = "http://" + net.JoinHostPort(info.IP, itoa(info.Port))
+		// Not the main PC with our number: never taken. Too busy to say, with the card we know: it is.
+		if acceptServer(info.URL) || (!steadyOff && wasUnknown(info.URL) && len(known) > 0 && sameCard(known, info.Macs)) {
 			return info
 		}
-		if other == nil {
-			other = info
-		}
 	}
-	return other
+	return nil
 }
 
 // infoFromURL: a serverInfo for an address that answered.
@@ -480,6 +491,10 @@ func keepFindingServer() {
 		}
 		// Not answering: looked for again every 15 s (its id, its network card, then the broadcast).
 		if tick%3 != 0 || pingServer() {
+			continue
+		}
+		// Its port opens: it is there, only busy. Nothing is searched (that makes it busier).
+		if !steadyOff && hostServer != "" && portOpens(hostServer) {
 			continue
 		}
 		// An address typed on this PC (the "cannot find the main PC" page).

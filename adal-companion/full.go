@@ -84,6 +84,12 @@ func windowHost() string {
 	if own {
 		return ownServerURL()
 	}
+	// Standing in with its own server dead: the main PC, when it is there.
+	if isActingURL(hostServer) && !steadyOff {
+		if u := mainForPages(); u != "" && !portOpens(ownServerURL()) {
+			return u
+		}
+	}
 	return strings.TrimRight(hostServer, "/")
 }
 
@@ -144,7 +150,7 @@ func learnFullCopy(root, mainURL string) {
 
 // fullLoop: the server on the copy kept running; the window follows the main PC.
 func (s *standbyRunner) fullLoop() {
-	var mainGone time.Time
+	var steps windowSteps
 	for tick := 0; ; tick++ {
 		if tick%6 == 0 { // about every minute
 			learnFullCopy(s.root, s.realMainAt([]string{hostServer}))
@@ -162,17 +168,15 @@ func (s *standbyRunner) fullLoop() {
 			}
 		}
 		// Where the window works.
-		if s.realMainAt([]string{hostServer}) != "" || s.realMainAt(s.mainCandidates()) != "" {
-			mainGone = time.Time{}
-			s.setOwn(false)
-		} else {
-			if mainGone.IsZero() {
-				mainGone = time.Now()
-			}
-			if time.Since(mainGone) >= ownAfter && fullJoined(s.root) && ownAnswers() {
-				s.setOwn(true)
-			}
+		st, _ := s.stateOf(append([]string{hostServer}, s.mainCandidates()...))
+		if st == mainGone && s.findMain() != "" {
+			st = mainUp
 		}
+		wantOwn := steps.step(time.Now(), st)
+		if wantOwn && (!fullJoined(s.root) || !ownAnswers()) {
+			wantOwn = false // its own server is not there: the window stays with the main PC
+		}
+		s.setOwn(wantOwn)
 		time.Sleep(10 * time.Second)
 	}
 }

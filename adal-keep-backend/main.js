@@ -1319,6 +1319,7 @@ initSystem().then(() => {
     // Every PC: heartbeat, Adal's signed commands, crash reports (Admin → Fleet; behind a flag).
     import('./src/services/tower.js').then(async t => t.startTower(app.locals.db, { installedVersion: (await import('./src/services/cloudSync.js')).installedVersion })).catch(e => console.warn('[tower]', e.message))
     import('./src/services/screenClip.js').then(c => c.startClipWatcher(PORT)).catch(e => console.warn('[clip]', e.message)) // double C crops the screen anywhere on this PC
+    import('./src/services/clipRelay.js').then(c => c.startClipRelay()).catch(e => console.warn('[clip]', e.message))   // a Companion: its crops reach its own window on the main PC's pages
     // New selections on Musaned, every hour, on ONE PC of the agency (the main PC picks the strongest).
     if (ROBOTS_HERE) import('./src/services/selectionCheck.js').then(s => s.startSelectionCheck(app.locals.db)).catch(e => console.warn('[selection-check]', e.message))
     if (isFollower()) {

@@ -68,11 +68,11 @@ export async function startChanges() {
     return
   }
   if (!('EventSource' in window)) return
-  const { appStream } = await import('./appStream.js')
+  const { appStream, changesStream, farWindow } = await import('./appStream.js')
   const shared = appStream()
   const open = () => {
     // On the main PC itself the window's one stream carries the changes (lib/appStream.js).
-    const es = shared || new EventSource('/api/changes')
+    const es = shared || (farWindow() ? changesStream() : new EventSource('/api/changes'))
     const got = (e) => { try { tellChanged(JSON.parse(e.data).tables) } catch {} }
     if (shared) es.addEventListener('changes', got)
     else es.onmessage = got

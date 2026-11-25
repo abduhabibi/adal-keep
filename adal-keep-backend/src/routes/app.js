@@ -33,19 +33,22 @@ router.get('/app/alive', async (req, res) => {
 })
 
 // Every window (this PC and the employees' PCs): which tables changed, as they change.
-router.get('/changes', (req, res) => {
+router.get('/changes', async (req, res) => {
   res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' })
   res.flushHeaders()
   res.write(': hello\n\n')
   const off = onChanged((c) => res.write(`data: ${JSON.stringify(c)}\n\n`))
   const ping = setInterval(() => res.write(': ping\n\n'), 25000)
-  req.on('close', () => { clearInterval(ping); off() })
+  let offClips = () => {}, gone = false
+  req.on('close', () => { gone = true; clearInterval(ping); off(); offClips() })
+  // Another PC's window: the pictures its own double C crops (a named event; older pages skip it).
+  if (!isLocal(req)) try { const c = await import('../services/clipRelay.js'); if (!gone) offClips = c.listenPC(req, res) } catch {}
 })
 
 // Double "C" in Adal Keep: Windows' own screen crop (as Win+Shift+S) on this
 // PC; the cropped picture comes back to the page (it goes into the tray).
 router.post('/app/screen-clip', async (req, res) => {
-  if (!isLocal(req) || req.headers['x-adal-cloud'] || process.platform !== 'win32') return res.status(403).json({ error: 'The screen crop works on the main PC itself: on this computer press Win+Shift+S, then Ctrl+V in Adal Keep.' })
+  if (!isLocal(req) || req.headers['x-adal-cloud'] || process.platform !== 'win32') return res.status(403).json({ error: 'The double C is not running on this computer: press Win+Shift+S, then Ctrl+V in Adal Keep.' })
   const out = path.join(os.tmpdir(), `adal-clip-${Date.now()}.png`)
   const script = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'scripts', 'screen-clip.ps1')
   execFile('powershell.exe', ['-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-File', script, '-Out', out, '-WaitSeconds', '120'],
@@ -60,7 +63,7 @@ router.post('/app/screen-clip', async (req, res) => {
 // The double-C watcher (bin/adal-clip.exe) sends its picture, or how the crop
 // stands; every open Adal Keep page of this PC gets it in its tray (services/screenClip.js).
 router.post('/app/clip', express.raw({ type: 'image/png', limit: '60mb' }), async (req, res) => {
-  if (!isLocal(req)) return res.status(403).end()
+  if (!isLocal(req)) return (await import('../services/clipRelay.js')).fromPC(req, res)   // a Companion's own watcher
   const { took } = await import('../services/screenClip.js')
   took(Buffer.isBuffer(req.body) ? req.body : null, req.query.state ? String(req.query.state) : '')
   res.json({ ok: true })
@@ -75,9 +78,7 @@ router.get('/app/clips', async (req, res) => {
   req.on('close', () => { clearInterval(ping); off() })
 })
 router.get('/app/clips/:id', async (req, res) => {
-  if (!isLocal(req)) return res.status(403).end()
-  const { clipOf } = await import('../services/screenClip.js')
-  const c = clipOf(req.params.id)
+  const c = isLocal(req) ? (await import('../services/screenClip.js')).clipOf(req.params.id) : (await import('../services/clipRelay.js')).clipFor(req, req.params.id)
   if (!c) return res.status(404).end()
   res.type('image/png').send(c.png)
 })

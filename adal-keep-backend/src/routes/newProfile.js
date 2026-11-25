@@ -63,7 +63,7 @@ router.get('/new-profile/place/:upload', async (req, res) => {
 // A scan the page is still waiting for (it asked for more than FIRST_MS): upload name ->
 // { at, step, done, payload }. The page asks GET /new-profile/result/:upload every second.
 const JOBS = new Map()
-const STEPS = { waiting: 'Waiting for the scan before it', reading: 'Reading the passport lines', checking: 'Checking the numbers', 'asking the cloud readers': 'The lines were not clear — asking the other readers', done: 'Done' }
+const STEPS = { waiting: 'Waiting for the scan before it', reading: 'Reading the passport lines', checking: 'Checking the numbers', 'asking the cloud readers': 'Not clear at first — reading the whole page', done: 'Done' }
 
 /** What the page gets for a finished scan. */
 async function payloadOf(db, file, r, t0) {
@@ -117,7 +117,8 @@ async function failureOf(file, e, t0) {
     jevReady() ? null : 'JEV has no key on this PC',
   ].filter(Boolean).join(' · ')
   console.error(`[new-profile] passport not read (${file.originalname}, ${file.size} bytes): ${why}\n${e.stack || ''}`)
-  return { upload: path.basename(file.path), filename: file.originalname, error: why, ms: Date.now() - t0 }
+  // The page shows plain words; the reasons (readers, keys) stay in the log above.
+  return { upload: path.basename(file.path), filename: file.originalname, error: 'the numbers at the bottom of the page could not be read', ms: Date.now() - t0 }
 }
 
 /**

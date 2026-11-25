@@ -61,6 +61,7 @@ const ROBOTS_HERE = robotsInApp()
 import { startScanner } from './src/services/autoScanner.js'
 import verificationRouter from './src/routes/verification.js'
 import newProfileRouter from './src/routes/newProfile.js'
+import tessFilesRouter from './src/routes/tessFiles.js'
 import cropReviewsRouter from './src/routes/cropReviews.js'
 import runHistoryRouter from './src/routes/runHistory.js'
 import runPriorityRouter from './src/routes/runPriority.js'
@@ -222,6 +223,7 @@ app.use('/api', automationsRouter)
 // 3-green-tick verification gate + the LAN endpoints the Employee-PC Companion talks to
 app.use('/api', verificationRouter)
 app.use('/api', newProfileRouter)
+app.use('/tess', tessFilesRouter)   // the passport reader's files for another PC's window
 app.use('/api', runHistoryRouter)   // what each robot did, 30 days
 app.use('/api', runPriorityRouter)  // runs waiting to start: move up/down, run next
 app.use('/api', (await import('./src/routes/tower.js')).default)   // crash reports from the pages and Go programs (Admin → Fleet)

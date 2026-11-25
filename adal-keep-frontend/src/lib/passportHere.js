@@ -16,7 +16,7 @@
  * same as saved. Uses tesseract.js inside the app (www/tess: the worker, the
  * engine and the two models, vite.config.js).
  */
-import { mrzIn, fieldsOf, placeFromLines } from './passportText'
+import { mrzIn, fieldsOf, placeFromLines, issueFromLines } from './passportText'
 
 const base = () => new URL('/tess/', location.href).href
 let readers = null
@@ -89,19 +89,32 @@ export async function readPassportHere(file) {
     if (!m) continue
     const b = ls[m.line].bbox
     const mrzTop = top + b.y0 / scale, mrzLeft = b.x0 / scale, mrzW = (b.x1 - b.x0) / scale
-    // The band where "Place of Birth" sits, measured from the MRZ.
-    let place = ''
-    try {
-      const L = Math.max(0, Math.round(mrzLeft + 0.22 * mrzW)), T = Math.max(0, Math.round(mrzTop - 0.44 * mrzW))
-      const Bt = Math.max(T + 10, Math.round(mrzTop - 0.17 * mrzW))
-      const band = piece(page, L, T, page.width - L, Bt - T, 1800)
-      place = placeFromLines(linesOf((await eng.recognize(band, {}, { blocks: true })).data))
-    } catch {}
-    const fields = { ...fieldsOf(m), ...(place ? { place_of_birth: place } : {}) }
+    // The rest follows the first answer (the page fills what it has, then these): the band where
+    // "Place of Birth" sits (measured from the MRZ), then the page above it for the date of issue.
+    const later = (async () => {
+      const out = {}
+      try {
+        const L = Math.max(0, Math.round(mrzLeft + 0.22 * mrzW)), T = Math.max(0, Math.round(mrzTop - 0.44 * mrzW))
+        const Bt = Math.max(T + 10, Math.round(mrzTop - 0.17 * mrzW))
+        const band = piece(page, L, T, page.width - L, Bt - T, 1800)
+        const place = placeFromLines(linesOf((await eng.recognize(band, {}, { blocks: true })).data))
+        if (place) out.place_of_birth = place
+      } catch {}
+      try {
+        const top0 = Math.round(page.height * 0.1), bottom = Math.round(mrzTop - 0.02 * mrzW)
+        const upper = piece(page, 0, top0, page.width, Math.max(10, bottom - top0), 1400)
+        const lines = linesOf((await eng.recognize(upper, {}, { blocks: true })).data)
+        const f = fieldsOf(m)
+        const issue = issueFromLines(lines, { date_of_birth: f.date_of_birth, date_of_expiry: f.date_of_expiry })
+        if (issue) out.passport_issue_date = issue
+        if (!out.place_of_birth) { const p2 = placeFromLines(lines); if (p2) out.place_of_birth = p2 }
+      } catch {}
+      return out
+    })()
     return {
       doc_type: 'Passport', verified: true, source: 'phone', ms: Math.round(performance.now() - t0),
       offline: true, file, filename: file.name || 'passport.jpg',
-      fields, markdown: `${m.mrz_line1}\n${m.mrz_line2}`,
+      fields: fieldsOf(m), markdown: `${m.mrz_line1}\n${m.mrz_line2}`, later,
     }
   }
   return null

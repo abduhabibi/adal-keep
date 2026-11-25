@@ -76,3 +76,47 @@ export const PLACE_ROWS = [
   { x0: 0.27, x1: 0.88, up0: 0.36, up1: 0.295 },  // the newer design: the value 0.31–0.34 above the MRZ
   { x0: 0.52, x1: 0.92, up0: 0.275, up1: 0.228 }, // the older one: 0.24–0.26, in the right-hand column
 ]
+
+// ---- the date of issue (the same rules as the PC's backend/src/services/passportVisual.js) ----
+const MONTHS = { JAN: 1, FEB: 2, MAR: 3, APR: 4, MAY: 5, JUN: 6, JUL: 7, AUG: 8, SEP: 9, SEPT: 9, OCT: 10, NOV: 11, DEC: 12 }
+const iso = (y, m, d) => `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+/** Every real date in a text: "16 APR 2007", "16 APR 07", "16/04/2007". */
+export function datesIn(text) {
+  const out = []
+  for (const m of String(text || '').toUpperCase().matchAll(/\b(\d{1,2})[\s./-]*([A-Z]{3,4})[\s./-]*(\d{4}|\d{2})\b/g)) {
+    const mo = MONTHS[m[2]]; let y = m[3]
+    if (!mo) continue
+    if (y.length === 2) y = (Number(y) > 50 ? '19' : '20') + y
+    const d = Number(m[1]); if (d >= 1 && d <= 31) out.push(iso(y, mo, d))
+  }
+  for (const m of String(text || '').matchAll(/\b(\d{1,2})[./-](\d{1,2})[./-](\d{4})\b/g)) {
+    const d = Number(m[1]), mo = Number(m[2]); if (d >= 1 && d <= 31 && mo >= 1 && mo <= 12) out.push(iso(m[3], mo, d))
+  }
+  return out
+}
+const days = (a, b) => Math.round((Date.parse(b) - Date.parse(a)) / 86400000)
+/** Passports run 5 or 10 years, ending the day before the anniversary of the issue. */
+export function fitsValidity(issue, expiry) {
+  if (!issue || !expiry) return false
+  const d = days(issue, expiry)
+  return [5, 10].some(y => Math.abs(d - Math.round(y * 365.25) + 1) <= 3)
+}
+/** The date of issue from the page's lines, or '' (a date that does not fit is never taken). known = { date_of_birth, date_of_expiry }. */
+export function issueFromLines(lines, known = {}) {
+  const exp = known.date_of_expiry, today = new Date().toISOString().slice(0, 10)
+  const ok = (d) => d && d <= today && (!known.date_of_birth || d > known.date_of_birth) && (!exp || (d < exp && fitsValidity(d, exp))) && d !== known.date_of_birth
+  const ls = (lines || []).filter(l => String(l.text || '').trim())
+  const i = ls.findIndex(l => /issu/i.test(l.text))
+  if (i >= 0) {
+    const lab = ls[i].bbox
+    const hit = datesIn(ls[i].text.replace(/.*issu\w*/i, '')).find(ok)
+    if (hit) return hit
+    for (const l of ls.slice(i + 1, i + 4)) {
+      const b = l.bbox
+      if (b.y0 < lab.y0 || b.x1 < lab.x0 - (lab.x1 - lab.x0) * 0.3 || b.x0 > lab.x1 + (lab.x1 - lab.x0)) continue
+      const d = datesIn(l.text).find(ok); if (d) return d
+    }
+  }
+  const left = [...new Set(ls.flatMap(l => datesIn(l.text)))].filter(d => d !== known.date_of_birth && d !== exp && ok(d) && exp)
+  return left.length === 1 ? left[0] : ''
+}

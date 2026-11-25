@@ -65,6 +65,9 @@ export function lockedSettingsDir({ envFile = path.join(BACKEND, '.env'), passwo
 }
 
 router.get('/companion/server-bundle', companionOnly, (req, res) => {
+  // Not signed: since 2026-11-25 a Companion takes its server from the signed release, file by file
+  // (routes/lanUpdate.js). On again for older Companions: ADAL_SERVER_BUNDLE=1.
+  if (process.env.ADAL_SERVER_BUNDLE !== '1') return res.status(404).json({ error: 'Signed releases only (/companion/lan)' })
   const node = path.join(INSTALL, 'runtime', 'node.exe')
   if (!fs.existsSync(node) || !fs.existsSync(path.join(BACKEND, 'node_modules'))) {
     return res.status(404).json({ error: 'This PC is not an installed main PC (no runtime here)' })

@@ -144,44 +144,6 @@ func TestOfficeDoorLive(t *testing.T) {
 	time.Sleep(3 * time.Minute)
 }
 
-// TestBundleLive (ADAL_BUNDLE_E2E="<main url> <key>"): the server is fetched
-// from a real main PC and put in place, this PC's data folder kept.
-func TestBundleLive(t *testing.T) {
-	v := strings.Fields(os.Getenv("ADAL_BUNDLE_E2E"))
-	if len(v) != 2 {
-		t.Skip("set ADAL_BUNDLE_E2E")
-	}
-	withTemp(t)
-	root := t.TempDir()
-	// A data folder of its own (a stand-in before): it must survive the new server.
-	os.MkdirAll(root+`\server\backend\data`, 0o755)
-	os.WriteFile(root+`\server\backend\data\keep.txt`, []byte("mine"), 0o644)
-	old := hostServer
-	hostServer = v[0]
-	defer func() { hostServer = old }()
-	keys := loadKeys()
-	keys.AccessKey = v[1]
-	saveKeys(keys)
-	s := &standbyRunner{root: root, peers: map[string]standbyPeer{}}
-	if err := s.fetchBundle(); err != nil {
-		t.Fatal(err)
-	}
-	if !hasServer(root) {
-		t.Fatal("no server in place")
-	}
-	if b, _ := os.ReadFile(root + `\server\backend\data\keep.txt`); string(b) != "mine" {
-		t.Fatal("this PC's data folder was lost")
-	}
-	if s.st.BundleVersion == "" {
-		t.Fatal("version not kept")
-	}
-	// The same version again: nothing downloaded (304).
-	if err := s.fetchBundle(); err != nil {
-		t.Fatal(err)
-	}
-	t.Logf("server in place, version %s", s.st.BundleVersion)
-}
-
 // Handing back: only the main PC comes in, so nothing saved after it read is lost.
 func TestOfficeDoorOnlyTheMainPCWhileHandingBack(t *testing.T) {
 	back := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) }))

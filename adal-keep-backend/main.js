@@ -71,6 +71,7 @@ import mainPCRouter from './src/routes/mainPC.js'
 import mobileRouter from './src/routes/mobile.js'
 import branchMergeRouter from './src/routes/branchMerge.js'
 import standbyRouter from './src/routes/standby.js'
+import lanUpdateRouter from './src/routes/lanUpdate.js'
 import wafidRouter from './src/routes/wafid.js'
 import backupRouter from './src/routes/backup.js'
 import replicaRouter from './src/routes/replica.js'
@@ -236,6 +237,7 @@ app.use('/api', (await import('./src/routes/dataRights.js')).default)   // conse
 app.use('/api', mainPCRouter)
 app.use('/api', mobileRouter)   // the phone app pairs with this PC
 app.use('/api', branchMergeRouter)
+app.use('/api', lanUpdateRouter)   // the signed release this PC runs, for its own Companions
 app.use('/api', standbyRouter)   // every Companion: the server in waiting, and its merge back
 app.use('/api', wafidRouter)
 app.use('/api', backupRouter)

@@ -281,12 +281,15 @@ func announceRobot() {
 				body[k] = v
 			}
 			var answer struct {
-				Peers []officePeer `json:"peers"`
+				Peers   []officePeer `json:"peers"`
+				Release string       `json:"release"`
+				Runs    int64        `json:"runs"`
 			}
 			if _, err := mainJSON(http.MethodPost, "/api/companion/robot-browser", body, keys.AccessKey, &answer); err != nil {
 				log.Printf("🤖 robot browser not announced: %v", err)
 			} else {
 				rememberPeers(answer.Peers)
+				heardRelease(answer.Release, answer.Runs)
 			}
 		}
 		time.Sleep(20 * time.Second)

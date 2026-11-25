@@ -195,6 +195,7 @@ func openAppWindow(root, url string) {
 	if u, err := neturl.Parse(url); err == nil && u.Scheme == "http" && u.Hostname() != "localhost" && u.Hostname() != "127.0.0.1" {
 		args = append(args, "--unsafely-treat-insecure-origin-as-secure="+u.Scheme+"://"+u.Host)
 	}
+	args = append(args, doorArgs(root)...) // its photos and documents from this PC's disk (owndoor.go)
 	// One that cannot start must not leave the person with nothing: the next one opens.
 	for _, b := range browsers() {
 		cmd := exec.Command(b, args...)

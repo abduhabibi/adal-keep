@@ -62,7 +62,9 @@ export async function list(db, { profile_id, action, limit = 200 } = {}) {
 
 /** Express middleware: opening a profile and downloading a document are lines in the log. */
 export function auditViews(req, res, next) {
-  if (req.method === 'GET') {
+  // (The online copy's own reading is not a person looking: it wrote a "viewed" line for every profile each sweep.)
+  const ownRead = req.get?.('x-adal-cloud') && !req.get?.('x-adal-who')
+  if (req.method === 'GET' && !ownRead) {
     const p = req.path
     let m
     if ((m = /^\/profiles\/(\d+)$/.exec(p))) res.on('finish', () => { if (res.statusCode < 300) record(req.app.locals.db, req, { action: 'viewed', id: Number(m[1]) }) })

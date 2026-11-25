@@ -22,6 +22,7 @@ const MAIN_ONLY = [
   /^\/sessions(\/|$)/,
   /^\/tasheer\/session$/,
   /^\/browser\/open$/,
+  /^\/scan(\/|$)/,                                           // the scanner is the main PC's
 ]
 
 // The main PC answering (checked at most every 20 s): when it does not — off, or

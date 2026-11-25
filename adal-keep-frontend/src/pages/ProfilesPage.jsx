@@ -9,6 +9,7 @@ import EmptyState from '../components/shared/EmptyState'
 import Spinner from '../components/shared/Spinner'
 import StatusBadge from '../components/shared/StatusBadge'
 import Button from '../components/shared/Button'
+import ScanButton from '../components/ScanButton'
 import Input from '../components/shared/Input'
 import { useProfileFilters } from '../components/profileFilters'
 import { JourneyFork, SHARED, BRANCHES } from '../components/ProfileJourney'
@@ -242,7 +243,8 @@ export default function ProfilesPage() {
           )}
         </>)}
         {/* On a phone: a round ＋ above the tab bar, always in reach. */}
-        <Button data-tour="new-profile" className="whitespace-nowrap hidden md:inline-flex md:ml-auto" onClick={() => navigate('/profiles/new')}>+ ፕሮፋይል አክል</Button>
+        {!onPhone() && <ScanButton className="hidden md:inline-flex md:ml-auto" />}
+        <Button data-tour="new-profile" className="whitespace-nowrap hidden md:inline-flex md:ml-2" onClick={() => navigate('/profiles/new')}>+ ፕሮፋይል አክል</Button>
         {createPortal(<button type="button" aria-label="ፕሮፋይል አክል" onClick={() => navigate('/profiles/new')}
           className="md:hidden fixed right-4 z-40 h-14 w-14 rounded-full bg-gradient-to-br from-teal-600 to-indigo-600 text-3xl font-light text-white shadow-xl active:scale-95"
           style={{ bottom: 'calc(5.5rem + env(safe-area-inset-bottom))' }}>＋</button>, document.body)}

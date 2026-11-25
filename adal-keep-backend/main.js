@@ -155,7 +155,7 @@ app.use((req, res, next) => { if (req.body === null || typeof req.body !== 'obje
 // Any change (from the PC, a phone or Admin): what it touches goes online in
 // about a second and the phones refresh their own copy (services/cloudSync.js).
 app.use('/api', (req, res, next) => {
-  if (req.method !== 'GET' && req.method !== 'HEAD' && !/^\/api\/(chat|mobile|tutor|system|updates|employees\/device|app\/clip|sync)/.test(req.originalUrl) && !/^\/api\/profiles\/\d+\/opened/.test(req.originalUrl)) {
+  if (req.method !== 'GET' && req.method !== 'HEAD' && !/^\/api\/(chat|mobile|tutor|system|updates|employees\/device|app\/clip|sync|scan)/.test(req.originalUrl) && !/^\/api\/profiles\/\d+\/opened/.test(req.originalUrl)) {
     res.on('finish', () => {
       if (res.statusCode < 400) import('./src/services/cloudSync.js').then(c => c.pushSoon(req.app.locals.db, req.originalUrl)).catch(() => {})
     })
@@ -226,6 +226,7 @@ app.use('/api', automationsRouter)
 // 3-green-tick verification gate + the LAN endpoints the Employee-PC Companion talks to
 app.use('/api', verificationRouter)
 app.use('/api', newProfileRouter)
+app.use('/api', (await import('./src/routes/scan.js')).default)   // the Scan button (WIA)
 app.use('/tess', tessFilesRouter)   // the passport reader's files for another PC's window
 app.use('/api', runHistoryRouter)   // what each robot did, 30 days
 app.use('/api', runPriorityRouter)  // runs waiting to start: move up/down, run next

@@ -6,6 +6,7 @@
  */
 import express from 'express'
 import { waiting, move } from '../services/runPriority.js'
+import { personAsked } from '../services/personPress.js'
 
 const router = express.Router()
 
@@ -16,6 +17,8 @@ router.post('/run-queue/:id/:how(up|down|next)', async (req, res) => {
   const db = req.app.locals.db
   try {
     await move(db, req.params.id, req.params.how)
+    const row = req.params.how === 'next' && await db('automation_queue').where('id', Number(req.params.id)).first()
+    if (row) await personAsked(db, row)
     res.json({ ok: true, line: await waiting(db) })
   } catch (e) { res.status(e.status || 500).json({ error: e.message }) }
 })

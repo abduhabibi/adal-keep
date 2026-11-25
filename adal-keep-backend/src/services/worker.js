@@ -33,6 +33,7 @@ import { createRunQueue } from './runQueue.js'
 import { reportRuns } from './busy.js'
 import { isCancelled, clearCancelled, markCancelled } from './cancellation.js'
 import { assertPoliceReady } from './verification.js'
+import { inCallback } from './steadyLoad.js'
 import { nobodyAsked as isNobodys } from './personPress.js'
 import { startRunClock, LIMIT_NOTE, RUN_LIMIT_MS } from './runLimit.js'
 import { begin as beginHistory, finishRun as finishHistory, prune as pruneHistory, closeStale as closeStaleHistory } from './runHistory.js'
@@ -1217,6 +1218,8 @@ async function continueSignedIn(db) {
     if (!page) continue
     // A person pressed Sign in on a waiting run: its code box is up and Adal Keep has the code.
     if (hostOf(page.url()) !== 'tawtheeq.musaned.com.sa' && !(await codeBoxUp(page) && await hasAuthenticator(r))) continue
+    // The sign-in is still coming back (its app loads): not yet (a run started over it, 2026-11-25).
+    if (inCallback(page.url())) continue
     // A blank Musaned page is not signed in: going on there paused the run again every 15 s.
     if (hostOf(page.url()) === 'tawtheeq.musaned.com.sa' && await page.evaluate(() => !(document.body?.innerText || '').trim()).catch(() => true)) continue
     await db('automation_queue').where('id', r.id).where('status', 'paused').update({ status: 'pending', updated_at: new Date().toISOString() })

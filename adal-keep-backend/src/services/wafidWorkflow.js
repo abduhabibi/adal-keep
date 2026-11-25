@@ -32,7 +32,7 @@ export async function toPage(page, url, { now = Date.now() } = {}) {
   const fresh = page.url() === url && now - (page.__adalStandbyAt || 0) < 30 * 60e3
     && await page.evaluate(() => document.readyState !== 'loading' && ![...document.querySelectorAll('input, textarea')].some(e => !['hidden', 'checkbox', 'radio', 'file', 'submit', 'button'].includes(e.type) && e.value && e.value !== e.defaultValue)).catch(() => false)
   if (fresh) return 'ready'
-  await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  await (await import('./steadyLoad.js')).steadyGoto(page, url, { log: (m) => console.log(`[wafid] ${m}`) })
   page.__adalStandbyAt = Date.now()
   return 'loaded'
 }

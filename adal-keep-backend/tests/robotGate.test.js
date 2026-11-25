@@ -1,7 +1,7 @@
 /** robotGate.test.js — 2026-11-25: on a busy 2-core PC runs waited for ever. A run waiting for a person is not work. */
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { makeGate } from '../robots/gate.mjs'
+import { makeGate, averageLoad } from '../robots/gate.mjs'
 
 test('the gate: never starved, one at a time while one works, said once', async () => {
   let t = 1000, hot = true, ours = 0
@@ -25,4 +25,17 @@ test('the gate: never starved, one at a time while one works, said once', async 
   process.env.ADAL_ROBOTS_GATE = '0'; hot = true
   assert.equal(await gate(), true, 'off')
   delete process.env.ADAL_ROBOTS_GATE
+})
+
+test('busy = the average of 15 s: a second at 100 % is not busy; a run a person pressed does not wait', async () => {
+  let t = 0, all = 0, idle = 0
+  const load = averageLoad({ times: () => ({ all, idle }), now: () => t, timer: false })
+  const flips = []
+  for (let i = 0; i < 40; i++) { t += 2500; all += 5000; idle += i % 4 ? 4900 : 0; load.take(); flips.push(load.over(0.8)) }   // one look in four at 100 %
+  assert.equal(flips.includes(true), false, 'about 27 % on average')
+  for (let i = 0; i < 8; i++) { t += 2500; all += 5000; load.take() }
+  assert.equal(load.over(0.8), true, 'full for 20 s: busy')
+  const lines = []
+  const gate = makeGate({ busy: async () => true, working: () => 1, pressed: async () => true, say: (m) => lines.push(m), now: () => t })
+  assert.equal(await gate(), true); assert.equal(lines.length, 0)
 })

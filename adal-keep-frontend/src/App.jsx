@@ -18,6 +18,7 @@ const BrokerDetailPage = lazy(() => fresh(() => import('./pages/BrokerDetailPage
 const ChecklistPage = lazy(() => fresh(() => import('./pages/ChecklistPage')))
 const OfficePage = lazy(() => fresh(() => import('./pages/OfficePage')))
 const SettingsPage = lazy(() => fresh(() => import('./pages/SettingsPage')))
+const WhatsAppSentPage = lazy(() => fresh(() => import('./pages/WhatsAppSentPage')))
 const WhatsAppLinkPage = lazy(() => fresh(() => import('./pages/WhatsAppLinkPage')))
 const NotificationsPage = lazy(() => fresh(() => import('./pages/NotificationsPage')))
 import { FileCaptureProvider } from './context/FileCaptureContext'
@@ -195,6 +196,7 @@ function Shell() {
             <Route path="cvs/templates/:id/edit" element={page(CVTemplateEditPage)} />
             <Route path="office" element={page(OfficePage)} />
             <Route path="settings" element={page(SettingsPage)} />
+            <Route path="whatsapp-sent" element={page(WhatsAppSentPage)} />
             <Route path="whatsapp" element={page(WhatsAppLinkPage)} />
             {/* The phone's More tab: every other page as one list (layout/PhoneChrome.jsx). */}
             <Route path="more" element={<Guarded><MorePage /></Guarded>} />

@@ -95,6 +95,7 @@ async function main() {
   // (ADAL_ROBOTS_EXTRAS=0: the queue only — a scratch copy's test.)
   const later = (name, f) => process.env.ADAL_ROBOTS_EXTRAS === '0' ? null : Promise.resolve().then(f).catch(e => console.warn(`[robots] ${name}:`, e.message))
   later('sessions', async () => (await import('../src/services/sessionKeeper.js')).startSessionKeeper(db))   // a day's sign-ins kept, Wafid on standby
+  later('tabs', async () => (await import('../src/services/spareTabs.js')).startSpareTabs(db))                    // one Musaned tab (an earlier start's spare ones close)
   later('lines', async () => (await import('../src/services/warmLines.js')).startWarmLines(db))                   // signed-in sites' connections stay open
   later('scanner', async () => (await import('../src/services/autoScanner.js')).startScanner(db))              // new work found every 2 min
   later('wafid', async () => (await import('../src/services/wafidStatus.js')).startWafidChecker(db))

@@ -57,7 +57,6 @@ const PRIV = SIGN ? fs.readFileSync(val('--key') || path.join(os.homedir(), '.ad
 const dirty = sh('git', ['status', '--porcelain', '--untracked-files=no', '--', 'adal-keep-backend', 'adal-keep-frontend', 'adal-companion', 'adal-launcher'])
 if (dirty) { console.error('Commit first — these are not committed:\n' + dirty); process.exit(1) }
 const sha = sh('git', ['rev-parse', 'HEAD']), short = sha.slice(0, 7)
-const COMMIT = Number(sh('git', ['log', '-1', '--pretty=%ct', sha]))
 const OUT = path.resolve(val('--out') || path.join(os.homedir(), '.adal-keep/lan-releases', short))
 const FILES = path.join(OUT, 'files')
 fs.rmSync(OUT, { recursive: true, force: true })
@@ -82,9 +81,10 @@ const patchOf = (from, to, file, extra = {}) => {
   const pt = bsdiff(from, to)
   return pt.length < to.length * 0.5 ? { from: sha256(from), ...extra, file, sha256: put(pt), size: pt.length } : null
 }
+// (One fixed time: the same files give the same piece, whatever the commit.)
 function packDir(cwd, names) {
   const f = path.join(os.tmpdir(), `adal-pack-${process.pid}-${crypto.randomBytes(4).toString('hex')}.tar`)
-  execFileSync('tar', ['-cf', f, '--sort=name', `--mtime=@${COMMIT}`, '--owner=0', '--group=0', '--numeric-owner', '--format=gnu', '-C', cwd, ...names])
+  execFileSync('tar', ['-cf', f, '--sort=name', '--mtime=@1700000000', '--owner=0', '--group=0', '--numeric-owner', '--format=gnu', '-C', cwd, ...names])
   const raw = fs.readFileSync(f); fs.unlinkSync(f)
   return { raw, gz: zlib.gzipSync(raw, { level: 9 }) }
 }

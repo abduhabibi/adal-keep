@@ -327,8 +327,7 @@ func (s *standbyRunner) followServer(u *updater, m *releaseManifest, env *envelo
 	}
 	next, err := s.stageServer(m, mark)
 	if err != nil {
-		os.RemoveAll(filepath.Join(s.root, "server.next"))
-		return err
+		return err // what came stays in server.next (checked by SHA-256): the next try goes on
 	}
 	if err := s.putServer(next, m, env); err != nil {
 		u.failed["server:"+m.SHA] = time.Now()
@@ -347,7 +346,6 @@ type staged struct {
 // stageServer: the files that differ, each checked, in server.next (nothing in place yet).
 func (s *standbyRunner) stageServer(m *releaseManifest, mark serverMark) (*staged, error) {
 	dir := filepath.Join(s.root, "server.next")
-	os.RemoveAll(dir)
 	st := &staged{dir: dir, puts: map[string]string{}, mark: mark}
 	want := map[string]string{} // where → sha
 	for rel, sha := range m.AppFiles {
@@ -412,7 +410,10 @@ func (s *standbyRunner) stageServer(m *releaseManifest, mark serverMark) (*stage
 			continue
 		}
 		f := filepath.Join(dir, sha)
-		if from := here[sha]; from != "" {
+		if fileSHA(f) == sha {
+			// here from the try before
+		} else if from := here[sha]; from != "" {
+			os.MkdirAll(dir, 0o755)
 			if err := copyFile(from, f); err != nil {
 				return nil, err
 			}
@@ -460,6 +461,7 @@ func lanPatched(m *releaseManifest, sha string, here map[string]string, dest str
 	if sum256(out) != sha {
 		return errors.New("the patched file does not match Adal's signed release")
 	}
+	os.MkdirAll(filepath.Dir(dest), 0o755)
 	return os.WriteFile(dest, out, 0o644)
 }
 
@@ -532,7 +534,6 @@ func undoServer(root string) {
 // program left to put in place is never used (one that holds this PC's data is left alone).
 func tidyServer(root string) {
 	undoServer(root)
-	os.RemoveAll(filepath.Join(root, "server.next"))
 	nw := serverDir(root) + ".new"
 	if dirExists(nw) && !dirExists(filepath.Join(nw, "backend", "data")) && !dirExists(filepath.Join(nw, "backend", "uploads")) {
 		os.RemoveAll(nw)

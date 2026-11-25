@@ -19,12 +19,62 @@ const ACCEPT = /^(image\/(jpeg|png|webp|bmp)|application\/pdf)$/
 // just to be read; 127.0.0.1:47801 has the reader in /tess like the phone app).
 const readsHere = () => (onPhone() || onCompanionOnline()) && !import.meta.env.VITE_ADMIN
 
+
+// ---- the scan's progress: a light line over the page (transform/opacity only) and the real step ----
+const STEP_TEXT = { reading: 'Reading the passport lines…', checking: 'Checking the numbers…', 'asking the cloud readers': 'The lines were not clear — asking the other readers…', waiting: 'Waiting for the scan before it…' }
+const STEP_AT = { waiting: 0, reading: 0, checking: 1, 'asking the cloud readers': 1 }
+const STYLE = `
+@keyframes adalScanLine { 0% { transform: translateY(0); opacity: 0 } 12% { opacity: 1 } 88% { opacity: 1 } 100% { transform: translateY(var(--h, 150px)); opacity: 0 } }
+@keyframes adalScanPulse { 0%, 100% { opacity: .35 } 50% { opacity: 1 } }
+.adal-scan-line { animation: adalScanLine 1.6s ease-in-out infinite; will-change: transform, opacity }
+.adal-scan-dot { animation: adalScanPulse 1.2s ease-in-out infinite }
+.adal-scan-stop .adal-scan-line, .adal-scan-stop .adal-scan-dot { animation-play-state: paused }
+@media (prefers-reduced-motion: reduce) { .adal-scan-line, .adal-scan-dot { animation: none !important } .adal-scan-line { opacity: 0 } }
+`
+/** True while the window is shown: the animation is paused when it is hidden. */
+function useVisible() {
+  const [v, setV] = useState(() => typeof document === 'undefined' || document.visibilityState !== 'hidden')
+  useEffect(() => {
+    const f = () => setV(document.visibilityState !== 'hidden')
+    document.addEventListener('visibilitychange', f)
+    return () => document.removeEventListener('visibilitychange', f)
+  }, [])
+  return v
+}
+
+function ScanView({ busy, step, secs, moving, onPhone }) {
+  const at = STEP_AT[step] ?? 0
+  return (
+    <div className={`flex w-full flex-col items-center gap-3 ${moving ? '' : 'adal-scan-stop'}`} role="status" aria-live="polite">
+      <style>{STYLE}</style>
+      <div className="relative overflow-hidden rounded-lg shadow" style={{ '--h': '150px' }}>
+        {busy.preview
+          ? <img src={busy.preview} alt="" className="block max-h-40 opacity-80" />
+          : <div className="flex h-40 w-56 items-center justify-center text-5xl">📄</div>}
+        <div className="adal-scan-line pointer-events-none absolute left-0 top-0 h-[3px] w-full bg-sky-400 shadow-[0_0_10px_2px_rgba(56,189,248,.8)]" />
+      </div>
+      <div className="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
+        <span className="adal-scan-dot h-2.5 w-2.5 rounded-full bg-sky-500" />
+        {STEP_TEXT[step] || STEP_TEXT.reading} {secs}s
+      </div>
+      <div className="flex w-56 gap-1" aria-hidden="true">
+        {['reading', 'checking', 'done'].map((k, i) => (
+          <div key={k} className={`h-1 flex-1 rounded-full transition-colors ${i <= at ? 'bg-sky-500' : 'bg-slate-300 dark:bg-slate-600'}`} />
+        ))}
+      </div>
+      {!onPhone && secs >= 5 && <p className="text-xs text-slate-500">The other readers are helping — the first sure answer fills the form.</p>}
+    </div>
+  )
+}
+
 export default function PassportFirst({ onRead, onSkip, onLater }) {
   const { capturedFiles } = useFileCapture()
   const [over, setOver] = useState(false)
   const [busy, setBusy] = useState(null)        // { name, preview, t0 }
   const [problem, setProblem] = useState(null)  // { text, result }
   const [, tick] = useState(0)
+  const [step, setStep] = useState('reading')   // the scan's real step: reading | checking | asking the cloud readers
+  const seen = useVisible()
   const inputRef = useRef(null)
   const cameraRef = useRef(null)
   const galleryRef = useRef(null)
@@ -67,8 +117,8 @@ export default function PassportFirst({ onRead, onSkip, onLater }) {
       // lines, check digits verified, and the place of birth by its position) —
       // no upload, no PC (asked on 2026-11-17).
       if (readsHere()) {
-        // Read on the phone; never more than 25 s (then typed in or read by the PC).
-        const here = await Promise.race([readPassportHere(file), new Promise(r => setTimeout(() => r(null), 25000))]).catch(() => null)
+        // Read on the phone; never more than 5 s (then the PC reads it, or it is typed in).
+        const here = await Promise.race([readPassportHere(file), new Promise(r => setTimeout(() => r(null), 5000))]).catch(() => null)
         if (here) {
           // The same passport already has a profile: said, not made twice.
           const pn = String(here.fields.passport_number || '').toUpperCase()
@@ -86,8 +136,16 @@ export default function PassportFirst({ onRead, onSkip, onLater }) {
       const fd = new FormData()
       fd.append('file', file, file.name || 'passport.jpg')
       let data
+      setStep('reading')
       try {
-        data = (await api.post('/new-profile/read', fd, { timeout: 120000, headers: { 'Content-Type': 'multipart/form-data' } })).data
+        data = (await api.post('/new-profile/read', fd, { timeout: 60000, headers: { 'Content-Type': 'multipart/form-data' } })).data
+        // The lines were not clear at once: the slower readers go on; ask how far it is, every second.
+        for (let n = 0; data?.pending && n < 150; n++) {
+          setStep(data.step || 'reading')
+          await new Promise(r => setTimeout(r, 1000))
+          data = (await api.get(`/new-profile/result/${encodeURIComponent(data.upload)}`, { adalNoCache: true, timeout: 15000 })).data
+        }
+        if (data?.pending) data = { error: 'it took too long — try a sharper picture, or fill the form by hand' }
       } catch (e) {
         // Adal Admin: the office PC did not answer — Admin reads it itself.
         if (!import.meta.env.VITE_ADMIN) throw e
@@ -157,16 +215,7 @@ export default function PassportFirst({ onRead, onSkip, onLater }) {
       >
         {busy ? (
           <>
-            {busy.preview
-              ? <img src={busy.preview} alt="" className="max-h-40 rounded-lg shadow opacity-80" />
-              : <div className="text-5xl">📄</div>}
-            <div className="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
-              <span className="h-2.5 w-2.5 rounded-full bg-sky-500 animate-pulse" />
-              Reading the passport… {secs}s
-            </div>
-            {!ON_PHONE && <p className="text-xs text-slate-500">
-              {secs < 3 ? 'Reading its bottom lines on this PC…' : 'JEV, this PC and Gemini are reading it — the first sure answer fills the form.'}
-            </p>}
+            <ScanView busy={busy} step={step} secs={secs} moving={seen} onPhone={ON_PHONE} />
           </>
         ) : (
           <>

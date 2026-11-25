@@ -449,7 +449,7 @@ async function withPlace(r, originalPath) {
   return r
 }
 
-export async function analyzeWithMineru(originalPath, { db = null, placeLater = false } = {}) {
+export async function analyzeWithMineru(originalPath, { db = null, placeLater = false, quickDone = false, quickResult = null } = {}) {
   const filename = path.basename(originalPath)
   // placeLater (the new-profile page): a verified passport is answered at once;
   // its place of birth, region and date of issue come behind it in r.placeLater
@@ -468,7 +468,8 @@ export async function analyzeWithMineru(originalPath, { db = null, placeLater = 
   const { quickMrz } = await import('./quickMrz.js')
   const tq = Date.now()
   setStage('reading the passport lines on this PC')
-  const quick = await quickMrz(originalPath, { tries: 1 }).catch(() => null)
+  // quickDone: the caller (passportScan.js) has read every crop already and found nothing.
+  const quick = quickResult || (quickDone ? null : await quickMrz(originalPath, { tries: 1 }).catch(() => null))
   if (quick) { console.log(`[classify] MRZ (OCR-B) ${Date.now() - tq}ms: Passport, every check digit verified`); return finish(quick) }
 
   // This PC starts reading at once (free). Gemini (paid) waits until JEV is
@@ -486,8 +487,8 @@ export async function analyzeWithMineru(originalPath, { db = null, placeLater = 
     jevP.then(j => (j?.result ? { jev: j.result } : null)),
     usualP.then(u => (verifiedPassport(u) ? { usual: u.r } : null)),
     // The other crops of the bottom lines (taller, upside down, sideways), meanwhile.
-    quickMrz(originalPath, { skip: 1 }).then(q => (q ? { quick: q } : null), () => null),
-  ])
+    quickDone ? null : quickMrz(originalPath, { skip: 1 }).then(q => (q ? { quick: q } : null), () => null),
+  ].filter(Boolean))
   if (first) {
     clearTimeout(timer)
     gate.cancelled = true

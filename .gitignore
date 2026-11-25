@@ -113,4 +113,7 @@ adal-admin/cv-collection/
 *.keystore
 adal-keep-backend/.wwebjs_cache/
 adal-admin/billing-ledger.json
+adal-admin/agency-locks.json
+adal-admin/seller-notes.json
+adal-admin/registrations-seen.json
 adal-admin/supabase/functions/agency-trust/shared/

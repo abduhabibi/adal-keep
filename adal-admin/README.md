@@ -61,7 +61,7 @@ heartbeats and tickets), no reload.
   opens what it is about.
 - **Agency page** (click an agency anywhere) — its PCs (light, version, restart / update /
   logs each), robots (today, 7 and 30 days), tickets, licence & payments, setup record,
-  staff, work; actions: Open Adal Keep, Message, Suspend, Update now, Collect logs, Note to
+  staff, work; actions: Open Adal Keep, Message, Lock / Unlock (the only thing that locks an agency; registry.mjs), Update now, Collect logs, Note to
   its PCs, plan, backup, ban, delete.
 - **Robots** — success per robot (today, 7, 30 days), why runs failed, who is waiting for a
   person, per agency.

@@ -305,10 +305,25 @@ async function publishLatest(manifest) {
   for (const f of [`release/${manifest.sha}.json`, 'release/latest.json']) await sb('POST', `/storage/v1/object/adal-updates/${f}`, body, { 'Content-Type': 'application/json', 'x-upsert': 'true', 'Cache-Control': 'no-cache' })
 }
 async function licenseOf(pc) {
-  try {
-    const file = await sb('GET', `/storage/v1/object/adal-updates/licenses/${pc}.json?t=${Date.now()}`)
-    return plans.verifyLicense(file, pc)
-  } catch { return null }
+  try { return await licenseToChange(pc) } catch { return null }
+}
+/**
+ * A licence about to be changed: what is on the server now, or null when there is none.
+ * Not readable now (no internet) or not signed by Adal → an error: a licence is never
+ * written over an unread one (its paid time, or a lock, would be lost).
+ */
+async function licenseToChange(pc) {
+  let file
+  try { file = await sb('GET', `/storage/v1/object/adal-updates/licenses/${pc}.json?t=${Date.now()}`) } catch (e) {
+    if (/not.?found/i.test(e.message)) return null
+    throw new Error(`The licence of PC ${pc} could not be read now (${e.message}): nothing was changed. Try again.`)
+  }
+  const ok = plans.verifyLicense(file, pc)
+  if (ok) return ok
+  // (Signed with this panel's own key: the demo and the tests.)
+  const own = file?.license && plans.signedPart(file.license)
+  if (own && own.pc === pc && fs.existsSync(SIGNING) && crypto.verify(null, Buffer.from(plans.canonical(own)), crypto.createPublicKey(fs.readFileSync(SIGNING, 'utf8')), Buffer.from(String(file.signature || ''), 'base64'))) return own
+  throw new Error(`The licence of PC ${pc} on the server is not signed by Adal: nothing was changed.`)
 }
 async function saveLicense(pc, l) {
   if (!fs.existsSync(SIGNING)) throw new Error('The signing key (~/.adal-keep/update-signing.pem) is not on this PC: licences can only be made on Adal\'s PC.')
@@ -542,7 +557,9 @@ const api = {
   'POST /api/plans/save': async (q, b) => {
     const pc = String(b.pc || '')
     if (!/^\d{6}$/.test(pc)) throw new Error('bad PC number')
-    const had = (await licenseOf(pc)) || {}
+    // (A page opened before this version: its Suspend / Allow is Lock / Unlock.)
+    if (typeof b.suspend === 'boolean') return REG.setLock({ pc, locked: b.suspend, note: b.suspend_note })
+    const had = (await licenseToChange(pc)) || {}
     const now = Date.now()
     const l = { ...had }
     if (b.plan) { if (!plans.PLANS.some(p => p.key === b.plan)) throw new Error('unknown plan'); l.plan = b.plan }
@@ -556,9 +573,6 @@ const api = {
     if (b.offer) l.offers = [...(had.offers || []).filter(o => o.feature !== b.offer), { id: `${b.offer}-${now}`, feature: b.offer, at: new Date(now).toISOString() }]
     if (b.unoffer) l.offers = (had.offers || []).filter(o => o.feature !== b.unoffer)
     if (b.note !== undefined) l.note = String(b.note || '').slice(0, 300)
-    // Suspend: Adal Keep on that PC stops until allowed again (nothing is deleted).
-    if (b.suspend === true) l.suspended = { at: new Date(now).toISOString(), note: String(b.suspend_note || '').slice(0, 300) }
-    if (b.suspend === false) delete l.suspended
     // Turned on: the offer is done.
     if (l.features) l.offers = (l.offers || []).filter(o => l.features[o.feature] !== 'on')
     const saved = await saveLicense(pc, l)
@@ -573,7 +587,7 @@ const api = {
       .filter(a => /^\d{6}$/.test(a.pc_number || '') && (!b.ids?.length || b.ids.includes(a.id)))
     let offered = 0
     for (const a of agencies) {
-      const had = (await licenseOf(a.pc_number)) || { plan: 'premium' }
+      const had = (await licenseToChange(a.pc_number)) || { plan: 'premium' }
       if (plans.featureState(f.key, had) === 'on') continue
       const now = Date.now()
       await saveLicense(a.pc_number, { ...had, offers: [...(had.offers || []).filter(o => o.feature !== f.key), { id: `${f.key}-${now}`, feature: f.key, at: new Date(now).toISOString() }] })
@@ -900,7 +914,7 @@ const api = {
     const ledger = readLedger()
     const dup = billing.duplicateOf(ledger.filter(x => x.pc === pc), p) || billing.duplicateOf(ledger, p)
     if (dup) throw new Error(`That ${p.method} reference was already recorded (${dup.date}, ${dup.amount} ETB, PC ${dup.pc}).`)
-    const had = (await licenseOf(pc)) || {}
+    const had = (await licenseToChange(pc)) || {}
     const now = Date.now()
     const until = billing.extendedUntil(had.paid_until, now, p.periods)
     await saveLicense(pc, { ...had, paid_until: until })
@@ -1215,6 +1229,9 @@ Object.assign(api, (await import('./tower.mjs')).towerApi({ rest, sb }))
 // Overview, search, one agency's page, Releases, the live stream (home.mjs: read-only).
 const HOME = (await import('./home.mjs')).homeApi({ api, rest, sb, url: URL_, key: KEY })
 Object.assign(api, HOME.routes)
+// Lock / Unlock, the registrations and each agency's details (registry.mjs).
+const REG = (await import('./registry.mjs')).registryApi({ dir: HERE, rest, readLicense: licenseToChange, saveLicense, mainAgencies, branchRe: BRANCH_RE, api, tell: async (id, t) => { if (!ADMIN_ID) await ensureAdmin(); return tell(id, t) } })
+Object.assign(api, REG.routes)
 
 http.createServer(async (req, res) => {
   const u = new URL(req.url, 'http://localhost')

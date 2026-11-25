@@ -11,7 +11,6 @@ import sharp from 'sharp'
 // picture, so pictures, Chromium and WhatsApp fit without swapping.
 sharp.cache({ files: 0 })
 if (os.totalmem() < 6 * 1024 ** 3) { sharp.cache({ memory: 24, files: 0, items: 50 }); sharp.concurrency(Math.min(2, os.cpus().length || 1)) }
-import zlib from 'zlib'
 import express from 'express'
 import musanedAccountsRouter, { accountsRouter } from './src/routes/musanedAccounts.js'
 import cors from 'cors'
@@ -97,6 +96,7 @@ import { isFollower, isCompanion, notMainPC, mainURL, instanceId } from './src/s
 import { startSync, syncRoutes, isMainRole } from './src/services/sync/index.js'
 import { moveToTrash } from './src/services/trash.js'
 import { profileFields } from './src/services/profileFields.js'
+import { packAnswers } from './src/services/packAnswers.js'
 import { pageFiles, keepPageFiles } from './src/services/pageFiles.js'
 import { startDiscoveryResponder } from './src/services/discovery.js'
 
@@ -129,27 +129,7 @@ app.use(cors((req, cb) => cb(null, { origin: originOk(req) ? (req.headers.origin
 app.use(networkGate)
 // The user's own uploads first: the online copy and the backup wait (services/userUploads.js).
 app.use(trackUserUploads)
-// Big answers go packed (gzip) — the profiles list is megabytes, and a phone
-// reads it over its own connection: packed it is about a tenth.
-app.use((req, res, next) => {
-  if (!/gzip/.test(req.headers['accept-encoding'] || '')) return next()
-  const json = res.json.bind(res)
-  res.json = (body) => {
-    let text
-    try { text = JSON.stringify(body) } catch { return json(body) }
-    if (text === undefined || text.length < 8192 || res.headersSent) return json(body)
-    zlib.gzip(text, { level: 5 }, (e, buf) => {
-      if (res.headersSent) return
-      res.type('application/json')
-      if (e) return res.send(text)
-      res.set('Content-Encoding', 'gzip')
-      res.append('Vary', 'Accept-Encoding')
-      res.send(buf)
-    })
-    return res
-  }
-  next()
-})
+app.use(packAnswers)   // big answers go packed (services/packAnswers.js)
 // strict: false — a body of just null (an older Update button sent one) is taken as nothing, not refused.
 app.use(express.json({ limit: '15mb', strict: false }))   // CV designs preview with their header image
 app.use((req, res, next) => { if (req.body === null || typeof req.body !== 'object') req.body = {}; next() })

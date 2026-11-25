@@ -274,6 +274,12 @@ function touch(s) {
 let follow = null
 export function followAgencyLicence(fn) { follow = fn; _cache.at = 0 }
 export const followsAgency = () => !!follow
+/** Until when this PC itself is paid (its code, or Adal's signed licence); 0: not. */
+function ownPaid() {
+  const s = readSide(), pc = pcNumber()
+  if (s?.unlocked_pc === pc && s?.unlock_proof === proofFor(pc)) return Infinity
+  return Math.max(s && paidOk(s, pc) ? s.paid_until : 0, licPaid())
+}
 function followed() {
   let f = null
   try { f = follow?.() } catch {}
@@ -286,6 +292,8 @@ function followed() {
   else if (l.forGood || (l.paidUntil && l.paidUntil > now)) mode = 'active'
   else if (l.mode === 'trial' && l.trialEndsAt && l.trialEndsAt > now) mode = 'trial'
   else mode = 'locked'
+  // This PC is paid for itself: the main PC's own trial (a PC standing in for it) never locks it (Nuzla, 2026-11-25).
+  if (mode === 'locked' && !cut && !l?.suspended && !suspension() && ownPaid() > now) mode = 'active'
   return { mode, l, now, cut }
 }
 

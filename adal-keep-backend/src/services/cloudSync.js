@@ -66,6 +66,8 @@ const GLOBAL = ['/setup/status', '/subscription/status', '/settings', '/profiles
   '/safety',
   // The agency's order of the steps after the EPRO: the Profiles tabs count the same everywhere.
   '/settings/journey-order',
+  // The agency's mobile number (the "Her CV" pop-up fills it in).
+  '/settings/step-popup',
   // The staff roles (Employees → Roles): the same on every PC and phone.
   '/staff-roles']
 const PER_PROFILE = (id) => [`/profiles/${id}`, `/profiles/${id}/fields`, `/profiles/${id}/automations`,

@@ -218,6 +218,7 @@ app.use('/api/visa', accountsRouter('visa_accounts', 'visa_account'))
 app.use('/api/tasheer', accountsRouter('tasheer_accounts', 'tasheer_account'))
 app.use('/api/insurance', accountsRouter('insurance_accounts', 'insurance_account'))
 app.use('/api/cv', cvRouter)
+app.use('/api', (await import('./src/routes/stepPopup.js')).default)   // the "Her CV" pop-up: the agency's mobile number
 app.use('/api/settings', settingsRouter)
 app.use('/api', (await import('./src/routes/mainProxy.js')).default)   // a Companion: the robots' live calls go to the main PC
 // Robots in Adal Robots (services/robotsInApp.js): a run's tab, the person's clicks, Stop and Continue go there.

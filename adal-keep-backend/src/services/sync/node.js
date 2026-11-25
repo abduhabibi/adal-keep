@@ -340,12 +340,20 @@ export class SyncNode {
           const down = await this.relay.download()
           const up = (await this.unacked()) ? await this.relay.upload() : { sent: 0 }
           res.relay = { ...down, ...up }
+          this.relayOkAt = this.now()
         } catch (e) { res.relay = { error: e.message } }
       }
       this.status = { last: res, error: null, rounds: this.status.rounds + 1 }
       return this.status
     })()
     try { return await this.busy } catch (e) { this.status = { ...this.status, error: e.message }; throw e } finally { this.busy = null }
+  }
+
+  /** This PC's own network works: another PC than `except` reached, the online copy a moment ago, or netOk() (index.js). */
+  async netProof(except) {
+    for (const [id, st] of this.peerState) if (id !== except && st.ok && this.now() - (st.seen || 0) < 15 * 60 * 1000) return true
+    if (this.relayOkAt && this.now() - this.relayOkAt < 10 * 60 * 1000) return true
+    return this.netOk ? !!(await this.netOk()) : true
   }
 
   /** Some PC of the agency has not had all of this PC's changes (as far as its last word goes). */

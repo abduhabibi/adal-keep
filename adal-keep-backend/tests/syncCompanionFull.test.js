@@ -14,7 +14,7 @@ import express from 'express'
 import { makePC, scratch } from './helpers/syncPCs.js'
 import { SyncNode } from '../src/services/sync/node.js'
 import { createSyncRouter } from '../src/routes/sync.js'
-import { LEASE } from '../src/services/sync/roles.js'
+import { LEASE, AUTO_AFTER } from '../src/services/sync/roles.js'
 import { joinAgency } from '../src/services/sync/bootstrap.js'
 import { okName, docNameOf } from '../src/services/sync/docs.js'
 
@@ -55,6 +55,9 @@ test('the main role moves by itself when Main is gone, and back when it returns'
   const comp = await join(main, 'Comp', { now })
   const third = await join(main, 'Third', { now })
   const all = [main, comp, third]
+  // The time goes minute by minute, every PC looking, as on a real PC.
+  const minutes = async (n, list) => { for (let i = 0; i < n; i++) { clock += 60000; for (const p of list) p.node.roles.look(await p.node.roles.pcs()) } }
+  const GONE = AUTO_AFTER / 60000 + 1
   const rounds = async (list) => { for (const p of list) await p.node.round(); for (const p of list) await p.node.round() }
   try {
     await comp.node.selfRow(); await third.node.selfRow()
@@ -76,7 +79,7 @@ test('the main role moves by itself when Main is gone, and back when it returns'
 
     await t.test('Main off longer than the lease: only the first PC alive takes it', async () => {
       await main.stop()
-      clock += LEASE + 60000
+      await minutes(GONE, [comp, third])
       await comp.node.selfRow(); await third.node.selfRow()
       await rounds([comp, third])
       assert.equal(await third.node.roles.autoStep(), null, 'not its turn: a smaller slot is alive')
@@ -105,7 +108,7 @@ test('the main role moves by itself when Main is gone, and back when it returns'
 
     await t.test('a hand-back waits for a run going (canHandBack false)', async () => {
       await main.stop()
-      clock += LEASE + 60000
+      await minutes(GONE, [comp, third])
       await comp.node.selfRow(); await third.node.selfRow()
       await rounds([comp, third])
       assert.equal(await comp.node.roles.autoStep(), 'taken')

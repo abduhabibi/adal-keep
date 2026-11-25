@@ -9,10 +9,12 @@
  * average was about 5 %. A run a person just pressed does not wait here.
  * ADAL_ROBOTS_CPU (0.8) the limit, ADAL_ROBOTS_GATE_S (20) the longest wait; ADAL_ROBOTS_GATE=0: no gate.
  */
-export function makeGate({ busy, working, say = () => {}, maxWaitMs = (Number(process.env.ADAL_ROBOTS_GATE_S) || 20) * 1000, limit = 0.8, now = Date.now, pressed = async () => false }) {
+export function makeGate({ busy, working, say = () => {}, maxWaitMs = (Number(process.env.ADAL_ROBOTS_GATE_S) || 20) * 1000, limit = 0.8, now = Date.now, pressed = async () => false, waiting = async () => true }) {
   let since = 0, told = false
   return async () => {
     if (process.env.ADAL_ROBOTS_GATE === '0') return true
+    // No run waits: nothing to hold and nothing to say (2026-11-25: "the run starts anyway" 22 times with none in line).
+    if (!(await Promise.resolve(waiting()).catch(() => true))) { since = 0; told = false; return true }
     const hot = await busy()
     // A run a person pressed starts now, whatever else this PC does.
     if (hot && await Promise.resolve(pressed()).catch(() => false)) return true

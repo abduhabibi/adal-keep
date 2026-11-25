@@ -39,3 +39,16 @@ test('busy = the average of 15 s: a second at 100 % is not busy; a run a person 
   const gate = makeGate({ busy: async () => true, working: () => 1, pressed: async () => true, say: (m) => lines.push(m), now: () => t })
   assert.equal(await gate(), true); assert.equal(lines.length, 0)
 })
+
+test('nothing is said, and nothing held, while no run waits', async () => {
+  let t = 0, line = 0
+  const lines = []
+  const gate = makeGate({ busy: async () => true, working: () => 0, waiting: async () => line > 0, say: (m) => lines.push(m), maxWaitMs: 20000, now: () => t })
+  for (let i = 0; i < 60; i++) { t += 4000; assert.equal(await gate(), true) }
+  assert.equal(lines.length, 0)
+  // A real one: its wait starts when it is there.
+  line = 1
+  assert.equal(await gate(), false); t += 12000; assert.equal(await gate(), false); t += 9000; assert.equal(await gate(), true)
+  assert.equal(lines.length, 2, lines.join('\n'))
+  line = 0; t += 60000; await gate(); assert.equal(lines.length, 2)
+})

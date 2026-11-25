@@ -86,8 +86,10 @@ async function main() {
   // A weak PC: no new run while one of ours works and the processor is over 80 % busy (robots/gate.mjs).
   const [{ makeGate, averageLoad }, { isWaiting }, { nobodyAsked }] = await Promise.all([import('./gate.mjs'), import('../src/services/attention.js'), import('../src/services/personPress.js')])
   const load = averageLoad({ times: cpuTimes })
-  const pressed = async () => { const r = await worker.readyJobsQuery(db).orderBy('id', 'asc').limit(5); return r.some(x => !nobodyAsked(x)) }
-  worker.setClaimGate(makeGate({ busy: async () => load.over(CPU_LIMIT), pressed, working: () => worker.queueSnapshot().running.filter(r => !isWaiting(r.runId)).length, say, limit: CPU_LIMIT }))
+  const line = async () => worker.readyJobsQuery(db).orderBy('id', 'asc').limit(5)
+  const pressed = async () => (await line()).some(x => !nobodyAsked(x))
+  const waiting = async () => (await line()).length > 0
+  worker.setClaimGate(makeGate({ busy: async () => load.over(CPU_LIMIT), pressed, waiting, working: () => worker.queueSnapshot().running.filter(r => !isWaiting(r.runId)).length, say, limit: CPU_LIMIT }))
   worker.startWorker(db)
   // What Adal Keep no longer runs itself (main.js, ROBOTS_HERE): it runs here.
   // (ADAL_ROBOTS_EXTRAS=0: the queue only — a scratch copy's test.)

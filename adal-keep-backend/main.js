@@ -22,6 +22,7 @@ import { exec } from 'child_process'
 import helmet from 'helmet'
 import cron from 'node-cron'
 import knexConfig from './knexfile.js'
+import { withLivingTown, fillTown } from './src/services/livingTown.js'
 import filesRouter from './src/routes/files.js'
 import multer from 'multer'
 import path from 'path'
@@ -60,6 +61,7 @@ const ROBOTS_HERE = robotsInApp()
 import { startScanner } from './src/services/autoScanner.js'
 import verificationRouter from './src/routes/verification.js'
 import newProfileRouter from './src/routes/newProfile.js'
+import tessFilesRouter from './src/routes/tessFiles.js'
 import cropReviewsRouter from './src/routes/cropReviews.js'
 import runHistoryRouter from './src/routes/runHistory.js'
 import runPriorityRouter from './src/routes/runPriority.js'
@@ -217,10 +219,12 @@ app.use('/api/settings', settingsRouter)
 app.use('/api', (await import('./src/routes/mainProxy.js')).default)   // a Companion: the robots' live calls go to the main PC
 // Robots in Adal Robots (services/robotsInApp.js): a run's tab, the person's clicks, Stop and Continue go there.
 app.use('/api', (await import('./src/services/robotsLink.js')).robotsLink)
+app.use('/api', (await import('./src/routes/musanedAsk.js')).default)   // "Make Musaned": asked only when it may be
 app.use('/api', automationsRouter)
 // 3-green-tick verification gate + the LAN endpoints the Employee-PC Companion talks to
 app.use('/api', verificationRouter)
 app.use('/api', newProfileRouter)
+app.use('/tess', tessFilesRouter)   // the passport reader's files for another PC's window
 app.use('/api', runHistoryRouter)   // what each robot did, 30 days
 app.use('/api', runPriorityRouter)  // runs waiting to start: move up/down, run next
 app.use('/api', (await import('./src/routes/tower.js')).default)   // crash reports from the pages and Go programs (Admin → Fleet)
@@ -271,6 +275,8 @@ async function initSystem() {
           console.log(`[passport details] checked ${n} profile(s) missing place of birth / issue date`)
         } catch (e) { console.warn('[passport details] backfill:', e.message) }
       }, 60000)
+      // A passport whose place of birth / issue date was not read is tried again later (not skipped for ever).
+      if (process.env.ADAL_ISOLATED !== '1') import('./src/services/passportRetry.js').then(m => m.startPassportRetry(db, { main: !notMainPC() })).catch(e => console.warn('[passport retry]', e.message))
       // (ADAL_ISOLATED=1, a scratch copy for tests: no WhatsApp, no browser — they would reach this PC's real ones.)
       if (process.env.ADAL_ISOLATED !== '1') {
         if (!notMainPC()) import('./src/services/whatsapp.js').then(w => w.startWhatsApp(db)).catch(e => console.warn('[whatsapp]', e.message))
@@ -455,7 +461,7 @@ app.get('/api/profiles', async (req, res) => {
       query = query.where('profiles.broker_id', broker_id)
     }
 
-    res.json(await query)
+    res.json((await query).map(fillTown))
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Failed to load profiles' })
@@ -497,7 +503,7 @@ app.get('/api/profiles/:id', async (req, res) => {
       .first()
 
     if (!profile) return res.status(404).json({ error: 'Not found' })
-    res.json(profile)
+    res.json(fillTown(profile))
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Failed to load profile' })
@@ -576,6 +582,7 @@ app.post('/api/profiles', async (req, res) => {
     data.created_by = (data.created_by || '').toString().trim() || 'System'
     if (data.broker_id === '' || data.broker_id === null) data.broker_id = null
     else if (data.broker_id !== undefined) data.broker_id = Number(data.broker_id)
+    withLivingTown(data)   // empty living town: her place of birth
 
     const [id] = await db('profiles').insert(data)
     const profile = await db('profiles')
@@ -675,6 +682,7 @@ app.put('/api/profiles/:id', async (req, res) => {
     if (data.broker_id === '' || data.broker_id === null) data.broker_id = null
     else if (data.broker_id !== undefined) data.broker_id = Number(data.broker_id)
 
+    withLivingTown(data, existing)   // empty living town: her place of birth
     data.updated_at = new Date().toISOString()
     await db('profiles').where('id', req.params.id).update(data)
 
@@ -1311,6 +1319,7 @@ initSystem().then(() => {
     // Every PC: heartbeat, Adal's signed commands, crash reports (Admin → Fleet; behind a flag).
     import('./src/services/tower.js').then(async t => t.startTower(app.locals.db, { installedVersion: (await import('./src/services/cloudSync.js')).installedVersion })).catch(e => console.warn('[tower]', e.message))
     import('./src/services/screenClip.js').then(c => c.startClipWatcher(PORT)).catch(e => console.warn('[clip]', e.message)) // double C crops the screen anywhere on this PC
+    import('./src/services/clipRelay.js').then(c => c.startClipRelay()).catch(e => console.warn('[clip]', e.message))   // a Companion: its crops reach its own window on the main PC's pages
     // New selections on Musaned, every hour, on ONE PC of the agency (the main PC picks the strongest).
     if (ROBOTS_HERE) import('./src/services/selectionCheck.js').then(s => s.startSelectionCheck(app.locals.db)).catch(e => console.warn('[selection-check]', e.message))
     if (isFollower()) {
@@ -1355,7 +1364,7 @@ initSystem().then(() => {
     if (ROBOTS_HERE) import("./src/services/transition.js").then(m => m.resumeTransitions(db)).catch(() => {})            // a move cut off by a restart goes on
     if (ROBOTS_HERE) startScanner(db)              // discovers new work every 2 min
     if (ROBOTS_HERE) startWafidChecker(db)         // Medical · Applied → Fit / Rejected from wafid.com
-    import('./src/services/needsAction.js').then(n => n.startNeedsAction(db, { isFollower: notMainPC })).catch(e => console.warn('[needs-action]', e.message))   // "Needs action today": one notification a day
+    if (process.env.ADAL_NEEDS_ACTION === '1') import('./src/services/needsAction.js').then(n => n.startNeedsAction(db, { isFollower: notMainPC })).catch(e => console.warn('[needs-action]', e.message))   // "Needs action today": one notification a day (off: the dashboard shows no counts)
     import('./src/services/portalHealth.js').then(p => p.startPortalHealth()).catch(() => {})
     setTimeout(() => import('./src/services/placement.js').then(p => p.sweepRecent(db)).catch(() => {}), 4 * 60 * 1000).unref?.()   // pictures put in the wrong box (last 7 days) set right
     import('./src/services/pcHealth.js').then(p => p.startPCHealth(db)).catch(() => {})   // disk space, database check, freezes (Admin sees it)   // is each portal answering? (Admin sees it)

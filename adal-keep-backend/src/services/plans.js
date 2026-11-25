@@ -12,7 +12,7 @@
  * features turned on or off for that agency alone, or offered to it (the
  * agency answers "I want it"; Adal turns it on when Adal wants).
  *
- * The PC reads it when it starts and every 5 minutes, checks the signature,
+ * The PC reads it when it starts and every 45 seconds, checks the signature,
  * and keeps the last good one (data/license.json), so it works offline too.
  * Adal Keep Admin also nudges the PC the moment it saves a licence (a Realtime
  * message on the PC's live channel, and an Adal command in keep_calls that
@@ -22,11 +22,17 @@
  * Suspended (Admin → Suspend): the licence says `suspended`; Adal Keep on
  * that PC stops (the lock screen says "suspended") until Admin allows it
  * again. Nothing is deleted. A code from the Authenticator does not lift it.
+ * Since 2026-11-25 this is the ONLY thing that locks an Adal Keep (owner:
+ * "never lock a device until I clicked lock"), besides the main PC cutting a PC
+ * off. The signed file is kept twice (data/ and outside the install folder) and
+ * the newest signed one counts, so an older copy or an edited one opens nothing.
+ * A Companion gets the main PC's signed file through the copying (roles.js) and
+ * keeps it the same way: it stays locked with the main PC off.
  */
-import fs from 'fs'
-import path from 'path'
-import { fileURLToPath } from 'url'
-import { canonical, verifyManifest, BUCKET } from './updateChannel.js'
+import { canonical, BUCKET } from './updateChannel.js'
+// The signed licence itself and Adal's lock (what is kept, what locks): adalLock.js.
+import { signedPart, verifyLicense, loadSaved, licenseNow, licenseFile, useLicense, keepAgencyLicense, lockedAgencyNumbers, __setLicenseForTest, __resetLicenseForTest } from './adalLock.js'
+export { signedPart, verifyLicense, licenseNow, licenseFile, __setLicenseForTest, __resetLicenseForTest }
 
 // One plan since 2026-11-23: Premium, everything in it (49,999 ETB / 6 months, 89,999 / 12; billing.js).
 // Licences that say basic / standard are read as Premium.
@@ -53,48 +59,24 @@ export const FEATURES = [
 export const featureOf = (key) => FEATURES.find(f => f.key === key) || null
 export const featureForWorkflow = (id) => FEATURES.find(f => f.workflows.includes(id)) || null
 
-const HERE = path.dirname(fileURLToPath(import.meta.url))
-const SAVED = path.join(HERE, '..', '..', 'data', 'license.json')
 const DAY = 86400000
 
-/** The licence's signed part (what Adal signs and the PC checks). */
-export const signedPart = (l) => ({
-  pc: String(l.pc || ''), plan: l.plan || 'premium',
-  paid_until: l.paid_until || null, trial_until: l.trial_until || null,
-  features: l.features || {}, offers: l.offers || [], note: l.note || '', at: l.at || null,
-  // Only when set: a licence that is not suspended is signed exactly as before
-  // (PCs on an older version keep accepting it).
-  ...(l.suspended ? { suspended: { at: l.suspended.at || null, note: String(l.suspended.note || '').slice(0, 300) } } : {}),
-})
 /** The licence says this PC is suspended by Adal. */
-export const isSuspended = (l = current) => !!l?.suspended
-export function verifyLicense(file, pc) {
-  if (!file?.license || !file?.signature) return null
-  const l = signedPart(file.license)
-  if (pc && l.pc !== String(pc)) return null
-  return verifyManifest(l, file.signature) ? l : null
-}
-
-let current = null // the verified licence in use
+export const isSuspended = (l = licenseNow()) => !!l?.suspended
 let dbRef = null
-function readSaved(pc) { try { return verifyLicense(JSON.parse(fs.readFileSync(SAVED, 'utf8')), pc) } catch { return null } }
-
 /** The licence in use (null: none from Adal yet — the trial, or an old unlock code). */
 export async function license() {
-  if (current) return current
+  if (licenseNow()) return licenseNow()
   const { pcNumber } = await import('./subscription.js')
-  current = readSaved(pcNumber())
-  return current
+  loadSaved(pcNumber())
+  return licenseNow()
 }
-export const licenseNow = () => current
-/** Tests only: the licence in use, without a signature. */
-export function __setLicenseForTest(l) { if (process.env.NODE_TEST_CONTEXT) current = l }
 
 /** The plan: the licence's, else Premium (the trial lets an agency try everything). */
-export function planOf(l = current) { return 'premium' }
+export function planOf(l = licenseNow()) { return 'premium' }
 
 /** on · off · offered — for one feature, for this agency. */
-export function featureState(key, l = current) {
+export function featureState(key, l = licenseNow()) {
   const f = featureOf(key)
   if (!f) return 'on'
   const own = l?.features?.[key]
@@ -125,21 +107,26 @@ export const requireFeature = (key) => (req, res, next) => {
 export async function refreshLicense() {
   const { pcNumber } = await import('./subscription.js')
   const pc = pcNumber()
+  await license()   // (what is kept here first: an older file from the server never replaces it)
   try {
     const c = await import('./chatCloud.js')
     if (!c.chatConfigured()) return license()
+    // Locked with its agency earlier and holding the main role now: that licence is read too (an Unlock opens it).
+    for (const other of lockedAgencyNumbers().filter(n => n !== pc)) {
+      const r = await c.cloudCall(dbRef, 'GET', `/storage/v1/object/authenticated/${BUCKET}/licenses/${other}.json?t=${Date.now()}`, undefined, { raw: true, headers: { 'Cache-Control': 'no-cache' } }).catch(() => null)
+      if (r?.ok) { keepAgencyLicense(await r.json().catch(() => null)); (await import('./subscription.js')).licenseChanged() }
+    }
     const res = await c.cloudCall(dbRef, 'GET', `/storage/v1/object/authenticated/${BUCKET}/licenses/${pc}.json?t=${Date.now()}`, undefined, { raw: true, headers: { 'Cache-Control': 'no-cache' } })
     if (res.status === 404 || res.status === 400) return license()
     if (!res.ok) return license()
     const file = await res.json()
     const l = verifyLicense(file, pc)
     if (!l) { console.warn('[plans] the licence on the server is not signed by Adal — ignored'); return license() }
-    const had = current
+    const had = licenseNow()
     // Never an older licence than the one in use (a copy put back to undo a suspension).
     if (had?.at && l.at && Date.parse(l.at) < Date.parse(had.at)) return had
-    current = l
+    useLicense(l, file)
     if (!had || had.at !== l.at) { try { (await import('./subscription.js')).licenseChanged() } catch {} }
-    try { fs.mkdirSync(path.dirname(SAVED), { recursive: true }); fs.writeFileSync(SAVED, JSON.stringify(file, null, 1)) } catch {}
     if (!had || had.at !== l.at) console.log(`[plans] licence from Adal: ${planOf(l)}${l.paid_until ? `, paid until ${new Date(l.paid_until).toISOString().slice(0, 10)}` : ''}${l.suspended ? ' — SUSPENDED' : ''}`)
     return l
   } catch (e) {
@@ -165,12 +152,12 @@ export function startLicenseWatch(db) {
   if (db) dbRef = db
   license().catch(() => {})
   setTimeout(() => refreshLicense().catch(() => {}), 20000)
-  // The fallback when no nudge arrives (Realtime down): every 5 minutes.
-  setInterval(() => refreshLicense().catch(() => {}), 5 * 60000).unref?.()
+  // The fallback when no nudge arrives (Realtime down): a lock or an unlock reaches a PC that is online within a minute.
+  setInterval(() => refreshLicense().catch(() => {}), 45000).unref?.()
 }
 
 /** What the pages need: the plan, each feature's state, what is offered. */
-export function planPayload(l = current) {
+export function planPayload(l = licenseNow()) {
   const plan = planOf(l)
   return {
     plan, plans: PLANS,

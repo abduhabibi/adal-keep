@@ -12,7 +12,7 @@ const keys = (m) => m.texts.map(t => t.key)
 test('CV step asks for both photos, living town and Date of Issue', () => {
   const m = missingNow({ marital_status: 'SINGLE', religion: 'Muslim', phone_number: '0912345678' }, [F('Photo'), F('Full Body Photo')], 'cv')
   assert.deepEqual(m.files, ['Photo', 'Full Body Photo'])
-  assert.deepEqual(keys(m), ['living_town', 'passport_issue_date'])
+  assert.deepEqual(keys(m), ['place_of_birth', 'passport_issue_date'])   // no living town, no place of birth: the place is asked
 })
 
 test('the next step (Musaned) is asked for early: religion, marital status, a real mobile', () => {

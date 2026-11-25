@@ -598,6 +598,7 @@ export async function runPipeline(filePath, db, analyzer, tag = '[pipeline]', op
   }
   // The region of her place of birth: a judgement, so only into an empty field.
   if (isPassport && ex.region && current && 'region' in current && !current.region) upd.region = ex.region
+  if (current && 'living_town' in current) { const { withLivingTown } = await import('./livingTown.js'); withLivingTown(upd, current) }
   await db('profiles').where('id', profileId).update(upd)
 
   // Place of birth and issue date are not in the passport's machine lines: when

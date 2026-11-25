@@ -45,6 +45,11 @@ export async function queueWafidSlip(db, profileId, trigger = 'booked') {
   const busy = await db('automation_queue').where({ profile_id: profileId, workflow_id: 'wafid_slip' })
     .whereIn('status', ['pending', 'running', 'paused']).first()
   if (busy) return { queued: false, runId: busy.id }
+  // Found missing by a check: one try by itself, then a person presses it (each check queued it again).
+  if (trigger === 'missing') {
+    const tried = await db('automation_queue').where({ profile_id: profileId, workflow_id: 'wafid_slip' }).whereIn('status', ['failed', 'cancelled']).first()
+    if (tried) return { queued: false, runId: tried.id, reason: `tried already (${tried.status})` }
+  }
   const now = new Date().toISOString()
   const [runId] = await db('automation_queue').insert({
     profile_id: profileId, workflow_id: 'wafid_slip', status: 'pending', current_step: 0,

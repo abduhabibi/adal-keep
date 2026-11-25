@@ -1,0 +1,5 @@
+/* Pop-ups over a girl's page: solid in every theme, no blur (weak PCs). */
+.ak-solid-back.ak-solid-back { background-color: #0f172a; background-color: rgba(15, 23, 42, 0.9) !important; }
+.ak-solid-pop.ak-solid-pop { background-color: #ffffff !important; opacity: 1 !important; isolation: isolate; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.35) !important; }
+.dark .ak-solid-pop.ak-solid-pop, [data-theme="dark"] .ak-solid-pop.ak-solid-pop { background-color: #111827 !important; }
+[data-theme="gradient"] .ak-solid-pop.ak-solid-pop { background-color: #0b0b14 !important; border-color: rgba(255, 255, 255, 0.14) !important; }

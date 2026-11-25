@@ -13,7 +13,10 @@ export async function startClipWatch() {
   started = true
   let wait = null
   // The window's one stream (lib/appStream.js) carries the pictures as "clips" events.
-  const shared = (await import('./appStream.js')).appStream()
+  const { appStream, changesStream, farWindow } = await import('./appStream.js')
+  // On another PC: the line /api/changes it has anyway (its own watcher's pictures come through the main PC).
+  const shared = appStream() || (farWindow() ? changesStream() : null)
+  if (!shared && !/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) return   // (an online copy: no PC's crops here)
   const es = shared || new EventSource('/api/app/clips')
   const got = async (e) => {
     let m = {}

@@ -12,14 +12,14 @@ import path from 'path'
 const IMAGE = /\.(jpe?g|png|webp)$/i
 const BLOCK = /^(PLACE|BIRTH|OF|DATE|ISSUE|ISSUED|EXPIRY|AUTHORITY|SEX|NATIONALITY|PASSPORT|FEDERAL|REPUBLIC|ETHIOPIAN|M|F)$/
 
-function cleanPlace(v) {
+export function cleanPlace(v) {
   const s = String(v || '').toUpperCase().replace(/[^A-Z\s'-]/g, ' ').replace(/\s+/g, ' ').trim()
   if (s.length < 2 || s.length > 40) return ''
   if (s.split(' ').every(w => BLOCK.test(w))) return ''
   return s
 }
 /** An issue date that makes sense: after birth, before expiry and today. */
-function cleanIssue(v, p) {
+export function cleanIssue(v, p) {
   const m = String(v || '').match(/^(\d{4})-(\d{2})-(\d{2})$/)
   if (!m) return ''
   const d = m[0], today = new Date().toISOString().slice(0, 10)
@@ -31,31 +31,47 @@ function cleanIssue(v, p) {
 
 const missing = (p) => ({ place: !String(p.place_of_birth || '').trim(), issue: !String(p.passport_issue_date || '').trim() })
 
-export async function fillPassportDetails(db, profileId, imagePath, log = console.log) {
+export async function fillPassportDetails(db, profileId, imagePath, log = console.log, { retry = false, ask = null } = {}) {   // ask: a stand-in for Gemini (tests)
   let p = await db('profiles').where('id', profileId).first()
   if (!p || !imagePath || !fs.existsSync(imagePath)) return {}
   let need = missing(p)
   if (!need.place && !need.issue) return {}
   const got = {}
   const take = (f, src) => {
+    const before = Object.keys(got).length
     if (need.place && !got.place_of_birth) { const v = cleanPlace(f.place_of_birth); if (v) got.place_of_birth = v }
     if (need.issue && !got.passport_issue_date) { const v = cleanIssue(f.date_of_issue || f.passport_issue_date, p); if (v) got.passport_issue_date = v }
-    if (Object.keys(got).length) log(`[passport details] profile #${profileId}: ${Object.entries(got).map(([k, v]) => `${k}=${v}`).join(', ')} (${src})`)
+    if (Object.keys(got).length > before) log(`[passport details] profile #${profileId}: ${Object.entries(got).map(([k, v]) => `${k}=${v}`).join(', ')} (${src})`)
   }
   const done = () => (!need.place || got.place_of_birth) && (!need.issue || got.passport_issue_date)
 
-  // 1. Gemini's quick model (a few seconds, almost no work for this PC).
-  {
+  // 0. This PC reads them from the page first (passportVisual.js): no network, a second or two.
+  if (IMAGE.test(imagePath)) {
+    try {
+      const { readVisual } = await import('./passportVisual.js')
+      const known = { date_of_birth: p.date_of_birth, date_of_expiry: p.passport_expiry_date }
+      let v = await readVisual(imagePath, { fields: known, turn: 0 })
+      if (!v) {
+        // A page photographed turned: the bottom lines say how far.
+        const { quickMrz } = await import('./quickMrz.js')
+        const q = await quickMrz(imagePath, { tries: 5 }).catch(() => null)
+        if (q?.turn) v = await readVisual(imagePath, { fields: known, turn: q.turn })
+      }
+      if (v) take({ place_of_birth: v.place_of_birth, date_of_issue: v.date_of_issue }, 'this PC, from the page')
+    } catch (e) { log(`[passport details] profile #${profileId}: local read failed (${e.message})`) }
+  }
+  // 1. Gemini's quick model fills what is left (a few seconds, almost no work for this PC).
+  if (!done()) {
     try {
       const { classifyWithGemini, isGeminiConfigured } = await import('./geminiClassifier.js')
-      if (isGeminiConfigured()) {
-        const r = await classifyWithGemini({ filePath: imagePath, filename: path.basename(imagePath), models: [process.env.GEMINI_QUICK_MODEL || 'gemini-3.5-flash-lite'] })
-        take(r?.fields || {}, 'Gemini')
+      if (ask || isGeminiConfigured()) {
+        const r = ask ? await ask(imagePath) : await classifyWithGemini({ filePath: imagePath, filename: path.basename(imagePath), models: [process.env.GEMINI_QUICK_MODEL || 'gemini-3.5-flash-lite'] })
+        take(r?.fields || r || {}, 'Gemini')
       }
     } catch (e) { log(`[passport details] profile #${profileId}: Gemini did not answer (${e.message})`) }
   }
   // 2. This PC's own reading (heavy) — only when Gemini could not.
-  if (!done() && IMAGE.test(imagePath)) {
+  if (!done() && !retry && IMAGE.test(imagePath)) {
     try {
       const { extractPassport, extractVisualFields } = await import('./passportOcr.js')
       const ocr = await extractPassport(imagePath)
@@ -69,6 +85,7 @@ export async function fillPassportDetails(db, profileId, imagePath, log = consol
   const upd = {}
   if (need.place && got.place_of_birth) upd.place_of_birth = got.place_of_birth
   if (need.issue && got.passport_issue_date) upd.passport_issue_date = got.passport_issue_date
+  if (upd.place_of_birth && 'living_town' in p) { const { withLivingTown } = await import('./livingTown.js'); withLivingTown(upd, p) }
   if (Object.keys(upd).length) await db('profiles').where('id', profileId).update({ ...upd, updated_at: new Date().toISOString() })
   return upd
 }

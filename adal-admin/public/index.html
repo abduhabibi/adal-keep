@@ -1014,7 +1014,7 @@ async function plansView() {
         <td>${d.features.map(f => { const st = a.states[f.key]; const own = l.features?.[f.key]; const [ic, fg, bg] = STATE[st]
           return `<button data-act="feat" data-f="${f.key}" title="${esc(f.about)} — ${own ? 'set by you' : 'from the plan'}" style="margin:2px;border-radius:999px;padding:2px 8px;border:1px solid ${fg};color:${fg};background:${bg};${own ? 'font-weight:700' : ''}">${ic} ${esc(f.title)}</button>` }).join('')}</td>
         <td><input type="text" data-act="note" value="${esc(l.note || '')}" placeholder="Shown to the agency"></td>
-        <td>${l.suspended ? `<b style="color:#b91c1c">Suspended</b><br><button data-act="allow">Allow</button>` : `<span style="color:#047857">Allowed</span><br><button data-act="suspend" class="danger">Suspend</button>`}</td></tr>` }).join('')}</table>
+        <td>${l.suspended ? `<b style="color:#b91c1c">Locked</b><br><button data-act="allow">Unlock</button>` : `<span style="color:#047857">Open</span><br><button data-act="suspend" class="danger">Lock</button>`}</td></tr>` }).join('')}</table>
     <p><small>Saved changes reach the agency's PC within seconds while it is on, or the moment it is on again. Bold = set for that agency alone.</small></p>`
   const save = async (a, body, said) => {
     $('#title').textContent = `Saving ${a.name}…`
@@ -1043,21 +1043,72 @@ async function plansView() {
     })
     tr.querySelector('[data-act=note]').onchange = (e) => save(a, { note: e.target.value }, 'note saved')
     const sus = tr.querySelector('[data-act=suspend]'), alw = tr.querySelector('[data-act=allow]')
-    if (sus) sus.onclick = () => suspendAgency(a, () => plansView())
-    if (alw) alw.onclick = () => allowAgency(a, () => plansView())
+    if (sus) sus.onclick = () => lockAgency(a, () => plansView())
+    if (alw) alw.onclick = () => unlockAgency(a, () => plansView())
   })
 }
 
-// Suspend: Adal Keep on that PC stops (a "suspended" screen) until allowed again. Nothing is deleted.
-async function suspendAgency(a, done) {
-  const note = await ask({ title: `Suspend ${a.name}?`, text: 'Adal Keep stops on that PC within seconds (or the moment it is on), until you allow it again. Nothing is deleted. Reason shown to them (optional):', input: '', ok: 'Suspend', danger: true })
+// Lock: the only thing that locks an agency. Adal Keep on its PCs stops (a "locked" screen) until unlocked here. Nothing is deleted.
+async function lockAgency(a, done) {
+  const note = await ask({ title: `Lock ${a.name}?`, text: `PC ${a.pc_number}. Adal Keep stops on every PC of this agency within about a minute (or the moment it is on), until you press Unlock. Nothing is deleted. Reason shown to them (optional):`, input: '', ok: 'Lock', danger: true })
   if (note === null) return
-  try { await api('/api/plans/save', { pc: a.pc_number, agency: a.id, suspend: true, suspend_note: String(note || '') }); toast(`${a.name}: suspended`) } catch (e) { await tell('Not done', e.message) }
+  try { const r = await api('/api/lock', { pc: a.pc_number, locked: true, note: String(note || '') }); toast(`${a.name}: locked${r.failed?.length ? ` (not yet: PC ${r.failed.map(f => f.pc).join(', ')})` : ''}`) } catch (e) { await tell('Not locked', e.message) }
   done?.()
 }
-async function allowAgency(a, done) {
-  try { await api('/api/plans/save', { pc: a.pc_number, agency: a.id, suspend: false, tell: 'Adal Keep: your Adal Keep is allowed again.' }); toast(`${a.name}: allowed`) } catch (e) { await tell('Not done', e.message) }
+async function unlockAgency(a, done) {
+  if (!(await ask({ title: `Unlock ${a.name}?`, text: `PC ${a.pc_number}. Adal Keep opens again on every PC of this agency.`, ok: 'Unlock' }))) return
+  try { const r = await api('/api/lock', { pc: a.pc_number, locked: false }); toast(`${a.name}: unlocked${r.failed?.length ? ` (not yet: PC ${r.failed.map(f => f.pc).join(', ')} — press Lock, then Unlock again)` : ''}`) } catch (e) { await tell('Not unlocked', e.message) }
   done?.()
+}
+
+// New registrations (an agency, a branch PC, the same PC installed again): a notice until pressed OK.
+let regShowing = false
+async function registrationNotices() {
+  // (Never over a question that is open, e.g. Lock: at the next look.)
+  if (regShowing || $('#dlg').style.display === 'flex') return
+  const { fresh } = await api('/api/registrations')
+  if (!fresh.length || $('#dlg').style.display === 'flex') return
+  regShowing = true
+  try {
+    await tell(fresh.length === 1 ? 'New registration' : `${fresh.length} new registrations`, fresh.map(x => `${x.name || 'No name'} — ${x.kind} — PC ${x.pc_number || '—'} — ${new Date(x.at).toLocaleString()}${x.phone ? ` — ${x.phone}` : ''}${x.email ? ` — ${x.email}` : ''}`).join('\n'))
+    await api('/api/registrations/seen', { ids: fresh.map(x => x.id) })
+  } finally { regShowing = false }
+}
+
+// One agency's registration, PCs, phones, licence, payments, notes and lock history (registry.mjs).
+const detailsOf = {}
+async function agencyDetails(A, pc) {
+  const el = $('#aReg')
+  if (!el) return
+  const at = (t) => t ? new Date(t).toLocaleString() : '—'
+  const paint = (D) => {
+    const el = $('#aReg')
+    if (!el || pageOf !== pc || document.activeElement?.id === 'aNotes') return
+    const line = (k, v) => `<span>${k}</span><b>${v ?? '—'}</b>`
+    const typed = $('#aNotes')?.dataset.dirty ? $('#aNotes').value : null
+    el.innerHTML = `<div class="detail" style="margin-top:14px">
+      <div class="box2"><h4>Registration</h4><div class="kv">
+        ${line('Registered', at(D.registered_at))}${line('PC number', esc(D.pc_number || '—'))}${line('Last seen', D.last_seen ? `${at(D.last_seen)}${ago(D.last_seen) === 'now' ? ' (now)' : ` (${ago(D.last_seen)} ago)`}` : '—')}
+        ${line('Sign-up', D.signup ? `${esc(D.signup.name || '')} · ${esc(D.signup.phone || '—')} · ${esc(D.signup.email || '—')} · ${at(D.signup.at)}` : D.signup_known ? 'none (set up in person)' : 'could not be read')}
+        ${line('CEO', esc([D.ceo?.name, D.ceo?.phone].filter(Boolean).join(' · ') || '—'))}
+        ${line('Girls', D.girls)}${line('Employees', D.employees)}${line('Installed on this PC number', `${D.accounts.length || 1}×`)}
+        ${line('Plan', esc(D.plan))}${line('Paid until', D.paid_until ? at(D.paid_until) : 'not set')}${line('Trial until', D.renewal?.state === 'trial' ? at(D.renewal.ends) : D.trial_until ? at(D.trial_until) : 'the first 21 days')}
+        ${line('Lock', D.licence_error ? `<span style="color:#b91c1c">${esc(D.licence_error)}</span>` : D.locked ? `<span style="color:#b91c1c">Locked since ${at(D.locked.at)}</span>${D.locked.note ? ' · ' + esc(D.locked.note) : ''}${D.pc_locked === true ? ' · its PC is locked' : ' · its PC has not said so yet'}` : `Open${D.pc_locked === true ? ' · <span style="color:#b91c1c">its PC still says locked</span>' : ''}`)}
+        </div><p class="muted" style="font-size:12px;margin:8px 0 0">Not collected from the PCs: ${D.not_collected.map(esc).join('; ')}.</p></div>
+      <div class="box2"><h4>PCs (${D.mains} main, ${D.companions} other)</h4>${D.pcs.map(p => `<div class="row2"><span class="dot ${p.last_seen && Date.now() - new Date(p.last_seen) < 150000 ? 'on' : ''}"></span><span class="grow"><b>${esc(p.name)}</b> · ${esc(p.role)} · PC ${esc(p.number || '—')}<div class="why">version ${esc(String(p.version || '—').slice(0, 7))} · ${esc(p.os || '—')} · employee ${esc(p.employee || '—')}</div></span><span class="muted">${p.last_seen ? ago(p.last_seen) + ' ago' : '—'}</span></div>`).join('') || `<p class="muted">No PC of this agency has sent a beat to the Fleet yet. Version from its online copy: ${esc(String(D.version || '—').slice(0, 7))}.</p>`}
+        ${D.branches.map(b => `<div class="row2"><span class="grow">Branch PC ${esc(b.number || '—')}<div class="why">registered ${at(b.created_at)}</div></span><span class="muted">${b.last_seen ? ago(b.last_seen) + ' ago' : '—'}</span></div>`).join('')}
+        <h4 style="margin-top:14px">Phones (${D.phones.filter(p => !p.revoked).length})</h4>${D.phones.map(p => `<div class="row2"><span class="grow">${esc(p.name || 'Phone')}${p.revoked ? ' <span class="pill rejected">cut off</span>' : ''}</span><span class="muted">since ${new Date(p.since).toLocaleDateString()}${p.last_seen ? ` · seen ${ago(p.last_seen)} ago` : ''}</span></div>`).join('') || '<p class="muted">None.</p>'}</div>
+      <div class="box2"><h4>Payments (${D.payments.length})</h4>${D.payments.map(p => `<div class="row2"><span class="grow"><b>${Number(p.amount).toLocaleString('en')} ETB</b> · ${esc(p.method)} ${esc(p.reference || '')}<div class="why">paid until ${p.paid_until ? new Date(p.paid_until).toLocaleDateString() : '—'}</div></span><span class="muted">${esc(p.date || '')}</span></div>`).join('') || '<p class="muted">None recorded.</p>'}
+        ${D.receipts.length ? `<h4 style="margin-top:14px">Receipts</h4>${D.receipts.map(x => `<div class="row2"><span class="grow">${at(x.created_at)}</span><span class="pill ${esc(x.status)}">${esc(x.status)}</span></div>`).join('')}` : ''}</div>
+      <div class="box2"><h4>Lock history</h4>${D.locks.map(l => `<div class="row2"><span class="pill ${l.action === 'lock' ? 'rejected' : 'approved'}">${l.action === 'lock' ? 'Locked' : 'Unlocked'}</span><span class="grow">${esc(l.by)}${l.note ? ` · ${esc(l.note)}` : ''}<div class="why">PC ${l.pcs.map(esc).join(', ')}${l.failed ? ` · not done: ${l.failed.map(f => esc(f.pc)).join(', ')}` : ''}</div></span><span class="muted">${at(l.at)}</span></div>`).join('') || '<p class="muted">Never locked from this page. (Kept since 25 Nov 2026.)</p>'}
+        <h4 style="margin-top:14px">Seller notes</h4><textarea id="aNotes" rows="4" style="width:100%" placeholder="Only you see this">${esc(typed ?? D.notes)}</textarea><button class="ghost" id="aNotesSave" style="margin-top:6px">Save notes</button></div></div>`
+    if (typed !== null) $('#aNotes').dataset.dirty = '1'
+    $('#aNotes').oninput = (e) => { e.target.dataset.dirty = '1' }
+    $('#aNotesSave').onclick = async () => { const notes = $('#aNotes').value; try { await api('/api/agency/notes', { pc: A.pc_number, id: A.id, notes }); D.notes = notes; delete $('#aNotes').dataset.dirty; toast('Notes saved') } catch (e) { tell('Not saved', e.message) } }
+  }
+  if (detailsOf[pc]) paint(detailsOf[pc])
+  else el.innerHTML = '<p class="muted">Loading its registration…</p>'
+  try { detailsOf[pc] = await api(`/api/agency/details?${A.pc_number ? 'pc=' + A.pc_number : 'id=' + A.id}`); paint(detailsOf[pc]) } catch (e) { if (!detailsOf[pc] && $('#aReg')) $('#aReg').innerHTML = `<p class="muted">${esc(e.message)}</p>` }
 }
 
 async function ceosView() {
@@ -1229,7 +1280,7 @@ function agenciesView() {
         <div class="sub"><span class="dot ${w.pcOnline ? 'on' : ''}"></span>${w.pcOnline ? 'PC on' : `PC off${w.pcSeen ? ' · ' + ago(w.pcSeen) : ''}`} · <span class="code" style="letter-spacing:.05em">${esc(a.pc_number || '')}</span></div></div>
         <span class="plantag ${esc(s?.plan || '')}">${esc(s?.plan || '—')}</span></div>
       <div class="nums"><div><b>${s ? s.profiles : '—'}</b><span>profiles</span></div><div><b>${s ? s.chosen : '—'}</b><span>chosen</span></div><div><b class="${s ? cls(s.runs.paused + s.runs.pending, 5, 15) : ''}">${s ? s.runs.paused + s.runs.pending : '—'}</b><span>waiting</span></div></div>
-      ${a.banned ? '<div style="margin-top:10px"><span class="pill rejected">banned</span></div>' : ''}
+      ${s?.safety?.licence?.suspended ? '<div style="margin-top:10px"><span class="pill rejected">locked</span></div>' : ''}${a.banned ? '<div style="margin-top:10px"><span class="pill rejected">banned</span></div>' : ''}
     </div>` }).join('') || '<p class="muted">No agency yet.</p>'}</div>
     <h4>Add an agency by its PC number</h4>
     <form class="addform" id="addf">
@@ -1279,8 +1330,8 @@ async function agencyPage(pc, fresh = true) {
           <button class="ghost" id="aPlan">Plan & days</button>
           <button class="ghost" id="aBackup">Back up now</button>
           <button class="ghost" id="aEarly" title="On: a new version reaches this agency as soon as it is published; every other PC gets it 2 hours later">Updates first: ${A.early ? 'on' : 'off'}</button>
-          ${A.license?.suspended ? '<button class="go" id="aAllow">Allow</button>' : '<button class="danger" id="aSuspend">Suspend</button>'}
-          <button class="ghost" id="aUnlock" title="6 more paid months (as an Authenticator code gives)">Unlock +6 mo</button>
+          ${A.license?.suspended ? '<button class="go" id="aAllow">Unlock</button>' : '<button class="danger" id="aSuspend">Lock</button>'}
+          <button class="ghost" id="aUnlock" title="6 more paid months (as an Authenticator code gives)">Add 6 months</button>
           ${A.banned ? '<button class="ghost" id="aUnban">Unban</button>' : '<button class="danger" id="aBan">Ban</button>'}
           <button class="ghost" id="aDel" style="color:var(--red)">Delete</button>
         </div></div>
@@ -1296,7 +1347,7 @@ async function agencyPage(pc, fresh = true) {
       <div class="detail">
         <div class="box2"><h4>What it has</h4><div class="kv">
           ${line('Plan', esc((A.plan || '—').replace(/^./, c => c.toUpperCase())))}
-          ${line('Status', A.license?.suspended ? `<span style="color:#b91c1c">Suspended</span>${A.pcSuspended === true ? ' (PC stopped)' : A.pcOnline ? ' (PC not yet)' : ' (when its PC is on)'}` : `Allowed${A.pcSuspended === true ? ' <span style="color:#b91c1c">(PC still suspended)</span>' : ''}`)}
+          ${line('Status', A.license?.suspended ? `<span style="color:#b91c1c">Locked</span>${A.pcSuspended === true ? ' (PC stopped)' : A.pcOnline ? ' (PC not yet)' : ' (when its PC is on)'}` : `Open${A.pcSuspended === true ? ' <span style="color:#b91c1c">(PC still locked)</span>' : ''}`)}
           ${line('Paid until', A.license?.paid_until ? new Date(A.license.paid_until).toLocaleDateString() : 'not set')}
           ${line('Trial until', A.license?.trial_until ? new Date(A.license.trial_until).toLocaleDateString() : 'the first 21 days')}
           ${line('Employees', h.employees)}${line('Brokers', h.brokers)}${line('Checklists', h.checklists)}
@@ -1314,15 +1365,16 @@ async function agencyPage(pc, fresh = true) {
         <div class="box2"><h4>Medicals ending soon</h4>${(s?.medicals || []).slice(0, 12).map(m => `<div class="row2"><span class="grow">${esc(m.name)}</span><span class="${m.days <= 7 ? 'num bad' : 'num warn'}">${m.days} d</span></div>`).join('') || '<p class="muted">None within 14 days.</p>'}</div>
         <div class="box2"><h4>Receipts</h4>${A.receipts.map(r => `<div class="row2"><span class="grow">${when(r.created_at)}</span><span class="pill ${r.status}">${r.status}</span></div>`).join('') || '<p class="muted">No receipts yet.</p>'}
           <h4 style="margin-top:14px">Phones</h4>${A.phones.map(p => `<div class="row2"><span class="grow">${esc(p.name || 'Phone')}</span><span class="muted">since ${new Date(p.since).toLocaleDateString()}</span></div>`).join('') || '<p class="muted">No phone paired.</p>'}</div>
-      </div><div id="aMore"></div></div>`
+      </div><div id="aReg"></div><div id="aMore"></div></div>`
+    agencyDetails(A, pc).catch(e => console.warn('[details]', e))
     $('#aOpen').onclick = () => openAgency(A.id)
     if ($('#aChat')) $('#aChat').onclick = () => { const c = data.conversations.find(x => x.id === A.inbox); if (c) { switchTab('inbox'); openConv(c) } }
     $('#aPlan').onclick = () => { switchTab('plans') }
     $('#aEarly').onclick = async () => { try { await api('/api/early', { id: A.id, on: !A.early }); agencyPage(pc) } catch (e) { tell('Not done', e.message) } }
     $('#aBackup').onclick = async () => { try { const r = await api('/api/backup-run', { agency: A.id }); if (!r.queued) toast(`${A.name}: backing up now`) } catch (e) { tell('Not done', e.message) } }
-    if ($('#aSuspend')) $('#aSuspend').onclick = () => suspendAgency(A, () => agencyPage(pc))
-    if ($('#aAllow')) $('#aAllow').onclick = () => allowAgency(A, () => agencyPage(pc))
-    $('#aUnlock').onclick = async () => { if (!(await ask({ title: `Unlock ${A.name} for 6 months?`, text: '182 paid days are added to what it has.', ok: 'Unlock' }))) return; try { await api('/api/plans/save', { pc: A.pc_number, agency: A.id, add_paid_days: 182, tell: 'Adal Keep: 6 months added to your subscription. Thank you!' }); toast(`${A.name}: 6 months added`); agencyPage(pc) } catch (e) { tell('Not done', e.message) } }
+    if ($('#aSuspend')) $('#aSuspend').onclick = () => lockAgency(A, () => agencyPage(pc))
+    if ($('#aAllow')) $('#aAllow').onclick = () => unlockAgency(A, () => agencyPage(pc))
+    $('#aUnlock').onclick = async () => { if (!(await ask({ title: `Add 6 paid months to ${A.name}?`, text: '182 paid days are added to what it has.', ok: 'Add' }))) return; try { await api('/api/plans/save', { pc: A.pc_number, agency: A.id, add_paid_days: 182, tell: 'Adal Keep: 6 months added to your subscription. Thank you!' }); toast(`${A.name}: 6 months added`); agencyPage(pc) } catch (e) { tell('Not done', e.message) } }
     if ($('#aBan')) $('#aBan').onclick = async () => { if (await ask({ title: `Ban ${A.name}?`, text: 'It can no longer write in Everyone or private chats (it can still write to you).', ok: 'Ban', danger: true })) { await api('/api/ban-pc', { pc: A.pc_number, id: A.id, banned: true }); agencyPage(pc) } }
     if ($('#aUnban')) $('#aUnban').onclick = async () => { await api('/api/ban-pc', { pc: A.pc_number, id: A.id, banned: false }); agencyPage(pc) }
     $('#aDel').onclick = async () => {
@@ -1447,6 +1499,7 @@ async function refresh() {
     data = await api('/api/overview'); KEEP('overview', data)
     work = await api('/api/work').catch(() => work); KEEP('work', work)
     try { licenceNotices() } catch {}
+    registrationNotices().catch(() => {})
     synced = Date.now(); $('#sync').className = ''; $('#sync').textContent = '● synced'
     if (open) open = data.conversations.find(c => c.id === open.id) || open
     renderList()

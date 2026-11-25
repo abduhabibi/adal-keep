@@ -3,8 +3,7 @@
  *
  * Every 2 minutes, scans every profile. For each one that satisfies
  * the police-clearance trigger conditions, it enqueues a job — but only
- * if there isn't already a pending/running/paused/done job for that
- * profile. This means the system keeps discovering new work as files
+ * if she never had such a job (one try: a person starts it again). This means the system keeps discovering new work as files
  * arrive, without any user action.
  *
  * LMIS contract (lmis_contract): chosen by an employer on Musaned
@@ -54,11 +53,9 @@ async function findReadyProfiles(db) {
 }
 
 async function isAlreadyQueued(db, profileId, workflowId = WORKFLOW_ID) {
-  // One agent, one try: any run before, however it ended (a cancelled or stopped one came back
-  // at the next scan, for ever). A person presses it again.
-  const row = await db('automation_queue')
-    .where({ profile_id: profileId, workflow_id: workflowId })
-    .first()
+  // One try: any run of hers, however it ended (a run stopped at 10 minutes is
+  // 'cancelled'), and none is queued by itself again — a person presses it.
+  const row = await db('automation_queue').where({ profile_id: profileId, workflow_id: workflowId }).first('id')
   return !!row
 }
 

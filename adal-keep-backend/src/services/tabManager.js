@@ -95,7 +95,15 @@ export async function setupTab(page, { runId, mute = true } = {}) {
     const name = (id) => { if (window === window.top) window.name = `adal-run-${id}` }
     try {
       page.evaluate?.(name, String(runId))?.catch?.(() => {})
-      if (page.__adalNamed !== runId) { page.__adalNamed = runId; page.evaluateOnNewDocument?.(name, String(runId))?.catch?.(() => {}) }
+      if (page.__adalNamed !== runId) {
+        page.__adalNamed = runId
+        // The last run's script goes first: a reused tab ran one more on every page for each run it ever had.
+        const old = page.__adalNameScript
+        page.__adalNameScript = Promise.resolve(old).then(async (id) => {
+          if (id) await page.removeScriptToEvaluateOnNewDocument?.(id).catch(() => {})
+          return (await page.evaluateOnNewDocument?.(name, String(runId)))?.identifier
+        }).catch(() => null)
+      }
     } catch {}
   }
   // A run never brings itself forward: only a person's Open does (LiveTab).
@@ -103,7 +111,9 @@ export async function setupTab(page, { runId, mute = true } = {}) {
   // A desktop page whatever the window's size: in a narrow one the sites fold
   // their menus away and the run cannot find them. It ends with the run.
   const desktopPage = () => page.__adalCdp?.send('Emulation.setDeviceMetricsOverride', { width: 1366, height: 900, deviceScaleFactor: 1, mobile: false }).catch(() => {})
+  try { await page.__adalWake?.() } catch {}   // slowed by robotGuard: a run works at full speed
   if (page.__adalSetup) {
+    page.__adalCdp?.send('Emulation.setFocusEmulationEnabled', { enabled: true }).catch(() => {})
     await desktopPage()
     if (runId !== undefined) page.__adalRunId = runId
     await setFileDialogs(page, true) // a resumed run takes the dialogs back
@@ -586,6 +596,8 @@ export async function doneWithTab(page) {
 export function forgetRunTab(runId) {
   const page = tabOfRun(runId)
   page?.__adalCdp?.send('Emulation.clearDeviceMetricsOverride').catch(() => {})
+  // No run in it: it is a tab behind like any other (its timers and animations slow down out of sight).
+  page?.__adalCdp?.send('Emulation.setFocusEmulationEnabled', { enabled: false }).catch(() => {})
   if (page) handTabToPerson(page)
   return _tabs.delete(Number(runId))
 }
@@ -677,14 +689,15 @@ export async function borrowSignIn(page, peer) {
     // Signed in in this very tab: nothing to copy, and the run loads no page (a load can lose LMIS's sign-in).
     if (other === page) { page.__adalSignedInHere = true; return url }
     page.__adalSignedInHere = false
-    await page.evaluateOnNewDocument((data, hosts) => {
+    if (page.__adalBorrowScript) await page.removeScriptToEvaluateOnNewDocument?.(page.__adalBorrowScript).catch(() => {})
+    page.__adalBorrowScript = (await page.evaluateOnNewDocument((data, hosts) => {
       try {
         const h = location.hostname
         if (!hosts.some(x => h === x || h.endsWith('.' + x))) return
         const o = JSON.parse(data)
         for (const k of Object.keys(o)) if (sessionStorage.getItem(k) === null) sessionStorage.setItem(k, o[k])
       } catch {}
-    }, st.data, PEERS[peer].hosts).catch(() => {})
+    }, st.data, PEERS[peer].hosts).catch(() => null))?.identifier
     return url
   }
   return null

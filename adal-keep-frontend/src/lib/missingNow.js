@@ -2,14 +2,15 @@
 // right at the top (the "Missing" card). Pure: the page (PC, Companion, phone)
 // feeds it her profile, her documents and her step key (backend stepNow).
 //
-//   cv        Photo + Full Body Photo + living town + passport Date of Issue
+//   cv        Photo + Full Body Photo + place of birth + passport Date of Issue
+//   (Living town is never asked: it is her place of birth when none is written, livingTown.js.)
 //   musaned   Photo, marital status, religion, a mobile (9 + 8 digits)  — musanedPreflight.js
 //   wafid     passport Date of Issue + Expiry, date of birth             — wafidWorkflow.js
 //   lmis      passport Date of Issue, date of birth, passport number     — lmisWorkflow.js
 import { hasFiles } from './photosFirst.js'
 
 const TEXT = {
-  living_town:         { label: 'Living town', type: 'text' },
+  place_of_birth:      { label: 'Place of birth', type: 'text', hint: 'as printed on the passport' },
   passport_issue_date: { label: 'Passport Date of Issue', type: 'date' },
   passport_expiry_date: { label: 'Passport Date of Expiry', type: 'date' },
   date_of_birth:       { label: 'Date of birth', type: 'date' },
@@ -20,7 +21,7 @@ const TEXT = {
 }
 
 const NEEDS = {
-  cv:      { files: ['Photo', 'Full Body Photo'], texts: ['living_town', 'passport_issue_date'] },
+  cv:      { files: ['Photo', 'Full Body Photo'], texts: ['place_of_birth', 'passport_issue_date'] },
   musaned: { files: ['Photo'], texts: ['marital_status', 'religion', 'phone_number'] },
   wafid:   { files: [], texts: ['passport_issue_date', 'passport_expiry_date', 'date_of_birth'] },
   lmis:    { files: [], texts: ['passport_number', 'passport_issue_date', 'date_of_birth'] },
@@ -38,7 +39,9 @@ const AHEAD = {
 
 const blank = (v) => v == null || String(v).trim() === ''
 const mobileOk = (v) => /^9\d{8}$/.test((() => { let d = String(v || '').replace(/\D/g, ''); if (d.startsWith('251') && d.length > 9) d = d.slice(3); if (d.length === 10 && d.startsWith('0')) d = d.slice(1); return d })())
-const isBad = (k, v) => (k === 'phone_number' ? !mobileOk(v) : blank(v))
+const isBad = (k, v, p = {}) => (k === 'phone_number' ? !mobileOk(v)
+  : k === 'place_of_birth' ? blank(v) && blank(p.living_town)   // a town written stands in on the CV
+  : blank(v))
 
 // ------------------------------------------------------------------ cleared
 // "Whenever I delete a field, make it appear at the top as a required field" (asked on
@@ -48,7 +51,7 @@ const isBad = (k, v) => (k === 'phone_number' ? !mobileOk(v) : blank(v))
 export const CLEARABLE = {
   full_name: 'Full name', phone_number: 'Mobile number', national_id: 'National ID', passport_number: 'Passport number',
   date_of_birth: 'Date of birth', passport_issue_date: 'Passport Date of Issue', passport_expiry_date: 'Passport Date of Expiry',
-  place_of_birth: 'Place of birth', living_town: 'Living town', region: 'Region', zone_subcity: 'Zone / Sub-city',
+  place_of_birth: 'Place of birth', region: 'Region', zone_subcity: 'Zone / Sub-city',
   marital_status: 'Marital status', religion: 'Religion', gender: 'Gender', nationality: 'Nationality', children_count: 'Children',
   height: 'Height', weight: 'Weight', education_level: 'Education', cooking_skill: 'Cooking skill',
   speaks_arabic: 'Speaks Arabic', speaks_english: 'Speaks English', emergency_phone: 'Emergency phone',
@@ -84,7 +87,8 @@ export function clearedOf(profileId, profile, fields) {
   if (!profileId) return { texts: [], files: [] }
   const c = read(profileId)
   const now = {
-    texts: c.texts.filter(k => !profile || blank(profile[k])),
+    // (Only what is asked: a living town noted by an older version is forgotten.)
+    texts: c.texts.filter(k => k in CLEARABLE && (!profile || blank(profile[k]))),
     files: c.files.filter(n => !fields || fields.some(f => f.name === n) && fileCount(fields, n) === 0),
   }
   if (now.texts.length !== c.texts.length || now.files.length !== c.files.length) write(profileId, now)
@@ -104,7 +108,7 @@ export function missingNow(profile, fields = [], stepKey, profileId = null) {
       if (f && !hasFiles(f) && !files.includes(n)) files.push(n)
     }
     for (const k of NEEDS[s].texts) {
-      if (profile && isBad(k, profile[k]) && !texts.some(t => t.key === k)) texts.push({ key: k, ...TEXT[k] })
+      if (profile && isBad(k, profile[k], profile) && !texts.some(t => t.key === k)) texts.push({ key: k, ...TEXT[k] })
     }
   }
   if (profileId) {

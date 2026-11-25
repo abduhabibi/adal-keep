@@ -97,7 +97,8 @@ export default function NeedsFill({ profileId, workflowId = null, cv = false, fi
     return () => { window.removeEventListener('adal-profile-changed', again); off() }
   }, [profileId])
 
-  const items = useMemo(() => itemsFor(names || [], profile), [names, profile])
+  // (Living town is never asked: her place of birth stands in. A main PC on an older version may still name it.)
+  const items = useMemo(() => itemsFor((names || []).filter(n => snake(n) !== 'living_town'), profile), [names, profile])
   // Her details the step's own list does not name but the Missing card does (asked on 2026-11-23:
   // a pop-up shows both). Shown and saved here too; they never hold the step back.
   const extras = useMemo(() => {
@@ -115,9 +116,10 @@ export default function NeedsFill({ profileId, workflowId = null, cv = false, fi
   // Everything there after the person filled it in: the step goes on by itself.
   useEffect(() => { if (ready && filled) { setFilled(false); onReady?.() } }, [ready, filled]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  const valueOf = (col) => values[col] ?? ''
   const save = async () => {
     const body = {}
-    for (const it of [...items, ...extras]) if (it.col && String(values[it.col] ?? '').trim() !== '') body[it.col] = it.type === 'number' ? Number(values[it.col]) : values[it.col]
+    for (const it of [...items, ...extras]) if (it.col && String(valueOf(it.col)).trim() !== '') body[it.col] = it.type === 'number' ? Number(valueOf(it.col)) : valueOf(it.col)
     if (!Object.keys(body).length) return toast.error('Choose or type something first')
     setSaving(true)
     setSaveError('')
@@ -158,7 +160,7 @@ export default function NeedsFill({ profileId, workflowId = null, cv = false, fi
                     {(it.brokers ? brokers.map(b => [b.id, b.name || b.full_name || `Broker ${b.id}`]) : it.options).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                   </select>
                 ) : (
-                  <input className={`${input} mt-1`} type={it.type} placeholder={it.hint || ''} value={values[it.col] ?? ''}
+                  <input className={`${input} mt-1`} type={it.type} placeholder={it.hint || ''} value={valueOf(it.col)}
                     onChange={e => setValues(v => ({ ...v, [it.col]: e.target.value }))} />
                 )}
               </label>

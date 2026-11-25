@@ -17,7 +17,12 @@ async function shot(page) {
   return Buffer.from(await page.screenshot({ type: 'jpeg', quality: QUALITY, captureBeyondViewport: false }))
 }
 
+const ACK_MS = 200, ACK_UNSEEN_MS = 500   // between a picture and the next
+/** Somebody sees this tab now (robotGuard leaves it at full speed). */
+export const isWatched = (page) => (casts.get(page)?.subs.size || 0) > 0
+
 async function castOf(page) {
+  try { await page.__adalWake?.() } catch {}   // slowed by robotGuard: full speed for the person
   if (casts.has(page)) return casts.get(page)
   const c = { subs: new Set(), ends: new Set(), dead: false, last: null, at: 0, used: Date.now(), cdp: null, ready: null, timer: null, filling: false }
   casts.set(page, c)
@@ -31,7 +36,9 @@ async function castOf(page) {
     c.cdp.on('Page.screencastFrame', ({ data, sessionId }) => {
       c.at = Date.now()
       give(Buffer.from(data, 'base64'))
-      c.cdp.send('Page.screencastFrameAck', { sessionId }).catch(() => {})
+      // The next picture is made only after this: a page that never stands still (a spinner, an animation) drew and
+      // sent up to 60 pictures a second — a whole core while someone watched.
+      setTimeout(() => c.cdp.send('Page.screencastFrameAck', { sessionId }).catch(() => {}), c.subs.size ? ACK_MS : ACK_UNSEEN_MS).unref?.()
     })
     // Chromium slows a tab nobody is looking at; while a person watches, it counts as looked at.
     await c.cdp.send('Emulation.setFocusEmulationEnabled', { enabled: true }).catch(() => {})

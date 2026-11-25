@@ -25,7 +25,7 @@ export function backupWarning(backup, now = Date.now()) {
 /**
  * The licence warning step reached now: the smallest of 7 d / 3 d / 1 d / 12 h
  * that the time left is under. null when more than 7 days are left, when it
- * has no end (paid for good) or when it has ended (the lock screen says so).
+ * has no end (paid for good) or when it has ended (Settings says so).
  */
 export function licenceStep(licence, now = Date.now()) {
   const end = Date.parse(licence?.expires_at || '') || 0

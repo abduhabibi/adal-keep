@@ -40,8 +40,13 @@ export function listen(res) {
   return () => pages.delete(res)
 }
 
+// A Companion: also to the pages this PC has open on the main PC (services/clipRelay.js).
+let relay = null
+export const setClipRelay = (fn) => { relay = fn }
+
 /** From the watcher: a picture (PNG bytes), or how the crop stands ('cropping' | 'none'). */
 export function took(png, state) {
+  try { relay?.({ png: state ? null : png, state }) } catch {}
   if (state) return send({ state })
   if (!png?.length) return
   const now = Date.now()

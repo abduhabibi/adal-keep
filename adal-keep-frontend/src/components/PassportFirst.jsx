@@ -9,15 +9,66 @@ import { readPassportHere, warmPassportReader } from '../lib/passportHere'
 /**
  * Step 1 of a new profile: the passport. Drag it in (from the tray, the
  * desktop or another window), paste it, click a tray file or choose it from
- * the PC. It is read at once (JEV, then this PC's reader and Gemini side by
- * side) and onRead() gets what was read.
+ * the PC. It is read at once (in this window, else on the main PC, with
+ * the slower readers as help) and onRead() gets what was read.
  */
 const ACCEPT = /^(image\/(jpeg|png|webp|bmp)|application\/pdf)$/
 
 // Read here, in this window, before anything is sent: a phone, and an Adal
 // Companion on its online pages (the passport is not uploaded to the internet
 // just to be read; 127.0.0.1:47801 has the reader in /tess like the phone app).
-const readsHere = () => (onPhone() || onCompanionOnline()) && !import.meta.env.VITE_ADMIN
+// Another PC on the office network (an Adal Companion working on the main PC's pages) reads it in its own
+// window too: the main PC may be busy with robots (the reader files come from it, /tess, and are kept).
+const onOtherPc = () => typeof location !== 'undefined' && !['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)
+const readsHere = () => (onPhone() || onCompanionOnline() || onOtherPc()) && !import.meta.env.VITE_ADMIN
+
+
+// ---- the scan's progress: a light line over the page (transform/opacity only) and the real step ----
+const STEP_TEXT = { reading: 'Reading the passport…', checking: 'Checking the numbers…', 'asking the cloud readers': 'Not clear at first — reading the whole page…', waiting: 'Waiting for the passport before it…' }
+const STEP_AT = { waiting: 0, reading: 0, checking: 1, 'asking the cloud readers': 1 }
+const STYLE = `
+@keyframes adalScanLine { 0% { transform: translateY(0); opacity: 0 } 12% { opacity: 1 } 88% { opacity: 1 } 100% { transform: translateY(var(--h, 150px)); opacity: 0 } }
+@keyframes adalScanPulse { 0%, 100% { opacity: .35 } 50% { opacity: 1 } }
+.adal-scan-line { animation: adalScanLine 1.6s ease-in-out infinite; will-change: transform, opacity }
+.adal-scan-dot { animation: adalScanPulse 1.2s ease-in-out infinite }
+.adal-scan-stop .adal-scan-line, .adal-scan-stop .adal-scan-dot { animation-play-state: paused }
+@media (prefers-reduced-motion: reduce) { .adal-scan-line, .adal-scan-dot { animation: none !important } .adal-scan-line { opacity: 0 } }
+`
+/** True while the window is shown: the animation is paused when it is hidden. */
+function useVisible() {
+  const [v, setV] = useState(() => typeof document === 'undefined' || document.visibilityState !== 'hidden')
+  useEffect(() => {
+    const f = () => setV(document.visibilityState !== 'hidden')
+    document.addEventListener('visibilitychange', f)
+    return () => document.removeEventListener('visibilitychange', f)
+  }, [])
+  return v
+}
+
+function ScanView({ busy, step, secs, moving, onPhone }) {
+  const at = STEP_AT[step] ?? 0
+  return (
+    <div className={`flex w-full flex-col items-center gap-3 ${moving ? '' : 'adal-scan-stop'}`} role="status" aria-live="polite">
+      <style>{STYLE}</style>
+      <div className="relative overflow-hidden rounded-lg shadow" style={{ '--h': '150px' }}>
+        {busy.preview
+          ? <img src={busy.preview} alt="" className="block max-h-40 opacity-80" />
+          : <div className="flex h-40 w-56 items-center justify-center text-5xl">📄</div>}
+        <div className="adal-scan-line pointer-events-none absolute left-0 top-0 h-[3px] w-full bg-sky-400 shadow-[0_0_10px_2px_rgba(56,189,248,.8)]" />
+      </div>
+      <div className="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
+        <span className="adal-scan-dot h-2.5 w-2.5 rounded-full bg-sky-500" />
+        {STEP_TEXT[step] || STEP_TEXT.reading} {secs}s
+      </div>
+      <div className="flex w-56 gap-1" aria-hidden="true">
+        {['reading', 'checking', 'done'].map((k, i) => (
+          <div key={k} className={`h-1 flex-1 rounded-full transition-colors ${i <= at ? 'bg-sky-500' : 'bg-slate-300 dark:bg-slate-600'}`} />
+        ))}
+      </div>
+      {secs >= 6 && <p className="text-xs text-slate-500">This page is harder to read — the form fills as soon as the numbers are sure.</p>}
+    </div>
+  )
+}
 
 export default function PassportFirst({ onRead, onSkip, onLater }) {
   const { capturedFiles } = useFileCapture()
@@ -25,6 +76,8 @@ export default function PassportFirst({ onRead, onSkip, onLater }) {
   const [busy, setBusy] = useState(null)        // { name, preview, t0 }
   const [problem, setProblem] = useState(null)  // { text, result }
   const [, tick] = useState(0)
+  const [step, setStep] = useState('reading')   // the scan's real step: reading | checking | asking the cloud readers
+  const seen = useVisible()
   const inputRef = useRef(null)
   const cameraRef = useRef(null)
   const galleryRef = useRef(null)
@@ -66,17 +119,29 @@ export default function PassportFirst({ onRead, onSkip, onLater }) {
       // A phone reads the passport itself first (lib/passportHere.js: its bottom
       // lines, check digits verified, and the place of birth by its position) —
       // no upload, no PC (asked on 2026-11-17).
-      if (readsHere()) {
-        // Read on the phone; never more than 25 s (then typed in or read by the PC).
-        const here = await Promise.race([readPassportHere(file), new Promise(r => setTimeout(() => r(null), 25000))]).catch(() => null)
-        if (here) {
-          // The same passport already has a profile: said, not made twice.
-          const pn = String(here.fields.passport_number || '').toUpperCase()
-          const same = pn ? ((await api.get('/profiles', { params: { q: pn } }).catch(() => ({ data: [] }))).data || []).find(p => String(p.passport_number || '').toUpperCase() === pn) : null
-          if (same) setProblem({ text: 'This passport already has a profile:', result: { ...here, existing: same } })
-          else onRead(here)
-          return
+      let settled = false   // this window's own reading and the main PC's race: the first to answer is used
+      const useHere = async (here) => {
+        // The same passport already has a profile: said, not made twice.
+        const pn = String(here.fields.passport_number || '').toUpperCase()
+        const same = pn ? ((await api.get('/profiles', { params: { q: pn } }).catch(() => ({ data: [] }))).data || []).find(p => String(p.passport_number || '').toUpperCase() === pn) : null
+        if (same) setProblem({ text: 'This passport already has a profile:', result: { ...here, existing: same } })
+        else {
+          onRead(here)   // the name, number, dates: at once
+          // the place of birth and the date of issue, a moment later (the page keeps what a person typed)
+          here.later?.then(f => { if (f && Object.values(f).some(Boolean)) onLater?.(f) }).catch(() => {})
         }
+      }
+      if (readsHere()) {
+        // Read in this window; if it takes more than 5 s the main PC is asked too, and whichever answers first is used.
+        const localP = readPassportHere(file).catch(() => null)
+        const here = await Promise.race([localP, new Promise(r => setTimeout(() => r(null), 5000))])
+        if (here) { settled = true; await useHere(here); return }
+        localP.then(async r => {
+          if (!r || settled) return
+          settled = true
+          await useHere(r)
+          busyRef.current = false; setBusy(null)
+        })
       }
       // The PC off: a passport the phone could not read is typed by hand; it goes with her profile.
       if (window.__ADAL_CLOUD && !import.meta.env.VITE_ADMIN) {
@@ -86,8 +151,16 @@ export default function PassportFirst({ onRead, onSkip, onLater }) {
       const fd = new FormData()
       fd.append('file', file, file.name || 'passport.jpg')
       let data
+      setStep('reading')
       try {
-        data = (await api.post('/new-profile/read', fd, { timeout: 120000, headers: { 'Content-Type': 'multipart/form-data' } })).data
+        data = (await api.post('/new-profile/read', fd, { timeout: 60000, headers: { 'Content-Type': 'multipart/form-data' } })).data
+        // The lines were not clear at once: the slower readers go on; ask how far it is, every second.
+        for (let n = 0; data?.pending && !settled && n < 150; n++) {
+          setStep(data.step || 'reading')
+          await new Promise(r => setTimeout(r, 1000))
+          data = (await api.get(`/new-profile/result/${encodeURIComponent(data.upload)}`, { adalNoCache: true, timeout: 15000 })).data
+        }
+        if (data?.pending) data = { error: 'it took too long — try a sharper picture, or fill the form by hand' }
       } catch (e) {
         // Adal Admin: the office PC did not answer — Admin reads it itself.
         if (!import.meta.env.VITE_ADMIN) throw e
@@ -97,6 +170,7 @@ export default function PassportFirst({ onRead, onSkip, onLater }) {
         const r = await fetch('/admin/read-passport', { method: 'POST', headers: { 'Content-Type': file.type || 'application/octet-stream' }, body: file })
         data = { ...(await r.json()), offline: true, file, filename: file.name }
       }
+      if (settled) return   // this window's own reading answered first
       // Adal Admin / a phone with the office PC not answering: the reading is done there, not here.
       if (data.queued || (!data.doc_type && !data.error && !data.fields)) setProblem({ text: 'The office PC did not answer, and a passport is read there. Open Adal Keep on the office PC (or check its internet), then try again.', result: data })
       else if (data.error) setProblem({ text: `The passport could not be read (${data.error}). Try a sharper picture, or fill the form by hand.`, result: data })
@@ -104,6 +178,7 @@ export default function PassportFirst({ onRead, onSkip, onLater }) {
       else if (data.existing) { setProblem({ text: 'This passport already has a profile:', result: data }); placeBehind(data) }
       else { onRead(data); placeBehind(data) }
     } catch (e) {
+      if (settled) return
       setProblem({ text: `Reading failed: ${e.response?.data?.error || e.message}. Try again.` })
     } finally {
       busyRef.current = false
@@ -157,16 +232,7 @@ export default function PassportFirst({ onRead, onSkip, onLater }) {
       >
         {busy ? (
           <>
-            {busy.preview
-              ? <img src={busy.preview} alt="" className="max-h-40 rounded-lg shadow opacity-80" />
-              : <div className="text-5xl">📄</div>}
-            <div className="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
-              <span className="h-2.5 w-2.5 rounded-full bg-sky-500 animate-pulse" />
-              Reading the passport… {secs}s
-            </div>
-            {!ON_PHONE && <p className="text-xs text-slate-500">
-              {secs < 3 ? 'Reading its bottom lines on this PC…' : 'JEV, this PC and Gemini are reading it — the first sure answer fills the form.'}
-            </p>}
+            <ScanView busy={busy} step={step} secs={secs} moving={seen} onPhone={ON_PHONE} />
           </>
         ) : (
           <>

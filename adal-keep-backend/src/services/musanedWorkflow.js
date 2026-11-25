@@ -727,10 +727,19 @@ export async function stepFillCandidatePreCheck(page, ctx) {
  * and vanish. This watcher, put in the run's tab from the start, keeps the
  * first one it sees in window.__adalAlready, so it is never missed.
  */
-const WATCH_ALREADY = () => {
-  if (window.__adalAlreadyWatch) return
-  window.__adalAlreadyWatch = setInterval(() => {
-    if (window.__adalAlready) return
+// It looks when the page changes (it used to read the whole page's text 4 times a second in every page and frame,
+// for as long as the tab lived), at most 4 times a second, and lets go once it saw the message or after 15 min.
+export const WATCH_ALREADY = () => {
+  if (window !== window.top) return
+  if (typeof window.__adalAlreadyWatch === 'number') clearInterval(window.__adalAlreadyWatch)   // an older Adal Keep's
+  window.__adalAlreadyWatch?.stop?.()
+  const SAID = /already\s*exists|already\s*been\s*added/i
+  let timer = null, last = 0
+  const look = () => {
+    timer = null; last = Date.now()
+    if (window.__adalAlready) return stop()
+    // textContent first: reading innerText makes the browser lay the page out again.
+    if (!SAID.test(document.body?.textContent || '')) return
     const t = document.body?.innerText || ''
     const other = /already\s+exists!?[\s\S]{0,120}contact\s+EPRO/i.test(t)
     const ours = /already\s+been\s+added\s+to\s+(your|our)\s+list/i.test(t)
@@ -741,7 +750,14 @@ const WATCH_ALREADY = () => {
       .find(e => needle.test(e.innerText || ''))
     const text = (box?.innerText || t.split('\n').filter(l => needle.test(l)).join(' ')).replace(/\s+\n/g, '\n').trim().slice(0, 600)
     window.__adalAlready = { kind: other ? 'other' : 'ours', text, at: Date.now() }
-  }, 250)
+    stop()
+  }
+  const obs = new MutationObserver(() => { if (!timer) timer = setTimeout(look, Math.max(0, 250 - (Date.now() - last))) })
+  const stop = () => { obs.disconnect(); clearTimeout(timer); clearTimeout(end); window.__adalAlreadyWatch = null }
+  const end = setTimeout(() => stop(), 15 * 60000)
+  window.__adalAlreadyWatch = { stop }
+  obs.observe(document.documentElement || document, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['class', 'style', 'hidden', 'open'] })
+  look()
 }
 
 export async function watchAlreadyRegistered(page) {
@@ -2389,10 +2405,13 @@ export async function watchForSaved(page) {
     const said = (t) => /\bsaved\b|saved successfully|added successfully|تم الحفظ/i.test(t || '')
     const look = (n) => {
       const e = n.nodeType === 1 ? n : n.parentElement
-      if (e && !e.closest('form') && !e.closest('button') && (e.textContent || '').length < 200 && said(e.textContent)) window.__adalSaved = true
+      if (!e || e.closest('form') || e.closest('button')) return
+      const t = e.textContent || ''
+      if (t.length < 200 && said(t)) { window.__adalSaved = true; obs.disconnect() }
     }
-    new MutationObserver(ms => ms.forEach(m => { look(m.target); m.addedNodes.forEach(look) }))
-      .observe(document.body, { childList: true, subtree: true, characterData: true })
+    // Each changed part once, however many changes it had; off once Musaned said it.
+    const obs = new MutationObserver(ms => { const seen = new Set(); for (const m of ms) { seen.add(m.target); m.addedNodes.forEach(n => seen.add(n)) } seen.forEach(look) })
+    obs.observe(document.body, { childList: true, subtree: true, characterData: true })
   }).catch(() => {})
 }
 export const savedOnPage = (page) => page.evaluate(() => !!window.__adalSaved).catch(() => false)

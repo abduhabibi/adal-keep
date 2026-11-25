@@ -806,7 +806,7 @@ router.get('/profiles/:profileId/journey', async (req, res) => {
     const p = await db('profiles').where('id', id).first()
     if (!p) return res.status(404).json({ error: 'Profile not found' })
     const runs = {}
-    for (const r of await db('automation_queue').where('profile_id', id).select('workflow_id', 'status').orderBy('id', 'asc')) runs[r.workflow_id] = r
+    for (const r of await db('automation_queue').where('profile_id', id).select('id', 'workflow_id', 'status').orderBy('id', 'asc')) runs[r.workflow_id] = r   // id: added again after a delete (goneFromMusaned)
     const cv = await db('generated_cvs').where('profile_id', id).first('id').catch(() => null)   // only whether one exists (its snapshot can be MBs)
     const docs = (await docsOf(db, [id])).get(id) || new Set()
     res.json({ ...journeyOf(p, runs, !!cv || docs.has('CV'), docs, (await agentsOut(db, [id])).get(id) || []), cv_missing: cvMissing(p, docs, !!cv || docs.has('CV')) })
@@ -917,7 +917,7 @@ export const STEP_ROBOTS = {
 
 async function journeyFor(db, id, p) {
   const runs = {}
-  for (const r of await db('automation_queue').where('profile_id', id).select('workflow_id', 'status').orderBy('id', 'asc')) runs[r.workflow_id] = r
+  for (const r of await db('automation_queue').where('profile_id', id).select('id', 'workflow_id', 'status').orderBy('id', 'asc')) runs[r.workflow_id] = r
   const cv = await db('generated_cvs').where('profile_id', id).first('id').catch(() => null)   // only whether one exists (its snapshot can be MBs)
   const docs = (await docsOf(db, [id])).get(id) || new Set()
   return journeyOf(p, runs, !!cv || docs.has('CV'), docs, [])
@@ -935,7 +935,7 @@ export function cvMissing(p, docs = new Set(), hasCv = false) {
   ].filter(Boolean)
 }
 
-// The dashboard's "Needs action today" (services/needsAction.js).
+// "Needs action today" (services/needsAction.js): older pages ask it; today's dashboard does not.
 router.get('/needs-action', async (req, res) => {
   try {
     const { needsActionToday } = await import('../services/needsAction.js')

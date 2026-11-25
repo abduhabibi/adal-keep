@@ -60,8 +60,6 @@ const GLOBAL = ['/setup/status', '/subscription/status', '/settings', '/profiles
   '/automations/ready-for-submit', '/tutor/adoption', '/main-pc', '/plan', '/whatsapp', '/whatsapp/agents',
   // The morning sign-in list (a Companion or phone sees it without waiting for the PC).
   '/sessions',
-  // The dashboard's "Needs action today" (also with the PC off).
-  '/needs-action',
   // What needs a person now: a phone with Adal Keep closed shows it (AdalNoticeJob).
   '/automations/attention',
   // The newest good backup and the licence's end: every screen warns (SafetyAlerts).

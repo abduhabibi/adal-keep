@@ -241,7 +241,7 @@ boot().finally(() => {
   // An Adal Companion PC: its own online account, so it works with the main PC off.
   if (import.meta.env.VITE_DEMO !== '1' && import.meta.env.VITE_ADMIN !== '1' && import.meta.env.VITE_PHONE !== '1') setTimeout(() => import('./lib/companionOnline.js').then(m => m.shareOnlineCopy()).catch(() => {}), 6000)
   // Double C anywhere on this PC: the cropped picture comes into this page's tray.
-  if (import.meta.env.VITE_DEMO !== '1' && import.meta.env.VITE_ADMIN !== '1' && import.meta.env.VITE_PHONE !== '1' && ['localhost', '127.0.0.1'].includes(location.hostname)) import('./lib/clipWatch.js').then(m => m.startClipWatch()).catch(() => {})
+  if (import.meta.env.VITE_DEMO !== '1' && import.meta.env.VITE_ADMIN !== '1' && import.meta.env.VITE_PHONE !== '1') import('./lib/clipWatch.js').then(m => m.startClipWatch()).catch(() => {})
 }).finally(() => ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <App />

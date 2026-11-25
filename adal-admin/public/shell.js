@@ -219,7 +219,7 @@ function paintOverview(h) {
 function renewTag(r, always = false) {
   if (!r) return ''
   if (r.state === 'expired') return `<span class="tag bad">ended ${-r.days} d ago</span>`
-  if (r.state === 'suspended') return '<span class="tag bad">suspended</span>'
+  if (r.state === 'suspended') return '<span class="tag bad">locked</span>'
   if (r.state === 'trial') return `<span class="tag ${r.days <= 7 ? 'warn' : ''}">trial · ${r.days} d</span>`
   if (r.days <= 30 || always) return `<span class="tag ${r.days <= 7 ? 'warn' : 'ok'}">paid · ${r.days} d</span>`
   return ''

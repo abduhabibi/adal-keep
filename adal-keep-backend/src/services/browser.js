@@ -13,14 +13,10 @@
  *
  * Cross-platform: Windows / macOS / Linux.
  *
- * v2 — Anti-throttle flags added so background lane tabs keep their
- *      timers, renderer priority, and rAF loop fully active while the
- *      user is focused on a different tab/window:
- *        --disable-background-timer-throttling
- *        --disable-renderer-backgrounding
- *        --disable-backgrounding-occluded-windows
- *      Without these, Chrome clamps setTimeout/setInterval to 1/min and
- *      starves the LMIS page's React state machine in non-focused lanes.
+ * v2 — A run's tab is never throttled: its focus is emulated while the run has
+ *      it (tabManager.setupTab). The flags that switched the slowing of every
+ *      tab behind off (background-timer-throttling, renderer-backgrounding)
+ *      are gone since 2026-11-25: tabs finished runs left ran on at full speed.
  *
  * v3 — Removed `--blink-settings=imagesEnabled=false`. That flag is
  *      browser-wide and can't be overridden per-tab, which made the
@@ -196,18 +192,18 @@ const BROWSER_ARGS = [
   ...(process.platform === 'linux' ? ['--disable-gpu'] : []),
   '--disable-dev-shm-usage',
   '--disable-background-networking',
-  // A minimized run window keeps its full speed: without these Chrome slows
-  // the timers of tabs that are not in front to ~1 tick a minute.
+  // A run's window out of sight keeps its full speed. Tabs behind are slowed as in any browser (once a second,
+  // a lower priority): a run's tab is not (its focus is emulated while the run has it — tabManager.setupTab),
+  // the tabs finished runs left are (2026-11-25, measured: 50 → 1 tick a second in those, 50 in a run's).
   '--disable-backgrounding-occluded-windows',
-  '--disable-renderer-backgrounding',
-  '--disable-background-timer-throttling',
   // NOTE: do NOT add '--blink-settings=imagesEnabled=false': it is
   // browser-wide and blanks the Musaned reCAPTCHA images. Image policy is
   // per tab (`page.__adalAllowImages`, see tabManager.setupTab).
   '--disable-notifications',
+  // IntensiveWakeUpThrottling: never slower than once a second (a site renews its sign-in by a timer).
   // SpareRendererForSitePerProcess: no extra empty page process kept waiting
   // (tens of MB on a 4 GB PC; runs reuse their tabs, so it is rarely used).
-  '--disable-features=Translate,MediaRouter,OptimizationHints,CalculateNativeWinOcclusion,SpareRendererForSitePerProcess,AutofillServerCommunication',
+  '--disable-features=Translate,MediaRouter,OptimizationHints,CalculateNativeWinOcclusion,SpareRendererForSitePerProcess,AutofillServerCommunication,IntensiveWakeUpThrottling',
   '--disable-popup-blocking',
   '--noerrdialogs',
   '--disable-infobars',

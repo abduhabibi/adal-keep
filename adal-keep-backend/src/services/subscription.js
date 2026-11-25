@@ -1,5 +1,5 @@
 /**
- * subscription.js — 3-week (21-day) trial, then locked until the PC is unlocked.
+ * subscription.js — the 3-week (21-day) trial, the paid time, and Adal's lock.
  *
  *   PC number   6 digits that belong to THIS server PC (from Windows'
  *               MachineGuid / Linux machine-id; the last digit is a check
@@ -12,11 +12,13 @@
  *               since 2026-11-03): the PC is open until then, and the next
  *               code adds 6 more months. PCs unlocked "for good" before that
  *               (50,000 ETB) stay open.
- *   Locked      every /api call and every stored document is refused, and
+ *   Ended       the trial or the paid time is over: said on the pages, and
+ *               everything goes on working (owner, 2026-11-25).
+ *   Locked      only Adal locks: Lock in Adal Keep Admin (signed licence,
+ *               plans.js), until Admin unlocks it; or the main PC cut this PC
+ *               off. Every /api call and every stored document is refused and
  *               the background work stops. Nothing is encrypted or deleted.
- *   Suspended   Adal suspended the PC in Adal Keep Admin (signed licence,
- *               plans.js): locked the same way, with a "suspended" screen,
- *               until Admin allows it again. Codes still add paid months.
+ *               Codes still add paid months.
  *
  * The seller makes the Authenticator entry with the private seller page
  * (seller/make-seller-page.mjs). ADAL_LICENSE_KEY must be the same in every
@@ -33,20 +35,20 @@ import { execSync } from 'child_process'
 import { fileURLToPath } from 'url'
 import dotenv from 'dotenv'
 import { generateFingerprint } from './fingerprints.js'
-import { licenseNow } from './plans.js'
+import { licenseNow, lockNow, say } from './adalLock.js'
 
 // Adal's signed licence (plans.js): paid until / a longer trial, given in the admin panel.
-const licPaid = () => Number(licenseNow()?.paid_until) || 0
-// Adal suspended this PC (Admin → Suspend): locked until Admin allows it again, whatever is paid.
-const suspension = () => licenseNow()?.suspended || null
+const licPaid = () => Number(licenseNow(pcNumber())?.paid_until) || 0
 const trialEnd = (s) => Math.max((s?.installation_date || trustedNow()) + TRIAL_DAYS * DAY, Number(licenseNow()?.trial_until) || 0)
 
 dotenv.config()
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.join(__dirname, '../..')
-const SIDE_PATH = path.join(ROOT, '.adal_sub.json')
-const COPY_PATH = process.platform === 'win32'
+// (ADAL_SUB_DIR: a test's own folder.)
+const SIDE_PATH = path.join(process.env.ADAL_SUB_DIR || ROOT, '.adal_sub.json')
+const COPY_PATH = process.env.ADAL_SUB_DIR ? path.join(process.env.ADAL_SUB_DIR, 'sub-copy.json')
+  : process.platform === 'win32'
   ? path.join(process.env.ProgramData || 'C:\\ProgramData', 'AdalKeep', 'sub.json')
   : path.join(os.homedir(), '.config', 'adal-keep', 'sub.json')
 
@@ -267,58 +269,82 @@ function touch(s) {
 // ---------------------------------------------------------------------------
 // A Companion with its own copy (docs/companion-full.md): the agency's licence
 // is the main PC's. The main PC writes its state for every PC (signed with
-// ADAL_LICENSE_KEY, services/sync/roles.js); a Companion opens while that is
-// paid or in its trial, and locks or shows "suspended" with it. Codes are
-// typed on the main PC (they are made for its PC number).
+// ADAL_LICENSE_KEY, services/sync/roles.js), with Adal's own signed file: a
+// Companion shows its dates, and locks only when Adal's signature says so —
+// never for the main PC's trial or paid time. Codes are typed on the main PC
+// (they are made for its PC number).
 // ---------------------------------------------------------------------------
 let follow = null
 export function followAgencyLicence(fn) { follow = fn; _cache.at = 0 }
 export const followsAgency = () => !!follow
-function followed() {
+/** This PC's own paid time (a code, or Adal's licence), or 0. */
+const ownPaid = (s) => Math.max(s && paidOk(s, pcNumber()) ? s.paid_until : 0, licPaid())
+const ownForGood = (s) => !!(s?.unlocked_pc === pcNumber() && s?.unlock_proof === proofFor(pcNumber()))
+function followed(s = readSide()) {
   let f = null
   try { f = follow?.() } catch {}
   const l = f?.licence || null
   const now = trustedNow()
-  const cut = f?.cutOff || null
-  let mode
-  if (cut || l?.suspended) mode = 'locked'
-  else if (!l) mode = 'trial'                       // (no word from the main PC yet: it let this PC in)
-  else if (l.forGood || (l.paidUntil && l.paidUntil > now)) mode = 'active'
-  else if (l.mode === 'trial' && l.trialEndsAt && l.trialEndsAt > now) mode = 'trial'
-  else mode = 'locked'
-  return { mode, l, now, cut }
+  const paidUntil = Math.max(Number(l?.paidUntil) || 0, ownPaid(s)) || null
+  // (forGood is always on in what the main PC writes, for PCs on an older version: see roles.js.)
+  const forGood = !!l?.paidForGood || ownForGood(s)
+  const mode = forGood || (paidUntil && paidUntil > now) ? 'active'
+    : !l || (l.trialEndsAt && l.trialEndsAt > now) ? 'trial' : 'ended'
+  return { mode, l, now, cut: f?.cutOff || null, paidUntil, forGood }
 }
 
-/** 'active' (unlocked) · 'trial' · 'locked' */
+/**
+ * What locks this PC, or null (adalLock.js; never throws): Adal's signed licence saying so
+ * (this PC's own, or its agency's main PC's), or the main PC cutting it off. Nothing else
+ * does (owner, 2026-11-25): not an ended trial or paid time, no licence, no internet, the
+ * clock, nor another PC's trial. An error in the licence work never locks or stops anything.
+ */
+const lockedBy = () => lockNow({ pc: pcNumber, follow })
+
+/** 'active' (paid) · 'trial' · 'ended' (the trial or the paid time is over: information only, everything works) · 'locked' (by Adal) */
 export function computeMode(s) {
-  syncClock()
-  if (follow) return followed().mode
-  if (suspension()) return 'locked'
+  if (lockedBy()) return 'locked'
+  try { syncClock(); return modeOf(s) } catch (e) { say('the dates', e); return 'ended' }
+}
+function modeOf(s) {
+  if (follow) return followed(s).mode
   if (!s) return 'trial'
   const now = effectiveNow(s)
-  const pc = pcNumber()
-  if (s.unlocked_pc === pc && s.unlock_proof === proofFor(pc)) return 'active'
-  if (paidOk(s, pc) && s.paid_until > now) return 'active'
-  if (licPaid() > now) return 'active'
-  return now < trialEnd(s) ? 'trial' : 'locked'
+  if (ownForGood(s) || ownPaid(s) > now) return 'active'
+  return now < trialEnd(s) ? 'trial' : 'ended'
 }
 
-export function statusPayload(s = state()) {
+export function statusPayload(s) {
+  const lock = lockedBy()
+  try { return payloadOf(s === undefined ? state() : s, lock) } catch (e) {
+    // The dates could not be worked out: the pages open all the same.
+    say('the status', e)
+    let pc = null
+    try { pc = pcNumber() } catch {}
+    return {
+      mode: lock ? 'locked' : 'ended', daysLeft: 0, trialDays: TRIAL_DAYS, trialEndsAt: null, pcNumber: pc, sellerPhone: SELLER_PHONE,
+      clockBack: false, unlockedAt: null, forGood: false, paidUntil: null, paidDaysLeft: 0, priceEtb: PRICE_ETB, paidMonths: 6, serverTime: Date.now(),
+      suspended: !!lock, suspendedAt: lock?.at || null, suspendNote: lock?.note || '',
+    }
+  }
+}
+function payloadOf(s, lock) {
+  const mode = lock ? 'locked' : modeOf(s)
+  const locked = { suspended: !!lock, suspendedAt: lock?.at || null, suspendNote: lock?.note || '' }
   if (follow) {
-    const { mode, l, now, cut } = followed()
+    const { l, now, paidUntil, forGood } = followed(s)
     return {
       mode, followsMain: true,
       daysLeft: mode === 'trial' && l?.trialEndsAt ? Math.max(0, Math.ceil((l.trialEndsAt - now) / DAY)) : 0,
       trialDays: TRIAL_DAYS, trialEndsAt: l?.trialEndsAt || null, pcNumber: l?.pcNumber || null, sellerPhone: SELLER_PHONE,
-      clockBack: false, unlockedAt: null, forGood: !!l?.forGood, paidUntil: l?.paidUntil || null,
-      paidDaysLeft: l?.paidUntil ? Math.max(0, Math.ceil((l.paidUntil - now) / DAY)) : 0, priceEtb: PRICE_ETB, paidMonths: 6, serverTime: now,
-      suspended: !!(cut === 'suspended' || l?.suspended), suspendedAt: l?.suspendedAt || null,
-      suspendNote: cut ? `This PC was ${cut} by the main PC.` : (l?.suspendNote || ''),
+      clockBack: false, unlockedAt: null, forGood, paidUntil,
+      paidDaysLeft: paidUntil ? Math.max(0, Math.ceil((paidUntil - now) / DAY)) : 0, priceEtb: PRICE_ETB, paidMonths: 6, serverTime: now,
+      ...locked,
     }
   }
-  const mode = computeMode(s)
   const now = effectiveNow(s)
   const trialEndsAt = s ? trialEnd(s) : null
+  const paid = ownPaid(s)
   return {
     mode,
     daysLeft: mode === 'trial' && trialEndsAt ? Math.max(0, Math.ceil((trialEndsAt - now) / DAY)) : 0,
@@ -328,24 +354,24 @@ export function statusPayload(s = state()) {
     sellerPhone: SELLER_PHONE,
     clockBack: false,   // never locked for the clock any more (internet time is used)
     unlockedAt: s?.unlocked_at || null,
-    forGood: !!(s?.unlocked_pc === pcNumber() && s?.unlock_proof === proofFor(pcNumber())),
-    paidUntil: Math.max(s && paidOk(s, pcNumber()) ? s.paid_until : 0, licPaid()) || null,
-    paidDaysLeft: Math.max(0, Math.ceil((Math.max(s && paidOk(s, pcNumber()) ? s.paid_until : 0, licPaid()) - now) / DAY)),
+    forGood: ownForGood(s),
+    paidUntil: paid || null,
+    paidDaysLeft: Math.max(0, Math.ceil((paid - now) / DAY)),
     priceEtb: PRICE_ETB,
     paidMonths: 6,
     serverTime: now,
-    suspended: !!suspension(),
-    suspendedAt: suspension()?.at || null,
-    suspendNote: suspension()?.note || '',
+    ...locked,
   }
 }
 
 let _cache = { at: 0, locked: false }
 /** A new licence from Adal (plans.js): background work sees it at once, not in 30 s. */
-export function licenseChanged() { _cache.at = 0 }
-/** For background work: true while the trial is over and the PC is not unlocked. */
+const changedFns = new Set()
+export function onLicenseChanged(fn) { changedFns.add(fn) }
+export function licenseChanged() { _cache.at = 0; for (const fn of changedFns) { try { fn() } catch {} } }
+/** For background work: true while Adal has this PC locked. */
 export function isAppLocked() {
-  if (Date.now() - _cache.at > 30000) _cache = { at: Date.now(), locked: computeMode(readSide()) === 'locked' }
+  if (Date.now() - _cache.at > 30000) _cache = { at: Date.now(), locked: !!lockedBy() }
   return _cache.locked
 }
 
@@ -393,8 +419,8 @@ export function applyCode(code) {
 export function unlockApproved() {
   const s = state()
   const pc = pcNumber()
-  // Suspended: an approval adds nothing now (it would add 6 months at every check).
-  if (suspension()) return { ok: false, suspended: true }
+  // Locked: an approval adds nothing now (it would add 6 months at every check).
+  if (lockedBy()) return { ok: false, suspended: true }
   if (computeMode(s) === 'active') return { ok: true }
   writeSide({ ...extend(s, pc, trustedNow(), 'approval'), tries: [] })
   _cache.at = 0
@@ -419,12 +445,10 @@ export function subscriptionGuard(req, res, next) {
   const p = req.path
   // The page itself (HTML, scripts, the lock screen's images) always loads.
   if (!p.startsWith('/api') && !p.startsWith('/uploads')) return next()
-  const s = state()
-  touch(s)
-  if (computeMode(s) !== 'locked') return next()
+  try { syncClock(); touch(state()) } catch (e) { say('the dates', e) }
+  if (!lockedBy()) return next()
   if (OPEN_WHEN_LOCKED.some(([m, q]) => req.method === m && p === q)) return next()
-  if (follow ? statusPayload(s).suspended : suspension()) return res.status(402).json({ error: 'locked', suspended: true, message: 'Adal Keep is suspended on this PC by Adal. Call Adal to have it allowed again.' })
-  return res.status(402).json({ error: 'locked', message: 'Adal Keep is locked. Unlock it to continue.' })
+  return res.status(402).json({ error: 'locked', suspended: true, message: 'Adal Keep is locked on this PC by Adal. Call Adal to have it opened again.' })
 }
 
 export async function maybeNotify(db, st) {
@@ -448,7 +472,7 @@ export async function maybeNotify(db, st) {
     if (!(await db('notifications').where({ type: 'trial_warning', created_day: today }).first())) {
       await db('notifications').insert({
         type: 'trial_warning', title: 'Free trial ending soon',
-        body: `Your ${TRIAL_DAYS}-day trial ends in ${st.daysLeft} day(s). Call ${SELLER_PHONE} and tell them PC number ${st.pcNumber} to get your unlock code.`,
+        body: `Your ${TRIAL_DAYS}-day trial ends in ${st.daysLeft} day(s). Call ${SELLER_PHONE} and tell them PC number ${st.pcNumber} for the code. Adal Keep goes on working.`,
         created_day: today, created_at: new Date().toISOString(),
       })
     }

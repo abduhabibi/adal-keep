@@ -19,20 +19,26 @@ import (
 	"encoding/binary"
 	"errors"
 	"math/bits"
+	"sync"
 )
 
 var lockMagic = []byte("ADALBK1")
 
-func lockPiece(plain []byte, password string) ([]byte, error) {
-	salt := make([]byte, 16)
-	iv := make([]byte, 12)
-	if _, err := rand.Read(salt); err != nil {
-		return nil, err
+var ownSalt = func() []byte {
+	s := make([]byte, 16)
+	if _, err := rand.Read(s); err != nil {
+		panic(err)
 	}
+	return s
+}()
+
+func lockPiece(plain []byte, password string) ([]byte, error) {
+	salt := ownSalt // (one per run of this program, as the main PC's lockFast; the iv is new every time)
+	iv := make([]byte, 12)
 	if _, err := rand.Read(iv); err != nil {
 		return nil, err
 	}
-	key := scryptKey([]byte(password), salt, 16384, 8, 1, 32)
+	key := pieceKey(password, salt)
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err
@@ -51,12 +57,35 @@ func lockPiece(plain []byte, password string) ([]byte, error) {
 	return append(out, ct...), nil
 }
 
+// pieceKey: the key of a salt; the last ones are kept (Main locks many pieces with one salt).
+var (
+	pieceKeyMu sync.Mutex
+	pieceKeys  = map[string][]byte{}
+)
+
+func pieceKey(password string, salt []byte) []byte {
+	id := password + "|" + string(salt)
+	pieceKeyMu.Lock()
+	k := pieceKeys[id]
+	pieceKeyMu.Unlock()
+	if k == nil {
+		k = scryptKey([]byte(password), salt, 16384, 8, 1, 32)
+		pieceKeyMu.Lock()
+		if len(pieceKeys) > 64 {
+			pieceKeys = map[string][]byte{}
+		}
+		pieceKeys[id] = k
+		pieceKeyMu.Unlock()
+	}
+	return k
+}
+
 func unlockPiece(buf []byte, password string) ([]byte, error) {
 	if len(buf) < 51 || string(buf[:7]) != string(lockMagic) {
 		return nil, errors.New("not an Adal Keep backup piece")
 	}
 	salt, iv, tag, ct := buf[7:23], buf[23:35], buf[35:51], buf[51:]
-	block, err := aes.NewCipher(scryptKey([]byte(password), salt, 16384, 8, 1, 32))
+	block, err := aes.NewCipher(pieceKey(password, salt))
 	if err != nil {
 		return nil, err
 	}

@@ -48,11 +48,12 @@ export default function ProfilesPage() {
   const [brokers, setBrokers] = useState([])
   const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState(searchParams.get('q') || '')
-  // The search looks 500 ms after the last key (not on every letter).
+  // The search looks 150 ms after the last key (not on every letter: it waited 500 ms for the
+  // PC to look, now this page itself does); the address follows at 500 ms.
   const [q, setQ] = useState(query)
+  useEffect(() => { const t = setTimeout(() => setQ(query), 150); return () => clearTimeout(t) }, [query])
   useEffect(() => {
     const t = setTimeout(() => {
-      setQ(query)
       setSearchParams(prev => {
         const next = new URLSearchParams(prev)
         if (query.trim()) next.set('q', query.trim())
@@ -336,7 +337,7 @@ export default function ProfilesPage() {
             <article
               key={p.id}
               data-profile-drop={p.id} data-profile-name={p.full_name || ''}
-              className={`panel group relative cursor-pointer px-3 py-2.5 sm:p-4 transition hover:shadow-soft ${picked.has(p.id) ? 'ring-2 ring-teal-500' : ''}`}
+              className={`panel ak-lazy group relative cursor-pointer px-3 py-2.5 sm:p-4 transition hover:shadow-soft ${picked.has(p.id) ? 'ring-2 ring-teal-500' : ''}`}
               onClick={() => navigate(`/profiles/${p.id}`)}
               onMouseEnter={() => prefetchProfile(p.id)} onTouchStart={() => prefetchProfile(p.id)}
             >

@@ -29,9 +29,14 @@ let refreshAll = () => {}
 export function setRefreshAll(fn) { refreshAll = fn }
 
 let lastAll = 0, allTimer = null
-export function tellChanged(tables) {
+/** mine: a change made on this page — while the PC's live link is up its own word for it
+ *  comes within a second and runs the timers; run here too, each click asked for everything twice. */
+export function tellChanged(tables, { mine = false } = {}) {
   if (!tables?.length) return
   for (const l of listeners) l(tables)
+  // (A CV sent on WhatsApp: only the WhatsApp page shows it, nothing else reloads.)
+  if (tables.every(t => t === 'whatsapp_log')) return
+  if (mine && typeof window !== 'undefined' && window.__adalLiveUp) return
   // The pages' own timers: once, soon (not once per change).
   if (allTimer) return
   allTimer = setTimeout(() => { allTimer = null; lastAll = Date.now(); if (!document.hidden) refreshAll() }, Math.max(300, 2000 - (Date.now() - lastAll)))

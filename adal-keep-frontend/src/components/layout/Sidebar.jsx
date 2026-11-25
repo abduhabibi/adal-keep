@@ -70,6 +70,13 @@ export const historyLink = {
   icon: <Icon name="robot" />,
 }
 
+/** CVs sent to agents on WhatsApp. */
+export const whatsappLink = {
+  to: '/whatsapp-sent',
+  label: 'WhatsApp',
+  icon: <Icon name="whatsapp" />,
+}
+
 export const settingsLink = {
   to: '/settings',
   label: 'ማስተካከያዎች',
@@ -157,7 +164,7 @@ export default function Sidebar({ isOpen, onToggle, collapsed: narrowWanted, onT
           ))}
 
           <div className={`pt-3 mt-3 border-t ak-side-sep space-y-1 ${collapsed ? 'px-0' : ''}`}>
-            {!onPhone() && [historyLink].map(link => (
+            {!onPhone() && [whatsappLink, historyLink].map(link => (
               <NavLink key={link.to} to={link.to}
                 onClick={() => { if (window.innerWidth < 768) onToggle() }}
                 className={({ isActive }) => { const base = getLinkClass({ isActive }); return collapsed ? `${base} justify-center px-0` : base }}

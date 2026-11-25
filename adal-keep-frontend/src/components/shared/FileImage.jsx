@@ -10,6 +10,8 @@ import { useEffect, useRef, useState } from 'react'
  *                       it is asked for again quietly every 20 s)
  *   a broken file       says so
  *
+ * under: its small picture (already on the page), shown at once while the big one comes.
+ *
  * After 3 s without the picture (or when it fails) the server is asked why, in 3 s at most.
  */
 const DECIDE_MS = 3000
@@ -24,7 +26,7 @@ async function why(url) {
   } catch { return 'away' }   // no answer in time: the file is being fetched from another PC
 }
 
-export default function FileImage({ src, alt = '', className = '', onClick, ...rest }) {
+export default function FileImage({ src, under = null, alt = '', className = '', onClick, ...rest }) {
   const [tries, setTries] = useState(0)
   const [state, setState] = useState('loading')   // loading | ok | away | missing | broken
   const stateRef = useRef(state)
@@ -68,6 +70,11 @@ export default function FileImage({ src, alt = '', className = '', onClick, ...r
       {state !== 'ok' && (
         <div data-testid="file-image-wait" data-state={state} onClick={(e) => e.stopPropagation()} title={WORDS[state] || 'Loading the photo…'}
           className="absolute inset-0 flex flex-col items-center justify-center gap-2 overflow-hidden p-2 text-center text-xs text-slate-500 dark:text-slate-400">
+          {state === 'loading' && under && (
+            // Its file is on another PC too: no broken icon, only the wheel.
+            <img src={under} alt="" data-testid="file-image-under" onError={(e) => { e.currentTarget.style.display = 'none' }}
+              className="absolute inset-0 h-full w-full rounded-3xl object-contain" />
+          )}
           {state === 'loading' ? (
             <>
               <span className="h-5 w-5 animate-spin rounded-full border-2 border-slate-300 border-t-teal-600" />

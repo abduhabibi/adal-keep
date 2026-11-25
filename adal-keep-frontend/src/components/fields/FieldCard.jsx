@@ -594,6 +594,7 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
             <div className="relative min-h-[12rem] min-w-[16rem] rounded-3xl" onClick={(e) => e.stopPropagation()}>
               <FileImage
                 src={`/api/files/${previewFile.id}/download`}
+                under={`/api/files/${previewFile.id}/thumbnail`}
                 alt={previewFile.original_name}
                 className="max-w-[92vw] max-h-[88vh] object-contain rounded-3xl shadow-2xl select-none"
                 draggable={false}

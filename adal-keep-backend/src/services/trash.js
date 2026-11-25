@@ -9,6 +9,7 @@
  */
 import fs from 'fs'
 import { seal } from './accountVault.js'
+import { forgetPictures } from './pictures.js'
 import path from 'path'
 import { fileURLToPath } from 'url'
 
@@ -155,6 +156,7 @@ export async function moveToTrash(db, kind, id, req = null) {
   const moved = []
   const seen = new Set()
   for (const p of item.paths || []) {
+    if (p) forgetPictures(p)   // the small copies made of it (pictures.js)
     for (const abs of [storedPath(p), thumbOf(storedPath(p))]) {
       if (!abs || seen.has(abs) || !fs.existsSync(abs)) continue
       seen.add(abs)

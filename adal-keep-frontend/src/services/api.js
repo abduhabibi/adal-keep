@@ -30,7 +30,7 @@ const api = axios.create({
 // again on the same visit (a page checking every few seconds), or right after
 // a change was sent, the PC answers. Live things always come from the PC.
 // CVs and one girl's own page too: a form filled from an old copy would show (and save) old values.
-const LIVE = /^\/?(cv\/|profiles\/\d+|automations\/(active|\d+)|transitions|chat\/(messages|typing|unlock|file|image|search)|subscription|setup|auth|plan\/|whatsapp\/(notify|bulk)|system|updates|health|app\/|captcha|pc-access|mobile|tutor|sessions|tower)/
+const LIVE = /^\/?(cv\/|profiles\/\d+|automations\/(active|\d+)|transitions|chat\/(messages|typing|unlock|file|image|search)|subscription|setup|auth|plan\/|whatsapp\/(notify|bulk|cv|own)|system|updates|health|app\/|captcha|pc-access|mobile|tutor|sessions|tower)/
 if (import.meta.env.VITE_DEMO !== '1') {
   const get = api.get
   const asked = new Set()
@@ -142,7 +142,7 @@ api.interceptors.response.use(
     // A change made here: this page and its neighbours reload at once.
     const m = String(response.config?.method || 'get').toLowerCase()
     if (m !== 'get' && m !== 'head') {
-      import('../lib/changes.js').then(c => { const t = c.tablesOfRequest(response.config?.url); if (t) c.tellChanged(t) }).catch(() => {})
+      import('../lib/changes.js').then(c => { const t = c.tablesOfRequest(response.config?.url); if (t) c.tellChanged(t, { mine: true }) }).catch(() => {})
     }
     return response
   },

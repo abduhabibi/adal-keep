@@ -1,6 +1,13 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { buildTemplateData, mergeTemplate } from '../src/services/cvRender.js'
+import fs from 'fs'
+import os from 'os'
+import path from 'path'
+import { randomBytes } from 'crypto'
+import sharp from 'sharp'
+process.env.ADAL_PIC_CACHE = path.join(os.tmpdir(), `adal-cvtest-${process.pid}`)
+const { buildTemplateData, mergeTemplate } = await import('../src/services/cvRender.js')
+test.after(() => fs.rmSync(process.env.ADAL_PIC_CACHE, { recursive: true, force: true }))
 
 // A knex stand-in: every query finds nothing (no files, no broker).
 function emptyDb() {
@@ -70,4 +77,31 @@ test('a new template is the hand-made page (TAMKIN and the others), only its col
     assert.match(out, /page-break-before:always/)
     assert.match(out, /window\.adalFit=fit/)
   }
+})
+
+test('the preview\'s pictures are drawn quickly, the same size as the PDF\'s; once those are made the preview shows them', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'adal-cvq-'))
+  const photo = path.join(dir, 'p.jpg'), body = path.join(dir, 'b.jpg'), banner = path.join(dir, 'h.png')
+  await sharp(randomBytes(900 * 1200 * 3), { raw: { width: 900, height: 1200, channels: 3 } }).jpeg().toFile(photo)
+  const her = await sharp({ create: { width: 400, height: 1300, channels: 3, background: '#335577' } }).png().toBuffer()
+  await sharp({ create: { width: 1200, height: 1600, channels: 3, background: '#ffffff' } }).composite([{ input: her, left: 400, top: 150 }]).jpeg().toFile(body)
+  await sharp({ create: { width: 1400, height: 200, channels: 4, background: { r: 200, g: 20, b: 20, alpha: 0.5 } } }).png().toFile(banner)
+  const row = { Photo: photo, 'Full Body Photo': body }
+  const db = () => { let field; const q = { join: () => q, where: () => q, andWhere: (a, b) => { field = b; return q }, select: () => q, first: async () => null, orderBy: () => q, then: (r) => r(row[field] ? [{ path: row[field], mimetype: 'image/jpeg' }] : []) }; return q }
+  const tplb = { ...tpl, header_path: banner }
+  const meta = async (uri) => { const [, kind, b64] = /^data:image\/(\w+);base64,(.+)$/.exec(uri); const m = await sharp(Buffer.from(b64, 'base64')).metadata(); return { kind, w: m.width, h: m.height, alpha: m.hasAlpha } }
+  const all = async (d) => ({ photo: await meta(d.PHOTO_URL), body: await meta(d.FULL_BODY_PHOTO_URL), head: await meta(d.HEADER_IMAGE) })
+  try {
+    const quick = await all(await buildTemplateData(db, { id: 1 }, tplb, {}, { quick: true }))
+    assert.equal(quick.head.kind, 'webp'); assert.equal(quick.head.alpha, true); assert.equal(quick.photo.kind, 'jpeg')
+    const f = await buildTemplateData(db, { id: 1 }, tplb, {})
+    const full = await all(f)
+    assert.equal(full.head.kind, 'png'); assert.equal(full.head.alpha, true)
+    for (const k of ['photo', 'head']) assert.deepEqual([quick[k].w, quick[k].h], [full[k].w, full[k].h], k)
+    // The white sides are cut in both: the same shape (the quick one looks for them on the small picture).
+    assert.ok(Math.abs(full.body.w / full.body.h - 400 / 1300) < 0.02)
+    assert.ok(Math.abs(quick.body.w / quick.body.h - full.body.w / full.body.h) < 0.02, JSON.stringify([quick.body, full.body]))
+    const again = await buildTemplateData(db, { id: 1 }, tplb, {}, { quick: true })
+    for (const k of ['PHOTO_URL', 'FULL_BODY_PHOTO_URL', 'HEADER_IMAGE']) assert.equal(again[k], f[k], k)
+  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
 })

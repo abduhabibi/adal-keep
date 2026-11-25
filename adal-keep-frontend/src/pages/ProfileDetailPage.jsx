@@ -76,7 +76,7 @@ export default function ProfileDetailPage() {
   const [loading, setLoading] = useState(true)
   const [step, setStep] = useState(null)        // the step she is at (backend stepNow)
   const [everything, setEverything] = useState(false)
-  const { phase, after, musaned } = useProfilePhase(profile)
+  const { phase, after, musaned, cv: cvStep } = useProfilePhase(profile)
   const ask = useMusanedAsk(id, phase, musaned)   // may "Make Musaned" be asked? (the server says)
   // Edit opens as a pop-up over her page (asked on 2026-11-19).
   const [editOpen, setEditOpen] = useState(false)
@@ -286,7 +286,7 @@ export default function ProfileDetailPage() {
         </GlassPopup>
       )}
       {nextOpen && !editOpen && !fill && (
-        <NextSteps profileId={id} fields={fields} cvs={cvs} onFileUpdate={handleFileUpdate} onClose={closeNext} onDone={doneNext} ask={ask}
+        <NextSteps profileId={id} fields={fields} cvs={cvs} onFileUpdate={handleFileUpdate} onClose={closeNext} onDone={doneNext} ask={ask} cvStep={cvStep}
           onCv={() => navigate(`/cvs/new?profile=${id}&auto=1`)} />
       )}
       <PageHeader
@@ -747,7 +747,7 @@ function GlassPopup({ children, onClose, wide = false, title = null }) {
  * A new profile's next steps, one pop-up after the other (asked on 2026-11-19):
  * 1. her Photo and Full Body Photo, 2. her CV (a "Created" box too), 3. Musaned.
  */
-function NextSteps({ profileId, fields, cvs, onFileUpdate, onClose, onDone, onCv, ask }) {
+function NextSteps({ profileId, fields, cvs, onFileUpdate, onClose, onDone, onCv, ask, cvStep }) {
   // The phone on the online copy: Musaned runs on an office PC, so with none reachable the step is not offered at all.
   const viaPhone = phoneCloud()
   const [pcOk, setPcOk] = useState(!viaPhone)
@@ -767,7 +767,9 @@ function NextSteps({ profileId, fields, cvs, onFileUpdate, onClose, onDone, onCv
   const photo = fields.find(f => f.name === 'Photo')
   const body = fields.find(f => f.name === 'Full Body Photo')
   const photosOk = hasFiles(photo) && hasFiles(body)
-  const cvOk = (cvs || []).length > 0 || madeByHand
+  // Made, or nothing it needs is lacking (no PDF, no tick needed: backend services/cvComplete.js).
+  const complete = !!cvStep?.complete
+  const cvOk = (cvs || []).length > 0 || madeByHand || complete
   const mark = (v) => { setMadeByHand(v); try { v ? sessionStorage.setItem(`next-cv-${profileId}`, '1') : sessionStorage.removeItem(`next-cv-${profileId}`) } catch {} }
   const musaned = async () => {
     setSending(true)
@@ -811,7 +813,7 @@ function NextSteps({ profileId, fields, cvs, onFileUpdate, onClose, onDone, onCv
       ) : !cvOk ? (
         <>
           <h2 className="mb-1 font-display text-xl font-bold text-slate-900 dark:text-white">Her CV</h2>
-          <p className="mb-4 text-sm text-slate-500">Both photos are in. Make her CV now.</p>
+          <p className="mb-4 text-sm text-slate-500">Both photos are in. Fill what is missing: the next step opens by itself.</p>
           <div className="mb-4"><NeedsFill profileId={profileId} cv fields={fields} onFileUpdate={onFileUpdate} /></div>
           <div className="flex flex-wrap items-center gap-4">
             <button type="button" onClick={onCv} className="rounded-xl bg-purple-600 px-5 py-3 font-semibold text-white shadow-lg shadow-purple-600/30 hover:bg-purple-700">📄 Create CV</button>
@@ -824,11 +826,12 @@ function NextSteps({ profileId, fields, cvs, onFileUpdate, onClose, onDone, onCv
       ) : (
         <>
           <h2 className="mb-1 font-display text-xl font-bold text-slate-900 dark:text-white">Musaned</h2>
-          <p className="mb-4 text-sm text-slate-500">Her CV is made. Add her to Musaned; when she waits there, send her CV to agents on WhatsApp.</p>
-          {/* What Musaned still needs, filled here; once it is all in, Musaned starts by itself. */}
-          <div className="mb-4"><NeedsFill profileId={profileId} workflowId="musaned_add_candidate" fields={fields} onFileUpdate={onFileUpdate} onReady={musaned} onState={setNeeds} /></div>
+          <p className="mb-4 text-sm text-slate-500">{complete ? 'Her CV is complete.' : 'Her CV is made.'} Add her to Musaned; when she waits there, send her CV to agents on WhatsApp.</p>
+          {/* Her CV complete: Musaned needs nothing more, nothing is asked again. Else what Musaned
+              still needs, filled here; once it is all in, Musaned starts by itself. */}
+          {!complete && <div className="mb-4"><NeedsFill profileId={profileId} workflowId="musaned_add_candidate" fields={fields} onFileUpdate={onFileUpdate} onReady={musaned} onState={setNeeds} /></div>}
           <div className="flex flex-wrap gap-3">
-            <button type="button" disabled={sending || !needs.ready} onClick={musaned}
+            <button type="button" disabled={sending || !(complete || needs.ready)} onClick={musaned}
               className="rounded-xl bg-indigo-600 px-5 py-3 font-semibold text-white shadow-lg shadow-indigo-600/30 hover:bg-indigo-700 disabled:opacity-50">
               {sending ? '…' : '🇸🇦 Make Musaned'}
             </button>

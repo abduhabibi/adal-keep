@@ -7,6 +7,7 @@ import { openBrowserIfAny, openForPerson } from '../services/browser.js'
 import { waiting, answerCaptcha, doneWith, TASK_MS } from '../services/attention.js'
 import { seal } from '../services/accountVault.js'
 import { plainReason, problemOf, goneFromMusaned } from '../services/runOutcome.js'
+import { CV_COLUMNS, completeIds, isComplete, lacksOf } from '../services/cvComplete.js'
 import { assertPoliceReady, getProfileVerification, runPassportVerification } from '../services/verification.js'
 
 const router = express.Router()
@@ -20,6 +21,12 @@ export async function insuranceAlreadyDone(db, profileId) {
   const h = await insuranceHistory(db, profileId)
   if (!h.count) return null
   return `Her insurance was already requested on ${dayOf(h.last)} (${h.count} time${h.count === 1 ? '' : 's'}). FetaP issues it about a day later: use "Get insurance certificate" instead.`
+}
+
+const runCols = new WeakMap()   // per database
+async function runColumns(db) {
+  if (!runCols.has(db)) runCols.set(db, Object.keys(await db('automation_queue').columnInfo()))
+  return runCols.get(db)
 }
 
 /** Run rows go to the browser: never send login passwords back with them. */
@@ -64,11 +71,12 @@ router.get('/profiles/:profileId/automations', async (req, res) => {
     const db = req.app.locals.db
     const profileId = Number(req.params.profileId)
     const workflows = listWorkflows()
-    const runs = await db('automation_queue')
-      .where('profile_id', profileId)
-      .orderBy('id', 'desc')
+    // The newest run of each robot only, without its log (up to 100 KB; /automations/:id gives it).
+    const newest = await db('automation_queue').where('profile_id', profileId).groupBy('workflow_id').max('id as id')
+    const cols = (await runColumns(db)).filter(c => c !== 'log')
+    const runs = await db('automation_queue').whereIn('id', newest.map(r => r.id)).select(cols)
     const latest = {}
-    for (const r of runs) if (!latest[r.workflow_id]) latest[r.workflow_id] = publicRun(r)
+    for (const r of runs) latest[r.workflow_id] = publicRun(r)
     // She has a contract: she is chosen on Musaned and her Musaned record is
     // there — "Check if chosen" and "Add from Musaned" count as done (✓) unless
     // a run of them is working now.
@@ -174,7 +182,8 @@ router.post('/profiles/:profileId/automations/:workflowId/start', async (req, re
       const prof = await db('profiles').where('id', profileId).first()
       const { musanedMissing, photoOnFile } = await import('../services/musanedPreflight.js')
       // Marital status and religion are asked in the notification during the run.
-      const missing = musanedMissing(prof, await photoOnFile(db, profileId)).filter(m => req.body?.check || !/^(marital status|religion)$/.test(m))
+      // Her CV is complete: Musaned needs nothing more, so nothing is checked or asked again.
+      const missing = await isComplete(db, profileId, prof) ? [] : musanedMissing(prof, await photoOnFile(db, profileId)).filter(m => req.body?.check || !/^(marital status|religion)$/.test(m))
       if (missing.length) {
         return res.status(400).json({
           error: 'Musaned not started. Profile is missing: ' + missing.join(', '),
@@ -693,7 +702,7 @@ export function journeyOf(p, runs = {}, hasCv = false, docs = null, agents = [])
   const fromRun = (r, doneNote = '') => r?.status === 'done' ? ['done', doneNote]
     : live(r) ? ['active', r.status === 'paused' ? 'waiting for you' : r.status === 'running' ? 'working now' : /^Retry/.test(r.pause_reason || '') ? `trying again — ${plainReason(r.pause_reason)}` : 'in line']
     : r?.status === 'failed' ? ['failed', plainReason(r.pause_reason)] : ['todo', '']
-  const cv = step('cv', 'CV', hasCv ? 'done' : 'todo', hasCv ? 'made' : '')
+  const cv = step('cv', 'CV', hasCv ? 'done' : 'todo', hasCv === 'ready' ? 'all there' : hasCv ? 'made' : '')
   const gone = goneFromMusaned(runs)
   const added = !gone && (runs.musaned_add_candidate?.status === 'done' || !!p.musaned_stage)
   // On Musaned and nobody chose her yet: 'waiting' (its own colour), not done.
@@ -809,7 +818,9 @@ router.get('/profiles/:profileId/journey', async (req, res) => {
     for (const r of await db('automation_queue').where('profile_id', id).select('id', 'workflow_id', 'status').orderBy('id', 'asc')) runs[r.workflow_id] = r   // id: added again after a delete (goneFromMusaned)
     const cv = await db('generated_cvs').where('profile_id', id).first('id').catch(() => null)   // only whether one exists (its snapshot can be MBs)
     const docs = (await docsOf(db, [id])).get(id) || new Set()
-    res.json({ ...journeyOf(p, runs, !!cv || docs.has('CV'), docs, (await agentsOut(db, [id])).get(id) || []), cv_missing: cvMissing(p, docs, !!cv || docs.has('CV')) })
+    const lacks = await lacksOf(db, id, p)   // [] = her CV is complete (services/cvComplete.js), null = not asked here
+    const hasCv = !!cv || docs.has('CV') || (lacks?.length === 0 && 'ready')
+    res.json({ ...journeyOf(p, runs, hasCv, docs, (await agentsOut(db, [id])).get(id) || []), cv_missing: cvMissing(p, docs, hasCv), ...(lacks ? { cv_lacks: lacks } : {}) })
   } catch (e) { res.status(e.status || 500).json({ error: e.message, ...(e.feature ? { feature: e.feature, plan: e.plan } : {}) }) }
 })
 
@@ -920,7 +931,7 @@ async function journeyFor(db, id, p) {
   for (const r of await db('automation_queue').where('profile_id', id).select('id', 'workflow_id', 'status').orderBy('id', 'asc')) runs[r.workflow_id] = r
   const cv = await db('generated_cvs').where('profile_id', id).first('id').catch(() => null)   // only whether one exists (its snapshot can be MBs)
   const docs = (await docsOf(db, [id])).get(id) || new Set()
-  return journeyOf(p, runs, !!cv || docs.has('CV'), docs, [])
+  return journeyOf(p, runs, !!cv || docs.has('CV') || (await isComplete(db, id, p) && 'ready'), docs, [])
 }
 
 /** What her CV still lacks before it can go to agents ([] = complete): a CV made, or all a CV shows. */
@@ -952,7 +963,8 @@ export async function allStages(db) {
   {
     const profiles = await db('profiles').select('id', 'status', 'musaned_stage', 'chosen_at', 'visa_stage', 'visa_application_number',
       'musaned_pro', 'employer_name', 'work_city', 'contract_number', 'labor_id', 'visa_number', 'medical_valid_until', 'musaned_payment',
-      'tasheer_ref', 'tasheer_date')
+      'tasheer_ref', 'tasheer_date', ...CV_COLUMNS)
+    const ready = await completeIds(db, profiles)   // her CV needs nothing more (no PDF needed)
     const rows = await db('automation_queue').select('id', 'profile_id', 'workflow_id', 'status', 'pause_reason', 'finished_at').orderBy('id', 'asc')
     const latest = new Map()
     for (const r of rows) {
@@ -966,7 +978,7 @@ export async function allStages(db) {
     // with { musaned: 'Office: …' } and its missing documents { lmis: ['Slip'] }.
     const stepsOf = (p) => {
       const d = docs.get(p.id) || new Set()
-      const all = (() => { const j = journeyOf(p, latest.get(p.id) || {}, withCv.has(p.id) || d.has('CV'), d, agents.get(p.id) || []); return [...j.embassy, ...j.extra] })()
+      const all = (() => { const j = journeyOf(p, latest.get(p.id) || {}, withCv.has(p.id) || d.has('CV') || (ready.has(p.id) && 'ready'), d, agents.get(p.id) || []); return [...j.embassy, ...j.extra] })()
       return {
         steps: Object.fromEntries(all.map(s => [s.key, s.state])),
         notes: Object.fromEntries(all.filter(s => s.state === 'failed' && s.note).map(s => [s.key, s.note])),
@@ -1361,6 +1373,11 @@ router.post('/automations/:id/resume', async (req, res) => {
       await db('automation_queue').where('id', runId).andWhere('status', 'paused')
         .update({ status: 'pending', updated_at: new Date().toISOString() })
     }
+    // A person pressed it: from now on it is a run somebody asked for, and the robot browser opens for it
+    // (2026-11-25, Main: a run the scanner had found waited for ever, "Waiting for Adal Browser to be open").
+    let ctx = {}; try { ctx = JSON.parse(row.context || '{}') || {} } catch {}
+    await db('automation_queue').where('id', runId).whereIn('status', ['pending', 'paused'])
+      .update({ context: JSON.stringify({ ...ctx, asked_at: Date.now() }), ...(/^(Retry |Waiting for Adal Browser)/.test(row.pause_reason || '') ? { pause_reason: null, updated_at: new Date().toISOString() } : {}) })
     if (row.status === 'paused') await noteRun(db, row, 'continued by a person')
     const s = await dispatchRun(db, runId)
     res.json({ ok: true, ...s, message: runMessage(runId, s, row.status === 'paused' ? 'continued' : 'was already queued') })

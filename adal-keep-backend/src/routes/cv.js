@@ -128,7 +128,7 @@ router.get('/generated', async (req, res) => {
 
 router.get('/generated/:id/download', async (req, res) => {
   const db = req.app.locals.db
-  const row = await db('generated_cvs').where('id', req.params.id).first()
+  const row = await db('generated_cvs').where('id', req.params.id).first('id', 'filename', 'pdf_path')   // not its 1–2 MB copy of the data
   if (!row) return res.status(404).json({ error: 'Not found' })
   const fullPath = path.join(SAFE_STORAGE_DIR, row.pdf_path)
   if (!fs.existsSync(fullPath)) return res.status(404).json({ error: 'File missing on disk' })
@@ -138,7 +138,7 @@ router.get('/generated/:id/download', async (req, res) => {
 // Opens in the browser's PDF viewer instead of downloading.
 router.get('/generated/:id/view', async (req, res) => {
   const db = req.app.locals.db
-  const row = await db('generated_cvs').where('id', req.params.id).first()
+  const row = await db('generated_cvs').where('id', req.params.id).first('id', 'filename', 'pdf_path')   // not its 1–2 MB copy of the data
   if (!row) return res.status(404).json({ error: 'Not found' })
   const fullPath = path.join(SAFE_STORAGE_DIR, row.pdf_path)
   if (!fs.existsSync(fullPath)) return res.status(404).json({ error: 'File missing on disk' })
@@ -193,6 +193,8 @@ router.get('/profile-readiness/:profileId', async (req, res) => {
     if (!profile.marital_status) cv_blockers.push('Marital status missing')
 
     const can_generate = cv_blockers.length === 0
+    // All it needs, with Musaned's (the same rule on every PC); [] = the CV step is done.
+    const cv_lacks = await (await import('../services/cvComplete.js')).lacksOf(db, profileId, profile)
 
 
     res.json({
@@ -207,6 +209,7 @@ router.get('/profile-readiness/:profileId', async (req, res) => {
       ].filter(Boolean),
       cv_blockers,
       can_generate,
+      ...(cv_lacks ? { cv_lacks } : {}),
     })
   } catch (e) {
     console.error('[CV] readiness error:', e.message)
@@ -285,19 +288,27 @@ function cvUpdatesOf(overrides = {}) {
   return cvUpd
 }
 
-// The CV page opened with her and a template: the PDF browser starts and her
-// pictures are shrunk now (both are kept), so the preview and the PDF are quick.
+// The CV page opened with her and a template: her pictures are shrunk now, then
+// the PDF browser starts (both are kept), so the preview and the PDF are quick.
+// (The browser after the pictures and the preview: started together, it took a weak PC's
+// processor for seconds and the preview waited for it.)
+let previewing = 0
+const WARM_AFTER_MS = 2500
 router.post('/warm', async (req, res) => {
   res.json({ ok: true })
   const db = req.app.locals.db
   const { warmPdfBrowser } = await import('../services/cvRender.js')
-  warmPdfBrowser().catch(() => {})
   try {
     const { profile_id, template_id } = req.body || {}
     const profile = profile_id && await db('profiles').where('id', profile_id).first()
     const template = template_id && await db('cv_templates').where('id', template_id).first()
-    if (profile && template) await buildTemplateData(db, profile, template, {})
+    if (profile && template) await buildTemplateData(db, profile, template, {}, { quick: true })
   } catch {}
+  for (let i = 0; i < 8; i++) {
+    await new Promise(r => setTimeout(r, WARM_AFTER_MS).unref?.())
+    if (!previewing) break
+  }
+  warmPdfBrowser().catch(() => {})
 })
 
 // The preview is open: its PDF is made behind, exactly as Download would make it
@@ -517,6 +528,8 @@ router.get('/templates/:id/footer-image', async (req, res) => {
 // POST /api/cv/preview — render merged HTML for any profile × template combo.
 // Does NOT save a PDF. Used by the CV form's live preview modal.
 router.post('/preview', async (req, res) => {
+  previewing++
+  res.on('close', () => { previewing-- })
   try {
     const db = req.app.locals.db
     const { profile_id, template_id, overrides = {} } = req.body || {}
@@ -526,7 +539,7 @@ router.post('/preview', async (req, res) => {
     const template = await db('cv_templates').where('id', template_id).first()
     if (!template) return res.status(404).json({ error: 'Template not found' })
 
-    const data = await buildTemplateData(db, profile, template, overrides)
+    const data = await buildTemplateData(db, profile, template, overrides, { quick: true })
     const html = withEdits(mergeTemplate(template.html_content, template.css_content, data), overrides.__edits)
     res.set('Content-Type', 'text/html; charset=utf-8').send(html)
   } catch (e) {

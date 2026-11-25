@@ -72,7 +72,7 @@ export default function NeedsFill({ profileId, workflowId = null, cv = false, fi
       setProfile(p)
       if (cv) {
         const r = (await api.get(`/cv/profile-readiness/${profileId}`)).data || {}
-        setNames([...(r.cv_blockers || []), ...(r.missing || [])])
+        setNames(Array.isArray(r.cv_lacks) ? r.cv_lacks : [...(r.cv_blockers || []), ...(r.missing || [])])
       } else {
         // Only asked, never started (an older main PC without this question answers 404: nothing shown).
         await api.get(`/profiles/${profileId}/automations/${workflowId}/needs`)

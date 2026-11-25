@@ -6,6 +6,7 @@ import imageToPdf from 'image-to-pdf'
 import { upload, generateThumbnail, getRelativePath } from '../services/storage.js'
 import { fileURLToPath } from 'url'
 import { fetchMissing, ANSWER_MS } from '../services/fileOnDemand.js'
+import { thumbnailFile, forgetPictures } from '../services/pictures.js'
 
 // The backend folder: where the agency's PCs put the documents they copy (sync/index.js), when
 // the program was started from another folder.
@@ -162,6 +163,7 @@ router.post('/profiles/:id/fields/:fieldId/assign-tray-file', async (req, res) =
     const oldFiles = await db('files').where('profile_field_id', fieldId)
     for (const oldFile of oldFiles) {
       if (fs.existsSync(oldFile.path)) fs.unlinkSync(oldFile.path)
+      forgetPictures(oldFile.path)
       const thumbPath = oldFile.path.replace(/(\.\w+)$/, '_thumb$1')
       if (fs.existsSync(thumbPath)) fs.unlinkSync(thumbPath)
     }
@@ -199,6 +201,7 @@ router.post('/profiles/:id/fields/:fieldId/upload', upload.single('file'), async
     const oldFiles = await db('files').where('profile_field_id', fieldId)
     for (const oldFile of oldFiles) {
       if (fs.existsSync(oldFile.path)) fs.unlinkSync(oldFile.path)
+      forgetPictures(oldFile.path)
       const thumbPath = oldFile.path.replace(/(\.\w+)$/, '_thumb$1')
       if (fs.existsSync(thumbPath)) fs.unlinkSync(thumbPath)
     }
@@ -332,11 +335,13 @@ router.get('/files/:fileId/thumbnail', async (req, res) => {
     // Listed here, its file still on another PC: the page shows "coming" and asks again.
     if (!fullPath) return res.status(404).set('X-Adal-Pending', '1').json({ error: 'This file is not on this PC yet — it is being copied from the other PC.', pending: true })
 
-    // Prefer a real thumbnail if one exists; else send the file itself
-    const thumb = resolveThumbPath(fullPath)
+    // A real thumbnail: the one beside it, else one made once and kept; the file
+    // itself while that one is being made (asked again soon: it is small then).
+    const thumb = resolveThumbPath(fullPath) || await thumbnailFile(fullPath, file.mimetype)
+    const whole = !thumb && /^image\//.test(file.mimetype || '') && (fs.statSync(fullPath).size > 60 * 1024)
     // Kept by the browser for an hour (a file id's picture does not change; a new
     // upload is a new id): reopening a profile shows her pictures with no request.
-    res.set('Cache-Control', 'private, max-age=3600')
+    res.set('Cache-Control', `private, max-age=${whole ? 60 : 3600}`)
     res.sendFile(thumb || fullPath, { cacheControl: false })
   } catch (err) {
     console.error('Thumbnail error:', err)

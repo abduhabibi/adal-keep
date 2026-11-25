@@ -7,7 +7,7 @@ import { execFile } from 'child_process'
 import { fileURLToPath } from 'url'
 import { isLocal } from '../services/networkGate.js'
 import { windowOpened, windowsOpen, busyNow, endEverything } from '../services/appLife.js'
-import { onChanged } from '../services/changes.js'
+import { onShown } from '../services/changes.js'
 
 const router = express.Router()
 
@@ -23,7 +23,7 @@ router.get('/app/alive', async (req, res) => {
   // streams per window left too few for the pages (and the live robot view) when two were open.
   const offs = []
   if (req.query.all === '1') {
-    offs.push(onChanged((c) => res.write(`event: changes\ndata: ${JSON.stringify(c)}\n\n`)))
+    offs.push(onShown((c) => res.write(`event: changes\ndata: ${JSON.stringify(c)}\n\n`)))
     const { listen } = await import('../services/screenClip.js')
     offs.push(listen({ write: (s) => res.write(`event: clips\n${s}`) }))
   }
@@ -37,7 +37,7 @@ router.get('/changes', async (req, res) => {
   res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' })
   res.flushHeaders()
   res.write(': hello\n\n')
-  const off = onChanged((c) => res.write(`data: ${JSON.stringify(c)}\n\n`))
+  const off = onShown((c) => res.write(`data: ${JSON.stringify(c)}\n\n`))
   const ping = setInterval(() => res.write(': ping\n\n'), 25000)
   let offClips = () => {}, gone = false
   req.on('close', () => { gone = true; clearInterval(ping); off(); offClips() })

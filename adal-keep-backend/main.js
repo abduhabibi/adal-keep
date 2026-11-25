@@ -95,6 +95,7 @@ import { startWafidChecker } from './src/services/wafidStatus.js'
 import { isFollower, isCompanion, notMainPC, mainURL, instanceId } from './src/services/mainPC.js'
 import { startSync, syncRoutes, isMainRole } from './src/services/sync/index.js'
 import { moveToTrash } from './src/services/trash.js'
+import { profileFields } from './src/services/profileFields.js'
 import { startDiscoveryResponder } from './src/services/discovery.js'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -242,6 +243,8 @@ app.use('/api', officeRouter)    // office health, morning backup line, end-of-d
 app.use('/api', replicaRouter)   // Companions keep a locked copy; /safety (backup age, licence end)
 app.use('/api', contractsRouter)
 app.use('/api', embassyRouter)   // the embassy print (3 pages a girl)
+app.use('/api', (await import('./src/routes/waOwn.js')).default)   // own WhatsApp on each PC (behind a switch)
+app.use('/api', (await import('./src/routes/waSend.js')).default)   // "Send on WhatsApp" (CV preview) and the WhatsApp page
 app.use('/api', whatsappRouter)   // Settings → WhatsApp, CVs to agents
 app.use('/api', (await import('./src/routes/agencyConfig.js')).default)   // per-agency config record + first-run sign-up (flags)
 watchPaid(db)
@@ -638,6 +641,7 @@ app.put('/api/profiles/:id', async (req, res) => {
       'education_level',
       'speaks_english',
       'speaks_arabic',
+      'english_read', 'english_write', 'arabic_read', 'arabic_write',
       'skills',
       'previous_employment',
       'work_experience',
@@ -876,65 +880,10 @@ app.delete('/api/brokers/:id', async (req, res) => {
   }
 })
 
-// The document fields not used for now: kept (with any file in them), not offered.
-// Medical Report and Labour ID too (asked on 2026-11-19): Wafid's result and the Labor ID live on the profile itself.
-const HIDDEN_FIELDS = new Set(['COC', 'Saudi-letter', 'Musaned', 'Broker ID', 'Ticket-ongoing', 'Ticket-deported', 'Experience Form', 'Employee ID', 'Client ID', 'Medical Report', 'Labour ID'])
-
 // Fetch & auto-create permanent profile fields
 app.get('/api/profiles/:id/fields', async (req, res) => {
   try {
-    const { id } = req.params
-    const database = req.app.locals.db
-
-    const templates = await database('field_templates').where('is_permanent', true).orderBy('id')
-
-    const forcedFields = ['Photo', 'Self Video']
-    for (const f of forcedFields) {
-      const exists = templates.some(t => t.name === f)
-      if (!exists) {
-        const [newTpl] = await database('field_templates').insert({
-          name: f,
-          data_type: 'file',
-          is_permanent: true,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        }).returning('*')
-        templates.push(newTpl)
-      }
-    }
-
-    const result = []
-    for (const template of templates) {
-      // Not used now (asked on 2026-11-09): shown only when she already has a file in it.
-      const hidden = HIDDEN_FIELDS.has(template.name)
-      // A profile can hold the same field twice: its files count whichever copy they are in.
-      const copies = await database('profile_fields')
-        .where('profile_id', id)
-        .andWhere('name', template.name)
-        .orderBy('id')
-      let field = copies[0]
-
-      if (!field && hidden) continue
-      if (!field) {
-        const [newFieldId] = await database('profile_fields').insert({
-          profile_id: id,
-          field_template_id: template.id,
-          name: template.name,
-          data_type: template.data_type,
-          is_permanent: true,
-        })
-        field = { id: newFieldId, name: template.name, data_type: template.data_type, is_permanent: true }
-      }
-
-      const files = await database('files')
-        .whereIn('profile_field_id', copies.length ? copies.map(c => c.id) : [field.id])
-        .select('id', 'original_name', 'path', 'mimetype', 'size')
-
-      if (hidden && !files.length) continue
-      result.push({ ...field, files })
-    }
-
-    res.json(result)
+    res.json(await profileFields(req.app.locals.db, req.params.id))
   } catch (err) {
     console.error('Fields error:', err)
     res.status(500).json({ error: 'Failed to load profile fields' })
@@ -1319,6 +1268,7 @@ initSystem().then(() => {
     // Every PC: heartbeat, Adal's signed commands, crash reports (Admin → Fleet; behind a flag).
     import('./src/services/tower.js').then(async t => t.startTower(app.locals.db, { installedVersion: (await import('./src/services/cloudSync.js')).installedVersion })).catch(e => console.warn('[tower]', e.message))
     import('./src/services/screenClip.js').then(c => c.startClipWatcher(PORT)).catch(e => console.warn('[clip]', e.message)) // double C crops the screen anywhere on this PC
+    import('./src/services/waOwn.js').then(w => w.startOwnWhatsApp(app.locals.db)).then(() => import('./src/services/waOwnHere.js')).then(w => w.startOwnLink(app.locals.db)).catch(e => console.warn('[own-whatsapp]', e.message))   // off unless switched on
     import('./src/services/clipRelay.js').then(c => c.startClipRelay()).catch(e => console.warn('[clip]', e.message))   // a Companion: its crops reach its own window on the main PC's pages
     // New selections on Musaned, every hour, on ONE PC of the agency (the main PC picks the strongest).
     if (ROBOTS_HERE) import('./src/services/selectionCheck.js').then(s => s.startSelectionCheck(app.locals.db)).catch(e => console.warn('[selection-check]', e.message))

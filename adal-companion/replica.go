@@ -99,6 +99,8 @@ type replicaState struct {
 	PCNumber      string            `json:"pc_number,omitempty"`
 	Made          string            `json:"made,omitempty"` // when the main PC made the snapshot this copy is
 	SyncedAt      string            `json:"synced_at,omitempty"`
+	Snap          string            `json:"snap,omitempty"` // the main PC's snapshot this copy is, and its documents' revision (replicadelta.go)
+	DocsAt        string            `json:"docs_at,omitempty"`
 	DB            rpDB              `json:"db"`
 	Docs          []rpDoc           `json:"docs"`
 	MainLastGood  string            `json:"main_last_good,omitempty"` // the newest good backup, as the main PC said
@@ -248,15 +250,11 @@ func mainJSON(method, path string, in any, key string, out any) (int, error) {
 
 // fetchPiece: one locked piece from the main PC, onto the disk as it came.
 func fetchPiece(path, key, name string) (int64, error) {
-	resp, err := mainRequest(http.MethodGet, path, nil, key)
+	resp, err := askAgain(path, key)
 	if err != nil {
 		return 0, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
-		return 0, fmt.Errorf("the main PC answered %d for %s", resp.StatusCode, path)
-	}
 	if err := os.MkdirAll(piecesDir(), 0o700); err != nil {
 		return 0, err
 	}
@@ -318,6 +316,8 @@ type rpManifest struct {
 	} `json:"backup"`
 }
 
+var sameSaid time.Time
+
 // syncReplica brings the copy up to the main PC's newest snapshot.
 func syncReplica() error {
 	if !replicaMu.TryLock() {
@@ -359,8 +359,9 @@ func syncReplica() error {
 			return err
 		}
 	}
-	var m rpManifest
-	if code, err := mainJSON(http.MethodGet, "/api/replica/manifest", nil, keys.AccessKey, &m); err != nil {
+	st := loadState()
+	m, docsAt, changed, code, err := askManifest(st, keys.AccessKey)
+	if err != nil {
 		if code == http.StatusUnauthorized || code == http.StatusForbidden {
 			keys.AccessKey = ""
 			_ = saveKeys(keys)
@@ -370,26 +371,59 @@ func syncReplica() error {
 	if m.Snap == "" || m.DB.Chunk <= 0 {
 		return errors.New("the main PC sent no copy")
 	}
-	st := loadState()
+	if !changed && st.Made != "" && (st.PCNumber == "" || m.PCNumber == "" || st.PCNumber == m.PCNumber) {
+		// Nothing changed: a word to the main PC now and then, nothing else.
+		if time.Since(sameSaid) > 10*time.Minute || st.MainLastGood != m.Backup.LastGoodAt && m.Backup.LastGoodAt != "" {
+			sameSaid = time.Now()
+			st.SyncedAt = time.Now().UTC().Format(time.RFC3339)
+			if m.Backup.LastGoodAt != "" {
+				st.MainLastGood = m.Backup.LastGoodAt
+			}
+			if err := saveState(st); err != nil {
+				return err
+			}
+			reportToMain(st, keys)
+		}
+		return nil
+	}
 	if st.PCNumber != "" && m.PCNumber != "" && st.PCNumber != m.PCNumber {
 		log.Printf("🗄 The main PC changed (%s → %s): a new copy is made", st.PCNumber, m.PCNumber)
 		st = replicaState{Sent: map[string]string{}}
 		os.RemoveAll(piecesDir())
 	}
 	var got, bytesGot int64
-	bases := peerBases() // the other Companions: a piece they have is not asked of the main PC
+	bases := copyPeers() // the other Companions: a piece they have is not asked of the main PC
 	fromPeers := 0
+	if replicaDeltaOn() {
+		missing := 0
+		for i, sum := range m.DB.Chunks {
+			if i >= len(st.DB.Chunks) && !pieceExists(dbPieceName(i, sum)) {
+				missing++
+			}
+		}
+		for _, d := range m.Docs {
+			if d.Parts > 0 && !pieceExists(docPieceName(d, 0)) {
+				missing++
+			}
+		}
+		letFirstGo(bases, missing)
+	}
 	for i, sum := range m.DB.Chunks {
 		name := dbPieceName(i, sum)
 		if pieceExists(name) {
 			continue
 		}
-		if pieceFromPeers(name, bases) {
+		// (A few changed frames from the main PC are less than the whole piece from another Companion.)
+		was := ""
+		if i < len(st.DB.Chunks) {
+			was = st.DB.Chunks[i]
+		}
+		if (was == "" || !replicaDeltaOn()) && pieceFromPeers(name, bases) {
 			got++
 			fromPeers++
 			continue
 		}
-		n, err := fetchPiece(fmt.Sprintf("/api/replica/db/%s/%d", url.PathEscape(m.Snap), i), keys.AccessKey, name)
+		n, err := fetchDBPiece(m.Snap, i, sum, was, keys)
 		if err != nil {
 			return err
 		}
@@ -430,7 +464,10 @@ func syncReplica() error {
 			docs = append(docs, d)
 		}
 	}
-	st.PCNumber, st.Made, st.DB, st.Docs = m.PCNumber, m.Made, m.DB, docs
+	st.PCNumber, st.Made, st.DB, st.Docs, st.Snap, st.DocsAt = m.PCNumber, m.Made, m.DB, docs, m.Snap, docsAt
+	if len(docs) != len(m.Docs) {
+		st.DocsAt = "" // some did not come: the whole list next time
+	}
 	st.SyncedAt = time.Now().UTC().Format(time.RFC3339)
 	if m.Backup.LastGoodAt != "" {
 		st.MainLastGood = m.Backup.LastGoodAt

@@ -12,7 +12,9 @@
  *   GET  /safety                     the newest good backup and the licence's end
  */
 import express from 'express'
-import { manifest, dbChunkAsync, docPiece, replicaKeys, recordReport, replicas } from '../services/replica.js'
+import zlib from 'zlib'
+import { manifest, manifestFor, dbChunkAsync, docPiece, replicaKeys, recordReport, replicas } from '../services/replica.js'
+import { deltaOn } from '../services/replicaDelta.js'
 import { withSlot } from '../services/replicaThrottle.js'
 import { backupHealth, recordCompanionBackup, restoreFromCompanion } from '../services/telegramBackup.js'
 import { onThisPC } from './trash.js'
@@ -29,11 +31,17 @@ const fail = (res, e) => { if (e.retryAfter) res.set('Retry-After', String(e.ret
 const bin = (res, buf) => { res.set('Content-Type', 'application/octet-stream'); res.set('Cache-Control', 'no-store'); res.end(buf) }
 
 router.get('/replica/manifest', companionOnly, async (req, res) => {
-  try { res.json(await manifest()) } catch (e) { fail(res, e) }
+  try {
+    const db = req.app.locals.db
+    const body = JSON.stringify(req.query.v === '2' && deltaOn() ? await manifestFor({ have: String(req.query.have || ''), docsAt: String(req.query.docs || ''), db }) : await manifest({ db }))
+    res.type('json')
+    if (body.length < 1024 || !/\bgzip\b/.test(String(req.headers['accept-encoding'] || ''))) return res.send(body)
+    zlib.gzip(body, (e, b) => e ? res.send(body) : res.set('Content-Encoding', 'gzip').send(b))
+  } catch (e) { fail(res, e) }
 })
 // The copy is the least urgent work on the main PC: one piece at a time, paced by how busy this PC is (replicaThrottle.js).
 router.get('/replica/db/:snap/:i', companionOnly, async (req, res) => {
-  try { bin(res, await withSlot(() => dbChunkAsync(req.params.snap, req.params.i))) } catch (e) { fail(res, e) }
+  try { bin(res, await withSlot(() => dbChunkAsync(req.params.snap, req.params.i, { framed: req.query.v === '2', base: /^[0-9a-f]{20}$/.test(req.query.base || '') ? req.query.base : '' }))) } catch (e) { fail(res, e) }
 })
 router.get('/replica/doc/:part', companionOnly, async (req, res) => {
   try { bin(res, await withSlot(async () => docPiece(req.query.name, req.params.part))) } catch (e) { fail(res, e) }

@@ -117,7 +117,7 @@ func peerGet(u string) (*http.Response, error) {
 // peerCopies: what copy each Companion has (newest first).
 func peerCopies() []peerCopy {
 	var out []peerCopy
-	for _, b := range peerBases() {
+	for _, b := range copyPeers() {
 		resp, err := peerGet(b + "/replica/info")
 		if err != nil {
 			continue
@@ -178,6 +178,17 @@ func savePiece(r io.Reader, name string) error {
 		return err
 	}
 	f.Close()
+	// Locked with the agency's own key, or it is not taken.
+	if pw := loadKeys().Password; pw != "" {
+		b, err := os.ReadFile(tmp)
+		if err == nil {
+			_, err = unlockPiece(b, pw)
+		}
+		if err != nil {
+			os.Remove(tmp)
+			return err
+		}
+	}
 	return os.Rename(tmp, filepath.Join(piecesDir(), name))
 }
 
@@ -250,6 +261,7 @@ func syncFromPeers() error {
 			continue // its database is not whole: another one
 		}
 		st.PCNumber, st.Made, st.DB, st.Docs = cs.PCNumber, cs.Made, cs.DB, docs
+		st.Snap, st.DocsAt = "", ""
 		if st.PCNumber == "" {
 			st.PCNumber = mainNumber()
 		}

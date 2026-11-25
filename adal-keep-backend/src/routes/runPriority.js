@@ -18,7 +18,7 @@ router.post('/run-queue/:id/:how(up|down|next)', async (req, res) => {
   try {
     await move(db, req.params.id, req.params.how)
     const row = req.params.how === 'next' && await db('automation_queue').where('id', Number(req.params.id)).first()
-    if (row) await personAsked(db, row)
+    if (row) await personAsked(db, row).catch(e => console.warn('[runs] the press was not written:', e.message))
     res.json({ ok: true, line: await waiting(db) })
   } catch (e) { res.status(e.status || 500).json({ error: e.message }) }
 })

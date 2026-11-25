@@ -22,6 +22,7 @@ import { pasteText, pasteAndCommit } from './domPaste.js'
 import { pasteOn, setAll, waitSign, waitOn, lastKey, noPanel, FIRST_OPTION_IS, LABEL_IN_PAGE, INPUT_IN_PAGE } from './pasteAll.js'
 import { isPeerUrl, expectFile, disarmFile, signInTurn, borrowSignIn, toEnglish, typeCodeInto, pressCodeButton, codeBoxUp } from './tabManager.js'
 import { newRunTab } from './browser.js'
+import { instantOn, screenOf, waitScreen, stillThere } from './instantScreen.js'
 import { musanedMissing, personalPhotoFile } from './musanedPreflight.js'
 
 const MUSANED_ROOT    = 'https://tawtheeq.musaned.com.sa/'
@@ -310,10 +311,12 @@ function fallbackClassify(s) {
   return null
 }
 async function classifyScreen(page, ctx) {
+  // What the page itself says, at once; JEV only for what is not clear (services/instantScreen.js).
+  if (instantOn()) try { return await screenOf(page, { snapshot: snapshotState, review: ctx?.reviewScreen || reviewMusanedScreen, fallback: fallbackClassify, log: (m) => log(ctx, m) }) } catch {}
   const state = await snapshotState(page)
   if (!state) return { screen: 'unknown', source: 'snapshot-failed' }
   let review = null
-  try { review = await reviewMusanedScreen(state) }
+  try { review = await (ctx?.reviewScreen || reviewMusanedScreen)(state) }
   catch (e) { log(ctx, `Jev threw: ${e.message}`, 'warn') }
   if (!review || !review.screen || review.screen === 'unknown') {
     const fb = fallbackClassify(state)
@@ -372,6 +375,7 @@ async function settleSignIn(page, ctx, ms = 90000) {
   let review = await classifyScreen(page, ctx), again = false
   const t0 = Date.now()
   while (review.screen === 'unknown' && Date.now() - t0 < ms) {
+    stillThere(page)
     if (ctx?.isCancelled?.()) { const e = new Error('Cancelled by user'); e.cancelled = true; throw e }
     if (!again && Date.now() - t0 > 60000 && !inCallback(page.url()) && await blankPage(page, 1000)) {
       again = true
@@ -508,6 +512,49 @@ export async function wrongAgencyCard(page, ctx) {
   return others.find(a => a.id !== ctx.account_id && words(a).some(w => text.includes(w)))?.name || ''
 }
 
+/** Runs in the page: where this account's agency card is. must: only while the list of agencies is shown. */
+const CARD_IN_PAGE = (hint, must) => {
+  if (must && !/please\s+select\s+the\s+establishment/i.test(document.body?.innerText || '')) return { ok: false }
+  const collectAll = (root) => {
+    const out = []
+    const walk = (n) => { if (!n?.querySelectorAll) return; for (const el of n.querySelectorAll('*')) { out.push(el); if (el.shadowRoot) walk(el.shadowRoot) } }
+    walk(root); return out
+  }
+  const all = collectAll(document)
+  const txt = (el) => el.textContent || ''
+  let candidates = all.filter(el => /FOREIGN\s+EMPLOYMENT\s+AGENCY/i.test(txt(el)) && /\bdetails\b/i.test(txt(el)))
+  if (!candidates.length) candidates = all.filter(el => /FOREIGN\s+EMPLOYMENT\s+AGENCY/i.test(txt(el)))
+  // Several agencies under one sign-in: this account's own.
+  const own = hint ? candidates.filter(el => txt(el).toUpperCase().includes(hint)) : []
+  if (own.length) candidates = own
+  if (!candidates.length && hint) candidates = all.filter(el => txt(el).toUpperCase().includes(hint))
+  if (candidates.length) {
+    candidates.sort((a, b) => {
+      const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect()
+      return (ra.width * ra.height) - (rb.width * rb.height)
+    })
+    let clickable = candidates[0]
+    for (let d = 0; d < 8 && clickable; d++) {
+      const r = clickable.getBoundingClientRect()
+      if (r.width >= 300 && r.width <= 1400 && r.height >= 60 && r.height <= 500) break
+      clickable = clickable.parentElement
+    }
+    if (!clickable) clickable = candidates[0]
+    try { clickable.scrollIntoView({ block: 'center' }) } catch {}
+    const r = clickable.getBoundingClientRect()
+    if (r.width >= 100 && r.height >= 30) return { ok: true, x: r.left + r.width / 2, y: r.top + r.height / 2 }
+  }
+  return { ok: false }
+}
+/** Clicks it when it is there. */
+async function clickCard(page, ctx, must = false) {
+  const found = await page.evaluate(CARD_IN_PAGE, String(ctx.musaned_name || ctx.musaned_username || '').trim().toUpperCase(), must)
+  if (!found.ok) return false
+  await page.mouse.move(found.x, found.y)
+  await sleep(100); await page.mouse.down(); await sleep(60); await page.mouse.up()
+  return true
+}
+
 export async function stepClickAgencyCard(page, ctx) {
   const other = await wrongAgencyCard(page, ctx)
   if (other) {
@@ -521,7 +568,6 @@ export async function stepClickAgencyCard(page, ctx) {
     else await logOutInNewTab(page, ctx)
     throw Object.assign(new Error('signing in again as this run\'s account'), { signInAgain: true })
   }
-  const agencyHint = String(ctx.musaned_name || ctx.musaned_username || '').trim().toUpperCase()
   // Musaned's list of agencies ("Please select the establishment") can spin for a long time (2026-11-24: three
   // runs failed after 20 s with its spinner still turning): 45 s, then Musaned loaded fresh once, 45 s more.
   let deadline = Date.now() + 45000, fresh = false
@@ -535,43 +581,7 @@ export async function stepClickAgencyCard(page, ctx) {
       deadline = Date.now() + 45000
       continue
     }
-    const found = await page.evaluate((hint) => {
-      const collectAll = (root) => {
-        const out = []
-        const walk = (n) => { if (!n?.querySelectorAll) return; for (const el of n.querySelectorAll('*')) { out.push(el); if (el.shadowRoot) walk(el.shadowRoot) } }
-        walk(root); return out
-      }
-      const all = collectAll(document)
-      const txt = (el) => el.textContent || ''
-      let candidates = all.filter(el => /FOREIGN\s+EMPLOYMENT\s+AGENCY/i.test(txt(el)) && /\bdetails\b/i.test(txt(el)))
-      if (!candidates.length) candidates = all.filter(el => /FOREIGN\s+EMPLOYMENT\s+AGENCY/i.test(txt(el)))
-      // Several agencies under one sign-in: this account's own.
-      const own = hint ? candidates.filter(el => txt(el).toUpperCase().includes(hint)) : []
-      if (own.length) candidates = own
-      if (!candidates.length && hint) candidates = all.filter(el => txt(el).toUpperCase().includes(hint))
-      if (candidates.length) {
-        candidates.sort((a, b) => {
-          const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect()
-          return (ra.width * ra.height) - (rb.width * rb.height)
-        })
-        let clickable = candidates[0]
-        for (let d = 0; d < 8 && clickable; d++) {
-          const r = clickable.getBoundingClientRect()
-          if (r.width >= 300 && r.width <= 1400 && r.height >= 60 && r.height <= 500) break
-          clickable = clickable.parentElement
-        }
-        if (!clickable) clickable = candidates[0]
-        try { clickable.scrollIntoView({ block: 'center' }) } catch {}
-        const r = clickable.getBoundingClientRect()
-        if (r.width >= 100 && r.height >= 30) return { ok: true, x: r.left + r.width / 2, y: r.top + r.height / 2 }
-      }
-      return { ok: false }
-    }, agencyHint)
-    if (found.ok) {
-      await page.mouse.move(found.x, found.y)
-      await sleep(100); await page.mouse.down(); await sleep(60); await page.mouse.up()
-      clicked = true; break
-    }
+    if (await clickCard(page, ctx)) { clicked = true; break }
     await sleep(700)
   }
   if (!clicked) throw new Error('Agency card not found: Musaned\'s list of agencies kept loading for 90 s (loaded again once). Nothing was filled. Try again when Musaned answers.')
@@ -2623,8 +2633,7 @@ async function musanedRun(page, ctx) {
         review = await classifyScreen(page, ctx)
       }
       if (review.screen === 'agency-picker') {
-        await stepClickAgencyCard(page, ctx)
-        const after = await waitForDashboard(page, ctx, 30000)
+        const after = await cardToDashboard(page, ctx)
         if (after !== 'dashboard') return { ok: true, pauseReason: `awaiting-musaned-${after}`, seconds: Math.round((Date.now() - t0) / 1000) }
       } else if (review.screen === 'dashboard') { log(ctx, '✓ already on dashboard') }
       else if (review.screen === 'landing') { await stepClickGoToDashboard(page, ctx); await waitForDashboard(page, ctx, 30000) }
@@ -2645,6 +2654,7 @@ async function musanedRun(page, ctx) {
       }
       await sleep(2000)
       let review = await classifyScreen(page, ctx)
+      if (instantOn() && review.screen === 'unknown') review = await settleSignIn(page, ctx)   // still loading: not "unclassified"
       // The form is filled but Google's box has not come yet (a slow line: ~40 s, 2026-11-24): wait for it
       // (90 s at most) instead of calling the page unclassified and pausing as "awaiting-musaned-login".
       if (review.screen === 'login-form') {
@@ -2664,8 +2674,7 @@ async function musanedRun(page, ctx) {
         review = await classifyScreen(page, ctx)
       }
       if (review.screen === 'agency-picker') {
-        await stepClickAgencyCard(page, ctx)
-        const after = await waitForDashboard(page, ctx, 30000)
+        const after = await cardToDashboard(page, ctx)
         if (after !== 'dashboard') return { ok: true, pauseReason: `awaiting-musaned-${after}`, seconds: Math.round((Date.now() - t0) / 1000) }
       } else if (review.screen === 'dashboard') { log(ctx, '✓ already on dashboard') }
       else if (review.screen === 'landing') { await stepClickGoToDashboard(page, ctx); await waitForDashboard(page, ctx, 30000) }
@@ -2864,13 +2873,14 @@ export async function signInMusaned(page, ctx) {
   await toEnglish(page, ctx)
   if (open.onKeycloak) { await stepFillMusanedLogin(page, ctx); await sleep(800) }
   let screen = (await classifyScreen(page, ctx)).screen
+  if (instantOn() && screen === 'unknown') screen = (await settleSignIn(page, ctx)).screen
   for (let turn = 0; turn < 6; turn++) {
     // A code box wins over a robot check still drawn on the page.
     if (screen === 'captcha' && await codeBoxUp(page)) screen = 'otp'
     if (screen === 'captcha' || (screen === 'login-form' && (await import('./robotCheck.js').then(r => r.robotCheck(page))).present)) {
       if (await waitForPersonCaptcha(page, ctx) === 'timeout') return 'captcha'
     } else if (screen === 'otp') { screen = await passOtp(page, ctx); continue }
-    else if (screen === 'agency-picker') { await stepClickAgencyCard(page, ctx); screen = await waitForDashboard(page, ctx, 30000); continue }
+    else if (screen === 'agency-picker') { screen = await cardToDashboard(page, ctx); continue }
     else if (screen === 'landing') { await stepClickGoToDashboard(page, ctx); screen = await waitForDashboard(page, ctx, 30000); continue }
     else return screen
     screen = await waitForDashboard(page, ctx, 20000)
@@ -2894,7 +2904,7 @@ async function passOtp(page, ctx) {
     // "unknown" is Musaned's page between the code and the dashboard: still going (on a slow line a minute or more —
     // it was read as "waiting for the code" after 20 s, 2026-11-25).
     if (screen === 'unknown') screen = (await settleSignIn(page, ctx)).screen
-    if (screen === 'agency-picker') { await stepClickAgencyCard(page, ctx); screen = await waitForDashboard(page, ctx, 30000) }
+    if (screen === 'agency-picker') { screen = await cardToDashboard(page, ctx) }
     else if (screen === 'landing') { await stepClickGoToDashboard(page, ctx); screen = await waitForDashboard(page, ctx, 30000) }
     if (screen !== 'otp') {
       log(ctx, screen === 'dashboard' ? '✓ signed in with the authenticator code' : `after the code: ${screen}`, screen === 'dashboard' ? 'info' : 'warn')
@@ -2926,7 +2936,7 @@ async function passOtp(page, ctx) {
       ask('That code was not accepted: type the new one')
     }
   }
-  if (screen === 'agency-picker') { await stepClickAgencyCard(page, ctx); screen = await waitForDashboard(page, ctx, 30000) }
+  if (screen === 'agency-picker') { screen = await cardToDashboard(page, ctx) }
   else if (screen === 'landing') { await stepClickGoToDashboard(page, ctx); screen = await waitForDashboard(page, ctx, 30000) }
   log(ctx, screen === 'dashboard' ? '✓ signed in — continuing' : `after the code: ${screen}`, screen === 'dashboard' ? 'info' : 'warn')
   return screen
@@ -2953,7 +2963,14 @@ async function typeAuthenticatorCode(page, ctx) {
   return true
 }
 
-async function waitForDashboard(page, ctx, timeoutMs) {
+/** The agency's card, then the dashboard: on a slow line up to 90 s, the card once more when it is still there. */
+async function cardToDashboard(page, ctx) {
+  await stepClickAgencyCard(page, ctx)
+  return waitForDashboard(page, ctx, 30000, { slowMs: 90000, again: () => clickCard(page, ctx, true), ...(ctx.cardWait || {}) })
+}
+
+async function waitForDashboard(page, ctx, timeoutMs, opts = {}) {
+  if (instantOn()) return waitScreen(page, ctx, timeoutMs, { classify: classifyScreen, log: (m) => log(ctx, m), ...opts })
   const deadline = Date.now() + timeoutMs
   let last = 'unknown'
   while (Date.now() < deadline) {
@@ -2968,4 +2985,4 @@ async function waitForDashboard(page, ctx, timeoutMs) {
 export { waitForPersonCaptcha, passOtp, leaveMusaned, checkAccount, signedInUser, logOutInNewTab, typeAndCommitDropdown, fillDateByLabel, readFieldValues, chosenChips, typeAuthenticatorCode, classifyScreen }
 
 /** For the mock-form test (tests/pasteAll.test.js): the form's own helpers. */
-export const _form = { typeAndCommitDropdown, fillSkillsByTyping, setFieldByLabel, enterInField, clickRadioByLabel, fillDateByLabel, readFieldValues }
+export const _form = { typeAndCommitDropdown, fillSkillsByTyping, setFieldByLabel, enterInField, clickRadioByLabel, fillDateByLabel, readFieldValues, waitForDashboard, cardToDashboard }

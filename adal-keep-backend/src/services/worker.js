@@ -825,7 +825,7 @@ export function laneOf(job) {
  * and runs of a lane (site + account) another run holds now (`lanes`).
  */
 /** A run waits in its site's tab for a person to sign in (a captcha, a code, a tick): not for a Save. */
-export const SIGN_IN_WAIT = /^awaiting-[a-z]+-(login|captcha|otp|code|robot|precheck)$/
+export const SIGN_IN_WAIT = /^awaiting-[a-z]+-(login|captcha|otp|code|robot|precheck|agency-picker)$/
 const SIGN_IN_FRESH_MS = 30 * 60e3
 
 /**
@@ -1206,10 +1206,15 @@ async function hasAuthenticator(run) {
   return !!(await import('./musanedTotp.js')).authenticatorInfo(saved.account_id || run.account_id)
 }
 
-async function continueSignedIn(db) {
+/** Musaned's menu is on this page, beyond doubt (services/instantScreen.js; off: never). */
+export async function dashboardNow(page) {
+  try { const i = await import('./instantScreen.js'); return i.instantOn() && i.sure(await i.lookNow(page)) === 'dashboard' } catch { return false }
+}
+
+export async function continueSignedIn(db) {
   const rows = await db('automation_queue').where('status', 'paused')
-    .whereIn('pause_reason', ['awaiting-musaned-login', 'awaiting-musaned-otp', 'awaiting-musaned-captcha'])
-    .where('updated_at', '>', new Date(Date.now() - 12 * 3600_000).toISOString()).select('id', 'workflow_id', 'account_id', 'context')
+    .whereIn('pause_reason', ['awaiting-musaned-login', 'awaiting-musaned-otp', 'awaiting-musaned-captcha', 'awaiting-musaned-agency-picker', 'awaiting-musaned-unknown'])
+    .where('updated_at', '>', new Date(Date.now() - 12 * 3600_000).toISOString()).select('id', 'workflow_id', 'account_id', 'context', 'pause_reason')
   if (!rows.length) return
   const browser = await openBrowserIfAny()
   if (!browser) return
@@ -1217,6 +1222,8 @@ async function continueSignedIn(db) {
   for (const r of rows) {
     const page = await findRunTab(browser, r.id, r.workflow_id, { liveRuns })
     if (!page) continue
+    // At the list of agencies (or a page still loading): goes on only once Musaned's menu is certainly there.
+    if (/agency-picker|unknown/.test(r.pause_reason) && !(await dashboardNow(page))) continue
     // A person pressed Sign in on a waiting run: its code box is up and Adal Keep has the code.
     if (hostOf(page.url()) !== 'tawtheeq.musaned.com.sa' && !(await codeBoxUp(page) && await hasAuthenticator(r))) continue
     // The sign-in is still coming back (its app loads): not yet (a run started over it, 2026-11-25).

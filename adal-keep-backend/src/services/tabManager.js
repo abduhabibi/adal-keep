@@ -112,6 +112,7 @@ export async function setupTab(page, { runId, mute = true } = {}) {
   // their menus away and the run cannot find them. It ends with the run.
   const desktopPage = () => page.__adalCdp?.send('Emulation.setDeviceMetricsOverride', { width: 1366, height: 900, deviceScaleFactor: 1, mobile: false }).catch(() => {})
   if (page.__adalSetup) {
+    page.__adalCdp?.send('Emulation.setFocusEmulationEnabled', { enabled: true }).catch(() => {})
     await desktopPage()
     if (runId !== undefined) page.__adalRunId = runId
     await setFileDialogs(page, true) // a resumed run takes the dialogs back
@@ -594,6 +595,8 @@ export async function doneWithTab(page) {
 export function forgetRunTab(runId) {
   const page = tabOfRun(runId)
   page?.__adalCdp?.send('Emulation.clearDeviceMetricsOverride').catch(() => {})
+  // No run in it: it is a tab behind like any other (its timers and animations slow down out of sight).
+  page?.__adalCdp?.send('Emulation.setFocusEmulationEnabled', { enabled: false }).catch(() => {})
   if (page) handTabToPerson(page)
   return _tabs.delete(Number(runId))
 }

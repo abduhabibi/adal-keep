@@ -49,8 +49,8 @@ export async function accountOfPage(db, page, spaceOf = null) {
 let browsersOf = async () => {
   const out = []
   try { const b = await (await import('./browser.js')).openBrowserIfAny(); if (b) out.push({ device: '', name: 'this PC', browser: b }) } catch {}
-  // Another PC's browser only with ADAL_LAN_ROBOTS=1 (sharePower.lanRobots): runs stay on this PC.
-  if (process.env.ADAL_LAN_ROBOTS === '1') try { for (const x of await (await import('./remoteBrowsers.js')).connectedBrowsers()) out.push({ device: x.id, name: x.name, browser: x.browser }) } catch {}
+  // (ADAL_LAN_ROBOTS=0, the emergency switch: this PC's only.)
+  if (process.env.ADAL_LAN_ROBOTS !== '0') try { for (const x of await (await import('./remoteBrowsers.js')).connectedBrowsers()) out.push({ device: x.id, name: x.name, browser: x.browser }) } catch {}
   return out
 }
 let spaceOfPage = null

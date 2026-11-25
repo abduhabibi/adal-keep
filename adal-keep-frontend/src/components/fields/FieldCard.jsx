@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import FileImage from '../shared/FileImage'
+import { tileFile, picKey } from '../../lib/pics'
 import { usePickFile, ON_PHONE } from '../shared/PickFile'
 import { useNavigate } from 'react-router-dom'
 import { createPortal } from 'react-dom'
@@ -261,9 +262,7 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
 
   const isImage = (f) => f?.mimetype?.startsWith('image/')
   // Photo and Full Body Photo: the newest picture is shown (it is the one the CV takes; a refined one is newest).
-  const mainFile = (field.name === 'Photo' || field.name === 'Full Body Photo') && field.files?.length
-    ? field.files.filter(isImage).reduce((a, b) => (b.id > a.id ? b : a), field.files.find(isImage) || field.files[0])
-    : field.files?.[0]
+  const mainFile = tileFile(field)
 
   return (
     <div
@@ -413,6 +412,7 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
             ) : isImage(mainFile) ? (
               <FileImage
                 src={`/api/files/${mainFile.id}/thumbnail`}
+                keep={picKey(mainFile)}
                 alt=""
                 className="h-full w-full object-cover cursor-zoom-in transition-transform hover:scale-[1.02]"
                 onClick={() => setPreviewFile(mainFile)}
@@ -595,6 +595,7 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
               <FileImage
                 src={`/api/files/${previewFile.id}/download`}
                 under={`/api/files/${previewFile.id}/thumbnail`}
+                underKeep={picKey(previewFile)}
                 alt={previewFile.original_name}
                 className="max-w-[92vw] max-h-[88vh] object-contain rounded-3xl shadow-2xl select-none"
                 draggable={false}

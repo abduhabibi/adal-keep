@@ -7,6 +7,7 @@
  */
 import fs from 'fs'
 import http from 'http'
+import net from 'net'
 import path from 'path'
 import { robotsInApp } from './robotsInApp.js'
 
@@ -59,7 +60,8 @@ export async function robotsLink(req, res, next) {
     r.pipe(res)
   })
   // Nothing at all in 30 s (a stream's headers come at once): it is stuck or off.
-  up.setTimeout(30000, () => up.destroy(new Error('no answer')))
+  // (Stop and Continue only write the queue: not answered in 4 s — Adal Robots is starting — done here.)
+  up.setTimeout(fallback ? 4000 : 30000, () => up.destroy(new Error('no answer')))
   up.on('error', off)
   res.on('close', () => up.destroy())   // the viewer closed: the robot stops sending
   up.end(body || undefined)
@@ -75,19 +77,32 @@ let robotsTimer = null
 export async function robotsAnswer(ms = 3000) {
   try { const r = await fetch(ROBOTS_URL() + '/health', { signal: AbortSignal.timeout(ms) }); return r.ok } catch { return false }
 }
+/** Something listens on its port (it may be too busy to answer). */
+export const robotsThere = (ms = 2000) => new Promise((resolve) => {
+  const s = net.connect({ host: '127.0.0.1', port: Number(process.env.ADAL_ROBOTS_PORT) || 4010 })
+  const end = (v) => { s.destroy(); resolve(v) }
+  s.setTimeout(ms, () => end(false)); s.once('connect', () => end(true)); s.once('error', () => end(false))
+})
 export function keepRobotsRunning({ spawnFn = null, platform = process.platform } = {}) {
   if (robotsInApp() || robotsTimer) return false
   if (platform === 'linux' && process.env.ADAL_ROBOTS_SPAWN !== '1') return false   // adal-robots.service
   if (process.env.ADAL_ROBOTS_SPAWN === '0') return false
+  let child = null, spawnedAt = 0
   const look = async () => {
     if (await robotsAnswer()) return
+    // Started a moment ago and still starting (a slow PC), or one is there and only slow: never a second one
+    // (2026-11-25, Main: "another Adal Robots already works — this one stops"). One that listens but answers
+    // nothing for 3 minutes is let go on too: it alone holds the port; its own start-up ends a second one.
+    if (child && child.exitCode === null && child.signalCode == null && Date.now() - spawnedAt < 120000) return
+    if (await robotsThere()) { if (await robotsAnswer(20000)) return; if (Date.now() - spawnedAt < 180000) return }
     try {
       const { spawn } = spawnFn ? { spawn: spawnFn } : await import('child_process')
       const out = fs.openSync(path.resolve(process.cwd(), 'data', 'robots.log'), 'a')
-      const child = spawn(process.execPath, [path.resolve(process.cwd(), 'robots', 'adal-robots.mjs')], {
+      child = spawn(process.execPath, [path.resolve(process.cwd(), 'robots', 'adal-robots.mjs')], {
         cwd: process.cwd(), detached: true, windowsHide: true, stdio: ['ignore', out, out],
         env: { ...process.env, ADAL_ROBOTS_IN_APP: '' },
       })
+      spawnedAt = Date.now()
       child.unref?.()
       console.log(`[robots] Adal Robots started (pid ${child.pid}, no window)`)
     } catch (e) { console.warn('[robots] Adal Robots could not start:', e.message) }

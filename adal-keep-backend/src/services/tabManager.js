@@ -27,6 +27,8 @@
  *
  * Cross-platform: pure Puppeteer/CDP — Windows / macOS / Linux identical.
  */
+import { notNeeded } from './pageDiet.js'
+import { noteSent } from './lostBrowser.js'
 import { noteCall } from './siteApi.js'
 import { newRunTab, outOfSight, sendAway } from './browser.js'
 import { isRemote } from './remoteBrowsers.js'
@@ -112,6 +114,7 @@ export async function setupTab(page, { runId, mute = true } = {}) {
   // their menus away and the run cannot find them. It ends with the run.
   const desktopPage = () => page.__adalCdp?.send('Emulation.setDeviceMetricsOverride', { width: 1366, height: 900, deviceScaleFactor: 1, mobile: false }).catch(() => {})
   try { await page.__adalWake?.() } catch {}   // slowed by robotGuard: a run works at full speed
+  if (runId !== undefined && page.__adalRunId !== runId) page.__adalSent = ''   // what this run sends is its own (lostBrowser.js)
   if (page.__adalSetup) {
     page.__adalCdp?.send('Emulation.setFocusEmulationEnabled', { enabled: true }).catch(() => {})
     await desktopPage()
@@ -150,8 +153,9 @@ export async function setupTab(page, { runId, mute = true } = {}) {
       // Google's reCAPTCHA (its box and its pictures) always comes: a person must see it to tick it.
       const allowImages = page.__adalAllowImages === true || CAPTCHA_HOSTS.test(hostOf(req.url()))
       // Fonts too (2026-11-23): 100–400 KB a page on a slow line, and the robot reads text, not letters' shapes.
-      if ((!allowImages && (type === 'image' || type === 'font')) || type === 'media' || TRACKERS.test(hostOf(req.url()))) req.abort().catch(() => {})
+      if (notNeeded(req, { pictures: page.__adalAllowImages === true }) || (!allowImages && (type === 'image' || type === 'font')) || type === 'media' || TRACKERS.test(hostOf(req.url()))) req.abort().catch(() => {})
       else {
+        noteSent(page, req)
         if (type === 'xhr' || type === 'fetch') noteCall(req.method(), req.url())   // the portal's own data calls (siteApi.js)
         req.continue().catch(() => {})
       }
@@ -455,7 +459,7 @@ export async function pagesOf(browser, ms = 3000) {
  * empty): the tab named after the run, or the only tab on the run's site.
  * Found tabs are adopted, so the run also resumes in them.
  */
-export async function findRunTab(browser, runId, workflowId = '', { bySite = true, adopt = true } = {}) {
+export async function findRunTab(browser, runId, workflowId = '', { bySite = true, adopt = true, lookOnly = false, liveRuns = null } = {}) {
   const known = tabOfRun(runId)
   if (known) return known
   if (!browser) return null
@@ -468,6 +472,14 @@ export async function findRunTab(browser, runId, workflowId = '', { bySite = tru
     const host = RUN_HOSTS.find(([w]) => w.test(String(workflowId)))?.[1]
     const onSite = host ? pages.filter(p => host.test(p.url())) : []
     if (onSite.length === 1) found = onSite[0]
+    // Another run's tab is only looked at, never taken over (2026-11-25, Main: three waiting Musaned runs each
+    // "found" the one sign-in tab, and the next started in it).
+    if (found && adopt) {
+      const other = ownerOf(found)
+      const i = pages.indexOf(found), named = /^adal-run-(\d+)$/.exec(names[i] || '')?.[1]
+      if (other !== null && other !== Number(runId)) return lookOnly ? found : null
+      if (named && Number(named) !== Number(runId) && liveRuns?.has(Number(named))) return lookOnly ? found : null
+    }
   }
   if (found && !adopt) return found   // only to look at (a finished run's live view): nobody's tab
   if (found) {
@@ -488,7 +500,7 @@ export function runsWithTabs() {
  * Submit) gets the same tab back when it resumes; otherwise a free tab on its
  * site, else a new tab. The run then goes to the page it needs by itself.
  */
-export async function openRunTab(browser, runId, { workflowId = '', busyRuns = new Set(), keepRuns = null, space = null, quiet = false } = {}) {
+export async function openRunTab(browser, runId, { workflowId = '', busyRuns = new Set(), keepRuns = null, space = null, quiet = false, fresh = false } = {}) {
   const id = Number(runId)
   const own = tabOfRun(id)
   if (own) {
@@ -500,12 +512,13 @@ export async function openRunTab(browser, runId, { workflowId = '', busyRuns = n
   // Work for another PC (sharePower.js): its own tab in the window out of sight
   // there — never a tab the person at that PC may be looking at.
   if (quiet) {
+    // (fresh: the one on the site was dead — a new one.)
     // A free tab already on the site is taken (tab reuse, 2026-11-21; LMIS: never
     // a second LMIS of the same account). findFreeTab never takes the front tab
     // nor one a person typed in.
     // Also the site's tab an earlier run still holds while it waits for a sign-in (siteTab): one tab per
     // site and account, never a second one beside it (2026-11-23: two Musaned runs opened two tabs).
-    const there = await oneAtATime(async () => {
+    const there = fresh ? null : await oneAtATime(async () => {
       const p = await findFreeTab(browser, workflowId, busyRuns, space) || (keepRuns && await siteTab(browser, workflowId, keepRuns, space))
       if (p) _tabs.set(id, p)
       return p
@@ -608,6 +621,21 @@ export function handTabToPerson(page) {
   setFileDialogs(page, false).catch(() => {})
   // The run's own clicks count as "trusted" too: only what comes after is a person's.
   try { page.evaluate?.(() => { try { sessionStorage.removeItem('adal-touched') } catch {} })?.catch?.(() => {}) } catch {}
+}
+
+/** A tab closed by the browser itself: also one whose page answers nothing (page.close waits for the page). */
+export async function closeTarget(page, ms = 4000) {
+  const within = (p) => Promise.race([Promise.resolve(p).then(() => true, () => false), new Promise(r => setTimeout(() => r(false), ms))])
+  try {
+    await keepBrowserOpen(page)
+    const s = page.browser().target().createCDPSession()
+    const cdp = await Promise.race([s.catch(() => null), new Promise(r => setTimeout(() => r(null), ms))])
+    if (!cdp) return within(page.close())
+    const ok = await within(cdp.send('Target.closeTarget', { targetId: page.target()._targetId }))
+    cdp.detach().catch(() => {})
+    for (const [id, t] of [..._tabs]) if (t === page) _tabs.delete(id)
+    return ok
+  } catch { return false }
 }
 
 /** Close the tab this run owns. Returns true when a tab was closed. */

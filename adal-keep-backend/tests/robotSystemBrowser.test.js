@@ -77,7 +77,8 @@ test("Adal Browser's sign-ins carry over once to the PC's browser; its own profi
     assert.equal(carryOverSignIns({ from, to, mode: 'system' }), true)
     assert.equal(fs.readFileSync(path.join(to, 'Default', 'Network', 'Cookies'), 'utf8'), 'musaned-signin')
     assert.ok(fs.existsSync(path.join(to, 'Local State')))           // the key the cookies are locked with
-    assert.ok(!fs.existsSync(path.join(to, 'Default', 'Cache')) && !fs.existsSync(path.join(to, 'SingletonLock')))
+    assert.ok(fs.existsSync(path.join(to, 'Default', 'Cache')), 'its page cache too: the first pages are not from an empty one')
+    assert.ok(!fs.existsSync(path.join(to, 'SingletonLock')))
     assert.ok(fs.existsSync(path.join(from, 'Default', 'Network', 'Cookies')))   // Adal Browser's own stays
     assert.equal(carryOverSignIns({ from, to, mode: 'system' }), false)          // once: its own are as new now
     assert.equal(carryOverSignIns({ from, to, mode: 'adal' }), false)

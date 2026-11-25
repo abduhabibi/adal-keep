@@ -7,8 +7,12 @@
  * the Companion found and the office addresses the main PC sends online; the
  * first that answers opens, at the same page. When the main PC goes away
  * again, its page comes back here (lib/companionOnline.js).
+ * By itself only while nobody has used the window yet; after that a note with a
+ * button (a person's page is never taken away).
  */
-import { backStep, watchSaves, busyHere } from './steady.js'
+import { windowNote, windowUsed, byItself } from './windowNote'
+import { backStep } from './steady.js'
+
 const ON_COMPANION = typeof location !== 'undefined' && location.host === '127.0.0.1:47801'
 
 async function look() {
@@ -29,8 +33,7 @@ let cid = ''   // this Companion's own id (AdalKeep.exe, hand.go): the main PC k
 export function startCompanionDirect() {
   if (!ON_COMPANION) return
   let stopped = false
-  watchSaves()
-  // Left the main PC a moment ago: back only once it answers steadily (lib/steady.js).
+  // Left the main PC a moment ago (a person's click): back only once it answers steadily (lib/steady.js).
   const left = location.hash === '#adal_left'
   if (left) history.replaceState(history.state, '', location.pathname + location.search)
   const steps = {}
@@ -39,7 +42,7 @@ export function startCompanionDirect() {
     let url = null
     try { url = await look() } catch {}
     if (url === null && stopped) return
-    if (backStep(steps, !!url, Date.now(), left) && !busyHere()) {
+    if (backStep(steps, !!url, Date.now(), left)) {
       stopped = true
       // A page about a profile made here (not on the PC yet) opens the list instead.
       const here = /\/-\d+/.test(location.pathname) ? '/' : location.pathname
@@ -47,7 +50,9 @@ export function startCompanionDirect() {
       let pc = null
       try { pc = JSON.parse(localStorage.getItem('adal-pc') || 'null') } catch {}
       const hand = pc?.number ? `#adal_number=${encodeURIComponent(pc.number)}${pc.cloud?.device ? `&adal_device=${encodeURIComponent(pc.cloud.device)}` : ''}${cid ? `&adal_cid=${encodeURIComponent(cid)}` : ''}` : ''
-      location.replace(`${url.replace(/\/$/, '')}${here}?adal_companion=1&adal_online=ok${hand}`)
+      const go = () => location.replace(`${url.replace(/\/$/, '')}${here}?adal_companion=1&adal_online=ok${hand}`)
+      if (!windowUsed() || byItself()) go()
+      else windowNote('main-pc', 'The main PC is on.', 'Open it', go)
       return
     }
     setTimeout(run, 10000)

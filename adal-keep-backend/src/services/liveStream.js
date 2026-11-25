@@ -140,7 +140,7 @@ export async function serveLive(req, res, { tabOf, ended = async () => false, on
       } catch { await wait(700, () => closed) }        // this tab cannot be shown just now: looked for again
       try { stop?.() } catch {}
       stop = null; page = null
-      if (!closed) v.say({ state: 'opening', text: 'The robot\'s tab closed — waiting for it to open again…' })
+      if (!closed) v.say({ state: 'opening', text: mine.__adalDead || 'The robot\'s tab closed — waiting for it to open again…' })
     }
   } finally { clearInterval(ping); try { stop?.() } catch {}; if (!res.writableEnded) res.end() }
 }

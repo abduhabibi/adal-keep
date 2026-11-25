@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { off } from '../lib/offSwitch'
 
 const api = axios.create({
   baseURL: '/api', // Vite proxy will forward this to http://localhost:4000/api
@@ -8,6 +9,43 @@ const api = axios.create({
   withCredentials: true, // Required for cookies/sessions
 })
 
+// The browser keeps 6 connections to the PC; on a busy one the refreshes of the page
+// held them all and a photo (or the click just made) waited seconds for its turn.
+// At most 4 questions at once, 2 of them refreshes: pictures and clicks always find
+// a free one. A question not answered in 8 s gives its place up. Off: "line".
+if (typeof window !== 'undefined' && !off('line') && !(import.meta.env.VITE_PHONE === '1' || import.meta.env.VITE_ADMIN === '1' || import.meta.env.VITE_DEMO === '1')) {
+  const get = api.get.bind(api)
+  const line = { now: [], later: [] }
+  let going = 0, behind = 0
+  const next = () => {
+    for (;;) {
+      const job = line.now.length && going < 4 ? line.now.shift() : line.later.length && going < 3 && behind < 2 ? line.later.shift() : null
+      if (!job) return
+      going++; if (job.behind) behind++
+      let held = true
+      const free = () => { if (!held) return; held = false; going--; if (job.behind) behind--; next() }
+      const t = setTimeout(free, 8000)
+      job.ask().finally(() => { clearTimeout(t); free() }).catch(() => {})
+    }
+  }
+  api.get = (url, config = {}) => {
+    if (window.__ADAL_CLOUD || (config.responseType && config.responseType !== 'json')) return get(url, config)
+    return new Promise((ok, no) => {
+      line[config.adalBehind ? 'later' : 'now'].push({ key: url + '?' + JSON.stringify(config.params || {}), behind: !!config.adalBehind, ask: () => { const p = get(url, config); p.then(ok, no); return p } })
+      next()
+    })
+  }
+  // A person asks for what a refresh is already waiting for: it goes first.
+  api.adalNow = (key) => {
+    const i = line.later.findIndex(j => j.key === key)
+    if (i < 0) return
+    const [job] = line.later.splice(i, 1)
+    job.behind = false
+    line.now.push(job)
+    next()
+  }
+}
+
 // The same GET asked again while the first is on its way shares its answer:
 // pages and side panels that load the same list at once cost one request.
 {
@@ -16,7 +54,7 @@ const api = axios.create({
   api.get = (url, config = {}) => {
     if (config.responseType && config.responseType !== 'json') return get(url, config)
     const key = url + '?' + JSON.stringify(config.params || {})
-    if (inflight.has(key)) return inflight.get(key)
+    if (inflight.has(key)) { if (!config.adalBehind) api.adalNow?.(key); return inflight.get(key) }
     const p = get(url, config).finally(() => inflight.delete(key))
     inflight.set(key, p)
     return p
@@ -58,6 +96,12 @@ if (import.meta.env.VITE_DEMO !== '1') {
   api.interceptors.request.use((c) => { if (c.method && c.method.toLowerCase() !== 'get' && !QUIET.test(String(c.url))) dirtyUntil = Date.now() + 8000; return c })
 }
 
+// What a page's timer asks (main.jsx) is a refresh: it goes behind what a person just asked for.
+if (typeof window !== 'undefined') {
+  const get = api.get
+  api.get = (url, config = {}) => get(url, window.__adalTimer ? { ...config, adalBehind: true } : config)
+}
+
 // How fast the PC answers: on a slow line (answers taking 1.5 s+ on average)
 // the pages' repeating refreshes ask less often (main.jsx).
 {
@@ -91,7 +135,7 @@ export function rememberJoin(j, key) {
     if (key) localStorage.setItem(KEY, key)
   } catch {}
 }
-export function forgetJoin() { try { localStorage.removeItem(JOIN); localStorage.removeItem(KEY) } catch {} }
+export function forgetJoin() { import('../lib/pics').then(p => p.clearPics()).catch(() => {}); try { localStorage.removeItem(JOIN); localStorage.removeItem(KEY) } catch {} }
 // Handed over in the address (#adal_number, #adal_cid, #adal_device — never sent to a server): kept at once.
 if (typeof location !== 'undefined' && !isMainItself() && import.meta.env.VITE_PHONE !== '1' && import.meta.env.VITE_ADMIN !== '1') {
   try {

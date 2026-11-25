@@ -1,13 +1,20 @@
 import { useEffect, useState } from 'react'
 import api, { joinInfo, rememberJoin, forgetJoin } from '../services/api'
+import { byItself } from '../lib/windowNote'
 
 /**
  * Opened from another computer (an Adal Companion PC, a branch PC, a laptop):
  * it types the main PC's number (5 digits, in the main PC's Settings — the one
  * phones are added with) and is in at once. Nobody at the main PC approves
  * anything. Typed once — the key stays in this browser.
+ *
+ * Over the page, never instead of it (asked on 2026-11-25: the window went white
+ * and reloaded): a Companion that joined before comes back in behind a small line,
+ * what was typed stays; only when the number must be typed does it cover the page.
  */
-export default function PcAccessGate() {
+let lastIn = 0   // came in, and the PC says no again: not asked over and over
+export default function PcAccessGate({ onIn, onOut }) {
+  const inNow = () => { lastIn = Date.now(); if (byItself() || !onIn) location.reload(); else onIn() }
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [number, setNumber] = useState('')
@@ -23,7 +30,7 @@ export default function PcAccessGate() {
       const { data } = await api.post('/pc-access/number', { number: n, name: name || 'Adal Companion PC', device: j.device || undefined, cid: j.cid || undefined })
       rememberJoin({ ...j, number: n }, data?.key)
       if (location.hash) history.replaceState(history.state, '', location.pathname + location.search)
-      location.reload()
+      inNow()
     } catch (er) {
       if (er.response?.data?.suspended) { window.dispatchEvent(new Event('adal-suspended')); return }
       // The main PC not answering for a moment (restarting, an update): tried again, nothing typed.
@@ -34,8 +41,8 @@ export default function PcAccessGate() {
     }
   }
   useEffect(() => {
-    api.get('/pc-access/status').then(r => {
-      if (r.data.state === 'approved') return location.reload()
+    const look = () => api.get('/pc-access/status').then(r => {
+      if (r.data.state === 'approved') return inNow()
       if (r.data.state === 'suspended') return window.dispatchEvent(new Event('adal-suspended'))
       // Taken off the main PC's list there: typed again, never by itself.
       const n = r.data.state === 'removed' ? '' : (joinInfo().number || '').replace(/\D/g, '')
@@ -45,16 +52,17 @@ export default function PcAccessGate() {
       const n = (joinInfo().number || '').replace(/\D/g, '')
       if (n.length >= 5) send(n, { auto: true }); else setQuiet(false)
     })
+    const t = setTimeout(look, Date.now() - lastIn < 30000 ? 10000 : 0)
+    return () => clearTimeout(t)
   }, [])
+  useEffect(() => { if (!quiet) onOut?.() }, [quiet])   // eslint-disable-line react-hooks/exhaustive-deps
 
   if (quiet) return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900" data-reconnecting="">
-      <div className="w-14 h-14 rounded-2xl overflow-hidden shadow-lg animate-pulse"><img src="/adal-logo.png" alt="Adal" className="h-full w-full object-cover" draggable={false} /></div>
-    </div>
+    <div role="status" data-reconnecting="" className="fixed left-1/2 top-2 z-[9997] -translate-x-1/2 rounded-full bg-slate-900 px-4 py-1.5 text-xs font-semibold text-white shadow-lg">Connecting to the main PC again…</div>
   )
   const signIn = (e) => { e.preventDefault(); send(number) }
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900 p-4">
+    <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-slate-50 dark:bg-slate-900 p-4">
       <div className="w-full max-w-md rounded-2xl bg-white dark:bg-slate-800 p-6 shadow-xl text-center space-y-4 animate-fade-up">
         <div className="text-5xl">🔐</div>
         <form onSubmit={signIn} className="space-y-3">

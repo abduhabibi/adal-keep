@@ -115,8 +115,10 @@ function useRunStates() {
  * Where every profile stands (Musaned → employer → Wafid → LMIS contract →
  * visa), refreshed every 30 s. { names: [[key, label]…], of: {profileId: key} }
  */
+// As last seen by this window: the Profiles page opens with every girl on her own tab.
+let stagesSeen = null
 function useStages() {
-  const [st, setSt] = useState({ names: [], of: {}, steps: {}, who: {}, missing: {} })
+  const [st, setSt] = useState(() => stagesSeen || { names: [], of: {}, steps: {}, who: {}, missing: {} })
   useEffect(() => {
     let alive = true
     // The saved counts at once (deviceCache), the fresh ones behind them.
@@ -128,7 +130,7 @@ function useStages() {
       if (!alive || now === last) return
       last = now
       const list = data?.profiles || []
-      setSt({
+      setSt(stagesSeen = {
         names: data?.stages || [],
         of: Object.fromEntries(list.map(x => [x.profile_id, x.stage])),
         steps: Object.fromEntries(list.map(x => [x.profile_id, x.steps || {}])),

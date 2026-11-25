@@ -1,5 +1,6 @@
-import { createContext, useContext, useEffect, useState, useCallback } from 'react'
+import { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react'
 import api from '../services/api'
+import { off } from '../lib/offSwitch'
 
 const AuthContext = createContext()
 
@@ -12,9 +13,19 @@ function loadStoredEmployee() {
   }
 }
 
+// What this window last was: open, for which agency. It opens as it was and asks the PC
+// behind (a white page with only the logo until the PC answered — 2026-11-25). Never kept
+// for a locked or suspended PC; the phone, the demo and the online copy start as before.
+const OPEN = 'adal-last-open'
+const mayOpen = () => typeof window !== 'undefined' && !off('open') && !window.__ADAL_CLOUD && !(import.meta.env.VITE_PHONE === '1' || import.meta.env.VITE_ADMIN === '1' || import.meta.env.VITE_DEMO === '1')
+const lastOpen = () => { try { return mayOpen() ? JSON.parse(localStorage.getItem(OPEN) || 'null') : null } catch { return null } }
+const rememberOpen = (o) => { try { if (o && mayOpen()) localStorage.setItem(OPEN, JSON.stringify(o)); else localStorage.removeItem(OPEN) } catch {} }
+
 export function AuthProvider({ children }) {
-  const [state, setState] = useState('loading')
-  const [company, setCompany] = useState(null)
+  const [state, setState] = useState(() => lastOpen() ? 'ready' : 'loading')
+  const [company, setCompany] = useState(() => lastOpen()?.company || null)
+  // Open from what was last seen, the PC not answering: said in a small line.
+  const [quiet, setQuiet] = useState(false)
   const [subscription, setSubscription] = useState(null)
   const [user, setUser] = useState(null)
   const [activeEmployee, setActiveEmployeeState] = useState(loadStoredEmployee)
@@ -43,18 +54,22 @@ export function AuthProvider({ children }) {
     import('../lib/i18n').then(m => m.followUser()).catch(() => {})
   }, [])
 
+  const forgetOpen = useCallback(() => rememberOpen(null), [])
+
   const setCurrentUser = useCallback((u) => {
     setUser(u)
   }, [])
 
-  const refresh = useCallback(async () => {
-    setState('loading')
+  const asking = useRef(null)   // one look at a time
+  const look = useCallback(async () => {
+    setState(s => s === 'ready' ? s : 'loading')   // (never a page taken away to look at the PC)
     for (let i = 0; i < 5; i++) {
       try {
         const st = await api.get('/setup/status')
         setCompany(st.data.companyName)
         setSubscription(st.data.subscription)
-        setState(st.data.state)
+        setState(st.data.state); setQuiet(false)
+        rememberOpen(st.data.state === 'ready' && st.data.subscription?.mode !== 'locked' ? { company: st.data.companyName } : null)
         try {
           const me = await api.get('/auth/me')
           setUser(me.data)
@@ -66,8 +81,9 @@ export function AuthProvider({ children }) {
         await new Promise((r) => setTimeout(r, 1500))
       }
     }
-    setState('error')
+    setState(s => s === 'ready' ? (setQuiet(true), s) : 'error')
   }, [])
+  const refresh = useCallback(() => asking.current ||= look().finally(() => { asking.current = null }), [look])
 
   // Signed in before staff roles (2026-11-22): the window keeps her name but has no staff key,
   // so the PC took it as signed out. Its device asks once for her key (asked on 2026-11-23).
@@ -96,6 +112,13 @@ export function AuthProvider({ children }) {
   }, [])
   // On the lock screen: every 3 s, so "Allow" or a month given in Adal Admin opens the app within seconds.
   const locked = subscription?.mode === 'locked'
+  useEffect(() => { if (locked) rememberOpen(null) }, [locked])
+  // Opened from what was last seen: asked again until the PC answers.
+  useEffect(() => {
+    if (!quiet) return
+    const t = setInterval(() => refresh(), 10000)
+    return () => clearInterval(t)
+  }, [quiet, refresh])
   useEffect(() => {
     if (!locked) return
     const t = setInterval(() => api.get('/subscription/status').then(r => setSubscription(r.data)).catch(() => {}), 3000)
@@ -112,13 +135,13 @@ export function AuthProvider({ children }) {
 
   const completeSetup = async (payload) => {
     const r = await api.post('/setup/company', payload)
-    await refresh()
+    await look()
     return r.data
   }
 
   const unlock = async (code) => {
     const r = await api.post('/subscription/unlock', { code })
-    await refresh()
+    await look()
     return r.data
   }
 
@@ -133,6 +156,8 @@ export function AuthProvider({ children }) {
         activeEmployee,
         setActiveEmployee,
         refresh,
+        quiet,
+        forgetOpen,
         completeSetup,
         unlock,
       }}

@@ -107,6 +107,9 @@ export const FRESH_MS = 45e3   // a Companion says how it is every 20 s: silent 
 export function ready(p, origin = null, now = Date.now()) {
   if (!p || p.id === '') return true
   if (p.updating) return false
+  // It answered a moment ago (robotPCs.askAll): there, and new enough to be driven, whatever release it has
+  // (2026-11-25: a hand-updated main PC and its Companions are often not on the same one).
+  if (p.answers) return true
   if (p.at && now - p.at > FRESH_MS) return false
   const mine = origin?.version
   return !mine || p.version === mine
@@ -262,14 +265,16 @@ export async function placeRun(db, job, { mainAllowed = true, pcs = null, tabs =
 }
 
 /**
- * Work handed to another PC over the office network (robots, moves, CV PDFs, another PC's LMIS):
- * OFF unless ADAL_LAN_ROBOTS=1 (the owner, 2026-11-24: "forget making the robots through LAN").
+ * Robot runs choose the best PC of the office by themselves (selfAssign.js): on, ADAL_LAN_ROBOTS=0 is the emergency
+ * off switch. (The owner, 2026-11-25; off from 2026-11-24 until then.) Moves and CV PDFs stay on the PC itself
+ * unless ADAL_LAN_ROBOTS=1.
  */
-export const lanRobots = () => process.env.ADAL_LAN_ROBOTS === '1'
+export const lanRobots = () => process.env.ADAL_LAN_ROBOTS !== '0'
+export const lanExtras = () => process.env.ADAL_LAN_ROBOTS === '1'
 
 /** The PC for a move (Transitions): the same choice, from this PC, with the site's open tabs counted. */
 export async function placeTransition(siteUrl, { from = '', pcs = null, browsers = null } = {}) {
-  if (!lanRobots()) return { to: from }   // on the PC itself (see lanRobots)
+  if (!lanExtras()) return { to: from }   // on the PC itself (see lanRobots)
   pcs = pcs || await officePCs()
   let host = ''
   try { host = new URL(siteUrl).hostname } catch {}
@@ -291,7 +296,7 @@ export async function placeTransition(siteUrl, { from = '', pcs = null, browsers
  * weak, else null (drawn here as before).
  */
 export async function helperForPdf() {
-  if (!lanRobots()) return null   // CV PDFs are made on this PC (see lanRobots)
+  if (!lanExtras()) return null   // CV PDFs are made on this PC (see lanRobots)
   const pcs = await officePCs()
   const c = choose({ from: '', pcs })
   return c.help && c.to ? c.to : null

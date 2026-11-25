@@ -77,7 +77,6 @@ test('a weak Main gives its run to a ready Companion only', () => {
 
 test('freeStrongDevice: not one on another release or updating', () => {
   rb._resetForTest()
-  process.env.ADAL_LAN_ROBOTS = '1'   // (the hand-off over the LAN is off unless switched on: ce98582)
   const reg = (id, body) => rb.registerDevice({ id, name: id }, '192.168.1.20', { token: 'x'.repeat(20), cores: 8, ...body })
   reg('OLD', { version: '4af9140' })
   reg('UPD', { version: 'aaaaaaa', updating: true })
@@ -122,7 +121,7 @@ test('a run paused at the sign-in (a captcha) holds back the next run of its sit
       { workflow_id: 'musaned_add_candidate', account_id: 2, status: 'paused', pause_reason: 'awaiting-human-save', updated_at: now },
     ])
     assert.deepEqual([...await signInLanes(db)], ['musaned:1'])
-    // A sign-in nobody answered in 5 minutes holds its account too while its tab waits at the box.
+    // A sign-in nobody answered in 10 minutes holds its account too while its tab waits at the box.
     const { NO_ANSWER } = await import('../src/services/worker.js')
     const [nid] = await db('automation_queue').insert({ workflow_id: 'musaned_add_candidate', account_id: 3, status: 'paused', pause_reason: NO_ANSWER, updated_at: now })
     _setTabLiveForTest((id) => id === 1 || id === nid)

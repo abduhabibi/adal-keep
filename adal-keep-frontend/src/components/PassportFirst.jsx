@@ -187,6 +187,9 @@ export default function PassportFirst({ onRead, onSkip, onLater }) {
     }
   }
 
+  // A passport just scanned (the Scan button's "Add profile") is read at once.
+  useEffect(() => { const f = window.__ADAL_SCAN_PASSPORT__; if (f) { window.__ADAL_SCAN_PASSPORT__ = null; read(f) } }, [])
+
   // Paste anywhere on the page (Ctrl+V): the passport, not the tray.
   useEffect(() => {
     const onPaste = (e) => {

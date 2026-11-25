@@ -118,11 +118,11 @@ function watch(db, page, who) {
               say: (m) => console.log(`[tasheer] sign-in: ${m}`), captchaMs: Math.max(60000, end - Date.now()),
               ask: asks < 6 ? (title) => { asks++; return captchaByNotice(page, codeCtx, { title, press: 'login', creds, gone: async () => !(await hasPassword(page)) }) } : null,
             }).catch(() => '')
-            if (out === 'no-captcha-typed') asks = 6        // nobody answered in 5 minutes: the live view is theirs
+            if (out === 'no-captcha-typed') asks = 6        // nobody answered in 10 minutes: the live view is theirs
             continue
           }
         }
-        // The sign-in waits for its captcha: asked by notification (5 minutes; up to 6 times for wrong codes).
+        // The sign-in waits for its captcha: asked by notification (10 minutes; up to 6 times for wrong codes).
         if (asks < 6 && await loginCodeWanted(page)) {
           const acct = await (chosen ? db('tasheer_accounts').where('id', chosen) : db('tasheer_accounts').orderBy('is_default', 'desc')).first().catch(() => null)
           asks++
@@ -130,7 +130,7 @@ function watch(db, page, who) {
             title: asks > 1 ? 'Not accepted: type the new Tasheer code' : 'Tasheer sign-in: type the code', press: 'login',
             creds: acct ? { user: acct.username, pass: acct.password } : null, gone: async () => !(await hasPassword(page)),
           }).catch(() => 'gone')
-          if (r === 'expired') { asks = 6; console.log('[tasheer] sign-in: nobody typed the code within 5 minutes — left to the live view') }
+          if (r === 'expired') { asks = 6; console.log('[tasheer] sign-in: nobody typed the code within 10 minutes — left to the live view') }
           if (r === 'typed') await sleep(5000)
           continue
         }

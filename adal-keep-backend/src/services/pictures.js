@@ -115,9 +115,12 @@ const behind = new Set()
  * A picture's thumbnail file, or null (not a picture sharp reads, a small
  * file, or not ready within `waitMs`: it goes on behind and is there next time).
  * With other pictures being made it is not waited for at all: the whole file
- * goes at once, and the small one is made a moment later.
+ * goes at once, and the small one is made a moment later. But a big one (a 2 MB
+ * passport) is waited for: sent whole it takes longer over the office network
+ * than its small copy takes to make (2026-11-25: three tiles waiting at once).
  */
-export async function thumbnailFile(abs, mimetype = '', waitMs = 100) {
+const BIG = 700 * 1024
+export async function thumbnailFile(abs, mimetype = '', waitMs = null) {
   if (!/^image\/(jpe?g|png|webp)$/i.test(mimetype || '') && !/\.(jpe?g|png|webp)$/i.test(abs)) return null
   const st = await fs.promises.stat(abs).catch(() => null)
   if (!st || st.size < THUMB_FROM) return null
@@ -127,7 +130,9 @@ export async function thumbnailFile(abs, mimetype = '', waitMs = 100) {
   }, { first: true }).then(async r => (r.kept || await fs.promises.access(r.file).then(() => true, () => false)) ? r.file : null, () => null)
   const file = copyFile(abs, st, THUMB, 'webp')
   if (await fs.promises.access(file).then(() => true, () => false)) return file
-  if (working || line.length) {
+  const big = waitMs == null && st.size > BIG
+  waitMs ??= big ? Math.min(2500, 300 + st.size / 1500) : 100
+  if (!big && (working || line.length)) {
     if (!behind.has(file)) { behind.add(file); setTimeout(() => make().finally(() => behind.delete(file)), BEHIND_MS).unref?.() }
     return null
   }

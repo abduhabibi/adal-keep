@@ -10,6 +10,7 @@
  * A browser that is not a Companion never does this.
  */
 import api, { forgetJoin } from '../services/api'
+import { windowNote, noNote, windowUsed, byItself } from './windowNote'
 import { look, leaveStep, watchSaves, busyHere, HOLD_MS } from './steady.js'
 
 const ONLINE = 'http://127.0.0.1:47801'
@@ -19,23 +20,27 @@ const TRIED = 'adal-companion-online-tried'
 const get = (k) => { try { return localStorage.getItem(k) } catch { return null } }
 const set = (k, v) => { try { localStorage.setItem(k, v) } catch {} }
 
-// The main PC stops answering (turned off, the Companion left the office): the
-// window goes back to the online copy, at the same page; that copy comes back
-// here by itself when the main PC answers (lib/companionDirect.js). Only once it is
-// really away (lib/steady.js): a slow answer, a save or someone typing moves nothing.
+// The main PC stops answering (turned off, the Companion left the office): said in
+// a note, with a button to this PC's own copy at the same page. Never by itself: a
+// busy main PC missed two answers and the whole window went away (2026-11-25).
+// (And only once it is really away, lib/steady.js: a slow answer is no note.)
 function watchMainPC() {
   watchSaves()
   const s = {}
-  let asking = false, heldAt = 0
+  let asking = false, heldAt = 0, said = false
   const t = setInterval(async () => {
     if (asking) return
     asking = true
     const seen = await look(() => fetch('/api/health', { cache: 'no-store', signal: AbortSignal.timeout(8000) }))
     asking = false
-    if (!leaveStep(s, seen, Date.now())) { heldAt = 0; return }
+    const away = leaveStep(s, seen, Date.now())
+    if (seen === 'up') { noNote('main-pc'); said = false }
+    if (!away) { heldAt = 0; return }
+    const go = () => location.replace(`${ONLINE}${location.pathname}#adal_left`)
     heldAt ||= Date.now()
-    if (busyHere() && Date.now() - heldAt < HOLD_MS) return
-    clearInterval(t); location.replace(`${ONLINE}${location.pathname}#adal_left`)
+    if (byItself() && busyHere() && Date.now() - heldAt < HOLD_MS) return
+    if (byItself()) { clearInterval(t); go() }
+    else if (!said) { said = true; windowNote('main-pc', 'The main PC is not answering.', 'Work on this PC’s copy', go) }
   }, 8000)
 }
 
@@ -98,8 +103,11 @@ export async function shareOnlineCopy() {
   if (get(IS) === '1' && get(DONE)) watchMainPC()
   if (get(IS) !== '1' || get(DONE)) return
   if (Date.now() - Number(get(TRIED) || 0) < 6 * 3600 * 1000) return
+  // Somebody is working in this window already: at its next opening (this goes to another page and back).
+  if (windowUsed() && !byItself()) return
   try {
     const { data } = await api.post('/pc-access/online-copy', { name: 'Companion PC' })
+    if (windowUsed() && !byItself()) return
     const back = location.href
     location.href = `${ONLINE}/companion-pair.html#${encodeURIComponent(JSON.stringify({ pc: data, back }))}`
   } catch (err) {

@@ -27,7 +27,14 @@ const bare = (text) => String(text || '').replace(/^Retry \d+\/\d+ at \S+ — /,
 const NETWORK = /Could not reach|net::ERR|ERR_[A-Z_]+|Navigation timeout|timed? ?out/i
 
 /** A network failure says whose it was: this PC's internet or the site's. */
-export async function withInternetCheck(text, probe = () => fetch('https://www.google.com/generate_204', { signal: AbortSignal.timeout(6000) })) {
+// Three places at once, and once more: the office line loses connections in bursts (2026-11-25, Main: "this PC's
+// internet was down" while it was not). Down = none of them answers, twice.
+const PLACES = ['https://www.google.com/generate_204', 'https://1.1.1.1/cdn-cgi/trace', 'https://www.gstatic.com/generate_204']
+export const internetUp = async (get = (u) => fetch(u, { signal: AbortSignal.timeout(6000) })) => {
+  for (let i = 0; i < 2; i++) { try { await Promise.any(PLACES.map(u => get(u))); return true } catch {} }
+  return false
+}
+export async function withInternetCheck(text, probe = async () => { if (!(await internetUp())) throw new Error('down') }) {
   if (!NETWORK.test(text)) return text
   const up = await probe().then(() => true).catch(() => false)
   return `${text} — ${up ? "this PC's internet was working" : "this PC's internet was down"}`

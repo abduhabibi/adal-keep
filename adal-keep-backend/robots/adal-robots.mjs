@@ -40,13 +40,8 @@ export function robotsToken(dir = path.join(BACK, 'data')) {
   return t
 }
 
-/** Over `limit` of the processor busy now (a 1-s sample; Windows has no load average)? */
-export async function cpuOver(limit = CPU_LIMIT, ms = 1000) {
-  const t = () => os.cpus().reduce((a, c) => { const v = Object.values(c.times); a.all += v.reduce((x, y) => x + y, 0); a.idle += c.times.idle; return a }, { all: 0, idle: 0 })
-  const a = t(); await new Promise(r => setTimeout(r, ms)); const b = t()
-  const all = b.all - a.all
-  return all > 0 && 1 - (b.idle - a.idle) / all > limit
-}
+/** The processor's time so far, all cores: { all, idle } (Windows has no load average). */
+export const cpuTimes = () => os.cpus().reduce((a, c) => { const v = Object.values(c.times); a.all += v.reduce((x, y) => x + y, 0); a.idle += c.times.idle; return a }, { all: 0, idle: 0 })
 
 /** Adal Keep's database settings with a connection that is never held. */
 export async function openDb() {
@@ -89,13 +84,16 @@ async function main() {
 
   const worker = await import('../src/services/worker.js')
   // A weak PC: no new run while one of ours works and the processor is over 80 % busy (robots/gate.mjs).
-  const [{ makeGate }, { isWaiting }] = await Promise.all([import('./gate.mjs'), import('../src/services/attention.js')])
-  worker.setClaimGate(makeGate({ busy: () => cpuOver(CPU_LIMIT), working: () => worker.queueSnapshot().running.filter(r => !isWaiting(r.runId)).length, say, limit: CPU_LIMIT }))
+  const [{ makeGate, averageLoad }, { isWaiting }, { nobodyAsked }] = await Promise.all([import('./gate.mjs'), import('../src/services/attention.js'), import('../src/services/personPress.js')])
+  const load = averageLoad({ times: cpuTimes })
+  const pressed = async () => { const r = await worker.readyJobsQuery(db).orderBy('id', 'asc').limit(5); return r.some(x => !nobodyAsked(x)) }
+  worker.setClaimGate(makeGate({ busy: async () => load.over(CPU_LIMIT), pressed, working: () => worker.queueSnapshot().running.filter(r => !isWaiting(r.runId)).length, say, limit: CPU_LIMIT }))
   worker.startWorker(db)
   // What Adal Keep no longer runs itself (main.js, ROBOTS_HERE): it runs here.
   // (ADAL_ROBOTS_EXTRAS=0: the queue only — a scratch copy's test.)
   const later = (name, f) => process.env.ADAL_ROBOTS_EXTRAS === '0' ? null : Promise.resolve().then(f).catch(e => console.warn(`[robots] ${name}:`, e.message))
   later('sessions', async () => (await import('../src/services/sessionKeeper.js')).startSessionKeeper(db))   // a day's sign-ins kept, Wafid on standby
+  later('lines', async () => (await import('../src/services/warmLines.js')).startWarmLines(db))                   // signed-in sites' connections stay open
   later('scanner', async () => (await import('../src/services/autoScanner.js')).startScanner(db))              // new work found every 2 min
   later('wafid', async () => (await import('../src/services/wafidStatus.js')).startWafidChecker(db))
   later('contracts', async () => (await import('../src/services/musanedContracts.js')).startContractChecker(db))

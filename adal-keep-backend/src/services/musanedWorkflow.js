@@ -358,7 +358,38 @@ async function staleSignIn(page) {
   return !(await within(robotCheck(page), { ticked: false })).ticked
 }
 
+/** A Musaned page on a line that loses connections (services/steadyLoad.js): only for opening a page. */
+const openPage = async (page, ctx, url, totalMs = FIRST_LOAD_MS) => (await import('./steadyLoad.js')).steadyGoto(page, url, { totalMs, isCancelled: ctx?.isCancelled, log: (m) => log(ctx, m) })
+
+/**
+ * The sign-in is coming back to Musaned (its app is loading after the code or the tick): waited for, never loaded
+ * over (2026-11-25, Main: a run started in a tab at …/#state=… and opened Musaned's front page over it). Past 60 s
+ * with nothing drawn it is opened again, once.
+ */
+async function settleSignIn(page, ctx, ms = 90000) {
+  const { inCallback } = await import('./steadyLoad.js')
+  let review = await classifyScreen(page, ctx), again = false
+  const t0 = Date.now()
+  while (review.screen === 'unknown' && Date.now() - t0 < ms) {
+    if (ctx?.isCancelled?.()) { const e = new Error('Cancelled by user'); e.cancelled = true; throw e }
+    if (!again && Date.now() - t0 > 60000 && !inCallback(page.url()) && await blankPage(page, 1000)) {
+      again = true
+      log(ctx, 'Musaned did not draw its page in 60 s after the sign-in — opening it again once', 'warn')
+      await openPage(page, ctx, MUSANED_ROOT).catch(() => {})
+    }
+    await sleep(1000)
+    review = await classifyScreen(page, ctx)
+  }
+  if (Date.now() - t0 > 3000) log(ctx, `Musaned came after ${Math.round((Date.now() - t0) / 1000)} s: ${review.screen}`)
+  return review
+}
+
 export async function stepOpenMusaned(page, ctx) {
+  if ((await import('./steadyLoad.js')).inCallback(page.url())) {
+    log(ctx, 'the sign-in is just coming back to Musaned — waiting for its page')
+    const r = await settleSignIn(page, ctx)
+    if (['agency-picker', 'dashboard', 'landing'].includes(r.screen)) return { ok: true, finalUrl: page.url(), onKeycloak: false }
+  }
   // Peer-aware: if this tab is ALREADY on a Musaned host we do NOT navigate to
   // the root — that would wipe an in-progress form and/or force a re-login.
   // We just inspect the current screen and continue.
@@ -376,7 +407,7 @@ export async function stepOpenMusaned(page, ctx) {
     if (onKeycloak) {
       if (!(await staleSignIn(page))) return { ok: true, finalUrl: page.url(), onKeycloak: true }
       log(ctx, 'this tab shows an older sign-in page (Musaned\'s sign-in expires in 2–3 min) — loading Musaned\'s sign-in fresh')
-      try { await page.goto(MUSANED_ROOT, { waitUntil: 'domcontentloaded', timeout: FIRST_LOAD_MS }) }
+      try { await openPage(page, ctx, MUSANED_ROOT) }
       catch (e) { throw new Error(unreachable(e)) }
       page.__adalRootAt = Date.now()
       await sleep(1500)
@@ -388,14 +419,14 @@ export async function stepOpenMusaned(page, ctx) {
     // and paused again, for ever.
     if (await blankPage(page)) {
       log(ctx, 'Musaned page is blank — loading it again')
-      try { await page.goto(MUSANED_ROOT, { waitUntil: 'domcontentloaded', timeout: FIRST_LOAD_MS }) }
+      try { await openPage(page, ctx, MUSANED_ROOT) }
       catch (e) { throw new Error(unreachable(e)) }
       await waitForText(page, 8000)
     }
     // On a Musaned host but unclassified — fall through to the login-click loop
     // below WITHOUT re-navigating away.
   } else {
-    try { await page.goto(MUSANED_ROOT, { waitUntil: 'domcontentloaded', timeout: FIRST_LOAD_MS }) }
+    try { await openPage(page, ctx, MUSANED_ROOT) }
     catch (e) { throw new Error(unreachable(e)) }
     page.__adalRootAt = Date.now()
     await sleep(1500)
@@ -499,7 +530,7 @@ export async function stepClickAgencyCard(page, ctx) {
       if (fresh) break
       fresh = true
       log(ctx, '⏳ Musaned\'s list of agencies is still loading after 45 s — loading Musaned again once', 'warn')
-      await page.goto('https://tawtheeq.musaned.com.sa/', { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {})
+      await openPage(page, ctx, MUSANED_ROOT).catch(() => {})
       deadline = Date.now() + 45000
       continue
     }
@@ -556,7 +587,7 @@ export async function stepClickGoToDashboard(page, ctx) {
     try { target.scrollIntoView({ block: 'center' }); target.click(); return true } catch { return false }
   })
   if (!clicked) {
-    try { await page.goto(DASHBOARD_URL, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS }); await sleep(2000); return { ok: true, via: 'direct-nav' } }
+    try { await openPage(page, ctx, DASHBOARD_URL, NAV_TIMEOUT_MS); await sleep(2000); return { ok: true, via: 'direct-nav' } }
     catch (e) { return { ok: false, error: e.message } }
   }
   await sleep(2500)
@@ -580,7 +611,7 @@ export async function stepClickHrPool(page, ctx) {
   if (!clicked) {
     // Its menu is folded away: the page itself still opens.
     log(ctx, 'HR Pool is not on the screen — going to its page', 'warn')
-    await page.goto(new URL('/hr-pool', page.url()).href, { waitUntil: 'domcontentloaded', timeout: 60000 })
+    await openPage(page, ctx, new URL('/hr-pool', page.url()).href)
   }
   const navDeadline = Date.now() + 20000
   while (Date.now() < navDeadline) {
@@ -599,7 +630,7 @@ export async function stepClickAddNewCandidate(page, ctx) {
   // 402 failed there: "ADD NEW CANDIDATE not found"): back to the HR Pool list, then Add New Candidate as always.
   if (/\/hr-pool\/candidates\/add/i.test(page.url())) {
     log(ctx, '↩ this tab is still on an Add Candidate form from before Adal Keep restarted — back to the HR Pool list to add her again')
-    await page.goto(new URL('/hr-pool', page.url()).href, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {})
+    await openPage(page, ctx, new URL('/hr-pool', page.url()).href).catch(() => {})
     await page.waitForFunction(() => [...document.querySelectorAll('button, a, [role="button"]')].some(el => /add\s+new\s+candidate/i.test(el.textContent || '')), { timeout: 45000 }).catch(() => {})
   }
   const deadline = Date.now() + 20000
@@ -2631,6 +2662,7 @@ async function musanedRun(page, ctx) {
     // An old sign-in page: from the start, where it is loaded fresh and filled (stepOpenMusaned).
     if ((stage === 'awaiting-musaned-captcha' || stage === 'awaiting-musaned-otp') && !(await staleSignIn(page))) {
       let review = await classifyScreen(page, ctx)
+      if (review.screen === 'unknown') review = await settleSignIn(page, ctx)
       if (review.screen === 'captcha') {
         const w = await waitForPersonCaptcha(page, ctx)
         if (w === 'timeout') return { ok: true, pauseReason: 'awaiting-musaned-captcha', seconds: Math.round((Date.now() - t0) / 1000) }
@@ -2850,7 +2882,7 @@ async function waitForPersonCaptcha(page, ctx) {
     // wahid.sa's sign-in expires while it waits ("Your login attempt timed out. Login will start from the
     // beginning", 2026-11-24 live): Musaned opened again (a new sign-in), the name and password filled, the box drawn.
     restart: async () => {
-      await page.goto(MUSANED_ROOT, { waitUntil: 'domcontentloaded', timeout: FIRST_LOAD_MS }).catch(() => {})   // Musaned's front page: its Login makes a new sign-in
+      await openPage(page, ctx, MUSANED_ROOT).catch(() => {})   // Musaned's front page: its Login makes a new sign-in
       page.__adalRootAt = Date.now()
       const o = await stepOpenMusaned(page, ctx)
       if (o?.onKeycloak !== false) await stepFillMusanedLogin(page, ctx)
@@ -2863,7 +2895,7 @@ async function waitForPersonCaptcha(page, ctx) {
   if (w === 'left') { log(ctx, '✓ the person signed in'); return 'signed-in' }
   if (w === 'timeout') log(ctx, 'nobody ticked "I\'m not a robot" within 10 minutes', 'warn')
   // Musaned's next page (the code) takes a moment to draw: the run reads it once it is there.
-  if (w === 'submitted') await waitForDashboard(page, ctx, 15000)
+  if (w === 'submitted') { const s = await waitForDashboard(page, ctx, 15000); if (s === 'unknown') await settleSignIn(page, ctx) }
   return w
 }
 
@@ -2904,8 +2936,10 @@ async function passOtp(page, ctx) {
   for (let turn = 1; turn <= 2 && await typeAuthenticatorCode(page, ctx); turn++) {
     let screen = 'otp'
     const until = Date.now() + 20000
-    // "unknown" is Musaned's page between the code and the dashboard: still going.
-    while (Date.now() < until && ['otp', 'unknown'].includes(screen)) { await sleep(700); screen = (await classifyScreen(page, ctx)).screen }
+    while (Date.now() < until && screen === 'otp') { await sleep(700); screen = (await classifyScreen(page, ctx)).screen }
+    // "unknown" is Musaned's page between the code and the dashboard: still going (on a slow line a minute or more —
+    // it was read as "waiting for the code" after 20 s, 2026-11-25).
+    if (screen === 'unknown') screen = (await settleSignIn(page, ctx)).screen
     if (screen === 'agency-picker') { await stepClickAgencyCard(page, ctx); screen = await waitForDashboard(page, ctx, 30000) }
     else if (screen === 'landing') { await stepClickGoToDashboard(page, ctx); screen = await waitForDashboard(page, ctx, 30000) }
     if (screen !== 'otp') {

@@ -87,12 +87,11 @@ test('Windows: Adal Robots is started with no window, apart (detached), and neve
 })
 
 test('the token is made once and kept; the processor gate answers', async () => {
-  const { robotsToken, cpuOver } = await import('../robots/adal-robots.mjs')
+  const { robotsToken, cpuTimes } = await import('../robots/adal-robots.mjs')
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'adal-robots-'))
   const a = robotsToken(dir), b = robotsToken(dir)
   assert.equal(a, b); assert.ok(a.length >= 32)
-  assert.equal(typeof await cpuOver(0.8, 200), 'boolean')
-  assert.equal(await cpuOver(2, 200), false, 'never over 200 %')
+  assert.ok(cpuTimes().all >= cpuTimes().idle)
   fs.rmSync(dir, { recursive: true, force: true })
 })
 

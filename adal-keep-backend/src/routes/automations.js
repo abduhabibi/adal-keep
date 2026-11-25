@@ -2,11 +2,13 @@ import express from 'express'
 import { listWorkflows } from '../services/workflows.js'
 import { dispatchRun, runStatus, queueSnapshot } from '../services/worker.js'
 import { markCancelled, isCancelled } from '../services/cancellation.js'
-import { forgetRunTab, dropTab, tabOfRun, tabAnswers, findRunTab, hostOf, codeBoxUp, typeCodeInto, pressCodeButton } from '../services/tabManager.js'
+import { forgetRunTab, dropTab, tabOfRun, tabAnswers, findRunTab, hostOf, codeBoxUp, activeRunIds, typeCodeInto, pressCodeButton } from '../services/tabManager.js'
 import { openBrowserIfAny, openForPerson } from '../services/browser.js'
 import { waiting, answerCaptcha, doneWith, TASK_MS } from '../services/attention.js'
 import { seal } from '../services/accountVault.js'
 import { plainReason, problemOf, goneFromMusaned } from '../services/runOutcome.js'
+import { hands, handsOn } from '../services/liveHands.js'
+import { personAsked } from '../services/personPress.js'
 import { CV_COLUMNS, completeIds, isComplete, lacksOf } from '../services/cvComplete.js'
 import { assertPoliceReady, getProfileVerification, runPassportVerification } from '../services/verification.js'
 
@@ -42,14 +44,6 @@ function publicRun(row) {
 // What the operator is told right after a click. Every answer says whether
 // the run is working now (in its own tab) or waiting, and what is ahead of it.
 // ---------------------------------------------------------------------------
-const isRetryWait = (row) => row?.status === 'pending' && String(row.pause_reason || '').startsWith('Retry ')
-
-function retryNote(row) {
-  const at = new Date(row.updated_at)
-  const when = isNaN(at.getTime()) ? 'shortly' : `at ${at.toLocaleTimeString()}`
-  return `It is waiting to retry after a failed attempt (${when}).`
-}
-
 function otherRunsText(n) {
   if (n <= 0) return 'No other run is working.'
   return n === 1 ? '1 other run is working.' : `${n} other runs are working.`
@@ -130,7 +124,12 @@ router.post('/companion/robot-browser', async (req, res) => {
 })
 // The sidebar's Browsers: every robot browser working now, on any PC (services/robotBrowsers.js).
 router.get('/browsers', async (req, res) => {
-  try { res.set('Cache-Control', 'no-store').json(await (await import('../services/robotBrowsers.js')).listBrowsers(req.app.locals.db)) }
+  try {
+    const list = await (await import('../services/robotBrowsers.js')).listBrowsers(req.app.locals.db)
+    // The live view's tab strip: the sites' own open tabs too (services/openTabs.js).
+    if (req.query.tabs) list.push(...await (await import('../services/openTabs.js')).openTabs(null, list.map(x => Number(x.run_id)).filter(Boolean)).catch(() => []))
+    res.set('Cache-Control', 'no-store').json(list)
+  }
   catch (e) { res.status(500).json({ error: e.message }) }
 })
 router.get('/companion/robot-browsers', async (req, res) => {
@@ -334,16 +333,11 @@ router.post('/profiles/:profileId/automations/:workflowId/start', async (req, re
           message: `Run #${runId} filled the visa form already — press Save in its tab, then "✔️ Visa saved".`,
         })
       }
-      if (isRetryWait(active)) {
-        return res.json({
-          ok: true, runId, resumed: true, state: 'queued',
-          message: `Run #${runId} is already queued. ${retryNote(active)}`,
-        })
-      }
       if (active.status === 'paused') {
         await db('automation_queue').where('id', runId).andWhere('status', 'paused')
           .update({ status: 'pending', updated_at: new Date().toISOString() })
       }
+      await personAsked(db, active)
       const s = await dispatchRun(db, runId)
       const verb = active.status === 'paused' ? 'resumed' : 'was already queued'
       return res.json({ ok: true, runId, resumed: true, ...s, message: runMessage(runId, s, verb) })
@@ -506,7 +500,7 @@ const PLAIN_WAIT = {
   'awaiting-musaned-precheck': 'Musaned: put her passport in the pre-check and press Continue',
   'awaiting-human-save': 'Look it over and press Save',
   'awaiting-human-submit': 'Look it over and press Submit',
-  'awaiting-tasheer-code': 'Tasheer: nobody typed the code in 5 minutes — press Continue',
+  'awaiting-tasheer-code': 'Tasheer: nobody typed the code in 10 minutes — press Continue',
 }
 // The notification bar: what needs a person now.
 router.get('/automations/attention', async (req, res) => {
@@ -515,10 +509,10 @@ router.get('/automations/attention', async (req, res) => {
     const calls = waiting()
     // Paused for a person today, in plain words. Older ones and runs a restart
     // interrupted stay on their profiles: nobody is being called for them now.
-    // A task lasts 5 minutes (attention.js TASK_MS); a run paused for no answer is not called again.
+    // A task lasts 10 minutes (attention.js TASK_MS); a run paused for no answer is not called again.
     const since = new Date(Date.now() - TASK_MS).toISOString()
     const paused = await db('automation_queue').where('status', 'paused').where('updated_at', '>', since)
-      .where('pause_reason', 'not like', 'No answer for 5 minutes%')
+      .where('pause_reason', 'not like', 'No answer for %')
       .where('pause_reason', 'not like', 'Interrupted%').where('pause_reason', 'not like', 'with-run-%').orderBy('id', 'desc').limit(10).select('id', 'pause_reason', 'updated_at')
     for (const r of paused) if (!calls.some(c => c.run_id === r.id)) calls.push({ run_id: r.id, title: PLAIN_WAIT[r.pause_reason] || 'Waiting for you', body: '', at: new Date(r.updated_at).getTime(), expires_in_ms: Math.max(0, new Date(r.updated_at).getTime() + TASK_MS - Date.now()), task_id: `${r.id}:p`, step: 1, kind: 'look', image: null, reason: r.pause_reason })
     const runs = await db('automation_queue as q').leftJoin('profiles as p', 'p.id', 'q.profile_id')
@@ -1033,13 +1027,14 @@ router.get('/automations/:id/login', async (req, res) => {
 export async function runTab(db, runId) {
   // A site's sign-in tab, not a run's ("site-tasheer"): the same live view.
   // A move's browser (Transitions, "tr-pextran"): the same live view.
+  if (/^tab-/.test(String(runId))) return (await import('../services/openTabs.js')).pageOfTab(String(runId))
   if (/^tr-/.test(String(runId))) return (await import('../services/robotBrowsers.js')).liveTabOf(String(runId))
   if (/^site-/.test(String(runId))) return (await import('../services/sessionKeeper.js')).siteTab(String(runId)) || (await import('../services/tasheerSession.js')).siteTab(String(runId))
   const run = await db('automation_queue').where('id', runId).first('id', 'workflow_id', 'status').catch(() => null)
   if (!run) return null
   // Looking at a finished run's tab does not make it that run's again (the site's next run uses it).
   const browser = await openBrowserIfAny()
-  const look = () => findRunTab(browser, run.id, run.workflow_id, { adopt: ['pending', 'running', 'paused'].includes(run.status) })
+  const look = async () => findRunTab(browser, run.id, run.workflow_id, { adopt: ['pending', 'running', 'paused'].includes(run.status), lookOnly: true, liveRuns: await activeRunIds(db) })
   let page = await look()
   // A closed tab: forget it and look again. A slow one is NOT forgotten: on a weak PC or a slow line the
   // page is busy (Google's reCAPTCHA loading) and missed the 2.5-s look, the live view dropped the tab the
@@ -1092,7 +1087,7 @@ router.get('/automations/:id/live', async (req, res) => {
       found = Date.now()
       return Promise.race([runTab(db, id).catch(() => null), new Promise(ok => setTimeout(() => ok(null), 6000))])
     },
-    ended: async () => /^\d+$/.test(id) && !['pending', 'running', 'paused'].includes((await db('automation_queue').where('id', id).first('status'))?.status),
+    ended: async () => /^tab-/.test(id) || /^\d+$/.test(id) && !['pending', 'running', 'paused'].includes((await db('automation_queue').where('id', id).first('status'))?.status),
     onOpen: async (page) => {
       page.__adalLookedAt = Date.now()
       const { freshForm } = await import('../services/freshForm.js')
@@ -1309,6 +1304,20 @@ router.post('/automations/:id/input', async (req, res) => {
   const page = await liveTab(req)
   if (!page || page === SLOW) { console.log(`[live] run ${req.params.id} input → ${page === SLOW ? 'the tab did not answer in 6 s' : 'no tab'}`); return noTab(res, page) }
   const b = req.body || {}
+  // Straight to the browser, in order, never behind a picture, never given up (services/liveHands.js).
+  if (handsOn()) {
+    try {
+      const db = req.app.locals.db, list = Array.isArray(b.batch) ? b.batch.slice(0, 200) : [b]
+      const signIn = [...list].reverse().find(x => x.kind === 'click' || (x.kind === 'mouse' && x.type === 'up'))
+      const asked = signIn ? bounded(pressesSignIn(page, signIn), 1000).catch(() => false) : false   // asked beside, the click does not wait for it
+      const move = list.every(x => (x.kind === 'mouse' && x.type === 'move') || x.kind === 'wheel')
+      const r = await hands(page, list, { waitMs: move ? 0 : 1200, other: (x) => personInput(db, req.params.id, page, x),
+        log: (x, ms, err) => { if (!err || x.kind !== 'mouse' || x.type !== 'move') console.log(`[live] run ${req.params.id} ${what(x)} → ${err ? `failed: ${String(err.message || err).slice(0, 80)}` : 'taken'} (${ms} ms)`) } })
+      const code = r.code || (signIn && await asked ? await codeOfRun(db, req.params.id).catch(() => null) : null)
+      if (list.some(x => x.kind === 'reload')) import('../services/freshForm.js').then(f => f.refillAfterReload(db, req.params.id, page)).catch(() => {})
+      return res.json({ ok: true, code, sent: r.sent, taken: r.taken, ...(r.error ? { error: r.error.message } : {}) })
+    } catch (e) { return res.status(e.status || 500).json({ error: e.message }) }
+  }
   // A burst of mouse moves, wheel turns and keys from the browser view: done in order, answered at once.
   if (Array.isArray(b.batch)) {
     let code = null
@@ -1353,9 +1362,6 @@ router.post('/automations/:id/resume', async (req, res) => {
     if (row.status === 'running') {
       return res.status(409).json({ error: `Run #${runId} is already working in its own tab.` })
     }
-    if (isRetryWait(row)) {
-      return res.json({ ok: true, state: 'queued', message: `Run #${runId} is already queued. ${retryNote(row)}` })
-    }
     if (row.status !== 'paused' && row.status !== 'pending') {
       return res.status(409).json({ error: `Run #${runId} is ${row.status} — nothing to continue. Start it again from its card.` })
     }
@@ -1376,11 +1382,7 @@ router.post('/automations/:id/resume', async (req, res) => {
       await db('automation_queue').where('id', runId).andWhere('status', 'paused')
         .update({ status: 'pending', updated_at: new Date().toISOString() })
     }
-    // A person pressed it: from now on it is a run somebody asked for, and the robot browser opens for it
-    // (2026-11-25, Main: a run the scanner had found waited for ever, "Waiting for Adal Browser to be open").
-    let ctx = {}; try { ctx = JSON.parse(row.context || '{}') || {} } catch {}
-    await db('automation_queue').where('id', runId).whereIn('status', ['pending', 'paused'])
-      .update({ context: JSON.stringify({ ...ctx, asked_at: Date.now() }), ...(/^(Retry |Waiting for Adal Browser)/.test(row.pause_reason || '') ? { pause_reason: null, updated_at: new Date().toISOString() } : {}) })
+    await personAsked(db, row)   // from now on a run somebody asked for: the robot browser opens for it (personPress.js)
     if (row.status === 'paused') await noteRun(db, row, 'continued by a person')
     const s = await dispatchRun(db, runId)
     res.json({ ok: true, ...s, message: runMessage(runId, s, row.status === 'paused' ? 'continued' : 'was already queued') })

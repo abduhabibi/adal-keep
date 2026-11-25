@@ -33,7 +33,7 @@ if (typeof document !== 'undefined') {
   const later = new Set()
   window.setInterval = (fn, ms, ...args) => {
     if (typeof fn !== 'function' || !(ms < 60000)) return every(fn, ms, ...args)
-    const run = () => fn(...args)
+    const run = () => { window.__adalTimer = (window.__adalTimer || 0) + 1; try { return fn(...args) } finally { window.__adalTimer-- } }
     // While the PC's live link is up (it says at once what changed, and every
     // refresh then runs), a refresh of 3 s+ is needed less often: every 3rd
     // tick; on a slow line (answers taking 1.5 s+) half as often again. At

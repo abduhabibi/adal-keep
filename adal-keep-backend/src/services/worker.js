@@ -20,19 +20,21 @@ import path from 'path'
 import { spawn } from 'child_process'
 import { fileURLToPath } from 'url'
 import { getBrowser, openBrowserIfAny } from './browser.js'
-import { needPerson, askCaptcha, doneWith, waiting, isWaiting, onWait, onTaskExpired, forgetRun } from './attention.js'
+import { needPerson, askCaptcha, doneWith, waiting, isWaiting, onWait, onTaskExpired, keepWhile, forgetRun } from './attention.js'
 import { runFullWorkflow } from './lmisWorkflow.js'
 import { decideAgencyActions } from './jev/agencyManager.js'
 import { getActiveEmployee } from './activeEmployee.js'
 import { isAppLocked } from './subscription.js'
 import { towerHeld } from './tower.js'
 import { plainReason, workflowName, withInternetCheck } from './runOutcome.js'
-import { openRunTab, forgetRunTab, tabOfRun, handTabToPerson, findRunTab, activeRunIds, keepingRunIds, tidySiteTabs, hostOf, codeBoxUp, spaceForRun, peerOf, tabAnswers } from './tabManager.js'
+import { openRunTab, forgetRunTab, tabOfRun, handTabToPerson, findRunTab, activeRunIds, keepingRunIds, tidySiteTabs, hostOf, codeBoxUp, spaceForRun, peerOf, tabAnswers, closeTarget } from './tabManager.js'
 import { registerTab, unregisterTab, noteLink } from './bandwidth.js'
 import { createRunQueue } from './runQueue.js'
 import { reportRuns } from './busy.js'
 import { isCancelled, clearCancelled, markCancelled } from './cancellation.js'
 import { assertPoliceReady } from './verification.js'
+import { inCallback } from './steadyLoad.js'
+import { nobodyAsked as isNobodys } from './personPress.js'
 import { startRunClock, LIMIT_NOTE, RUN_LIMIT_MS } from './runLimit.js'
 import { begin as beginHistory, finishRun as finishHistory, prune as pruneHistory, closeStale as closeStaleHistory } from './runHistory.js'
 
@@ -85,22 +87,24 @@ export function beepFor(runId) {
 }
 export const _forgetBeep = (runId) => _beeped.delete(Number(runId))
 
-// A human step nobody answered in 5 minutes (attention.js): the run stops
+// A human step nobody answered in 10 minutes (attention.js): the run stops
 // before its next step — nothing half-sent — and waits, paused, for a person
 // to press Continue. Its tab stays as it is.
 const _expired = new Set()
 export const pausedForNoAnswer = (runId) => _expired.has(Number(runId))
-export const NO_ANSWER = 'No answer for 5 minutes: paused before anything was sent. Press Continue when someone is there.'
+export const NO_ANSWER = 'No answer for 10 minutes: paused before anything was sent. Press Continue when someone is there.'
 let _expiryHooked = false
 function hookTaskExpiry(db) {
   if (_expiryHooked) return
   _expiryHooked = true
+  // A person is at its tab now (the live view, a click): the call stays, never paused under their hand.
+  keepWhile((id) => { const p = tabOfRun(id); return !!p && Date.now() - Math.max(p.__adalLookedAt || 0, p.__adalInputAt || 0) < 60000 })
   onTaskExpired(async (runId, task) => {
     const row = await db('automation_queue').where('id', runId).first('status').catch(() => null)
     if (row?.status !== 'running') return          // paused already: only its task goes
     _expired.add(Number(runId))
     markCancelled(runId)
-    console.log(`[worker] run #${runId}: "${task?.title}" had no answer for 5 minutes — pausing`)
+    console.log(`[worker] run #${runId}: "${task?.title}" had no answer for 10 minutes — pausing`)
   })
 }
 
@@ -212,7 +216,7 @@ async function executeRun(db, page, job) {
   }
 
   const handleCancelled = async () => {
-    // Stopped because a human step had no answer for 5 minutes: paused, not cancelled.
+    // Stopped because a human step had no answer for 10 minutes: paused, not cancelled.
     if (_expired.delete(Number(runId))) {
       try {
         await db('automation_queue').where('id', runId).update({ status: 'paused', pause_reason: NO_ANSWER, updated_at: new Date().toISOString() })
@@ -270,7 +274,7 @@ async function executeRun(db, page, job) {
   const notify = async (title, body, level = 'info', opts = {}) => {
     try {
       // A human step (sign-in, code, captcha, Save) is a task of the run (attention.js),
-      // gone when answered or after 5 minutes: no lasting notice for it.
+      // gone when answered or after 10 minutes: no lasting notice for it.
       const human = !!(opts.login || opts.confirm)
       const [taskId] = human ? [Date.now()] : await db('tasks').insert({
         type: 'automation', title, description: body || '',
@@ -358,7 +362,7 @@ async function executeRun(db, page, job) {
   ctx.isCancelled = () => isCancelled(runId)
   // Enjaz (the visa platform): the captcha goes to this PC first (a Windows
   // notification with its picture); nobody in 30 s → to the phones. Nobody in
-  // 5 minutes → its task goes and the run is paused (attention.js, hookTaskExpiry).
+  // 10 minutes → its task goes and the run is paused (attention.js, hookTaskExpiry).
   const enjaz = /^mofa/.test(String(job.workflow_id || ''))
   const ringPhones = (opts) => import('./liveChannel.js').then(L => L.broadcast({ t: 'ring', id: Date.now(), title: opts?.title || 'Type the captcha', profile_id: job.profile_id, run: runId, at: Date.now() })).catch(() => {})
   const stillAsked = () => waiting().some(w => w.run_id === Number(runId) && w.asks)
@@ -373,7 +377,7 @@ async function executeRun(db, page, job) {
       ringPhones(opts)
     }, 30_000)
   }
-  // A code asked by notification and not answered in time (Tasheer, 5 minutes):
+  // A code asked by notification and not answered in time (Tasheer, 10 minutes):
   // the call goes from the bar and the phones, and its task is closed.
   ctx.forgetCaptcha = () => {
     doneWith(runId, { force: true })
@@ -381,7 +385,7 @@ async function executeRun(db, page, job) {
       .update({ status: 'done', updated_at: new Date().toISOString() }).catch(() => {})
   }
   // A field the run cannot do without: asked as a task, kept on the profile,
-  // and the run goes on. No answer in 5 minutes: the run is paused (it stops here).
+  // and the run goes on. No answer in 10 minutes: the run is paused (it stops here).
   ctx.askField = (column, title, choices) => new Promise((resolve, reject) => {
     const watch = setInterval(() => { if (isCancelled(runId)) { clearInterval(watch); reject(Object.assign(new Error('Stopped'), { cancelled: true })) } }, 1000)
     watch.unref?.()
@@ -426,6 +430,9 @@ async function executeRun(db, page, job) {
       await handleCancelled()
       return false
     }
+    // The PC it worked on went away: it ends here, said plainly (one try; nothing is sent again by itself).
+    const went = !(result.ok && result.done) && await pcGone(db, job)
+    if (went) { await recordFailure(db, job, went); return false }
 
     // The person finished the last step themselves and the run saw it.
     if (result.ok && result.done) {
@@ -452,6 +459,7 @@ async function executeRun(db, page, job) {
 
     // ---- Failure: retry vs permanent ----
     const errText = result.error || result.reason || ''
+    if (await lostAndBack(db, job, page, errText)) return false
     await recordFailure(db, job, errText)
     return false
   } catch (e) {
@@ -460,7 +468,9 @@ async function executeRun(db, page, job) {
       await handleCancelled()
       return false
     }
-    await recordFailure(db, job, e.message)
+    const gone = await pcGone(db, job)
+    if (!gone && await lostAndBack(db, job, page, e.message)) return false
+    await recordFailure(db, job, gone || e.message)
     return false
   }
 }
@@ -477,8 +487,8 @@ async function executeRun(db, page, job) {
  */
 /** A run nobody pressed goes to a free, strong Companion (its context says so from now on). */
 // Robots run on the PC itself, never handed to another PC over the office network (the owner,
-// 2026-11-24: "forget making the robots through LAN"). ADAL_LAN_ROBOTS=1 brings the hand-over back.
-const LAN_ROBOTS = process.env.ADAL_LAN_ROBOTS === '1'
+// 2026-11-24; by themselves since 2026-11-25: selfAssign.js). ADAL_LAN_ROBOTS=0 is the emergency off switch.
+const LAN_ROBOTS = process.env.ADAL_LAN_ROBOTS !== '0'
 
 async function sendToFreeCompanion(db, job) {
   try {
@@ -517,22 +527,64 @@ async function browserForJob(db, job, { quiet = false } = {}) {
   const dev = onDevice(job)
   if (dev) {
     const rb = await import('./remoteBrowsers.js')
-    try {
-      // Never a Companion installing an update, restarting, or on another release than this PC (sharePower.ready).
-      const sp = await import('./sharePower.js')
-      const d = rb.liveDevices().find(x => x.id === dev)
-      if (d && !sp.ready(d, sp.ownPower())) throw new Error(d.updating ? `${d.name} is installing an update` : d.version !== sp.ownPower().version ? `${d.name} is on another release (${d.version || '?'})` : `${d.name} has not been heard from for a while`)
-      const helping = helpedRun(job)
-      const b = await rb.browserForDevice(dev, { quiet: true })
-      if (!quiet) await appendLog(db, job.id, helping
-        ? `Working in ${rb.deviceOf(b)?.name || 'the Companion'}'s Adal Browser for this PC (out of sight there)`
-        : `Working in ${rb.deviceOf(b)?.name || 'the Companion'}'s Adal Browser (out of sight there)`)
-      return b
-    } catch (e) {
-      if (!quiet) await appendLog(db, job.id, `The Companion's browser could not be reached (${e.message}) — working on the main PC instead`, 'warn')
+    const sp = await import('./sharePower.js')
+    let next = []
+    try { next = JSON.parse(job.context || '{}').place_order || [] } catch {}
+    // The chosen PC, then the next best ones (a run that starts; one that goes on stays where its tab is), then this one.
+    for (const id of quiet ? [dev] : [dev, ...next.filter(x => x !== dev)]) {
+      try {
+        // Never a Companion installing an update or restarting (sharePower.ready).
+        const d = rb.liveDevices().find(x => x.id === id)
+        if (d && !sp.ready(d, sp.ownPower())) throw new Error(d.updating ? `${d.name} is installing an update` : `${d.name} does not answer now or is on another release (${d.version || '?'})`)
+        const b = await rb.browserForDevice(id, { quiet: true })
+        if (id !== dev) await movedTo(db, job, id)
+        if (!quiet) await appendLog(db, job.id, `Working in ${rb.deviceOf(b)?.name || 'the other PC'}'s robot browser (out of sight there)`)
+        return b
+      } catch (e) {
+        if (!quiet) await appendLog(db, job.id, `Not on ${rb.nameOf(id) || 'that PC'} (${e.message}) — ${next.length && id === dev ? 'the next best PC' : 'on this PC instead'}`, 'warn')
+      }
     }
+    if (!quiet) await movedTo(db, job, '')
   }
   return getBrowser()
+}
+
+/** The tab or browser was lost before anything was sent: back in line, once (services/lostBrowser.js). */
+async function lostAndBack(db, job, page, message) {
+  try {
+    const line = await (await import('./lostBrowser.js')).backInLine(db, job, page, message)
+    if (line) { await appendLog(db, job.id, line, 'warn'); console.warn(`[worker] run #${job.id}: ${line}`) }
+    return !!line
+  } catch { return false }
+}
+
+/** The PC this run worked on went away while it did (remoteBrowsers.watchOver): the words for it, or ''. */
+async function pcGone(db, job) {
+  const dev = onDevice(job)
+  if (!dev) return ''
+  try {
+    const rb = await import('./remoteBrowsers.js')
+    if (!rb.lostLately(dev)) return ''
+    const name = rb.nameOf(dev) || 'The other PC'
+    // Started again by a person, it chooses anew.
+    let ctx = {}
+    try { ctx = JSON.parse(job.context || '{}') } catch {}
+    delete ctx.placed; delete ctx.place_order; delete ctx.on_device; delete ctx.helped_by; delete ctx.helped_for
+    job.context = JSON.stringify(ctx)
+    const { seal } = await import('./accountVault.js')
+    await db('automation_queue').where('id', job.id).update({ context: seal(job.context) }).catch(() => {})
+    return `${name} went away (switched off, or off the network) while it worked. Nothing is sent again by itself: look whether it is saved on the site, then start it again`
+  } catch { return '' }
+}
+
+/** The run works on another PC than first chosen ('' = this one). */
+async function movedTo(db, job, id) {
+  let ctx = {}
+  try { ctx = JSON.parse(job.context || '{}') } catch {}
+  if (id) ctx.on_device = id; else { delete ctx.on_device; delete ctx.helped_by }
+  job.context = JSON.stringify(ctx)
+  const { seal } = await import('./accountVault.js')
+  await db('automation_queue').where('id', job.id).update({ context: seal(job.context) }).catch(() => {})
 }
 
 async function appendLog(db, id, msg, level = 'info') {
@@ -568,47 +620,34 @@ async function runJob(db, job) {
     // never opens Brave itself. While Brave is closed it waits, and it goes
     // on once Brave is open again. Brave that a person closed (or quit Adal
     // Keep) stays closed.
-    // (A person's press on it counts from then on: "asked_at" in its context, POST /automations/:id/resume.)
-    const nobodyAsked = !/"asked_at"/.test(String(job.context || ''))
-      && (/^(Retry |Waiting for Adal Browser)/.test(job.pause_reason || '') || /Auto-discovered by scanner/.test(String(job.log || '')))
+    // (A person's press counts from then on, through restarts: services/personPress.js.)
+    const nobodyAsked = isNobodys(job)
     // Nobody pressed it and this PC's browser is closed: a free, strong Companion does it.
     if (LAN_ROBOTS && nobodyAsked && !onDevice(job) && !(await openBrowserIfAny())) await sendToFreeCompanion(db, job)
     if (nobodyAsked && !onDevice(job) && !(await openBrowserIfAny())) {
       const at = new Date(Date.now() + 2 * 60000).toISOString()
       await db('automation_queue').where('id', job.id).update({
         status: 'pending',
-        pause_reason: 'Waiting for Adal Browser to be open',
+        pause_reason: WAIT_BROWSER,
         updated_at: at,
       })
       return
     }
-    // A weak or busy PC's run (once): the strongest PC in the office does it,
-    // out of sight there, watched here (services/sharePower.js).
-    if (LAN_ROBOTS) try {
-      const { placeRun } = await import('./sharePower.js')
-      const line = await placeRun(db, job, { mainAllowed: !nobodyAsked || !!(await openBrowserIfAny()) })
-      if (line) { await appendLog(db, job.id, line); console.log(`[share] run #${job.id}: ${line}`) }
+    // The best PC of the office, chosen by itself at the start (services/selfAssign.js, under a second). Any trouble: here.
+    let alone = true
+    try {
+      const { selfAssign } = await import('./selfAssign.js')
+      const line = await selfAssign(db, job, { log: (m) => { alone = m === 'one PC'; if (!alone) console.log(`[share] run #${job.id}: ${m}`) } })
+      if (line) { alone = false; await appendLog(db, job.id, line); console.log(`[share] run #${job.id}: ${line}`) }
     } catch (e) { console.warn(`[share] run #${job.id} stays where it is:`, e.message) }
-    // Under 4 cores no robot runs on this PC while a stronger PC of the office is on: it waits
-    // for that one. With none on it runs here anyway, said in its log (never stopped silently).
+    // Under 4 cores and no other PC can take it: it runs here, said in its log (never stopped silently, never waiting).
     try {
       const H = await import('./hardware.js')
       const hw = H.hardwareNow()
-      let strongerOn = false
-      if (!onDevice(job) && hw.cores < H.MIN_CORES) {
-        // Only a PC that may take runs now (same release, not updating): else the run would wait for one that never takes it.
-        if (LAN_ROBOTS) try { const sp = await import('./sharePower.js'); const pcs = await sp.officePCs(); strongerOn = H.strongerPCOn(pcs.filter(p => sp.ready(p, pcs[0]))) } catch {}
-        if (!H.robotsBlocked(hw, process.env, { strongerOn }) && process.env.ADAL_HW_GATE !== '0') {
-          const note = `This PC has ${hw.cores} core${hw.cores === 1 ? '' : 's'} (robots need ${H.MIN_CORES}) and no stronger office PC is on: it runs here, slower`
-          await appendLog(db, job.id, note)
-          console.warn(`[hardware] run #${job.id}: ${note}`)
-        }
-      }
-      if (!onDevice(job) && H.robotsBlocked(hw, process.env, { strongerOn })) {
-        const note = `Waiting for a stronger PC (this PC has ${hw.cores} core${hw.cores === 1 ? '' : 's'}; robots need ${H.MIN_CORES})`
-        await db('automation_queue').where('id', job.id).update({ status: 'pending', pause_reason: note, updated_at: new Date(Date.now() + 2 * 60000).toISOString() })
+      if (!onDevice(job) && hw.cores < H.MIN_CORES && process.env.ADAL_HW_GATE !== '0') {
+        const note = `This PC has ${hw.cores} core${hw.cores === 1 ? '' : 's'} and no stronger office PC ${alone ? 'answers' : 'is free'} now: it runs here, slower`
         await appendLog(db, job.id, note)
-        return
+        console.warn(`[hardware] run #${job.id}: ${note}`)
       }
     } catch (e) { console.warn(`[hardware] run #${job.id}: core check skipped (${e.message})`) }
     // One LMIS per account (services/lmisOne.js): where this account's LMIS is
@@ -664,6 +703,16 @@ async function runJob(db, job) {
       const space2 = await spaceForRun(db, here, job).catch(() => null)
       page = await openRunTab(here, job.id, { workflowId: job.workflow_id, busyRuns: await activeRunIds(db), keepRuns: await keepingRunIds(db), space: space2, quiet: true })
     }
+    // A tab taken on this PC that does not answer (2026-11-25, Main: a run started in a dead sign-in tab and hung):
+    // closed, a fresh one at once.
+    if (!onDevice(job) && page.__adalReused && !(await tabAnswers(page, 5000))) {
+      await appendLog(db, job.id, 'The tab on the site does not answer — closed, a fresh one opened', 'warn')
+      console.warn(`[worker] run #${job.id}: its tab (${page.url().slice(0, 60)}) does not answer — closed, a fresh one opened`)
+      const dead = page
+      forgetRunTab(job.id)
+      page = await openRunTab(await getBrowser(), job.id, { workflowId: job.workflow_id, space, quiet: true, fresh: true })
+      await closeTarget(dead)
+    }
     // Which account the tab is: its title starts with the account's name.
     try {
       const { labelTab, accountLabel } = await import('./robotCheck.js')
@@ -693,6 +742,15 @@ async function runJob(db, job) {
     // The row's end, with the picture of the tab while it is still open.
     await finishHistory(db, job.id, page)
     const row = await db('automation_queue').where('id', job.id).first().catch(() => null)
+    // Where this account is signed in now: its next runs go there (services/signInHome.js).
+    try {
+      if (row && (row.status === 'done' || (row.status === 'paused' && /-human-|epro-save/.test(String(row.pause_reason || ''))))) {
+        const { rememberHome } = await import('./signInHome.js')
+        let acct = job.account_id
+        if (!acct) { try { acct = JSON.parse(job.context || '{}').account_id } catch {} }
+        rememberHome(peerOf(job.workflow_id), acct, onDevice(job))
+      }
+    } catch {}
     try {
       // Done, failed or cancelled: the tab stays open for the person.
       doneWith(job.id, { keepCaptcha: row?.status === 'paused' })
@@ -781,9 +839,9 @@ export async function signInLanes(db, now = Date.now(), { tabLive = _tabLive } =
     .select('id', 'workflow_id', 'account_id', 'context', 'pause_reason').catch(() => [])
   // Only while its tab is really there: a run whose browser is gone (closed, restarted) holds nothing
   // (2026-11-24: the robot browser died, 4 runs stayed "waiting for the sign-in" and held 25 others).
-  // (Also a sign-in nobody answered in 5 minutes, NO_ANSWER: its tab still waits at the box — the next run
+  // (Also a sign-in nobody answered in 10 minutes, NO_ANSWER: its tab still waits at the box — the next run
   // would only open a second sign-in tab beside it and call again.)
-  const lanes = new Set(rows.filter(r => (SIGN_IN_WAIT.test(String(r.pause_reason || '')) || r.pause_reason === NO_ANSWER) && tabLive(r.id)).map(laneOf).filter(Boolean))
+  const lanes = new Set(rows.filter(r => (SIGN_IN_WAIT.test(String(r.pause_reason || '')) || /^No answer for /.test(String(r.pause_reason || ''))) && tabLive(r.id)).map(laneOf).filter(Boolean))
   // Forms waiting for a person's Save: each holds a tab with its filled form (8 Musaned tabs on this PC,
   // 2026-11-24, gigabytes on a weak PC). At most a few per site and account; the next run waits in line
   // until a person saves one (nothing is lost, nothing is filled twice).
@@ -845,10 +903,20 @@ export async function reviveSignIns(db, now = Date.now(), { tabLive = _tabLive }
   return { back, ended }
 }
 
-export async function claimNextJob(db, exclude = [], lanes = new Set()) {
+/**
+ * Lanes of the runs working now, as the database says (one Musaned tab per account: the second run waits in line
+ * until the first ends — also one another program of this PC started). One not touched for 15 minutes holds nothing.
+ */
+export async function workingLanes(db, mine = [], now = Date.now()) {
+  const rows = await db('automation_queue').where('status', 'running').where('started_at', '>', new Date(now - 15 * 60e3).toISOString())
+    .select('id', 'workflow_id', 'account_id', 'context').catch(() => [])
+  return new Set(rows.map(laneOf).filter(Boolean))
+}
+
+export async function claimNextJob(db, exclude = [], lanes = new Set(), { wait = null } = {}) {
   if (isAppLocked()) return null // trial over and not unlocked: no runs start
   if (towerHeld()) return null   // Adal support held the robots on this PC (Admin → Fleet → Suspend)
-  lanes = new Set([...lanes, ...(await signInLanes(db))])
+  lanes = new Set([...lanes, ...(await signInLanes(db)), ...(await workingLanes(db, exclude))])
   for (let i = 0; i < 5; i++) {
     const q = readyJobsQuery(db)
     if (exclude.length) q.whereNotIn('id', exclude)
@@ -857,6 +925,9 @@ export async function claimNextJob(db, exclude = [], lanes = new Set()) {
     const rows = await q.orderBy('id', 'asc').limit(lanes.size ? 50 : 1)
     const row = rows.find(r => !lanes.has(laneOf(r)))
     if (!row) return null
+    // A run only the scanner asked for, the robot browser closed: it waits in line, it is not started and put back
+    // (2026-11-25, Main: two such runs "started — 1/1 working" in the same second, again and again).
+    if (wait && isNobodys(row) && !onDevice(row) && await wait(row)) continue
     const now = new Date().toISOString()
     const updated = await db('automation_queue')
       .where('id', row.id)
@@ -879,13 +950,23 @@ async function mayClaim() {
   return _gateOk
 }
 
+const WAIT_BROWSER = 'Waiting for Adal Browser to be open'
+const waitsForBrowser = (db) => async (row) => {
+  try {
+    if (await openBrowserIfAny()) return false
+    if (LAN_ROBOTS) { const rb = await import('./remoteBrowsers.js'); await rb.hear?.(); if (rb.freeStrongDevice()) return false }
+    await db('automation_queue').where({ id: row.id, status: 'pending' }).update({ pause_reason: WAIT_BROWSER, updated_at: new Date(Date.now() + 2 * 60000).toISOString() })
+    return true
+  } catch { return false }
+}
+
 let _runs = null
 function runs(db) {
   if (!_runs) {
     _runs = createRunQueue({
       max: MAX_RUNS,
       isIdle: (id) => isWaiting(id),
-      claimNext: async (exclude, lanes) => ((await mayClaim()) ? claimNextJob(db, exclude, lanes) : null),
+      claimNext: async (exclude, lanes) => ((await mayClaim()) ? claimNextJob(db, exclude, lanes, { wait: waitsForBrowser(db) }) : null),
       laneOf,
       runJob: (job) => runJob(db, job),
     })
@@ -1106,8 +1187,9 @@ export async function closeSavedRuns(db) {
   const browser = await openBrowserIfAny()
   if (!browser) return
   const { savedOnPage } = await import('./musanedWorkflow.js')
+  const liveRuns = await activeRunIds(db)
   for (const r of rows) {
-    const page = await findRunTab(browser, r.id, r.workflow_id)
+    const page = await findRunTab(browser, r.id, r.workflow_id, { liveRuns })
     if (!page || !(await savedOnPage(page))) continue
     const now = new Date().toISOString()
     let log = []
@@ -1134,11 +1216,14 @@ async function continueSignedIn(db) {
   if (!rows.length) return
   const browser = await openBrowserIfAny()
   if (!browser) return
+  const liveRuns = await activeRunIds(db)
   for (const r of rows) {
-    const page = await findRunTab(browser, r.id, r.workflow_id)
+    const page = await findRunTab(browser, r.id, r.workflow_id, { liveRuns })
     if (!page) continue
     // A person pressed Sign in on a waiting run: its code box is up and Adal Keep has the code.
     if (hostOf(page.url()) !== 'tawtheeq.musaned.com.sa' && !(await codeBoxUp(page) && await hasAuthenticator(r))) continue
+    // The sign-in is still coming back (its app loads): not yet (a run started over it, 2026-11-25).
+    if (inCallback(page.url())) continue
     // A blank Musaned page is not signed in: going on there paused the run again every 15 s.
     if (hostOf(page.url()) === 'tawtheeq.musaned.com.sa' && await page.evaluate(() => !(document.body?.innerText || '').trim()).catch(() => true)) continue
     await db('automation_queue').where('id', r.id).where('status', 'paused').update({ status: 'pending', updated_at: new Date().toISOString() })
@@ -1167,6 +1252,10 @@ export function startWorker(db) {
     drainQueue(db).catch(e => console.error('[worker] poll error:', e))
   }, POLL_MS)
   // No robot tab holds this PC: one that uses the processor without end is stopped (services/robotGuard.js).
+  // A tab that answers nothing any more: closed, and its run goes on in a fresh one (a waiting sign-in at once).
+  import('./deadTabs.js').then(d => d.startDeadTabs(db, { afterClose: async () => {
+    for (const ms of [500, 4000, 12000]) setTimeout(() => reviveSignIns(db).then(() => drainQueue(db)).catch(() => {}), ms).unref?.()
+  } })).catch(e => console.warn('[dead] not started:', e.message))
   import('./robotGuard.js').then(g => g.startRobotGuard(db)).catch(e => console.warn('[guard] not started:', e.message))
   setInterval(() => continueSignedIn(db).catch(e => console.warn('[worker] sign-in look:', e.message)), 15000).unref?.()
   setInterval(() => closeSavedRuns(db).catch(e => console.warn('[worker] saved look:', e.message)), 3000).unref?.()

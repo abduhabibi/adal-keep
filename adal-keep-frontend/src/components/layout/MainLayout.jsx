@@ -18,6 +18,8 @@ import WhatsNewCard from '../WhatsNewCard'
 import StandbyBanner from '../StandbyBanner'
 import SafetyAlerts from '../SafetyAlerts'
 import { PresencePing } from '../OfficeCards'
+import { tellChanged } from '../../lib/changes'
+import { byItself } from '../../lib/windowNote'
 import { swipeBack } from '../../lib/phoneApp'
 import { PhoneTabBar, PhoneTopBar, usePageMotion, prefetchTabs } from './PhoneChrome'
 
@@ -27,6 +29,9 @@ const PAD_KEY = 'adal-search-pad'
 const DEMO = import.meta.env.VITE_DEMO === '1'
 const DemoBanner = DEMO ? lazy(() => import('../../demo/DemoBrowser').then(m => ({ default: m.DemoBanner }))) : null
 const DemoBrowser = DEMO ? lazy(() => import('../../demo/DemoBrowser')) : null
+
+// The pages that ask again by themselves (their own refresh or lib/changes.js).
+const ASKS_AGAIN = /^\/(profiles(\/\d+)?|checklist|chat|tasks|notifications|office|whatsapp|employees)?(\/|$)/
 
 function readPad() {
   try { return localStorage.getItem(PAD_KEY) !== 'closed' } catch { return true }
@@ -41,10 +46,19 @@ export default function MainLayout() {
   const { pathname } = useLocation()
   // Pages open from what this device kept (services/api.js); the PC's fresh
   // answer, when it differs and comes within a few seconds, shows the page
-  // again with it — once per visit, never while something is being typed.
+  // again with it — once per visit, never while something is being typed, and never
+  // once this page has been used (clicked, scrolled, a key): then it asks again in
+  // place, or (a page that cannot) says there is something newer.
   const [pageKey, setPageKey] = useState(0)
-  const visit = useRef({ path: '', at: 0, redone: false })
-  useEffect(() => { api.adalVisit?.(); visit.current = { path: pathname, at: Date.now(), redone: false }; rememberPlace(pathname + window.location.search) }, [pathname])
+  const visit = useRef({ path: '', at: 0, redone: false, used: false })
+  const [newer, setNewer] = useState(false)
+  useEffect(() => {
+    const used = (e) => { if (mainRef.current?.contains(e.target)) visit.current.used = true }
+    const all = ['pointerdown', 'wheel', 'keydown', 'touchmove']
+    for (const e of all) window.addEventListener(e, used, { passive: true, capture: true })
+    return () => { for (const e of all) window.removeEventListener(e, used, { capture: true }) }
+  }, [])
+  useEffect(() => { api.adalVisit?.(); visit.current = { path: pathname, at: Date.now(), redone: false, used: false }; setNewer(false); rememberPlace(pathname + window.location.search) }, [pathname])
   useEffect(() => {
     let timer = null
     const on = () => {
@@ -57,6 +71,10 @@ export default function MainLayout() {
         if (visit.current !== v || v.redone) return
         v.redone = true
         api.adalVisit?.()
+        if (v.used && !byItself()) {
+          if (ASKS_AGAIN.test(v.path)) tellChanged(['*']); else setNewer(true)
+          return
+        }
         setPageKey(k => k + 1)
       }, 350)
     }
@@ -178,6 +196,7 @@ export default function MainLayout() {
           <main ref={mainRef} className="flex-1 min-w-0 overflow-y-auto overscroll-contain custom-scrollbar"
             style={!wide && !bare ? { paddingBottom: 'calc(58px + env(safe-area-inset-bottom))' } : undefined}>
             <div key={wide ? 'page' : pathname} className={`${inChat ? 'h-full' : wide ? 'px-3 py-4 sm:p-6' : 'px-4 pb-4 pt-1'} ${wide ? '' : motion}`}>
+              {newer && <button type="button" data-newer="" onClick={() => { setNewer(false); setPageKey(k => k + 1) }} className="mb-2 rounded-full bg-teal-600 px-3 py-1 text-xs font-semibold text-white hover:bg-teal-700">Newer data came — show it</button>}
               <Outlet key={pageKey} />
             </div>
           </main>

@@ -12,7 +12,7 @@
  * it stops before its next step, nothing half-sent). One gentle sound per run,
  * not per step (worker.js beepFor).
  */
-export const TASK_MS = Number(process.env.ADAL_TASK_MS) || 5 * 60e3
+export const TASK_MS = Number(process.env.ADAL_TASK_MS) || 10 * 60e3   // the same 10 minutes the tick is waited for (robotCheck.waitForTick)
 const waits = new Map() // run id → { title, body, at, image, answer, label, confirm, step, kind }
 const steps = new Map() // run id → how many human steps it asked so far
 const listeners = new Set()
@@ -44,7 +44,7 @@ export function kindOf(title = '', { image = null, answer = null, choices = null
   return answer ? 'answer' : 'look'
 }
 
-// A new step of the run: a new task (its own 5 minutes). The same step said again keeps its time.
+// A new step of the run: a new task (its own 10 minutes). The same step said again keeps its time.
 function put(id, next) {
   const had = waits.get(id)
   const same = had && had.title === next.title
@@ -77,7 +77,7 @@ export function askCaptcha(runId, image, answer, { title, label = 'Numbers', cho
 /**
  * Done with this call. keepCaptcha: a paused run's question stays in the bar. A
  * confirmation (Save is a person's) stays after the run ends, until the person
- * says it is done (force) or its 5 minutes are over.
+ * says it is done (force) or its 10 minutes are over.
  */
 export function doneWith(runId, { keepCaptcha = false, force = false } = {}) {
   const id = Number(runId), w = waits.get(id)
@@ -106,11 +106,16 @@ export async function answerCaptcha(runId, text) {
   await answer(String(text).trim())
 }
 
-/** Tasks nobody answered for 5 minutes go; their runs are paused (onTaskExpired). */
+let kept = () => false
+/** A task whose run `fn` says a person is at now does not expire (at most as long again). */
+export const keepWhile = (fn) => { kept = fn }
+
+/** Tasks nobody answered for 10 minutes go; their runs are paused (onTaskExpired). */
 export function expireTasks(now = Date.now()) {
   const gone = []
   for (const [id, w] of waits) {
     if (now - w.at < TASK_MS) continue
+    try { if (now - w.at < 2 * TASK_MS && kept(id)) continue } catch {}
     waits.delete(id)
     gone.push({ run_id: id, title: w.title, kind: w.kind, step: w.step })
   }

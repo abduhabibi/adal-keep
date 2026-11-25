@@ -1,13 +1,13 @@
-import { lazy, Suspense, useEffect, useRef, useState } from 'react'
+import { Suspense, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import api from '../services/api'
 import { phoneCloud } from '../lib/phoneMode'
 import { markDone, DONE_LABEL } from '../lib/markDone'
+import { lazyPart } from '../lib/pageCode'
 // The live view's code (30 kB) only when a notification is opened: not part of every start.
-// (After an update its old file is gone: the page reloads with the new files.)
-const LiveTab = lazy(() => import('./LiveTab').catch(() => { location.reload(); return new Promise(() => {}) }))
+const LiveTab = lazyPart(() => import('./LiveTab'))
 
 /**
  * What needs a person, as normal notifications in the corner of Adal Keep, each

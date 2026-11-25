@@ -1,6 +1,6 @@
 /**
  * officeCompute.test.js — robots on the PC that finishes first (asked on
- * 2026-11-21), human steps as tasks that go after 5 minutes, and the
+ * 2026-11-21), human steps as tasks that go after 10 minutes, and the
  * sidebar's Browsers list.
  */
 import test from 'node:test'
@@ -120,7 +120,7 @@ test('the internet is measured: answer time, speed, how often it answers', async
   assert.deepEqual(got.map(g => g.ok), [true, false])
 })
 
-test('a human step is a task: grouped per run, gone after 5 minutes, and its run is paused', async () => {
+test('a human step is a task: grouped per run, gone after 10 minutes, and its run is paused', async () => {
   const A = await import('../src/services/attention.js')
   const W = await import('../src/services/worker.js')
   const { isCancelled, clearCancelled } = await import('../src/services/cancellation.js')
@@ -134,10 +134,18 @@ test('a human step is a task: grouped per run, gone after 5 minutes, and its run
   assert.equal(t501.step, 2)                               // its 2nd human step
   assert.equal(t501.kind, 'code')
   assert.equal(w.find(x => x.run_id === 502).kind, 'slot')
-  assert.ok(t501.expires_in_ms > 4 * 60e3 && t501.expires_in_ms <= A.TASK_MS)
-  // 4 minutes later: still there.
-  assert.equal(A.expireTasks(Date.now() + 4 * 60e3).length, 0)
-  // 5 minutes later: gone, and the running run stops before its next step, as paused.
+  assert.ok(t501.expires_in_ms > 9 * 60e3 && t501.expires_in_ms <= A.TASK_MS)
+  // The tick's window and the pause are the same 10 minutes.
+  assert.equal(A.TASK_MS, 10 * 60e3)
+  assert.match(W.NO_ANSWER, /^No answer for 10 minutes/)
+  // 9 minutes later: still there.
+  assert.equal(A.expireTasks(Date.now() + 9 * 60e3).length, 0)
+  // A person at the tab then: it stays, as long again at most.
+  A.keepWhile(id => id === 501)
+  assert.deepEqual(A.expireTasks(Date.now() + A.TASK_MS + 500).map(g => g.run_id), [502])
+  A.keepWhile(() => false)
+  A.needPerson(502, 'Pick a time slot on Tasheer')
+  // 10 minutes later: gone, and the running run stops before its next step, as paused.
   const gone = A.expireTasks(Date.now() + A.TASK_MS + 1000)
   assert.deepEqual(gone.map(g => g.run_id).sort(), [501, 502])
   assert.equal(A.waiting().filter(x => [501, 502].includes(x.run_id)).length, 0)

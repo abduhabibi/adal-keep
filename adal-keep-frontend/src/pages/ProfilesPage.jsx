@@ -9,13 +9,14 @@ import EmptyState from '../components/shared/EmptyState'
 import Spinner from '../components/shared/Spinner'
 import StatusBadge from '../components/shared/StatusBadge'
 import Button from '../components/shared/Button'
+import ScanButton from '../components/ScanButton'
 import Input from '../components/shared/Input'
 import { useProfileFilters } from '../components/profileFilters'
 import { JourneyFork, SHARED, BRANCHES } from '../components/ProfileJourney'
 import SelectionBar from '../components/SelectionBar'
 import ReadingBar from '../components/ReadingBar'
 import { onDataChange } from '../lib/changes'
-import { profilesList } from '../lib/profilesCache'
+import { profilesList, lastProfiles } from '../lib/profilesCache'
 import { prefetchProfile, prefetchRecent } from '../lib/profileCache'
 import { cachedGet } from '../lib/deviceCache'
 import { onPhone } from '../lib/phoneMode'
@@ -41,12 +42,14 @@ export const phaseOf = (steps = {}, p = {}, after = AFTER) => phaseFrom(steps, p
 const NOW_TEXT = { cv: 'CV next', musaned: 'Musaned next', waiting: 'WhatsApp — send her CV to agents', selected: 'Chosen — book Wafid', wafid: 'Wafid medical', lmis: 'LMIS contract next', epro: 'EPRO approval',
   tasheer: 'Tasheer next', insurance: 'Insurance next', embassy: 'Visa next', police: 'Police clearance next', choices: 'All steps done' }
 
+let brokersSeen = []   // as last seen by this window
+
 export default function ProfilesPage() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
-  const [profiles, setProfiles] = useState([])
-  const [brokers, setBrokers] = useState([])
-  const [loading, setLoading] = useState(true)
+  const [profiles, setProfiles] = useState(() => lastProfiles() || [])
+  const [brokers, setBrokers] = useState(() => brokersSeen)
+  const [loading, setLoading] = useState(() => !lastProfiles())
   const [query, setQuery] = useState(searchParams.get('q') || '')
   // The search looks 150 ms after the last key (not on every letter: it waited 500 ms for the
   // PC to look, now this page itself does); the address follows at 500 ms.
@@ -69,14 +72,14 @@ export default function ProfilesPage() {
 
   // The whole list once (cached); the search, status and broker filter it here, in the browser.
   const load = useCallback(async (quiet) => {
-    if (quiet !== true) setLoading(true)
+    if (quiet !== true && !lastProfiles()) setLoading(true)   // (what is shown stays until the new list is here)
     try {
       const [profilesRes, brokersRes] = await Promise.all([
         profilesList({ fresh: quiet === true, onSaved: quiet === true ? undefined : (d) => { setProfiles(d || []); setLoading(false) } }),
         cachedGet('/brokers', { onSaved: quiet === true ? undefined : (d) => setBrokers(d || []) }),
       ])
       setProfiles(profilesRes || [])
-      setBrokers(brokersRes || [])
+      setBrokers(brokersSeen = brokersRes || [])
     } catch {
       if (quiet !== true) toast.error('ፕሮፋይሎችን መጫን አልተቻለም')
     } finally {
@@ -240,7 +243,8 @@ export default function ProfilesPage() {
           )}
         </>)}
         {/* On a phone: a round ＋ above the tab bar, always in reach. */}
-        <Button data-tour="new-profile" className="whitespace-nowrap hidden md:inline-flex md:ml-auto" onClick={() => navigate('/profiles/new')}>+ ፕሮፋይል አክል</Button>
+        {!onPhone() && <ScanButton className="hidden md:inline-flex md:ml-auto" />}
+        <Button data-tour="new-profile" className="whitespace-nowrap hidden md:inline-flex md:ml-2" onClick={() => navigate('/profiles/new')}>+ ፕሮፋይል አክል</Button>
         {createPortal(<button type="button" aria-label="ፕሮፋይል አክል" onClick={() => navigate('/profiles/new')}
           className="md:hidden fixed right-4 z-40 h-14 w-14 rounded-full bg-gradient-to-br from-teal-600 to-indigo-600 text-3xl font-light text-white shadow-xl active:scale-95"
           style={{ bottom: 'calc(5.5rem + env(safe-area-inset-bottom))' }}>＋</button>, document.body)}

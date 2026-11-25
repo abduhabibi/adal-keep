@@ -91,7 +91,7 @@ function Shell() {
   const [pcGate, setPcGate] = useState(false)
   const [suspended, setSuspended] = useState(false)
   useEffect(() => {
-    const on = () => { forgetOpen(); setSuspended(true) }
+    const on = () => { forgetOpen(); import('./lib/pics').then(p => p.clearPics()).catch(() => {}); setSuspended(true) }
     window.addEventListener('adal-suspended', on)
     return () => window.removeEventListener('adal-suspended', on)
   }, [])

@@ -9,6 +9,7 @@
  */
 import api from '../services/api'
 import { idbGet, idbPut, answerKey } from './idbStore'
+import { picsOn, picsAhead } from './pics'
 
 const mem = new Map()                 // key -> data
 const fetchedAt = new Map()           // profile id -> time of the last fetch ahead
@@ -56,6 +57,7 @@ export function recentIds() { try { return JSON.parse(localStorage.getItem(RECEN
 
 // Her pictures into the browser's cache (the thumbnails the page shows first).
 function warmPictures(fields) {
+  if (picsOn()) return picsAhead(Array.isArray(fields) ? fields : [])
   for (const f of Array.isArray(fields) ? fields : []) {
     if (!/photo|passport/i.test(f?.name || '')) continue
     const file = (f.files || [])[0]

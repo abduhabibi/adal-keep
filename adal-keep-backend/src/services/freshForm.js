@@ -41,9 +41,9 @@ export const FILL_IN_PAGE = ({ user, password }) => {
 }
 
 /** → '' (nothing to do) | 'filled' | 'fresh' */
-export async function freshForm(db, runId, page, { freshMs = 60000, now = Date.now } = {}) {
+export async function freshForm(db, runId, page, { freshMs = 60000, now = Date.now, reloaded = false } = {}) {
   if (process.env.ADAL_FRESH_FORM === '0' || !/^\d+$/.test(String(runId)) || page.__adalFreshing) return ''
-  if (now() - (page.__adalFreshAt || 0) < 15000 || now() - (page.__adalInputAt || 0) < PERSON_MS) return ''
+  if (!reloaded && (now() - (page.__adalFreshAt || 0) < 15000 || now() - (page.__adalInputAt || 0) < PERSON_MS)) return ''
   page.__adalFreshing = true
   try {
     const run = await db('automation_queue').where('id', runId).first('id', 'workflow_id', 'status', 'context')
@@ -73,4 +73,17 @@ export async function freshForm(db, runId, page, { freshMs = 60000, now = Date.n
     }
     return ''
   } catch (e) { console.warn(`[live] run #${runId}: the form stays as it is (${e.message})`); return '' } finally { page.__adalFreshing = false }
+}
+
+/** The person pressed Reload in the live view: the new form is empty — filled at once (as soon as it is drawn). */
+export async function refillAfterReload(db, runId, page, { tries = [0, 400, 1200, 3000, 6000] } = {}) {
+  for (const ms of tries) {
+    await new Promise(r => setTimeout(r, ms))
+    if (page.isClosed?.()) return ''
+    const done = await freshForm(db, runId, page, { reloaded: true })
+    if (done) return done
+    const there = await Promise.race([page.evaluate(FORM_IN_PAGE).catch(() => null), new Promise(r => setTimeout(() => r(null), 3000))])
+    if (there?.password) return ''                         // filled already (the run itself, the browser)
+  }
+  return ''
 }

@@ -190,12 +190,15 @@ func numberKnown(u, num string) bool {
 
 // ── The sweep of the whole network ──────────────────────────────────────────
 
+const sweepGrace = 4 * time.Minute
+
 var sweepPauses = []time.Duration{time.Minute, 2 * time.Minute, 5 * time.Minute, 10 * time.Minute, 20 * time.Minute, 30 * time.Minute}
 var sweep = struct {
 	mu   sync.Mutex
 	n    int
 	next time.Time
 	net  string
+	seen time.Time // the main PC answered here last
 }{}
 
 // sweepDue: may every address of the network be asked now? Another network (a new address
@@ -207,7 +210,12 @@ func sweepDue(now time.Time, network string) bool {
 	sweep.mu.Lock()
 	defer sweep.mu.Unlock()
 	if network != sweep.net {
-		sweep.n, sweep.next, sweep.net = 0, time.Time{}, network
+		sweep.n, sweep.next, sweep.net, sweep.seen = 0, time.Time{}, network, time.Time{}
+	}
+	// It answered a few minutes ago on this very network: a restart, not a move (2026-11-25: two
+	// sweeps while Main restarted).
+	if now.Sub(sweep.seen) < sweepGrace {
+		return false
 	}
 	if now.Before(sweep.next) {
 		return false
@@ -222,7 +230,7 @@ func sweepDue(now time.Time, network string) bool {
 // sweepFound: the main PC is known: the pauses start from the beginning next time.
 func sweepFound() {
 	sweep.mu.Lock()
-	sweep.n, sweep.next = 0, time.Time{}
+	sweep.n, sweep.next, sweep.seen = 0, time.Time{}, time.Now()
 	sweep.mu.Unlock()
 }
 

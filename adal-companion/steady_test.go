@@ -151,8 +151,11 @@ func TestSweepPauses(t *testing.T) {
 		t.Fatal("another network: at once")
 	}
 	sweepFound()
-	if !sweepDue(now.Add(8*time.Hour+time.Second), "192.168.8.0") {
-		t.Fatal("found, then lost: at once")
+	if sweepDue(time.Now().Add(3*time.Minute), "192.168.8.0") {
+		t.Fatal("it answered 3 minutes ago: a restart")
+	}
+	if !sweepDue(time.Now().Add(5*time.Minute), "192.168.8.0") {
+		t.Fatal("found, then lost: after a few minutes")
 	}
 }
 

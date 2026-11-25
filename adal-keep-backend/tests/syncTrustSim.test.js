@@ -14,7 +14,7 @@ import express from 'express'
 import { makePC, scratch } from './helpers/syncPCs.js'
 import { SyncNode } from '../src/services/sync/node.js'
 import { createSyncRouter } from '../src/routes/sync.js'
-import { LEASE } from '../src/services/sync/roles.js'
+import { LEASE, AUTO_AFTER } from '../src/services/sync/roles.js'
 import { newSigningKey, sign, TrustStore, TrustClient, agencyTag, crlVersion } from '../src/services/sync/trust.js'
 import { Authority, handle, CloudTrust, approveSig, collectSig } from '../src/services/sync/authority.js'
 import { attachTrust, applyCRL } from '../src/services/sync/equal.js'
@@ -163,7 +163,7 @@ test('three equal PCs and intruders: certificates decide, sealed copying, the ro
   for (const p of [A, B, C]) assert.equal(p.node.roles.holder(), B.node.pcId, p.name)
   await B.node.selfRow(); await roundAll([A, C, B], 1)
   await new Promise(r => B.server.close(r)); B.server.closeAllConnections?.()
-  clock += LEASE + 60000
+  for (let i = 0; i < AUTO_AFTER / 60000 + 1; i++) { clock += 60000; for (const p of [A, C]) p.node.roles.look(await p.node.roles.pcs()) }
   await A.node.selfRow(); await C.node.selfRow(); await roundAll([A, C], 2)
   assert.equal(await A.node.roles.autoStepEqual(), null)        // A is not the strongest alive
   assert.equal(await C.node.roles.autoStepEqual(), 'taken')

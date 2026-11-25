@@ -2,7 +2,7 @@ import express from 'express'
 import { listWorkflows } from '../services/workflows.js'
 import { dispatchRun, runStatus, queueSnapshot } from '../services/worker.js'
 import { markCancelled, isCancelled } from '../services/cancellation.js'
-import { forgetRunTab, dropTab, tabAnswers, findRunTab, hostOf, codeBoxUp, typeCodeInto, pressCodeButton } from '../services/tabManager.js'
+import { forgetRunTab, dropTab, tabOfRun, tabAnswers, findRunTab, hostOf, codeBoxUp, typeCodeInto, pressCodeButton } from '../services/tabManager.js'
 import { openBrowserIfAny, openForPerson } from '../services/browser.js'
 import { waiting, answerCaptcha, doneWith, TASK_MS } from '../services/attention.js'
 import { seal } from '../services/accountVault.js'
@@ -1061,12 +1061,38 @@ const noTab = (res, page) => page === SLOW
   ? res.status(504).json({ error: 'The robot browser does not answer just now.', slow: true })
   : res.status(404).json({ error: 'No robot browser is open for this.' })
 
+// One answer that never ends: the tab's pictures and its address, each only when it changed (services/liveStream.js).
+router.get('/automations/:id/live', async (req, res) => {
+  const L = await import('../services/liveStream.js')
+  if (!L.liveOn()) return res.status(404).json({ error: 'off', live2: false })
+  const id = req.params.id, db = req.app.locals.db
+  let found = 0
+  await L.serveLive(req, res, {
+    codeBox: codeBoxUp,
+    // The tab the run works in, known here: never asked anything first (a busy page answers in seconds).
+    tabOf: async () => {
+      const known = /^\d+$/.test(id) ? tabOfRun(Number(id)) : null
+      if (known) return known
+      if (Date.now() - found < 1500) return null      // looked for in the browser at most every 1.5 s
+      found = Date.now()
+      return Promise.race([runTab(db, id).catch(() => null), new Promise(ok => setTimeout(() => ok(null), 6000))])
+    },
+    ended: async () => /^\d+$/.test(id) && !['pending', 'running', 'paused'].includes((await db('automation_queue').where('id', id).first('status'))?.status),
+    onOpen: async (page) => {
+      page.__adalLookedAt = Date.now()
+      const { freshForm } = await import('../services/freshForm.js')
+      await freshForm(db, id, page)
+    },
+  }).catch(() => { try { res.end() } catch {} })
+})
+
 router.get('/automations/:id/screen', async (req, res) => {
   const page = await liveTab(req)
   if (!page || page === SLOW) return noTab(res, page)
   try {
+    const { latestFrame } = await import('../services/liveFrames.js')   // the stream's last picture (a screenshot of its own took 2.4 s on a 2-core PC)
     const shot = await Promise.race([
-      page.screenshot({ type: 'jpeg', quality: 60, captureBeyondViewport: false }),
+      latestFrame(page),
       new Promise((_, no) => setTimeout(() => no(new Error('The tab did not answer.')), 8000)),
     ])
     const size = await page.evaluate(() => [window.innerWidth, window.innerHeight]).catch(() => [0, 0])

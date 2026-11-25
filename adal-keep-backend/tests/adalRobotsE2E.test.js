@@ -12,12 +12,13 @@ import assert from 'node:assert/strict'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { findChrome, rmTmp } from './helpers/chrome.js'
 import net from 'net'
 import { spawn } from 'child_process'
 import { fileURLToPath } from 'url'
 
 const BACK = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const CHROME = ['/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find(f => fs.existsSync(f))
+const CHROME = findChrome()
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'adal-robots-e2e-'))
 const ENV = {
   SQLITE_PATH: path.join(tmp, 'scratch.sqlite'),
@@ -76,7 +77,7 @@ test('Adal Robots claims a queued Check if chosen, the person ticks through Adal
     await sleep(800)
     try { robots.kill('SIGKILL') } catch {}
     chrome.kill('SIGKILL'); app?.close(); await mock.close(); await db.destroy().catch(() => {})
-    fs.rmSync(tmp, { recursive: true, force: true })
+    rmTmp(tmp)
   })
   const row = () => db('automation_queue').where('id', runId).first()
   const waitFor = async (fn, ms, what) => { const end = Date.now() + ms; while (Date.now() < end) { const v = await fn().catch(() => null); if (v) return v; await sleep(300) } assert.fail(`timed out: ${what}\n--- Adal Robots said:\n${out.slice(-3000)}`) }
@@ -124,6 +125,19 @@ test('Adal Robots claims a queued Check if chosen, the person ticks through Adal
   assert.ok(piece?.value?.length, 'its first picture comes')
   console.log(`the live view's first picture: ${Date.now() - tPic} ms`)
   ac.abort()
+
+  // The shared live stream (services/liveStream.js) through Adal Keep to Adal Robots: its pieces come as they are made.
+  {
+    const { pieces } = await import('../../adal-keep-frontend/src/lib/livePieces.js')
+    const ac2 = new AbortController(), kinds = [], t0 = Date.now()
+    const lr = await fetch(`${K}/automations/${runId}/live`, { signal: ac2.signal })
+    assert.equal(lr.status, 200); assert.equal(lr.headers.get('x-adal-live'), '2')
+    const feed = pieces((k) => kinds.push([k, Date.now() - t0]))
+    ;(async () => { try { for await (const c of lr.body) feed(new Uint8Array(c)) } catch {} })()
+    await waitFor(async () => kinds.some(k => k[0] === 'P'), 5000, 'the live stream\'s first picture')
+    console.log(`the live stream's first picture through Adal Robots: ${kinds.find(k => k[0] === 'P')[1]} ms`)
+    ac2.abort()
+  }
 
   // The person ticks the box in Adal Keep's live view.
   const tick = await fetch(`${K}/automations/${runId}/input`, { method: 'POST', headers: { 'content-type': 'application/json' },

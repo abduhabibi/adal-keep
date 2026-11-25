@@ -16,14 +16,16 @@ const SIZES = [
 
 export default function RefineCompare({ file, fieldName, onClose, onKept }) {
   const [size, setSize] = useState('original')
+  const [ai, setAi] = useState(false)          // the AI way (a very little of it), only when this PC offers it
+  const [offer, setOffer] = useState(false)
   const [busy, setBusy] = useState(false)
   const [res, setRes] = useState(null)       // { token, width, height, bytes, from }
   const [err, setErr] = useState('')
 
-  useEffect(() => () => {}, [])
+  useEffect(() => { api.get('/photo-refine/status', { adalNoCache: true }).then(r => setOffer(!!r.data?.esrgan)).catch(() => {}) }, [])
   const run = async () => {
     setBusy(true); setErr(''); setRes(null)
-    try { setRes((await api.post(`/photo-refine/${file.id}/preview`, { size }, { timeout: 300000 })).data) }
+    try { setRes((await api.post(`/photo-refine/${file.id}/preview`, { size, engine: ai ? 'esrgan' : 'plain' }, { timeout: 300000 })).data) }
     catch (e) { setErr(e.response?.data?.error || 'Refine failed') }
     setBusy(false)
   }
@@ -50,15 +52,22 @@ export default function RefineCompare({ file, fieldName, onClose, onKept }) {
             </label>
           ))}
         </div>
+        {offer && (
+          <label className="flex cursor-pointer items-start gap-2 rounded-xl border border-slate-300 dark:border-slate-600 p-3 text-sm">
+            <input type="checkbox" className="mt-1" checked={ai} onChange={e => setAi(e.target.checked)} />
+            <span><b>A very little AI cleaning</b><span className="block text-xs text-slate-500">A small part (10–30%) of an AI upscaler's cleaning is mixed in, only while the picture stays the same as the original. Runs on this PC; can take up to 3 minutes.</span></span>
+          </label>
+        )}
         {err && <p className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">{err}</p>}
         {res && (
           <div className="space-y-2">
             <div className="grid gap-3 sm:grid-cols-2">
               <figure><img src={`/api/files/${file.id}/download`} alt="Before" className="w-full rounded-lg object-contain max-h-[55vh]" /><figcaption className="mt-1 text-center text-xs text-slate-500">Before — {res.from.width}×{res.from.height}</figcaption></figure>
-              <figure><img src={`/api/photo-refine/preview/${res.token}`} alt="After" className="w-full rounded-lg object-contain max-h-[55vh]" /><figcaption className="mt-1 text-center text-xs text-slate-500">After — {res.width}×{res.height}, {kb(res.bytes)}</figcaption></figure>
+              <figure><img src={`/api/photo-refine/preview/${res.token}`} alt="After" className="w-full rounded-lg object-contain max-h-[55vh]" /><figcaption className="mt-1 text-center text-xs text-slate-500">After — {res.width}×{res.height}, {kb(res.bytes)}{res.engine === 'esrgan' ? ` · AI ${Math.round(res.blend * 100)}%` : ''}</figcaption></figure>
             </div>
           </div>
         )}
+        {res?.note && <p className="text-xs text-slate-500">{res.note}</p>}
         <div className="flex flex-wrap gap-2">
           <button type="button" disabled={busy} onClick={run} className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{busy && !res ? 'Refining…' : res ? 'Refine again' : 'Refine'}</button>
           {res && <button type="button" disabled={busy} onClick={keep} className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Keep the refined picture</button>}

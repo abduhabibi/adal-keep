@@ -77,3 +77,25 @@ Nothing is raised above a limit.
 `realesr-general-x4v3.onnx`, source in refineCore.js (`SR_MODEL_URL`, huggingface CoderViking/realesr-general-x4v3-onnx),
 4,866,417 bytes, BSD-3-Clause per the code comment, sha256 not recorded (the file is not on this PC). `onnxruntime-node` is also
 not installed in the backend's node_modules. The existing `ensureSrModel` would download it if `ADAL_LOCAL_ENHANCE=1`: leave that off.
+
+## The AI way (added 2026-11-25; off by default: `ADAL_REFINE_ESRGAN=1`)
+Real-ESRGAN `realesr-general-x4v3` blended into the plain way: X = (1-a) plain + a AI, a = 30 % -> 20 % -> 10 %, no brightness /
+gamma / saturation / normalise on the AI picture. Guards, measured on the result shrunk back to the input's size: PSNR >= **34 dB**
+(plain way 37.5, old Refine 31.7 which visibly changed her) and mean colour shift <= **1.0** (plain 0.4, old 5.5); over a limit the
+blend is lowered, then the plain way is used and the note says why. Only inputs up to 1400 px long go to the network.
+It runs in its own low-priority process (`esrganWorker.mjs`), killed after 3 minutes; one refine at a time; a person's click.
+The model loads only from `data/models/realesr-general-x4v3.onnx` with exactly 4,866,417 bytes and sha256
+`1940a93ee08283a0a7286183186357b1688fe9fa8ede74604b424586aaddf112`; **nothing downloads it** (the old `ensureSrModel` download is gone).
+Stub only so far: the network's own picture (tests use a stand-in that enlarges the input with a chosen fault). Real numbers:
+`node scripts/esrgan-check.mjs outDir` on a PC with the model and `npm install` done (onnxruntime-node is in package.json).
+The 34 dB / 1.0 limits are my choice from the plain-way and old-Refine numbers above, not measured on the real network yet: adjust after
+the first real run.
+
+## Is the original kept? (audit, 2026-11-25)
+- Refine: yes (a new file; the original stays). Crop review / placement: cut-outs are new files; the combined Passport picture's
+  database row is deleted but its file stays on disk and is noted in `data/placement-moves.json` (placement.js ~123): kept on disk, not
+  shown on the profile.
+- **Found and fixed**: the single-file upload and "assign tray file" (routes/files.js) destroyed the picture a field held when a new
+  one replaced it. They now move it to `data/SafeStorage/replaced/` (services/keepOriginals.js).
+- Not changed: the webp -> png twin in docPipeline.js (the webp is decoded exactly, nothing is lost); the tray's duplicate copy
+  removal after filing (a copy of a file that was just filed).

@@ -4,6 +4,7 @@ import fs from 'fs'
 import sharp from 'sharp'
 import imageToPdf from 'image-to-pdf'
 import { upload, generateThumbnail, getRelativePath } from '../services/storage.js'
+import { keepReplaced } from '../services/keepOriginals.js'
 import { fileURLToPath } from 'url'
 import { fetchMissing, ANSWER_MS } from '../services/fileOnDemand.js'
 import { thumbnailFile, forgetPictures } from '../services/pictures.js'
@@ -163,7 +164,7 @@ router.post('/profiles/:id/fields/:fieldId/assign-tray-file', async (req, res) =
     // Optionally clean up existing files for this field if it only holds one
     const oldFiles = await db('files').where('profile_field_id', fieldId)
     for (const oldFile of oldFiles) {
-      if (fs.existsSync(oldFile.path)) fs.unlinkSync(oldFile.path)
+      keepReplaced(oldFile.path)   // moved to SafeStorage/replaced, not destroyed (services/keepOriginals.js)
       forgetPictures(oldFile.path)
       const thumbPath = oldFile.path.replace(/(\.\w+)$/, '_thumb$1')
       if (fs.existsSync(thumbPath)) fs.unlinkSync(thumbPath)
@@ -254,7 +255,7 @@ router.post('/profiles/:id/fields/:fieldId/upload', uploadOnce, upload.single('f
     await db('files').where('profile_field_id', fieldId).whereIn('id', oldFiles.map(f => f.id)).del()
     for (const oldFile of oldFiles) {
       try {
-        if (fs.existsSync(oldFile.path)) fs.unlinkSync(oldFile.path)
+        keepReplaced(oldFile.path)   // moved to SafeStorage/replaced, not destroyed (services/keepOriginals.js)
         forgetPictures(oldFile.path)
         const thumbPath = oldFile.path.replace(/(\.\w+)$/, '_thumb$1')
         if (fs.existsSync(thumbPath)) fs.unlinkSync(thumbPath)

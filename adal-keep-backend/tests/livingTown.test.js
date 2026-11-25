@@ -19,7 +19,9 @@ test('an empty living town is saved as her place of birth; a written one stays',
 
 test('the CV pop-up no longer asks for living town when her place of birth is known', () => {
   const p = { passport_issue_date: '2024-04-09', marital_status: 'SINGLE', religion: 'Muslim', phone_number: '0912345678' }
-  assert.ok(missingNow(p, [], 'cv').texts.some(t => t.key === 'living_town'))
+  // no place of birth either: the place is asked (the town follows it), once
+  const none = missingNow(p, [], 'cv').texts.map(t => t.key)
+  assert.ok(none.includes('place_of_birth') && !none.includes('living_town'))
   assert.ok(!missingNow({ ...p, place_of_birth: 'ADAMA' }, [], 'cv').texts.some(t => t.key === 'living_town'))
 })
 

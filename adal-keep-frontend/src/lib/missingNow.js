@@ -10,6 +10,7 @@ import { hasFiles } from './photosFirst.js'
 
 const TEXT = {
   living_town:         { label: 'Living town', type: 'text' },
+  place_of_birth:      { label: 'Place of birth', type: 'text', hint: 'as printed on the passport' },
   passport_issue_date: { label: 'Passport Date of Issue', type: 'date' },
   passport_expiry_date: { label: 'Passport Date of Expiry', type: 'date' },
   date_of_birth:       { label: 'Date of birth', type: 'date' },
@@ -106,7 +107,9 @@ export function missingNow(profile, fields = [], stepKey, profileId = null) {
       if (f && !hasFiles(f) && !files.includes(n)) files.push(n)
     }
     for (const k of NEEDS[s].texts) {
-      if (profile && isBad(k, profile[k], profile) && !texts.some(t => t.key === k)) texts.push({ key: k, ...TEXT[k] })
+      // No living town and no place of birth: the place is what is asked (the town follows it on save).
+      const key = k === 'living_town' ? 'place_of_birth' : k
+      if (profile && isBad(k, profile[k], profile) && !texts.some(t => t.key === key)) texts.push({ key, ...TEXT[key] })
     }
   }
   if (profileId) {

@@ -111,8 +111,8 @@ export async function quickMrz(file, { tries = TRIES.length, skip = 0, deadline 
   onStep('reading')
   let pg
   try { pg = await page(file) } catch { return null }
-  const done = (m) => ({
-    doc_type: 'Passport', confidence: 0.98, source: 'mrz-ocrb',
+  const done = (m, turn = 0) => ({
+    doc_type: 'Passport', confidence: 0.98, source: 'mrz-ocrb', turn,   // turn: how far the page was turned to read it
     markdown: `${m.mrz_line1}\n${m.mrz_line2}`,
     fields: {
       full_name: `${m.given_names} ${m.surname}`.trim(), surname: m.surname, given_names: m.given_names,
@@ -128,7 +128,7 @@ export async function quickMrz(file, { tries = TRIES.length, skip = 0, deadline 
       onStep('checking')
       const m = verifiedIn(text)
       onStep('reading')
-      return m ? done(m) : null
+      return m ? done(m, angle) : null
     } catch { return null }
   }
   const list = TRIES.slice(skip, tries)

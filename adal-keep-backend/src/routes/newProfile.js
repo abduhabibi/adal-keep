@@ -49,6 +49,7 @@ const placeFields = (f = {}) => ({
 router.post('/new-profile/warm', async (req, res) => {
   const { warmMrzReader } = await import('../services/quickMrz.js')
   warmMrzReader().catch(() => {})
+  import('../services/passportVisual.js').then(m => m.warmVisualReader()).catch(() => {})
   res.json({ ok: true })
 })
 

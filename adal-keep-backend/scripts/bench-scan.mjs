@@ -24,6 +24,7 @@ const variants = {
 }
 const files = []
 for (const [k, f] of Object.entries(variants)) { const p = path.join(dir, `${k}.jpg`); fs.writeFileSync(p, await f()); files.push([k, p]) }
+await (await import('../src/services/passportVisual.js')).warmVisualReader()
 const qm = await import('../src/services/quickMrz.js'); { const w0 = performance.now(); await qm.warmMrzReader(); console.log('warm', Math.round(performance.now() - w0)) }
 const { scan } = await import('../src/services/passportScan.js').catch(() => ({ scan: null }))
 const { analyzeWithMineru } = await import('../src/services/mineruClassifier.js')

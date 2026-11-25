@@ -14,7 +14,7 @@ const SAMPLE = new URL('./fixtures/sample-passport.jpg', import.meta.url).pathna
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'scan-test-'))
 const { quickMrz, warmMrzReader, stopMrzReader } = await import('../src/services/quickMrz.js')
 const { scan } = await import('../src/services/passportScan.js')
-after(async () => { await stopMrzReader(); fs.rmSync(dir, { recursive: true, force: true }) })
+after(async () => { await stopMrzReader(); await (await import('../src/services/passportVisual.js')).stopVisualReader(); fs.rmSync(dir, { recursive: true, force: true }) })
 
 test('an upright and an upside-down page both verify, the steps are reported in order', async () => {
   await warmMrzReader()
@@ -46,6 +46,7 @@ test('scans take their turn: the second answers after the first', async () => {
 })
 
 test('POST /new-profile/read answers a verified passport at once, without waiting for the place', async () => {
+  await warmMrzReader(); await (await import('../src/services/passportVisual.js')).warmVisualReader()   // the page warms them when it opens
   const { default: router } = await import('../src/routes/newProfile.js')
   const app = express()
   app.locals.db = () => ({ where: () => ({ first: async () => null }) })
@@ -56,6 +57,8 @@ test('POST /new-profile/read answers a verified passport at once, without waitin
     const t = Date.now()
     const r = await (await fetch(`http://127.0.0.1:${server.address().port}/api/new-profile/read`, { method: 'POST', body: fd })).json()
     assert.equal(r.verified, true); assert.equal(r.fields.passport_number, 'L898902C3')
+    // place of birth and date of issue come read from the page, in the same answer, with no Gemini
+    assert.equal(r.fields.place_of_birth, 'ADDIS ABABA'); assert.equal(r.fields.passport_issue_date, '2007-04-16')
     assert.ok(Date.now() - t < 5000, `took ${Date.now() - t} ms`)
     assert.equal(r.pending, undefined)
     const gone = await fetch(`http://127.0.0.1:${server.address().port}/api/new-profile/result/nothing`)

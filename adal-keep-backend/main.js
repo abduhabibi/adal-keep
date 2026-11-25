@@ -272,6 +272,8 @@ async function initSystem() {
           console.log(`[passport details] checked ${n} profile(s) missing place of birth / issue date`)
         } catch (e) { console.warn('[passport details] backfill:', e.message) }
       }, 60000)
+      // A passport whose place of birth / issue date was not read is tried again later (not skipped for ever).
+      if (process.env.ADAL_ISOLATED !== '1') import('./src/services/passportRetry.js').then(m => m.startPassportRetry(db, { main: !notMainPC() })).catch(e => console.warn('[passport retry]', e.message))
       // (ADAL_ISOLATED=1, a scratch copy for tests: no WhatsApp, no browser — they would reach this PC's real ones.)
       if (process.env.ADAL_ISOLATED !== '1') {
         if (!notMainPC()) import('./src/services/whatsapp.js').then(w => w.startWhatsApp(db)).catch(e => console.warn('[whatsapp]', e.message))

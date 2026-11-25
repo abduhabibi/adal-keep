@@ -1366,6 +1366,11 @@ router.post('/automations/:id/resume', async (req, res) => {
       await db('automation_queue').where('id', runId).andWhere('status', 'paused')
         .update({ status: 'pending', updated_at: new Date().toISOString() })
     }
+    // A person pressed it: from now on it is a run somebody asked for, and the robot browser opens for it
+    // (2026-11-25, Main: a run the scanner had found waited for ever, "Waiting for Adal Browser to be open").
+    let ctx = {}; try { ctx = JSON.parse(row.context || '{}') || {} } catch {}
+    await db('automation_queue').where('id', runId).whereIn('status', ['pending', 'paused'])
+      .update({ context: JSON.stringify({ ...ctx, asked_at: Date.now() }), ...(/^(Retry |Waiting for Adal Browser)/.test(row.pause_reason || '') ? { pause_reason: null, updated_at: new Date().toISOString() } : {}) })
     if (row.status === 'paused') await noteRun(db, row, 'continued by a person')
     const s = await dispatchRun(db, runId)
     res.json({ ok: true, ...s, message: runMessage(runId, s, row.status === 'paused' ? 'continued' : 'was already queued') })

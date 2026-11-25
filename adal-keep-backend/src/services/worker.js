@@ -568,7 +568,9 @@ async function runJob(db, job) {
     // never opens Brave itself. While Brave is closed it waits, and it goes
     // on once Brave is open again. Brave that a person closed (or quit Adal
     // Keep) stays closed.
-    const nobodyAsked = /^(Retry |Waiting for Adal Browser)/.test(job.pause_reason || '') || /Auto-discovered by scanner/.test(String(job.log || ''))
+    // (A person's press on it counts from then on: "asked_at" in its context, POST /automations/:id/resume.)
+    const nobodyAsked = !/"asked_at"/.test(String(job.context || ''))
+      && (/^(Retry |Waiting for Adal Browser)/.test(job.pause_reason || '') || /Auto-discovered by scanner/.test(String(job.log || '')))
     // Nobody pressed it and this PC's browser is closed: a free, strong Companion does it.
     if (LAN_ROBOTS && nobodyAsked && !onDevice(job) && !(await openBrowserIfAny())) await sendToFreeCompanion(db, job)
     if (nobodyAsked && !onDevice(job) && !(await openBrowserIfAny())) {

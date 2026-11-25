@@ -34,19 +34,6 @@ is 9 bytes. Off: `ADAL_LIVE_TILES=0`; the whole new stream: `ADAL_LIVE2=0` (the 
 | Clicks and pictures for a person | nothing between | one hop more on the office network (not measured) | — |
 | Needs | nothing | see below | nothing |
 
-### Proposal: Adal Robots on 10RD4GN (not built)
-- **Queue:** it must be the agency's one copy, the main PC's SQLite. A second process may not open that file over the
-  network (SQLite locks do not work on a share). So: a small queue service on Main (claim, log, step, result), asked
-  with that PC's certificate (equal PCs), one job at a time, a lease of 60 s renewed while it works; Main takes the job back
-  when the lease ends and marks it stopped (**never** started again by itself).
-- **Passwords:** the vault key never leaves Main. Main gives the one account's name and password of the claimed job
-  only, over the certificate channel, kept in memory only. The authenticator code is made on Main when asked.
-- **Files:** the job's documents (passport, photo, slip) fetched on claim, erased after it.
-- **Sign-ins (cookies):** they live in that PC's profile: every account signs in there once (a person's tick).
-- **Live view:** the stream as built here; Main passes it on (one hop).
-- **Safe order:** (1) the queue service with a switch, off; (2) a mock run end to end between two PCs; (3) one
-  account's "Check if chosen" for a day; (4) the rest.
-- This touches the main PC's server (new routes, certificates, vault), not only the robots' files, so it was not built.
-  What exists already: `ADAL_LAN_ROBOTS=1` (remoteBrowsers.js) lets Main drive a Companion's browser: the pages are
-  drawn there, the robot code, queue, passwords and files stay on Main. That takes the dear part (Chrome) off
-  Main with nothing new, and is the first thing to try — one PC, one day, with the owner's yes.
+**Since 2026-11-25 the robots choose the PC by themselves** (docs/robots-best-pc.md); the proposal that stood here
+(a queue service on Main) is not needed: the robot's code, queue, passwords and files stay on Main, only its browser is
+the other PC's.

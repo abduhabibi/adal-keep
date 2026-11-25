@@ -432,6 +432,31 @@ export default function CVNewPage() {
 
   const generate = () => openPreview()
 
+  // Done: what was filled here is saved on her — no PDF, nothing to download. Then her page: complete,
+  // Musaned is next; else what is still lacking is asked there. The PDF is made when it is previewed, saved or sent.
+  const done = async () => {
+    const err = validate()
+    if (err && err !== 'Pick a template') return toast.error(err)   // (no template yet: her details can still be saved)
+    setSaving(true)
+    try {
+      const f = form
+      const body = {}
+      for (const k of ['religion', 'marital_status', 'weight', 'height', 'mother_name', 'father_name', 'education_level', 'region', 'zone_subcity', 'labor_id', 'personal_number', 'emergency_name', 'emergency_phone', 'emergency_gender', 'emergency_relationship', 'cooking_skill',
+        'speaks_english', 'speaks_arabic', 'english_read', 'english_write', 'arabic_read', 'arabic_write']) if (f[k] !== undefined) body[k] = f[k]
+      body.children_count = parseInt(f.children_count, 10) || 0
+      body.skills = JSON.stringify(f.skills || {})
+      body.previous_employment = JSON.stringify(f.previous_employment || [])
+      await api.put(`/profiles/${profileId}`, body)
+      window.dispatchEvent(new Event('adal-profile-changed'))
+      const r = (await api.get(`/cv/profile-readiness/${profileId}`, { adalNoCache: true }).catch(() => null))?.data
+      if (r?.cv_lacks?.length) {
+        toast('Saved. Her CV still needs: ' + r.cv_lacks.map(x => String(x).replace(/ missing$/i, '').replace(/_/g, ' ')).join(', '), { duration: 8000 })
+      } else toast.success('Her CV is complete')
+      navigate(`/profiles/${profileId}`)
+    } catch (e) { toast.error(e.response?.data?.error || e.message || 'Not saved') }
+    finally { setSaving(false) }
+  }
+
   // ===== STEP 1 =====
   if (step === 1) {
     return (
@@ -645,7 +670,8 @@ export default function CVNewPage() {
       <div className="fixed inset-x-0 bottom-0 max-md:bottom-[calc(51px+env(safe-area-inset-bottom))] z-30 border-t border-slate-200 bg-white/95 px-4 py-3 backdrop-blur dark:border-slate-700 dark:bg-slate-900/95">
         <div className="mx-auto flex max-w-4xl items-center justify-center gap-3">
           <Button variant="secondary" onClick={generate} isLoading={busy} disabled={!!blocker}>Preview</Button>
-          <Button onClick={downloadCurrent} isLoading={saving} disabled={!!blocker}>⬇ PDF</Button>
+          <Button variant="secondary" onClick={downloadCurrent} isLoading={saving} disabled={!!blocker}>⬇ PDF</Button>
+          <Button onClick={done} isLoading={saving} disabled={!!blocker && blocker !== 'Pick a template'}>✓ Done</Button>
         </div>
       </div>
           {/* Preview modal */}

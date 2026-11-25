@@ -638,6 +638,7 @@ app.put('/api/profiles/:id', async (req, res) => {
       'education_level',
       'speaks_english',
       'speaks_arabic',
+      'english_read', 'english_write', 'arabic_read', 'arabic_write',
       'skills',
       'previous_employment',
       'work_experience',

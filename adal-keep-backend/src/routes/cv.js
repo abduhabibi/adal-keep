@@ -193,6 +193,8 @@ router.get('/profile-readiness/:profileId', async (req, res) => {
     if (!profile.marital_status) cv_blockers.push('Marital status missing')
 
     const can_generate = cv_blockers.length === 0
+    // All it needs, with Musaned's (the same rule on every PC); [] = the CV step is done.
+    const cv_lacks = await (await import('../services/cvComplete.js')).lacksOf(db, profileId, profile)
 
 
     res.json({
@@ -207,6 +209,7 @@ router.get('/profile-readiness/:profileId', async (req, res) => {
       ].filter(Boolean),
       cv_blockers,
       can_generate,
+      ...(cv_lacks ? { cv_lacks } : {}),
     })
   } catch (e) {
     console.error('[CV] readiness error:', e.message)

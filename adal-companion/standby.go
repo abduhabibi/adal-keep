@@ -86,6 +86,9 @@ type standbyRunner struct {
 	door     *officeDoor
 	myID     string
 	realMain string // the main PC's address, remembered while it answered
+	mainUpAt time.Time
+	ownDead  int // looks in a row this PC's own server did not answer (hand back)
+	ownNext  time.Time
 }
 
 var standby *standbyRunner
@@ -428,15 +431,22 @@ type healthReply struct {
 }
 
 func healthOf(u string, wait time.Duration) *healthReply {
-	resp, err := (&http.Client{Timeout: wait}).Get(strings.TrimRight(u, "/") + "/api/health")
+	c := probeClient
+	if steadyOff {
+		c = &http.Client{Timeout: wait}
+	}
+	resp, err := c.Get(strings.TrimRight(u, "/") + "/api/health")
 	if err != nil {
+		markBusy(u, true)
 		return nil
 	}
 	defer resp.Body.Close()
 	var h healthReply
 	if json.NewDecoder(io.LimitReader(resp.Body, 8192)).Decode(&h) != nil || h.Status != "ok" {
+		markBusy(u, true) // (a 502, a cut answer: something is there, not well)
 		return nil
 	}
+	markBusy(u, false)
 	return &h
 }
 
@@ -462,15 +472,16 @@ func (s *standbyRunner) realMainAt(cands []string) string {
 		if h == nil || h.Acting || h.Role == "follower" {
 			continue
 		}
-		if num != "" && !isMainWithNumber(u, num) {
+		if num != "" && !numberKnown(u, num) {
 			continue
 		}
 		s.mu.Lock()
 		if h.Instance != "" {
 			s.st.MainInstance = h.Instance
 		}
-		s.realMain = u
+		s.realMain, s.mainUpAt = u, time.Now()
 		s.mu.Unlock()
+		sweepFound()
 		return u
 	}
 	return ""
@@ -509,11 +520,20 @@ func (s *standbyRunner) mainCandidates() []string {
 	s.mu.Lock()
 	cands := []string{s.realMain}
 	s.mu.Unlock()
-	cands = append(cands, hostServer, loadIdentity().URL, pinnedHostURL())
-	if info := discoverServer(1500 * time.Millisecond); info != nil {
-		cands = append(cands, info.URL)
+	return uniqueURLs(append(cands, hostServer, loadIdentity().URL, pinnedHostURL()))
+}
+
+// findMain: the main PC at an address known here; only when it is at none of them, searched.
+func (s *standbyRunner) findMain() string {
+	cands := s.mainCandidates()
+	st, u := s.stateOf(cands)
+	if st != mainGone {
+		return u // it answers — or it is there, only busy: nothing is searched
 	}
-	return cands
+	if info := discoverServer(1500 * time.Millisecond); info != nil {
+		return s.realMainAt([]string{info.URL})
+	}
+	return ""
 }
 
 // mainAliveOnline: the main PC's heartbeat (online) is fresh and is not a
@@ -558,7 +578,7 @@ func (s *standbyRunner) watch() {
 		now := time.Now()
 		openSettings(serverDir(s.root)) // settings that came locked before the key: opened once the key is here
 		if standbyActing() {
-			if u := s.realMainAt(s.mainCandidates()); u != "" {
+			if u := s.findMain(); u != "" && s.ownReadyToHandBack(now) {
 				log.Printf("🏢 The main PC is back at %s: handing over what was done here", u)
 				if err := s.handBack(u); err != nil {
 					log.Printf("🏢 hand back: %v (trying again in a minute)", err)
@@ -585,8 +605,13 @@ func (s *standbyRunner) watch() {
 		if s.othersActing(now) || now.Sub(s.mainSeen) < standbyAfter {
 			continue
 		}
-		if s.realMainAt(s.mainCandidates()) != "" {
+		// (There but too busy to answer is not "away": this office has one main PC.)
+		st, _ := s.stateOf(s.mainCandidates())
+		if st == mainUp || (st == mainGone && s.findMain() != "") {
 			s.mainSeen = now
+			continue
+		}
+		if st == mainSlow && now.Sub(s.mainSeen) < standbyAfter+slowAfter {
 			continue
 		}
 		learnNumberOnline(s.root)
@@ -684,6 +709,7 @@ func (s *standbyRunner) run() {
 	}
 	hostServer = fmt.Sprintf("http://127.0.0.1:%d", actingPort)
 	os.Setenv("ADAL_HOST_URL", hostServer)
+	quick := 0 // starts in a row that ended within 15 s
 	for standbyActing() {
 		backend := serverBackend(s.root)
 		logf, _ := os.OpenFile(filepath.Join(backend, "data", "server.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
@@ -704,6 +730,12 @@ func (s *standbyRunner) run() {
 			"ADAL_HIDDEN_AGENTS=1",
 			"ADAL_BROWSER_EXE="+filepath.Join(s.root, "browser", "AdalBrowser.exe"),
 		)
+		// It ends at once again and again: its pages and data only (no robots, copying, updates …), so
+		// what was done here can still be read by the main PC (hand back).
+		if quick >= 3 && !steadyOff {
+			log.Printf("🏢 the server ended at once %d times: started with its data only. Its last words: %s", quick, lastLines(filepath.Join(backend, "data", "server.log"), 600))
+			cmd.Env = append(cmd.Env, "ADAL_ISOLATED=1", "ADAL_SYNC=0")
+		}
 		if logf != nil {
 			cmd.Stdout, cmd.Stderr = logf, logf
 		}
@@ -729,11 +761,54 @@ func (s *standbyRunner) run() {
 		}
 		log.Printf("🏢 the server stopped (%v) — starting it again", err)
 		if time.Since(t0) < 15*time.Second {
-			time.Sleep(30 * time.Second)
+			quick++
+			time.Sleep(restartPause(quick))
 		} else {
+			quick = 0
 			time.Sleep(3 * time.Second)
 		}
 	}
+}
+
+// restartPause: 30 s, 1, 2, then 5 minutes between starts of a server that ends at once.
+func restartPause(n int) time.Duration {
+	if steadyOff {
+		return 30 * time.Second
+	}
+	return []time.Duration{30 * time.Second, 30 * time.Second, 30 * time.Second, time.Minute, 2 * time.Minute, 5 * time.Minute}[min(max(n, 0), 5)]
+}
+
+// lastLines: the end of a log, on one line.
+func lastLines(p string, n int) string {
+	b, err := os.ReadFile(p)
+	if err != nil {
+		return "(no log)"
+	}
+	if len(b) > n {
+		b = b[len(b)-n:]
+	}
+	return strings.Join(strings.Fields(string(b)), " ")
+}
+
+// ownReadyToHandBack: this PC's own server answers, so the main PC can read what was done here.
+// It does not: the main PC is not asked to read it (it failed every 90 s, for ever); run() starts
+// it again, and this looks again after 1, 2, 4 … 15 minutes. Nothing here is dropped meanwhile.
+func (s *standbyRunner) ownReadyToHandBack(now time.Time) bool {
+	if steadyOff || ownAnswers() {
+		s.ownDead = 0
+		return true
+	}
+	if now.Before(s.ownNext) {
+		return false
+	}
+	s.ownDead++
+	p := time.Minute << min(s.ownDead-1, 4)
+	if p > 15*time.Minute {
+		p = 15 * time.Minute
+	}
+	s.ownNext = now.Add(p)
+	log.Printf("🏢 The main PC is back, but this PC's own server does not answer: what was done here waits in %s (looked at again in %s)", filepath.Join(serverBackend(s.root), "data"), p)
+	return false
 }
 
 // officeAddr: the loopback address a computer of the office comes from (127.<b>.<c>.<d>
@@ -811,10 +886,37 @@ func (d *officeDoor) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Transport:     d.transportFor(ip),
 		FlushInterval: -1,
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			http.Error(w, `{"error":"Adal Keep is starting on this PC — try again in a moment"}`, http.StatusBadGateway)
+			ownDown(w, r, mainForPages())
 		},
 	}
 	rp.ServeHTTP(w, r)
+}
+
+// mainForPages: the main PC's address when it answered within the last 2 minutes.
+func mainForPages() string {
+	if standby == nil {
+		return ""
+	}
+	standby.mu.Lock()
+	defer standby.mu.Unlock()
+	if time.Since(standby.mainUpAt) < 2*time.Minute {
+		return standby.realMain
+	}
+	return ""
+}
+
+// ownDown: this PC's own server does not answer. A page goes to the main PC when it is there;
+// a call is told to try again (503 with a time, never a bare 502).
+func ownDown(w http.ResponseWriter, r *http.Request, main string) {
+	if main != "" && (r.Method == http.MethodGet || r.Method == http.MethodHead) && !strings.HasPrefix(r.URL.Path, "/api/") && strings.Contains(r.Header.Get("Accept"), "text/html") {
+		w.Header().Set("Cache-Control", "no-store")
+		http.Redirect(w, r, main+r.URL.RequestURI(), http.StatusTemporaryRedirect)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", "5")
+	w.WriteHeader(http.StatusServiceUnavailable)
+	w.Write([]byte(`{"error":"Adal Keep is starting on this PC — try again in a moment"}`))
 }
 
 func (s *standbyRunner) openOffice() error {

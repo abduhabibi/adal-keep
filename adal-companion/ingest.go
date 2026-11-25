@@ -99,6 +99,7 @@ func pingServer() bool {
 		os.Setenv("ADAL_HOST_URL", "")
 		return false
 	}
+	sweepFound()
 	// Its network card: found by it next time the router moves it (mainid.go).
 	learnMain(hostServer, info.Macs)
 	// Its permanent id: found by it from now on, whatever address it gets (presence.go).
@@ -264,6 +265,9 @@ func uploadToIngest(filePath, filename string) {
 func rediscover() bool {
 	if standbyActing() {
 		return false
+	}
+	if !steadyOff && hostServer != "" && portOpens(hostServer) {
+		return false // it is there, only busy: the file waits in the outbox
 	}
 	log.Println("🔁 Re-scanning the LAN for the Adal Keep server...")
 	if info := discoverServer(2500 * time.Millisecond); info != nil && strings.TrimRight(info.URL, "/") != strings.TrimRight(hostServer, "/") {

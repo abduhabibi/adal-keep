@@ -119,6 +119,9 @@ func addMainProxy(mux *http.ServeMux) {
 		req.Header.Set("x-adal-flush", "1") // what comes is handed on at once (below)
 		resp, err := mainProxyClient.Do(req)
 		if err != nil {
+			if serveOwn(w, r, "/api/"+strings.TrimPrefix(r.URL.Path, "/local/main/")) {
+				return
+			}
 			http.Error(w, `{"error":"the main PC does not answer on the network"}`, http.StatusBadGateway)
 			return
 		}

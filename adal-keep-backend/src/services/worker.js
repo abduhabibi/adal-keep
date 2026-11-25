@@ -1233,6 +1233,10 @@ export function startWorker(db) {
     drainQueue(db).catch(e => console.error('[worker] poll error:', e))
   }, POLL_MS)
   // No robot tab holds this PC: one that uses the processor without end is stopped (services/robotGuard.js).
+  // A tab that answers nothing any more: closed, and its run goes on in a fresh one (a waiting sign-in at once).
+  import('./deadTabs.js').then(d => d.startDeadTabs(db, { afterClose: async () => {
+    for (const ms of [500, 4000, 12000]) setTimeout(() => reviveSignIns(db).then(() => drainQueue(db)).catch(() => {}), ms).unref?.()
+  } })).catch(e => console.warn('[dead] not started:', e.message))
   import('./robotGuard.js').then(g => g.startRobotGuard(db)).catch(e => console.warn('[guard] not started:', e.message))
   setInterval(() => continueSignedIn(db).catch(e => console.warn('[worker] sign-in look:', e.message)), 15000).unref?.()
   setInterval(() => closeSavedRuns(db).catch(e => console.warn('[worker] saved look:', e.message)), 3000).unref?.()

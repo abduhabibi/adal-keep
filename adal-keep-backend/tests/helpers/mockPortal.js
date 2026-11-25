@@ -9,17 +9,13 @@
  * takes only the account's current TOTP code.
  */
 import https from 'https'
-import { execFileSync } from 'child_process'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { KEY, CERT } from './mockCert.js'
 import { totp } from '../../src/services/musanedTotp.js'
 
-export function selfSigned(dir) {
-  const key = path.join(dir, 'k.pem'), cert = path.join(dir, 'c.pem')
-  execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', key, '-out', cert, '-days', '1', '-subj', '/CN=mock'], { stdio: 'ignore' })
-  return { key: fs.readFileSync(key), cert: fs.readFileSync(cert) }
-}
+export const selfSigned = () => ({ key: KEY, cert: CERT })
 
 const page = (title, body, head = '') => `<!doctype html><html><head><title>${title}</title>${head}</head><body>${body}</body></html>`
 const cookies = (req) => Object.fromEntries(String(req.headers.cookie || '').split(/;\s*/).filter(Boolean).map(c => c.split('=').map(decodeURIComponent)))

@@ -16,10 +16,11 @@ import assert from 'node:assert/strict'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { findChrome, rmTmp } from './helpers/chrome.js'
 import { spawn } from 'child_process'
 import net from 'net'
 
-const CHROME = ['/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find(f => fs.existsSync(f))
+const CHROME = findChrome()
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'adal-signin-'))
 // This test's own files only: never the PC's secrets, vault key, spaces or browser.
 process.env.SECRETS_PATH = path.join(tmp, 'secrets.enc')
@@ -50,7 +51,7 @@ test('sign-in: tab reuse, one space per account, the person only ticks the box',
   t.after(async () => {
     try { browser?.disconnect() } catch {}
     chrome.kill('SIGKILL'); await db.destroy().catch(() => {}); await mock.close()
-    fs.rmSync(tmp, { recursive: true, force: true })
+    rmTmp(tmp)
   })
 
   await db.schema.createTable('musaned_accounts', (x) => { x.integer('id'); x.string('name'); x.string('username'); x.string('password'); x.integer('is_default') })

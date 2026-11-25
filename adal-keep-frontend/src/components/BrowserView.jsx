@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 import api from '../services/api'
+import LiveCanvas from './LiveCanvas'
 
 /**
  * A robot browser opened from the sidebar's Browsers (2026-11-22): the real
@@ -18,6 +19,8 @@ async function giveCode(code) {
 }
 
 export default function BrowserView({ runId, title = '', onClose }) {
+  // The shared stream (lib/liveView.js); a PC that has none (older): the picture stream of before.
+  const [old, setOld] = useState(false)
   const [src, setSrc] = useState(null)
   const [meta, setMeta] = useState({ url: '' })
   const [address, setAddress] = useState('')
@@ -34,17 +37,19 @@ export default function BrowserView({ runId, title = '', onClose }) {
 
   // The pictures: one stream, started again when it drops.
   useEffect(() => {
+    if (!old) return
     let alive = true
     const start = () => alive && setSrc(`${api.defaults.baseURL}/automations/${runId}/stream?t=${Date.now()}`)
     start()
     setSeen(false); setSlow(null)
     const t = setTimeout(() => { if (alive) setSlow(s => s || 'The robot browser does not answer just now.') }, 12000)
     return () => { alive = false; clearTimeout(t) }
-  }, [runId, tries])
+  }, [runId, tries, old])
   const dropped = () => { if (!gone) setTimeout(() => setSrc(`${api.defaults.baseURL}/automations/${runId}/stream?t=${Date.now()}`), 1000) }
 
-  // The address, and whether the tab is still there.
+  // The address, and whether the tab is still there. (The shared stream says both by itself.)
   useEffect(() => {
+    if (!old) return
     let alive = true, timer
     const step = async () => {
       try {
@@ -60,7 +65,7 @@ export default function BrowserView({ runId, title = '', onClose }) {
     }
     step()
     return () => { alive = false; clearTimeout(timer) }
-  }, [runId])
+  }, [runId, old])
   useEffect(() => { if (!editing) setAddress(meta.url || '') }, [meta.url, editing])
 
   // Input: everything waiting goes in one request; moves and wheel turns merge.
@@ -88,7 +93,7 @@ export default function BrowserView({ runId, title = '', onClose }) {
   // Where on the page (0–1): the picture sits centred in the window, so its own edges count.
   const at = (e) => {
     const el = img.current; if (!el) return null
-    const r = el.getBoundingClientRect(), nw = el.naturalWidth || r.width, nh = el.naturalHeight || r.height
+    const r = el.getBoundingClientRect(), nw = el.naturalWidth || (el.tagName === 'CANVAS' && el.width) || r.width, nh = el.naturalHeight || (el.tagName === 'CANVAS' && el.height) || r.height
     const k = Math.min(r.width / nw, r.height / nh), w = nw * k, h = nh * k
     const x = (e.clientX - r.left - (r.width - w) / 2) / w, y = (e.clientY - r.top - (r.height - h) / 2) / h
     return { x: Math.max(0, Math.min(1, x)), y: Math.max(0, Math.min(1, y)), inside: x >= 0 && x <= 1 && y >= 0 && y <= 1 }
@@ -141,13 +146,18 @@ export default function BrowserView({ runId, title = '', onClose }) {
       </div>
       <div ref={box} tabIndex={0} onKeyDown={keyboard} onPaste={paste} onPointerDown={() => box.current?.focus()}
         className="relative min-h-0 flex-1 overflow-hidden bg-slate-100 outline-none dark:bg-slate-900" style={{ touchAction: 'none' }}>
-        {src && !gone && (
+        {!old && (
+          <LiveCanvas runId={runId} canvasRef={img} onMeta={setMeta} onState={(st, t) => setGone(g => (st === 'gone' ? t || 'No robot browser is running for this now.' : null))} onUnsupported={() => setOld(true)}
+            onPointerDown={mouse('down')} onPointerMove={mouse('move')} onPointerUp={mouse('up')} onContextMenu={(e) => e.preventDefault()}
+            className="absolute inset-0 h-full w-full cursor-default select-none object-contain" />
+        )}
+        {old && src && !gone && (
           <img ref={img} src={src} alt="" draggable={false} onError={dropped} onLoad={() => { setSeen(true); setSlow(null) }}
             onPointerDown={mouse('down')} onPointerMove={mouse('move')} onPointerUp={mouse('up')} onContextMenu={(e) => e.preventDefault()}
             className="absolute inset-0 h-full w-full cursor-default select-none object-contain" />
         )}
-        {gone && <p data-testid="browser-gone" className="absolute inset-0 grid place-items-center p-6 text-center text-sm text-slate-500">{gone}</p>}
-        {!gone && !seen && (
+        {old && gone && <p data-testid="browser-gone" className="absolute inset-0 grid place-items-center p-6 text-center text-sm text-slate-500">{gone}</p>}
+        {old && !gone && !seen && (
           <div data-testid="browser-waiting" className="pointer-events-none absolute inset-0 grid place-items-center p-6 text-center text-sm text-slate-500">
             {slow ? (
               <div className="pointer-events-auto space-y-3">

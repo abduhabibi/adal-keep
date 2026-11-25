@@ -8,6 +8,7 @@ import assert from 'node:assert/strict'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { rmTmp } from './helpers/chrome.js'
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'adal-onetry-'))
 process.env.ACCOUNT_VAULT_KEY = path.join(tmp, 'vault.key')
@@ -23,7 +24,7 @@ fs.writeFileSync(process.env.ACCOUNT_VAULT_KEY, (await import('crypto')).randomB
 const knex = (await import('knex')).default
 const db = knex({ client: 'sqlite3', connection: { filename: path.join(tmp, 'x.sqlite') }, useNullAsDefault: true })
 await db.migrate.latest({ directory: path.resolve(import.meta.dirname, '..', 'src', 'migrations') })
-test.after(async () => { await db.destroy(); fs.rmSync(tmp, { recursive: true, force: true }); setTimeout(() => process.exit(), 200).unref() })
+test.after(async () => { await db.destroy(); rmTmp(tmp); setTimeout(() => process.exit(), 200).unref() })
 
 const { wantsMusaned } = await import('../src/services/firstStage.js')
 const { scanOnce } = await import('../src/services/autoScanner.js')

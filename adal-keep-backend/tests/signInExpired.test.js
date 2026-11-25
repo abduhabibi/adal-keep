@@ -11,10 +11,11 @@ import assert from 'node:assert/strict'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { findChrome, rmTmp } from './helpers/chrome.js'
 import net from 'net'
 import { spawn } from 'child_process'
 
-const CHROME = ['/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find(f => fs.existsSync(f))
+const CHROME = findChrome()
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'adal-expired-'))
 process.env.SECRETS_PATH = path.join(tmp, 'secrets.enc')
 process.env.ACCOUNT_VAULT_KEY = path.join(tmp, 'vault.key')
@@ -36,7 +37,7 @@ test('an expired Musaned sign-in starts again; a stale form is fresh for the tic
   const puppeteer = (await import('puppeteer-core')).default
   let browser
   for (let i = 0; i < 40 && !browser; i++) { await sleep(250); browser = await puppeteer.connect({ browserURL: `http://127.0.0.1:${cdp}`, defaultViewport: null }).catch(() => null) }
-  t.after(async () => { try { browser?.disconnect() } catch {}; chrome.kill('SIGKILL'); await mock.close(); fs.rmSync(tmp, { recursive: true, force: true }) })
+  t.after(async () => { try { browser?.disconnect() } catch {}; chrome.kill('SIGKILL'); await mock.close(); rmTmp(tmp) })
   await (await import('../src/services/musanedTotp.js')).saveAuthenticator(1, { text: ACCOUNTS[0].secret })
   const w = await import('../src/services/musanedWorkflow.js')
   const anchor = (p) => p.frames().find(f => /recaptcha\/api2\/anchor/.test(f.url()))

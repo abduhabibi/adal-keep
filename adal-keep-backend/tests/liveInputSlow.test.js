@@ -12,13 +12,15 @@ import assert from 'node:assert/strict'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { findChrome, rmTmp } from './helpers/chrome.js'
 import net from 'net'
 import http from 'http'
 import { spawn } from 'child_process'
 
-const EXE = process.env.TEST_BROWSER || ['/usr/bin/google-chrome', '/usr/bin/chromium', '/opt/brave.com/brave/brave'].find(f => fs.existsSync(f))
+const EXE = findChrome()
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'adal-liveinput-'))
 process.env.ADAL_NO_BROWSER_START = '1'
+process.env.ADAL_ROBOTS_IN_APP = '1'   // (the live view's routes here, not passed on to Adal Robots)
 process.env.ADAL_SPACES_FILE = path.join(tmp, 'spaces.json')
 process.env.JEV_ENABLED = 'false'
 process.env.HOME = tmp
@@ -100,6 +102,6 @@ test('clicks reach the run tab and a box in another site\'s frame, on a slow PC 
     app?.close(); site.close()
     try { process.kill(-child.pid) } catch { child.kill() }
     await sleep(500)
-    fs.rmSync(tmp, { recursive: true, force: true })
+    rmTmp(tmp)
   }
 })

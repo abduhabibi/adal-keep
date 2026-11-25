@@ -2,7 +2,7 @@ import express from 'express'
 import { listWorkflows } from '../services/workflows.js'
 import { dispatchRun, runStatus, queueSnapshot } from '../services/worker.js'
 import { markCancelled, isCancelled } from '../services/cancellation.js'
-import { forgetRunTab, dropTab, tabAnswers, findRunTab, hostOf, codeBoxUp, typeCodeInto, pressCodeButton } from '../services/tabManager.js'
+import { forgetRunTab, dropTab, tabOfRun, tabAnswers, findRunTab, hostOf, codeBoxUp, typeCodeInto, pressCodeButton } from '../services/tabManager.js'
 import { openBrowserIfAny, openForPerson } from '../services/browser.js'
 import { waiting, answerCaptcha, doneWith, TASK_MS } from '../services/attention.js'
 import { seal } from '../services/accountVault.js'
@@ -1061,12 +1061,38 @@ const noTab = (res, page) => page === SLOW
   ? res.status(504).json({ error: 'The robot browser does not answer just now.', slow: true })
   : res.status(404).json({ error: 'No robot browser is open for this.' })
 
+// One answer that never ends: the tab's pictures and its address, each only when it changed (services/liveStream.js).
+router.get('/automations/:id/live', async (req, res) => {
+  const L = await import('../services/liveStream.js')
+  if (!L.liveOn()) return res.status(404).json({ error: 'off', live2: false })
+  const id = req.params.id, db = req.app.locals.db
+  let found = 0
+  await L.serveLive(req, res, {
+    codeBox: codeBoxUp,
+    // The tab the run works in, known here: never asked anything first (a busy page answers in seconds).
+    tabOf: async () => {
+      const known = /^\d+$/.test(id) ? tabOfRun(Number(id)) : null
+      if (known) return known
+      if (Date.now() - found < 1500) return null      // looked for in the browser at most every 1.5 s
+      found = Date.now()
+      return Promise.race([runTab(db, id).catch(() => null), new Promise(ok => setTimeout(() => ok(null), 6000))])
+    },
+    ended: async () => /^\d+$/.test(id) && !['pending', 'running', 'paused'].includes((await db('automation_queue').where('id', id).first('status'))?.status),
+    onOpen: async (page) => {
+      page.__adalLookedAt = Date.now()
+      const { freshForm } = await import('../services/freshForm.js')
+      await freshForm(db, id, page)
+    },
+  }).catch(() => { try { res.end() } catch {} })
+})
+
 router.get('/automations/:id/screen', async (req, res) => {
   const page = await liveTab(req)
   if (!page || page === SLOW) return noTab(res, page)
   try {
+    const { latestFrame } = await import('../services/liveFrames.js')   // the stream's last picture (a screenshot of its own took 2.4 s on a 2-core PC)
     const shot = await Promise.race([
-      page.screenshot({ type: 'jpeg', quality: 60, captureBeyondViewport: false }),
+      latestFrame(page),
       new Promise((_, no) => setTimeout(() => no(new Error('The tab did not answer.')), 8000)),
     ])
     const size = await page.evaluate(() => [window.innerWidth, window.innerHeight]).catch(() => [0, 0])
@@ -1081,17 +1107,29 @@ router.get('/automations/:id/stream', async (req, res) => {
   const page = await liveTab(req)
   if (!page || page === SLOW) return noTab(res, page)
   const { watchFrames } = await import('../services/liveFrames.js')
-  let stop = () => {}
+  let stop = () => {}, stopAgain = () => {}
   let closed = false
-  req.on('close', () => { closed = true; stop() })
+  req.on('close', () => { closed = true; stopAgain(); stop() })
   try {
     res.socket?.setNoDelay(true)
     res.writeHead(200, { 'Content-Type': 'multipart/x-mixed-replace; boundary=adalframe', 'Cache-Control': 'no-store', Connection: 'close', 'X-Accel-Buffering': 'no' })
+    // A browser draws a picture of such a stream only when the next one comes: on a still page it stayed on
+    // "Opening the robot's browser…" (2026-11-25). The last one is sent once more when nothing follows it.
+    let newest = null, again = null
+    stopAgain = () => clearTimeout(again)
+    const part = (img) => res.write(Buffer.concat([Buffer.from(`--adalframe\r\nContent-Type: image/jpeg\r\nContent-Length: ${img.length}\r\n\r\n`), img, Buffer.from('\r\n')]))
+    const give = () => {
+      if (!newest || res.writableNeedDrain || closed) return
+      const img = newest
+      newest = null
+      part(img)
+      clearTimeout(again)
+      again = setTimeout(() => { if (!newest && !closed && !res.writableNeedDrain) part(img) }, 200)
+    }
+    res.on('drain', give)
     stop = await watchFrames(page, (img) => {
-      if (res.writableNeedDrain || closed) return
-      res.write(`--adalframe\r\nContent-Type: image/jpeg\r\nContent-Length: ${img.length}\r\n\r\n`)
-      res.write(img)
-      res.write('\r\n')
+      newest = img
+      give()
     }, () => res.end())
     if (closed) stop()
   } catch { res.end() }

@@ -17,7 +17,7 @@ export const PASSED = [
   ['GET', /^\/automations\/attention$/, false],
   ['POST', /^\/automations\/\d+\/captcha$/, false],
   ['POST', /^\/automations\/\d+\/attention\/done$/, false],
-  ['GET', /^\/automations\/[\w-]+\/(screen|stream|tab|mirror)$/, false],
+  ['GET', /^\/automations\/[\w-]+\/(screen|stream|live|tab|mirror)$/, false],
   ['POST', /^\/automations\/[\w-]+\/input$/, false],
   ['POST', /^\/automations\/\d+\/(cancel|resume)$/, true],
 ]
@@ -49,10 +49,10 @@ export async function robotsLink(req, res, next) {
   const body = req.method === 'GET' ? null : JSON.stringify(req.body || {})
   const u = new URL(ROBOTS_URL() + '/api' + req.url)
   const up = http.request({ host: u.hostname, port: u.port, path: u.pathname + u.search, method: req.method, agent: false,
-    headers: { 'x-adal-robots': t, ...(body ? { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) } : {}) } }, (r) => {
+    headers: { 'x-adal-robots': t, ...(req.headers['x-adal-pc'] ? { 'x-adal-pc': '1', ...(req.headers['x-adal-flush'] ? { 'x-adal-flush': '1' } : {}) } : {}), ...(body ? { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) } : {}) } }, (r) => {
     up.setTimeout(0)
     res.status(r.statusCode)
-    for (const h of ['content-type', 'cache-control', 'x-frame-at', 'x-accel-buffering']) if (r.headers[h]) res.set(h, r.headers[h])
+    for (const h of ['content-type', 'cache-control', 'x-frame-at', 'x-accel-buffering', 'x-adal-live']) if (r.headers[h]) res.set(h, r.headers[h])
     res.flushHeaders?.()
     res.socket?.setNoDelay?.(true)
     r.on('error', () => res.end())

@@ -16,8 +16,9 @@ import assert from 'node:assert/strict'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { findChrome, rmTmp } from './helpers/chrome.js'
 
-const CHROME = ['/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find(f => fs.existsSync(f))
+const CHROME = findChrome()
 const { herMusanedPage, idOfPassport } = await import('../src/services/musanedImport.js')
 const { lookup, remember, forget } = await import('../src/services/robotCache.js')
 const { shapeOf } = await import('../src/services/siteApi.js')
@@ -144,7 +145,7 @@ test('her Musaned record: pages first time, then Musaned\'s own data calls; the 
     delete process.env.ADAL_API_FIRST
     await browser.close().catch(() => {})
     for (const d of dbs) await d.destroy()
-    fs.rmSync(tmp, { recursive: true, force: true })
+    rmTmp(tmp)
   }
 })
 

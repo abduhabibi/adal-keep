@@ -16,7 +16,9 @@ const router = express.Router()
 const MAIN_ONLY = [
   /^\/automations\/attention$/,
   /^\/automations\/active$/,
-  /^\/automations\/\d+\/(captcha|attention\/done|login|screen|stream|tab|mirror|input|resume|pause|cancel|complete)$/,
+  /^\/browsers$/,                                             // the robots' browsers are the main PC's
+  /^\/automations\/(site|tr)-[\w-]+\/(screen|stream|live|tab|mirror|input)$/,
+  /^\/automations\/\d+\/(captcha|attention\/done|login|screen|stream|live|tab|mirror|input|resume|pause|cancel|complete)$/,
   /^\/sessions(\/|$)/,
   /^\/tasheer\/session$/,
   /^\/browser\/open$/,
@@ -41,21 +43,21 @@ router.use(async (req, res, next) => {
   const main = mainURL()
   if (!(await mainAnswers(main))) return next()
   try {
-    const headers = { 'x-adal-pc': await mainKey() }
+    const headers = { 'x-adal-pc': await mainKey(), 'x-adal-flush': '1' }   // (passed on piece by piece)
     for (const h of ['content-type', 'x-adal-who', 'accept']) if (req.headers[h]) headers[h] = req.headers[h]
     const body = ['GET', 'HEAD'].includes(req.method) ? undefined
       : /json/i.test(req.headers['content-type'] || '') ? JSON.stringify(req.body ?? {}) : undefined
-    const live = /\/stream$/.test(req.path)
+    const live = /\/(stream|live)$/.test(req.path)
     const ac = new AbortController()
     if (live) req.on('close', () => ac.abort())
     const r = await fetch(`${main}/api${req.originalUrl.replace(/^\/api/, '')}`, { method: req.method, headers, body, signal: live ? ac.signal : AbortSignal.timeout(60000) })
     res.status(r.status)
-    for (const h of ['content-type', 'cache-control', 'content-disposition']) { const v = r.headers.get(h); if (v) res.setHeader(h, v) }
+    for (const h of ['content-type', 'cache-control', 'content-disposition', 'x-adal-live']) { const v = r.headers.get(h); if (v) res.setHeader(h, v) }
     if (!r.body) return res.end()
     Readable.fromWeb(r.body).on('error', () => res.end()).pipe(res)
   } catch (e) {
     up = { url: main, ok: false, at: Date.now() }
-    if (!res.headersSent && !/\/stream$/.test(req.path)) return next()   // (gone meanwhile: answered here)
+    if (!res.headersSent && !/\/(stream|live)$/.test(req.path)) return next()   // (gone meanwhile: answered here)
     if (!res.headersSent) res.status(503).json({ error: `The robots run on the main PC (${main}), which did not answer: ${e.message}`, on_main: true })
   }
 })

@@ -2,6 +2,7 @@ import GlassSelect from './shared/GlassSelect'
 import { useEffect, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 import api from '../services/api'
+import LiveCanvas from './LiveCanvas'
 import { onBack, IN_PHONE_APP } from '../lib/phoneApp'
 
 /**
@@ -39,6 +40,8 @@ export default function LiveTab({ runId, fill = false, startFull = false, onClos
   // cannot show another site's frame — Google's "I'm not a robot" stayed an empty space there and could not
   // be clicked (2026-11-24). "Page" stays one click away; the phone keeps its choice.
   const [view, setView] = useState(() => { if (!PHONE) return 'picture'; try { return localStorage.getItem(VIEW_KEY) || 'mirror' } catch { return 'mirror' } })
+  // On a PC: the one stream every view of this run shares (lib/liveView.js). Not there (an older main PC): as before.
+  const [shared, setShared] = useState(!PHONE)
   const [src, setSrc] = useState(null)
   const [page, setPage] = useState(null)        // the light page
   const [meta, setMeta] = useState({ url: '', title: '' })
@@ -80,6 +83,8 @@ export default function LiveTab({ runId, fill = false, startFull = false, onClos
 
   useEffect(() => {
     let alive = true, timer = null, off = null, renew = null
+    live.current = null
+    if (shared && view === 'picture') { setMode('live'); setErr(null); return }
     const start = async () => {
       if (window.__ADAL_CLOUD) {
         const L = await import('../cloud/live.js')
@@ -148,7 +153,7 @@ export default function LiveTab({ runId, fill = false, startFull = false, onClos
     }
     start()
     return () => { alive = false; clearTimeout(timer); clearInterval(renew); off?.(); poke.current = null }
-  }, [runId, view])
+  }, [runId, view, shared])
 
   useEffect(() => () => { if (last.current) URL.revokeObjectURL(last.current) }, [])
   useEffect(() => { if (!editing) setAddress(meta.url) }, [meta.url, editing])
@@ -291,7 +296,7 @@ export default function LiveTab({ runId, fill = false, startFull = false, onClos
           {tabBtn('mirror', 'Page')}
           {tabBtn('picture', 'Picture')}
         </div>
-        <span className="shrink-0 text-[10px] text-slate-500">{busy ? '⏳' : mode === 'live' ? `⚡ ${fps}/s` : mode === 'pictures' ? '🔄' : '…'}</span>
+        <span className="shrink-0 text-[10px] text-slate-500">{busy ? '⏳' : mode === 'live' ? (fps ? `⚡ ${fps}/s` : '⚡ live') : mode === 'pictures' ? '🔄' : '…'}</span>
       </div>
       {meta.title && !fill && <p className="text-[10px] text-slate-500 truncate">{meta.title}</p>}
       {err && <p className="text-xs rounded-lg bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-300 px-2 py-1.5">{err}</p>}
@@ -314,7 +319,16 @@ export default function LiveTab({ runId, fill = false, startFull = false, onClos
       )}
 
       {view === 'picture' && <>
-        {src && (
+        {shared && (
+          <div className={`relative ${full || fill ? 'flex-1 min-h-0' : 'max-h-[50vh] min-h-[10rem]'} overflow-auto rounded-lg border border-slate-200 outline-none focus:border-indigo-400 dark:border-slate-800`}
+            tabIndex={0} onKeyDown={keyboard} onPaste={paste} style={{ touchAction: zoom > 1 ? 'pan-x pan-y' : 'none' }}>
+            <LiveCanvas runId={runId} onPicture={tick} onMeta={(m) => { setCodeBox(!!m.codeBox); setMeta({ url: m.url || '', title: m.title || '' }) }}
+              onState={(st) => setErr(st === 'gone' ? GONE : null)} onUnsupported={() => setShared(false)}
+              onMouseDown={mouse('down')} onMouseMove={mouse('move')} onMouseUp={mouse('up')} onWheel={wheelAt} onContextMenu={(e) => e.preventDefault()}
+              style={{ width: `${zoom * 100}%`, maxWidth: 'none' }} className="block select-none cursor-default" />
+          </div>
+        )}
+        {!shared && src && (
           <div className={`${full || fill ? 'flex-1 min-h-0' : 'max-h-[50vh]'} overflow-auto rounded-lg border border-slate-200 outline-none focus:border-indigo-400 dark:border-slate-800`}
             tabIndex={PHONE ? undefined : 0} onKeyDown={PHONE ? undefined : keyboard} onPaste={PHONE ? undefined : paste}
             style={{ touchAction: zoom > 1 ? 'pan-x pan-y' : 'none' }}>
@@ -328,7 +342,7 @@ export default function LiveTab({ runId, fill = false, startFull = false, onClos
               className={`block select-none ${PHONE ? 'cursor-crosshair' : 'cursor-default'}`} />
           </div>
         )}
-        {!src && !err && <div className="h-40 rounded-lg bg-slate-100 dark:bg-slate-900 animate-pulse" />}
+        {!shared && !src && !err && <div className="h-40 rounded-lg bg-slate-100 dark:bg-slate-900 animate-pulse" />}
         {!PHONE && (
           <div className="flex flex-wrap gap-1.5">
             {[['▲ Up', { kind: 'scroll', dy: -600 }], ['▼ Down', { kind: 'scroll', dy: 600 }], ['⇟ To the bottom', { kind: 'bottom' }]].map(([l, b]) => (

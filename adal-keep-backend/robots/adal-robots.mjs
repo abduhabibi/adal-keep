@@ -9,7 +9,7 @@
  *    (2026-11-24: Adal Keep stopped answering with its connection pool full).
  *  - Its own browser (the PC's Brave / Chrome / Edge, its own profile): headless on Linux, out of sight on Windows.
  *    No window, unless switched on for this PC (ADAL_ROBOTS_WINDOW=1).
- *  - A weak PC: while the processor is over 80 % busy no new run starts (it waits in line).
+ *  - A weak PC: while a run works and the processor is over 80 % busy no other starts (robots/gate.mjs).
  *  - 127.0.0.1:4010 (this PC only, a token): the live view of a run's tab and the person's clicks (the "I'm not a
  *    robot" tick), the "needs you" list, Stop and Continue — Adal Keep passes those on (src/services/robotsLink.js).
  *
@@ -88,14 +88,9 @@ async function main() {
   say(`working (pid ${process.pid}), this PC only on 127.0.0.1:${PORT}`)
 
   const worker = await import('../src/services/worker.js')
-  // A weak PC: no new run while the processor is over 80 % busy.
-  let waitedSince = 0
-  worker.setClaimGate(async () => {
-    const busy = await cpuOver(CPU_LIMIT)
-    if (busy && !waitedSince) { waitedSince = Date.now(); say(`the processor is over ${Math.round(CPU_LIMIT * 100)} % busy — the next run waits`) }
-    if (!busy && waitedSince) { say(`the processor is free again after ${Math.round((Date.now() - waitedSince) / 1000)} s — runs go on`); waitedSince = 0 }
-    return !busy
-  })
+  // A weak PC: no new run while one of ours works and the processor is over 80 % busy (robots/gate.mjs).
+  const [{ makeGate }, { isWaiting }] = await Promise.all([import('./gate.mjs'), import('../src/services/attention.js')])
+  worker.setClaimGate(makeGate({ busy: () => cpuOver(CPU_LIMIT), working: () => worker.queueSnapshot().running.filter(r => !isWaiting(r.runId)).length, say, limit: CPU_LIMIT }))
   worker.startWorker(db)
   // What Adal Keep no longer runs itself (main.js, ROBOTS_HERE): it runs here.
   // (ADAL_ROBOTS_EXTRAS=0: the queue only — a scratch copy's test.)

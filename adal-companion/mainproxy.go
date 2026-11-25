@@ -116,6 +116,7 @@ func addMainProxy(mux *http.ServeMux) {
 			}
 		}
 		req.Header.Set("x-adal-pc", key)
+		req.Header.Set("x-adal-flush", "1") // what comes is handed on at once (below)
 		resp, err := mainProxyClient.Do(req)
 		if err != nil {
 			http.Error(w, `{"error":"the main PC does not answer on the network"}`, http.StatusBadGateway)
@@ -129,6 +130,28 @@ func addMainProxy(mux *http.ServeMux) {
 		}
 		w.Header().Set("X-Adal-Via", "lan")
 		w.WriteHeader(resp.StatusCode)
-		io.Copy(w, resp.Body)
+		copyAtOnce(w, resp.Body)
 	})
+}
+
+// copyAtOnce hands on each piece as it comes: a robot's live view is an answer that never
+// ends, and its last few KB stayed in the buffer until the page changed again (2026-11-25:
+// "Opening the robot's browser…" on a Companion while the main PC had sent the picture).
+func copyAtOnce(w http.ResponseWriter, r io.Reader) {
+	f, _ := w.(http.Flusher)
+	buf := make([]byte, 32*1024)
+	for {
+		n, err := r.Read(buf)
+		if n > 0 {
+			if _, werr := w.Write(buf[:n]); werr != nil {
+				return
+			}
+			if f != nil {
+				f.Flush()
+			}
+		}
+		if err != nil {
+			return
+		}
+	}
 }

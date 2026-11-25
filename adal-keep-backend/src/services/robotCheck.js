@@ -104,6 +104,8 @@ export async function waitForTick(page, { onForm, submit, refill = null, restart
       errAt = Date.now()
       const err = await readError()
       if (signInErrorKind(err) === 'expired' && await startAgain(`Musaned's sign-in timed out ("${err}") — started again: name and password filled, tick once more`, true)) continue
+      // The page emptied its own boxes: filled again (never while the person is at it).
+      if (refill && Date.now() - (page.__adalInputAt || 0) > 30000) await refill().catch(() => {})
     }
     const rc = await robotCheck(page)
     if (rc.ticked) {

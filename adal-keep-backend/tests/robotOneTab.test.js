@@ -10,9 +10,10 @@ import assert from 'node:assert/strict'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { findChrome, rmTmp } from './helpers/chrome.js'
 import http from 'http'
 
-const CHROME = ['/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find(f => fs.existsSync(f))
+const CHROME = findChrome()
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'adal-onetab-'))
 process.env.ADAL_NO_BROWSER_START = '1'
 process.env.ADAL_BROWSER_PROFILE = path.join(tmp, 'never')
@@ -49,6 +50,6 @@ test('a run takes the site tab a waiting run holds: one Musaned tab, not two', {
   } finally {
     await browser.close().catch(() => {})
     server.close()
-    fs.rmSync(tmp, { recursive: true, force: true })
+    rmTmp(tmp)
   }
 })

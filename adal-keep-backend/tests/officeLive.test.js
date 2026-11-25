@@ -11,13 +11,14 @@ import assert from 'node:assert/strict'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { findChrome, rmTmp } from './helpers/chrome.js'
 import http from 'http'
 import net from 'net'
 import { spawn } from 'child_process'
 import { fileURLToPath } from 'url'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
-const CHROME = [process.env.ADAL_TEST_CHROME, '/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser', '/usr/bin/brave-browser'].find(p => p && fs.existsSync(p))
+const CHROME = findChrome()
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'adal-office-live-'))
 Object.assign(process.env, {
   ACCOUNT_VAULT_KEY: path.join(tmp, 'vault.key'), ADAL_KEYS_OUTSIDE: path.join(tmp, 'keys'), ADAL_SPACES_FILE: path.join(tmp, 'spaces.json'),
@@ -76,7 +77,7 @@ test('office: placement, Browsers and the live view across scratch PCs', { skip:
     await mainChrome.close().catch(() => {})
     await db.destroy()
     await new Promise(r => setTimeout(r, 500))
-    fs.rmSync(tmp, { recursive: true, force: true })
+    rmTmp(tmp)
   })
   await Promise.all([
     companion('OLD', 'Old PC', { cores: 2, mem_gb: 4, free_gb: 0.8, load: 85, net_rtt_ms: 700, net_mbps: 2, net_ok: 0.8 }),

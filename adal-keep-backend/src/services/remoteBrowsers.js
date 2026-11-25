@@ -22,12 +22,34 @@
  */
 import fs from 'fs'
 import path from 'path'
+import { keepAnnounced, announced, askAll } from './robotPCs.js'
 
 const SEEN_MS = 3 * 60e3                 // a Companion not heard from for 3 minutes is gone
 const devices = new Map()                // pc id → { id, name, ip, port, token, at }
 const conns = new Map()                  // pc id → Promise<Browser>
 const remote = new WeakMap()             // Browser → device
 let patched = false
+const lost = new Map()                   // pc id → when its browser went away while a run worked in it
+
+/** Adal Robots (its own program): what Adal Keep heard from the Companions. */
+function hear() {
+  if (process.env.ADAL_ROBOT_PROCESS !== '1') return
+  for (const d of announced()) {
+    const have = devices.get(d.id)
+    if (have && Number(have.at) >= Number(d.at)) continue
+    if (have && (have.token !== d.token || have.ip !== d.ip || have.port !== d.port)) dropConnection(d.id)
+    devices.set(d.id, { ...d })
+  }
+}
+/** Every PC known that answers now, with how it is (robotPCs.askAll). */
+export async function askDevices(ms = 600, opts = {}) {
+  hear()
+  const up = await askAll([...devices.values()].filter(d => d.lan !== false), { ms, ...opts })
+  for (const d of up) if (d.answers && devices.has(d.id)) Object.assign(devices.get(d.id), { at: d.at, answers: true, cores: d.cores, mem_gb: d.mem_gb, free_gb: d.free_gb, load: d.load, battery: d.battery, updating: d.updating, version: d.version })
+  return up.map(({ token, ...d }) => d)
+}
+/** Its PC went away (switched off, off the network) in the last `ms`? */
+export const lostLately = (id, ms = 5 * 60e3, now = Date.now()) => now - (lost.get(String(id)) || 0) < ms
 
 /** A Companion says where its robot browser is (called with its approved key). */
 export function registerDevice(pc, ip, body = {}) {
@@ -59,11 +81,13 @@ export function registerDevice(pc, ip, body = {}) {
     peers_down: Array.isArray(body.peers_down) ? body.peers_down.slice(0, 20).map(x => String(x).slice(0, 60)) : [],
   }
   devices.set(pc.id, { id: pc.id, name: String(body.name || pc.name || 'Companion').slice(0, 60), ip: at, port, token, cores, ...power, net, ...health, lan, at: Date.now() })
+  keepAnnounced(() => [...devices.values()])
   return { ok: true }
 }
 
 /** That Companion's robot browser is there (heard from in the last 3 minutes). */
 export function deviceLive(id, now = Date.now()) {
+  hear()
   const d = devices.get(id)
   return !!d && now - d.at < SEEN_MS
 }
@@ -95,7 +119,8 @@ export async function tabForPerson(id) {
  * own already, does it ("the fast PCs do the most work"). '' when none.
  */
 export function freeStrongDevice(busyIds = new Set(), now = Date.now(), version = null) {
-  if (process.env.ADAL_LAN_ROBOTS !== '1') return ''   // runs stay on this PC (sharePower.lanRobots)
+  if (process.env.ADAL_LAN_ROBOTS === '0') return ''   // the emergency off switch (sharePower.lanRobots)
+  hear()
   // Never one installing an update, silent for 45 s, or on another release than this PC (sharePower.ready).
   const list = [...devices.values()].filter(d => now - d.at < 45e3 && !d.updating && (!version || d.version === version) && !busyIds.has(d.id))
   list.sort((a, b) => (b.cores || 1) - (a.cores || 1) || String(a.id).localeCompare(String(b.id)))
@@ -115,9 +140,11 @@ export async function connectedBrowsers(now = Date.now()) {
 }
 
 export function liveDevices(now = Date.now()) {
+  hear()
   return [...devices.values()].filter(d => now - d.at < SEEN_MS).map(({ token, ...d }) => d)
 }
 
+export const nameOf = (id) => devices.get(String(id))?.name || ''
 export function deviceOf(browser) { return browser ? remote.get(browser) || null : null }
 export const isRemote = (browser) => !!deviceOf(browser)
 
@@ -151,13 +178,37 @@ export async function browserForDevice(id, { quiet = false } = {}) {
     const answers = await Promise.race([b.version().then(() => true, () => false), new Promise(r => setTimeout(() => r(false), 5000))])
     if (!answers) { b.disconnect().catch(() => {}); throw new Error('its Adal Browser does not answer') }
     remote.set(b, d)
-    b.on('disconnected', () => { if (conns.get(id) === p) conns.delete(id) })
+    const beat = watchOver(b, d)
+    b.on('disconnected', () => { clearInterval(beat); lost.set(id, Date.now()); if (conns.get(id) === p) conns.delete(id) })
     await patchUploads(b)
     console.log(`[remote-browser] connected to ${d.name}'s Adal Browser (${d.ip})`)
     return b
   })()
   conns.set(id, p)
   try { return await p } catch (e) { conns.delete(id); throw e }
+}
+
+/**
+ * A PC switched off or off the network closes nothing: its browser is asked every 5 s, and after 15 s without an answer
+ * it is let go — everything waiting on it ends at once, so the run ends (one try) instead of hanging for minutes.
+ */
+export function watchOver(b, d, { everyMs = 5000, misses = 3, ask = null } = {}) {
+  let n = 0, asking = false, own = null
+  // (Asked over a session: puppeteer answers browser.version() from its own memory.)
+  ask = ask || (async () => { own = own || await b.target().createCDPSession(); await own.send('Browser.getVersion') })
+  const t = setInterval(async () => {
+    if (asking || !b.connected) return
+    asking = true
+    const ok = await Promise.race([ask().then(() => true, (e) => { own = null; return !/closed|detached|disconnected/i.test(String(e?.message)) && b.connected }), new Promise(r => setTimeout(() => r(false), everyMs - 200))])
+    asking = false
+    n = ok ? 0 : n + 1
+    if (n < misses) return
+    clearInterval(t)
+    console.warn(`[remote-browser] ${d.name} does not answer any more — let go`)
+    try { await b.disconnect() } catch {}
+  }, everyMs)
+  t.unref?.()
+  return t
 }
 
 /** Send one file to the Companion; its path there. */
@@ -209,5 +260,5 @@ export function patchProto(proto) {
   patched = true
 }
 
-export function _resetForTest() { devices.clear(); conns.clear(); patched = false }
+export function _resetForTest() { devices.clear(); conns.clear(); lost.clear(); patched = false }
 export const _rememberForTest = (browser, d) => remote.set(browser, d)

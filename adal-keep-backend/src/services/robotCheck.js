@@ -136,45 +136,6 @@ export async function waitForTick(page, { onForm, submit, refill = null, restart
 }
 
 /**
- * Runs in the page: "[label] " in front of its title, kept there. Title marks may never loop (2026-11-23/25: on a
- * page with no title "[nuzla] " came back as "[nuzla]", was set again, woke its own observer … 98 % of a core for
- * hours, and the tab answered nothing). Three locks: compared as the browser gives the title back (spaces
- * collapsed); the observer is off while the title is set and never sets it twice in a second; a site that puts its
- * own title back 5 times keeps it. A blank page gets its label once and no observer. An observer an older Adal
- * Keep left in the page is taken away.
- */
-export const LABEL_IN_PAGE = (l) => {
-  if (window !== window.top) return
-  window.__adalLabel = l
-  const norm = (x) => String(x || '').replace(/\s+/g, ' ').trim()
-  const wanted = () => norm(`[${window.__adalLabel}] ` + (document.title || '').replace(/^\[[^\]]*\]\s*/, ''))
-  try { window.__adalLabelObs?.disconnect() } catch {}
-  window.__adalLabelObs = null
-  let last = 0, fights = 0, timer = null
-  const watch = () => {
-    const head = document.head
-    if (!head || location.href === 'about:blank' || fights > 5) return
-    const obs = window.__adalLabelObs = new MutationObserver(() => {
-      if (timer || norm(document.title) === wanted()) return
-      timer = setTimeout(mark, Math.max(0, 1000 - (Date.now() - last)))
-    })
-    obs.observe(head, { subtree: true, childList: true, characterData: true })
-  }
-  const mark = () => {
-    timer = null
-    const want = wanted()
-    if (norm(document.title) === want) return
-    try { window.__adalLabelObs?.disconnect() } catch {}
-    fights = Date.now() - last < 3000 ? fights + 1 : 0
-    last = Date.now()
-    document.title = want
-    watch()
-  }
-  const go = () => { if (norm(document.title) !== wanted()) mark(); else watch() }
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', go); else go()
-}
-
-/**
  * Which account a tab is: its title starts with "[name] " (also after its
  * pages change), so two accounts' tabs on one site are told apart.
  */
@@ -182,12 +143,30 @@ export async function labelTab(page, label) {
   label = String(label || '').trim()
   if (!page || !label || page.__adalLabel === label) return
   page.__adalLabel = label
-  // LABEL_IN_PAGE (above): never an endless loop, whatever the site does with its title.
+  const put = (l) => {
+    window.__adalLabel = l
+    if (window !== window.top) return
+    // Compared as the browser gives the title back (spaces collapsed, trimmed): on a page with no title,
+    // "[nuzla] " came back as "[nuzla]", was set again, woke the observer, … for ever — the tab's page froze
+    // at 100 % of a core and every robot call to it timed out (2026-11-23, this PC).
+    const norm = (x) => String(x || '').replace(/\s+/g, ' ').trim()
+    const mark = () => {
+      const t = document.title || ''
+      const want = norm(`[${window.__adalLabel}] ` + t.replace(/^\[[^\]]*\]\s*/, ''))
+      if (norm(t) !== want) document.title = want
+    }
+    const go = () => {
+      mark()
+      const head = document.head || document.documentElement
+      if (head && !window.__adalLabelObs) { window.__adalLabelObs = new MutationObserver(mark); window.__adalLabelObs.observe(head, { subtree: true, childList: true, characterData: true }) }
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', go); else go()
+  }
   try {
     if (page.__adalLabelScript) await page.removeScriptToEvaluateOnNewDocument?.(page.__adalLabelScript).catch(() => {})
-    const s = await page.evaluateOnNewDocument?.(LABEL_IN_PAGE, label)
+    const s = await page.evaluateOnNewDocument?.(put, label)
     page.__adalLabelScript = s?.identifier
-    await page.evaluate(LABEL_IN_PAGE, label)
+    await page.evaluate(put, label)
   } catch {}
 }
 

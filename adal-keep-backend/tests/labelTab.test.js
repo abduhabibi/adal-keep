@@ -27,7 +27,7 @@ test('the account label on a page with no title: the tab keeps answering', { ski
     assert.equal(answer, '[nuzla]')
     await page.goto('data:text/html,<title>Musaned</title><body>x</body>')
     await page.evaluate(() => { document.title = 'Dashboard' })
-    await new Promise(r => setTimeout(r, 1300))   // (at most once a second)
+    await new Promise(r => setTimeout(r, 100))
     assert.equal(await page.evaluate(() => document.title), '[nuzla] Dashboard')
   } finally {
     await browser.close().catch(() => {})

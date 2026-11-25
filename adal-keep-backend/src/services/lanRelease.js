@@ -29,6 +29,7 @@ const FILES = path.join(DIR, 'files')
 const CURRENT = path.join(DIR, 'current.json')
 const HEX = /^[0-9a-f]{64}$/
 
+export const currentFile = () => CURRENT
 export function current() {
   try {
     const env = JSON.parse(fs.readFileSync(CURRENT, 'utf8'))
@@ -55,6 +56,8 @@ export function piecesOf(m, { all = false } = {}) {
 }
 /** Every SHA-256 a piece can be kept as: itself, its plain .tar, its patch. */
 export const formsOf = (p) => [p?.sha256, p?.raw?.sha256, p?.patch?.sha256].filter(s => HEX.test(s || ''))
+/** The small files a LAN release also names: the per-file patches and the list of the packages (scripts/build-lan-release.mjs). */
+export const extrasOf = (m) => [...Object.values(m?.file_patches || {}), m?.tree].filter(x => form(x))
 /** The kept form of a piece (the piece itself or its plain .tar), or null. */
 export const pieceHere = (p) => piecePath(p?.sha256) || piecePath(p?.raw?.sha256)
 
@@ -86,6 +89,7 @@ export async function recordInstalled(env, projectRoot = '') {
   // The pieces of the release before stay too: "Go back to previous version" then needs no internet (services/rollback.js).
   // (Every form: the next release's patches start from this one's plain .tar.)
   const wanted = new Set([...piecesOf(env.manifest, { all: true }), ...piecesOf(env.manifest.rollback?.manifest, { all: true })].flatMap(formsOf))
+  for (const x of extrasOf(env.manifest)) wanted.add(x.sha256)
   for (const f of fs.readdirSync(FILES)) {
     const base = f.replace(/\.part$/, '')
     // A half-download of a piece still wanted (or of a newer release, for a day) stays: the next try goes on from it.
@@ -280,6 +284,9 @@ export async function importRelease(src) {
         }
         if (done) break
       }
+    }
+    for (const x of extrasOf(env.manifest)) {
+      for (const f of all) if (path.basename(f) === x.sha256 && await keepPiece(x.sha256, f)) break
     }
     if (!kept.includes(env.manifest.sha256)) throw new Error(`the app itself (${path.basename(env.manifest.file || '')}, sha256 ${String(env.manifest.sha256).slice(0, 12)}…) is not in it, or does not match the signed release`)
     return { ...env, pieces: kept.length, of: piecesOf(env.manifest, { all: true }).length }

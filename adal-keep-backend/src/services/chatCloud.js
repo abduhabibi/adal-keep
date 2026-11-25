@@ -435,4 +435,6 @@ export const cloudCall = (db, method, pathAndQuery, body, opts) => call(db, meth
 export const cloudToken = (db) => token(db)
 export const cloudAuth = (pathAndQuery, body) => auth(pathAndQuery, body)
 export async function cloudAgencyId(db) { await token(db); return sess?.user_id || null }
+/** The account this PC signs in with (no internet asked), or null. */
+export const savedAccount = () => (sess ||= readSession())?.user_id || null
 export const cloudConfig = () => cfg()

@@ -17,7 +17,7 @@
 import crypto from 'crypto'
 import { plainReason } from './runOutcome.js'
 import { runsWorking } from './busy.js'
-import { me as joinAgency, chatConfigured, cloudCall, cloudAuth, cloudAgencyId, cloudConfig } from './chatCloud.js'
+import { me as joinAgency, chatConfigured, cloudCall, cloudAuth, cloudAgencyId, cloudConfig, savedAccount } from './chatCloud.js'
 // ("isFollower" here: not the PC holding the main PC's role. Only that PC keeps the online copy.)
 import { notMainPC as isFollower, pcNumber as myPcNumber } from './mainPC.js'
 import { getLanAddresses } from './discovery.js'
@@ -36,6 +36,7 @@ import('./plans.js').then(P => { licBeat = () => { const l = P.licenseNow(); ret
 let hwBeat = () => ({})
 import('./hardware.js').then(H => { hwBeat = () => ({ hw: H.hardwareBeat() }) }).catch(() => {})
 const beatData = () => ({ at: new Date().toISOString(), ...hwBeat(), ...(isFollower() ? {} : { pc: myPcNumber(), lan: lanNow(), port: Number(process.env.ADAL_ADVERTISE_PORT) || PORT(), ...(process.env.ADAL_ACTING_MAIN === '1' ? { acting: true } : {}), ...(licBeat?.() || {}) }) })
+import { accountIsAgencys } from './cloudGuard.js'
 import { waitForQuiet, afterClicks, breath } from './userUploads.js'
 import { tgReady, tgPut, tgDelete, TG_MAX_DOWNLOAD, findStorageChat } from './tgStore.js'
 import { viewCopy } from './viewCopy.js'
@@ -813,7 +814,8 @@ async function syncOnce(db, { light = false } = {}) {
 export async function cloudOn(db) {
   if (!chatConfigured() || isFollower()) return false
   const s = await db('settings').where({ key: 'cloud_sync' }).first().catch(() => null)
-  return String(s?.value || 'on').toLowerCase() !== 'off'
+  if (String(s?.value || 'on').toLowerCase() === 'off') return false
+  return accountIsAgencys(db, savedAccount())   // never into another agency's account (cloudGuard.js)
 }
 
 let timer = null

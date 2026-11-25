@@ -676,6 +676,23 @@ async function sweepFolder(watchDir, db, since) {
   return n
 }
 
+// Every 30 s every file of the folder was looked at (a Downloads folder: thousands). Now only when the
+// folder changed (a file came, went, was renamed: its own time), a file there is still new, or after
+// 10 minutes; Windows' own notices (fs.watch) come at once as before. (Off: ADAL_SWEEP_ALWAYS=1.)
+export function sweepNeeded(watchDir, now = Date.now) {
+  let dirAt = -1, full = 0
+  return async () => {
+    if (process.env.ADAL_SWEEP_ALWAYS === '1') return true
+    let m = 0
+    try { m = (await fs.promises.stat(watchDir)).mtimeMs } catch { return true }
+    const t = now()
+    // (Changed within the last minute: a file may still be being written; looked at once more after.)
+    if (m === dirAt && t - m > 60000 && t - full < 10 * 60000) return false
+    dirAt = m; full = t
+    return true
+  }
+}
+
 export function startWatcher(watchDir, db, processorFn, tag = '[pipeline]') {
   if (!fs.existsSync(watchDir)) {
     // e.g. Telegram's folder before its first download: look again later.
@@ -696,7 +713,8 @@ export function startWatcher(watchDir, db, processorFn, tag = '[pipeline]') {
     const bootSince = Math.max(LAST_ALIVE ? LAST_ALIVE - 60000 : BOOT_AT - 10 * 60000, Date.now() - 24 * 3600000)
     setTimeout(() => sweepFolder(watchDir, db, bootSince)
       .then(n => { if (n) console.log(`${tag} ${n} file(s) that came while Adal Keep was closed: reading them`) }).catch(() => {}), 5000).unref?.()
-    setInterval(() => sweepFolder(watchDir, db, Date.now() - 10 * 60000)
+    const need = sweepNeeded(watchDir)
+    setInterval(async () => (await need()) && sweepFolder(watchDir, db, Date.now() - 10 * 60000)
       .then(n => { if (n) console.log(`${tag} ${n} file(s) Windows did not report: reading them`) }).catch(() => {}), 30000).unref?.()
   }
   const timers = new Map()

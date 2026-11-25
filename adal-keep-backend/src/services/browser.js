@@ -224,6 +224,12 @@ const BROWSER_ARGS = [
  * when that has no newer sign-ins of its own; Adal Browser's own stays as it was (ADAL_ROBOT_BROWSER=adal
  * goes back to it). An older profile of the same name is kept beside it. Never while the browser runs.
  */
+function cacheSize(dir) {
+  let n = 0
+  const walk = (d) => { let l = []; try { l = fs.readdirSync(d, { withFileTypes: true }) } catch { return } ; for (const e of l) { if (n > 1e9) return; const f = path.join(d, e.name); if (e.isDirectory()) walk(f); else try { n += fs.statSync(f).size } catch {} } }
+  for (const c of ['Cache', 'Code Cache']) walk(path.join(dir, 'Default', c))
+  return n
+}
 export function carryOverSignIns({ from = path.join(path.dirname(PROFILE_DIR), 'adal-browser'), to = PROFILE_DIR, mode = robotBrowserMode(), now = Date.now() } = {}) {
   if (mode === 'adal' || path.resolve(from) === path.resolve(to) || process.env.ADAL_BROWSER_PROFILE) return false
   const cookies = (dir) => {
@@ -235,8 +241,10 @@ export function carryOverSignIns({ from = path.join(path.dirname(PROFILE_DIR), '
   if (!theirs || cookies(to) >= theirs) return false
   try {
     if (fs.existsSync(to)) fs.renameSync(to, `${to}.before-${new Date(now).toISOString().slice(0, 10)}-${now % 100000}`)
-    const SKIP = /^(Cache|Code Cache|GPUCache|GrShaderCache|ShaderCache|DawnCache|DawnGraphiteCache|DawnWebGPUCache|Service Worker|CacheStorage|Crashpad|Safe Browsing|component_crx_cache|optimization_guide_model_store|BrowserMetrics|Singleton.*|lockfile|LOCK)$/i
-    fs.cpSync(from, to, { recursive: true, filter: (src) => !SKIP.test(path.basename(src)) })
+    // Its page cache comes too (a first page from an empty one takes 2–3 times as long), unless it is very big.
+    const cacheToo = cacheSize(from) < 250e6
+    const SKIP = /^(GPUCache|GrShaderCache|ShaderCache|DawnCache|DawnGraphiteCache|DawnWebGPUCache|Service Worker|CacheStorage|Crashpad|Safe Browsing|component_crx_cache|optimization_guide_model_store|BrowserMetrics|Singleton.*|lockfile|LOCK)$/i
+    fs.cpSync(from, to, { recursive: true, filter: (src) => !SKIP.test(path.basename(src)) && (cacheToo || !/^(Cache|Code Cache)$/i.test(path.basename(src))) })
     console.log(`[browser] the sign-ins of Adal Browser carried over to ${path.basename(to)} (nobody signs in again)`)
     return true
   } catch (e) { console.warn('[browser] sign-ins not carried over:', e.message); return false }

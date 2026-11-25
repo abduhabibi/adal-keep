@@ -758,7 +758,7 @@ async function runJob(db, job) {
         forgetRunTab(job.id)
         // One tab for the site: the extra ones runs opened there close.
         const b = onDevice(job) ? await browserForJob(db, job, { quiet: true }).catch(() => null) : await openBrowserIfAny().catch(() => null)
-        if (b) await tidySiteTabs(b, job.workflow_id, await keepingRunIds(db)).catch(() => {})
+        if (b) await tidySiteTabs(b, job.workflow_id, await keepingRunIds(db), await activeRunIds(db)).catch(() => {})
       }
       // paused / pending (retry): the tab stays with the run; while a
       // person works in it, file dialogs open normally again.

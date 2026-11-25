@@ -29,6 +29,8 @@
  */
 import { notNeeded } from './pageDiet.js'
 import { noteSent } from './lostBrowser.js'
+import { stopRequest } from './emptyPicture.js'
+import { robotsOwnTab } from './robotsOwnTab.js'
 import { noteCall } from './siteApi.js'
 import { newRunTab, outOfSight, sendAway } from './browser.js'
 import { isRemote } from './remoteBrowsers.js'
@@ -153,7 +155,7 @@ export async function setupTab(page, { runId, mute = true } = {}) {
       // Google's reCAPTCHA (its box and its pictures) always comes: a person must see it to tick it.
       const allowImages = page.__adalAllowImages === true || CAPTCHA_HOSTS.test(hostOf(req.url()))
       // Fonts too (2026-11-23): 100–400 KB a page on a slow line, and the robot reads text, not letters' shapes.
-      if (notNeeded(req, { pictures: page.__adalAllowImages === true }) || (!allowImages && (type === 'image' || type === 'font')) || type === 'media' || TRACKERS.test(hostOf(req.url()))) req.abort().catch(() => {})
+      if (notNeeded(req, { pictures: page.__adalAllowImages === true }) || (!allowImages && (type === 'image' || type === 'font')) || type === 'media' || TRACKERS.test(hostOf(req.url()))) stopRequest(req)
       else {
         noteSent(page, req)
         if (type === 'xhr' || type === 'fetch') noteCall(req.method(), req.url())   // the portal's own data calls (siteApi.js)
@@ -332,6 +334,7 @@ async function isFree(p, busyRuns, signedIn = false) {
       !['hidden', 'password', 'checkbox', 'radio', 'file', 'submit', 'button'].includes(e.type) && e.value && e.value !== e.defaultValue),
   })).catch(() => null))
   if (!st) return false
+  if (robotsOwnTab(st, busyRuns)) return true
   // A tab a run drove always says "visible" (its focus is faked), so there a
   // person shows by their clicks and keys since the run let go.
   // The tab already signed in is used — also the one in front — quietly (muted,
@@ -375,13 +378,15 @@ const ownerOf = (p) => { for (const [id, t] of _tabs) if (t === p) return id; re
 export const isRunTab = (p) => ownerOf(p) !== null
 
 /** A person is using this tab now (clicked or typed in the last minute, or typed a form). */
-async function personIn(p) {
+async function personIn(p, busyRuns = null) {
   const st = await inTime(p.evaluate(() => ({
+    name: window.name,
     touched: Number(sessionStorage.getItem('adal-touched')) || 0,
     typed: [...document.querySelectorAll('input, textarea')].some(e =>
       !['hidden', 'password', 'checkbox', 'radio', 'file', 'submit', 'button'].includes(e.type) && e.value && e.value !== e.defaultValue),
   })).catch(() => null))
   if (!st) return true
+  if (robotsOwnTab(st, busyRuns)) return false
   return Date.now() - st.touched < PERSON_MS || (!p.__adalCdp && st.typed)
 }
 
@@ -413,7 +418,7 @@ async function siteTab(browser, workflowId, keep, space = null) {
  * After a run: the site keeps one tab (the signed-in one); the other tabs runs
  * opened there and nobody needs any more are closed.
  */
-export async function tidySiteTabs(browser, workflowId, keep = new Set()) {
+export async function tidySiteTabs(browser, workflowId, keep = new Set(), busyRuns = null) {
   const host = RUN_HOSTS.find(([w]) => w.test(String(workflowId)))?.[1]
   if (!host || !browser?.pages) return 0
   const peer = peerOf(workflowId)
@@ -430,7 +435,7 @@ export async function tidySiteTabs(browser, workflowId, keep = new Set()) {
     for (const p of tabs) {
       if (p === stays || held(p)) continue
       const ours = p.__adalCdp || /^adal-run-/.test(await inTime(p.evaluate(() => window.name).catch(() => ''), 2000) || '')
-      if (!ours || !(await outOfSight(p)) || (await personIn(p))) continue
+      if (!ours || !(await outOfSight(p)) || (await personIn(p, busyRuns))) continue
       for (const [id, t] of [..._tabs]) if (t === p) _tabs.delete(id)
       await p.close().catch(() => {})
       closed++

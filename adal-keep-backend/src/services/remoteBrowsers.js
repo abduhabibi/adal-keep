@@ -44,10 +44,16 @@ function hear() {
 /** Every PC known that answers now, with how it is (robotPCs.askAll). */
 export async function askDevices(ms = 600, opts = {}) {
   hear()
-  const up = await askAll([...devices.values()].filter(d => d.lan !== false), { ms, ...opts })
+  const list = [...devices.values()].filter(d => d.lan !== false)
+  let up = await askAll(list, { ms, ...opts })
+  // Nobody answered: this PC itself may be too busy to hear in time (a 2-core Main at 100 %): once more, longer.
+  if (!up.length && list.length) up = await askAll(list, { ms: 2500, ...opts })
+  for (const d of up) if (!d.answers && devices.has(d.id)) devices.get(d.id).at = d.at
   for (const d of up) if (d.answers && devices.has(d.id)) Object.assign(devices.get(d.id), { at: d.at, answers: true, cores: d.cores, mem_gb: d.mem_gb, free_gb: d.free_gb, load: d.load, battery: d.battery, updating: d.updating, version: d.version })
   return up.map(({ token, ...d }) => d)
 }
+/** How many PCs of the office this one has heard of. */
+export const knownDevices = () => { hear(); return devices.size }
 /** Its PC went away (switched off, off the network) in the last `ms`? */
 export const lostLately = (id, ms = 5 * 60e3, now = Date.now()) => now - (lost.get(String(id)) || 0) < ms
 

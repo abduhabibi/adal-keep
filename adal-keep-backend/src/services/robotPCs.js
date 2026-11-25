@@ -58,6 +58,6 @@ export async function askPC(d, ms = 600, fetchFn = fetch) {
 /** All of them at once: those that can be reached now, with how they are. */
 export async function askAll(list, { ms = 600, fetchFn = fetch, now = Date.now() } = {}) {
   const got = await Promise.all(list.map(async d => ({ d, a: await askPC(d, ms, fetchFn) })))
-  return got.filter(x => x.a.reachable).map(({ d, a }) => ({ ...d, ...a, at: a.answers ? now : d.at }))
+  return got.filter(x => x.a.reachable).map(({ d, a }) => ({ ...d, ...a, at: now }))
 }
 export const _resetForTest = () => { written = 0; clearTimeout(pending); pending = null; seen = { mtime: 0, list: [] } }

@@ -25,7 +25,8 @@ export async function selfAssign(db, job, { pcs = null, tabs = null, running = n
   const from = String(ctx.on_device || '')
   if (!pcs) {
     const rb = await import('./remoteBrowsers.js')
-    pcs = [ownPower(), ...await within(rb.askDevices(600), DECIDE_MS - 150, [])]
+    pcs = [ownPower(), ...await within(rb.askDevices(600), 3400, [])]   // (0.6 s; only when nobody answered, 2.5 s more)
+    if (pcs.length < 2 && rb.knownDevices()) log(`${rb.knownDevices()} office PC(s) known, none answers now`)
   }
   pcs = pcs.filter(p => p.id === '' || p.browser !== false)
   if (pcs.length < 2) {

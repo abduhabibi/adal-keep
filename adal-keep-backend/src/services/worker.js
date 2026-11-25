@@ -637,7 +637,7 @@ async function runJob(db, job) {
     let alone = true
     try {
       const { selfAssign } = await import('./selfAssign.js')
-      const line = await selfAssign(db, job, { log: (m) => { alone = m === 'one PC' } })
+      const line = await selfAssign(db, job, { log: (m) => { alone = m === 'one PC'; if (!alone) console.log(`[share] run #${job.id}: ${m}`) } })
       if (line) { alone = false; await appendLog(db, job.id, line); console.log(`[share] run #${job.id}: ${line}`) }
     } catch (e) { console.warn(`[share] run #${job.id} stays where it is:`, e.message) }
     // Under 4 cores and no other PC can take it: it runs here, said in its log (never stopped silently, never waiting).

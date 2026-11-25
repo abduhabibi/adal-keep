@@ -1081,17 +1081,29 @@ router.get('/automations/:id/stream', async (req, res) => {
   const page = await liveTab(req)
   if (!page || page === SLOW) return noTab(res, page)
   const { watchFrames } = await import('../services/liveFrames.js')
-  let stop = () => {}
+  let stop = () => {}, stopAgain = () => {}
   let closed = false
-  req.on('close', () => { closed = true; stop() })
+  req.on('close', () => { closed = true; stopAgain(); stop() })
   try {
     res.socket?.setNoDelay(true)
     res.writeHead(200, { 'Content-Type': 'multipart/x-mixed-replace; boundary=adalframe', 'Cache-Control': 'no-store', Connection: 'close', 'X-Accel-Buffering': 'no' })
+    // A browser draws a picture of such a stream only when the next one comes: on a still page it stayed on
+    // "Opening the robot's browser…" (2026-11-25). The last one is sent once more when nothing follows it.
+    let newest = null, again = null
+    stopAgain = () => clearTimeout(again)
+    const part = (img) => res.write(Buffer.concat([Buffer.from(`--adalframe\r\nContent-Type: image/jpeg\r\nContent-Length: ${img.length}\r\n\r\n`), img, Buffer.from('\r\n')]))
+    const give = () => {
+      if (!newest || res.writableNeedDrain || closed) return
+      const img = newest
+      newest = null
+      part(img)
+      clearTimeout(again)
+      again = setTimeout(() => { if (!newest && !closed && !res.writableNeedDrain) part(img) }, 200)
+    }
+    res.on('drain', give)
     stop = await watchFrames(page, (img) => {
-      if (res.writableNeedDrain || closed) return
-      res.write(`--adalframe\r\nContent-Type: image/jpeg\r\nContent-Length: ${img.length}\r\n\r\n`)
-      res.write(img)
-      res.write('\r\n')
+      newest = img
+      give()
     }, () => res.end())
     if (closed) stop()
   } catch { res.end() }

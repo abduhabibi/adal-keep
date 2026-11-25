@@ -102,7 +102,8 @@ type ownStore struct {
 	fresh  time.Time            // Main's changes are known up to now
 	away   bool                 // Main did not answer the last question
 	lately map[string]time.Time // changed lately (by name and by id)
-	never  map[string]bool      // Main does not say what it is: not kept, asked as the window asks it
+	noCopy time.Time
+	never  map[string]bool // Main does not say what it is: not kept, asked as the window asks it
 	hits   int64
 	saved  int64 // bytes not asked of Main
 	getMu  sync.Mutex
@@ -415,6 +416,16 @@ func (o *ownStore) doc(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Main is asked; a range or a condition is not (the answer would not be whole), nor gzip (it is kept as it is).
+	// Its locked copy (replica.go) may have this very file: Main says what it is, not the file itself.
+	if pw != "" && !asset && (e == nil || e.Old) && o.fromCopy(r, path, pw) {
+		o.mu.Lock()
+		o.ix.Who[who] = time.Now().Unix()
+		e = o.ix.Entries[path]
+		o.mu.Unlock()
+		if e != nil && o.show(w, r, path, e, pw, "this PC's copy") {
+			return
+		}
+	}
 	// Here too, but maybe changed: Main has a moment to answer, then it is shown as it was.
 	asked := time.Now()
 	ctx, stop := context.WithCancel(r.Context())
@@ -494,6 +505,90 @@ func (o *ownStore) doc(w http.ResponseWriter, r *http.Request) {
 	if err := o.keep(path, doc, hdr, buf.Bytes(), asked); err != nil && int64(buf.Len()) == doc.Size {
 		log.Printf("🖼 not kept: %v", err)
 	}
+}
+
+// fromCopy: the very file Main describes is in this PC's locked copy (same name, size and time, and the same
+// SHA-256): kept from there, nothing more is asked.
+func (o *ownStore) fromCopy(r *http.Request, path, pw string) bool {
+	if !strings.HasSuffix(path, "/download") || !o.mayKeep(path) {
+		return false
+	}
+	o.mu.Lock()
+	noCopy := time.Since(o.noCopy) < time.Minute
+	o.mu.Unlock()
+	if noCopy {
+		return false
+	}
+	if f, err := os.ReadDir(piecesDir()); err != nil || len(f) == 0 {
+		o.mu.Lock()
+		o.noCopy = time.Now()
+		o.mu.Unlock()
+		return false
+	}
+	asked := time.Now()
+	ctx, stop := context.WithTimeout(r.Context(), ownSlow)
+	defer stop()
+	resp, err := o.ask(r.WithContext(ctx), map[string]string{"x-adal-own": "describe", "Range": "", "If-Range": "", "If-None-Match": "", "If-Modified-Since": "", "Accept-Encoding": "identity"})
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotModified {
+		return false
+	}
+	resp.StatusCode = http.StatusOK // (for docOf: what it would be)
+	resp.ContentLength = 0
+	doc, ok := docOf(resp, false)
+	if !ok || doc.Size == 0 {
+		return false
+	}
+	var body []byte
+	for k := 0; k < partsOf(doc.Size); k++ {
+		b, err := os.ReadFile(filepath.Join(piecesDir(), docPieceName(rpDoc{Name: doc.Name, Size: doc.Size, Sum: doc.V}, k)))
+		if err != nil {
+			return false
+		}
+		p, err := unlockPiece(b, pw)
+		if err != nil {
+			return false
+		}
+		body = append(body, p...)
+	}
+	hdr := map[string]string{}
+	for _, h := range []string{"Content-Type", "Content-Disposition", "Cache-Control"} {
+		if v := resp.Header.Get(h); v != "" {
+			hdr[h] = v
+		}
+	}
+	return o.keep(path, doc, hdr, body, asked) == nil
+}
+
+// pieceFromOwn: a document piece of the locked copy that is here already (locked with the same key).
+func pieceFromOwn(d rpDoc, k int, name string) bool {
+	if own == nil {
+		return false
+	}
+	own.mu.Lock()
+	src := ""
+	for p, e := range own.ix.Entries {
+		if e.Doc.V == d.Sum && e.Doc.Name == d.Name && e.Size == d.Size && strings.HasSuffix(p, "/download") {
+			src = partFile(ownKey(p), k)
+		}
+	}
+	pw := own.load()
+	own.mu.Unlock()
+	if src == "" || pw == "" {
+		return false
+	}
+	b, err := os.ReadFile(src)
+	if err != nil {
+		return false
+	}
+	if _, err := unlockPiece(b, pw); err != nil {
+		return false
+	}
+	os.MkdirAll(piecesDir(), 0o700)
+	return writeAtomic(filepath.Join(piecesDir(), name), b, 0o600) == nil
 }
 
 func (o *ownStore) mayKeep(path string) bool {
@@ -796,6 +891,14 @@ func (o *ownStore) fetchOne(path string) error {
 	key, err := mainAccessKey(false)
 	if err != nil {
 		return err
+	}
+	if pw := loadKeys().Password; pw != "" {
+		if r, err := http.NewRequest(http.MethodGet, strings.TrimRight(hostServer, "/")+"/api/companion/docs/file/"+strings.TrimPrefix(path, "/api/files/"), nil); err == nil {
+			r.Header.Set("x-adal-pc", key)
+			if o.fromCopy(r, path, pw) {
+				return nil
+			}
+		}
 	}
 	asked := time.Now()
 	var doc ownDoc

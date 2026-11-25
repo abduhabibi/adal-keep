@@ -80,6 +80,10 @@ func (m *docMain) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		d, _ := json.Marshal(ownDoc{ID: id, Name: "n" + id, V: fmt.Sprint(m.v[id]), SHA: sha, Size: int64(len(b))})
 		w.Header().Set("X-Adal-Doc", base64.StdEncoding.EncodeToString(d))
 		w.Header().Set("Content-Type", "image/jpeg")
+		if r.Header.Get("x-adal-own") == "describe" {
+			w.WriteHeader(304)
+			return
+		}
 		http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(b))
 		m.bytes += int64(len(b))
 	default:
@@ -336,5 +340,39 @@ func TestOwnDoorPassesTheRestOn(t *testing.T) {
 	d.get("/assets/index-abc123.js", "adal_pc=a")
 	if _, b, h := d.get("/assets/index-abc123.js", "adal_pc=a"); b != "code()" || h.Get("X-Adal-From") != "disk" || m.count("/assets/") != 1 {
 		t.Fatal(b, h, m.asked)
+	}
+}
+
+func TestOwnAndTheLockedCopyShare(t *testing.T) {
+	m, _, o, d := ownFixture(t)
+	o.news(0)
+	d.get(photo, "adal_pc=a")
+	// The copy takes it from here.
+	own = o
+	defer func() { own = nil }()
+	doc := o.ix.Entries[photo].Doc
+	rd := rpDoc{Name: doc.Name, Size: doc.Size, Sum: doc.V, Parts: 1}
+	if !pieceFromOwn(rd, 0, docPieceName(rd, 0)) || !pieceExists(docPieceName(rd, 0)) {
+		t.Fatal("asked of Main again")
+	}
+	// And a photo of the copy, opened for the first time, is not asked of Main again.
+	os.RemoveAll(ownDir())
+	fresh := newOwnStore()
+	*o = ownStore{client: fresh.client, lately: fresh.lately, never: fresh.never}
+	o.news(0)
+	was := m.bytes
+	_, b, h := d.get(photo, "adal_pc=a")
+	if b != string(m.files["7"]) || h.Get("X-Adal-From") != "this PC's copy" || m.bytes != was {
+		t.Fatal(h, m.bytes-was)
+	}
+	o.tellSeen()
+	if m.seen != 1 {
+		t.Fatal("not in the audit list")
+	}
+	// Main refuses this window: not shown from the copy either.
+	m.files["7"] = nil
+	o.ix.Entries = map[string]*ownEntry{}
+	if code, _, _ := d.get(photo, "adal_pc=a"); code != 404 {
+		t.Fatal(code)
 	}
 }

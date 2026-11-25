@@ -9,8 +9,9 @@ import assert from 'node:assert/strict'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { findChrome, rmTmp } from './helpers/chrome.js'
 
-const EXE = process.env.TEST_BROWSER || ['/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/brave-browser'].find(f => fs.existsSync(f))
+const EXE = findChrome()
 
 test('the account label on a page with no title: the tab keeps answering', { skip: !EXE && 'no browser', timeout: 60000 }, async () => {
   const puppeteer = (await import('puppeteer-core')).default
@@ -31,6 +32,6 @@ test('the account label on a page with no title: the tab keeps answering', { ski
     assert.equal(await page.evaluate(() => document.title), '[nuzla] Dashboard')
   } finally {
     await browser.close().catch(() => {})
-    fs.rmSync(tmp, { recursive: true, force: true })
+    rmTmp(tmp)
   }
 })

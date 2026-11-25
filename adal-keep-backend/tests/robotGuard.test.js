@@ -8,11 +8,12 @@ import assert from 'node:assert/strict'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { findChrome, rmTmp } from './helpers/chrome.js'
 import net from 'net'
 import http from 'http'
 import { spawn } from 'child_process'
 
-const CHROME = ['/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find(f => fs.existsSync(f))
+const CHROME = findChrome()
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'adal-guard-'))
 process.env.ADAL_NO_BROWSER_START = '1'
 process.env.BRAVE_CDP_URL = 'http://127.0.0.1:9'
@@ -62,7 +63,7 @@ test('in a real browser', { skip: !CHROME && 'no Chrome', timeout: 240000 }, asy
   const puppeteer = (await import('puppeteer-core')).default
   const connect = async () => { for (let i = 0; i < 60; i++) { const b = await puppeteer.connect({ browserURL: `http://127.0.0.1:${cdp}`, defaultViewport: null }).catch(() => null); if (b) return b; await sleep(250) } }
   let browser = await connect()
-  t.after(async () => { try { browser?.disconnect() } catch {}; chrome.kill('SIGKILL'); site.close(); await sleep(300); fs.rmSync(tmp, { recursive: true, force: true }) })
+  t.after(async () => { try { browser?.disconnect() } catch {}; chrome.kill('SIGKILL'); site.close(); await sleep(300); rmTmp(tmp) })
   /** The busiest page process now, of a core. */
   const busiest = async (b = browser, ms = 2000) => {
     const c = await b.target().createCDPSession()

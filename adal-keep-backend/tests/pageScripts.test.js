@@ -8,8 +8,9 @@ import assert from 'node:assert/strict'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { findChrome, rmTmp } from './helpers/chrome.js'
 
-const CHROME = ['/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find(f => fs.existsSync(f))
+const CHROME = findChrome()
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'adal-scripts-'))
 process.env.ADAL_NO_BROWSER_START = '1'
 process.env.BRAVE_CDP_URL = 'http://127.0.0.1:9'
@@ -21,7 +22,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 test('scripts in the pages', { skip: !CHROME && 'no Chrome', timeout: 110000 }, async (t) => {
   const puppeteer = (await import('puppeteer-core')).default
   const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, userDataDir: path.join(tmp, 'p'), args: ['--no-first-run', '--disable-gpu'], protocolTimeout: 15000 })
-  t.after(async () => { await browser.close().catch(() => {}); fs.rmSync(tmp, { recursive: true, force: true }) })
+  t.after(async () => { await browser.close().catch(() => {}); rmTmp(tmp) })
   const { labelTab } = await import('../src/services/robotCheck.js')
   const W = await import('../src/services/musanedWorkflow.js')
   const { setupTab } = await import('../src/services/tabManager.js')

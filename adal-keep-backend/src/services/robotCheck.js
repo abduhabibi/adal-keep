@@ -64,13 +64,20 @@ export function signInErrorKind(text) {
  * Returns 'submitted' (ticked, pressed, the form went away), 'left' (the form went away by itself: the person
  * pressed it) or 'timeout'. A refused name or password throws (nothing more is tried).
  */
-export async function waitForTick(page, { onForm, submit, refill = null, restart = null, again = null, isCancelled = null, timeoutMs = 10 * 60000, freshMs = 60000, log = () => {}, pollMs = 300 } = {}) {
+export async function waitForTick(page, opts = {}) {
+  const [{ rester }, { isWatched }] = await Promise.all([import('./restPage.js'), import('./liveFrames.js')])
+  const rest = rester(page, { watched: isWatched, ...(opts.rest || {}) })   // nobody looks: the waiting page rests
+  try { return await tickWait(page, opts, rest) } finally { await rest.end() }
+}
+
+async function tickWait(page, { onForm, submit, refill = null, restart = null, again = null, isCancelled = null, timeoutMs = 10 * 60000, freshMs = 60000, log = () => {}, pollMs = 300 } = {}, rest) {
   const deadline = Date.now() + timeoutMs
   let pressed = false, formSince = Date.now(), lastLook = page.__adalLookedAt || 0, errAt = 0
   const readError = () => page.evaluate(SIGN_IN_ERROR).catch(() => '')
   const startAgain = async (why, tell) => {
     if (!restart) return false
     log(why)
+    await rest.wake()
     await restart().catch(e => log(`the sign-in could not be loaded again: ${e.message}`))
     formSince = Date.now(); pressed = false
     if (tell) await again?.(why)
@@ -113,6 +120,7 @@ export async function waitForTick(page, { onForm, submit, refill = null, restart
     if (rc.ticked) {
       // The box says ticked a moment before its token is in the page.
       for (let i = 0; i < 10 && !rc.token; i++) { await sleep(200); rc.token = (await robotCheck(page)).token }
+      await rest.wake()
       log('✓ "I\'m not a robot" ticked — pressing Sign in')
       if (refill) await refill().catch(() => {})
       await submit().catch(() => {})
@@ -134,7 +142,7 @@ export async function waitForTick(page, { onForm, submit, refill = null, restart
       }
       continue
     }
-    await sleep(pollMs)
+    await rest.pause(pollMs)
   }
   return 'timeout'
 }

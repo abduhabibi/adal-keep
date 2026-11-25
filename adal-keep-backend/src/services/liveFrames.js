@@ -29,6 +29,7 @@ export const isWatched = (page) => (casts.get(page)?.subs.size || 0) > 0
 
 async function castOf(page) {
   try { await page.__adalWake?.() } catch {}   // slowed by robotGuard: full speed for the person
+  try { await page.__adalRestWake?.() } catch {}   // it rested while nobody looked (restPage.js)
   if (casts.has(page)) return casts.get(page)
   const c = { subs: new Set(), ends: new Set(), dead: false, last: null, at: Date.now(), used: Date.now(), cdp: null, ready: null, timer: null, filling: false }
   casts.set(page, c)

@@ -158,7 +158,7 @@ export async function cvData(profile, template, overrides = {}, imgs = {}, broke
     PLACE_OF_BIRTH:   merged.place_of_birth || '',
     RELIGION:         merged.religion || '',
     MARITAL_STATUS:   merged.marital_status || 'SINGLE',
-    CHILDREN_COUNT:   merged.children_count == null || merged.children_count === '' ? 'None' : String(merged.children_count),
+    CHILDREN_COUNT:   merged.children_count == null || String(merged.children_count).trim() === '' ? '0' : String(merged.children_count),
     WEIGHT:           merged.weight,
     HEIGHT:           merged.height,
     COMPLEXION:       merged.complexion || '',

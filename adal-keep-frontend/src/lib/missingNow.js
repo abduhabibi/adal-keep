@@ -52,7 +52,7 @@ export const CLEARABLE = {
   full_name: 'Full name', phone_number: 'Mobile number', national_id: 'National ID', passport_number: 'Passport number',
   date_of_birth: 'Date of birth', passport_issue_date: 'Passport Date of Issue', passport_expiry_date: 'Passport Date of Expiry',
   place_of_birth: 'Place of birth', region: 'Region', zone_subcity: 'Zone / Sub-city',
-  marital_status: 'Marital status', religion: 'Religion', gender: 'Gender', nationality: 'Nationality', children_count: 'Children',
+  marital_status: 'Marital status', religion: 'Religion', gender: 'Gender', nationality: 'Nationality',
   height: 'Height', weight: 'Weight', education_level: 'Education', cooking_skill: 'Cooking skill',
   speaks_arabic: 'Speaks Arabic', speaks_english: 'Speaks English', emergency_phone: 'Emergency phone',
   emergency_relationship: 'Emergency relationship', destination_country: 'Destination Country', personal_number: 'Personal number',

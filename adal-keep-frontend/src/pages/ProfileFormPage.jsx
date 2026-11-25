@@ -1,3 +1,4 @@
+import { childrenOrZero } from '../lib/childrenCount'
 import GlassSelect from '../components/shared/GlassSelect'
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
@@ -48,8 +49,6 @@ const EXPERIENCE_COUNTRIES = [
   'Bahrain', 'Jordan', 'Kuwait', 'Oman', 'Qatar', 'Saudi Arabia', 'United Arab Emirates',
 ]
 
-// Empty / missing children count is 0; any number in the database is kept.
-const childrenOrZero = (v) => (v === null || v === undefined || String(v).trim() === '' ? 0 : Number(v) || 0)
 
 // Visa & Contract fields (Musaned employment request).
 const CONTRACT_KEYS = ["contract_number", "visa_number", "tawassut_number", "musaned_stage", "musaned_payment", "contract_date", "employer_name", "employer_id", "employer_phone", "employer_address", "work_city", "salary", "issuing_authority", "job_title", "musaned_pro"]

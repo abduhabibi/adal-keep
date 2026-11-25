@@ -9,6 +9,9 @@ import { useEffect, useMemo, useState } from 'react'
 import api from '../services/api'
 import toast from 'react-hot-toast'
 import FieldCard from './fields/FieldCard'
+import BrokerSearch from './BrokerSearch'
+import AgencyMobile from './AgencyMobile'
+import { mobileShown, mobileToSave } from '../lib/popupMobile'
 import { missingNow } from '../lib/missingNow'
 import { onDataChange } from '../lib/changes'
 
@@ -29,6 +32,8 @@ const KNOWN = [
   [/passport (number|no)/i, { col: 'passport_number', label: 'Passport number' }],
   [/application number/i, { col: 'visa_application_number', label: 'Application number' }],
 ]
+// Never asked (a main PC on an older version may still name them): her place of birth stands in; children are 0.
+const NOT_ASKED = /^(living_town|children_count)$/
 const NUMBER = /^(children_count|weight|height|experience_years|salary)$/
 const human = (k) => k.replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase())
 const snake = (s) => String(s).toLowerCase().replace(/\(.*?\)/g, '').replace(/\bmissing\b|\bnot assigned\b/g, '').trim().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')
@@ -56,6 +61,9 @@ export function itemsFor(names, profile = {}) {
   return out
 }
 
+// (The broker's box and the mobile's have their own things to click: not inside a label.)
+const Box = ({ div, children, ...p }) => (div ? <div {...p}>{children}</div> : <label {...p}>{children}</label>)
+
 export default function NeedsFill({ profileId, workflowId = null, cv = false, fields = [], onFileUpdate, onReady, onState }) {
   const [names, setNames] = useState(null)      // null = asking
   const [note, setNote] = useState('')
@@ -64,6 +72,7 @@ export default function NeedsFill({ profileId, workflowId = null, cv = false, fi
   const [brokers, setBrokers] = useState([])
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
+  const [popup, setPopup] = useState(null)      // { mobile, broker_search } (an older main PC, or off: null — as before)
   const [filled, setFilled] = useState(false)   // the person filled something: the step goes on by itself
 
   const check = async () => {
@@ -89,6 +98,11 @@ export default function NeedsFill({ profileId, workflowId = null, cv = false, fi
   // Asked again whenever a document arrives (her fields change).
   const fileCount = fields.reduce((n, f) => n + (f.files?.length || 0), 0)
   useEffect(() => { check() }, [profileId, workflowId, cv, fileCount]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const look = () => api.get('/settings/step-popup').then(r => setPopup(typeof r.data?.mobile === 'string' ? r.data : null)).catch(() => {})
+    look()
+    return onDataChange(['settings'], look)
+  }, [])
   // Her details changed (cleared or filled here, on the page or on another PC): the list follows at once.
   useEffect(() => {
     const again = () => api.get(`/profiles/${profileId}`).then(r => setProfile(r.data || {})).catch(() => {})
@@ -97,8 +111,7 @@ export default function NeedsFill({ profileId, workflowId = null, cv = false, fi
     return () => { window.removeEventListener('adal-profile-changed', again); off() }
   }, [profileId])
 
-  // (Living town is never asked: her place of birth stands in. A main PC on an older version may still name it.)
-  const items = useMemo(() => itemsFor((names || []).filter(n => snake(n) !== 'living_town'), profile), [names, profile])
+  const items = useMemo(() => itemsFor((names || []).filter(n => !NOT_ASKED.test(snake(n))), profile), [names, profile])
   // Her details the step's own list does not name but the Missing card does (asked on 2026-11-23:
   // a pop-up shows both). Shown and saved here too; they never hold the step back.
   const extras = useMemo(() => {
@@ -116,14 +129,24 @@ export default function NeedsFill({ profileId, workflowId = null, cv = false, fi
   // Everything there after the person filled it in: the step goes on by itself.
   useEffect(() => { if (ready && filled) { setFilled(false); onReady?.() } }, [ready, filled]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const valueOf = (col) => values[col] ?? ''
+  const mobile = { typed: values.phone_number, hers: profile.phone_number, saved: popup?.mobile }
+  const valueOf = (col) => (col === 'phone_number' && popup ? mobileShown(mobile).value : values[col] ?? '')
   const save = async () => {
     const body = {}
-    for (const it of [...items, ...extras]) if (it.col && String(valueOf(it.col)).trim() !== '') body[it.col] = it.type === 'number' ? Number(valueOf(it.col)) : valueOf(it.col)
+    for (const it of [...items, ...extras]) if (it.col && (it.col !== 'phone_number' || !popup) && String(valueOf(it.col)).trim() !== '') body[it.col] = it.type === 'number' ? Number(valueOf(it.col)) : valueOf(it.col)
+    const asksMobile = popup && [...items, ...extras].some(it => it.col === 'phone_number')
+    if (asksMobile && mobileToSave(mobile)) body.phone_number = mobileToSave(mobile)
     if (!Object.keys(body).length) return toast.error('Choose or type something first')
     setSaving(true)
     setSaveError('')
     try {
+      // The agency's number is never put over one she got meanwhile (another PC): looked at now.
+      if (asksMobile && body.phone_number && mobileShown(mobile).from === 'agency') {
+        const now = (await api.get(`/profiles/${profileId}`)).data?.phone_number
+        const n = mobileToSave(mobile, now)
+        if (n) body.phone_number = n; else delete body.phone_number
+      }
+      if (!Object.keys(body).length) { setFilled(true); await check(); setSaving(false); return }
       // The normal profile update: saved in this PC's database, synced to every PC, fetched again here.
       await api.put(`/profiles/${profileId}`, body)
       setValues(v => { const n = { ...v }; for (const k of Object.keys(body)) delete n[k]; return n })
@@ -152,18 +175,21 @@ export default function NeedsFill({ profileId, workflowId = null, cv = false, fi
         <form onSubmit={(e) => { e.preventDefault(); save() }} className="space-y-3">
           <div className="grid gap-3 sm:grid-cols-2">
             {cols.map(it => (
-              <label key={it.key} className="block text-xs font-semibold text-slate-600 dark:text-slate-300">
+              <Box key={it.key} div={it.brokers || (it.col === 'phone_number' && popup)} className="block text-xs font-semibold text-slate-600 dark:text-slate-300">
                 {it.label}
-                {it.options || it.brokers ? (
+                {it.brokers ? (
+                  <div className="mt-1"><BrokerSearch off={!popup?.broker_search} brokers={brokers} value={values[it.col] ?? ''} onChange={v => setValues(x => ({ ...x, [it.col]: v }))} className={input} /></div>
+                ) : it.options ? (
                   <select className={`${input} mt-1`} value={values[it.col] ?? ''} onChange={e => setValues(v => ({ ...v, [it.col]: e.target.value }))}>
                     <option value="">— Choose —</option>
-                    {(it.brokers ? brokers.map(b => [b.id, b.name || b.full_name || `Broker ${b.id}`]) : it.options).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                    {it.options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                   </select>
                 ) : (
-                  <input className={`${input} mt-1`} type={it.type} placeholder={it.hint || ''} value={valueOf(it.col)}
+                  <input className={`${input} mt-1`} type={it.type} aria-label={it.label} placeholder={it.hint || ''} value={valueOf(it.col)}
                     onChange={e => setValues(v => ({ ...v, [it.col]: e.target.value }))} />
                 )}
-              </label>
+                {it.col === 'phone_number' && popup && <AgencyMobile shown={mobileShown(mobile)} saved={popup.mobile} onSaved={m => setPopup(p => ({ ...p, mobile: m }))} />}
+              </Box>
             ))}
           </div>
           {saveError && <p className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-300" data-testid="needs-save-error">{saveError}</p>}

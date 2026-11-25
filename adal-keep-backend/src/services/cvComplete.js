@@ -13,8 +13,8 @@ import { mobileOk, isPassportCrop } from './musanedPreflight.js'
 
 export const cvReadyOn = () => process.env.ADAL_CV_READY !== '0'
 
-// What a CV shows of her (the CV page's list).
-export const CV_DETAILS = ['full_name', 'first_name', 'last_name', 'passport_number', 'date_of_birth', 'place_of_birth', 'nationality', 'gender', 'children_count', 'weight', 'height']
+// What a CV shows of her (the CV page's list; children: 0 unless written, never lacking).
+export const CV_DETAILS = ['full_name', 'first_name', 'last_name', 'passport_number', 'date_of_birth', 'place_of_birth', 'nationality', 'gender', 'weight', 'height']
 // The columns the rule reads (the lists that look at every girl select just these).
 export const CV_COLUMNS = [...CV_DETAILS, 'living_town', 'broker_id', 'religion', 'marital_status', 'phone_number']
 /** Her Photo is only the face cut from her passport: a document name of its own here (docsFor). */

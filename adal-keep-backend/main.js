@@ -23,6 +23,7 @@ import helmet from 'helmet'
 import cron from 'node-cron'
 import knexConfig from './knexfile.js'
 import { withLivingTown, fillTown } from './src/services/livingTown.js'
+import { withChildren, fillChildren } from './src/services/childrenCount.js'
 import filesRouter from './src/routes/files.js'
 import multer from 'multer'
 import path from 'path'
@@ -218,6 +219,7 @@ app.use('/api/visa', accountsRouter('visa_accounts', 'visa_account'))
 app.use('/api/tasheer', accountsRouter('tasheer_accounts', 'tasheer_account'))
 app.use('/api/insurance', accountsRouter('insurance_accounts', 'insurance_account'))
 app.use('/api/cv', cvRouter)
+app.use('/api', (await import('./src/routes/stepPopup.js')).default)   // the "Her CV" pop-up: the agency's mobile number
 app.use('/api/settings', settingsRouter)
 app.use('/api', (await import('./src/routes/mainProxy.js')).default)   // a Companion: the robots' live calls go to the main PC
 // Robots in Adal Robots (services/robotsInApp.js): a run's tab, the person's clicks, Stop and Continue go there.
@@ -468,7 +470,7 @@ app.get('/api/profiles', async (req, res) => {
       query = query.where('profiles.broker_id', broker_id)
     }
 
-    res.json((await query).map(fillTown))
+    res.json((await query).map(p => fillChildren(fillTown(p))))
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Failed to load profiles' })
@@ -510,7 +512,7 @@ app.get('/api/profiles/:id', async (req, res) => {
       .first()
 
     if (!profile) return res.status(404).json({ error: 'Not found' })
-    res.json(fillTown(profile))
+    res.json(fillChildren(fillTown(profile)))
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Failed to load profile' })
@@ -590,6 +592,7 @@ app.post('/api/profiles', async (req, res) => {
     if (data.broker_id === '' || data.broker_id === null) data.broker_id = null
     else if (data.broker_id !== undefined) data.broker_id = Number(data.broker_id)
     withLivingTown(data)   // empty living town: her place of birth
+    withChildren(data)     // no number of children: 0
 
     const [id] = await db('profiles').insert(data)
     const profile = await db('profiles')
@@ -691,6 +694,7 @@ app.put('/api/profiles/:id', async (req, res) => {
     else if (data.broker_id !== undefined) data.broker_id = Number(data.broker_id)
 
     withLivingTown(data, existing)   // empty living town: her place of birth
+    withChildren(data, existing)     // no number of children: 0
     data.updated_at = new Date().toISOString()
     await db('profiles').where('id', req.params.id).update(data)
 

@@ -110,6 +110,8 @@ async function onlyIdle(db, last) {
       if (s <= (last.vec[o] || 0)) continue
       for (const r of await db.raw('SELECT DISTINCT tbl FROM sync_log WHERE origin = ? AND seq > ?', [o, last.vec[o] || 0])) if (!IDLE.has(r.tbl)) return false
     }
+    // (written, not yet in the log: the sync takes it from here)
+    for (const r of await db.raw('SELECT DISTINCT tbl FROM sync_dirty')) if (!IDLE.has(r.tbl)) return false
     return true
   } catch { return false }
 }

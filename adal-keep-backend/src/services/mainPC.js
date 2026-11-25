@@ -178,9 +178,12 @@ const TS_EXE = process.platform === 'win32'
   ? ['C:\\Program Files\\Tailscale\\tailscale.exe', 'tailscale']
   : ['tailscale', '/usr/bin/tailscale', '/usr/local/bin/tailscale']
 
+let noTailscaleAt = 0   // not installed: looked for again after 10 minutes (it was 3 starts every minute)
 function runTailscale(args, timeout = 6000) {
+  if (args[0] === 'status' && Date.now() - noTailscaleAt < 10 * 60000) return Promise.resolve({ ok: false, error: 'Tailscale is not installed on this PC.' })
   return new Promise((resolve) => {
     const tryAt = (i) => {
+      if (i >= TS_EXE.length) noTailscaleAt = Date.now()
       if (i >= TS_EXE.length) return resolve({ ok: false, error: 'Tailscale is not installed on this PC.' })
       execFile(TS_EXE[i], args, { timeout, windowsHide: true }, (err, stdout, stderr) => {
         if (err && err.code === 'ENOENT') return tryAt(i + 1)

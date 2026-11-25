@@ -89,7 +89,9 @@ export class DocStore {
     const known = new Map((await this.db.raw(`SELECT name, size, mtime, hash FROM sync_docs`)).map(r => [r.name, r]))
     let added = 0, left = 0
     const here = new Set(names)
+    let looked = 0
     for (const name of names) {
+      if (++looked % 100 === 0) await new Promise(ok => setTimeout(ok, 5))   // thousands of looks at the disk: in small steps
       let st
       try { st = fs.statSync(this.pathOf(name)) } catch { continue }
       const k = known.get(name)

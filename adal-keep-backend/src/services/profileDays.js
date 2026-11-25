@@ -17,18 +17,29 @@ export async function snapshotDays(db) {
   try {
     const { allStages } = await import('../routes/automations.js')
     const { profiles } = await allStages(db)
-    const day = today(), at = new Date().toISOString()
-    const had = new Map((await db('profile_days').where({ day }).select('profile_id', 'data')).map(r => [r.profile_id, r.data]))
-    let n = 0
-    for (const p of profiles) {
-      const data = JSON.stringify({ stage: p.stage, musaned_stage: p.musaned_stage || '', steps: p.steps || {}, notes: p.notes || {} })
-      if (had.get(p.profile_id) === data) continue
-      if (had.has(p.profile_id)) await db('profile_days').where({ profile_id: p.profile_id, day }).update({ data, updated_at: at })
-      else await db('profile_days').insert({ profile_id: p.profile_id, day, data, updated_at: at }).catch(() => {})
-      n++
-    }
-    return n
+    return await keepDays(db, profiles)
   } finally { busy = false }
+}
+
+/** Today's rows (exported for tests). */
+export async function keepDays(db, profiles) {
+  const day = today(), at = new Date().toISOString()
+  const had = new Map((await db('profile_days').where({ day }).select('profile_id', 'data')).map(r => [r.profile_id, r.data]))
+  const add = []
+  let n = 0
+  for (const p of profiles) {
+    const data = JSON.stringify({ stage: p.stage, musaned_stage: p.musaned_stage || '', steps: p.steps || {}, notes: p.notes || {} })
+    if (had.get(p.profile_id) === data) continue
+    if (had.has(p.profile_id)) await db('profile_days').where({ profile_id: p.profile_id, day }).update({ data, updated_at: at })
+    else add.push({ profile_id: p.profile_id, day, data, updated_at: at })
+    n++
+  }
+  // A new day's rows: 50 in one write (one by one, the disk was written once for every profile).
+  for (let i = 0; i < add.length; i += 50) {
+    await db('profile_days').insert(add.slice(i, i + 50)).onConflict(['profile_id', 'day']).ignore().catch(async () => { for (const r of add.slice(i, i + 50)) await db('profile_days').insert(r).catch(() => {}) })
+    await new Promise(ok => setTimeout(ok, 100))
+  }
+  return n
 }
 
 /** Her days, newest first: what she was and what changed from the day before. */

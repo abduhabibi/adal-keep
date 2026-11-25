@@ -1050,9 +1050,14 @@ const liveTab = async (req) => {
   const id = String(req.params.id)
   const k = _liveTabs.get(id)
   if (k && !k.page.isClosed?.() && Date.now() - k.at < KEEP_MS) return marked(k.page, req)
+  // The run's own tab, known here: at once (looking for it asks the database, the browser's port and every tab; on a
+  // full PC that took over 6 s and the click was refused, 2026-11-25).
+  const own = handsOn() && /^\d+$/.test(id) ? tabOfRun(id) : null
+  if (own) return marked(own, req)
   let t
   const page = await Promise.race([runTab(req.app.locals.db, req.params.id).catch(() => null), new Promise(ok => { t = setTimeout(() => ok(SLOW), 6000) })])
   clearTimeout(t)
+  if (page === SLOW && handsOn() && k && !k.page.isClosed?.()) return marked(k.page, req)   // the one of a moment ago
   if (page && page !== SLOW) { _liveTabs.set(id, { page, at: Date.now() }); if (_liveTabs.size > 30) _liveTabs.delete(_liveTabs.keys().next().value) }
   return marked(page, req)
 }
@@ -1305,7 +1310,7 @@ router.post('/automations/:id/input', async (req, res) => {
   if (handsOn()) {
     try {
       const db = req.app.locals.db, list = Array.isArray(b.batch) ? b.batch.slice(0, 200) : [b]
-      const signIn = [...list].reverse().find(x => x.kind === 'click' || (x.kind === 'mouse' && x.type === 'up'))
+      const signIn = [...list].reverse().find(x => x.kind === 'click' || (x.kind === 'mouse' && x.type === 'up') || (x.kind === 'key' && x.key === 'Enter'))
       const asked = signIn ? bounded(pressesSignIn(page, signIn), 1000).catch(() => false) : false   // asked beside, the click does not wait for it
       const move = list.every(x => (x.kind === 'mouse' && x.type === 'move') || x.kind === 'wheel')
       const r = await hands(page, list, { waitMs: move ? 0 : 1200, other: (x) => personInput(db, req.params.id, page, x),

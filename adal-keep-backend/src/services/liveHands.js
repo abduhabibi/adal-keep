@@ -31,10 +31,25 @@ async function sizeOf(page) {
 }
 
 /** Can this one go straight to the browser? */
-export const direct = (b) => ['mouse', 'wheel', 'paste', 'click'].includes(b?.kind)
+export const direct = (b) => ['mouse', 'wheel', 'paste', 'click'].includes(b?.kind) || plainKey(b)
+const NAMED = /^(Enter|Tab|Escape|Backspace|Delete|Insert|Home|End|PageUp|PageDown|Arrow(Left|Right|Up|Down)|F([1-9]|1[0-2])|Space)$/
+/** A key of the keyboard (with Ctrl / Alt / Shift); other letters go the way they went. */
+const plainKey = (b) => b?.kind === 'key' && (/^[\x20-\x7e]$/.test(String(b.key || '')) || NAMED.test(String(b.key || '')))
+/** A key, all its parts handed over at once (down and up each waited for a busy page: "C" after 9.9 s, 2026-11-25). */
+function sendKey(page, b) {
+  const s = of(page), kb = page.keyboard, key = b.key === 'Space' ? ' ' : String(b.key)
+  const held = [['Control', b.ctrl], ['Shift', b.shift], ['Alt', b.alt], ['Meta', b.meta]].filter(x => x[1]).map(x => x[0])
+  const all = held.map(m => kb.down(m))
+  all.push(kb.down(key), kb.up(key))
+  for (const m of held.reverse()) all.push(kb.up(m))
+  s.pending++
+  const t0 = Date.now()
+  return { ack: Promise.all(all).then(() => Date.now() - t0).finally(() => { s.pending-- }) }
+}
 
 /** Sends it now. → { ack: Promise } resolved when the page took it. */
 async function sendNow(page, b) {
+  if (plainKey(b)) return sendKey(page, b)
   const s = of(page)
   s.cdp ||= page.createCDPSession().catch(e => { s.cdp = null; throw e })
   const cdp = await s.cdp

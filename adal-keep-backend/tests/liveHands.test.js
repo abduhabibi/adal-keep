@@ -48,6 +48,14 @@ test('clicks on a frozen page: answered at once, taken when it can, all of them,
   // Then typed: after the click.
   r = await hands(p, [{ kind: 'type', text: 'abc' }], { other })
   assert.equal(await p.evaluate(() => document.querySelector('#i').value), 'abc')
+  // Keys on a frozen page: all handed over at once, in order (each part waited for the page before).
+  p.evaluate(() => { const e = Date.now() + 3000; while (Date.now() < e); }).catch(() => {})
+  await sleep(150)
+  const k0 = Date.now()
+  r = await hands(p, [{ kind: 'key', key: 'End' }, { kind: 'key', key: 'x' }, { kind: 'key', key: 'Y', shift: true }, { kind: 'key', key: 'a', ctrl: true }, { kind: 'key', key: 'C' }], { other, waitMs: 200 })
+  assert.equal(r.sent, 5); assert.equal(r.taken, null); assert.ok(Date.now() - k0 < 800, `keys answered in ${Date.now() - k0} ms`)
+  for (let i = 0; i < 40 && (await Promise.race([p.evaluate(() => document.querySelector('#i').value), sleep(500)])) !== 'C'; i++) await sleep(150)
+  assert.equal(await p.evaluate(() => document.querySelector('#i').value), 'C', 'in order: typed, all chosen, written over')
   assert.equal(handsBusy(p), false)
   clearInterval(shots); un()
 })

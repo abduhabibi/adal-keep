@@ -127,7 +127,7 @@ export function PhoneTopBar({ scroller }) {
     return () => el.removeEventListener('scroll', on)
   }, [scroller, pathname])
   useEffect(() => {
-    // Tasks still to do + the calls waiting for a person right now (those expire after 5 minutes on the PC).
+    // Tasks still to do + the calls waiting for a person right now (those expire after 10 minutes on the PC).
     const calls = () => api.get('/automations/attention').then(r => (Array.isArray(r.data) ? r.data.filter(c => c.run_id > 0).length : 0)).catch(() => 0)
     const look = () => Promise.all([listed(), calls()]).then(([n, c]) => setTasks(n + c))
     const listed = () => api.get('/tasks/count').then(r => { if (typeof r.data?.undone !== 'number') throw new Error('no count'); return r.data.undone })

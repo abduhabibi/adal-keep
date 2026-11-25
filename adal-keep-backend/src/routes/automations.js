@@ -503,7 +503,7 @@ const PLAIN_WAIT = {
   'awaiting-musaned-precheck': 'Musaned: put her passport in the pre-check and press Continue',
   'awaiting-human-save': 'Look it over and press Save',
   'awaiting-human-submit': 'Look it over and press Submit',
-  'awaiting-tasheer-code': 'Tasheer: nobody typed the code in 5 minutes — press Continue',
+  'awaiting-tasheer-code': 'Tasheer: nobody typed the code in 10 minutes — press Continue',
 }
 // The notification bar: what needs a person now.
 router.get('/automations/attention', async (req, res) => {
@@ -512,10 +512,10 @@ router.get('/automations/attention', async (req, res) => {
     const calls = waiting()
     // Paused for a person today, in plain words. Older ones and runs a restart
     // interrupted stay on their profiles: nobody is being called for them now.
-    // A task lasts 5 minutes (attention.js TASK_MS); a run paused for no answer is not called again.
+    // A task lasts 10 minutes (attention.js TASK_MS); a run paused for no answer is not called again.
     const since = new Date(Date.now() - TASK_MS).toISOString()
     const paused = await db('automation_queue').where('status', 'paused').where('updated_at', '>', since)
-      .where('pause_reason', 'not like', 'No answer for 5 minutes%')
+      .where('pause_reason', 'not like', 'No answer for %')
       .where('pause_reason', 'not like', 'Interrupted%').where('pause_reason', 'not like', 'with-run-%').orderBy('id', 'desc').limit(10).select('id', 'pause_reason', 'updated_at')
     for (const r of paused) if (!calls.some(c => c.run_id === r.id)) calls.push({ run_id: r.id, title: PLAIN_WAIT[r.pause_reason] || 'Waiting for you', body: '', at: new Date(r.updated_at).getTime(), expires_in_ms: Math.max(0, new Date(r.updated_at).getTime() + TASK_MS - Date.now()), task_id: `${r.id}:p`, step: 1, kind: 'look', image: null, reason: r.pause_reason })
     const runs = await db('automation_queue as q').leftJoin('profiles as p', 'p.id', 'q.profile_id')

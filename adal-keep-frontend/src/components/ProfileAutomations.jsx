@@ -23,7 +23,7 @@ const PAUSE_TEXT = {
   'awaiting-insurance-save':  'waiting for you to finish the insurance certificate on FetaP',
   'awaiting-epro-save':       'waiting for you to tick the pledge and press SAVE on Musaned (Contract Upload)',
   'awaiting-tasheer-save':    'waiting for you to look the applicants over and press Save on Tasheer',
-  'awaiting-tasheer-code':    'paused: nobody typed the Tasheer code within 5 minutes — press Continue to sign in again',
+  'awaiting-tasheer-code':    'paused: nobody typed the Tasheer code within 10 minutes — press Continue to sign in again',
   'with-run':  'in a group run (one certificate / one Tasheer appointment) — it finishes with that run',
   'Done by hand': 'marked done by hand',
   'awaiting-visa-pay':        'waiting for you to pay the visa fees on the visa platform',

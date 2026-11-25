@@ -19,7 +19,7 @@
  *   Every captcha (sign-in, Concurrent Login, the scheduling page) comes by
  *   notification with its picture (PC and phones): the code typed there goes
  *   in by itself — nobody opens the Tasheer tab for it (captchaByNotice). No
- *   answer in 5 minutes: the run pauses ('awaiting-tasheer-code').
+ *   answer in 10 minutes: the run pauses ('awaiting-tasheer-code').
  *
  * Only for girls whose visa is made: the E.No column is her visa
  * application number.
@@ -256,8 +256,8 @@ const pressLogin = (page) => page.evaluate(() => {
 // Tasheer's captcha picture goes into a notification and a task (the PC's bar
 // and the phones) with a code box; what is typed there goes into Tasheer's
 // box here and LOGIN (or Confirm) is pressed. Nobody opens the Tasheer tab for
-// a code. No answer in 5 minutes: the call goes and the caller pauses.
-export const CODE_WAIT_MS = 5 * 60000
+// a code. No answer in 10 minutes: the call goes and the caller pauses.
+export const CODE_WAIT_MS = 10 * 60000
 
 /** Marks Tasheer's captcha box (data-adal-tcap) and its picture (data-adal-tcap-img); the picture's src when it is a data: one. */
 function markCaptcha(page) {
@@ -355,7 +355,7 @@ async function loginCodeWanted(page) {
   return !!(m.box && m.pic && !m.value)
 }
 /** A run's pause for a code nobody typed (runTasheer turns it into a clean pause). */
-const codePause = () => Object.assign(new Error('Nobody typed the Tasheer code within 5 minutes'), { pauseReason: 'awaiting-tasheer-code' })
+const codePause = () => Object.assign(new Error('Nobody typed the Tasheer code within 10 minutes'), { pauseReason: 'awaiting-tasheer-code' })
 
 /**
  * The dialog is up: SUBMIT (the person's, or ours after `graceMs`), the same
@@ -386,7 +386,7 @@ export async function afterConcurrentLogin(page, user, pass, { say = () => {}, g
   if (c.kind === 'text' && ask) {
     const r = await ask('Tasheer (Concurrent Login): type the new code')
     if (r === 'typed') return 'logged-in-pressed'
-    if (r === 'expired' || r === 'gone') { say(r === 'expired' ? 'nobody typed the code within 5 minutes' : 'the sign-in page went away', 'warn'); return 'no-captcha-typed' }
+    if (r === 'expired' || r === 'gone') { say(r === 'expired' ? 'nobody typed the code within 10 minutes' : 'the sign-in page went away', 'warn'); return 'no-captcha-typed' }
     // 'no-picture' / 'no-asker': the person types it in the tab, as before.
   }
   if (c.kind !== 'none') {
@@ -469,7 +469,7 @@ async function signIn(page, ctx) {
     }
     const byNotice = await loginCodeWanted(page)
     if (byNotice) {
-      await ctx.notify(`🛂 ${ctx.groupTitle}: Tasheer sign-in code`, 'Type the code from the picture in the notification; Adal Keep signs in to Tasheer and goes on by itself. The call goes after 5 minutes without an answer.', 'warn')
+      await ctx.notify(`🛂 ${ctx.groupTitle}: Tasheer sign-in code`, 'Type the code from the picture in the notification; Adal Keep signs in to Tasheer and goes on by itself. The call goes after 10 minutes without an answer.', 'warn')
       const r = await askLogin('Tasheer sign-in: type the code')
       if (r !== 'typed') {
         await page.bringToFront().catch(() => {})
@@ -616,7 +616,7 @@ export async function runTasheer(page, ctx) {
   // The person presses Submit: the upload page (Option 1) comes.
   log(ctx, '⏳ waiting for the day, the time and Submit')
   // A captcha on the scheduling page (before Confirm) comes by notification
-  // too: typed here and Confirm pressed. Not answered in 5 minutes: it is left
+  // too: typed here and Confirm pressed. Not answered in 10 minutes: it is left
   // to the person, who is in the tab for the day and the time anyway.
   let pickAsks = 0
   const pickWatch = async () => {
@@ -626,7 +626,7 @@ export async function runTasheer(page, ctx) {
       if (m.box && m.pic && !m.value) {
         pickAsks++
         const r = await captchaByNotice(page, ctx, { title: 'Tasheer appointment: type the code', press: 'confirm', gone: async () => uploadShown(page) })
-        if (r === 'expired') { pickAsks = 3; log(ctx, 'nobody typed the code within 5 minutes — type it in the Tasheer tab', 'warn') }
+        if (r === 'expired') { pickAsks = 3; log(ctx, 'nobody typed the code within 10 minutes — type it in the Tasheer tab', 'warn') }
       }
     }
     return false

@@ -20,7 +20,7 @@ import path from 'path'
 import { spawn } from 'child_process'
 import { fileURLToPath } from 'url'
 import { getBrowser, openBrowserIfAny } from './browser.js'
-import { needPerson, askCaptcha, doneWith, waiting, isWaiting, onWait, onTaskExpired, forgetRun } from './attention.js'
+import { needPerson, askCaptcha, doneWith, waiting, isWaiting, onWait, onTaskExpired, keepWhile, forgetRun } from './attention.js'
 import { runFullWorkflow } from './lmisWorkflow.js'
 import { decideAgencyActions } from './jev/agencyManager.js'
 import { getActiveEmployee } from './activeEmployee.js'
@@ -85,22 +85,24 @@ export function beepFor(runId) {
 }
 export const _forgetBeep = (runId) => _beeped.delete(Number(runId))
 
-// A human step nobody answered in 5 minutes (attention.js): the run stops
+// A human step nobody answered in 10 minutes (attention.js): the run stops
 // before its next step — nothing half-sent — and waits, paused, for a person
 // to press Continue. Its tab stays as it is.
 const _expired = new Set()
 export const pausedForNoAnswer = (runId) => _expired.has(Number(runId))
-export const NO_ANSWER = 'No answer for 5 minutes: paused before anything was sent. Press Continue when someone is there.'
+export const NO_ANSWER = 'No answer for 10 minutes: paused before anything was sent. Press Continue when someone is there.'
 let _expiryHooked = false
 function hookTaskExpiry(db) {
   if (_expiryHooked) return
   _expiryHooked = true
+  // A person is at its tab now (the live view, a click): the call stays, never paused under their hand.
+  keepWhile((id) => { const p = tabOfRun(id); return !!p && Date.now() - Math.max(p.__adalLookedAt || 0, p.__adalInputAt || 0) < 60000 })
   onTaskExpired(async (runId, task) => {
     const row = await db('automation_queue').where('id', runId).first('status').catch(() => null)
     if (row?.status !== 'running') return          // paused already: only its task goes
     _expired.add(Number(runId))
     markCancelled(runId)
-    console.log(`[worker] run #${runId}: "${task?.title}" had no answer for 5 minutes — pausing`)
+    console.log(`[worker] run #${runId}: "${task?.title}" had no answer for 10 minutes — pausing`)
   })
 }
 
@@ -212,7 +214,7 @@ async function executeRun(db, page, job) {
   }
 
   const handleCancelled = async () => {
-    // Stopped because a human step had no answer for 5 minutes: paused, not cancelled.
+    // Stopped because a human step had no answer for 10 minutes: paused, not cancelled.
     if (_expired.delete(Number(runId))) {
       try {
         await db('automation_queue').where('id', runId).update({ status: 'paused', pause_reason: NO_ANSWER, updated_at: new Date().toISOString() })
@@ -270,7 +272,7 @@ async function executeRun(db, page, job) {
   const notify = async (title, body, level = 'info', opts = {}) => {
     try {
       // A human step (sign-in, code, captcha, Save) is a task of the run (attention.js),
-      // gone when answered or after 5 minutes: no lasting notice for it.
+      // gone when answered or after 10 minutes: no lasting notice for it.
       const human = !!(opts.login || opts.confirm)
       const [taskId] = human ? [Date.now()] : await db('tasks').insert({
         type: 'automation', title, description: body || '',
@@ -358,7 +360,7 @@ async function executeRun(db, page, job) {
   ctx.isCancelled = () => isCancelled(runId)
   // Enjaz (the visa platform): the captcha goes to this PC first (a Windows
   // notification with its picture); nobody in 30 s → to the phones. Nobody in
-  // 5 minutes → its task goes and the run is paused (attention.js, hookTaskExpiry).
+  // 10 minutes → its task goes and the run is paused (attention.js, hookTaskExpiry).
   const enjaz = /^mofa/.test(String(job.workflow_id || ''))
   const ringPhones = (opts) => import('./liveChannel.js').then(L => L.broadcast({ t: 'ring', id: Date.now(), title: opts?.title || 'Type the captcha', profile_id: job.profile_id, run: runId, at: Date.now() })).catch(() => {})
   const stillAsked = () => waiting().some(w => w.run_id === Number(runId) && w.asks)
@@ -373,7 +375,7 @@ async function executeRun(db, page, job) {
       ringPhones(opts)
     }, 30_000)
   }
-  // A code asked by notification and not answered in time (Tasheer, 5 minutes):
+  // A code asked by notification and not answered in time (Tasheer, 10 minutes):
   // the call goes from the bar and the phones, and its task is closed.
   ctx.forgetCaptcha = () => {
     doneWith(runId, { force: true })
@@ -381,7 +383,7 @@ async function executeRun(db, page, job) {
       .update({ status: 'done', updated_at: new Date().toISOString() }).catch(() => {})
   }
   // A field the run cannot do without: asked as a task, kept on the profile,
-  // and the run goes on. No answer in 5 minutes: the run is paused (it stops here).
+  // and the run goes on. No answer in 10 minutes: the run is paused (it stops here).
   ctx.askField = (column, title, choices) => new Promise((resolve, reject) => {
     const watch = setInterval(() => { if (isCancelled(runId)) { clearInterval(watch); reject(Object.assign(new Error('Stopped'), { cancelled: true })) } }, 1000)
     watch.unref?.()
@@ -781,7 +783,7 @@ export async function signInLanes(db, now = Date.now(), { tabLive = _tabLive } =
     .select('id', 'workflow_id', 'account_id', 'context', 'pause_reason').catch(() => [])
   // Only while its tab is really there: a run whose browser is gone (closed, restarted) holds nothing
   // (2026-11-24: the robot browser died, 4 runs stayed "waiting for the sign-in" and held 25 others).
-  // (Also a sign-in nobody answered in 5 minutes, NO_ANSWER: its tab still waits at the box — the next run
+  // (Also a sign-in nobody answered in 10 minutes, NO_ANSWER: its tab still waits at the box — the next run
   // would only open a second sign-in tab beside it and call again.)
   const lanes = new Set(rows.filter(r => (SIGN_IN_WAIT.test(String(r.pause_reason || '')) || r.pause_reason === NO_ANSWER) && tabLive(r.id)).map(laneOf).filter(Boolean))
   // Forms waiting for a person's Save: each holds a tab with its filled form (8 Musaned tabs on this PC,

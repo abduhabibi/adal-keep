@@ -76,7 +76,9 @@ export async function waitForTick(page, { onForm, submit, refill = null, restart
     if (tell) await again?.(why)
     return true
   }
-  while (Date.now() < deadline) {
+  // (A person at the tab now is not cut off: as long again at most.)
+  const atIt = () => Date.now() - Math.max(page.__adalLookedAt || 0, page.__adalInputAt || 0) < 60000
+  while (Date.now() < deadline || (Date.now() < deadline + timeoutMs && atIt())) {
     if (isCancelled?.()) { const e = new Error('Cancelled by user'); e.cancelled = true; throw e }
     // Its tab or its browser is gone (closed, crashed): nothing to wait for (the run goes back in line).
     let gone = false

@@ -31,7 +31,7 @@ export default function TasksPage() {
   const [busyId, setBusyId] = useState(null)
   const [dragId, setDragId] = useState(null)
   const [overCol, setOverCol] = useState(null)
-  const [calls, setCalls] = useState([])   // runs waiting for a person right now (they expire after 5 minutes)
+  const [calls, setCalls] = useState([])   // runs waiting for a person right now (they expire after 10 minutes)
 
   const load = async () => {
     try {

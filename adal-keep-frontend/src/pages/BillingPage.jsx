@@ -4,7 +4,7 @@ import PageHeader from '../components/shared/PageHeader'
 import PaymentInstructions, { useBilling } from '../components/PaymentInstructions'
 
 /** Billing: when the licence ends, how to pay, and the payments Adal marked received (flag "billing"). */
-const STATE = { trial: 'Free trial', active: 'Paid', locked: 'Ended', suspended: 'Suspended' }
+const STATE = { trial: 'Free trial', active: 'Paid', ended: 'Ended', locked: 'Locked', suspended: 'Locked by Adal' }
 const day = (iso) => iso ? new Date(iso).toLocaleDateString([], { dateStyle: 'medium' }) : '—'
 
 function ReceiptUpload() {
@@ -44,7 +44,7 @@ export default function BillingPage() {
               <p className="mt-1 text-lg font-bold">{b.suspended ? STATE.suspended : STATE[b.mode] || '—'}{b.for_good ? ' · for good' : ''}</p>
               {b.ends_at
                 ? <p className="mt-1 text-sm">{b.mode === 'trial' ? 'The trial ends' : 'Renewal date'}: <b>{day(b.ends_at)}</b>{b.days_left != null && <> — {b.days_left} day{b.days_left === 1 ? '' : 's'} left</>}</p>
-                : !b.for_good && <p className="mt-1 text-sm text-slate-500">Pay below to open Adal Keep again.</p>}
+                : !b.for_good && <p className="mt-1 text-sm text-slate-500">The time has ended. Adal Keep goes on working; pay below to renew.</p>}
               <p className="mt-1 text-xs text-slate-500">You are reminded in the app 7 days, 3 days, 1 day and 12 hours before it ends.</p>
             </section>
             <section className="panel rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-800">

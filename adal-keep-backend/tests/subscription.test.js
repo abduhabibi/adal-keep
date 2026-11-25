@@ -35,14 +35,14 @@ test('a code opens only the PC it was made for, and only for about a minute', ()
   assert.equal(codeMatches('091835', code, now, ''), false)       // no licence key
 })
 
-test('trial → locked after the trial days; a clock set back never locks', () => {
+test('trial → ended after the trial days (never locked); a clock set back never locks', () => {
   const now = Date.now()
   assert.equal(computeMode({ installation_date: now - (TRIAL_DAYS - 1) * DAY, last_seen: now }), 'trial')
-  assert.equal(computeMode({ installation_date: now - (TRIAL_DAYS + 1) * DAY, last_seen: now }), 'locked')
+  assert.equal(computeMode({ installation_date: now - (TRIAL_DAYS + 1) * DAY, last_seen: now }), 'ended')
   assert.equal(computeMode({ installation_date: now - DAY, last_seen: now + 2 * DAY }), 'trial')   // the clock was set back: counted from the last time seen, not locked
   assert.equal(computeMode({ installation_date: now - 99 * DAY, paid_until: now + DAY, paid_proof: paidProof(pcNumber(), now + DAY) }), 'active')
-  assert.equal(computeMode({ installation_date: now - 99 * DAY, paid_until: now + DAY }), 'locked')   // a date without its proof
-  assert.equal(computeMode({ installation_date: now - 99 * DAY, unlocked_pc: pcNumber(), unlock_proof: 'forged' }), 'locked')
+  assert.equal(computeMode({ installation_date: now - 99 * DAY, paid_until: now + DAY }), 'ended')   // a date without its proof
+  assert.equal(computeMode({ installation_date: now - 99 * DAY, unlocked_pc: pcNumber(), unlock_proof: 'forged' }), 'ended')
 })
 
 test('internet time: how far the PC clock is off, from a Date header', async () => {

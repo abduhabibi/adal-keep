@@ -83,7 +83,7 @@ function TrialBanner({ days, renew }) {
       <button type="button" onClick={() => setOpen(true)}
         className="lock-button fixed top-0 left-0 right-0 z-[9999] !rounded-none !py-2 !text-sm">
         {renew ? `Your 6 paid months end in ${days} day${days === 1 ? '' : 's'} — renew now →`
-          : `Your free trial ends in ${days} day${days === 1 ? '' : 's'} — unlock Adal Keep now →`}
+          : `Your free trial ends in ${days} day${days === 1 ? '' : 's'} — how to pay →`}
       </button>
       {open && <Suspense fallback={null}><LockScreen onClose={() => setOpen(false)} /></Suspense>}
     </>
@@ -157,7 +157,7 @@ function Shell() {
     )
   }
 
-  // After the free trial nothing else is shown until this PC is unlocked.
+  // Locked by Adal (Adal Keep Admin): nothing else is shown until Adal unlocks it. Nothing else locks.
   if (subscription?.mode === 'locked') return <>{toaster}<Suspense fallback={null}><LockScreen /></Suspense></>
   // A Companion install joins an agency (its own full copy) instead of starting one.
   if (state === 'join') return <>{toaster}<Suspense fallback={null}><JoinAgency /></Suspense></>

@@ -30,7 +30,7 @@
  *   • The licence lives with the role: the holder writes its licence state
  *     (sync_role 'licence', signed with the licence key every build has), and
  *     the other PCs follow it — they open while it is paid or in its trial,
- *     and lock or show "suspended" with it.
+ *     and lock only with Adal's own signed lock in it (subscription.js).
  */
 import crypto from 'crypto'
 import os from 'os'
@@ -207,11 +207,14 @@ export class Roles {
     return crypto.createHmac('sha256', key || 'no-key').update(`adal-keep-agency-licence:${canonical(data)}`).digest('hex')
   }
   /** The main PC: its licence state for every PC of the agency (only when it changed). */
-  async publishLicence(st) {
+  async publishLicence(st, adal = null) {
     await this.refresh()
     if (!this.isMain() || !st) return false
     const data = {
-      mode: st.mode, trialEndsAt: st.trialEndsAt || null, paidUntil: st.paidUntil || null, forGood: !!st.forGood,
+      mode: st.mode, trialEndsAt: st.trialEndsAt || null, paidUntil: st.paidUntil || null,
+      // PCs on an older version lock when the trial or the paid time they read here is over: "for good" keeps
+      // them open (never lock, 2026-11-25). Newer PCs read paidForGood, and Adal's signed file for a lock.
+      forGood: !st.suspended, paidForGood: !!st.forGood, ...(adal ? { adal } : {}),
       suspended: !!st.suspended, suspendedAt: st.suspendedAt || null, suspendNote: st.suspendNote || '', pcNumber: st.pcNumber || null,
     }
     const old = this.cache?.licence?.data

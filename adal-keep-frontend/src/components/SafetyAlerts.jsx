@@ -68,7 +68,7 @@ export default function SafetyAlerts() {
             <p id="licence-step-title" className="text-base font-bold text-slate-900 dark:text-white">
               ⏰ {s?.licence?.mode === 'trial' ? 'The free trial' : 'Adal Keep\'s paid time'} ends in {leftText(step.left)}
             </p>
-            <p className="mt-2">It ends on <b>{new Date(step.end).toLocaleString()}</b>. After that Adal Keep locks until it is renewed (nothing is deleted).</p>
+            <p className="mt-2">It ends on <b>{new Date(step.end).toLocaleString()}</b>. Adal Keep goes on working after that; please renew.</p>
             {s?.licence?.seller_phone && (
               <p className="mt-2">Call <b>{s.licence.seller_phone}</b> and say PC number <b>{s.licence.pc_number}</b>{s.licence.price_etb ? ` (${Number(s.licence.price_etb).toLocaleString('en')} ETB for 6 months)` : ''}.</p>
             )}

@@ -4,9 +4,8 @@ import api from '../services/api'
 import PaymentInstructions, { useBilling } from './PaymentInstructions'
 
 /**
- * The paywall. After the 3-week trial the server refuses everything until
- * this PC is unlocked; this screen is all that shows. During the trial the
- * same screen opens from the banner (with a close button).
+ * How to pay: opened from the banner or Settings (with a close button). It never
+ * stands in the way: only Adal's lock ("Adal Keep is locked" below) does.
  *
  * Unlock: pay with the QR → call the seller, say the PC number → type the
  * 6-digit Google Authenticator code they read out.
@@ -170,7 +169,6 @@ export default function LockScreen({ onClose }) {
   const phone = subscription?.sellerPhone || '0995668080'
   const billing = useBilling()
   const price6 = billing?.enabled ? billing.plan_price_etb : (subscription?.priceEtb || 30000)
-  const locked = subscription?.mode === 'locked'
 
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 15000); return () => clearInterval(t) }, [])
   useEffect(() => { if (paid) inputRef.current?.focus() }, [paid])
@@ -197,14 +195,14 @@ export default function LockScreen({ onClose }) {
   // Suspended by Adal (Adal Keep Admin): nothing to pay or type here; only Adal allows it again.
   // Everything on this PC is kept as it is.
   if (subscription?.suspended) return (
-    <div className="lock-screen fixed inset-0 z-[10000] overflow-y-auto" role="dialog" aria-modal="true" aria-label="Adal Keep is suspended">
+    <div className="lock-screen fixed inset-0 z-[10000] overflow-y-auto" role="dialog" aria-modal="true" aria-label="Adal Keep is locked">
       <div className="lock-backdrop" aria-hidden="true"><span /><span /><span /></div>
       <div className="relative min-h-full flex items-center justify-center px-4 py-8">
         <div className="lock-frame w-full max-w-xl">
           <div className="lock-card p-6 sm:p-10 text-center">
             <div className="text-5xl" aria-hidden="true">⏸️</div>
-            <h1 className="mt-4 text-2xl sm:text-3xl font-extrabold text-white">Adal Keep is suspended</h1>
-            <p className="mt-3 text-slate-300">Adal has suspended Adal Keep on this PC. Nothing is deleted: all your profiles, documents and settings are kept, and everything works again as soon as Adal allows it.</p>
+            <h1 className="mt-4 text-2xl sm:text-3xl font-extrabold text-white">Adal Keep is locked</h1>
+            <p className="mt-3 text-slate-300">Adal has locked Adal Keep on this PC. Nothing is deleted: all your profiles, documents and settings are kept, and everything works again as soon as Adal allows it.</p>
             {subscription.suspendNote && <p className="mt-4 rounded-xl bg-white/10 px-4 py-3 text-white">{subscription.suspendNote}</p>}
             <p className="mt-5 text-slate-300">Call Adal: <a className="font-bold text-white" href={`tel:${phone}`}>{phone}</a> · PC number <span className="font-mono font-bold text-white">{pc}</span></p>
             {subscription.suspendedAt && <p className="mt-2 text-xs text-slate-400">Since {new Date(subscription.suspendedAt).toLocaleString()}</p>}
@@ -246,9 +244,8 @@ export default function LockScreen({ onClose }) {
             <div className="flex flex-col gap-5 min-w-0">
               <div>
                 <span className="lock-pill">
-                  {locked
-                    ? (subscription?.clockBack ? 'This PC\'s clock was set back — Adal Keep is locked'
-                      : subscription?.paidUntil ? `Your ${subscription?.paidMonths || 6} paid months ended on ${new Date(subscription.paidUntil).toLocaleDateString()} — renew to go on`
+                  {subscription?.mode === 'ended'
+                    ? (subscription?.paidUntil ? `Your ${subscription?.paidMonths || 6} paid months ended on ${new Date(subscription.paidUntil).toLocaleDateString()} — renew to go on`
                       : `Your ${subscription?.trialDays || 21}-day free trial has ended`)
                     : subscription?.mode === 'active' && subscription?.paidUntil
                       ? `Paid until ${new Date(subscription.paidUntil).toLocaleDateString()} · ${subscription.paidDaysLeft} day${subscription.paidDaysLeft === 1 ? '' : 's'} left — renew now and the 6 months are added on`

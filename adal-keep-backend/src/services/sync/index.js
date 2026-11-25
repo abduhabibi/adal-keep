@@ -164,6 +164,8 @@ let roleBusySince = 0
 function startAutoRole() {
   const step = async () => {
     if (!node || node.cutOff) return
+    // Locked by Adal: the main role is not taken (a locked PC is no agency's main PC).
+    if ((await import('../subscription.js')).isAppLocked()) return
     const r = await node.roles[node.equal ? 'autoStepEqual' : 'autoStep']({
       // Handing back waits for the robots' runs going here, at most 10 minutes (the run limit).
       canHandBack: async () => {
@@ -240,10 +242,13 @@ export async function reconcileRole({ restart = false } = {}) {
 function startLicencePublisher() {
   const go = async () => {
     const { statusPayload } = await import('../subscription.js')
-    await node.roles.publishLicence(statusPayload())
+    const { licenseFile } = await import('../plans.js')
+    await node?.roles.publishLicence(statusPayload(), licenseFile())
   }
   go().catch(() => {})
-  const t = setInterval(() => go().catch(() => {}), 30 * 60 * 1000); t.unref?.()
+  // A lock (or an unlock) from Adal goes to the other PCs at once.
+  import('../subscription.js').then(s => s.onLicenseChanged(() => go().catch(() => {}))).catch(() => {})
+  const t = setInterval(() => go().catch(() => {}), 60 * 1000); t.unref?.()
 }
 async function followLicence() {
   const sub = await import('../subscription.js')

@@ -4,8 +4,7 @@
 //
 //   - The server itself: while the main PC answers, this program keeps the
 //     main PC's server (Node and the backend, never its data) in server\
-//     (GET /api/companion/server-bundle, again when the main PC's version
-//     changes). The agency's data is here already: the locked copy (replica.go).
+//     (file by file from the signed release Main runs, lanupdate.go). The agency's data is here already: the locked copy (replica.go).
 //   - Standing in: when the main PC has not answered for 5 minutes, and is not
 //     alive anywhere else (its heartbeat online), ONE Companion of the office —
 //     the strongest with a copy and the server, agreed on the network
@@ -52,7 +51,7 @@ var (
 	actingPort     = envInt("ADAL_ACTING_PORT", 4140) // the server standing in, on 127.0.0.1 only
 	officePort     = envInt("ADAL_OFFICE_PORT", 4000) // what the office reaches (this program)
 	standbyUDPPort = envInt("ADAL_STANDBY_UDP", 45456)
-	bundleEvery    = 30 * time.Minute // a 304 when nothing changed: cheap
+	bundleEvery    = 30 * time.Minute
 )
 
 const standbyMagic = "ADAL_STANDBY_V1"
@@ -166,6 +165,7 @@ func startStandby(root string) {
 	}
 	s := &standbyRunner{root: root, peers: map[string]standbyPeer{}, mainSeen: time.Now(), myID: companionOwnID(root)}
 	s.load()
+	tidyServer(root)
 	standby = s
 	go s.listen()
 	go s.announce()
@@ -190,107 +190,21 @@ func kickBundle() {
 	}
 }
 
+// bundleLoop: the server kept here comes file by file from Main's signed release (lanupdate.go).
+// (Until 2026-11-25 it was Main's whole server, unsigned, again at every version.)
 func (s *standbyRunner) bundleLoop() {
 	time.Sleep(2 * time.Minute)
 	for {
 		learnNumberOnline(s.root)
-		// Only for this PC's own full copy (switched on per agency, full.go); never from another
-		// Companion (2026-11-23: no update pieces between the office's PCs).
-		if !standbyActing() && fullCopyAllowed(s.root) {
-			var err error
-			if hostServer != "" && pingServer() {
-				err = s.fetchBundle()
-			}
-			if err != nil {
-				log.Printf("🏢 server copy: %v", err)
-			}
-		}
-		wait := bundleEvery
-		if !hasServer(s.root) {
-			wait = 15 * time.Minute // none yet: soon again
-		}
 		select {
 		case <-bundleKick:
-			time.Sleep(90 * time.Second) // the main PC installs it too, then has the same version
-		case <-time.After(wait):
+			select {
+			case lanKick <- struct{}{}:
+			default:
+			}
+		case <-time.After(bundleEvery):
 		}
 	}
-}
-
-var bundleClient = &http.Client{Timeout: 30 * time.Minute}
-
-func (s *standbyRunner) fetchBundle() error {
-	key, err := mainAccessKey(false)
-	if err != nil {
-		return err
-	}
-	req, _ := http.NewRequest(http.MethodGet, strings.TrimRight(hostServer, "/")+"/api/companion/server-bundle", nil)
-	req.Header.Set("x-adal-pc", key)
-	s.mu.Lock()
-	have := s.st.BundleVersion
-	s.mu.Unlock()
-	if have != "" && hasServer(s.root) {
-		req.Header.Set("If-None-Match", `"`+have+`"`)
-	}
-	resp, err := bundleClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	switch resp.StatusCode {
-	case http.StatusNotModified:
-		return nil
-	case http.StatusNotFound:
-		return nil // a main PC run by a developer (no runtime there)
-	case http.StatusOK:
-	default:
-		return fmt.Errorf("the main PC answered %d", resp.StatusCode)
-	}
-	return s.installBundle(resp.Body, resp.Header.Get("X-Adal-Version"))
-}
-
-// installBundle: a server (as tar.gz) unpacked beside the one here and put in
-// place (when this PC does not stand in now), this PC's data folder kept.
-func (s *standbyRunner) installBundle(body io.Reader, ver string) error {
-	part := filepath.Join(s.root, "server-bundle.tgz.part")
-	f, err := os.Create(part)
-	if err != nil {
-		return err
-	}
-	n, err := io.Copy(f, body)
-	f.Close()
-	if err != nil {
-		os.Remove(part)
-		return err
-	}
-	newDir := serverDir(s.root) + ".new"
-	os.RemoveAll(newDir)
-	if err := os.MkdirAll(newDir, 0o755); err != nil {
-		return err
-	}
-	cmd := exec.Command(windowsTar(), "-xzf", part, "-C", newDir)
-	hideWindow(cmd)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		os.RemoveAll(newDir)
-		os.Remove(part)
-		return fmt.Errorf("unpacking the server: %v %s", err, strings.TrimSpace(string(out)))
-	}
-	os.Remove(part)
-	openSettings(newDir)
-	log.Printf("🏢 The main PC's server is kept here (%d MB, version %.7s)", n>>20, ver)
-	s.mu.Lock()
-	s.st.BundleVersion, s.st.BundleAt = ver, time.Now().UTC().Format(time.RFC3339)
-	s.save()
-	acting := s.st.Acting
-	s.mu.Unlock()
-	if !acting {
-		// Its own copy's server runs from that folder: stopped for the swap, started again by fullLoop.
-		swapMu.Lock()
-		defer swapMu.Unlock()
-		s.stopFull()
-		return s.swapServer()
-	}
-	return nil
 }
 
 // swapServer: the new server in place; this PC's own data folder kept.

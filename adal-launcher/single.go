@@ -9,6 +9,8 @@ package main
 import (
 	"strings"
 	"syscall"
+	"time"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -57,4 +59,41 @@ func focusAppWindow(root string) bool {
 	}
 	pSetForegroundWindow.Call(h)
 	return true
+}
+
+var programStart = time.Now()
+
+// openingNow: no other AdalKeep.exe is opening the window at this moment. A second click does not
+// wait for the first one: its window may be closed (X) by then, and must not come back.
+func openingNow() (release func(), ok bool) {
+	name, _ := windows.UTF16PtrFromString(`Local\AdalKeepOpening`)
+	h, err := windows.CreateMutex(nil, false, name)
+	if h == 0 {
+		return func() {}, true // (cannot tell: as before)
+	}
+	if err == windows.ERROR_ALREADY_EXISTS {
+		windows.CloseHandle(h)
+		return nil, false
+	}
+	return func() { windows.CloseHandle(h) }, true
+}
+
+// profileHolders: the browsers that have this profile open, with a window or (closing) without.
+func profileHolders(profile string) (pids []uint32) {
+	snap, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
+	if err != nil {
+		return nil
+	}
+	defer windows.CloseHandle(snap)
+	var e windows.ProcessEntry32
+	e.Size = uint32(unsafe.Sizeof(e))
+	for err = windows.Process32First(snap, &e); err == nil; err = windows.Process32Next(snap, &e) {
+		switch strings.ToLower(windows.UTF16ToString(e.ExeFile[:])) {
+		case "adalbrowser.exe", "brave.exe", "chrome.exe", "msedge.exe":
+			if holdsProfile(commandLine(e.ProcessID), profile) {
+				pids = append(pids, e.ProcessID)
+			}
+		}
+	}
+	return pids
 }

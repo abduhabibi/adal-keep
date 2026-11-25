@@ -195,28 +195,25 @@ func openAppWindow(root, url string) {
 	if u, err := neturl.Parse(url); err == nil && u.Scheme == "http" && u.Hostname() != "localhost" && u.Hostname() != "127.0.0.1" {
 		args = append(args, "--unsafely-treat-insecure-origin-as-secure="+u.Scheme+"://"+u.Host)
 	}
-	// One that cannot start must not leave the person with nothing: the next one opens.
-	for _, b := range browsers() {
-		cmd := exec.Command(b, args...)
-		if err := cmd.Start(); err != nil {
-			logf("could not start %s: %v", b, err)
-			continue
-		}
-		done := make(chan error, 1)
-		go func() { done <- cmd.Wait() }()
-		select {
-		case err := <-done:
-			if err != nil { // a clean end only means a window was already open
-				logf("%s stopped at once: %v", filepath.Base(b), err)
-				continue
-			}
-		case <-time.After(4 * time.Second):
-		}
-		logf("opened %s in %s (app window)", url, filepath.Base(b))
+	// Another click is opening it this very moment: that one does (one window, single.go).
+	release, mine := openingNow()
+	if !mine {
+		logf("Adal Keep's window is being opened already")
 		return
 	}
-	logf("no browser could open — using the default one")
-	exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
+	defer release()
+	logf("opening %s", url)
+	o := windowOpener{
+		browsers: browsers(), args: args, log: logf,
+		focus:   func() bool { return focusAppWindow(root) },
+		holders: func() []uint32 { return profileHolders(profile) },
+		wait:    profileWait(), shown: 10 * time.Second, step: 250 * time.Millisecond,
+	}
+	// The default browser: only for the click this program was started by, never later by itself.
+	if time.Since(programStart) < 2*time.Minute {
+		o.lastResort = func() { exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start() }
+	}
+	o.open()
 }
 
 // followedMainURL: on a full install, the main PC chosen in Settings → Main PC

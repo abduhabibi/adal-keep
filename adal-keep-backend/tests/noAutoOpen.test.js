@@ -69,6 +69,14 @@ test('Windows: opening Adal Keep again brings its window to the front, never a s
   const launch = open.indexOf('exec.Command(')
   assert.ok(focus > 0 && focus < launch, 'openAppWindow looks for the open window before starting a browser')
   assert.match(read('adal-launcher/single.go'), /SetForegroundWindow/)
+  // A profile in use (the last window still closing) is waited for: looked for before each new try, one opener at a
+  // time, and the default browser only for the click the program was started by (openwindow.go).
+  assert.ok(open.indexOf('openingNow()') > focus && open.indexOf('openingNow()') < launch, 'one opener at a time')
+  assert.match(open, /time\.Since\(programStart\) < 2\*time\.Minute \{\s*o\.lastResort = /)
+  const ow = read('adal-launcher/openwindow.go')
+  const again = goFunc(ow, '(o windowOpener) again')
+  assert.ok(again.lastIndexOf('o.focus()') < again.lastIndexOf('o.start(b)') && again.lastIndexOf('o.focus()') > 0, 'the window is looked for before every new try')
+  assert.ok(!/rundll32|xdg-open/.test(ow))
 })
 
 test('the installer starts only the server; its window opens from the icon or the finish box', () => {

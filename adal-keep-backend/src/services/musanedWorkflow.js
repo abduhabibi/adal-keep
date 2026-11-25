@@ -19,6 +19,7 @@ import {
   reviewMusanedScreen, reviewStageComplete, reviewPreCheckReady,
 } from './jev/musanedDecisions.js'
 import { pasteText, pasteAndCommit } from './domPaste.js'
+import { pasteOn, setAll, waitSign, waitOn, lastKey, noPanel, FIRST_OPTION_IS, LABEL_IN_PAGE, INPUT_IN_PAGE } from './pasteAll.js'
 import { isPeerUrl, expectFile, disarmFile, signInTurn, borrowSignIn, toEnglish, typeCodeInto, pressCodeButton, codeBoxUp } from './tabManager.js'
 import { newRunTab } from './browser.js'
 import { musanedMissing, personalPhotoFile } from './musanedPreflight.js'
@@ -847,7 +848,7 @@ async function findInOurList(page, ctx, passport) {
     const input = await filter.$('textarea, input')
     if (!input) return false
     await input.evaluate(i => { i.focus(); i.value = '' })
-    await input.type(passport, { delay: 40 })
+    await lastKey(page, input, passport, { delay: 40 })
     await input.press('Enter')
     await page.waitForNetworkIdle({ idleTime: 800, timeout: 20000 }).catch(() => {})
     await sleep(1200)
@@ -894,72 +895,20 @@ async function stopAlreadyRegistered(page, ctx, r, secs) {
 // v16.7 HELPERS
 // ============================================================================
 
-async function findLabelEl(page, labelText) {
-  const h = await page.evaluateHandle((lbl) => {
-    const norm = (s) => (s || '').toLowerCase().replace(/\s+/g, ' ').replace(/\s*\*\s*$/, '').trim()
-    const target = norm(lbl)
-    const labels = Array.from(document.querySelectorAll('label'))
-    let m = labels.find(l => norm(l.textContent) === target)
-    if (!m) m = labels.find(l => norm(l.textContent).includes(target))
-    return m || null
-  }, labelText)
-  return h.asElement()
+async function findInputForLabel(page, labelText) {
+  const labelEl = (await page.evaluateHandle(LABEL_IN_PAGE, labelText)).asElement()
+  if (!labelEl) return { input: null, labelEl: null, reason: 'label-not-found' }
+  const input = (await labelEl.evaluateHandle(INPUT_IN_PAGE)).asElement()
+  return { input, labelEl, reason: input ? null : 'input-not-found' }
 }
 
-async function findInputForLabel(page, labelText) {
-  const labelEl = await findLabelEl(page, labelText)
-  if (!labelEl) return { input: null, labelEl: null, reason: 'label-not-found' }
-
-  const inputHandle = await labelEl.evaluateHandle((label) => {
-    const isUsable = (i) => i && !i.disabled &&
-      !['radio','checkbox','file','hidden'].includes(i.type)
-
-    const keys = new Set()
-    const forId = label.getAttribute('for')
-    if (forId) keys.add(forId)
-
-    for (const key of keys) {
-      const t = document.getElementById(key)
-      if (t) {
-        if (t.tagName === 'INPUT' && isUsable(t)) return t
-        const inner = t.querySelector('input:not([type=radio]):not([type=checkbox]):not([type=file]):not([type=hidden])')
-        if (isUsable(inner)) return inner
-      }
-    }
-
-    for (const key of keys) {
-      const byCtl = document.querySelector(`[formcontrolname="${key}"]`)
-      if (byCtl) {
-        if (byCtl.tagName === 'INPUT' && isUsable(byCtl)) return byCtl
-        const inner = byCtl.querySelector('input:not([type=radio]):not([type=checkbox]):not([type=file]):not([type=hidden])')
-        if (isUsable(inner)) return inner
-      }
-    }
-
-    let el = label.nextElementSibling
-    for (let i = 0; i < 6 && el; i++) {
-      if (el.tagName === 'INPUT' && isUsable(el)) return el
-      const inp = el.querySelector?.('input:not([type=radio]):not([type=checkbox]):not([type=file]):not([type=hidden])')
-      if (isUsable(inp)) return inp
-      el = el.nextElementSibling
-    }
-
-    const parent = label.parentElement
-    if (parent) {
-      const inp = parent.querySelector('input:not([type=radio]):not([type=checkbox]):not([type=file]):not([type=hidden])')
-      if (isUsable(inp)) return inp
-    }
-
-    let cur = label.parentElement
-    for (let i = 0; i < 8 && cur; i++) {
-      const inp = cur.querySelector('p-datepicker input, p-calendar input, .p-datepicker-input, .p-autocomplete-input, input.p-inputtext, input.form-control')
-      if (isUsable(inp)) return inp
-      cur = cur.parentElement
-    }
-    return null
-  })
-  const input = inputHandle.asElement()
-  return { input, labelEl, reason: input ? null : 'input-not-found' }
+/** All plain text fields of one part in one step; only what did not keep its value is filled alone, as before. */
+export async function setFieldsByLabel(page, fields, ctx) {
+  const t0 = Date.now()
+  const got = await setAll(page, Object.entries(fields).map(([name, value]) => ({ name, value })))
+  const ok = Object.keys(got).filter(n => got[n] === 'ok')
+  if (ok.length) log(ctx, `✓ ${ok.map(n => `${n} = "${fields[n]}"`).join(' · ')} (pasted together, ${Date.now() - t0} ms)`)
+  for (const [name, value] of Object.entries(fields)) if (got[name] !== 'ok') await setFieldByLabel(page, name, value, ctx)
 }
 
 async function ensureInView(page, input) {
@@ -969,7 +918,7 @@ async function ensureInView(page, input) {
   }).catch(() => false)
   if (!inView) {
     try { await input.evaluate(n => n.scrollIntoView({ block: 'center', behavior: 'instant' })) } catch {}
-    await sleep(350)
+    await waitOn(input, n => { const r = n.getBoundingClientRect(); return r.top >= 0 && r.bottom <= window.innerHeight && r.width > 0 }, null, 350)
   }
 }
 
@@ -978,14 +927,14 @@ async function ensureFocus(page, input, ctx, label) {
 
   try {
     await input.click({ delay: 20 })
-    await sleep(250)
+    await waitOn(input, n => document.activeElement === n, null, 250)
     const ok = await input.evaluate(n => document.activeElement === n)
     if (ok) return { focused: true, method: 'click' }
   } catch (e) { log(ctx, `  ${label}: click() failed: ${e.message}`, 'warn') }
 
   try {
     await input.evaluate(n => { n.focus(); n.click() })
-    await sleep(250)
+    await waitOn(input, n => document.activeElement === n, null, 250)
     const ok = await input.evaluate(n => document.activeElement === n)
     if (ok) return { focused: true, method: 'js-focus' }
   } catch {}
@@ -997,7 +946,7 @@ async function ensureFocus(page, input, ctx, label) {
     })
     if (box && box.x > 0 && box.y > 0) {
       await page.mouse.click(box.x, box.y, { delay: 30 })
-      await sleep(250)
+      await waitOn(input, n => document.activeElement === n, null, 250)
       const ok = await input.evaluate(n => document.activeElement === n)
       if (ok) return { focused: true, method: 'mouse' }
     }
@@ -1081,7 +1030,7 @@ async function clickRadioByLabel(page, labelText, optionText, ctx) {
   }, labelText, optionText)
   if (r.already) { log(ctx, `✓ ${labelText} already "${optionText}"`); return true }
   if (!r.ok) { log(ctx, `✗ ${labelText}: ${r.reason}`, 'warn'); return false }
-  await sleep(200)
+  await waitSign(page, (id) => !!id && !!document.getElementById(id)?.checked, r.id, 200)
   log(ctx, `✓ ${labelText} = "${optionText}" (id=${r.id})`)
   return true
 }
@@ -1092,7 +1041,7 @@ async function closeAnyPanel(page) {
       .forEach(p => { try { p.style.display = 'none' } catch {} })
   }).catch(() => {})
   await page.keyboard.press('Escape').catch(() => {})
-  await sleep(250)
+  await noPanel(page, 250)
 }
 
 async function countSkillChips(page) {
@@ -1176,13 +1125,14 @@ async function typeAndCommitDropdown(page, labelText, optionText, ctx) {
 
   try { await input.click({ clickCount: 3, delay: 20 }) } catch {}
   await page.keyboard.press('Backspace').catch(() => {})
-  await sleep(200)
+  await waitOn(input, n => !n.value, null, 200)
 
   // Paste-like typing (one input event) → the autocomplete panel filters once.
   try { await pasteText(page, input, String(optionText)) } catch (e) {
     log(ctx, `  ${labelText}: paste failed: ${e.message}`, 'warn')
   }
-  await sleep(800)
+  // Its list is there with the wanted choice first (it searches 0.3 s after the last letter).
+  await waitSign(page, FIRST_OPTION_IS, String(optionText), 800, { min: 350 })
 
   let v = await input.evaluate(n => n.value).catch(() => '')
   log(ctx, `  ${labelText}: typed value = "${v}" (focus via ${f.method})`)
@@ -1218,9 +1168,9 @@ async function typeAndCommitDropdown(page, labelText, optionText, ctx) {
   } else {
     // Attempt 1: ArrowDown + Enter (PrimeNG's official selection)
     await page.keyboard.press('ArrowDown').catch(() => {})
-    await sleep(200)
+    await waitOn(input, n => !!n.getAttribute('aria-activedescendant') || !!document.querySelector('.p-autocomplete-option.p-focus, .p-autocomplete-item.p-highlight, .p-autocomplete-option[data-p-focused="true"], [role="option"].p-focus'), null, 200)
     await page.keyboard.press('Enter').catch(() => {})
-    await sleep(500)
+    await noPanel(page, 500)
 
     v = await input.evaluate(n => n.value).catch(() => '')
     const chipped = chipsBefore && (await chosenChips(page, labelText) || []).some(c => norm(c) === norm(optionText))
@@ -1423,9 +1373,15 @@ async function verifyAndRefill(page, want, ctx) {
   return left
 }
 
+/** A new chip is there (the fixed wait of before at most). */
+async function moreChips(page, had, max) {
+  if (!pasteOn()) return sleep(max)
+  for (const end = Date.now() + max; Date.now() < end;) { if ((await countSkillChips(page)).count > had) return; await sleep(40) }
+}
+
 async function fillSkillsByTyping(page, skills, ctx) {
   await closeAnyPanel(page)
-  await sleep(300)
+  await noPanel(page, 300)
 
   const { input, reason } = await findInputForLabel(page, 'Skills')
   if (!input) { log(ctx, `Skills: ${reason}`, 'warn'); return false }
@@ -1445,7 +1401,7 @@ async function fillSkillsByTyping(page, skills, ctx) {
     // Close any panel from the previous iteration, re-focus
     if (idx > 0) {
       await closeAnyPanel(page)
-      await sleep(300)
+      await noPanel(page, 300)
     }
     const still = await input.evaluate(n => document.activeElement === n).catch(() => false)
     if (!still) {
@@ -1455,7 +1411,7 @@ async function fillSkillsByTyping(page, skills, ctx) {
 
     // Paste-like typing (one input event) → faster panel filtering per skill.
     try { await pasteText(page, input, String(skill)) } catch {}
-    await sleep(900)
+    const first = await waitSign(page, FIRST_OPTION_IS, String(skill), 900, { min: 350 })
 
     // Wait for panel items
     const itemsAppeared = await page.waitForFunction(() => {
@@ -1469,7 +1425,7 @@ async function fillSkillsByTyping(page, skills, ctx) {
       log(ctx, `✗ skill: "${skill}" — no panel items`, 'warn')
       continue
     }
-    await sleep(300)
+    if (!first) await sleep(300)
 
     const c0 = await countSkillChips(page)
 
@@ -1493,7 +1449,7 @@ async function fillSkillsByTyping(page, skills, ctx) {
     // option REPLACED the previous skill (chips stayed at 2 for 6 skills),
     // so they are only a fallback when Tab added nothing.
     await page.keyboard.press('Tab').catch(() => {})
-    await sleep(600)
+    await moreChips(page, c0.count, 600)
     let c1 = await countSkillChips(page)
     if (c1.count <= c0.count) {
       log(ctx, `  skill "${skill}": Tab added nothing — highlighting the match and pressing Tab again`)
@@ -1504,7 +1460,7 @@ async function fillSkillsByTyping(page, skills, ctx) {
         await page.keyboard.press('ArrowDown').catch(() => {})
         await sleep(200)
         await page.keyboard.press('Tab').catch(() => {})
-        await sleep(600)
+        await moreChips(page, c0.count, 600)
         c1 = await countSkillChips(page)
       }
     }
@@ -2282,13 +2238,13 @@ export async function stepFillCandidateDetails(page, ctx) {
 
     // ─── Dropdowns ───────────────────────────────────────────────────
     await typeAndCommitDropdown(page, 'Job', jobTitle, ctx)
-    await sleep(400)
+    await noPanel(page, 400)
     await typeAndCommitDropdown(page, 'Education level', education, ctx)
-    await sleep(400)
+    await noPanel(page, 400)
     await typeAndCommitDropdown(page, 'Languages', languages, ctx)
-    await sleep(400)
+    await noPanel(page, 400)
     await typeAndCommitDropdown(page, 'Experience', experience, ctx)
-    await sleep(400)
+    await noPanel(page, 400)
     let experienceFields = { country: null, years: null }
     if (experience === 'Have experience') {
       experienceFields = await fillExperienceDetails(page, { country: experienceCountry, years: experienceYears }, ctx)
@@ -2299,25 +2255,22 @@ export async function stepFillCandidateDetails(page, ctx) {
     await sleep(500)
 
     // ─── Text fields ─────────────────────────────────────────────────
-    await setFieldByLabel(page, 'Mobile Number', mobileNumber, ctx)
-    await setFieldByLabel(page, 'E-Mail', agencyEmail, ctx)
-    await setFieldByLabel(page, 'Number Of Children', childrenCount, ctx)
+    await setFieldsByLabel(page, { 'Mobile Number': mobileNumber, 'E-Mail': agencyEmail, ...(pasteOn() && passportIssuePlace ? { 'Passport Issue Place': passportIssuePlace } : {}) }, ctx)
+    await setFieldByLabel(page, 'Number Of Children', childrenCount, ctx)   // (a number box of its own kind)
     await enterInField(page, 'Number Of Children', ctx)
 
     // ─── Passport ────────────────────────────────────────────────────
-    if (passportIssuePlace) await setFieldByLabel(page, 'Passport Issue Place', passportIssuePlace, ctx)
+    if (passportIssuePlace && !pasteOn()) await setFieldByLabel(page, 'Passport Issue Place', passportIssuePlace, ctx)
     if (passportIssueDate) {
       await fillDateByLabel(page, 'Passport Issue Date', passportIssueDate, ctx)
     }
     if (passportExpiryDate) await fillDateByLabel(page, 'Passport Expiry Date', passportExpiryDate, ctx)
 
     // ─── Address + Relative ──────────────────────────────────────────
-    await setFieldByLabel(page, 'City', city, ctx)
-    await setFieldByLabel(page, 'Address', address, ctx)
-    await setFieldByLabel(page, 'Relative name', employeeName, ctx)
-    await setFieldByLabel(page, 'Relative kinship', 'cousin', ctx)
-    await setFieldByLabel(page, 'Relative phone', relativePhone, ctx)
-    await setFieldByLabel(page, 'Relative address', relativeAddress, ctx)
+    await setFieldsByLabel(page, {
+      'City': city, 'Address': address, 'Relative name': employeeName, 'Relative kinship': 'cousin',
+      'Relative phone': relativePhone, 'Relative address': relativeAddress,
+    }, ctx)
 
     await clickAcknowledge(page, ctx)
 
@@ -3012,3 +2965,6 @@ async function waitForDashboard(page, ctx, timeoutMs) {
 }
 // For tests (mock Musaned pages): the field fillers.
 export { waitForPersonCaptcha, passOtp, leaveMusaned, checkAccount, signedInUser, logOutInNewTab, typeAndCommitDropdown, fillDateByLabel, readFieldValues, chosenChips, typeAuthenticatorCode, classifyScreen }
+
+/** For the mock-form test (tests/pasteAll.test.js): the form's own helpers. */
+export const _form = { typeAndCommitDropdown, fillSkillsByTyping, setFieldByLabel, enterInField, clickRadioByLabel, fillDateByLabel, readFieldValues }

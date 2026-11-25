@@ -98,7 +98,7 @@ async function search(page, passport, url = LIST_URL) {
   const input = await filter.asElement().$('textarea, input') // Musaned uses a <textarea>
   if (!input) throw new Error('Musaned: the passport search box did not open')
   await input.evaluate(i => { i.focus(); i.value = '' })
-  await input.type(passport, { delay: 40 })
+  await (await import('./pasteAll.js')).lastKey(page, input, passport, { delay: 40 })
   await input.press('Enter')
   // Wait for the list to follow the filter (the chip with the passport shows).
   await page.waitForFunction((p) => (document.body.innerText || '').includes(`Passport Number:`) && (document.body.innerText || '').includes(p), { timeout: 20000 }, passport).catch(() => {})

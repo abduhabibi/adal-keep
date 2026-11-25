@@ -28,6 +28,7 @@
  * Cross-platform: pure Puppeteer/CDP — Windows / macOS / Linux identical.
  */
 import { notNeeded } from './pageDiet.js'
+import { noteSent } from './lostBrowser.js'
 import { noteCall } from './siteApi.js'
 import { newRunTab, outOfSight, sendAway } from './browser.js'
 import { isRemote } from './remoteBrowsers.js'
@@ -113,6 +114,7 @@ export async function setupTab(page, { runId, mute = true } = {}) {
   // their menus away and the run cannot find them. It ends with the run.
   const desktopPage = () => page.__adalCdp?.send('Emulation.setDeviceMetricsOverride', { width: 1366, height: 900, deviceScaleFactor: 1, mobile: false }).catch(() => {})
   try { await page.__adalWake?.() } catch {}   // slowed by robotGuard: a run works at full speed
+  if (runId !== undefined && page.__adalRunId !== runId) page.__adalSent = ''   // what this run sends is its own (lostBrowser.js)
   if (page.__adalSetup) {
     page.__adalCdp?.send('Emulation.setFocusEmulationEnabled', { enabled: true }).catch(() => {})
     await desktopPage()
@@ -153,6 +155,7 @@ export async function setupTab(page, { runId, mute = true } = {}) {
       // Fonts too (2026-11-23): 100–400 KB a page on a slow line, and the robot reads text, not letters' shapes.
       if (notNeeded(req, { pictures: page.__adalAllowImages === true }) || (!allowImages && (type === 'image' || type === 'font')) || type === 'media' || TRACKERS.test(hostOf(req.url()))) req.abort().catch(() => {})
       else {
+        noteSent(page, req)
         if (type === 'xhr' || type === 'fetch') noteCall(req.method(), req.url())   // the portal's own data calls (siteApi.js)
         req.continue().catch(() => {})
       }

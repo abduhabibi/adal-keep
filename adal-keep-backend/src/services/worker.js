@@ -458,6 +458,7 @@ async function executeRun(db, page, job) {
 
     // ---- Failure: retry vs permanent ----
     const errText = result.error || result.reason || ''
+    if (await lostAndBack(db, job, page, errText)) return false
     await recordFailure(db, job, errText)
     return false
   } catch (e) {
@@ -466,7 +467,9 @@ async function executeRun(db, page, job) {
       await handleCancelled()
       return false
     }
-    await recordFailure(db, job, (await pcGone(db, job)) || e.message)
+    const gone = await pcGone(db, job)
+    if (!gone && await lostAndBack(db, job, page, e.message)) return false
+    await recordFailure(db, job, gone || e.message)
     return false
   }
 }
@@ -543,6 +546,15 @@ async function browserForJob(db, job, { quiet = false } = {}) {
     if (!quiet) await movedTo(db, job, '')
   }
   return getBrowser()
+}
+
+/** The tab or browser was lost before anything was sent: back in line, once (services/lostBrowser.js). */
+async function lostAndBack(db, job, page, message) {
+  try {
+    const line = await (await import('./lostBrowser.js')).backInLine(db, job, page, message)
+    if (line) { await appendLog(db, job.id, line, 'warn'); console.warn(`[worker] run #${job.id}: ${line}`) }
+    return !!line
+  } catch { return false }
 }
 
 /** The PC this run worked on went away while it did (remoteBrowsers.watchOver): the words for it, or ''. */

@@ -2405,10 +2405,13 @@ export async function watchForSaved(page) {
     const said = (t) => /\bsaved\b|saved successfully|added successfully|تم الحفظ/i.test(t || '')
     const look = (n) => {
       const e = n.nodeType === 1 ? n : n.parentElement
-      if (e && !e.closest('form') && !e.closest('button') && (e.textContent || '').length < 200 && said(e.textContent)) window.__adalSaved = true
+      if (!e || e.closest('form') || e.closest('button')) return
+      const t = e.textContent || ''
+      if (t.length < 200 && said(t)) { window.__adalSaved = true; obs.disconnect() }
     }
-    new MutationObserver(ms => ms.forEach(m => { look(m.target); m.addedNodes.forEach(look) }))
-      .observe(document.body, { childList: true, subtree: true, characterData: true })
+    // Each changed part once, however many changes it had; off once Musaned said it.
+    const obs = new MutationObserver(ms => { const seen = new Set(); for (const m of ms) { seen.add(m.target); m.addedNodes.forEach(n => seen.add(n)) } seen.forEach(look) })
+    obs.observe(document.body, { childList: true, subtree: true, characterData: true })
   }).catch(() => {})
 }
 export const savedOnPage = (page) => page.evaluate(() => !!window.__adalSaved).catch(() => false)

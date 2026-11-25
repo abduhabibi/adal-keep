@@ -18,8 +18,11 @@ async function shot(page) {
 }
 
 const ACK_MS = 200, ACK_UNSEEN_MS = 500   // between a picture and the next
+/** Somebody sees this tab now (robotGuard leaves it at full speed). */
+export const isWatched = (page) => (casts.get(page)?.subs.size || 0) > 0
 
 async function castOf(page) {
+  try { await page.__adalWake?.() } catch {}   // slowed by robotGuard: full speed for the person
   if (casts.has(page)) return casts.get(page)
   const c = { subs: new Set(), ends: new Set(), dead: false, last: null, at: 0, used: Date.now(), cdp: null, ready: null, timer: null, filling: false }
   casts.set(page, c)

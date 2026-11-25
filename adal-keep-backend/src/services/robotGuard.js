@@ -88,8 +88,17 @@ const pcTimes = () => os.cpus().reduce((a, c) => { const v = Object.values(c.tim
 /** The session puppeteer has had with this page since it opened: the one a looping page still hears. */
 const ownSession = (page) => { try { return page._client?.() || page.mainFrame?.().client || null } catch { return null } }
 
+/** The tabs as the browser told of each change (puppeteer keeps them): nothing is asked. Asked only if that is not there. */
+async function infosOf(browser, cdp) {
+  try {
+    const known = browser.targets().map(t => t._getTargetInfo?.()).filter(Boolean)
+    if (known.length) return known.filter(t => t.type === 'page')
+  } catch {}
+  return ((await within(cdp.send('Target.getTargets'), 5000))?.targetInfos || []).filter(t => t.type === 'page')
+}
+
 async function tabsOf(browser, cdp) {
-  const infos = ((await within(cdp.send('Target.getTargets'), 5000))?.targetInfos || []).filter(t => t.type === 'page' && !/^(devtools|chrome-extension):/.test(t.url))
+  const infos = (await infosOf(browser, cdp)).filter(t => !/^(devtools|chrome-extension):/.test(t.url))
   const pages = new Map()
   // A looping tab of before a restart never attaches: it stays without a page (4 s for all of them together).
   await Promise.all(browser.targets().filter(t => t.type() === 'page').map(async t => { const p = await within(t.page(), 4000); if (p) pages.set(t._targetId, p) }))
@@ -222,7 +231,7 @@ export async function guardLook(browser, db, { now = Date.now(), hotFor = HOT_FO
   const closeTarget = (t) => within(cdp.send('Target.closeTarget', { targetId: t.id }).then(() => true), 5000, false)
 
   // Empty labelled tabs nobody owns, and too many tabs (asked of the browser, not of the pages).
-  const infos = ((await within(cdp.send('Target.getTargets'), 5000))?.targetInfos || []).filter(t => t.type === 'page')
+  const infos = await infosOf(browser, cdp)
   const blanks = infos.filter(t => t.url === 'about:blank' && LABELLED.test(t.title || ''))
   for (const id of [..._blank.keys()]) if (!blanks.some(t => t.targetId === id)) _blank.delete(id)
   for (const t of blanks) if (!_blank.has(t.targetId)) _blank.set(t.targetId, now)

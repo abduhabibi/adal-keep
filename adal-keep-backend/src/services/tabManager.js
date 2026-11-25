@@ -111,6 +111,7 @@ export async function setupTab(page, { runId, mute = true } = {}) {
   // A desktop page whatever the window's size: in a narrow one the sites fold
   // their menus away and the run cannot find them. It ends with the run.
   const desktopPage = () => page.__adalCdp?.send('Emulation.setDeviceMetricsOverride', { width: 1366, height: 900, deviceScaleFactor: 1, mobile: false }).catch(() => {})
+  try { await page.__adalWake?.() } catch {}   // slowed by robotGuard: a run works at full speed
   if (page.__adalSetup) {
     page.__adalCdp?.send('Emulation.setFocusEmulationEnabled', { enabled: true }).catch(() => {})
     await desktopPage()

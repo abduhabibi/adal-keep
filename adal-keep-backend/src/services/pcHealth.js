@@ -64,13 +64,18 @@ export function pcCalls(s = state) {
 
 export function startPCHealth(db) {
   if (timer || process.env.NODE_ENV === 'test') return
-  setTimeout(() => checkPC(db).catch(() => {}), 3 * 60 * 1000).unref?.()
-  // The disk every 30 minutes, the database once a day.
-  let lastDb = Date.now()
+  // The disk every 30 minutes, the database once a day (the day kept over restarts: reading
+  // the whole database at each start made a slow disk busy just after Adal Keep opened).
+  const DONE = path.join(BACKEND, 'data', 'pc-check.json')
+  let lastDb = 0
+  try { const j = JSON.parse(fs.readFileSync(DONE, 'utf8')); if (j.ok) lastDb = Math.min(Date.now(), Date.parse(j.at) || 0) } catch {}
+  const kept = () => { try { fs.writeFileSync(DONE, JSON.stringify({ at: state.database?.at, ok: !!state.database?.ok })) } catch {} }
+  setTimeout(() => checkPC(db, { withDatabase: false }).catch(() => {}), 3 * 60 * 1000).unref?.()
+  setTimeout(() => { if (Date.now() - lastDb >= DAY) { lastDb = Date.now(); checkPC(db).then(kept).catch(() => {}) } }, 20 * 60 * 1000).unref?.()
   timer = setInterval(() => {
     const withDatabase = Date.now() - lastDb >= DAY
     if (withDatabase) lastDb = Date.now()
-    checkPC(db, { withDatabase }).catch(() => {})
+    checkPC(db, { withDatabase }).then(() => { if (withDatabase) kept() }).catch(() => {})
   }, 30 * 60 * 1000)
   timer.unref?.()
 }

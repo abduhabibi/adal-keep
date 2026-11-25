@@ -38,6 +38,7 @@ export function uploadStarted() { active++ }
 export function uploadEnded() { active = Math.max(0, active - 1); lastEnd = clock() }
 
 export function trackUserUploads(req, res, next) {
+  notePerson(req)
   if (!isUserUpload(req)) return next()
   uploadStarted()
   let done = false
@@ -46,6 +47,26 @@ export function trackUserUploads(req, res, next) {
   res.on('close', end)
   next()
 }
+
+// ── A person's clicks first ──────────────────────────────────────────────────
+// A page opened or saved by a person (not Adal Keep's own sweeps, not the looks an open
+// window repeats by itself): heavy background work waits a moment for it.
+export const CLICK_MS = 2500
+let lastClick = 0
+const REPEATED = /^\/api\/(health|app|live|events|attention|notifications|automations\/(active|attention)|main-pc|pc-access|companion|replica|sync|system|chat|robots|sessions|safety|setup|subscription)\b/
+export function notePerson(req) {
+  if (req.headers?.['x-adal-cloud'] || req.headers?.['x-adal-robots']) return
+  const p = String(req.path || req.url || '')
+  if (p.startsWith('/api') && !REPEATED.test(p)) lastClick = clock()
+}
+export const personBusy = (now = clock()) => lastClick > 0 && now - lastClick < CLICK_MS
+/** Waits while a person clicks, at most `max` ms (background work is slowed, never stopped). */
+export async function afterClicks({ max = 20_000, every = 250 } = {}) {
+  for (let waited = 0; personBusy() && waited < max; waited += every) await new Promise(ok => setTimeout(ok, every))
+}
+/** A breath between two pieces of background work, as long as they leave this PC free: `share` of one processor at most. */
+export const breath = (workedMs, { share = 0.08, min = 20, max = 1500 } = {}) =>
+  new Promise(ok => setTimeout(ok, Math.max(min, Math.min(max, workedMs * (1 / share - 1)))))
 
 /** Someone is uploading now, or stopped less than QUIET_MS ago. */
 export function uploadsBusy(now = clock()) {
@@ -67,4 +88,4 @@ export async function waitForQuiet({ onWait, every = 1000 } = {}) {
 
 // Tests: a clock that moves when told to.
 export function _setClock(fn) { clock = fn || (() => Date.now()) }
-export function _reset() { active = 0; lastEnd = 0 }
+export function _reset() { active = 0; lastEnd = 0; lastClick = 0 }

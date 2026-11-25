@@ -36,7 +36,7 @@ import('./plans.js').then(P => { licBeat = () => { const l = P.licenseNow(); ret
 let hwBeat = () => ({})
 import('./hardware.js').then(H => { hwBeat = () => ({ hw: H.hardwareBeat() }) }).catch(() => {})
 const beatData = () => ({ at: new Date().toISOString(), ...hwBeat(), ...(isFollower() ? {} : { pc: myPcNumber(), lan: lanNow(), port: Number(process.env.ADAL_ADVERTISE_PORT) || PORT(), ...(process.env.ADAL_ACTING_MAIN === '1' ? { acting: true } : {}), ...(licBeat?.() || {}) }) })
-import { waitForQuiet } from './userUploads.js'
+import { waitForQuiet, afterClicks, breath } from './userUploads.js'
 import { tgReady, tgPut, tgDelete, TG_MAX_DOWNLOAD, findStorageChat } from './tgStore.js'
 import { viewCopy } from './viewCopy.js'
 import fs from 'fs'
@@ -433,12 +433,44 @@ async function pushKeys(db) {
 // done, and the last sweep, are kept (cloud_sync "sweep:full" / "sweep:at"),
 // so a start only reads the profiles changed since. It was every 30 minutes
 // and at every start: ~1,800 reads at once, a busy PC for a minute or two.
+// (2026-11-25: 6 hours had always passed by the morning, so ~3,000 pages were made 45 s after Adal
+// Keep opened. Now the sweep goes a slice with each minute's round, not in the first 10 minutes,
+// and every page leaves the PC free after it — services/userUploads.js breath, afterClicks.)
 const FULL_MS = 6 * 3600 * 1000
-const PACE_MS = 60
-let lastFullAt = 0, lastSweepAt = 0, lastDiagAt = 0, lastUsageAt = 0
+const SWEEP_AFTER_MS = Number(process.env.ADAL_SWEEP_AFTER_MS) || 10 * 60 * 1000
+const SWEEP_SLICE_MS = 15 * 1000
+// The agency's lists again when something changed (here, or by Adal Robots), else every 10 minutes;
+// these few every minute (they are not all in the database).
+const LISTS_MS = 10 * 60 * 1000
+const LIVE = ['/sessions', '/whatsapp', '/automations/attention', '/automations/active', '/subscription/status']
+const NO_PAGE = /^(audit_log|sync_|feature_use|run_history_shots|cloud_sync|profile_days|robot_lookups)/
+const startedAt = Date.now()
+let openedFor = 0
+let listsAt = 0, listsDirty = true, cvDirty = true, dataVersion = null
+let sweepLeft = null
+/** Something changed in these tables: the lists go online with the next round. */
+export function noteChanged(tables) {
+  if (tables.some(t => !NO_PAGE.test(t))) listsDirty = true
+  if (tables.some(t => /^cv_/.test(t) || t === '*')) cvDirty = true
+}
+/** Another program (Adal Robots) wrote to this database since the last look. */
+async function changedOutside(db) {
+  try {
+    const v = Number(Object.values((await db.raw('PRAGMA data_version'))[0])[0])
+    const other = dataVersion !== null && v !== dataVersion
+    dataVersion = v
+    return other
+  } catch { return true }
+}
+let lastFullAt = 0, lastSweepAt = 0, lastDiagAt = 0
+let lastUsageAt = Date.now() - 20 * 60000   // (the counts read the whole database: first 10 minutes after the start)
 
 /** Profiles touched since `since` (runs, documents, CVs, tasks, the profile itself). */
+let cvIndex = null
 async function changedProfiles(db, since) {
+  // Each made CV keeps a 1–2 MB copy of its data before its date: without this index every look
+  // read all of them (67 MB a minute on a real agency's database).
+  await (cvIndex ||= db.raw('CREATE INDEX IF NOT EXISTS generated_cvs_updated_at_profile_id_speed_index ON generated_cvs (updated_at, profile_id)').catch(() => {}))
   // SQLite keeps both "2026-10-29 08:40:12" and ISO times: compare against the
   // older-sorting space form, so nothing is missed (a few extra at most).
   const at = since.toISOString().replace('T', ' ').slice(0, 19)
@@ -447,7 +479,7 @@ async function changedProfiles(db, since) {
   const q = (fn) => fn().catch(() => [])
   add(await q(() => db('profiles').where('updated_at', '>=', at).select('id')))
   for (const t of ['automation_queue', 'profile_automations', 'profile_fields', 'tasks', 'generated_cvs', 'document_verifications']) {
-    add(await q(() => db(t).where('updated_at', '>=', at).whereNotNull('profile_id').distinct('profile_id as id')))
+    add(await q(() => db(t).where('updated_at', '>=', at).select('profile_id as id')))   // (no distinct: it made SQLite walk the profile_id index and read every row)
   }
   add(await q(() => db('files').join('profile_fields', 'files.profile_field_id', 'profile_fields.id')
     .where('files.created_at', '>=', at).distinct('profile_fields.profile_id as id')))
@@ -460,10 +492,16 @@ async function pushAnswers(db, agency, state, { light = false } = {}) {
   if (!lastSweepAt) lastSweepAt = Number(state.get('sweep:at') || 0)
   const first = !lastFullAt        // nothing went online yet (a new PC or a new online account)
   cloudStatus.textDone = !first
-  const full = (first || !light) && (!lastFullAt || started - lastFullAt >= FULL_MS)
+  const due = first || (!light && started - lastFullAt >= FULL_MS && openedFor + started - startedAt >= SWEEP_AFTER_MS)
+  const full = first
   const ids = full
     ? (await db('profiles').select('id')).map(r => r.id)
     : await changedProfiles(db, new Date((lastSweepAt || started) - 3 * 60000))
+  const outside = await changedOutside(db)
+  const lists = full || listsDirty || outside || started - listsAt >= LISTS_MS
+  const cvToo = full || cvDirty || started - listsAt >= LISTS_MS
+  if (lists) { listsDirty = false; listsAt = started }
+  if (cvToo) cvDirty = false
   const brokers = (await db('brokers').select('id').catch(() => [])).map(r => r.id)
   // Each template, and its header and footer pictures (the phone draws CVs with the PC off).
   const templates = (await db('cv_templates').select('id').catch(() => [])).flatMap(r => [`/cv/templates/${r.id}`, `/cv/templates/${r.id}/banners`])
@@ -472,11 +510,15 @@ async function pushAnswers(db, agency, state, { light = false } = {}) {
   // minutes, not hours.
   const keys = first
     ? [...new Set([...GLOBAL, ...ids.flatMap(id => [`/profiles/${id}`, `/profiles/${id}/fields`]), ...brokers.flatMap(PER_BROKER), ...ids.flatMap(PER_PROFILE), ...templates])]
-    : [...GLOBAL, ...ids.flatMap(PER_PROFILE), ...brokers.flatMap(PER_BROKER), ...templates]
+    : [...(lists ? GLOBAL : LIVE), ...ids.flatMap(PER_PROFILE), ...(lists ? brokers.flatMap(PER_BROKER) : []), ...(cvToo ? templates : [])]
   if (first) console.log(`[cloud] first copy of the text: ${keys.length} pages (${ids.length} profiles) before any document`)
-  await pushVault(db, agency, state).catch(e => console.warn('[cloud] vault:', e.message))
-  await pushVaultKey(db, agency, state).catch(e => console.warn('[cloud] vault key:', e.message))
-  const wanted = new Set(keys)
+  if (lists) await pushVault(db, agency, state).catch(e => console.warn('[cloud] vault:', e.message))
+  if (lists) await pushVaultKey(db, agency, state).catch(e => console.warn('[cloud] vault key:', e.message))
+  // The safety sweep: all of it in line, a slice with this round and the next ones.
+  if (due && !first && !sweepLeft) {
+    const all = (await db('profiles').select('id')).map(r => r.id)
+    sweepLeft = [...new Set([...GLOBAL, ...all.flatMap(PER_PROFILE), ...brokers.flatMap(PER_BROKER), ...templates])]
+  }
   let batch = []
   const flush = async () => {
     batch = batch.filter(b => !(soonAt.get(b.row.key) > b.readAt))   // a newer change already went online
@@ -489,28 +531,37 @@ async function pushAnswers(db, agency, state, { light = false } = {}) {
     batch = []
   }
   let done = 0
-  for (const key of keys) {
-    // (The first copy goes as fast as the PC answers; later sweeps leave the PC room.)
-    if (full && !first) await new Promise(res => setTimeout(res, PACE_MS))
-    if (first && ++done % 200 === 0) console.log(`[cloud] first copy: ${done} of ${keys.length} pages`)
+  const one = async (key, sweep = false) => {
     let r
-    try { r = await local('GET', key) } catch { continue }
-    if (!r.ok) continue
+    try { r = await local('GET', key) } catch { return }
+    if (!r.ok) return
     const text = await r.text()
     let data
-    try { data = clean(key, JSON.parse(text)) } catch { continue }
+    try { data = clean(key, JSON.parse(text)) } catch { return }
     const body = JSON.stringify(data)
     const hash = sha(body)
     // The full sweep sends the agency's own pages (the dashboard, the lists…)
     // even when this PC thinks they are online already: what it remembers and
     // what is online can part (the dashboard stayed a day behind its list).
-    if (state.get(key) === hash && !(full && GLOBAL.includes(key))) continue
+    if (state.get(key) === hash && !((full || sweep) && GLOBAL.includes(key))) return
     batch.push({ row: { agency_id: agency, key, data, updated_at: new Date().toISOString() }, hash, readAt: Date.now() })
     // The list of profiles goes at once: a Companion opens with it.
     if (batch.length >= 20 || key === '/profiles') await flush()
   }
+  // (The first copy goes as fast as the PC answers; later rounds leave the PC room, a person's clicks first.)
+  const next = async (key, sweep) => {
+    if (!first) await afterClicks({ max: 5000 })
+    const t = Date.now()
+    await one(key, sweep)
+    if (!first) await breath(Date.now() - t, { share: 0.03, min: 40 })
+  }
+  for (const key of keys) {
+    if (first && ++done % 200 === 0) console.log(`[cloud] first copy: ${done} of ${keys.length} pages`)
+    await next(key)
+  }
+  for (const until = Date.now() + SWEEP_SLICE_MS; !light && sweepLeft?.length && Date.now() < until;) await next(sweepLeft.shift(), true)
   // The work summary (Adal Keep Admin).
-  try {
+  if (lists || ids.length) try {
     const data = await summary(db)
     const hash = sha(JSON.stringify(data))
     if (state.get('/_summary') !== hash) {
@@ -521,14 +572,17 @@ async function pushAnswers(db, agency, state, { light = false } = {}) {
   await flush()
   lastSweepAt = started
   await setState(db, 'sweep:at', String(started)).catch(() => {})
-  if (!full) return
+  if (!first && (!sweepLeft || sweepLeft.length)) return
+  sweepLeft = null
   lastFullAt = started
   await setState(db, TEXT_DONE, String(started)).catch(() => {})
   if (first) {
     cloudStatus.textDone = true
     console.log(`[cloud] first copy of the text done in ${Math.round((Date.now() - started) / 1000)} s — the documents go now, smallest first`)
   }
-  // Profiles that are gone: their answers go too.
+  // Profiles that are gone: their answers go too (those here now stay: one may have come during the sweep).
+  const now = (await db('profiles').select('id')).map(r => r.id)
+  const wanted = new Set([...GLOBAL, ...now.flatMap(PER_PROFILE), ...brokers.flatMap(PER_BROKER), ...templates])
   for (const key of state.keys()) {
     if (!key.startsWith('/') || wanted.has(key) || key === '/_summary' || key === '/vault') continue
     await cloudCall(db, 'DELETE', `/rest/v1/keep_meta?agency_id=eq.${agency}&key=eq.${encodeURIComponent(key)}`, undefined, { headers: { Prefer: 'return=minimal' } }).catch(() => {})
@@ -719,6 +773,7 @@ async function syncOnce(db, { light = false } = {}) {
     // Someone is uploading files into Adal Keep: the copy waits until about 30 s after the last one (nothing skipped).
     await waitForUploads()
     await pushAnswers(db, agency, state, { light })
+      .catch(e => { listsDirty = cvDirty = true; sweepLeft = null; throw e })   // not online: all of it again
     // Documents too, every round (also while a robot works): every one is kept
     // in Telegram as well as on this PC as soon as it can be.
     await pushFiles(db, agency, await stateOf(db))
@@ -782,6 +837,7 @@ function filesSoon(db) {
 export function startCloudSync(db) {
   if (timer) return
   import('./changes.js').then(c => c.onChanged(({ tables }) => {
+    noteChanged(tables)
     if (tables.includes('files')) filesSoon(db)
     // A run paused for a person (or went on): the "needs you" list online at once.
     if (tables.includes('automation_queue')) pushKeysSoon(db, ['/automations/attention'])
@@ -795,8 +851,8 @@ export function startCloudSync(db) {
     const { transitionRunning } = await import('./transition.js')
     if (cloudStatus.on && !transitionRunning()) await syncOnce(db, { light: runsWorking() > 0 })
   }
-  setTimeout(tick, 45000)
-  timer = setInterval(tick, EVERY_MS)
+  // Not in the first minute: the person opening Adal Keep has this PC to themselves.
+  timer = setTimeout(() => { tick(); timer = setInterval(tick, EVERY_MS) }, 75000)
   startRelay(db)
   watchStorageChat()
   // A phone asking to join is seen within 10 s (it was every 4 s: ~21,000 internet calls a day).
@@ -804,6 +860,8 @@ export function startCloudSync(db) {
   console.log('☁️  Online copy for phones: what changed every minute, everything every 30 minutes (when on)')
 }
 export const syncNow = (db) => syncOnce(db)
+/** Tests: a round as if Adal Keep had been open this long. */
+export function _openedFor(ms) { openedFor = ms }
 
 // ------------------------------------------------------------ phones
 /** A new phone: its own online account, allowed to see this agency's copy. */

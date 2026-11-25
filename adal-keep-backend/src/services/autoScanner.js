@@ -54,16 +54,10 @@ async function findReadyProfiles(db) {
 }
 
 async function isAlreadyQueued(db, profileId, workflowId = WORKFLOW_ID) {
-  // Block re-enqueue if there is any active OR recently-failed OR done run.
-  const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString()
+  // One agent, one try: any run before, however it ended (a cancelled or stopped one came back
+  // at the next scan, for ever). A person presses it again.
   const row = await db('automation_queue')
     .where({ profile_id: profileId, workflow_id: workflowId })
-    .andWhere(function () {
-      this.whereIn('status', ['pending', 'running', 'paused', 'done'])
-        .orWhere(function () {
-          this.where('status', 'failed').andWhere('updated_at', '>', twoHoursAgo)
-        })
-    })
     .first()
   return !!row
 }

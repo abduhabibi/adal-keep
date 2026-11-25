@@ -11,9 +11,9 @@
  *      "Musaned: Add candidate" is queued once (it waits while Adal Browser
  *      is closed, like the other robots nobody pressed).
  *
- * Never twice: a girl whose CV could not be made is left for an hour; a
- * Musaned run that is in line, done or failed in the last 2 hours is not
- * queued again. Only girls added from 3 days before it first ran (first_stage_since).
+ * Never twice: a girl whose CV could not be made is left for an hour; a girl
+ * with any Musaned run before (done, failed, cancelled, stopped) is not queued
+ * again by itself: a person presses the button. Only girls added from 3 days before it first ran (first_stage_since).
  * Settings key first_stage_auto = '0' turns it off.
  */
 import { seal } from './accountVault.js'
@@ -42,8 +42,9 @@ export function wantsMusaned(p, runs = {}, hasCv = false) {
   if (p.musaned_stage || isChosen(p)) return false
   const r = runs.musaned_add_candidate
   if (r) {
-    if (['pending', 'running', 'paused', 'done'].includes(r.status)) return false
-    if (r.status === 'failed' && Date.now() - new Date(r.updated_at || 0).getTime() < 2 * 60 * 60 * 1000) return false
+    // One agent, one try: in line, working, waiting, done, failed, cancelled or stopped by the 10-minute
+    // limit — never put in line again by itself (a stopped run came back 2 minutes later, for ever). A person presses it.
+    return false
   }
   if (goneFromMusaned(runs)) return false
   return true

@@ -21,10 +21,7 @@ export function medicalDeadline(text) {
 
 /** Read the medical record PDF and set her battery. Returns the dates or null. */
 export async function applyMedicalRecord(db, profileId, buf) {
-  const { PDFParse } = await import('pdf-parse')
-  const parser = new PDFParse({ data: buf })
-  let text = ''
-  try { text = (await parser.getText()).text || '' } finally { await parser.destroy?.().catch?.(() => {}) }
+  const text = await (await import('./pdfText.js')).pdfText(buf)
   const dates = medicalDeadline(text)
   if (!dates) return null
   const p = await db('profiles').where('id', profileId).first('medical_valid_from', 'medical_valid_until')

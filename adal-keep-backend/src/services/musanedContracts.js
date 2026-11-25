@@ -510,9 +510,7 @@ async function readContractScan(buf) {
 
 /** The text of a PDF (pdf-parse). */
 async function pdfText(buf) {
-  const m = await import('pdf-parse')
-  if (m.PDFParse) { const p = new m.PDFParse({ data: buf }); try { return (await p.getText()).text } finally { await p.destroy?.() } }
-  return (await (m.default || m)(buf)).text
+  return (await import('./pdfText.js')).pdfText(buf)
 }
 
 /**

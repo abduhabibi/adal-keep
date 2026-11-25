@@ -1,6 +1,7 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useSyncExternalStore } from 'react'
 import FileImage from '../shared/FileImage'
-import { tileFile, picKey } from '../../lib/pics'
+import { tileFile, picKey, picSeed } from '../../lib/pics'
+import { sendFiles, onUploads, uploadsOf } from '../../lib/uploads'
 import { usePickFile, ON_PHONE } from '../shared/PickFile'
 import { useNavigate } from 'react-router-dom'
 import { createPortal } from 'react-dom'
@@ -71,7 +72,10 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
   const cvReady = isCVField && cvReadiness?.can_generate
   const cvBlockers = cvReadiness?.cv_blockers || []
   const { capturedFiles } = useFileCapture()
-  const [uploading, setUploading] = useState(false)
+  // What is being put in this box (lib/uploads.js): shown at once, saved behind.
+  const box = `${profileId}/${field.id}`
+  const coming = useSyncExternalStore(onUploads, () => uploadsOf(box))
+  const root = useRef(null)
   const [refining, setRefining] = useState(false)
   const [compare, setCompare] = useState(false)   // the faithful Refine's before / after
   const [pendingFile, setPendingFile] = useState(null)
@@ -109,47 +113,37 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
   const handleFormatChoice = async (targetFormat, direct = null) => {
     const file = direct || pendingFile
     if (!file) return
-    setUploading(true)
-    const formData = new FormData()
-    formData.append('file', file)
-    if (targetFormat) formData.append('targetFormat', targetFormat)
-
-    try {
-      const res = await api.post(`/profiles/${profileId}/fields/${field.id}/upload`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      })
-      toast.success('Uploaded and converted!')
-      onFileUpdate(field.id, res.data.files)
-    } catch (err) {
-      toast.error(err.response?.data?.error || 'Upload failed')
-    } finally {
-      setUploading(false)
-      setPendingFile(null)
-      if (fileInputRef.current) fileInputRef.current.value = ''
-    }
+    setPendingFile(null)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+    await sendFiles({
+      key: box, url: `/profiles/${profileId}/fields/${field.id}/upload`, files: [file], name: 'file', fields: { targetFormat },
+      onSaved: (res, url) => {
+        const files = res.data.files
+        const shown = tileFile({ name: field.name, files })
+        const same = url && /^image\//.test(shown?.mimetype || '') && shown.id === files?.[0]?.id
+        if (same) picSeed(picKey(shown), url)
+        toast.success(targetFormat ? 'Saved' : 'Uploaded')
+        onFileUpdate(field.id, files)
+        return same
+      },
+    }).catch(() => {})   // (said in the box, with Try again)
   }
   const handleMultiUpload = async (fileList) => {
     if (!fileList || fileList.length === 0) return
     // One full body photo, cropped like any other upload of it.
     const firstImage = isFullBody && Array.from(fileList).find(f => /^image\//.test(f.type || ''))
     if (firstImage) { if (multiInputRef.current) multiInputRef.current.value = ''; setCropFile(firstImage); return }
-    setUploading(true)
-    const fd = new FormData()
-    Array.from(fileList).forEach(f => fd.append('files', f))
-    try {
-      await api.post(`/profiles/${profileId}/fields/${field.id}/files`, fd, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      })
-      const res = await api.get(`/profiles/${profileId}/fields`)
-      const updated = res.data.find(x => x.id === field.id)
-      onFileUpdate(field.id, updated ? updated.files : [])
-      toast.success(`${fileList.length} file(s) added`)
-    } catch (err) {
-      toast.error(err.response?.data?.error || 'Upload failed')
-    } finally {
-      setUploading(false)
-      if (multiInputRef.current) multiInputRef.current.value = ''
-    }
+    const files = Array.from(fileList)
+    if (multiInputRef.current) multiInputRef.current.value = ''
+    await sendFiles({
+      key: box, url: `/profiles/${profileId}/fields/${field.id}/files`, files,
+      onSaved: (res) => {
+        const now = (f) => onFileUpdate(field.id, f)
+        api.get(`/profiles/${profileId}/fields`, { adalNoCache: true }).then(r => now(r.data.find(x => x.id === field.id)?.files || []))
+          .catch(() => now([...(field.files || []), ...(res.data?.files || [])]))
+        toast.success(`${files.length} file(s) added`)
+      },
+    }).catch(() => {})
   }
 
 
@@ -216,11 +210,14 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
   // the same way as a drop (a full body photo is cropped first). Not while
   // typing in a text box.
   const [hovered, setHovered] = useState(false)
-  const showPasteHint = hovered && !tapMode() && !uploading
+  const showPasteHint = hovered && !tapMode()
   useEffect(() => {
-    if (!hovered) return
     const onPaste = (e) => {
-      if (typingIn(document.activeElement) || typingIn(e.target)) return
+      if (!root.current?.matches(':hover')) return
+      // The cursor left in a search box: a picture goes into this box all the same (text goes to the
+      // search box). It was ignored, and people pasted twice (2026-11-25).
+      const pictures = [...(e.clipboardData?.items || [])].some(i => i.kind === 'file') && !(e.clipboardData?.getData('text/plain') || '').trim()
+      if (!pictures && (typingIn(document.activeElement) || typingIn(e.target))) return
       let files = Array.from(e.clipboardData?.files || [])
       if (!files.length) {
         for (const item of e.clipboardData?.items || []) if (item.kind === 'file') { const f = item.getAsFile(); if (f) files.push(f) }
@@ -234,7 +231,7 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
     }
     document.addEventListener('paste', onPaste, true)
     return () => document.removeEventListener('paste', onPaste, true)
-  }, [hovered, capturedFiles, field])
+  }, [capturedFiles, field])
 
   // --- OTHER HANDLERS ---
 
@@ -268,6 +265,7 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
 
   return (
     <div
+      ref={root}
       data-field-name={field.name}
       className={`panel p-2.5 sm:p-4 flex flex-col gap-2 sm:gap-3 relative bg-white dark:bg-slate-800 border rounded-xl shadow-sm transition-all duration-200 ${
         isDragOver
@@ -333,7 +331,6 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
             type="button"
             data-tour="field-upload"
             onClick={pick.open}
-            disabled={uploading}
             className="text-[10px] px-2 py-0.5 rounded-md bg-teal-50 text-teal-700 hover:bg-teal-100 dark:bg-teal-900/30 dark:text-teal-400 disabled:opacity-50"
             title="Add more files to this field"
           >＋<span className="hidden sm:inline"> Add files</span></button>
@@ -402,8 +399,24 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
         )
       )}
 
+      {/* What is being put here: shown at once */}
+      {coming.map(u => (
+        <div key={u.id} data-testid="upload-coming" data-state={u.state} className="flex flex-col gap-1.5">
+          {u.url && <div className="relative aspect-square w-full overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700"><img src={u.url} alt="" className="h-full w-full object-cover" /></div>}
+          {u.state === 'failed' ? (
+            <div className="rounded-lg bg-red-50 p-2 text-xs text-red-700 dark:bg-red-900/20 dark:text-red-300">
+              Not saved: {u.why}
+              <div className="mt-1 flex gap-2">
+                <button type="button" onClick={u.retry} className="rounded-md bg-red-600 px-2 py-1 font-semibold text-white hover:bg-red-700">↻ Try again</button>
+                <button type="button" onClick={u.forget} className="rounded-md border border-red-300 px-2 py-1 font-semibold">Leave it</button>
+              </div>
+            </div>
+          ) : <p className="text-xs text-slate-500 dark:text-slate-400">{u.state === 'again' ? `${u.why} It is sent again by itself.` : `Saving${u.url ? '' : ` ${u.name}`}…`}</p>}
+        </div>
+      ))}
+
       {/* Content Area */}
-      {field.files?.length > 0 ? (
+      {coming.some(u => u.url) ? null : field.files?.length > 0 ? (
         <div className="flex flex-col gap-3">
           <div className={`relative w-full overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 ${
             field.name === 'Self Video' ? 'aspect-video' : 'aspect-square'
@@ -456,12 +469,12 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
           </div>
         </div>
       ) : (
-        <div onClick={isPhotoSlot && !uploading ? (e) => { if (!e.target.closest('button')) pick.open() } : undefined}
+        <div onClick={isPhotoSlot ? (e) => { if (!e.target.closest('button')) pick.open() } : undefined}
           className={`${isPhotoSlot ? 'cursor-pointer ' : ''}flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed bg-slate-50/50 dark:bg-slate-900/50 py-6 text-center transition-all duration-200 ${
           isDragOver ? 'border-teal-500 bg-teal-50 dark:bg-teal-900/20' : 'border-slate-200 dark:border-slate-700 hover:border-teal-400 hover:bg-teal-50/50 dark:hover:bg-teal-900/10'
         }`}>
           <svg className={`h-8 w-8 transition-colors ${isDragOver ? 'text-teal-500' : 'text-slate-300 dark:text-slate-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
-          {field.name === 'Passport' && !uploading && !isDragOver ? (
+          {field.name === 'Passport' && !isDragOver ? (
             // No passport yet: scan one from the files here, or copy hers from Musaned's HR Pool.
             <div className="flex w-full flex-col gap-1.5 px-3">
               <button type="button" onClick={pick.open}
@@ -470,9 +483,9 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
                 className="rounded-lg border border-teal-300 px-3 py-1.5 text-xs font-semibold text-teal-700 hover:bg-teal-50 dark:border-teal-700 dark:text-teal-300 dark:hover:bg-teal-900/20">📥 Add from Musaned</button>}
             </div>
           ) : (
-          <button type="button" onClick={pick.open} disabled={uploading}
+          <button type="button" onClick={pick.open}
             className="cursor-pointer text-xs font-semibold text-teal-700 dark:text-teal-400 hover:text-teal-800 dark:hover:text-teal-300 disabled:opacity-60">
-            {uploading ? 'Uploading...' : isDragOver ? 'Drop files here!' : ON_PHONE ? '📷 Camera · 🖼️ Gallery · 📁 Files' : 'Click to upload (or drop files here)'}
+            {isDragOver ? 'Drop files here!' : ON_PHONE ? '📷 Camera · 🖼️ Gallery · 📁 Files' : 'Click to upload (or drop files here)'}
           </button>
           )}
           <input type="file" ref={fileInputRef} className="hidden" />

@@ -7,6 +7,7 @@ import { upload, generateThumbnail, getRelativePath } from '../services/storage.
 import { fileURLToPath } from 'url'
 import { fetchMissing, ANSWER_MS } from '../services/fileOnDemand.js'
 import { thumbnailFile, forgetPictures } from '../services/pictures.js'
+import { uploadOnce } from '../services/uploadOnce.js'
 
 // The backend folder: where the agency's PCs put the documents they copy (sync/index.js), when
 // the program was started from another folder.
@@ -186,7 +187,7 @@ router.post('/profiles/:id/fields/:fieldId/assign-tray-file', async (req, res) =
    ========================================================================== */
 
 // Upload file to specific field with optional format conversion
-router.post('/profiles/:id/fields/:fieldId/upload', upload.single('file'), async (req, res) => {
+router.post('/profiles/:id/fields/:fieldId/upload', uploadOnce, upload.single('file'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' })
 
@@ -197,16 +198,8 @@ router.post('/profiles/:id/fields/:fieldId/upload', upload.single('file'), async
     const field = await db('profile_fields').where('id', fieldId).andWhere('profile_id', profileId).first()
     if (!field) return res.status(404).json({ error: 'Profile field not found' })
 
-    // Delete old files for this field
+    // The ones it replaces: gone only once the new one is saved (a PC stopped in between lost both).
     const oldFiles = await db('files').where('profile_field_id', fieldId)
-    for (const oldFile of oldFiles) {
-      if (fs.existsSync(oldFile.path)) fs.unlinkSync(oldFile.path)
-      forgetPictures(oldFile.path)
-      const thumbPath = oldFile.path.replace(/(\.\w+)$/, '_thumb$1')
-      if (fs.existsSync(thumbPath)) fs.unlinkSync(thumbPath)
-    }
-    await db('files').where('profile_field_id', fieldId).del()
-
     const savedFiles = []
 
     // 1. Save ORIGINAL file
@@ -222,7 +215,7 @@ router.post('/profiles/:id/fields/:fieldId/upload', upload.single('file'), async
       mimetype: req.file.mimetype,
       size: req.file.size,
     })
-    savedFiles.push({ id: origId, path: req.file.path, mimetype: req.file.mimetype })
+    savedFiles.push({ id: origId, path: req.file.path, mimetype: req.file.mimetype, size: req.file.size })
 
     // 2. Convert and save TARGET format if requested
     if (targetFormat) {
@@ -254,8 +247,18 @@ router.post('/profiles/:id/fields/:fieldId/upload', upload.single('file'), async
           mimetype: convertedMime,
           size: fs.statSync(convertedPath).size,
         })
-        savedFiles.push({ id: convId, path: convertedPath, mimetype: convertedMime })
+        savedFiles.push({ id: convId, path: convertedPath, mimetype: convertedMime, size: fs.statSync(convertedPath).size })
       }
+    }
+
+    await db('files').where('profile_field_id', fieldId).whereIn('id', oldFiles.map(f => f.id)).del()
+    for (const oldFile of oldFiles) {
+      try {
+        if (fs.existsSync(oldFile.path)) fs.unlinkSync(oldFile.path)
+        forgetPictures(oldFile.path)
+        const thumbPath = oldFile.path.replace(/(\.\w+)$/, '_thumb$1')
+        if (fs.existsSync(thumbPath)) fs.unlinkSync(thumbPath)
+      } catch (e) { console.warn('[files] the one replaced:', e.message) }
     }
 
     res.json({ success: true, files: savedFiles })
@@ -390,7 +393,7 @@ router.post('/files/:fileId/refine', async (req, res) => {
   }
 })
 
-router.post('/profiles/:id/fields/:fieldId/files', upload.array('files', 20), async (req, res) => {
+router.post('/profiles/:id/fields/:fieldId/files', uploadOnce, upload.array('files', 20), async (req, res) => {
   try {
     const { id: profileId, fieldId } = req.params
     if (!req.files || req.files.length === 0) return res.status(400).json({ error: 'No files uploaded' })

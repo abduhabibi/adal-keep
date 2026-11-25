@@ -37,6 +37,9 @@ function show(key, blob) {
   return url
 }
 
+/** Just put here by this window: shown from its own copy (until the window is closed). */
+export const picSeed = (key, url) => { if (key && url && picsOn()) shown.set(key, url) }
+
 export const picKey = (f) => f?.id ? `f${f.id}-${f.size || 0}` : null
 /** Already in this window: its address, at once (or null). */
 export const picNow = (key) => key && shown.get(key) || null

@@ -19,6 +19,7 @@
  * Where each profile stands is kept in profiles.visa_stage, so the profile
  * list can filter by it.
  */
+import { pasteOn, setAll, waitSign, lastKey } from './pasteAll.js'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -270,12 +271,12 @@ export async function typeInSelect(page, key, word, src) {
   if (!box) return { ok: false, why: 'not found' }
   if (box.kind !== 'select2') return { ok: false, why: box.kind }
   await page.click(`[data-adal-s2="${key}"] .select2-selection, [data-adal-s2="${key}"] .chosen-single, [data-adal-s2="${key}"]`).catch(() => {})
-  await sleep(500)
+  await waitSign(page, () => !!document.querySelector('.select2-container--open .select2-search__field, .select2-drop-active input, .chosen-with-drop input'), null, 500)
   const search = await page.$('.select2-container--open .select2-search__field, .select2-drop-active input, .chosen-with-drop input')
-  if (search) await search.type(word, { delay: 60 })
+  if (search) await lastKey(page, search, word, { delay: 60 })   // (it searches on key events)
   const re = new RegExp(src, 'i')
   for (let i = 0; i < 20; i++) {
-    await sleep(500)
+    await waitSign(page, (src) => [...document.querySelectorAll('.select2-results__option, .select2-result-label, .chosen-results li')].some(o => new RegExp(src, 'i').test(o.textContent.trim())), src, 500, { min: 200 })
     const hit = await page.evaluateHandle((src) => {
       const re = new RegExp(src, 'i')
       return [...document.querySelectorAll('.select2-results__option, .select2-result-label, .chosen-results li')].find(o => re.test(o.textContent.trim())) || null
@@ -291,6 +292,20 @@ export async function typeInSelect(page, key, word, src) {
   }
   await page.keyboard.press('Escape').catch(() => {})
   return { ok: false, why: 'select2: no match for ' + word }
+}
+
+/** After a choice: until the page has asked its questions (a choice may load the next list) — the fixed wait of before at most. */
+const quiet = (page, max) => waitSign(page, () => document.readyState === 'complete' && !!window.jQuery && window.jQuery.active === 0, null, max, { min: 250, every: 60 })
+
+/** A Select2 / Chosen list with no choices while the page asks for nothing (for 1.5 s at most; off with ADAL_PASTE_ALL=0). */
+async function emptySearchList(page, key) {
+  if (!pasteOn()) return false
+  const filled = await waitSign(page, (key) => [...(document.querySelector(`[data-adal-v="${key}"]`)?.options || [])].some(o => o.value), key, 1500, { every: 100 })
+  return !filled && page.evaluate((key) => {
+    const el = document.querySelector(`[data-adal-v="${key}"]`)
+    const box = el && (/select2|chosen/i.test(el.nextElementSibling?.className || '') ? el.nextElementSibling : el.parentElement?.querySelector('.select2-container, .select2, .chosen-container'))
+    return !!box && document.readyState === 'complete' && !!window.jQuery && window.jQuery.active === 0
+  }, key).catch(() => false)
 }
 
 /** Sets a date box: the page's own date picker when it has one, else dd/mm/yyyy. */
@@ -619,7 +634,7 @@ async function documentAndOccupation(page, ctx, v, left) {
     if (!doc) left.push('DocumentNumber (her visa number — not on the profile yet)')
     else {
       await page.click('#DocumentNumber', { clickCount: 3 }).catch(() => {})
-      await page.type('#DocumentNumber', doc, { delay: 40 })
+      await lastKey(page, await page.$('#DocumentNumber'), doc, { delay: 40 })   // (the platform looks it up as it is typed)
       await page.evaluate(() => { const e = document.getElementById('DocumentNumber'); e.dispatchEvent(new Event('change', { bubbles: true })); e.blur() })
       log(ctx, `✓ DocumentNumber: ${doc} (her visa number)`)
     }
@@ -650,19 +665,21 @@ async function documentAndOccupation(page, ctx, v, left) {
 }
 
 /** Fills the long form. Returns what is still for a person to fill. */
-async function fillForm(page, ctx, v) {
+export async function fillForm(page, ctx, v) {
   const left = []
   const select = async (label, key, src, name = label, typeWord = '') => {
     const kind = await markField(page, label, key, 'select')
     if (!kind) return
-    let r = await setSelect(page, key, src, ctx)
+    // A search list still empty with the page at rest: typed into now, not after 10 s of waiting for its choices.
+    let t = typeWord && await emptySearchList(page, key) ? await typeInSelect(page, key, typeWord, src).catch(() => null) : null
+    let r = t?.ok ? t : await setSelect(page, key, src, ctx)
     // An empty list: one that fills as you type (Issuing Country) — type her country.
     if (!r.ok && !r.options?.length && typeWord) {
-      const t = await typeInSelect(page, key, typeWord, src)
+      t = await typeInSelect(page, key, typeWord, src)
       if (t.ok) r = t
       else log(ctx, `${name}: the list stayed empty (${t.why})`, 'warn')
     }
-    if (r.ok) { log(ctx, `✓ ${name}: ${r.text}`); await sleep(700) }
+    if (r.ok) { log(ctx, `✓ ${name}: ${r.text}`); await quiet(page, 700) }
     else left.push(`${name}${r.options?.length ? ` (choices: ${r.options.slice(0, 6).join(', ')})` : ''}`)
   }
   const text = async (label, key, value, name = label) => {
@@ -672,6 +689,16 @@ async function fillForm(page, ctx, v) {
     if (!value) return left.push(name)
     if (await setText(page, key, value)) log(ctx, `✓ ${name}: ${value}`)
     else left.push(name)
+  }
+  // All of one part in one page step; only what did not keep its value is filled alone (services/pasteAll.js).
+  const texts = async (list) => {
+    const asked = []
+    if (pasteOn()) for (const [label, key, value, name] of list) if (value && await markField(page, label, key, 'input, textarea').catch(() => '') === 'text') asked.push({ name, mark: key, value, keep: true, keyup: true })
+    const got = asked.length > 1 ? await setAll(page, asked) : {}
+    for (const [label, key, value, name] of list) {
+      if (got[name] === 'ok') log(ctx, `✓ ${name}: ${value}`)
+      else await text(label, key, value, name)
+    }
   }
   const date = async (label, key, iso, name = label) => {
     if (!(await markField(page, label, key, 'input'))) return
@@ -684,9 +711,9 @@ async function fillForm(page, ctx, v) {
   // Visa information (each choice may load the next list).
   log(ctx, '✍️ Visa information')
   await select('visa type', 'vtype', v.visa_type, 'Visa Type')
-  await sleep(1200)
+  await quiet(page, 1200)
   await select('current nationality', 'cnat', v.nationality, 'Current Nationality')
-  await sleep(1000)
+  await quiet(page, 1000)
   await select('nearest saudi mission', 'mission', v.mission, 'Nearest Saudi Mission')
   await select('number of entries', 'entries', v.entries, 'Number of Entries')
   await select('visa validity', 'validity', v.validity, 'Visa Validity')
@@ -696,10 +723,12 @@ async function fillForm(page, ctx, v) {
 
   // Personal information.
   log(ctx, '✍️ Personal information')
-  await text('(?:last|family|last ?/ ?family) name', 'family', v.family, 'Last/Family Name')
-  await text('first name', 'first', v.first, 'First Name')
-  if (v.father) await text('(?:second ?/ ?father|father|second) name', 'father', v.father, 'Second/Father Name')
-  if (v.grandfather) await text('(?:other ?/ ?g\\.? ?father|grand ?father|other) name', 'gfather', v.grandfather, 'Other/G.Father Name')
+  await texts([
+    ['(?:last|family|last ?/ ?family) name', 'family', v.family, 'Last/Family Name'],
+    ['first name', 'first', v.first, 'First Name'],
+    ...(v.father ? [['(?:second ?/ ?father|father|second) name', 'father', v.father, 'Second/Father Name']] : []),
+    ...(v.grandfather ? [['(?:other ?/ ?g\\.? ?father|grand ?father|other) name', 'gfather', v.grandfather, 'Other/G.Father Name']] : []),
+  ])
 
   // Personal photo.
   if (v.photoPath && fs.existsSync(v.photoPath)) {
@@ -742,17 +771,21 @@ async function fillForm(page, ctx, v) {
   if (!(await page.$eval('#JOB_OR_RELATION_Id', e => e.value && e.value !== '0').catch(() => false))) {
     await select('occupation', 'occupation', v.occupation, 'Occupation')
   }
-  await text('qualification', 'qual', v.qualification, 'Qualification')
-  await text('source of degree', 'degree', v.degree_source, 'Source of Degree')
-  await text('ksa home address', 'ksaaddr', v.ksa_address, 'KSA Home Address')
-  await text('e-?mail(?: address)?', 'email', v.email, 'Email Address')
+  await texts([
+    ['qualification', 'qual', v.qualification, 'Qualification'],
+    ['source of degree', 'degree', v.degree_source, 'Source of Degree'],
+    ['ksa home address', 'ksaaddr', v.ksa_address, 'KSA Home Address'],
+    ['e-?mail(?: address)?', 'email', v.email, 'Email Address'],
+  ])
 
   // Sponsor = her employer on the Musaned contract.
   log(ctx, '✍️ Sponsor information')
-  await text('sponsor name', 'sname', v.sponsor_name, 'Sponsor Name')
-  await text('sponsor id (?:no\\.?|number)', 'sid', v.sponsor_id, 'Sponsor ID Number')
-  await text('sponsor address', 'saddr', v.sponsor_address, 'Sponsor Address')
-  await text('phone (?:no\\.?|number)', 'sphone', v.sponsor_phone, 'Phone Number')
+  await texts([
+    ['sponsor name', 'sname', v.sponsor_name, 'Sponsor Name'],
+    ['sponsor id (?:no\\.?|number)', 'sid', v.sponsor_id, 'Sponsor ID Number'],
+    ['sponsor address', 'saddr', v.sponsor_address, 'Sponsor Address'],
+    ['phone (?:no\\.?|number)', 'sphone', v.sponsor_phone, 'Phone Number'],
+  ])
   await select('transport mode', 'transport', v.transport, 'Transport Mode')
   // Port of Entry: left empty on purpose (asked on 2026-11-10).
   await date('expected entry date to ksa', 'entry', v.entry_date, 'Expected Entry Date To KSA')
@@ -894,7 +927,7 @@ async function typeUnder(page, labelSrc, value) {
   if (!el) return false
   await el.click({ clickCount: 3 }).catch(() => {})
   await el.evaluate(e => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(e, ''); e.dispatchEvent(new Event('input', { bubbles: true })) })
-  await el.type(String(value), { delay: 30 })
+  await lastKey(page, el, String(value), { delay: 30 })
   await el.evaluate(e => e.dispatchEvent(new Event('change', { bubbles: true })))
   return true
 }

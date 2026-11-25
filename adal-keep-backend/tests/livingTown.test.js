@@ -30,3 +30,31 @@ test('the CV shows her place of birth as living town', async () => {
   const d = await buildTemplateData(() => q, { id: 1, place_of_birth: 'ADAMA', region: 'Oromia' }, { html_content: '', css_content: '' }, {})
   assert.equal(d.LIVING_TOWN, 'ADAMA')
 })
+
+test('living town is never asked: not when cleared, not from an older note in this browser, not by name', async () => {
+  const kept = {}
+  globalThis.localStorage = { getItem: (k) => kept[k] ?? null, setItem: (k, v) => { kept[k] = v }, removeItem: (k) => { delete kept[k] } }
+  const { noteCleared } = await import('../../adal-keep-frontend/src/lib/missingNow.js')
+  const p = { id: 5, passport_issue_date: '2024-04-09', marital_status: 'SINGLE', religion: 'Muslim', phone_number: '0912345678', place_of_birth: 'JIMMA', living_town: 'JIMMA' }
+  noteCleared(5, { profile: p }, { profile: { ...p, living_town: '' } })
+  kept['adal-cleared:5'] = JSON.stringify({ texts: ['living_town'], files: [] })   // noted by the version before
+  assert.deepEqual(missingNow({ ...p, living_town: '' }, [], 'cv', 5).texts, [])
+  assert.equal(kept['adal-cleared:5'], undefined, 'the old note is forgotten')
+  // Neither written: the place of birth, and only that.
+  assert.deepEqual(missingNow({ ...p, living_town: '', place_of_birth: '' }, [], 'cv', 5).texts.map(t => t.key), ['place_of_birth'])
+  delete globalThis.localStorage
+})
+
+test('old girls: filled when read, nothing written; a corrected place of birth takes it along', async () => {
+  const { fillTown } = await import('../src/services/livingTown.js')
+  assert.equal(fillTown({ place_of_birth: 'JIMMA', living_town: null }).living_town, 'JIMMA')
+  assert.equal(fillTown({ place_of_birth: 'JIMMA', living_town: 'HARAR' }).living_town, 'HARAR')
+  assert.equal(fillTown({ place_of_birth: '', living_town: '' }).living_town, '')
+  assert.deepEqual(fillTown({ id: 1, place_of_birth: 'JIMMA' }), { id: 1, place_of_birth: 'JIMMA' }, 'no such column asked for: not added')
+  assert.equal(fillTown(null), null)
+  process.env.ADAL_TOWN_FILL = '0'
+  assert.equal(fillTown({ place_of_birth: 'JIMMA', living_town: '' }).living_town, '')
+  delete process.env.ADAL_TOWN_FILL
+  assert.equal(withLivingTown({ place_of_birth: 'JIMMA', living_town: 'JIMA' }, { place_of_birth: 'JIMA', living_town: null }).living_town, 'JIMMA')
+  assert.equal(withLivingTown({ place_of_birth: 'JIMMA', living_town: 'HARAR' }, { place_of_birth: 'JIMA', living_town: 'HARAR' }).living_town, 'HARAR')
+})

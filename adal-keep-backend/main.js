@@ -22,7 +22,7 @@ import { exec } from 'child_process'
 import helmet from 'helmet'
 import cron from 'node-cron'
 import knexConfig from './knexfile.js'
-import { withLivingTown } from './src/services/livingTown.js'
+import { withLivingTown, fillTown } from './src/services/livingTown.js'
 import filesRouter from './src/routes/files.js'
 import multer from 'multer'
 import path from 'path'
@@ -460,7 +460,7 @@ app.get('/api/profiles', async (req, res) => {
       query = query.where('profiles.broker_id', broker_id)
     }
 
-    res.json(await query)
+    res.json((await query).map(fillTown))
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Failed to load profiles' })
@@ -502,7 +502,7 @@ app.get('/api/profiles/:id', async (req, res) => {
       .first()
 
     if (!profile) return res.status(404).json({ error: 'Not found' })
-    res.json(profile)
+    res.json(fillTown(profile))
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Failed to load profile' })

@@ -5,11 +5,13 @@
  *   POST /companion/docs/check       { have: [[name, version] …] } → the names that differ now
  *   GET  /companion/docs/file/:id/(download|thumbnail)   one of them, by the program itself
  *   GET  /files/:id/(download|thumbnail) asked by a Companion's program for its window (x-adal-own): the
- *        answer is as ever, with what the file is (its name, version, SHA-256) beside it. x-adal-seen: the
+ *        answer is as ever, with what the file is (its name, version, SHA-256) beside it. x-adal-own: describe: that only, the
+ *        file itself not (a 304). x-adal-seen: the
  *        window opened it from its own disk — nothing is sent, the audit line is written as ever.
  */
 import express from 'express'
 import fs from 'fs'
+import path from 'path'
 import * as F from '../services/docFeed.js'
 
 const router = express.Router()
@@ -29,7 +31,7 @@ router.post('/companion/docs/check', companionOnly, edge(async (req, res) => {
 }))
 // (a program fetching one for its disk is not a person opening it: past the audit list, services/audit.js)
 router.get('/companion/docs/file/:id/:what(download|thumbnail)', companionOnly, (req, res, next) => {
-  req.headers['x-adal-own'] = '1'
+  if (req.headers['x-adal-own'] !== 'describe') req.headers['x-adal-own'] = '1'
   delete req.headers['x-adal-seen']
   req.url = `/files/${encodeURIComponent(req.params.id)}/${req.params.what}`
   next()
@@ -52,6 +54,11 @@ router.get('/files/:id/:what(download|thumbnail)', (req, res, next) => {
           res.set('X-Adal-Doc', Buffer.from(JSON.stringify({ id: String(req.params.id), name: orig, v: F.versionOf(orig, fs.statSync(of)), sha: await F.hashOf(file, st), size: st.size })).toString('base64'))
         }
       } catch {}
+      if (req.headers['x-adal-own'] === 'describe') {   // what it is, not the file: the Companion may have it in its copy
+        res.type(path.extname(file)).set('Cache-Control', 'private, no-cache')
+        if (a[0]?.headers) res.set(a[0].headers)
+        return res.status(304).end()                      // (not opened yet: no audit line)
+      }
       send.call(res, file, ...a)
     })()
     return res

@@ -104,3 +104,11 @@ test('the routes: start → status → image, over HTTP', async () => {
     assert.equal((await fetch(`${base}/nothing/image`)).status, 404)
   } finally { server.close() }
 })
+
+test('a scanner that only gives BMP (Canon G3030, 2026-11-25): Windows turns it into PNG before it is saved', async () => {
+  const { script } = await import('../src/services/scanner.js')
+  const ps = script({ action: 'scan', out: 'C:\\t\\a.png' })
+  assert.match(ps, /FormatID -ne '\{B96B3CAF-/)
+  assert.match(ps, /FilterInfos\.Item\('Convert'\)/)
+  assert.ok(ps.indexOf('$ip.Apply') < ps.indexOf('$img.SaveFile'))
+})

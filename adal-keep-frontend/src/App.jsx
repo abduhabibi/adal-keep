@@ -25,6 +25,7 @@ const WhatsAppSentPage = lazyPage(() => import('./pages/WhatsAppSentPage'))
 const WhatsAppLinkPage = lazyPage(() => import('./pages/WhatsAppLinkPage'))
 const NotificationsPage = lazyPage(() => import('./pages/NotificationsPage'))
 import { FileCaptureProvider } from './context/FileCaptureContext'
+import { ScanHost } from './components/ScanButton'
 import { AuthProvider, useAuth } from './context/AuthContext'
 const TasksPage = lazyPage(() => import('./pages/TasksPage'))
 // The lock screen and the first-start wizard are seen rarely: their code is
@@ -203,6 +204,7 @@ function Inside() {
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>
+        <ScanHost />
       </BrowserRouter>
     </FileCaptureProvider>
   )

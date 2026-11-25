@@ -60,6 +60,13 @@ try { $bw = [int]$dev.Properties.Item('Horizontal Bed Size').Value; $bh = [int]$
 setp 'Horizontal Extent' ([int]($bw * ${dpi} / 1000))
 setp 'Vertical Extent' ([int]($bh * ${dpi} / 1000))
 $img = $item.Transfer('${WIA_PNG}')
+# A scanner that only gives BMP (Canon G3030) gives BMP however it is asked: Windows turns it into PNG (sharp reads no BMP).
+if ([string]$img.FormatID -ne '${WIA_PNG}') {
+  $ip = New-Object -ComObject WIA.ImageProcess
+  $ip.Filters.Add($ip.FilterInfos.Item('Convert').FilterID)
+  $ip.Filters.Item(1).Properties.Item('FormatID').Value = '${WIA_PNG}'
+  $img = $ip.Apply($img)
+}
 $img.SaveFile('${o}')
 emit @{ ok = $true } } catch { emit @{ ok = $false; code = ('{0:X8}' -f $_.Exception.HResult); text = $_.Exception.Message } }`
 }
@@ -141,7 +148,7 @@ export function makeScanner({ run = powershell, platform = process.platform, hos
 
 async function defaultJpeg(png) {
   const sharp = (await import('sharp')).default
-  return sharp(png).jpeg({ quality: 92 }).toBuffer()
+  return sharp(png).jpeg({ quality: 95, chromaSubsampling: '4:4:4' }).toBuffer()
 }
 
 /** The PC's printers (names only), to tell "printer with no scan driver" from "nothing connected". */

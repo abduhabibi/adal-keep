@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The online pages' calls go to the main PC over the network, with this
@@ -65,5 +66,52 @@ func TestMainProxyCarriesTheKeyAndTheUpload(t *testing.T) {
 		if rec.Code != http.StatusNotFound || gotKey != "" {
 			t.Fatalf("let through: %d", rec.Code)
 		}
+	}
+}
+
+// A live view through the Companion: each picture is there at once, not when the next one comes.
+func TestMainProxyHandsOnAtOnce(t *testing.T) {
+	withTemp(t)
+	more := make(chan bool)
+	main := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("x-adal-flush") != "1" {
+			t.Error("the main PC is not told that nothing is held back")
+		}
+		w.Write([]byte("picture"))
+		w.(http.Flusher).Flush()
+		<-more
+	}))
+	defer main.Close()
+	defer close(more)
+	old := hostServer
+	hostServer = main.URL
+	defer func() { hostServer = old }()
+	if err := saveKeys(replicaKeys{AccessKey: "the-key"}); err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	addMainProxy(mux)
+	here := httptest.NewServer(mux)
+	defer here.Close()
+	req, _ := http.NewRequest(http.MethodGet, here.URL+"/local/main/automations/7/live", nil)
+	req.Header.Set("X-Adal", "1")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	got := make(chan string, 1)
+	go func() {
+		b := make([]byte, 7)
+		io.ReadFull(resp.Body, b)
+		got <- string(b)
+	}()
+	select {
+	case s := <-got:
+		if s != "picture" {
+			t.Fatalf("got %q", s)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the picture was held back")
 	}
 }

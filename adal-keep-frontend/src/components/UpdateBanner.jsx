@@ -7,6 +7,7 @@
 import { useEffect, useRef, useState } from 'react'
 import api from '../services/api'
 import { onPhone } from '../lib/phoneMode'
+import { byItself } from '../lib/windowNote'
 
 const LATER_KEY = 'adal-update-later'
 const later = () => { try { return JSON.parse(localStorage.getItem(LATER_KEY) || 'null') } catch { return null } }
@@ -19,8 +20,8 @@ export default function UpdateBanner() {
   const [hiddenFor, setHiddenFor] = useState(later())
 
   // The version the server ran when this page opened: when it changes, the
-  // server updated itself. The page then reloads once nobody has typed or
-  // clicked for 2 minutes (nothing half-typed is lost).
+  // server updated itself. The page goes on as it is, with a note: the new
+  // version opens on a person's click, never by itself.
   const [firstVersion, setFirstVersion] = useState('')
   const [updated, setUpdated] = useState(false)
   const lastTouch = useRef(Date.now())
@@ -42,7 +43,7 @@ export default function UpdateBanner() {
     return () => { clearInterval(t); for (const e of ['keydown', 'mousedown', 'touchstart']) window.removeEventListener(e, touch) }
   }, [])
   useEffect(() => {
-    if (!updated) return
+    if (!updated || !byItself()) return
     const t = setInterval(() => { if (Date.now() - lastTouch.current > 2 * 60 * 1000) location.reload() }, 10000)
     return () => clearInterval(t)
   }, [updated])
@@ -50,8 +51,8 @@ export default function UpdateBanner() {
   if (updated) {
     return (
       <div translate="no" className="bg-emerald-50 dark:bg-emerald-900/30 border-b border-emerald-200 dark:border-emerald-800 px-4 py-2 text-sm text-emerald-900 dark:text-emerald-100 flex flex-wrap items-center gap-3">
-        <span>✅ <b>Adal Keep updated itself.</b> This page reloads by itself after 2 quiet minutes — or now:</span>
-        <button type="button" onClick={() => location.reload()} className="rounded-md bg-emerald-600 px-3 py-1 font-semibold text-white hover:bg-emerald-700">Reload now</button>
+        <span>✅ <b>Adal Keep was updated.</b> Go on with your work — the new version opens when you click:</span>
+        <button type="button" onClick={() => location.reload()} className="rounded-md bg-emerald-600 px-3 py-1 font-semibold text-white hover:bg-emerald-700">Open the new version</button>
       </div>
     )
   }
@@ -71,10 +72,10 @@ export default function UpdateBanner() {
       const r = await api.post('/system/update/apply', {}, { timeout: 15 * 60 * 1000 })
       setMsg(r.data?.message || '')
       setPhase('restarting')
-      // The server restarts: reload once it answers again.
+      // The server restarts: once it answers again, the note with the button.
       const t0 = Date.now()
       const wait = setInterval(async () => {
-        try { await api.get('/health', { timeout: 3000 }); if (Date.now() - t0 > 6000) { clearInterval(wait); location.reload() } } catch {}
+        try { await api.get('/health', { timeout: 3000 }); if (Date.now() - t0 > 6000) { clearInterval(wait); if (byItself()) location.reload(); else setUpdated(true) } } catch {}
         if (Date.now() - t0 > 5 * 60 * 1000) clearInterval(wait)
       }, 3000)
     } catch (e) {
@@ -88,7 +89,7 @@ export default function UpdateBanner() {
     <div translate="no" className="bg-teal-50 dark:bg-teal-900/30 border-b border-teal-200 dark:border-teal-800 px-4 py-2 text-sm text-teal-900 dark:text-teal-100">
       <div className="flex flex-wrap items-center gap-3">
         {busy ? (
-          <span>⏳ {phase === 'restarting' ? 'Update installed — Adal Keep restarts and this page reloads by itself. Wait about a minute.' : n.auto ? 'Adal Keep is updating itself… (1–3 minutes). The page reloads by itself afterwards.' : 'Installing the update… (1–3 minutes, do not close Adal Keep)'}</span>
+          <span>⏳ {phase === 'restarting' ? 'Update installed — Adal Keep restarts. Wait about a minute.' : n.auto ? 'Adal Keep is updating itself… (1–3 minutes).' : 'Installing the update… (1–3 minutes, do not close Adal Keep)'}</span>
         ) : phase === 'error' ? (
           <span className="text-red-700 dark:text-red-300">The update did not install: {msg}</span>
         ) : selfUpdating ? (
@@ -120,7 +121,7 @@ export default function UpdateBanner() {
             <ol className="list-decimal pl-5 space-y-0.5">
               <li>Finish what you are typing. Wait until no automation run is working{n.running ? ` (now: ${n.running} working)` : ''}.</li>
               <li>Press <b>Update now</b> — once is enough, even when many changes are listed.</li>
-              <li>Wait 1–3 minutes. Adal Keep restarts and the page reloads by itself. Profiles, documents and settings stay.</li>
+              <li>Wait 1–3 minutes. Adal Keep restarts, then press <b>Open the new version</b>. Profiles, documents and settings stay.</li>
               <li>Employee PCs need nothing: they open the main PC's Adal Keep, which is now new.</li>
               <li>No internet now? Run “2 - Install Adal Main.exe” from the newest USB instead.</li>
             </ol>

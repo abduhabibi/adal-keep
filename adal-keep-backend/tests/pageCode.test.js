@@ -32,3 +32,15 @@ test('no page of the window reloads by itself for its code', () => {
     assert.doesNotMatch(t, /catch\([^)]*\) ?=> ?\{[^}]*location\.reload|if \(again\) \{ location\.reload/, f)
   }
 })
+
+test('the window never reloads or leaves by itself: only behind a click (or the off switch)', () => {
+  const at = (f) => fs.readFileSync(new URL(`../../adal-keep-frontend/src/${f}`, import.meta.url), 'utf8')
+  assert.match(at('components/UpdateBanner.jsx'), /if \(!updated \|\| !byItself\(\)\) return/)
+  assert.match(at('components/UpdateBanner.jsx'), /if \(byItself\(\)\) location\.reload\(\); else setUpdated\(true\)/)
+  assert.match(at('lib/companionOnline.js'), /if \(byItself\(\)\) \{ clearInterval\(t\); go\(\) \}/)
+  assert.match(at('lib/companionDirect.js'), /if \(!windowUsed\(\) \|\| byItself\(\)\) go\(\)/)
+  assert.match(at('components/PcAccessGate.jsx'), /if \(byItself\(\) \|\| !onIn\) location\.reload\(\); else onIn\(\)/)
+  // Every reload of the window in the pages' code: after a person's press only (none on a timer but these, behind the switch).
+  for (const f of ['components/UpdateBanner.jsx', 'components/PcAccessGate.jsx', 'lib/companionOnline.js', 'lib/companionDirect.js', 'App.jsx', 'context/AuthContext.jsx'])
+    for (const line of at(f).split('\n').filter(l => /location\.reload\(|location\.replace\(/.test(l) && !/byItself|onClick|const go = /.test(l))) assert.match(line, /lastTouch\.current/, `${f}: ${line.trim()}`)
+})

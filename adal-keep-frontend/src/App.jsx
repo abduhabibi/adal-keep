@@ -5,6 +5,7 @@ import { Toaster } from 'react-hot-toast'
 import MainLayout from './components/layout/MainLayout'
 import { lazyPage, warmPages, FirstPage, PageComing } from './lib/pageCode'
 import { off } from './lib/offSwitch'
+import { tellChanged } from './lib/changes'
 import { MorePage } from './components/layout/PhoneChrome'
 const DashboardPage = lazyPage(() => import('./pages/DashboardPage'))
 const ProfilesPage = lazyPage(() => import('./pages/ProfilesPage'))
@@ -86,11 +87,11 @@ function TrialBanner({ days, renew }) {
 const GATED = !(import.meta.env.VITE_PHONE === '1' || import.meta.env.VITE_ADMIN === '1' || import.meta.env.VITE_DEMO === '1')
 
 function Shell() {
-  const { state, subscription, refresh } = useAuth()
+  const { state, refresh, forgetOpen } = useAuth()
   const [pcGate, setPcGate] = useState(false)
   const [suspended, setSuspended] = useState(false)
   useEffect(() => {
-    const on = () => setSuspended(true)
+    const on = () => { forgetOpen(); setSuspended(true) }
     window.addEventListener('adal-suspended', on)
     return () => window.removeEventListener('adal-suspended', on)
   }, [])
@@ -106,9 +107,14 @@ function Shell() {
     window.addEventListener('adal-pc-access', on)
     return () => window.removeEventListener('adal-pc-access', on)
   }, [])
+  // In again: the pages stay as they are and ask again for what they show.
+  const inAgain = () => { setPcGate(false); if (state !== 'ready') refresh(); tellChanged(['*']) }
   if (suspended) return <>{toaster}<SuspendedScreen /></>
-  if (pcGate) return <>{toaster}<PcAccessGate /></>
+  return <>{pcGate && <PcAccessGate onIn={inAgain} onOut={forgetOpen} />}<Inside /></>
+}
 
+function Inside() {
+  const { state, subscription, refresh, quiet } = useAuth()
   if (state === 'loading') {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900">
@@ -160,6 +166,7 @@ function Shell() {
       {/* A page is shown when it is ready: until then the one before stays (lib/pageCode.jsx). */}
       <BrowserRouter future={{ v7_startTransition: !off('pages') }}>
         <PageComing />
+        {quiet && <div role="status" data-pc-quiet="" className="fixed bottom-3 left-1/2 z-[9990] flex -translate-x-1/2 items-center gap-3 rounded-full bg-slate-900 px-4 py-2 text-xs font-semibold text-white shadow-lg">The PC is not answering — this is what was last seen here.<button type="button" onClick={refresh} className="rounded-full bg-teal-600 px-3 py-1">Try again</button></div>}
         {toaster}
         <Suspense fallback={null}><SignupBanner /></Suspense>
         {subscription?.mode === 'trial' && subscription.daysLeft <= 3 && <TrialBanner days={subscription.daysLeft} />}

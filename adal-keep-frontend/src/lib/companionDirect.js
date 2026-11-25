@@ -7,7 +7,11 @@
  * the Companion found and the office addresses the main PC sends online; the
  * first that answers opens, at the same page. When the main PC goes away
  * again, its page comes back here (lib/companionOnline.js).
+ * By itself only while nobody has used the window yet; after that a note with a
+ * button (a person's page is never taken away).
  */
+import { windowNote, windowUsed, byItself } from './windowNote'
+
 const ON_COMPANION = typeof location !== 'undefined' && location.host === '127.0.0.1:47801'
 
 async function look() {
@@ -41,7 +45,9 @@ export function startCompanionDirect() {
       let pc = null
       try { pc = JSON.parse(localStorage.getItem('adal-pc') || 'null') } catch {}
       const hand = pc?.number ? `#adal_number=${encodeURIComponent(pc.number)}${pc.cloud?.device ? `&adal_device=${encodeURIComponent(pc.cloud.device)}` : ''}${cid ? `&adal_cid=${encodeURIComponent(cid)}` : ''}` : ''
-      location.replace(`${url.replace(/\/$/, '')}${here}?adal_companion=1&adal_online=ok${hand}`)
+      const go = () => location.replace(`${url.replace(/\/$/, '')}${here}?adal_companion=1&adal_online=ok${hand}`)
+      if (!windowUsed() || byItself()) go()
+      else windowNote('main-pc', 'The main PC is on.', 'Open it', go)
       return
     }
     setTimeout(run, 10000)

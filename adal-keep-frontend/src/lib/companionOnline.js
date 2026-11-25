@@ -10,6 +10,7 @@
  * A browser that is not a Companion never does this.
  */
 import api, { forgetJoin } from '../services/api'
+import { windowNote, noNote, windowUsed, byItself } from './windowNote'
 
 const ONLINE = 'http://127.0.0.1:47801'
 const IS = 'adal-is-companion'
@@ -18,16 +19,20 @@ const TRIED = 'adal-companion-online-tried'
 const get = (k) => { try { return localStorage.getItem(k) } catch { return null } }
 const set = (k, v) => { try { localStorage.setItem(k, v) } catch {} }
 
-// The main PC stops answering (turned off, the Companion left the office): the
-// window goes back to the online copy at once, at the same page; that copy
-// comes back here by itself when the main PC answers (lib/companionDirect.js).
+// The main PC stops answering (turned off, the Companion left the office): said in
+// a note, with a button to this PC's own copy at the same page. Never by itself: a
+// busy main PC missed two answers and the whole window went away (2026-11-25).
 function watchMainPC() {
   let misses = 0
   const t = setInterval(async () => {
     let ok = false
     try { ok = (await fetch('/api/health', { cache: 'no-store', signal: AbortSignal.timeout(5000) })).status < 500 } catch {}
     misses = ok ? 0 : misses + 1
-    if (misses >= 2) { clearInterval(t); location.replace(`${ONLINE}${location.pathname}`) }
+    if (!misses) { noNote('main-pc'); return }
+    const go = () => location.replace(`${ONLINE}${location.pathname}`)
+    if (misses < 2) return
+    if (byItself()) { clearInterval(t); go() }
+    else if (misses === 2) windowNote('main-pc', 'The main PC is not answering.', 'Work on this PC’s copy', go)
   }, 8000)
 }
 
@@ -90,8 +95,11 @@ export async function shareOnlineCopy() {
   if (get(IS) === '1' && get(DONE)) watchMainPC()
   if (get(IS) !== '1' || get(DONE)) return
   if (Date.now() - Number(get(TRIED) || 0) < 6 * 3600 * 1000) return
+  // Somebody is working in this window already: at its next opening (this goes to another page and back).
+  if (windowUsed() && !byItself()) return
   try {
     const { data } = await api.post('/pc-access/online-copy', { name: 'Companion PC' })
+    if (windowUsed() && !byItself()) return
     const back = location.href
     location.href = `${ONLINE}/companion-pair.html#${encodeURIComponent(JSON.stringify({ pc: data, back }))}`
   } catch (err) {

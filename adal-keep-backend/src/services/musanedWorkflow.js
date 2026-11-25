@@ -527,7 +527,14 @@ const CARD_IN_PAGE = (hint, must) => {
   // Several agencies under one sign-in: this account's own.
   const own = hint ? candidates.filter(el => txt(el).toUpperCase().includes(hint)) : []
   if (own.length) candidates = own
-  if (!candidates.length && hint) candidates = all.filter(el => txt(el).toUpperCase().includes(hint))
+  // By the name alone: only what comes after the words, and never while the list is still loading (2026-11-25, Main:
+  // the spinner turned, the agency's name stood in the page's header, and that was clicked).
+  if (!candidates.length && hint) {
+    const seen = (el) => el.getClientRects().length > 0
+    const busy = all.some(el => /spinner|loader|loading|skeleton/i.test(String(el.className?.baseVal ?? el.className ?? '')) && seen(el))
+    const words = all.filter(el => /please\s+select\s+the\s+establishment/i.test(txt(el)) && !/^(SCRIPT|STYLE)$/.test(el.tagName)).pop()
+    if (!busy) candidates = all.filter(el => txt(el).toUpperCase().includes(hint) && (!words || (words.compareDocumentPosition(el) & 4 && !words.contains(el))))
+  }
   if (candidates.length) {
     candidates.sort((a, b) => {
       const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect()

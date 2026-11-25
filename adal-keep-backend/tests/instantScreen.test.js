@@ -40,6 +40,7 @@ const PAGES = {
   '/second': CARD + `<script>n=0;card.onclick=()=>{n++; if (n===2) { document.body.innerHTML = ${JSON.stringify(NAV)} }}</script>`,
   '/slow': CARD + `<script>n=0;card.onclick=()=>{n++; document.body.innerHTML = '<p></p>'; setTimeout(() => { document.body.innerHTML = ${JSON.stringify(NAV)} }, 3000)}</script>`,
   '/later': `<p>Please wait</p><script>setTimeout(() => { document.body.innerHTML = ${JSON.stringify(NAV)} }, 1500)</script>`,
+  '/spin': `<header><div style="width:400px;height:60px" onclick="window.wrong=(window.wrong||0)+1">ZADUL</div></header><p>Please select the establishment:</p><div id=l><i class="spinner" style="display:block;width:20px;height:20px">.</i></div><script>setTimeout(() => { const t = ['ZADUL FOR', 'EIGN EMPLOY', 'MENT AGE', 'NCY det', 'ails'].join(''); l.innerHTML = '<div id="card" style="width:500px;height:120px;border:1px solid">' + t + '</div>'; card.onclick = () => { window.n = (window.n || 0) + 1; document.body.innerHTML = ${JSON.stringify(NAV)} } }, 4000)</script>`,
   '/blank': '<p>One moment</p>',
   '/pool': '<h1>HR Pool</h1>' + NAV + '<input type=text id=q>',
   '/hr-pool': NAV + '<input type=text id=q>',
@@ -75,6 +76,10 @@ test('JEV answers after 25 s: the dashboard at once; the agency\'s card; a page 
   assert.equal(await F.cardToDashboard(p, ctx({ cardWait: { againMs: 1500 } })), 'dashboard')
   console.log(`JEV of 25 s: dashboard told after ${at} ms; a lost first click: dashboard ${Date.now() - t0} ms after it`)
   assert.ok(logs.some(l => /its card clicked once more/.test(l)))
+  // The list still loading (the owner's picture, 16:17): the name in the header is never clicked; the card when it comes.
+  await p.goto(U('/spin')); t0 = Date.now()
+  assert.equal(await F.cardToDashboard(p, ctx()), 'dashboard')
+  assert.deepEqual(await p.evaluate(() => [window.wrong || 0, window.n]), [0, 1]); assert.ok(Date.now() - t0 < 8000)
   // A click that takes long: not clicked again on a page without the list; longer than the limit on a slow line.
   await p.goto(U('/slow')); logs.length = 0
   assert.equal(await F.cardToDashboard(p, ctx({ cardWait: { againMs: 600, slowMs: 9000 } })), 'dashboard')

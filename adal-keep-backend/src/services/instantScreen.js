@@ -115,7 +115,7 @@ const WORDS = { 'agency-picker': 'the list of agencies is still shown', unknown:
  */
 export async function waitScreen(page, ctx, timeoutMs, { classify, log = () => {}, again = null, slowMs = 0, againMs = 10000, everyMs = LOOK_EVERY } = {}) {
   const t0 = Date.now()
-  let last = 'unknown', clicked = false, spoke = t0
+  let last = 'unknown', clicked = false, spoke = t0, triedAt = 0
   for (;;) {
     if (ctx?.isCancelled?.()) { const e = new Error('Cancelled by user'); e.cancelled = true; throw e }
     stillThere(page)
@@ -123,9 +123,10 @@ export async function waitScreen(page, ctx, timeoutMs, { classify, log = () => {
     if (screen !== last) { log(`waiting — screen: ${screen}`); last = screen }
     if (['dashboard', 'captcha', 'otp', 'login-error', 'login-form'].includes(screen)) return screen
     const ms = Date.now() - t0
-    if (again && !clicked && screen === 'agency-picker' && ms >= againMs) {
-      clicked = true
-      log(`the list of agencies is still shown after ${Math.round(ms / 1000)} s — ${await again().catch(() => false) ? 'its card clicked once more' : 'its card is not there now'}`)
+    if (again && !clicked && screen === 'agency-picker' && ms >= againMs && Date.now() - triedAt >= 3000) {
+      triedAt = Date.now()
+      clicked = await again().catch(() => false)      // (the list still loading, no card yet: looked again, not spent)
+      if (clicked) log(`the list of agencies is still shown after ${Math.round(ms / 1000)} s — its card clicked once more`)
     }
     if (ms >= Math.max(timeoutMs, slowMs)) return last
     if (Date.now() - spoke >= 15000) { spoke = Date.now(); log(`waiting for Musaned's dashboard (${Math.round(ms / 1000)} s of ${Math.round(Math.max(timeoutMs, slowMs) / 1000)}): ${WORDS[screen] || screen}`) }

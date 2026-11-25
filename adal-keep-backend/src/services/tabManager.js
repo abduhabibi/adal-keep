@@ -32,6 +32,7 @@ import { noteSent } from './lostBrowser.js'
 import { stopRequest } from './emptyPicture.js'
 import { robotsOwnTab } from './robotsOwnTab.js'
 import { stopSignOut } from './oneSitePage.js'
+import { tabRank } from './bestTab.js'
 import { noteCall } from './siteApi.js'
 import { newRunTab, outOfSight, sendAway } from './browser.js'
 import { isRemote } from './remoteBrowsers.js'
@@ -358,7 +359,7 @@ async function findFreeTab(browser, workflowId, busyRuns, space = null) {
   const mine = space || browser.defaultBrowserContext?.() || null
   const onSite = (await browser.pages().catch(() => [])).filter(p => !isClosed(p) && !owned.has(p) && host.test(p.url()) && (!mine || spaceIs(p, mine)))
   const signedIn = (p) => { try { return !!signedInHere[peer]?.(p.url()) } catch { return false } }
-  for (const p of onSite.sort((a, b) => signedIn(b) - signedIn(a))) {
+  for (const p of onSite.sort((a, b) => signedIn(b) - signedIn(a) || tabRank(b.url()) - tabRank(a.url()))) {
     if (await isFree(p, busyRuns, signedIn(p))) return p
   }
   return null
@@ -407,7 +408,7 @@ async function siteTab(browser, workflowId, keep, space = null) {
   const onSite = (await browser.pages().catch(() => []))
     .filter(p => !isClosed(p) && !p.__adalBorrowed && host.test(p.url()) && (!mine || spaceIs(p, mine)))
     .filter(p => { const o = ownerOf(p); return o === null || !keep.has(o) })
-  for (const p of onSite.sort((a, b) => signedIn(b) - signedIn(a))) {
+  for (const p of onSite.sort((a, b) => signedIn(b) - signedIn(a) || tabRank(b.url()) - tabRank(a.url()))) {
     if (await personIn(p)) continue
     for (const [id, t] of [..._tabs]) if (t === p) _tabs.delete(id)
     if (!(await outOfSight(p))) await sendAway(p).catch(() => {})

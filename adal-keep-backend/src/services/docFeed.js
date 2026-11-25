@@ -21,7 +21,7 @@ export const docsOn = () => process.env.ADAL_OWN_DOCS !== '0'
 export const dirs = () => ({ safe: process.env.ADAL_BACKUP_SAFE || path.join(BACKEND, 'data', 'SafeStorage'), uploads: process.env.ADAL_UPLOADS_DIR || path.join(BACKEND, 'uploads') })
 
 const epoch = crypto.randomBytes(5).toString('hex')
-let rev = 0, log = [], vec = null
+let rev = 0, log = [], vec = null, dirty = 0
 const waiting = new Set(), watchers = []
 function add(e) { log.push({ rev: ++rev, ...e }); if (log.length > 3000) log.splice(0, 1500); clearTimeout(add.t); add.t = setTimeout(() => { for (const w of [...waiting]) w() }, 300); add.t.unref?.() }
 
@@ -43,14 +43,19 @@ function look(db) { soon ||= setTimeout(() => { soon = null; readRows(db).catch(
 /** The files' rows changed since the last look, from the change log. */
 export async function readRows(db) {
   const top = Object.fromEntries((await db.raw('SELECT origin, MAX(seq) AS s FROM sync_log GROUP BY origin')).map(r => [r.origin, Number(r.s)]))
+  const told = async (id) => {
+    const f = await db('files').leftJoin('profile_fields', 'files.profile_field_id', 'profile_fields.id').where('files.id', id).first('files.mimetype', 'files.size', 'profile_fields.profile_id').catch(() => null)
+    add({ id: String(id), profile: f?.profile_id ?? null, gone: !f, mime: f?.mimetype || '', size: f?.size || 0 })
+  }
   if (vec) for (const [o, s] of Object.entries(top)) {
     if (s <= (vec[o] || 0)) continue
     const rows = (await db.raw("SELECT DISTINCT rid FROM sync_log WHERE origin = ? AND seq > ? AND tbl = 'files' LIMIT 500", [o, vec[o] || 0])).map(r => r.rid)
-    for (const id of rows) {
-      const f = await db('files').leftJoin('profile_fields', 'files.profile_field_id', 'profile_fields.id').where('files.id', id).first('files.mimetype', 'files.size', 'profile_fields.profile_id').catch(() => null)
-      add({ id: String(id), profile: f?.profile_id ?? null, gone: !f, mime: f?.mimetype || '', size: f?.size || 0 })
-    }
+    for (const id of rows) await told(id)
   }
+  // (written, not yet in the log: the sync takes it from here)
+  const now = (await db.raw("SELECT seq, rid FROM sync_dirty WHERE tbl = 'files' AND seq > ? ORDER BY seq LIMIT 500", [dirty]).catch(() => []))
+  if (vec) for (const id of new Set(now.map(r => r.rid))) await told(id)
+  if (now.length) dirty = now[now.length - 1].seq
   vec = top
 }
 

@@ -78,6 +78,7 @@ test('the manifest: nothing changed is one line; signs of life make no new snaps
   t.after(() => db.destroy())
   await db.raw('PRAGMA journal_mode = WAL')
   await db.schema.createTable('sync_log', x => { x.string('origin'); x.integer('seq'); x.string('tbl'); x.string('rid') })
+  await db.schema.createTable('sync_dirty', x => { x.increments('seq'); x.string('tbl'); x.string('rid') })
   await db.schema.createTable('profiles', x => { x.increments('id'); x.string('full_name') })
   await db.batchInsert('profiles', [...Array(3000)].map((_, i) => ({ full_name: `girl ${i} ${'x'.repeat(400)}` })), 200)
   await db('sync_log').insert({ origin: 'm', seq: 1, tbl: 'profiles', rid: '1' })
@@ -98,7 +99,7 @@ test('the manifest: nothing changed is one line; signs of life make no new snaps
   try { assert.equal((await R.manifestFor({ db, have: m1.snap, docsAt: m1.docs_at })).same_db, true) } finally { undo() }
   // A girl changed: a new snapshot, only the pieces that changed, and of them only the frames.
   await db('profiles').where({ id: 1500 }).update({ full_name: 'changed' })
-  await db('sync_log').insert({ origin: 'm', seq: 3, tbl: 'profiles', rid: '1500' })
+  await db('sync_dirty').insert({ tbl: 'profiles', rid: '1500' })   // (not yet in the log)
   undo = later(60000)
   try {
     const m3 = await R.manifestFor({ db, have: m1.snap, docsAt: m1.docs_at })

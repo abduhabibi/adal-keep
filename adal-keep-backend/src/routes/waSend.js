@@ -3,6 +3,8 @@ import express from 'express'
 import os from 'os'
 import { prepareSend, startSend, retrySend, jobs, mayNot } from '../services/waSend.js'
 import { listSends, lastSent } from '../services/waRecords.js'
+import { ownOn } from '../services/waOwn.js'
+import * as own from '../services/waOwnHere.js'
 import { agencyTransport, keyOf, stateOf } from '../services/whatsapp.js'
 
 const router = express.Router()
@@ -18,11 +20,15 @@ router.use('/whatsapp/cv', async (req, res, next) => {
   requireFeature('whatsapp')(req, res, next)
 })
 
-/** Which WhatsApp this request sends through. */
+/** Which WhatsApp this request sends through: this PC's own (switched on), else the agency's one. */
 async function transportFor(req) {
+  const db = req.app.locals.db
+  if (await ownOn(db)) return own.transportFor(req, db)
   return agencyTransport(keyOf())
 }
 async function stateFor(req) {
+  const db = req.app.locals.db
+  if (await ownOn(db)) { const o = await own.stateFor(req, db).catch(e => ({ status: 'off', error: e.message })); return { status: o.status, me: o.me || null, own: true } }
   const s = stateOf(keyOf())
   return { status: s.status, me: s.me || null, own: false }
 }

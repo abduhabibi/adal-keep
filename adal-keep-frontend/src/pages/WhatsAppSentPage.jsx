@@ -9,6 +9,7 @@ import toast from 'react-hot-toast'
 import { wa } from '../lib/whatsapp'
 import { onDataChange } from '../lib/changes'
 import PageHeader from '../components/shared/PageHeader'
+import OwnWhatsApp from '../components/OwnWhatsApp'
 import Button from '../components/shared/Button'
 
 const err = (e) => e?.response?.data?.error || e.message
@@ -73,6 +74,7 @@ export default function WhatsAppSentPage() {
   return (
     <div className="space-y-4">
       <PageHeader title="WhatsApp" subtitle="CVs sent to agents" />
+      <OwnWhatsApp />
       <div className="flex flex-wrap gap-2">
         <select className="field" value={agent} onChange={e => setAgent(e.target.value)} aria-label="Agent">
           <option value="">All agents</option>

@@ -44,7 +44,8 @@ async function agentBody(req) {
   const row = {}
   if (b.name !== undefined) row.name = String(b.name).trim().slice(0, 120)
   if (b.chat_id) row.chat_id = String(b.chat_id)
-  else if (b.number) row.chat_id = await chatForNumber(who(req), b.number)
+  // (The agency's one is off and this PC has its own: that one looks the number up.)
+  else if (b.number) row.chat_id = await chatForNumber(who(req), b.number).catch(async (e) => { const o = await import('../services/waOwn.js'); if (o.ownState().status !== 'ready') throw e; return o.checkNumber(b.number) })
   if (b.template_ids !== undefined) row.template_ids = JSON.stringify((b.template_ids || []).map(Number).filter(Boolean))
   if (b.musaned_office !== undefined) row.musaned_office = String(b.musaned_office || '').trim().slice(0, 200)
   if (b.active !== undefined) row.active = b.active ? 1 : 0

@@ -242,6 +242,7 @@ app.use('/api', officeRouter)    // office health, morning backup line, end-of-d
 app.use('/api', replicaRouter)   // Companions keep a locked copy; /safety (backup age, licence end)
 app.use('/api', contractsRouter)
 app.use('/api', embassyRouter)   // the embassy print (3 pages a girl)
+app.use('/api', (await import('./src/routes/waOwn.js')).default)   // own WhatsApp on each PC (behind a switch)
 app.use('/api', (await import('./src/routes/waSend.js')).default)   // "Send on WhatsApp" (CV preview) and the WhatsApp page
 app.use('/api', whatsappRouter)   // Settings → WhatsApp, CVs to agents
 app.use('/api', (await import('./src/routes/agencyConfig.js')).default)   // per-agency config record + first-run sign-up (flags)
@@ -1321,6 +1322,7 @@ initSystem().then(() => {
     // Every PC: heartbeat, Adal's signed commands, crash reports (Admin → Fleet; behind a flag).
     import('./src/services/tower.js').then(async t => t.startTower(app.locals.db, { installedVersion: (await import('./src/services/cloudSync.js')).installedVersion })).catch(e => console.warn('[tower]', e.message))
     import('./src/services/screenClip.js').then(c => c.startClipWatcher(PORT)).catch(e => console.warn('[clip]', e.message)) // double C crops the screen anywhere on this PC
+    import('./src/services/waOwn.js').then(w => w.startOwnWhatsApp(app.locals.db)).then(() => import('./src/services/waOwnHere.js')).then(w => w.startOwnLink(app.locals.db)).catch(e => console.warn('[own-whatsapp]', e.message))   // off unless switched on
     import('./src/services/clipRelay.js').then(c => c.startClipRelay()).catch(e => console.warn('[clip]', e.message))   // a Companion: its crops reach its own window on the main PC's pages
     // New selections on Musaned, every hour, on ONE PC of the agency (the main PC picks the strongest).
     if (ROBOTS_HERE) import('./src/services/selectionCheck.js').then(s => s.startSelectionCheck(app.locals.db)).catch(e => console.warn('[selection-check]', e.message))

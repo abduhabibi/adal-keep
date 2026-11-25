@@ -1,0 +1,11 @@
+{
+  "name": "adal-wa-helper",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "license": "GPL-3.0-only",
+  "description": "A separate small program: one WhatsApp sign-in on this PC (Baileys, no browser). Adal Keep's server talks to it over its stdin/stdout.",
+  "dependencies": {
+    "@whiskeysockets/baileys": "7.0.0-rc14"
+  }
+}

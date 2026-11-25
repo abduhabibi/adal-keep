@@ -113,6 +113,21 @@ test('an expired Musaned sign-in starts again; a stale form is fresh for the tic
     await p.close()
   })
 
+  await t.test('JEV answers after 25 s: after the tick and the code the dashboard is told at once (2026-11-25, Main)', async () => {
+    const p = await (await browser.createBrowserContext()).newPage()
+    const logs = [], asks = []
+    let asked = 0
+    const run = w.signInMusaned(p, ctxOf(logs, asks, { reviewScreen: async () => { asked++; await new Promise(r => { setTimeout(r, 25000).unref?.() }); return { screen: 'unknown', source: 'jev' } } }))
+    for (let i = 0; i < 80 && !anchor(p); i++) await sleep(250)
+    await tick(p)
+    const t0 = Date.now()
+    assert.equal(await run, 'dashboard', logs.join('\n'))
+    const ms = Date.now() - t0
+    console.log(`JEV of 25 s: signed in ${ms} ms after the tick (JEV asked ${asked} time(s))`)
+    assert.ok(ms < 15000, `${ms} ms`)
+    await p.close()
+  })
+
   await t.test('a refused password is said in plain words and nothing more is tried', async () => {
     const p = await (await browser.createBrowserContext()).newPage()   // (its own cookies: signed out)
     const logs = [], asks = []

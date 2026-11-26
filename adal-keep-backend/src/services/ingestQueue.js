@@ -272,6 +272,7 @@ export function startQueueWorker(db, processorFn, tag = '[QUEUE]', watchDir = nu
   console.log(tag, 'worker started (concurrency', concurrency + ', tick ' + TICK_MS + 'ms)')
 
   // Fire N parallel loops that each drain one file at a time
+  const timers = [], mine = []
   for (let w = 0; w < concurrency; w++) {
     // A reading takes many seconds: the next tick waits for it, or every
     // second another file would start beside it (10 files at once on a 4 GB PC).
@@ -287,6 +288,9 @@ export function startQueueWorker(db, processorFn, tag = '[QUEUE]', watchDir = nu
       } finally { busy = false }
     }
     wakes.add(go)
-    setInterval(go, TICK_MS + w * 300) // stagger startup
+    mine.push(go)
+    timers.push(setInterval(go, TICK_MS + w * 300)) // stagger startup
   }
+  // (a test ends its worker: nothing keeps the program running after it)
+  return () => { for (const t of timers) clearInterval(t); for (const g of mine) wakes.delete(g) }
 }

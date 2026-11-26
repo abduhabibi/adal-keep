@@ -231,6 +231,14 @@ func sweepDue(now time.Time, network string) bool {
 	return true
 }
 
+// sweepHeard: our Main said it is on this network (presence.go): its next message brings its new address,
+// asking every address meanwhile helps nothing.
+func sweepHeard() {
+	sweep.mu.Lock()
+	sweep.seen = time.Now()
+	sweep.mu.Unlock()
+}
+
 // sweepFound: the main PC is known: the pauses start from the beginning next time.
 func sweepFound() {
 	sweep.mu.Lock()

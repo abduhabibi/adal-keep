@@ -375,7 +375,7 @@ func announceRobot() {
 	for {
 		keys := loadKeys()
 		if keys.AccessKey != "" && hostServer != "" {
-			body := map[string]any{"token": robotToken, "port": lanHTTPPort, "name": clientName, "cores": runtime.NumCPU()}
+			body := map[string]any{"token": robotToken, "port": lanHTTPPort, "name": clientName, "cores": runtime.NumCPU(), "pc_id": myPCID}
 			// How strong it is right now: the main PC gives the heavy work to the strongest.
 			for k, v := range powerLately() {
 				body[k] = v
@@ -401,6 +401,10 @@ func announceRobot() {
 			rememberPeers(answer.Peers)
 			heardRelease(answer.Release, answer.Runs)
 		}
-		time.Sleep(20 * time.Second)
+		// (this PC's address changed: Main hears the new one at once, book.go)
+		select {
+		case <-robotKick:
+		case <-time.After(20 * time.Second):
+		}
 	}
 }

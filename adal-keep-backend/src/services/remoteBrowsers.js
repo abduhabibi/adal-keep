@@ -23,6 +23,7 @@
 import fs from 'fs'
 import path from 'path'
 import { keepAnnounced, announced, askAll } from './robotPCs.js'
+import { presenceNow } from './pcPresence.js'
 
 /** How long a Companion may take to open its robot browser (its own wait for a first start is 30 s and more). */
 const OPEN_MS = () => Number(process.env.ADAL_REMOTE_OPEN_MS) || 50000
@@ -91,7 +92,8 @@ export function registerDevice(pc, ip, body = {}) {
     peers_ok: peersTotal == null ? null : num(body.peers_ok, 0, peersTotal),
     peers_down: Array.isArray(body.peers_down) ? body.peers_down.slice(0, 20).map(x => String(x).slice(0, 60)) : [],
   }
-  devices.set(pc.id, { id: pc.id, name: String(body.name || pc.name || 'Companion').slice(0, 60), ip: at, port, token, cores, ...power, net, ...health, lan, at: Date.now() })
+  const pcId = /^[0-9a-f]{12}$/.test(String(body.pc_id || '')) ? String(body.pc_id) : null   // its permanent id (presence)
+  devices.set(pc.id, { id: pc.id, pcId, name: String(body.name || pc.name || 'Companion').slice(0, 60), ip: at, port, token, cores, ...power, net, ...health, lan, at: Date.now() })
   keepAnnounced(() => [...devices.values()])
   return { ok: true }
 }
@@ -159,7 +161,10 @@ export const nameOf = (id) => devices.get(String(id))?.name || ''
 export function deviceOf(browser) { return browser ? remote.get(browser) || null : null }
 export const isRemote = (browser) => !!deviceOf(browser)
 
-function base(d) { return `http://${d.ip.includes(':') ? `[${d.ip}]` : d.ip}:${d.port}` }
+// Where it is now: the address its permanent id was heard at, signed, a moment ago (the address book,
+// pcPresence.js) — a Companion that got a new address is reached there before its next announcement.
+function ipNow(d) { const e = d.pcId && presenceNow()?.get(d.pcId); return e?.signed && e.ip ? e.ip : d.ip }
+function base(d) { const ip = ipNow(d); return `http://${ip.includes(':') ? `[${ip}]` : ip}:${d.port}` }
 
 function dropConnection(id) {
   const c = conns.get(id)

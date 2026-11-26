@@ -100,6 +100,11 @@ func discoverServer(timeout time.Duration) *serverInfo {
 		}
 		presenceFailed(loadIdentity().PCID)
 	}
+	// Where it was heard last (book.go), when that is not where this PC looks already.
+	if u := lastKnown(loadIdentity().PCID); u != "" && u != strings.TrimRight(hostServer, "/") && answersAdalKeep(u) && acceptServer(u) {
+		log.Printf("🪪 Main PC found where it was heard last: %s", u)
+		return infoFromURL(u)
+	}
 	// The network card it had, in this PC's neighbour table: its address now.
 	if u := findByMAC(); u != "" {
 		log.Printf("🪪 Main PC found by its network card at %s", u)
@@ -110,6 +115,10 @@ func discoverServer(timeout time.Duration) *serverInfo {
 	}
 	if os.Getenv("ADAL_NO_DISCOVERY") == "1" {
 		return nil
+	}
+	// Its heartbeat online names its addresses (book.go): before every address is asked.
+	if u := mainFromCloud(); u != "" {
+		return infoFromURL(u)
 	}
 	if !sweepDue(time.Now(), networkNow()) {
 		return nil

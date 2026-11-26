@@ -282,7 +282,8 @@ func confirmedOurs(u string) bool {
 }
 
 // acceptServer: what discovery and the scan accept (replaced in tests).
-var acceptServer = serverIsOurs
+// (and, with the agency's key here, it proves it has the same: book.go)
+var acceptServer = func(u string) bool { return serverIsOurs(u) && provesOurs(u) }
 
 // findByMAC: the main PC's current address from this PC's neighbour table,
 // by the network card it had. "" when the card is not in the table (yet).

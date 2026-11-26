@@ -213,6 +213,7 @@ export async function scanContracts(db, { auto = false, remote = null, limitMs =
     }
     let ok = await open(LIST_URL.replace('size=10', 'size=50'))
     if (!ok && !auto && await signInForCheck(db, page)) ok = await open(LIST_URL.replace('size=10', 'size=50'))
+    if (!ok) console.warn('[contracts] the Employment Requests list cannot be read: Musaned is signed out — the check stops')
     if (!ok && auto) return { signedOut: true }
     if (!ok) {
       contractCheck.signedOut = true
@@ -252,8 +253,10 @@ export async function scanContracts(db, { auto = false, remote = null, limitMs =
       if (!p.passport_number) { contractCheck.results.push({ id: p.id, name: p.full_name, state: 'error', error: 'no passport number on the profile' }); continue }
       await sleep(BETWEEN_MS / 2)
       let r
-      try { r = await checkOne(db, browser, page, p) } catch (e) { r = { state: 'error', error: e.message } }
+      // Its request opened from the list itself (DETAILS of that card) — her passport is never searched.
+      try { r = await requestDetails(db, browser, page, p, c) } catch (e) { r = { state: 'error', error: e.message } }
       if (r.state === 'error' && pageGone(page, r.error)) { console.warn(`[contracts] Musaned ${pageGone(page, r.error)} — the check stops`); break }
+      if (r.state === 'signed-out') { console.warn('[contracts] Musaned signed out while reading the list — the check stops'); break }
       contractCheck.results.push({ id: p.id, name: p.full_name, passport: p.passport_number, ...r })
       console.log(`[contracts] ${p.full_name}: ${r.state}${r.first ? ' (NEW)' : ''}${r.stage ? ' · ' + r.stage : ''}${r.error ? ' — ' + r.error : ''}`)
     }
@@ -351,6 +354,7 @@ export function parseCard(text) {
     pro: after('PRO'),
     payment: /^unpaid$/i.test(pay) ? 'Unpaid' : /^paid$/i.test(pay) ? 'Paid' : pay,
     created: after('CREATION DATE').match(/\d{4}-\d{2}-\d{2}/)?.[0] || '',
+    reason: after('REASON') || after('REJECTION REASON') || after('CANCELLATION REASON') || (t.match(/reason\s*:\s*([^\n]+)/i)?.[1] || '').trim(),
   }
 }
 
@@ -682,6 +686,15 @@ async function checkOne(db, browser, page, p) {
   return saveDetails(db, (n) => downloadPdf(browser, page, n), p, card, s.cards[0], d)
 }
 
+/** A request of the list (a card on Employment Requests or Pending) → its contract page, read and saved. */
+async function requestDetails(db, browser, page, p, c) {
+  await page.goto(c.url, { waitUntil: 'networkidle2', timeout: 60000 })
+  if (!(await signedIn(page))) return { state: 'signed-out' }
+  if (c.contract_number) await page.waitForFunction((n) => (document.body.innerText || '').includes(n), { timeout: 20000 }, c.contract_number).catch(() => {})
+  const d = await openDetails(page, c.contract_number)
+  return saveDetails(db, (n) => downloadPdf(browser, page, n), p, c, c.text, d)
+}
+
 /** DETAILS (of the card holding `contract`, else the first) → the contract page, read. */
 async function openDetails(page, contract = '') {
   await Promise.all([
@@ -798,9 +811,9 @@ async function saveDetails(db, pdfOf, p, card, cardText, d) {
     await task(db, p.id, `Chosen on Musaned: ${p.full_name}`, `Contract ${update.contract_number || ''} · ${update.employer_name || ''} · ${update.musaned_stage || ''}. Book her Wafid medical when you are ready (her page → Book Wafid medical).`)
     import('./whatsapp.js').then(w => w.onChosen(db, p.id)).catch(e => console.warn('[contracts] whatsapp:', e.message))
   } else if (dead && p.chosen_at && !/CANCEL|REJECT/i.test(p.musaned_stage || '')) {
-    await task(db, p.id, `Musaned: ${p.full_name}'s contract was ${update.musaned_stage}`, `Contract ${update.contract_number || ''} · ${update.employer_name || ''}. She is free for another employer.`)
+    await task(db, p.id, `Musaned: ${p.full_name}'s contract was ${update.musaned_stage}`, `Contract ${update.contract_number || ''} · ${update.employer_name || ''}.${card.reason ? ` Reason: ${card.reason}.` : ''} She is free for another employer.`)
   } else if (p.musaned_stage && update.musaned_stage && p.musaned_stage !== update.musaned_stage) {
-    await task(db, p.id, `Musaned: ${p.full_name} → ${update.musaned_stage}`, `Was ${p.musaned_stage}.`)
+    await task(db, p.id, `Musaned: ${p.full_name} → ${update.musaned_stage}`, `Was ${p.musaned_stage}.${card.reason ? ` Reason: ${card.reason}.` : ''}`)
   }
   // Wakala unpaid → the agent who chose her is asked (a call that opens their WhatsApp).
   if (!dead && /^unpaid$/i.test(update.musaned_payment || '')) import('./wakala.js').then(w => w.askToPay(db, p.id)).catch(e => console.warn('[contracts] wakala:', e.message))
@@ -973,7 +986,20 @@ async function signInForCheck(db, page) {
   return false
 }
 
+/**
+ * Check now (all girls, or one): Employment Requests' own list only (2026-11-26, the owner: "not passport after
+ * passport"). Its data call first; else its pages, newest first (scanContracts); a list that cannot be read: one line.
+ */
 export async function checkContracts(db, { onlyId = null } = {}) {
+  const r = await checkContractsByApi(db, { onlyId })
+  if (!r?.pages) return r
+  const all = await scanContracts(db, {})
+  if (!onlyId || !all?.results) return all
+  const mine = all.results.filter(x => x.id === Number(onlyId))
+  return { ...all, results: mine.length ? mine : [{ id: Number(onlyId), state: 'not-chosen' }] }
+}
+
+async function checkContractsByApi(db, { onlyId = null } = {}) {
   if (contractCheck.running) return { busy: true }
   Object.assign(contractCheck, { running: true, results: [], signedOut: false })
   let page = null
@@ -999,27 +1025,9 @@ export async function checkContracts(db, { onlyId = null } = {}) {
       return { checked: contractCheck.results.length, results: contractCheck.results }
     }
     if (pageGone(page)) { console.warn(`[contracts] Musaned ${pageGone(page)} — the check stops`); return { checked: 0, error: pageGone(page), results: contractCheck.results } }
-    console.warn('[contracts] Employment Requests list not read (' + viaApi.why + ') — searching each passport instead')
-    for (const [i, p] of list.entries()) {
-      if (i) await sleep(BETWEEN_MS)
-      let r
-      try { r = await checkOne(db, browser, page, p) } catch (e) { r = { state: 'error', error: e.message } }
-      if (r.state === 'error' && pageGone(page, r.error)) { console.warn(`[contracts] Musaned ${pageGone(page, r.error)} — the check stops`); break }
-      contractCheck.results.push({ id: p.id, name: p.full_name, passport: p.passport_number, ...r })
-      console.log(`[contracts] ${p.full_name} (${p.passport_number}): ${r.state}${r.stage ? ' · ' + r.stage : ''}${r.error ? ' — ' + r.error : ''}`)
-      // Musaned signed out: fill the sign-in and ring for a person (captcha +
-      // code are theirs), then go on with the same girl.
-      if (r.state === 'signed-out' && await signInForCheck(db, page)) {
-        try { r = await checkOne(db, browser, page, p) } catch (e) { r = { state: 'error', error: e.message } }
-        contractCheck.results[contractCheck.results.length - 1] = { id: p.id, name: p.full_name, passport: p.passport_number, ...r }
-      }
-      if (r.state === 'signed-out') {
-        contractCheck.signedOut = true
-        await task(db, null, SIGN_IN_TASKS[1],
-          'Adal Keep looks every 4 hours whether a Saudi employer chose a girl, but Musaned is signed out. Sign in to Musaned in Adal Browser whenever you can (captcha + code) — Adal Keep notices it by itself and checks again.')
-        break
-      }
-    }
+    if (contractCheck.cancel) return { cancelled: true, why: contractCheck.cancel, results: contractCheck.results }
+    console.warn('[contracts] Employment Requests data not read (' + viaApi.why + ') — reading its list pages instead (no passport searched)')
+    return { pages: true }
     if (!contractCheck.signedOut && contractCheck.results.length) await doneSignInTasks(db)
     return { checked: contractCheck.results.length, results: contractCheck.results }
   } finally {
@@ -1074,6 +1082,8 @@ export function cardOfRow(r) {
     pro: r.proNameEn || '',
     payment: pay === 'PAID' ? 'Paid' : pay === 'UNPAID' ? 'Unpaid' : (r.paymentStatus || ''),
     created: String(r.createdAt || '').slice(0, 10),
+    // Why a request was rejected or cancelled, in whatever field Musaned gives it (…Reason, …ReasonEn).
+    reason: String(Object.entries(r).find(([k, v]) => /reason/i.test(k) && !/ar$/i.test(k) && typeof v === 'string' && v.trim())?.[1] || '').trim(),
     id: r.id, candidateId: r.candidateId,
   }
 }

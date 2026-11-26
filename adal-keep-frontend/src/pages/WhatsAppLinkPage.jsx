@@ -13,6 +13,7 @@ import { openOutside } from '../lib/phoneApp'
 import PageHeader from '../components/shared/PageHeader'
 import Card from '../components/shared/Card'
 import Button from '../components/shared/Button'
+import WhatsAppLinkSteps from '../components/WhatsAppLinkSteps'
 
 const err = (e) => e?.response?.data?.error || e.message
 const digitsOf = (v) => String(v || '').replace(/\D/g, '')
@@ -48,7 +49,7 @@ export default function WhatsAppLinkPage() {
 
   const connect = async () => {
     const n = digitsOf(phone)
-    if (n.length < 9) { setError('Type the WhatsApp number with its country code, e.g. 2519…'); return }
+    if (n.length < 9) { setError('Type the WhatsApp number, e.g. 0911…, 2519… or +251 9…'); return }
     setError(''); setBusy(true); pressed.current = Date.now()
     try { setS(x => ({ ...x, status: 'starting' })); setS((await wa.post('/whatsapp/link', { phone: n }, { timeout: 30000 })).data) }
     catch (e) { setError(err(e)) }
@@ -87,6 +88,7 @@ export default function WhatsAppLinkPage() {
           </ol>
           <p className="mt-3 flex items-center gap-2 text-xs text-slate-500"><span className="h-2 w-2 animate-ping rounded-full bg-emerald-500" />Waiting for the code in WhatsApp{since != null ? ` · ${since}s` : ''}</p>
           <p className="mt-2 text-xs text-slate-500">For +{s.phone || digitsOf(phone)} · <button type="button" className="underline" onClick={connect}>New code</button></p>
+          <WhatsAppLinkSteps s={s} onState={setS} />
         </Card>
       ) : s.status === 'signing-in' ? (
         <Card>
@@ -102,12 +104,13 @@ export default function WhatsAppLinkPage() {
           <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">The agency's WhatsApp number (the phone that has WhatsApp):</p>
           <form className="mt-3 space-y-3" onSubmit={(e) => { e.preventDefault(); connect() }}>
             <input className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-lg dark:border-slate-600 dark:bg-slate-800" inputMode="tel" autoComplete="tel"
-              placeholder="2519…" value={phone} onChange={e => setPhone(e.target.value)} />
+              placeholder="0911… or +251 9…" value={phone} onChange={e => setPhone(e.target.value)} />
             <Button type="submit" className="w-full" disabled={busy || s.status === 'starting'}>
               {busy || s.status === 'starting' ? `Asking WhatsApp for the code…${since != null && busy ? ` ${since}s` : ''}` : '💬 Connect WhatsApp'}
             </Button>
           </form>
-          {(error || s.error) && <p className="mt-2 text-sm text-red-600">{error || s.error}</p>}
+          {(error || (s.error && s.status !== 'failed')) && <p className="mt-2 text-sm text-red-600">{error || s.error}</p>}
+          <WhatsAppLinkSteps s={s} onState={setS} onAgain={connect} busy={busy} />
         </Card>
       )}
 

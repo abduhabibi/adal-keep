@@ -6,7 +6,8 @@
  */
 import express from 'express'
 import os from 'os'
-import { lastNumber, keyOf, stateOf, allStates, connect, linkByCode, prepare, openWeb, logout, listChats, chatForNumber, agentRow, agentsOf, sendCV, sendMany, bulk, notifyMany, notices, sendsOf, onChosen, available, agentLimit, roomForAgent, waitingOnly } from '../services/whatsapp.js'
+import { linkLog, sendLinkLog } from '../services/waLinkCode.js'
+import { lastNumber, keyOf, stateOf, allStates, connect, linkByCode, cancelLink, prepare, openWeb, logout, listChats, chatForNumber, agentRow, agentsOf, sendCV, sendMany, bulk, notifyMany, notices, sendsOf, onChosen, available, agentLimit, roomForAgent, waitingOnly } from '../services/whatsapp.js'
 
 const router = express.Router()
 // WhatsApp is in the Standard plan (plans.js): connecting and sending need it; looking does not.
@@ -26,6 +27,11 @@ router.post('/whatsapp/open-web', async (req, res) => { try { res.json(await ope
 // With a number: WhatsApp's 8-character code from the browser already open (linkByCode), never a new one.
 router.post('/whatsapp/connect', async (req, res) => { try { res.json(req.body?.phone ? await linkByCode(req.app.locals.db, who(req), req.body.phone) : await connect(req.app.locals.db, who(req))) } catch (e) { fail(res, e) } })
 router.post('/whatsapp/link', async (req, res) => { try { res.json(await linkByCode(req.app.locals.db, who(req), req.body?.phone || lastNumber(who(req)))) } catch (e) { fail(res, e) } })
+// The X on a code being asked: that try stops, WhatsApp's page stays open for the next one.
+router.post('/whatsapp/link/cancel', (req, res) => { try { res.json(cancelLink(who(req))) } catch (e) { fail(res, e) } })
+// The link's steps on this PC (numbers masked), and "Send this PC's WhatsApp log" to Adal.
+router.get('/whatsapp/link-log', (req, res) => res.json({ steps: linkLog(who(req)) }))
+router.post('/whatsapp/link-log/send', async (req, res) => { try { res.json(await sendLinkLog(req.app.locals.db, who(req), stateOf(who(req)))) } catch (e) { fail(res, e) } })
 // The phone's WhatsApp page opened: the PC loads WhatsApp's page now, so the code is there at once.
 router.post('/whatsapp/prepare', (req, res) => { try { res.json(prepare(req.app.locals.db, who(req))) } catch (e) { fail(res, e) } })
 router.post('/whatsapp/logout', async (req, res) => { try { await logout(who(req)); res.json(stateOf(who(req))) } catch (e) { fail(res, e) } })

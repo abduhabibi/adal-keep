@@ -20,6 +20,7 @@ import { headlessHere } from './noWindows.js'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { findBrowserExecutable } from './browser.js'
+import { buttonsFirst, phoneDigits, noteStep, codeFromButtons, readCode, pageState, whyNoPage, masked } from './waLinkCode.js'
 
 const BACKEND = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const DIR = path.join(BACKEND, 'data', 'whatsapp')
@@ -156,6 +157,7 @@ export async function connect(db, key = 'owner', { phone = '' } = {}, tries = 2)
   // One start-up at a time: a second one would close the first one's WhatsApp tab.
   if (s.startingAt && Date.now() - s.startingAt < 45000 && !phone) return s.state
   s.startingAt = Date.now()
+  s.linkOnly = false
   if (s.client) { const old = s.client; s.client = null; await release(old) }
   freeProfile(key)
   setState(key, { status: 'starting', qr: null, code: null, error: null })
@@ -358,8 +360,8 @@ function linkTiming(s) {
 export async function linkByCode(db, key = 'owner', phone = '') {
   if (db) dbRef = db
   if (!whatsappAllowed()) throw Object.assign(new Error(OFF_HERE), { status: 403 })
-  const digits = String(phone || '').replace(/\D/g, '').replace(/^00/, '')
-  if (digits.length < 9 || digits.length > 15) throw new Error('Type the WhatsApp number with its country code, e.g. 2519…')
+  const digits = buttonsFirst() ? phoneDigits(phone) : String(phone || '').replace(/\D/g, '').replace(/^00/, '')
+  if (digits.length < 9 || digits.length > 15) throw new Error('Type the WhatsApp number, e.g. 0911…, 2519… or +251 9…')
   const s = session(key)
   if (s.state.status === 'ready' && s.client) return s.state
   if (s.state.status === 'web') throw new Error('WhatsApp\'s own window is open on the PC: finish there, or close it first')
@@ -367,17 +369,95 @@ export async function linkByCode(db, key = 'owner', phone = '') {
   const link = s.link = { phone: digits, pressedAt: Date.now(), codeAt: 0, linkedAt: 0, readyAt: 0 }
   s.pairing = true
   s.warmUntil = Date.now() + WARM_MS
-  if (!s.client || s.state.status === 'failed') {
+  noteStep(key, `Connect pressed for ${masked(digits)}`)
+  // Only the code failed last time (its page is fine): the same page, no new browser.
+  const pageFine = s.linkOnly && s.client?.pupPage && !s.client.pupPage.isClosed()
+  s.linkOnly = false
+  if (!s.client || (s.state.status === 'failed' && !pageFine)) {
     if (s.state.status === 'failed') { const old = s.client; s.client = null; s.startingAt = 0; await release(old) }
     connect(dbRef, key).catch(e => console.warn('[whatsapp]', e.message))
   }
-  setState(key, { status: 'starting', qr: null, code: null, error: null, phone: digits, timing: null })
-  codeLoop(key, link).catch(e => console.warn(`[whatsapp ${key}] code:`, e.message))
+  setState(key, { status: 'starting', qr: null, code: null, error: null, phone: digits, timing: null, step: s.client?.pupPage ? 'Waiting for WhatsApp\'s page…' : 'Starting WhatsApp on this PC…' })
+  ;(buttonsFirst() ? codeByButtons : codeLoop)(key, link).catch(e => console.warn(`[whatsapp ${key}] code:`, e.message))
   for (const until = Date.now() + 15_000; !link.codeAt && s.state.status !== 'failed' && Date.now() < until;) await sleep(250)
   return stateOf(key)
 }
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
+
+/** A promise, or null after ms (a page call that never answers must not hold the steps). */
+const within = (p, ms) => Promise.race([p.catch(() => null), sleep(ms).then(() => null)])
+
+/**
+ * The code, WhatsApp's own way first (waLinkCode.js): its page → "Log in with phone number"
+ * → the number → Next → the code. Its linking part only as a shortcut when the page is ready
+ * for it. Each step is said on the page; a failure says why and the page stays for a new try.
+ */
+async function codeByButtons(key, link) {
+  const s = session(key)
+  const mine = () => s.link === link && s.state.status !== 'ready'
+  const say = (step) => { if (mine()) { noteStep(key, step); setState(key, { step }) } }
+  const fail = (error) => {
+    if (!mine()) return
+    noteStep(key, 'Failed', error)
+    s.linkOnly = !!s.client?.pupPage && !s.client.pupPage.isClosed()
+    s.pairing = false
+    setState(key, { status: 'failed', step: null, code: null, error })
+  }
+  let page = null, saidPage = false
+  for (const end = Date.now() + 90_000; ;) {
+    if (!mine()) return
+    // The browser itself did not start (connect said why): that reason stays.
+    if (s.state.status === 'failed') { noteStep(key, 'Failed', s.state.error); s.pairing = false; return }
+    page = s.client?.pupPage
+    if (page && !page.isClosed()) {
+      if (!saidPage) { say('Waiting for WhatsApp\'s page…'); saidPage = true }
+      const now = await within(pageState(page), 5000)
+      if (now?.phoneLink || now?.box) break
+    }
+    if (Date.now() > end) return fail(page ? await whyNoPage() : 'WhatsApp did not start on this PC (Adal Browser could not open it).')
+    await sleep(700)
+  }
+  // A code from before (a cancelled try) is not this one: a fresh page first.
+  if (await within(readCode(page), 3000)) {
+    say('A fresh WhatsApp page for a new code…')
+    await page.reload({ waitUntil: 'domcontentloaded', timeout: 90_000 }).catch(() => {})
+    for (const end = Date.now() + 60_000; mine() && Date.now() < end; await sleep(700)) { const now = await within(pageState(page), 5000); if (now?.phoneLink || now?.box) break }
+  }
+  if (!mine()) return
+  say('WhatsApp\'s page is open')
+  await within(page.evaluate(traceLinking), 3000)
+  // The shortcut: a second at most, never a wait.
+  const quick = await within(page.evaluate(askCode, link.phone), 8000)
+  let res = quick?.code ? { code: quick.code } : null
+  for (let i = 0; !res?.code && i < 2 && mine(); i++) {
+    if (i) { noteStep(key, 'Once more', res?.error); await sleep(2000) }
+    res = await codeFromButtons(page, link.phone, say).catch(e => ({ error: `WhatsApp's page: ${String(e?.message || e).slice(0, 120)}` }))
+    if (res.refused) break
+  }
+  if (!mine()) return
+  if (!res?.code) return fail(res?.error || 'WhatsApp did not give a code.')
+  gotCode(key, link, res.code)
+  say('Type the code in WhatsApp on the phone')
+  await watchLink(key, link)
+  if (mine() && !link.helloAt && s.state.status === 'code') fail('The code was not typed in time: press Connect for a new code.')
+}
+
+/** Tests: a fake client (its page a mock of WhatsApp's) for an account. */
+export const _setClientForTests = (key, client, state = {}) => { const s = session(key); s.client = client; Object.assign(s.state, state) }
+
+/** The X: the try stops; the page stays open (warm) for the next one. */
+export function cancelLink(key = 'owner') {
+  const s = session(key)
+  if (s.link) noteStep(key, 'Cancelled')
+  s.link = null
+  s.pairing = false
+  if (s.state.status !== 'ready') {
+    s.linkOnly = !!s.client?.pupPage && !s.client.pupPage.isClosed()
+    setState(key, { status: 'off', code: null, step: null, error: null })
+  }
+  return stateOf(key)
+}
 
 /** Asks WhatsApp's page for the code (its own linking part, else its buttons), then watches for the link. */
 async function codeLoop(key, link) {
@@ -403,7 +483,13 @@ async function codeLoop(key, link) {
     }
     await sleep(700)
   }
-  // Watch for the link: WhatsApp leaves "unpaired" the moment the code is entered.
+  await watchLink(key, link)
+}
+
+/** Watch for the link: WhatsApp leaves "unpaired" the moment the code is entered. */
+async function watchLink(key, link) {
+  const s = session(key)
+  const mine = () => s.link === link && s.state.status !== 'ready'
   let refreshAt = link.codeAt + 160_000
   while (mine() && Date.now() - link.pressedAt < 15 * 60_000) {
     const page = s.client?.pupPage
@@ -432,6 +518,11 @@ async function codeLoop(key, link) {
       refreshAt = Date.now() + 160_000
       const n = await page.evaluate(askCode, link.phone).catch(() => null)
       if (n?.code && mine()) setState(key, { status: 'code', code: fmtCode(n.code) })
+    }
+    // Its /login page (no connection part): it changes the code on its own screen; the new one shows here.
+    if (buttonsFirst() && !link.helloAt && r && !r.sock && Date.now() > refreshAt - 150_000) {
+      const shown = await within(readCode(page), 3000)
+      if (shown && mine() && fmtCode(shown) !== s.state.code) { noteStep(key, 'WhatsApp changed the code'); setState(key, { status: 'code', code: fmtCode(shown) }) }
     }
     await sleep(1000)
   }
@@ -695,6 +786,8 @@ async function keepConnected() {
       await release(old)
       connect(dbRef, key).catch(e => console.warn('[whatsapp]', e.message))
     }
+    // Only a code that failed or was cancelled: its page is fine and waits for the next try.
+    if ((st === 'off' || st === 'failed') && s.linkOnly && s.client?.pupPage && !s.client.pupPage.isClosed()) return
     if (st === 'off' || st === 'failed') return connect(dbRef, key).catch(e => console.warn('[whatsapp]', e.message))
     // A code just entered: WhatsApp brings the chats (minutes on a slow line) — never cut that short.
     const linking = s.link?.linkedAt && Date.now() - s.link.linkedAt < 10 * 60_000

@@ -9,6 +9,7 @@ import api from '../services/api'
 import { wa } from '../lib/whatsapp'
 import Card from './shared/Card'
 import Button from './shared/Button'
+import WhatsAppLinkSteps from './WhatsAppLinkSteps'
 
 const field = 'w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm'
 const err = (e) => e?.response?.data?.error || e.message
@@ -180,6 +181,7 @@ export default function WhatsAppCard() {
             <li>Paste (or type) this code. That's all — Adal Keep finishes by itself.</li>
           </ol>
           <p className="mt-2 text-xs text-slate-500">No notification? WhatsApp → ⋮ → Linked devices → Link a device → <b>Link with phone number instead</b>. <button type="button" className="underline" onClick={() => start(true)}>New code</button> · <button type="button" className="underline" onClick={() => setAsk(true)}>Another number</button></p>
+          <WhatsAppLinkSteps s={s} onState={setS} />
         </div>
       ) : s.status === 'qr' ? (
         <div className="mb-4 flex flex-col items-center gap-4 rounded-xl border border-slate-200 p-4 sm:flex-row dark:border-slate-700">
@@ -211,12 +213,13 @@ export default function WhatsAppCard() {
             WhatsApp sends you a notification: tap it and paste the code (already copied). It stays connected.
             {!window.__ADAL_CLOUD && <>{' '}Or <button type="button" className="underline" onClick={() => connect(false)}>show a QR</button> · <button type="button" className="underline" onClick={openWeb}>web.whatsapp.com</button></>}
           </p>
-          {s.error && <p className="text-sm text-red-600">{s.error}</p>}
+          {s.error && s.status !== 'failed' && <p className="text-sm text-red-600">{s.error}</p>}
+          <WhatsAppLinkSteps s={s} onState={setS} onAgain={() => start(!number)} />
         </div>
       )}
       {ask && !['ready', 'web'].includes(s.status) && (
         <form className="-mt-2 mb-4 flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); start(true) }}>
-          <input autoFocus className={field + ' max-w-xs'} inputMode="tel" placeholder="Your WhatsApp number, e.g. 2519…" value={phone} onChange={e => setPhone(e.target.value)} />
+          <input autoFocus className={field + ' max-w-xs'} inputMode="tel" placeholder="Your WhatsApp number, e.g. 0911… or +251 9…" value={phone} onChange={e => setPhone(e.target.value)} />
           <Button size="sm" type="submit" disabled={phone.replace(/\D/g, '').length < 9}>Send me the code</Button>
         </form>
       )}

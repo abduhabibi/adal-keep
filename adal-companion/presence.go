@@ -62,6 +62,8 @@ type presenceEntry struct {
 	Port               int
 	Tags               []string
 	RandomMac          bool
+	Signed             bool     // by our agency's key (book.go)
+	Addrs              []string // all its addresses, as it signed them
 	At                 time.Time
 }
 
@@ -164,7 +166,15 @@ func presenceHeard(text, fromIP string) (presenceEntry, bool) {
 	if !ours || e.ID == myPCID || ip == nil || !presenceAddrOK(ip) {
 		return e, false
 	}
-	e.IP, e.At = ip.String(), time.Now()
+	signed, ok, addrs := checkSigned(text, e.ID, ip.String(), time.Now())
+	if !ok {
+		presenceMu.Lock()
+		refused++
+		presenceMu.Unlock()
+		return e, false
+	}
+	e.IP, e.At, e.Signed, e.Addrs = ip.String(), time.Now(), signed, addrs
+	bookHeard(e, signed)
 	presenceMu.Lock()
 	before, had := presenceMap[e.ID]
 	presenceMap[e.ID] = e
@@ -259,7 +269,7 @@ func switchToMainAt(u string) {
 	if pinned := pinnedHostURL(); pinned != "" && !strings.HasPrefix(readConfHeader(), autoConfHeader) && answersAt(pinned) {
 		return // an address typed on this PC that answers: kept
 	}
-	if cur := strings.TrimRight(hostServer, "/"); cur != "" && cur != u && answersAt(cur) && confirmedOurs(cur) {
+	if cur := strings.TrimRight(hostServer, "/"); cur != "" && cur != u && !signedNotThere(cur) && answersAt(cur) && confirmedOurs(cur) {
 		return // still answers where it was (a second network card): left as it is
 	}
 	if !answersAt(u) || !acceptServer(u) {
@@ -314,6 +324,7 @@ func startPresence(root string) {
 	if myPCID == "" || os.Getenv("ADAL_PRESENCE") == "0" {
 		return
 	}
+	loadBook(root)
 	rnd := randomMACsHere()
 	if len(rnd) > 0 {
 		log.Printf("⚠️ %s: random hardware addresses are ON here — this PC's network card may change (the other PCs find it by its id, not its card)", strings.Join(rnd, ", "))
@@ -340,15 +351,19 @@ func startPresence(root string) {
 			}
 		}
 	}()
+	say := func() {
+		if tag := ownAgencyTag(); tag != "" {
+			msg := []byte(signPresence(presenceMessage(tag, myPCID, lanHTTPPort, "companion", clientName, len(rnd) > 0), presenceKey(), ownAddrs(), time.Now().UnixMilli()))
+			for _, t := range presenceTargets() {
+				_, _ = conn.WriteToUDP(msg, t)
+			}
+		}
+	}
 	go func() {
 		for {
-			if tag := ownAgencyTag(); tag != "" {
-				msg := []byte(presenceMessage(tag, myPCID, lanHTTPPort, "companion", clientName, len(rnd) > 0))
-				for _, t := range presenceTargets() {
-					_, _ = conn.WriteToUDP(msg, t)
-				}
-			}
+			say()
 			time.Sleep(presenceEvery)
 		}
 	}()
+	go watchOwnAddress(say, nil)
 }

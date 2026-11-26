@@ -291,7 +291,7 @@ func officeBases() []string {
 func copyPeers() []string {
 	seen := map[string]bool{}
 	var out []string
-	for _, b := range append(peerBases(), officeBases()...) {
+	for _, b := range append(append(peerBases(), officeBases()...), companionsHeard()...) {
 		if !seen[b] {
 			seen[b] = true
 			out = append(out, b)

@@ -26,6 +26,7 @@ import { contractsMayCreate } from './passportOnly.js'
 import crypto from 'crypto'
 import { fileURLToPath } from 'url'
 import { getBrowser, openBrowserIfAny } from './browser.js'
+import { pageGone } from './pageGone.js'
 import { setupTab, borrowTab, borrowOpenTab, doneWithTab, activeRunIds, keepingRunIds } from './tabManager.js'
 
 const SAFE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'data', 'SafeStorage')
@@ -194,8 +195,9 @@ export async function scanContracts(db, { auto = false, remote = null, limitMs =
     await setupTab(page, { runId: 'musaned-contracts' })
     page.__adalAllowImages = true
     // Musaned's own list data first (no passport searched, every detail at once).
-    const viaApi = await scanListByApi(db, page, { log: (m) => console.log('[contracts] ' + m) }).catch(e => ({ ok: false, why: e.message, cancelled: e.cancelled }))
+    const viaApi = await scanListByApi(db, page, { log: (m) => console.log('[contracts] ' + m) }).catch(e => ({ ok: false, why: e.message, cancelled: e.cancelled, gone: e.pageGone }))
     if (viaApi.cancelled || contractCheck.cancel) return { cancelled: true, why: contractCheck.cancel || viaApi.why, results: contractCheck.results }
+    if (viaApi.gone || pageGone(page)) { console.warn(`[contracts] ${viaApi.why || `Musaned ${pageGone(page)}`} — not read again from its pages`); return { checked: 0, error: viaApi.why || pageGone(page), results: contractCheck.results } }
     if (viaApi.ok) {
       contractCheck.results = viaApi.results
       contractCheck.added = viaApi.added
@@ -251,6 +253,7 @@ export async function scanContracts(db, { auto = false, remote = null, limitMs =
       await sleep(BETWEEN_MS / 2)
       let r
       try { r = await checkOne(db, browser, page, p) } catch (e) { r = { state: 'error', error: e.message } }
+      if (r.state === 'error' && pageGone(page, r.error)) { console.warn(`[contracts] Musaned ${pageGone(page, r.error)} — the check stops`); break }
       contractCheck.results.push({ id: p.id, name: p.full_name, passport: p.passport_number, ...r })
       console.log(`[contracts] ${p.full_name}: ${r.state}${r.first ? ' (NEW)' : ''}${r.stage ? ' · ' + r.stage : ''}${r.error ? ' — ' + r.error : ''}`)
     }
@@ -833,6 +836,7 @@ export async function checkChosenInRun(page, ctx) {
     if (mine.first) await ctx.notify?.('🎉 ' + ctx.profileName + ': chosen by an employer on Musaned', note)
     return { ok: true, done: true, note }
   }
+  if (pageGone(page)) return { ok: false, error: `Musaned ${pageGone(page)}` }
   ctx.onLog?.('warn', 'Musaned list data not read (' + all.why + ') — searching her passport instead')
   const r = await checkOne(db, page.browser(), page, p)
   if (r.state === 'signed-out') return { ok: false, error: 'Musaned signed out during the check' }
@@ -994,11 +998,13 @@ export async function checkContracts(db, { onlyId = null } = {}) {
       console.log(`[contracts] Employment Requests: ${viaApi.checked} read, ${contractCheck.results.filter(r => r.state === 'chosen').length} of ${list.length} chosen`)
       return { checked: contractCheck.results.length, results: contractCheck.results }
     }
+    if (pageGone(page)) { console.warn(`[contracts] Musaned ${pageGone(page)} — the check stops`); return { checked: 0, error: pageGone(page), results: contractCheck.results } }
     console.warn('[contracts] Employment Requests list not read (' + viaApi.why + ') — searching each passport instead')
     for (const [i, p] of list.entries()) {
       if (i) await sleep(BETWEEN_MS)
       let r
       try { r = await checkOne(db, browser, page, p) } catch (e) { r = { state: 'error', error: e.message } }
+      if (r.state === 'error' && pageGone(page, r.error)) { console.warn(`[contracts] Musaned ${pageGone(page, r.error)} — the check stops`); break }
       contractCheck.results.push({ id: p.id, name: p.full_name, passport: p.passport_number, ...r })
       console.log(`[contracts] ${p.full_name} (${p.passport_number}): ${r.state}${r.stage ? ' · ' + r.stage : ''}${r.error ? ' — ' + r.error : ''}`)
       // Musaned signed out: fill the sign-in and ring for a person (captcha +
@@ -1184,6 +1190,7 @@ export async function scanListByApi(db, page, opts = {}) {
 /** What Musaned answers, read in this signed-in tab (every step can be cancelled). */
 export function tabSource(page, H) {
   return {
+    gone: (e) => pageGone(page, e),
     api: (url, o) => cancelable(apiGet(page, H, url, o)),
     contract: (card) => cancelable(openContract(page, card)),
     pdf: (name) => cancelable(downloadPdf(page.browser(), page, name)),
@@ -1243,6 +1250,9 @@ export async function scanRows(db, src, { log = () => {}, maxPages = 10, onlyId 
         profiles = profiles.map(x => x.id === p.id ? { ...x, musaned_stage: card.stage, contract_number: x.contract_number || card.contract_number, chosen_at: x.chosen_at || new Date().toISOString() } : x)
       } catch (e) {
         if (e.cancelled) throw e
+        // Its tab gone: every next girl would fail the same way — stopped at once, said once.
+        const gone = src.gone?.(e)
+        if (gone) { log(`${gone} — the check stops; the next one opens its tab again`); throw Object.assign(new Error(`Musaned ${gone}`), { pageGone: true }) }
         results.push({ id: p?.id, name: p?.full_name || card.candidate, state: 'error', error: e.message })
         log(`${p?.full_name || card.candidate}: ${e.message}`)
       }

@@ -6,6 +6,10 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 
+// The AI cutting photos out of a combined picture is off by default (services/aiPhotoGuard.js, tests/aiPhotoGuard.test.js);
+// this file tests the crop check itself, so the path is switched on here.
+process.env.ADAL_AI_PHOTOS = 'split'
+
 async function setup() {
   const { default: knex } = await import('knex')
   const db = knex({ client: 'sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true })

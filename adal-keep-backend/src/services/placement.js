@@ -10,6 +10,7 @@
  * Only a clear answer moves anything; otherwise the file stays as it was.
  */
 import { resolveStoredPath } from './cvRender.js'
+import { allowed } from './aiPhotoGuard.js'
 
 export const BOXES = { passport: 'Passport', photo: 'Photo', fullbody: 'Full Body Photo' }
 const KIND_OF = { Passport: 'passport', Photo: 'photo', 'Full Body Photo': 'fullbody' }
@@ -52,13 +53,17 @@ async function fieldOf(db, profileId, name) {
  */
 export async function checkPlacement(db, profileId, fieldName, file, { choose = null, split = null, review = false, log = console.log } = {}) {
   if (!watched(fieldName) || !/^image\//.test(file?.mimetype || '')) return { act: 'stay' }
+  // The AI puts nothing into Photo / Full Body Photo (services/aiPhotoGuard.js): a picture a person put there stays, and
+  // nothing is asked about it. In Passport only the passport part can still be cut out.
+  if (fieldName !== 'Passport' && !allowed('split') && !allowed('move')) return { act: 'stay' }
   const abs = resolveStoredPath(file.path)
   if (!abs) return { act: 'stay' }
   const sharp = (await import('sharp')).default
   const png = await sharp(abs).rotate().png().toBuffer()
   const ask = choose || (await import('./jevClassifier.js')).chooseOnPage
   const answer = (await ask(png, { what: QUESTION }))?.what
-  const d = decide(fieldName, answer)
+  let d = decide(fieldName, answer)
+  if (d.act === 'move' && !allowed('move')) d = { act: 'stay' }
   if (d.act === 'move') {
     const to = await fieldOf(db, profileId, d.to)
     await db('files').where('id', file.id).update({ profile_field_id: to.id, updated_at: new Date().toISOString() })
@@ -71,6 +76,9 @@ export async function checkPlacement(db, profileId, fieldName, file, { choose = 
     const parts = await cut(abs, { anyShape: true })
     if (!parts) return { act: 'stay' }
     const fs = (await import('fs')).default
+    // Only the passport is cut out: the head and standing photos are dropped unless a person's own path brings them back.
+    if (!allowed('split')) { delete parts.photo; delete parts.fullbody }
+    if (!partsToUse(fieldName, parts).length) { try { fs.rmSync(parts.dir, { recursive: true, force: true }) } catch {} return { act: 'stay' } }
     // A picture a person put in: the cut-outs wait for their OK (answerReview below).
     if (review) {
       try { return { act: 'review', id: await saveForReview(db, profileId, fieldName, file, parts) } }
@@ -88,7 +96,7 @@ export async function checkPlacement(db, profileId, fieldName, file, { choose = 
 /** Which parts of a cut picture go where (the passport part only when it was put in Passport). */
 export function partsToUse(fieldName, parts) {
   const out = []
-  for (const k of ['photo', 'fullbody']) if (parts[k] && BOXES[k] !== fieldName) out.push(k)
+  for (const k of ['photo', 'fullbody']) if (parts[k] && BOXES[k] !== fieldName && allowed('split')) out.push(k)
   if (fieldName === 'Passport' && parts.passport) out.push('passport')
   return out
 }
@@ -98,13 +106,13 @@ export function partsToUse(fieldName, parts) {
  * in Passport the passport part takes the combined picture's place (it reads
  * better too; the picture itself stays on the disk). parts: { kind: path }.
  */
-export async function applyParts(db, profileId, fieldName, file, parts) {
+export async function applyParts(db, profileId, fieldName, file, parts, { byPerson = false } = {}) {
   const fs = (await import('fs')).default, path = (await import('path')).default, crypto = (await import('crypto')).default
   const { SAFE_STORAGE_DIR } = await import('./docPipeline.js')
   const done = []
   const base = String(file.original_name || 'picture').replace(/\.[^.]+$/, '')
   for (const k of ['photo', 'fullbody']) {
-    if (!parts[k] || BOXES[k] === fieldName) continue
+    if (!parts[k] || BOXES[k] === fieldName || !(allowed('split') || byPerson)) continue   // (a head / standing photo only when a person ticked it in the crop check)
     const to = await fieldOf(db, profileId, BOXES[k])
     const hash = crypto.createHash('sha256').update(fs.readFileSync(parts[k])).digest('hex')
     if (await db('files').where({ profile_field_id: to.id, content_hash: hash }).first()) continue
@@ -159,7 +167,7 @@ export async function answerReview(db, id, { use = [], replaced = {} } = {}) {
   const parts = {}
   for (const x of list) if (use.includes(x.kind)) parts[x.kind] = replaced[x.kind] || x.path
   const file = row.file_id ? (await db('files').where('id', row.file_id).first()) || { id: row.file_id } : {}
-  const done = Object.keys(parts).length ? await applyParts(db, row.profile_id, row.field_name, file, parts) : []
+  const done = Object.keys(parts).length ? await applyParts(db, row.profile_id, row.field_name, file, parts, { byPerson: true }) : []
   await db('crop_reviews').where({ id }).update({ status: done.length ? 'done' : 'kept', updated_at: new Date().toISOString() })
   try { fs.rmSync(row.dir, { recursive: true, force: true }) } catch {}
   return { ok: true, done }
@@ -170,6 +178,7 @@ export async function answerReview(db, id, { use = [], replaced = {} } = {}) {
  * that were never looked at (each looked at once; data/placement-checked.json).
  */
 export async function sweepRecent(db, { days = 7, limit = 60, log = console.log } = {}) {
+  if (!allowed('sweep')) return   // the look-back is off (services/aiPhotoGuard.js)
   const fs = (await import('fs')).default, path = (await import('path')).default
   const { fileURLToPath } = await import('url')
   const seenFile = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'data', 'placement-checked.json')
@@ -208,6 +217,7 @@ function noteMove(m) {
  * "…_photo.jpg") moved into Passport goes back to Photo.
  */
 export async function undoWrongMoves(db, { log = console.log } = {}) {
+  if (!allowed('move')) return 0   // it moves pictures into Photo: off with the other AI moves
   const fs = (await import('fs')).default, path = (await import('path')).default
   const flag = path.join(path.dirname(await MOVES()), 'placement-undo-1.json')
   if (fs.existsSync(flag)) return 0

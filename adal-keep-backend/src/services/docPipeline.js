@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url'
 import crypto from 'crypto'
 import imageToPdf from 'image-to-pdf'
 import sharp from 'sharp'
+import { allowed, BOX } from './aiPhotoGuard.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -223,7 +224,9 @@ export async function notifyPassportUnreadable(db, filename, reason) {
  * A photo cut out of a combined picture goes straight into its field (Photo,
  * Full Body Photo) of the profile its passport made or found — once.
  */
-async function fileInto(db, profileId, fieldName, file, originalName) {
+export async function fileInto(db, profileId, fieldName, file, originalName, kind = 'split') {
+  // Photo / Full Body Photo: only the paths the guard allows (services/aiPhotoGuard.js); 'split' (one picture cut in parts) is off.
+  if (BOX.test(fieldName) && !allowed(kind)) return false
   const hash = sha256File(file)
   let field = await db('profile_fields').where({ profile_id: profileId, name: fieldName }).first()
   if (field && await db('files').where({ profile_field_id: field.id, content_hash: hash }).first()) return false
@@ -389,7 +392,7 @@ export async function runPipeline(filePath, db, analyzer, tag = '[pipeline]', op
         const profileId = r.profileId || first?.profileId
         if (profileId) {
           for (const [k, field] of [['photo', 'Photo'], ['fullbody', 'Full Body Photo']]) {
-            if (pics[k] && await fileInto(db, profileId, field, pics[k], `${k}-${base}.jpg`)) log(`${field} filed from the PDF (profile #${profileId})`)
+            if (pics[k] && await fileInto(db, profileId, field, pics[k], `${k}-${base}.jpg`, 'pdf')) log(`${field} filed from the PDF (profile #${profileId})`)
           }
         }
         const out = r.ok ? r : first?.ok ? { ...first, cv: r.reason } : r
@@ -498,6 +501,11 @@ export async function runPipeline(filePath, db, analyzer, tag = '[pipeline]', op
   setStage(`saving it to ${profile.full_name || 'the profile'}`)
   // Route to the correct field — doc_type is already the field-template name
   const fieldName = result.doc_type
+  // A picture the AI calls a Photo / Full Body Photo is never filed into a profile on its own (it cannot tell people apart).
+  if (BOX.test(fieldName) && !allowed('classify')) {
+    log(`skip — ${fieldName}: only a person puts pictures there (profile #${profileId} not touched)`)
+    return { ok: false, reason: 'photo_needs_a_person', docType: fieldName, profileId }
+  }
   let field = await db('profile_fields').where('profile_id', profileId).andWhere('name', fieldName).first()
 
   // One copy per profile + field: a file whose exact content is already in

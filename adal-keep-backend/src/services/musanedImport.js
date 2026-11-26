@@ -407,7 +407,8 @@ export async function applyMusanedFiles(ctx, got) {
     } else log('Musaned\'s "personal photo" is her passport again — her face is cut from the passport')
   }
   let faceCut = false
-  if (!photoFile && passportFile) {
+  // Her face cut from the passport is a guess at her photo: off (services/aiPhotoGuard.js 'face'); Musaned's own personal photo above stays.
+  if (!photoFile && passportFile && (await import('./aiPhotoGuard.js')).allowed('face')) {
     try {
       const { faceFromPassport } = await import('./passportFace.js')
       photoFile = await faceFromPassport(passportFile, tmp('face_photo.jpg'))

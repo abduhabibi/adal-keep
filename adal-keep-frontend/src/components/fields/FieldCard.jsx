@@ -9,6 +9,8 @@ import toast from 'react-hot-toast'
 import api from '../../services/api'
 import { useFileCapture } from '../../context/FileCaptureContext'
 import FullBodyCropper from '../FullBodyCropper'
+import PastePreview from '../PastePreview'
+import { pasteFiles, pasteInfo } from '../../lib/clipPaste'
 import RefineCompare from '../RefineCompare'
 import { printFileOnPhone } from '../../lib/phoneApp'
 import { onPhone } from '../../lib/phoneMode'
@@ -76,6 +78,23 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
   const box = `${profileId}/${field.id}`
   const coming = useSyncExternalStore(onUploads, () => uploadsOf(box))
   const root = useRef(null)
+  // The Paste button (lib/clipPaste.js): what is copied is shown first (PastePreview), saved on Save.
+  const [paste, setPaste] = useState(null)        // { on, here }
+  const [pasted, setPasted] = useState(null)      // File[] being looked at
+  const [reading, setReading] = useState(false)
+  useEffect(() => { let alive = true; pasteInfo().then(i => alive && setPaste(i)); return () => { alive = false } }, [])
+  const pasteNow = async () => {
+    if (reading) return
+    setReading(true)
+    try { setPasted(await pasteFiles({ here: !!paste?.here })) }
+    catch (e) { toast.error(e.message, { id: `paste-${field.id}`, duration: e.why === 'nothing' ? 5000 : 9000 }) }
+    finally { setReading(false) }
+  }
+  const savePasted = (files, format) => {
+    setPasted(null)
+    if (files.length > 1) return handleMultiUpload(files)
+    handleFormatChoice(format || 'image', files[0])
+  }
   const [refining, setRefining] = useState(false)
   const [compare, setCompare] = useState(false)   // the faithful Refine's before / after
   const [pendingFile, setPendingFile] = useState(null)
@@ -327,6 +346,12 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
           )}
           {compare && <RefineCompare file={mainFile} fieldName={field.name} onClose={() => setCompare(false)}
             onKept={async () => { const res = await api.get(`/profiles/${profileId}/fields`); const u = res.data.find(f => f.id === field.id); onFileUpdate(field.id, u ? u.files : []) }} />}
+          {paste?.on && (
+            <button type="button" data-testid="field-paste" onClick={pasteNow} disabled={reading}
+              className="text-[10px] px-2 py-0.5 rounded-md bg-teal-50 text-teal-700 hover:bg-teal-100 dark:bg-teal-900/30 dark:text-teal-400 disabled:opacity-50"
+              title="Put what is copied into this box (a picture, or a file copied in Explorer) — you see it first">
+              {reading ? '⏳' : '📋'}<span className="hidden sm:inline"> Paste</span></button>
+          )}
           <button
             type="button"
             data-tour="field-upload"
@@ -494,6 +519,8 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
       )}
 
       {pick.element}
+
+      {pasted && <PastePreview field={field} files={pasted} onCancel={() => setPasted(null)} onSave={savePasted} />}
 
       {/* Upload Format Modal */}
       {cropFile && (

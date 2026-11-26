@@ -83,6 +83,7 @@ import { trackUserUploads } from './src/services/userUploads.js'
 import whatsappRouter from './src/routes/whatsapp.js'
 import transitionsRouter from './src/routes/transitions.js'
 import appRouter from './src/routes/app.js'
+import clipboardRouter from './src/routes/clipboard.js'
 import notesRouter from './src/routes/notes.js'
 import { watchChanges } from './src/services/changes.js'
 import { answerCache, forget as forgetAnswer } from './src/services/answerCache.js'
@@ -168,6 +169,7 @@ app.use("/api", tenancyRouter)
 app.use('/api', pcAccessRouter)   // other computers ask to open Adal Keep; this PC answers
 app.use("/api", transitionsRouter)
 app.use('/api', notesRouter)         // the Notes page
+app.use('/api', clipboardRouter())   // the Paste button of a document box (services/clipboardRead.js)
 app.use('/api', appRouter)          // its window on this PC: closing the last one ends Adal Keep
 app.use("/api/employees", employeesRouter)
 app.use("/api/employees", employeeRegisterRouter)

@@ -24,7 +24,7 @@ const ONLY = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789<'
 // One reader kept warm for 10 minutes after its last page (starting it costs
 // ~0.5 s): the "new profile" page warms it when it opens (warmMrzReader).
 const IDLE_MS = 10 * 60000
-let worker = null, idle = null, chain = Promise.resolve()
+let worker = null, idle = null, chain = Promise.resolve(), busy = 0
 function reader() {
   if (!worker) {
     worker = createWorker(['ocrb'], 1, { langPath: ROOT, cachePath: path.join(ROOT, 'data', 'tessdata'), gzip: false })
@@ -32,7 +32,8 @@ function reader() {
     worker.catch(() => { worker = null })
   }
   clearTimeout(idle)
-  idle = setTimeout(() => { const w = worker; worker = null; w?.then(x => x.terminate()).catch(() => {}) }, IDLE_MS)
+  idle = setTimeout(function letGo() { if (busy) { idle = setTimeout(letGo, 5000); idle.unref?.(); return }   // never under a read in progress
+    const w = worker; worker = null; w?.then(x => x.terminate()).catch(() => {}) }, IDLE_MS)
   idle.unref?.()
   return worker
 }
@@ -51,11 +52,25 @@ export function warmMrzReader() {
 /** Let the reader go now (tests, a closing app). */
 export async function stopMrzReader() {
   clearTimeout(idle)
+  await chain.catch(() => {})   // the reads already waiting finish first (a terminated worker cannot be posted to)
   const w = worker; worker = null
   await w?.then(x => x.terminate()).catch(() => {})
 }
 // A picture (a PNG buffer) or a file read; one at a time on the one reader.
-const read = (img) => { const next = chain.then(async () => (await (await reader()).recognize(img)).data.text || ''); chain = next.catch(() => {}); return next }
+const read = (img) => {
+  const next = chain.then(async () => {
+    busy++
+    try {
+      for (let again = 0; ; again++) {
+        try { return (await (await reader()).recognize(img)).data.text || '' }
+        // The worker was stopped under this read (an app closing, a test): one new worker, once; else the read is a failure.
+        catch (e) { if (again || !/postMessage|terminated|null/i.test(String(e?.message))) throw e; worker = null }
+      }
+    } finally { busy-- }
+  })
+  chain = next.catch(() => {})
+  return next
+}
 
 /** The verified MRZ in an OCR text, or null. */
 export function verifiedIn(text) {

@@ -21,7 +21,7 @@ import { cleanPlace, cleanIssue } from './passportDetails.js'
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const IDLE_MS = 10 * 60000
-let worker = null, idle = null, chain = Promise.resolve()
+let worker = null, idle = null, chain = Promise.resolve(), busy = 0
 const enabled = () => process.env.ADAL_PASSPORT_VISUAL !== '0' && fs.existsSync(path.join(ROOT, 'eng.traineddata'))
 
 function reader() {
@@ -31,12 +31,13 @@ function reader() {
     worker.catch(() => { worker = null })
   }
   clearTimeout(idle)
-  idle = setTimeout(() => { const w = worker; worker = null; w?.then(x => x.terminate()).catch(() => {}) }, IDLE_MS)
+  idle = setTimeout(function letGo() { if (busy) { idle = setTimeout(letGo, 5000); idle.unref?.(); return }   // never under a read in progress
+    const w = worker; worker = null; w?.then(x => x.terminate()).catch(() => {}) }, IDLE_MS)
   idle.unref?.()
   return worker
 }
 export function warmVisualReader() { return enabled() ? reader().then(() => true, () => false) : Promise.resolve(false) }
-export async function stopVisualReader() { clearTimeout(idle); const w = worker; worker = null; await w?.then(x => x.terminate()).catch(() => {}) }
+export async function stopVisualReader() { clearTimeout(idle); await chain.catch(() => {}); const w = worker; worker = null; await w?.then(x => x.terminate()).catch(() => {}) }
 const linesOf = (data) => (data.blocks || []).flatMap(b => (b.paragraphs || []).flatMap(p => p.lines || []))
 
 // ---- reading the text ------------------------------------------------------
@@ -127,7 +128,13 @@ export function pageLines(file, turn = 0, { deadline = Infinity } = {}) {
     const png = await sharp(data, { raw: { width: info.width, height: info.height, channels: info.channels } })
       .extract({ left: 0, top, width: info.width, height: bottom - top })
       .resize({ width: 1400 }).grayscale().normalise().png({ compressionLevel: 1 }).toBuffer()
-    return linesOf((await (await reader()).recognize(png, {}, { blocks: true })).data)
+    busy++
+    try {
+      for (let again = 0; ; again++) {
+        try { return linesOf((await (await reader()).recognize(png, {}, { blocks: true })).data) }
+        catch (e) { if (again || !/postMessage|terminated|null/i.test(String(e?.message))) throw e; worker = null }   // stopped under the read: one new worker, once
+      }
+    } finally { busy-- }
   }).catch((e) => { console.warn('[passport visual]', e.message); return null })
   chain = run.then(() => {}, () => {})
   return run

@@ -15,7 +15,7 @@ globalThis.fetch = async () => { fetched++; throw new Error('no network in this 
 for (const k of ['GEMINI_API_KEY', 'GOOGLE_API_KEY', 'JEV_API_KEY']) delete process.env[k]
 const O = await import('../src/services/passportOnly.js')
 const { stopMrzReader } = await import('../src/services/quickMrz.js')
-after(async () => { globalThis.fetch = real; await stopMrzReader(); await (await import('../src/services/passportVisual.js')).stopVisualReader() })
+after(async () => { await (await import('../src/services/docPipeline.js')).settleBackground(); globalThis.fetch = real; await stopMrzReader(); await (await import('../src/services/passportVisual.js')).stopVisualReader() })
 
 const db = async () => {
   const d = knex({ client: 'sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true, pool: { min: 1, max: 1 }, migrations: { directory: new URL('../src/migrations', import.meta.url).pathname } })

@@ -293,6 +293,12 @@ export async function pdfPictures(pdfPath) {
   return pics
 }
 
+// Work that goes on after a file is filed (the passport's place of birth / date of issue): kept so that it can be waited for
+// (tests, a closing app) and never outlives the readers it uses.
+const _background = new Set()
+const background = (p) => { _background.add(p); p.finally(() => _background.delete(p)); return p }
+export const settleBackground = () => Promise.allSettled([..._background])
+
 export async function runPipeline(filePath, db, analyzer, tag = '[pipeline]', opts = {}) {
   const filename = opts.name || path.basename(filePath)
   const ext = path.extname(filename).toLowerCase()
@@ -613,7 +619,7 @@ export async function runPipeline(filePath, db, analyzer, tag = '[pipeline]', op
   // the passport was settled from those alone, read them now (in the background).
   if (isPassport && (!(upd.place_of_birth || current?.place_of_birth) || !(upd.passport_issue_date || current?.passport_issue_date))) {
     const img = formats.find(f => /^image\//.test(f.mimetype || ''))?.path || stagedPath
-    import('./passportDetails.js').then(m => m.fillPassportDetails(db, profileId, img, log)).catch(e => log('passport details:', e.message))
+    background(import('./passportDetails.js').then(m => m.fillPassportDetails(db, profileId, img, log)).catch(e => log('passport details:', e.message)))
   }
 
   // A passport is checked against its MRZ right away, so the police-clearance

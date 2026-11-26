@@ -131,3 +131,12 @@ test('the person\'s 10 minutes: the same everywhere, and nobody is cut off while
   assert.equal(A.expireTasks(Date.now() + 20.1 * 60e3).length, 1, 'not for ever')
   A.keepWhile(() => false)
 })
+
+test('Tasheer and LMIS stay on the PC their sign-in belongs to; Wafid, Enjaz, insurance go to the strong PC', async (t) => {
+  t.after(() => { delete process.env.ADAL_MOVE_SITES })
+  const go = async (wf) => { const j = { ...job(), workflow_id: wf }; const line = await selfAssign(fakeDb([{ id: 1 }]), j, { pcs: [MAIN, STRONG], tabs: {}, running: {}, home: null }); return [line, JSON.parse(j.context).on_device || ''] }
+  for (const wf of ['tasheer_upload', 'lmis_contract', 'police_clearance']) assert.deepEqual(await go(wf), ['', ''], wf)
+  for (const wf of ['wafid_slip', 'mofa_visa', 'insurance_certificate', 'musaned_add_candidate']) assert.notEqual((await go(wf))[1], '', wf)
+  process.env.ADAL_MOVE_SITES = 'tasheer'
+  assert.notEqual((await go('tasheer_upload'))[1], '', 'let go by the switch')
+})

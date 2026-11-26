@@ -21,6 +21,11 @@ export async function selfAssign(db, job, { pcs = null, tabs = null, running = n
   let ctx = {}
   try { ctx = JSON.parse(job.context || '{}') } catch {}
   if (!lanRobots() || ctx.placed || ctx.on_main) return ''
+  // Sites whose sign-in belongs to one PC stay where they are (2026-11-26): Tasheer keeps one session for the agency
+  // (on another PC it would sign this one out), LMIS's codes are typed at the PC that pressed Sign In (lmisOne.js
+  // sends a run to where its LMIS is open). ADAL_MOVE_SITES=tasheer,lmis lets them go too.
+  const stay = (peerOf(job.workflow_id) || '').match(/^(tasheer|lmis)$/)?.[0]
+  if (stay && !String(process.env.ADAL_MOVE_SITES || '').split(',').map(x => x.trim()).includes(stay)) { log(`${stay === 'tasheer' ? 'Tasheer' : 'LMIS'}: stays on the PC its sign-in belongs to`); return '' }
   const t0 = now()
   const from = String(ctx.on_device || '')
   if (!pcs) {

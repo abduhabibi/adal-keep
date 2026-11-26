@@ -6,6 +6,7 @@ import FullBodyCropper from './FullBodyCropper'
  * What the Paste button found, shown before anything is saved (asked on 2026-11-26):
  *   Photo            the frame for a head photo (3:4) — see it, frame it, Save or Cancel
  *   Full Body Photo  the full body frame (1:3), as when it is uploaded
+ *   (FieldCard opens it only for these two; the other boxes take a paste at once, as Ctrl+V.)
  *   anything else    the picture or PDF as it is, Save (as a picture or a PDF) or Cancel
  * onSave(files, format) — nothing is saved before it. The crop keeps the picture's own pixels (FullBodyCropper).
  */

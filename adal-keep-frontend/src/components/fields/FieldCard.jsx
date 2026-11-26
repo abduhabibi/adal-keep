@@ -78,7 +78,8 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
   const box = `${profileId}/${field.id}`
   const coming = useSyncExternalStore(onUploads, () => uploadsOf(box))
   const root = useRef(null)
-  // The Paste button (lib/clipPaste.js): what is copied is shown first (PastePreview), saved on Save.
+  // The Paste button (lib/clipPaste.js): Photo and Full Body Photo show it first in their frame
+  // (PastePreview), saved on Save; every other box takes it at once, as Ctrl+V does (the owner, 2026-11-26).
   const [paste, setPaste] = useState(null)        // { on, here }
   const [pasted, setPasted] = useState(null)      // File[] being looked at
   const [reading, setReading] = useState(false)
@@ -86,7 +87,12 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
   const pasteNow = async () => {
     if (reading) return
     setReading(true)
-    try { setPasted(await pasteFiles({ here: !!paste?.here })) }
+    try {
+      const files = await pasteFiles({ here: !!paste?.here })
+      if (isPhotoSlot && files.length === 1 && /^image\//.test(files[0].type)) setPasted(files)
+      else if (files.length > 1) handleMultiUpload(files)
+      else handleFileSelect(files[0])
+    }
     catch (e) { toast.error(e.message, { id: `paste-${field.id}`, duration: e.why === 'nothing' ? 5000 : 9000 }) }
     finally { setReading(false) }
   }

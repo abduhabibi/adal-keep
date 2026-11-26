@@ -14,6 +14,7 @@ import PageHeader from '../components/shared/PageHeader'
 import Card from '../components/shared/Card'
 import Button from '../components/shared/Button'
 import WhatsAppLinkSteps from '../components/WhatsAppLinkSteps'
+import WhatsAppNumberBox from '../components/WhatsAppNumberBox'
 
 const err = (e) => e?.response?.data?.error || e.message
 const digitsOf = (v) => String(v || '').replace(/\D/g, '')
@@ -47,8 +48,8 @@ export default function WhatsAppLinkPage() {
     if (s?.status === 'code' && s.code && copied !== s.code) { try { navigator.clipboard?.writeText(digitsOrCode(s.code)).then(() => setCopied(s.code)).catch(() => {}) } catch {} }
   }, [s?.status, s?.code])
 
-  const connect = async () => {
-    const n = digitsOf(phone)
+  const connect = async (typed) => {
+    const n = digitsOf(typeof typed === 'string' ? typed : phone)
     if (n.length < 9) { setError('Type the WhatsApp number, e.g. 0911…, 2519… or +251 9…'); return }
     setError(''); setBusy(true); pressed.current = Date.now()
     try { setS(x => ({ ...x, status: 'starting' })); setS((await wa.post('/whatsapp/link', { phone: n }, { timeout: 30000 })).data) }
@@ -102,13 +103,12 @@ export default function WhatsAppLinkPage() {
         <Card>
           <p className="text-lg font-bold">Connect WhatsApp</p>
           <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">The agency's WhatsApp number (the phone that has WhatsApp):</p>
-          <form className="mt-3 space-y-3" onSubmit={(e) => { e.preventDefault(); connect() }}>
-            <input className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-lg dark:border-slate-600 dark:bg-slate-800" inputMode="tel" autoComplete="tel"
-              placeholder="0911… or +251 9…" value={phone} onChange={e => setPhone(e.target.value)} />
-            <Button type="submit" className="w-full" disabled={busy || s.status === 'starting'}>
+          <div className="mt-3 space-y-3">
+            <WhatsAppNumberBox off={s.number_box === false} value={phone} onChange={setPhone} onDone={(n) => { setPhone(n); connect(n) }} disabled={busy || s.status === 'starting'} />
+            <Button className="w-full" onClick={() => connect()} disabled={busy || s.status === 'starting'}>
               {busy || s.status === 'starting' ? `Asking WhatsApp for the code…${since != null && busy ? ` ${since}s` : ''}` : '💬 Connect WhatsApp'}
             </Button>
-          </form>
+          </div>
           {(error || (s.error && s.status !== 'failed')) && <p className="mt-2 text-sm text-red-600">{error || s.error}</p>}
           <WhatsAppLinkSteps s={s} onState={setS} onAgain={connect} busy={busy} />
         </Card>

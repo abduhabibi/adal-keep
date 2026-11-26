@@ -22,7 +22,7 @@ const who = (req) => keyOf(req.query.u ?? req.body?.u)
 const from = (req) => String(req.pcAccess?.name || (req.headers['x-adal-cloud'] ? 'phone' : os.hostname())).slice(0, 80)
 const by = (req) => { try { return decodeURIComponent(req.get('x-adal-who') || '') } catch { return '' } }
 
-router.get('/whatsapp', async (req, res) => res.json({ agent_limit: await agentLimit(req.app.locals.db), ...stateOf(who(req)), key: who(req), last_number: lastNumber(who(req)), others: allStates().filter(s => s.key !== who(req) && s.status === 'ready') }))
+router.get('/whatsapp', async (req, res) => res.json({ agent_limit: await agentLimit(req.app.locals.db), ...stateOf(who(req)), key: who(req), last_number: lastNumber(who(req)), number_box: process.env.ADAL_WA_NUMBER_BOX !== '0', others: allStates().filter(s => s.key !== who(req) && s.status === 'ready') }))
 router.post('/whatsapp/open-web', async (req, res) => { try { res.json(await openWeb(req.app.locals.db, who(req))) } catch (e) { fail(res, e) } })
 // With a number: WhatsApp's 8-character code from the browser already open (linkByCode), never a new one.
 router.post('/whatsapp/connect', async (req, res) => { try { res.json(req.body?.phone ? await linkByCode(req.app.locals.db, who(req), req.body.phone) : await connect(req.app.locals.db, who(req))) } catch (e) { fail(res, e) } })

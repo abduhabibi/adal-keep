@@ -110,3 +110,11 @@ test('linkByCode end to end on the mock page: every step said, the code, the X',
     assert.equal(off.status, 'off'); assert.equal(off.code, null)
   } finally { W.cancelLink(key); W._setClientForTests(key, null, { status: 'off' }); await b.close() }
 })
+
+test('the number box (frontend) and the PC read a number the same way', async () => {
+  const F = await import('../../adal-keep-frontend/src/lib/waNumber.js')
+  for (const v of ['+251 911 234 567', '0911234567', '251711234567', '00251911234567', '+966 55 123 4567', '911234567'])
+    assert.equal(F.phoneDigits(v), phoneDigits(v), v)
+  assert.equal(F.localPart('+251 0911 234 567'), '911234567')
+  assert.equal(F.localPart('812345678'), '', 'a first digit other than 9 or 7 is not taken')
+})

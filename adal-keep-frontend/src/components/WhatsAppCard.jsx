@@ -10,6 +10,7 @@ import { wa } from '../lib/whatsapp'
 import Card from './shared/Card'
 import Button from './shared/Button'
 import WhatsAppLinkSteps from './WhatsAppLinkSteps'
+import WhatsAppNumberBox from './WhatsAppNumberBox'
 
 const field = 'w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm'
 const err = (e) => e?.response?.data?.error || e.message
@@ -146,8 +147,8 @@ export default function WhatsAppCard() {
   const remembered = () => { try { return localStorage.getItem('adal-wa-number') || '' } catch { return '' } }
   const number = String(s.last_number || remembered() || '').replace(/\D/g, '')
   const busyNow = s.status === 'starting' || s.status === 'signing-in'
-  const start = async (typed) => {
-    const n = (typed ? phone : number).replace(/\D/g, '')
+  const start = async (typed, given) => {
+    const n = String(given || (typed ? phone : number)).replace(/\D/g, '')
     if (n.length < 9) { setAsk(true); return }
     try { localStorage.setItem('adal-wa-number', n) } catch {}
     setAsk(false)
@@ -218,10 +219,10 @@ export default function WhatsAppCard() {
         </div>
       )}
       {ask && !['ready', 'web'].includes(s.status) && (
-        <form className="-mt-2 mb-4 flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); start(true) }}>
-          <input autoFocus className={field + ' max-w-xs'} inputMode="tel" placeholder="Your WhatsApp number, e.g. 0911… or +251 9…" value={phone} onChange={e => setPhone(e.target.value)} />
-          <Button size="sm" type="submit" disabled={phone.replace(/\D/g, '').length < 9}>Send me the code</Button>
-        </form>
+        <div className="-mt-2 mb-4 flex flex-wrap items-start gap-2">
+          <WhatsAppNumberBox autoFocus className="w-full max-w-xs" off={s.number_box === false} value={phone} onChange={setPhone} onDone={(n) => { setPhone(n); start(true, n) }} />
+          <Button size="sm" className="mt-2" onClick={() => start(true)} disabled={phone.replace(/\D/g, '').length < 9}>Send me the code</Button>
+        </div>
       )}
       {s.others?.length > 0 && (
         <p className="-mt-2 mb-4 text-xs text-slate-500">Also connected on this agency: {s.others.map(o => o.me?.name || o.me?.number || o.key).join(' · ')}</p>

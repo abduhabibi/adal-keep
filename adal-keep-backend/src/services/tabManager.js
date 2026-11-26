@@ -442,6 +442,7 @@ export async function tidySiteTabs(browser, workflowId, keep = new Set(), busyRu
       const ours = p.__adalCdp || /^adal-run-/.test(await inTime(p.evaluate(() => window.name).catch(() => ''), 2000) || '')
       if (!ours || !(await outOfSight(p)) || (await personIn(p, busyRuns))) continue
       for (const [id, t] of [..._tabs]) if (t === p) _tabs.delete(id)
+      p.__adalClosedBy = p.__adalClosedBy || 'one tab per site (a second tab of the account)'
       await p.close().catch(() => {})
       closed++
     }
@@ -647,7 +648,7 @@ export async function borrowOpenTab(browser, workflowId, busyRuns = new Set()) {
 export async function doneWithTab(page) {
   if (!page) return
   page.__adalGiveWay = null
-  if (!page.__adalBorrowed) { await keepBrowserOpen(page); await page.close().catch(() => {}); return }
+  if (!page.__adalBorrowed) { await keepBrowserOpen(page); page.__adalClosedBy = page.__adalClosedBy || 'the end of its run'; await page.close().catch(() => {}); return }
   page.__adalBorrowed = false
   page.__adalRunId = undefined
   handTabToPerson(page)

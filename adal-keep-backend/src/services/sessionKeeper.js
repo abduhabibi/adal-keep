@@ -263,7 +263,7 @@ async function closeSpareTabs(pages) {
       tabs.push({ p, owned: Number.isFinite(id) && active.has(id), borrowed: !!p.__adalBorrowed || !!p.__adalShown || !!p.__adalPerson, typed, signedIn: signedInAt(site, p.url()) })
     }
     const go = spareTabs(tabs)
-    for (const t of go) await t.p.close().catch(() => {})
+    for (const t of go) { t.p.__adalClosedBy = t.p.__adalClosedBy || 'the session keeper (a tab no run needs)'; await t.p.close().catch(() => {}) }
     if (go.length) console.log(`[sessions] ${site.name}: ${go.length} tab(s) no run needs any more closed (one signed-in tab stays)`)
   }
 }

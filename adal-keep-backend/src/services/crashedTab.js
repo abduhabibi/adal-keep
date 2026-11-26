@@ -13,6 +13,7 @@ export function watchCrash(page, log = console.warn) {
     page.on('error', (e) => {
       if (!/crash/i.test(String(e?.message))) return
       page.__adalCrashed = Date.now()
+      page.__adalClosedBy = page.__adalClosedBy || 'the crash watch (its page crashed)'
       setTimeout(() => { page.close().catch(() => {}) }, 1500).unref?.()   // (nobody can use it: gone from the strip too)
       log(`[tabManager] run #${page.__adalRunId ?? '-'}: its page crashed (${String(page.url()).slice(0, 60)}) — it counts as closed, a fresh tab opens`)
     })

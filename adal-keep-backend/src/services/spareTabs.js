@@ -54,6 +54,7 @@ export async function closeSpare(browser, { live, seenOf = (p) => Math.max(p.__a
     for (const g of may) {
       if (g === stays || g.p.isClosed?.()) continue
       await keepBrowserOpen(g.p)
+      g.p.__adalClosedBy = g.p.__adalClosedBy || 'spare tabs (a second Musaned tab)'
       if (await within(g.p.close().then(() => true), 4000, false)) closed++
     }
   }

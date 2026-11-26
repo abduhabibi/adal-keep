@@ -14,6 +14,7 @@
  * ADAL_DEAD_TABS=0 turns it off; any error: nothing is done.
  */
 import os from 'os'
+import { closedBy } from './pageGone.js'
 import { openBrowserIfAny } from './browser.js'
 import { tabOfRun, runsWithTabs, closeTarget } from './tabManager.js'
 
@@ -98,6 +99,7 @@ export async function lookDead(browser, db, { askMs = ASK_MS, onClosed = null } 
     }
     p.__adalDead = 'The page did not answer any more — a fresh one is opening…'
     p.__adalClosing = true
+    closedBy(p, 'the dead-tab look (it answered nothing)')
     const ok = await closeTarget(p)
     if (!ok) p.__adalClosing = false
     else counts.closed++

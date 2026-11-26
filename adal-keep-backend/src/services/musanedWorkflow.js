@@ -2720,8 +2720,20 @@ async function musanedRun(page, ctx) {
       return await checkChosenInRun(page, ctx)
     }
     await watchAlreadyRegistered(page)
-    await stepClickHrPool(page, ctx)
-    await stepClickAddNewCandidate(page, ctx)
+    // Locate, then go (docs/robot-architecture.md): from wherever the tab is to the pre-check by the map; when the map
+    // cannot, the clicks of before (ADAL_SITE_MAP=0: those only).
+    const { siteMapOn, goTo, jevPick } = await import('./siteMap/engine.js')
+    let mapped = null
+    if (siteMapOn()) {
+      const { musanedMap } = await import('./siteMap/musaned.js')
+      const data = process.env.ADAL_ROBOTS_DATA || path.join(process.cwd(), 'data')
+      mapped = await goTo(page, musanedMap, 'precheck', { ctx, log: (m) => log(ctx, m), jev: jevPick, unknownDir: path.join(data, 'unknown-screens'), timesFile: path.join(data, 'step-times.json') })
+      if (!mapped.ok) log(ctx, `the map did not reach the pre-check (${mapped.why || mapped.gate || mapped.screen}) — the clicks of before`, 'warn')
+    }
+    if (!mapped?.ok) {
+      await stepClickHrPool(page, ctx)
+      await stepClickAddNewCandidate(page, ctx)
+    }
 
     const pre = await stepFillCandidatePreCheck(page, ctx)
     // Registered already (in our list, or by another agency): noted, stopped.

@@ -49,9 +49,11 @@ test('run 1 types and ends, the robots restart, run 2 takes the same tab; a paus
   assert.equal(await own.evaluate(() => window.name), 'adal-run-4', 'still run 4\'s')
   assert.equal(await own.evaluate(() => document.querySelector('#q').value), 'EP1234567', 'as it was')
   for (const p of pages) if (p !== own && /musaned|blank/.test(p.url()) && pages.length > 2) await p.close().catch(() => {})
-  // A person clicked and typed in it a moment ago: theirs.
-  await own.evaluate(() => { window.name = 'adal-run-6'; sessionStorage.setItem('adal-touched', String(Date.now())) })
-  const seven = await robots(7, 'look')
+  // A person clicked and typed in it a moment ago: theirs. The run waits while they click (one page a site), then,
+  // their form staying, opens its own.
+  await own.evaluate(() => { window.name = 'adal-run-6'; sessionStorage.setItem('adal-touched', String(Date.now() - 57000)) })
+  const t7 = Date.now(), seven = await robots(7, 'look')
   assert.notEqual(seven.target, one.target, 'a person\'s tab is not taken')
+  assert.ok(Date.now() - t7 >= 2500, 'it waited while the person clicked')
   assert.equal(await own.evaluate(() => document.querySelector('#q').value), 'EP1234567')
 })

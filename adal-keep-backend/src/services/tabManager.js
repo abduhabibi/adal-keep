@@ -31,7 +31,7 @@ import { notNeeded } from './pageDiet.js'
 import { noteSent } from './lostBrowser.js'
 import { stopRequest } from './emptyPicture.js'
 import { robotsOwnTab } from './robotsOwnTab.js'
-import { stopSignOut } from './oneSitePage.js'
+import { stopSignOut, onePageOn } from './oneSitePage.js'
 import { tabRank } from './bestTab.js'
 import { watchCrash, crashed } from './crashedTab.js'
 import { noteCall } from './siteApi.js'
@@ -540,11 +540,13 @@ export async function openRunTab(browser, runId, { workflowId = '', busyRuns = n
       console.log(`[tabManager] run #${id} took the free tab already on ${there.url().slice(0, 60)} (out of sight)`)
       return there
     }
+    const waited = fresh ? null : await waitForSiteTab(browser, id, workflowId, busyRuns, space)
+    if (waited) { await letPageGo(waited); waited.__adalReused = waited.url(); await setupTab(waited, { runId: id }); console.log(`[tabManager] run #${id} waited for the site's one tab and took it (out of sight)`); return waited }
     const page = await newRunTab(browser, space, { quiet: true })
     _tabs.set(id, page)
     await setupTab(page, { runId: id })
     const peer = peerOf(workflowId)
-    const lent = peer ? await borrowSignIn(page, peer).catch(() => null) : null
+    const lent = peer && !onePageOn() ? await borrowSignIn(page, peer).catch(() => null) : null   // (never a copied sign-in beside the signed-in tab: oneSitePage.js)
     console.log(`[tabManager] run #${id} opened its own tab out of sight${lent ? ', signed in from another tab' : ''}`)
     return page
   }
@@ -560,13 +562,15 @@ export async function openRunTab(browser, runId, { workflowId = '', busyRuns = n
     console.log(`[tabManager] run #${id} took the free tab on ${free.url().slice(0, 60)}`)
     return free
   }
+  const waited = await waitForSiteTab(browser, id, workflowId, busyRuns, space)
+  if (waited) { await letPageGo(waited); waited.__adalReused = waited.url(); await setupTab(waited, { runId: id }); console.log(`[tabManager] run #${id} waited for the site's one tab and took it`); return waited }
   const page = await newRunTab(browser, space)
   _tabs.set(id, page)
   await setupTab(page, { runId: id })
   // Every site: a tab of the same space signed in already lends its sign-in to
   // the new tab before its first page loads (no second sign-in, no new code).
   const peer = peerOf(workflowId)
-  const lent = peer ? await borrowSignIn(page, peer).catch(() => null) : null
+  const lent = peer && !onePageOn() ? await borrowSignIn(page, peer).catch(() => null) : null   // (never a copied sign-in beside the signed-in tab: oneSitePage.js)
   console.log(`[tabManager] run #${id} opened its own tab${space ? ' (in its account own space)' : ''}${lent ? ', signed in from another tab' : ''} (${runsWithTabs().length} run tab(s) open)`)
   return page
 }
@@ -582,14 +586,50 @@ async function letPageGo(page) {
  * For a background check (not a run): a free tab on the site, or a new one.
  * doneWithTab() afterwards closes only a tab the check opened itself.
  */
-export async function borrowTab(browser, workflowId, busyRuns = new Set(), keepRuns = null) {
-  const free = await oneAtATime(async () => {
+export async function borrowTab(browser, workflowId, busyRuns = new Set(), keepRuns = null, { giveWay = null, waitMs = 5 * 60e3 } = {}) {
+  const take = () => oneAtATime(async () => {
     const p = await findFreeTab(browser, workflowId, busyRuns) || (keepRuns && await siteTab(browser, workflowId, keepRuns))
-    if (p) p.__adalBorrowed = true
+    if (p) { p.__adalBorrowed = true; p.__adalGiveWay = giveWay }
     return p
   })
+  let free = await take()
+  // One page a site (oneSitePage.js): a run (or a person) has it — the check waits for it, never a second tab beside it.
+  for (const t0 = Date.now(); !free && onePageOn() && (await siteTabsNow(browser, workflowId)).length && Date.now() - t0 < waitMs;) {
+    await new Promise(r => setTimeout(r, 1000))
+    free = await take()
+  }
+  if (!free && onePageOn() && (await siteTabsNow(browser, workflowId)).length) throw new Error(`The ${PEERS[peerOf(workflowId)]?.label || (/^wafid/.test(workflowId) ? 'Wafid' : 'site')}'s page is in use (a run or a person): this check goes on at its next time`)
   if (free) await letPageGo(free)
   return free || newRunTab(browser)
+}
+/** The site's tabs of the browser's own space now (only their addresses are looked at). */
+async function siteTabsNow(browser, workflowId, space = null) {
+  const host = RUN_HOSTS.find(([w]) => w.test(String(workflowId)))?.[1]
+  const mine = space || browser.defaultBrowserContext?.() || null
+  if (!host || !browser?.pages) return []
+  return (await (typeof browser.targets === 'function' ? pagesOf(browser, 1500) : browser.pages().catch(() => []))).filter(p => !isClosed(p) && host.test(p.url()) && (!mine || spaceIs(p, mine)))
+}
+/**
+ * One page a site, for a run: its site's tab is in use for a moment (a check, the session keeper, a person's click):
+ * a check is asked to give way, and the run waits for the tab (60 s at most) instead of opening a second one.
+ */
+async function waitForSiteTab(browser, id, workflowId, busyRuns, space, limitMs = 60000) {
+  if (!onePageOn() || !(await siteTabsNow(browser, workflowId, space)).length) return null
+  const asked = new Set()
+  for (const t0 = Date.now(); Date.now() - t0 < limitMs;) {
+    const p = await oneAtATime(async () => { const f = await findFreeTab(browser, workflowId, busyRuns, space); if (f) _tabs.set(id, f); return f })
+    if (p) return p
+    // Only a tab busy for a moment is waited for: one a check or the keeper holds, one a person clicked in a minute ago
+    // (never a form waiting for its Save, or a person's own form: those stay theirs, as before).
+    let brief = false
+    for (const t of await siteTabsNow(browser, workflowId, space)) {
+      if (t.__adalBorrowed) { brief = true; if (t.__adalGiveWay && !asked.has(t)) { asked.add(t); try { t.__adalGiveWay() } catch {} } continue }
+      if (ownerOf(t) === null && Date.now() - (Number(await inTime(t.evaluate(() => sessionStorage.getItem('adal-touched')).catch(() => 0), 1500)) || 0) < PERSON_MS) brief = true
+    }
+    if (!brief) return null
+    await new Promise(r => setTimeout(r, 500))
+  }
+  return null
 }
 /**
  * Only a tab already open on that site and free (never a new one): the
@@ -606,6 +646,7 @@ export async function borrowOpenTab(browser, workflowId, busyRuns = new Set()) {
 }
 export async function doneWithTab(page) {
   if (!page) return
+  page.__adalGiveWay = null
   if (!page.__adalBorrowed) { await keepBrowserOpen(page); await page.close().catch(() => {}); return }
   page.__adalBorrowed = false
   page.__adalRunId = undefined

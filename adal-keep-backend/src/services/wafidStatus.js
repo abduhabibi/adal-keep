@@ -130,6 +130,7 @@ export async function checkAll(db, { onlyId = null, auto = false, list = null, l
   // The timed check never opens Brave itself: only when Brave is open.
   if (auto && !look && !(await openBrowserIfAny())) { console.log('[wafid] Brave is closed — checking when it is open'); return { skipped: true } }
   checker.running = true
+  checker.giveWay = ''
   checker.results = []
   checker.by = by
   checker.auto = !!auto
@@ -144,7 +145,7 @@ export async function checkAll(db, { onlyId = null, auto = false, list = null, l
 
     if (!look) {
       const browser = await getBrowser()
-      page = await borrowTab(browser, 'wafid_check', await activeRunIds(db))
+      page = await borrowTab(browser, 'wafid_check', await activeRunIds(db), null, { giveWay: () => { checker.giveWay = 'A robot run needs the Wafid page — the check goes on at its next time' } })
       await setupTab(page, { runId: 'wafid-status' })
       page.__adalAllowImages = true // reCAPTCHA
     }
@@ -155,7 +156,7 @@ export async function checkAll(db, { onlyId = null, auto = false, list = null, l
       if (i && gapMs) await sleep(gapMs)
       // One agent at a time: a robot that started meanwhile goes first.
       while (auto && runsWorking() > 0 && !(stopped = shouldStop?.() || '')) await sleep(30000)
-      if ((stopped = stopped || shouldStop?.() || '')) break
+      if ((stopped = stopped || checker.giveWay || shouldStop?.() || '')) break
       const passport = String(p.passport_number).trim().toUpperCase()
       let r, pdf = null
       try {

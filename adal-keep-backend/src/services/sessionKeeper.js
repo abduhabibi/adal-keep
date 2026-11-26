@@ -405,6 +405,8 @@ export async function siteTabOf(browser, site, space, running = new Set()) {
     if (await tabSignedIn(site, p)) return { page: p, signedIn: true }
     free.push(p)
   }
+  // One page a site: a run's tab signed in is this account's sign-in — no second sign-in beside it.
+  if (process.env.ADAL_ONE_PAGE !== '0') for (const p of pages) if ((p.__adalBorrowed || running.has(Number(p.__adalRunId))) && await tabSignedIn(site, p).catch(() => false)) return { page: p, signedIn: true, busy: true }
   for (const p of free) {
     const typed = await Promise.race([p.evaluate(() => [...document.querySelectorAll('input, textarea')].some(e => !['hidden', 'password', 'checkbox', 'radio', 'file', 'submit', 'button'].includes(e.type) && e.value && e.value !== e.defaultValue)).catch(() => true), new Promise(r => setTimeout(() => r(true), 5000))])
     if (!typed) return { page: p, signedIn: false }
@@ -479,7 +481,7 @@ export async function openSite(key, database = null, { accountId = null, browser
   const liveKey = `site-${key}${accountId ? `-${Number(accountId)}` : ''}`
   if (found.signedIn) {
     // Musaned's main space can hold another account (a person signed in by hand): its menu says who.
-    if (key === 'musaned' && label && !space) {
+    if (key === 'musaned' && label && !space && !found.busy) {   // (never a run's tab: its menu is not clicked)
       const w = await import('./musanedWorkflow.js')
       const acct = await accountOf('musaned_accounts')
       const who = await w.signedInUser(found.page).catch(() => '')

@@ -854,7 +854,8 @@ export async function signInLanes(db, now = Date.now(), { tabLive = _tabLive } =
   return lanes
 }
 /** How many forms may wait for Save per site and account: 3, 2 on a PC of 4 cores or fewer (ADAL_MAX_SAVE_WAITING). */
-export const maxSaveWaiting = () => Number(process.env.ADAL_MAX_SAVE_WAITING) || ((os.cpus()?.length || 2) <= 4 ? 2 : 3)
+// One page a site (oneSitePage.js, 2026-11-26): one form waits for its Save, the next run of that site waits for it.
+export const maxSaveWaiting = () => Number(process.env.ADAL_MAX_SAVE_WAITING) || (process.env.ADAL_ONE_PAGE !== '0' ? 1 : (os.cpus()?.length || 2) <= 4 ? 2 : 3)
 
 /** The run's tab is open in a browser this PC is connected to. */
 export function runTabLive(runId) {

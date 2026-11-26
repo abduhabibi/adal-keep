@@ -179,6 +179,7 @@ export async function scanContracts(db, { auto = false, remote = null, limitMs =
   if (auto) {
     const browser = await openBrowserIfAny()
     page = browser ? await borrowOpenTab(browser, 'musaned_check_chosen', await activeRunIds(db)) : null
+    if (page) page.__adalGiveWay = () => cancelCheck('A robot run needs the Musaned page — the check goes on at its next time')
     if (!page) return { skipped: true, why: 'no free Musaned tab open' }
     if (/\/(login|auth)\b|sso\.|wahid\.sa|\/realms\//i.test(page.url())) { await doneWithTab(page).catch(() => {}); return { skipped: true, why: 'Musaned is signed out' } }
     backTo = page.url()
@@ -188,7 +189,7 @@ export async function scanContracts(db, { auto = false, remote = null, limitMs =
   try {
     const profiles = await db('profiles').select('*')
     const browser = await getBrowser()
-    if (!page) page = await borrowTab(browser, 'musaned_check_chosen', await activeRunIds(db), await keepingRunIds(db))
+    if (!page) page = await borrowTab(browser, 'musaned_check_chosen', await activeRunIds(db), await keepingRunIds(db), { giveWay: () => cancelCheck('A robot run needs the Musaned page — the check goes on at its next time') })
     await setupTab(page, { runId: 'musaned-contracts' })
     page.__adalAllowImages = true
     // Musaned's own list data first (no passport searched, every detail at once).
@@ -974,7 +975,7 @@ export async function checkContracts(db, { onlyId = null } = {}) {
     const list = await candidates(db, onlyId)
     if (!list.length) return { checked: 0 }
     const browser = await getBrowser()
-    page = await borrowTab(browser, 'musaned_check_chosen', await activeRunIds(db), await keepingRunIds(db))
+    page = await borrowTab(browser, 'musaned_check_chosen', await activeRunIds(db), await keepingRunIds(db), { giveWay: () => cancelCheck('A robot run needs the Musaned page — the check goes on at its next time') })
     await setupTab(page, { runId: 'musaned-contracts' })
     page.__adalAllowImages = true
     // Employment Requests' own list first (asked on 2026-11-17): one read for

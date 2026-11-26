@@ -190,3 +190,14 @@ export const FIRST_OPTION_IS = (opt) => {
   const seen = [...document.querySelectorAll('.p-autocomplete-item, .p-autocomplete-option, .p-multiselect-item, .p-select-option, [role="option"]')].filter(o => { const r = o.getBoundingClientRect(); return r.width > 2 && r.height > 2 })
   return seen.length > 0 && bare(seen[0].textContent) === bare(opt)
 }
+
+/**
+ * After a choice that may make the page ask for the next list: until it has asked nothing for `idle` ms — the fixed
+ * wait of before (max) at most. Off: the fixed wait.
+ */
+export async function quietNet(page, max, idle = 150) {
+  if (!pasteOn() || typeof page.waitForNetworkIdle !== 'function') return sleep(max)
+  const t0 = Date.now()
+  await page.waitForNetworkIdle({ idleTime: Math.min(idle, max), timeout: max }).catch(() => {})
+  return Date.now() - t0
+}

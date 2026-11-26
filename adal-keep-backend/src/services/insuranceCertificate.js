@@ -17,6 +17,7 @@
  */
 import { signInTurn } from './tabManager.js'
 import { visaNames, clickText } from './mofaVisa.js'
+import { pasteOn, waitSign, quietNet } from './pasteAll.js'
 
 export const INSURANCE_CERTIFICATE = 'insurance_certificate'
 const HOME = 'https://agency.niscofetap.com/'
@@ -113,7 +114,8 @@ async function signIn(page, ctx) {
   try {
     log(ctx, 'opening FetaP (agency.niscofetap.com)')
     await page.goto(DRAFT_URL, { waitUntil: 'domcontentloaded', timeout: 120000 }).catch(e => log(ctx, `navigation threw: ${e.message}`, 'warn'))
-    await sleep(2500)
+    // Its own sign: the sign-in form or the drafts ("New Certificate") — the 2.5 s of before at most.
+    await waitSign(page, () => [...document.querySelectorAll('input[type="password"]')].some(i => i.offsetParent !== null) || /new certificate/i.test(document.body?.innerText || ''), null, 2500, { min: 200, every: 100 })
     if (!(await hasPassword(page))) { log(ctx, '✓ already signed in to FetaP'); return }
     if (!ctx.insurance_username || !ctx.insurance_password) throw new Error('No insurance account — add one under AI Actions → Insurance login account')
     const f = await fillLogin(page, ctx)
@@ -163,6 +165,32 @@ function fillBox(page, placeholder, value, force = false) {
   }, placeholder, value, force)
 }
 
+/** Runs in the page: several boxes as fillBox does each (its answers, in order). */
+const FILL_BOXES = (list, force) => list.map(([ph, v]) => {
+  const root = document.querySelector('.modal-parent') || document
+  const el = [...root.querySelectorAll('input, textarea')].find(i => (i.placeholder || '').trim().toLowerCase() === ph.toLowerCase() && i.offsetParent !== null)
+  if (!el) return 'missing'
+  if (el.value === v) return 'ok'
+  if (el.value && !force) return 'kept'
+  const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
+  el.focus()
+  Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, v)
+  for (const t of ['input', 'change']) el.dispatchEvent(new Event(t, { bubbles: true }))
+  el.blur()
+  return el.value === v ? 'ok' : 'failed'
+})
+/**
+ * The text boxes of one part of the form in one page step (pasteAll.js; ADAL_PASTE_ALL=0: one by one as before), read
+ * back the same way; only what did not take is tried again alone. list: [[placeholder, value, name]] with values.
+ */
+async function fillBoxes(page, list, force = false) {
+  const want = list.filter(([, v]) => v)
+  const got = pasteOn() && want.length > 1 ? await page.evaluate(FILL_BOXES, want.map(([ph, v]) => [ph, v]), force).catch(() => null) : null
+  const out = {}
+  for (const [i, [ph, v]] of want.entries()) out[ph] = got?.[i] && got[i] !== 'failed' ? got[i] : await fillBox(page, ph, v, force)
+  return out
+}
+
 function chooseIn(page, firstOption, src) {
   return page.evaluate((first, src) => {
     const root = document.querySelector('.modal-parent') || document
@@ -196,7 +224,7 @@ async function fillCertificate(page, ctx, v) {
   const select = async (first, src, name = first) => {
     if (!src) return left.push(name)
     const r = await chooseIn(page, first, src)
-    if (r.state === 'ok') { log(ctx, `✓ ${name}: ${r.text}`); await sleep(400) }
+    if (r.state === 'ok') { log(ctx, `✓ ${name}: ${r.text}`); await quietNet(page, 400) }
     else left.push(`${name}${r.options?.length ? ` (choices: ${r.options.join(', ')})` : ''}`)
   }
   const text = async (placeholder, value, name = placeholder) => {
@@ -210,19 +238,22 @@ async function fillCertificate(page, ctx, v) {
   await select('Insurance Branch', v.branch, `Insurance Branch${v.branchName ? '' : ' (choose it in Settings → Insurance)'}`)
   await text('Number Of Insured', v.insured)
   log(ctx, '✍️ Add Insured')
+  // A part's boxes in one page step; each said as before.
+  const texts = async (list) => {
+    const got = await fillBoxes(page, list)
+    for (const [ph, value, name = ph] of list) {
+      if (!value) left.push(name)
+      else if (got[ph] === 'ok') log(ctx, `✓ ${name}: ${value}`)
+      else if (got[ph] === 'kept') log(ctx, `${name} already filled — kept`)
+      else left.push(name)
+    }
+  }
   await select('Title', v.title)
-  await text('First Name', v.first)
-  await text('Father Name', v.father)
-  await text('Grand Father Name', v.grandfather)
+  await texts([['First Name', v.first], ['Father Name', v.father], ['Grand Father Name', v.grandfather]])
   await select('Gender', v.gender)
   const dob = await setDateNth(page, 0, v.dob)
   if (dob) log(ctx, `✓ Date Of Birth: ${dob}`); else left.push('Date Of Birth')
-  await text('Passport Number', v.passport)
-  await text('Labor ID', v.labor_id)
-  await text('Phone', v.phone)
-  await text('Email', v.email)
-  await text('Woreda', v.woreda)
-  await text('Sub city', v.sub_city, 'Sub City')
+  await texts([['Passport Number', v.passport], ['Labor ID', v.labor_id], ['Phone', v.phone], ['Email', v.email], ['Woreda', v.woreda], ['Sub city', v.sub_city, 'Sub City']])
   await select('Region', v.region)
   await select('Country Of Destination', v.destination)
   return left
@@ -270,7 +301,7 @@ export async function runInsuranceCertificate(page, ctx) {
     throw new Error('The Draft Certificates page did not show "New Certificate"')
   }
   await openNewCertificate(page, ctx)
-  await sleep(800)
+  await quietNet(page, 800)
   const left = await fillCertificate(page, ctx, v)
 
   await ctx.noteProfile?.(`Insurance: the FetaP certificate form is filled — waiting for a person${left.length ? ` (also to fill: ${left.join('; ')})` : ''}`)
@@ -301,7 +332,7 @@ async function fillHeader(page, ctx, v) {
   const left = []
   if (v.branch) {
     const r = await chooseIn(page, 'Insurance Branch', v.branch)
-    if (r.state === 'ok') { log(ctx, `✓ Insurance Branch: ${r.text}`); await sleep(400) } else left.push('Insurance Branch')
+    if (r.state === 'ok') { log(ctx, `✓ Insurance Branch: ${r.text}`); await quietNet(page, 400) } else left.push('Insurance Branch')
   } else left.push('Insurance Branch (choose it in Settings → Insurance)')
   const n = await fillBox(page, 'Number Of Insured', v.insured, true)
   if (n === 'ok') log(ctx, `✓ Number Of Insured: ${v.insured}`); else left.push('Number Of Insured')
@@ -314,7 +345,7 @@ async function fillMember(page, ctx, v, force) {
   const select = async (first, src, name = first) => {
     if (!src) return left.push(name)
     const r = await chooseIn(page, first, src)
-    if (r.state === 'ok') { log(ctx, `✓ ${name}: ${r.text}`); await sleep(300) }
+    if (r.state === 'ok') { log(ctx, `✓ ${name}: ${r.text}`); await quietNet(page, 300) }
     else left.push(`${name}${r.options?.length ? ` (choices: ${r.options.join(', ')})` : ''}`)
   }
   const text = async (placeholder, value, name = placeholder) => {
@@ -324,19 +355,23 @@ async function fillMember(page, ctx, v, force) {
     else if (r === 'kept') log(ctx, `${name} already filled — kept`)
     else left.push(name)
   }
+  // A part's boxes in one page step (an empty one is cleared when the last member left something in it).
+  const texts = async (list) => {
+    for (const [ph, value] of list) if (!value && force) await fillBox(page, ph, '', true).catch(() => {})
+    const got = await fillBoxes(page, list, force)
+    for (const [ph, value, name = ph] of list) {
+      if (!value) left.push(name)
+      else if (got[ph] === 'ok') log(ctx, `✓ ${name}`)
+      else if (got[ph] === 'kept') log(ctx, `${name} already filled — kept`)
+      else left.push(name)
+    }
+  }
   await select('Title', v.title)
-  await text('First Name', v.first)
-  await text('Father Name', v.father)
-  await text('Grand Father Name', v.grandfather)
+  await texts([['First Name', v.first], ['Father Name', v.father], ['Grand Father Name', v.grandfather]])
   await select('Gender', v.gender)
   const dob = await setDateNth(page, 0, v.dob)
   if (dob) log(ctx, '✓ Date Of Birth'); else left.push('Date Of Birth')
-  await text('Passport Number', v.passport)
-  await text('Labor ID', v.labor_id)
-  await text('Phone', v.phone)
-  await text('Email', v.email)
-  await text('Woreda', v.woreda)
-  await text('Sub city', v.sub_city, 'Sub City')
+  await texts([['Passport Number', v.passport], ['Labor ID', v.labor_id], ['Phone', v.phone], ['Email', v.email], ['Woreda', v.woreda], ['Sub city', v.sub_city, 'Sub City']])
   await select('Region', v.region)
   await select('Country Of Destination', v.destination)
   return left
@@ -376,7 +411,7 @@ async function runGroupCertificate(page, ctx, t0) {
     throw new Error('The Draft Certificates page did not show "New Certificate"')
   }
   await openNewCertificate(page, ctx)
-  await sleep(800)
+  await quietNet(page, 800)
   const left = await fillHeader(page, ctx, all[0].v)
   const added = [], notAdded = []
   for (let i = 0; i < all.length; i++) {
@@ -391,7 +426,7 @@ async function runGroupCertificate(page, ctx, t0) {
       added.push(p.id)
       log(ctx, `✓ Add Member — ${p.full_name} (${added.length} in the list)`)
       if (miss.length) left.push(`${p.full_name}: ${miss.join(', ')}`)
-      await sleep(700)
+      await quietNet(page, 700)
     } catch (e) {
       log(ctx, `${p.full_name}: ${e.message}`, 'warn')
       notAdded.push(`${p.full_name} (${e.message})`)

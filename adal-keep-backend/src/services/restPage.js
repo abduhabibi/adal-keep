@@ -4,7 +4,8 @@
  * nobody sees — no drawing, its timers once a second. The run asks it once a second and not three times.
  * The moment a person opens the live view (liveFrames.castOf), the tick comes or the run goes on: as before.
  * Nothing of it when the robot browser has a window of its own on the screen. ADAL_REST=0 turns it off; any error:
- * the page stays awake.
+ * the page stays awake. Since 2026-11-26 only the polling slows (the page set to rest crashed about 1 in 10 behind
+ * another tab, services/crashedTab.js); ADAL_REST_DEEP=1: the page rests too.
  */
 export const REST_AFTER_MS = 20000
 export const REST_POLL_MS = 1200
@@ -17,7 +18,9 @@ export function rester(page, { afterMs = REST_AFTER_MS, pollMs = REST_POLL_MS, w
   const cdp = () => page.__adalCdp
   const set = async (on) => {
     const s = cdp()
-    if (!s) return
+    // The page set to rest crashed now and then (about 1 in 10 behind another tab, 2026-11-26): only the polling slows
+    // now. ADAL_REST_DEEP=1: the page itself rests too, as before.
+    if (!s || process.env.ADAL_REST_DEEP !== '1') return
     await within(Promise.all([
       s.send('Emulation.setFocusEmulationEnabled', { enabled: !on }),
       s.send('Animation.enable').then(() => s.send('Animation.setPlaybackRate', { playbackRate: on ? 0 : 1 })),

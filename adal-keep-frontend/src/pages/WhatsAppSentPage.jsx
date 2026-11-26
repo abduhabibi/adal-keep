@@ -10,6 +10,7 @@ import { wa } from '../lib/whatsapp'
 import { onDataChange } from '../lib/changes'
 import PageHeader from '../components/shared/PageHeader'
 import OwnWhatsApp from '../components/OwnWhatsApp'
+import WhatsAppConnect from '../components/WhatsAppConnect'
 import Button from '../components/shared/Button'
 
 const err = (e) => e?.response?.data?.error || e.message
@@ -39,6 +40,12 @@ export default function WhatsAppSentPage() {
   const [failed, setFailed] = useState(false)
   const [busy, setBusy] = useState(null)
   const [error, setError] = useState('')
+  const [gate, setGate] = useState(true)
+  const [ready, setReady] = useState(null)
+  const [ask, setAsk] = useState(0)
+  const wasOff = useRef(false)
+  // Just connected: the list is asked again, so it shows at once.
+  useEffect(() => { if (ready && wasOff.current) setAsk(a => a + 1); wasOff.current = ready === false }, [ready])
   const upto = useRef('')
   const params = useCallback((x = {}) => ({ params: { ...(agent ? { agent } : {}), ...(girl.trim() ? { girl: girl.trim() } : {}), ...(failed ? { status: 'failed' } : {}), ...x } }), [agent, girl, failed])
 
@@ -47,10 +54,10 @@ export default function WhatsAppSentPage() {
     let live = true
     const t = setTimeout(() => wa.get('/whatsapp/cv-log', params()).then(({ data }) => {
       if (!live) return
-      setRows(data.rows); setMore(data.more); upto.current = data.upto; setError('')
+      setRows(data.rows); setMore(data.more); upto.current = data.upto; setError(''); setGate(data.gate !== false)
     }).catch(e => { if (live) { setRows([]); setError(e.response?.status === 404 ? 'Update the main PC first' : err(e)) } }), girl ? 300 : 0)
     return () => { live = false; clearTimeout(t) }
-  }, [params]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [params, ask]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => onDataChange(['whatsapp_log'], () => {
     // With "not sent" only, a line that went through leaves the list: asked whole (short) then.
     if (failed) return wa.get('/whatsapp/cv-log', params()).then(({ data }) => { setRows(data.rows); setMore(data.more); upto.current = data.upto }).catch(() => {})
@@ -69,23 +76,27 @@ export default function WhatsAppSentPage() {
     catch (e) { toast.error(err(e), { duration: 8000 }) }
     setBusy(null)
   }
+  const filtering = !!(agent || girl.trim() || failed)
   const when = (t) => { const d = new Date(t); return isNaN(d) ? '' : d.toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) }
 
   return (
     <div className="space-y-4">
       <PageHeader title="WhatsApp" subtitle="CVs sent to agents" />
       <OwnWhatsApp />
-      <div className="flex flex-wrap gap-2">
+      <WhatsAppConnect off={!gate} onReady={setReady} />
+      {(!gate || filtering || !!rows?.length) && <div className="flex flex-wrap gap-2">
         <select className="field" value={agent} onChange={e => setAgent(e.target.value)} aria-label="Agent">
           <option value="">All agents</option>
           {agents.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
         </select>
         <input className="field min-w-0 flex-1" placeholder="Girl: name or passport" value={girl} onChange={e => setGirl(e.target.value)} />
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={failed} onChange={e => setFailed(e.target.checked)} /> Not sent only</label>
-      </div>
+      </div>}
       {error && <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-900/20 dark:text-amber-200">{error}</p>}
       {rows === null ? <div className="h-40 rounded-2xl bg-slate-100 dark:bg-slate-800" /> : !rows.length ? (
-        <p className="py-10 text-center text-sm text-slate-500">Nothing sent yet</p>
+        // No list: no empty table. Not connected, the Connect card above is all there is.
+        !gate || filtering ? <p className="py-10 text-center text-sm text-slate-500">{filtering ? 'Nothing matches' : 'Nothing sent yet'}</p>
+          : ready ? <p className="py-6 text-center text-sm text-slate-500">Connected · nothing sent yet</p> : null
       ) : (
         <ul className="panel divide-y divide-slate-100 dark:divide-slate-800">
           {rows.map(r => {

@@ -54,7 +54,7 @@ router.post('/whatsapp/cv/:profileId', async (req, res) => {
 
 // The WhatsApp page.
 router.get('/whatsapp/cv-log', async (req, res) => {
-  try { res.json(await listSends(req.app.locals.db, req.query)) } catch (e) { bad(res, e) }
+  try { res.json({ ...(await listSends(req.app.locals.db, req.query)), gate: process.env.ADAL_WA_GATE !== '0' }) } catch (e) { bad(res, e) }
 })
 router.post('/whatsapp/cv/retry/:id', async (req, res) => {
   try { res.json(await retrySend(req.app.locals.db, req.params.id, () => transportFor(req), { by: by(req), from: from(req) })) } catch (e) { bad(res, e) }

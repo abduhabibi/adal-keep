@@ -1048,6 +1048,9 @@ export async function runCall(db, agency, c) {
   return patch
 }
 
+/** This PC's address changed: the heartbeat (with its addresses) goes online at the next look (pcPresence.js). */
+export function beatSoon() { lastBeat = 0 }
+
 async function relayOnce(db) {
   const agency = await cloudAgencyId(db)
   if (!agency) return

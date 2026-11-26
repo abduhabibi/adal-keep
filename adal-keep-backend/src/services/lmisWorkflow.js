@@ -51,6 +51,7 @@ import os from 'os'
 import { runMusanedWorkflow } from './musanedWorkflow.js'
 import { expectFile, signInTurn, borrowSignIn, typeCodeInto, pressCodeButton } from './tabManager.js'
 import { lookAtPage, lookUnavailableReason } from './jevClassifier.js'
+import { waitSign, lastKey } from './pasteAll.js'
 
 
 const LMIS_BASE = 'https://lmis.gov.et'
@@ -860,7 +861,7 @@ export async function stepSearchAndFindWorker(page, ctx) {
   await page.keyboard.press('Backspace')
   await sleep(150)
 
-  await input.type(laborId, { delay: 60 })
+  await lastKey(page, input, laborId, { delay: 60 })
 
   let valueNow = ''
   for (let i = 0; i < 12; i++) {
@@ -1551,7 +1552,7 @@ async function clickButtonInModal(page, modalTitle, labelRegex) {
   }, { modalTitle, src: labelRegex.source })
 }
 
-async function setReactSelect(page, modalTitle, labelText, value) {
+export async function setReactSelect(page, modalTitle, labelText, value) {
   if (!value) return
   const opened = await page.evaluate(({ modalTitle, labelText }) => {
     const all = Array.from(document.querySelectorAll('*'))
@@ -1588,15 +1589,21 @@ async function setReactSelect(page, modalTitle, labelText, value) {
   // The option list comes from LMIS and can be slow: wait longer each try and
   // check that the value really stuck.
   for (let attempt = 1; attempt <= 3; attempt++) {
-    await sleep(500)
+    await waitSign(page, () => !!document.activeElement?.closest?.('[class*="control"], [role="combobox"]'), null, 500, { min: 50 })
     await page.keyboard.down('Control').catch(() => {})
     await page.keyboard.press('KeyA').catch(() => {})
     await page.keyboard.up('Control').catch(() => {})
     await page.keyboard.press('Backspace').catch(() => {})
-    await page.keyboard.type(String(value), { delay: 60 })
-    await sleep(1500 * attempt)
+    const box = await page.evaluateHandle(() => document.activeElement)
+    if (box?.asElement()) await lastKey(page, box.asElement(), String(value), { delay: 60 })
+    else await page.keyboard.type(String(value), { delay: 60 })
+    // The list has the value as its first choice (what Enter takes) — the wait of before at most.
+    await waitSign(page, (v) => {
+      const seen = [...document.querySelectorAll('[class*="option"], [role="option"]')].filter(o => { const r = o.getBoundingClientRect(); return r.width > 2 && r.height > 2 && !o.querySelector('[class*="option"], [role="option"]') })
+      return seen.length > 0 && !/loading|no options/i.test(seen[0].textContent || '') && (seen[0].textContent || '').toLowerCase().includes(v)
+    }, String(value).toLowerCase(), 1500 * attempt, { min: 100 })
     await page.keyboard.press('Enter')
-    await sleep(600)
+    await waitSign(page, () => ![...document.querySelectorAll('[class*="menu"], [role="listbox"]')].some(m => m.getBoundingClientRect().height > 2), null, 600, { min: 50 })
     const shown = await page.evaluate(({ modalTitle, labelText, value }) => {
       let modal = null, area = Infinity
       for (const el of document.querySelectorAll('*')) {

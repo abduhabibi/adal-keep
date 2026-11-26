@@ -9,7 +9,7 @@
  * that answers now. Not reachable when the browser is needed → the next best one → this PC (worker.browserForJob).
  * Emergency off switch: ADAL_LAN_ROBOTS=0 — every run on the main PC, as before.
  */
-import { ownPower, runningOn, tabsOnPCs, chooseBest, estimate, MIN_HELPER_CORES, lanRobots } from './sharePower.js'
+import { ownPower, runningOn, tabsOnPCs, chooseBest, estimate, MIN_HELPER_CORES, lanRobots, takesRuns } from './sharePower.js'
 import { peerOf } from './tabManager.js'
 import { homeOf } from './signInHome.js'
 
@@ -34,6 +34,7 @@ export async function selfAssign(db, job, { pcs = null, tabs = null, running = n
     if (pcs.length < 2 && rb.knownDevices()) log(`${rb.knownDevices()} office PC(s) known, none answers now`)
   }
   pcs = pcs.filter(p => p.id === '' || p.browser !== false)
+  for (const p of pcs) if (p.id !== '' && !takesRuns(p)) log(p.answers === false ? `${p.name || 'a PC'} has an older Adal Companion: no runs go to it until its Companion is updated` : `${label(p)}: too busy for a run now`)
   if (pcs.length < 2) {
     log('one PC')
     ctx.quiet = 1                         // (out of sight here too; asked again when it is started again)
@@ -50,7 +51,7 @@ export async function selfAssign(db, job, { pcs = null, tabs = null, running = n
   if (at !== null && pcs.some(p => p.id === at)) tabs[at] = { signedIn: true }
   const c = chooseBest({ from, pcs, running, tabs })
   // Where else, should it not be reached: the other able PCs, the fastest first, this PC last.
-  const order = pcs.filter(p => p.id !== '' && p.id !== c.to && (Number(p.cores) || 1) >= MIN_HELPER_CORES)
+  const order = pcs.filter(p => p.id !== '' && p.id !== c.to && (Number(p.cores) || 1) >= MIN_HELPER_CORES && takesRuns(p))
     .map(p => [p.id, estimate(p, { running: running[p.id] || 0, tab: tabs[p.id] || null, remote: true })]).sort((a, b) => a[1] - b[1]).map(x => x[0]).slice(0, 3)
   ctx.placed = 1
   ctx.quiet = 1                           // out of sight, on whatever PC

@@ -165,10 +165,22 @@ export function estimate(p, { running = 0, tab = null, remote = false } = {}) {
  * another PC is clearly faster (15 % and 15 s), so runs do not hop about.
  * → { to, help, secs: { id: seconds }, why }
  */
+/**
+ * May another PC be given a run at all (2026-11-26, DESKTOP-U5UO9NM twice "aborted due to timeout")? Only a Companion
+ * that answers /robot/now (03ab485e and later: its robot browser out of sight); one on an older Companion (ce98582)
+ * says nothing of itself and opens a robot browser a person sees. Not one over 80 % busy now either (ADAL_BUSY_PC).
+ * ADAL_OLD_COMPANIONS=1: the old Companions too, as before.
+ */
+export function takesRuns(p, env = process.env) {
+  if (!p || p.id === '') return true
+  if (p.answers === false && env.ADAL_OLD_COMPANIONS !== '1') return false
+  return !(Number(p.load ?? 0) > (Number(env.ADAL_BUSY_PC) || 80))
+}
+
 export function chooseBest({ from = '', pcs = [], running = {}, tabs = {}, mainAllowed = true }) {
   const origin = pcs.find(p => p.id === from)
   if (!origin) return { to: from, help: false, secs: {}, why: '' }
-  const known = (p) => p.id === '' || (p.mem_gb != null && p.lan !== false && ready(p, pcs.find(x => x.id === '')))
+  const known = (p) => p.id === '' || (p.mem_gb != null && p.lan !== false && ready(p, pcs.find(x => x.id === '')) && takesRuns(p))
   // Never given to a PC under 4 cores (2026-11-23: "never on a PC under 4 cores"); its own runs stay
   // there only when no other PC of the office can take them.
   const able = (p) => (Number(p.cores) || 1) >= MIN_HELPER_CORES

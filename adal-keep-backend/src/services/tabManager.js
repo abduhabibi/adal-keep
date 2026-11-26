@@ -33,6 +33,7 @@ import { stopRequest } from './emptyPicture.js'
 import { robotsOwnTab } from './robotsOwnTab.js'
 import { stopSignOut } from './oneSitePage.js'
 import { tabRank } from './bestTab.js'
+import { watchCrash, crashed } from './crashedTab.js'
 import { noteCall } from './siteApi.js'
 import { newRunTab, outOfSight, sendAway, spaceOf } from './browser.js'
 import { isRemote } from './remoteBrowsers.js'
@@ -80,7 +81,7 @@ const LOGOUT = /^https?:\/\/[^/]*(wahid\.sa|musaned\.com\.sa)(:\d+)?\/.*(openid-
 const CAPTCHA_HOSTS = /(^|\.)(google\.com|gstatic\.com|recaptcha\.net)$/i
 
 function isClosed(page) {
-  try { return !page || (typeof page.isClosed === 'function' && page.isClosed()) } catch { return true }
+  try { return !page || crashed(page) || (typeof page.isClosed === 'function' && page.isClosed()) } catch { return true }
 }
 
 // --------------------------------------------------------------------------
@@ -114,6 +115,7 @@ export async function setupTab(page, { runId, mute = true } = {}) {
   }
   // A run never brings itself forward: only a person's Open does (LiveTab).
   page.bringToFront = async () => {}
+  watchCrash(page)
   // A desktop page whatever the window's size: in a narrow one the sites fold
   // their menus away and the run cannot find them. It ends with the run.
   const desktopPage = () => page.__adalCdp?.send('Emulation.setDeviceMetricsOverride', { width: 1366, height: 900, deviceScaleFactor: 1, mobile: false }).catch(() => {})

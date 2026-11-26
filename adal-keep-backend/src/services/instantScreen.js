@@ -104,7 +104,7 @@ export async function screenOf(page, { snapshot, review, fallback, log = () => {
 /** Its tab or its browser is gone (a PC switched off): nothing to wait for (lostBrowser.js knows these words). */
 export function stillThere(page) {
   let gone = false
-  try { gone = page.isClosed?.() === true || page.browser?.()?.connected === false } catch { gone = true }
+  try { gone = !!page.__adalCrashed || page.isClosed?.() === true || page.browser?.()?.connected === false } catch { gone = true }
   if (gone) throw new Error('Target closed: the robot\'s tab or its browser is gone')
 }
 

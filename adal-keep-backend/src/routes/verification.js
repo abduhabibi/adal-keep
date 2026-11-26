@@ -81,6 +81,14 @@ router.get('/companion/info', async (req, res) => {
   try {
     const handle = req.app.locals.db
     const name = await companyName(handle)
+    // "Are you ours?" (adal-companion book.go): signed with the agency's key, for this fresh question only.
+    if (/^[0-9a-f]{32}$/.test(String(req.query.proof || ''))) {
+      try {
+        const P = await import('../services/pcPresence.js'), { getSecret } = await import('../services/secretStore.js')
+        const p = P.proofOf(P.signKey(getSecret('backup_password')), req.query.proof, (await import('../services/sync/identity.js')).pcId())
+        if (p && P.signOn()) res.set('X-Adal-Proof', p)
+      } catch {}
+    }
     res.json({
       service: 'adal-keep',
       role: 'server',

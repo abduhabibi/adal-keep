@@ -31,6 +31,7 @@ import zlib from 'zlib'
 import { signInTurn } from './tabManager.js'
 import { visaNames, clickText } from './mofaVisa.js'
 import { doneWith } from './attention.js'
+import { waitSign, quietNet } from './pasteAll.js'
 
 export const TASHEER = 'tasheer_schedule'
 // Tasheer's own front page (its sign-in). Its inner pages (/auth/cnav,
@@ -554,6 +555,28 @@ async function uploadFrame(page) {
 }
 const uploadShown = async (page) => !!(await uploadFrame(page))
 
+/** VISA Type → VSC Center → Number of Applicants on the group scheduling page; what is left for a person. */
+export async function pickScheduling(page, ctx, n) {
+  const left = []
+  const pick = async (id, label, src, name) => {
+    let r
+    for (let i = 0; i < 20; i++) {          // the next list loads after the one before is chosen
+      r = await chooseBy(page, id, label, src)
+      if (r.state === 'ok') break
+      await waitSign(page, () => true, null, 1000, { min: 300 })   // (looked at again sooner: the list may have come)
+    }
+    if (r.state === 'ok') { log(ctx, `✓ ${name}: ${r.text}`); await quietNet(page, 1500) }   // (the next list asked for; the 1.5 s of before at most)
+    else left.push(`${name}${r.options?.length ? ` (choices: ${r.options.join(', ')})` : ''}`)
+    return r
+  }
+  await pick('group_scheduling_visatype', '^\\s*visa\\s*type\\s*\\*?\\s*:?\\s*$', '^\\s*work\\s*$', 'VISA Type')
+  await pick('group_scheduling_vscId', '^\\s*vsc\\s*cent(er|re)\\s*\\*?\\s*:?\\s*$', 'addis', 'VSC Center')
+  const r = await pick('scheduling_numberOfApplicants', '^\\s*number\\s*of\\s*applicants\\s*\\*?\\s*:?\\s*$', `^\\s*${n}\\s*$`, 'Number of Applicants')
+  if (r.state === 'no-match' && r.max && r.max < n) left.push(`Tasheer takes at most ${r.max} applicants at once — ${n} were selected`)
+
+  return left
+}
+
 export async function runTasheer(page, ctx) {
   const t0 = Date.now()
   const secs = () => Math.round((Date.now() - t0) / 1000)
@@ -587,25 +610,10 @@ export async function runTasheer(page, ctx) {
     } else log(ctx, '✓ GROUP SCHEDULING')
   }
   if (!(await until(async () => /visa\s*type/i.test(await bodyText(page)) && /vsc\s*cent(er|re)/i.test(await bodyText(page)), clicked ? 60000 : LOGIN_WAIT_MS, ctx))) throw new Error('The group scheduling page (VISA Type, VSC Center) did not open')
-  await sleep(1500)
+  await quietNet(page, 1500)
 
   // VISA Type → VSC Center → Number of Applicants (each may reload the next list).
-  const left = []
-  const pick = async (id, label, src, name) => {
-    let r
-    for (let i = 0; i < 20; i++) {          // the next list loads after the one before is chosen
-      r = await chooseBy(page, id, label, src)
-      if (r.state === 'ok') break
-      await sleep(1000)
-    }
-    if (r.state === 'ok') { log(ctx, `✓ ${name}: ${r.text}`); await sleep(1500) }
-    else left.push(`${name}${r.options?.length ? ` (choices: ${r.options.join(', ')})` : ''}`)
-    return r
-  }
-  await pick('group_scheduling_visatype', '^\\s*visa\\s*type\\s*\\*?\\s*:?\\s*$', '^\\s*work\\s*$', 'VISA Type')
-  await pick('group_scheduling_vscId', '^\\s*vsc\\s*cent(er|re)\\s*\\*?\\s*:?\\s*$', 'addis', 'VSC Center')
-  const r = await pick('scheduling_numberOfApplicants', '^\\s*number\\s*of\\s*applicants\\s*\\*?\\s*:?\\s*$', `^\\s*${people.length}\\s*$`, 'Number of Applicants')
-  if (r.state === 'no-match' && r.max && r.max < people.length) left.push(`Tasheer takes at most ${r.max} applicants at once — ${people.length} were selected`)
+  const left = await pickScheduling(page, ctx, people.length)
 
   await ctx.noteProfile?.('Tasheer: group scheduling filled — waiting for a person to choose the day and time and press Submit').catch?.(() => {})
   await page.bringToFront().catch(() => {})
@@ -633,7 +641,7 @@ export async function runTasheer(page, ctx) {
   }
   if (!(await until(pickWatch, PICK_WAIT_MS, ctx))) throw new Error('Nobody pressed Submit on Tasheer within an hour')
   log(ctx, '✓ the upload page is open')
-  await sleep(1500)
+  await quietNet(page, 1500)
   const frame = (await uploadFrame(page)) || page.mainFrame()
   return uploadAndSave(page, frame, people, settings, ctx, secs)
 }

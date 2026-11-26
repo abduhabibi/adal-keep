@@ -19,6 +19,7 @@
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { waitSign } from './pasteAll.js'
 
 const BOOK_URL = 'https://wafid.com/en/book-appointment/'
 const STATUS_URL = 'https://wafid.com/en/medical-status-search/'
@@ -26,11 +27,12 @@ const SLIP_URL = 'https://wafid.com/en/search-slip/'
 
 /**
  * Its page: at once when the tab is on it already, loaded in the last 30 minutes and nothing typed in it
- * (Wafid on standby, sessionKeeper.wafidStandby), else loaded.
+ * (Wafid on standby, sessionKeeper.wafidStandby), else loaded. (A result has the search's address too: only a page that
+ * still has its form counts.)
  */
 export async function toPage(page, url, { now = Date.now() } = {}) {
   const fresh = page.url() === url && now - (page.__adalStandbyAt || 0) < 30 * 60e3
-    && await page.evaluate(() => document.readyState !== 'loading' && ![...document.querySelectorAll('input, textarea')].some(e => !['hidden', 'checkbox', 'radio', 'file', 'submit', 'button'].includes(e.type) && e.value && e.value !== e.defaultValue)).catch(() => false)
+    && await page.evaluate(() => document.readyState !== 'loading' && !!document.querySelector('form input:not([type=hidden])') && ![...document.querySelectorAll('input, textarea')].some(e => !['hidden', 'checkbox', 'radio', 'file', 'submit', 'button'].includes(e.type) && e.value && e.value !== e.defaultValue)).catch(() => false)
   if (fresh) return 'ready'
   await (await import('./steadyLoad.js')).steadyGoto(page, url, { log: (m) => console.log(`[wafid] ${m}`) })
   page.__adalStandbyAt = Date.now()
@@ -136,7 +138,7 @@ export async function runWafidBooking(page, ctx) {
   await toPage(page, BOOK_URL)
   await page.waitForSelector('#id_country', { timeout: 30000 })
   await page.waitForFunction(() => !!window.jQuery && !!window.jQuery.fn.calendar, { timeout: 30000 }).catch(() => {})
-  await sleep(800)
+  await waitSign(page, () => document.readyState === 'complete', null, 800)   // (the page's own sign; the old wait at most)
 
   // 1. Appointment location → the appointment type appears.
   log(ctx, `📍 Location: Ethiopia · ${v.city} · travelling to ${v.travel}`)
@@ -171,7 +173,7 @@ export async function runWafidBooking(page, ctx) {
   const typeOk = await page.$eval('#id_appointment_type_0', r => r.checked).catch(() => false)
   if (!typeOk) return { ok: false, step: 'appointment-type', error: 'Wafid: could not choose the Standard Appointment', seconds: secs() }
   log(ctx, '✅ Standard Appointment chosen (medical center is assigned by Wafid)')
-  await sleep(600)
+  await waitSign(page, () => !!document.getElementById('id_first_name')?.offsetParent, null, 600)
 
   // 2. Candidate information.
   log(ctx, '✍️ Filling the candidate details')
@@ -257,6 +259,9 @@ export async function runWafidBooking(page, ctx) {
  * Check one passport on wafid.com/en/medical-status-search in `page`.
  * Returns { state: 'fit'|'unfit'|'pending'|'none'|'challenge'|'unknown', text }.
  */
+/** Runs in the page: Wafid answered a search (its result, a message, the robot check, the slip's buttons). */
+const ANSWERED = () => document.readyState === 'complete' && !!document.querySelector('.ui.segment, .card, .result, .ui.message, .errorlist, .ui.error, iframe[src*="recaptcha"][title*="challenge"], iframe[src*="hcaptcha"]')
+
 export async function checkMedicalStatus(page, passport, nationality = 'Ethiopian') {
   await toPage(page, STATUS_URL)
   await page.waitForSelector('#id_passport', { timeout: 30000 })
@@ -280,7 +285,7 @@ export async function checkMedicalStatus(page, passport, nationality = 'Ethiopia
     page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => null),
     page.click('#med-status-form-submit'),
   ])
-  await sleep(1500)
+  await waitSign(page, ANSWERED, null, 1500, { min: 150 })
   if (await challengeShown(page)) return { state: 'challenge', text: 'Wafid asks "I am not a robot"' }
 
   const res = await page.evaluate(() => {
@@ -486,7 +491,7 @@ export async function runWafidSlip(page, ctx) {
       page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => null),
       btn.asElement().click(),
     ])
-    await sleep(1500)
+    await waitSign(page, ANSWERED, null, 1500, { min: 150 })
   }
   // The slip pops up with Close / PDF / Print at its bottom.
   const slipShown = () => page.waitForFunction(() => [...document.querySelectorAll('a, button')]

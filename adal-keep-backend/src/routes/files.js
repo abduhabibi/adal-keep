@@ -8,7 +8,8 @@ import { keepReplaced } from '../services/keepOriginals.js'
 import { fileURLToPath } from 'url'
 import { fetchMissing, ANSWER_MS } from '../services/fileOnDemand.js'
 import { thumbnailFile, forgetPictures } from '../services/pictures.js'
-import { uploadOnce } from '../services/uploadOnce.js'
+import { uploadOnce, uploadState } from '../services/uploadOnce.js'
+
 
 // The backend folder: where the agency's PCs put the documents they copy (sync/index.js), when
 // the program was started from another folder.
@@ -83,6 +84,9 @@ const convertPdfToImage = async (inputPath, outputPath) => {
 /* ==========================================================================
    TRAY ROUTES (Capturing & Unassigned Files)
    ========================================================================== */
+
+// An upload stopped with its X: did it reach the PC? (lib/uploads.js)
+router.get('/upload-state/:id', (req, res) => res.set('Cache-Control', 'no-store').json(uploadState(req.params.id)))
 
 // 1. Fetch all unassigned tray files
 router.get('/files/tray', async (req, res) => {

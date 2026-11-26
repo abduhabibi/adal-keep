@@ -68,7 +68,7 @@ export default function BrokersPage() {
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center">
-        <Spinner />
+        <Spinner back />
       </div>
     )
   }

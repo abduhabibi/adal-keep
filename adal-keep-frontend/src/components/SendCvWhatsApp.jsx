@@ -7,6 +7,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import toast from 'react-hot-toast'
+import { waitToast, stopper, wasStopped } from './shared/StopX'
 import { wa } from '../lib/whatsapp'
 
 const err = (e) => e?.response?.data?.error || e.message
@@ -41,16 +42,18 @@ export default function SendCvWhatsApp({ profileId, templateId, name, onMake, on
 
   const send = async () => {
     setBusy(true)
-    const t = toast.loading('Making her CV…')
+    let stopped = false
+    const t = waitToast('Making her CV…', { onStop: () => { stopped = true; setBusy(false) }, said: 'Stopped: nothing is sent. (If her CV was made, it stays under her CVs.)' })
     try {
       const cv = await onMake()
+      if (stopped) return
       if (!cv?.generated_cv_id) throw new Error('The office PC must be on to send it')
       const { data } = await wa.post(`/whatsapp/cv/${profileId}`, { cv_id: cv.generated_cv_id, template_id: Number(templateId) || null, agent_ids: [...pick], again: [...again].filter(id => pick.has(id)) })
       toast.dismiss(t); setJob(data)
     } catch (e) {
       const before = e.response?.data?.before
       if (before) setInfo(i => ({ ...i, had: { ...(i.had || {}), ...Object.fromEntries(before.map(b => [b.agent_id, b])) } }))
-      toast.error(err(e), { id: t, duration: 8000 })
+      if (!stopped) toast.error(err(e), { id: t, duration: 8000 })
     }
     setBusy(false)
   }

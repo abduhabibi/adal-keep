@@ -5,6 +5,7 @@
  */
 import { useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
+import { waitToast, stopper, wasStopped } from './shared/StopX'
 import api from '../services/api'
 import { wa } from '../lib/whatsapp'
 import Button from './shared/Button'
@@ -65,15 +66,17 @@ export default function WhatsAppSend({ profile }) {
   const day = (t) => t ? new Date(t).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' }) : ''
   const send = async (ids) => {
     setBusy(true)
-    const t = toast.loading('Making the CVs and sending…')
+    let stopped = false
+    const t = waitToast('Making the CVs and sending…', { onStop: () => { stopped = true; setBusy(false) }, said: 'Stopped waiting. What the PC already began goes on: what was sent shows in the WhatsApp page.' })
     try {
       const { data } = await wa.post(`/profiles/${profile.id}/whatsapp/send`, { agent_ids: ids })
+      if (stopped) { loadSends(); return }
       const ok = data.results.filter(r => r.ok && !r.already).length
       const bad = data.results.filter(r => !r.ok)
       if (bad.length) toast.error(`${ok} sent · ${bad.length} not sent: ${bad[0].agent} — ${bad[0].error}`, { id: t, duration: 9000 })
       else toast.success(ok ? `Sent to ${ok} chat${ok === 1 ? '' : 's'}` : 'Already sent to them', { id: t })
       setPick(null); loadSends()
-    } catch (e) { toast.error(err(e), { id: t }) }
+    } catch (e) { if (!stopped) toast.error(err(e), { id: t }) }
     setBusy(false)
   }
   // Newest line per agent.

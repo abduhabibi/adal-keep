@@ -11,6 +11,7 @@
  */
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { off } from './offSwitch'
+import StopX from '../components/shared/StopX'
 
 const WAITS = [400, 1500, 4000]
 const pause = (ms) => new Promise(r => setTimeout(r, ms))
@@ -79,10 +80,14 @@ export function PageComing() {
     window.addEventListener('adal-page-code', f)
     return () => { clearTimeout(t); window.removeEventListener('adal-page-code', f) }
   }, [])
-  return on ? <div data-testid="page-coming" role="status" aria-label="Opening…" className="pointer-events-none fixed left-0 right-0 top-0 z-[9998] h-1 animate-pulse bg-teal-500" /> : null
+  // X: not this page after all — back to the one still on the screen.
+  return on ? <>
+    <div data-testid="page-coming" role="status" aria-label="Opening…" className="pointer-events-none fixed left-0 right-0 top-0 z-[9998] h-1 animate-pulse bg-teal-500" />
+    <span className="fixed right-2 top-2 z-[9998] flex items-center gap-2 rounded-full bg-slate-900/90 py-1 pl-3 pr-1 text-xs font-semibold text-white shadow">Opening… <StopX light title="Stop — stay on this page" onStop={() => { setOn(false); window.history.back() }} /></span>
+  </> : null
 }
 
 /** The first page ever (nothing to keep on the screen yet): said in words, never white. */
 export function FirstPage({ children }) {
-  return <Suspense fallback={<div data-testid="page-first" className="flex h-64 items-center justify-center text-sm text-slate-500 dark:text-slate-400">Opening…</div>}>{children}</Suspense>
+  return <Suspense fallback={<div data-testid="page-first" className="flex h-64 items-center justify-center gap-3 text-sm text-slate-500 dark:text-slate-400">Opening… <StopX title="Stop — back to where you were" onStop={() => window.history.length > 1 ? window.history.back() : window.location.assign('/')} /></div>}>{children}</Suspense>
 }

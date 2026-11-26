@@ -90,3 +90,25 @@ test('the window: the same picture pasted twice while it is being saved is sent 
   await Promise.all([sendFiles({ key: 'g/4', url: '/u', files: [f], post }), sendFiles({ key: 'g/4', url: '/u', files: [f], post })])
   assert.equal(n, 1)
 })
+
+test('the window\'s X: no more tries; arrived = saved and shown, not arrived = not saved', async () => {
+  // Not arrived: the PC never had it.
+  let tries = 0
+  const p1 = sendFiles({ key: 'x/1', url: '/u', files: [file()], waits: [5, 5, 5], post: (u, d, c) => new Promise((_, no) => { tries++; c.signal.addEventListener('abort', () => no(Object.assign(new Error('canceled'), { code: 'ERR_CANCELED' }))) }), ask: async () => ({ state: 'none' }) })
+  await wait(10)
+  assert.equal(await uploadsOf('x/1')[0].stop(), 'not saved')
+  await assert.rejects(p1, (e) => e.stopped === true)
+  await wait(40); assert.equal(tries, 1); assert.equal(uploadsOf('x/1').length, 0)
+  // Arrived, its answer late: the saved answer is used.
+  let shown = null
+  const p2 = sendFiles({ key: 'x/2', url: '/u', files: [file()], onSaved: (r) => { shown = r.data }, post: (u, d, c) => new Promise((_, no) => c.signal.addEventListener('abort', () => no(new Error('canceled')))), ask: async () => ({ state: 'saved', status: 200, body: { files: [{ id: 7 }] } }) })
+  p2.catch(() => {})
+  await wait(10)
+  assert.equal(await uploadsOf('x/2')[0].stop(), 'saved'); assert.deepEqual(shown, { files: [{ id: 7 }] })
+  // Still being saved: waited for, then saved.
+  let n = 0
+  const p3 = sendFiles({ key: 'x/3', url: '/u', files: [file()], sleep: () => wait(1), post: (u, d, c) => new Promise((_, no) => c.signal.addEventListener('abort', () => no(new Error('canceled')))), ask: async () => (++n < 3 ? { state: 'saving' } : { state: 'saved', status: 200, body: {} }) })
+  p3.catch(() => {})
+  await wait(10)
+  assert.equal(await uploadsOf('x/3')[0].stop(), 'saved'); assert.equal(n, 3)
+})

@@ -76,7 +76,7 @@ export default function BrokerDetailPage() {
     }
   }
 
-  if (loading) return <div className="flex h-64 items-center justify-center"><Spinner /></div>
+  if (loading) return <div className="flex h-64 items-center justify-center"><Spinner back /></div>
   if (!broker) return null
 
   const unassignProfile = async (profileId) => {

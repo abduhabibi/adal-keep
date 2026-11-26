@@ -257,7 +257,7 @@ export default function ProfileDetailPage() {
     }
   }
 
-  if (loading) return <div className="flex h-64 items-center justify-center"><Spinner /></div>
+  if (loading) return <div className="flex h-64 items-center justify-center"><Spinner back /></div>
   if (!profile) return null
   // Her stage's buttons only (lib/stageActions.js); the stage ones wait until her stage is known.
   const can = (key) => phase ? shows(key, phase, after) : !!ACTIONS[key]?.all

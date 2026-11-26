@@ -5,7 +5,9 @@
  *   - the PC not answering, or gone in the middle: sent again by itself (about 5
  *     minutes), with one number, so it is never saved twice (backend uploadOnce.js);
  *   - not saved in the end: said in its box, with Try again — the picture stays there;
- *   - the window is not closed without a word while one is not saved yet.
+ *   - the window is not closed without a word while one is not saved yet;
+ *   - its X stops it: not arrived = not saved (said); arrived already = saved whole, and shown
+ *     (the PC is asked by its number — backend uploadOnce.js), never half.
  */
 import api from '../services/api'
 
@@ -27,7 +29,7 @@ const again = (e) => !e.response || e.response.status >= 500 || e.response.statu
 const words = (e) => e.response?.data?.error || (e.response ? `The PC refused it (${e.response.status}).` : 'The PC is not answering.')
 
 /** files → the PC. onSaved(answer, the picture's address here): also after Try again. Resolves with its answer; rejects when it is refused or given up. show: shown in the box meanwhile. */
-export async function sendFiles({ key, url, files, name = 'files', fields = {}, show = true, onSaved = () => {}, waits = WAITS, sleep = pause, post = (u, d, c) => api.post(u, d, c) }) {
+export async function sendFiles({ key, url, files, name = 'files', fields = {}, show = true, onSaved = () => {}, waits = WAITS, sleep = pause, post = (u, d, c) => api.post(u, d, c), ask = (u) => api.get(u, { adalNoCache: true, timeout: 8000 }).then(r => r.data) }) {
   const first = files[0], id = number()
   const size = files.reduce((t, f) => t + (f.size || 0), 0)
   // The very same picture pasted again while it is being saved: it is being saved.
@@ -35,20 +37,25 @@ export async function sendFiles({ key, url, files, name = 'files', fields = {}, 
   if (same) return same.job
   const row = { id, at: Date.now(), name: first?.name || '', type: first?.type || '', state: 'saving', why: '', sign: `${files.length}:${size}:${first?.type}:${url}`,
     url: show && /^image\//.test(first?.type || '') ? URL.createObjectURL(first) : null }
+  let ctl = null, stopped = false
   const run = async () => {
     let err
+    stopped = false
     for (let i = 0; i <= waits.length; i++) {
-      if (i) await sleep(waits[i - 1])
+      if (i) await Promise.race([sleep(waits[i - 1]), new Promise(r => { row.wake = r })])
+      if (stopped) throw Object.assign(new Error('stopped'), { stopped: true })
+      ctl = new AbortController()
       const fd = new FormData()
       files.forEach(f => fd.append(name, f))
       for (const [k, v] of Object.entries(fields)) if (v) fd.append(k, v)
       try {
-        const r = await post(url, fd, { headers: { 'Content-Type': 'multipart/form-data', 'X-Adal-Upload': id }, timeout: 30000 + size / 20 })
+        const r = await post(url, fd, { headers: { 'Content-Type': 'multipart/form-data', 'X-Adal-Upload': id }, timeout: 30000 + size / 20, signal: ctl.signal })
         if (onSaved(r, row.url)) change(key, id, { kept: true })   // (its box goes on showing it)
         drop(key, id)
         return r
       } catch (e) {
         err = e
+        if (stopped) throw Object.assign(new Error('stopped'), { stopped: true })
         if (!again(e)) break
         change(key, id, { state: 'again', why: words(e) })
       }
@@ -58,6 +65,26 @@ export async function sendFiles({ key, url, files, name = 'files', fields = {}, 
   }
   row.retry = () => { change(key, id, { state: 'saving', why: '' }); const j = run(); change(key, id, { job: j }); j.catch(() => {}) }
   row.forget = () => drop(key, id)
+  // The X: no more tries; what reached the PC is asked for by its number.
+  row.stop = async () => {
+    if (stopped) return
+    stopped = true
+    ctl?.abort(); row.wake?.()
+    change(key, id, { state: 'stopping', why: '' })
+    for (let i = 0; i < 30; i++) {
+      let s = null
+      try { s = await ask(`/upload-state/${id}`) } catch {}
+      if (s?.state === 'saved') {
+        if (onSaved({ data: s.body, status: s.status }, row.url)) change(key, id, { kept: true })
+        drop(key, id)
+        return 'saved'
+      }
+      if (s?.state !== 'saving') { drop(key, id); return s ? 'not saved' : 'unknown' }
+      await sleep(1000)
+    }
+    drop(key, id)
+    return 'unknown'
+  }
   set(key, [...uploadsOf(key).filter(u => u.state !== 'failed'), row])
   const job = run()
   row.job = job

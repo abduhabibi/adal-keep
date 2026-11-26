@@ -162,7 +162,7 @@ export default function ChecklistPage() {
   const q = newChecklistName.trim().toLowerCase()
   const shown = !q ? checklists : checklists.filter(c => c.name.toLowerCase().includes(q) || c.profiles.some(p => p.full_name?.toLowerCase().includes(q) || p.phone_number?.includes(q)))
 
-  if (loading) return <div className="flex h-64 items-center justify-center"><Spinner /></div>
+  if (loading) return <div className="flex h-64 items-center justify-center"><Spinner back /></div>
 
   return (
     <div className="animate-fade-up h-[calc(100dvh-5.5rem)] flex flex-col">

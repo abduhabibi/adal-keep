@@ -164,7 +164,7 @@ export default function TasksPage() {
   const byCol = (key) => tasks.filter(t => normalizeStatus(t.status) === key)
 
   if (loading) {
-    return <div className="flex h-64 items-center justify-center"><Spinner /></div>
+    return <div className="flex h-64 items-center justify-center"><Spinner back /></div>
   }
 
   return (

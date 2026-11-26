@@ -212,7 +212,7 @@ export default function SettingsPage() {
   const canSettings = useCan('change_settings')
 
   if (loading) {
-    return <div className="flex h-64 items-center justify-center"><Spinner /></div>
+    return <div className="flex h-64 items-center justify-center"><Spinner back /></div>
   }
 
   const daysLeft = subscription?.daysLeft
@@ -359,7 +359,7 @@ export default function SettingsPage() {
           )}
           {updateModal === 'installing' && (
             <div className="flex items-center gap-3">
-              <Spinner />
+              <Spinner onStop={() => { setUpdateModal(null); toast('The update goes on on the PC: closing this does not stop it (stopping half way would leave Adal Keep broken).', { icon: '✋', duration: 8000 }) }} />
               <span>Downloading from GitHub and installing. This can take a few minutes.</span>
             </div>
           )}

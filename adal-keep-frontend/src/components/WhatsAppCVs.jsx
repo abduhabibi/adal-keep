@@ -52,7 +52,7 @@ export default function WhatsAppCVs() {
     (filter === 'all' || (filter === 'new' ? !r.sent_to.length : r.sent_to.length > 0)) &&
     (!q || `${r.full_name} ${r.passport_number || ''}`.toLowerCase().includes(q.toLowerCase()))), [rows, filter, q])
 
-  if (rows === null || conn === null) return <Spinner />
+  if (rows === null || conn === null) return <Spinner back />
   const ready = conn?.status === 'ready'
   const allShownPicked = shown.length > 0 && shown.every(r => picked.has(r.id))
   const toggle = (set, setter, id) => { const n = new Set(set); n.has(id) ? n.delete(id) : n.add(id); setter(n) }

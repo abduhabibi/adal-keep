@@ -165,7 +165,7 @@ export default function CVTemplateEditPage() {
     }
   }
 
-  if (loading) return <div className="flex h-64 items-center justify-center"><Spinner /></div>
+  if (loading) return <div className="flex h-64 items-center justify-center"><Spinner back /></div>
 
   const headerUrl = headerPath ? `/api/cv/templates/${id}/header-image?t=${imgVersion}` : null
   const footerUrl = footerPath ? `/api/cv/templates/${id}/footer-image?t=${imgVersion}` : null

@@ -4,6 +4,7 @@ import { startTransition, useCallback, useEffect, useMemo, useState } from 'reac
 import PrioritizeButton, { useWaitingFiles } from '../components/PrioritizeButton'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
+import { waitToast, stopper, wasStopped } from '../components/shared/StopX'
 import api from '../services/api'
 import EmptyState from '../components/shared/EmptyState'
 import Spinner from '../components/shared/Spinner'
@@ -163,15 +164,17 @@ export default function ProfilesPage() {
   const cancelScan = () => api.post('/contracts/cancel').then(() => toast('Cancelling the check…', { id: 'scan-cancel' })).catch(() => {})
   const scanMusaned = async () => {
     setScanning(true)
-    const id = toast.loading('Looking at the Musaned list… (sign in if Musaned asks)')
+    let stopped = false
+    const id = waitToast('Looking at the Musaned list… (sign in if Musaned asks)', { onStop: () => { stopped = true; cancelScan() }, said: 'Stopped: the check is cancelled on the PC too.' })
     try {
       const r = await api.post('/contracts/scan')
       if (!r.data.started && !r.data.busy) throw new Error(r.data.error || 'Could not start')
-      if (r.data.busy) toast.loading(`A check is already on${r.data.by ? ` (${r.data.by})` : ''} — following it…`, { id })
+      if (r.data.busy && !stopped) waitToast(`A check is already on${r.data.by ? ` (${r.data.by})` : ''} — following it…`, { id, onStop: () => { stopped = true; cancelScan() }, said: 'Stopped: the check is cancelled on the PC too.' })
       const limit = Date.now() + (r.data.limit_ms || 10 * 60000) + 60000
       let s
       for (;;) {
         await new Promise(res => setTimeout(res, 4000))
+        if (stopped) return
         s = (await api.get('/contracts/check')).data
         setCheckInfo(s)
         if (!s.running) break
@@ -319,7 +322,7 @@ export default function ProfilesPage() {
       <ReadingBar onDone={() => load(true)} />
 
       {loading ? (
-        <Spinner />
+        <Spinner back />
       ) : rows.length === 0 ? (
         <EmptyState
           title="ምንም ፕሮፋይል አልተገኘም"

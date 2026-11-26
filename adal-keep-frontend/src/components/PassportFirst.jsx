@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import api from '../services/api'
+import toast from 'react-hot-toast'
+import StopX, { stopper } from './shared/StopX'
 import { useFileCapture } from '../context/FileCaptureContext'
 import { CameraShot, ON_PHONE } from './shared/PickFile'
 import { onPhone, onCompanionOnline } from '../lib/phoneMode'
@@ -45,7 +47,7 @@ function useVisible() {
   return v
 }
 
-function ScanView({ busy, step, secs, moving, onPhone }) {
+function ScanView({ busy, step, secs, moving, onPhone, onStop }) {
   const at = STEP_AT[step] ?? 0
   return (
     <div className={`flex w-full flex-col items-center gap-3 ${moving ? '' : 'adal-scan-stop'}`} role="status" aria-live="polite">
@@ -59,6 +61,7 @@ function ScanView({ busy, step, secs, moving, onPhone }) {
       <div className="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
         <span className="adal-scan-dot h-2.5 w-2.5 rounded-full bg-sky-500" />
         {STEP_TEXT[step] || STEP_TEXT.reading} {secs}s
+        <StopX title="Stop reading it" onStop={onStop} />
       </div>
       <div className="flex w-56 gap-1" aria-hidden="true">
         {['reading', 'checking', 'done'].map((k, i) => (
@@ -82,6 +85,7 @@ export default function PassportFirst({ onRead, onSkip, onLater }) {
   const cameraRef = useRef(null)
   const galleryRef = useRef(null)
   const busyRef = useRef(false)
+  const stopRead = useRef(null)   // the X: stop reading this passport (nothing is made from it)
   const [camera, setCamera] = useState(false)
   // Camera: the live camera here when the browser allows it (phone app,
   // this PC's webcam), else the phone's own camera app.
@@ -112,6 +116,8 @@ export default function PassportFirst({ onRead, onSkip, onLater }) {
     setProblem(null)
     const preview = file.type?.startsWith('image/') ? URL.createObjectURL(file) : null
     setBusy({ name: file.name, preview, t0: Date.now() })
+    // (Out here: the catch below reads it too — inside the try it was not there, and a failed reading threw again.)
+    let settled = false   // this window's own reading and the main PC's race: the first to answer is used
     try {
       // The phone with the office PC off: a passport is read on the PC, so her
       // details are typed here; the passport goes with her profile and the PC
@@ -119,7 +125,8 @@ export default function PassportFirst({ onRead, onSkip, onLater }) {
       // A phone reads the passport itself first (lib/passportHere.js: its bottom
       // lines, check digits verified, and the place of birth by its position) —
       // no upload, no PC (asked on 2026-11-17).
-      let settled = false   // this window's own reading and the main PC's race: the first to answer is used
+      const ask = stopper()
+      stopRead.current = () => { settled = true; ask.stop(); busyRef.current = false; setBusy(null); toast('Stopped: nothing was made from this passport.', { icon: '✋' }) }
       const useHere = async (here) => {
         // The same passport already has a profile: said, not made twice.
         const pn = String(here.fields.passport_number || '').toUpperCase()
@@ -153,12 +160,12 @@ export default function PassportFirst({ onRead, onSkip, onLater }) {
       let data
       setStep('reading')
       try {
-        data = (await api.post('/new-profile/read', fd, { timeout: 60000, headers: { 'Content-Type': 'multipart/form-data' } })).data
+        data = (await api.post('/new-profile/read', fd, { timeout: 60000, signal: ask.signal, headers: { 'Content-Type': 'multipart/form-data' } })).data
         // The lines were not clear at once: the slower readers go on; ask how far it is, every second.
         for (let n = 0; data?.pending && !settled && n < 150; n++) {
           setStep(data.step || 'reading')
           await new Promise(r => setTimeout(r, 1000))
-          data = (await api.get(`/new-profile/result/${encodeURIComponent(data.upload)}`, { adalNoCache: true, timeout: 15000 })).data
+          data = (await api.get(`/new-profile/result/${encodeURIComponent(data.upload)}`, { adalNoCache: true, timeout: 15000, signal: ask.signal })).data
         }
         if (data?.pending) data = { error: 'it took too long — try a sharper picture, or fill the form by hand' }
       } catch (e) {
@@ -235,7 +242,7 @@ export default function PassportFirst({ onRead, onSkip, onLater }) {
       >
         {busy ? (
           <>
-            <ScanView busy={busy} step={step} secs={secs} moving={seen} onPhone={ON_PHONE} />
+            <ScanView busy={busy} step={step} secs={secs} moving={seen} onPhone={ON_PHONE} onStop={() => stopRead.current?.()} />
           </>
         ) : (
           <>

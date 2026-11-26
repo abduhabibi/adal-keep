@@ -6,6 +6,7 @@ import { usePickFile, ON_PHONE } from '../shared/PickFile'
 import { useNavigate } from 'react-router-dom'
 import { createPortal } from 'react-dom'
 import toast from 'react-hot-toast'
+import StopX, { waitToast, stopper, wasStopped } from '../shared/StopX'
 import api from '../../services/api'
 import { useFileCapture } from '../../context/FileCaptureContext'
 import FullBodyCropper from '../FullBodyCropper'
@@ -336,14 +337,15 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
                 // The faithful Refine (before / after, a person keeps it); the old one only when this PC turned it off.
                 try { if ((await api.get('/photo-refine/status', { adalNoCache: true })).data?.faithful) { setCompare(true); return } } catch {}
                 setRefining(true)
-                const t = toast.loading('Refining the picture… (up to a minute)')
+                const s = stopper()
+                const t = waitToast('Refining the picture… (up to a minute)', { onStop: () => { s.stop(); setRefining(false) }, said: 'Stopped waiting. The PC may still finish it: a refined picture then shows here, the original kept.' })
                 try {
-                  const { data } = await api.post(`/files/${mainFile.id}/refine`, {}, { timeout: 300000 })
+                  const { data } = await api.post(`/files/${mainFile.id}/refine`, {}, { timeout: 300000, signal: s.signal })
                   const res = await api.get(`/profiles/${profileId}/fields`)
                   const updated = res.data.find(f => f.id === field.id)
                   onFileUpdate(field.id, updated ? updated.files : [])
                   toast.success(`Refined to ${data.width}×${data.height}${data.ai ? ' with AI' : ''} — the original is kept below`, { id: t, duration: 6000 })
-                } catch (e) { toast.error(e.response?.data?.error || 'Refine failed', { id: t }) }
+                } catch (e) { if (!wasStopped(e)) toast.error(e.response?.data?.error || 'Refine failed', { id: t }) }
                 setRefining(false)
               }}
               className="text-[10px] px-2 py-0.5 rounded-md bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 font-semibold"
@@ -442,7 +444,12 @@ export default function FieldCard({ field, profileId, onFileUpdate, cvReadiness 
                 <button type="button" onClick={u.forget} className="rounded-md border border-red-300 px-2 py-1 font-semibold">Leave it</button>
               </div>
             </div>
-          ) : <p className="text-xs text-slate-500 dark:text-slate-400">{u.state === 'again' ? `${u.why} It is sent again by itself.` : `Saving${u.url ? '' : ` ${u.name}`}…`}</p>}
+          ) : <p className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400"><span className="min-w-0 flex-1">{u.state === 'stopping' ? 'Stopping — asking the PC whether it arrived…' : u.state === 'again' ? `${u.why} It is sent again by itself.` : `Saving${u.url ? '' : ` ${u.name}`}…`}</span>
+            {u.state !== 'stopping' && <StopX title="Stop saving it" onStop={async () => {
+              const r = await u.stop?.()
+              const said = { saved: 'It had already reached the PC: it is saved.', 'not saved': 'Stopped: it is not saved.', unknown: 'Stopped. The PC did not say whether it arrived — look at the box in a moment.' }
+              toast(said[r] || said.unknown, { icon: '✋', id: `stop-${u.id}`, duration: 6000 })
+            }} />}</p>}
         </div>
       ))}
 

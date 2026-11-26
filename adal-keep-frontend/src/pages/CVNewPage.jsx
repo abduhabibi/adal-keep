@@ -3,6 +3,7 @@ import { useEffect, useState, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
+import StopX, { waitToast, stopper, wasStopped } from '../components/shared/StopX'
 import api from '../services/api'
 import PickBrokerHere from '../components/PickBrokerHere'
 import { childrenOrZero } from '../lib/childrenCount'
@@ -379,9 +380,11 @@ export default function CVNewPage() {
       name = /\.pdf$/i.test(typed.trim()) ? typed.trim() : `${typed.trim() || who}.pdf`
     }
     setSaving(true)
-    const t = toast.loading('Making the PDF…')
+    const t = waitToast('Making the PDF…', { onStop: () => { stoppedSave = true; setSaving(false) }, said: 'Stopped. If the PC finishes it, the CV shows under her CVs (nothing is saved half).' })
+    let stoppedSave = false
     try {
       const res = await job
+      if (stoppedSave) return
       if (res.data?.local_html) {
         // The PC is off: this phone made the CV itself (the PC files the same CV when it is on).
         const how = await pdfHere(res.data.local_html, name)
@@ -417,9 +420,10 @@ export default function CVNewPage() {
     const err = validate()
     if (err) return toast.error(err)
     setSaving(true)
-    const t = toast.loading('Making the PDF…')
+    const s = stopper()
+    const t = waitToast('Making the PDF…', { onStop: () => { s.stop(); setSaving(false) }, said: 'Stopped. If the PC finishes it, the CV shows under her CVs (nothing is saved half).' })
     try {
-      const res = await api.post('/cv/generate', cvBody(tid))
+      const res = await api.post('/cv/generate', cvBody(tid), { signal: s.signal })
       // A phone with the office PC off: this phone makes the PDF itself (the PC files the same CV when it is on).
       if (res.data?.local_html) {
         const how = await pdfHere(res.data.local_html, res.data.filename || 'CV.pdf')
@@ -441,7 +445,7 @@ export default function CVNewPage() {
       if (!window.Capacitor?.Plugins?.AdalDiscovery?.saveFile) toast.success('PDF downloaded', { id: t })
       else toast.dismiss(t)
       try { localStorage.removeItem('cv-draft-' + profileId) } catch {}
-    } catch (e) { toast.error(e.response?.data?.error || 'Save failed', { id: t }) }
+    } catch (e) { if (!wasStopped(e)) toast.error(e.response?.data?.error || 'Save failed', { id: t }) }
     finally { setSaving(false) }
   }
 
@@ -496,7 +500,7 @@ export default function CVNewPage() {
     )
   }
 
-  if (busy && !readiness) return <div className="flex h-64 items-center justify-center"><Spinner /></div>
+  if (busy && !readiness) return <div className="flex h-64 items-center justify-center"><Spinner back /></div>
 
   const p = readiness?.profile || {}
   const skills = form.skills || {}
@@ -764,6 +768,7 @@ export default function CVNewPage() {
               <div data-testid="cv-drawing" className="flex items-center gap-3 px-5 py-3 text-sm text-slate-600 dark:text-slate-300">
                 <span className="h-5 w-5 animate-spin rounded-full border-2 border-slate-300 border-t-teal-600" />
                 Drawing the CV of {readiness?.profile?.full_name || 'her'}…
+                <StopX title="Stop — close the preview" onStop={closePreview} />
               </div>
             )}
             {previewUrl && <iframe

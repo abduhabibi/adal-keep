@@ -370,7 +370,7 @@ export default function EmployeesPage() {
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center">
-        <Spinner />
+        <Spinner back />
       </div>
     )
   }
@@ -400,7 +400,7 @@ export default function EmployeesPage() {
 
         {wsLoading ? (
           <div className="flex h-40 items-center justify-center">
-            <Spinner />
+            <Spinner back />
           </div>
         ) : (
           <>

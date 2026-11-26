@@ -55,7 +55,7 @@ export default function CVTemplatesPage() {
         <b>አርም</b> በማንኛውም ካርድ ላይ ይቀይረዋል።
       </div>
 
-      {loading ? <Spinner /> : rows.length === 0 ? (
+      {loading ? <Spinner back /> : rows.length === 0 ? (
         <EmptyState
           title="No templates yet"
           description="Click Create template to make your first agency layout."

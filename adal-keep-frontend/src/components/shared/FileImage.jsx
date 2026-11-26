@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { pic, picNow, dropPic, picsOn } from '../../lib/pics'
+import StopX from './StopX'
 
 /**
  * A document's picture that never shows a broken icon and never spins for ever
@@ -40,18 +41,19 @@ export default function FileImage(props) {
 const WORDS = {
   away: 'This photo is on another PC — it comes when that PC is on.',
   quiet: 'The PC is not answering — the photo is asked for again.',
+  stopped: 'Stopped. The photo is not shown.',
   missing: 'This photo’s file is not on this PC. Upload it again.',
   broken: 'This photo’s file is damaged and cannot be shown. Upload it again.',
 }
 
 /** The wheel, only when it takes a moment. */
-function Wheel() {
+function Wheel({ onStop }) {
   const [late, setLate] = useState(false)
   useEffect(() => { const t = setTimeout(() => setLate(true), SPIN_MS); return () => clearTimeout(t) }, [])
-  return late ? <><span className="h-5 w-5 animate-spin rounded-full border-2 border-slate-300 border-t-teal-600" /><span>Loading the photo…</span></> : null
+  return late ? <><span className="h-5 w-5 animate-spin rounded-full border-2 border-slate-300 border-t-teal-600" /><span>Loading the photo…</span><StopX onStop={onStop} title="Stop loading the photo" /></> : null
 }
 
-function Waiting({ state, retry, under = null }) {
+function Waiting({ state, retry, under = null, stop }) {
   return (
     <div data-testid="file-image-wait" data-state={state} onClick={(e) => e.stopPropagation()} title={WORDS[state] || ''}
       className="absolute inset-0 flex flex-col items-center justify-center gap-2 overflow-hidden p-2 text-center text-xs text-slate-500 dark:text-slate-400">
@@ -60,9 +62,9 @@ function Waiting({ state, retry, under = null }) {
         <img src={under} alt="" data-testid="file-image-under" onError={(e) => { e.currentTarget.style.display = 'none' }}
           className="absolute inset-0 h-full w-full rounded-3xl object-contain" />
       )}
-      {state === 'loading' ? <Wheel /> : (
+      {state === 'loading' ? <Wheel onStop={stop} /> : (
         <>
-          <span className={state === 'away' || state === 'quiet' ? '' : 'text-red-600 dark:text-red-400'}>{WORDS[state]}</span>
+          <span className={state === 'away' || state === 'quiet' || state === 'stopped' ? '' : 'text-red-600 dark:text-red-400'}>{WORDS[state]}</span>
           <button type="button" onClick={retry}
             className="rounded-lg border border-slate-300 px-2 py-1 font-semibold hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-800">↻ Retry</button>
         </>
@@ -75,12 +77,13 @@ function Waiting({ state, retry, under = null }) {
 function KeptImage({ src, keep, under: _u, underKeep: _k, alt = '', className = '', onClick, ...rest }) {
   const [url, setUrl] = useState(() => picNow(keep))
   const [state, setState] = useState('loading')   // (only without a url) loading | away | quiet | missing | broken
+  const stopped = useRef(false)
   const [tries, setTries] = useState(0)
   useEffect(() => {
     if (url) return
     let alive = true
     pic(keep, tries ? `${src}${src.includes('?') ? '&' : '?'}r=${tries}` : src)
-      .then(u => alive && setUrl(u), e => alive && setState(e.state || 'quiet'))
+      .then(u => alive && !stopped.current && setUrl(u), e => alive && !stopped.current && setState(e.state || 'quiet'))
     return () => { alive = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [keep, tries, url])
@@ -91,7 +94,7 @@ function KeptImage({ src, keep, under: _u, underKeep: _k, alt = '', className = 
   }, [url, state])
   const retry = (e) => { e.stopPropagation(); setTries(n => n + 1); setState('loading') }
   const failed = useRef(false)
-  if (!url) return <Waiting state={state} retry={retry} />
+  if (!url) return <Waiting state={state} retry={(e) => { stopped.current = false; retry(e) }} stop={() => { stopped.current = true; setState('stopped') }} />
   return <img src={url} data-file={src} alt={alt} onClick={onClick} {...rest} className={className}
     onError={() => { dropPic(keep); if (failed.current) { setUrl(null); setState('broken') } else { failed.current = true; setUrl(null); setTries(n => n + 1) } }} />
 }
@@ -126,12 +129,12 @@ function LoadedImage({ src, under = null, alt = '', className = '', onClick, ...
   const retry = (e) => { e.stopPropagation(); setTries(n => n + 1); setState('loading') }
   return (
     <>
-      {state !== 'missing' && state !== 'broken' && (
+      {state !== 'missing' && state !== 'broken' && state !== 'stopped' && (
         <img src={url} alt={alt} onClick={onClick} {...rest}
           className={`${className} ${state === 'ok' ? '' : 'opacity-0'}`}
           onLoad={() => setState('ok')} onError={() => ask(true)} />
       )}
-      {state !== 'ok' && <Waiting state={state} retry={retry} under={under} />}
+      {state !== 'ok' && <Waiting state={state} retry={retry} under={under} stop={() => setState('stopped')} />}
     </>
   )
 }

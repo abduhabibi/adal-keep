@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
+import { waitToast } from '../components/shared/StopX'
 import api from '../services/api'
 import PageHeader from '../components/shared/PageHeader'
 import Button from '../components/shared/Button'
@@ -101,7 +102,8 @@ export default function CVTemplateDesignPage() {
     if (!name.trim()) return toast.error('Type the agency (template) name')
     if (!headerFile && !headerId) return toast.error('Upload the agency header picture, or pick one cut from your CVs')
     setSaving(true)
-    const t = toast.loading('Saving the template…')
+    let stopped = false
+    const t = waitToast('Saving the template…', { onStop: () => { stopped = true; setSaving(false) }, said: 'Stopped waiting. It is finished whole on the PC (never half a template): it shows in Templates in a moment.' })
     try {
       const { html: html_content, css: css_content } = designHtml(design, primary, secondary)
       const { data } = await api.post('/cv/templates', { name: name.trim(), agency_name: name.trim(), agency_name_ar: nameAr.trim(), html_content, css_content })
@@ -113,7 +115,7 @@ export default function CVTemplateDesignPage() {
       }
       await api.patch(`/cv/templates/${data.id}`, { include_passport: 1, passport_h1: passportTitle, passport_h1_color: passportColor, passport_include_header: 1 })
       toast.success('Template saved — it is ready for CVs', { id: t })
-      navigate('/cvs/templates')
+      if (!stopped) navigate('/cvs/templates')
     } catch (e) {
       toast.error(e.response?.data?.error || 'Not saved', { id: t })
     } finally { setSaving(false) }

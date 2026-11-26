@@ -390,7 +390,7 @@ export default function ProfileFormPage({ embeddedId = null, onDone = null } = {
     }
   }
 
-  if (loading) return <Spinner label={isEdit ? 'ፕሮፋይል በመጫን ላይ…' : 'በመጫን ላይ…'} />
+  if (loading) return <Spinner back label={isEdit ? 'ፕሮፋይል በመጫን ላይ…' : 'በመጫን ላይ…'} />
 
   const inputClass = "w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-900/50 px-3 py-3 text-[15px] text-slate-800 dark:text-slate-100 focus:bg-white dark:focus:bg-slate-900 focus:border-teal-500 focus:outline-none transition-colors"
   const labelClass = "label mb-1.5 block font-semibold text-sm text-slate-700 dark:text-slate-200"

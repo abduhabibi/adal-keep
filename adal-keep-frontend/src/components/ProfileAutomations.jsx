@@ -6,6 +6,7 @@ import { createPortal } from 'react-dom'
 import { portalOf } from '../lib/phoneTask'
 import { useNavigate, useLocation } from 'react-router-dom'
 import toast from 'react-hot-toast'
+import { waitToast, stopper, wasStopped } from './shared/StopX'
 import api from '../services/api'
 import LmisAccountPicker from './LmisAccountPicker'
 import MusanedAccountPicker from './MusanedAccountPicker'
@@ -276,12 +277,14 @@ export default function ProfileAutomations({ profileId, phase = null, after }) {
       return
     }
     armedDelete.current = 0
-    const t = toast.loading(`${name}: checking the profile…`)
+    const s = stopper()
+    const t = waitToast(`${name}: checking the profile…`, { onStop: s.stop, said: `${name}: stopped waiting. If it had started, it shows below with its Stop.` })
     setSending(s => ({ ...s, [workflowId]: true }))
     try {
       const r = await api.post(
         `/profiles/${profileId}/automations/${workflowId}/start`,
-        { account_id: accountFor(workflowId) }
+        { account_id: accountFor(workflowId) },
+        { signal: s.signal }
       )
       if (/^mofa/.test(workflowId)) {
         toast.success(`${name}: started — it works quietly; its captcha comes as a notification`, { id: t, duration: 5000 })
@@ -291,6 +294,7 @@ export default function ProfileAutomations({ profileId, phase = null, after }) {
       }
       load({ quiet: true })
     } catch (e) {
+      if (wasStopped(e)) return
       const missing = e.response?.data?.missing
       // Something missing: her page opens a pop-up to fill it in, and the robot starts once it is all there.
       const detail = { profileId, workflowId, name, body: { account_id: accountFor(workflowId) }, handled: false }

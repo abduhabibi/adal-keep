@@ -55,4 +55,6 @@ export async function uploadOnce(req, res, next) {
   res.on('close', () => { if (!req.complete) over(null); else setTimeout(() => over(null), 120000).unref?.() })
   next()
 }
+/** Where one number is: saved (with its answer), being saved now, or never arrived whole. */
+export const uploadState = (id) => { const s = load().get(String(id)); return s ? { state: 'saved', status: s.status, body: s.body } : going.has(String(id)) ? { state: 'saving' } : { state: 'none' } }
 export const _forget = () => { saved = null; going.clear() }

@@ -1,4 +1,5 @@
 import GlassSelect from './shared/GlassSelect'
+import StopX from './shared/StopX'
 import { useEffect, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 import api from '../services/api'
@@ -323,7 +324,7 @@ export default function LiveTab({ runId: opened, fill = false, startFull = false
       {view === 'mirror' && (
         page
           ? <Mirror page={page} send={send} className={fill || full ? 'flex-1 min-h-0 overflow-y-auto overscroll-contain' : 'max-h-[70vh] overflow-y-auto'} />
-          : !err && <div className="h-40 rounded-lg bg-slate-100 dark:bg-slate-900 animate-pulse" />
+          : !err && <div className="flex h-40 items-center justify-center gap-3 rounded-lg bg-slate-100 text-xs text-slate-500 dark:bg-slate-900"><span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-indigo-600" />Opening the robot’s page…<StopX title="Stop — close the robot view" onStop={() => (onClose ? onClose() : shrink())} /></div>
       )}
 
       {view === 'picture' && <>
@@ -350,7 +351,7 @@ export default function LiveTab({ runId: opened, fill = false, startFull = false
               className={`block select-none ${PHONE ? 'cursor-crosshair' : 'cursor-default'}`} />
           </div>
         )}
-        {!shared && !src && !err && <div className="h-40 rounded-lg bg-slate-100 dark:bg-slate-900 animate-pulse" />}
+        {!shared && !src && !err && <div className="flex h-40 items-center justify-center gap-3 rounded-lg bg-slate-100 text-xs text-slate-500 dark:bg-slate-900"><span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-indigo-600" />Opening the robot’s page…<StopX title="Stop — close the robot view" onStop={() => (onClose ? onClose() : shrink())} /></div>}
         {!PHONE && (
           <div className="flex flex-wrap gap-1.5">
             {[['▲ Up', { kind: 'scroll', dy: -600 }], ['▼ Down', { kind: 'scroll', dy: 600 }], ['⇟ To the bottom', { kind: 'bottom' }]].map(([l, b]) => (

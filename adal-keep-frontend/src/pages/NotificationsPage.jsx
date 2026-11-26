@@ -74,7 +74,7 @@ export default function NotificationsPage() {
     return 'low'
   }
 
-  if (loading) return <div className="flex h-64 items-center justify-center"><Spinner /></div>
+  if (loading) return <div className="flex h-64 items-center justify-center"><Spinner back /></div>
 
   return (
     <div className="animate-fade-up h-[calc(100vh-8rem)] flex flex-col">

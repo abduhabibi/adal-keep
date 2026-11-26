@@ -72,7 +72,7 @@ export default function CVsPage() {
 
       {fromMusaned && <AddFromMusaned onClose={() => setFromMusaned(false)} />}
 
-      {tab === 'whatsapp' ? <WhatsAppCVs /> : loading ? <Spinner /> : rows.length === 0 ? (
+      {tab === 'whatsapp' ? <WhatsAppCVs /> : loading ? <Spinner back /> : rows.length === 0 ? (
         <EmptyState
           title="No CVs yet"
           description="Click New CV to pick a candidate and generate a formatted CV for one of your agencies."

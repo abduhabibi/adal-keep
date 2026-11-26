@@ -7,6 +7,7 @@ import { createHash } from 'crypto'
 import { findBrowserExecutable } from './browser.js'
 import { smallCopy, isKept, inLine, pdfFirstPagePng } from './pictures.js'
 import * as PQ from './photoQuality.js'
+import { viaHelper, recordLocal } from './pdfHelperGuard.js'
 
 // Her father's name as the emergency contact: his name and his father's (her surname),
 // e.g. "ABAGOLE KEDIR". A saved name that was only his first name gets the surname too.
@@ -697,29 +698,30 @@ export function warmPdfBrowser() {
  * (services/sharePower.js). Anything wrong there: drawn here, as before.
  */
 async function pdfElsewhere(html, outPath) {
-  let page = null
-  try {
-    const { helperForPdf } = await import('./sharePower.js')
-    const id = await helperForPdf()
-    if (!id) return false
-    const rb = await import('./remoteBrowsers.js')
-    const browser = await rb.browserForDevice(id, { quiet: true })
-    const { newRunTab } = await import('./browser.js')
-    page = await newRunTab(browser, null, { quiet: true })
-    const pdf = await drawPdf(page, html, null)
-    fs.writeFileSync(outPath, Buffer.from(pdf))
-    console.log(`[cv] PDF drawn by ${rb.deviceOf(browser)?.name || 'another PC'} for this PC`)
-    return true
-  } catch (e) {
-    console.warn('[cv] the other PC could not draw it — drawn here:', e.message)
-    return false
-  } finally {
-    if (page) {
-      // Its last tab closing would close that PC's browser (tabManager.keepBrowserOpen).
-      await (await import('./tabManager.js')).keepBrowserOpen(page).catch(() => {})
-      await page.close().catch(() => {})
-    }
-  }
+  // The guard (services/pdfHelperGuard.js): a helper that failed is skipped at once for a while, none is waited for longer
+  // than drawing here would take, and one slower than this PC is not used.
+  return viaHelper({
+    pick: async () => (await import('./sharePower.js')).helperForPdf(),
+    attempt: async (id, ticket) => {
+      let page = null
+      try {
+        const rb = await import('./remoteBrowsers.js')
+        const browser = await rb.browserForDevice(id, { quiet: true })
+        const { newRunTab } = await import('./browser.js')
+        page = await newRunTab(browser, null, { quiet: true })
+        const pdf = await drawPdf(page, html, null)
+        if (ticket.abandoned) return   // too late: this PC drew it already
+        fs.writeFileSync(outPath, Buffer.from(pdf))
+        console.log(`[cv] PDF drawn by ${rb.deviceOf(browser)?.name || 'another PC'} for this PC`)
+      } finally {
+        if (page) {
+          // Its last tab closing would close that PC's browser (tabManager.keepBrowserOpen).
+          await (await import('./tabManager.js')).keepBrowserOpen(page).catch(() => {})
+          await page.close().catch(() => {})
+        }
+      }
+    },
+  })
 }
 
 export async function htmlToPdf(html, outPath) {
@@ -728,7 +730,9 @@ export async function htmlToPdf(html, outPath) {
   const browser = await pdfBrowser()
   const page = await browser.newPage()
   try {
+    const drawStart = Date.now()
     await drawPdf(page, html, outPath)
+    recordLocal(Date.now() - drawStart)   // what drawing here takes: the limit for waiting on another PC
   } finally {
     await page.close().catch(() => {})
     _idle = setTimeout(() => { _pdfBrowser?.close().catch(() => {}); _pdfBrowser = null }, 5 * 60000)

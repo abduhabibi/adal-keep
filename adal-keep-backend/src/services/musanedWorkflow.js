@@ -2863,7 +2863,8 @@ async function waitForPersonCaptcha(page, ctx) {
     isCancelled: ctx.isCancelled, timeoutMs: ctx.captchaWaitMs || 10 * 60 * 1000, log: (m) => log(ctx, m),
   })
   if (w === 'left') { log(ctx, '✓ the person signed in'); return 'signed-in' }
-  if (w === 'timeout') log(ctx, 'nobody ticked "I\'m not a robot" within 10 minutes', 'warn')
+  // (Its tab gone before that — closed, crashed — is no "nobody ticked": 1795682494148001, 41 s in.)
+  if (w === 'timeout') log(ctx, (await import('./robotCheck.js')).tabGone(page) ? `the tab went before anyone could tick (${(await import('./robotCheck.js')).tabGone(page)}) — nobody was too late` : 'nobody ticked "I\'m not a robot" within 10 minutes', 'warn')
   // Musaned's next page (the code) takes a moment to draw: the run reads it once it is there.
   if (w === 'submitted') { const s = await waitForDashboard(page, ctx, 15000); if (s === 'unknown') await settleSignIn(page, ctx) }
   return w

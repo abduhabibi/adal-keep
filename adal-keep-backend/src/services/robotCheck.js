@@ -64,6 +64,16 @@ export function signInErrorKind(text) {
  * Returns 'submitted' (ticked, pressed, the form went away), 'left' (the form went away by itself: the person
  * pressed it) or 'timeout'. A refused name or password throws (nothing more is tried).
  */
+/** The tab or its browser is gone: why ('its page crashed' / 'its browser closed' / 'the tab was closed'), else ''. */
+export function tabGone(page) {
+  try {
+    if (page.__adalCrashed) return 'its page crashed'
+    if (page.browser?.()?.connected === false) return 'its browser closed or lost its connection'
+    if (page.isClosed?.()) return 'the tab was closed'
+    return ''
+  } catch { return 'the tab cannot be reached' }
+}
+
 export async function waitForTick(page, opts = {}) {
   const [{ rester }, { isWatched }] = await Promise.all([import('./restPage.js'), import('./liveFrames.js')])
   const rest = rester(page, { watched: isWatched, ...(opts.rest || {}) })   // nobody looks: the waiting page rests
@@ -88,9 +98,8 @@ async function tickWait(page, { onForm, submit, refill = null, restart = null, a
   while (Date.now() < deadline || (Date.now() < deadline + timeoutMs && atIt())) {
     if (isCancelled?.()) { const e = new Error('Cancelled by user'); e.cancelled = true; throw e }
     // Its tab or its browser is gone (closed, crashed): nothing to wait for (the run goes back in line).
-    let gone = false
-    try { gone = !!page.__adalCrashed || page.isClosed?.() || page.browser?.()?.connected === false } catch { gone = true }
-    if (gone) { log('the tab is gone (its browser closed) — not waiting for the tick'); return 'timeout' }
+    const gone = tabGone(page)
+    if (gone) { log(`the tab is gone (${gone}) — not waiting for the tick`); return 'timeout' }
     if (!(await onForm().catch(() => true))) return pressed ? 'submitted' : 'left'
     // A person opens the tab (after nobody looked for 15 s) and the form has waited long: fresh first, so the
     // tick goes onto a sign-in that is still alive. Never right after a click of theirs.

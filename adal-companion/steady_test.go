@@ -156,6 +156,11 @@ func TestSweepPauses(t *testing.T) {
 	}
 	if !sweepDue(time.Now().Add(5*time.Minute), "192.168.8.0") {
 		t.Fatal("found, then lost: after a few minutes")
+	}	// Just started, Main answered a moment ago, then went off: the first look is no sweep (2026-11-26, a test).
+	sweepFound()
+	sweep.net = ""
+	if sweepDue(time.Now().Add(10*time.Second), "192.168.8.0") {
+		t.Fatal("the first look after a start forgot Main's answer")
 	}
 }
 

@@ -210,7 +210,11 @@ func sweepDue(now time.Time, network string) bool {
 	sweep.mu.Lock()
 	defer sweep.mu.Unlock()
 	if network != sweep.net {
-		sweep.n, sweep.next, sweep.net, sweep.seen = 0, time.Time{}, network, time.Time{}
+		// (the first look after a start is not another network: Main's answer a moment ago still counts)
+		if sweep.net != "" {
+			sweep.n, sweep.next, sweep.seen = 0, time.Time{}, time.Time{}
+		}
+		sweep.net = network
 	}
 	// It answered a few minutes ago on this very network: a restart, not a move (2026-11-25: two
 	// sweeps while Main restarted).

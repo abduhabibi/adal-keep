@@ -162,6 +162,11 @@ func TestSweepPauses(t *testing.T) {
 	if sweepDue(time.Now().Add(10*time.Second), "192.168.8.0") {
 		t.Fatal("the first look after a start forgot Main's answer")
 	}
+	sweep.seen = time.Time{}
+	sweepHeard()
+	if sweepDue(time.Now().Add(time.Minute), "192.168.8.0") {
+		t.Fatal("Main was heard on the network a minute ago: no sweep")
+	}
 }
 
 // The number is asked once, not at every look.

@@ -185,6 +185,9 @@ func presenceHeard(text, fromIP string) (presenceEntry, bool) {
 	mainID := loadIdentity().PCID
 	switch {
 	case mainID != "" && e.ID == mainID:
+		if signed || len(presenceKey()) == 0 {
+			sweepHeard()
+		}
 		if u := e.url(); u != strings.TrimRight(hostServer, "/") {
 			oneAtATime(func() { presenceSwitch(u) })
 		}

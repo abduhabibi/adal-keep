@@ -510,7 +510,7 @@ async function signIn(page, ctx) {
     log(ctx, `opening ${LOGIN_URL}`)
     await page.goto(LOGIN_URL, { waitUntil: 'domcontentloaded', timeout: 120000 })
       .catch(e => log(ctx, `navigation threw: ${e.message}`, 'warn'))
-    await sleep(2500)
+    await quiet(page, 2500)
     await toEnglish(page, ctx)
     if (await signedIn(page)) {
       log(ctx, '✓ already signed in to the visa platform (shared sign-in)')
@@ -592,17 +592,17 @@ async function openForm(page, ctx) {
       [...document.querySelectorAll('a, button, input[type="submit"], input[type="button"]')].map(b => b.innerText || b.value).join('|'))), 60000, ctx)
     if (!at) throw new Error('The agreement page did not open')
     if (/traditionalapp/i.test(page.url())) break
-    await sleep(800)
+    await quiet(page, 800)
     log(ctx, `Agree (${i})`)
     await page.evaluate(() => { window.__adalBefore = 1 }).catch(() => {})
     if (!(await clickText(page, /^\s*(i )?agree\s*$/))) throw new Error('The Agree button was not found')
     // The next page has loaded once the old page's mark is gone.
     await until(async () => /traditionalapp/i.test(page.url()) || !(await page.evaluate(() => window.__adalBefore === 1)), 60000, ctx)
-    await sleep(1000)
+    await quiet(page, 1000)
   }
   const ok = await until(async () => /passport number/i.test(await page.evaluate(() => document.body?.innerText || '')), 90000, ctx)
   if (!ok) throw new Error('The visa application form did not open after Agree')
-  await sleep(1500)
+  await quiet(page, 1500)
   log(ctx, '✓ the visa application form is open')
 }
 
@@ -795,7 +795,7 @@ export async function fillForm(page, ctx, v) {
   if (travelled) log(ctx, `✓ Travelled in the last five years: ${v.travelled === 'yes' ? `Yes (${v.travelled_where})` : 'No'}`)
   else left.push('Travelled to other countries in the last five years (Yes/No)')
   if (travelled && v.travelled === 'yes') {
-    await sleep(800)
+    await quiet(page, 800)
     // The box that opens for "please clarify it".
     const done = await page.evaluate((where) => {
       const q = [...document.querySelectorAll('label, span, div, td, p')].find(e => /have you ever traveled/i.test(e.innerText || '') && (e.innerText || '').length < 220)
@@ -965,7 +965,7 @@ export async function runMofaPay(page, ctx) {
   if (!(await until(async () => !!(await markField(page, 'Application\\s*Number', 'pay-probe', 'input')), 30000, ctx))) {
     if (onLogin(page)) { await signIn(page, ctx); await page.goto(PAY_URL, { waitUntil: 'domcontentloaded', timeout: 120000 }).catch(() => {}) }
   }
-  await sleep(1000)
+  await quiet(page, 1000)
   const a = await typeUnder(page, 'Application\\s*Number', app)
   const b = await typeUnder(page, 'Passport\\s*Number', pp)
   if (!a || !b) log(ctx, `could not find the ${!a ? 'Application Number' : 'Passport Number'} box — a person fills it`, 'warn')
@@ -973,7 +973,8 @@ export async function runMofaPay(page, ctx) {
   if (a && b) {
     await clickText(page, /^\s*Search\s*$/)
     log(ctx, 'pressed Search')
-    await sleep(4000)
+    // Until the page says paid / not found / an amount — the 4 s of before at most.
+    if (pasteOn()) { const t0 = Date.now(); await sleep(400); while (Date.now() - t0 < 4000) { const x = await readPayResult(page); if (x.paid || x.notFound || x.amount) break; await sleep(150) } } else await sleep(4000)
   }
   const r = await readPayResult(page)
   if (r.paid) {
@@ -1029,7 +1030,7 @@ export async function runMofaFindApp(page, ctx) {
   await page.goto(LIST_URL, { waitUntil: 'domcontentloaded', timeout: 120000 }).catch(() => {})
   if (onLogin(page)) { await signIn(page, ctx); await page.goto(LIST_URL, { waitUntil: 'domcontentloaded', timeout: 120000 }).catch(() => {}) }
   await until(async () => !!(await markField(page, 'Passport\\s*Number', 'find-probe', 'input')), 30000, ctx)
-  await sleep(800)
+  await quiet(page, 800)
   if (!(await typeUnder(page, 'Passport\\s*Number', pp))) throw new Error('The Passport Number box was not found on the list of visa applications')
   await clickText(page, /^\s*Search\s*$/)
   log(ctx, `searched passport ${pp}`)

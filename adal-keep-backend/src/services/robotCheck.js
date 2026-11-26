@@ -77,7 +77,9 @@ export function tabGone(page) {
 export async function waitForTick(page, opts = {}) {
   const [{ rester }, { isWatched }] = await Promise.all([import('./restPage.js'), import('./liveFrames.js')])
   const rest = rester(page, { watched: isWatched, ...(opts.rest || {}) })   // nobody looks: the waiting page rests
-  try { return await tickWait(page, opts, rest) } finally { await rest.end() }
+  // (deadTabs never closes a page a person's step is awaited on.)
+  page.__adalPersonWait = Date.now()
+  try { return await tickWait(page, opts, rest) } finally { page.__adalPersonWait = 0; await rest.end() }
 }
 
 async function tickWait(page, { onForm, submit, refill = null, restart = null, again = null, isCancelled = null, timeoutMs = 10 * 60000, freshMs = 60000, log = () => {}, pollMs = 300 } = {}, rest) {

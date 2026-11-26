@@ -102,7 +102,8 @@ test('A + B in a real browser', { skip: !CHROME && 'no Chrome', timeout: 110000 
     await sleep(2500)
     assert.equal(await tm.tabAnswers(dead, 1500), false, 'it answers nothing')
     const t0 = Date.now(), closed = []
-    const acts = await D.lookDead(b, db, { askMs: 2000, onClosed: async (x) => closed.push(x.run) })
+    process.env.ADAL_DEAD_MS = '0'   // (silent long enough at once here; the wait itself is the next test's)
+    const acts = await D.lookDead(b, db, { askMs: 2000, onClosed: async (x) => closed.push(x.run) }).finally(() => { delete process.env.ADAL_DEAD_MS })
     console.log(`dead tab found and closed in ${((Date.now() - t0) / 1000).toFixed(1)} s (asked 2 s; 5 s live, looked at every 8 s)`)
     assert.deepEqual(acts.map(a => [a.act, a.run]).sort(), [['close', run], ['keep', form]].sort())
     assert.deepEqual(closed, [run])
@@ -113,6 +114,27 @@ test('A + B in a real browser', { skip: !CHROME && 'no Chrome', timeout: 110000 
     assert.equal((await w.reviveSignIns(db)).back, 1, 'the waiting sign-in goes back in line at its step')
     assert.equal((await D.lookDead(b, db, { askMs: 1000 })).length, 0, 'said once')
     await tm.closeTarget(save)
+  })
+
+  await t.test('A: a sign-in page busy for 15 s on a slowed processor, one a person ticks on, one watched: none closed', async () => {
+    const busy = await tm.openRunTab(b, 902); await busy.goto(`${base}/auth/login?busy`)
+    const c = await busy.createCDPSession(); await c.send('Emulation.setCPUThrottlingRate', { rate: 6 })
+    busy.evaluate(() => { const e = Date.now() + 15000; while (Date.now() < e); }).catch(() => {})
+    const tick = await tm.openRunTab(b, 903); await tick.goto(`${base}/auth/login?dies`); tick.__adalPersonWait = Date.now()
+    const seen = await tm.openRunTab(b, 904); await seen.goto(`${base}/auth/login?dies`); seen.__adalLookedAt = Date.now()
+    await sleep(2500)
+    const t0 = Date.now(), acts = []
+    while (Date.now() - t0 < 17000) { acts.push(...await D.lookDead(b, db, { askMs: 1500 })); await sleep(500) }
+    console.log(`busy 15 s, ticked on, watched: ${acts.filter(a => a.act === 'close').length} closed in ${Math.round((Date.now() - t0) / 1000)} s of looks`)
+    assert.equal(acts.filter(a => a.act === 'close').length, 0)
+    assert.equal(busy.isClosed(), false); assert.equal(tick.isClosed(), false); assert.equal(seen.isClosed(), false)
+    await tm.closeTarget(busy).catch(() => {}); await sleep(300)
+    // Silent past the limit: the one a person ticks on and the watched one are only said, never closed.
+    process.env.ADAL_DEAD_MS = '0'
+    try { const again = await D.lookDead(b, db, { askMs: 1000 }); assert.deepEqual(again.filter(a => a.act === 'close'), []) } finally { delete process.env.ADAL_DEAD_MS }
+    assert.equal(tick.isClosed(), false); assert.equal(seen.isClosed(), false)
+    tick.__adalPersonWait = 0; seen.__adalLookedAt = 0
+    for (const p of [busy, tick, seen]) await tm.closeTarget(p).catch(() => {})
   })
 
   await t.test('A: a page that works hard for a while is not dead', async () => {
@@ -129,6 +151,9 @@ test('what counts as a person\'s form', async () => {
   assert.equal(isSignInPage('https://accounts.wahid.sa/auth/realms/x'), true)
   assert.equal(isSignInPage('https://tawtheeq.musaned.com.sa/hr-pool'), false)
   assert.equal(decide({ url: 'https://accounts.wahid.sa/login', touched: Date.now() }), 'close', 'a sign-in page is nobody\'s form')
+  assert.equal(decide({ url: 'https://accounts.wahid.sa/login', personWait: true }), 'keep', 'a person ticks on it')
+  assert.equal(decide({ url: 'https://accounts.wahid.sa/login', looked: Date.now() - 30e3 }), 'keep', 'watched in the live view')
+  assert.equal(decide({ url: 'https://tawtheeq.musaned.com.sa/employment-requests/contract/1', borrowed: true }), 'keep', 'a check uses it')
   assert.equal(decide({ url: 'https://tawtheeq.musaned.com.sa/x', touched: Date.now() - 1000 }), 'keep')
   assert.equal(decide({ url: 'https://tawtheeq.musaned.com.sa/x' }), 'close')
   assert.equal(decide({ row: { status: 'paused', pause_reason: 'awaiting-visa-save' }, url: 'https://visa.mofa.gov.sa/login' }), 'keep')

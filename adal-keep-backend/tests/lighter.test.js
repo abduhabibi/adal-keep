@@ -74,6 +74,16 @@ test('a waiting page rests while nobody looks, is awake at once for the person, 
   const ticks = async (ms) => { const a = await p.evaluate('n'); await sleep(ms); return (await p.evaluate('n') - a) / ms * 1000 }
   assert.ok(await ticks(1500) > 10, 'full speed before')
   let gone = false, submitted = 0
+  // Since 2026-11-26 the page itself no longer rests (it crashed about 1 in 10): full speed, seen. The deep rest of
+  // before is still there behind ADAL_REST_DEEP=1, checked below.
+  {
+    let left = false
+    const w0 = waitForTick(p, { onForm: async () => !left, submit: async () => { left = true }, timeoutMs: 60000, rest: { afterMs: 1500 } })
+    await sleep(3000)
+    assert.ok(await ticks(1500) > 10, 'not slowed'); assert.equal(await p.evaluate(() => document.hidden), false, 'seen')
+    left = true; await w0
+  }
+  process.env.ADAL_REST_DEEP = '1'; t.after(() => { delete process.env.ADAL_REST_DEEP })
   const wait = waitForTick(p, { onForm: async () => !gone, submit: async () => { submitted++; gone = true }, timeoutMs: 60000, rest: { afterMs: 1500 } })
   await sleep(4500)
   const slow = await ticks(4000)

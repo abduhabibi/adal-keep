@@ -22,6 +22,7 @@ import fs from 'fs'
 import sharp from 'sharp'
 import path from 'path'
 import { withLivingTown } from './livingTown.js'
+import { contractsMayCreate } from './passportOnly.js'
 import crypto from 'crypto'
 import { fileURLToPath } from 'url'
 import { getBrowser, openBrowserIfAny } from './browser.js'
@@ -272,6 +273,7 @@ export async function scanContracts(db, { auto = false, remote = null, limitMs =
         await page.waitForFunction((n) => (document.body.innerText || '').includes(n), { timeout: 20000 }, c.contract_number).catch(() => {})
         const d = await openDetails(page, c.contract_number)
         const r = await addFromMusaned(db, browser, page, c, d)
+        if (r.skipped) { u.note = 'not added — only a passport makes a profile'; continue }
         u.note = r.existing ? `matched by passport: ${r.name}` : `added as a new profile`
         if (!r.existing) contractCheck.added.push({ id: r.id, name: r.name, stage: c.stage })
         contractCheck.results.push({ id: r.id, name: r.name, ...r.result })
@@ -704,6 +706,8 @@ export async function addFromMusaned(db, browser, page, card, d) {
   const passport = String(pick(d.pairs, 'Passport Number') || '').trim().toUpperCase().replace(/\s+/g, '')
   let p = passport ? await db('profiles').whereRaw("upper(replace(passport_number, ' ', '')) = ?", [passport]).first() : null
   const existing = !!p
+  // Only a passport makes a profile (services/passportOnly.js): a girl who is not here is NOT created from Musaned's list.
+  if (!p && !contractsMayCreate()) return { id: null, name: card.candidate, existing: false, skipped: true, result: {} }
   if (!p) {
     const given = String(pick(d.pairs, 'Given Names') || '').trim().toUpperCase()
     const sur = String(pick(d.pairs, 'Surname') || '').trim().toUpperCase()
@@ -1223,6 +1227,8 @@ export async function scanRows(db, src, { log = () => {}, maxPages = 10, onlyId 
       if (only && !p) p = only
       if (p && !cardIsNew(p, card)) { results.push({ id: p.id, name: p.full_name, state: 'chosen', stage: card.stage, unchanged: true }); continue }
       if (!p && /CANCEL|REJECT/i.test(card.stage)) continue        // someone else's request that ended: nothing to add
+      // Only a passport makes a profile (services/passportOnly.js): a girl not here is not created from Musaned's list (and not "new": no more pages for her).
+      if (!p && !contractsMayCreate()) { results.push({ name: card.candidate, passport: card.passport, state: 'not-added', note: 'only a passport makes a profile' }); continue }
       anyNew = true
       try {
         let made = false

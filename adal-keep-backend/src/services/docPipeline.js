@@ -345,7 +345,7 @@ export async function runPipeline(filePath, db, analyzer, tag = '[pipeline]', op
   // One picture with the passport, her photo and her full-body photo side by
   // side (how most agencies send them): JEV points at each part, each is cut
   // out — the passport read as a passport, the photos filed into her profile.
-  if (!opts.part && /^image\//.test(ALLOWED_EXTS[ext] || '')) {
+  if (!opts.part && !opts.noAi && /^image\//.test(ALLOWED_EXTS[ext] || '')) {
     let parts = null
     try { setStage('JEV is looking at what the picture holds'); parts = await (await import('./composite.js')).splitComposite(filePath) } catch (e) { log('parts:', e.message) }
     if (parts?.passport) {

@@ -5,6 +5,7 @@ import { startWatcher } from './docPipeline.js'
 import { startQueueWorker } from './ingestQueue.js'
 import { analyzeWithMineru } from './mineruClassifier.js'
 import { isAppLocked } from './subscription.js'
+import { downloadsUseAI, analyzeLocalPassport } from './passportOnly.js'
 
 // Where Windows really keeps Downloads: it is often moved to D:\ or OneDrive.
 export function windowsDownloads(run = readDownloadsKey, env = process.env) {
@@ -39,6 +40,9 @@ export async function processFile(filePath, db) {
   // Locked: new documents wait in the queue until the PC is unlocked.
   while (isAppLocked()) await new Promise(r => setTimeout(r, 60000))
   console.log(`[AI] 📄 Processing: ${filePath}`)
+  // Downloads and dropped files: only a passport counts, recognised here from its machine-readable lines (no JEV, no Gemini, no
+  // network); anything else is left alone. ADAL_DOWNLOAD_AI=1 brings the old AI classification back (services/passportOnly.js).
+  if (!downloadsUseAI()) return runPipeline(filePath, db, (p) => analyzeLocalPassport(p), '[AI]', { noAi: true })
   return runPipeline(filePath, db, (p) => analyzeWithMineru(p, { db }), '[AI]')
 }
 

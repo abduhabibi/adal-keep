@@ -102,10 +102,14 @@ const TURNS = [180, 90, 270]
  *   deadline Date.now() value after which no further crop is started (a scan
  *            has a time to answer in; a crop already being read finishes)
  *   onStep   'reading' | 'checking' for the page's progress text
+ *   skews    angles (degrees) to try when every crop failed but something that looks like bottom lines was seen (25+ '<'
+ *            fillers were read in some crop: a photographed page that is a little crooked); null = never
+ *   minFill  fast "no" (for files that are probably not passports): a crop whose reading shows fewer than this many '<'
+ *            (the filler of the bottom lines; a real strip has 25+) is not tried again in another way. 0 = try everything.
  * A page that is not upright is not read crop by crop: each turn is first probed at
  * a small size (a third of the work), the most MRZ-like one is read in full first.
  */
-export async function quickMrz(file, { tries = TRIES.length, skip = 0, deadline = Infinity, onStep = () => {} } = {}) {
+export async function quickMrz(file, { tries = TRIES.length, skip = 0, deadline = Infinity, onStep = () => {}, minFill = 0, skews = null } = {}) {
   // An upload may have no extension: sharp decides whether it is a picture (a PDF is not read here).
   if (!fs.existsSync(MODEL) || /\.pdf$/i.test(file)) return null
   onStep('reading')
@@ -120,11 +124,14 @@ export async function quickMrz(file, { tries = TRIES.length, skip = 0, deadline 
       sex: m.sex, gender: m.sex, nationality: m.nationality_code,
     },
   })
+  let lastFill = 0, maxFill = 0
   const attempt = async (angle, from) => {
     const mine = await strip(pg, angle, from).catch(() => null)
     if (!mine) return null
     try {
       const text = await read(mine)
+      lastFill = (text.match(/</g) || []).length
+      if (lastFill > maxFill) maxFill = lastFill
       onStep('checking')
       const m = verifiedIn(text)
       onStep('reading')
@@ -133,7 +140,8 @@ export async function quickMrz(file, { tries = TRIES.length, skip = 0, deadline 
   }
   const list = TRIES.slice(skip, tries)
   const upright = list.filter(([a]) => a === 0), turned = list.filter(([a]) => a !== 0)
-  for (const [a, f] of upright.slice(0, 1)) { const r = await attempt(a, f); if (r) return r }
+  let uprightFill = 0
+  for (const [a, f] of upright.slice(0, 1)) { const r = await attempt(a, f); uprightFill = lastFill; if (r) return r }
   if (Date.now() > deadline) return null
   // Not read upright: probe the turns small, the one with the most '<' (the filler of the MRZ) first.
   const angles = turned.map(([a]) => a).filter((a, i, all) => all.indexOf(a) === i)
@@ -146,12 +154,27 @@ export async function quickMrz(file, { tries = TRIES.length, skip = 0, deadline 
     if (n >= 15) break   // a page the right way up shows 25+ fillers at this size; a wrong way shows ~0: the rest is not probed
   }
   scored.sort((x, y) => y[1] - x[1])
-  for (const [a] of scored) {
+  for (const [a, n] of scored) {
+    if (n < minFill) continue   // no sign of bottom lines this way up: not read in full
     if (Date.now() > deadline) return null
     const r = await attempt(a, 0.78); if (r) return r
   }
   // Last: the taller upright strip (a crooked photo with the lines higher up).
-  for (const [a, f] of upright.slice(1)) { if (Date.now() > deadline) return null; const r = await attempt(a, f); if (r) return r }
+  for (const [a, f] of upright.slice(1)) { if (Date.now() > deadline || uprightFill < minFill) return null; const r = await attempt(a, f); if (r) return r }
+  // A crooked page: the lines were seen (fillers read) but did not verify — turned a few degrees and read again.
+  if (skews && maxFill >= 6) {
+    for (const k of skews) {
+      if (Date.now() > deadline) return null
+      try {
+        const { data, info } = await sharp(pg.raw, { raw: { width: pg.w, height: pg.h, channels: pg.ch } }).rotate(k, { background: '#ffffff' }).raw().toBuffer({ resolveWithObject: true })
+        const sk = { raw: data, w: info.width, h: info.height, ch: info.channels }
+        for (const from of [0.74, 0.62]) {
+          const text = await strip(sk, 0, from).then(read)
+          const m = verifiedIn(text); if (m) return done(m, 0)
+        }
+      } catch {}
+    }
+  }
   return null
 }
 

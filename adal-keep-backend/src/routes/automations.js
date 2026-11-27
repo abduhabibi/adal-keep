@@ -323,10 +323,26 @@ router.post('/profiles/:profileId/automations/:workflowId/start', async (req, re
     // One run per profile + workflow at a time. A second click never starts a
     // second copy (that is what put two runs in one tab): it reports on the
     // run that already exists, and resumes it if it was paused.
-    const active = await db('automation_queue')
+    let active = await db('automation_queue')
       .where({ profile_id: profileId, workflow_id: workflowId })
       .whereIn('status', ['running', 'paused', 'pending'])
       .orderBy('id', 'desc').first()
+    // Robots on every PC: "running" in this copy, but no PC holds her and that site (runClaims) and the row has not
+    // moved for 90 s — its PC went away (its own copy may say so already; this one has not heard yet). It ends here
+    // ("stopped — PC went away") and the person's Start runs her fresh (brain scenario 4).
+    if (active?.status === 'running') {
+      try {
+        const C = await import('../services/runClaims.js')
+        const quiet = Date.now() - new Date(active.updated_at || 0).getTime() > 90e3
+        if (C.claimsOn() && quiet && !C.runClaimsNow().some(l => l.key === C.keyOf(active))) {
+          const { GONE_NOTE } = await import('../services/worker.js')
+          let log = []; try { log = JSON.parse(active.log || '[]') } catch {}
+          log.push({ ts: new Date().toISOString(), level: 'error', msg: `${GONE_NOTE} (no PC holds this run; a person started her again)` })
+          await db('automation_queue').where({ id: active.id, status: 'running' }).update({ status: 'failed', pause_reason: GONE_NOTE, log: JSON.stringify(log), updated_at: new Date().toISOString() })
+          active = null
+        }
+      } catch {}
+    }
     if (active) {
       const runId = active.id
       if (active.status === 'running') {

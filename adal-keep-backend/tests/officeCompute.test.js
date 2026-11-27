@@ -33,6 +33,13 @@ test('placement: the stronger, less busy PC gets the run', () => {
   assert.ok(!('W' in c.secs) || c.secs.W > c.secs[''])
 })
 
+test('placement: one run per Companion at a time (ADAL_RUNS_PER_PC for more); Main has no such limit', () => {
+  assert.equal(chooseBest({ from: '', pcs: [main, strong], running: { S: 1 } }).to, '')
+  assert.equal(chooseBest({ from: '', pcs: [main, strong], running: { S: 0, '': 3 } }).to, 'S')
+  process.env.ADAL_RUNS_PER_PC = '2'
+  try { assert.equal(chooseBest({ from: '', pcs: [main, strong], running: { S: 1, '': 3 } }).to, 'S') } finally { delete process.env.ADAL_RUNS_PER_PC }
+})
+
 test('placement: the PC with the faster internet wins when they are as strong', () => {
   const a = { ...strong, id: 'A', name: 'A', net: slowNet }
   const b = { ...strong, id: 'B', name: 'B', net: fastNet }

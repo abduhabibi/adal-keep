@@ -115,3 +115,34 @@ export function keepRobotsRunning({ spawnFn = null, platform = process.platform 
   robotsTimer.unref?.()
   return true
 }
+
+// ── New code, Adal Robots started again (2026-11-27, Main: after an install Adal Robots went on with the code from
+// before — pid 17904, up 1170 s — the server restarts, Adal Robots does not) ─────────────────────────────────────
+// Adal Robots says the newest time of its main files when it started (/health code); this server looks every minute,
+// and when the files on disk are newer and no run is working there, asks it to stop (POST /api/robots/new-code, its
+// token). The launcher, the service or keepRobotsRunning above starts it again on the new code. Off: ADAL_ROBOTS_NEW_CODE=0.
+export const CODE_FILES = ['robots/adal-robots.mjs', 'src/services/worker.js', 'src/services/musanedWorkflow.js', 'src/services/browser.js', 'src/services/tabManager.js', 'package.json']
+export function codeStamp(dir = process.cwd()) {
+  let t = 0
+  for (const f of CODE_FILES) { try { t = Math.max(t, fs.statSync(path.resolve(dir, f)).mtimeMs) } catch {} }
+  return String(Math.round(t))
+}
+/** Should it be started again? Pure. */
+export const robotsOld = (health, stamp) => !!health && !!health.code && health.code !== stamp && Number(health.running || 0) === 0
+let newCodeTimer = null
+export function restartOnNewCode({ everyMs = 60000 } = {}) {
+  if (process.env.ADAL_ROBOTS_NEW_CODE === '0' || robotsInApp() || newCodeTimer) return false
+  const look = async () => {
+    try {
+      const h = await fetch(`${ROBOTS_URL()}/health`, { signal: AbortSignal.timeout(5000) }).then(r => r.json()).catch(() => null)
+      if (!robotsOld(h, codeStamp())) return
+      const t = tokenOf()
+      if (!t) return
+      console.log(`[robots] Adal Robots (pid ${h.pid}) runs the code from before the install, no run working — started again on the new code`)
+      await fetch(`${ROBOTS_URL()}/api/robots/new-code`, { method: 'POST', headers: { 'x-adal-robots': t }, signal: AbortSignal.timeout(5000) }).catch(() => {})
+    } catch {}
+  }
+  newCodeTimer = setInterval(look, everyMs); newCodeTimer.unref?.()
+  setTimeout(look, 30000).unref?.()
+  return true
+}

@@ -112,9 +112,18 @@ async function main() {
   app.use(express.json({ limit: '2mb' }))
   // running: the runs working here (Adal Keep's update waits for them: routes/systemUpdate.js robotsRunning).
   let runningNow = () => 0
-  app.get('/health', (req, res) => res.json({ ok: true, program: 'Adal Robots', pid: process.pid, up_s: Math.round(process.uptime()), here: E.robotsMayRunHere({ main: mainHere }), running: runningNow() }))
+  const { codeStamp } = await import('../src/services/robotsLink.js')
+  const code = codeStamp(BACK)   // its code when it started: Adal Keep starts it again after an install (robotsLink.restartOnNewCode)
+  app.get('/health', (req, res) => res.json({ ok: true, program: 'Adal Robots', pid: process.pid, up_s: Math.round(process.uptime()), here: E.robotsMayRunHere({ main: mainHere }), running: runningNow(), code }))
   // Everything else: Adal Keep only (its token), never another program or PC.
   app.use((req, res, next) => (req.get('x-adal-robots') === token ? next() : res.status(403).json({ error: 'Adal Robots answers Adal Keep only' })))
+  // Adal Keep: new code is installed — stops when no run works (started again by the launcher / the service / Adal Keep).
+  let stopForNewCode = null
+  app.post('/api/robots/new-code', (req, res) => {
+    const n = runningNow()
+    res.json({ ok: n === 0, running: n })
+    if (n === 0) setTimeout(() => stopForNewCode?.('new code installed'), 300)
+  })
   app.use('/api', (await import('../src/routes/automations.js')).default)
   const server = await new Promise((resolve, reject) => {
     const s = app.listen(PORT, '127.0.0.1', () => resolve(s))
@@ -187,6 +196,7 @@ async function main() {
     await db.destroy().catch(() => {})
     process.exit(0)
   }
+  stopForNewCode = stop
   process.on('SIGTERM', () => stop('SIGTERM'))
   process.on('SIGINT', () => stop('SIGINT'))
   process.on('unhandledRejection', (e) => console.warn('[robots] unhandled:', e?.message || e))

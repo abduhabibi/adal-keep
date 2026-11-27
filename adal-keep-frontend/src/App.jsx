@@ -11,6 +11,7 @@ import { MorePage } from './components/layout/PhoneChrome'
 import OneTab from './components/shared/OneTab'
 const DashboardPage = lazyPage(() => import('./pages/DashboardPage'))
 const ProfilesPage = lazyPage(() => import('./pages/ProfilesPage'))
+const StatusBoardPage = lazyPage(() => import('./pages/StatusBoardPage'))
 const ProfileDetailPage = lazyPage(() => import('./pages/ProfileDetailPage'))
 const ProfileFormPage = lazyPage(() => import('./pages/ProfileFormPage'))
 const ChatPage = lazyPage(() => import('./pages/ChatPage'))
@@ -47,7 +48,7 @@ const CVTemplateDesignPage = lazyPage(() => import('./pages/CVTemplateDesignPage
 // Every page's code, fetched once while nothing else is happening, the pages used most
 // first: opening a tab never waits for its code (the browser keeps those files for good).
 if (typeof window !== 'undefined' && import.meta.env.VITE_DEMO !== '1') {
-  const warm = () => warmPages([ProfilesPage, CVsPage, ProfileDetailPage, DashboardPage, CVNewPage, ProfileFormPage, TasksPage, BrokersPage, BrokerDetailPage, ChecklistPage, ChatPage, SettingsPage, EmployeesPage, NotificationsPage, WhatsAppSentPage, TrashPage, CVTemplatesPage, CVTemplateEditPage, CVTemplateDesignPage])
+  const warm = () => warmPages([ProfilesPage, StatusBoardPage, CVsPage, ProfileDetailPage, DashboardPage, CVNewPage, ProfileFormPage, TasksPage, BrokersPage, BrokerDetailPage, ChecklistPage, ChatPage, SettingsPage, EmployeesPage, NotificationsPage, WhatsAppSentPage, TrashPage, CVTemplatesPage, CVTemplateEditPage, CVTemplateDesignPage])
   const start = () => setTimeout(warm, 600)
   if (document.readyState === 'complete') start(); else window.addEventListener('load', start, { once: true })
 }
@@ -183,6 +184,7 @@ function Inside() {
             <Route path="billing" element={page(BillingPage)} />
             <Route path="robot-history" element={page(RunHistoryPage)} />
             <Route path="profiles/new" element={page(ProfileFormPage)} />
+            <Route path="profiles/board" element={page(StatusBoardPage)} />
             <Route path="profiles/:id/edit" element={page(ProfileFormPage)} />
             <Route path="profiles/:id" element={page(ProfileDetailPage)} />
             <Route path="employees" element={page(EmployeesPage)} />

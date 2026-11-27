@@ -1,4 +1,5 @@
 import GlassSelect from '../components/shared/GlassSelect'
+import { boardOn } from '../lib/statusBoard'
 import { createPortal } from 'react-dom'
 import { startTransition, useCallback, useEffect, useMemo, useState } from 'react'
 import PrioritizeButton, { useWaitingFiles } from '../components/PrioritizeButton'
@@ -231,6 +232,8 @@ export default function ProfilesPage() {
         <StageSteps phases={PHASES} unfit={UNFIT} counts={phaseCounts} phase={phase} searching={searching}
           onPick={(k) => { setPhase(k); setStep(null) }} dragging={dragging} setDragging={setDragging} dropOn={dropOn} />
         <div className="flex flex-wrap items-center gap-2">
+        {/* The same profiles by status, drag a card to change it (pages/StatusBoardPage.jsx; off: ADAL_STATUS_BOARD=0). */}
+        {boardOn() && <Button variant="secondary" className="whitespace-nowrap !px-3 text-sm" data-board-link onClick={() => navigate('/profiles/board')} title="The profiles in one column per status: drag a card to change her status">Board</Button>}
         {shows('musaned_scan', phase, after) && !searching && !onPhone() && (<>
           <Button variant="secondary" className="whitespace-nowrap !px-3 text-sm" onClick={scanMusaned} disabled={scanning || checkInfo?.running}
             title={`Check for new selections on Musaned (by itself every ${checkInfo?.every_min || 60} minutes; Check now stops after ${checkInfo?.manual_limit_min || 10} minutes)`}>

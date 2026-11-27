@@ -8,6 +8,7 @@
 package main
 
 import (
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -26,6 +27,21 @@ func robotsAnswer() bool {
 	return resp.StatusCode == http.StatusOK
 }
 
+// robotsListening: something holds 127.0.0.1:4010 — an Adal Robots busy on a slow PC answers /health late
+// (2026-11-27, Main's robots.log: "another Adal Robots already works … this one stops" again and again, a whole Node
+// started for nothing each time). Such a one is waited for, not doubled. Off: ADAL_ROBOTS_PORT_CHECK=0.
+func robotsListening() bool {
+	if os.Getenv("ADAL_ROBOTS_PORT_CHECK") == "0" {
+		return false
+	}
+	c, err := net.DialTimeout("tcp", "127.0.0.1:4010", 2*time.Second)
+	if err != nil {
+		return false
+	}
+	c.Close()
+	return true
+}
+
 // robotsHere: this install has Adal Robots (a release since 7e455b5) and is the main PC's.
 func robotsHere(root string) bool {
 	if employeePC(root) || companionInstall(root) {
@@ -39,6 +55,11 @@ func keepRobotsRunning(root string) {
 	backend := filepath.Join(root, "backend")
 	for {
 		if !robotsHere(root) || robotsAnswer() {
+			time.Sleep(30 * time.Second)
+			continue
+		}
+		// Busy, not gone: a slow /health is not a reason for a second one. Only a port nobody holds is.
+		if robotsListening() {
 			time.Sleep(30 * time.Second)
 			continue
 		}

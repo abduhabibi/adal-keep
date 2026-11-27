@@ -108,7 +108,8 @@ const PERSON_MS = 10 * 60e3
 /** Which tabs may close. Pure. tabs: [{ url, run, borrowed, shown, touched }] → indexes. */
 export function spareForMemory(tabs, now = Date.now()) {
   const go = [], keptSite = new Set()
-  const free = (t) => !t.run && !t.borrowed && !t.shown && now - (t.touched || 0) >= PERSON_MS
+  // (Never the one window's blank anchor tab: every new tab is opened from it — browser.js.)
+  const free = (t) => !t.anchor && !t.run && !t.borrowed && !t.shown && now - (t.touched || 0) >= PERSON_MS
   // First the signed-in one of each site is kept, then the first other one.
   const order = tabs.map((t, i) => ({ t, i, s: STANDING.find(s => onSite(s, t.url)) })).sort((a, b) => (b.s && signedInOn(b.s, b.t.url)) - (a.s && signedInOn(a.s, a.t.url)))
   for (const { t, i, s } of order) {
@@ -127,6 +128,7 @@ export async function shrinkBrowser(browser) {
     const { pagesOf, isRunTab } = await import('./tabManager.js')
     const all = (await pagesOf(browser, 1500)).filter(p => !p.isClosed?.())
     const look = await Promise.all(all.map(async p => ({
+      anchor: await Promise.race([p.evaluate(() => window.name === 'adal-agents-window').catch(() => false), new Promise(r => setTimeout(() => r(false), 2000))]),
       url: p.url(), run: isRunTab(p) || p.__adalRunId !== undefined, borrowed: !!p.__adalBorrowed || !!p.__adalPerson, shown: !!p.__adalShown,
       touched: Number(await Promise.race([p.evaluate(() => sessionStorage.getItem('adal-touched')).catch(() => 0), new Promise(r => setTimeout(() => r(Date.now()), 2000))])) || 0,
     })))

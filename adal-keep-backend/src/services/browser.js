@@ -490,7 +490,10 @@ async function tuckAway() {
  * tab is opened from. It survives a server restart, and comes back if closed.
  */
 async function agentsWindow(browser) {
-  for (const page of await browser.pages()) if (await named(page)) return page
+  const pages = await browser.pages()
+  for (const page of pages) if (await named(page)) return page
+  // One window: the browser has a window already (its first tabs brought back) — the anchor is a tab in it.
+  if (oneWindowOn() && !ADAL_MODE && pages.length) { const t = await backgroundTab(browser).catch(() => null); if (t) return makeAnchor(t) }
   return makeAnchor(await newWindow(browser, OFF, true))
 }
 
@@ -521,6 +524,14 @@ export async function newRunTab(browser, space = null, { quiet = false } = {}) {
   // its own window out of sight (a plain tab would go to whichever window was used last, maybe a person's).
   if (!ADAL_MODE) {
     if (noWindows() || !HIDDEN) return quiet ? keepBehind(await browser.newPage()) : browser.newPage()
+    // One window (the owner, 2026-11-27: "one window, many tabs"): every run tab and the standing site tabs are tabs of
+    // the robots' one window, opened from its blank anchor tab like Adal Browser's agents' window; only the first one
+    // is placed out of sight. Off: ADAL_ONE_WINDOW=0 (a window out of sight for each tab, as before).
+    if (oneWindowOn()) {
+      const made = _opening.then(() => tabInAgentsWindow(browser))
+      _opening = made.catch(() => {})
+      return keepBehind(await made)
+    }
     const page = await newWindow(browser, OFF, true)
     await hide(page).catch(() => {})
     return keepBehind(page)
@@ -540,6 +551,7 @@ export async function newRunTab(browser, space = null, { quiet = false } = {}) {
   return made
 }
 let _opening = Promise.resolve()
+export const oneWindowOn = (env = process.env) => env.ADAL_ONE_WINDOW !== '0'
 
 /** A tab working for another PC never jumps in front of the person at this one. */
 function keepBehind(page) {

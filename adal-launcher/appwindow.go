@@ -74,6 +74,9 @@ func startAppDoor(root string) {
 			r.Header.Set("Origin", uiURL)
 		}
 	}
+	if t := doorTransport(target); t != nil { // 16 kept connections, 127.0.0.1 (doorproxy.go)
+		proxy.Transport = t
+	}
 	proxy.FlushInterval = -1
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, e error) {
 		if strings.HasPrefix(r.URL.Path, "/api") || strings.HasPrefix(r.URL.Path, "/uploads") {

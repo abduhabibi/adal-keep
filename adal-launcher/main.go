@@ -228,6 +228,10 @@ func profileDir(root string) string {
 // bar, no tabs), apart from the agents' browser.
 func openUI(root string) {
 	if appDoorOpen() {
+		if defaultBrowserOn(root) { // the person's own browser (defaultbrowser.go); off: ADAL_DEFAULT_BROWSER=0
+			openInDefaultBrowser(root, appURL)
+			return
+		}
 		openAppWindow(root, appURL)
 		return
 	}

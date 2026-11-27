@@ -7,6 +7,7 @@ import { lazyPage, warmPages, FirstPage, PageComing } from './lib/pageCode'
 import { off } from './lib/offSwitch'
 import { tellChanged } from './lib/changes'
 import { MorePage } from './components/layout/PhoneChrome'
+import OneTab from './components/shared/OneTab'
 const DashboardPage = lazyPage(() => import('./pages/DashboardPage'))
 const ProfilesPage = lazyPage(() => import('./pages/ProfilesPage'))
 const ProfileDetailPage = lazyPage(() => import('./pages/ProfileDetailPage'))
@@ -213,6 +214,7 @@ function Inside() {
 function App() {
   return (
     <AuthProvider>
+      <OneTab />
       <Shell />
     </AuthProvider>
   )

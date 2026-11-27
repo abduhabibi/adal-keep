@@ -134,3 +134,24 @@ test('results come back by the PC copying: runs, their history, profile steps an
   for (const t of ['automation_queue', 'run_history', 'profile_automations', 'files', 'profiles']) assert.ok(!T.LOCAL.has(t), `${t} is copied`)
   assert.ok(T.ID_TABLES.includes('automation_queue'), 'a run queued on any PC gets an id that says which PC')
 })
+
+test('Adal Robots asks the server on its PC: claim and release over 127.0.0.1', async () => {
+  const { default: express } = await import('express')
+  const { default: router } = await import('../src/routes/runClaims.js')
+  const R = await import('../src/services/runClaims.js')
+  R._setEnvForTests({ me: { pc_id: 'pc-x', pc_name: 'PC-X' }, node: null, store: null, slot: () => 1, isMain: () => true, now: () => Date.now() })
+  const app = express(); app.use(express.json()); app.use('/api', router)
+  const srv = await new Promise(ok => { const s = app.listen(0, '127.0.0.1', () => ok(s)) })
+  const base = `http://127.0.0.1:${srv.address().port}/api/run-claims`
+  const post = (p, b) => fetch(base + p, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(r => r.json())
+  try {
+    const j = { id: idOn('pc-a', 77), profile_id: 77, workflow_id: 'wafid_book' }
+    assert.deepEqual(await post('/claim', { job: j }), { ok: true, via: 'alone' })
+    assert.equal((await fetch(base).then(r => r.json()))[0].key, 'wafid|77')
+    assert.deepEqual(await post('/release', { job: j, result: 'done' }), { ok: true })
+    assert.equal((await fetch(base).then(r => r.json())).length, 0)
+    assert.equal((await post('/claim', { job: j })).ok, false, 'done: not again')
+    const bad = await fetch(base + '/claim', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-adal-cloud': '1' }, body: '{}' })
+    assert.equal(bad.status, 403, 'not through the online link')
+  } finally { srv.close() }
+})

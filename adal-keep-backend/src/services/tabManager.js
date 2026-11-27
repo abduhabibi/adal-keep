@@ -166,6 +166,8 @@ export async function setupTab(page, { runId, mute = true } = {}) {
       else {
         noteSent(page, req)
         if (type === 'xhr' || type === 'fetch') noteCall(req.method(), req.url())   // the portal's own data calls (siteApi.js)
+        // (A search sent as a whole page — Enjaz's, Tasheer's forms — noted too: which reads could be data calls.)
+        else if (type === 'document' && req.method() === 'POST') noteCall('POST-PAGE', req.url())
         req.continue().catch(() => {})
       }
     })

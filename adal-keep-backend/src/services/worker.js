@@ -400,13 +400,18 @@ async function executeRun(db, page, job) {
   })
   // A run writes what it found into the profile's notes (dated), and may set
   // a few profile fields with it.
+  // (A busy database: tried again once after 3 s.) → true when written, false when not.
   ctx.noteProfile = async (text, fields = {}) => {
-    try {
-      const row = await db('profiles').where('id', job.profile_id).first('notes')
-      const line = `[${new Date().toISOString().slice(0, 10)}] ${text}`
-      const notes = row?.notes ? `${row.notes}\n${line}` : line
-      await db('profiles').where('id', job.profile_id).update({ ...fields, notes, updated_at: new Date().toISOString() })
-    } catch (e) { console.error('[worker] note failed:', e.message) }
+    for (let i = 0; i < 2; i++) {
+      try {
+        const row = await db('profiles').where('id', job.profile_id).first('notes')
+        const line = `[${new Date().toISOString().slice(0, 10)}] ${text}`
+        const notes = row?.notes ? `${row.notes}\n${line}` : line
+        await db('profiles').where('id', job.profile_id).update({ ...fields, notes, updated_at: new Date().toISOString() })
+        return true
+      } catch (e) { console.error(`[worker] note failed${i ? '' : ' (again in 3 s)'}:`, e.message); if (!i) await new Promise(r => setTimeout(r, 3000)) }
+    }
+    return false
   }
 
   try { await noteLink(page) } catch {}
@@ -436,9 +441,10 @@ async function executeRun(db, page, job) {
 
     // The person finished the last step themselves and the run saw it.
     if (result.ok && result.done) {
+      if (result.reason) await onLog('info', `✓ Finished: ${result.reason}`).catch(() => {})
       await db('automation_queue').where('id', runId).update({
         status: 'done',
-        pause_reason: null,
+        pause_reason: result.reason || null,   // finished with a reason (e.g. registered on Musaned by another agency)
         finished_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })

@@ -927,11 +927,19 @@ async function stopAlreadyRegistered(page, ctx, r, secs) {
   const said = r.text ? ` Musaned says: "${String(r.text).replace(/\s+/g, ' ').trim().slice(0, 400)}"` : ''
   const text = `Musaned: ${r.who || 'she'} is registered by ${agency}${where ? ` (${where})` : ''}. Ask that agency to delete her before adding her here.${said}`
   log(ctx, `⚠ ${text}`, 'warn')
-  await ctx.noteProfile?.(text, { musaned_stage: 'REGISTERED BY ANOTHER AGENCY' })
+  // (2026-11-27, owner: "already registered must update the profile" — run 1795786953074001 failed and her profile
+  // showed nothing.) Her Musaned stage names that agency (the badge on her profile), the contacts and the date go in
+  // her notes, and the Musaned step is finished with that reason, not failed: nothing starts it again by itself
+  // (firstStage: a Musaned stage; taskGate). Off: ADAL_REGISTERED_ELSEWHERE=0 (failed, as before).
+  const elsewhere = process.env.ADAL_REGISTERED_ELSEWHERE !== '0'
+  const stage = elsewhere ? `REGISTERED BY ${String(agency).toUpperCase()}`.slice(0, 120) : 'REGISTERED BY ANOTHER AGENCY'
+  const noted = await ctx.noteProfile?.(text, { musaned_stage: stage })
+  if (noted === false) log(ctx, 'her profile could not be written now — the note is in this run\'s log', 'warn')
   // A ringing notice, and a task to follow up with that agency.
   await ctx.notify(`⚠️ ${ctx.profileName}: registered on Musaned by ${agency}`, text, 'warn')
   await ctx.addTask?.(`Ask ${agency} to delete ${ctx.profileName} on Musaned`, `${where || 'EPRO contact not shown'} — then run "Make Musaned" again.`)
   await page.evaluate(() => [...document.querySelectorAll('button')].find(b => /^\s*OK\s*$/i.test(b.innerText || ''))?.click()).catch(() => {})
+  if (elsewhere) return { ok: true, done: true, reason: `Registered on Musaned by ${agency}${where ? ` (${where})` : ''} — not added here`, note: text, seconds: secs }
   return { ok: false, step: 'pre-check', error: `Musaned: she already exists — registered by ${agency}${where ? ` (${where})` : ''}`, seconds: secs }
 }
 
@@ -3033,3 +3041,4 @@ export { waitForPersonCaptcha, passOtp, leaveMusaned, checkAccount, signedInUser
 /** For the mock-form test (tests/pasteAll.test.js): the form's own helpers. */
 export const _form = { typeAndCommitDropdown, fillSkillsByTyping, setFieldByLabel, enterInField, clickRadioByLabel, fillDateByLabel, readFieldValues, waitForDashboard, cardToDashboard }
 export { findInOurList as _findInOurList }   // (the fast-steps test)
+export { stopAlreadyRegistered as _stopAlreadyRegistered }   // (tests)

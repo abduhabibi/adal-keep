@@ -23,6 +23,7 @@ export function notNeeded({ workflowId, profile, open = [], done = [] }) {
   if (done.length && !AGAIN.test(workflowId)) return `done already for her (#${done[0].id})`
   if (!profile) return 'her profile is not there'
   if (NEEDS_PASSPORT.test(workflowId) && !String(profile.passport_number || '').trim()) return 'no passport number on her profile'
+  if (/^musaned_add/.test(workflowId) && String(profile.musaned_stage || '').trim()) return `she is on Musaned already: ${profile.musaned_stage}`
   return ''
 }
 
@@ -31,7 +32,7 @@ export async function taskNeeded(db, { profileId, workflowId, by = 'by itself', 
   if (!taskGateOn()) return { ok: true }
   try {
     const rows = await db('automation_queue').where({ profile_id: profileId, workflow_id: workflowId }).whereIn('status', [...OPEN, 'done']).orderBy('id', 'desc').select('id', 'status').limit(20)
-    const profile = await db('profiles').where('id', profileId).first('id', 'full_name', 'passport_number')
+    const profile = await db('profiles').where('id', profileId).first('id', 'full_name', 'passport_number', 'musaned_stage')
     const why = notNeeded({ workflowId, profile, open: rows.filter(r => OPEN.includes(r.status)), done: rows.filter(r => r.status === 'done') })
     if (!why) return { ok: true }
     keepSkip({ at: new Date().toISOString(), workflow: workflowId, profile_id: profileId, name: profile?.full_name || '', why, by })

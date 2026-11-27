@@ -26,7 +26,7 @@ function Task({ t }) {
       <span className="font-medium" translate="no">{t.name || '—'}</span>
       <span className="text-slate-500"> · {words(t.workflow)}</span>
       <span className={`float-right font-semibold ${cls}`}>{label}{t.at ? ` ${time(t.at)}` : ''}</span>
-      {(t.said || (t.status === 'paused' && t.why)) && <span className="block truncate text-slate-400">{t.said || t.why}</span>}
+      {(t.said || ((t.status === 'paused' || t.status === 'done') && t.why)) && <span className={`block truncate ${t.status === 'done' && t.why ? 'text-amber-700' : 'text-slate-400'}`} title={t.said || t.why}>{t.said || t.why}</span>}
     </li>
   )
 }

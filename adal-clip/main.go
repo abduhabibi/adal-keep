@@ -14,7 +14,7 @@
 // picture is sent to the server, which puts it in the tray of every open
 // Adal Keep page, and onto the clipboard.
 //
-//	adal-clip.exe --server http://127.0.0.1:4000 --parent <pid>
+//	adal-clip.exe --server http://127.0.0.1:4000 --parent <pid> [--beat 45s]
 package main
 
 import (
@@ -235,6 +235,7 @@ func dibToPNG(b []byte) []byte {
 
 func tell(state string) {
 	req, _ := http.NewRequest("POST", server+"/api/app/clip?state="+state, nil)
+	req.Header.Set("X-Adal", "1") // a Companion's door to the main PC lets in only this PC's own programs (adal-companion mainproxy.go)
 	c := &http.Client{Timeout: 5 * time.Second}
 	if r, err := c.Do(req); err == nil {
 		r.Body.Close()
@@ -243,7 +244,10 @@ func tell(state string) {
 
 func sendPNG(p []byte) {
 	c := &http.Client{Timeout: 60 * time.Second}
-	if r, err := c.Post(server+"/api/app/clip", "image/png", bytes.NewReader(p)); err == nil {
+	req, _ := http.NewRequest("POST", server+"/api/app/clip", bytes.NewReader(p))
+	req.Header.Set("Content-Type", "image/png")
+	req.Header.Set("X-Adal", "1")
+	if r, err := c.Do(req); err == nil {
 		r.Body.Close()
 	}
 }
@@ -297,6 +301,9 @@ func main() {
 	flag.StringVar(&server, "server", "http://127.0.0.1:4000", "the Adal Keep server")
 	parent := flag.Int("parent", 0, "ends when this process ends")
 	once := flag.Int("once", 0, "this many crops now, then end (a test)")
+	// A Companion (adal-companion clipwatch.go): the main PC is told this often that the watcher runs here,
+	// so its pages on this PC leave double C to it (backend services/clipRelay.js keeps that 100 s).
+	beat := flag.Duration("beat", 0, "say ?state=hook this often (0: never)")
 	flag.Parse()
 	dpiOnce()
 	if *once > 0 {
@@ -315,6 +322,14 @@ func main() {
 	name, _ := windows.UTF16PtrFromString(`Local\AdalKeepClip`)
 	if _, err := windows.CreateMutex(nil, false, name); err == windows.ERROR_ALREADY_EXISTS {
 		return
+	}
+	if *beat > 0 {
+		go func() {
+			for {
+				tell("hook")
+				time.Sleep(*beat)
+			}
+		}()
 	}
 	if *parent > 0 {
 		go func() {

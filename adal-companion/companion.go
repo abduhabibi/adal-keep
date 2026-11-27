@@ -70,6 +70,8 @@ func main() {
 			watchReplica()
 			// A full Adal Keep in waiting: it stands in when the main PC is away (standby.go).
 			startStandby(root)
+			// Double C crops the screen here too: the watcher, sending to the main PC (clipwatch.go).
+			startClipWatch(root)
 		}
 	}
 

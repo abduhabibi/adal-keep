@@ -27,7 +27,7 @@ export const SCENARIOS = [
     check(JSON.stringify(pcsOf(site, 201)) === '["Comp"]', 'on the Companion', pcsOf(site, 201))
     check(!(await b.results('Main')).length, 'Main knows nothing yet')
     await b.on('Main')
-    check(await waitFor(async () => (await b.results('Main')).some(r => r.key === '201:musaned_check_chosen' && r.status === 'done')), 'the result reached Main when it came back', await b.results('Main'))
+    check(await waitFor(async () => (await b.results('Main')).some(r => r.key === 'musaned|201' && r.status === 'done')), 'the result reached Main when it came back', await b.results('Main'))
     check(site.started(201).length === 1, 'she was not run again', site.started(201).length)
   }],
   ['3. Both PCs try the same girl: only one runs her', async (b, site) => {
@@ -44,9 +44,11 @@ export const SCENARIOS = [
     await b.enqueue('Comp', 401)
     check(await waitFor(() => site.started(401).length), 'the Companion started her')
     await b.off('Comp')                                            // it dies mid-run
-    check(await waitFor(async () => (await b.claims('Main')).some(c => c.key.startsWith('401:') && c.state === 'expired'), LEASE_MS * 6), 'her claim expired on Main after the lease', await b.claims('Main'))
+    check(await waitFor(async () => (await b.claims('Main')).some(c => c.key === 'musaned|401' && c.state === 'expired'), LEASE_MS * 6), 'her claim expired on Main after the lease', await b.claims('Main'))
     await sleep(LEASE_MS * 3)
     check(site.started(401).length === 1 && !site.ended(401).length, 'nothing started her again by itself (one agent, one try)', site.visits.filter(v => v.girl === '401'))
+    await b.on('Comp')                                             // it comes back: its own row for her says what happened
+    check(await waitFor(async () => (await b.rows('Comp')).some(r => r.profile_id === 401 && r.status === 'failed' && /stopped — Comp went away/.test(`${r.pause_reason || ''}${r.log || ''}`)), LEASE_MS * 4), 'her run is failed with "stopped — PC went away"', (await b.rows('Comp')).map(r => [r.status, r.pause_reason]))
     await b.enqueue('Main', 401, { pinned: true })                 // a person presses Start
     check(await waitFor(() => site.ended(401).length), 'the person\'s Start ran her')
     check(JSON.stringify(pcsOf(site, 401)) === '["Comp","Main"]', 'one aborted visit then one fresh run', pcsOf(site, 401))

@@ -5,8 +5,10 @@
  */
 import knex from 'knex'
 
-export const LEASE_MS = 500, TICK_MS = 40
-const key = (girl, wf) => `${girl}:${wf}`
+export const LEASE_MS = 500, TICK_MS = 40   // (60 s lease renewed every 20 s in the real code: the same ratio, 1/120 of the time)
+// Umar's contract (docs/CLAIMS.md): the key is <site>|<profile_id>; the real lease is 60 s renewed every 20 s — scaled here to 500 ms / ~100 ms
+const siteOf = (wf) => String(wf).split('_')[0]
+const key = (girl, wf) => `${siteOf(wf)}|${girl}`
 
 export async function makeReferenceBrain({ site, now = Date.now, broken = '' } = {}) {   // broken: 'no-claims' | 'auto-retry' (the test proves its scenarios catch these)
   const pcs = new Map(), cuts = new Set()
@@ -43,8 +45,13 @@ export async function makeReferenceBrain({ site, now = Date.now, broken = '' } =
       }
       for (const c of await claimsOf(pc).where({ state: 'running' }).where('lease_until', '<', t)) {
         await claimsOf(pc).where({ key: c.key }).update({ state: 'expired' })
-        await pc.db('automation_queue').where({ workflow_id: c.key.split(':')[1], profile_id: Number(c.key.split(':')[0]) }).whereIn('status', ['running', 'pending']).update({ status: 'stopped', pause_reason: `stopped — ${c.pc} went away` })
-        if (broken === 'auto-retry') await pc.db('automation_queue').insert({ profile_id: Number(c.key.split(':')[0]), workflow_id: c.key.split(':')[1], status: 'pending', context: JSON.stringify({ pinned: true }), created_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+        await pc.db('automation_queue').where({ profile_id: Number(c.key.split('|')[1]) }).where('workflow_id', 'like', `${c.key.split('|')[0]}%`).whereIn('status', ['running', 'pending']).update({ status: 'failed', pause_reason: `stopped — ${c.pc} went away`, log: JSON.stringify([{ level: 'error', msg: `stopped — ${c.pc} went away` }]) })
+        if (broken === 'auto-retry') await pc.db('automation_queue').insert({ profile_id: Number(c.key.split('|')[1]), workflow_id: 'musaned_check_chosen', status: 'pending', context: JSON.stringify({ pinned: true }), created_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      }
+      // a run of this PC that the others gave up on while it was away: failed, with the reason (never started again)
+      for (const c of await claimsOf(pc).where({ state: 'expired', pc: pc.name })) {
+        pc.running.delete(c.key)
+        await pc.db('automation_queue').where({ profile_id: Number(c.key.split('|')[1]) }).where('workflow_id', 'like', `${c.key.split('|')[0]}%`).where({ status: 'running' }).update({ status: 'failed', pause_reason: `stopped — ${c.pc} went away`, log: JSON.stringify([{ level: 'error', msg: `stopped — ${c.pc} went away` }]) })
       }
       // 3. results go to Main when it is reachable
       if (!pc.main) for (const m of [...pcs.values()].filter(x => x.main && reach(pc.name, x.name))) {

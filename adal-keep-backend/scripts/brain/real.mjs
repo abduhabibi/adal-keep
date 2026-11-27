@@ -18,7 +18,7 @@ export async function makeRealBrain({ site } = {}) {
     cut: missing('cut the network between two instances (a gate in front of their sync / robots calls)'),
     heal: missing('put it back'),
     rows: missing('automation_queue rows of one instance'),
-    claims: missing('the run claims / leases (Umar: table and columns)'),
+    claims: missing('GET /api/run-claims on the instance (Umar: key <site>|<profile_id>, lease 60 s renewed every 20 s, an expired run is failed with "stopped — PC went away")'),
     results: missing('the newest finished result per girl on Main'),
     close: async () => {},
   }

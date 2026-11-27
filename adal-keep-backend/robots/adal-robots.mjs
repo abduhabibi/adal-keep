@@ -5,7 +5,7 @@
  *
  *  - It reads the jobs Adal Keep puts in line (automation_queue, the same SQLite file), runs them one at a time and
  *    writes back their steps, log and result: Adal Keep's pages show them as before.
- *  - Its own database connection, never held: one at most, closed after 2 s unused, a short wait for it
+ *  - Its own database connection: one at most, closed after a minute unused, a short wait for it
  *    (2026-11-24: Adal Keep stopped answering with its connection pool full).
  *  - Its own browser (the PC's Brave / Chrome / Edge, its own profile): headless on Linux, out of sight on Windows.
  *    No window, unless switched on for this PC (ADAL_ROBOTS_WINDOW=1).
@@ -43,13 +43,18 @@ export function robotsToken(dir = path.join(BACK, 'data')) {
 /** The processor's time so far, all cores: { all, idle } (Windows has no load average). */
 export const cpuTimes = () => os.cpus().reduce((a, c) => { const v = Object.values(c.times); a.all += v.reduce((x, y) => x + y, 0); a.idle += c.times.idle; return a }, { all: 0, idle: 0 })
 
-/** Adal Keep's database settings with a connection that is never held. */
+// (2026-11-27, Main's robots.log: "Acquire connection error: operation timed out" — opening the connection itself
+// took over 30 s, again and again: closed after 2 s unused, it was opened anew for nearly every 3-15 s timer, each time
+// the file and six PRAGMAs. An idle connection in WAL holds no lock: it stays a minute. Off: ADAL_ROBOTS_DB_KEEP=0.)
+export const dbIdleMs = (env = process.env) => env.ADAL_ROBOTS_DB_KEEP === '0' ? 2000 : 60000
+
+/** Adal Keep's database settings with one connection, closed after a minute unused. */
 export async function openDb() {
   const knexConfig = (await import('../knexfile.js')).default.development
   const knex = (await import('knex')).default
   return knex({
     ...knexConfig,
-    pool: { ...knexConfig.pool, min: 0, max: 1, idleTimeoutMillis: 2000, reapIntervalMillis: 1000, acquireTimeoutMillis: 30000 },
+    pool: { ...knexConfig.pool, min: 0, max: 1, idleTimeoutMillis: dbIdleMs(), reapIntervalMillis: 1000, acquireTimeoutMillis: 30000 },
   })
 }
 

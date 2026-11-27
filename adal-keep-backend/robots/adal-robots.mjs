@@ -5,7 +5,7 @@
  *
  *  - It reads the jobs Adal Keep puts in line (automation_queue, the same SQLite file), runs them one at a time and
  *    writes back their steps, log and result: Adal Keep's pages show them as before.
- *  - Its own database connection: one at most, closed after a minute unused, a short wait for it
+ *  - Its own database connections: two at most, closed after a minute unused, a short wait for them
  *    (2026-11-24: Adal Keep stopped answering with its connection pool full).
  *  - Its own browser (the PC's Brave / Chrome / Edge, its own profile): headless on Linux, out of sight on Windows.
  *    No window, unless switched on for this PC (ADAL_ROBOTS_WINDOW=1).
@@ -48,14 +48,36 @@ export const cpuTimes = () => os.cpus().reduce((a, c) => { const v = Object.valu
 // the file and six PRAGMAs. An idle connection in WAL holds no lock: it stays a minute. Off: ADAL_ROBOTS_DB_KEEP=0.)
 export const dbIdleMs = (env = process.env) => env.ADAL_ROBOTS_DB_KEEP === '0' ? 2000 : 60000
 
-/** Adal Keep's database settings with one connection, closed after a minute unused. */
+// (2026-11-27, Main, after the minute above: "Timeout acquiring a connection" still, in the saved look and the history's
+// prune. Adal Keep writes the same file; a statement here then waits up to 8 s on its lock (busy_timeout), holding the
+// one connection, and the 3-5 s timers line up behind it past 30 s.) Two connections: in WAL a read never waits for
+// a write, so one held at the lock no longer stops the others. Off: ADAL_ROBOTS_DB_TWO=0 (one, as before).
+export const dbMax = (env = process.env) => env.ADAL_ROBOTS_DB_TWO === '0' ? 1 : 2
+// A statement that takes over 5 s is said, with its start: who holds the connection. Off: ADAL_ROBOTS_DB_SLOW=0.
+export function watchSlow(db, { ms = 5000, log = (m) => console.warn(m) } = {}) {
+  if (process.env.ADAL_ROBOTS_DB_SLOW === '0') return
+  const started = new Map()
+  db.on('query', (q) => { if (q.__knexQueryUid) started.set(q.__knexQueryUid, Date.now()) })
+  const end = (q) => {
+    const t0 = started.get(q?.__knexQueryUid); if (!t0) return
+    started.delete(q.__knexQueryUid)
+    const took = Date.now() - t0
+    if (took >= ms) log(`[db] slow: ${String(q.sql || '').replace(/\s+/g, ' ').slice(0, 120)} — ${(took / 1000).toFixed(1)} s`)
+  }
+  db.on('query-response', (r, q) => end(q))
+  db.on('query-error', (e, q) => end(q))
+}
+
+/** Adal Keep's database settings with two connections at most, closed after a minute unused. */
 export async function openDb() {
   const knexConfig = (await import('../knexfile.js')).default.development
   const knex = (await import('knex')).default
-  return knex({
+  const db = knex({
     ...knexConfig,
-    pool: { ...knexConfig.pool, min: 0, max: 1, idleTimeoutMillis: dbIdleMs(), reapIntervalMillis: 1000, acquireTimeoutMillis: 30000 },
+    pool: { ...knexConfig.pool, min: 0, max: dbMax(), idleTimeoutMillis: dbIdleMs(), reapIntervalMillis: 1000, acquireTimeoutMillis: 30000 },
   })
+  watchSlow(db)
+  return db
 }
 
 async function main() {

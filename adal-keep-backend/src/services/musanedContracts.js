@@ -486,10 +486,21 @@ async function pdfWithoutViewer(page, name) {
   }
 }
 
+// (2026-11-27, Main: 100 PDFs in a row could not be read this way, 30 s each — the hourly check hit its 30-minute
+// limit twice.) After 2 misses in a row in one check (or within 15 minutes), its other PDFs are not tried; the next
+// check tries again. Off: ADAL_PDF_GIVE_UP=0.
+const pdfMisses = { check: '', n: 0, at: 0 }
+export const pdfGiveUpOn = (env = process.env) => env.ADAL_PDF_GIVE_UP !== '0'
+export function resetPdfMisses() { Object.assign(pdfMisses, { check: '', n: 0, at: 0 }) }
+
 export async function downloadPdf(browser, page, name) {
+  const check = contractCheck.started || ''
+  if (pdfMisses.check !== check || Date.now() - pdfMisses.at > 15 * 60000) Object.assign(pdfMisses, { check, n: 0 })
+  if (pdfGiveUpOn() && pdfMisses.n >= 2) throw new Error(`${name}: not tried — this check's PDFs could not be read without Musaned's viewer tab (the next check tries again)`)
   // Read in the page itself first: no viewer tab at all.
   const here = await pdfWithoutViewer(page, name).catch(e => { if (/not found/.test(e.message)) throw e; return null })
-  if (here && here.subarray(0, 4).toString() === '%PDF') return here
+  if (here && here.subarray(0, 4).toString() === '%PDF') { pdfMisses.n = 0; return here }
+  pdfMisses.n++; pdfMisses.at = Date.now()
   // Musaned's viewer was never opened: say so (no tab is made for it).
   throw new Error(`${name}: the PDF could not be read without opening Musaned's viewer tab`)
 }

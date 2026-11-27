@@ -27,6 +27,7 @@
  *
  * Cross-platform: pure Puppeteer/CDP — Windows / macOS / Linux identical.
  */
+import { noteHeaders } from './directRead.js'
 import { notNeeded } from './pageDiet.js'
 import { noteSent } from './lostBrowser.js'
 import { stopRequest } from './emptyPicture.js'
@@ -144,6 +145,7 @@ export async function setupTab(page, { runId, mute = true } = {}) {
   try {
     await page.setRequestInterception(true)
     page.on('request', req => {
+      noteHeaders(page, req)   // (directRead.js: Musaned's own data headers, for reads without a page load)
       // Never signed out by the site itself (the owner: "keep every login for a day"): a Musaned page whose
       // sign-in refresh failed on a dropped line went to the sign-out address — six tabs on this PC, 2026-11-24.
       // Only Adal Keep's own account switch signs out (page.__adalMayLogOut, or a tab of its own).

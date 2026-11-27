@@ -27,6 +27,7 @@ import crypto from 'crypto'
 import { fileURLToPath } from 'url'
 import { getBrowser, openBrowserIfAny } from './browser.js'
 import { pageGone } from './pageGone.js'
+import { directOn, freshHeaders, dropHeaders, timed } from './directRead.js'
 import { setupTab, borrowTab, borrowOpenTab, doneWithTab, activeRunIds, keepingRunIds } from './tabManager.js'
 
 const SAFE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'data', 'SafeStorage')
@@ -207,6 +208,7 @@ export async function scanContracts(db, { auto = false, remote = null, limitMs =
       return { checked: viaApi.checked, newlyChosen: viaApi.results.filter(r => r.first).map(r => r.name), results: viaApi.results, unknown: [], added: viaApi.added }
     }
     console.warn('[contracts] Musaned list data not read (' + viaApi.why + ') — reading its pages instead')
+    const pagesFrom = Date.now()
     const open = async (url) => {
       await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 })
       return signedIn(page)
@@ -287,6 +289,7 @@ export async function scanContracts(db, { auto = false, remote = null, limitMs =
       } catch (e) { u.note = `not added — ${e.message}`; console.warn(`[contracts] ${c.candidate}: ${e.message}`) }
     }
     await doneSignInTasks(db)
+    console.log(`[direct] Musaned list: pages ${((Date.now() - pagesFrom) / 1000).toFixed(1)} s`)
     const fresh = contractCheck.results.filter(r => r.first)
     import('./profileDays.js').then(d => d.snapshotDays(db)).catch(() => {})
     return { checked: cards.length, newlyChosen: fresh.map(r => r.name), results: contractCheck.results, unknown: contractCheck.unknown }
@@ -1089,7 +1092,10 @@ export function cardOfRow(r) {
 }
 
 /** The headers Musaned's own page sends (its sign-in, role, organization): seen once the list loads. */
-export async function apiHeadersOf(page) {
+export async function apiHeadersOf(page, { fresh = false } = {}) {
+  // The tab's own headers, seen a moment ago (directRead.js): no page load.
+  const kept = fresh ? null : freshHeaders(page)
+  if (kept) return kept
   let H = null
   const on = (r) => { const h = r.headers(); if (r.url().startsWith(API) && h.authorization && h['app-organization']) H = Object.fromEntries(Object.entries(h).filter(([k]) => /^(authorization|app-|accept-language)/.test(k))) }
   page.on('request', on)
@@ -1192,9 +1198,19 @@ export async function openContract(page, card) {
 // addLimit: at most this many girls added per round (the next round goes on),
 // so a first check of a long list never takes hours in one go.
 export async function scanListByApi(db, page, opts = {}) {
-  const H = await cancelable(apiHeadersOf(page))
-  if (!H) return { ok: false, why: 'Musaned did not answer as signed in' }
-  return scanRows(db, tabSource(page, H), opts)
+  if (!directOn()) return { ok: false, why: 'direct reading is off (ADAL_DIRECT_READ=0)' }
+  return timed('Musaned list', 'data call', async () => {
+    let H = await cancelable(apiHeadersOf(page))
+    if (!H) return { ok: false, why: 'Musaned did not answer as signed in' }
+    let r = await scanRows(db, tabSource(page, H), opts)
+    // Kept headers refused (the sign-in renewed meanwhile): the page once for fresh ones, then the same read.
+    if (!r.ok && /answered 40[13]/.test(r.why || '')) {
+      dropHeaders(page)
+      H = await cancelable(apiHeadersOf(page, { fresh: true }))
+      if (H) r = await scanRows(db, tabSource(page, H), opts)
+    }
+    return r
+  })
 }
 
 /** What Musaned answers, read in this signed-in tab (every step can be cancelled). */

@@ -38,6 +38,15 @@ export const VISA_STAGES = {
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 import { settle, pollUntil } from './fastSteps.js'
+import { timed } from './stepTimes.js'
+// One line per step in robots.log (ADAL_STEP_TIMES=0: off): services/stepTimes.js. The functions below are hoisted, so this can sit up here.
+const signIn = timed('Enjaz', 'signIn', signIn$raw)
+const openForm = timed('Enjaz', 'openForm', openForm$raw)
+const documentAndOccupation = timed('Enjaz', 'documentAndOccupation', documentAndOccupation$raw)
+export const fillForm = timed('Enjaz', 'fillForm', fillForm$raw)
+export const runMofaVisa = timed('Enjaz', 'runMofaVisa', runMofaVisa$raw)
+export const runMofaPay = timed('Enjaz', 'runMofaPay', runMofaPay$raw)
+export const runMofaFindApp = timed('Enjaz', 'runMofaFindApp', runMofaFindApp$raw)
 const cancelled = (ctx) => typeof ctx?.isCancelled === 'function' && ctx.isCancelled()
 
 function log(ctx, msg, level = 'info') {
@@ -505,7 +514,7 @@ async function signedIn(page) {
   return !onLogin(page) || st.welcome
 }
 
-async function signIn(page, ctx) {
+async function signIn$raw(page, ctx) {
   const release = await signInTurn('mofa')
   try {
     log(ctx, `opening ${LOGIN_URL}`)
@@ -577,7 +586,7 @@ async function signIn(page, ctx) {
 }
 
 /** New Application → Add A New Application → Agree, Agree → the form. */
-async function openForm(page, ctx) {
+async function openForm$raw(page, ctx) {
   log(ctx, 'New Application')
   if (!(await clickText(page, /^new application$/))) {
     await page.goto(LIST_URL, { waitUntil: 'domcontentloaded', timeout: 120000 }).catch(() => {})
@@ -613,7 +622,7 @@ async function openForm(page, ctx) {
  * her job is chosen. No list (the visa is not found): Classify Occupations →
  * "Building and housekeeping…", then "House work".
  */
-async function documentAndOccupation(page, ctx, v, left) {
+async function documentAndOccupation$raw(page, ctx, v, left) {
   if (!(await page.$('#DocumentNumber'))) return
   const want = new RegExp(v.occupation || 'house ?work|house ?maid|domestic|housekeeper|عاملة منزلية|خادمة', 'i')
   const options = () => page.$$eval('#JOB_OR_RELATION_Id option', os => os.map(o => ({ v: o.value, t: o.text.trim() })).filter(o => o.v && o.v !== '0')).catch(() => [])
@@ -666,7 +675,7 @@ async function documentAndOccupation(page, ctx, v, left) {
 }
 
 /** Fills the long form. Returns what is still for a person to fill. */
-export async function fillForm(page, ctx, v) {
+async function fillForm$raw(page, ctx, v) {
   const left = []
   const select = async (label, key, src, name = label, typeWord = '') => {
     const kind = await markField(page, label, key, 'select')
@@ -857,7 +866,7 @@ async function waitForSave(page, ctx, passport) {
 // ---------------------------------------------------------------------------
 // Runner
 // ---------------------------------------------------------------------------
-export async function runMofaVisa(page, ctx) {
+async function runMofaVisa$raw(page, ctx) {
   const t0 = Date.now()
   const secs = () => Math.round((Date.now() - t0) / 1000)
   const v = visaValues(ctx.profile, { photoPath: ctx.photoPath }, ctx.visa || {})
@@ -950,7 +959,7 @@ async function readPayResult(page) {
  * the tab comes to the front and rings: a person checks and pays. Already
  * paid → her profile says so (visa_stage "Visa paid") and the run is done.
  */
-export async function runMofaPay(page, ctx) {
+async function runMofaPay$raw(page, ctx) {
   const t0 = Date.now()
   const secs = () => Math.round((Date.now() - t0) / 1000)
   const p = ctx.profile || {}
@@ -1021,7 +1030,7 @@ async function readAppRow(page, pp) {
   }, pp).catch(() => null)
 }
 
-export async function runMofaFindApp(page, ctx) {
+async function runMofaFindApp$raw(page, ctx) {
   const t0 = Date.now()
   const secs = () => Math.round((Date.now() - t0) / 1000)
   const pp = String(ctx.profile?.passport_number || '').trim().toUpperCase()

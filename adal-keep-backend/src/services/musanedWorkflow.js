@@ -70,6 +70,18 @@ function log(ctx, msg, level = 'info') {
 }
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
 import { fast as fastOn } from './fastSteps.js'
+import { timed } from './stepTimes.js'
+// One line per step in robots.log (ADAL_STEP_TIMES=0: off): services/stepTimes.js. The functions below are hoisted, so this can sit up here.
+export const stepOpenMusaned = timed('Musaned', 'stepOpenMusaned', stepOpenMusaned$raw)
+export const stepFillMusanedLogin = timed('Musaned', 'stepFillMusanedLogin', stepFillMusanedLogin$raw)
+export const stepClickAgencyCard = timed('Musaned', 'stepClickAgencyCard', stepClickAgencyCard$raw)
+export const stepClickGoToDashboard = timed('Musaned', 'stepClickGoToDashboard', stepClickGoToDashboard$raw)
+export const stepClickHrPool = timed('Musaned', 'stepClickHrPool', stepClickHrPool$raw)
+export const stepClickAddNewCandidate = timed('Musaned', 'stepClickAddNewCandidate', stepClickAddNewCandidate$raw)
+export const stepFillCandidatePreCheck = timed('Musaned', 'stepFillCandidatePreCheck', stepFillCandidatePreCheck$raw)
+export const stepFillCandidateDetails = timed('Musaned', 'stepFillCandidateDetails', stepFillCandidateDetails$raw)
+const cardToDashboard = timed('Musaned', 'cardToDashboard', cardToDashboard$raw)
+export const runMusanedWorkflow = timed('Musaned', 'runMusanedWorkflow', runMusanedWorkflow$raw)
 /** Musaned's page after a load / sign-in click is ready: Keycloak's sign-in, or its own picker / dashboard. */
 const musanedSettled = async (page) => page.url().includes(KEYCLOAK_HOST) || (async () => { const s = await snapshotState(page); return !!(s?.hasAgencyPicker || s?.hasDashboardNav || s?.hasGoToDashboard) })()
 const hrPoolLinkThere = (page) => page.evaluate(() => [...document.querySelectorAll('a, button, [role="button"], [role="menuitem"]')].some(e => /\/hr-pool/i.test(e.getAttribute('href') || '') || /^hr\s*pool$/i.test((e.textContent || '').trim())))
@@ -395,7 +407,7 @@ async function settleSignIn(page, ctx, ms = 90000) {
   return review
 }
 
-export async function stepOpenMusaned(page, ctx) {
+async function stepOpenMusaned$raw(page, ctx) {
   if ((await import('./steadyLoad.js')).inCallback(page.url())) {
     log(ctx, 'the sign-in is just coming back to Musaned — waiting for its page')
     const r = await settleSignIn(page, ctx)
@@ -474,7 +486,7 @@ export async function stepOpenMusaned(page, ctx) {
   return { ok: true, finalUrl, onKeycloak: finalUrl.includes(KEYCLOAK_HOST) }
 }
 
-export async function stepFillMusanedLogin(page, ctx) {
+async function stepFillMusanedLogin$raw(page, ctx) {
   const username = String(ctx.musaned_username || '').trim()
   const password = String(ctx.musaned_password || '')
   if (!username || !password) return { filled: false }
@@ -568,7 +580,7 @@ async function clickCard(page, ctx, must = false) {
   return true
 }
 
-export async function stepClickAgencyCard(page, ctx) {
+async function stepClickAgencyCard$raw(page, ctx) {
   const other = await wrongAgencyCard(page, ctx)
   if (other) {
     if (ctx.accountSwitched) throw new Error(`Musaned stays signed in as ${other}`)
@@ -601,7 +613,7 @@ export async function stepClickAgencyCard(page, ctx) {
   return { ok: true }
 }
 
-export async function stepClickGoToDashboard(page, ctx) {
+async function stepClickGoToDashboard$raw(page, ctx) {
   const clicked = await page.evaluate(() => {
     const target = Array.from(document.querySelectorAll('button, a, [role="button"]'))
       .find(el => /^go\s+to\s+dashboard$/i.test((el.textContent || '').trim()))
@@ -618,7 +630,7 @@ export async function stepClickGoToDashboard(page, ctx) {
   return { ok: true }
 }
 
-export async function stepClickHrPool(page, ctx) {
+async function stepClickHrPool$raw(page, ctx) {
   const deadline = Date.now() + 20000
   let clicked = false
   while (Date.now() < deadline && !clicked) {
@@ -650,7 +662,7 @@ export async function stepClickHrPool(page, ctx) {
   return { ok: true }
 }
 
-export async function stepClickAddNewCandidate(page, ctx) {
+async function stepClickAddNewCandidate$raw(page, ctx) {
   // A tab already on an Add Candidate form (this run's own, filled before Adal Keep restarted — 2026-11-24, run
   // 402 failed there: "ADD NEW CANDIDATE not found"): back to the HR Pool list, then Add New Candidate as always.
   if (/\/hr-pool\/candidates\/add/i.test(page.url())) {
@@ -677,7 +689,7 @@ export async function stepClickAddNewCandidate(page, ctx) {
   return { ok: true }
 }
 
-export async function stepFillCandidatePreCheck(page, ctx) {
+async function stepFillCandidatePreCheck$raw(page, ctx) {
   log(ctx, 'pre-check starting')
   try {
     const profile = ctx.profile || {}
@@ -2132,7 +2144,7 @@ async function clickAcknowledge(page, ctx) {
 // STEP 6.5 — Details (v16.7)
 // ============================================================================
 
-export async function stepFillCandidateDetails(page, ctx) {
+async function stepFillCandidateDetails$raw(page, ctx) {
   log(ctx, '=== stepFillCandidateDetails v16.7 starting ===')
   await diagnoseMusanedPage(page, ctx, 'details-entry')
   const startUrl = page.url()
@@ -2595,7 +2607,7 @@ async function checkAccount(page, ctx) {
   return false
 }
 
-export async function runMusanedWorkflow(page, ctx) {
+async function runMusanedWorkflow$raw(page, ctx) {
   await waitForOtherAccounts(ctx, page)
   // Musaned runs take turns signing in; a run uses a Musaned tab that is
   // already signed in (the person's or another run's) instead of signing in
@@ -2998,7 +3010,7 @@ async function typeAuthenticatorCode(page, ctx) {
 }
 
 /** The agency's card, then the dashboard: on a slow line up to 90 s, the card once more when it is still there. */
-async function cardToDashboard(page, ctx) {
+async function cardToDashboard$raw(page, ctx) {
   await stepClickAgencyCard(page, ctx)
   return waitForDashboard(page, ctx, 30000, { slowMs: 90000, again: () => clickCard(page, ctx, true), ...(ctx.cardWait || {}) })
 }

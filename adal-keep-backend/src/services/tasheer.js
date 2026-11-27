@@ -42,6 +42,12 @@ const LOGIN_WAIT_MS = 30 * 60 * 1000
 const PICK_WAIT_MS = 60 * 60 * 1000
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 import { settle, pollUntil } from './fastSteps.js'
+import { timed } from './stepTimes.js'
+// One line per step in robots.log (ADAL_STEP_TIMES=0: off): services/stepTimes.js. The functions below are hoisted, so this can sit up here.
+const pastCloudflare = timed('Tasheer', 'pastCloudflare', pastCloudflare$raw)
+const signIn = timed('Tasheer', 'signIn', signIn$raw)
+export const pickScheduling = timed('Tasheer', 'pickScheduling', pickScheduling$raw)
+export const runTasheer = timed('Tasheer', 'runTasheer', runTasheer$raw)
 const cancelled = (ctx) => typeof ctx?.isCancelled === 'function' && ctx.isCancelled()
 const stop = (ctx) => { if (cancelled(ctx)) { const e = new Error('Cancelled by user'); e.cancelled = true; throw e } }
 function log(ctx, msg, level = 'info') {
@@ -425,7 +431,7 @@ const challenged = (page) => page.evaluate(() => document.title + ' ' + (documen
 const notAllowed = (page) => page.evaluate(() => /method\s+'?get'?\s+is not supported/i.test(document.body?.innerText || '')).catch(() => false)
 
 /** Past Cloudflare's check: by itself, or a person ticks it (rung once). */
-async function pastCloudflare(page, ctx) {
+async function pastCloudflare$raw(page, ctx) {
   if (!(await challenged(page))) return
   log(ctx, '⏳ Cloudflare is checking the browser')
   if (await until(async () => !(await challenged(page)), 20000, ctx)) return
@@ -434,7 +440,7 @@ async function pastCloudflare(page, ctx) {
   if (!(await until(async () => !(await challenged(page)), LOGIN_WAIT_MS, ctx))) throw new Error('Tasheer\'s Cloudflare check was not passed within 30 minutes')
 }
 
-async function signIn(page, ctx) {
+async function signIn$raw(page, ctx) {
   const release = await signInTurn('tasheer')
   try {
     const home = async () => /group scheduling/i.test(await page.evaluate(() => document.body?.innerText || '').catch(() => ''))
@@ -557,7 +563,7 @@ async function uploadFrame(page) {
 const uploadShown = async (page) => !!(await uploadFrame(page))
 
 /** VISA Type → VSC Center → Number of Applicants on the group scheduling page; what is left for a person. */
-export async function pickScheduling(page, ctx, n) {
+async function pickScheduling$raw(page, ctx, n) {
   const left = []
   const pick = async (id, label, src, name) => {
     let r
@@ -578,7 +584,7 @@ export async function pickScheduling(page, ctx, n) {
   return left
 }
 
-export async function runTasheer(page, ctx) {
+async function runTasheer$raw(page, ctx) {
   const t0 = Date.now()
   const secs = () => Math.round((Date.now() - t0) / 1000)
   const people = ctx.group?.length ? ctx.group : [ctx.profile]

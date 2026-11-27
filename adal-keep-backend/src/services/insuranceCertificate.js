@@ -26,6 +26,15 @@ const LOGIN_WAIT_MS = 30 * 60 * 1000
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 import { pollFor } from './fastSteps.js'
+import { timed } from './stepTimes.js'
+// One line per step in robots.log (ADAL_STEP_TIMES=0: off): services/stepTimes.js. The functions below are hoisted, so this can sit up here.
+const signIn = timed('Insurance', 'signIn', signIn$raw)
+const fillCertificate = timed('Insurance', 'fillCertificate', fillCertificate$raw)
+const openNewCertificate = timed('Insurance', 'openNewCertificate', openNewCertificate$raw)
+const fillHeader = timed('Insurance', 'fillHeader', fillHeader$raw)
+const fillMember = timed('Insurance', 'fillMember', fillMember$raw)
+const addMember = timed('Insurance', 'addMember', addMember$raw)
+export const runInsuranceCertificate = timed('Insurance', 'runInsuranceCertificate', runInsuranceCertificate$raw)
 const cancelled = (ctx) => typeof ctx?.isCancelled === 'function' && ctx.isCancelled()
 
 function log(ctx, msg, level = 'info') {
@@ -110,7 +119,7 @@ function fillLogin(page, ctx) {
   }, ctx.insurance_username, ctx.insurance_password)
 }
 
-async function signIn(page, ctx) {
+async function signIn$raw(page, ctx) {
   const release = await signInTurn('insurance')
   try {
     log(ctx, 'opening FetaP (agency.niscofetap.com)')
@@ -220,7 +229,7 @@ function setDateNth(page, n, iso) {
   }, n, iso)
 }
 
-async function fillCertificate(page, ctx, v) {
+async function fillCertificate$raw(page, ctx, v) {
   const left = []
   const select = async (first, src, name = first) => {
     if (!src) return left.push(name)
@@ -261,7 +270,7 @@ async function fillCertificate(page, ctx, v) {
 }
 
 /** "+ New certificate" is a clickable <div>: click it like a person, until the form shows. */
-async function openNewCertificate(page, ctx) {
+async function openNewCertificate$raw(page, ctx) {
   const formOpen = () => page.evaluate(() => {
     const m = document.querySelector('.modal-parent')
     const first = [...document.querySelectorAll('input')].find(i => i.placeholder === 'First Name')
@@ -286,7 +295,7 @@ async function openNewCertificate(page, ctx) {
   throw new Error('The New Certificate form did not open after clicking "+ New certificate"')
 }
 
-export async function runInsuranceCertificate(page, ctx) {
+async function runInsuranceCertificate$raw(page, ctx) {
   const t0 = Date.now()
   const secs = () => Math.round((Date.now() - t0) / 1000)
   const v = insuranceValues(ctx.profile, ctx.insurance || {})
@@ -329,7 +338,7 @@ export async function settleMembers(db, runId, status, why = null) {
 }
 
 /** The certificate's own boxes (once): branch, and how many are insured. */
-async function fillHeader(page, ctx, v) {
+async function fillHeader$raw(page, ctx, v) {
   const left = []
   if (v.branch) {
     const r = await chooseIn(page, 'Insurance Branch', v.branch)
@@ -341,7 +350,7 @@ async function fillHeader(page, ctx, v) {
 }
 
 /** One member's boxes (Add Insured). force: what the last member left in a box is written over. */
-async function fillMember(page, ctx, v, force) {
+async function fillMember$raw(page, ctx, v, force) {
   const left = []
   const select = async (first, src, name = first) => {
     if (!src) return left.push(name)
@@ -385,7 +394,7 @@ const addedCount = (page) => page.evaluate(() => {
 }).catch(() => -1)
 
 /** Add Member, and wait until the list under the form has one more. */
-async function addMember(page, ctx, before) {
+async function addMember$raw(page, ctx, before) {
   if (!(await clickText(page, /^\s*add member\s*$/))) throw new Error('FetaP shows no "Add Member" button')
   if (await until(async () => (await addedCount(page)) > Math.max(0, before), 15000, ctx)) return true
   // The site said why (a box it wants): tell it.

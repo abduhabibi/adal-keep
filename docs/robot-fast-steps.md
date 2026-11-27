@@ -100,3 +100,10 @@ flows that need the real sites): Enjaz, Tasheer, LMIS, Insurance and the contrac
        800 ms  fixed sleep        insuranceFetch.js:193  runInsuranceFetch  await sleep(800)
        500 ms  fixed sleep        insuranceCertificate.js:42  until  await sleep(500)
        500 ms  fixed sleep        insuranceFetch.js:40  until  await sleep(500)
+
+## Step times in robots.log (2026-11-27, `ADAL_STEP_TIMES=0` turns it off)
+Main's robots.log had no per-step times, so the ranking above is from the source. Every main step of Musaned, LMIS, Wafid, Enjaz, Tasheer
+and Insurance now writes one line when it ends: `[steps] run=<id> profile=<profile id> <Site> <step> <s> s` (`... failed` when it threw).
+Log only (`services/stepTimes.js` wraps the function; result and errors pass through; only the profile id, no name or passport).
+After a working day on Main: `node scripts/step-times.mjs <robots.log>` ranks steps per site by total time (whole `run*` entries listed apart).
+Wafid has whole-run lines only (its steps are not separate functions yet).

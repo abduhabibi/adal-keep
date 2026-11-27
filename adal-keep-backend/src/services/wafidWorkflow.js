@@ -20,6 +20,11 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { waitSign } from './pasteAll.js'
+import { timed } from './stepTimes.js'
+// One line per step in robots.log (ADAL_STEP_TIMES=0: off): services/stepTimes.js. The functions below are hoisted, so this can sit up here.
+export const runWafidBooking = timed('Wafid', 'runWafidBooking', runWafidBooking$raw)
+export const runWafidCheck = timed('Wafid', 'runWafidCheck', runWafidCheck$raw)
+export const runWafidSlip = timed('Wafid', 'runWafidSlip', runWafidSlip$raw)
 
 const BOOK_URL = 'https://wafid.com/en/book-appointment/'
 const STATUS_URL = 'https://wafid.com/en/medical-status-search/'
@@ -115,7 +120,7 @@ async function challengeShown(page) {
  * Fill the booking form in this tab. Returns the worker's result:
  * { ok:true, pauseReason } when it waits for a person, { ok:false, error } else.
  */
-export async function runWafidBooking(page, ctx) {
+async function runWafidBooking$raw(page, ctx) {
   const t0 = Date.now()
   const secs = () => Math.round((Date.now() - t0) / 1000)
   // Asked in the notification instead of stopping. A Musaned contract or visa
@@ -408,7 +413,7 @@ export async function downloadResultPdf(page) {
  * FIT / UNFIT is written on the profile (Medical · Fit / Rejected). Wafid's
  * "I am not a robot" is a person's: the run waits for them, then reads again.
  */
-export async function runWafidCheck(page, ctx) {
+async function runWafidCheck$raw(page, ctx) {
   const t0 = Date.now()
   const secs = () => Math.round((Date.now() - t0) / 1000)
   const passport = String(ctx.profile?.passport_number || '').trim().toUpperCase()
@@ -463,7 +468,7 @@ export async function runWafidCheck(page, ctx) {
  * pops up → its PDF button → the PDF is saved in her Appointment Slip (to print).
  * Wafid's "I am not a robot" is a person's: the run waits, then searches again.
  */
-export async function runWafidSlip(page, ctx) {
+async function runWafidSlip$raw(page, ctx) {
   const t0 = Date.now()
   const secs = () => Math.round((Date.now() - t0) / 1000)
   const passport = String(ctx.profile?.passport_number || '').trim().toUpperCase()

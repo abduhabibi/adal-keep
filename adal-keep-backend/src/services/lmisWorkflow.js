@@ -91,6 +91,14 @@ export function log(ctx, msg, level = 'info') {
 
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
 import { pollFor } from './fastSteps.js'
+import { timed } from './stepTimes.js'
+// One line per step in robots.log (ADAL_STEP_TIMES=0: off): services/stepTimes.js. The functions below are hoisted, so this can sit up here.
+export const stepLogin = timed('LMIS', 'stepLogin', stepLogin$raw)
+export const stepDirectNavigate = timed('LMIS', 'stepDirectNavigate', stepDirectNavigate$raw)
+export const stepAddNew = timed('LMIS', 'stepAddNew', stepAddNew$raw)
+export const stepSearchAndFindWorker = timed('LMIS', 'stepSearchAndFindWorker', stepSearchAndFindWorker$raw)
+export const stepUploadDocuments = timed('LMIS', 'stepUploadDocuments', stepUploadDocuments$raw)
+export const stepVerifyForm = timed('LMIS', 'stepVerifyForm', stepVerifyForm$raw)
 
 export async function waitForAnyText(page, needles, timeoutMs = DEFAULT_TIMEOUT) {
   const deadline = Date.now() + timeoutMs
@@ -402,7 +410,7 @@ async function asksForCode(page) {
  * tab that is already signed in (the person's or another run's) instead of
  * signing in again and asking for a new SMS code.
  */
-export async function stepLogin(page, ctx) {
+async function stepLogin$raw(page, ctx) {
   const release = await waitTurn(ctx)
   // From the moment Sign In is pressed, the SMS code LMIS sends is this run's
   // (services/smsCodes.js): the agency's phone passes it here and nobody else's tray shows it.
@@ -661,7 +669,7 @@ export async function goInApp(page, url, ctx = null) {
   return false
 }
 
-export async function stepDirectNavigate(page, ctx) {
+async function stepDirectNavigate$raw(page, ctx) {
   // Never through the dashboard menus: the police page's own address —
   // inside the signed-in app when it can be, else loaded.
   if (!page.url().includes('police-certificate') && !(await goInApp(page, POLICE_URL, ctx).catch(() => false))) {
@@ -777,7 +785,7 @@ export async function stepDirectNavigate(page, ctx) {
   await closePopups(page, ctx)
 }
 
-export async function stepAddNew(page, ctx) {
+async function stepAddNew$raw(page, ctx) {
   log(ctx, 'clicking Add New')
   let res = await clickByText(page, 'Add New', { timeout: 20000 })
   if (!res.ok) {
@@ -807,7 +815,7 @@ export async function stepAddNew(page, ctx) {
   await closePopups(page, ctx)
 }
 
-export async function stepSearchAndFindWorker(page, ctx) {
+async function stepSearchAndFindWorker$raw(page, ctx) {
   const laborId = String(ctx.labor_id || '').trim()
   if (!laborId) throw new Error('labor_id is empty')
 
@@ -1036,7 +1044,7 @@ export async function stepSearchAndFindWorker(page, ctx) {
 // POLICE CERTIFICATE — DOCUMENT UPLOADS
 // ============================================================================
 
-export async function stepUploadDocuments(page, ctx) {
+async function stepUploadDocuments$raw(page, ctx) {
   log(ctx, '▶ starting document uploads')
   ctx.__sectionOk = {}
   for (const [i, sec] of FORM_SECTIONS.entries()) {
@@ -1942,7 +1950,7 @@ async function closeUploadModal(page, title, ctx) {
  * and, when JEV is available, on a screenshot — and redo what is missing.
  * Throws (the run is retried) rather than hand over a half-filled form.
  */
-export async function stepVerifyForm(page, ctx) {
+async function stepVerifyForm$raw(page, ctx) {
   const reasons = {}
   let missing = []
   for (let pass = 1; pass <= 3; pass++) {

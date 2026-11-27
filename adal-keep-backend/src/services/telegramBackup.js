@@ -47,6 +47,8 @@ const MAGIC = Buffer.from('ADALBK1')
 const BASE_HASHES = path.join(path.dirname(STATE), 'backup-base.hashes') // one 8-byte fingerprint per page of the last whole copy sent
 const FULL_EVERY_MS = 3 * 864e5        // a whole copy every 3 days (or when the changes grow big)
 const UPLOADS_AT_ONCE = 2
+// Telegram's address (tests: a local stand-in; never set on a PC).
+const TG_API = (process.env.ADAL_TELEGRAM_API || 'https://api.telegram.org').replace(/\/$/, '')
 
 // ── Settings ─────────────────────────────────────────────────────────────────
 
@@ -141,7 +143,7 @@ const NET_DOWN = /No connection to Telegram|fetch failed|ETIMEDOUT|ENOTFOUND|EAI
 async function tg(token, method, body, timeoutMs = 60000, tries = 0, maxTries = 4) {
   let r
   try {
-    r = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+    r = await fetch(`${TG_API}/bot${token}/${method}`, {
     method: 'POST', body, signal: AbortSignal.timeout(timeoutMs),
     ...(body instanceof FormData ? {} : { headers: { 'content-type': 'application/json' } }),
   })
@@ -272,7 +274,7 @@ async function fetchPiece(token, fileId) {
     return Buffer.from(await r.arrayBuffer())
   }
   const f = await tg(token, 'getFile', JSON.stringify({ file_id: fileId }))
-  const r = await fetch(`https://api.telegram.org/file/bot${token}/${f.file_path}`, { signal: AbortSignal.timeout(10 * 60 * 1000) })
+  const r = await fetch(`${TG_API}/file/bot${token}/${f.file_path}`, { signal: AbortSignal.timeout(10 * 60 * 1000) })
   if (!r.ok) throw new Error(`Telegram download ${r.status}`)
   return Buffer.from(await r.arrayBuffer())
 }

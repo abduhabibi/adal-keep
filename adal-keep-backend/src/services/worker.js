@@ -625,7 +625,20 @@ async function claimedRun(db, job) {
     return
   }
   let result = 'failed'
-  try { const r = await runJob(db, job); result = 'done'; return r } finally { await releaseForRun(db, job, result) }
+  try { const r = await (testRunner() ? testRun(db, job) : runJob(db, job)); result = 'done'; return r } finally { await releaseForRun(db, job, result) }
+}
+
+// A test seam (Hamza's brain test, scripts/brain): ADAL_BRAIN_TEST_RUNNER=<module> does the run instead of a site —
+// its default export (db, job) → { ok, note }; the row is marked done / failed here. Never set outside a test.
+let _testRunner
+const testRunner = () => (_testRunner === undefined ? (_testRunner = process.env.ADAL_BRAIN_TEST_RUNNER || null) : _testRunner)
+async function testRun(db, job) {
+  const mod = await import(testRunner())
+  let r
+  try { r = await mod.default(db, job) } catch (e) { r = { ok: false, note: e.message } }
+  await appendLog(db, job.id, r?.note || (r?.ok ? 'done (test runner)' : 'failed (test runner)'), r?.ok ? 'info' : 'error').catch(() => {})
+  await db('automation_queue').where({ id: job.id }).update({ status: r?.ok ? 'done' : 'failed', updated_at: new Date().toISOString() })
+  return r
 }
 
 async function runJob(db, job) {
@@ -1047,8 +1060,38 @@ export async function dispatchRun(db, runId) {
  * sight: nothing it does is final, since Save stays a person's. One from long
  * ago is parked: nobody expects it now.
  */
+// Robots on every PC (robotsEverywhere.js, runClaims.js): this PC's copy also holds the other PCs' running runs. At a
+// start only this PC's own (queued here) are its to end, and none goes on by itself (one agent, one try): failed,
+// "stopped — PC went away". A row of another PC is left to it — unless it has not moved for 15 minutes (dead
+// anywhere: a run's log moves while it works; one that waits for a person is paused, not running).
+// ADAL_ROBOTS_EVERYWHERE=0: as before (recent ones go on, older ones paused).
+export const GONE_NOTE = 'stopped — PC went away'
+export async function endInterruptedRuns(db, { slot, isMain, now = Date.now() } = {}) {
+  const { queuedHere } = await import('./runClaims.js')
+  const rows = await db('automation_queue').where('status', 'running').select('id', 'updated_at', 'log')
+  let mine = 0, stale = 0
+  for (const row of rows) {
+    const here = queuedHere(row, slot, isMain)
+    const dead = now - new Date(row.updated_at || 0).getTime() > 15 * 60e3
+    if (!here && !dead) continue
+    let log = []; try { log = JSON.parse(row.log || '[]') } catch {}
+    log.push({ ts: new Date(now).toISOString(), level: 'error', msg: `${GONE_NOTE} (${here ? 'this PC restarted while it worked' : 'no word from it for 15 minutes'})` })
+    const n = await db('automation_queue').where({ id: row.id, status: 'running' }).update({ status: 'failed', pause_reason: GONE_NOTE, log: JSON.stringify(log), updated_at: new Date(now).toISOString() })
+    if (n) { if (here) mine++; else stale++ }
+  }
+  return { mine, stale, left: rows.length - mine - stale }
+}
+
 async function parkInterruptedRuns(db) {
   try {
+    const { everywhereOn } = await import('./robotsEverywhere.js')
+    if (everywhereOn()) {
+      const [{ currentSlot }, { notMainPC }] = await Promise.all([import('./sync/ids.js'), import('./mainPC.js')])
+      const r = await endInterruptedRuns(db, { slot: currentSlot(), isMain: !notMainPC() })
+      if (r.mine || r.stale) console.log(`[worker] ${r.mine} run(s) of this PC interrupted by a restart, ${r.stale} silent for 15 min — ${GONE_NOTE} (none goes on by itself)`)
+      if (r.left) console.log(`[worker] ${r.left} running run(s) of other PCs left to them`)
+      return
+    }
     const recent = new Date(Date.now() - 6 * 3600_000).toISOString()
     const back = await db('automation_queue').where('status', 'running').where('updated_at', '>', recent)
       .update({ status: 'pending', updated_at: new Date().toISOString() })

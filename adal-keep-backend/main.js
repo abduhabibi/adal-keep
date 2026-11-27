@@ -1265,6 +1265,17 @@ initSystem().then(() => {
     // backups, no discovery, no updates (checking a copy of an agency on another PC).
     // A scratch copy in a test (ADAL_RUN_CLAIMS_SWEEP=1): a PC gone mid-run is still failed, "stopped — PC went away".
     if (process.env.ADAL_RUN_CLAIMS_SWEEP === '1') import('./src/services/runClaims.js').then(r => r.startRunClaims(app.locals.db)).catch(e => console.warn('[run claims]', e.message))
+    // (Hamza's brain test: a scratch copy runs the real queue, claims and gate with a test runner instead of sites.)
+    if (process.env.ADAL_ISOLATED === '1' && process.env.ADAL_BRAIN_TEST_RUNNER && ROBOTS_HERE) {
+      (async () => {
+      const [W, C, E, S] = await Promise.all([import('./src/services/worker.js'), import('./src/services/runClaims.js'), import('./src/services/robotsEverywhere.js'), import('./src/services/sync/index.js')])
+      C.startRunClaims(db)
+      if (notMainPC()) { E.startRobotsHere({ main: () => !notMainPC(), full: () => S.companionFullOn(), node: () => S.syncNode() }); W.setClaimGate(async () => E.robotsMayRunHere().may) }
+      W.startWorker(db, notMainPC() ? { queueOnly: true, slot: (await import('./src/services/sync/ids.js')).currentSlot() } : {})
+      console.log('🔒 Isolated, brain test: the real queue, claims and gate, a test runner instead of sites')
+      })().catch(e => console.warn('[brain test]', e.message))
+      return
+    }
     if (process.env.ADAL_ISOLATED === '1') { console.log('🔒 Isolated: no background work'); return }
     startUpdateWatcher(app.locals.db) // a new version installs by itself when no run is working
     // Every PC: heartbeat, Adal's signed commands, crash reports (Admin → Fleet; behind a flag).

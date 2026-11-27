@@ -101,3 +101,21 @@ test("a Companion's robots drive the Companion's own robot browser, started by t
   assert.ok((await b.version()).length > 0)
   b.disconnect()
 })
+
+test("at a start: this PC's interrupted runs end (none goes on by itself), another PC's live run is left", async () => {
+  const knex = (await import('knex')).default
+  const db = knex({ client: 'sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true, pool: { min: 1, max: 1 }, migrations: { directory: new URL('../src/migrations', import.meta.url).pathname } })
+  await db.migrate.latest()
+  const W = await import('../src/services/worker.js')
+  const now = Date.now(), at = now * 1000
+  const row = (id, ago) => ({ id, workflow_id: 'wafid_check', status: 'running', profile_id: 1, log: '[]', created_at: new Date(now).toISOString(), updated_at: new Date(now - ago).toISOString() })
+  await db('automation_queue').insert([row(at + 7, 60e3), row(at + 1003, 60e3), row(at + 2003, 20 * 60e3)])   // mine (slot 7), slot 3's live, slot 3's silent
+  try {
+    const r = await W.endInterruptedRuns(db, { slot: 7, isMain: false, now })
+    assert.deepEqual(r, { mine: 1, stale: 1, left: 1 })
+    const st = Object.fromEntries((await db('automation_queue').select('id', 'status', 'pause_reason')).map(x => [x.id, x]))
+    assert.equal(st[at + 7].status, 'failed'); assert.equal(st[at + 7].pause_reason, W.GONE_NOTE)
+    assert.equal(st[at + 1003].status, 'running', "another PC's live run is left to it")
+    assert.equal(st[at + 2003].status, 'failed')
+  } finally { await db.destroy() }
+})

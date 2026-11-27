@@ -59,6 +59,8 @@ export async function askDevices(ms = 600, opts = {}) {
 }
 /** How many PCs of the office this one has heard of. */
 export const knownDevices = () => { hear(); return devices.size }
+/** The Companions heard lately, with the address of their own door (:47810): peerUpdate.js asks them. */
+export const deviceDoors = () => { hear(); return [...devices.values()].map(d => ({ name: d.name, url: `http://${d.ip}:${d.port || 47810}` })) }
 /** Its PC went away (switched off, off the network) in the last `ms`? */
 export const lostLately = (id, ms = 5 * 60e3, now = Date.now()) => now - (lost.get(String(id)) || 0) < ms
 

@@ -570,6 +570,25 @@ function undoChecks(db, sha) {
 }
 
 /** Looks for a new version now and then, and installs it by itself (see autoUpdate). */
+// A Companion newer than this main PC hands its signed release here (services/peerUpdate.js). Off: ADAL_PEER_UPDATES=0.
+let peerSince = 0
+async function peerTick(db) {
+  const P = await import('../services/peerUpdate.js')
+  if (!P.peerUpdatesOn() || updateNotice.applying) return
+  if ((await import('../services/mainPC.js')).isCompanion()) return
+  if (!(await autoUpdateOn(db))) return
+  const L = await import('../services/lanRelease.js')
+  await P.peerStep({
+    peers: async () => (await import('../services/remoteBrowsers.js')).deviceDoors(),
+    mine: async () => installedRelease(await getInstalled(), L.current()?.manifest),
+    busy: async () => { const h = holdForRuns((await busyNow(db)).running > 0, peerSince); peerSince = h.since; return h.wait },
+    apply: async (dir) => {
+      updateNotice.applying = true; updateNotice.applyingSince = new Date().toISOString()
+      try { return await applyLocalRelease(dir) } finally { updateNotice.applying = false }
+    },
+    notice: updateNotice,
+  })
+}
 export function startUpdateWatcher(db = null) {
   setUpdateDb(db)
   if (db) updateDb = db
@@ -601,6 +620,7 @@ export function startUpdateWatcher(db = null) {
         await applyAssignments().catch(e => console.warn('[update] Adal\'s decisions:', e.message))
       }
       await autoUpdate(db, result)
+      await peerTick(db).catch(e => console.warn('[peer-update]', e.message))
     } catch (e) {
       Object.assign(updateNotice, { checkedAt: new Date().toISOString(), error: e.message })
       console.error(`[update] the update look failed: ${e.message}`)
@@ -1170,7 +1190,7 @@ router.get('/update/notice', async (req, res) => {
   res.json({
     hasUpdate: !!r?.hasUpdate, count: r?.count || 0, changes: r?.changes || [], latest: r?.latest || null,
     installed: r?.installed || null, note: r?.note || null, checkedAt: updateNotice.checkedAt,
-    applying: updateNotice.applying, running, moving,
+    applying: updateNotice.applying, running, moving, peer: updateNotice.peer || null,
     // The version this server runs now: an open page reloads when it changes.
     version: BOOT_VERSION, auto: updateNotice.auto, autoError: updateNotice.autoError,
     autoUpdate: await autoUpdateOn(req.app.locals.db),

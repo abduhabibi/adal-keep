@@ -60,6 +60,14 @@ export default function UpdateBanner() {
   if (!n) return null
   const busy = phase === 'installing' || phase === 'restarting' || n.applying
   const selfUpdating = n.autoUpdate && !n.autoError
+  // A Companion runs a newer version: this PC takes it from there in a minute, when no run works (peerUpdate.js).
+  if (n.peer && !busy && phase !== 'error') {
+    return (
+      <div translate="no" className="bg-teal-50 dark:bg-teal-900/30 border-b border-teal-200 dark:border-teal-800 px-4 py-2 text-sm text-teal-900 dark:text-teal-100">
+        🆕 <b>{n.peer.from}</b> runs a newer Adal Keep ({n.peer.short}). This PC takes it in a minute, when no run works, and restarts by itself.
+      </div>
+    )
+  }
   if (!n.hasUpdate && !busy && phase !== 'error') return null
   // "Later": hidden for 4 hours for this version; a newer one shows again.
   if (!busy && phase !== 'error' && hiddenFor && hiddenFor.sha === n.latest?.sha && Date.now() < hiddenFor.until) return null

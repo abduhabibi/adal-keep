@@ -175,3 +175,28 @@ test('a dead PC\'s run is failed about 105 s after it died (60 s lease + 30 s + 
   const R = pcs['pc-a'].R
   assert.equal(R.LEASE_MS + R.GRACE_MS + R.SWEEP_MS, 105_000)
 })
+
+test('the dead PC is back (it restarted mid-run): asked, it no longer has the run → failed here too, once; still working → kept', async () => {
+  const db = knex({ client: 'sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true })
+  try {
+    await db.schema.createTable('automation_queue', t => { t.bigInteger('id'); t.string('status'); t.text('log'); t.string('pause_reason'); t.string('updated_at') })
+    const id = idOn('pc-a', 60), id2 = idOn('pc-a', 61)
+    await db('automation_queue').insert([{ id, status: 'running', log: '[]' }, { id: id2, status: 'running', log: '[]' }])
+    assert.equal((await pcs['pc-a'].R.claimRun(null, job(id, 60))).ok, true)
+    assert.equal((await pcs['pc-a'].R.claimRun(null, job(id2, 61))).ok, true)
+    const b = pcs['pc-b'], later = Date.now() + 7 * 60_000 + 4 * 60_000
+    // Still working on 61 (its lease there), restarted for 60 (gone from its memory): only 60 is failed.
+    const a = pcs['pc-a']
+    const keep = a.R.runClaimsNow().find(l => l.run_id === id2)
+    await a.R.releaseRun(null, job(id, 60), 'stopped')   // (its memory of 60 gone, as after a restart; the release is lost below)
+    b.R.peerClaim({ op: 'try', key: 'musaned|60', run_id: id, pc_id: 'pc-a', pc_name: 'PC-A' }, { pc_id: 'pc-a' })   // B still thinks A has 60
+    assert.ok(keep)
+    a.clock.add = 11 * 60_000   // A's clock moves on with B's; its lease for 61 is renewed by its own timer in real life:
+    await a.R.claimRun(null, job(id2, 61)).catch(() => {})
+    assert.equal(await b.R.sweepGone(db, later), 1)
+    const r60 = await db('automation_queue').where({ id }).first(), r61 = await db('automation_queue').where({ id: id2 }).first()
+    assert.equal(r60.status, 'failed'); assert.match(r60.pause_reason, /stopped — PC went away/)
+    assert.equal(r61.status, 'running', 'the run it still does is left alone')
+    assert.equal(await b.R.sweepGone(db, later + 60_000), 0, 'once')
+  } finally { await db.destroy() }
+})

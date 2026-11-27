@@ -73,10 +73,11 @@ function alive(key, now) {
   return null
 }
 
-/** Another PC asks (POST /api/sync/claim): try, renew, release. Its clock is never used. */
-export function peerClaim(body = {}, peer = {}) {
+/** Another PC asks (POST /api/sync/claim): try, renew, release, ask. Its clock is never used. */
+export function peerClaim(body = {}, peer = {}, db = null) {
   const now = (deps?.now || Date.now)()
   const { op, key, run_id } = body
+  if (op === 'ask') return askedAbout(body, db, now)
   const pc_id = String(peer.pc_id || body.pc_id || ''), pc_name = String(body.pc_name || peer.name || pc_id).slice(0, 60)
   if (!key || !pc_id) return { granted: false, why: 'no key' }
   if (op === 'release') {
@@ -93,6 +94,20 @@ export function peerClaim(body = {}, peer = {}) {
   if (op === 'renew' && l && l.pc_id === pc_id) { l.until = now + LEASE_MS; return { granted: true } }
   leases.set(key, { key, run_id: Number(run_id) || null, profile_id: body.profile_id ?? null, workflow_id: body.workflow_id || null, pc_id, pc_name, until: now + LEASE_MS, since: (l && !l.mine && l.since) || new Date(now).toISOString(), via: 'lan', mine: false })
   return { granted: true }
+}
+
+/**
+ * Another PC's sweep asks this one about a lease of its that ran out: still doing it (held),
+ * or what this PC's own row says now (ended: done / failed / … ; null: running here with no
+ * lease, i.e. this PC restarted mid-run).
+ */
+async function askedAbout({ key, run_id }, db, now) {
+  const l = leases.get(key)
+  if (l && l.mine && l.until > now && (!run_id || l.run_id === Number(run_id))) return { held: true }
+  if (run_id && (done.get(Number(run_id)) || 0) > now) return { held: false, ended: 'done' }
+  let status = null
+  try { status = db && run_id ? (await db('automation_queue').where({ id: Number(run_id) }).first('status'))?.status || null : null } catch {}
+  return { held: false, ended: status && status !== 'running' ? status : null }
 }
 
 /** Asks one PC on the office network: { granted } | { granted: false, holder } | { away: true }. */
@@ -277,9 +292,13 @@ export async function sweepGone(db, now = (deps?.now || Date.now)()) {
     // Only a PC that is really gone: its lease out for 30 s more, not on the network now, silent online
     // (about 105 s after it died: 60 s lease + 30 s + the 15 s look).
     if (now - l.until < GRACE_MS) continue
-    const st = E.node?.peerState?.get(l.pc_id)
-    if (st?.ok && !blockedPeer(l.pc_id) && now - (st.seen || st.at || 0) < GRACE_MS) { leases.delete(key); continue }   // it is there: its run ended, the release was lost
-    if (await onlineAlive(E, key, l.pc_id, now)) continue
+    // It is on the network: asked. Still doing it → its lease stays; its row ended → the copy brings
+    // that; neither (it restarted mid-run) → the run is failed here too, its copy gets it by the sync.
+    const pc = E.node ? (await E.node.others().catch(() => [])).find(p => p.pc_id === l.pc_id) : null
+    const said = pc && !blockedPeer(l.pc_id) ? await askPeer(E.node, pc, { op: 'ask', key, run_id: l.run_id }) : { away: true }
+    if (!said.away && said.held === true) { l.until = now + LEASE_MS; continue }
+    if (!said.away && said.ended) { leases.delete(key); continue }
+    if (said.away && await onlineAlive(E, key, l.pc_id, now)) continue
     leases.delete(key)
     if (!l.run_id) continue
     try {

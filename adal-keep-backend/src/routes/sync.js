@@ -117,7 +117,7 @@ export function createSyncRouter({ getNode, here, admitted = (req) => req.pcAcce
   })
 
   // Robots on every PC: another PC asks for a girl and site (runClaims.js).
-  router.post('/sync/claim', agencyPC, (req, res) => import('../services/runClaims.js').then(m => res.json(m.peerClaim(req.body, req.syncPeer))).catch(e => fail(res, e)))
+  router.post('/sync/claim', agencyPC, (req, res) => import('../services/runClaims.js').then(async m => res.json(await m.peerClaim(req.body, req.syncPeer, req.app.locals.db))).catch(e => fail(res, e)))
   router.get('/sync/hello', agencyPC, async (req, res) => { try { res.json(await getNode().hello()) } catch (e) { fail(res, e) } })
   router.post('/sync/pull', agencyPC, async (req, res) => {
     // Paced like the replica copy (replicaThrottle): one transfer at a time, waiting while this PC is busy.

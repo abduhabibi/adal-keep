@@ -78,6 +78,18 @@ export function demoData(now = Date.now()) {
         crashes: a.n === 3 ? [{ source: 'frontend', message: 'Minified React error #310', where: 'SettingsPage', count: 3, first: iso(now - 5 * 3600e3), last: iso(now - 30 * MIN), version: SHA.slice(0, 7) }] : [],
       } })
     }
+    // Each PC's own problems report (pcReport.js → Admin's Problems).
+    if (a.on) for (const p of pcs) keep_meta.push({ agency_id: p.uid, key: '/_tower/report', updated_at: iso(now - 2 * MIN), data: {
+      v: 1, at: iso(now - 2 * MIN), pc_name: p.name, pc_number: p.role === 'main' ? a.pc : null, role: p.role, version: SHA,
+      sys: { ram_free_mb: a.n === 3 ? 310 : 2900, ram_total_mb: 8192, disk_free_mb: a.n === 6 ? 2100 : 80000, cpu_busy: a.n === 3 ? 94 : 22, cores: a.n === 3 ? 2 : 8, node_mb: 240, uptime_min: 300 },
+      net: { mbps: a.n === 1 ? 0.6 : 8, rtt_ms: 120, ok: true },
+      errors: a.n === 2 ? [
+        { source: 'server', line: '[worker] Musaned failed for [name] (passport [passport]): timeout #ms', first: iso(now - 3 * 3600e3), last: iso(now - 10 * MIN), today: 7, yesterday: 0, total: 7 },
+        { source: 'robots', line: 'UnhandledPromiseRejection: page crashed (tab #)', first: iso(now - 3 * DAY), last: iso(now - 40 * MIN), today: 2, yesterday: 5, total: 30 },
+      ] : [],
+      runs_failed: a.n === 2 ? [{ workflow: 'Musaned contract', site: 'Musaned', outcome: 'failed', step: 'Upload for [name]', reason: 'no passport scan', at: iso(now - 50 * MIN), duration_s: 80 }] : [],
+      slow_steps: a.n === 2 ? [{ workflow: 'musaned_contract', step: 'Search [name]', max_s: 61, avg_s: 40, times: 4 }] : [],
+    } })
     if (a.n === 2 || a.n === 3) keep_meta.push({ agency_id: aid, key: '/_tower/tickets', updated_at: iso(now - 30 * MIN), data: { tickets: [
       { id: crypto.randomUUID(), at: iso(now - (a.n === 2 ? 25 : 90) * MIN), status: 'open', replies: [], text: a.n === 2 ? 'The Musaned robot stops at the contract page every time.' : 'How do I add a new employee?', who: 'Office staff', page: '/profiles', agency: a.name, pc_name: pcs[0].name, pc_number: a.pc, version: SHA, log: null, shot: null },
       ...(a.n === 2 ? [{ id: crypto.randomUUID(), at: iso(now - 2 * DAY), status: 'closed', replies: [{ id: 'r1', from: 'Adal support', text: 'Fixed in the new version.', at: iso(now - DAY) }], text: 'CV photo is blurry', who: 'Owner', page: '/cv', agency: a.name, pc_name: pcs[0].name, pc_number: a.pc, version: OLD }] : []),

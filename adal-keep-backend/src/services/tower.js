@@ -457,6 +457,8 @@ export function startTower(db, { installedVersion } = {}) {
   started = true
   if (installedVersion) versionOf = installedVersion
   hookCrashes()
+  // Every PC's own problems to the tower, every 5 minutes (pcReport.js; off: ADAL_PC_REPORTS=0).
+  import('./pcReport.js').then(r => r.startReports(db, { version: versionNow })).catch(e => console.warn('[pc report]', e.message))
   let flagAt = 0, beatAt = 0
   const loop = async () => {
     let wait = POLL_MS

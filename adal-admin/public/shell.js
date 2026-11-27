@@ -16,7 +16,7 @@ const NAV = [
   { key: 'overview', label: 'Overview', icon: 'i-home', k: 'o' },
   { key: 'work', label: 'Work', icon: 'i-tasks', k: 'w' },
   { key: 'agencies', label: 'Agencies', icon: 'i-building', k: 'a' },
-  { key: 'fleet', label: 'PCs / Fleet', icon: 'i-monitor', k: 'p', subs: [['fleet', 'Fleet'], ['health', 'Health']] },
+  { key: 'fleet', label: 'PCs / Fleet', icon: 'i-monitor', k: 'p', subs: [['fleet', 'Fleet'], ...(window.problemsView ? [['problems', 'Problems']] : []), ['health', 'Health']] },
   { key: 'robots', label: 'Robots', icon: 'i-robot', k: 'r' },
   { key: 'tickets', label: 'Tickets', icon: 'i-inbox', k: 't' },
   { g: 'Money' },
@@ -30,8 +30,8 @@ const NAV = [
 ]
 const ITEMS = NAV.filter(n => n.key)
 const groupOf = (t) => ITEMS.find(n => n.key === t || (n.subs || []).some(([k]) => k === t)) || ITEMS[0]
-const OWN = { overview: overviewView, robots: robotsView, releases: releasesView }
-const TITLE = { overview: 'Overview', robots: 'Robots', releases: 'Releases' }
+const OWN = { overview: overviewView, robots: robotsView, releases: releasesView, ...(window.problemsView ? { problems: () => window.problemsView() } : {}) }
+const TITLE = { overview: 'Overview', robots: 'Robots', releases: 'Releases', problems: 'Problems' }
 const LIGHTWORD = { green: 'All fine', amber: 'Look at it', red: 'Down' }
 const fmt = (n) => n == null ? '—' : Number(n).toLocaleString('en')
 const etb = (n) => n == null ? '—' : `${Number(n).toLocaleString('en')} ETB`

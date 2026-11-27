@@ -1227,6 +1227,8 @@ async function sbProxy(req, res, u) {
 
 // The control tower (Fleet tab): every PC's beat, signed commands, crash reports (tower.mjs).
 Object.assign(api, (await import('./tower.mjs')).towerApi({ rest, sb }))
+// Problems: every PC's own report (problems.mjs); when it fails, Admin opens without it.
+await import('./problems.mjs').then(m => Object.assign(api, m.problemsApi({ rest }))).catch(e => console.error('[problems] not working:', e.message))
 // Overview, search, one agency's page, Releases, the live stream (home.mjs: read-only).
 const HOME = (await import('./home.mjs')).homeApi({ api, rest, sb, url: URL_, key: KEY })
 Object.assign(api, HOME.routes)
@@ -1397,7 +1399,7 @@ http.createServer(async (req, res) => {
     if (u.pathname === '/api/image') return await image(res, u.searchParams.get('path'))
     if (u.pathname === '/api/live') return HOME.live(req, res)
     // The page's own script and styles (public/shell.js, shell.css): nothing else is served from public/.
-    if (/^\/shell\.(js|css)$/.test(u.pathname)) {
+    if (/^\/(shell\.(js|css)|problems\.js)$/.test(u.pathname)) {
       res.writeHead(200, { 'Content-Type': u.pathname.endsWith('.js') ? 'text/javascript; charset=utf-8' : 'text/css; charset=utf-8', 'Cache-Control': 'no-store' }).end(fs.readFileSync(path.join(HERE, 'public', u.pathname.slice(1))))
       return
     }

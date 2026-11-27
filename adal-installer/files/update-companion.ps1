@@ -3,7 +3,8 @@
 #
 #   powershell -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File update-companion.ps1 [-Package <folder>] [-Root <install folder>]
 #
-# The package folder: adal-companion.exe, AdalKeep.exe, SHA256SUMS (and this script).
+# The package folder: adal-companion.exe, AdalKeep.exe, SHA256SUMS (and this script); maybe adal-clip-N.exe (the crop's
+# watcher, put in <Root>\server\backend\bin, where the Companion starts it).
 #  - Only the two programs are replaced. The data (companion.conf, companion-id, main-pc.json, keys,
 #    the locked copy, the robot browser's profile) stays where it is, untouched.
 #  - The new Companion is started for the person signed in at this PC (a task in their session): over ssh
@@ -37,7 +38,9 @@ Say "Adal Companion in $Root, package $Package"
 $names = 'adal-companion.exe', 'AdalKeep.exe'
 $sums = @{}
 foreach ($line in Get-Content (Join-Path $Package 'SHA256SUMS')) { $f = $line -split '\s+'; if ($f.Count -ge 2) { $sums[$f[1].TrimStart('*')] = $f[0].ToLower() } }
-foreach ($n in $names) {
+# The crop's watcher, when the package has one (adal-clip-N.exe: each version its own name, the newest runs).
+$clips = @(Get-ChildItem -Path $Package -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^adal-clip(-\d+)?\.exe$' } | ForEach-Object { $_.Name })
+foreach ($n in $names + $clips) {
   $h = (Get-FileHash -Algorithm SHA256 (Join-Path $Package $n)).Hash.ToLower()
   if ($sums[$n] -ne $h) { Say "$n in the package is damaged ($h) - nothing changed"; exit 1 }
 }
@@ -92,6 +95,13 @@ try {
     Copy-Item (Join-Path $Package $n) $to
   }
   Say 'new programs in place'
+  # The watcher goes where the Companion looks for it (clipwatch.go: server\backend\bin). A name already there is
+  # the same version (maybe running): left as it is. Kept on a way back too: an older Companion never starts it.
+  if ($clips.Count) {
+    $bin = Join-Path $Root 'server\backend\bin'
+    New-Item -ItemType Directory -Path $bin -Force | Out-Null
+    foreach ($c in $clips) { $to = Join-Path $bin $c; if (-not (Test-Path $to)) { Copy-Item (Join-Path $Package $c) $to; Say "$c in $bin" } else { Say "$c already in $bin" } }
+  }
   Start-Companion
   if (Healthy) { Say 'the new Adal Companion is healthy'; exit 0 }
   Say 'the new Adal Companion is not healthy - going back to the old one'

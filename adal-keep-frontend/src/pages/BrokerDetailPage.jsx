@@ -1,5 +1,5 @@
 import BrokersAssignPanel from './BrokersAssignPanel'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import api from '../services/api'
@@ -10,6 +10,9 @@ import Button from '../components/shared/Button'
 import Input from '../components/shared/Input'
 import Modal from '../components/shared/Modal'
 import BrokerProfileList from '../components/BrokerProfileList'
+import { profilesList, lastProfiles } from '../lib/profilesCache'
+import { saved } from '../lib/deviceCache'
+import { fastSwitch, brokerSeen, keepBroker, keepBrokers, girlsOf } from '../lib/fastSwitch'
 
 /* BrokersAssignPanel: drop zone */
 export default function BrokerDetailPage() {
@@ -22,9 +25,35 @@ export default function BrokerDetailPage() {
   const [form, setForm] = useState({ name: '', contact1: '', address: '' })
   const [saving, setSaving] = useState(false)
 
+  const now = useRef(id)
+  now.current = id   // (a quick switch: an answer for the broker before is not shown)
   useEffect(() => { load() }, [id])
 
-  const load = async () => {
+  // At once from what this window has (lib/fastSwitch.js), then quietly the fresh broker and list.
+  const fill = (b) => { setBroker(b); setForm({ name: b.name || '', contact1: b.contact1 || '', address: b.address || '' }) }
+  const quick = async ({ fresh = false } = {}) => {
+    const mineNow = () => now.current === id
+    const all = lastProfiles()
+    const mine = all ? girlsOf(all, id) : null
+    let b = brokerSeen(id)
+    if (!b) { try { const list = await saved('/brokers'); keepBrokers(list); b = brokerSeen(id) } catch {} }
+    if (!b && mine?.[0]?.broker_name) b = { id: Number(id), name: mine[0].broker_name }
+    if (!mineNow()) return
+    const shown = !!(b && mine)
+    if (shown) { fill(b); setProfiles(mine); setLoading(false) } else setLoading(true)
+    try {
+      const [bRes, list] = await Promise.all([api.get(`/brokers/${id}`), profilesList({ fresh })])
+      keepBroker(bRes.data)
+      if (!mineNow()) return
+      fill(bRes.data)
+      setProfiles(girlsOf(list, id))
+    } catch {
+      if (!shown && mineNow()) { toast.error('መረጃ መጫን አልተቻለም'); navigate('/brokers') }
+    } finally { if (mineNow()) setLoading(false) }
+  }
+
+  const load = async (o) => {
+    if (fastSwitch()) return quick(o)
     setLoading(true)
     try {
       const [bRes, pRes] = await Promise.all([
@@ -54,7 +83,7 @@ export default function BrokerDetailPage() {
       await api.put(`/brokers/${id}`, form)
       toast.success('ተዘምኗል')
       setEditOpen(false)
-      load()
+      load({ fresh: true })
     } catch {
       toast.error('ማዘመን አልተቻለም')
     } finally {
@@ -83,14 +112,14 @@ export default function BrokerDetailPage() {
     try {
       await api.post('/brokers/unassign', { profileId })
       toast.success('ከደላላ ተነጥሏል')
-      if (typeof load === 'function') await load()
+      if (typeof load === 'function') await load({ fresh: true })
       else if (typeof loadBroker === 'function') await loadBroker()
       else window.location.reload()
     } catch (e) {
       try {
         await api.patch(`/profiles/${profileId}`, { broker_id: null })
         toast.success('ከደላላ ተነጥሏል')
-        if (typeof load === 'function') await load()
+        if (typeof load === 'function') await load({ fresh: true })
         else window.location.reload()
       } catch {
         toast.error('ማስወገድ አልተቻለም')
@@ -151,7 +180,7 @@ export default function BrokerDetailPage() {
         </form>
       </Modal>
     
-      <BrokersAssignPanel brokerId={Number(id)} onAssigned={() => load()} />
+      <BrokersAssignPanel brokerId={Number(id)} onAssigned={() => load({ fresh: true })} />
 </div>
   )
 }

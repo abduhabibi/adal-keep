@@ -6,7 +6,8 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import api from '../services/api'
-import { profilesList } from '../lib/profilesCache'
+import { profilesList, lastProfiles } from '../lib/profilesCache'
+import { fastSwitch } from '../lib/fastSwitch'
 import toast from 'react-hot-toast'
 
 const SHOWN = 60
@@ -18,10 +19,14 @@ export default function BrokersAssignPanel({ brokerId, onAssigned }) {
   const [busy, setBusy] = useState(0)
   const bid = Number(brokerId)
 
-  const load = async () => {
+  const free = (list) => list.filter(p => !p.broker_id).sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')))
+  const load = async ({ again = false } = {}) => {
     try {
-      const list = await profilesList({ fresh: true })
-      setAll(list.filter(p => !p.broker_id).sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || ''))))
+      // From one broker to the next: the list this window has, at once; the shared refresh behind it (lib/fastSwitch.js).
+      const fast = fastSwitch() && !again
+      if (fast && lastProfiles()) setAll(free(lastProfiles()))
+      const list = await profilesList({ fresh: !fast })
+      setAll(free(list))
     } catch {
       setAll([])
     }
@@ -47,7 +52,7 @@ export default function BrokersAssignPanel({ brokerId, onAssigned }) {
       if (typeof onAssigned === 'function') await onAssigned()
     } catch (e) {
       toast.error(e.response?.data?.error || 'መመደብ አልተቻለም')
-      await load()
+      await load({ again: true })
     } finally {
       setBusy(0)
     }

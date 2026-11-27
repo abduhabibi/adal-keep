@@ -8,6 +8,7 @@ import Spinner from '../components/shared/Spinner'
 import Input from '../components/shared/Input'
 import { profilesList } from '../lib/profilesCache'
 import { cachedGet } from '../lib/deviceCache'
+import { keepBrokers } from '../lib/fastSwitch'
 import Modal from '../components/shared/Modal'
 import Button from '../components/shared/Button'
 
@@ -48,9 +49,10 @@ export default function BrokersPage() {
     try {
       // What was kept on this device shows at once; the fresh lists replace it.
       const [brokersRes, profilesRes] = await Promise.all([
-        cachedGet('/brokers', { onSaved: (d) => { setBrokers(d || []); setLoading(false) } }),
+        cachedGet('/brokers', { onSaved: (d) => { keepBrokers(d); setBrokers(d || []); setLoading(false) } }),
         profilesList({ onSaved: (d) => setProfiles(d || []) })
       ])
+      keepBrokers(brokersRes)   // a broker's page opens with it at once (lib/fastSwitch.js)
       setBrokers(brokersRes || [])
       setProfiles(profilesRes || [])
     } catch (err) {

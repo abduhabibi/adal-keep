@@ -195,6 +195,7 @@ app.use('/api', tutorRouter)   // daily in-app tutor
 app.use('/api/system', systemUpdateRouter)
 app.use('/api/system', hardwareRouter)   // this PC's cores, RAM, 32/64-bit, network link
 app.use('/api/system', (await import('./src/routes/pcCheck.js')).default)   // Settings → This PC: the equipment check (off: ADAL_PC_CHECK=0)
+app.get('/api/app/fast-agent-switch', (req, res) => res.set('Cache-Control', 'no-store').json({ on: process.env.ADAL_FAST_AGENT_SWITCH !== '0' }))   // a broker's page from the list in memory (frontend BrokerDetailPage); off: ADAL_FAST_AGENT_SWITCH=0
 app.use('/api/system', aiKeysRouter)   // Settings → Photo refining keys (this PC only)
 app.use("/api/quick-links", quickLinksRouter)
 app.use("/api/auth", authRouter)

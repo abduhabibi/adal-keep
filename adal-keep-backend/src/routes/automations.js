@@ -132,6 +132,15 @@ router.get('/browsers', async (req, res) => {
   }
   catch (e) { res.status(500).json({ error: e.message }) }
 })
+// "Watch robots" (services/watchRobots.js): the robots' window on screen / back out of sight, on a person's click only.
+router.get('/automations/watch-robots', async (req, res) => {
+  try { res.set('Cache-Control', 'no-store').json(await (await import('../services/watchRobots.js')).watchState()) }
+  catch (e) { res.status(500).json({ error: e.message }) }
+})
+router.post('/automations/watch-robots', async (req, res) => {
+  try { res.json(await (await import('../services/watchRobots.js')).setWatch(!!req.body?.watch)) }
+  catch (e) { res.status(500).json({ error: e.message }) }
+})
 router.get('/companion/robot-browsers', async (req, res) => {
   const { liveDevices } = await import('../services/remoteBrowsers.js')
   res.json(liveDevices())

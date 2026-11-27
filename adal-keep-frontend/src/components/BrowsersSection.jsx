@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import api from '../services/api'
 import Icon from './shared/Icon'
 import { lazyPart } from '../lib/pageCode'
+import toast from 'react-hot-toast'
 
 const BrowserView = lazyPart(() => import('./BrowserView'))
 
@@ -23,6 +24,21 @@ export default function BrowsersSection({ collapsed = false }) {
     return () => { alive = false; clearInterval(t) }
   }, [])
   const need = list.filter(b => b.needs_you).length
+  // "Watch robots" (backend services/watchRobots.js): the robots' own window on screen, a second click
+  // sends it back. Only on this click; the button is not there when switched off (ADAL_WATCH_ROBOTS=0).
+  const [watch, setWatch] = useState(null)
+  const [busy, setBusy] = useState(false)
+  useEffect(() => { api.get('/automations/watch-robots').then(r => setWatch(r.data)).catch(() => setWatch(null)) }, [])
+  const toggle = () => {
+    if (busy) return
+    setBusy(true)
+    api.post('/automations/watch-robots', { watch: !watch?.watching }).then(r => {
+      setWatch(r.data)
+      if (r.data?.why) toast(r.data.why)
+      else if (r.data?.watching) toast.success(r.data.windows ? 'The robots\' window is on your screen. Click again to put it away.' : 'The robots\' window is already on your screen.')
+      else toast.success('The robots\' window is out of sight again. It keeps working.')
+    }).catch(e => toast.error(e?.response?.data?.robots === 'off' ? 'Adal Robots is not running on this PC.' : 'Could not move the robots\' window.')).finally(() => setBusy(false))
+  }
   return (
     <div className={`pt-3 mt-3 border-t ak-side-sep ${collapsed ? 'px-0' : ''}`}>
       <div className={`flex items-center gap-2 px-3 pb-1 text-[11px] font-bold uppercase tracking-wide opacity-70 ${collapsed ? 'justify-center px-0' : ''}`} title="Browsers">
@@ -30,6 +46,13 @@ export default function BrowsersSection({ collapsed = false }) {
         {!collapsed && <span className="truncate">Browsers</span>}
         {need > 0 && <span className="ml-auto rounded-full bg-amber-500 px-1.5 text-[10px] text-white">{need}</span>}
       </div>
+      {watch?.on && watch.can && (
+        <button type="button" onClick={toggle} disabled={busy} title={watch.watching ? 'Put the robots\' window away' : 'Show the robots\' window on this screen'}
+          className={`ak-side-link w-full text-left ${collapsed ? 'justify-center px-0' : ''} ${watch.watching ? 'font-semibold' : ''}`}>
+          <Icon name="eye" size={14} />
+          {!collapsed && <span className="truncate text-[13px]">{watch.watching ? 'Stop watching robots' : 'Watch robots'}</span>}
+        </button>
+      )}
       {!list.length && !collapsed && <p className="px-3 py-1 text-[11px] opacity-60">No robot is working now</p>}
       <ul className="space-y-0.5">
         {list.map(b => (

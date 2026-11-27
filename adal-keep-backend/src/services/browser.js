@@ -28,6 +28,7 @@
 import { robotsInApp } from './robotsInApp.js'
 import fs from 'fs'
 import { headlessArgs, noWindows } from './noWindows.js'
+import { watchingNow, watchedWindow } from './watchRobots.js'
 import path from 'path'
 import { spawn, execFile, execFileSync } from 'child_process'
 import { fileURLToPath } from 'url'
@@ -155,6 +156,7 @@ export async function raiseForPerson(page) {
 }
 const DEBUG_PORT = Number(process.env.ADAL_CDP_PORT) || 9222   // (Adal Robots may use another: robots/adal-robots.mjs)
 const OFF = { left: -32000, top: -32000, width: 1366, height: 900 }
+export const OFF_BOUNDS = OFF   // (services/watchRobots.js sends the window back here)
 
 /**
  * Start Brave fresh: one window, no tabs brought back from last time. Brave
@@ -277,7 +279,9 @@ export async function outOfSight(page) {
   // was then taken for one in sight and a run opened a new one.
   if (noWindows()) return true
   try {
-    const { bounds } = await (await windowOf(page)).cdp.send('Browser.getWindowForTarget')
+    const { windowId, bounds } = await (await windowOf(page)).cdp.send('Browser.getWindowForTarget')
+    // Watched by a person (services/watchRobots.js): still the robots' window, its tabs reused as before.
+    if (watchedWindow(windowId)) return true
     return bounds.windowState === 'minimized' || bounds.left < -10000
   } catch { return true }
 }
@@ -442,6 +446,7 @@ const place = async ({ cdp, windowId }, bounds) => {
  */
 async function hide(page) {
   if (noWindows()) return   // headless on Linux: there is no window to hide
+  if (watchingNow()) return   // a person watches the robots' window (services/watchRobots.js)
   const w = await windowOf(page)
   if (process.platform !== 'linux') return place(w, OFF)
   // A new window ignores this until the desktop has finished showing it.

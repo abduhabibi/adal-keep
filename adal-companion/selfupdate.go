@@ -1139,6 +1139,7 @@ func (u *updater) fromCloud() error {
 // handler: what this program answers on :47810 (this PC's own window; no update pieces since 2026-11-23).
 func (u *updater) handler() *http.ServeMux {
 	mux := http.NewServeMux()
+	u.peerRoutes(mux) // a newer Companion hands its signed release to Main (peerserve.go)
 	// "Back up now" in this PC's own Adal Keep window while the main PC is off
 	// (asked on 2026-11-19): the locked copy kept here goes to the agency's
 	// Telegram at once. Only from this PC itself, never from the network.

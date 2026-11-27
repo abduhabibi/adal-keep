@@ -22,6 +22,7 @@ import { pasteText, pasteAndCommit } from './domPaste.js'
 import { pasteOn, setAll, waitSign, waitOn, lastKey, noPanel, FIRST_OPTION_IS, LABEL_IN_PAGE, INPUT_IN_PAGE } from './pasteAll.js'
 import { isPeerUrl, expectFile, disarmFile, signInTurn, borrowSignIn, toEnglish, typeCodeInto, pressCodeButton, codeBoxUp } from './tabManager.js'
 import { newRunTab } from './browser.js'
+import { settle, pollFor } from './fastSteps.js'
 import { instantOn, screenOf, waitScreen, stillThere } from './instantScreen.js'
 import { musanedMissing, personalPhotoFile } from './musanedPreflight.js'
 
@@ -68,6 +69,11 @@ function log(ctx, msg, level = 'info') {
   if (ctx.onLog) ctx.onLog(level, msg)
 }
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
+import { fast as fastOn } from './fastSteps.js'
+/** Musaned's page after a load / sign-in click is ready: Keycloak's sign-in, or its own picker / dashboard. */
+const musanedSettled = async (page) => page.url().includes(KEYCLOAK_HOST) || (async () => { const s = await snapshotState(page); return !!(s?.hasAgencyPicker || s?.hasDashboardNav || s?.hasGoToDashboard) })()
+const hrPoolLinkThere = (page) => page.evaluate(() => [...document.querySelectorAll('a, button, [role="button"], [role="menuitem"]')].some(e => /\/hr-pool/i.test(e.getAttribute('href') || '') || /^hr\s*pool$/i.test((e.textContent || '').trim())))
+const addCandidateThere = (page) => page.evaluate(() => [...document.querySelectorAll('button, a, [role="button"]')].some(el => /add\s+new\s+candidate/i.test((el.textContent || '').trim())))
 function applyGlobalTimeouts(page, ctx) {
   try {
     page.setDefaultTimeout(DEFAULT_TIMEOUT_MS)
@@ -415,7 +421,7 @@ export async function stepOpenMusaned(page, ctx) {
       try { await openPage(page, ctx, MUSANED_ROOT) }
       catch (e) { throw new Error(unreachable(e)) }
       page.__adalRootAt = Date.now()
-      await sleep(1500)
+      await settle(1500, () => musanedSettled(page))   // (was a fixed 1.5 s)
       const st = await snapshotState(page)
       if (!page.url().includes(KEYCLOAK_HOST) && (st?.hasAgencyPicker || st?.hasDashboardNav || st?.hasGoToDashboard)) return { ok: true, finalUrl: page.url(), onKeycloak: false }
     } else
@@ -434,7 +440,7 @@ export async function stepOpenMusaned(page, ctx) {
     try { await openPage(page, ctx, MUSANED_ROOT) }
     catch (e) { throw new Error(unreachable(e)) }
     page.__adalRootAt = Date.now()
-    await sleep(1500)
+    await settle(1500, () => musanedSettled(page))   // (was a fixed 1.5 s)
     const preState = await snapshotState(page)
     if (preState?.hasAgencyPicker || preState?.hasDashboardNav || preState?.hasGoToDashboard) {
       return { ok: true, finalUrl: page.url(), onKeycloak: false }
@@ -453,15 +459,15 @@ export async function stepOpenMusaned(page, ctx) {
       try { target.scrollIntoView({ block: 'center' }); target.click(); return true } catch { return false }
     })
     if (clickedLogin) break
-    await sleep(500)
+    await sleep(pollFor(500))
   }
-  if (clickedLogin) await sleep(1500)
+  if (clickedLogin) await settle(1500, () => musanedSettled(page))   // (was a fixed 1.5 s; the loop below decides)
   const redirectDeadline = Date.now() + 15000
   while (Date.now() < redirectDeadline) {
     if (page.url().includes(KEYCLOAK_HOST)) break
     const s = await snapshotState(page)
     if (s?.hasAgencyPicker || s?.hasDashboardNav || s?.hasGoToDashboard) break
-    await sleep(500)
+    await sleep(pollFor(500))
   }
   const finalUrl = page.url()
   if (!finalUrl || finalUrl === 'about:blank') throw new Error('Tab landed on about:blank')
@@ -605,10 +611,10 @@ export async function stepClickGoToDashboard(page, ctx) {
     try { target.scrollIntoView({ block: 'center' }); target.click(); return true } catch { return false }
   })
   if (!clicked) {
-    try { await openPage(page, ctx, DASHBOARD_URL, NAV_TIMEOUT_MS); await sleep(2000); return { ok: true, via: 'direct-nav' } }
+    try { await openPage(page, ctx, DASHBOARD_URL, NAV_TIMEOUT_MS); await settle(2000, () => hrPoolLinkThere(page)); return { ok: true, via: 'direct-nav' } }   // (was a fixed 2 s; the next step looks for the link itself)
     catch (e) { return { ok: false, error: e.message } }
   }
-  await sleep(2500)
+  await settle(2500, () => hrPoolLinkThere(page))   // (was a fixed 2.5 s; the next step looks for the link itself)
   return { ok: true }
 }
 
@@ -624,7 +630,7 @@ export async function stepClickHrPool(page, ctx) {
       if (byText) { const r = byText.getBoundingClientRect(); if (r.width > 5 && r.height > 5) { try { byText.scrollIntoView({ block: 'center' }); byText.click(); return true } catch {} } }
       return false
     })
-    if (!clicked) await sleep(500)
+    if (!clicked) await sleep(pollFor(500))
   }
   if (!clicked) {
     // Its menu is folded away: the page itself still opens.
@@ -638,8 +644,8 @@ export async function stepClickHrPool(page, ctx) {
       const url = location.href, body = document.body?.innerText || ''
       return /\/hr-pool/i.test(url) || (/candidates/i.test(body) && /add\s+new\s+candidate/i.test(body))
     })
-    if (ok) { await sleep(1000); return { ok: true } }
-    await sleep(400)
+    if (ok) { await settle(1000, () => addCandidateThere(page)); return { ok: true } }   // (was a fixed 1 s; the next step looks for the button itself)
+    await sleep(pollFor(400))
   }
   return { ok: true }
 }
@@ -663,10 +669,11 @@ export async function stepClickAddNewCandidate(page, ctx) {
       if (r.width < 5 || r.height < 5) return false
       try { target.scrollIntoView({ block: 'center' }); target.click(); return true } catch { return false }
     })
-    if (!clicked) await sleep(500)
+    if (!clicked) await sleep(pollFor(500))
   }
   if (!clicked) throw new Error('ADD NEW CANDIDATE not found')
-  await sleep(1500)
+  // (was a fixed 1.5 s) The pre-check that follows needs the ID Number box: ready when it shows.
+  await settle(1500, () => page.evaluate(() => [...document.querySelectorAll('input')].some(el => /id\s*number/i.test(el.placeholder || '') && el.offsetParent !== null)))
   return { ok: true }
 }
 
@@ -858,18 +865,25 @@ async function findInOurList(page, ctx, passport) {
   if (!passport) return false
   try {
     log(ctx, `🔎 looking for passport ${passport} in our HR Pool list`)
-    await page.goto('https://tawtheeq.musaned.com.sa/hr-pool', { waitUntil: 'networkidle2', timeout: 60000 }).catch(() => {})
+    // Fast: the page is ready when its filter shows (the line below waits for it), not when the whole site is quiet (Musaned keeps requests open: 25 s).
+    await page.goto('https://tawtheeq.musaned.com.sa/hr-pool', { waitUntil: fastOn() ? 'domcontentloaded' : 'networkidle2', timeout: 60000 }).catch(() => {})
     await page.waitForFunction(() => [...document.querySelectorAll('app-filter-search')].some(f => /Passport Number/i.test(f.textContent || '')), { timeout: 30000 })
     const filter = (await page.evaluateHandle(() => [...document.querySelectorAll('app-filter-search')].find(f => /Passport Number/i.test(f.textContent || '')))).asElement()
     await filter.evaluate(f => f.querySelector('button.app-filter-header, .app-filter-header')?.click())
-    await sleep(700)
+    await settle(700, () => filter.evaluate(f => !!f.querySelector('textarea, input')))   // (was a fixed 0.7 s)
     const input = await filter.$('textarea, input')
     if (!input) return false
     await input.evaluate(i => { i.focus(); i.value = '' })
     await lastKey(page, input, passport, { delay: 40 })
     await input.press('Enter')
-    await page.waitForNetworkIdle({ idleTime: 800, timeout: 20000 }).catch(() => {})
-    await sleep(1200)
+    // Fast: her row showing is the answer (found); nothing showing yet falls back to the old waits (quiet network + 1.2 s) before "not found".
+    const rowOf = () => page.evaluate((pp) => [...document.querySelectorAll('button, a')]
+      .filter(b => /^\s*VIEW\s*$/i.test(b.innerText || ''))
+      .some(b => { let c = b; for (let i = 0; i < 8 && c && !/PASSPORT NUMBER/i.test(c.innerText || ''); i++) c = c.parentElement; return !!c && (c.innerText || '').toUpperCase().includes(pp) }), passport)
+    // Her row showing ends the wait at once; the quiet network (the old wait) ends it as before when it never shows — "not found" costs what it did.
+    const idle = page.waitForNetworkIdle({ idleTime: 800, timeout: 20000 }).then(() => 'idle', () => 'idle')
+    const first = fastOn() ? await Promise.race([settle(20000, rowOf, { poll: 200 }).then(ok => (ok ? 'row' : 'idle')), idle]) : (await idle)
+    if (first !== 'row') await sleep(1200)
     return await page.evaluate((pp) => [...document.querySelectorAll('button, a')]
       .filter(b => /^\s*VIEW\s*$/i.test(b.innerText || ''))
       .some(b => { let c = b; for (let i = 0; i < 8 && c && !/PASSPORT NUMBER/i.test(c.innerText || ''); i++) c = c.parentElement; return !!c && (c.innerText || '').toUpperCase().includes(pp) }), passport)
@@ -3006,3 +3020,4 @@ export { waitForPersonCaptcha, passOtp, leaveMusaned, checkAccount, signedInUser
 
 /** For the mock-form test (tests/pasteAll.test.js): the form's own helpers. */
 export const _form = { typeAndCommitDropdown, fillSkillsByTyping, setFieldByLabel, enterInField, clickRadioByLabel, fillDateByLabel, readFieldValues, waitForDashboard, cardToDashboard }
+export { findInOurList as _findInOurList }   // (the fast-steps test)

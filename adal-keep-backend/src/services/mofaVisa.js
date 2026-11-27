@@ -37,6 +37,7 @@ export const VISA_STAGES = {
 }
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
+import { settle, pollUntil } from './fastSteps.js'
 const cancelled = (ctx) => typeof ctx?.isCancelled === 'function' && ctx.isCancelled()
 
 function log(ctx, msg, level = 'info') {
@@ -547,7 +548,7 @@ async function signIn(page, ctx) {
         sentAt = Date.now()
         if (!(await pressLogin(page))) log(ctx, 'the Login button was not found — press Login', 'warn')
         // Still on the same form a few seconds later: Enter in the captcha box.
-        await sleep(5000)
+        await settle(5000, async () => !(await onLoginForm()))   // (was a fixed 5 s: gone from the login form = signed in or on its way)
         const digits = String(text).replace(/[^0-9]/g, '')
         if (await onLoginForm() && await page.evaluate((t) => document.querySelector('[data-adal-captcha]')?.value === t, digits).catch(() => false)) {
           log(ctx, 'Login did not go — pressing Enter in the captcha box', 'warn')
@@ -649,14 +650,14 @@ async function documentAndOccupation(page, ctx, v, left) {
   }
   if (await page.$('#ddlClassifyOccupations')) await pickClass()
   // The visa's own occupations come back after a moment.
-  for (let i = 0; i < 24 && !(await options()).length; i++) await sleep(500)
+  await pollUntil(async () => (await options()).length, 12000, 500)   // (was 24 x 0.5 s polls)
   let got = await choose()
   if (!got) {
     const cls = await page.$$eval('#ddlClassifyOccupations option', os => (os.find(o => /building and housekeep/i.test(o.text)) || os.find(o => /housekeep|domestic/i.test(o.text)) || {}).value || '').catch(() => '')
     if (cls) {
       await page.evaluate((val) => { const s = document.getElementById('ddlClassifyOccupations'); if (window.jQuery) window.jQuery(s).val(val).trigger('change'); else { s.value = val; s.dispatchEvent(new Event('change', { bubbles: true })) } }, cls)
       log(ctx, '✓ Classify Occupations: Building and housekeeping')
-      for (let i = 0; i < 24 && !(await options()).length; i++) await sleep(500)
+      await pollUntil(async () => (await options()).length, 12000, 500)
       got = await choose()
     }
   }

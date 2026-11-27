@@ -41,6 +41,7 @@ const START = 'https://agents.tasheer.com/AgentTasheer/'
 const LOGIN_WAIT_MS = 30 * 60 * 1000
 const PICK_WAIT_MS = 60 * 60 * 1000
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
+import { settle, pollUntil } from './fastSteps.js'
 const cancelled = (ctx) => typeof ctx?.isCancelled === 'function' && ctx.isCancelled()
 const stop = (ctx) => { if (cancelled(ctx)) { const e = new Error('Cancelled by user'); e.cancelled = true; throw e } }
 function log(ctx, msg, level = 'info') {
@@ -939,10 +940,10 @@ export async function uploadAndSave(page, frame, people, settings, ctx, secs = (
     // 3. Upload Sheet, and the site's answer.
     if (option1) {
       let b = { found: false }
-      for (let i = 0; i < 10 && !(b = await markUploadButton(frame)).found; i++) await sleep(1000)
+      await pollUntil(async () => (b = await markUploadButton(frame)).found, 10000, 1000)   // (10 x 1 s polls before)
       if (!b.found) { option1 = false; why1 = 'the Upload Sheet button was not found' }
       else {
-        for (let i = 0; i < 10 && b.disabled; i++) { await sleep(1000); b = await markUploadButton(frame) }
+        if (b.disabled) await pollUntil(async () => { b = await markUploadButton(frame); return !b.disabled }, 10000, 1000)
         const press = async (real) => {
           const h = await frame.$('[data-adal-upload]')
           if (!h) return false
@@ -989,7 +990,7 @@ export async function uploadAndSave(page, frame, people, settings, ctx, secs = (
         const r = tasheerRow(p, settings)
         return { ...r, gender: r.gender, nationality: r.nationality }
       }))
-      await sleep(1500)
+      await settle(1500, async () => (await uploadState(frame, passports)).found.length >= people.length)   // (was a fixed 1.5 s after the grid was filled)
       s = await uploadState(frame, passports)
       if (!g.ok || s.found.length < people.length) {
         return await pause('Tasheer — the applicants could not be put in',
@@ -1001,7 +1002,8 @@ export async function uploadAndSave(page, frame, people, settings, ctx, secs = (
     // 5. The consent box, then Save (enabled once the rows are in).
     if (await tickConsent(frame)) log(ctx, '✓ consent box ticked')
     else log(ctx, 'the consent box was not found', 'warn')
-    for (let i = 0; i < 15; i++) { s = await uploadState(frame, passports); if (s.saveOn) break; await sleep(1000) }
+    await pollUntil(async () => { s = await uploadState(frame, passports); return s.saveOn }, 15000, 1000)   // (Save is only waited for, never pressed here)
+    if (!s) s = await uploadState(frame, passports)
     if (s.grid && s.found.length < people.length) {
       log(ctx, `✗ only ${s.found.length} of ${people.length} applicants are in Tasheer's grid — Save not pressed`, 'warn')
       return await pause('Tasheer — look the applicants over',

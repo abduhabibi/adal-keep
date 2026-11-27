@@ -23,6 +23,7 @@ import sharp from 'sharp'
 import path from 'path'
 import { withLivingTown } from './livingTown.js'
 import { contractsMayCreate } from './passportOnly.js'
+import { fast as fastOn, settle } from './fastSteps.js'
 import crypto from 'crypto'
 import { fileURLToPath } from 'url'
 import { getBrowser, openBrowserIfAny } from './browser.js'
@@ -85,11 +86,15 @@ async function signedIn(page) {
   return onList()
 }
 
+/** Fast: after a contract page loads, wait for what decides the next step — the contract's own number on the page, or Musaned's sign-in. */
+const contractOrSignIn = (page, n) => page.waitForFunction((num) => /accounts\.wahid\.sa/.test(location.host) || (!!num && (document.body?.innerText || '').includes(num)) || !num, { timeout: 30000 }, n || '').catch(() => {})
+
 /** Search one passport on the list page. Returns the cards' text (0 cards = not chosen). */
 async function search(page, passport, url = LIST_URL) {
-  await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 })
+  // Fast: the page is read when its filter shows (waited for below), not when the whole site is quiet (Musaned keeps requests open).
+  await page.goto(url, { waitUntil: fastOn() ? 'domcontentloaded' : 'networkidle2', timeout: 60000 })
   if (!(await signedIn(page))) return { signedOut: true }
-  await sleep(1500)
+  if (!fastOn()) await sleep(1500)
   // "Passport Number" filter (an <app-filter-search>): its header button
   // opens it; its own input takes the passport; Enter applies it.
   await page.waitForFunction(() => [...document.querySelectorAll('app-filter-search')].some(f => /Passport Number/i.test(f.textContent || '')), { timeout: 30000 }).catch(() => {})
@@ -97,7 +102,7 @@ async function search(page, passport, url = LIST_URL) {
     [...document.querySelectorAll('app-filter-search')].find(f => /Passport Number/i.test(f.textContent || '')))
   if (!filter.asElement()) throw new Error('Musaned: the "Passport Number" filter was not found')
   await filter.asElement().evaluate(f => f.querySelector('button.app-filter-header, .app-filter-header')?.click())
-  await sleep(700)
+  await settle(700, () => filter.asElement().evaluate(f => !!f.querySelector('textarea, input')))   // (was a fixed 0.7 s)
   const input = await filter.asElement().$('textarea, input') // Musaned uses a <textarea>
   if (!input) throw new Error('Musaned: the passport search box did not open')
   await input.evaluate(i => { i.focus(); i.value = '' })
@@ -276,7 +281,8 @@ export async function scanContracts(db, { auto = false, remote = null, limitMs =
       if (contractCheck.cancel) break
       try {
         await sleep(BETWEEN_MS / 2)
-        await page.goto(c.url, { waitUntil: 'networkidle2', timeout: 60000 })
+        await page.goto(c.url, { waitUntil: fastOn() ? 'domcontentloaded' : 'networkidle2', timeout: 60000 })
+        if (fastOn()) await contractOrSignIn(page, c.contract_number)
         if (!(await signedIn(page))) break
         await page.waitForFunction((n) => (document.body.innerText || '').includes(n), { timeout: 20000 }, c.contract_number).catch(() => {})
         const d = await openDetails(page, c.contract_number)
@@ -691,7 +697,8 @@ async function checkOne(db, browser, page, p) {
 
 /** A request of the list (a card on Employment Requests or Pending) → its contract page, read and saved. */
 async function requestDetails(db, browser, page, p, c) {
-  await page.goto(c.url, { waitUntil: 'networkidle2', timeout: 60000 })
+  await page.goto(c.url, { waitUntil: fastOn() ? 'domcontentloaded' : 'networkidle2', timeout: 60000 })
+  if (fastOn()) await contractOrSignIn(page, c.contract_number)
   if (!(await signedIn(page))) return { state: 'signed-out' }
   if (c.contract_number) await page.waitForFunction((n) => (document.body.innerText || '').includes(n), { timeout: 20000 }, c.contract_number).catch(() => {})
   const d = await openDetails(page, c.contract_number)

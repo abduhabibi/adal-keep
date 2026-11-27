@@ -25,6 +25,7 @@ const DRAFT_URL = 'https://agency.niscofetap.com/certificate/draft'
 const LOGIN_WAIT_MS = 30 * 60 * 1000
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
+import { pollFor } from './fastSteps.js'
 const cancelled = (ctx) => typeof ctx?.isCancelled === 'function' && ctx.isCancelled()
 
 function log(ctx, msg, level = 'info') {
@@ -131,7 +132,7 @@ async function signIn(page, ctx) {
     let asked = !f.ok
     while (Date.now() - t0 < LOGIN_WAIT_MS) {
       if (cancelled(ctx)) { const e = new Error('Cancelled by user'); e.cancelled = true; throw e }
-      await sleep(2000)
+      await sleep(pollFor(2000))   // (a person signing in: noticed in 0.4 s, not 2 s)
       if (!(await hasPassword(page))) break
       if (!asked && Date.now() - t0 > 15000) {
         asked = true

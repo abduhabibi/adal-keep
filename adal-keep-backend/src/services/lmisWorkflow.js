@@ -90,6 +90,7 @@ export function log(ctx, msg, level = 'info') {
 }
 
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
+import { pollFor } from './fastSteps.js'
 
 export async function waitForAnyText(page, needles, timeoutMs = DEFAULT_TIMEOUT) {
   const deadline = Date.now() + timeoutMs
@@ -761,7 +762,7 @@ export async function stepDirectNavigate(page, ctx) {
       continue
     }
 
-    await sleep(1000)
+    await sleep(pollFor(1000))   // (the police page showing is noticed in 0.3 s, not up to 1 s later)
   }
 
   if (!ready) {

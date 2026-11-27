@@ -174,6 +174,8 @@ export function matchCard(card, profiles) {
 const cardIsNew = (p, c) => (!p.chosen_at && !/CANCEL|REJECT/i.test(c.stage || '')) ||
   (c.stage && (p.musaned_stage || '') !== c.stage) || (c.contract_number && p.contract_number !== c.contract_number)
 
+export const refindOn = (env = process.env) => env.ADAL_CONTRACTS_REFIND !== '0'
+
 // remote: Musaned is read in another PC's tab (services/selectionCheck.js), this PC saves.
 // limitMs: the time limit (Check now: 10 minutes). by: the PC that reads Musaned.
 export async function scanContracts(db, { auto = false, remote = null, limitMs = 0, by = '' } = {}) {
@@ -201,7 +203,22 @@ export async function scanContracts(db, { auto = false, remote = null, limitMs =
     await setupTab(page, { runId: 'musaned-contracts' })
     page.__adalAllowImages = true
     // Musaned's own list data first (no passport searched, every detail at once).
-    const viaApi = await scanListByApi(db, page, { log: (m) => console.log('[contracts] ' + m) }).catch(e => ({ ok: false, why: e.message, cancelled: e.cancelled, gone: e.pageGone }))
+    const readList = () => scanListByApi(db, page, { log: (m) => console.log('[contracts] ' + m) }).catch(e => ({ ok: false, why: e.message, cancelled: e.cancelled, gone: e.pageGone }))
+    let viaApi = await readList()
+    // Its tab replaced while read ("detached Frame"): the Musaned tab open now, once (never a new tab). Off: ADAL_CONTRACTS_REFIND=0.
+    if (!viaApi.cancelled && !contractCheck.cancel && (viaApi.gone || pageGone(page)) && refindOn()) {
+      const again = await borrowOpenTab(browser, 'musaned_check_chosen', await activeRunIds(db)).catch(() => null)
+      if (again && again !== page && !pageGone(again)) {
+        console.log(`[contracts] its Musaned tab was replaced while read — read again in the Musaned tab open now`)
+        const old = page
+        page = again
+        page.__adalGiveWay = () => cancelCheck('A robot run needs the Musaned page — the check goes on at its next time')
+        await doneWithTab(old).catch(() => {})
+        await setupTab(page, { runId: 'musaned-contracts' })
+        page.__adalAllowImages = true
+        viaApi = await readList()
+      } else if (again && again !== page) await doneWithTab(again).catch(() => {})
+    }
     if (viaApi.cancelled || contractCheck.cancel) return { cancelled: true, why: contractCheck.cancel || viaApi.why, results: contractCheck.results }
     if (viaApi.gone || pageGone(page)) { console.warn(`[contracts] ${viaApi.why || `Musaned ${pageGone(page)}`} — not read again from its pages`); return { checked: 0, error: viaApi.why || pageGone(page), results: contractCheck.results } }
     if (viaApi.ok) {

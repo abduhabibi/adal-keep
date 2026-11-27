@@ -954,6 +954,18 @@ export async function workingLanes(db, mine = [], now = Date.now()) {
   return new Set(rows.map(laneOf).filter(Boolean))
 }
 
+// The columns of a run in line, its log cut to its start (where "Auto-discovered by scanner" stands): the polls look at
+// up to 50 runs every few seconds (lightLoops above). → [cols] for .select(), or null (off / not known: '*').
+// (The table's columns are read each time: a small PRAGMA, and a migration may add one.)
+export async function lightJobColumns(db) {
+  if (!lightLoops()) return null
+  try {
+    const all = Object.keys(await db('automation_queue').columnInfo())
+    if (!all.includes('log')) return null
+    return [...all.filter(c => c !== 'log').map(c => `automation_queue.${c}`), db.raw('substr(automation_queue.log, 1, 600) as log')]
+  } catch { return null }
+}
+
 export async function claimNextJob(db, exclude = [], lanes = new Set(), { wait = null } = {}) {
   if (isAppLocked()) return null // trial over and not unlocked: no runs start
   if (towerHeld()) return null   // Adal support held the robots on this PC (Admin → Fleet → Suspend)
@@ -966,8 +978,10 @@ export async function claimNextJob(db, exclude = [], lanes = new Set(), { wait =
     if (_ownSlot !== null) q.whereRaw('id >= ? AND (id % 1000) = ?', [1e15, _ownSlot])
     // The highest priority first (a person moved it up, Robot history → Waiting), then the oldest.
     if (await queueHasPriority(db)) q.orderBy('priority', 'desc')
+    const light = await lightJobColumns(db)
+    if (light) q.select(light)
     const rows = await q.orderBy('id', 'asc').limit(lanes.size ? 50 : 1)
-    const row = rows.find(r => !lanes.has(laneOf(r)))
+    let row = rows.find(r => !lanes.has(laneOf(r)))
     if (!row) return null
     // A run only the scanner asked for, the robot browser closed: it waits in line, it is not started and put back
     // (2026-11-25, Main: two such runs "started — 1/1 working" in the same second, again and again).
@@ -977,7 +991,10 @@ export async function claimNextJob(db, exclude = [], lanes = new Set(), { wait =
       .where('id', row.id)
       .andWhere('status', 'pending')
       .update({ status: 'running', started_at: now, updated_at: now })
-    if (updated === 1) return { ...row, status: 'running' }
+    if (updated === 1) {
+      if (light) row = (await db('automation_queue').where('id', row.id).first()) || row   // the whole run, its log too
+      return { ...row, status: 'running' }
+    }
   }
   return null
 }
@@ -1267,10 +1284,16 @@ export async function runAgencyManager(db) {
   }
 }
 
+// (2026-11-27, Main: "select id, profile_id, workflow_id, log … where status = ? and workflow_id = ?" 8.9 s, and even
+// "select 1" waited 1-1.3 s: Adal Robots' own thread was full.) The loops every few seconds read no run's whole log
+// (each a long text, made into a string on the main thread every 3 s); the log is read only for a run that changes.
+// Off: ADAL_LIGHT_LOOPS=0.
+export const lightLoops = (env = process.env) => env.ADAL_LIGHT_LOOPS !== '0'
+
 /** A person pressed Save in the live view and Musaned said SAVED: Musaned is done. */
 export async function closeSavedRuns(db) {
   const rows = await db('automation_queue').where({ status: 'paused', workflow_id: 'musaned_add_candidate', pause_reason: 'awaiting-human-save' })
-    .where('updated_at', '>', new Date(Date.now() - 48 * 3600_000).toISOString()).select('id', 'profile_id', 'workflow_id', 'log')
+    .where('updated_at', '>', new Date(Date.now() - 48 * 3600_000).toISOString()).select(lightLoops() ? ['id', 'profile_id', 'workflow_id'] : ['id', 'profile_id', 'workflow_id', 'log'])
   if (!rows.length) return
   const browser = await openBrowserIfAny()
   if (!browser) return
@@ -1281,7 +1304,7 @@ export async function closeSavedRuns(db) {
     if (!page || !(await savedOnPage(page))) continue
     const now = new Date().toISOString()
     let log = []
-    try { log = JSON.parse(r.log || '[]') } catch {}
+    try { log = JSON.parse((lightLoops() ? (await db('automation_queue').where('id', r.id).first('log'))?.log : r.log) || '[]') } catch {}
     log.push({ ts: Date.now(), level: 'info', msg: '✅ Musaned said SAVED — done' })
     await db('automation_queue').where('id', r.id).where('status', 'paused').update({ status: 'done', pause_reason: null, finished_at: now, updated_at: now, log: JSON.stringify(log) })
     doneWith(r.id, { force: true })

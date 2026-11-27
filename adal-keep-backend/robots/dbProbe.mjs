@@ -39,3 +39,54 @@ export async function startDbProbe(file, { everyMs = 10000, log = (m) => console
   const t = setInterval(round, everyMs); t.unref?.()
   return t
 }
+
+// ── What fills Adal Robots' own thread ─────────────────────────────────────────────────────────────────────────
+// (Main: "select 1" 1-1.3 s while a read under lock took 1 ms: the event loop itself was busy.) When the loop stalls
+// over 500 ms, a 20 s CPU profile (Node's own, at most once in 10 minutes) says the functions that took the time.
+// Off: ADAL_STALL_PROFILE=0.
+let profiledAt = 0
+/** The top functions of a CPU profile by own time. Pure. → [{ fn, where, ms }] */
+export function topOf(profile, n = 6) {
+  const self = new Map(), byId = new Map(profile.nodes.map(x => [x.id, x]))
+  const dt = (profile.endTime - profile.startTime) / 1000 / Math.max(1, profile.samples.length)
+  for (const id of profile.samples) self.set(id, (self.get(id) || 0) + 1)
+  const sum = new Map()
+  for (const [id, hits] of self) {
+    const f = byId.get(id)?.callFrame; if (!f) continue
+    if (/^\((idle|program|garbage collector)\)$/.test(f.functionName)) { const k = f.functionName; sum.set(k, { fn: k, where: '', ms: (sum.get(k)?.ms || 0) + hits * dt }); continue }
+    const where = `${String(f.url || '').replace(/^.*[\\/](src|robots|node_modules)[\\/]/, '$1/')}:${f.lineNumber + 1}`
+    const k = `${f.functionName || '(anonymous)'} ${where}`
+    sum.set(k, { fn: f.functionName || '(anonymous)', where, ms: (sum.get(k)?.ms || 0) + hits * dt })
+  }
+  return [...sum.values()].filter(x => x.fn !== '(idle)').sort((a, b) => b.ms - a.ms).slice(0, n).map(x => ({ ...x, ms: Math.round(x.ms) }))
+}
+
+export async function profileStall({ ms = 20000, log = (m) => console.warn(m) } = {}) {
+  if (process.env.ADAL_STALL_PROFILE === '0' || Date.now() - profiledAt < 10 * 60e3) return null
+  profiledAt = Date.now()
+  try {
+    const inspector = await import('node:inspector')
+    const s = new inspector.Session(); s.connect()
+    const post = (m, p = {}) => new Promise((ok, no) => s.post(m, p, (e, r) => e ? no(e) : ok(r)))
+    await post('Profiler.enable'); await post('Profiler.setSamplingInterval', { interval: 1000 }); await post('Profiler.start')
+    await new Promise(r => setTimeout(r, ms))
+    const { profile } = await post('Profiler.stop')
+    s.disconnect()
+    const top = topOf(profile)
+    log(`[db] Adal Robots' thread for ${ms / 1000} s: ${top.map(t => `${t.fn}${t.where ? ` (${t.where})` : ''} ${t.ms} ms`).join(', ')}`)
+    return top
+  } catch (e) { log(`[db] no profile: ${e.message}`); return null }
+}
+
+/** Every 2 s: how late a timer comes (the loop's stall); over 500 ms → a profile. */
+export function watchStalls({ log } = {}) {
+  if (process.env.ADAL_STALL_PROFILE === '0') return null
+  let at = Date.now()
+  const t = setInterval(() => {
+    const late = Date.now() - at - 2000
+    at = Date.now()
+    if (late > 500) { lastProbe.stallMs = late; profileStall({ log }).catch(() => {}) }
+  }, 2000)
+  t.unref?.()
+  return t
+}

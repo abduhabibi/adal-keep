@@ -29,7 +29,7 @@ import { fileURLToPath } from 'url'
 // set before anything uses the pool (only Node's own modules are loaded above). Off: ADAL_ROBOTS_THREADS=0.
 if (process.env.ADAL_ROBOTS_THREADS !== '0' && !process.env.UV_THREADPOOL_SIZE) process.env.UV_THREADPOOL_SIZE = '16'
 
-import { probeLine, startDbProbe } from './dbProbe.mjs'
+import { probeLine, startDbProbe, watchStalls } from './dbProbe.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const BACK = path.resolve(HERE, '..')
@@ -76,6 +76,7 @@ export function watchSlow(db, { ms = Number(process.env.ADAL_DB_SLOW_MS) || 1000
   db.on('query-error', (e, q) => end(q))
 }
 
+let _stalls = null
 /** Adal Keep's database settings with two connections at most, closed after a minute unused. */
 export async function openDb() {
   const knexConfig = (await import('../knexfile.js')).default.development
@@ -86,6 +87,7 @@ export async function openDb() {
   })
   watchSlow(db)
   startDbProbe(knexConfig.connection?.filename).catch(() => {})
+  if (!_stalls) _stalls = watchStalls()
   return db
 }
 
@@ -129,7 +131,7 @@ async function main() {
   // A weak PC: no new run while one of ours works and the processor is over 80 % busy (robots/gate.mjs).
   const [{ makeGate, averageLoad }, { isWaiting }, { nobodyAsked }] = await Promise.all([import('./gate.mjs'), import('../src/services/attention.js'), import('../src/services/personPress.js')])
   const load = averageLoad({ times: cpuTimes })
-  const line = async () => worker.readyJobsQuery(db).orderBy('id', 'asc').limit(5)
+  const line = async () => { const q = worker.readyJobsQuery(db).orderBy('id', 'asc').limit(5); const light = await worker.lightJobColumns(db); return light ? q.select(light) : q }
   const pressed = async () => (await line()).some(x => !nobodyAsked(x))
   const waiting = async () => (await line()).length > 0
   const cpuGate = makeGate({ busy: async () => load.over(CPU_LIMIT), pressed, waiting, working: () => worker.queueSnapshot().running.filter(r => !isWaiting(r.runId)).length, say, limit: CPU_LIMIT })

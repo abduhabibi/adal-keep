@@ -10,7 +10,7 @@ import crypto from 'crypto'
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'adal-bkup-'))
 Object.assign(process.env, {
   SQLITE_PATH: path.join(dir, 'data.sqlite'), ADAL_BACKUP_STATE: path.join(dir, 'backup-state.json'), SECRETS_PATH: path.join(dir, 'secrets.enc'),
-  ADAL_BACKUP_SAFE: path.join(dir, 'SafeStorage'), ADAL_UPLOADS_DIR: path.join(dir, 'uploads'), ACCOUNT_VAULT_KEY: path.join(dir, 'account-vault.key'),
+  ADAL_BACKUP_SAFE: path.join(dir, 'SafeStorage'), ADAL_UPLOADS_DIR: path.join(dir, 'uploads'), ADAL_BACKUP_TMP: path.join(dir, 'backup-tmp'), ACCOUNT_VAULT_KEY: path.join(dir, 'account-vault.key'),
   TELEGRAM_BOT_TOKEN: 'test-token', TELEGRAM_STORAGE_CHAT: '-100', SUPABASE_URL: '', SUPABASE_ANON_KEY: '',
 })
 const store = new Map()

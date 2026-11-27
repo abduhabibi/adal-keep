@@ -66,7 +66,7 @@ function listUploads() {
   return out
 }
 const STATE = process.env.ADAL_BACKUP_STATE || path.join(DATA, 'backup-state.json')
-const TMP = path.join(DATA, 'backup-tmp')
+const TMP = process.env.ADAL_BACKUP_TMP || path.join(DATA, 'backup-tmp')   // (tests: their own, so one run's cleanup never removes another's snapshot)
 const DB_FILE = process.env.SQLITE_PATH ? path.resolve(process.env.SQLITE_PATH) : path.join(BACKEND, 'data.sqlite')
 
 const PART = 4 * 1024 * 1024           // small pieces: each one gets through a slow office line (a bot downloads ≤ 20 MB)

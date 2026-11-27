@@ -13,6 +13,7 @@ process.env.SQLITE_PATH = path.join(dir, 'data.sqlite')
 process.env.ADAL_BACKUP_STATE = path.join(dir, 'backup-state.json')
 process.env.SECRETS_PATH = path.join(dir, 'secrets.enc')
 process.env.ADAL_BACKUP_SAFE = path.join(dir, 'SafeStorage')
+process.env.ADAL_BACKUP_TMP = path.join(dir, 'backup-tmp')
 process.env.TELEGRAM_BOT_TOKEN = 'test-token'
 // No cloud: the chat and the agency's online rows are never asked (nor their sign-in file written).
 process.env.SUPABASE_URL = ''

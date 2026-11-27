@@ -177,6 +177,10 @@ export function takesRuns(p, env = process.env) {
   return !(Number(p.load ?? 0) > (Number(env.ADAL_BUSY_PC) || 80))
 }
 
+/** How many runs one Companion works at once (2026-11-27: one run per PC; ADAL_RUNS_PER_PC=2… for more). Main: no limit here. */
+export const runsPerPC = (env = process.env) => Math.max(1, Number(env.ADAL_RUNS_PER_PC) || 1)
+export const hasRoom = (p, running = {}, env = process.env) => !p || p.id === '' || (running[p.id] || 0) < runsPerPC(env)
+
 export function chooseBest({ from = '', pcs = [], running = {}, tabs = {}, mainAllowed = true }) {
   const origin = pcs.find(p => p.id === from)
   if (!origin) return { to: from, help: false, secs: {}, why: '' }
@@ -186,7 +190,7 @@ export function chooseBest({ from = '', pcs = [], running = {}, tabs = {}, mainA
   const able = (p) => (Number(p.cores) || 1) >= MIN_HELPER_CORES
   const secs = {}
   for (const p of pcs) {
-    if (p.id !== from && (!known(p) || !able(p) || (p.id === '' && !mainAllowed))) continue
+    if (p.id !== from && (!known(p) || !able(p) || !hasRoom(p, running) || (p.id === '' && !mainAllowed))) continue
     secs[p.id] = estimate(p, { running: running[p.id] || 0, tab: tabs[p.id] || null, remote: p.id !== '' })
   }
   const mine = secs[from]

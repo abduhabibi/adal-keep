@@ -118,6 +118,7 @@ else
 fi
 cp -f "$INST/files/stop-adal.ps1" "$STAGE/"
 cp -f "$INST/files/hw-check.ps1" "$STAGE/"
+cp -f "$BACK/src/services/pc-check.ps1" "$STAGE/"   # the equipment check (also Settings -> This PC)
 cp -f "$INST/files/support-setup.ps1" "$STAGE/"
 cp -f "$INST/files/clean-main.ps1" "$STAGE/"
 file "$STAGE/main/"*.exe | sed 's/^/   /'

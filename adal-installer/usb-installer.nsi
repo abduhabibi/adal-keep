@@ -142,7 +142,33 @@ Section "Install"
   File "stage\hw-check.ps1"
   nsExec::ExecToLog '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\hw-check.ps1"'
   Pop $0
-  ${If} $0 == 3
+  ; --- the equipment check (pc-check.ps1, the same rules as Settings -> This PC): a plain list of what is OK,
+  ;     what is weak and the fix. It warns, it never blocks. Off: ADAL_PC_CHECK=0 (then the old warning below).
+  File "stage\pc-check.ps1"
+!ifdef COMPANION
+  nsExec::ExecToLog '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\pc-check.ps1" -Role Companion -InstDir "$INSTDIR" -Out "$PLUGINSDIR\pc-check.txt"'
+!else
+  nsExec::ExecToLog '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\pc-check.ps1" -Role Main -InstDir "$INSTDIR" -Out "$PLUGINSDIR\pc-check.txt"'
+!endif
+  Pop $1
+  ${If} $1 == 3
+    StrCpy $2 ""
+    ClearErrors
+    FileOpen $3 "$PLUGINSDIR\pc-check.txt" r
+    ${IfNot} ${Errors}
+      ${Do}
+        ClearErrors
+        FileRead $3 $4
+        ${If} ${Errors}
+          ${ExitDo}
+        ${EndIf}
+        StrCpy $2 "$2$4"
+      ${Loop}
+      FileClose $3
+    ${EndIf}
+    MessageBox MB_ICONEXCLAMATION|MB_OK "This PC's equipment for ${PRODUCT}:$\r$\n$\r$\n$2$\r$\n$\r$\n${PRODUCT} installs anyway. Fix the WEAK lines when you can: they make it slow." /SD IDOK
+  ${ElseIf} $1 != 0
+  ${AndIf} $0 == 3
     MessageBox MB_ICONEXCLAMATION|MB_OK "This PC is below 4 processor cores / 8 GB of memory.$\r$\n$\r$\nAdal Keep will work, but the robots (Musaned, LMIS ...) will not run on this PC: a stronger PC of the office does them. Use this PC for office work, or choose a stronger PC as the Main PC." /SD IDOK
   ${EndIf}
   ${If} ${FileExists} "$INSTDIR\*.*"

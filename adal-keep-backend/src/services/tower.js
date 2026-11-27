@@ -195,6 +195,8 @@ export async function beatData(db, { agencyName = null } = {}) {
     last_error: errs.length ? { at: errs[errs.length - 1].at, line: hide(errs[errs.length - 1].line).slice(0, 240) } : null,
     crashes: crashList().slice(0, 15).map(({ key, stack, ...g }) => g),
     last_cmd: st().acks[0] ? { id: st().acks[0].id, kind: st().acks[0].kind, status: st().acks[0].status } : null,
+    // The equipment check (services/pcCheck.js: RAM, SSD, free disk, cores, cable / Wi-Fi and its speed), with PC reports on.
+    ...(process.env.ADAL_PC_REPORTS === '1' ? { pc_check: await import('./pcCheck.js').then(p => p.pcCheck().then(() => p.pcCheckReport())).catch(() => null) } : {}),
   }
 }
 

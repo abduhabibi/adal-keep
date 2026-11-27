@@ -193,6 +193,7 @@ app.use('/api/updates', updatesRouter)
 app.use('/api', tutorRouter)   // daily in-app tutor
 app.use('/api/system', systemUpdateRouter)
 app.use('/api/system', hardwareRouter)   // this PC's cores, RAM, 32/64-bit, network link
+app.use('/api/system', (await import('./src/routes/pcCheck.js')).default)   // Settings → This PC: the equipment check (off: ADAL_PC_CHECK=0)
 app.use('/api/system', aiKeysRouter)   // Settings → Photo refining keys (this PC only)
 app.use("/api/quick-links", quickLinksRouter)
 app.use("/api/auth", authRouter)

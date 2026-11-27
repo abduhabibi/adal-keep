@@ -13,6 +13,7 @@ import { getTheme, applyTheme } from '../lib/theme'
 import { getLang, setLang } from '../lib/i18n'
 import { whoAmI } from '../lib/tutor'
 import TutorCard from '../components/TutorCard'
+import ThisPcCard from '../components/ThisPcCard'
 import MainPCCard from '../components/MainPCCard'
 import AgencyPCsCard from '../components/AgencyPCsCard'
 import { CompanionSwitchCard } from '../components/CompanionSwitchPC'
@@ -49,6 +50,7 @@ const SETTINGS_TABS = [
   ['plan', 'Plan'],
   ['portals', 'Portals'],
   ['health', 'Health'],
+  ['thispc', 'This PC'],
   ['integrations', 'Integrations'],
   ['transitions', 'Transitions'],
   ['backup', 'Backup & updates'],
@@ -63,7 +65,7 @@ export default function SettingsPage() {
   const asked = params.get('tab') === 'whatsapp' ? 'integrations' : params.get('tab')
   // A phone has no Transitions (moving from another system is done on a PC).
   // (Backups and software updates are the PC's too: the phone's own update is in This phone.)
-  const TABS = phoneCloud() || isPhoneView() ? SETTINGS_TABS.filter(([id]) => id !== 'transitions' && !(isPhoneView() && id === 'backup')) : SETTINGS_TABS
+  const TABS = phoneCloud() || isPhoneView() ? SETTINGS_TABS.filter(([id]) => id !== 'transitions' && id !== 'thispc' && !(isPhoneView() && id === 'backup')) : SETTINGS_TABS
   const tab = TABS.some(([id]) => id === asked) ? asked : 'agency'
   // "Connect WhatsApp" buttons: straight to its card.
   useEffect(() => {
@@ -311,6 +313,7 @@ export default function SettingsPage() {
       {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Insurance"><InsuranceCard /></ErrorBoundary>}
       </>}
       {tab === 'health' && import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Health"><AutomationHealthCard /></ErrorBoundary>}
+      {tab === 'thispc' && import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="This PC"><ThisPcCard /></ErrorBoundary>}
       {tab === 'integrations' && <>
       {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="Musaned code"><MusanedCodesCard /></ErrorBoundary>}
       {import.meta.env.VITE_DEMO !== '1' && <ErrorBoundary small name="EPRO signature"><EproSignatureCard /></ErrorBoundary>}

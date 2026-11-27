@@ -922,6 +922,9 @@ export async function claimNextJob(db, exclude = [], lanes = new Set(), { wait =
   for (let i = 0; i < 5; i++) {
     const q = readyJobsQuery(db)
     if (exclude.length) q.whereNotIn('id', exclude)
+    // A Companion's robots (startWorker queueOnly): only the runs put in line on this PC — the last three digits of
+    // a row's id are the slot of the PC that made it (sync/ids.js). Another PC's runs are never taken here.
+    if (_ownSlot !== null) q.whereRaw('id >= ? AND (id % 1000) = ?', [1e15, _ownSlot])
     // The highest priority first (a person moved it up, Robot history → Waiting), then the oldest.
     if (await queueHasPriority(db)) q.orderBy('priority', 'desc')
     const rows = await q.orderBy('id', 'asc').limit(lanes.size ? 50 : 1)
@@ -1246,13 +1249,28 @@ export async function continueSignedIn(db) {
 // --------------------------------------------------------------------------
 // Lifecycle
 // --------------------------------------------------------------------------
-export function startWorker(db) {
+// queueOnly (a Companion's robots, robotsEverywhere.js): only the runs this PC starts from its queue. Nothing that
+// changes other runs' rows — the main PC's runs are in this copy too (no parking, reviving, closing saved runs, no
+// agency manager queueing work twice).
+let _ownSlot = null
+export const _setOwnSlotForTest = (v) => { _ownSlot = v }
+export function startWorker(db, { queueOnly = false, slot = null } = {}) {
   if (_interval) return
+  // (Slot 0 or none: not joined, or the main PC's — a Companion then takes no run.)
+  if (queueOnly) _ownSlot = Number(slot) > 0 ? Number(slot) : -1
   if (!robotsInApp()) { console.log('[worker] robots run in Adal Robots: this app runs no robot job (ADAL_ROBOTS_IN_APP=1 to run them here)'); return }
 
   console.log(
     `[worker] polling every ${POLL_MS}ms — one run at a time, in its own tab`
   )
+  if (queueOnly) {
+    console.log('[worker] a Companion: its own queue only (robotsEverywhere.js)')
+    _interval = setInterval(() => { drainQueue(db).catch(e => console.error('[worker] poll error:', e)) }, POLL_MS)
+    drainQueue(db).catch(() => {})
+    import('./deadTabs.js').then(d => d.startDeadTabs(db)).catch(e => console.warn('[dead] not started:', e.message))
+    import('./robotGuard.js').then(g => g.startRobotGuard(db)).catch(e => console.warn('[guard] not started:', e.message))
+    return
+  }
   closeStaleHistory(db).then(() => pruneHistory(db))
   setInterval(() => pruneHistory(db), 6 * 3600_000).unref?.()
   parkInterruptedRuns(db).then(() => adoptWaitingTabs(db)).then(() => reviveSignIns(db)).catch(() => {}).finally(() => drainQueue(db))

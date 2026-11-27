@@ -1324,6 +1324,8 @@ initSystem().then(() => {
     import('./src/services/profileDays.js').then(d => d.startProfileDays(db)).catch(e => console.warn('[days]', e.message)) // each profile's status, per day
     console.log(ROBOTS_HERE ? '🤖 Automation: worker + scanner running' : '🤖 Robots: in Adal Robots (none in this app; ADAL_ROBOTS_IN_APP=1 runs them here)')
     if (!ROBOTS_HERE) import('./src/services/robotsLink.js').then(r => r.keepRobotsRunning()).catch(e => console.warn('[robots]', e.message))   // Adal Robots, its own program (Windows: started here, no window)
+    // A Companion's robots take runs while the main PC is off (services/robotsEverywhere.js; off: ADAL_ROBOTS_EVERYWHERE=0).
+    if (notMainPC()) Promise.all([import('./src/services/robotsEverywhere.js'), import('./src/services/sync/index.js')]).then(([E, S]) => E.startRobotsHere({ main: () => !notMainPC(), full: () => S.companionFullOn(), node: () => S.syncNode() })).catch(e => console.warn('[robots-here]', e.message))
 
   })
 })

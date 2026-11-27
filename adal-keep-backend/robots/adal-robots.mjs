@@ -57,9 +57,12 @@ async function main() {
   process.chdir(BACK)                              // uploads/, data/ and the profile are found as in Adal Keep
   process.env.ADAL_ROBOT_PROCESS = '1'
   process.env.ADAL_ROBOTS_IN_APP = '1'            // the robot code runs here (Adal Keep itself runs none: services/robotsInApp.js)
-  // The robots work on the agency's main PC only (a Companion's jobs reach the main PC with the rest of its data).
+  // The main PC's robots, and since 2026-11-27 a Companion's too (robotsEverywhere.js): a Companion takes runs from its
+  // own queue only while the main PC is off (or it holds the main role); otherwise the main PC drives its browser.
   const { notMainPC } = await import('../src/services/mainPC.js')
-  if (notMainPC()) { say('this PC is not the agency\'s main PC: the robots work there — nothing to do here'); return }
+  const E = await import('../src/services/robotsEverywhere.js')
+  const mainHere = !notMainPC()
+  if (!mainHere && !E.everywhereOn()) { say('this PC is not the agency\'s main PC: the robots work there — nothing to do here (ADAL_ROBOTS_EVERYWHERE=0)'); return }
   // Below the person's programs: on a 2-core PC Adal Keep's window and the PC answer first (its browser inherits it).
   try { os.setPriority(0, os.constants.priority.PRIORITY_BELOW_NORMAL) } catch {}
   const token = robotsToken(process.env.ADAL_ROBOTS_DATA || undefined)
@@ -69,7 +72,7 @@ async function main() {
   const app = express()
   app.locals.db = db
   app.use(express.json({ limit: '2mb' }))
-  app.get('/health', (req, res) => res.json({ ok: true, program: 'Adal Robots', pid: process.pid, up_s: Math.round(process.uptime()) }))
+  app.get('/health', (req, res) => res.json({ ok: true, program: 'Adal Robots', pid: process.pid, up_s: Math.round(process.uptime()), here: E.robotsMayRunHere({ main: mainHere }) }))
   // Everything else: Adal Keep only (its token), never another program or PC.
   app.use((req, res, next) => (req.get('x-adal-robots') === token ? next() : res.status(403).json({ error: 'Adal Robots answers Adal Keep only' })))
   app.use('/api', (await import('../src/routes/automations.js')).default)
@@ -89,11 +92,22 @@ async function main() {
   const line = async () => worker.readyJobsQuery(db).orderBy('id', 'asc').limit(5)
   const pressed = async () => (await line()).some(x => !nobodyAsked(x))
   const waiting = async () => (await line()).length > 0
-  worker.setClaimGate(makeGate({ busy: async () => load.over(CPU_LIMIT), pressed, waiting, working: () => worker.queueSnapshot().running.filter(r => !isWaiting(r.runId)).length, say, limit: CPU_LIMIT }))
-  worker.startWorker(db)
+  const cpuGate = makeGate({ busy: async () => load.over(CPU_LIMIT), pressed, waiting, working: () => worker.queueSnapshot().running.filter(r => !isWaiting(r.runId)).length, say, limit: CPU_LIMIT })
+  // A Companion: a run only while robotsEverywhere says so (said when it changes).
+  let hereWas = null
+  const hereGate = () => {
+    if (mainHere) return true
+    const h = E.robotsMayRunHere()
+    if (h.may !== hereWas) { hereWas = h.may; say(h.may ? `this PC's robots take runs from its own queue — ${h.why}` : `no runs here now — ${h.why}`) }
+    return h.may
+  }
+  worker.setClaimGate(async () => hereGate() && await cpuGate())
+  worker.startWorker(db, { queueOnly: !mainHere, slot: mainHere ? null : (await import('../src/services/sync/ids.js')).currentSlot() })
   // What Adal Keep no longer runs itself (main.js, ROBOTS_HERE): it runs here.
   // (ADAL_ROBOTS_EXTRAS=0: the queue only — a scratch copy's test.)
-  const later = (name, f) => process.env.ADAL_ROBOTS_EXTRAS === '0' ? null : Promise.resolve().then(f).catch(e => console.warn(`[robots] ${name}:`, e.message))
+  // (A Companion: the queue only — its scanner would make the main PC's work twice, its keeper drive the browser the
+  // main PC drives.)
+  const later = (name, f) => process.env.ADAL_ROBOTS_EXTRAS === '0' || !mainHere ? null : Promise.resolve().then(f).catch(e => console.warn(`[robots] ${name}:`, e.message))
   later('sessions', async () => (await import('../src/services/sessionKeeper.js')).startSessionKeeper(db))   // a day's sign-ins kept, Wafid on standby
   later('tabs', async () => (await import('../src/services/spareTabs.js')).startSpareTabs(db))                    // one Musaned tab (an earlier start's spare ones close)
   later('lines', async () => (await import('../src/services/warmLines.js')).startWarmLines(db))                   // signed-in sites' connections stay open

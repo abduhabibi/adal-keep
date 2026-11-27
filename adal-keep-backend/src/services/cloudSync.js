@@ -990,6 +990,9 @@ async function adalCommand(db, method, p, body) {
   throw Object.assign(new Error('Unknown command'), { code: 404 })
 }
 
+// (the recovery test drives the same command as Admin, without the online relay)
+export { adalCommand as adalCommandHere }
+
 export async function runCall(db, agency, c) {
   const patch = {}
   try {

@@ -64,7 +64,23 @@ test('Main back: handed back though the Companion\'s clock is an hour ahead (its
   assert.equal(await c.autoStep(), 'handed-back')
   assert.equal(o.role.holder, 'main')
 })
-test('not handed back (the Companion does not reach it): Main takes its own role back after 10 minutes', async () => {
+test('Main up again (2026-11-27): it takes its role back at once, before it turns into a Companion', async () => {
+  const o = office()
+  o.role = { holder: 'comp', data: { how: 'auto', from: 'main' } }
+  const m = o.make('main')
+  await m.refresh()
+  assert.equal(await m.takeBackNow(), true)
+  assert.equal(o.role.holder, 'main')
+  assert.equal(o.role.data.how, 'back')
+  // A role a person moved stays where it is; and the Companion never takes it back for Main.
+  o.role = { holder: 'comp', data: { how: 'handed over', from: 'main' } }
+  await m.refresh(); assert.equal(await m.takeBackNow(), false)
+  o.role = { holder: 'comp', data: { how: 'auto', from: 'main' } }
+  const c = o.make('comp'); await c.refresh(); assert.equal(await c.takeBackNow(), false)
+})
+
+test('not handed back (the Companion does not reach it): Main takes its own role back after 10 minutes (ADAL_ROLE_BACK_AT_ONCE=0)', async (t) => {
+  process.env.ADAL_ROLE_BACK_AT_ONCE = '0'; t.after(() => { delete process.env.ADAL_ROLE_BACK_AT_ONCE })
   const o = office()
   o.role = { holder: 'comp', data: { how: 'auto', from: 'main' } }
   const m = o.make('main')

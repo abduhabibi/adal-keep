@@ -46,7 +46,10 @@ export const LEASE = Number(process.env.ADAL_SYNC_LEASE_MS) || 15 * 60 * 1000
 /** The role moves by itself only after this long without the holder, seen by this PC itself. */
 export const AUTO_AFTER = Number(process.env.ADAL_AUTO_MAIN_AFTER_MS) || Number(process.env.ADAL_SYNC_LEASE_MS) || 30 * 60 * 1000
 const GAP = 5 * 60 * 1000            // no look for this long (asleep, the clock moved): the wait starts again
-const BACK_AFTER = 10 * 60 * 1000    // (a run is at most 10 minutes)
+// The PC stood in for, up again, takes its role back at once (2026-11-27, the owner: "Main takes it back at once
+// when it returns"; it waited 10 minutes as a Companion, two restarts). Off: ADAL_ROLE_BACK_AT_ONCE=0 (10 minutes, as before).
+const backAtOnce = () => process.env.ADAL_ROLE_BACK_AT_ONCE !== '0'
+const BACK_AFTER = () => backAtOnce() ? 0 : 10 * 60 * 1000    // (a run is at most 10 minutes)
 const steady = () => process.env.ADAL_ROLE_STEADY !== '0'
 
 export class Roles {
@@ -165,6 +168,20 @@ export class Roles {
    * was taken from once that PC is back. → 'taken' | 'handed-back' | null.
    * canHandBack(): false while this PC must keep the role a little longer (a run going).
    */
+  /**
+   * The role was taken by itself from THIS PC (it was off) and this PC is up: it takes the role back now, before
+   * it would turn into a Companion (a restart) and back again (another). → true when taken back.
+   */
+  async takeBackNow() {
+    if (!steady() || !backAtOnce()) return false
+    const h = this.holder(), d = this.cache?.main?.data || {}
+    if (!h || h === this.me || d.how !== 'auto' || d.from !== this.me) return false
+    const me = (await this.pcs()).find(p => p.pc_id === this.me)
+    if (!me || me.suspended_at || me.revoked_at) return false
+    await this.write('main', this.me, { since: new Date(this.node.now()).toISOString(), by: 'auto', how: 'back', from: h })
+    return true
+  }
+
   async autoStep({ canHandBack = () => true } = {}) {
     const l = await this.leaseOf()
     if (!l.holder) return null
@@ -190,7 +207,7 @@ export class Roles {
     // This PC was stood in for and is up again: handed back within 10 minutes, or it takes its role back.
     if (steady() && d.how === 'auto' && d.from === this.me) {
       this.homeSince ||= now
-      if (now - this.homeSince < BACK_AFTER) return null
+      if (now - this.homeSince < BACK_AFTER()) return null
       this.homeSince = 0
       await this.write('main', this.me, { since: new Date(now).toISOString(), by: 'auto', how: 'back', from: l.holder })
       return 'back'

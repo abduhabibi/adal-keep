@@ -22,7 +22,7 @@ export async function makeReferenceBrain({ site, now = Date.now, broken = '' } =
     try { await (await import('../../src/migrations/021_automation_queue.js')).up(db) } finally { console.log = quiet.log; console.warn = quiet.warn }
     await db.schema.createTable('run_claims', t => { t.string('key').primary(); t.string('pc'); t.integer('run_id'); t.integer('lease_until'); t.string('state') })
     await db.schema.createTable('results', t => { t.string('key').primary(); t.string('status'); t.string('pc'); t.integer('at') })
-    const pc = { name, strength, main, runMs, db, alive: true, running: new Set(), outbox: [], timer: null }
+    const pc = { name, strength, main, runMs, db, alive: true, gen: 0, running: new Set(), outbox: [], timer: null }
     pcs.set(name, pc)
     pc.timer = setInterval(() => tick(pc).catch((e) => { if (process.env.BRAIN_DEBUG) console.error('tick', name, e.message) }), TICK_MS)
     return pc
@@ -90,9 +90,10 @@ export async function makeReferenceBrain({ site, now = Date.now, broken = '' } =
   }
 
   async function run(pc, row, k) {
+    const gen = pc.gen
     const go = (phase) => fetch(`${site.base}/${phase}?girl=${row.profile_id}&pc=${pc.name}`).catch(() => {})
     await go('start')
-    for (let i = 0; i < 4; i++) { await new Promise(r => setTimeout(r, pc.runMs / 4)); if (!pc.alive) return }   // a dead PC stops here: no end, no writes
+    for (let i = 0; i < 4; i++) { await new Promise(r => setTimeout(r, pc.runMs / 4)); if (!pc.alive || pc.gen !== gen) return }   // a dead PC stops here: no end, no writes (and a restarted one does not carry on)
     await go('end')
     pc.running.delete(k)
     await claimsOf(pc).where({ key: k }).update({ state: 'done' })
@@ -102,14 +103,16 @@ export async function makeReferenceBrain({ site, now = Date.now, broken = '' } =
 
   // ---- the adapter the scenarios use
   return {
-    name: 'reference',
+    name: 'reference', leaseMs: LEASE_MS,
+    async runState(name, girl) { const c = (await claimsOf(pcs.get(name)).select()).find(x => x.key === `musaned|${girl}`); return c?.state === 'expired' ? 'expired' : c?.state || null },
+    async profileId(girl) { return girl },
     async addPC(name, o) { return makePC(name, o) },
     /** A person starts a run in a PC's window. pinned: "run it on this PC". */
     async enqueue(name, girl, { wf = 'musaned_check_chosen', pinned = false } = {}) {
       const [id] = await pcs.get(name).db('automation_queue').insert({ profile_id: girl, workflow_id: wf, status: 'pending', context: JSON.stringify({ pinned }), created_at: new Date().toISOString(), updated_at: new Date().toISOString() })
       return id
     },
-    async off(name) { pcs.get(name).alive = false },
+    async off(name) { const p = pcs.get(name); p.alive = false; p.gen++; p.running.clear() },   // the process died: it remembers nothing
     async on(name) { pcs.get(name).alive = true },
     cut(a, b) { cuts.add(pair(a, b)) }, heal(a, b) { cuts.delete(pair(a, b)) },
     async rows(name) { return pcs.get(name).db('automation_queue').select() },

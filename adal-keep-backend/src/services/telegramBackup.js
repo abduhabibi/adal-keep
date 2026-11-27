@@ -37,6 +37,34 @@ import { getSecret, setSecret, secretBlobs, restoreSecretBlobs } from './secretS
 const BACKEND = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const DATA = path.join(BACKEND, 'data')
 const SAFE = process.env.ADAL_BACKUP_SAFE || path.join(DATA, 'SafeStorage')   // (tests: a folder of their own)
+// The photos and documents added in the window are kept under uploads/<girl>/<box>/ (2026-11-27: a restore
+// test found none of them in the backup). Named "uploads/<path>" in the backup. Off: ADAL_BACKUP_UPLOADS=0.
+const UPLOADS = process.env.ADAL_UPLOADS_DIR || path.join(BACKEND, 'uploads')
+const uploadsOn = () => process.env.ADAL_BACKUP_UPLOADS !== '0'
+/** Where a document of the backup lives on this PC (null: a name that would leave its folder). */
+function fileOf(name) {
+  if (!String(name).startsWith('uploads/')) return path.join(SAFE, path.basename(name))
+  const rel = String(name).slice(8)
+  if (!rel || rel.split(/[\\/]/).some(x => x === '..' || x === '') || path.isAbsolute(rel)) return null
+  return path.join(UPLOADS, ...rel.split('/'))
+}
+let uploadsListed = { at: 0, names: [] }
+function listUploads() {
+  if (!uploadsOn()) return []
+  if (Date.now() - uploadsListed.at < 60000) return uploadsListed.names
+  const out = []
+  const walk = (dir, rel) => {
+    let es = []
+    try { es = fs.readdirSync(dir, { withFileTypes: true }) } catch { return }
+    for (const e of es) {
+      if (e.isDirectory()) { if (e.name !== 'thumbnails') walk(path.join(dir, e.name), rel + e.name + '/') }   // (small pictures are made again)
+      else if (e.isFile() && !e.name.startsWith('thumb_')) out.push('uploads/' + rel + e.name)
+    }
+  }
+  walk(UPLOADS, '')
+  uploadsListed = { at: Date.now(), names: out }
+  return out
+}
 const STATE = process.env.ADAL_BACKUP_STATE || path.join(DATA, 'backup-state.json')
 const TMP = path.join(DATA, 'backup-tmp')
 const DB_FILE = process.env.SQLITE_PATH ? path.resolve(process.env.SQLITE_PATH) : path.join(BACKEND, 'data.sqlite')
@@ -347,15 +375,15 @@ function listDocuments() {
     if (dirAt !== listed.dirAt || now - dirAt < 5000 || listed.at - dirAt < 5000 || now - listed.at > 10 * 60000) {
       listed = { at: now, dirAt, names: fs.readdirSync(SAFE, { withFileTypes: true }).filter(d => d.isFile()).map(d => d.name) }
     }
-    return listed.names.slice()
-  } catch { return [] }
+    return [...listed.names, ...listUploads()]
+  } catch { return listUploads().slice() }
 }
 
 /** Pack files: [4-byte header length][JSON {name,size}][bytes] … */
 function pack(names) {
   const chunks = []
   for (const name of names) {
-    const data = fs.readFileSync(path.join(SAFE, name))
+    const data = fs.readFileSync(fileOf(name))
     const head = Buffer.from(JSON.stringify({ name, size: data.length }))
     const len = Buffer.alloc(4); len.writeUInt32BE(head.length)
     chunks.push(len, head, data)
@@ -367,9 +395,8 @@ function unpack(buf, intoDir) {
   while (off < buf.length) {
     const hl = buf.readUInt32BE(off); off += 4
     const { name, size } = JSON.parse(buf.subarray(off, off + hl).toString()); off += hl
-    const safeName = path.basename(name)
-    const dest = path.join(intoDir, safeName)
-    if (!fs.existsSync(dest)) fs.writeFileSync(dest, buf.subarray(off, off + size))
+    const dest = String(name).startsWith('uploads/') ? fileOf(name) : path.join(intoDir, path.basename(name))
+    if (dest && !fs.existsSync(dest)) { fs.mkdirSync(path.dirname(dest), { recursive: true }); fs.writeFileSync(dest, buf.subarray(off, off + size)) }
     off += size; n++
   }
   return n
@@ -543,7 +570,7 @@ export async function runBackup(db, { force = false, docsOnly = false, light = f
     // 1. The database (the newest replaces the older ones in the index) —
     //    not on the quick runs that only carry new documents.
     // Everything this run will send, measured first, so it can say how far it is (percent).
-    for (const n of dbOnly ? [] : listDocuments().filter(n => !s.sent[n])) { try { progress.bytes_total += fs.statSync(path.join(SAFE, n)).size } catch {} }
+    for (const n of dbOnly ? [] : listDocuments().filter(n => !s.sent[n])) { try { progress.bytes_total += fs.statSync(fileOf(n)).size } catch {} }
     let profilesAtSnap = null
     let sentWhole = false   // a whole database copy went up (only then is it read back to check it)
     if (!docsOnly) {
@@ -578,7 +605,7 @@ export async function runBackup(db, { force = false, docsOnly = false, light = f
     // (Never waits for the robots: the backup goes now, one piece at a time while one works.)
     for (const name of todo) {
       let sz = 0
-      try { sz = fs.statSync(path.join(SAFE, name)).size } catch { continue }
+      try { sz = fs.statSync(fileOf(name)).size } catch { continue }
       group.push(name); size += sz
       if (size >= SET_TARGET) await flush()
     }
@@ -890,16 +917,18 @@ export async function restoreFrom(indexBuf, { bot_token, password, fromReplica =
       progress.files_done = files
     }
     const raw = await databaseFromIndex(index, get)
+    let keyCarried = false
     if (raw) {
       if (fs.existsSync(DB_FILE)) fs.copyFileSync(DB_FILE, `${DB_FILE}.before-restore-${Date.now()}`)
       fs.writeFileSync(`${DB_FILE}.restored`, raw)
       fs.rmSync(BASE_HASHES, { force: true })   // this PC's next backup sends a whole copy again
       stageVaultKey(index.vault_key)   // the restored passwords open with it
       restoreSecretBlobs(index.secrets)  // and the authenticators, keys and bot with it
+      keyCarried = !!index.vault_key && typeof index.secrets?.backup_password === 'string'   // (its backup key among them, locked with that vault key)
       if (index.chat_account && !fs.existsSync(path.join(BACKEND, '.adal_chat.json'))) fs.writeFileSync(path.join(BACKEND, '.adal_chat.json'), index.chat_account)
     }
     // The database is swapped in on the next start (the open one cannot be replaced live).
-    return { ok: true, files, database: !!raw, made: index.made }
+    return { ok: true, files, database: !!raw, made: index.made, key_carried: keyCarried }
   } finally {
     progress.running = false
   }

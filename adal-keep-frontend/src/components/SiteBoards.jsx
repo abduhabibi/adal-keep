@@ -35,10 +35,11 @@ export default function SiteBoards() {
   const [data, setData] = useState(null)
   const [tabs, setTabs] = useState({})
   const [robots, setRobots] = useState('')
+  const [memory, setMemory] = useState(null)
   const load = useCallback(() => {
     api.get('/automations/by-site', { adalNoCache: true }).then(r => setData(r.data)).catch(() => setData({ off: true, sites: [] }))
     api.get('/automations/site-tabs', { adalNoCache: true })
-      .then(r => { setTabs(Object.fromEntries((r.data?.sites || []).map(s => [s.key, s]))); setRobots(r.data?.off ? 'off' : '') })
+      .then(r => { setTabs(Object.fromEntries((r.data?.sites || []).map(s => [s.key, s]))); setRobots(r.data?.off ? 'off' : ''); setMemory(r.data?.memory || null) })
       .catch(e => { setTabs({}); setRobots(e.response?.data?.robots === 'off' ? 'Adal Robots is not running on this PC' : '') })
   }, [])
   useEffect(() => { load(); const t = setInterval(load, 5000); return () => clearInterval(t) }, [load])
@@ -47,6 +48,7 @@ export default function SiteBoards() {
   return (
     <div className="space-y-2">
       {robots && robots !== 'off' && <p className="text-xs text-amber-700">{robots}</p>}
+      {memory?.critical && <p className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-800 dark:bg-red-950/40 dark:text-red-200">This PC is short of memory ({memory.freeMB} MB free). Close programs you do not need. The robots' site tabs stay open, so their sign-ins are kept.</p>}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {data.sites.map(s => {
           const tab = tabs[s.key]

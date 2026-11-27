@@ -138,7 +138,9 @@ router.get('/automations/site-tabs', async (req, res) => {
   const T = await import('../services/siteTabs.js')
   if (!T.siteTabsOn()) return res.json({ off: true, sites: [] })
   const running = new Set((await req.app.locals.db('automation_queue').where('status', 'running').pluck('id').catch(() => [])).map(Number))
-  res.json({ sites: await T.siteTabsNow({ running }) })
+  // Short of memory: said here for the owner — the standing tabs are never closed for it.
+  const freeMB = Math.round((await import('os')).default.freemem() / 1048576)
+  res.json({ sites: await T.siteTabsNow({ running }), memory: { freeMB, critical: freeMB < T.CRITICAL_FREE_MB() } })
 })
 
 // The Robots page by site (bySite.js): each site's tasks waiting and working, and its last results.

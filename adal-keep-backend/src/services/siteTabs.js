@@ -96,3 +96,53 @@ export function startSiteTabs() {
   timer.unref?.()
   console.log('[site-tabs] Musaned, Wafid, Enjaz, Tasheer and LMIS: one standing tab each (off: ADAL_SITE_TABS=0)')
 }
+
+// ── Short of memory (2026-11-27, Main: 427 MB free of 7.3 GB) ───────────────────────────────────────────────────
+// The browser that holds the standing tabs is never quit for memory: blank and error tabs and a site's second tab that
+// is not signed in close (never a run's, a borrowed one, one on the screen, or one a person touched in 10 minutes),
+// and every tab drops its caches and its unused JavaScript memory. Off: ADAL_MEMORY_SHRINK=0 (quit as before).
+export const shrinkOn = (env = process.env) => siteTabsOn(env) && env.ADAL_MEMORY_SHRINK !== '0'
+export const CRITICAL_FREE_MB = () => Number(process.env.ADAL_CRITICAL_FREE_MB) || 250
+const PERSON_MS = 10 * 60e3
+
+/** Which tabs may close. Pure. tabs: [{ url, run, borrowed, shown, touched }] → indexes. */
+export function spareForMemory(tabs, now = Date.now()) {
+  const go = [], keptSite = new Set()
+  const free = (t) => !t.run && !t.borrowed && !t.shown && now - (t.touched || 0) >= PERSON_MS
+  // First the signed-in one of each site is kept, then the first other one.
+  const order = tabs.map((t, i) => ({ t, i, s: STANDING.find(s => onSite(s, t.url)) })).sort((a, b) => (b.s && signedInOn(b.s, b.t.url)) - (a.s && signedInOn(a.s, a.t.url)))
+  for (const { t, i, s } of order) {
+    if (!free(t)) { if (s) keptSite.add(s.key); continue }
+    if (/^(about:blank|chrome-error:|chrome:\/\/newtab)/i.test(t.url || 'about:blank')) { go.push(i); continue }
+    if (!s) continue
+    if (keptSite.has(s.key) && !signedInOn(s, t.url)) { go.push(i); continue }
+    keptSite.add(s.key)
+  }
+  return go.sort((a, b) => a - b)
+}
+
+export async function shrinkBrowser(browser) {
+  let closed = 0, pages = 0
+  try {
+    const { pagesOf, isRunTab } = await import('./tabManager.js')
+    const all = (await pagesOf(browser, 1500)).filter(p => !p.isClosed?.())
+    const look = await Promise.all(all.map(async p => ({
+      url: p.url(), run: isRunTab(p) || p.__adalRunId !== undefined, borrowed: !!p.__adalBorrowed || !!p.__adalPerson, shown: !!p.__adalShown,
+      touched: Number(await Promise.race([p.evaluate(() => sessionStorage.getItem('adal-touched')).catch(() => 0), new Promise(r => setTimeout(() => r(Date.now()), 2000))])) || 0,
+    })))
+    const go = new Set(spareForMemory(look))
+    // (The browser keeps one tab at least.)
+    for (const i of go) { if (all.length - closed <= 1) break; all[i].__adalClosedBy = 'the memory guard (a spare tab)'; await all[i].close().catch(() => {}); closed++ }
+    for (const [i, p] of all.entries()) {
+      if (go.has(i)) continue
+      try {
+        const c = await p.target().createCDPSession()
+        await c.send('Memory.simulatePressureNotification', { level: 'critical' }).catch(() => {})
+        await c.send('HeapProfiler.collectGarbage').catch(() => {})
+        await c.detach().catch(() => {})
+        pages++
+      } catch {}
+    }
+  } catch {}
+  return { closed, pages }
+}

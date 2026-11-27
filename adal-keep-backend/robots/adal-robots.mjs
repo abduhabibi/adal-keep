@@ -129,8 +129,10 @@ async function main() {
     const [g, b] = await Promise.all([import('../src/services/memoryGuard.js'), import('../src/services/browser.js')])
     g.startMemoryGuard({
       working: () => worker.queueSnapshot().running.length,
-      // (The standing site tabs hold the people's sign-ins: the browser is not quit under them — siteTabs.js.)
-      quit: async () => { if ((await import('../src/services/siteTabs.js')).siteTabsOn()) return; const br = await b.openBrowserIfAny().catch(() => null); if (!br) return; const pages = await br.pages().catch(() => []); if (pages.some(p => p.__adalBorrowed || p.__adalPerson)) return; await b.quitBrowser() },
+      // The standing site tabs hold the people's sign-ins: their browser is made smaller instead, never quit (siteTabs.js
+      // shrinkBrowser; off: ADAL_MEMORY_SHRINK=0 — quit as before).
+      shrink: async () => { const T = await import('../src/services/siteTabs.js'); if (!T.shrinkOn()) return null; const br = await b.openBrowserIfAny().catch(() => null); return br ? T.shrinkBrowser(br) : { closed: 0, pages: 0 } },
+      quit: async () => { const br = await b.openBrowserIfAny().catch(() => null); if (!br) return; const pages = await br.pages().catch(() => []); if (pages.some(p => p.__adalBorrowed || p.__adalPerson)) return; await b.quitBrowser() },
     })
   })
   // Stopped in Adal Keep (its Stop wrote 'cancelled'): the run here stops at its next step.

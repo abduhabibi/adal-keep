@@ -22,6 +22,7 @@ export const PASSED = [
   ['POST', /^\/automations\/[\w-]+\/input$/, false],
   ['POST', /^\/automations\/\d+\/(cancel|resume)$/, true],
   ['GET', /^\/automations\/watch-robots$/, false],
+  ['GET', /^\/automations\/site-tabs$/, false],
   ['POST', /^\/automations\/watch-robots$/, false],
 ]
 export const passedTo = (method, p) => PASSED.find(([m, re]) => m === method && re.test(p)) || null

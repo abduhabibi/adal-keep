@@ -118,6 +118,7 @@ async function main() {
   // main PC drives.)
   const later = (name, f) => process.env.ADAL_ROBOTS_EXTRAS === '0' || !mainHere ? null : Promise.resolve().then(f).catch(e => console.warn(`[robots] ${name}:`, e.message))
   later('sessions', async () => (await import('../src/services/sessionKeeper.js')).startSessionKeeper(db))   // a day's sign-ins kept, Wafid on standby
+  later('site-tabs', async () => (await import('../src/services/siteTabs.js')).startSiteTabs())                   // Musaned, Wafid, Enjaz, Tasheer, LMIS: a standing tab each
   later('tabs', async () => (await import('../src/services/spareTabs.js')).startSpareTabs(db))                    // one Musaned tab (an earlier start's spare ones close)
   later('lines', async () => (await import('../src/services/warmLines.js')).startWarmLines(db))                   // signed-in sites' connections stay open
   later('scanner', async () => (await import('../src/services/autoScanner.js')).startScanner(db))              // new work found every 2 min
@@ -128,7 +129,8 @@ async function main() {
     const [g, b] = await Promise.all([import('../src/services/memoryGuard.js'), import('../src/services/browser.js')])
     g.startMemoryGuard({
       working: () => worker.queueSnapshot().running.length,
-      quit: async () => { const br = await b.openBrowserIfAny().catch(() => null); if (!br) return; const pages = await br.pages().catch(() => []); if (pages.some(p => p.__adalBorrowed || p.__adalPerson)) return; await b.quitBrowser() },
+      // (The standing site tabs hold the people's sign-ins: the browser is not quit under them — siteTabs.js.)
+      quit: async () => { if ((await import('../src/services/siteTabs.js')).siteTabsOn()) return; const br = await b.openBrowserIfAny().catch(() => null); if (!br) return; const pages = await br.pages().catch(() => []); if (pages.some(p => p.__adalBorrowed || p.__adalPerson)) return; await b.quitBrowser() },
     })
   })
   // Stopped in Adal Keep (its Stop wrote 'cancelled'): the run here stops at its next step.

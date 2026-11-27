@@ -133,6 +133,14 @@ router.get('/browsers', async (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }) }
 })
 // "Watch robots" (services/watchRobots.js): the robots' window on screen / back out of sight, on a person's click only.
+// The five standing site tabs (siteTabs.js), for the Robots page: signed in and standing by, working, or sign in needed.
+router.get('/automations/site-tabs', async (req, res) => {
+  const T = await import('../services/siteTabs.js')
+  if (!T.siteTabsOn()) return res.json({ off: true, sites: [] })
+  const running = new Set((await req.app.locals.db('automation_queue').where('status', 'running').pluck('id').catch(() => [])).map(Number))
+  res.json({ sites: await T.siteTabsNow({ running }) })
+})
+
 router.get('/automations/watch-robots', async (req, res) => {
   try { res.set('Cache-Control', 'no-store').json(await (await import('../services/watchRobots.js')).watchState()) }
   catch (e) { res.status(500).json({ error: e.message }) }

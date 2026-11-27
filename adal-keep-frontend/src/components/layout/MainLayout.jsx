@@ -1,3 +1,4 @@
+import CreatingBadge from '../CreatingBadge'
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
 import { rememberPlace } from '../../lib/lastPlace'
@@ -198,6 +199,7 @@ export default function MainLayout() {
             <div key={wide ? 'page' : pathname} className={`${inChat ? 'h-full' : wide ? 'px-3 py-4 sm:p-6' : 'px-4 pb-4 pt-1'} ${wide ? '' : motion}`}>
               {newer && <button type="button" data-newer="" onClick={() => { setNewer(false); setPageKey(k => k + 1) }} className="mb-2 rounded-full bg-teal-600 px-3 py-1 text-xs font-semibold text-white hover:bg-teal-700">Newer data came — show it</button>}
               <Outlet key={pageKey} />
+              <CreatingBadge />
             </div>
           </main>
 

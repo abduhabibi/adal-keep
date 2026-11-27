@@ -7,6 +7,7 @@ import { useFileCapture } from '../context/FileCaptureContext'
 import { CameraShot, ON_PHONE } from './shared/PickFile'
 import { onPhone, onCompanionOnline } from '../lib/phoneMode'
 import { readPassportHere, warmPassportReader } from '../lib/passportHere'
+import { askCreations } from '../lib/creationJobs'
 
 /**
  * Step 1 of a new profile: the passport. Drag it in (from the tray, the
@@ -85,6 +86,8 @@ export default function PassportFirst({ onRead, onSkip, onLater }) {
   const cameraRef = useRef(null)
   const galleryRef = useRef(null)
   const busyRef = useRef(false)
+  const alive = useRef(true)
+  useEffect(() => () => { alive.current = false }, [])
   const stopRead = useRef(null)   // the X: stop reading this passport (nothing is made from it)
   const [camera, setCamera] = useState(false)
   // Camera: the live camera here when the browser allows it (phone app,
@@ -160,9 +163,11 @@ export default function PassportFirst({ onRead, onSkip, onLater }) {
       let data
       setStep('reading')
       try {
-        data = (await api.post('/new-profile/read', fd, { timeout: 60000, signal: ask.signal, headers: { 'Content-Type': 'multipart/form-data' } })).data
+        const sent = api.post('/new-profile/read', fd, { timeout: 60000, signal: ask.signal, headers: { 'Content-Type': 'multipart/form-data' } })
+        setTimeout(askCreations, 800)   // the item on every page appears at once
+        data = (await sent).data
         // The lines were not clear at once: the slower readers go on; ask how far it is, every second.
-        for (let n = 0; data?.pending && !settled && n < 150; n++) {
+        for (let n = 0; data?.pending && !settled && alive.current && n < 150; n++) {
           setStep(data.step || 'reading')
           await new Promise(r => setTimeout(r, 1000))
           data = (await api.get(`/new-profile/result/${encodeURIComponent(data.upload)}`, { adalNoCache: true, timeout: 15000, signal: ask.signal })).data
@@ -193,6 +198,33 @@ export default function PassportFirst({ onRead, onSkip, onLater }) {
       if (preview) URL.revokeObjectURL(preview)
     }
   }
+
+  // A reading the server still has (the page was left and came back, ADAL_BG_INGEST): taken up here, not an empty form.
+  useEffect(() => {
+    if (window.__ADAL_SCAN_PASSPORT__ || window.__ADAL_CLOUD || import.meta.env.VITE_ADMIN) return
+    ;(async () => {
+      try {
+        const jobs = (await api.get('/new-profile/jobs', { adalNoCache: true, timeout: 8000 })).data?.jobs || []
+        const j = jobs.find(x => !x.failed) || jobs[0]
+        if (!j || busyRef.current || !alive.current) return
+        busyRef.current = true
+        setBusy({ name: j.filename, preview: null, t0: Date.now() - j.ms })
+        let data = { upload: j.upload, pending: !j.done }
+        try {
+          for (let n = 0; alive.current && n < 150; n++) {
+            data = (await api.get(`/new-profile/result/${encodeURIComponent(j.upload)}`, { adalNoCache: true, timeout: 15000 })).data
+            if (!data?.pending) break
+            setStep(data.step || 'reading')
+            await new Promise(r => setTimeout(r, 1000))
+          }
+        } catch { data = { error: 'it is no longer here' } }
+        if (!alive.current) return
+        if (data?.pending || data?.error || data?.doc_type !== 'Passport') { api.delete(`/new-profile/jobs/${encodeURIComponent(j.upload)}`).catch(() => {}); askCreations(); return }
+        if (data.existing) setProblem({ text: 'This passport already has a profile:', result: data })
+        else { onRead(data); placeBehind(data) }
+      } catch {} finally { busyRef.current = false; if (alive.current) setBusy(null) }
+    })()
+  }, [])
 
   // A passport just scanned (the Scan button's "Add profile") is read at once.
   useEffect(() => { const f = window.__ADAL_SCAN_PASSPORT__; if (f) { window.__ADAL_SCAN_PASSPORT__ = null; read(f) } }, [])

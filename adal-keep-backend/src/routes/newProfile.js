@@ -10,6 +10,14 @@ import os from 'os'
 import path from 'path'
 import multer from 'multer'
 import { scan, FIRST_MS } from '../services/passportScan.js'
+import { fileURLToPath } from 'url'
+
+// ADAL_BG_INGEST=0 brings the old behaviour back. On (2026-11-27, the owner): making a profile does not belong to the page. The reading
+// is a job on this server; it stays here after the page is left (until the profile is saved or the person throws it away), the pages
+// show a small "creating 1 profile…" item, and what was half-typed is kept as a draft (data/new-profile-draft.json).
+export const bgOn = () => process.env.ADAL_BG_INGEST !== '0'
+const DRAFT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'data', 'new-profile-draft.json')
+const DAY = 86400000
 
 const router = express.Router()
 const TMP = path.join(os.tmpdir(), 'adal-new-profile')
@@ -130,18 +138,18 @@ router.post('/new-profile/read', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file' })
   sweep()
   for (const [k, v] of PLACES) if (Date.now() - v.at > 120000) PLACES.delete(k)
-  for (const [k, v] of JOBS) if (Date.now() - v.at > 600000) JOBS.delete(k)
+  for (const [k, v] of JOBS) if (Date.now() - v.at > (bgOn() ? DAY : 600000)) JOBS.delete(k)
   const db = req.app.locals.db
   const t0 = Date.now()
   const key = path.basename(req.file.path)
-  const job = { at: t0, step: 'waiting', done: false, payload: null }
+  const job = { at: t0, step: 'waiting', done: false, payload: null, filename: req.file.originalname }
   JOBS.set(key, job)
   const work = scan(req.file.path, { db, onStep: (s) => { job.step = s } })
     .then(r => payloadOf(db, req.file, r, t0))
     .catch(e => failureOf(req.file, e, t0))
     .then(p => { job.payload = p; job.done = true; return p })
   const early = await Promise.race([work, new Promise(r => setTimeout(() => r(null), Number(process.env.SCAN_FIRST_MS || FIRST_MS)))])
-  if (early) { JOBS.delete(key); return res.json(early) }
+  if (early) { if (!bgOn()) JOBS.delete(key); return res.json(early) }
   res.json({ upload: key, filename: req.file.originalname, pending: true, step: job.step, step_text: STEPS[job.step] || '', ms: Date.now() - t0 })
 })
 
@@ -150,9 +158,38 @@ router.get('/new-profile/result/:upload', async (req, res) => {
   const job = JOBS.get(key)
   if (!job) return res.status(404).json({ error: 'This scan is no longer here — scan the passport again.' })
   if (!job.done) return res.json({ upload: key, pending: true, step: job.step, step_text: STEPS[job.step] || '', ms: Date.now() - job.at })
-  JOBS.delete(key)
+  if (!bgOn()) JOBS.delete(key)   // on: it stays until the profile is saved (attach) or thrown away (DELETE), so a page that came back finds it
   res.json(job.payload)
 })
+
+/** The readings in progress or waiting for their profile: the pages' "creating 1 profile…" item and the create page read this. */
+router.get('/new-profile/jobs', (req, res) => {
+  if (!bgOn()) return res.json({ enabled: false, jobs: [] })
+  const jobs = [...JOBS.entries()].map(([upload, j]) => ({
+    upload, filename: j.filename || '', done: j.done, step: j.step, step_text: STEPS[j.step] || '', ms: Date.now() - j.at,
+    ready: !!(j.done && j.payload && j.payload.doc_type === 'Passport' && !j.payload.error), failed: !!(j.done && (!j.payload || j.payload.error || j.payload.doc_type !== 'Passport')),
+  })).sort((a, b) => b.ms - a.ms)
+  res.json({ enabled: true, jobs })
+})
+
+router.delete('/new-profile/jobs/:upload', (req, res) => {
+  const key = path.basename(String(req.params.upload || ''))
+  JOBS.delete(key)
+  const f = tmpPath(key); if (f) fs.unlink(f, () => {})
+  res.json({ ok: true })
+})
+
+// The half-typed create form, kept until she is saved or the person discards it (one draft per PC).
+router.get('/new-profile/draft', (req, res) => {
+  if (!bgOn()) return res.json({ enabled: false, draft: null })
+  try { res.json({ enabled: true, draft: JSON.parse(fs.readFileSync(DRAFT, 'utf8')) }) } catch { res.json({ enabled: true, draft: null }) }
+})
+router.put('/new-profile/draft', express.json({ limit: '1mb' }), (req, res) => {
+  if (!bgOn()) return res.json({ ok: false })
+  try { fs.mkdirSync(path.dirname(DRAFT), { recursive: true }); fs.writeFileSync(DRAFT, JSON.stringify({ ...(req.body || {}), at: Date.now() })); res.json({ ok: true }) }
+  catch (e) { res.status(500).json({ error: e.message }) }
+})
+router.delete('/new-profile/draft', (req, res) => { try { fs.unlinkSync(DRAFT) } catch {} res.json({ ok: true }) })
 
 // A passport picture that also holds her photo and her standing photo (how most
 // agencies send them): JEV finds them and they go into Photo and Full Body Photo,
@@ -173,6 +210,7 @@ router.post('/new-profile/attach', async (req, res) => {
     const { attachFileToProfile } = await import('../services/profileFiles.js')
     const att = await attachFileToProfile(Number(profileId), 'Passport', file, filename || path.basename(file))
     fs.unlink(file, () => {})
+    JOBS.delete(path.basename(String(name || '')))   // the reading has its profile now
     // Attached: the page goes on; the passport is checked behind.
     res.json({ ok: true })
     import('../services/verification.js').then(v => v.runPassportVerification(Number(profileId), { handle: db })).catch(() => {})

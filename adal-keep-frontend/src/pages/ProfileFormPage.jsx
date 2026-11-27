@@ -157,6 +157,32 @@ export default function ProfileFormPage({ embeddedId = null, onDone = null } = {
   const [passport, setPassport] = useState(null)   // what was read + the waiting upload
   const [showAll, setShowAll] = useState(isEdit)
   const [contract, setContract] = useState({ chosen_at: null, checked_at: null, extra: [] })
+  // The half-typed new profile is kept on the server as a draft (ADAL_BG_INGEST) until she is saved or it is discarded.
+  const [draftInfo, setDraftInfo] = useState(null)
+  const [draftReady, setDraftReady] = useState(isEdit)
+  useEffect(() => {
+    if (isEdit) return
+    let alive = true
+    api.get('/new-profile/draft', { adalNoCache: true, timeout: 8000 }).then(r => {
+      const d = r.data?.draft
+      if (!alive || !d?.form) return
+      setForm({ ...emptyForm, ...d.form }); setPassport(d.passport || null); setStep(d.step || 'form'); setShowAll(!!d.showAll)
+      if (d.createdBy) setCreatedBy(d.createdBy)
+      setConsent(!!d.consent); setDraftInfo({ at: d.at })
+    }).catch(() => {}).finally(() => { if (alive) setDraftReady(true) })
+    return () => { alive = false }
+  }, [])
+  useEffect(() => {
+    if (isEdit || !draftReady || saving || passport?.offline) return
+    if (step !== 'form' || (!passport && JSON.stringify(form) === JSON.stringify(emptyForm))) return
+    const t = setTimeout(() => api.put('/new-profile/draft', { form, passport, step, showAll, createdBy, consent }, { timeout: 8000 }).catch(() => {}), 1200)
+    return () => clearTimeout(t)
+  }, [form, passport, step, showAll, createdBy, consent, draftReady, saving])
+  const discardDraft = async () => {
+    await api.delete('/new-profile/draft').catch(() => {})
+    if (passport?.upload) await api.delete(`/new-profile/jobs/${encodeURIComponent(passport.upload)}`).catch(() => {})
+    setForm(emptyForm); setPassport(null); setStep('passport'); setShowAll(false); setDraftInfo(null)
+  }
   const [checkingContract, setCheckingContract] = useState(false)
 
   // Look this profile up on Musaned now (the same check that runs every 4 hours).
@@ -379,6 +405,7 @@ export default function ProfileFormPage({ embeddedId = null, onDone = null } = {
             await api.post('/new-profile/attach', { upload: passport.upload, profileId: res.data.id, filename: passport.filename })
           } catch { toast.error('The profile was made, but the passport file could not be added — drop it on the Passport field.') }
         }
+        api.delete('/new-profile/draft').catch(() => {})
         toast.success('አዲስ ፕሮፋይል ተፈጥሯል')
         // Next: her photos, then her CV, then Musaned (the pop-ups on her page).
         navigate(`/profiles/${res.data.id}?next=photos`)
@@ -417,6 +444,12 @@ export default function ProfileFormPage({ embeddedId = null, onDone = null } = {
         subtitle={isEdit ? 'የደንበኛ ዝርዝሮችን ያዘምኑ' : 'አዲስ ደንበኛ ወደ ስራ ቦታዎ ያክሉ'}
       />
 
+      {draftInfo && !isEdit && (
+        <div data-draft-notice="" className="mb-3 flex items-center justify-between gap-3 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-800 dark:border-sky-800 dark:bg-sky-900/20 dark:text-sky-200">
+          <span>Your unfinished profile is back — nothing was lost.</span>
+          <button type="button" onClick={discardDraft} className="font-semibold underline">Discard it</button>
+        </div>
+      )}
       <form onSubmit={handleSubmit} className="panel space-y-5 p-5 sm:p-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/60 rounded-xl shadow-sm">
 
         {/* ---- Labor ID first ---- */}

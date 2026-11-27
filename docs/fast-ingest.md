@@ -21,3 +21,17 @@ no line: second ask ~24 s -> 8 ms.
 ## Not done here (needs its own task, each can be measured after this)
 Showing the profile at once after the MRZ read with CV and the rest in the background; running independent stages in parallel; not
 re-doing unchanged stages. The log has no per-stage lines for those yet; `[first-stage]` shows only the end results.
+
+## Creating a profile no longer belongs to the page (2026-11-27, `ADAL_BG_INGEST=0` turns it off)
+- The passport reading is a job on the server (`routes/newProfile.js`). On, it stays there after the page is left, until her profile is saved
+  (`/new-profile/attach`) or the person discards it; `GET /new-profile/jobs` lists them, `GET /new-profile/result/:upload` gives the result
+  as often as asked, `DELETE /new-profile/jobs/:upload` throws it away.
+- A small "Creating 1 profile… / 1 passport read — finish the profile" item on every page (`CreatingBadge`, bottom left); click: the create page.
+- Coming back to the create page: `PassportFirst` takes up the running or finished reading (progress shown, form filled), not an empty form.
+- The half-typed form is kept as a draft (`data/new-profile-draft.json`, one per PC, saved 1.2 s after each change) and comes back with
+  "Your unfinished profile is back — Discard it"; it is removed when the profile is saved or discarded.
+- Tested: `tests/bgIngest.test.js` (a real passport scan: leave mid-reading, list, result twice, discard; draft round trip; off = as before).
+  The pages themselves are syntax-checked only (the frontend build in this worktree stops on a missing font package, not on these files);
+  not clicked through in a browser.
+- Not covered: a server restart in the middle of a reading loses that reading (the file stays, the person drops it again); the profile's
+  own photos/CV steps after saving are the profile page's and were not moved.

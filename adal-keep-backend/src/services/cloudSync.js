@@ -121,7 +121,16 @@ const local = (method, p, { body, headers = {} } = {}) => fetch(`http://127.0.0.
   headers: { ...(body != null && !(body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}), 'X-Adal-Cloud': '1', ...headers },
   body: body == null || method === 'GET' ? undefined : body instanceof FormData ? body : JSON.stringify(body),
 })
-const upsert = (db, table, rows, onConflict) => cloudCall(db, 'POST', `/rest/v1/${table}?on_conflict=${onConflict}`, rows,
+// One row per conflict key, the last one read: Postgres refuses a whole batch that has a key twice ("ON CONFLICT DO
+// UPDATE command cannot affect row a second time"; a page of the round came again in the same round's sweep slice).
+// Off: ADAL_CLOUD_DEDUPE=0.
+export function oncePerKey(rows, onConflict) {
+  if (process.env.ADAL_CLOUD_DEDUPE === '0' || !Array.isArray(rows) || rows.length < 2) return rows
+  const cols = String(onConflict).split(','), by = new Map()
+  for (const r of rows) { const k = JSON.stringify(cols.map(c => r[c])); by.delete(k); by.set(k, r) }
+  return by.size === rows.length ? rows : [...by.values()]
+}
+const upsert = (db, table, rows, onConflict) => cloudCall(db, 'POST', `/rest/v1/${table}?on_conflict=${onConflict}`, oncePerKey(rows, onConflict),
   { headers: { Prefer: 'resolution=merge-duplicates,return=minimal' } })
 
 async function stateOf(db) {

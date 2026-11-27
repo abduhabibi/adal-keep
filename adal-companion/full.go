@@ -249,6 +249,11 @@ func (s *standbyRunner) startFull() error {
 		"ADAL_AUTO_UPDATE=0", // this program keeps server\ at the main PC's version (standby.go bundle loop)
 		// It runs only when the full copy is on (fullCopyAllowed): its copying and the main role moving too.
 		"ADAL_COMPANION_FULL=1",
+		// Its robots (robotsEverywhere.js, while the main PC is off) drive this PC's own robot browser — the one the
+		// main PC drives — never a second one: where it is, and how to have it started (robot.go).
+		fmt.Sprintf("ADAL_ROBOT_CDP=http://127.0.0.1:%d", robotDebugPort),
+		fmt.Sprintf("ADAL_ROBOT_BROWSER_URL=http://127.0.0.1:%d/robot", lanHTTPPort),
+		"ADAL_ROBOT_TOKEN="+robotToken,
 	)
 	if joinMain != "" {
 		env = append(env, "ADAL_SYNC_JOIN_MAIN="+joinMain, "ADAL_SYNC_JOIN_KEY="+joinKey)

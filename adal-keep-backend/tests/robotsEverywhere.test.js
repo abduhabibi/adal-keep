@@ -69,3 +69,35 @@ test("a Companion's robots take only the runs put in line on that PC", async () 
     assert.ok([at, at + 2003].includes((await W.claimNextJob(db))?.id), 'the main PC: any')
   } finally { W._setOwnSlotForTest(null); await db.destroy() }
 })
+
+test("a Companion's robots drive the Companion's own robot browser, started by the Companion program", { timeout: 60000 }, async (t) => {
+  const { findChrome, rmTmp } = await import('./helpers/chrome.js')
+  const CHROME = findChrome()
+  if (!CHROME) return t.skip('no Chrome')
+  const http = await import('http'), { spawn } = await import('child_process')
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'adal-cbrowser-'))
+  const port = 9300 + Math.floor(Math.random() * 500)
+  let chrome = null, asked = 0
+  // The Companion program (robot.go): /robot/json/version with its token starts the browser.
+  const prog = http.createServer((q, r) => {
+    if (q.url.startsWith('/robot/json/version') && q.headers['x-adal-robot'] === 'tok') {
+      asked++
+      chrome ||= spawn(CHROME, ['--headless=new', `--remote-debugging-port=${port}`, '--remote-debugging-address=127.0.0.1', `--user-data-dir=${path.join(dir, 'p')}`, '--no-first-run', '--disable-gpu'], { stdio: 'ignore' })
+      const wait = async () => { for (let i = 0; i < 100; i++) { try { const v = await fetch(`http://127.0.0.1:${port}/json/version`); if (v.ok) return v.text() } catch {} await new Promise(x => setTimeout(x, 100)) } return '{}' }
+      return wait().then(b => r.end(b))
+    }
+    r.statusCode = 404; r.end()
+  })
+  await new Promise(r => prog.listen(0, '127.0.0.1', r))
+  const saved = { ...process.env }
+  Object.assign(process.env, { ADAL_ROBOTS_IN_APP: '1', ADAL_ROBOT_CDP: `http://127.0.0.1:${port}`, ADAL_ROBOT_BROWSER_URL: `http://127.0.0.1:${prog.address().port}/robot`, ADAL_ROBOT_TOKEN: 'tok', ADAL_NO_BROWSER_START: '1' })
+  delete process.env.BRAVE_CDP_URL
+  t.after(async () => { process.env = saved; prog.close(); chrome?.kill(); await new Promise(x => setTimeout(x, 300)); rmTmp(dir) })
+  const B = await import('../src/services/browser.js')
+  assert.equal(await B.openBrowserIfAny(), null, 'closed: never started by a look')
+  const b = await B.getBrowser()
+  assert.equal(asked, 1, 'the Companion program started it')
+  assert.ok(b.connected)
+  assert.ok((await b.version()).length > 0)
+  b.disconnect()
+})

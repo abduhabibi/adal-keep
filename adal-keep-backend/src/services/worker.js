@@ -1267,8 +1267,8 @@ export function startWorker(db, { queueOnly = false, slot = null } = {}) {
     console.log('[worker] a Companion: its own queue only (robotsEverywhere.js)')
     _interval = setInterval(() => { drainQueue(db).catch(e => console.error('[worker] poll error:', e)) }, POLL_MS)
     drainQueue(db).catch(() => {})
+    // (No processor guard: the browser is the one the main PC drives too, its tabs are not this program's to stop.)
     import('./deadTabs.js').then(d => d.startDeadTabs(db)).catch(e => console.warn('[dead] not started:', e.message))
-    import('./robotGuard.js').then(g => g.startRobotGuard(db)).catch(e => console.warn('[guard] not started:', e.message))
     return
   }
   closeStaleHistory(db).then(() => pruneHistory(db))

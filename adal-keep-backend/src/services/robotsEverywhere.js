@@ -74,4 +74,12 @@ export function robotsMayRunHere({ main = false, env = process.env, now = Date.n
   } catch { return { may: false, why: 'Adal Keep has not said yet' } }
 }
 
+/** The Companion program starts its robot browser (out of sight) when it is closed: ADAL_ROBOT_BROWSER_URL + token. */
+export async function startCompanionBrowser({ url = process.env.ADAL_ROBOT_BROWSER_URL, token = process.env.ADAL_ROBOT_TOKEN, fetchFn = fetch } = {}) {
+  if (!url || !token) throw new Error('No Companion robot browser to start (ADAL_ROBOT_BROWSER_URL / ADAL_ROBOT_TOKEN)')
+  const r = await fetchFn(`${url.replace(/\/+$/, '')}/json/version?quiet=1`, { headers: { 'x-adal-robot': token }, signal: AbortSignal.timeout(60000) })
+  if (!r.ok) throw new Error(`the Companion's robot browser did not start (${r.status})`)
+  return true
+}
+
 export const _resetForTest = () => { downSince = 0; if (timer) clearInterval(timer); timer = null; last = '' }

@@ -324,7 +324,7 @@ const endpointOf = (b) => { try { return b.wsEndpoint() } catch { return '' } }
 async function onlyOurs(b, { closeOld = false } = {}) {
   // The PC's own browser is the robots' browser (system mode): no look at who holds the port (7 s on Main).
   if (!ADAL_MODE) return b
-  if (process.platform !== 'win32' || process.env.BRAVE_CDP_URL || _checked.has(endpointOf(b))) return b
+  if (process.platform !== 'win32' || process.env.BRAVE_CDP_URL || process.env.ADAL_ROBOT_CDP || _checked.has(endpointOf(b))) return b
   const who = whoseBrowser(await portOwner())
   if (who === 'ours' || who === 'unknown') { _checked.add(endpointOf(b)); return b }
   if (who === 'old' && closeOld) {
@@ -354,7 +354,7 @@ export async function getBrowser(fresh = false) {
   if (_connecting) { await _connecting; if (alive(_browser)) return _browser }
 
   const puppeteer = (await import('puppeteer-core')).default
-  const cdpUrl = process.env.BRAVE_CDP_URL || `http://localhost:${DEBUG_PORT}`
+  const cdpUrl = process.env.BRAVE_CDP_URL || process.env.ADAL_ROBOT_CDP || `http://localhost:${DEBUG_PORT}`
   let open = null
   try { open = await connectTo(puppeteer, cdpUrl) } catch { /* not open yet — start it */ }
   // Another look connected meanwhile: one connection only.
@@ -365,6 +365,15 @@ export async function getBrowser(fresh = false) {
     if (_browser) { console.log('[browser] connected to the open browser at', cdpUrl); return _browser }
   }
 
+  // A Companion (robotsEverywhere.js): the Companion's own robot browser — the one the main PC drives — started by the
+  // Companion program; never a second browser of its own (one tab a site a PC, the same sign-ins whoever drives).
+  if (process.env.ADAL_ROBOT_CDP) {
+    const { startCompanionBrowser } = await import('./robotsEverywhere.js')
+    await startCompanionBrowser()
+    _browser = await connectTo(puppeteer, process.env.ADAL_ROBOT_CDP)
+    console.log('[browser] connected to the Companion\'s robot browser at', process.env.ADAL_ROBOT_CDP)
+    return _browser
+  }
   // (Tests: only their own browser, never one started here.)
   if (process.env.ADAL_NO_BROWSER_START === '1') throw new Error('No browser (not started in tests)')
   const exec = findBrowserExecutable()
@@ -420,7 +429,7 @@ export async function openBrowserIfAny() {
   if (!_connecting) _connecting = (async () => {
     try {
       const puppeteer = (await import('puppeteer-core')).default
-      const b = await connectTo(puppeteer, process.env.BRAVE_CDP_URL || `http://localhost:${DEBUG_PORT}`)
+      const b = await connectTo(puppeteer, process.env.BRAVE_CDP_URL || process.env.ADAL_ROBOT_CDP || `http://localhost:${DEBUG_PORT}`)
       if (alive(_browser)) { b.disconnect().catch(() => {}); return _browser }
       _browser = await onlyOurs(b).catch(() => null)
       return _browser

@@ -981,8 +981,11 @@ async function adalCommand(db, method, p, body) {
     return go('restore', async () => {
       const b = await B.newestBackup(db, { file_id: body.file_id, key: body.key })
       const r = await B.restoreFrom(b.index, { password: b.key })
-      // Restored from another agency PC's backup: keep its key for later backups.
-      if (body.key && r.ok) B.saveConfig({ password: body.key })
+      // Restored from another agency PC's backup: keep its key for later backups. When the backup brought that key
+      // back itself (with its vault key: every restore with the database), it is left as it came — saved here again it
+      // was locked with this PC's old vault key, and opened by nothing after the restart (2026-11-27, the recovery
+      // test: the new PC made a new backup key). Off: ADAL_RESTORE_KEEP_KEY=0.
+      if (body.key && r.ok && !(r.key_carried && process.env.ADAL_RESTORE_KEEP_KEY !== '0')) B.saveConfig({ password: body.key })
       if (r.database && process.platform === 'win32') setTimeout(() => process.exit(0), 2000)   // the launcher starts it again with the restored database
       return r
     })

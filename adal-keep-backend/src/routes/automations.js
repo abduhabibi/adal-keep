@@ -468,6 +468,9 @@ router.post('/profiles/:profileId/automations/:workflowId/start', async (req, re
       if (dev) accountContext.on_device = dev
     }
 
+    // "Run it on this PC" (pinned: true): no other PC is chosen for it (selfAssign) — the PC whose window started it.
+    if (req.body?.pinned === true) { accountContext.placed = 1; if (!accountContext.on_device) accountContext.on_main = true }
+
     const [runId] = await db('automation_queue').insert({
       profile_id: profileId,
       workflow_id: workflowId,

@@ -92,9 +92,9 @@ export async function makeRealBrain({ site } = {}) {
     name: 'real', leaseMs: 105000, timeoutMs: 1500000, slackMs: 150000,   // (the Companion's gate: Main silent 45 s, or 120 s since its own start)
       // (Umar: a dead PC's run is failed ~105 s after it died)
     async addPC(name, o = {}) { const i = need(name); rig.runMs[name] = o.runMs; (rig.power ||= {})[name] = o.strength ?? 1; writeCtl(site, rig.runMs); writePower(); return i },
-    async enqueue(name, girl, { wf = 'musaned_check_chosen' } = {}) {
+    async enqueue(name, girl, { wf = 'musaned_check_chosen', pinned = false } = {}) {
       const i = need(name), pid = await ensureProfile(girl)
-      const r = await (await fetch(`${i.url}/api/profiles/${pid}/automations/${wf}/start`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ anyStep: true }) })).json()
+      const r = await (await fetch(`${i.url}/api/profiles/${pid}/automations/${wf}/start`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ anyStep: true, ...(pinned ? { pinned: true } : {}) }) })).json()
       if (!r.runId) throw new Error(`the run was not queued on ${name}: ${JSON.stringify(r)}`)
       return r.runId
     },

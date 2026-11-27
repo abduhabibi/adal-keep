@@ -12,6 +12,7 @@ import crypto from 'crypto'
 import { spawn, spawnSync } from 'child_process'
 import { DatabaseSync } from 'node:sqlite'
 import { fileURLToPath } from 'url'
+import net from 'net'
 
 export class NotBuilt extends Error { constructor(what) { super(what); this.notBuilt = true } }
 const BACK = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
@@ -19,6 +20,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 const HOST = Object.values(os.networkInterfaces()).flat().find(i => i && i.family === 'IPv4' && !i.internal)?.address
 export const GATE_MS = 8000   // (Yusuf: 45 s; shortened for the test)
 
+const freePort = () => new Promise((res, rej) => { const s = net.createServer(); s.listen(0, '0.0.0.0', () => { const p = s.address().port; s.close(() => res(p)) }); s.on('error', rej) })   // (two people may run the test at once)
 let rig = null     // one rig for the whole run: building it takes ~80 s
 async function waitHealth(port, ms = 90000) {
   const end = Date.now() + ms
@@ -35,12 +37,12 @@ function copyBackend(to) {
 async function buildRig() {
   if (!HOST) throw new NotBuilt('this PC has no network address other than loopback (a Companion must reach Main from a non-loopback address, or Main takes it for itself)')
   if (spawnSync(process.execPath, ['-e', "require('node:sqlite')"]).status !== 0) throw new NotBuilt('node:sqlite is not in this Node')
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'adal-brain-'))
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `adal-brain-${process.pid}-`))   // (only this run's folder is ever removed)
   const inst = (name, port) => ({ name, port, block: null, dir: copyBackend(path.join(root, name)), url: `http://127.0.0.1:${port}`, proc: null, alive: false, log: path.join(root, `${name}.log`) })
-  const main = inst('Main', 4181), comp = inst('Comp', 4182)
+  const main = inst('Main', await freePort()), comp = inst('Comp', await freePort())
   const start = (i, extra = {}) => {
     const out = fs.openSync(i.log, 'a')
-    i.proc = spawn(process.execPath, ['main.js'], { cwd: i.dir, stdio: ['ignore', out, out], env: { ...process.env, PORT: String(i.port), SQLITE_PATH: path.join(i.dir, 'data.sqlite'), ADAL_ISOLATED: '1', ADAL_NO_PUBLISH: '1', ADAL_PC_NAME: i.name, ADAL_WHATSAPP: '0', ADAL_ROBOTS_IN_APP: '1', ADAL_BRAIN_TEST_RUNNER: path.join(BACK, 'scripts', 'brain', 'runner.mjs'), ADAL_BRAIN_CTL: path.join(i.dir, 'brain-ctl.json'), ADAL_AGENCY_MANAGER: '0', ADAL_RUN_CLAIMS_SWEEP: '1', ADAL_BLOCK_PEERS: path.join(i.dir, 'block-peers.txt'), ...extra } })
+    i.proc = spawn(process.execPath, ['main.js'], { cwd: i.dir, stdio: ['ignore', out, out], env: { ...process.env, PORT: String(i.port), SQLITE_PATH: path.join(i.dir, 'data.sqlite'), ADAL_ISOLATED: '1', ADAL_NO_PUBLISH: '1', ADAL_PC_NAME: i.name, ADAL_WHATSAPP: '0', ADAL_ROBOTS_IN_APP: '1', ADAL_BRAIN_TEST_RUNNER: path.join(BACK, 'scripts', 'brain', 'runner.mjs'), ADAL_BRAIN_CTL: path.join(i.dir, 'brain-ctl.json'), ADAL_BRAIN_POWER: path.join(i.dir, 'brain-power.json'), ADAL_AGENCY_MANAGER: '0', ADAL_RUN_CLAIMS_SWEEP: '1', ADAL_BLOCK_PEERS: path.join(i.dir, 'block-peers.txt'), ...extra } })
     i.alive = true
     i.proc.on('exit', () => { i.alive = false })
   }
@@ -62,14 +64,17 @@ async function stopProc(i) { try { i.proc.kill('SIGKILL') } catch {} i.alive = f
 
 const db = (i) => { const d = new DatabaseSync(path.join(i.dir, 'data.sqlite')); d.exec('PRAGMA busy_timeout = 4000'); return d }
 const rowsOf = (i) => { const d = db(i); try { return d.prepare('select * from automation_queue order by id').all() } finally { d.close() } }
+// The PCs the real selfAssign chooses among (Yusuf: ADAL_BRAIN_POWER; Main has id ''; a PC needs 4+ cores to be chosen; strength = cores).
+// A PC without a server ("Fast") only needs an entry here: in production Main drives the chosen PC's browser, so the run is still Main's worker.
+const writePower = () => { for (const i of [rig.main, rig.comp]) fs.writeFileSync(path.join(i.dir, 'brain-power.json'), JSON.stringify(Object.entries(rig.power || {}).map(([name, strength]) => ({ id: name === 'Main' ? '' : name.toLowerCase(), name, ...(strength <= 1 ? { cores: 2, mem_gb: 4, free_gb: 0.5, load: 60 } : strength <= 5 ? { cores: 4, mem_gb: 16, free_gb: 8, load: 50 } : { cores: 16, mem_gb: 32, free_gb: 12, load: 0 }) })))) }
 const writeCtl = (site, runMs = {}) => { for (const i of [rig.main, rig.comp]) fs.writeFileSync(path.join(i.dir, 'brain-ctl.json'), JSON.stringify({ site: site.base, runMs: runMs[i.name] || 400, girls: Object.fromEntries([...girls].map(([g, id]) => [id, g])) })) }
 // ---- the adapter
 const girls = new Map()    // girl number -> profile id (made once on Main, copied to the Companion)
 export async function makeRealBrain({ site } = {}) {
   if (!rig) await buildRig()
   rig.site = site; rig.stopped = false; rig.runMs = {}; writeCtl(site)
-  const inst = (n) => (n === 'Main' ? rig.main : n === 'Comp' ? rig.comp : null)
-  const need = (n) => inst(n) || (() => { throw new NotBuilt(`a third PC ("${n}") — the rig has a Main and one Companion`) })()
+  const inst = (n) => (n === 'Main' ? rig.main : n === 'Comp' ? rig.comp : n === 'Fast' ? { name: 'Fast', virtual: true } : null)
+  const need = (n) => inst(n) || (() => { throw new NotBuilt(`a PC called "${n}" — the rig has Main, Comp and (power entry only) Fast`) })()
   const making = new Map()
   const ensureProfile = (g) => { if (!making.has(g)) making.set(g, makeProfile(g)); return making.get(g) }
   const makeProfile = async (g) => {
@@ -86,7 +91,7 @@ export async function makeRealBrain({ site } = {}) {
   return {
     name: 'real', leaseMs: 105000, timeoutMs: 1500000, slackMs: 150000,   // (the Companion's gate: Main silent 45 s, or 120 s since its own start)
       // (Umar: a dead PC's run is failed ~105 s after it died)
-    async addPC(name, o = {}) { const i = need(name); rig.runMs[name] = o.runMs; writeCtl(site, rig.runMs); return i },
+    async addPC(name, o = {}) { const i = need(name); rig.runMs[name] = o.runMs; (rig.power ||= {})[name] = o.strength ?? 1; writeCtl(site, rig.runMs); writePower(); return i },
     async enqueue(name, girl, { wf = 'musaned_check_chosen' } = {}) {
       const i = need(name), pid = await ensureProfile(girl)
       const r = await (await fetch(`${i.url}/api/profiles/${pid}/automations/${wf}/start`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ anyStep: true }) })).json()

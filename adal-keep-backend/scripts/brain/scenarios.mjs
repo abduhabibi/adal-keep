@@ -10,16 +10,15 @@ const overlaps = (site, g) => { const v = site.visits.filter(x => x.girl === Str
 
 export const SCENARIOS = [
   ['1. Main on: a run goes to the faster PC', async (b, site) => {
-    await b.addPC('Main', { strength: 3, main: true, runMs: 200 }); await b.addPC('Comp', { strength: 1, runMs: 600 })
-    await b.enqueue('Comp', 101)                                   // a person starts it in the Companion's window
+    // A weak Main (Yusuf: 4 cores or fewer) gives its runs to the strongest PC that is on; a strong Main runs them itself.
+    await b.addPC('Main', { strength: 1, main: true, runMs: 200 }); await b.addPC('Comp', { strength: 5, runMs: 200 })
+    await b.enqueue('Main', 101)
     check(await waitFor(() => site.ended(101).length), 'the run finished')
-    check(JSON.stringify(pcsOf(site, 101)) === '["Main"]', 'it ran once, on the faster PC (Main)', pcsOf(site, 101))
-    await b.enqueue('Main', 102)                                   // and the other way round: the Companion is stronger now
-    await b.addPC('Fast', { strength: 9, runMs: 150 })
-    await b.enqueue('Comp', 103)
+    check(JSON.stringify(pcsOf(site, 101)) === '["Comp"]', 'it ran once, on the faster PC (Comp)', pcsOf(site, 101))
+    await b.addPC('Fast', { strength: 9, runMs: 150 })              // a still stronger PC comes on
+    await b.enqueue('Comp', 103)                                   // started in the Companion's window
     check(await waitFor(() => site.ended(103).length), 'the second run finished')
     check(JSON.stringify(pcsOf(site, 103)) === '["Fast"]', 'a stronger PC that joins gets the next run', pcsOf(site, 103))
-    check(site.started(102).length === 1, 'every run started once', site.started(102).length)
   }],
   ['2. Main off: the Companion runs a girl by itself; the result reaches Main when it returns', async (b, site) => {
     await b.addPC('Main', { strength: 3, main: true, runMs: 200 }); await b.addPC('Comp', { strength: 1, runMs: 300 })

@@ -5,7 +5,9 @@ import fs from 'fs'
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 export default async function run(db, job) {
   const ctl = JSON.parse(fs.readFileSync(process.env.ADAL_BRAIN_CTL, 'utf8'))
-  const girl = ctl.girls?.[job.profile_id] ?? job.profile_id, pc = process.env.ADAL_PC_NAME
+  let pc = process.env.ADAL_PC_NAME   // selfAssign (the real PC choice) puts the PC it chose in the job's context
+  try { const c = JSON.parse(job.context || '{}'); if (c.helped_by) pc = c.helped_by } catch {}
+  const girl = ctl.girls?.[job.profile_id] ?? job.profile_id
   const visit = (phase) => fetch(`${ctl.site}/${phase}?girl=${girl}&pc=${pc}`).catch(() => {})
   await visit('start')
   for (const end = Date.now() + (ctl.runMs || 400); Date.now() < end;) await sleep(150)

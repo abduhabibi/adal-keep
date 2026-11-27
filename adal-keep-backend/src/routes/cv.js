@@ -242,6 +242,11 @@ export function withEdits(html, edits) {
 export async function generateCvFile(db, fresh, template, overrides = {}, createdBy = 'user') {
   // Religion is a must on every CV (asked on 2026-11-10).
   if (!String(fresh?.religion || '').trim()) throw Object.assign(new Error(`Religion is missing for ${fresh?.full_name || 'her'}: fill it in on the profile, then make the CV.`), { status: 400 })
+  // Nothing she or the template is made of changed: her ready CV, straight from the disk (cvFast.js; off: ADAL_CV_FAST=0).
+  const fast = await import('../services/cvFast.js').catch(() => null)
+  const fastKey = fast?.cvFastOn() ? await fast.cvInputKey(db, fresh, template, overrides).catch(e => { console.warn('[CV] fast key:', e.message); return null }) : null
+  const ready = fastKey ? await fast.readyCv(db, fastKey, (f) => resolveStoredPath(f.path)) : null
+  if (ready) return ready
 
   const slug = (fresh.full_name || 'profile').replace(/[^A-Za-z0-9]+/g, '_').slice(0, 40)
   const tslug = (template.name || 'template').replace(/[^A-Za-z0-9]+/g, '_').slice(0, 30)
@@ -268,7 +273,9 @@ export async function generateCvFile(db, fresh, template, overrides = {}, create
   const original_name = slug + '_' + tslug + '.pdf'
   const [fileId] = await db('files').insert({ profile_field_id: cvField.id, original_name, path: filename, mimetype: 'application/pdf', size, created_at: new Date().toISOString(), updated_at: new Date().toISOString() })
   const [cvsId] = await db('generated_cvs').insert({ profile_id: fresh.id, template_id: template.id, filename, data_snapshot: JSON.stringify(data), pdf_path: filename, created_by: createdBy, created_at: new Date().toISOString(), updated_at: new Date().toISOString() })
-  return { generated_cv_id: cvsId, file_id: fileId, filename, original_name, path: outPath }
+  const made = { generated_cv_id: cvsId, file_id: fileId, filename, original_name, path: outPath }
+  if (fastKey) fast.rememberCv(fastKey, made)
+  return made
 }
 
 /** What the CV form changed on her profile (saved with the CV). */

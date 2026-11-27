@@ -612,6 +612,22 @@ export async function stopAtLimit(db, job, page) {
   try { await page?.close?.() } catch {}
 }
 
+/**
+ * One run per girl and site across the agency's PCs (Umar's runClaims.js, through claimBridge.js): asked just before
+ * the run starts; another PC doing it → the row waits in line again (a minute), said in its log; released in any case.
+ */
+async function claimedRun(db, job) {
+  const { claimForRun, releaseForRun } = await import('./claimBridge.js')
+  const c = await claimForRun(db, job)
+  if (c && c.ok === false) {
+    await db('automation_queue').where({ id: job.id, status: 'running' }).update({ status: 'pending', started_at: null, pause_reason: `Waiting for ${c.by || 'another PC'}`, updated_at: new Date(Date.now() + 60000).toISOString() }).catch(() => {})
+    await appendLog(db, job.id, `not started here: ${c.why || `${c.by || 'another PC'} is doing it`}`, 'info').catch(() => {})
+    return
+  }
+  let result = 'failed'
+  try { const r = await runJob(db, job); result = 'done'; return r } finally { await releaseForRun(db, job, result) }
+}
+
 async function runJob(db, job) {
   _limited.delete(job.id)
   let page = null, historyId = null
@@ -973,7 +989,7 @@ function runs(db) {
       isIdle: (id) => isWaiting(id),
       claimNext: async (exclude, lanes) => ((await mayClaim()) ? claimNextJob(db, exclude, lanes, { wait: waitsForBrowser(db) }) : null),
       laneOf,
-      runJob: (job) => runJob(db, job),
+      runJob: (job) => claimedRun(db, job),
     })
     reportRuns(() => _runs.snapshot().running.length)
     // The other processes of this PC hold their internet while a run works (runFocus.js; off: ADAL_RUN_FOCUS=0).

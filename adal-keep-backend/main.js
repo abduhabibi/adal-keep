@@ -153,6 +153,7 @@ app.use('/api', (req, res, next) => {
 // The agency's PCs copying to each other (services/sync): before the lock, so
 // a locked Companion still hears that the main PC was paid for.
 app.use('/api', await syncRoutes())
+app.use('/api', (await import('./src/services/claimBridge.js')).claimRoutes(express))   // Adal Robots asks the run claims here (this PC only, its token)
 // Locked after the trial: every API call and stored document is refused.
 app.use(subscriptionGuard)
 // Serve uploaded SafeStorage files statically

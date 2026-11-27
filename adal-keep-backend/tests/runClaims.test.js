@@ -150,3 +150,28 @@ test('GET /api/run-claims: who is doing what (claims come from Adal Robots throu
     await R.releaseRun(null, j, 'done')
   } finally { srv.close() }
 })
+
+test('ADAL_BLOCK_PEERS: a test cuts two PCs apart without root (claims and PC copying)', async () => {
+  const fs = await import('fs'), os = await import('os'), path = await import('path')
+  const B = await import('../src/services/peerBlock.js')
+  const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'block-')), 'cut.txt')
+  fs.writeFileSync(f, '# cut\nhttp://127.0.0.1:4101\npc-b\n')
+  const env = { ADAL_BLOCK_PEERS: f }
+  B._resetBlockCache()
+  assert.equal(B.blockedPeer('http://127.0.0.1:4101', env), true)
+  assert.equal(B.blockedPeer('http://127.0.0.1:4101/api/sync/hello', env), true)
+  assert.equal(B.blockedPeer('http://127.0.0.1:41011', env), false, 'another port is not cut')
+  assert.equal(B.blockedPeer('pc-b', env), true); assert.equal(B.blockedPeer('pc-c', env), false)
+  assert.equal(B.blockedPeer('pc-b', {}), false, 'no variable: nothing cut')
+  const { SyncNode } = await import('../src/services/sync/node.js')
+  process.env.ADAL_BLOCK_PEERS = f
+  try {
+    const n = Object.create(SyncNode.prototype); n.f = async () => { throw new Error('fetch must not be reached') }
+    await assert.rejects(() => n.call('http://127.0.0.1:4101', 'GET', '/hello'), /cut \(ADAL_BLOCK_PEERS\)/)
+  } finally { delete process.env.ADAL_BLOCK_PEERS }
+})
+
+test('a dead PC\'s run is failed about 105 s after it died (60 s lease + 30 s + the 15 s look)', async () => {
+  const R = pcs['pc-a'].R
+  assert.equal(R.LEASE_MS + R.GRACE_MS + R.SWEEP_MS, 105_000)
+})

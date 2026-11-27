@@ -22,8 +22,10 @@
  */
 import crypto from 'crypto'
 import os from 'os'
+import { blockedPeer } from './peerBlock.js'
 
 export const claimsOn = (env = process.env) => env.ADAL_ROBOTS_EVERYWHERE !== '0'
+export const GRACE_MS = 30_000, SWEEP_MS = 15_000
 export const LEASE_MS = 60_000, RENEW_MS = 20_000, DONE_MS = 15 * 60_000, AWAY_MS = 5 * 60_000, ONLINE_DEAD_MS = 90_000
 const GONE = 'stopped — PC went away'
 
@@ -96,9 +98,10 @@ export function peerClaim(body = {}, peer = {}) {
 /** Asks one PC on the office network: { granted } | { granted: false, holder } | { away: true }. */
 async function askPeer(node, pc, body) {
   try {
+    if (blockedPeer(pc.pc_id)) return { away: true, pc, error: 'cut (ADAL_BLOCK_PEERS)' }
     let url = node.peerState?.get(pc.pc_id)?.ok ? node.peerState.get(pc.pc_id).url : null
     if (!url) url = await Promise.race([node.reach(pc), new Promise(r => setTimeout(() => r(null), 5000))])
-    if (!url) return { away: true, pc }
+    if (!url || blockedPeer(url)) return { away: true, pc }
     return { ...(await node.call(url, 'POST', '/claim', body, { timeout: 4000 })), pc }
   } catch (e) { return { away: true, pc, error: e.message } }
 }
@@ -271,10 +274,11 @@ export async function sweepGone(db, now = (deps?.now || Date.now)()) {
   const E = await env()
   for (const [key, l] of leases) {
     if (l.mine || l.until > now) continue
-    // Only a PC that is really gone: 2 more minutes, not on the network now, silent online.
-    if (now - l.until < 2 * 60_000) continue
+    // Only a PC that is really gone: its lease out for 30 s more, not on the network now, silent online
+    // (about 105 s after it died: 60 s lease + 30 s + the 15 s look).
+    if (now - l.until < GRACE_MS) continue
     const st = E.node?.peerState?.get(l.pc_id)
-    if (st?.ok && now - (st.seen || st.at || 0) < 2 * 60_000) { leases.delete(key); continue }   // it is there: its run ended, the release was lost
+    if (st?.ok && !blockedPeer(l.pc_id) && now - (st.seen || st.at || 0) < GRACE_MS) { leases.delete(key); continue }   // it is there: its run ended, the release was lost
     if (await onlineAlive(E, key, l.pc_id, now)) continue
     leases.delete(key)
     if (!l.run_id) continue
@@ -290,7 +294,7 @@ export async function sweepGone(db, now = (deps?.now || Date.now)()) {
 }
 let swept = null
 export function startRunClaims(db) {
-  if (swept || !claimsOn() || process.env.NODE_ENV === 'test') return
-  swept = setInterval(() => sweepGone(db).catch(() => {}), 30_000)
+  if (swept || !claimsOn() || (process.env.NODE_ENV === 'test' && process.env.ADAL_RUN_CLAIMS_SWEEP !== '1')) return
+  swept = setInterval(() => sweepGone(db).catch(() => {}), SWEEP_MS)
   swept.unref?.()
 }

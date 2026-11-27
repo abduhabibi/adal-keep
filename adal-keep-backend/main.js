@@ -1263,6 +1263,8 @@ initSystem().then(() => {
     console.log(`🚀 Backend running on http://localhost:${PORT}`)
     // ADAL_ISOLATED=1: pages and data only — no robots, no scanner, no online copy, no
     // backups, no discovery, no updates (checking a copy of an agency on another PC).
+    // A scratch copy in a test (ADAL_RUN_CLAIMS_SWEEP=1): a PC gone mid-run is still failed, "stopped — PC went away".
+    if (process.env.ADAL_RUN_CLAIMS_SWEEP === '1') import('./src/services/runClaims.js').then(r => r.startRunClaims(app.locals.db)).catch(e => console.warn('[run claims]', e.message))
     if (process.env.ADAL_ISOLATED === '1') { console.log('🔒 Isolated: no background work'); return }
     startUpdateWatcher(app.locals.db) // a new version installs by itself when no run is working
     // Every PC: heartbeat, Adal's signed commands, crash reports (Admin → Fleet; behind a flag).

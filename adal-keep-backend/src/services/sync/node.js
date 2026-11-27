@@ -17,6 +17,7 @@
  * checks it against sync_pcs (its hash), and that the PC is not suspended
  * or removed.
  */
+import { blockedPeer } from '../peerBlock.js'
 import os from 'os'
 import { DocStore } from './docs.js'
 import { DOC_COLUMNS } from './tables.js'
@@ -167,6 +168,8 @@ export class SyncNode {
   // ── Talking to another PC ─────────────────────────────────────────────────
 
   async call(url, method, p, body, { timeout = 30000, raw = false, legacy = true } = {}) {
+    // A test's network cut (ADAL_BLOCK_PEERS, peerBlock.js): that PC does not answer.
+    if (process.env.ADAL_BLOCK_PEERS && blockedPeer(url)) throw Object.assign(new Error(`${url} cut (ADAL_BLOCK_PEERS)`), { status: 0 })
     // With the agency certificate (ADAL_EQUAL_PCS, trust.js): sealed. A PC that has no
     // certificate yet (an older version, still being moved over) gets the key as before,
     // unless strict — then only certificates.

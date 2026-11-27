@@ -63,6 +63,7 @@ export const SCENARIOS = [
   }],
   ['5. Network cut between the PCs: each runs only its own queue', async (b, site) => {
     await b.addPC('Main', { strength: 3, main: true, runMs: 250 }); await b.addPC('Comp', { strength: 9, runMs: 250 })
+    await b.prepare?.([501, 502])                                  // (her profile is on both PCs before the network is cut)
     b.cut('Main', 'Comp')
     await b.enqueue('Main', 501); await b.enqueue('Comp', 502)
     check(await waitFor(() => site.ended(501).length && site.ended(502).length), 'both ran')

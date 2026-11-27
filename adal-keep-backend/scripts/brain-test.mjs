@@ -1,6 +1,6 @@
 // "The robot brain runs on every PC, and Main can be off": the five scenarios, one command, PASS / FAIL (BLOCKED = the real code has not built that part yet).
 //   node scripts/brain-test.mjs            the reference brain (the contract in docs/CLAIMS.md, brain-test): proves the scenarios are sound
-//   node scripts/brain-test.mjs --real     the same scenarios on the real code through scripts/brain/real.mjs
+//   node scripts/brain-test.mjs --real     the same scenarios on the real code through scripts/brain/real.mjs (--only=2,4 for some; one scenario is about 3-6 minutes)
 // Exit 0 only when every scenario passed.
 import { startMockSite } from './brain/mocksite.mjs'
 import { SCENARIOS } from './brain/scenarios.mjs'
@@ -10,7 +10,9 @@ const broken = (process.argv.find(a => a.startsWith('--broken=')) || '').slice(9
 const make = real ? (await import('./brain/real.mjs')).makeRealBrain : (o) => import('./brain/reference.mjs').then(m => m.makeReferenceBrain({ ...o, broken }))
 let failed = 0, blocked = 0, last = null
 console.log(`robot brain on every PC — ${real ? 'REAL code' : 'REFERENCE brain (the contract)'}\n`)
-for (const [name, fn] of SCENARIOS) {
+// --only=2,4 runs just those scenarios (each real scenario builds its own pair of servers: run them separately to stay under 10 minutes each)
+const only = (process.argv.find(a => a.startsWith('--only=')) || '').slice(7).split(',').filter(Boolean)
+for (const [name, fn] of SCENARIOS.filter(([n]) => !only.length || only.includes(n.split('.')[0]))) {
   const site = await startMockSite(), t = Date.now()
   let brain = { close: async () => {} }
   let res = 'PASS', why = ''
@@ -21,5 +23,5 @@ for (const [name, fn] of SCENARIOS) {
 }
 await Promise.all([].map(() => 0))
 await last?.shutdown?.()
-console.log(`\n${failed ? 'FAIL' : blocked ? 'BLOCKED' : 'PASS'} — ${SCENARIOS.length - failed - blocked} passed, ${failed} failed, ${blocked} blocked`)
+console.log(`\n${failed ? 'FAIL' : blocked ? 'BLOCKED' : 'PASS'} — ${(only.length || SCENARIOS.length) - failed - blocked} passed, ${failed} failed, ${blocked} blocked`)
 process.exit(failed || blocked ? 1 : 0)

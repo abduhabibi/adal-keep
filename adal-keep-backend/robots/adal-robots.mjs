@@ -86,6 +86,7 @@ async function main() {
   say(`working (pid ${process.pid}), this PC only on 127.0.0.1:${PORT}`)
 
   const worker = await import('../src/services/worker.js')
+  const ended = (await import('./lastEnd.mjs')).watchLastEnd(process.env.ADAL_ROBOTS_DATA || path.join(BACK, 'data'), { say, running: () => worker.queueSnapshot().running.length })
   // A weak PC: no new run while one of ours works and the processor is over 80 % busy (robots/gate.mjs).
   const [{ makeGate, averageLoad }, { isWaiting }, { nobodyAsked }] = await Promise.all([import('./gate.mjs'), import('../src/services/attention.js'), import('../src/services/personPress.js')])
   const load = averageLoad({ times: cpuTimes })
@@ -135,6 +136,7 @@ async function main() {
   const stop = async (sig) => {
     say(`${sig}: stopping (the runs working now go on after the next start)`)
     clearInterval(watch)
+    ended.stopped(sig)
     try { worker.stopWorker() } catch {}
     server.close()
     await db.destroy().catch(() => {})

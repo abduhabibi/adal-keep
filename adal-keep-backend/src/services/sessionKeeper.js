@@ -321,7 +321,9 @@ export function startSessionKeeper(database) {
   db = database
   if (timer) return
   setTimeout(() => keepAlive().catch(() => {}), 60000)
-  timer = setInterval(() => {
+  timer = setInterval(async () => {
+    // A robot run has the internet (runFocus.js): the other tabs' signs of life wait (a run is 10 min at most).
+    if ((await import('./runFocus.js')).held('the other tabs\' signs of life')) return
     keepAlive().catch(e => console.warn('[sessions]', e.message))
     insuranceMorning().catch(e => console.warn('[sessions] insurance morning:', e.message))
   }, EVERY_MS)

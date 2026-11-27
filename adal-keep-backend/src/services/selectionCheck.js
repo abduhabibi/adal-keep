@@ -300,6 +300,9 @@ export function checkInfo() {
 // Every minute on the main PC: the hourly check first, then the daily Wafid one
 // (each takes the one lease at once, so the second sees the first started).
 async function tick(db) {
+  // A robot run has the internet (runFocus.js): the chosen check and Wafid's daily look after it.
+  const RF = await import('./runFocus.js')
+  if (RF.held('the chosen check')) { RF.later('the chosen check', () => tick(db)); return }
   await selectionTick(db)
   await wafidTick(db)
 }

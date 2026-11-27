@@ -458,6 +458,8 @@ export function startTower(db, { installedVersion } = {}) {
   let flagAt = 0, beatAt = 0
   const loop = async () => {
     let wait = POLL_MS
+    // A robot run has the internet (runFocus.js): Adal's tower is asked every 5 minutes only, until the run ends.
+    try { const RF = await import('./runFocus.js'); if (RF.held('the tower') && Date.now() - beatAt < 5 * 60e3) { RF.later('the tower', () => {}); setTimeout(loop, 30_000).unref?.(); return } } catch {}
     try {
       const C = await import('./chatCloud.js')
       if (!C.chatConfigured()) { status.on = false; status.why = 'no Supabase on this PC'; wait = FLAG_MS }

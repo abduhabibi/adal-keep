@@ -56,6 +56,6 @@ export const portalStatus = () => last
 export function startPortalHealth() {
   if (timer || process.env.NODE_ENV === 'test') return
   setTimeout(() => checkPortals().catch(() => {}), 2 * 60 * 1000).unref?.()
-  timer = setInterval(() => checkPortals().catch(() => {}), EVERY)
+  timer = setInterval(async () => { if ((await import('./runFocus.js')).held('the portal check')) return; checkPortals().catch(() => {}) }, EVERY)
   timer.unref?.()
 }

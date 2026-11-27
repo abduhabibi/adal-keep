@@ -569,6 +569,8 @@ export function startUpdateWatcher(db = null) {
     // One look at a time: on a slow line a check outlasted the minute, and two looks then both
     // installed the same release into the same download (2026-11-24, Main).
     if (updateNotice.applying || ticking) return
+    // A robot run has the internet (runFocus.js): no update look or download now; again a moment after it.
+    try { const RF = await import('../services/runFocus.js'); if (RF.held('the update check')) { RF.later('the update check', tick); return } } catch {}
     ticking = true
     try {
       // GitHub is asked every UPDATE_CHECK_MINUTES; a found update is tried

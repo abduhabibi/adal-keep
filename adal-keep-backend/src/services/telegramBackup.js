@@ -823,6 +823,8 @@ export function startBackupSchedule(db) {
   const failed = (what) => (e) => { failures++; console.warn(`${what} ${e.message} — again in ${retryAfterMs(failures) / 60000} min`) }
   const tick = async () => {
     try {
+      const RF = await import('./runFocus.js')
+      if (RF.held('the backup')) { RF.later('the backup', tick); return }
       const cfg = getConfig()
       if (!cfg.enabled || !cfg.has_password || progress.running) return
       // A route: Telegram, or the online storage.

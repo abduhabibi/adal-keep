@@ -828,6 +828,9 @@ function filesSoon(db) {
   clearTimeout(filesSoonTimer)
   filesSoonTimer = setTimeout(async () => {
     if (filesBusy) { filesSoon(db); return }
+    // A robot run has the internet (runFocus.js): the documents go up when it ends.
+    const RF = await import('./runFocus.js')
+    if (RF.held('the online copy (documents)')) { RF.later('the online copy (documents)', () => filesSoon(db)); return }
     filesBusy = (async () => {
       if (!(await cloudOn(db).catch(() => false))) return
       const agency = await cloudAgencyId(db)
@@ -846,6 +849,9 @@ export function startCloudSync(db) {
   })).catch(() => {})
   import('./attention.js').then(a => a.onAttentionChange(() => pushKeysSoon(db, ['/automations/attention']))).catch(() => {})
   const tick = async () => {
+    // A robot run has the internet (runFocus.js): this round after it (off: ADAL_RUN_FOCUS=0 — the light round below).
+    const RF = await import('./runFocus.js')
+    if (RF.held('the online copy')) { RF.later('the online copy', tick); return }
     cloudStatus.on = await cloudOn(db).catch(() => false)
     // A move from another system is working: the copy catches up when it is done.
     // A robot working: a light round (the changed profiles only) —

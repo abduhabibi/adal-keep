@@ -29,6 +29,7 @@ export function startWarmLines(db) {
   let busy = false
   timer = setInterval(async () => {
     if (busy) return
+    if ((await import('./runFocus.js')).held('the warm lines')) return
     busy = true
     try { const b = await openBrowserIfAny(); if (b) await warmOnce(b, await activeRunIds(db)) } catch {} finally { busy = false }
   }, EVERY_MS)

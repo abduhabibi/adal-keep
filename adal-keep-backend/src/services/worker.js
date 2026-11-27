@@ -1214,6 +1214,7 @@ export async function runAgencyManager(db) {
             skipped++
             break
           }
+          if (!(await (await import('./taskGate.js')).taskNeeded(db, { profileId: d.profileId, workflowId: 'police_certificate', by: 'the agency manager' })).ok) { skipped++; break }
           await db('automation_queue').insert({
             profile_id: d.profileId,
             workflow_id: 'police_certificate',

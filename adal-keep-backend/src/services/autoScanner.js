@@ -147,6 +147,7 @@ async function scanOnce(db) {
     let enqueued = 0
     for (const p of ready) {
       if (await isAlreadyQueued(db, p.id, p.wf)) continue
+      if (!(await (await import('./taskGate.js')).taskNeeded(db, { profileId: p.id, workflowId: p.wf, by: 'the scanner' })).ok) continue
 
       const accountContext = {
         login_value: account.login_value || account.phone || '',

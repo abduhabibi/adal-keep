@@ -200,6 +200,8 @@ export async function checkAutoTrigger(db, profileId, trigger = 'unknown') {
     account_id: account.id,
   }
 
+  const needed = await (await import('./taskGate.js')).taskNeeded(db, { profileId, workflowId: POLICE_WORKFLOW, by: trigger })
+  if (!needed.ok) return { ready: true, triggered: false, reason: needed.why }
   const [runId] = await db('automation_queue').insert({
     profile_id: profileId,
     workflow_id: POLICE_WORKFLOW,

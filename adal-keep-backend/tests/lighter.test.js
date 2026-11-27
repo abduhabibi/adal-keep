@@ -41,16 +41,22 @@ test('empty tabs: which go', async () => {
   assert.equal(spares([{ blank: false }, blank({ used: true }), blank({ anchor: true }), blank({ ms: 5000 })]).length, 0)
 })
 
-test('no Wafid standby on a weak PC', async () => {
+test('no Wafid standby on a weak PC (the standing site tabs off); with them on, Wafid\'s tab stays there too', async () => {
   const { wafidStandby } = await import('../src/services/sessionKeeper.js')
   const cpus = os.cpus
   os.cpus = () => cpus().slice(0, 2)
   try {
     let closed = 0
     const tab = (x) => ({ url: () => 'https://wafid.com/en/search-slip/', close: async () => { closed++ }, ...x })
+    process.env.ADAL_SITE_TABS = '0'
     assert.equal(await wafidStandby({}, [tab({ __adalStandbyAt: 1 }), tab({}), tab({ __adalStandbyAt: 1, __adalRunId: 7 })]), null)
     assert.equal(closed, 1, 'the standby tab only: never a run\'s or another')
-  } finally { os.cpus = cpus }
+    delete process.env.ADAL_SITE_TABS
+    closed = 0
+    const fresh = tab({ __adalStandbyAt: Date.now(), evaluate: async () => ({ typed: false, broken: false }) })
+    assert.equal(await wafidStandby({}, [fresh]), 'ok')
+    assert.equal(closed, 0, 'the standing Wafid tab is kept on a weak PC')
+  } finally { os.cpus = cpus; delete process.env.ADAL_SITE_TABS }
 })
 
 test('a waiting page rests while nobody looks, is awake at once for the person, and the run goes on', { skip: !CHROME && 'no Chrome', timeout: 100000 }, async (t) => {

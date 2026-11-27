@@ -138,6 +138,8 @@ export async function pushFirstStage(db, { log = console.log } = {}) {
     const full = await db('profiles').where('id', p.id).first()
     const missing = musanedMissing(full, await photoOnFile(db, p.id)).filter(m => !/^(marital status|religion)$/.test(m))
     if (missing.length) continue
+    // Not one in line or done already for her (taskGate.js; off: ADAL_TASK_GATE=0).
+    if (!(await (await import('./taskGate.js')).taskNeeded(db, { profileId: p.id, workflowId: 'musaned_add_candidate', by: 'the first stage', log })).ok) continue
     const now = new Date().toISOString()
     await db('automation_queue').insert({
       profile_id: p.id, workflow_id: 'musaned_add_candidate', account_id: acct.id,

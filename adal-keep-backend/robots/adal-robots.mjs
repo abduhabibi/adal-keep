@@ -29,6 +29,8 @@ import { fileURLToPath } from 'url'
 // set before anything uses the pool (only Node's own modules are loaded above). Off: ADAL_ROBOTS_THREADS=0.
 if (process.env.ADAL_ROBOTS_THREADS !== '0' && !process.env.UV_THREADPOOL_SIZE) process.env.UV_THREADPOOL_SIZE = '16'
 
+import { probeLine, startDbProbe } from './dbProbe.mjs'
+
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const BACK = path.resolve(HERE, '..')
 const PORT = Number(process.env.ADAL_ROBOTS_PORT) || 4010
@@ -59,8 +61,8 @@ export const dbIdleMs = (env = process.env) => env.ADAL_ROBOTS_DB_KEEP === '0' ?
 // one connection, and the 3-5 s timers line up behind it past 30 s.) Two connections: in WAL a read never waits for
 // a write, so one held at the lock no longer stops the others. Off: ADAL_ROBOTS_DB_TWO=0 (one, as before).
 export const dbMax = (env = process.env) => env.ADAL_ROBOTS_DB_TWO === '0' ? 1 : 2
-// A statement that takes over 5 s is said, with its start: who holds the connection. Off: ADAL_ROBOTS_DB_SLOW=0.
-export function watchSlow(db, { ms = 5000, log = (m) => console.warn(m) } = {}) {
+// A statement that takes over 1 s is said (ADAL_DB_SLOW_MS), with the latest probe (dbProbe.mjs). Off: ADAL_ROBOTS_DB_SLOW=0.
+export function watchSlow(db, { ms = Number(process.env.ADAL_DB_SLOW_MS) || 1000, log = (m) => console.warn(m) } = {}) {
   if (process.env.ADAL_ROBOTS_DB_SLOW === '0') return
   const started = new Map()
   db.on('query', (q) => { if (q.__knexQueryUid) started.set(q.__knexQueryUid, Date.now()) })
@@ -68,7 +70,7 @@ export function watchSlow(db, { ms = 5000, log = (m) => console.warn(m) } = {}) 
     const t0 = started.get(q?.__knexQueryUid); if (!t0) return
     started.delete(q.__knexQueryUid)
     const took = Date.now() - t0
-    if (took >= ms) log(`[db] slow: ${String(q.sql || '').replace(/\s+/g, ' ').slice(0, 120)} — ${(took / 1000).toFixed(1)} s`)
+    if (took >= ms) log(`[db] slow: ${String(q.sql || '').replace(/\s+/g, ' ').slice(0, 120)} — ${(took / 1000).toFixed(1)} s (${probeLine()})`)
   }
   db.on('query-response', (r, q) => end(q))
   db.on('query-error', (e, q) => end(q))
@@ -83,6 +85,7 @@ export async function openDb() {
     pool: { ...knexConfig.pool, min: 0, max: dbMax(), idleTimeoutMillis: dbIdleMs(), reapIntervalMillis: 1000, acquireTimeoutMillis: 30000 },
   })
   watchSlow(db)
+  startDbProbe(knexConfig.connection?.filename).catch(() => {})
   return db
 }
 

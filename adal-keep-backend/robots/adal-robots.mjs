@@ -77,7 +77,9 @@ async function main() {
   const app = express()
   app.locals.db = db
   app.use(express.json({ limit: '2mb' }))
-  app.get('/health', (req, res) => res.json({ ok: true, program: 'Adal Robots', pid: process.pid, up_s: Math.round(process.uptime()), here: E.robotsMayRunHere({ main: mainHere }) }))
+  // running: the runs working here (Adal Keep's update waits for them: routes/systemUpdate.js robotsRunning).
+  let runningNow = () => 0
+  app.get('/health', (req, res) => res.json({ ok: true, program: 'Adal Robots', pid: process.pid, up_s: Math.round(process.uptime()), here: E.robotsMayRunHere({ main: mainHere }), running: runningNow() }))
   // Everything else: Adal Keep only (its token), never another program or PC.
   app.use((req, res, next) => (req.get('x-adal-robots') === token ? next() : res.status(403).json({ error: 'Adal Robots answers Adal Keep only' })))
   app.use('/api', (await import('../src/routes/automations.js')).default)
@@ -91,6 +93,7 @@ async function main() {
   say(`working (pid ${process.pid}), this PC only on 127.0.0.1:${PORT}`)
 
   const worker = await import('../src/services/worker.js')
+  runningNow = () => { try { return worker.queueSnapshot().running.length } catch { return 0 } }
   const ended = (await import('./lastEnd.mjs')).watchLastEnd(process.env.ADAL_ROBOTS_DATA || path.join(BACK, 'data'), { say, running: () => worker.queueSnapshot().running.length })
   // A weak PC: no new run while one of ours works and the processor is over 80 % busy (robots/gate.mjs).
   const [{ makeGate, averageLoad }, { isWaiting }, { nobodyAsked }] = await Promise.all([import('./gate.mjs'), import('../src/services/attention.js'), import('../src/services/personPress.js')])

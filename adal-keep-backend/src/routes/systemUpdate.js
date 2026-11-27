@@ -372,9 +372,24 @@ async function autoUpdateOn(db) {
   return true
 }
 
+// The runs work in Adal Robots, its own program (robots/adal-robots.mjs), not in this server: here runsWorking() is 0,
+// and an update installed and restarted in the middle of a run (2026-11-27, Main: the server ended cleanly 100 s after
+// its start). Its /health says how many work. No answer: 0, as before. Off: ADAL_UPDATE_ASKS_ROBOTS=0.
+export async function robotsRunning(env = process.env) {
+  if (env.ADAL_UPDATE_ASKS_ROBOTS === '0') return 0
+  try {
+    const { robotsInApp } = await import('../services/robotsInApp.js')
+    if (robotsInApp()) return 0
+    const { ROBOTS_URL } = await import('../services/robotsLink.js')
+    const r = await fetch(`${ROBOTS_URL()}/health`, { signal: AbortSignal.timeout(3000) })
+    return Math.max(0, Number((await r.json())?.running) || 0)
+  } catch { return 0 }
+}
+
 async function busyNow(db) {
   let running = 0, waiting = 0
   try { const { runsWorking } = await import('../services/busy.js'); running = runsWorking() } catch {}
+  running += await robotsRunning()
   try { if (db) waiting = Number((await withTimeout(db('automation_queue').where('status', 'pending').count({ c: '*' }).first(), 5000, null))?.c || 0) } catch {}
   // A move from another system (Transitions) is lost by a restart: the update waits for it too.
   try { if ((await import('../services/transition.js')).transitionRunning()) running++ } catch {}

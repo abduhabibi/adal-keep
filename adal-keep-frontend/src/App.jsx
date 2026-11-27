@@ -2,6 +2,7 @@ import { useState, useEffect, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import ErrorBoundary from './components/shared/ErrorBoundary'
 import { Toaster } from 'react-hot-toast'
+import { cappedToast } from './lib/toastCap'
 import MainLayout from './components/layout/MainLayout'
 import { lazyPage, warmPages, FirstPage, PageComing } from './lib/pageCode'
 import { off } from './lib/offSwitch'
@@ -68,7 +69,7 @@ const toaster = (
         boxShadow: '0 10px 30px -12px rgba(15,28,26,0.25)'
       }
     }}
-  />
+  >{cappedToast}</Toaster>
 )
 
 function TrialBanner({ days, renew }) {

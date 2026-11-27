@@ -19,7 +19,7 @@ import path from 'path'
 import { FIELD_NAMES, tryParse, normalizeResult } from './deepseekVision.js'
 import { setStage } from './ingestQueue.js'
 
-const API = 'https://generativelanguage.googleapis.com/v1beta/models'
+const API = process.env.GEMINI_API_BASE || 'https://generativelanguage.googleapis.com/v1beta/models'
 const MODELS = [...new Set([
   process.env.GEMINI_MODEL || 'gemini-3.6-flash',
   'gemini-3.8-flash',
@@ -30,6 +30,17 @@ const MODELS = [...new Set([
 // One answer may take this long; then the next model is asked. Files are
 // sorted one at a time, so a slow model holds up every file behind it.
 const CALL_TIMEOUT_MS = Number(process.env.GEMINI_TIMEOUT_MS || 45000)
+
+// ADAL_FAST_INGEST=0 brings back the old behaviour of this file. Measured on Main's server.log (2026-11-27, ~190 answers): a document
+// took 13 s (median), 35-120 s (slowest tenth) and 185 calls ran the whole 45 s to no answer, because the whole scan went up over a
+// 4-5 Mbit/s Wi-Fi and a slow or dead line was tried on every model, three times each.
+//  - Images go up shrunk (1800 px long side, JPEG): a copy for this one question; the stored file is never touched.
+//  - A model that did not answer in time rests 90 s; with no internet every model rests 60 s: the usual path (local OCR / MinerU) goes on at once.
+const fastOn = () => process.env.ADAL_FAST_INGEST !== '0'
+const modelRests = new Map()   // model -> time it may be asked again
+let offlineUntil = 0
+export const _resetGeminiRests = () => { modelRests.clear(); offlineUntil = 0 }
+const connectionDown = (e) => /fetch failed|ENOTFOUND|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|UND_ERR/i.test(`${e?.message || ''} ${e?.cause?.code || ''} ${e?.cause?.message || ''}`)
 
 // Inline file uploads are capped by the API at about 20 MB per request.
 const MAX_INLINE_BYTES = 18 * 1024 * 1024
@@ -121,7 +132,11 @@ async function generate(parts, models = MODELS, { system = PROMPT, json = true }
   if (!geminiKeys().length) throw new Error('GEMINI_API_KEY not configured')
 
   let lastErr = null
-  for (const model of models) {
+  if (fastOn() && offlineUntil > Date.now()) throw new Error('Gemini: no internet just now (asked again in under a minute)')
+  const modelResting = (m) => fastOn() && (modelRests.get(m) || 0) > Date.now()
+  const open = models.filter(m => !modelResting(m))
+  if (!open.length) throw new Error('Gemini: every model was too slow a moment ago (asked again within 90 s)')
+  for (const model of open) {
     if (system === PROMPT) setStage(`asking Gemini (${model})`)
     // Gemini 3 thinks before answering, and the thinking counts against
     // maxOutputTokens: at the default level it used the whole budget and cut
@@ -190,15 +205,34 @@ async function generate(parts, models = MODELS, { system = PROMPT, json = true }
           // Too slow: the next model, not the same one again.
           lastErr = new Error(`Gemini ${model} gave no answer within ${CALL_TIMEOUT_MS / 1000}s`)
           console.warn(`[classify] ${lastErr.message}`)
+          if (fastOn()) modelRests.set(model, Date.now() + 90000)
           break
         }
         lastErr = e
+        if (fastOn() && connectionDown(e)) {   // no line: another model or attempt cannot help
+          offlineUntil = Date.now() + 60000
+          lastGeminiError = String(e.message || '').slice(0, 200)
+          throw e
+        }
         await sleep(2000 * attempt)
       }
     }
   }
   lastGeminiError = String((lastErr || {}).message || 'no model answered').slice(0, 200)
   throw lastErr || new Error('Gemini: no model answered')
+}
+
+/** A smaller copy of a picture for the AI to read (never written back, the stored file is not touched); null = send the file as it is. */
+export async function shrinkForAI(filePath, mime, { maxSide = 1800, quality = 82 } = {}) {
+  if (!/^image\/(png|jpeg|webp|bmp)$/.test(mime)) return null
+  try {
+    const { default: sharp } = await import('sharp')
+    const img = sharp(filePath, { failOn: 'none' }).rotate()
+    const { width = 0, height = 0 } = await sharp(filePath, { failOn: 'none' }).metadata()
+    if (fs.statSync(filePath).size < 350 * 1024 && Math.max(width, height) <= maxSide) return null
+    const buf = await img.resize({ width: maxSide, height: maxSide, fit: 'inside', withoutEnlargement: true }).jpeg({ quality }).toBuffer()
+    return buf.length < fs.statSync(filePath).size ? buf : null
+  } catch { return null }
 }
 
 /**
@@ -217,7 +251,8 @@ export async function classifyWithGemini({ text = '', filePath = null, filename,
     if (size > MAX_INLINE_BYTES) throw new Error(`file too large for inline upload (${Math.round(size / 1048576)} MB)`)
     const mime = MIME[path.extname(filePath).toLowerCase()]
     if (!mime) throw new Error(`no MIME type for ${path.extname(filePath)}`)
-    parts.push({ inline_data: { mime_type: mime, data: fs.readFileSync(filePath).toString('base64') } })
+    const small = fastOn() ? await shrinkForAI(filePath, mime) : null
+    parts.push({ inline_data: { mime_type: small ? 'image/jpeg' : mime, data: (small || fs.readFileSync(filePath)).toString('base64') } })
   }
   if (text) {
     parts.push({ text: `===== DOCUMENT TEXT =====\n${text.slice(0, 30000)}\n===== END DOCUMENT TEXT =====` })

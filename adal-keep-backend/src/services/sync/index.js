@@ -230,6 +230,7 @@ export async function reconcileRole({ restart = false } = {}) {
   if (!node) return
   const mp = await import('../mainPC.js')
   await node.roles.refresh()
+  if (await node.roles.takeBackNow().catch(() => false)) console.log('[sync] this PC is back: it takes its main role again at once')
   const holder = node.roles.holder()
   if (!holder) return
   if (holder === node.pcId) {

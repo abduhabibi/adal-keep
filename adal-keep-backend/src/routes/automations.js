@@ -141,6 +141,17 @@ router.get('/automations/site-tabs', async (req, res) => {
   res.json({ sites: await T.siteTabsNow({ running }) })
 })
 
+// The Robots page by site (bySite.js): each site's tasks waiting and working, and its last results.
+router.get('/automations/by-site', async (req, res) => {
+  try {
+    const B = await import('../services/bySite.js')
+    if (!B.bySiteOn()) return res.json({ off: true, sites: [] })
+    let skipped = []
+    try { skipped = (await import('../services/taskGate.js')).lastSkipped() } catch {}
+    res.set('Cache-Control', 'no-store').json(await B.bySite(req.app.locals.db, { skipped }))
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
 router.get('/automations/watch-robots', async (req, res) => {
   try { res.set('Cache-Control', 'no-store').json(await (await import('../services/watchRobots.js')).watchState()) }
   catch (e) { res.status(500).json({ error: e.message }) }

@@ -4,6 +4,7 @@ import api from '../services/api'
 import PageHeader from '../components/shared/PageHeader'
 import GlassSelect from '../components/shared/GlassSelect'
 import WaitingRuns from '../components/WaitingRuns'
+import SiteBoards from '../components/SiteBoards'
 
 /** What each robot did in the last 30 days, from every PC (the main PC's history). */
 const OUTCOME = {
@@ -40,6 +41,7 @@ export default function RunHistoryPage() {
   return (
     <div className="space-y-5 animate-fade-up">
       <PageHeader title="Robot history" subtitle="What each robot did in the last 30 days, from every PC." />
+      <SiteBoards />
       <WaitingRuns />
       <div className="panel rounded-2xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800">
         <div className="flex flex-wrap items-center gap-3 border-b border-slate-200 p-4 dark:border-slate-700">

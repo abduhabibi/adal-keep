@@ -18,7 +18,13 @@ export async function makeRealBrain({ site } = {}) {
     cut: missing('cut the network between two instances (a gate in front of their sync / robots calls)'),
     heal: missing('put it back'),
     rows: missing('automation_queue rows of one instance'),
-    claims: missing('GET /api/run-claims on the instance (Umar: key <site>|<profile_id>, lease 60 s renewed every 20 s, an expired run is failed with "stopped — PC went away")'),
+    // Umar: built (services/runClaims.js). Needs an instance with its address (`pc.url`, from addPC).
+    claims: async (pc) => {
+      if (!pc?.url) throw new NotBuilt('an instance with its url (addPC)')
+      const r = await fetch(`${pc.url}/api/run-claims`, { signal: AbortSignal.timeout(5000) })
+      if (!r.ok) throw new Error(`${pc.url}/api/run-claims answered ${r.status}`)
+      return (await r.json()).map(c => ({ key: c.key, pc_id: c.pc_id, pc_name: c.pc_name, run_id: c.run_id, lease_s: c.lease_s, via: c.via }))
+    },
     results: missing('the newest finished result per girl on Main'),
     close: async () => {},
   }

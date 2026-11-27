@@ -203,6 +203,7 @@ app.use('/api/visa', accountsRouter('visa_accounts', 'visa_account'))
 app.use('/api/tasheer', accountsRouter('tasheer_accounts', 'tasheer_account'))
 app.use('/api/insurance', accountsRouter('insurance_accounts', 'insurance_account'))
 app.use('/api/cv', cvRouter)
+app.use('/api', (await import('./src/routes/runClaims.js')).default)   // which PC runs which girl and site now (robots on every PC)
 app.use('/api', (await import('./src/routes/stepPopup.js')).default)   // the "Her CV" pop-up: the agency's mobile number
 app.use('/api/settings', settingsRouter)
 app.use('/api', (await import('./src/routes/mainProxy.js')).default)   // a Companion: the robots' live calls go to the main PC
@@ -1264,6 +1265,7 @@ initSystem().then(() => {
     if (process.env.ADAL_ISOLATED === '1') { console.log('🔒 Isolated: no background work'); return }
     startUpdateWatcher(app.locals.db) // a new version installs by itself when no run is working
     // Every PC: heartbeat, Adal's signed commands, crash reports (Admin → Fleet; behind a flag).
+    import('./src/services/runClaims.js').then(r => r.startRunClaims(app.locals.db)).catch(e => console.warn('[run claims]', e.message))   // a PC gone mid-run: its run failed, "stopped — PC went away"
     import('./src/services/tower.js').then(async t => t.startTower(app.locals.db, { installedVersion: (await import('./src/services/cloudSync.js')).installedVersion })).catch(e => console.warn('[tower]', e.message))
     import('./src/services/screenClip.js').then(c => c.startClipWatcher(PORT)).catch(e => console.warn('[clip]', e.message)) // double C crops the screen anywhere on this PC
     import('./src/services/waOwn.js').then(w => w.startOwnWhatsApp(app.locals.db)).then(() => import('./src/services/waOwnHere.js')).then(w => w.startOwnLink(app.locals.db)).catch(e => console.warn('[own-whatsapp]', e.message))   // off unless switched on

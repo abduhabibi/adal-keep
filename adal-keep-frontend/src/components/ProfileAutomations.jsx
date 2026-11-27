@@ -15,6 +15,7 @@ import { phoneCloud } from '../lib/phoneMode'
 import { shows } from '../lib/stageActions'
 import { markDone as markStepDone, untick, DONE_LABEL } from '../lib/markDone'
 import { useCan } from '../lib/staffPerms'
+import RunOnPc from './RunOnPc'
 
 // What a paused run is waiting for, in words.
 const PAUSE_TEXT = {
@@ -468,6 +469,7 @@ export default function ProfileAutomations({ profileId, phase = null, after }) {
           <button type="button" onClick={() => panelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })} className="shrink-0 text-left" title="Go to the run">
             <span className="block max-w-[11rem] truncate text-xs font-bold">{wfName(detail.workflow_id)} <span className="font-normal text-slate-400">#{detail.id}</span></span>
             <span className={`block text-[10px] ${detail.status === 'paused' ? 'font-semibold text-amber-600' : 'text-slate-500'}`}>{detail.status === 'paused' ? '🖐 needs you' : detail.status === 'running' ? '⚙️ working' : detail.status}</span>
+            {detail.status === 'running' && <RunOnPc runId={detail.id} />}
           </button>
           <SignInChip runId={detail.id} />
               {detail.status === 'paused' && !NO_CONTINUE.has(reasonKey(detail.pause_reason)) && (

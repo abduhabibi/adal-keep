@@ -625,7 +625,8 @@ async function claimedRun(db, job) {
     return
   }
   let result = 'failed'
-  try { const r = await (testRunner() ? testRun(db, job) : runJob(db, job)); result = 'done'; return r } finally { await releaseForRun(db, job, result) }
+  noteRunHere(job.id, true)
+  try { const r = await (testRunner() ? testRun(db, job) : runJob(db, job)); result = 'done'; return r } finally { noteRunHere(job.id, false); await releaseForRun(db, job, result) }
 }
 
 // A test seam (Hamza's brain test, scripts/brain): ADAL_BRAIN_TEST_RUNNER=<module> does the run instead of a site —
@@ -633,6 +634,15 @@ async function claimedRun(db, job) {
 let _testRunner
 const testRunner = () => (_testRunner === undefined ? (_testRunner = process.env.ADAL_BRAIN_TEST_RUNNER || null) : _testRunner)
 async function testRun(db, job) {
+  // ADAL_BRAIN_POWER=<json [{ id, name, cores, mem_gb, free_gb, load }]>, the main PC's id '': the real choice of the PC
+  // (selfAssign, as a run on the main PC makes it) — the runner reads it in job.context (helped_by / on_device).
+  if (process.env.ADAL_BRAIN_POWER) {
+    try {
+      const pcs = JSON.parse(fs.readFileSync(process.env.ADAL_BRAIN_POWER, 'utf8')).map(p => ({ answers: true, lan: true, browser: true, at: Date.now(), ...p }))
+      const line = await (await import('./selfAssign.js')).selfAssign(db, job, { pcs, tabs: {}, running: {}, home: null })
+      if (line) await appendLog(db, job.id, line, 'info').catch(() => {})
+    } catch (e) { await appendLog(db, job.id, `brain test: no PC chosen (${e.message})`, 'warn').catch(() => {}) }
+  }
   const mod = await import(testRunner())
   let r
   try { r = await mod.default(db, job) } catch (e) { r = { ok: false, note: e.message } }
@@ -1066,12 +1076,22 @@ export async function dispatchRun(db, runId) {
 // anywhere: a run's log moves while it works; one that waits for a person is paused, not running).
 // ADAL_ROBOTS_EVERYWHERE=0: as before (recent ones go on, older ones paused).
 export const GONE_NOTE = 'stopped — PC went away'
-export async function endInterruptedRuns(db, { slot, isMain, now = Date.now() } = {}) {
+// The runs this PC's robots started and have not ended (data/runs-here.json, this PC only, never copied): a PC killed
+// mid-run knows at its next start which "running" rows were its own — whichever PC queued them.
+const RUNS_FILE = () => path.resolve(process.env.ADAL_ROBOTS_DATA || path.join(process.cwd(), 'data'), 'runs-here.json')
+function readRunsHere() { try { const a = JSON.parse(fs.readFileSync(RUNS_FILE(), 'utf8')); return Array.isArray(a) ? a.map(Number) : null } catch { return null } }
+function writeRunsHere(ids) { try { fs.mkdirSync(path.dirname(RUNS_FILE()), { recursive: true }); fs.writeFileSync(RUNS_FILE() + '.new', JSON.stringify([...ids])); fs.renameSync(RUNS_FILE() + '.new', RUNS_FILE()) } catch {} }
+const _runsHere = new Set()
+export function noteRunHere(id, on) { const n = Number(id); if (!n) return; if (on) _runsHere.add(n); else _runsHere.delete(n); writeRunsHere(_runsHere) }
+
+export async function endInterruptedRuns(db, { slot, isMain, ranHere = readRunsHere(), now = Date.now() } = {}) {
   const { queuedHere } = await import('./runClaims.js')
   const rows = await db('automation_queue').where('status', 'running').select('id', 'updated_at', 'log')
+  const mineSet = ranHere ? new Set(ranHere.map(Number)) : null
   let mine = 0, stale = 0
   for (const row of rows) {
-    const here = queuedHere(row, slot, isMain)
+    // Its own: the runs it started (the file); an install from before the file: the rows queued on it.
+    const here = mineSet ? mineSet.has(Number(row.id)) : queuedHere(row, slot, isMain)
     const dead = now - new Date(row.updated_at || 0).getTime() > 15 * 60e3
     if (!here && !dead) continue
     let log = []; try { log = JSON.parse(row.log || '[]') } catch {}
@@ -1079,6 +1099,7 @@ export async function endInterruptedRuns(db, { slot, isMain, now = Date.now() } 
     const n = await db('automation_queue').where({ id: row.id, status: 'running' }).update({ status: 'failed', pause_reason: GONE_NOTE, log: JSON.stringify(log), updated_at: new Date(now).toISOString() })
     if (n) { if (here) mine++; else stale++ }
   }
+  writeRunsHere(_runsHere)   // (what it held before the start is done with)
   return { mine, stale, left: rows.length - mine - stale }
 }
 
@@ -1324,6 +1345,8 @@ export function startWorker(db, { queueOnly = false, slot = null } = {}) {
   )
   if (queueOnly) {
     console.log('[worker] a Companion: its own queue only (robotsEverywhere.js)')
+    // Killed mid-run before: those runs end now, "stopped — PC went away" (none goes on by itself).
+    endInterruptedRuns(db, { slot: _ownSlot, isMain: false }).then(r => { if (r.mine || r.stale) console.log(`[worker] ${r.mine} run(s) of this PC interrupted, ${r.stale} silent for 15 min — ${GONE_NOTE}`) }).catch(e => console.warn('[worker] interrupted runs:', e.message))
     _interval = setInterval(() => { drainQueue(db).catch(e => console.error('[worker] poll error:', e)) }, POLL_MS)
     drainQueue(db).catch(() => {})
     // (No processor guard: the browser is the one the main PC drives too, its tabs are not this program's to stop.)

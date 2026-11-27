@@ -119,3 +119,20 @@ test("at a start: this PC's interrupted runs end (none goes on by itself), anoth
     assert.equal(st[at + 2003].status, 'failed')
   } finally { await db.destroy() }
 })
+
+test('at a start: the runs this PC started (data/runs-here.json) end, whichever PC queued them', async () => {
+  const knex = (await import('knex')).default
+  const db = knex({ client: 'sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true, pool: { min: 1, max: 1 }, migrations: { directory: new URL('../src/migrations', import.meta.url).pathname } })
+  await db.migrate.latest()
+  const W = await import('../src/services/worker.js')
+  const now = Date.now(), at = now * 1000
+  const row = (id) => ({ id, workflow_id: 'musaned_check_chosen', status: 'running', profile_id: 2, log: '[]', created_at: new Date(now).toISOString(), updated_at: new Date(now - 30e3).toISOString() })
+  await db('automation_queue').insert([row(at + 7), row(at + 1003)])   // queued here (slot 7) but run by another PC; queued on slot 3, run here
+  W.noteRunHere(at + 1003, true)
+  try {
+    const r = await W.endInterruptedRuns(db, { slot: 7, isMain: false, now })
+    assert.deepEqual(r, { mine: 1, stale: 0, left: 1 })
+    assert.equal((await db('automation_queue').where('id', at + 1003).first()).status, 'failed')
+    assert.equal((await db('automation_queue').where('id', at + 7).first()).status, 'running', 'its own queue, run elsewhere: left')
+  } finally { W.noteRunHere(at + 1003, false); await db.destroy() }
+})

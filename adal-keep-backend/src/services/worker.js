@@ -973,6 +973,8 @@ function runs(db) {
       runJob: (job) => runJob(db, job),
     })
     reportRuns(() => _runs.snapshot().running.length)
+    // The other processes of this PC hold their internet while a run works (runFocus.js; off: ADAL_RUN_FOCUS=0).
+    import('./runFocus.js').then(f => f.startFocusBeacon(() => _runs?.snapshot().running.length || 0)).catch(() => {})
     onWait(() => setTimeout(() => _runs?.drain(), 50))
     hookTaskExpiry(db)
     // This PC's internet, measured while no robot works (services/sharePower.js picks the PC by it).

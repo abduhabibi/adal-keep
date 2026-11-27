@@ -23,6 +23,12 @@ import path from 'path'
 import crypto from 'crypto'
 import { fileURLToPath } from 'url'
 
+// (2026-11-27, Main: "[db] slow: select … where q.id in …" 5.9 s, a read by its primary key.) SQLite's statements run on
+// Node's thread pool, four threads, shared with file writes, DNS lookups (slow on Main's Wi-Fi), zip, and writes waiting
+// up to 8 s on Adal Keep's lock: when four are busy every read waits (a test: 1442 ms with 4, 2 ms with 16). Sixteen,
+// set before anything uses the pool (only Node's own modules are loaded above). Off: ADAL_ROBOTS_THREADS=0.
+if (process.env.ADAL_ROBOTS_THREADS !== '0' && !process.env.UV_THREADPOOL_SIZE) process.env.UV_THREADPOOL_SIZE = '16'
+
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const BACK = path.resolve(HERE, '..')
 const PORT = Number(process.env.ADAL_ROBOTS_PORT) || 4010

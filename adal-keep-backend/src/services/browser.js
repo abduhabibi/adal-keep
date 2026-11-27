@@ -203,6 +203,9 @@ const BROWSER_ARGS = [
   // a lower priority): a run's tab is not (its focus is emulated while the run has it — tabManager.setupTab),
   // the tabs finished runs left are (2026-11-25, measured: 50 → 1 tick a second in those, 50 in a run's).
   '--disable-backgrounding-occluded-windows',
+  // (2026-11-26, the owner: "the robots lag"): no tab of the robots' browser is put to a lower priority or slowed
+  // to one timer a second when it is behind — one tab a site now, so few tabs. ADAL_BG_THROTTLE=1: as before.
+  ...(process.env.ADAL_BG_THROTTLE === '1' ? [] : ['--disable-renderer-backgrounding', '--disable-background-timer-throttling']),
   // NOTE: do NOT add '--blink-settings=imagesEnabled=false': it is
   // browser-wide and blanks the Musaned reCAPTCHA images. Image policy is
   // per tab (`page.__adalAllowImages`, see tabManager.setupTab).
